@@ -6,6 +6,9 @@ default:
 install:
     cargo install --path . --locked --force
 
+serve:
+    cargo run -- serve
+
 build:
     cargo build --release --locked
     npm --prefix docs run docs:build
