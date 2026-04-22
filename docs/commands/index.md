@@ -38,8 +38,7 @@ Writes a static bundle:
 
 - `index.html`
 - `snapshot.json`
-- `assets/app.css`
-- `assets/app.js`
+- `assets/*`
 
 ## Removal
 

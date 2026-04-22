@@ -50,8 +50,75 @@ fn local_flow_installs_syncs_exports_and_uninstalls() -> Result<()> {
         commands::export::run_html(&app, Some(html_out.clone())).await?;
         assert!(html_out.join("index.html").is_file());
         assert!(html_out.join("snapshot.json").is_file());
+        assert!(html_out.join("assets").join("base.css").is_file());
+        assert!(html_out.join("assets").join("layout.css").is_file());
+        assert!(html_out.join("assets").join("components.css").is_file());
+        assert!(html_out.join("assets").join("charts.css").is_file());
+        assert!(html_out.join("assets").join("app.js").is_file());
+        assert!(html_out.join("assets").join("copy.js").is_file());
+        assert!(html_out.join("assets").join("data.js").is_file());
+        assert!(
+            html_out
+                .join("assets")
+                .join("data")
+                .join("fetch.js")
+                .is_file()
+        );
+        assert!(
+            html_out
+                .join("assets")
+                .join("data")
+                .join("format.js")
+                .is_file()
+        );
+        assert!(
+            html_out
+                .join("assets")
+                .join("data")
+                .join("derive.js")
+                .is_file()
+        );
+        assert!(html_out.join("assets").join("render.js").is_file());
+        assert!(
+            html_out
+                .join("assets")
+                .join("render")
+                .join("hero.js")
+                .is_file()
+        );
+        assert!(
+            html_out
+                .join("assets")
+                .join("render")
+                .join("charts.js")
+                .is_file()
+        );
+        assert!(
+            html_out
+                .join("assets")
+                .join("render")
+                .join("tables.js")
+                .is_file()
+        );
+        assert!(
+            html_out
+                .join("assets")
+                .join("render")
+                .join("health.js")
+                .is_file()
+        );
+        let exported_index = fs::read_to_string(html_out.join("index.html"))?;
+        assert!(exported_index.contains("type=\"module\""));
+        assert!(exported_index.contains("assets/app.js"));
+        assert!(exported_index.contains("assets/base.css"));
+        assert!(exported_index.contains("assets/layout.css"));
+        assert!(exported_index.contains("assets/components.css"));
+        assert!(exported_index.contains("assets/charts.css"));
+        assert!(exported_index.contains("llmusage 本地用量概览"));
+        assert!(exported_index.contains("用量趋势"));
+        assert!(!exported_index.contains("llmusage 本地账本"));
         assert!(web::live_index_html().contains("data-mode=\"live\""));
-        assert!(web::app_javascript().contains("/api/overview"));
+        assert!(web::live_index_html().contains("type=\"module\""));
 
         commands::diagnostics::run(&app, Some(fixture.root.path().join("diagnostics.json")))
             .await?;
