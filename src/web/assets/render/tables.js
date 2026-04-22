@@ -40,7 +40,11 @@ function renderTable(headers, rows, emptyMessage) {
                     ${headers
                       .map((column) => {
                         const cell = row[column.key] ?? '';
-                        return `<td${column.align === 'right' ? ' data-align="right"' : ''}>${cell}</td>`;
+                        return `
+                          <td${column.align === 'right' ? ' data-align="right"' : ''} data-label="${escapeHtml(column.label)}">
+                            <span class="table-cell-value">${cell}</span>
+                          </td>
+                        `;
                       })
                       .join('')}
                   </tr>

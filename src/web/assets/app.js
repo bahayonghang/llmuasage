@@ -21,7 +21,9 @@ function renderCurrent() {
   if (!state.context) return;
   renderPage(state.context, state);
   document.querySelectorAll('[data-window]').forEach((button) => {
-    button.classList.toggle('active', button.dataset.window === state.window);
+    const isActive = button.dataset.window === state.window;
+    button.classList.toggle('active', isActive);
+    button.setAttribute('aria-pressed', String(isActive));
   });
 }
 
