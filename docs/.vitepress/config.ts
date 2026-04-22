@@ -24,7 +24,7 @@ export default defineConfig({
         },
       ],
     },
-    socialLinks: [{ icon: "github", link: "https://github.com/example/llmusage" }],
+    socialLinks: [{ icon: "github", link: "https://github.com/bahayonghang/llmuasage" }],
     footer: {
       message: "Local-first by design.",
       copyright: "Copyright © 2026 llmusage",
