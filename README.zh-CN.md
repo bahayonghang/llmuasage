@@ -32,6 +32,12 @@
 - `llmusage export html`
 - `llmusage uninstall`
 
+Web 分析页：
+
+下面这张图就是 `llmusage serve` 启动后的本地浏览器分析页。
+
+![llmusage 本地 web 分析页概览](./docs/public/screenshots/web-dashboard-overview.png)
+
 开发：
 
 ```powershell

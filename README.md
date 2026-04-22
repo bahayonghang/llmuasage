@@ -32,6 +32,12 @@ Commands:
 - `llmusage export html`
 - `llmusage uninstall`
 
+Web dashboard:
+
+Below is the local browser dashboard served by `llmusage serve`.
+
+![llmusage web dashboard overview](./docs/public/screenshots/web-dashboard-overview.png)
+
 Development:
 
 ```powershell
