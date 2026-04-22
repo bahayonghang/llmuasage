@@ -1,22 +1,26 @@
 # llmusage
 
-本地优先的 Rust CLI。
+[简体中文](./README.zh-CN.md)
 
-目标很直接：用 hook 和本地 SQLite 复现多 CLI 用量采集，不上传、不登录、不连云端 API。
+Local-first Rust CLI for AI coding usage analytics.
 
-当前 v1 覆盖：
+The goal is simple: use hooks and a local SQLite database to track multiple AI coding CLIs without upload, login, or any cloud API.
+
+Thanks to [vibeusage](https://github.com/victorGPT/vibeusage) for the original idea. `llmusage` is a Rust rewrite and improvement built on that foundation, with a stricter local-first path.
+
+Current v1 coverage:
 
 - Codex `config.toml notify`
 - Claude `Stop` / `SessionEnd` hooks
 - OpenCode `session.updated` plugin event
 
-核心真源：
+Core sources of truth:
 
-- 配置目录：`~/.llmusage/`
-- 数据库：`~/.llmusage/llmusage.db`
-- hook 包装器：`~/.llmusage/bin/llmusage-hook.cmd`、`~/.llmusage/bin/llmusage-hook.sh`
+- Config directory: `~/.llmusage/`
+- Database: `~/.llmusage/llmusage.db`
+- Hook wrappers: `~/.llmusage/bin/llmusage-hook.cmd`, `~/.llmusage/bin/llmusage-hook.sh`
 
-命令：
+Commands:
 
 - `llmusage init`
 - `llmusage sync`
@@ -28,7 +32,7 @@
 - `llmusage export html`
 - `llmusage uninstall`
 
-开发：
+Development:
 
 ```powershell
 cargo check
@@ -38,8 +42,8 @@ cargo run -- sync
 cargo run -- serve
 ```
 
-说明：
+Notes:
 
-- `serve` 只监听 `127.0.0.1`
-- `export html` 生成离线静态报告
-- `status` / `diagnostics` / `doctor` 都是只读命令
+- `serve` only binds to `127.0.0.1`
+- `export html` generates an offline static report
+- `status`, `diagnostics`, and `doctor` are read-only commands
