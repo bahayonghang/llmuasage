@@ -10,6 +10,7 @@ pub mod project;
 pub mod query;
 pub mod store;
 pub mod tui;
+pub mod util;
 pub mod web;
 
 use anyhow::Result;

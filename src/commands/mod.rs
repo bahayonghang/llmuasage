@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 use crate::{app::AppContext, models::SourceKind};
@@ -87,8 +87,4 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
             auto,
         } => hook_run::run(&app, source, &trigger, auto).await,
     }
-}
-
-pub fn not_implemented(command: &str) -> Result<()> {
-    bail!("{command} 尚未实现")
 }

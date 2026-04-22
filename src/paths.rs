@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
+
+use crate::util::resolve_home_dir;
 
 #[derive(Debug, Clone)]
 pub struct AppPaths {
@@ -16,7 +18,10 @@ pub struct AppPaths {
 
 impl AppPaths {
     pub fn discover() -> Result<Self> {
-        let home_dir = dirs::home_dir().context("无法解析用户主目录")?;
+        let home_dir = resolve_home_dir();
+        if home_dir.as_os_str().is_empty() {
+            anyhow::bail!("无法解析用户主目录");
+        }
         let root_dir = home_dir.join(".llmusage");
         let bin_dir = root_dir.join("bin");
         let backups_dir = root_dir.join("backups");

@@ -1,10 +1,35 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
+use tracing::info;
 
-use crate::{app::AppContext, commands, store::Store};
+use crate::{app::AppContext, export, store::Store};
 
-pub async fn run_html(app: &AppContext, _out: Option<PathBuf>) -> Result<()> {
-    Store::new(&app.paths).bootstrap()?;
-    commands::not_implemented("export html")
+pub async fn run_html(app: &AppContext, out: Option<PathBuf>) -> Result<()> {
+    /*
+     * ========================================================================
+     * 步骤1：导出离线可开的静态 HTML 报告
+     * ========================================================================
+     * 目标：
+     * 1) 写出 index.html + snapshot.json + assets
+     * 2) 保持导出结构与本地 Web UI 一致
+     * 3) 导出过程只读数据库，不触发任何网络请求
+     */
+    info!("开始导出静态 HTML 报告");
+
+    let store = Store::new(&app.paths);
+    store.bootstrap()?;
+    let output_dir = out.unwrap_or_else(|| app.paths.exports_dir.join("latest"));
+    let run_id = store.record_run_start("export html")?;
+    export::export_html_bundle(&store, &output_dir)?;
+    store.finish_run(
+        run_id,
+        "success",
+        Some(&format!("out={}", output_dir.display())),
+        None,
+    )?;
+    println!("Exported HTML bundle to {}", output_dir.display());
+
+    info!("完成静态 HTML 报告导出");
+    Ok(())
 }
