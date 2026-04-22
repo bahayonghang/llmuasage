@@ -108,6 +108,7 @@ fn local_flow_installs_syncs_exports_and_uninstalls() -> Result<()> {
                 .is_file()
         );
         let exported_index = fs::read_to_string(html_out.join("index.html"))?;
+        assert!(exported_index.contains("data-mode=\"snapshot\""));
         assert!(exported_index.contains("type=\"module\""));
         assert!(exported_index.contains("assets/app.js"));
         assert!(exported_index.contains("assets/base.css"));
@@ -118,6 +119,7 @@ fn local_flow_installs_syncs_exports_and_uninstalls() -> Result<()> {
         assert!(exported_index.contains("用量趋势"));
         assert!(!exported_index.contains("llmusage 本地账本"));
         assert!(web::live_index_html().contains("data-mode=\"live\""));
+        assert!(web::snapshot_index_html().contains("data-mode=\"snapshot\""));
         assert!(web::live_index_html().contains("type=\"module\""));
 
         commands::diagnostics::run(&app, Some(fixture.root.path().join("diagnostics.json")))

@@ -21,6 +21,11 @@ fn html_shell(mode: &str) -> String {
     } else {
         "127.0.0.1 · 本地服务"
     };
+    let hero_subhead = if mode == "snapshot" {
+        "查看 Codex、Claude、OpenCode 的本地 Token 用量、模型分布、项目排行、成本估算和运行状态。"
+    } else {
+        "本地查看近期用量、成本估算和运行状态，不改变现有数据接口。"
+    };
 
     format!(
         r##"<!doctype html>
@@ -36,21 +41,22 @@ fn html_shell(mode: &str) -> String {
   </head>
   <body data-mode="{mode}">
     <main class="page-shell">
-      <section class="hero-block">
-        <div class="hero-copy">
-          <div class="hero-kicker-row">
-            <p class="hero-kicker">仅本地</p>
-            <span class="hero-chip">{environment_chip}</span>
+      <section class="hero-stage">
+        <div class="hero-main">
+          <div class="hero-copy">
+            <div class="hero-kicker-row">
+              <p class="hero-kicker">仅本地</p>
+              <span class="hero-chip">{environment_chip}</span>
+            </div>
+            <h1>llmusage 本地用量概览</h1>
+            <p class="hero-subhead">
+              {hero_subhead}
+            </p>
           </div>
-          <h1>llmusage 本地用量概览</h1>
-          <p class="hero-subhead">
-            查看 Codex、Claude、OpenCode 的本地 Token 用量、模型分布、项目排行、成本估算和运行状态。
-          </p>
+          <section id="overview" class="overview-grid"></section>
         </div>
-        <aside id="ledger-summary" class="ledger-card"></aside>
+        <aside id="ledger-summary" class="ledger-card hero-summary"></aside>
       </section>
-
-      <section id="overview" class="overview-grid"></section>
 
       <section class="trend-stage">
         <div class="section-header section-header--stage">
@@ -60,10 +66,10 @@ fn html_shell(mode: &str) -> String {
             <p class="section-copy">主图展示当前窗口内最近 10 条记录，完整明细可展开查看。</p>
           </div>
           <div class="window-switch">
-            <button data-window="day">24h</button>
-            <button data-window="week">7d</button>
-            <button data-window="month">30d</button>
-            <button data-window="all">全部</button>
+            <button type="button" data-window="day">24h</button>
+            <button type="button" data-window="week">7d</button>
+            <button type="button" data-window="month">30d</button>
+            <button type="button" data-window="all">全部</button>
           </div>
         </div>
         <div id="trend-spotlight" class="trend-spotlight"></div>
@@ -71,22 +77,38 @@ fn html_shell(mode: &str) -> String {
       </section>
 
       <section class="analysis-grid">
-        <section class="panel panel--feature">
-          <div class="section-header section-header--tight">
-            <div>
-              <p class="section-kicker">模型</p>
-              <h2>模型用量分布</h2>
-              <p class="section-copy">先看用量最高的模型，再按需展开完整排行。</p>
+        <div class="analysis-column analysis-column--main">
+          <section class="panel panel--feature">
+            <div class="section-header section-header--tight">
+              <div>
+                <p class="section-kicker">模型</p>
+                <h2>模型用量分布</h2>
+                <p class="section-copy">先看用量最高的模型，再按需展开完整排行。</p>
+              </div>
             </div>
-          </div>
-          <div class="panel-stack">
-            <div id="models-chart"></div>
-            <div id="models-table"></div>
-            <div id="models-ledger"></div>
-          </div>
-        </section>
+            <div class="panel-stack">
+              <div id="models-chart"></div>
+              <div id="models-table"></div>
+              <div id="models-ledger"></div>
+            </div>
+          </section>
 
-        <div class="analysis-rail">
+          <section class="panel">
+            <div class="section-header section-header--tight">
+              <div>
+                <p class="section-kicker">成本</p>
+                <h2>成本估算</h2>
+              </div>
+            </div>
+            <div class="panel-stack panel-stack--compact">
+              <div id="costs-chart"></div>
+              <div id="costs-table"></div>
+              <div id="costs-ledger"></div>
+            </div>
+          </section>
+        </div>
+
+        <div class="analysis-column analysis-column--rail">
           <section class="panel">
             <div class="section-header section-header--tight">
               <div>
@@ -114,21 +136,7 @@ fn html_shell(mode: &str) -> String {
             </div>
           </section>
 
-          <section class="panel">
-            <div class="section-header section-header--tight">
-              <div>
-                <p class="section-kicker">成本</p>
-                <h2>成本估算</h2>
-              </div>
-            </div>
-            <div class="panel-stack panel-stack--compact">
-              <div id="costs-chart"></div>
-              <div id="costs-table"></div>
-              <div id="costs-ledger"></div>
-            </div>
-          </section>
-
-          <section class="panel panel--dark">
+          <section class="panel panel--dark panel--health">
             <div class="section-header section-header--tight">
               <div>
                 <p class="section-kicker">状态</p>

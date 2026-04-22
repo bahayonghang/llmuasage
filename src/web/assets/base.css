@@ -46,6 +46,12 @@ body {
     linear-gradient(180deg, #f7f5ee 0%, var(--paper) 100%);
 }
 
+body[data-mode="live"] {
+  background:
+    radial-gradient(circle at top left, rgba(201, 100, 66, 0.04), transparent 22%),
+    linear-gradient(180deg, #f7f5ee 0%, var(--paper) 100%);
+}
+
 body::before {
   content: "";
   position: fixed;
@@ -54,6 +60,10 @@ body::before {
   background-image: linear-gradient(rgba(20, 20, 19, 0.025) 1px, transparent 1px);
   background-size: 100% 24px;
   opacity: 0.2;
+}
+
+body[data-mode="live"]::before {
+  opacity: 0.14;
 }
 
 h1,

@@ -168,7 +168,7 @@ async fn api_health(
 
 #[cfg(test)]
 mod tests {
-    use super::{asset_manifest, live_index_html};
+    use super::{asset_manifest, live_index_html, snapshot_index_html};
 
     #[test]
     fn live_shell_uses_module_entry() {
@@ -192,6 +192,15 @@ mod tests {
         assert!(!html.contains("来源节奏"));
         assert!(!html.contains("项目热区"));
         assert!(!html.contains("运行脉冲"));
+    }
+
+    #[test]
+    fn snapshot_shell_uses_snapshot_mode_marker() {
+        let html = snapshot_index_html();
+        assert!(html.contains("data-mode=\"snapshot\""));
+        assert!(html.contains("离线文件 · 静态导出"));
+        assert!(html.contains("type=\"module\""));
+        assert!(html.contains("assets/app.js"));
     }
 
     #[test]
