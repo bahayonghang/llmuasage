@@ -4,7 +4,6 @@ default:
     just --list
 
 install:
-    npm install --prefix docs
     cargo install --path . --locked --force
 
 build:
