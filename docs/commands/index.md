@@ -28,6 +28,8 @@ Runs read-only health checks over wrapper presence, integration drift, OpenCode 
 
 Starts the local dashboard and JSON API on `127.0.0.1`.
 
+![llmusage web dashboard overview](/screenshots/web-dashboard-overview.png)
+
 ### `llmusage tui`
 
 Opens the terminal summary panel.

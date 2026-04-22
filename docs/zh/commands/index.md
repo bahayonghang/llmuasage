@@ -28,6 +28,8 @@
 
 在 `127.0.0.1` 启动本地分析页和 JSON API。
 
+![llmusage 本地 web 分析页概览](/screenshots/web-dashboard-overview.png)
+
 ### `llmusage tui`
 
 打开终端摘要与运维面板。

@@ -31,6 +31,12 @@ features:
 - TUI 运维面板
 - 静态 HTML 导出
 
+## Web 分析页预览
+
+下面这张图就是 `llmusage serve` 暴露出来的本地浏览器分析页。
+
+![llmusage 本地 web 分析页概览](/screenshots/web-dashboard-overview.png)
+
 ## 开发命令
 
 ```powershell

@@ -31,6 +31,12 @@ features:
 - TUI status surface
 - Offline HTML export
 
+## Dashboard preview
+
+This is the local browser dashboard exposed by `llmusage serve`.
+
+![llmusage web dashboard overview](/screenshots/web-dashboard-overview.png)
+
 ## Development workflow
 
 Use the root `justfile`:
