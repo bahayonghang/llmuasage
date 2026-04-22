@@ -1,0 +1,449 @@
+use std::{
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+};
+
+use anyhow::Result;
+use llmusage::{app::AppContext, commands, query, store::Store};
+use rusqlite::Connection;
+use tempfile::TempDir;
+
+#[test]
+fn sync_hot_run_and_append_remain_incremental() -> Result<()> {
+    /*
+     * ========================================================================
+     * 步骤1：验证热启动空跑与追加续跑
+     * ========================================================================
+     * 目标：
+     * 1) 首次 sync 导入基础数据
+     * 2) 二次空跑不重复导入
+     * 3) 追加同一文件时只导入新增事件
+     */
+    let fixture = Fixture::new()?;
+    fixture.seed_codex("rollout-test.jsonl", 120, "2026-04-22T01:12:00Z")?;
+    fixture.seed_claude("session.jsonl", 90, "2026-04-22T02:00:00Z")?;
+    fixture.seed_opencode("msg-1", 1776823200000, 64)?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+
+        commands::sync::run(&app).await?;
+        let store = Store::new(&app.paths);
+        let first_overview = query::load_overview(&store)?;
+        let first_sync_status = store.load_source_sync_statuses()?;
+        assert_eq!(first_sync_status.len(), 3);
+
+        commands::sync::run(&app).await?;
+        let second_overview = query::load_overview(&store)?;
+        assert_eq!(
+            first_overview.total.total_tokens,
+            second_overview.total.total_tokens
+        );
+
+        let hot_status = store.load_source_sync_statuses()?;
+        let claude_status = hot_status
+            .iter()
+            .find(|item| item.source == "claude")
+            .expect("claude sync status");
+        assert_eq!(claude_status.changed_files, 0);
+        let codex_status = hot_status
+            .iter()
+            .find(|item| item.source == "codex")
+            .expect("codex sync status");
+        assert_eq!(codex_status.changed_files, 0);
+
+        fixture.append_codex("rollout-test.jsonl", 33, "2026-04-22T03:12:00Z")?;
+        fixture.append_claude("session.jsonl", 44, "2026-04-22T03:00:00Z")?;
+        commands::sync::run(&app).await?;
+
+        let third_overview = query::load_overview(&store)?;
+        assert!(third_overview.total.total_tokens > second_overview.total.total_tokens);
+        let count = usage_event_count(&app.paths.db_path)?;
+        assert_eq!(count, 5);
+
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn sync_replay_replaces_old_file_totals() -> Result<()> {
+    /*
+     * ========================================================================
+     * 步骤2：验证整文件重放会先清理旧事件
+     * ========================================================================
+     * 目标：
+     * 1) 首次 sync 导入原始 Codex 文件
+     * 2) 覆盖同一路径文件，触发整文件重放
+     * 3) 最终总量应等于新文件，不保留旧值
+     */
+    let fixture = Fixture::new()?;
+    fixture.seed_codex("rollout-reset.jsonl", 120, "2026-04-22T01:12:00Z")?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        commands::sync::run(&app).await?;
+
+        let store = Store::new(&app.paths);
+        let first_total = query::load_overview(&store)?.total.total_tokens;
+        assert_eq!(first_total, 120);
+
+        fixture.replace_codex("rollout-reset.jsonl", 45, "2026-04-22T04:00:00Z")?;
+        commands::sync::run(&app).await?;
+
+        let replaced_total = query::load_overview(&store)?.total.total_tokens;
+        assert_eq!(replaced_total, 45);
+        assert_eq!(usage_event_count(&app.paths.db_path)?, 1);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn source_breakdown_matches_bucket_totals() -> Result<()> {
+    /*
+     * ========================================================================
+     * 步骤3：验证来源汇总与 bucket 总量一致
+     * ========================================================================
+     * 目标：
+     * 1) 走一轮全量 sync
+     * 2) 校验 source breakdown 不再被 join 放大
+     * 3) 汇总值必须与 overview 总量一致
+     */
+    let fixture = Fixture::new()?;
+    fixture.seed_codex("rollout-test.jsonl", 120, "2026-04-22T01:12:00Z")?;
+    fixture.seed_claude("session.jsonl", 90, "2026-04-22T02:00:00Z")?;
+    fixture.seed_opencode("msg-1", 1776823200000, 64)?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        commands::sync::run(&app).await?;
+
+        let store = Store::new(&app.paths);
+        let overview = query::load_overview(&store)?;
+        let sources = query::load_source_breakdown(&store)?;
+        let total_from_sources = sources.iter().map(|item| item.total_tokens).sum::<i64>();
+        assert_eq!(overview.total.total_tokens, total_from_sources);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn sqlite_worker_lease_is_exclusive() -> Result<()> {
+    /*
+     * ========================================================================
+     * 步骤4：验证 SQLite 租约锁排他
+     * ========================================================================
+     * 目标：
+     * 1) 第一把锁成功拿到
+     * 2) 第二次尝试立刻失败
+     * 3) 释放后可以再次获取
+     */
+    let fixture = Fixture::new()?;
+    let app = AppContext::discover()?;
+    let store = Store::new(&app.paths);
+    store.bootstrap()?;
+
+    let first = store.acquire_worker_lock()?;
+    assert!(first.is_some());
+    let second = store.acquire_worker_lock()?;
+    assert!(second.is_none());
+    drop(first);
+    let third = store.acquire_worker_lock()?;
+    assert!(third.is_some());
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn opencode_high_water_handles_same_timestamp_ids() -> Result<()> {
+    /*
+     * ========================================================================
+     * 步骤5：验证 OpenCode 同时间戳多主键续跑
+     * ========================================================================
+     * 目标：
+     * 1) 首次 sync 导入第一条 assistant 记录
+     * 2) 第二次插入同 time_created 但更大 id 的记录
+     * 3) 第三次空跑不重复导入
+     */
+    let fixture = Fixture::new()?;
+    fixture.seed_opencode("msg-1", 1776823200000, 64)?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        commands::sync::run(&app).await?;
+        assert_eq!(usage_event_count(&app.paths.db_path)?, 1);
+
+        fixture.seed_opencode("msg-2", 1776823200000, 48)?;
+        commands::sync::run(&app).await?;
+        assert_eq!(usage_event_count(&app.paths.db_path)?, 2);
+
+        commands::sync::run(&app).await?;
+        assert_eq!(usage_event_count(&app.paths.db_path)?, 2);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+fn usage_event_count(db_path: &Path) -> Result<i64> {
+    let conn = Connection::open(db_path)?;
+    let count = conn.query_row("SELECT COUNT(*) FROM usage_event", [], |row| row.get(0))?;
+    Ok(count)
+}
+
+struct Fixture {
+    _root: TempDir,
+    home: PathBuf,
+    codex_home: PathBuf,
+    opencode_home: PathBuf,
+    saved: Vec<(String, Option<String>)>,
+}
+
+impl Fixture {
+    fn new() -> Result<Self> {
+        let root = TempDir::new()?;
+        let home = root.path().join("home");
+        let codex_home = home.join(".codex");
+        let opencode_home = root.path().join("opencode-home");
+        fs::create_dir_all(&home)?;
+        fs::create_dir_all(&codex_home)?;
+        fs::create_dir_all(&opencode_home)?;
+
+        let mut saved = Vec::new();
+        for key in ["HOME", "USERPROFILE", "CODEX_HOME", "OPENCODE_HOME"] {
+            saved.push((key.to_string(), std::env::var(key).ok()));
+        }
+        unsafe {
+            std::env::set_var("HOME", &home);
+            std::env::set_var("USERPROFILE", &home);
+            std::env::set_var("CODEX_HOME", &codex_home);
+            std::env::set_var("OPENCODE_HOME", &opencode_home);
+        }
+
+        fs::create_dir_all(home.join(".claude").join("projects").join("demo"))?;
+        write_git_repo(&home.join("workspace").join("demo-repo"))?;
+
+        Ok(Self {
+            _root: root,
+            home,
+            codex_home,
+            opencode_home,
+            saved,
+        })
+    }
+
+    fn restore_env(&self) {
+        for (key, value) in &self.saved {
+            unsafe {
+                if let Some(value) = value {
+                    std::env::set_var(key, value);
+                } else {
+                    std::env::remove_var(key);
+                }
+            }
+        }
+    }
+
+    fn seed_codex(&self, name: &str, total_tokens: i64, timestamp: &str) -> Result<()> {
+        let sessions_dir = self
+            .codex_home
+            .join("sessions")
+            .join("2026")
+            .join("04")
+            .join("22");
+        fs::create_dir_all(&sessions_dir)?;
+        let repo_root = self.home.join("workspace").join("demo-repo");
+        let payload = [
+            serde_json::json!({
+                "type": "session_meta",
+                "payload": {
+                    "model": "gpt-5",
+                    "cwd": repo_root.to_string_lossy().to_string(),
+                }
+            })
+            .to_string(),
+            codex_token_line(timestamp, total_tokens, total_tokens),
+        ]
+        .join("\n");
+        fs::write(sessions_dir.join(name), payload)?;
+        Ok(())
+    }
+
+    fn append_codex(&self, name: &str, total_tokens: i64, timestamp: &str) -> Result<()> {
+        let path = self
+            .codex_home
+            .join("sessions")
+            .join("2026")
+            .join("04")
+            .join("22")
+            .join(name);
+        let payload = format!("\n{}", codex_token_line(timestamp, total_tokens, 153));
+        fs::OpenOptions::new()
+            .append(true)
+            .open(path)?
+            .write_all(payload.as_bytes())?;
+        Ok(())
+    }
+
+    fn replace_codex(&self, name: &str, total_tokens: i64, timestamp: &str) -> Result<()> {
+        let path = self
+            .codex_home
+            .join("sessions")
+            .join("2026")
+            .join("04")
+            .join("22")
+            .join(name);
+        let repo_root = self.home.join("workspace").join("demo-repo");
+        let payload = [
+            serde_json::json!({
+                "type": "session_meta",
+                "payload": {
+                    "model": "gpt-5",
+                    "cwd": repo_root.to_string_lossy().to_string(),
+                }
+            })
+            .to_string(),
+            codex_token_line(timestamp, total_tokens, total_tokens),
+        ]
+        .join("\n");
+        fs::write(path, payload)?;
+        Ok(())
+    }
+
+    fn seed_claude(&self, name: &str, total_tokens: i64, timestamp: &str) -> Result<()> {
+        let claude_file = self
+            .home
+            .join(".claude")
+            .join("projects")
+            .join("demo")
+            .join(name);
+        fs::write(
+            claude_file,
+            format!("{}\n", claude_usage_line(timestamp, total_tokens)),
+        )?;
+        Ok(())
+    }
+
+    fn append_claude(&self, name: &str, total_tokens: i64, timestamp: &str) -> Result<()> {
+        let claude_file = self
+            .home
+            .join(".claude")
+            .join("projects")
+            .join("demo")
+            .join(name);
+        let payload = format!("{}\n", claude_usage_line(timestamp, total_tokens));
+        fs::OpenOptions::new()
+            .append(true)
+            .open(claude_file)?
+            .write_all(payload.as_bytes())?;
+        Ok(())
+    }
+
+    fn seed_opencode(&self, message_id: &str, time_created: i64, total_tokens: i64) -> Result<()> {
+        let db_path = self.opencode_home.join("opencode.db");
+        let conn = Connection::open(&db_path)?;
+        conn.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS project(id TEXT PRIMARY KEY, worktree TEXT);
+            CREATE TABLE IF NOT EXISTS session(id TEXT PRIMARY KEY, project_id TEXT);
+            CREATE TABLE IF NOT EXISTS message(id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT);
+            "#,
+        )?;
+        let repo_root = self.home.join("workspace").join("demo-repo");
+        conn.execute(
+            "INSERT OR IGNORE INTO project(id, worktree) VALUES (?1, ?2)",
+            (&"project-1", &repo_root.to_string_lossy().to_string()),
+        )?;
+        conn.execute(
+            "INSERT OR IGNORE INTO session(id, project_id) VALUES (?1, ?2)",
+            (&"session-1", &"project-1"),
+        )?;
+        let message = serde_json::json!({
+            "id": message_id,
+            "role": "assistant",
+            "modelID": "gpt-5",
+            "tokens": {
+                "input": total_tokens,
+                "output": 0,
+                "reasoning": 0,
+                "cache": { "read": 0, "write": 0 }
+            },
+            "time": {
+                "created": time_created,
+                "completed": time_created
+            }
+        });
+        conn.execute(
+            "INSERT OR REPLACE INTO message(id, session_id, time_created, data) VALUES (?1, ?2, ?3, ?4)",
+            (&message_id, &"session-1", &time_created, &message.to_string()),
+        )?;
+        Ok(())
+    }
+}
+
+fn write_git_repo(repo_root: &Path) -> Result<()> {
+    fs::create_dir_all(repo_root.join(".git"))?;
+    fs::write(
+        repo_root.join(".git").join("config"),
+        "[remote \"origin\"]\n    url = https://github.com/example/demo-repo.git\n",
+    )?;
+    Ok(())
+}
+
+fn codex_token_line(timestamp: &str, last_total: i64, total_total: i64) -> String {
+    serde_json::json!({
+        "timestamp": timestamp,
+        "payload": {
+            "type": "token_count",
+            "info": {
+                "last_token_usage": {
+                    "input_tokens": last_total,
+                    "cached_input_tokens": 0,
+                    "output_tokens": 0,
+                    "reasoning_output_tokens": 0,
+                    "total_tokens": last_total,
+                },
+                "total_token_usage": {
+                    "input_tokens": total_total,
+                    "cached_input_tokens": 0,
+                    "output_tokens": 0,
+                    "reasoning_output_tokens": 0,
+                    "total_tokens": total_total,
+                }
+            }
+        }
+    })
+    .to_string()
+}
+
+fn claude_usage_line(timestamp: &str, total_tokens: i64) -> String {
+    serde_json::json!({
+        "timestamp": timestamp,
+        "message": {
+            "model": "claude-sonnet-4",
+            "usage": {
+                "input_tokens": total_tokens,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": total_tokens,
+            }
+        }
+    })
+    .to_string()
+}

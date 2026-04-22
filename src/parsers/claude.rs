@@ -2,98 +2,143 @@ use std::{
     fs::File,
     io::{BufRead, BufReader, Seek, SeekFrom},
     path::{Path, PathBuf},
+    time::Instant,
 };
 
 use anyhow::Result;
 use serde_json::Value;
+use tokio::task;
 use tracing::info;
 use walkdir::WalkDir;
 
 use crate::{
     models::{SourceKind, UsageEvent, UsageTokens},
-    parsers::SourceSyncStats,
-    project::ProjectResolver,
-    store::{FileCursor, Store},
-    util::{
-        bucket_start_from_rfc3339, hash_string, metadata_inode, normalize_model, now_utc,
-        resolve_home_dir,
+    parsers::{
+        SourceParseOutput, SourceSyncStats,
+        file_state::{
+            CandidateFile, FileReplayMode, decide_file_replay, finalize_cursor, should_rescan_file,
+        },
     },
+    project::ProjectResolver,
+    store::Store,
+    util::{bucket_start_from_rfc3339, hash_string, normalize_model, resolve_home_dir},
 };
 
-pub fn sync_claude(store: &Store) -> Result<SourceSyncStats> {
-    /*
-     * ========================================================================
-     * 步骤1：遍历 Claude 项目 jsonl 并做增量解析
-     * ========================================================================
-     * 目标：
-     * 1) 读取 ~/.claude/projects 下的项目 jsonl
-     * 2) 只增量消费 usage 记录
-     * 3) 将标准化 token 事件落入 SQLite 真源
-     */
-    info!("开始同步 Claude 项目真源");
+#[derive(Debug, Clone)]
+struct ClaudeShardPlan {
+    files: Vec<CandidateFile>,
+}
 
-    // 1.1 枚举 Claude 项目日志与既有游标
-    let home_dir = resolve_home_dir();
-    let projects_dir = home_dir.join(".claude").join("projects");
-    let files = list_project_logs(&projects_dir);
-    let cursor_map = store.load_file_cursors(SourceKind::Claude)?;
-    let mut resolver = ProjectResolver::default();
-    let mut stats = SourceSyncStats {
-        source: SourceKind::Claude,
-        ..SourceSyncStats::default()
-    };
-
-    // 1.2 按文件偏移量增量解析 usage 行
-    for file_path in files {
-        let Some(file_name) = file_path.to_str() else {
-            continue;
-        };
-        let metadata = std::fs::metadata(&file_path)?;
-        let inode = metadata_inode(&metadata);
-        let existing = cursor_map.get(file_name).cloned().unwrap_or_default();
-        let start_offset = if existing.inode == inode {
-            existing.offset
-        } else {
-            0
-        };
-        let project = resolver.resolve(file_path.parent().unwrap_or(Path::new(".")))?;
-        let parsed = parse_project_file(&file_path, inode, start_offset, project)?;
-
-        for event in &parsed.events {
-            stats.events_seen += 1;
-            if store.record_usage_event(event)? {
-                stats.events_inserted += 1;
-            }
-        }
-
-        store.save_file_cursor(
-            SourceKind::Claude,
-            &FileCursor {
-                cursor_key: file_name.to_string(),
-                file_path: file_name.to_string(),
-                inode,
-                offset: parsed.end_offset,
-                last_total: None,
-                last_model: None,
-                updated_at: now_utc(),
-            },
-        )?;
-        stats.files_processed += 1;
-    }
-
-    info!(
-        files_processed = stats.files_processed,
-        events_seen = stats.events_seen,
-        events_inserted = stats.events_inserted,
-        "完成 Claude 项目真源同步"
-    );
-    Ok(stats)
+#[derive(Debug)]
+struct ClaudeShardOutput {
+    events: Vec<UsageEvent>,
+    cursors: Vec<crate::store::FileCursor>,
+    reset_path_hashes: Vec<String>,
+    events_seen: usize,
+    events_replayed: usize,
+    bytes_scanned: u64,
 }
 
 #[derive(Debug)]
 struct ClaudeParseResult {
     end_offset: u64,
     events: Vec<UsageEvent>,
+}
+
+pub async fn sync_claude(store: &Store, parallelism: usize) -> Result<SourceParseOutput> {
+    /*
+     * ========================================================================
+     * 步骤1：按项目目录分片并行解析 Claude 真源
+     * ========================================================================
+     * 目标：
+     * 1) 读取 ~/.claude/projects 下的项目 jsonl
+     * 2) 只把缺失、追加或重放文件送去解析
+     * 3) 返回 event / cursor / reset 指令给单 writer 统一落库
+     */
+    info!("开始同步 Claude 项目真源");
+
+    // 1.1 构建按项目目录分片的候选文件计划
+    let parse_started = Instant::now();
+    let home_dir = resolve_home_dir();
+    let projects_dir = home_dir.join(".claude").join("projects");
+    let files = list_project_logs(&projects_dir);
+    let total_files = files.len();
+    let cursor_map = store.load_file_cursors(SourceKind::Claude)?;
+
+    let mut shards = std::collections::HashMap::<PathBuf, Vec<CandidateFile>>::new();
+    let mut changed_files = 0usize;
+    for file_path in files {
+        let key = file_path.parent().unwrap_or(&projects_dir).to_path_buf();
+        let existing = file_path
+            .to_str()
+            .and_then(|raw| cursor_map.get(raw).cloned());
+        if should_rescan_file(&file_path, existing.as_ref())? {
+            changed_files += 1;
+            shards.entry(key).or_default().push(CandidateFile {
+                path: file_path,
+                existing,
+            });
+        }
+    }
+
+    // 1.2 控制并发度并行解析分片
+    let mut events = Vec::new();
+    let mut cursors = Vec::new();
+    let mut reset_path_hashes = Vec::new();
+    let mut events_seen = 0usize;
+    let mut events_replayed = 0usize;
+    let mut bytes_scanned = 0u64;
+    let mut plans = shards
+        .into_values()
+        .map(|files| ClaudeShardPlan { files })
+        .collect::<Vec<_>>();
+    plans.sort_by_key(|plan| plan.files.first().map(|file| file.path.clone()));
+
+    let width = parallelism.max(1);
+    for batch in plans.chunks(width) {
+        let mut tasks = Vec::new();
+        for plan in batch {
+            let plan = plan.clone();
+            tasks.push(task::spawn_blocking(move || parse_claude_shard(plan)));
+        }
+
+        for task in tasks {
+            let shard = task.await??;
+            events_seen += shard.events_seen;
+            events_replayed += shard.events_replayed;
+            bytes_scanned += shard.bytes_scanned;
+            events.extend(shard.events);
+            cursors.extend(shard.cursors);
+            reset_path_hashes.extend(shard.reset_path_hashes);
+        }
+    }
+
+    let mut stats = SourceSyncStats {
+        source: SourceKind::Claude,
+        files_processed: total_files,
+        changed_files,
+        bytes_scanned,
+        events_seen,
+        events_replayed,
+        ..SourceSyncStats::default()
+    };
+    stats.parse_ms = parse_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+
+    info!(
+        files_processed = stats.files_processed,
+        changed_files = stats.changed_files,
+        events_seen = stats.events_seen,
+        bytes_scanned = stats.bytes_scanned,
+        "完成 Claude 项目真源解析"
+    );
+    Ok(SourceParseOutput {
+        source: SourceKind::Claude,
+        events,
+        cursors,
+        opencode_cursor: None,
+        reset_path_hashes,
+        stats,
+    })
 }
 
 fn list_project_logs(projects_dir: &Path) -> Vec<PathBuf> {
@@ -113,9 +158,57 @@ fn list_project_logs(projects_dir: &Path) -> Vec<PathBuf> {
     files
 }
 
+fn parse_claude_shard(plan: ClaudeShardPlan) -> Result<ClaudeShardOutput> {
+    let mut resolver = ProjectResolver::default();
+    let mut output = ClaudeShardOutput {
+        events: Vec::new(),
+        cursors: Vec::new(),
+        reset_path_hashes: Vec::new(),
+        events_seen: 0,
+        events_replayed: 0,
+        bytes_scanned: 0,
+    };
+
+    for candidate in plan.files {
+        let existing = candidate.existing.clone();
+        let decision = decide_file_replay(candidate)?;
+        let project =
+            resolver.resolve(decision.snapshot.path.parent().unwrap_or(Path::new(".")))?;
+        let path_hash = hash_string(&decision.snapshot.path.to_string_lossy());
+        let parsed = parse_project_file(
+            &decision.snapshot.path,
+            &path_hash,
+            &decision.snapshot.file_fingerprint,
+            decision.start_offset,
+            project,
+        )?;
+
+        output.bytes_scanned += decision
+            .snapshot
+            .file_size
+            .saturating_sub(decision.start_offset);
+        output.events_seen += parsed.events.len();
+        if decision.replay_mode == FileReplayMode::Reparse && existing.is_some() {
+            output.events_replayed += parsed.events.len();
+            output.reset_path_hashes.push(path_hash);
+        }
+        output.events.extend(parsed.events);
+        output.cursors.push(finalize_cursor(
+            &decision.snapshot.path,
+            &decision.snapshot,
+            parsed.end_offset,
+            None,
+            None,
+        ));
+    }
+
+    Ok(output)
+}
+
 fn parse_project_file(
     file_path: &Path,
-    inode: u64,
+    path_hash: &str,
+    file_fingerprint: &str,
     start_offset: u64,
     project: Option<crate::models::ProjectInfo>,
 ) -> Result<ClaudeParseResult> {
@@ -164,13 +257,6 @@ fn parse_project_file(
             continue;
         };
 
-        let model = normalize_model(
-            value
-                .get("message")
-                .and_then(|message| message.get("model"))
-                .and_then(Value::as_str)
-                .or_else(|| value.get("model").and_then(Value::as_str)),
-        );
         let tokens = normalize_claude_usage(usage);
         if tokens.total_tokens == 0
             && tokens.input_tokens == 0
@@ -181,14 +267,15 @@ fn parse_project_file(
         }
 
         events.push(UsageEvent {
-            event_key: format!(
-                "claude:{}:{}:{}",
-                inode,
-                hash_string(&file_path.to_string_lossy()),
-                offset
-            ),
+            event_key: format!("claude:{path_hash}:{file_fingerprint}:{offset}"),
             source: SourceKind::Claude,
-            model,
+            model: normalize_model(
+                value
+                    .get("message")
+                    .and_then(|message| message.get("model"))
+                    .and_then(Value::as_str)
+                    .or_else(|| value.get("model").and_then(Value::as_str)),
+            ),
             event_at: timestamp.to_string(),
             hour_start,
             tokens,

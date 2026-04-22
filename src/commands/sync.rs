@@ -1,11 +1,15 @@
+use std::time::Instant;
+
 use anyhow::Result;
 use tracing::info;
 
 use crate::{
     app::AppContext,
     parsers::{SourceSyncStats, claude::sync_claude, codex::sync_codex, opencode::sync_opencode},
-    store::Store,
+    store::{SourceSyncStatus, Store},
 };
+
+const WRITE_BATCH_SIZE: usize = 1000;
 
 #[derive(Debug, Clone)]
 pub struct SyncSummary {
@@ -20,17 +24,18 @@ pub async fn run(app: &AppContext) -> Result<()> {
      * 步骤1：执行全量本地真源同步
      * ========================================================================
      * 目标：
-     * 1) 拿全局锁，避免 hook-run 与手动 sync 并发
-     * 2) 顺序消费 Codex、Claude、OpenCode 三类真源
-     * 3) 输出人读摘要并记录 run_log
+     * 1) 拿 SQLite 租约锁，避免 hook-run 与手动 sync 并发
+     * 2) 并行解析 Codex、Claude、OpenCode 三类真源
+     * 3) 用单 writer 批量落库并记录 run_log
      */
     info!("开始执行全量本地真源同步");
 
-    // 1.1 建立 store、记录 run_log 并拿全局锁
+    // 1.1 建立 store、申请租约锁、回收脏 run
     let store = Store::new(&app.paths);
     store.bootstrap()?;
-    let run_id = store.record_run_start("sync")?;
-    let Some(_lock) = store.acquire_worker_lock()? else {
+    let lock_started = Instant::now();
+    let Some(lock) = store.acquire_worker_lock()? else {
+        let run_id = store.record_run_start("sync")?;
         store.finish_run(
             run_id,
             "skipped",
@@ -40,9 +45,12 @@ pub async fn run(app: &AppContext) -> Result<()> {
         println!("已有 worker 在运行，跳过本次 sync。");
         return Ok(());
     };
+    let lock_wait_ms = lock_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+    store.recover_running_runs(&["sync", "hook-run"])?;
+    let run_id = store.record_run_start("sync")?;
 
-    // 1.2 串行消费三类本地真源
-    let summary = run_once(app, &store)?;
+    // 1.2 并行解析、单 writer 落库并记录每源统计
+    let summary = run_once(app, &store, lock_wait_ms).await?;
     let summary_text = format!(
         "sources={} seen={} inserted={}",
         summary.sources.len(),
@@ -50,12 +58,17 @@ pub async fn run(app: &AppContext) -> Result<()> {
         summary.total_inserted
     );
     store.finish_run(run_id, "success", Some(&summary_text), None)?;
+    drop(lock);
 
     println!("Sync finished:");
     for item in &summary.sources {
         println!(
-            "- {}: files={} seen={} inserted={}",
-            item.source, item.files_processed, item.events_seen, item.events_inserted
+            "- {}: files={} changed={} seen={} inserted={}",
+            item.source,
+            item.files_processed,
+            item.changed_files,
+            item.events_seen,
+            item.events_inserted
         );
     }
     println!(
@@ -67,16 +80,81 @@ pub async fn run(app: &AppContext) -> Result<()> {
     Ok(())
 }
 
-pub fn run_once(_app: &AppContext, store: &Store) -> Result<SyncSummary> {
-    let sources = vec![
-        sync_codex(store)?,
-        sync_claude(store)?,
-        sync_opencode(store)?,
-    ];
-    let total_seen = sources.iter().map(|item| item.events_seen).sum();
-    let total_inserted = sources.iter().map(|item| item.events_inserted).sum();
+pub async fn run_once(_app: &AppContext, store: &Store, lock_wait_ms: u64) -> Result<SyncSummary> {
+    /*
+     * ========================================================================
+     * 步骤2：执行三阶段同步流水线
+     * ========================================================================
+     * 目标：
+     * 1) 先并行解析三类真源
+     * 2) 再用单 writer 顺序提交 reset / event / cursor
+     * 3) 最后刷新每源诊断状态
+     */
+    info!("开始执行 sync 三阶段流水线");
+
+    // 2.1 计算并发度并并行执行 parser
+    let parallelism = std::thread::available_parallelism()
+        .map(|value| value.get().min(4))
+        .unwrap_or(1);
+    let (codex, claude, opencode) = tokio::try_join!(
+        sync_codex(store, parallelism),
+        sync_claude(store, parallelism),
+        sync_opencode(store, parallelism),
+    )?;
+
+    // 2.2 用单 writer 统一落库并回写状态
+    let mut writer = store.begin_sync_run()?;
+    let mut sources = vec![codex, claude, opencode];
+    let mut total_seen = 0usize;
+    let mut total_inserted = 0usize;
+    let mut sync_statuses = Vec::new();
+
+    for source in &mut sources {
+        let write_started = Instant::now();
+        let mut inserted = 0usize;
+
+        if !source.reset_path_hashes.is_empty() {
+            writer.reset_file_events_batch(source.source, &source.reset_path_hashes)?;
+        }
+        for batch in source.events.chunks(WRITE_BATCH_SIZE) {
+            inserted += writer.write_event_batch(batch)?;
+        }
+        if !source.cursors.is_empty() {
+            writer.write_cursor_batch(source.source, &source.cursors)?;
+        }
+        if let Some(opencode_cursor) = &source.opencode_cursor {
+            store.save_opencode_cursor(opencode_cursor)?;
+        }
+
+        source.stats.events_inserted = inserted;
+        source.stats.lock_wait_ms = lock_wait_ms;
+        source.stats.write_ms = write_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+        total_seen += source.stats.events_seen;
+        total_inserted += source.stats.events_inserted;
+        sync_statuses.push(SourceSyncStatus {
+            source: source.source.as_str().to_string(),
+            files_processed: source.stats.files_processed as i64,
+            changed_files: source.stats.changed_files as i64,
+            bytes_scanned: source.stats.bytes_scanned as i64,
+            events_seen: source.stats.events_seen as i64,
+            events_replayed: source.stats.events_replayed as i64,
+            events_inserted: source.stats.events_inserted as i64,
+            parse_ms: source.stats.parse_ms as i64,
+            write_ms: source.stats.write_ms as i64,
+            lock_wait_ms: source.stats.lock_wait_ms as i64,
+            updated_at: crate::util::now_utc(),
+        });
+    }
+    writer.finish_sync_run()?;
+    store.save_source_sync_statuses(&sync_statuses)?;
+
+    let stats = sources
+        .into_iter()
+        .map(|source| source.stats)
+        .collect::<Vec<_>>();
+    info!("完成 sync 三阶段流水线");
     Ok(SyncSummary {
-        sources,
+        sources: stats,
         total_seen,
         total_inserted,
     })

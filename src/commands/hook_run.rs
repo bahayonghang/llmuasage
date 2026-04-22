@@ -25,6 +25,7 @@ pub async fn run(app: &AppContext, source: SourceKind, trigger: &str, _auto: boo
     let Some(_lock) = store.acquire_worker_lock()? else {
         return Ok(());
     };
+    store.recover_running_runs(&["sync", "hook-run"])?;
 
     // 1.2 当前 worker 按 snapshot 差异循环补跑
     let run_id = store.record_run_start("hook-run")?;
@@ -33,7 +34,7 @@ pub async fn run(app: &AppContext, source: SourceKind, trigger: &str, _auto: boo
     for _ in 0..3 {
         let started_at = now_utc();
         store.mark_trigger_worker_started(source, &started_at)?;
-        let summary = run_once(app, &store)?;
+        let summary = run_once(app, &store, 0).await?;
         total_inserted += summary.total_inserted;
         let finished_at = now_utc();
         store.mark_trigger_worker_finished(source, &finished_at)?;

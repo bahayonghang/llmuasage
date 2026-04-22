@@ -26,6 +26,7 @@ pub async fn run(app: &AppContext, out: Option<PathBuf>) -> Result<()> {
     let sources = query::load_source_breakdown(&store)?;
     let probes = integrations::probe_all(app)?;
     let recent_runs = store.recent_runs(20)?;
+    let sync_status = store.load_source_sync_statuses()?;
     let diagnostics = json!({
         "env": {
             "os": std::env::consts::OS,
@@ -46,6 +47,7 @@ pub async fn run(app: &AppContext, out: Option<PathBuf>) -> Result<()> {
         },
         "cursors": health.cursors,
         "sources": sources,
+        "sync_status": sync_status,
         "health_checks": {
             "recent_failures": health.recent_failures,
             "integration_records": health.integrations,

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Instant};
 
 use anyhow::Result;
 use rusqlite::{Connection, params};
@@ -7,25 +7,37 @@ use tracing::info;
 
 use crate::{
     models::{SourceKind, UsageEvent, UsageTokens},
-    parsers::SourceSyncStats,
+    parsers::{SourceParseOutput, SourceSyncStats},
     project::ProjectResolver,
     store::Store,
-    util::{bucket_start_from_rfc3339, metadata_inode, normalize_model, now_utc, resolve_home_dir},
+    util::{bucket_start_from_rfc3339, normalize_model, now_utc, resolve_home_dir},
 };
 
-pub fn sync_opencode(store: &Store) -> Result<SourceSyncStats> {
+const OPENCODE_PAGE_SIZE: i64 = 1000;
+
+#[derive(Debug)]
+struct OpencodeRow {
+    id: String,
+    time_created: i64,
+    role: Option<String>,
+    project_worktree: Option<String>,
+    data: String,
+}
+
+pub async fn sync_opencode(store: &Store, _parallelism: usize) -> Result<SourceParseOutput> {
     /*
      * ========================================================================
-     * 步骤1：读取 OpenCode SQLite 真源并做增量同步
+     * 步骤1：按高水位分页读取 OpenCode SQLite 真源
      * ========================================================================
      * 目标：
-     * 1) 直接读取本地 opencode.db，不走任何外部 sqlite3 命令
-     * 2) 按 db inode + last_time_created + last_processed_ids 增量续跑
-     * 3) 将 assistant usage 事件直接落入 SQLite 聚合真源
+     * 1) 直接读取本地 opencode.db，不走外部 sqlite3
+     * 2) 只依赖 last_time_created + last_processed_ids 续跑
+     * 3) 返回 event 和新 cursor 给单 writer 统一落库
      */
     info!("开始同步 OpenCode SQLite 真源");
 
-    // 1.1 定位本地 opencode.db 与现有游标
+    // 1.1 定位本地 DB 并读取当前 cursor
+    let parse_started = Instant::now();
     let home_dir = resolve_home_dir();
     let data_home = dirs::data_local_dir().unwrap_or_else(|| home_dir.join(".local").join("share"));
     let opencode_home = std::env::var("OPENCODE_HOME")
@@ -33,7 +45,6 @@ pub fn sync_opencode(store: &Store) -> Result<SourceSyncStats> {
         .unwrap_or_else(|_| data_home.join("opencode"));
     let db_path = opencode_home.join("opencode.db");
     let mut cursor = store.load_opencode_cursor()?;
-    let mut resolver = ProjectResolver::default();
     let mut stats = SourceSyncStats {
         source: SourceKind::Opencode,
         ..SourceSyncStats::default()
@@ -42,21 +53,101 @@ pub fn sync_opencode(store: &Store) -> Result<SourceSyncStats> {
     if !db_path.is_file() {
         cursor.sqlite_status = "missing-db".to_string();
         cursor.updated_at = now_utc();
-        store.save_opencode_cursor(&cursor)?;
         stats.last_error = Some("OpenCode SQLite DB 缺失".to_string());
-        return Ok(stats);
+        return Ok(SourceParseOutput {
+            source: SourceKind::Opencode,
+            events: Vec::new(),
+            cursors: Vec::new(),
+            opencode_cursor: Some(cursor),
+            reset_path_hashes: Vec::new(),
+            stats,
+        });
     }
 
-    let metadata = std::fs::metadata(&db_path)?;
-    let inode = metadata_inode(&metadata);
-    if cursor.inode != 0 && cursor.inode != inode {
-        cursor.last_time_created = 0;
-        cursor.last_processed_ids.clear();
-    }
-    cursor.inode = inode;
-
-    // 1.2 查询 message/session/project 三表并按时间增量消费
+    // 1.2 按时间和主键分页读取 message 表
     let connection = Connection::open(&db_path)?;
+    let mut resolver = ProjectResolver::default();
+    let mut events = Vec::new();
+    let mut latest_time = cursor.last_time_created;
+    let mut latest_ids = cursor.last_processed_ids.clone();
+    let mut seen_rows = 0usize;
+    let mut scanned_bytes = 0u64;
+    let mut page_last_time = cursor.last_time_created;
+    let mut page_last_id = cursor
+        .last_processed_ids
+        .iter()
+        .max()
+        .cloned()
+        .unwrap_or_default();
+
+    loop {
+        let rows = load_opencode_page(&connection, page_last_time, &page_last_id)?;
+        if rows.is_empty() {
+            break;
+        }
+
+        for row in rows {
+            page_last_time = row.time_created;
+            page_last_id = row.id.clone();
+            scanned_bytes += row.data.len() as u64;
+            seen_rows += 1;
+
+            if row.time_created < cursor.last_time_created {
+                continue;
+            }
+            if row.time_created == cursor.last_time_created
+                && cursor.last_processed_ids.contains(&row.id)
+            {
+                continue;
+            }
+
+            if row.time_created > latest_time {
+                latest_time = row.time_created;
+                latest_ids.clear();
+            }
+            if row.time_created == latest_time {
+                latest_ids.push(row.id.clone());
+            }
+
+            let Some(event) = row_to_event(&row, &mut resolver)? else {
+                continue;
+            };
+            events.push(event);
+        }
+    }
+
+    cursor.last_time_created = latest_time;
+    cursor.last_processed_ids = latest_ids;
+    cursor.sqlite_status = "ok".to_string();
+    cursor.updated_at = now_utc();
+
+    stats.files_processed = 1;
+    stats.changed_files = usize::from(!events.is_empty());
+    stats.bytes_scanned = scanned_bytes;
+    stats.events_seen = events.len();
+    stats.parse_ms = parse_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+
+    info!(
+        rows_seen = seen_rows,
+        events_seen = stats.events_seen,
+        bytes_scanned = stats.bytes_scanned,
+        "完成 OpenCode SQLite 真源解析"
+    );
+    Ok(SourceParseOutput {
+        source: SourceKind::Opencode,
+        events,
+        cursors: Vec::new(),
+        opencode_cursor: Some(cursor),
+        reset_path_hashes: Vec::new(),
+        stats,
+    })
+}
+
+fn load_opencode_page(
+    connection: &Connection,
+    last_time_created: i64,
+    last_id: &str,
+) -> Result<Vec<OpencodeRow>> {
     let mut statement = connection.prepare(
         r#"
         SELECT
@@ -68,72 +159,25 @@ pub fn sync_opencode(store: &Store) -> Result<SourceSyncStats> {
         FROM message m
         LEFT JOIN session s ON s.id = m.session_id
         LEFT JOIN project p ON p.id = s.project_id
-        WHERE m.time_created >= ?1
+        WHERE m.time_created > ?1
+           OR (m.time_created = ?1 AND m.id > ?2)
         ORDER BY m.time_created ASC, m.id ASC
+        LIMIT ?3
         "#,
     )?;
-    let rows = statement.query_map(params![cursor.last_time_created], |row| {
-        Ok(OpencodeRow {
-            id: row.get(0)?,
-            time_created: row.get::<_, Option<i64>>(1)?.unwrap_or_default(),
-            role: row.get(2)?,
-            project_worktree: row.get(3)?,
-            data: row.get(4)?,
-        })
-    })?;
-
-    let mut latest_time = cursor.last_time_created;
-    let mut latest_ids = Vec::new();
-    for row in rows {
-        let row = row?;
-        if row.time_created < cursor.last_time_created {
-            continue;
-        }
-        if row.time_created == cursor.last_time_created
-            && cursor.last_processed_ids.contains(&row.id)
-        {
-            continue;
-        }
-
-        if row.time_created > latest_time {
-            latest_time = row.time_created;
-            latest_ids.clear();
-        }
-        if row.time_created == latest_time {
-            latest_ids.push(row.id.clone());
-        }
-
-        let Some(event) = row_to_event(&row, &mut resolver)? else {
-            continue;
-        };
-        stats.events_seen += 1;
-        if store.record_usage_event(&event)? {
-            stats.events_inserted += 1;
-        }
-    }
-
-    cursor.last_time_created = latest_time;
-    cursor.last_processed_ids = latest_ids;
-    cursor.sqlite_status = "ok".to_string();
-    cursor.updated_at = now_utc();
-    store.save_opencode_cursor(&cursor)?;
-    stats.files_processed = 1;
-
-    info!(
-        events_seen = stats.events_seen,
-        events_inserted = stats.events_inserted,
-        "完成 OpenCode SQLite 真源同步"
-    );
-    Ok(stats)
-}
-
-#[derive(Debug)]
-struct OpencodeRow {
-    id: String,
-    time_created: i64,
-    role: Option<String>,
-    project_worktree: Option<String>,
-    data: String,
+    let rows = statement.query_map(
+        params![last_time_created, last_id, OPENCODE_PAGE_SIZE],
+        |row| {
+            Ok(OpencodeRow {
+                id: row.get(0)?,
+                time_created: row.get::<_, Option<i64>>(1)?.unwrap_or_default(),
+                role: row.get(2)?,
+                project_worktree: row.get(3)?,
+                data: row.get(4)?,
+            })
+        },
+    )?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 fn row_to_event(row: &OpencodeRow, resolver: &mut ProjectResolver) -> Result<Option<UsageEvent>> {

@@ -10,18 +10,91 @@ use crate::{models::ProjectInfo, util::hash_string};
 
 #[derive(Debug, Default)]
 pub struct ProjectResolver {
-    cache: HashMap<PathBuf, Option<ProjectInfo>>,
+    project_cache: HashMap<PathBuf, Option<ProjectInfo>>,
+    repo_root_cache: HashMap<PathBuf, Option<PathBuf>>,
+    project_ref_cache: HashMap<PathBuf, Option<String>>,
 }
 
 impl ProjectResolver {
     pub fn resolve(&mut self, start_dir: &Path) -> Result<Option<ProjectInfo>> {
-        if let Some(cached) = self.cache.get(start_dir) {
+        if let Some(cached) = self.project_cache.get(start_dir) {
             return Ok(cached.clone());
         }
 
-        let resolved = resolve_project_info(start_dir)?;
-        self.cache.insert(start_dir.to_path_buf(), resolved.clone());
+        let resolved = self.resolve_project_info(start_dir)?;
+        self.project_cache
+            .insert(start_dir.to_path_buf(), resolved.clone());
         Ok(resolved)
+    }
+
+    fn resolve_project_info(&mut self, start_dir: &Path) -> Result<Option<ProjectInfo>> {
+        let Some(repo_root) = self.find_git_root(start_dir) else {
+            return Ok(None);
+        };
+
+        let project_ref = if let Some(cached) = self.project_ref_cache.get(&repo_root) {
+            cached.clone()
+        } else {
+            let resolved = resolve_git_config_path(&repo_root)
+                .as_deref()
+                .and_then(read_git_remote_url)
+                .and_then(|value| canonicalize_project_ref(&value));
+            self.project_ref_cache
+                .insert(repo_root.clone(), resolved.clone());
+            resolved
+        };
+
+        let repo_root_text = repo_root.to_string_lossy();
+        let repo_root_hash = hash_string(&repo_root_text);
+        let path_hash = hash_string(&start_dir.to_string_lossy());
+        let project_hash = hash_string(&repo_root_text);
+        let project_label = normalize_project_label(project_ref.as_deref(), &repo_root);
+
+        Ok(Some(ProjectInfo {
+            project_hash,
+            project_label,
+            project_ref,
+            repo_root_hash,
+            path_hash,
+        }))
+    }
+
+    fn find_git_root(&mut self, start_dir: &Path) -> Option<PathBuf> {
+        if let Some(cached) = self.repo_root_cache.get(start_dir) {
+            return cached.clone();
+        }
+
+        let mut current = start_dir.to_path_buf();
+        let mut visited = Vec::new();
+
+        loop {
+            if let Some(cached) = self.repo_root_cache.get(&current) {
+                let resolved = cached.clone();
+                for path in visited {
+                    self.repo_root_cache.insert(path, resolved.clone());
+                }
+                return resolved;
+            }
+
+            visited.push(current.clone());
+            let git_entry = current.join(".git");
+            if git_entry.exists() {
+                let resolved = Some(current.clone());
+                for path in visited {
+                    self.repo_root_cache.insert(path, resolved.clone());
+                }
+                return resolved;
+            }
+
+            let next = current.parent()?.to_path_buf();
+            if next == current {
+                for path in visited {
+                    self.repo_root_cache.insert(path, None);
+                }
+                return None;
+            }
+            current = next;
+        }
     }
 }
 

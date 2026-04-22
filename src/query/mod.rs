@@ -204,13 +204,21 @@ pub fn load_source_breakdown(store: &Store) -> Result<Vec<SourceBreakdown>> {
     let mut stmt = conn.prepare(
         r#"
         SELECT
-            b.source,
-            SUM(b.total_tokens),
-            MAX(e.event_at)
-        FROM usage_bucket_30m b
-        LEFT JOIN usage_event e ON e.source = b.source
-        GROUP BY b.source
-        ORDER BY SUM(b.total_tokens) DESC, b.source ASC
+            totals.source,
+            totals.total_tokens,
+            last_event.last_event_at
+        FROM (
+            SELECT source, SUM(total_tokens) AS total_tokens
+            FROM usage_bucket_30m
+            GROUP BY source
+        ) totals
+        LEFT JOIN (
+            SELECT source, MAX(event_at) AS last_event_at
+            FROM usage_event
+            GROUP BY source
+        ) last_event
+            ON last_event.source = totals.source
+        ORDER BY totals.total_tokens DESC, totals.source ASC
         "#,
     )?;
     let rows = stmt.query_map([], |row| {
