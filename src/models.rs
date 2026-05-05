@@ -47,6 +47,17 @@ pub struct UsageTokens {
     pub total_tokens: i64,
 }
 
+/// Optional conversation/session metadata attached to one normalized usage event.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionInfo {
+    /// Stable session identifier from the source when available.
+    pub session_id: String,
+    /// Optional human-readable label, usually a transcript/file stem.
+    pub session_label: Option<String>,
+    /// Privacy-preserving hash of the source transcript or local DB session path.
+    pub source_path_hash: Option<String>,
+}
+
 /// Stable, privacy-preserving project dimension values derived from a local path.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectInfo {
@@ -79,4 +90,6 @@ pub struct UsageEvent {
     pub tokens: UsageTokens,
     /// Optional project metadata resolved from the local working directory.
     pub project: Option<ProjectInfo>,
+    /// Optional session metadata used by report-first commands.
+    pub session: Option<SessionInfo>,
 }

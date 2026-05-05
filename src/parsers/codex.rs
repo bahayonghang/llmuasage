@@ -12,7 +12,7 @@ use tracing::info;
 use walkdir::WalkDir;
 
 use crate::{
-    models::{SourceKind, UsageEvent, UsageTokens},
+    models::{SessionInfo, SourceKind, UsageEvent, UsageTokens},
     parsers::{
         EVENT_WRITE_BATCH_SIZE, SourceSyncStats,
         file_state::{
@@ -262,6 +262,18 @@ fn parse_rollout_file(
     let mut offset = start_offset;
     let mut model = last_model;
     let mut totals = last_total;
+    let session_label = file_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .map(str::to_string);
+    let fallback_session_id = session_label
+        .clone()
+        .unwrap_or_else(|| path_hash.to_string());
+    let mut current_session = Some(SessionInfo {
+        session_id: fallback_session_id,
+        session_label: session_label.clone(),
+        source_path_hash: Some(path_hash.to_string()),
+    });
     let mut current_project = None;
     let mut current_cwd: Option<String> = None;
     let mut line = String::new();
@@ -294,6 +306,20 @@ fn parse_rollout_file(
         {
             if let Some(next_model) = payload.get("model").and_then(Value::as_str) {
                 model = Some(next_model.trim().to_string());
+            }
+            if matches!(
+                value.get("type").and_then(Value::as_str),
+                Some("session_meta")
+            ) && let Some(session_id) = payload.get("id").and_then(Value::as_str)
+            {
+                let trimmed = session_id.trim();
+                if !trimmed.is_empty() {
+                    current_session = Some(SessionInfo {
+                        session_id: trimmed.to_string(),
+                        session_label: session_label.clone(),
+                        source_path_hash: Some(path_hash.to_string()),
+                    });
+                }
             }
             if let Some(cwd) = payload.get("cwd").and_then(Value::as_str) {
                 let trimmed = cwd.trim().to_string();
@@ -339,6 +365,7 @@ fn parse_rollout_file(
             hour_start,
             tokens: delta,
             project: current_project.clone(),
+            session: current_session.clone(),
         });
     }
 

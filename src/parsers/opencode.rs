@@ -6,7 +6,7 @@ use serde_json::Value;
 use tracing::info;
 
 use crate::{
-    models::{SourceKind, UsageEvent, UsageTokens},
+    models::{SessionInfo, SourceKind, UsageEvent, UsageTokens},
     parsers::{EVENT_WRITE_BATCH_SIZE, SourceSyncStats},
     project::ProjectResolver,
     store::{Store, SyncRunWriter},
@@ -18,6 +18,7 @@ const OPENCODE_PAGE_SIZE: i64 = 1000;
 #[derive(Debug)]
 struct OpencodeRow {
     id: String,
+    session_id: Option<String>,
     time_created: i64,
     role: Option<String>,
     project_worktree: Option<String>,
@@ -171,6 +172,7 @@ fn load_opencode_page(
         r#"
         SELECT
             m.id,
+            m.session_id,
             m.time_created,
             json_extract(m.data, '$.role') AS role,
             p.worktree,
@@ -189,10 +191,11 @@ fn load_opencode_page(
         |row| {
             Ok(OpencodeRow {
                 id: row.get(0)?,
-                time_created: row.get::<_, Option<i64>>(1)?.unwrap_or_default(),
-                role: row.get(2)?,
-                project_worktree: row.get(3)?,
-                data: row.get(4)?,
+                session_id: row.get(1)?,
+                time_created: row.get::<_, Option<i64>>(2)?.unwrap_or_default(),
+                role: row.get(3)?,
+                project_worktree: row.get(4)?,
+                data: row.get(5)?,
             })
         },
     )?;
@@ -255,6 +258,14 @@ fn row_to_event(row: &OpencodeRow, resolver: &mut ProjectResolver) -> Result<Opt
         .transpose()?
         .flatten();
 
+    let session_id = row
+        .session_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(row.id.as_str())
+        .to_string();
+
     Ok(Some(UsageEvent {
         event_key: format!("opencode:{}", row.id),
         source: SourceKind::Opencode,
@@ -269,6 +280,11 @@ fn row_to_event(row: &OpencodeRow, resolver: &mut ProjectResolver) -> Result<Opt
         hour_start,
         tokens,
         project,
+        session: Some(SessionInfo {
+            session_label: Some(session_id.clone()),
+            session_id,
+            source_path_hash: None,
+        }),
     }))
 }
 

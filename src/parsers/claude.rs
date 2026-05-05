@@ -12,7 +12,7 @@ use tracing::info;
 use walkdir::WalkDir;
 
 use crate::{
-    models::{SourceKind, UsageEvent, UsageTokens},
+    models::{SessionInfo, SourceKind, UsageEvent, UsageTokens},
     parsers::{
         EVENT_WRITE_BATCH_SIZE, SourceSyncStats,
         file_state::{
@@ -239,6 +239,13 @@ fn parse_project_file(
     reader.seek(SeekFrom::Start(start_offset))?;
 
     let mut offset = start_offset;
+    let fallback_session_label = file_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .map(str::to_string);
+    let fallback_session_id = fallback_session_label
+        .clone()
+        .unwrap_or_else(|| path_hash.to_string());
     let mut line = String::new();
     let mut events = Vec::new();
 
@@ -280,6 +287,21 @@ fn parse_project_file(
             continue;
         }
 
+        let session_id = value
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .or_else(|| value.get("session_id").and_then(Value::as_str))
+            .or_else(|| {
+                value
+                    .get("message")
+                    .and_then(|message| message.get("sessionId"))
+                    .and_then(Value::as_str)
+            })
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(fallback_session_id.as_str())
+            .to_string();
+
         events.push(UsageEvent {
             event_key: format!("claude:{path_hash}:{file_fingerprint}:{offset}"),
             source: SourceKind::Claude,
@@ -294,6 +316,11 @@ fn parse_project_file(
             hour_start,
             tokens,
             project: project.clone(),
+            session: Some(SessionInfo {
+                session_id,
+                session_label: fallback_session_label.clone(),
+                source_path_hash: Some(path_hash.to_string()),
+            }),
         });
     }
 
