@@ -20,15 +20,17 @@ pub async fn run_html(app: &AppContext, out: Option<PathBuf>) -> Result<()> {
     let store = Store::new(&app.paths);
     store.bootstrap()?;
     let output_dir = out.unwrap_or_else(|| app.paths.exports_dir.join("latest"));
-    let run_id = store.record_run_start("export html")?;
-    export::export_html_bundle(&store, &output_dir)?;
-    store.finish_run(
-        run_id,
-        "success",
-        Some(&format!("out={}", output_dir.display())),
-        None,
-    )?;
-    println!("Exported HTML bundle to {}", output_dir.display());
+    let exported_dir = super::run_tracked(
+        &store,
+        "export html",
+        async {
+            export::export_html_bundle(&store, &output_dir)?;
+            Ok(output_dir.clone())
+        },
+        |path| Some(format!("out={}", path.display())),
+    )
+    .await?;
+    println!("Exported HTML bundle to {}", exported_dir.display());
 
     info!("完成静态 HTML 报告导出");
     Ok(())

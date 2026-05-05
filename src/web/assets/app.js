@@ -70,19 +70,30 @@ function attachInteractions() {
 }
 
 function renderError(error) {
-  document.body.innerHTML = `
-    <main class="page-shell">
-      <section class="panel">
-        <div class="section-header section-header--tight">
-          <div>
-            <p class="section-kicker">错误</p>
-            <h2>加载失败</h2>
-          </div>
-        </div>
-        <div class="empty-state mono">${String(error?.stack || error?.message || error)}</div>
-      </section>
-    </main>
+  const message = String(error?.stack || error?.message || error);
+  const main = document.createElement('main');
+  main.className = 'page-shell';
+
+  const panel = document.createElement('section');
+  panel.className = 'panel';
+
+  const header = document.createElement('div');
+  header.className = 'section-header section-header--tight';
+  header.innerHTML = `
+    <div>
+      <p class="section-kicker">错误</p>
+      <h2>加载失败</h2>
+    </div>
   `;
+
+  const detail = document.createElement('div');
+  detail.className = 'empty-state mono';
+  detail.textContent = message;
+
+  panel.append(header, detail);
+  main.append(panel);
+  document.body.innerHTML = '';
+  document.body.append(main);
 }
 
 /*

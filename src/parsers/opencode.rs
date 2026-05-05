@@ -7,10 +7,10 @@ use tracing::info;
 
 use crate::{
     models::{SourceKind, UsageEvent, UsageTokens},
-    parsers::{SourceParseOutput, SourceSyncStats},
+    parsers::{EVENT_WRITE_BATCH_SIZE, SourceSyncStats},
     project::ProjectResolver,
-    store::Store,
-    util::{bucket_start_from_rfc3339, normalize_model, now_utc, resolve_home_dir},
+    store::{Store, SyncRunWriter},
+    util::{bucket_start_from_rfc3339, file_identity, normalize_model, now_utc, resolve_home_dir},
 };
 
 const OPENCODE_PAGE_SIZE: i64 = 1000;
@@ -24,7 +24,11 @@ struct OpencodeRow {
     data: String,
 }
 
-pub async fn sync_opencode(store: &Store, _parallelism: usize) -> Result<SourceParseOutput> {
+pub async fn sync_opencode(
+    store: &Store,
+    writer: &mut SyncRunWriter,
+    _parallelism: usize,
+) -> Result<SourceSyncStats> {
     /*
      * ========================================================================
      * 步骤1：按高水位分页读取 OpenCode SQLite 真源
@@ -54,24 +58,32 @@ pub async fn sync_opencode(store: &Store, _parallelism: usize) -> Result<SourceP
         cursor.sqlite_status = "missing-db".to_string();
         cursor.updated_at = now_utc();
         stats.last_error = Some("OpenCode SQLite DB 缺失".to_string());
-        return Ok(SourceParseOutput {
-            source: SourceKind::Opencode,
-            events: Vec::new(),
-            cursors: Vec::new(),
-            opencode_cursor: Some(cursor),
-            reset_path_hashes: Vec::new(),
-            stats,
-        });
+        store.save_opencode_cursor(&cursor)?;
+        return Ok(stats);
     }
 
     // 1.2 按时间和主键分页读取 message 表
+    let db_identity = file_identity(&db_path)?;
+    if cursor.inode != 0 && cursor.inode != db_identity {
+        info!(
+            previous_inode = cursor.inode,
+            current_inode = db_identity,
+            "检测到 OpenCode DB 身份变化，重置高水位"
+        );
+        cursor.last_time_created = 0;
+        cursor.last_processed_ids.clear();
+    }
+    cursor.inode = db_identity;
+
     let connection = Connection::open(&db_path)?;
     let mut resolver = ProjectResolver::default();
-    let mut events = Vec::new();
     let mut latest_time = cursor.last_time_created;
     let mut latest_ids = cursor.last_processed_ids.clone();
     let mut seen_rows = 0usize;
+    let mut normalized_events_seen = 0usize;
     let mut scanned_bytes = 0u64;
+    let mut inserted = 0usize;
+    let mut write_ms = 0u64;
     let mut page_last_time = cursor.last_time_created;
     let mut page_last_id = cursor
         .last_processed_ids
@@ -86,6 +98,7 @@ pub async fn sync_opencode(store: &Store, _parallelism: usize) -> Result<SourceP
             break;
         }
 
+        let mut page_events = Vec::new();
         for row in rows {
             page_last_time = row.time_created;
             page_last_id = row.id.clone();
@@ -112,7 +125,16 @@ pub async fn sync_opencode(store: &Store, _parallelism: usize) -> Result<SourceP
             let Some(event) = row_to_event(&row, &mut resolver)? else {
                 continue;
             };
-            events.push(event);
+            page_events.push(event);
+        }
+
+        normalized_events_seen += page_events.len();
+        if !page_events.is_empty() {
+            let write_started = Instant::now();
+            for batch in page_events.chunks(EVENT_WRITE_BATCH_SIZE) {
+                inserted += writer.write_event_batch(batch)?;
+            }
+            write_ms += write_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
         }
     }
 
@@ -120,12 +142,16 @@ pub async fn sync_opencode(store: &Store, _parallelism: usize) -> Result<SourceP
     cursor.last_processed_ids = latest_ids;
     cursor.sqlite_status = "ok".to_string();
     cursor.updated_at = now_utc();
+    store.save_opencode_cursor(&cursor)?;
 
     stats.files_processed = 1;
-    stats.changed_files = usize::from(!events.is_empty());
+    stats.changed_files = usize::from(normalized_events_seen > 0);
     stats.bytes_scanned = scanned_bytes;
-    stats.events_seen = events.len();
-    stats.parse_ms = parse_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+    stats.events_seen = normalized_events_seen;
+    stats.events_inserted = inserted;
+    stats.write_ms = write_ms;
+    let total_elapsed = parse_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+    stats.parse_ms = total_elapsed.saturating_sub(write_ms);
 
     info!(
         rows_seen = seen_rows,
@@ -133,14 +159,7 @@ pub async fn sync_opencode(store: &Store, _parallelism: usize) -> Result<SourceP
         bytes_scanned = stats.bytes_scanned,
         "完成 OpenCode SQLite 真源解析"
     );
-    Ok(SourceParseOutput {
-        source: SourceKind::Opencode,
-        events,
-        cursors: Vec::new(),
-        opencode_cursor: Some(cursor),
-        reset_path_hashes: Vec::new(),
-        stats,
-    })
+    Ok(stats)
 }
 
 fn load_opencode_page(

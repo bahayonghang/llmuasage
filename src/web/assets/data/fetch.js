@@ -15,7 +15,20 @@ export async function loadJson(path) {
   // 1.1 发起请求并校验 HTTP 状态
   const response = await fetch(path);
   if (!response.ok) {
-    throw new Error(`请求失败：${response.status}`);
+    let detail = '';
+    try {
+      const payload = await response.clone().json();
+      detail = payload?.error?.detail || payload?.error?.message || '';
+    } catch (_) {}
+
+    if (!detail) {
+      detail = await response.text().catch(() => '');
+    }
+
+    const message = detail || `请求失败：${response.status}`;
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
   }
 
   // 1.2 返回解析后的 JSON 结果

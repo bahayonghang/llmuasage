@@ -2,10 +2,11 @@ use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
+    process::Command,
 };
 
 use anyhow::Result;
-use llmusage::{app::AppContext, commands, query, store::Store};
+use llmusage::{app::AppContext, commands, models::SourceKind, query, store::Store};
 use rusqlite::Connection;
 use tempfile::TempDir;
 
@@ -200,10 +201,215 @@ fn opencode_high_water_handles_same_timestamp_ids() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn opencode_replaced_db_resets_high_water() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_opencode("msg-1", 1776823200000, 64)?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        commands::sync::run(&app).await?;
+
+        let store = Store::new(&app.paths);
+        let first_cursor = store.load_opencode_cursor()?;
+        assert_ne!(first_cursor.inode, 0);
+        assert_eq!(usage_event_count(&app.paths.db_path)?, 1);
+
+        fixture.replace_opencode_db("msg-replaced", 1776823100000, 48)?;
+        commands::sync::run(&app).await?;
+
+        let second_cursor = store.load_opencode_cursor()?;
+        assert_ne!(second_cursor.inode, first_cursor.inode);
+        assert_eq!(second_cursor.last_time_created, 1776823100000);
+        assert_eq!(usage_event_count(&app.paths.db_path)?, 2);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn sync_failure_marks_run_failed_immediately() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_broken_opencode_schema()?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let err = commands::sync::run(&app)
+            .await
+            .expect_err("sync should fail");
+        assert!(!err.to_string().trim().is_empty());
+
+        let run = latest_run_record(&app.paths.db_path, "sync")?;
+        assert_failed_run(&run);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn hook_run_failure_marks_run_failed_and_finishes_worker() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_broken_opencode_schema()?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let err = commands::hook_run::run(&app, SourceKind::Codex, "manual-test", false)
+            .await
+            .expect_err("hook-run should fail");
+        assert!(!err.to_string().trim().is_empty());
+
+        let run = latest_run_record(&app.paths.db_path, "hook-run")?;
+        assert_failed_run(&run);
+
+        let (started_at, finished_at) = trigger_worker_times(&app.paths.db_path, "codex")?;
+        assert!(started_at.is_some());
+        assert!(finished_at.is_some());
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn export_failure_marks_run_failed_immediately() -> Result<()> {
+    let fixture = Fixture::new()?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let blocked_out = fixture.home.join("blocked-export-path");
+        fs::write(&blocked_out, "occupied")?;
+
+        let err = commands::export::run_html(&app, Some(blocked_out))
+            .await
+            .expect_err("export should fail");
+        assert!(!err.to_string().trim().is_empty());
+
+        let run = latest_run_record(&app.paths.db_path, "export html")?;
+        assert_failed_run(&run);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn doctor_warns_on_recovered_aborted_runs() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let app = AppContext::discover()?;
+    let store = Store::new(&app.paths);
+    store.bootstrap()?;
+    store.record_run_start("sync")?;
+    store.recover_running_runs(&["sync", "hook-run"])?;
+
+    let health = query::load_health(&store)?;
+    assert!(
+        health
+            .recent_failures
+            .iter()
+            .any(|run| run.status == "aborted")
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_llmusage"))
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .args(["doctor", "--json"])
+        .env("HOME", &fixture.home)
+        .env("USERPROFILE", &fixture.home)
+        .env("CODEX_HOME", &fixture.codex_home)
+        .env("OPENCODE_HOME", &fixture.opencode_home)
+        .env("RUST_LOG", "off")
+        .output()?;
+    assert!(output.status.success(), "{output:?}");
+
+    let checks: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    let recent_failures = checks
+        .as_array()
+        .and_then(|items| {
+            items.iter().find(|item| {
+                item.get("id").and_then(serde_json::Value::as_str) == Some("recent.failures")
+            })
+        })
+        .expect("recent.failures check");
+    assert_eq!(
+        recent_failures
+            .get("status")
+            .and_then(serde_json::Value::as_str),
+        Some("warn")
+    );
+
+    fixture.restore_env();
+    Ok(())
+}
+
 fn usage_event_count(db_path: &Path) -> Result<i64> {
     let conn = Connection::open(db_path)?;
     let count = conn.query_row("SELECT COUNT(*) FROM usage_event", [], |row| row.get(0))?;
     Ok(count)
+}
+
+#[derive(Debug)]
+struct RunLogRecord {
+    status: String,
+    error: Option<String>,
+    finished_at: Option<String>,
+    duration_ms: Option<i64>,
+}
+
+fn latest_run_record(db_path: &Path, command: &str) -> Result<RunLogRecord> {
+    let conn = Connection::open(db_path)?;
+    let run = conn.query_row(
+        r#"
+        SELECT status, error, finished_at, duration_ms
+        FROM run_log
+        WHERE command = ?1
+        ORDER BY id DESC
+        LIMIT 1
+        "#,
+        [command],
+        |row| {
+            Ok(RunLogRecord {
+                status: row.get(0)?,
+                error: row.get(1)?,
+                finished_at: row.get(2)?,
+                duration_ms: row.get(3)?,
+            })
+        },
+    )?;
+    Ok(run)
+}
+
+fn trigger_worker_times(db_path: &Path, source: &str) -> Result<(Option<String>, Option<String>)> {
+    let conn = Connection::open(db_path)?;
+    let times = conn.query_row(
+        r#"
+        SELECT last_worker_started_at, last_worker_finished_at
+        FROM trigger_state
+        WHERE source = ?1
+        "#,
+        [source],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    Ok(times)
+}
+
+fn assert_failed_run(run: &RunLogRecord) {
+    assert_eq!(run.status, "failed");
+    assert!(
+        run.error
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+    );
+    assert!(run.finished_at.is_some());
+    assert!(run.duration_ms.is_some());
 }
 
 struct Fixture {
@@ -393,6 +599,26 @@ impl Fixture {
             (&message_id, &"session-1", &time_created, &message.to_string()),
         )?;
         Ok(())
+    }
+
+    fn seed_broken_opencode_schema(&self) -> Result<()> {
+        let db_path = self.opencode_home.join("opencode.db");
+        let conn = Connection::open(&db_path)?;
+        conn.execute_batch("CREATE TABLE broken(id INTEGER PRIMARY KEY);")?;
+        Ok(())
+    }
+
+    fn replace_opencode_db(
+        &self,
+        message_id: &str,
+        time_created: i64,
+        total_tokens: i64,
+    ) -> Result<()> {
+        let db_path = self.opencode_home.join("opencode.db");
+        if db_path.exists() {
+            fs::remove_file(&db_path)?;
+        }
+        self.seed_opencode(message_id, time_created, total_tokens)
     }
 }
 

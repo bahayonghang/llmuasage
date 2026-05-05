@@ -9,8 +9,6 @@ use crate::{
     store::{SourceSyncStatus, Store},
 };
 
-const WRITE_BATCH_SIZE: usize = 1000;
-
 #[derive(Debug, Clone)]
 pub struct SyncSummary {
     pub sources: Vec<SourceSyncStats>,
@@ -47,17 +45,21 @@ pub async fn run(app: &AppContext) -> Result<()> {
     };
     let lock_wait_ms = lock_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
     store.recover_running_runs(&["sync", "hook-run"])?;
-    let run_id = store.record_run_start("sync")?;
-
     // 1.2 并行解析、单 writer 落库并记录每源统计
-    let summary = run_once(app, &store, lock_wait_ms).await?;
-    let summary_text = format!(
-        "sources={} seen={} inserted={}",
-        summary.sources.len(),
-        summary.total_seen,
-        summary.total_inserted
-    );
-    store.finish_run(run_id, "success", Some(&summary_text), None)?;
+    let summary = super::run_tracked(
+        &store,
+        "sync",
+        run_once(app, &store, lock_wait_ms),
+        |item| {
+            Some(format!(
+                "sources={} seen={} inserted={}",
+                item.sources.len(),
+                item.total_seen,
+                item.total_inserted
+            ))
+        },
+    )
+    .await?;
     drop(lock);
 
     println!("Sync finished:");
@@ -92,66 +94,42 @@ pub async fn run_once(_app: &AppContext, store: &Store, lock_wait_ms: u64) -> Re
      */
     info!("开始执行 sync 三阶段流水线");
 
-    // 2.1 计算并发度并并行执行 parser
+    // 2.1 计算并发度并按 source 顺序解析 + 即时写入
     let parallelism = std::thread::available_parallelism()
         .map(|value| value.get().min(4))
         .unwrap_or(1);
-    let (codex, claude, opencode) = tokio::try_join!(
-        sync_codex(store, parallelism),
-        sync_claude(store, parallelism),
-        sync_opencode(store, parallelism),
-    )?;
-
-    // 2.2 用单 writer 统一落库并回写状态
     let mut writer = store.begin_sync_run()?;
-    let mut sources = vec![codex, claude, opencode];
+    let mut sources = vec![
+        sync_codex(store, &mut writer, parallelism).await?,
+        sync_claude(store, &mut writer, parallelism).await?,
+        sync_opencode(store, &mut writer, parallelism).await?,
+    ];
     let mut total_seen = 0usize;
     let mut total_inserted = 0usize;
     let mut sync_statuses = Vec::new();
 
     for source in &mut sources {
-        let write_started = Instant::now();
-        let mut inserted = 0usize;
-
-        if !source.reset_path_hashes.is_empty() {
-            writer.reset_file_events_batch(source.source, &source.reset_path_hashes)?;
-        }
-        for batch in source.events.chunks(WRITE_BATCH_SIZE) {
-            inserted += writer.write_event_batch(batch)?;
-        }
-        if !source.cursors.is_empty() {
-            writer.write_cursor_batch(source.source, &source.cursors)?;
-        }
-        if let Some(opencode_cursor) = &source.opencode_cursor {
-            store.save_opencode_cursor(opencode_cursor)?;
-        }
-
-        source.stats.events_inserted = inserted;
-        source.stats.lock_wait_ms = lock_wait_ms;
-        source.stats.write_ms = write_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
-        total_seen += source.stats.events_seen;
-        total_inserted += source.stats.events_inserted;
+        source.lock_wait_ms = lock_wait_ms;
+        total_seen += source.events_seen;
+        total_inserted += source.events_inserted;
         sync_statuses.push(SourceSyncStatus {
             source: source.source.as_str().to_string(),
-            files_processed: source.stats.files_processed as i64,
-            changed_files: source.stats.changed_files as i64,
-            bytes_scanned: source.stats.bytes_scanned as i64,
-            events_seen: source.stats.events_seen as i64,
-            events_replayed: source.stats.events_replayed as i64,
-            events_inserted: source.stats.events_inserted as i64,
-            parse_ms: source.stats.parse_ms as i64,
-            write_ms: source.stats.write_ms as i64,
-            lock_wait_ms: source.stats.lock_wait_ms as i64,
+            files_processed: source.files_processed as i64,
+            changed_files: source.changed_files as i64,
+            bytes_scanned: source.bytes_scanned as i64,
+            events_seen: source.events_seen as i64,
+            events_replayed: source.events_replayed as i64,
+            events_inserted: source.events_inserted as i64,
+            parse_ms: source.parse_ms as i64,
+            write_ms: source.write_ms as i64,
+            lock_wait_ms: source.lock_wait_ms as i64,
             updated_at: crate::util::now_utc(),
         });
     }
     writer.finish_sync_run()?;
     store.save_source_sync_statuses(&sync_statuses)?;
 
-    let stats = sources
-        .into_iter()
-        .map(|source| source.stats)
-        .collect::<Vec<_>>();
+    let stats = sources;
     info!("完成 sync 三阶段流水线");
     Ok(SyncSummary {
         sources: stats,

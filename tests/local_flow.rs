@@ -4,7 +4,9 @@ use std::{
 };
 
 use anyhow::Result;
-use llmusage::{app::AppContext, commands, query, web};
+use llmusage::{
+    app::AppContext, commands, integrations, models::SourceKind, query, store::Store, web,
+};
 use rusqlite::Connection;
 use tempfile::TempDir;
 
@@ -147,6 +149,150 @@ fn local_flow_installs_syncs_exports_and_uninstalls() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn claude_install_reports_invalid_settings_shapes() -> Result<()> {
+    let cases = [
+        ("top-level", "[]", "顶层必须是 object"),
+        (
+            "hooks-shape",
+            "{\"hooks\":\"invalid\"}",
+            "hooks 字段必须是 object",
+        ),
+        (
+            "event-shape",
+            "{\"hooks\":{\"Stop\":{}}}",
+            "Claude hooks.Stop 必须是数组",
+        ),
+    ];
+
+    for (_name, raw, expected) in cases {
+        let fixture = Fixture::new()?;
+        fs::write(fixture.home.join(".claude").join("settings.json"), raw)?;
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths);
+        store.bootstrap()?;
+
+        let err = integrations::claude::install(&app, &store).expect_err("shape should fail");
+        assert!(
+            err.to_string().contains(expected),
+            "unexpected error: {err:#}"
+        );
+
+        fixture.restore_env();
+    }
+
+    Ok(())
+}
+
+#[test]
+fn init_continues_when_claude_install_fails_and_records_error() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fs::write(
+        fixture.home.join(".claude").join("settings.json"),
+        "{\"hooks\":\"invalid\"}",
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        commands::init::run(&app).await?;
+
+        let codex_config = fs::read_to_string(fixture.codex_home.join("config.toml"))?;
+        assert!(codex_config.contains("llmusage-hook"));
+        assert!(
+            fixture
+                .opencode_config
+                .join("plugin")
+                .join("llmusage-tracker.js")
+                .is_file()
+        );
+        assert_eq!(
+            fs::read_to_string(fixture.home.join(".claude").join("settings.json"))?,
+            "{\"hooks\":\"invalid\"}"
+        );
+
+        let store = Store::new(&app.paths);
+        let states = store.load_integration_states()?;
+        assert_eq!(
+            states
+                .iter()
+                .find(|item| item.source == "claude")
+                .map(|item| item.status.as_str()),
+            Some("error")
+        );
+        assert_eq!(
+            states
+                .iter()
+                .find(|item| item.source == "codex")
+                .map(|item| item.status.as_str()),
+            Some("ready")
+        );
+        assert_eq!(
+            states
+                .iter()
+                .find(|item| item.source == "opencode")
+                .map(|item| item.status.as_str()),
+            Some("ready")
+        );
+
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn init_writes_quoted_windows_string_commands_for_spaced_paths() -> Result<()> {
+    let fixture = Fixture::new_with_spaces()?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        commands::init::run(&app).await?;
+
+        let expected_stop = integrations::platform_shell_command(&app, SourceKind::Claude, "Stop");
+        let claude_settings: serde_json::Value = serde_json::from_slice(&fs::read(
+            fixture.home.join(".claude").join("settings.json"),
+        )?)?;
+        let stop_commands = claude_settings
+            .get("hooks")
+            .and_then(|hooks| hooks.get("Stop"))
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| entry.get("hooks").and_then(serde_json::Value::as_array))
+            .flatten()
+            .filter_map(|hook| hook.get("command").and_then(serde_json::Value::as_str))
+            .collect::<Vec<_>>();
+        assert!(
+            stop_commands
+                .iter()
+                .any(|command| *command == expected_stop)
+        );
+
+        if cfg!(windows) {
+            assert!(expected_stop.contains("cmd /c \"\""));
+            assert!(
+                expected_stop.contains("llmusage-hook.cmd\" --source claude --trigger Stop --auto")
+            );
+        }
+
+        let plugin_body = fs::read_to_string(
+            fixture
+                .opencode_config
+                .join("plugin")
+                .join("llmusage-tracker.js"),
+        )?;
+        assert!(plugin_body.contains("cmd /c \"\""));
+
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
 struct Fixture {
     root: TempDir,
     home: PathBuf,
@@ -158,11 +304,23 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Result<Self> {
+        Self::new_with_names("home", "opencode-home", "opencode-config")
+    }
+
+    fn new_with_spaces() -> Result<Self> {
+        Self::new_with_names("home with spaces", "opencode home", "opencode config")
+    }
+
+    fn new_with_names(
+        home_name: &str,
+        opencode_home_name: &str,
+        opencode_config_name: &str,
+    ) -> Result<Self> {
         let root = TempDir::new()?;
-        let home = root.path().join("home");
+        let home = root.path().join(home_name);
         let codex_home = home.join(".codex");
-        let opencode_home = root.path().join("opencode-home");
-        let opencode_config = root.path().join("opencode-config");
+        let opencode_home = root.path().join(opencode_home_name);
+        let opencode_config = root.path().join(opencode_config_name);
         fs::create_dir_all(&home)?;
         fs::create_dir_all(&codex_home)?;
         fs::create_dir_all(&opencode_home)?;

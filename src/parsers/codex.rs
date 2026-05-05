@@ -14,13 +14,13 @@ use walkdir::WalkDir;
 use crate::{
     models::{SourceKind, UsageEvent, UsageTokens},
     parsers::{
-        SourceParseOutput, SourceSyncStats,
+        EVENT_WRITE_BATCH_SIZE, SourceSyncStats,
         file_state::{
             CandidateFile, FileReplayMode, decide_file_replay, finalize_cursor, should_rescan_file,
         },
     },
     project::ProjectResolver,
-    store::Store,
+    store::{Store, SyncRunWriter},
     util::{bucket_start_from_rfc3339, hash_string, normalize_model, resolve_home_dir},
 };
 
@@ -47,7 +47,11 @@ struct RolloutParseResult {
     events: Vec<UsageEvent>,
 }
 
-pub async fn sync_codex(store: &Store, parallelism: usize) -> Result<SourceParseOutput> {
+pub async fn sync_codex(
+    store: &Store,
+    writer: &mut SyncRunWriter,
+    parallelism: usize,
+) -> Result<SourceSyncStats> {
     /*
      * ========================================================================
      * 步骤1：按日期分片并行解析 Codex rollout 真源
@@ -87,12 +91,12 @@ pub async fn sync_codex(store: &Store, parallelism: usize) -> Result<SourceParse
     }
 
     // 1.2 控制并发度并行解析分片
-    let mut events = Vec::new();
     let mut cursors = Vec::new();
-    let mut reset_path_hashes = Vec::new();
     let mut events_seen = 0usize;
     let mut events_replayed = 0usize;
     let mut bytes_scanned = 0u64;
+    let mut inserted = 0usize;
+    let mut write_ms = 0u64;
     let mut plans = shards
         .into_values()
         .map(|files| CodexShardPlan { files })
@@ -112,10 +116,24 @@ pub async fn sync_codex(store: &Store, parallelism: usize) -> Result<SourceParse
             events_seen += shard.events_seen;
             events_replayed += shard.events_replayed;
             bytes_scanned += shard.bytes_scanned;
-            events.extend(shard.events);
+            if !shard.reset_path_hashes.is_empty() {
+                let write_started = Instant::now();
+                writer.reset_file_events_batch(SourceKind::Codex, &shard.reset_path_hashes)?;
+                write_ms += write_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+            }
+            let write_started = Instant::now();
+            for batch in shard.events.chunks(EVENT_WRITE_BATCH_SIZE) {
+                inserted += writer.write_event_batch(batch)?;
+            }
+            write_ms += write_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
             cursors.extend(shard.cursors);
-            reset_path_hashes.extend(shard.reset_path_hashes);
         }
+    }
+
+    if !cursors.is_empty() {
+        let write_started = Instant::now();
+        writer.write_cursor_batch(SourceKind::Codex, &cursors)?;
+        write_ms += write_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
     }
 
     let mut stats = SourceSyncStats {
@@ -125,9 +143,12 @@ pub async fn sync_codex(store: &Store, parallelism: usize) -> Result<SourceParse
         bytes_scanned,
         events_seen,
         events_replayed,
+        events_inserted: inserted,
+        write_ms,
         ..SourceSyncStats::default()
     };
-    stats.parse_ms = parse_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+    let total_elapsed = parse_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+    stats.parse_ms = total_elapsed.saturating_sub(write_ms);
 
     info!(
         files_processed = stats.files_processed,
@@ -136,14 +157,7 @@ pub async fn sync_codex(store: &Store, parallelism: usize) -> Result<SourceParse
         bytes_scanned = stats.bytes_scanned,
         "完成 Codex rollout 真源解析"
     );
-    Ok(SourceParseOutput {
-        source: SourceKind::Codex,
-        events,
-        cursors,
-        opencode_cursor: None,
-        reset_path_hashes,
-        stats,
-    })
+    Ok(stats)
 }
 
 fn list_rollout_files(sessions_dir: &Path) -> Vec<PathBuf> {

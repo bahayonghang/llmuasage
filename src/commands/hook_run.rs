@@ -28,26 +28,33 @@ pub async fn run(app: &AppContext, source: SourceKind, trigger: &str, _auto: boo
     store.recover_running_runs(&["sync", "hook-run"])?;
 
     // 1.2 当前 worker 按 snapshot 差异循环补跑
-    let run_id = store.record_run_start("hook-run")?;
-    let mut snapshot = store.trigger_snapshot()?;
-    let mut total_inserted = 0usize;
-    for _ in 0..3 {
-        let started_at = now_utc();
-        store.mark_trigger_worker_started(source, &started_at)?;
-        let summary = run_once(app, &store, 0).await?;
-        total_inserted += summary.total_inserted;
-        let finished_at = now_utc();
-        store.mark_trigger_worker_finished(source, &finished_at)?;
+    let total_inserted = super::run_tracked(
+        &store,
+        "hook-run",
+        async {
+            let mut snapshot = store.trigger_snapshot()?;
+            let mut total_inserted = 0usize;
+            for _ in 0..3 {
+                let started_at = now_utc();
+                store.mark_trigger_worker_started(source, &started_at)?;
+                let attempt = run_once(app, &store, 0).await;
+                let finished_at = now_utc();
+                store.mark_trigger_worker_finished(source, &finished_at)?;
+                let summary = attempt?;
+                total_inserted += summary.total_inserted;
 
-        let next_snapshot = store.trigger_snapshot()?;
-        if next_snapshot == snapshot {
-            break;
-        }
-        snapshot = next_snapshot;
-    }
+                let next_snapshot = store.trigger_snapshot()?;
+                if next_snapshot == snapshot {
+                    break;
+                }
+                snapshot = next_snapshot;
+            }
+            Ok(total_inserted)
+        },
+        |inserted| Some(format!("hook source={source} inserted={inserted}")),
+    )
+    .await?;
 
-    let summary = format!("hook source={source} inserted={total_inserted}");
-    store.finish_run(run_id, "success", Some(&summary), None)?;
     info!(source = %source, inserted = total_inserted, "完成 hook-run 信号处理");
     Ok(())
 }

@@ -1,27 +1,38 @@
 use serde::Serialize;
 
-use crate::{
-    models::{SourceKind, UsageEvent},
-    store::{FileCursor, OpencodeCursor},
-};
+use crate::models::SourceKind;
 
 pub mod claude;
 pub mod codex;
 pub mod file_state;
 pub mod opencode;
 
+pub const EVENT_WRITE_BATCH_SIZE: usize = 1000;
+
+/// Per-source sync metrics reported after a parser + write cycle completes.
 #[derive(Debug, Clone, Serialize)]
 pub struct SourceSyncStats {
+    /// Source these stats belong to.
     pub source: SourceKind,
+    /// Number of candidate files or SQLite sources inspected.
     pub files_processed: usize,
+    /// Number of files/DBs that required re-parse or incremental scan.
     pub changed_files: usize,
+    /// Bytes scanned while parsing the source.
     pub bytes_scanned: u64,
+    /// Number of normalized events observed before dedupe.
     pub events_seen: usize,
+    /// Number of events replayed because an existing file had to be rebuilt.
     pub events_replayed: usize,
+    /// Number of newly inserted events after SQLite dedupe.
     pub events_inserted: usize,
+    /// Parser wall-clock time in milliseconds.
     pub parse_ms: u64,
+    /// SQLite write wall-clock time in milliseconds.
     pub write_ms: u64,
+    /// Time spent waiting for the global sync worker lock in milliseconds.
     pub lock_wait_ms: u64,
+    /// Optional last parse error surfaced for diagnostics.
     pub last_error: Option<String>,
 }
 
@@ -41,14 +52,4 @@ impl Default for SourceSyncStats {
             last_error: None,
         }
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct SourceParseOutput {
-    pub source: SourceKind,
-    pub events: Vec<UsageEvent>,
-    pub cursors: Vec<FileCursor>,
-    pub opencode_cursor: Option<OpencodeCursor>,
-    pub reset_path_hashes: Vec<String>,
-    pub stats: SourceSyncStats,
 }

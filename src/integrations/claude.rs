@@ -1,7 +1,10 @@
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
-use anyhow::Result;
-use serde_json::{Value, json};
+use anyhow::{Result, anyhow};
+use serde_json::{Map, Value, json};
 
 use crate::{app::AppContext, models::SourceKind, store::Store, util::resolve_home_dir};
 
@@ -55,18 +58,18 @@ pub fn install(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
     }
 
     let mut settings = read_settings(&settings_path)?;
-    let backup_path = backup_file(&settings_path, &app.paths.backups_dir, "claude-settings")?;
-
     ensure_event_command(
         &mut settings,
         "Stop",
         &platform_shell_command(app, SourceKind::Claude, "Stop"),
-    );
+    )?;
     ensure_event_command(
         &mut settings,
         "SessionEnd",
         &platform_shell_command(app, SourceKind::Claude, "SessionEnd"),
-    );
+    )?;
+
+    let backup_path = backup_file(&settings_path, &app.paths.backups_dir, "claude-settings")?;
 
     fs::write(&settings_path, serde_json::to_vec_pretty(&settings)?)?;
     record_action(
@@ -106,12 +109,12 @@ pub fn uninstall(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
         &mut settings,
         "Stop",
         &platform_shell_command(app, SourceKind::Claude, "Stop"),
-    );
+    )?;
     remove_event_command(
         &mut settings,
         "SessionEnd",
         &platform_shell_command(app, SourceKind::Claude, "SessionEnd"),
-    );
+    )?;
 
     fs::write(&settings_path, serde_json::to_vec_pretty(&settings)?)?;
     record_action(
@@ -136,7 +139,7 @@ fn resolve_claude_settings(_app: &AppContext) -> PathBuf {
     home_dir.join(".claude").join("settings.json")
 }
 
-fn read_settings(path: &PathBuf) -> Result<Value> {
+fn read_settings(path: &Path) -> Result<Value> {
     Ok(serde_json::from_slice(&fs::read(path)?)?)
 }
 
@@ -161,18 +164,9 @@ fn event_has_command(settings: &Value, event: &str, command: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn ensure_event_command(settings: &mut Value, event: &str, command: &str) {
-    let hooks = settings
-        .as_object_mut()
-        .unwrap()
-        .entry("hooks".to_string())
-        .or_insert_with(|| json!({}));
-    let entries = hooks
-        .as_object_mut()
-        .unwrap()
-        .entry(event.to_string())
-        .or_insert_with(|| json!([]));
-    let array = entries.as_array_mut().unwrap();
+fn ensure_event_command(settings: &mut Value, event: &str, command: &str) -> Result<()> {
+    let hooks = hooks_object_mut(root_object_mut(settings)?)?;
+    let array = event_entries_mut(hooks, event)?;
 
     if !array.iter().any(|entry| {
         entry
@@ -191,24 +185,55 @@ fn ensure_event_command(settings: &mut Value, event: &str, command: &str) {
             ]
         }));
     }
+    Ok(())
 }
 
-fn remove_event_command(settings: &mut Value, event: &str, command: &str) {
-    if let Some(entries) = settings
-        .get_mut("hooks")
-        .and_then(|hooks| hooks.get_mut(event))
-        .and_then(Value::as_array_mut)
-    {
-        entries.retain(|entry| {
-            !entry
-                .get("hooks")
-                .and_then(Value::as_array)
-                .map(|hooks| {
-                    hooks
-                        .iter()
-                        .any(|hook| hook.get("command").and_then(Value::as_str) == Some(command))
-                })
-                .unwrap_or(false)
-        });
-    }
+fn remove_event_command(settings: &mut Value, event: &str, command: &str) -> Result<()> {
+    let Some(hooks_value) = root_object_mut(settings)?.get_mut("hooks") else {
+        return Ok(());
+    };
+    let hooks = hooks_value
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("Claude settings.json 的 hooks 字段必须是 object"))?;
+    let Some(entries_value) = hooks.get_mut(event) else {
+        return Ok(());
+    };
+    let entries = entries_value
+        .as_array_mut()
+        .ok_or_else(|| anyhow!("Claude hooks.{event} 必须是数组"))?;
+    entries.retain(|entry| {
+        !entry
+            .get("hooks")
+            .and_then(Value::as_array)
+            .map(|hooks| {
+                hooks
+                    .iter()
+                    .any(|hook| hook.get("command").and_then(Value::as_str) == Some(command))
+            })
+            .unwrap_or(false)
+    });
+    Ok(())
+}
+
+fn root_object_mut(settings: &mut Value) -> Result<&mut Map<String, Value>> {
+    settings
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("Claude settings.json 顶层必须是 object"))
+}
+
+fn hooks_object_mut(root: &mut Map<String, Value>) -> Result<&mut Map<String, Value>> {
+    let hooks = root.entry("hooks".to_string()).or_insert_with(|| json!({}));
+    hooks
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("Claude settings.json 的 hooks 字段必须是 object"))
+}
+
+fn event_entries_mut<'a>(
+    hooks: &'a mut Map<String, Value>,
+    event: &str,
+) -> Result<&'a mut Vec<Value>> {
+    let entries = hooks.entry(event.to_string()).or_insert_with(|| json!([]));
+    entries
+        .as_array_mut()
+        .ok_or_else(|| anyhow!("Claude hooks.{event} 必须是数组"))
 }

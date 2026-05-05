@@ -4,19 +4,29 @@ use anyhow::Result;
 
 use crate::util::resolve_home_dir;
 
+/// Concrete on-disk layout used by the local-only runtime.
 #[derive(Debug, Clone)]
 pub struct AppPaths {
+    /// Root runtime directory, typically `~/.llmusage`.
     pub root_dir: PathBuf,
+    /// SQLite database path.
     pub db_path: PathBuf,
+    /// Generated wrapper script directory.
     pub bin_dir: PathBuf,
+    /// Backup directory for mutated third-party configs.
     pub backups_dir: PathBuf,
+    /// Default export output directory.
     pub exports_dir: PathBuf,
+    /// Windows hook wrapper path.
     pub hook_cmd_path: PathBuf,
+    /// POSIX hook wrapper path.
     pub hook_sh_path: PathBuf,
+    /// Legacy lock file path kept for compatibility/debugging.
     pub lock_path: PathBuf,
 }
 
 impl AppPaths {
+    /// Builds the runtime layout under the current user's home directory.
     pub fn discover() -> Result<Self> {
         let home_dir = resolve_home_dir();
         if home_dir.as_os_str().is_empty() {

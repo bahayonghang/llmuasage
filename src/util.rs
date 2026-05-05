@@ -1,5 +1,7 @@
 use std::{
+    collections::hash_map::DefaultHasher,
     fs::{File, Metadata},
+    hash::{Hash, Hasher},
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
 };
@@ -134,4 +136,14 @@ pub fn metadata_inode(metadata: &Metadata) -> u64 {
             .unwrap_or_default();
         metadata.len() ^ modified
     }
+}
+
+pub fn file_identity(path: &Path) -> std::io::Result<u64> {
+    let metadata = std::fs::metadata(path)?;
+    let mut hasher = DefaultHasher::new();
+    metadata_inode(&metadata).hash(&mut hasher);
+    metadata.len().hash(&mut hasher);
+    metadata_modified_ns(&metadata).hash(&mut hasher);
+    read_head_signature(path, 256)?.hash(&mut hasher);
+    Ok(hasher.finish() & i64::MAX as u64)
 }

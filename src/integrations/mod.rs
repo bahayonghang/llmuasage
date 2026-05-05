@@ -54,9 +54,9 @@ pub fn install_all(app: &AppContext, store: &Store) -> Result<Vec<IntegrationAct
 
     // 1.2 顺序安装三类本地集成
     let actions = vec![
-        codex::install(app, store)?,
-        claude::install(app, store)?,
-        opencode::install(app, store)?,
+        collect_install_result(store, SourceKind::Codex, codex::install(app, store))?,
+        collect_install_result(store, SourceKind::Claude, claude::install(app, store))?,
+        collect_install_result(store, SourceKind::Opencode, opencode::install(app, store))?,
     ];
 
     info!("完成本地 hook 包装器生成与集成安装");
@@ -138,7 +138,7 @@ pub fn platform_shell_command(app: &AppContext, source: SourceKind, trigger: &st
     if cfg!(windows) {
         format!(
             "cmd /c \"{} --source {} --trigger {} --auto\"",
-            app.paths.hook_cmd_path.to_string_lossy(),
+            quote_windows_cmd_path(&app.paths.hook_cmd_path),
             source.as_str(),
             trigger
         )
@@ -187,5 +187,28 @@ fn quote_unix_path(path: &Path) -> String {
         raw.to_string()
     } else {
         format!("\"{}\"", raw.replace('"', "\\\""))
+    }
+}
+
+fn quote_windows_cmd_path(path: &Path) -> String {
+    format!("\"{}\"", path.to_string_lossy().replace('"', "\"\""))
+}
+
+fn collect_install_result(
+    store: &Store,
+    source: SourceKind,
+    result: Result<IntegrationAction>,
+) -> Result<IntegrationAction> {
+    match result {
+        Ok(action) => Ok(action),
+        Err(err) => {
+            let detail = format!("{err:#}");
+            record_action(store, source, "init", "error", &detail, None, None)?;
+            Ok(IntegrationAction {
+                source,
+                status: "error".to_string(),
+                detail,
+            })
+        }
     }
 }

@@ -8,9 +8,10 @@ use axum::{
     response::{Html, IntoResponse, Response},
     routing::get,
 };
+use serde::Serialize;
 use serde_json::json;
 use tokio::net::TcpListener;
-use tracing::info;
+use tracing::{error, info};
 
 use crate::{query, store::Store};
 
@@ -108,67 +109,68 @@ async fn asset_file(Path(path): Path<String>) -> Response {
     }
 }
 
-async fn api_overview(
-    State(state): State<WebState>,
-) -> Result<Json<serde_json::Value>, axum::http::StatusCode> {
-    query::load_overview(&state.store)
-        .map(|value| Json(json!(value)))
-        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)
+async fn api_overview(State(state): State<WebState>) -> Response {
+    api_json("/api/overview", query::load_overview(&state.store))
 }
 
 async fn api_trends(
     State(state): State<WebState>,
     Query(params): Query<HashMap<String, String>>,
-) -> Result<Json<serde_json::Value>, axum::http::StatusCode> {
+) -> Response {
     let window = params.get("window").map(String::as_str).unwrap_or("day");
-    query::load_trends(&state.store, window)
-        .map(|value| Json(json!(value)))
-        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)
+    api_json("/api/trends", query::load_trends(&state.store, window))
 }
 
-async fn api_models(
-    State(state): State<WebState>,
-) -> Result<Json<serde_json::Value>, axum::http::StatusCode> {
-    query::load_model_breakdown(&state.store)
-        .map(|value| Json(json!(value)))
-        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)
+async fn api_models(State(state): State<WebState>) -> Response {
+    api_json("/api/models", query::load_model_breakdown(&state.store))
 }
 
-async fn api_sources(
-    State(state): State<WebState>,
-) -> Result<Json<serde_json::Value>, axum::http::StatusCode> {
-    query::load_source_breakdown(&state.store)
-        .map(|value| Json(json!(value)))
-        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)
+async fn api_sources(State(state): State<WebState>) -> Response {
+    api_json("/api/sources", query::load_source_breakdown(&state.store))
 }
 
-async fn api_projects(
-    State(state): State<WebState>,
-) -> Result<Json<serde_json::Value>, axum::http::StatusCode> {
-    query::load_project_breakdown(&state.store)
-        .map(|value| Json(json!(value)))
-        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)
+async fn api_projects(State(state): State<WebState>) -> Response {
+    api_json("/api/projects", query::load_project_breakdown(&state.store))
 }
 
-async fn api_costs(
-    State(state): State<WebState>,
-) -> Result<Json<serde_json::Value>, axum::http::StatusCode> {
-    query::load_cost_breakdown(&state.store)
-        .map(|value| Json(json!(value)))
-        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)
+async fn api_costs(State(state): State<WebState>) -> Response {
+    api_json("/api/costs", query::load_cost_breakdown(&state.store))
 }
 
-async fn api_health(
-    State(state): State<WebState>,
-) -> Result<Json<serde_json::Value>, axum::http::StatusCode> {
-    query::load_health(&state.store)
-        .map(|value| Json(json!(value)))
-        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)
+async fn api_health(State(state): State<WebState>) -> Response {
+    api_json("/api/health", query::load_health(&state.store))
+}
+
+fn api_json<T>(endpoint: &'static str, result: Result<T>) -> Response
+where
+    T: Serialize,
+{
+    match result {
+        Ok(value) => Json(json!(value)).into_response(),
+        Err(err) => {
+            error!(endpoint, error = %err, "Web API handler failed");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": {
+                        "code": "internal_error",
+                        "message": "读取本地数据失败",
+                        "detail": err.to_string(),
+                        "endpoint": endpoint,
+                    }
+                })),
+            )
+                .into_response()
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{asset_manifest, live_index_html, snapshot_index_html};
+    use anyhow::anyhow;
+    use axum::{body::to_bytes, http::StatusCode};
+
+    use super::{api_json, asset_manifest, live_index_html, snapshot_index_html};
 
     #[test]
     fn live_shell_uses_module_entry() {
@@ -265,5 +267,44 @@ mod tests {
                 "found outdated term: {old_term}"
             );
         }
+    }
+
+    #[test]
+    fn error_renderer_uses_text_content() {
+        let app_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "app.js")
+            .expect("app.js asset")
+            .body;
+        assert!(app_js.contains("detail.textContent = message;"));
+        assert!(!app_js.contains("empty-state mono\">${String(error"));
+    }
+
+    #[test]
+    fn fetch_layer_reads_structured_error_payloads() {
+        let fetch_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "data/fetch.js")
+            .expect("fetch.js asset")
+            .body;
+        assert!(fetch_js.contains("payload?.error?.detail"));
+        assert!(fetch_js.contains("response.clone().json()"));
+    }
+
+    #[test]
+    fn api_error_payload_is_structured_json() {
+        let response = api_json::<serde_json::Value>("/api/test", Err(anyhow!("boom")));
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let runtime = tokio::runtime::Runtime::new().expect("runtime");
+        let body = runtime.block_on(async {
+            to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("body bytes")
+        });
+        let payload: serde_json::Value = serde_json::from_slice(&body).expect("json payload");
+        assert_eq!(payload["error"]["code"], "internal_error");
+        assert_eq!(payload["error"]["endpoint"], "/api/test");
+        assert_eq!(payload["error"]["detail"], "boom");
     }
 }

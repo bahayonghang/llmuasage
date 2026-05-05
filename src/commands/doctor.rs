@@ -83,17 +83,20 @@ pub async fn run(app: &AppContext, json: bool) -> Result<()> {
         });
     }
 
-    if recent_runs.iter().any(|run| run.status == "failed") {
+    if recent_runs
+        .iter()
+        .any(crate::store::RunRecord::counts_as_failure)
+    {
         checks.push(DoctorCheck {
             id: "recent.failures",
             status: "warn",
-            detail: "最近运行中存在 failed 记录".to_string(),
+            detail: "最近运行中存在 failed/aborted 等非成功记录".to_string(),
         });
     } else {
         checks.push(DoctorCheck {
             id: "recent.failures",
             status: "ok",
-            detail: "最近运行未发现 failed 记录".to_string(),
+            detail: "最近运行未发现 failed/aborted 等非成功记录".to_string(),
         });
     }
 
