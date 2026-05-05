@@ -16,7 +16,7 @@ The runtime state lives under `~/.llmusage/`:
 3. The worker runs the three local parsers in sequence.
 4. New events are written into `usage_event`.
 5. 30-minute UTC aggregates are upserted into `usage_bucket_30m`.
-6. Query endpoints and local exports read the same SQLite database.
+6. Report commands, query endpoints, TUI, and local exports read the same SQLite database.
 
 ## Local-only guarantees
 
@@ -27,3 +27,7 @@ The runtime state lives under `~/.llmusage/`:
 - No GitHub public visibility probe
 
 Project labels come from the local git remote when present. Only hashed local paths are stored.
+
+## Report layer
+
+`daily`, `monthly`, `session`, `blocks`, and `statusline` are read-only SQLite views. They reuse `usage_event` as the report source of truth and keep costs labeled as `estimatedCostUsd`. Session reports use `session_id` metadata when available and fall back to stable source-file keys for older databases. `statusline` may write a tiny local cache under `~/.llmusage/statusline-cache/`; it does not upload or call network APIs.

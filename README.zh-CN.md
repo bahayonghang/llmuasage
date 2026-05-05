@@ -22,8 +22,22 @@
 
 命令：
 
+报表优先命令（只读本地 SQLite；如果数据看起来过旧，先运行 `llmusage sync`）：
+
+- `llmusage` / `llmusage daily`
+- `llmusage monthly`
+- `llmusage session`
+- `llmusage blocks`
+- `llmusage statusline`
+
+`llmusage` / `llmusage daily` 默认按所选时区只显示今天；需要完整 daily 历史时使用 `--all`，需要指定范围时使用 `--since YYYYMMDD` / `--until YYYYMMDD`。
+
+常用报表参数包括 `--since YYYYMMDD`、`--until YYYYMMDD`、`--json`、`--breakdown`、`--order asc|desc`、`--timezone UTC|local|+08:00`、`--locale en-US|zh-CN|ja-JP`、`--compact`、`--source codex|claude|opencode`。
+
+运维命令：
+
 - `llmusage init`
-- `llmusage sync`
+- `llmusage sync`（`--rebuild` 会重新解析本地真源并重建用量行/bucket）
 - `llmusage status`
 - `llmusage diagnostics`
 - `llmusage doctor`
@@ -43,13 +57,11 @@ Web 分析页：
 ```powershell
 cargo check
 cargo test
-cargo run -- init
-cargo run -- sync
-cargo run -- serve
+cargo run -- init`r`ncargo run -- sync`r`ncargo run -- --json`r`ncargo run -- serve
 ```
 
 说明：
 
 - `serve` 只监听 `127.0.0.1`
 - `export html` 生成离线静态报告
-- `status`、`diagnostics`、`doctor` 都是只读命令
+- 报表命令都是只读 SQLite 视图，不会自动 sync`r`n- `status`、`diagnostics`、`doctor` 都是只读命令
