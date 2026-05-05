@@ -9,3 +9,8 @@ ref/
 /docs/node_modules/
 /docs/.vitepress/cache/
 /docs/.vitepress/dist/
+
+# planning with files
+task_plan.md
+findings.md
+progress.md
