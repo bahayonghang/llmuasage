@@ -17,6 +17,10 @@ pub struct SyncSummary {
 }
 
 pub async fn run(app: &AppContext) -> Result<()> {
+    run_with_options(app, false).await
+}
+
+pub async fn run_with_options(app: &AppContext, rebuild: bool) -> Result<()> {
     /*
      * ========================================================================
      * 步骤1：执行全量本地真源同步
@@ -46,10 +50,16 @@ pub async fn run(app: &AppContext) -> Result<()> {
     let lock_wait_ms = lock_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
     store.recover_running_runs(&["sync", "hook-run"])?;
     // 1.2 并行解析、单 writer 落库并记录每源统计
+    let command_name = if rebuild { "sync --rebuild" } else { "sync" };
     let summary = super::run_tracked(
         &store,
-        "sync",
-        run_once(app, &store, lock_wait_ms),
+        command_name,
+        async {
+            if rebuild {
+                store.reset_usage_data()?;
+            }
+            run_once(app, &store, lock_wait_ms).await
+        },
         |item| {
             Some(format!(
                 "sources={} seen={} inserted={}",
@@ -63,6 +73,9 @@ pub async fn run(app: &AppContext) -> Result<()> {
     drop(lock);
 
     println!("Sync finished:");
+    if rebuild {
+        println!("- rebuild: reset usage rows, buckets, projects, and cursors before sync");
+    }
     for item in &summary.sources {
         println!(
             "- {}: files={} changed={} seen={} inserted={}",

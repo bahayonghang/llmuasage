@@ -182,8 +182,10 @@ impl SyncRunWriter {
                 INSERT OR IGNORE INTO usage_event(
                     event_key, source, model, event_at, hour_start,
                     input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens, total_tokens,
-                    project_hash, project_label, project_ref, path_hash, created_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+                    project_hash, project_label, project_ref, path_hash,
+                    session_id, session_label, source_path_hash,
+                    created_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
                 "#,
             )?;
             let mut projects = HashMap::new();
@@ -215,6 +217,18 @@ impl SyncRunWriter {
                         .as_ref()
                         .and_then(|value| value.project_ref.as_deref()),
                     event.project.as_ref().map(|value| value.path_hash.as_str()),
+                    event
+                        .session
+                        .as_ref()
+                        .map(|value| value.session_id.as_str()),
+                    event
+                        .session
+                        .as_ref()
+                        .and_then(|value| value.session_label.as_deref()),
+                    event
+                        .session
+                        .as_ref()
+                        .and_then(|value| value.source_path_hash.as_deref()),
                     now,
                 ])?;
                 if changed == 0 {

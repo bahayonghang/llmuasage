@@ -62,6 +62,9 @@ impl Store {
                 project_label TEXT,
                 project_ref TEXT,
                 path_hash TEXT,
+                session_id TEXT,
+                session_label TEXT,
+                source_path_hash TEXT,
                 created_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS usage_bucket_30m (
@@ -145,9 +148,45 @@ impl Store {
         ensure_column(&conn, "source_cursor", "file_size", "INTEGER")?;
         ensure_column(&conn, "source_cursor", "file_mtime_ns", "INTEGER")?;
         ensure_column(&conn, "source_cursor", "tail_signature", "TEXT")?;
+        ensure_column(&conn, "usage_event", "session_id", "TEXT")?;
+        ensure_column(&conn, "usage_event", "session_label", "TEXT")?;
+        ensure_column(&conn, "usage_event", "source_path_hash", "TEXT")?;
         ensure_column(&conn, "run_log", "duration_ms", "INTEGER")?;
+        conn.execute_batch(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_usage_event_session
+                ON usage_event(source, session_id, event_at);
+            "#,
+        )?;
 
         info!("完成本地目录与 SQLite schema 初始化");
+        Ok(())
+    }
+
+    pub fn reset_usage_data(&self) -> Result<()> {
+        /*
+         * ========================================================================
+         * 步骤2：清空可重建的用量真源
+         * ========================================================================
+         * 目标：
+         * 1) 支持 `sync --rebuild` 重新解析本地源以补齐新 schema 字段
+         * 2) 只删除可从本地 Codex/Claude/OpenCode 真源重建的数据
+         * 3) 保留 run_log / integration_install / trigger_state 等运维记录
+         */
+        info!("开始清空可重建用量数据");
+
+        let conn = self.open_connection()?;
+        conn.execute_batch(
+            r#"
+            DELETE FROM usage_event;
+            DELETE FROM usage_bucket_30m;
+            DELETE FROM project_dim;
+            DELETE FROM source_cursor;
+            DELETE FROM source_sync_status;
+            "#,
+        )?;
+
+        info!("完成清空可重建用量数据");
         Ok(())
     }
 }

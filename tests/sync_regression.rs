@@ -169,6 +169,69 @@ fn sqlite_worker_lease_is_exclusive() -> Result<()> {
 }
 
 #[test]
+fn bootstrap_migrates_legacy_usage_event_before_session_index() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let app = AppContext::discover()?;
+    fs::create_dir_all(&app.paths.root_dir)?;
+    let conn = Connection::open(&app.paths.db_path)?;
+    conn.execute_batch(
+        r#"
+        CREATE TABLE usage_event (
+            event_key TEXT PRIMARY KEY,
+            source TEXT NOT NULL,
+            model TEXT NOT NULL,
+            event_at TEXT NOT NULL,
+            hour_start TEXT NOT NULL,
+            input_tokens INTEGER NOT NULL,
+            cached_input_tokens INTEGER NOT NULL,
+            output_tokens INTEGER NOT NULL,
+            reasoning_output_tokens INTEGER NOT NULL,
+            total_tokens INTEGER NOT NULL,
+            project_hash TEXT,
+            project_label TEXT,
+            project_ref TEXT,
+            path_hash TEXT,
+            created_at TEXT NOT NULL
+        );
+        INSERT INTO usage_event(
+            event_key, source, model, event_at, hour_start,
+            input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens, total_tokens,
+            project_hash, project_label, project_ref, path_hash, created_at
+        ) VALUES (
+            'legacy-event', 'codex', 'gpt-5', '2026-05-05T12:00:00Z', '2026-05-05T12:00:00Z',
+            10, 0, 5, 0, 15,
+            'project-hash', 'demo', 'example/demo', 'path-hash', '2026-05-05T12:00:00Z'
+        );
+        "#,
+    )?;
+    drop(conn);
+
+    let store = Store::new(&app.paths);
+    store.bootstrap()?;
+
+    let conn = Connection::open(&app.paths.db_path)?;
+    let columns = table_columns(&conn, "usage_event")?;
+    assert!(columns.iter().any(|column| column == "session_id"));
+    assert!(columns.iter().any(|column| column == "session_label"));
+    assert!(columns.iter().any(|column| column == "source_path_hash"));
+    assert_eq!(usage_event_count(&app.paths.db_path)?, 1);
+
+    let session_index_count = conn.query_row(
+        r#"
+        SELECT COUNT(*)
+        FROM sqlite_master
+        WHERE type = 'index' AND name = 'idx_usage_event_session'
+        "#,
+        [],
+        |row| row.get::<_, i64>(0),
+    )?;
+    assert_eq!(session_index_count, 1);
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
 fn opencode_high_water_handles_same_timestamp_ids() -> Result<()> {
     /*
      * ========================================================================
@@ -354,6 +417,12 @@ fn usage_event_count(db_path: &Path) -> Result<i64> {
     let conn = Connection::open(db_path)?;
     let count = conn.query_row("SELECT COUNT(*) FROM usage_event", [], |row| row.get(0))?;
     Ok(count)
+}
+
+fn table_columns(conn: &Connection, table: &str) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 #[derive(Debug)]

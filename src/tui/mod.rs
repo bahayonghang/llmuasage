@@ -16,6 +16,8 @@ use ratatui::{
 
 use crate::{query, store::Store};
 
+pub mod report_table;
+
 pub fn run_terminal(store: &Store) -> Result<()> {
     let overview = query::load_overview(store)?;
     let sources = query::load_source_breakdown(store)?;
