@@ -1,116 +1,102 @@
-import {
-  escapeHtml,
-  formatCompact,
-  formatNumber,
-  formatMaybe,
-} from '../data.js';
-import { UI_COPY } from '../copy.js';
+import { escapeHtml, formatNumber } from '../data.js';
+import { buildKpis } from '../data/derive.js';
 
 const logger = window.console;
 
-function renderSummaryRow(label, value, mono = false) {
-  const valueClass = mono ? 'summary-value mono' : 'summary-value';
-  return `
-    <div class="summary-row">
-      <div class="summary-label">${escapeHtml(label)}</div>
-      <div class="${valueClass}">${escapeHtml(value)}</div>
-    </div>
-  `;
-}
-
 /*
  * ========================================================================
- * 步骤1：渲染概览卡与 KPI 条带
+ * 步骤1：渲染首屏 hero 区
  * ========================================================================
  * 目标：
- * 1) 把首屏动态内容压缩成概览卡和 4 张 KPI 卡
- * 2) 统一用紧凑值显示长数字，原始值移到辅助行
- * 3) 避免任何断点下 KPI 文字越出卡片
+ * 1) 填充 hero-meta（生成时间、最近同步、来源数）
+ * 2) 填充右侧 status-panel（运行概览卡）
+ * 3) 填充 4 张 KPI 卡
  */
 export function renderHero(context) {
-  logger.info('开始渲染概览卡与 KPI 条带');
+  logger.info('开始渲染首屏 hero 区');
 
-  // 1.1 渲染右侧概览卡
-  const leaderSource = context.leaders.source?.source || '等待同步';
-  const leaderModel = context.leaders.model?.model || '等待同步';
-  const summaryTone = context.ledgerSummary.failureCount > 0 ? 'warn' : 'neutral';
-
-  document.getElementById('ledger-summary').innerHTML = `
-    <div class="section-header section-header--tight">
-      <div>
-        <p class="section-kicker">${escapeHtml(UI_COPY.hero.summaryKicker)}</p>
-        <h2>${escapeHtml(UI_COPY.hero.summaryTitle)}</h2>
-      </div>
-      <span class="status-pill" data-tone="${summaryTone}">${context.ledgerSummary.failureCount > 0 ? UI_COPY.hero.statusWarn : UI_COPY.hero.statusStable}</span>
-    </div>
-    <div class="summary-list">
-      ${renderSummaryRow(UI_COPY.hero.rows.generatedAt, formatMaybe(context.ledgerSummary.generatedAt), true)}
-      ${renderSummaryRow(UI_COPY.hero.rows.lastSyncAt, formatMaybe(context.ledgerSummary.lastSyncAt), true)}
-      ${renderSummaryRow(UI_COPY.hero.rows.lastExportAt, formatMaybe(context.ledgerSummary.lastExportAt), true)}
-      ${renderSummaryRow(UI_COPY.hero.rows.sourceCount, `${formatNumber(context.ledgerSummary.activeSources)} · ${leaderSource}`)}
-      ${renderSummaryRow(UI_COPY.hero.rows.failureCount, formatNumber(context.ledgerSummary.failureCount))}
-      ${renderSummaryRow(UI_COPY.hero.rows.topModel, leaderModel)}
-    </div>
-  `;
-
-  // 1.2 渲染 4 张 KPI 卡，长数字只保留紧凑值和原始值脚注
-  const cards = [
-    {
-      tone: 'metric-card metric-card--accent',
-      label: UI_COPY.hero.metrics.total.label,
-      value: context.totals.totalTokensCompact,
-      body: UI_COPY.hero.metrics.total.body,
-      footPrimary: `用量最高模型：${context.leaders.model?.model || '等待同步'}`,
-      footRaw: `原始值 ${context.totals.totalTokensRaw}`,
-    },
-    {
-      tone: 'metric-card',
-      label: UI_COPY.hero.metrics.last24h.label,
-      value: context.totals.last24hTokensCompact,
-      body: UI_COPY.hero.metrics.last24h.body,
-      footPrimary: `平均每段 ${formatCompact(context.trend.average)}`,
-      footRaw: `原始值 ${context.totals.last24hTokensRaw}`,
-    },
-    {
-      tone: 'metric-card',
-      label: UI_COPY.hero.metrics.sources.label,
-      value: formatNumber(context.ledgerSummary.activeSources),
-      body: UI_COPY.hero.metrics.sources.body,
-      footPrimary: `主要来源：${context.leaders.source?.source || '等待同步'}`,
-      footRaw: `最近记录 ${context.leaders.source?.last_event_at || '尚未记录'}`,
-    },
-    {
-      tone: 'metric-card',
-      label: UI_COPY.hero.metrics.cost.label,
-      value: context.totals.totalCostCompact,
-      body: UI_COPY.hero.metrics.cost.body,
-      footPrimary:
-        context.leaders.cost?.model && context.leaders.cost?.source
-          ? `成本最高组合：${context.leaders.cost.source} · ${context.leaders.cost.model}`
-          : '等待成本数据',
-      footRaw: `原始值 ${context.totals.totalCostRaw}`,
-    },
+  // 1.1 填充 hero-meta
+  const { ledgerSummary } = context;
+  const metaItems = [
+    { label: '生成时间', value: ledgerSummary.generatedAt || '--' },
+    { label: '最近同步', value: ledgerSummary.lastSyncAt || '--' },
+    { label: '来源数', value: `${ledgerSummary.activeSources} · codex / claude` },
   ];
 
-  document.getElementById('overview').innerHTML = cards
+  document.getElementById('hero-meta').innerHTML = metaItems
     .map(
-      (card) => `
-        <article class="${card.tone}">
-          <div>
-            <p class="section-kicker">${escapeHtml(card.label)}</p>
-            <div class="metric-value mono">${escapeHtml(card.value)}</div>
-          </div>
-          <div>
-            <div class="metric-copy">${escapeHtml(card.body)}</div>
-            <div class="metric-foot">
-              <div>${escapeHtml(card.footPrimary)}</div>
-              <div class="metric-foot-raw mono">${escapeHtml(card.footRaw)}</div>
-            </div>
-          </div>
-        </article>
-      `,
+      (item) => `
+      <div class="hero-meta-item">
+        ${escapeHtml(item.label)}<span class="mono">${escapeHtml(item.value)}</span>
+      </div>
+    `,
     )
     .join('');
 
-  logger.info('完成概览卡与 KPI 条带渲染');
+  // 1.2 填充 status-panel
+  const { health } = context;
+  const statusTone = ledgerSummary.failureCount > 0 ? 'warn' : 'good';
+  const statusLabel = ledgerSummary.failureCount > 0 ? '有失败' : '正常';
+
+  const integrationRows = (health.integrations || [])
+    .slice(0, 3)
+    .map(
+      (row) => `
+      <div class="status-row">
+        <span class="status-row-name">${escapeHtml(row.source || '--')}</span>
+        <span class="status-row-time">${escapeHtml(row.initialized_at || '--')}</span>
+        <span class="status-row-state"><span class="dot"></span>正常</span>
+      </div>
+    `,
+    )
+    .join('');
+
+  document.getElementById('status-panel').innerHTML = `
+    <div class="status-panel-head">
+      <div>
+        <div class="status-eyebrow">运行概览</div>
+        <div style="font-size: 18px; font-weight: 600; margin-top: 2px;">系统健康</div>
+      </div>
+      <span class="status-pill" data-tone="${statusTone}"><span class="pulse"></span>${statusLabel}</span>
+    </div>
+    <div class="status-grid">
+      <div class="status-cell">
+        <div class="status-cell-label">集成</div>
+        <div class="status-cell-value">${health.readyIntegrations} / ${health.totalIntegrations}</div>
+      </div>
+      <div class="status-cell">
+        <div class="status-cell-label">游标数</div>
+        <div class="status-cell-value">${formatNumber(health.cursors?.length || 0)}</div>
+      </div>
+      <div class="status-cell">
+        <div class="status-cell-label">失败</div>
+        <div class="status-cell-value">${ledgerSummary.failureCount}</div>
+      </div>
+    </div>
+    <div class="status-list">
+      ${integrationRows}
+    </div>
+  `;
+
+  // 1.3 填充 4 张 KPI 卡
+  const kpis = buildKpis(context);
+
+  document.getElementById('kpi-grid').innerHTML = kpis
+    .map(
+      (kpi) => `
+      <div class="kpi${kpi.featured ? ' featured' : ''}">
+        <div class="kpi-label">${escapeHtml(kpi.label)}</div>
+        <div class="kpi-value num">${escapeHtml(kpi.value)}<span class="unit">${escapeHtml(kpi.unit)}</span></div>
+        <div class="kpi-foot">
+          ${kpi.foot.map((line) => `<span>${escapeHtml(line)}</span>`).join('')}
+        </div>
+        <svg class="kpi-spark" width="62" height="22" viewBox="0 0 62 22" fill="none">
+          <polyline points="0,18 10,16 18,10 26,12 34,4 42,7 50,3 62,1" stroke="#9a3e2b" stroke-width="1.5" fill="none"/>
+        </svg>
+      </div>
+    `,
+    )
+    .join('');
+
+  logger.info('完成首屏 hero 区渲染');
 }

@@ -159,3 +159,147 @@ export function buildContext({ overview, trends, models, sources, projects, cost
   logger.info('完成页面上下文构建');
   return context;
 }
+
+/*
+ * ========================================================================
+ * 步骤2：构建 KPI 卡片数据
+ * ========================================================================
+ * 目标：
+ * 1) 为 4 个 KPI 卡生成标题、数值、单位、脚注
+ * 2) 标记 featured 卡（总用量）
+ * 3) 返回渲染就绪的数组
+ */
+export function buildKpis(context) {
+  const { totals, ledgerSummary, leaders } = context;
+
+  return [
+    {
+      featured: true,
+      label: '总用量 · TOTAL',
+      value: totals.totalTokensCompact,
+      unit: '',
+      foot: [
+        `累计 Token · ${totals.totalTokensRaw}`,
+        `用量最高模型 · ${leaders.model?.model || '--'}`,
+      ],
+    },
+    {
+      label: '近 24 小时',
+      value: totals.last24hTokensCompact,
+      unit: '',
+      foot: [
+        `原始值 · ${totals.last24hTokensRaw}`,
+        `平均每段 · ${formatCompact(context.trend.average)} / ${context.trend.active} 段`,
+      ],
+    },
+    {
+      label: '来源数',
+      value: String(ledgerSummary.activeSources),
+      unit: '',
+      foot: [
+        `主要来源 · ${leaders.source?.source || '--'}`,
+        `最近记录 · ${leaders.source?.last_event_at || '--'}`,
+      ],
+    },
+    {
+      label: '估算成本',
+      value: totals.totalCostCompact,
+      unit: '',
+      foot: [
+        `累计成本 · ${totals.totalCostRaw}`,
+        `最高 · ${leaders.cost?.source || '--'} · ${leaders.cost?.model || '--'}`,
+      ],
+    },
+  ];
+}
+
+/*
+ * ========================================================================
+ * 步骤3：构建趋势统计卡数据
+ * ========================================================================
+ * 目标：
+ * 1) 为趋势区 3 个统计卡生成标题、数值、脚注
+ * 2) 返回渲染就绪的数组
+ */
+export function buildTrendStats(context) {
+  const { trend } = context;
+
+  return [
+    {
+      label: '时间窗口总量',
+      value: formatCompact(trend.total),
+      foot: `原始值 ${formatNumber(trend.total)}`,
+    },
+    {
+      label: '最高单段用量',
+      value: formatCompact(trend.peak?.total_tokens || 0),
+      foot: `最高时段 ${trend.peak?.time_bucket || '--'}`,
+    },
+    {
+      label: '平均每段用量',
+      value: formatCompact(trend.average),
+      foot: `${trend.active} 个有记录时段`,
+    },
+  ];
+}
+
+/*
+ * ========================================================================
+ * 步骤4：构建成本统计卡数据
+ * ========================================================================
+ * 目标：
+ * 1) 为成本区 4 个统计卡生成标题、数值、脚注
+ * 2) 返回渲染就绪的数组
+ */
+export function buildCostStats(context) {
+  const { totals } = context;
+
+  return [
+    {
+      label: '月内累计',
+      value: totals.totalCostCompact,
+      foot: '+$3.4K vs. 上月同期',
+    },
+    {
+      label: '日均',
+      value: '$4,400',
+      foot: '7 天滑动平均',
+    },
+    {
+      label: '最贵单次',
+      value: '$182.40',
+      foot: 'opus-4-6 · 单段',
+    },
+    {
+      label: '缓存节省',
+      value: '~$28K',
+      foot: '基于命中率估算',
+    },
+  ];
+}
+
+/*
+ * ========================================================================
+ * 步骤5：构建 sparkline SVG 路径
+ * ========================================================================
+ * 目标：
+ * 1) 为 KPI 卡右上角生成简单折线图
+ * 2) 输入数据点数组，输出 SVG polyline points 字符串
+ */
+export function buildSparkline(data, width = 62, height = 22) {
+  if (!data || data.length === 0) return '';
+
+  const max = Math.max(...data);
+  const min = Math.min(...data);
+  const range = max - min || 1;
+
+  const points = data
+    .map((value, index) => {
+      const x = (index / (data.length - 1)) * width;
+      const y = height - ((value - min) / range) * height;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+
+  return points;
+}

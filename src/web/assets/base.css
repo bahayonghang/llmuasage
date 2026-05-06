@@ -1,130 +1,51 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
+
 :root {
-  color-scheme: light;
-  --paper: #f5f4ed;
-  --paper-soft: #faf9f5;
-  --paper-warm: rgba(250, 249, 245, 0.92);
-  --paper-strong: #ebe7db;
-  --ink: #141413;
-  --ink-soft: #30302e;
-  --copy: #5e5d59;
-  --copy-muted: #87867f;
-  --accent: #c96442;
-  --accent-soft: rgba(201, 100, 66, 0.1);
-  --line: #f0eee6;
-  --line-strong: #e0ddcf;
-  --ring: #d1cfc5;
-  --dark: #141413;
-  --dark-soft: #30302e;
-  --dark-line: rgba(250, 249, 245, 0.12);
-  --dark-copy: #b0aea5;
-  --good: #2f7a54;
-  --warn: #b53333;
-  --shadow-soft: 0 18px 48px rgba(20, 20, 19, 0.08);
-  --shadow-ring: 0 0 0 1px var(--ring);
+  --bg: #f6f3ee;
+  --surface: #ffffff;
+  --surface-2: #faf7f2;
+  --ink: #1c1a17;
+  --ink-2: #3a352f;
+  --muted: #8a8278;
+  --muted-2: #b8b0a4;
+  --line: #e8e2d6;
+  --line-2: #ece6db;
+  --accent: #c8553d;
+  --accent-soft: #f3dfd8;
+  --accent-deep: #9a3e2b;
+  --good: #4f7a5c;
+  --good-soft: #dde8de;
+  --warn: #c08a3b;
+  --dark: #1a1815;
+  --dark-2: #25221e;
+  --dark-line: #34302a;
+  --dark-text: #f0ebe1;
+  --dark-muted: #8d867a;
 }
 
 * {
   box-sizing: border-box;
+  margin: 0;
+  padding: 0;
 }
 
-html {
-  min-height: 100%;
-}
-
+html,
 body {
-  margin: 0;
-  min-height: 100vh;
-  font-family:
-    "Segoe UI",
-    "PingFang SC",
-    "Hiragino Sans GB",
-    "Microsoft YaHei",
-    sans-serif;
+  background: var(--bg);
   color: var(--ink);
-  background:
-    radial-gradient(circle at top left, rgba(201, 100, 66, 0.07), transparent 26%),
-    linear-gradient(180deg, #f7f5ee 0%, var(--paper) 100%);
-}
-
-body[data-mode="live"] {
-  background:
-    radial-gradient(circle at top left, rgba(201, 100, 66, 0.04), transparent 22%),
-    linear-gradient(180deg, #f7f5ee 0%, var(--paper) 100%);
-}
-
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background-image: linear-gradient(rgba(20, 20, 19, 0.025) 1px, transparent 1px);
-  background-size: 100% 24px;
-  opacity: 0.2;
-}
-
-body[data-mode="live"]::before {
-  opacity: 0.14;
-}
-
-h1,
-h2,
-h3,
-h4 {
-  margin: 0;
-  font-family: Georgia, "Times New Roman", serif;
-  font-weight: 500;
-  letter-spacing: -0.02em;
-}
-
-p {
-  margin: 0;
-}
-
-button {
-  font: inherit;
-}
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-  table-layout: fixed;
-}
-
-th,
-td {
-  padding: 10px 0;
-  border-top: 1px solid var(--line);
-  text-align: left;
-  vertical-align: top;
-  word-break: break-word;
-}
-
-tbody tr:first-child td,
-thead + tbody tr:first-child td {
-  border-top: 1px solid var(--line);
-}
-
-thead th {
-  padding-top: 0;
-  border-top: none;
-  color: var(--copy);
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-family: 'Inter', 'Noto Sans SC', system-ui, sans-serif;
+  font-feature-settings: 'ss01', 'cv11';
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.5;
+  scroll-behavior: smooth;
 }
 
 .mono {
-  font-family: Consolas, "SFMono-Regular", "Cascadia Code", monospace;
-  font-variant-numeric: tabular-nums;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-feature-settings: 'tnum';
 }
 
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  border: 0;
+.num {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
 }
