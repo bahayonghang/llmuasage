@@ -11,6 +11,7 @@ export default defineConfig({
       { text: "Guide", link: "/guide/getting-started" },
       { text: "Architecture", link: "/architecture/" },
       { text: "Commands", link: "/commands/" },
+      { text: "ADR", link: "/adr/" },
     ],
     sidebar: {
       "/": [
@@ -20,6 +21,15 @@ export default defineConfig({
             { text: "Getting Started", link: "/guide/getting-started" },
             { text: "Architecture", link: "/architecture/" },
             { text: "Commands", link: "/commands/" },
+          ],
+        },
+        {
+          text: "Architecture Decisions",
+          items: [
+            { text: "Index", link: "/adr/" },
+            { text: "0001 — SourceParser trait + registry", link: "/adr/0001-source-registry-and-parser-trait" },
+            { text: "0002 — SyncShard as commit protocol", link: "/adr/0002-sync-shard-as-commit-protocol" },
+            { text: "0003 — Store façade vs substores", link: "/adr/0003-store-facade-vs-substores" },
           ],
         },
       ],
@@ -39,6 +49,7 @@ export default defineConfig({
           { text: "Guide", link: "/guide/getting-started" },
           { text: "Architecture", link: "/architecture/" },
           { text: "Commands", link: "/commands/" },
+          { text: "ADR", link: "/adr/" },
         ],
         sidebar: {
           "/": [
@@ -48,6 +59,15 @@ export default defineConfig({
                 { text: "Getting Started", link: "/guide/getting-started" },
                 { text: "Architecture", link: "/architecture/" },
                 { text: "Commands", link: "/commands/" },
+              ],
+            },
+            {
+              text: "Architecture Decisions",
+              items: [
+                { text: "Index", link: "/adr/" },
+                { text: "0001 — SourceParser trait + registry", link: "/adr/0001-source-registry-and-parser-trait" },
+                { text: "0002 — SyncShard as commit protocol", link: "/adr/0002-sync-shard-as-commit-protocol" },
+                { text: "0003 — Store façade vs substores", link: "/adr/0003-store-facade-vs-substores" },
               ],
             },
           ],
