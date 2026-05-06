@@ -26,6 +26,13 @@ function normalizeRows(rows) {
   return Array.isArray(rows) ? rows : [];
 }
 
+function normalizeTrendRows(rows) {
+  return normalizeRows(rows).map((row) => ({
+    label: row?.label ?? row?.time_bucket ?? '--',
+    total_tokens: Number(row?.total_tokens || 0),
+  }));
+}
+
 function sortDesc(rows, select) {
   return [...normalizeRows(rows)].sort((left, right) => {
     const rightValue = Number(select(right) || 0);
@@ -47,7 +54,7 @@ export function buildContext({ overview, trends, models, sources, projects, cost
   logger.info('开始构建页面上下文');
 
   // 1.1 规范化并排序趋势、排行和健康数据
-  const trendAscending = normalizeRows(trends);
+  const trendAscending = normalizeTrendRows(trends);
   const trendLedgerRows = [...trendAscending].reverse();
   const trendSpotlightRows = trendLedgerRows.slice(0, PANEL_LIMITS.trendSpotlight);
   const modelRows = sortDesc(models, (row) => row?.total_tokens);
@@ -233,7 +240,7 @@ export function buildTrendStats(context) {
     {
       label: '最高单段用量',
       value: formatCompact(trend.peak?.total_tokens || 0),
-      foot: `最高时段 ${trend.peak?.time_bucket || '--'}`,
+      foot: `最高时段 ${trend.peak?.label || '--'}`,
     },
     {
       label: '平均每段用量',
