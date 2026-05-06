@@ -9,14 +9,36 @@ use serde_json::{Map, Value, json};
 use crate::{app::AppContext, models::SourceKind, store::Store, util::resolve_home_dir};
 
 use super::{
-    IntegrationAction, IntegrationProbe, backup_file, platform_shell_command, record_action,
+    HookTarget, Integration, IntegrationAction, IntegrationProbe, backup_file, record_action,
     record_probe,
 };
 
+/// ZST handle implementing [`Integration`] for the Claude `settings.json` hooks.
+pub struct ClaudeIntegration;
+
+impl Integration for ClaudeIntegration {
+    fn source(&self) -> SourceKind {
+        SourceKind::Claude
+    }
+
+    fn probe(&self, app: &AppContext) -> Result<IntegrationProbe> {
+        probe(app)
+    }
+
+    fn install(&self, app: &AppContext, store: &Store) -> Result<IntegrationAction> {
+        install(app, store)
+    }
+
+    fn uninstall(&self, app: &AppContext, store: &Store) -> Result<IntegrationAction> {
+        uninstall(app, store)
+    }
+}
+
 pub fn probe(app: &AppContext) -> Result<IntegrationProbe> {
     let settings_path = resolve_claude_settings(app);
-    let stop_command = platform_shell_command(app, SourceKind::Claude, "Stop");
-    let end_command = platform_shell_command(app, SourceKind::Claude, "SessionEnd");
+    let hook = HookTarget::current(app);
+    let stop_command = hook.shell_command(SourceKind::Claude, "Stop");
+    let end_command = hook.shell_command(SourceKind::Claude, "SessionEnd");
 
     let probe = if !settings_path.is_file() {
         IntegrationProbe {
@@ -58,15 +80,16 @@ pub fn install(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
     }
 
     let mut settings = read_settings(&settings_path)?;
+    let hook = HookTarget::current(app);
     ensure_event_command(
         &mut settings,
         "Stop",
-        &platform_shell_command(app, SourceKind::Claude, "Stop"),
+        &hook.shell_command(SourceKind::Claude, "Stop"),
     )?;
     ensure_event_command(
         &mut settings,
         "SessionEnd",
-        &platform_shell_command(app, SourceKind::Claude, "SessionEnd"),
+        &hook.shell_command(SourceKind::Claude, "SessionEnd"),
     )?;
 
     let backup_path = backup_file(&settings_path, &app.paths.backups_dir, "claude-settings")?;
@@ -105,15 +128,16 @@ pub fn uninstall(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
         &app.paths.backups_dir,
         "claude-settings-restore",
     )?;
+    let hook = HookTarget::current(app);
     remove_event_command(
         &mut settings,
         "Stop",
-        &platform_shell_command(app, SourceKind::Claude, "Stop"),
+        &hook.shell_command(SourceKind::Claude, "Stop"),
     )?;
     remove_event_command(
         &mut settings,
         "SessionEnd",
-        &platform_shell_command(app, SourceKind::Claude, "SessionEnd"),
+        &hook.shell_command(SourceKind::Claude, "SessionEnd"),
     )?;
 
     fs::write(&settings_path, serde_json::to_vec_pretty(&settings)?)?;

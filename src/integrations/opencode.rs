@@ -5,11 +5,32 @@ use anyhow::Result;
 use crate::{app::AppContext, models::SourceKind, store::Store};
 
 use super::{
-    IntegrationAction, IntegrationProbe, backup_file, platform_shell_command, record_action,
+    HookTarget, Integration, IntegrationAction, IntegrationProbe, backup_file, record_action,
 };
 
 const PLUGIN_MARKER: &str = "LLMUSAGE_LOCAL_PLUGIN";
 const PLUGIN_NAME: &str = "llmusage-tracker.js";
+
+/// ZST handle implementing [`Integration`] for the OpenCode local plugin.
+pub struct OpencodeIntegration;
+
+impl Integration for OpencodeIntegration {
+    fn source(&self) -> SourceKind {
+        SourceKind::Opencode
+    }
+
+    fn probe(&self, app: &AppContext) -> Result<IntegrationProbe> {
+        probe(app)
+    }
+
+    fn install(&self, app: &AppContext, store: &Store) -> Result<IntegrationAction> {
+        install(app, store)
+    }
+
+    fn uninstall(&self, app: &AppContext, store: &Store) -> Result<IntegrationAction> {
+        uninstall(app, store)
+    }
+}
 
 pub fn probe(app: &AppContext) -> Result<IntegrationProbe> {
     let plugin_path = resolve_plugin_path(app);
@@ -120,7 +141,7 @@ fn resolve_plugin_path(_app: &AppContext) -> PathBuf {
 }
 
 fn build_plugin(app: &AppContext) -> String {
-    let command = platform_shell_command(app, SourceKind::Opencode, "session.updated");
+    let command = HookTarget::current(app).shell_command(SourceKind::Opencode, "session.updated");
     format!(
         "// {PLUGIN_MARKER}\n\
          export const LlmusagePlugin = async ({{ $ }}) => {{\n\

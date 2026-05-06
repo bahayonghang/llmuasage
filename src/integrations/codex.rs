@@ -7,13 +7,34 @@ use toml_edit::{DocumentMut, Item, Value, value};
 use crate::{app::AppContext, models::SourceKind, store::Store, util::resolve_home_dir};
 
 use super::{
-    IntegrationAction, IntegrationProbe, backup_file, platform_notify_args, record_action,
+    HookTarget, Integration, IntegrationAction, IntegrationProbe, backup_file, record_action,
     record_probe,
 };
 
+/// ZST handle implementing [`Integration`] for the Codex `notify` array.
+pub struct CodexIntegration;
+
+impl Integration for CodexIntegration {
+    fn source(&self) -> SourceKind {
+        SourceKind::Codex
+    }
+
+    fn probe(&self, app: &AppContext) -> Result<IntegrationProbe> {
+        probe(app)
+    }
+
+    fn install(&self, app: &AppContext, store: &Store) -> Result<IntegrationAction> {
+        install(app, store)
+    }
+
+    fn uninstall(&self, app: &AppContext, store: &Store) -> Result<IntegrationAction> {
+        uninstall(app, store)
+    }
+}
+
 pub fn probe(app: &AppContext) -> Result<IntegrationProbe> {
     let config_path = resolve_codex_config(app);
-    let expected = platform_notify_args(app, SourceKind::Codex, "notify");
+    let expected = HookTarget::current(app).notify_args(SourceKind::Codex, "notify");
 
     let probe = if !config_path.is_file() {
         IntegrationProbe {
@@ -55,7 +76,7 @@ pub fn install(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
         });
     }
 
-    let expected = platform_notify_args(app, SourceKind::Codex, "notify");
+    let expected = HookTarget::current(app).notify_args(SourceKind::Codex, "notify");
     let raw = fs::read_to_string(&config_path)?;
     let mut doc = raw.parse::<DocumentMut>()?;
     let current = read_notify(&config_path)?;
