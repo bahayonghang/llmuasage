@@ -1,4 +1,4 @@
-import { escapeHtml, formatNumber, formatUsd, formatCompact, ratio } from '../data.js';
+import { escapeHtml, formatUsd, formatCompact, ratio, statusTone } from '../data.js';
 import { buildCostStats } from '../data/derive.js';
 
 const logger = window.console;
@@ -103,14 +103,21 @@ export function renderCosts(context) {
   } else {
     const failureHtml = failureRows
       .slice(0, 5)
-      .map(
-        (row) => `
+      .map((row) => {
+        const label = row.command || '--';
+        const detail = row.error || row.summary || row.started_at || '--';
+        const tone = statusTone(row.status);
+        const statusLabel = tone === 'good' ? '成功' : row.status || '异常';
+        return `
         <div style="padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; font-size: 12px;">
-          <div style="font-family: 'JetBrains Mono', monospace; font-weight: 500;">${escapeHtml(row.source || '--')}</div>
-          <div style="color: var(--muted); margin-top: 4px;">${escapeHtml(row.error_message || '--')}</div>
+          <div style="display: flex; justify-content: space-between; gap: 8px;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-weight: 500;">${escapeHtml(label)}</div>
+            <div style="color: var(--muted);">${escapeHtml(statusLabel)}</div>
+          </div>
+          <div style="color: var(--muted); margin-top: 4px;">${escapeHtml(detail)}</div>
         </div>
-      `,
-      )
+      `;
+      })
       .join('');
 
     document.getElementById('failures-card').innerHTML = `
@@ -124,17 +131,19 @@ export function renderCosts(context) {
   const integrationRows = health.integrations || [];
 
   const integrationHtml = integrationRows
-    .map(
-      (row) => `
+    .map((row) => {
+      const tone = statusTone(row.status);
+      const statusLabel = tone === 'good' ? '● 正常' : `● ${row.status || '未知'}`;
+      return `
       <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px;">
         <div>
           <div class="mono" style="font-weight: 600; font-size: 13px;">${escapeHtml(row.source || '--')}</div>
-          <div style="font-size: 11px; color: var(--muted); margin-top: 2px;" class="mono">init · ${escapeHtml(row.initialized_at || '--')}</div>
+          <div style="font-size: 11px; color: var(--muted); margin-top: 2px;" class="mono">${escapeHtml(row.install_type || 'probe')} · ${escapeHtml(row.updated_at || '--')}</div>
         </div>
-        <span class="tag ok">● 正常</span>
+        <span class="tag ok">${escapeHtml(statusLabel)}</span>
       </div>
-    `,
-    )
+    `;
+    })
     .join('');
 
   document.getElementById('integrations-rows').innerHTML = integrationHtml;

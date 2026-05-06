@@ -26,11 +26,13 @@ export function renderProjects(context) {
     .map((row) => {
       const totalTokens = Number(row.total_tokens || 0);
       const widthPct = ratio(totalTokens, max);
+      const projectName = row.project_label || row.project_name || '--';
+      const projectRef = row.project_ref || row.project_hash || row.project_url || '--';
 
       return `
         <div class="project-row">
-          <div class="project-name">${escapeHtml(row.project_name || '--')}</div>
-          <div class="project-url">${escapeHtml(row.project_url || '--')}</div>
+          <div class="project-name">${escapeHtml(projectName)}</div>
+          <div class="project-url">${escapeHtml(projectRef)}</div>
           <div class="project-bar-wrap"><div class="project-bar-track"><div class="project-bar-fill" style="width: ${widthPct}%"></div></div></div>
           <div class="project-value">${formatCompact(totalTokens)}</div>
         </div>
