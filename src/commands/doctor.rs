@@ -27,7 +27,7 @@ pub async fn run(app: &AppContext, json: bool) -> Result<()> {
     let store = Store::new(&app.paths);
     store.bootstrap()?;
     let probes = integrations::probe_all(app)?;
-    let recent_runs = store.recent_runs(10)?;
+    let recent_runs = store.run_log().recent_runs(10)?;
     let opencode_db_path = std::env::var("OPENCODE_HOME")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| {

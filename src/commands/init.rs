@@ -18,7 +18,7 @@ pub async fn run(app: &AppContext) -> Result<()> {
     // 1.1 建立本地 store 与 run_log
     let store = Store::new(&app.paths);
     store.bootstrap()?;
-    let run_id = store.record_run_start("init")?;
+    let run_id = store.run_log().record_run_start("init")?;
 
     // 1.2 安装三类本地 hook / plugin
     let actions = integrations::install_all(app, &store)?;
@@ -27,7 +27,9 @@ pub async fn run(app: &AppContext) -> Result<()> {
         .map(|item| format!("{}={}", item.source, item.status))
         .collect::<Vec<_>>()
         .join(", ");
-    store.finish_run(run_id, "success", Some(&summary), None)?;
+    store
+        .run_log()
+        .finish_run(run_id, "success", Some(&summary), None)?;
 
     println!("Init finished:");
     for action in actions {

@@ -4,7 +4,7 @@ use anyhow::Result;
 use serde_json::json;
 use tracing::info;
 
-use crate::{app::AppContext, integrations, query, store::Store};
+use crate::{app::AppContext, integrations, query::Dashboard, store::Store};
 
 pub async fn run(app: &AppContext, out: Option<PathBuf>) -> Result<()> {
     /*
@@ -21,12 +21,13 @@ pub async fn run(app: &AppContext, out: Option<PathBuf>) -> Result<()> {
     // 1.1 聚合本地诊断所需的全部数据面
     let store = Store::new(&app.paths);
     store.bootstrap()?;
-    let overview = query::load_overview(&store)?;
-    let health = query::load_health(&store)?;
-    let sources = query::load_source_breakdown(&store)?;
+    let dashboard = Dashboard::open(&store)?;
+    let overview = dashboard.overview()?;
+    let health = dashboard.health()?;
+    let sources = dashboard.source_breakdown()?;
     let probes = integrations::probe_all(app)?;
-    let recent_runs = store.recent_runs(20)?;
-    let sync_status = store.load_source_sync_statuses()?;
+    let recent_runs = store.run_log().recent_runs(20)?;
+    let sync_status = store.sync_status().load_source_sync_statuses()?;
     let diagnostics = json!({
         "env": {
             "os": std::env::consts::OS,

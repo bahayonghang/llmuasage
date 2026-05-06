@@ -104,16 +104,20 @@ where
     Fut: Future<Output = Result<T>>,
     S: FnOnce(&T) -> Option<String>,
 {
-    let run_id = store.record_run_start(command)?;
+    let run_id = store.run_log().record_run_start(command)?;
     match body.await {
         Ok(value) => {
             let summary = success_summary(&value);
-            store.finish_run(run_id, "success", summary.as_deref(), None)?;
+            store
+                .run_log()
+                .finish_run(run_id, "success", summary.as_deref(), None)?;
             Ok(value)
         }
         Err(err) => {
             if let Err(finish_err) =
-                store.finish_run(run_id, "failed", None, Some(&format!("{err:#}")))
+                store
+                    .run_log()
+                    .finish_run(run_id, "failed", None, Some(&format!("{err:#}")))
             {
                 return Err(err.context(format!(
                     "记录 {command} 失败 run_log 时也失败: {finish_err}"

@@ -5,7 +5,8 @@ use tracing::info;
 
 use crate::{
     app::AppContext,
-    parsers::{SourceSyncStats, claude::sync_claude, codex::sync_codex, opencode::sync_opencode},
+    parsers::{SourceSyncStats, driver},
+    sources,
     store::{SourceSyncStatus, Store},
 };
 
@@ -37,8 +38,8 @@ pub async fn run_with_options(app: &AppContext, rebuild: bool) -> Result<()> {
     store.bootstrap()?;
     let lock_started = Instant::now();
     let Some(lock) = store.acquire_worker_lock()? else {
-        let run_id = store.record_run_start("sync")?;
-        store.finish_run(
+        let run_id = store.run_log().record_run_start("sync")?;
+        store.run_log().finish_run(
             run_id,
             "skipped",
             Some("已有 worker 在运行，跳过本次 sync"),
@@ -48,7 +49,9 @@ pub async fn run_with_options(app: &AppContext, rebuild: bool) -> Result<()> {
         return Ok(());
     };
     let lock_wait_ms = lock_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
-    store.recover_running_runs(&["sync", "hook-run"])?;
+    store
+        .run_log()
+        .recover_running_runs(&["sync", "hook-run"])?;
     // 1.2 并行解析、单 writer 落库并记录每源统计
     let command_name = if rebuild { "sync --rebuild" } else { "sync" };
     let summary = super::run_tracked(
@@ -101,9 +104,10 @@ pub async fn run_once(_app: &AppContext, store: &Store, lock_wait_ms: u64) -> Re
      * 步骤2：执行三阶段同步流水线
      * ========================================================================
      * 目标：
-     * 1) 先并行解析三类真源
-     * 2) 再用单 writer 顺序提交 reset / event / cursor
-     * 3) 最后刷新每源诊断状态
+     * 1) 用 SourceParser 注册表替代硬列三连
+     * 2) 由 driver 串行驱动并注入锁等待耗时
+     * 3) 单 writer 顺序提交 reset / event / cursor
+     * 4) 最后刷新每源诊断状态
      */
     info!("开始执行 sync 三阶段流水线");
 
@@ -112,17 +116,13 @@ pub async fn run_once(_app: &AppContext, store: &Store, lock_wait_ms: u64) -> Re
         .map(|value| value.get().min(4))
         .unwrap_or(1);
     let mut writer = store.begin_sync_run()?;
-    let mut sources = vec![
-        sync_codex(store, &mut writer, parallelism).await?,
-        sync_claude(store, &mut writer, parallelism).await?,
-        sync_opencode(store, &mut writer, parallelism).await?,
-    ];
+    let parsers = sources::registered_parsers();
+    let sources = driver::drive(&parsers, store, &mut writer, parallelism, lock_wait_ms).await?;
     let mut total_seen = 0usize;
     let mut total_inserted = 0usize;
     let mut sync_statuses = Vec::new();
 
-    for source in &mut sources {
-        source.lock_wait_ms = lock_wait_ms;
+    for source in &sources {
         total_seen += source.events_seen;
         total_inserted += source.events_inserted;
         sync_statuses.push(SourceSyncStatus {
@@ -140,7 +140,9 @@ pub async fn run_once(_app: &AppContext, store: &Store, lock_wait_ms: u64) -> Re
         });
     }
     writer.finish_sync_run()?;
-    store.save_source_sync_statuses(&sync_statuses)?;
+    store
+        .sync_status()
+        .save_source_sync_statuses(&sync_statuses)?;
 
     let stats = sources;
     info!("完成 sync 三阶段流水线");

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use tracing::info;
 
-use crate::{app::AppContext, integrations, query, store::Store};
+use crate::{app::AppContext, integrations, query::Dashboard, store::Store};
 
 pub async fn run(app: &AppContext) -> Result<()> {
     /*
@@ -18,9 +18,10 @@ pub async fn run(app: &AppContext) -> Result<()> {
     // 1.1 读取概览、来源、健康和实时集成探针
     let store = Store::new(&app.paths);
     store.bootstrap()?;
-    let overview = query::load_overview(&store)?;
-    let sources = query::load_source_breakdown(&store)?;
-    let health = query::load_health(&store)?;
+    let dashboard = Dashboard::open(&store)?;
+    let overview = dashboard.overview()?;
+    let sources = dashboard.source_breakdown()?;
+    let health = dashboard.health()?;
     let probes = integrations::probe_all(app)?;
 
     // 1.2 打印人读摘要

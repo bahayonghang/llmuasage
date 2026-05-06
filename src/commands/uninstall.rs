@@ -17,9 +17,11 @@ pub async fn run(app: &AppContext, purge: bool) -> Result<()> {
 
     let store = Store::new(&app.paths);
     store.bootstrap()?;
-    let run_id = store.record_run_start("uninstall")?;
+    let run_id = store.run_log().record_run_start("uninstall")?;
     let actions = integrations::uninstall_all(app, &store)?;
-    store.finish_run(run_id, "success", Some("local uninstall completed"), None)?;
+    store
+        .run_log()
+        .finish_run(run_id, "success", Some("local uninstall completed"), None)?;
 
     println!("Uninstall finished:");
     for action in actions {

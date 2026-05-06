@@ -17,9 +17,11 @@ pub async fn run(app: &AppContext, port: Option<u16>) -> Result<()> {
 
     let store = Store::new(&app.paths);
     store.bootstrap()?;
-    let run_id = store.record_run_start("serve")?;
+    let run_id = store.run_log().record_run_start("serve")?;
     let addr = web::serve(store.clone(), port).await?;
-    store.finish_run(run_id, "success", Some(&format!("listen={addr}")), None)?;
+    store
+        .run_log()
+        .finish_run(run_id, "success", Some(&format!("listen={addr}")), None)?;
 
     println!("Local dashboard: http://{}", addr);
     tokio::signal::ctrl_c().await?;
