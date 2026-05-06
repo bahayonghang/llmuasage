@@ -1,4 +1,4 @@
-use std::{path::PathBuf, time::Instant};
+use std::{future::Future, path::PathBuf, pin::Pin, time::Instant};
 
 use anyhow::Result;
 use rusqlite::{Connection, params};
@@ -7,9 +7,9 @@ use tracing::info;
 
 use crate::{
     models::{SessionInfo, SourceKind, UsageEvent, UsageTokens},
-    parsers::{EVENT_WRITE_BATCH_SIZE, SourceSyncStats},
+    parsers::{SourceParser, SourceSyncStats},
     project::ProjectResolver,
-    store::{Store, SyncRunWriter},
+    store::{Store, SyncRunWriter, SyncShard},
     util::{bucket_start_from_rfc3339, file_identity, normalize_model, now_utc, resolve_home_dir},
 };
 
@@ -25,7 +25,26 @@ struct OpencodeRow {
     data: String,
 }
 
-pub async fn sync_opencode(
+/// OpenCode SQLite parser. Owns the page-streamed scan + per-page commit
+/// pipeline for the local `opencode.db` message table.
+pub struct OpencodeParser;
+
+impl SourceParser for OpencodeParser {
+    fn source(&self) -> SourceKind {
+        SourceKind::Opencode
+    }
+
+    fn parse<'a>(
+        &'a self,
+        store: &'a Store,
+        writer: &'a mut SyncRunWriter,
+        parallelism: usize,
+    ) -> Pin<Box<dyn Future<Output = Result<SourceSyncStats>> + Send + 'a>> {
+        Box::pin(sync_opencode(store, writer, parallelism))
+    }
+}
+
+async fn sync_opencode(
     store: &Store,
     writer: &mut SyncRunWriter,
     _parallelism: usize,
@@ -49,7 +68,7 @@ pub async fn sync_opencode(
         .map(PathBuf::from)
         .unwrap_or_else(|_| data_home.join("opencode"));
     let db_path = opencode_home.join("opencode.db");
-    let mut cursor = store.load_opencode_cursor()?;
+    let mut cursor = store.cursors().load_opencode_cursor()?;
     let mut stats = SourceSyncStats {
         source: SourceKind::Opencode,
         ..SourceSyncStats::default()
@@ -59,7 +78,7 @@ pub async fn sync_opencode(
         cursor.sqlite_status = "missing-db".to_string();
         cursor.updated_at = now_utc();
         stats.last_error = Some("OpenCode SQLite DB 缺失".to_string());
-        store.save_opencode_cursor(&cursor)?;
+        store.cursors().save_opencode_cursor(&cursor)?;
         return Ok(stats);
     }
 
@@ -131,11 +150,16 @@ pub async fn sync_opencode(
 
         normalized_events_seen += page_events.len();
         if !page_events.is_empty() {
-            let write_started = Instant::now();
-            for batch in page_events.chunks(EVENT_WRITE_BATCH_SIZE) {
-                inserted += writer.write_event_batch(batch)?;
-            }
-            write_ms += write_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+            // OpenCode 是流式分页，shard 仅承载本页 event；
+            // OpencodeCursor 仍由 store.save_opencode_cursor 自行收尾，故 cursors/resets 均为空。
+            let commit = writer.commit_shard(SyncShard {
+                source: SourceKind::Opencode,
+                reset_path_hashes: Vec::new(),
+                events: page_events,
+                cursors: Vec::new(),
+            })?;
+            inserted += commit.events_inserted;
+            write_ms += commit.write_ms;
         }
     }
 
@@ -143,7 +167,7 @@ pub async fn sync_opencode(
     cursor.last_processed_ids = latest_ids;
     cursor.sqlite_status = "ok".to_string();
     cursor.updated_at = now_utc();
-    store.save_opencode_cursor(&cursor)?;
+    store.cursors().save_opencode_cursor(&cursor)?;
 
     stats.files_processed = 1;
     stats.changed_files = usize::from(normalized_events_seen > 0);

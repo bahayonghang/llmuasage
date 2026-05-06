@@ -1,7 +1,9 @@
 use std::{
     fs::File,
+    future::Future,
     io::{BufRead, BufReader, Seek, SeekFrom},
     path::{Path, PathBuf},
+    pin::Pin,
     time::Instant,
 };
 
@@ -14,13 +16,13 @@ use walkdir::WalkDir;
 use crate::{
     models::{SessionInfo, SourceKind, UsageEvent, UsageTokens},
     parsers::{
-        EVENT_WRITE_BATCH_SIZE, SourceSyncStats,
+        SourceParser, SourceSyncStats,
         file_state::{
             CandidateFile, FileReplayMode, decide_file_replay, finalize_cursor, should_rescan_file,
         },
     },
     project::ProjectResolver,
-    store::{Store, SyncRunWriter},
+    store::{Store, SyncRunWriter, SyncShard},
     util::{bucket_start_from_rfc3339, hash_string, normalize_model, resolve_home_dir},
 };
 
@@ -45,7 +47,26 @@ struct ClaudeParseResult {
     events: Vec<UsageEvent>,
 }
 
-pub async fn sync_claude(
+/// Claude project log parser. Owns the per-file scan + per-shard commit
+/// pipeline for `~/.claude/projects`.
+pub struct ClaudeParser;
+
+impl SourceParser for ClaudeParser {
+    fn source(&self) -> SourceKind {
+        SourceKind::Claude
+    }
+
+    fn parse<'a>(
+        &'a self,
+        store: &'a Store,
+        writer: &'a mut SyncRunWriter,
+        parallelism: usize,
+    ) -> Pin<Box<dyn Future<Output = Result<SourceSyncStats>> + Send + 'a>> {
+        Box::pin(sync_claude(store, writer, parallelism))
+    }
+}
+
+async fn sync_claude(
     store: &Store,
     writer: &mut SyncRunWriter,
     parallelism: usize,
@@ -67,7 +88,7 @@ pub async fn sync_claude(
     let projects_dir = home_dir.join(".claude").join("projects");
     let files = list_project_logs(&projects_dir);
     let total_files = files.len();
-    let cursor_map = store.load_file_cursors(SourceKind::Claude)?;
+    let cursor_map = store.cursors().load_file_cursors(SourceKind::Claude)?;
 
     let mut shards = std::collections::HashMap::<PathBuf, Vec<CandidateFile>>::new();
     let mut changed_files = 0usize;
@@ -86,7 +107,6 @@ pub async fn sync_claude(
     }
 
     // 1.2 控制并发度并行解析分片
-    let mut cursors = Vec::new();
     let mut events_seen = 0usize;
     let mut events_replayed = 0usize;
     let mut bytes_scanned = 0u64;
@@ -111,24 +131,17 @@ pub async fn sync_claude(
             events_seen += shard.events_seen;
             events_replayed += shard.events_replayed;
             bytes_scanned += shard.bytes_scanned;
-            if !shard.reset_path_hashes.is_empty() {
-                let write_started = Instant::now();
-                writer.reset_file_events_batch(SourceKind::Claude, &shard.reset_path_hashes)?;
-                write_ms += write_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
-            }
-            let write_started = Instant::now();
-            for batch in shard.events.chunks(EVENT_WRITE_BATCH_SIZE) {
-                inserted += writer.write_event_batch(batch)?;
-            }
-            write_ms += write_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
-            cursors.extend(shard.cursors);
-        }
-    }
 
-    if !cursors.is_empty() {
-        let write_started = Instant::now();
-        writer.write_cursor_batch(SourceKind::Claude, &cursors)?;
-        write_ms += write_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+            // 1.3 把 reset / event / cursor 协议交给单写入端原子提交
+            let commit = writer.commit_shard(SyncShard {
+                source: SourceKind::Claude,
+                reset_path_hashes: shard.reset_path_hashes,
+                events: shard.events,
+                cursors: shard.cursors,
+            })?;
+            inserted += commit.events_inserted;
+            write_ms += commit.write_ms;
+        }
     }
 
     let mut stats = SourceSyncStats {
