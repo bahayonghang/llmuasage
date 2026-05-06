@@ -1,4 +1,4 @@
-import { buildContext } from './data/derive.js';
+import { buildContext, loadSection, loadTrendWindow } from './data.js';
 import { renderHero } from './render/hero.js';
 import { renderTrends } from './render/trends.js';
 import { renderModels } from './render/models.js';
@@ -7,45 +7,145 @@ import { renderProjects } from './render/projects.js';
 import { renderCosts } from './render/costs.js';
 
 const logger = window.console;
+const DEFAULT_TREND_WINDOW = 'day';
 
 /*
  * ========================================================================
  * 步骤1：主入口
  * ========================================================================
  * 目标：
- * 1) 从 window.LLMUSAGE_DATA 读取原始数据
+ * 1) 按 live / snapshot 模式加载 dashboard 数据
  * 2) 调用 buildContext 派生渲染上下文
  * 3) 依次调用各区域 render 函数
- * 4) 设置 IntersectionObserver 实现侧边栏高亮
+ * 4) 设置侧边栏高亮与趋势窗口切换
  */
 async function main() {
   logger.info('llmusage dashboard 启动');
 
-  // 1.1 读取原始数据
-  const rawData = window.LLMUSAGE_DATA;
-  if (!rawData) {
-    logger.error('未找到 window.LLMUSAGE_DATA');
-    return;
-  }
+  const state = {
+    mode: document.body?.dataset?.mode === 'snapshot' ? 'snapshot' : 'live',
+    trendWindow: DEFAULT_TREND_WINDOW,
+    rawData: null,
+  };
 
-  // 1.2 构建渲染上下文
+  try {
+    // 1.1 先加载首屏需要的全部数据
+    state.rawData = await loadDashboardData(state);
+
+    // 1.2 首次渲染
+    renderDashboard(state.rawData);
+
+    // 1.3 绑定交互
+    setupNavigation();
+    setupTrendSegments(state);
+
+    logger.info('llmusage dashboard 渲染完成');
+  } catch (error) {
+    logger.error('llmusage dashboard 数据加载失败', error);
+    renderBootstrapError(error);
+  }
+}
+
+async function loadDashboardData(state) {
+  logger.info('开始加载 dashboard 数据');
+
+  const [overview, trends, models, sources, projects, costs, health] = await Promise.all([
+    loadSection(state, 'overview', '/api/overview'),
+    loadTrendWindow(state, state.trendWindow),
+    loadSection(state, 'models', '/api/models'),
+    loadSection(state, 'sources', '/api/sources'),
+    loadSection(state, 'projects', '/api/projects'),
+    loadSection(state, 'costs', '/api/costs'),
+    loadSection(state, 'health', '/api/health'),
+  ]);
+
+  logger.info('完成 dashboard 数据加载');
+  return { overview, trends, models, sources, projects, costs, health };
+}
+
+function renderDashboard(rawData) {
   const context = buildContext(rawData);
 
-  // 1.3 依次渲染各区域
   renderHero(context);
   renderTrends(context);
   renderModels(context);
   renderSources(context);
   renderProjects(context);
   renderCosts(context);
+}
 
-  // 1.4 设置侧边栏导航高亮
-  setupNavigation();
+function renderBootstrapError(error) {
+  const message = error?.message || '读取本地数据失败';
+  const hostEl = document.getElementById('endpoint-host');
+  if (hostEl) {
+    hostEl.textContent = window.location.host;
+  }
 
-  // 1.5 设置趋势区时间窗口切换
-  setupTrendSegments();
+  const syncEl = document.getElementById('endpoint-sync');
+  if (syncEl) {
+    syncEl.textContent = '--';
+  }
 
-  logger.info('llmusage dashboard 渲染完成');
+  const statusCard = `
+    <div class="status-panel-head">
+      <div>
+        <div class="status-eyebrow">运行概览</div>
+        <div style="font-size: 18px; font-weight: 600; margin-top: 2px;">数据加载失败</div>
+      </div>
+      <span class="status-pill" data-tone="warn"><span class="pulse"></span>异常</span>
+    </div>
+    <div class="status-list">
+      <div class="status-row">
+        <span class="status-row-name">detail</span>
+        <span class="status-row-time mono">${escapeHtml(message)}</span>
+      </div>
+    </div>
+  `;
+  const errorBlock = `
+    <div style="padding: 18px; border: 1px dashed rgba(200,85,61,0.35); border-radius: 14px; color: #f5a890; font-size: 13px;">
+      ${escapeHtml(message)}
+    </div>
+  `;
+
+  const heroMeta = document.getElementById('hero-meta');
+  if (heroMeta) {
+    heroMeta.innerHTML = `
+      <div class="hero-meta-item">
+        数据读取<span class="mono">失败</span>
+      </div>
+    `;
+  }
+
+  const statusPanel = document.getElementById('status-panel');
+  if (statusPanel) {
+    statusPanel.innerHTML = statusCard;
+  }
+
+  for (const id of ['kpi-grid', 'trends-stats', 'trends-table', 'trends-sources']) {
+    const el = document.getElementById(id);
+    if (el) {
+      el.innerHTML = errorBlock;
+    }
+  }
+
+  const bars = document.getElementById('trends-bars');
+  if (bars) {
+    bars.innerHTML = '';
+  }
+
+  const labels = document.getElementById('trends-labels');
+  if (labels) {
+    labels.innerHTML = '';
+  }
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
 }
 
 /*
@@ -87,7 +187,6 @@ function setupNavigation() {
     if (el) observer.observe(el);
   });
 
-  // 覆盖 projects 链接，滚动到内联面板
   const projAnchor = document.getElementById('projects-anchor');
   document.querySelectorAll('a[data-target="projects"]').forEach((a) => {
     a.addEventListener('click', (e) => {
@@ -103,21 +202,39 @@ function setupNavigation() {
  * ========================================================================
  * 目标：
  * 1) 监听 seg 按钮点击
- * 2) 切换 active 状态
+ * 2) 重新请求趋势数据并重渲染整页
  */
-function setupTrendSegments() {
+function setupTrendSegments(state) {
   const seg = document.getElementById('seg');
   if (!seg) return;
 
-  seg.addEventListener('click', (e) => {
-    if (e.target.tagName === 'BUTTON') {
-      seg.querySelectorAll('button').forEach((b) => b.classList.remove('active'));
-      e.target.classList.add('active');
+  seg.addEventListener('click', async (e) => {
+    if (e.target.tagName !== 'BUTTON') {
+      return;
+    }
+
+    const nextWindow = e.target.dataset.window || DEFAULT_TREND_WINDOW;
+    if (nextWindow === state.trendWindow) {
+      return;
+    }
+
+    seg.querySelectorAll('button').forEach((b) => b.classList.remove('active'));
+    e.target.classList.add('active');
+
+    try {
+      state.trendWindow = nextWindow;
+      state.rawData = {
+        ...state.rawData,
+        trends: await loadTrendWindow(state, nextWindow),
+      };
+      renderDashboard(state.rawData);
+    } catch (error) {
+      logger.error('趋势窗口切换失败', error);
+      renderBootstrapError(error);
     }
   });
 }
 
-// 启动
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', main);
 } else {
