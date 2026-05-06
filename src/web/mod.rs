@@ -317,6 +317,18 @@ mod tests {
     }
 
     #[test]
+    fn app_entry_loads_dashboard_sections_instead_of_missing_window_global() {
+        let app_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "app.js")
+            .expect("app.js asset")
+            .body;
+        assert!(app_js.contains("loadSection(state, 'overview', '/api/overview')"));
+        assert!(app_js.contains("loadTrendWindow(state, state.trendWindow)"));
+        assert!(!app_js.contains("window.LLMUSAGE_DATA"));
+    }
+
+    #[test]
     fn api_error_payload_is_structured_json() {
         let response = api_json::<serde_json::Value>("/api/test", Err(anyhow!("boom")));
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
