@@ -1,3 +1,4 @@
+import { UI_COPY } from '../copy.js';
 import { escapeHtml, formatNumber, statusTone } from '../data.js';
 import { buildKpis } from '../data/derive.js';
 
@@ -11,16 +12,21 @@ const logger = window.console;
  * 1) 填充 hero-meta（生成时间、最近同步、来源数）
  * 2) 填充右侧 status-panel（运行概览卡）
  * 3) 填充 4 张 KPI 卡
+ * 4) 文案统一从 UI_COPY 取，不在渲染层散落硬编码字符串
  */
 export function renderHero(context) {
   logger.info('开始渲染首屏 hero 区');
 
   // 1.1 填充 hero-meta
   const { ledgerSummary } = context;
+  const heroCopy = UI_COPY.hero;
   const metaItems = [
-    { label: '生成时间', value: ledgerSummary.generatedAt || '--' },
-    { label: '最近同步', value: ledgerSummary.lastSyncAt || '--' },
-    { label: '来源数', value: `${ledgerSummary.activeSources} · codex / claude` },
+    { label: heroCopy.rows.generatedAt, value: ledgerSummary.generatedAt || '--' },
+    { label: heroCopy.rows.lastSyncAt, value: ledgerSummary.lastSyncAt || '--' },
+    {
+      label: heroCopy.rows.sourceCount,
+      value: `${ledgerSummary.activeSources} · ${heroCopy.sourceSuffix}`,
+    },
   ];
 
   document.getElementById('hero-meta').innerHTML = metaItems
@@ -36,13 +42,13 @@ export function renderHero(context) {
   // 1.2 填充 status-panel
   const { health } = context;
   const panelTone = ledgerSummary.failureCount > 0 ? 'warn' : 'good';
-  const statusLabel = ledgerSummary.failureCount > 0 ? '有失败' : '正常';
+  const statusLabel = ledgerSummary.failureCount > 0 ? heroCopy.statusWarn : heroCopy.statusOk;
 
   const integrationRows = (health.integrations || [])
     .slice(0, 3)
     .map((row) => {
       const tone = statusTone(row.status);
-      const label = tone === 'good' ? '正常' : row.status || '未知';
+      const label = tone === 'good' ? heroCopy.statusOk : row.status || heroCopy.statusUnknown;
       return `
       <div class="status-row">
         <span class="status-row-name">${escapeHtml(row.source || '--')}</span>
@@ -56,22 +62,22 @@ export function renderHero(context) {
   document.getElementById('status-panel').innerHTML = `
     <div class="status-panel-head">
       <div>
-        <div class="status-eyebrow">运行概览</div>
-        <div style="font-size: 18px; font-weight: 600; margin-top: 2px;">系统健康</div>
+        <div class="status-eyebrow">${escapeHtml(heroCopy.statusEyebrow)}</div>
+        <div style="font-size: 18px; font-weight: 600; margin-top: 2px;">${escapeHtml(heroCopy.statusTitle)}</div>
       </div>
-      <span class="status-pill" data-tone="${panelTone}"><span class="pulse"></span>${statusLabel}</span>
+      <span class="status-pill" data-tone="${panelTone}"><span class="pulse"></span>${escapeHtml(statusLabel)}</span>
     </div>
     <div class="status-grid">
       <div class="status-cell">
-        <div class="status-cell-label">集成</div>
+        <div class="status-cell-label">${escapeHtml(heroCopy.cell.integrations)}</div>
         <div class="status-cell-value">${health.readyIntegrations} / ${health.totalIntegrations}</div>
       </div>
       <div class="status-cell">
-        <div class="status-cell-label">游标数</div>
+        <div class="status-cell-label">${escapeHtml(heroCopy.cell.cursors)}</div>
         <div class="status-cell-value">${formatNumber(health.cursors?.length || 0)}</div>
       </div>
       <div class="status-cell">
-        <div class="status-cell-label">失败</div>
+        <div class="status-cell-label">${escapeHtml(heroCopy.cell.failures)}</div>
         <div class="status-cell-value">${ledgerSummary.failureCount}</div>
       </div>
     </div>

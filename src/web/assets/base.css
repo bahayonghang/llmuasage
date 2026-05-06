@@ -1,11 +1,23 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
 
-:root {
+/*
+ * ========================================================================
+ * 颜色 token：双主题（light / dark）
+ * ========================================================================
+ * 1) 默认 :root 与 [data-theme="light"] 同值，保留旧行为
+ * 2) [data-theme="dark"] 给出深色映射
+ * 3) --dark / --dark-2 / --dark-line / --dark-text / --dark-muted 是
+ *    trends-card / status-panel 的腔体配色，两个主题保持一致，避免双层暗色失去层次
+ * 4) --ink-strong 取代旧 #000 字面值，方便随主题变深
+ */
+:root,
+[data-theme='light'] {
   --bg: #f6f3ee;
   --surface: #ffffff;
   --surface-2: #faf7f2;
   --ink: #1c1a17;
   --ink-2: #3a352f;
+  --ink-strong: #000000;
   --muted: #8a8278;
   --muted-2: #b8b0a4;
   --line: #e8e2d6;
@@ -16,6 +28,34 @@
   --good: #4f7a5c;
   --good-soft: #dde8de;
   --warn: #c08a3b;
+  --pct-low-bg: #eef0ec;
+  --kpi-featured-grad: linear-gradient(180deg, var(--accent-soft), #f8e8e1);
+  --dark: #1a1815;
+  --dark-2: #25221e;
+  --dark-line: #34302a;
+  --dark-text: #f0ebe1;
+  --dark-muted: #8d867a;
+}
+
+[data-theme='dark'] {
+  --bg: #14120f;
+  --surface: #1c1a17;
+  --surface-2: #25221e;
+  --ink: #f0ebe1;
+  --ink-2: #d6cfc1;
+  --ink-strong: #ffffff;
+  --muted: #8d867a;
+  --muted-2: #5c574e;
+  --line: #2d2925;
+  --line-2: #353029;
+  --accent: #d96a52;
+  --accent-soft: #3a221c;
+  --accent-deep: #f3a18a;
+  --good: #7faf8b;
+  --good-soft: #233027;
+  --warn: #d4a05c;
+  --pct-low-bg: #233027;
+  --kpi-featured-grad: linear-gradient(180deg, #3a221c, #2a1814);
   --dark: #1a1815;
   --dark-2: #25221e;
   --dark-line: #34302a;
@@ -38,6 +78,7 @@ body {
   -webkit-font-smoothing: antialiased;
   line-height: 1.5;
   scroll-behavior: smooth;
+  transition: background-color 0.18s ease, color 0.18s ease;
 }
 
 .mono {

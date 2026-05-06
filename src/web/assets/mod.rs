@@ -55,6 +55,21 @@ const ASSET_MANIFEST: &[WebAsset] = &[
         body: include_str!("copy.js"),
     },
     WebAsset {
+        path: "i18n.js",
+        content_type: "application/javascript; charset=utf-8",
+        body: include_str!("i18n.js"),
+    },
+    WebAsset {
+        path: "theme.js",
+        content_type: "application/javascript; charset=utf-8",
+        body: include_str!("theme.js"),
+    },
+    WebAsset {
+        path: "runtime.js",
+        content_type: "application/javascript; charset=utf-8",
+        body: include_str!("runtime.js"),
+    },
+    WebAsset {
         path: "data.js",
         content_type: "application/javascript; charset=utf-8",
         body: include_str!("data.js"),
@@ -123,5 +138,10 @@ const ASSET_MANIFEST: &[WebAsset] = &[
         path: "render/health.js",
         content_type: "application/javascript; charset=utf-8",
         body: include_str!("render/health.js"),
+    },
+    WebAsset {
+        path: "favicon.svg",
+        content_type: "image/svg+xml",
+        body: include_str!("favicon.svg"),
     },
 ];

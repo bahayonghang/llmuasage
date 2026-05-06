@@ -16,6 +16,7 @@ use tracing::{error, info};
 use crate::{query::Dashboard, store::Store};
 
 mod assets;
+mod brand;
 mod shell;
 
 #[derive(Clone)]
@@ -205,6 +206,10 @@ mod tests {
         assert!(html.contains("assets/layout.css"));
         assert!(html.contains("assets/components.css"));
         assert!(html.contains("assets/charts.css"));
+        assert!(html.contains("rel=\"icon\""));
+        assert!(html.contains("assets/favicon.svg"));
+        assert!(html.contains("aria-label=\"llmusage\""));
+        assert!(!html.contains("<div class=\"brand-mark\">l</div>"));
         assert!(html.contains("本地用量<span class=\"accent\">概览</span>"));
         assert!(html.contains("id=\"overview\""));
         assert!(html.contains("id=\"trends\""));
@@ -239,6 +244,9 @@ mod tests {
                 "charts.css",
                 "app.js",
                 "copy.js",
+                "i18n.js",
+                "theme.js",
+                "runtime.js",
                 "data.js",
                 "data/fetch.js",
                 "data/format.js",
@@ -253,6 +261,7 @@ mod tests {
                 "render/charts.js",
                 "render/tables.js",
                 "render/health.js",
+                "favicon.svg",
             ]
         );
     }
@@ -326,6 +335,105 @@ mod tests {
         assert!(app_js.contains("loadSection(state, 'overview', '/api/overview')"));
         assert!(app_js.contains("loadTrendWindow(state, state.trendWindow)"));
         assert!(!app_js.contains("window.LLMUSAGE_DATA"));
+    }
+
+    #[test]
+    fn live_shell_includes_theme_and_locale_toggles() {
+        let html = live_index_html();
+        assert!(html.contains("id=\"toggle-theme\""));
+        assert!(html.contains("id=\"toggle-locale\""));
+        assert!(html.contains("class=\"sidebar-toggles\""));
+    }
+
+    #[test]
+    fn live_shell_declares_default_theme_and_locale() {
+        let html = live_index_html();
+        assert!(html.contains("data-theme=\"light\""));
+        assert!(html.contains("data-locale=\"zh\""));
+        assert!(html.contains("data-i18n-title=\"shell.window.title\""));
+    }
+
+    #[test]
+    fn live_shell_uses_data_i18n_for_chrome() {
+        let html = live_index_html();
+        for key in [
+            "data-i18n=\"shell.nav.item.usage\"",
+            "data-i18n=\"shell.nav.item.trend\"",
+            "data-i18n=\"shell.nav.item.cost\"",
+            "data-i18n=\"shell.btn.export\"",
+            "data-i18n=\"shell.btn.sync\"",
+            "data-i18n=\"shell.endpoint.lastSync\"",
+            "data-i18n=\"shell.crumb.local\"",
+            "data-i18n=\"shell.tag.local\"",
+            "data-i18n-html=\"shell.hero.title.html\"",
+        ] {
+            assert!(html.contains(key), "missing i18n key in shell HTML: {key}");
+        }
+    }
+
+    #[test]
+    fn snapshot_shell_uses_snapshot_chip_key() {
+        let html = snapshot_index_html();
+        assert!(html.contains("data-i18n=\"shell.tag.snapshot\""));
+        assert!(html.contains("离线文件"));
+    }
+
+    #[test]
+    fn live_shell_inlines_theme_locale_bootstrap() {
+        let html = live_index_html();
+        assert!(html.contains("llmusage:theme"));
+        assert!(html.contains("llmusage:locale"));
+    }
+
+    #[test]
+    fn copy_module_exposes_locale_api() {
+        let copy_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "copy.js")
+            .expect("copy.js asset")
+            .body;
+        assert!(copy_js.contains("export let UI_COPY"));
+        assert!(copy_js.contains("export function setLocale"));
+        assert!(copy_js.contains("export function getLocale"));
+        assert!(copy_js.contains("UI_COPY_EN"));
+    }
+
+    #[test]
+    fn theme_module_exposes_setter() {
+        let theme_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "theme.js")
+            .expect("theme.js asset")
+            .body;
+        assert!(theme_js.contains("export function setTheme"));
+        assert!(theme_js.contains("export function toggleTheme"));
+        assert!(theme_js.contains("llmusage:theme"));
+    }
+
+    #[test]
+    fn i18n_module_walks_data_attributes() {
+        let i18n_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "i18n.js")
+            .expect("i18n.js asset")
+            .body;
+        assert!(i18n_js.contains("[data-i18n]"));
+        assert!(i18n_js.contains("[data-i18n-html]"));
+        assert!(i18n_js.contains("[data-i18n-attr]"));
+    }
+
+    #[test]
+    fn app_entry_wires_theme_locale_setup() {
+        let app_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "app.js")
+            .expect("app.js asset")
+            .body;
+        assert!(app_js.contains("setupThemeToggle"));
+        assert!(app_js.contains("setupLocaleToggle"));
+        assert!(app_js.contains("initTheme()"));
+        assert!(app_js.contains("applyDomI18n(document)"));
+        assert!(app_js.contains("onLocaleChange"));
     }
 
     #[test]

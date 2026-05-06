@@ -120,7 +120,7 @@ fn local_flow_installs_syncs_exports_and_uninstalls() -> Result<()> {
         assert!(exported_index.contains("assets/components.css"));
         assert!(exported_index.contains("assets/charts.css"));
         assert!(exported_index.contains("<title>llmusage · 本地用量概览</title>"));
-        assert!(exported_index.contains("<strong>本地用量概览</strong>"));
+        assert!(exported_index.contains(">本地用量概览</strong>"));
         assert!(exported_index.contains("用量趋势"));
         assert!(!exported_index.contains("llmusage 本地账本"));
         assert!(web::live_index_html().contains("data-mode=\"live\""));

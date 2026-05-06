@@ -1,11 +1,28 @@
 const logger = window.console;
 
-export const UI_COPY = Object.freeze({
+export const LOCALES = Object.freeze(['zh', 'en']);
+export const DEFAULT_LOCALE = 'zh';
+export const LOCALE_STORAGE_KEY = 'llmusage:locale';
+
+/*
+ * ========================================================================
+ * 步骤1：定义中文 UI_COPY
+ * ========================================================================
+ * 目标：
+ * 1) 保留原有结构，render/* 模块的导入路径无需改动
+ * 2) 给 hero / runtime 错误占位补齐显式的字段，避免散落的硬编码
+ */
+const UI_COPY_ZH = Object.freeze({
   hero: Object.freeze({
     summaryKicker: '概览',
     summaryTitle: '运行概览',
+    statusEyebrow: '运行概览',
+    statusTitle: '系统健康',
     statusStable: '正常',
+    statusOk: '正常',
     statusWarn: '有失败',
+    statusUnknown: '未知',
+    sourceSuffix: 'codex / claude',
     rows: Object.freeze({
       generatedAt: '生成时间',
       lastSyncAt: '最近同步',
@@ -13,6 +30,11 @@ export const UI_COPY = Object.freeze({
       sourceCount: '来源数',
       failureCount: '失败记录',
       topModel: '用量最高模型',
+    }),
+    cell: Object.freeze({
+      integrations: '集成',
+      cursors: '游标数',
+      failures: '失败',
     }),
     metrics: Object.freeze({
       total: Object.freeze({
@@ -32,6 +54,17 @@ export const UI_COPY = Object.freeze({
         body: '累计成本',
       }),
     }),
+    error: Object.freeze({
+      title: '数据加载失败',
+      detail: 'detail',
+      heroMeta: '数据读取',
+      heroMetaState: '失败',
+      pill: '异常',
+      generic: '读取本地数据失败',
+    }),
+  }),
+  actions: Object.freeze({
+    exportDone: '已导出',
   }),
   sections: Object.freeze({
     trend: Object.freeze({
@@ -130,7 +163,429 @@ export const UI_COPY = Object.freeze({
   }),
 });
 
-const TREND_WINDOW_COPY = Object.freeze({
+/*
+ * ========================================================================
+ * 步骤2：定义英文 UI_COPY（结构与中文严格一致）
+ * ========================================================================
+ */
+const UI_COPY_EN = Object.freeze({
+  hero: Object.freeze({
+    summaryKicker: 'Overview',
+    summaryTitle: 'Run summary',
+    statusEyebrow: 'Run summary',
+    statusTitle: 'System health',
+    statusStable: 'Healthy',
+    statusOk: 'Healthy',
+    statusWarn: 'Has failures',
+    statusUnknown: 'Unknown',
+    sourceSuffix: 'codex / claude',
+    rows: Object.freeze({
+      generatedAt: 'Generated',
+      lastSyncAt: 'Last sync',
+      lastExportAt: 'Last export',
+      sourceCount: 'Sources',
+      failureCount: 'Failures',
+      topModel: 'Top model',
+    }),
+    cell: Object.freeze({
+      integrations: 'Integrations',
+      cursors: 'Cursors',
+      failures: 'Failures',
+    }),
+    metrics: Object.freeze({
+      total: Object.freeze({
+        label: 'Total',
+        body: 'Cumulative tokens',
+      }),
+      last24h: Object.freeze({
+        label: 'Last 24h',
+        body: 'Tokens in last 24 hours',
+      }),
+      sources: Object.freeze({
+        label: 'Sources',
+        body: 'Recorded sources',
+      }),
+      cost: Object.freeze({
+        label: 'Est. cost',
+        body: 'Cumulative cost',
+      }),
+    }),
+    error: Object.freeze({
+      title: 'Failed to load data',
+      detail: 'detail',
+      heroMeta: 'Data read',
+      heroMetaState: 'failed',
+      pill: 'Error',
+      generic: 'Failed to read local data',
+    }),
+  }),
+  actions: Object.freeze({
+    exportDone: 'Exported',
+  }),
+  sections: Object.freeze({
+    trend: Object.freeze({
+      kicker: 'Trends',
+      title: 'Usage trends',
+      copy: 'The chart shows the most recent 10 buckets in the current window. Expand for the full table.',
+      detailKicker: 'Detail',
+      detailCopy: 'The full time series for the current window is collapsed by default to keep the first screen tight.',
+      expandLabel: 'Expand full detail',
+      collapseLabel: 'Collapse detail',
+      totalLabel: 'Window total',
+      peakLabel: 'Peak bucket',
+      averageLabel: 'Average per bucket',
+      rawPrefix: 'Raw',
+      tableTime: 'Time',
+      tableTokens: 'Tokens',
+      emptyChart: 'No trend data.',
+      tableEmpty: 'No trend detail.',
+      chartAria: 'Usage trend bar chart',
+    }),
+    models: Object.freeze({
+      kicker: 'Models',
+      title: 'Model usage',
+      copy: 'Top models first; expand for the full ranking on demand.',
+      chartCaption: 'Top 8 models by tokens',
+      expandedChartCaption: 'All models',
+      chartAria: 'Model usage horizontal bar chart',
+      emptyChart: 'No model data.',
+      emptyTable: 'No model comparison data.',
+      expandLabel: 'Expand full ranking',
+      collapseLabel: 'Collapse ranking',
+      headers: Object.freeze({
+        model: 'Model',
+        totalTokens: 'Tokens',
+        inputShare: 'Input %',
+        outputShare: 'Output %',
+        cachedShare: 'Cached %',
+      }),
+    }),
+    sources: Object.freeze({
+      kicker: 'Sources',
+      title: 'Sources',
+      chartCaption: 'Top 4 sources by tokens',
+      expandedChartCaption: 'All sources',
+      chartAria: 'Source usage horizontal bar chart',
+      emptyChart: 'No source data.',
+      emptyTable: 'No source detail.',
+      expandLabel: 'Expand all sources',
+      collapseLabel: 'Collapse sources',
+      headers: Object.freeze({
+        source: 'Source',
+        lastEventAt: 'Last seen',
+      }),
+    }),
+    projects: Object.freeze({
+      kicker: 'Projects',
+      title: 'Projects',
+      emptyTable: 'No project data.',
+      expandLabel: 'Expand all projects',
+      collapseLabel: 'Collapse projects',
+      headers: Object.freeze({
+        project: 'Project',
+        ref: 'Reference',
+        tokens: 'Tokens',
+      }),
+    }),
+    costs: Object.freeze({
+      kicker: 'Cost',
+      title: 'Cost estimate',
+      chartCaption: 'Top 5 source / model combinations',
+      expandedChartCaption: 'All source / model entries',
+      chartAria: 'Cost estimate horizontal bar chart',
+      emptyChart: 'No cost data.',
+      emptyTable: 'No cost detail.',
+      expandLabel: 'Expand all cost entries',
+      collapseLabel: 'Collapse cost entries',
+      headers: Object.freeze({
+        model: 'Model',
+        source: 'Source',
+        estimatedCostUsd: 'Est. cost',
+      }),
+    }),
+    health: Object.freeze({
+      kicker: 'Status',
+      title: 'Health',
+      chips: Object.freeze({
+        integrations: 'Integrations ready',
+        cursors: 'Cursors',
+        failures: 'Failures',
+      }),
+      failuresTitle: 'Recent failures',
+      failuresEmpty: 'No failures recorded.',
+      integrationsTitle: 'Integrations',
+      integrationsEmpty: 'No integration status.',
+    }),
+  }),
+});
+
+/*
+ * ========================================================================
+ * 步骤3：扁平化 SHELL_COPY，专供 [data-i18n] 走 DOM 替换
+ * ========================================================================
+ * 目标：
+ * 1) 服务端模板里的中文短语全部走 key 查表
+ * 2) 默认值仍写在 HTML 中（保持 mod.rs 现有断言）
+ * 3) 只覆盖切到英文需要替换的部分
+ */
+const SHELL_COPY_ZH = Object.freeze({
+  'shell.crumb.dashboard': 'dashboard',
+  'shell.crumb.local': '本地用量概览',
+  'shell.tag.local': '仅本地',
+  'shell.tag.snapshot': '离线文件',
+  'shell.btn.export': '导出 JSON',
+  'shell.btn.sync': '同步',
+  'shell.brand.sub': 'v0.4.2 · local',
+  'shell.nav.label.overview': '概览',
+  'shell.nav.label.distribution': '分布',
+  'shell.nav.label.ops': '运营',
+  'shell.nav.item.usage': '用量概览',
+  'shell.nav.item.trend': '用量趋势',
+  'shell.nav.item.models': '模型分布',
+  'shell.nav.item.sources': '来源分布',
+  'shell.nav.item.projects': '项目排行',
+  'shell.nav.item.cost': '成本估算',
+  'shell.nav.item.status': '运行状态',
+  'shell.endpoint.lastSync': '最近同步',
+  'shell.hero.eyebrow': 'DASHBOARD',
+  'shell.hero.title.html': '本地用量<span class="accent">概览</span>',
+  'shell.hero.desc':
+    '本地查看近期用量、成本估算和运行状态。所有数据存放在本机 SQLite 中，不依赖任何外部接口、不上报任何遥测，可放心断网使用。',
+  'shell.trends.eyebrow': 'TRENDS',
+  'shell.trends.title': '用量趋势',
+  'shell.trends.sub': '主图展示当前窗口内最近 10 条记录，完整明细可展开查看。',
+  'shell.trends.legend.tokens': '用量 (Token)',
+  'shell.trends.chart.recent10': '最近 10 个时段',
+  'shell.models.eyebrow': 'MODELS',
+  'shell.models.title': '模型用量分布',
+  'shell.models.sub': '先看用量最高的模型，再按需展开完整排行。',
+  'shell.models.panelTitle': '用量最高的 8 个模型',
+  'shell.models.panelSub': '单位：Token，按累计计算',
+  'shell.models.expand': '展开完整排行 →',
+  'shell.sources.eyebrow': 'SOURCES',
+  'shell.sources.title': '来源分布',
+  'shell.sources.sub': '用量最高的 4 个来源',
+  'shell.projects.eyebrow': 'PROJECTS',
+  'shell.projects.title': '项目排行',
+  'shell.projects.sub': '按累计 Token 排序',
+  'shell.projects.expand': '展开全部项目 →',
+  'shell.cost.eyebrow': 'COST',
+  'shell.cost.title': '成本估算',
+  'shell.cost.sub': '基于公开计价表的本地估算。仅供参考，与账单存在差异。',
+  'shell.cost.panelTitle': '成本最高的 5 个 来源 / 模型 组合',
+  'shell.cost.panelSub': '单位：USD',
+  'shell.cost.expand': '展开全部成本项 →',
+  'shell.failures.eyebrow': 'FAILURES',
+  'shell.failures.title': '最近失败',
+  'shell.integrations.eyebrow': 'INTEGRATIONS',
+  'shell.integrations.title': '集成状态',
+  'shell.footer.build': 'llmusage v0.4.2 · build 2026.05.06',
+  'shell.footer.backToTop': '回到顶部 ↑',
+  'toolbar.theme.toLight': '浅色',
+  'toolbar.theme.toDark': '深色',
+  'toolbar.lang.label.zh': '中',
+  'toolbar.lang.label.en': 'EN',
+  'toolbar.theme.aria': '切换主题',
+  'toolbar.lang.aria': '切换语言',
+  'toolbar.group.aria': '偏好',
+  'shell.window.title': 'llmusage · 本地用量概览',
+  'seg.all': '全部',
+});
+
+const SHELL_COPY_EN = Object.freeze({
+  'shell.crumb.dashboard': 'dashboard',
+  'shell.crumb.local': 'Local usage',
+  'shell.tag.local': 'Local-only',
+  'shell.tag.snapshot': 'Snapshot',
+  'shell.btn.export': 'Export JSON',
+  'shell.btn.sync': 'Sync',
+  'shell.brand.sub': 'v0.4.2 · local',
+  'shell.nav.label.overview': 'Overview',
+  'shell.nav.label.distribution': 'Distribution',
+  'shell.nav.label.ops': 'Operations',
+  'shell.nav.item.usage': 'Usage',
+  'shell.nav.item.trend': 'Trends',
+  'shell.nav.item.models': 'Models',
+  'shell.nav.item.sources': 'Sources',
+  'shell.nav.item.projects': 'Projects',
+  'shell.nav.item.cost': 'Cost',
+  'shell.nav.item.status': 'Status',
+  'shell.endpoint.lastSync': 'Last sync',
+  'shell.hero.eyebrow': 'DASHBOARD',
+  'shell.hero.title.html': 'Local <span class="accent">usage</span>',
+  'shell.hero.desc':
+    'View recent local usage, cost estimates and runtime status. All data stays in a local SQLite file with no external calls and no telemetry — safe to use offline.',
+  'shell.trends.eyebrow': 'TRENDS',
+  'shell.trends.title': 'Usage trends',
+  'shell.trends.sub': 'The chart shows the most recent 10 buckets in the current window; expand for the full table.',
+  'shell.trends.legend.tokens': 'Usage (tokens)',
+  'shell.trends.chart.recent10': 'Recent 10 buckets',
+  'shell.models.eyebrow': 'MODELS',
+  'shell.models.title': 'Model usage',
+  'shell.models.sub': 'Top models first; expand for the full ranking on demand.',
+  'shell.models.panelTitle': 'Top 8 models by tokens',
+  'shell.models.panelSub': 'Unit: tokens, cumulative',
+  'shell.models.expand': 'Expand full ranking →',
+  'shell.sources.eyebrow': 'SOURCES',
+  'shell.sources.title': 'Sources',
+  'shell.sources.sub': 'Top 4 sources by tokens',
+  'shell.projects.eyebrow': 'PROJECTS',
+  'shell.projects.title': 'Projects',
+  'shell.projects.sub': 'Sorted by cumulative tokens',
+  'shell.projects.expand': 'Expand all projects →',
+  'shell.cost.eyebrow': 'COST',
+  'shell.cost.title': 'Cost estimate',
+  'shell.cost.sub': 'Local estimate from public pricing tables. For reference only — may differ from your bill.',
+  'shell.cost.panelTitle': 'Top 5 source / model combinations',
+  'shell.cost.panelSub': 'Unit: USD',
+  'shell.cost.expand': 'Expand all cost entries →',
+  'shell.failures.eyebrow': 'FAILURES',
+  'shell.failures.title': 'Recent failures',
+  'shell.integrations.eyebrow': 'INTEGRATIONS',
+  'shell.integrations.title': 'Integrations',
+  'shell.footer.build': 'llmusage v0.4.2 · build 2026.05.06',
+  'shell.footer.backToTop': 'Back to top ↑',
+  'toolbar.theme.toLight': 'Light',
+  'toolbar.theme.toDark': 'Dark',
+  'toolbar.lang.label.zh': '中',
+  'toolbar.lang.label.en': 'EN',
+  'toolbar.theme.aria': 'Toggle theme',
+  'toolbar.lang.aria': 'Toggle language',
+  'toolbar.group.aria': 'Preferences',
+  'shell.window.title': 'llmusage · Local Usage',
+  'seg.all': 'All',
+});
+
+const STATUS_LABEL_ZH = Object.freeze({
+  ready: '正常',
+  success: '成功',
+  running: '运行中',
+  failed: '失败',
+  warn: '警告',
+  ok: '正常',
+  missing: '缺失',
+  drifted: '配置漂移',
+  disabled: '已禁用',
+  stale: '已过期',
+  'missing-db': '数据库缺失',
+});
+
+const STATUS_LABEL_EN = Object.freeze({
+  ready: 'Ready',
+  success: 'Success',
+  running: 'Running',
+  failed: 'Failed',
+  warn: 'Warning',
+  ok: 'Healthy',
+  missing: 'Missing',
+  drifted: 'Drifted',
+  disabled: 'Disabled',
+  stale: 'Stale',
+  'missing-db': 'Missing DB',
+});
+
+/*
+ * ========================================================================
+ * 步骤4：locale 状态 + 订阅器
+ * ========================================================================
+ * 目标：
+ * 1) 默认按 localStorage 决定首屏语言
+ * 2) setLocale 保存、切换 UI_COPY 引用、广播事件
+ * 3) onLocaleChange 让 toggle 触发后所有渲染层都能 rerender
+ */
+let currentLocale = readStoredLocale();
+const localeListeners = new Set();
+
+function readStoredLocale() {
+  try {
+    const stored = window.localStorage?.getItem(LOCALE_STORAGE_KEY);
+    return LOCALES.includes(stored) ? stored : DEFAULT_LOCALE;
+  } catch (_err) {
+    return DEFAULT_LOCALE;
+  }
+}
+
+function uiCopyFor(locale) {
+  return locale === 'en' ? UI_COPY_EN : UI_COPY_ZH;
+}
+
+function shellCopyFor(locale) {
+  return locale === 'en' ? SHELL_COPY_EN : SHELL_COPY_ZH;
+}
+
+function statusMappingFor(locale) {
+  return locale === 'en' ? STATUS_LABEL_EN : STATUS_LABEL_ZH;
+}
+
+export let UI_COPY = uiCopyFor(currentLocale);
+
+export function getLocale() {
+  return currentLocale;
+}
+
+export function setLocale(locale) {
+  logger.info('开始切换 locale');
+
+  // 4.1 标准化输入；不识别的回退默认
+  const next = LOCALES.includes(locale) ? locale : DEFAULT_LOCALE;
+  if (next === currentLocale) {
+    logger.info('locale 未变化，跳过');
+    return next;
+  }
+
+  // 4.2 更新内部状态并写存储
+  currentLocale = next;
+  UI_COPY = uiCopyFor(next);
+  try {
+    window.localStorage?.setItem(LOCALE_STORAGE_KEY, next);
+  } catch (_err) {
+    /* 忽略隐私模式下的写失败 */
+  }
+
+  // 4.3 通知订阅者
+  for (const cb of localeListeners) {
+    try {
+      cb(next);
+    } catch (err) {
+      logger.error('locale 监听器抛错', err);
+    }
+  }
+
+  logger.info('完成 locale 切换');
+  return next;
+}
+
+export function onLocaleChange(callback) {
+  if (typeof callback !== 'function') return () => {};
+  localeListeners.add(callback);
+  return () => localeListeners.delete(callback);
+}
+
+/*
+ * ========================================================================
+ * 步骤5：扁平 key 查表
+ * ========================================================================
+ */
+export function getShellCopy(key) {
+  const map = shellCopyFor(currentLocale);
+  if (Object.prototype.hasOwnProperty.call(map, key)) {
+    return map[key];
+  }
+  // 未配置 key 时回退中文默认，避免空字符串
+  const fallback = SHELL_COPY_ZH[key];
+  return fallback ?? key;
+}
+
+export function getShellCopyMap() {
+  return shellCopyFor(currentLocale);
+}
+
+/*
+ * ========================================================================
+ * 步骤6：解析趋势窗口文案（按 locale 切换）
+ * ========================================================================
+ */
+const TREND_WINDOW_COPY_ZH = Object.freeze({
   day: Object.freeze({
     peakFootLabel: '最高时段',
     activeFootSuffix: '个有记录时段',
@@ -157,20 +612,39 @@ const TREND_WINDOW_COPY = Object.freeze({
   }),
 });
 
-/*
- * ========================================================================
- * 步骤1：解析趋势窗口文案
- * ========================================================================
- * 目标：
- * 1) 按时间窗口返回对应的单位和标题
- * 2) 避免在渲染层散落 day / week / month / all 判断
- * 3) 让趋势区标题始终贴合真实聚合粒度
- */
+const TREND_WINDOW_COPY_EN = Object.freeze({
+  day: Object.freeze({
+    peakFootLabel: 'Peak bucket',
+    activeFootSuffix: ' active buckets',
+    chartCaption: 'Recent 10 buckets',
+    compareCaption: 'Recent buckets compared',
+  }),
+  week: Object.freeze({
+    peakFootLabel: 'Peak day',
+    activeFootSuffix: ' active days',
+    chartCaption: 'Recent 10 days',
+    compareCaption: 'Recent days compared',
+  }),
+  month: Object.freeze({
+    peakFootLabel: 'Peak day',
+    activeFootSuffix: ' active days',
+    chartCaption: 'Recent 10 days',
+    compareCaption: 'Recent days compared',
+  }),
+  all: Object.freeze({
+    peakFootLabel: 'Peak month',
+    activeFootSuffix: ' active months',
+    chartCaption: 'Recent 10 months',
+    compareCaption: 'Recent months compared',
+  }),
+});
+
 export function resolveTrendWindowCopy(windowName) {
   logger.info('开始解析趋势窗口文案');
 
-  // 1.1 根据窗口名选择对应的时间单位文案
-  const resolved = TREND_WINDOW_COPY[windowName] || TREND_WINDOW_COPY.day;
+  // 6.1 按当前 locale 选表，未识别窗口回退 day
+  const table = currentLocale === 'en' ? TREND_WINDOW_COPY_EN : TREND_WINDOW_COPY_ZH;
+  const resolved = table[windowName] || table.day;
 
   logger.info('完成趋势窗口文案解析');
   return resolved;
@@ -178,32 +652,17 @@ export function resolveTrendWindowCopy(windowName) {
 
 /*
  * ========================================================================
- * 步骤2：翻译状态文案
+ * 步骤7：翻译状态文案（按 locale 切换）
  * ========================================================================
- * 目标：
- * 1) 把后端状态码转换成用户可读中文
- * 2) 保持未知状态原样回退，避免吞掉真实值
- * 3) 让运行状态区不再直接暴露英文状态码
  */
 export function translateStatusLabel(status) {
   logger.info('开始翻译状态文案');
 
-  // 2.1 优先命中常见状态，再回退到原始状态文本
+  // 7.1 命中常用状态后按 locale 输出，未知状态原样回退
   const normalized = String(status || '').toLowerCase();
-  const mapping = {
-    ready: '正常',
-    success: '成功',
-    running: '运行中',
-    failed: '失败',
-    warn: '警告',
-    ok: '正常',
-    missing: '缺失',
-    drifted: '配置漂移',
-    disabled: '已禁用',
-    stale: '已过期',
-    'missing-db': '数据库缺失',
-  };
-  const resolved = mapping[normalized] || String(status || '未知');
+  const mapping = statusMappingFor(currentLocale);
+  const fallbackLabel = currentLocale === 'en' ? 'Unknown' : '未知';
+  const resolved = mapping[normalized] || String(status || fallbackLabel);
 
   logger.info('完成状态文案翻译');
   return resolved;
