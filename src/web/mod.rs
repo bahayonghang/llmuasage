@@ -205,25 +205,21 @@ mod tests {
         assert!(html.contains("assets/layout.css"));
         assert!(html.contains("assets/components.css"));
         assert!(html.contains("assets/charts.css"));
-        assert!(html.contains("llmusage 本地用量概览"));
-        assert!(html.contains("用量趋势"));
-        assert!(html.contains("模型用量分布"));
-        assert!(html.contains("来源分布"));
-        assert!(html.contains("项目排行"));
-        assert!(html.contains("运行状态"));
-        assert!(!html.contains("llmusage 本地账本"));
-        assert!(!html.contains("趋势聚焦"));
-        assert!(!html.contains("模型偏好"));
-        assert!(!html.contains("来源节奏"));
-        assert!(!html.contains("项目热区"));
-        assert!(!html.contains("运行脉冲"));
+        assert!(html.contains("本地用量<span class=\"accent\">概览</span>"));
+        assert!(html.contains("id=\"overview\""));
+        assert!(html.contains("id=\"trends\""));
+        assert!(html.contains("id=\"models\""));
+        assert!(html.contains("id=\"sources\""));
+        assert!(html.contains("id=\"projects\""));
+        assert!(html.contains("id=\"cost\""));
+        assert!(html.contains("id=\"status\""));
     }
 
     #[test]
     fn snapshot_shell_uses_snapshot_mode_marker() {
         let html = snapshot_index_html();
         assert!(html.contains("data-mode=\"snapshot\""));
-        assert!(html.contains("离线文件 · 静态导出"));
+        assert!(html.contains("离线文件"));
         assert!(html.contains("type=\"module\""));
         assert!(html.contains("assets/app.js"));
     }
@@ -249,6 +245,11 @@ mod tests {
                 "data/derive.js",
                 "render.js",
                 "render/hero.js",
+                "render/trends.js",
+                "render/models.js",
+                "render/sources.js",
+                "render/projects.js",
+                "render/costs.js",
                 "render/charts.js",
                 "render/tables.js",
                 "render/health.js",
@@ -299,8 +300,9 @@ mod tests {
             .find(|asset| asset.path == "app.js")
             .expect("app.js asset")
             .body;
-        assert!(app_js.contains("detail.textContent = message;"));
-        assert!(!app_js.contains("empty-state mono\">${String(error"));
+        assert!(app_js.contains("renderHero(context)"));
+        assert!(app_js.contains("renderTrends(context)"));
+        assert!(app_js.contains("setupNavigation()"));
     }
 
     #[test]

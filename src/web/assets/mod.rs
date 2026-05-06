@@ -85,6 +85,31 @@ const ASSET_MANIFEST: &[WebAsset] = &[
         body: include_str!("render/hero.js"),
     },
     WebAsset {
+        path: "render/trends.js",
+        content_type: "application/javascript; charset=utf-8",
+        body: include_str!("render/trends.js"),
+    },
+    WebAsset {
+        path: "render/models.js",
+        content_type: "application/javascript; charset=utf-8",
+        body: include_str!("render/models.js"),
+    },
+    WebAsset {
+        path: "render/sources.js",
+        content_type: "application/javascript; charset=utf-8",
+        body: include_str!("render/sources.js"),
+    },
+    WebAsset {
+        path: "render/projects.js",
+        content_type: "application/javascript; charset=utf-8",
+        body: include_str!("render/projects.js"),
+    },
+    WebAsset {
+        path: "render/costs.js",
+        content_type: "application/javascript; charset=utf-8",
+        body: include_str!("render/costs.js"),
+    },
+    WebAsset {
         path: "render/charts.js",
         content_type: "application/javascript; charset=utf-8",
         body: include_str!("render/charts.js"),
