@@ -1,4 +1,4 @@
-import { escapeHtml, formatNumber } from '../data.js';
+import { escapeHtml, formatNumber, statusTone } from '../data.js';
 import { buildKpis } from '../data/derive.js';
 
 const logger = window.console;
@@ -35,20 +35,22 @@ export function renderHero(context) {
 
   // 1.2 填充 status-panel
   const { health } = context;
-  const statusTone = ledgerSummary.failureCount > 0 ? 'warn' : 'good';
+  const panelTone = ledgerSummary.failureCount > 0 ? 'warn' : 'good';
   const statusLabel = ledgerSummary.failureCount > 0 ? '有失败' : '正常';
 
   const integrationRows = (health.integrations || [])
     .slice(0, 3)
-    .map(
-      (row) => `
+    .map((row) => {
+      const tone = statusTone(row.status);
+      const label = tone === 'good' ? '正常' : row.status || '未知';
+      return `
       <div class="status-row">
         <span class="status-row-name">${escapeHtml(row.source || '--')}</span>
-        <span class="status-row-time">${escapeHtml(row.initialized_at || '--')}</span>
-        <span class="status-row-state"><span class="dot"></span>正常</span>
+        <span class="status-row-time">${escapeHtml(row.updated_at || '--')}</span>
+        <span class="status-row-state"><span class="dot"></span>${escapeHtml(label)}</span>
       </div>
-    `,
-    )
+    `;
+    })
     .join('');
 
   document.getElementById('status-panel').innerHTML = `
@@ -57,7 +59,7 @@ export function renderHero(context) {
         <div class="status-eyebrow">运行概览</div>
         <div style="font-size: 18px; font-weight: 600; margin-top: 2px;">系统健康</div>
       </div>
-      <span class="status-pill" data-tone="${statusTone}"><span class="pulse"></span>${statusLabel}</span>
+      <span class="status-pill" data-tone="${panelTone}"><span class="pulse"></span>${statusLabel}</span>
     </div>
     <div class="status-grid">
       <div class="status-cell">
@@ -97,6 +99,16 @@ export function renderHero(context) {
     `,
     )
     .join('');
+
+  const endpointHost = document.getElementById('endpoint-host');
+  if (endpointHost) {
+    endpointHost.textContent = window.location.host;
+  }
+
+  const endpointSync = document.getElementById('endpoint-sync');
+  if (endpointSync) {
+    endpointSync.textContent = ledgerSummary.lastSyncAt || '--';
+  }
 
   logger.info('完成首屏 hero 区渲染');
 }
