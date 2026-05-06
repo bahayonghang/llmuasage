@@ -9,9 +9,20 @@ use crate::{
     util::now_utc,
 };
 
-impl Store {
+/// Borrowed view onto the cursor surface of [`Store`].
+///
+/// 通过 `store.cursors()` 创建；持借用 `&Store` 不引入 cascade clone。
+pub struct CursorStore<'a> {
+    store: &'a Store,
+}
+
+impl<'a> CursorStore<'a> {
+    pub(super) fn new(store: &'a Store) -> Self {
+        Self { store }
+    }
+
     pub fn load_file_cursors(&self, source: SourceKind) -> Result<HashMap<String, FileCursor>> {
-        let conn = self.open_connection()?;
+        let conn = self.store.open_connection()?;
         let mut stmt = conn.prepare(
             r#"
             SELECT
@@ -56,7 +67,7 @@ impl Store {
     }
 
     pub fn load_opencode_cursor(&self) -> Result<OpencodeCursor> {
-        let conn = self.open_connection()?;
+        let conn = self.store.open_connection()?;
         let row = conn
             .query_row(
                 r#"
@@ -87,7 +98,7 @@ impl Store {
     }
 
     pub fn save_opencode_cursor(&self, cursor: &OpencodeCursor) -> Result<()> {
-        let conn = self.open_connection()?;
+        let conn = self.store.open_connection()?;
         conn.execute(
             r#"
             INSERT INTO source_cursor(

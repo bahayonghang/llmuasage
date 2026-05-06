@@ -2,7 +2,7 @@ use std::{fs, path::Path};
 
 use anyhow::Result;
 
-use crate::{query, store::Store, web};
+use crate::{query::Dashboard, store::Store, web};
 
 pub fn export_html_bundle(store: &Store, output_dir: &Path) -> Result<()> {
     /*
@@ -18,7 +18,7 @@ pub fn export_html_bundle(store: &Store, output_dir: &Path) -> Result<()> {
     fs::create_dir_all(output_dir.join("assets"))?;
 
     // 1.1 先构建 snapshot，再写出页面骨架
-    let snapshot = query::build_dashboard_snapshot(store)?;
+    let snapshot = Dashboard::open(store)?.snapshot()?;
     fs::write(output_dir.join("index.html"), web::snapshot_index_html())?;
 
     // 1.2 逐个写出 manifest 中登记的静态资源

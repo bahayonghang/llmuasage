@@ -14,14 +14,18 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
 };
 
-use crate::{query, store::Store};
+use crate::{
+    query::{self, Dashboard},
+    store::Store,
+};
 
 pub mod report_table;
 
 pub fn run_terminal(store: &Store) -> Result<()> {
-    let overview = query::load_overview(store)?;
-    let sources = query::load_source_breakdown(store)?;
-    let health = query::load_health(store)?;
+    let dashboard = Dashboard::open(store)?;
+    let overview = dashboard.overview()?;
+    let sources = dashboard.source_breakdown()?;
+    let health = dashboard.health()?;
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();

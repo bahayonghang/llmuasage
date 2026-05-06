@@ -7,7 +7,18 @@ use serde_json::Value;
 use super::{IntegrationState, Store};
 use crate::{models::SourceKind, util::now_utc};
 
-impl Store {
+/// Borrowed view onto the integration-state surface of [`Store`].
+///
+/// 通过 `store.integration_state()` 创建。
+pub struct IntegrationStateStore<'a> {
+    store: &'a Store,
+}
+
+impl<'a> IntegrationStateStore<'a> {
+    pub(super) fn new(store: &'a Store) -> Self {
+        Self { store }
+    }
+
     pub fn record_integration_state(
         &self,
         source: SourceKind,
@@ -17,7 +28,7 @@ impl Store {
         backup_path: Option<&Path>,
         details: Option<&Value>,
     ) -> Result<()> {
-        let conn = self.open_connection()?;
+        let conn = self.store.open_connection()?;
         conn.execute(
             r#"
             INSERT INTO integration_install(
@@ -45,7 +56,7 @@ impl Store {
     }
 
     pub fn load_integration_states(&self) -> Result<Vec<IntegrationState>> {
-        let conn = self.open_connection()?;
+        let conn = self.store.open_connection()?;
         self.load_integration_states_with_conn(&conn)
     }
 

@@ -3,9 +3,20 @@ use rusqlite::params;
 
 use super::{SourceSyncStatus, Store};
 
-impl Store {
+/// Borrowed view onto the `source_sync_status` surface of [`Store`].
+///
+/// 通过 `store.sync_status()` 创建。
+pub struct SyncStatusStore<'a> {
+    store: &'a Store,
+}
+
+impl<'a> SyncStatusStore<'a> {
+    pub(super) fn new(store: &'a Store) -> Self {
+        Self { store }
+    }
+
     pub fn load_source_sync_statuses(&self) -> Result<Vec<SourceSyncStatus>> {
-        let conn = self.open_connection()?;
+        let conn = self.store.open_connection()?;
         let mut stmt = conn.prepare(
             r#"
             SELECT
@@ -47,7 +58,7 @@ impl Store {
             return Ok(());
         }
 
-        let mut conn = self.open_connection()?;
+        let mut conn = self.store.open_connection()?;
         let tx = conn.transaction()?;
         {
             let mut stmt = tx.prepare_cached(

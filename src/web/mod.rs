@@ -13,7 +13,7 @@ use serde_json::json;
 use tokio::net::TcpListener;
 use tracing::{error, info};
 
-use crate::{query, store::Store};
+use crate::{query::Dashboard, store::Store};
 
 mod assets;
 mod shell;
@@ -110,7 +110,10 @@ async fn asset_file(Path(path): Path<String>) -> Response {
 }
 
 async fn api_overview(State(state): State<WebState>) -> Response {
-    api_json("/api/overview", query::load_overview(&state.store))
+    api_json(
+        "/api/overview",
+        load_via_dashboard(&state, |d| d.overview()),
+    )
 }
 
 async fn api_trends(
@@ -118,27 +121,47 @@ async fn api_trends(
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
     let window = params.get("window").map(String::as_str).unwrap_or("day");
-    api_json("/api/trends", query::load_trends(&state.store, window))
+    api_json(
+        "/api/trends",
+        load_via_dashboard(&state, |d| d.trends(window)),
+    )
 }
 
 async fn api_models(State(state): State<WebState>) -> Response {
-    api_json("/api/models", query::load_model_breakdown(&state.store))
+    api_json(
+        "/api/models",
+        load_via_dashboard(&state, |d| d.model_breakdown()),
+    )
 }
 
 async fn api_sources(State(state): State<WebState>) -> Response {
-    api_json("/api/sources", query::load_source_breakdown(&state.store))
+    api_json(
+        "/api/sources",
+        load_via_dashboard(&state, |d| d.source_breakdown()),
+    )
 }
 
 async fn api_projects(State(state): State<WebState>) -> Response {
-    api_json("/api/projects", query::load_project_breakdown(&state.store))
+    api_json(
+        "/api/projects",
+        load_via_dashboard(&state, |d| d.project_breakdown()),
+    )
 }
 
 async fn api_costs(State(state): State<WebState>) -> Response {
-    api_json("/api/costs", query::load_cost_breakdown(&state.store))
+    api_json(
+        "/api/costs",
+        load_via_dashboard(&state, |d| d.cost_breakdown()),
+    )
 }
 
 async fn api_health(State(state): State<WebState>) -> Response {
-    api_json("/api/health", query::load_health(&state.store))
+    api_json("/api/health", load_via_dashboard(&state, |d| d.health()))
+}
+
+fn load_via_dashboard<T>(state: &WebState, f: impl FnOnce(&Dashboard) -> Result<T>) -> Result<T> {
+    let dashboard = Dashboard::open(&state.store)?;
+    f(&dashboard)
 }
 
 fn api_json<T>(endpoint: &'static str, result: Result<T>) -> Response

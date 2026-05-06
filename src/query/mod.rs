@@ -157,33 +157,42 @@ pub struct DashboardSnapshot {
     pub health: HealthPayload,
 }
 
-struct QueryContext<'a> {
-    store: &'a Store,
-    conn: &'a Connection,
+/// Read-side façade backed by a single SQLite connection. All eight dashboard
+/// queries share the same connection so a snapshot only opens the DB once.
+pub struct Dashboard {
+    store: Store,
+    conn: Connection,
 }
 
-impl<'a> QueryContext<'a> {
-    fn new(store: &'a Store, conn: &'a Connection) -> Self {
-        Self { store, conn }
+impl Dashboard {
+    /// Opens a fresh connection bound to `store` and returns a Dashboard ready
+    /// to answer any of the dashboard queries.
+    pub fn open(store: &Store) -> Result<Self> {
+        let conn = store.open_connection()?;
+        Ok(Self {
+            store: store.clone(),
+            conn,
+        })
     }
 
-    fn load_overview(&self) -> Result<OverviewPayload> {
-        let total = query_token_summary(self.conn, None)?;
+    /// Loads top-level lifetime/24h overview metrics plus recent sync/export timestamps.
+    pub fn overview(&self) -> Result<OverviewPayload> {
+        let total = query_token_summary(&self.conn, None)?;
         let cutoff = (Utc::now() - Duration::hours(24)).to_rfc3339();
-        let last_24h = query_token_summary(self.conn, Some(&cutoff))?;
+        let last_24h = query_token_summary(&self.conn, Some(&cutoff))?;
         let source_count = scalar_i64(
-            self.conn,
+            &self.conn,
             "SELECT COUNT(DISTINCT source) FROM usage_bucket_30m",
             [],
         )?;
-        let bucket_count = scalar_i64(self.conn, "SELECT COUNT(*) FROM usage_bucket_30m", [])?;
+        let bucket_count = scalar_i64(&self.conn, "SELECT COUNT(*) FROM usage_bucket_30m", [])?;
         let last_sync_at = scalar_optional_string(
-            self.conn,
+            &self.conn,
             "SELECT MAX(finished_at) FROM run_log WHERE command IN ('sync', 'hook-run') AND status = 'success'",
             [],
         )?;
         let last_export_at = scalar_optional_string(
-            self.conn,
+            &self.conn,
             "SELECT MAX(finished_at) FROM run_log WHERE command = 'export html' AND status = 'success'",
             [],
         )?;
@@ -199,7 +208,8 @@ impl<'a> QueryContext<'a> {
         })
     }
 
-    fn load_trends(&self, window: &str) -> Result<Vec<TrendPoint>> {
+    /// Loads aggregated trend points for the requested window (`day`, `week`, `month`, or `all`).
+    pub fn trends(&self, window: &str) -> Result<Vec<TrendPoint>> {
         let (sql, cutoff): (&str, Option<String>) = match window {
             "day" => (
                 "SELECT hour_start AS label, SUM(total_tokens) AS total_tokens FROM usage_bucket_30m WHERE hour_start >= ?1 GROUP BY hour_start ORDER BY hour_start ASC",
@@ -239,7 +249,8 @@ impl<'a> QueryContext<'a> {
         }
     }
 
-    fn load_model_breakdown(&self) -> Result<Vec<ModelBreakdown>> {
+    /// Loads total token usage grouped by normalized model.
+    pub fn model_breakdown(&self) -> Result<Vec<ModelBreakdown>> {
         let mut stmt = self.conn.prepare(
             r#"
             SELECT
@@ -267,7 +278,8 @@ impl<'a> QueryContext<'a> {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    fn load_source_breakdown(&self) -> Result<Vec<SourceBreakdown>> {
+    /// Loads total token usage grouped by source plus each source's freshest event time.
+    pub fn source_breakdown(&self) -> Result<Vec<SourceBreakdown>> {
         let mut stmt = self.conn.prepare(
             r#"
             SELECT
@@ -298,7 +310,8 @@ impl<'a> QueryContext<'a> {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    fn load_project_breakdown(&self) -> Result<Vec<ProjectBreakdown>> {
+    /// Loads ranked project totals derived from aggregated buckets.
+    pub fn project_breakdown(&self) -> Result<Vec<ProjectBreakdown>> {
         let mut stmt = self.conn.prepare(
             r#"
             SELECT
@@ -325,7 +338,8 @@ impl<'a> QueryContext<'a> {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    fn load_cost_breakdown(&self) -> Result<Vec<CostLine>> {
+    /// Loads estimated cost totals for each `(source, model)` pair.
+    pub fn cost_breakdown(&self) -> Result<Vec<CostLine>> {
         let mut stmt = self.conn.prepare(
             r#"
             SELECT
@@ -368,11 +382,16 @@ impl<'a> QueryContext<'a> {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    fn load_health(&self) -> Result<HealthPayload> {
-        let integrations = self.store.load_integration_states_with_conn(self.conn)?;
+    /// Loads integration, cursor, and recent failure health signals.
+    pub fn health(&self) -> Result<HealthPayload> {
+        let integrations = self
+            .store
+            .integration_state()
+            .load_integration_states_with_conn(&self.conn)?;
         let recent_failures = self
             .store
-            .recent_runs_with_conn(self.conn, 10)?
+            .run_log()
+            .recent_runs_with_conn(&self.conn, 10)?
             .into_iter()
             .filter(crate::store::RunRecord::counts_as_failure)
             .collect::<Vec<_>>();
@@ -399,66 +418,22 @@ impl<'a> QueryContext<'a> {
             recent_failures,
         })
     }
-}
 
-/// Loads top-level lifetime/24h overview metrics plus recent sync/export timestamps.
-pub fn load_overview(store: &Store) -> Result<OverviewPayload> {
-    let conn = store.open_connection()?;
-    QueryContext::new(store, &conn).load_overview()
-}
-
-/// Loads aggregated trend points for the requested window (`day`, `week`, `month`, or `all`).
-pub fn load_trends(store: &Store, window: &str) -> Result<Vec<TrendPoint>> {
-    let conn = store.open_connection()?;
-    QueryContext::new(store, &conn).load_trends(window)
-}
-
-/// Loads total token usage grouped by normalized model.
-pub fn load_model_breakdown(store: &Store) -> Result<Vec<ModelBreakdown>> {
-    let conn = store.open_connection()?;
-    QueryContext::new(store, &conn).load_model_breakdown()
-}
-
-/// Loads total token usage grouped by source plus each source's freshest event time.
-pub fn load_source_breakdown(store: &Store) -> Result<Vec<SourceBreakdown>> {
-    let conn = store.open_connection()?;
-    QueryContext::new(store, &conn).load_source_breakdown()
-}
-
-/// Loads ranked project totals derived from aggregated buckets.
-pub fn load_project_breakdown(store: &Store) -> Result<Vec<ProjectBreakdown>> {
-    let conn = store.open_connection()?;
-    QueryContext::new(store, &conn).load_project_breakdown()
-}
-
-/// Loads estimated cost totals for each `(source, model)` pair.
-pub fn load_cost_breakdown(store: &Store) -> Result<Vec<CostLine>> {
-    let conn = store.open_connection()?;
-    QueryContext::new(store, &conn).load_cost_breakdown()
-}
-
-/// Loads integration, cursor, and recent failure health signals.
-pub fn load_health(store: &Store) -> Result<HealthPayload> {
-    let conn = store.open_connection()?;
-    QueryContext::new(store, &conn).load_health()
-}
-
-/// Builds the full dashboard snapshot used by static HTML export.
-pub fn build_dashboard_snapshot(store: &Store) -> Result<DashboardSnapshot> {
-    let conn = store.open_connection()?;
-    let query = QueryContext::new(store, &conn);
-    Ok(DashboardSnapshot {
-        overview: query.load_overview()?,
-        day_trends: query.load_trends("day")?,
-        week_trends: query.load_trends("week")?,
-        month_trends: query.load_trends("month")?,
-        all_trends: query.load_trends("all")?,
-        models: query.load_model_breakdown()?,
-        sources: query.load_source_breakdown()?,
-        projects: query.load_project_breakdown()?,
-        costs: query.load_cost_breakdown()?,
-        health: query.load_health()?,
-    })
+    /// Builds the full dashboard snapshot used by static HTML export.
+    pub fn snapshot(&self) -> Result<DashboardSnapshot> {
+        Ok(DashboardSnapshot {
+            overview: self.overview()?,
+            day_trends: self.trends("day")?,
+            week_trends: self.trends("week")?,
+            month_trends: self.trends("month")?,
+            all_trends: self.trends("all")?,
+            models: self.model_breakdown()?,
+            sources: self.source_breakdown()?,
+            projects: self.project_breakdown()?,
+            costs: self.cost_breakdown()?,
+            health: self.health()?,
+        })
+    }
 }
 
 fn query_token_summary(conn: &Connection, cutoff: Option<&str>) -> Result<TokenSummary> {
@@ -527,61 +502,59 @@ mod tests {
     use anyhow::Result;
     use tempfile::TempDir;
 
-    use super::{
-        build_dashboard_snapshot, load_cost_breakdown, load_health, load_model_breakdown,
-        load_overview, load_project_breakdown, load_source_breakdown, load_trends,
-    };
+    use super::Dashboard;
     use crate::{paths::AppPaths, store::Store};
 
     #[test]
-    fn build_dashboard_snapshot_reuses_single_connection_and_matches_wrappers() -> Result<()> {
+    fn dashboard_snapshot_uses_single_connection_and_matches_individual_methods() -> Result<()> {
         let fixture = QueryFixture::new()?;
         fixture.seed_dashboard_rows(180)?;
 
         Store::reset_open_connection_counter();
-        let snapshot = build_dashboard_snapshot(&fixture.store)?;
+        let dashboard = Dashboard::open(&fixture.store)?;
+        let snapshot = dashboard.snapshot()?;
         assert_eq!(Store::open_connection_count(), 1);
 
         let mut snapshot_overview = serde_json::to_value(&snapshot.overview)?;
-        let mut wrapper_overview = serde_json::to_value(load_overview(&fixture.store)?)?;
+        let mut method_overview = serde_json::to_value(dashboard.overview()?)?;
         snapshot_overview["generated_at"] = serde_json::Value::String("same".to_string());
-        wrapper_overview["generated_at"] = serde_json::Value::String("same".to_string());
-        assert_eq!(snapshot_overview, wrapper_overview);
+        method_overview["generated_at"] = serde_json::Value::String("same".to_string());
+        assert_eq!(snapshot_overview, method_overview);
         assert_eq!(
             serde_json::to_value(&snapshot.day_trends)?,
-            serde_json::to_value(load_trends(&fixture.store, "day")?)?
+            serde_json::to_value(dashboard.trends("day")?)?
         );
         assert_eq!(
             serde_json::to_value(&snapshot.week_trends)?,
-            serde_json::to_value(load_trends(&fixture.store, "week")?)?
+            serde_json::to_value(dashboard.trends("week")?)?
         );
         assert_eq!(
             serde_json::to_value(&snapshot.month_trends)?,
-            serde_json::to_value(load_trends(&fixture.store, "month")?)?
+            serde_json::to_value(dashboard.trends("month")?)?
         );
         assert_eq!(
             serde_json::to_value(&snapshot.all_trends)?,
-            serde_json::to_value(load_trends(&fixture.store, "all")?)?
+            serde_json::to_value(dashboard.trends("all")?)?
         );
         assert_eq!(
             serde_json::to_value(&snapshot.models)?,
-            serde_json::to_value(load_model_breakdown(&fixture.store)?)?
+            serde_json::to_value(dashboard.model_breakdown()?)?
         );
         assert_eq!(
             serde_json::to_value(&snapshot.sources)?,
-            serde_json::to_value(load_source_breakdown(&fixture.store)?)?
+            serde_json::to_value(dashboard.source_breakdown()?)?
         );
         assert_eq!(
             serde_json::to_value(&snapshot.projects)?,
-            serde_json::to_value(load_project_breakdown(&fixture.store)?)?
+            serde_json::to_value(dashboard.project_breakdown()?)?
         );
         assert_eq!(
             serde_json::to_value(&snapshot.costs)?,
-            serde_json::to_value(load_cost_breakdown(&fixture.store)?)?
+            serde_json::to_value(dashboard.cost_breakdown()?)?
         );
         assert_eq!(
             serde_json::to_value(&snapshot.health)?,
-            serde_json::to_value(load_health(&fixture.store)?)?
+            serde_json::to_value(dashboard.health()?)?
         );
 
         assert!(snapshot.overview.bucket_count >= 180);

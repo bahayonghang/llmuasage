@@ -1,13 +1,25 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Instant,
+};
 
 use anyhow::Result;
 use tracing::info;
 
-use super::{BucketKey, BucketRollup, FileCursor, Store, SyncRunWriter};
+use super::{
+    BucketKey, BucketRollup, FileCursor, ShardCommitStats, Store, SyncRunWriter, SyncShard,
+};
 use crate::{
     models::{ProjectInfo, SourceKind, UsageEvent, UsageTokens},
     util::now_utc,
 };
+
+/// Maximum events committed in a single `usage_event` transaction.
+///
+/// Owned by the writer side of the protocol so parsers stay agnostic to
+/// SQLite batch sizing. Removing this constant is a deletion-test signal:
+/// each parser would have to reintroduce its own chunking constant.
+const EVENT_WRITE_BATCH_SIZE: usize = 1000;
 
 impl Store {
     pub fn begin_sync_run(&self) -> Result<SyncRunWriter> {
@@ -28,7 +40,7 @@ impl Store {
 }
 
 impl SyncRunWriter {
-    pub fn reset_file_events_batch(
+    fn reset_file_events_batch(
         &mut self,
         source: SourceKind,
         path_hashes: &[String],
@@ -157,7 +169,7 @@ impl SyncRunWriter {
         Ok(())
     }
 
-    pub fn write_event_batch(&mut self, events: &[UsageEvent]) -> Result<usize> {
+    fn write_event_batch(&mut self, events: &[UsageEvent]) -> Result<usize> {
         if events.is_empty() {
             return Ok(0);
         }
@@ -254,7 +266,7 @@ impl SyncRunWriter {
         Ok(inserted)
     }
 
-    pub fn write_cursor_batch(&mut self, source: SourceKind, cursors: &[FileCursor]) -> Result<()> {
+    fn write_cursor_batch(&mut self, source: SourceKind, cursors: &[FileCursor]) -> Result<()> {
         if cursors.is_empty() {
             return Ok(());
         }
@@ -329,6 +341,49 @@ impl SyncRunWriter {
     pub fn finish_sync_run(self) -> Result<()> {
         info!("完成 sync 单写入端收尾");
         Ok(())
+    }
+
+    pub fn commit_shard(&mut self, shard: SyncShard) -> Result<ShardCommitStats> {
+        /*
+         * ========================================================================
+         * 步骤7：原子化提交单个 shard
+         * ========================================================================
+         * 目标：
+         * 1) 把 reset → write_event(分批) → write_cursor 的隐式协议固化
+         * 2) 让 parser 不再关心写入顺序与 batch 大小
+         * 3) 统一返回 inserted 数与本次提交耗时
+         */
+        info!(
+            source = %shard.source,
+            resets = shard.reset_path_hashes.len(),
+            events = shard.events.len(),
+            cursors = shard.cursors.len(),
+            "开始提交 shard"
+        );
+
+        // 7.1 计时入口与累加器
+        let started = Instant::now();
+        let mut stats = ShardCommitStats::default();
+
+        // 7.2 先清旧 event，再批写 event，最后落 cursor —— 顺序由协议保证
+        if !shard.reset_path_hashes.is_empty() {
+            self.reset_file_events_batch(shard.source, &shard.reset_path_hashes)?;
+        }
+        for batch in shard.events.chunks(EVENT_WRITE_BATCH_SIZE) {
+            stats.events_inserted += self.write_event_batch(batch)?;
+        }
+        if !shard.cursors.is_empty() {
+            self.write_cursor_batch(shard.source, &shard.cursors)?;
+        }
+
+        stats.write_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+        info!(
+            source = %shard.source,
+            inserted = stats.events_inserted,
+            write_ms = stats.write_ms,
+            "完成 shard 提交"
+        );
+        Ok(stats)
     }
 }
 
@@ -450,4 +505,130 @@ fn flush_buckets_tx(
         ])?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        models::{SourceKind, UsageEvent, UsageTokens},
+        paths::AppPaths,
+        store::FileCursor,
+    };
+    use tempfile::TempDir;
+
+    fn build_paths(root: &std::path::Path) -> AppPaths {
+        let root_dir = root.to_path_buf();
+        AppPaths {
+            db_path: root_dir.join("llmusage.db"),
+            hook_cmd_path: root_dir.join("hook.cmd"),
+            hook_sh_path: root_dir.join("hook.sh"),
+            lock_path: root_dir.join("worker.lock"),
+            bin_dir: root_dir.join("bin"),
+            backups_dir: root_dir.join("backups"),
+            exports_dir: root_dir.join("exports"),
+            root_dir,
+        }
+    }
+
+    fn build_event(suffix: &str, path_hash: &str, total: i64) -> UsageEvent {
+        UsageEvent {
+            event_key: format!("codex:{path_hash}:{suffix}"),
+            source: SourceKind::Codex,
+            model: "gpt-5".to_string(),
+            event_at: "2026-05-01T10:00:00Z".to_string(),
+            hour_start: "2026-05-01T10:00:00Z".to_string(),
+            tokens: UsageTokens {
+                input_tokens: 1,
+                cached_input_tokens: 0,
+                output_tokens: 0,
+                reasoning_output_tokens: 0,
+                total_tokens: total,
+            },
+            project: None,
+            session: None,
+        }
+    }
+
+    fn build_cursor(path_hash: &str) -> FileCursor {
+        FileCursor {
+            cursor_key: format!("cursor:{path_hash}"),
+            file_path: format!("/tmp/{path_hash}.jsonl"),
+            file_fingerprint: "fp".to_string(),
+            file_size: 1024,
+            file_mtime_ns: 0,
+            tail_signature: "tail".to_string(),
+            offset: 1024,
+            last_total: None,
+            last_model: Some("gpt-5".to_string()),
+            updated_at: "2026-05-01T10:00:00Z".to_string(),
+        }
+    }
+
+    /// Validates the reset → events → cursor protocol is upheld in a single shard:
+    /// 1) seed one event under `path_hash_a` with total=100,
+    /// 2) commit a shard that resets `path_hash_a` and writes 5 fresh events
+    ///    summing to 150 tokens plus a single cursor row.
+    ///
+    /// Asserts the seeded event is gone, the bucket reflects only the new events,
+    /// and the cursor lands.
+    #[test]
+    fn commit_shard_runs_reset_then_events_then_cursor() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = build_paths(temp.path());
+        let store = Store::new(&paths);
+        store.bootstrap()?;
+
+        let mut writer = store.begin_sync_run()?;
+
+        let seed = writer.commit_shard(SyncShard {
+            source: SourceKind::Codex,
+            reset_path_hashes: Vec::new(),
+            events: vec![build_event("seed", "pathA", 100)],
+            cursors: Vec::new(),
+        })?;
+        assert_eq!(seed.events_inserted, 1);
+
+        let new_events = (0..5)
+            .map(|index| build_event(&format!("ev{index}"), "pathA", 10 * (index + 1) as i64))
+            .collect::<Vec<_>>();
+        let stats = writer.commit_shard(SyncShard {
+            source: SourceKind::Codex,
+            reset_path_hashes: vec!["pathA".to_string()],
+            events: new_events,
+            cursors: vec![build_cursor("pathA")],
+        })?;
+        assert_eq!(stats.events_inserted, 5);
+
+        let conn = store.open_connection()?;
+
+        let event_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_event WHERE source = 'codex'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(
+            event_count, 5,
+            "reset 在 events 之前生效，旧 event 应被清理"
+        );
+
+        let bucket_total: i64 = conn.query_row(
+            "SELECT total_tokens FROM usage_bucket_30m WHERE source = 'codex'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(
+            bucket_total, 150,
+            "bucket 总 tokens 应等于第二次写入 events 的总和 10+20+30+40+50"
+        );
+
+        let cursor_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM source_cursor WHERE source = 'codex'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(cursor_count, 1, "cursor 应当落库");
+
+        Ok(())
+    }
 }

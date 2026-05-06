@@ -4,10 +4,21 @@ use rusqlite::{Connection, params, params_from_iter, types::Value as SqlValue};
 use super::{RunRecord, Store};
 use crate::util::now_utc;
 
-impl Store {
+/// Borrowed view onto the `run_log` surface of [`Store`].
+///
+/// 通过 `store.run_log()` 创建。
+pub struct RunLog<'a> {
+    store: &'a Store,
+}
+
+impl<'a> RunLog<'a> {
+    pub(super) fn new(store: &'a Store) -> Self {
+        Self { store }
+    }
+
     pub fn record_run_start(&self, command: &str) -> Result<i64> {
         let now = now_utc();
-        let conn = self.open_connection()?;
+        let conn = self.store.open_connection()?;
         conn.execute(
             "INSERT INTO run_log(command, status, started_at) VALUES (?1, 'running', ?2)",
             params![command, now],
@@ -23,7 +34,7 @@ impl Store {
         error: Option<&str>,
     ) -> Result<()> {
         let now = now_utc();
-        let conn = self.open_connection()?;
+        let conn = self.store.open_connection()?;
         conn.execute(
             r#"
             UPDATE run_log
@@ -72,13 +83,13 @@ impl Store {
               AND command IN ({placeholders})
             "#
         );
-        let conn = self.open_connection()?;
+        let conn = self.store.open_connection()?;
         let changed = conn.execute(&sql, params_from_iter(params))?;
         Ok(changed)
     }
 
     pub fn recent_runs(&self, limit: usize) -> Result<Vec<RunRecord>> {
-        let conn = self.open_connection()?;
+        let conn = self.store.open_connection()?;
         self.recent_runs_with_conn(&conn, limit)
     }
 

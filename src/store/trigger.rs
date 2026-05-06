@@ -4,7 +4,18 @@ use rusqlite::params;
 use super::Store;
 use crate::{models::SourceKind, util::now_utc};
 
-impl Store {
+/// Borrowed view onto the `trigger_state` surface of [`Store`].
+///
+/// 通过 `store.triggers()` 创建。
+pub struct TriggerStore<'a> {
+    store: &'a Store,
+}
+
+impl<'a> TriggerStore<'a> {
+    pub(super) fn new(store: &'a Store) -> Self {
+        Self { store }
+    }
+
     pub fn upsert_trigger_state(
         &self,
         source: SourceKind,
@@ -12,7 +23,7 @@ impl Store {
         signal_at: &str,
     ) -> Result<()> {
         let now = now_utc();
-        let conn = self.open_connection()?;
+        let conn = self.store.open_connection()?;
         conn.execute(
             r#"
             INSERT INTO trigger_state(source, last_signal_at, trigger, updated_at)
@@ -28,7 +39,7 @@ impl Store {
     }
 
     pub fn mark_trigger_worker_started(&self, source: SourceKind, started_at: &str) -> Result<()> {
-        let conn = self.open_connection()?;
+        let conn = self.store.open_connection()?;
         conn.execute(
             r#"
             UPDATE trigger_state
@@ -45,7 +56,7 @@ impl Store {
         source: SourceKind,
         finished_at: &str,
     ) -> Result<()> {
-        let conn = self.open_connection()?;
+        let conn = self.store.open_connection()?;
         conn.execute(
             r#"
             UPDATE trigger_state
@@ -58,7 +69,7 @@ impl Store {
     }
 
     pub fn trigger_snapshot(&self) -> Result<Vec<(String, String)>> {
-        let conn = self.open_connection()?;
+        let conn = self.store.open_connection()?;
         let mut stmt =
             conn.prepare("SELECT source, last_signal_at FROM trigger_state ORDER BY source ASC")?;
         let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;

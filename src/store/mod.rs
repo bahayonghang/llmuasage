@@ -1,7 +1,10 @@
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use crate::{models::UsageTokens, paths::AppPaths};
+use crate::{
+    models::{SourceKind, UsageEvent, UsageTokens},
+    paths::AppPaths,
+};
 
 mod connection;
 mod cursor;
@@ -12,6 +15,12 @@ mod schema;
 mod sync_status;
 mod sync_writer;
 mod trigger;
+
+pub use cursor::CursorStore;
+pub use integration::IntegrationStateStore;
+pub use run_log::RunLog;
+pub use sync_status::SyncStatusStore;
+pub use trigger::TriggerStore;
 
 const WORKER_LOCK_NAME: &str = "sync-worker";
 const WORKER_LEASE_MINUTES: i64 = 30;
@@ -174,9 +183,76 @@ pub struct Store {
     pub paths: AppPaths,
 }
 
+impl Store {
+    /// Borrowed view onto the `source_cursor` surface.
+    pub fn cursors(&self) -> CursorStore<'_> {
+        CursorStore::new(self)
+    }
+
+    /// Borrowed view onto the `integration_install` surface.
+    pub fn integration_state(&self) -> IntegrationStateStore<'_> {
+        IntegrationStateStore::new(self)
+    }
+
+    /// Borrowed view onto the `run_log` surface.
+    pub fn run_log(&self) -> RunLog<'_> {
+        RunLog::new(self)
+    }
+
+    /// Borrowed view onto the `source_sync_status` surface.
+    pub fn sync_status(&self) -> SyncStatusStore<'_> {
+        SyncStatusStore::new(self)
+    }
+
+    /// Borrowed view onto the `trigger_state` surface.
+    pub fn triggers(&self) -> TriggerStore<'_> {
+        TriggerStore::new(self)
+    }
+}
+
 /// Single-connection writer used by sync to batch event/cursor updates transactionally.
 pub struct SyncRunWriter {
     conn: Connection,
+}
+
+/// Atomic per-shard payload committed by [`SyncRunWriter::commit_shard`].
+///
+/// Bundles the implicit reset → write_event → write_cursor protocol that every
+/// file-backed parser used to inline. Parsers produce one shard per chunk of
+/// candidate files; the writer enforces ordering and chunking. Streaming
+/// sources (e.g. OpenCode) submit shards with empty `reset_path_hashes` and
+/// `cursors`, retaining their own custom cursor persistence.
+#[derive(Debug)]
+pub struct SyncShard {
+    /// Source the shard belongs to. Used by reset/cursor SQL keys.
+    pub source: SourceKind,
+    /// Path hashes whose existing events must be cleared before re-inserting.
+    pub reset_path_hashes: Vec<String>,
+    /// Normalized usage events to upsert in chunked transactions.
+    pub events: Vec<UsageEvent>,
+    /// File cursors to persist after events land. Empty for streaming sources.
+    pub cursors: Vec<FileCursor>,
+}
+
+impl SyncShard {
+    /// Builds an empty shard scoped to one source. Caller fills the vecs.
+    pub fn new(source: SourceKind) -> Self {
+        Self {
+            source,
+            reset_path_hashes: Vec::new(),
+            events: Vec::new(),
+            cursors: Vec::new(),
+        }
+    }
+}
+
+/// Outcome of [`SyncRunWriter::commit_shard`] reported back to the caller.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ShardCommitStats {
+    /// Newly inserted events after SQLite dedupe.
+    pub events_inserted: usize,
+    /// Wall-clock milliseconds spent inside the commit (reset + events + cursors).
+    pub write_ms: u64,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
