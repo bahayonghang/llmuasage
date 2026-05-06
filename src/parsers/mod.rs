@@ -4,10 +4,15 @@ use crate::models::SourceKind;
 
 pub mod claude;
 pub mod codex;
+pub mod driver;
 pub mod file_state;
 pub mod opencode;
+pub mod source_parser;
 
-pub const EVENT_WRITE_BATCH_SIZE: usize = 1000;
+pub use claude::ClaudeParser;
+pub use codex::CodexParser;
+pub use opencode::OpencodeParser;
+pub use source_parser::SourceParser;
 
 /// Per-source sync metrics reported after a parser + write cycle completes.
 #[derive(Debug, Clone, Serialize)]

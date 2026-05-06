@@ -8,6 +8,7 @@ pub mod parsers;
 pub mod paths;
 pub mod project;
 pub mod query;
+pub mod sources;
 pub mod store;
 pub mod tui;
 pub mod util;
