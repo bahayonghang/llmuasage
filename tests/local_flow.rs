@@ -5,7 +5,8 @@ use std::{
 
 use anyhow::Result;
 use llmusage::{
-    app::AppContext, commands, integrations, models::SourceKind, query, store::Store, web,
+    app::AppContext, commands, integrations, models::SourceKind, query::Dashboard, store::Store,
+    web,
 };
 use rusqlite::Connection;
 use tempfile::TempDir;
@@ -41,11 +42,12 @@ fn local_flow_installs_syncs_exports_and_uninstalls() -> Result<()> {
 
         commands::sync::run(&app).await?;
         let store = llmusage::store::Store::new(&app.paths);
-        let overview = query::load_overview(&store)?;
+        let dashboard = Dashboard::open(&store)?;
+        let overview = dashboard.overview()?;
         assert_eq!(overview.source_count, 3);
         assert!(overview.total.total_tokens >= 344);
 
-        let projects = query::load_project_breakdown(&store)?;
+        let projects = dashboard.project_breakdown()?;
         assert!(!projects.is_empty());
 
         let html_out = fixture.root.path().join("html-out");
@@ -212,7 +214,7 @@ fn init_continues_when_claude_install_fails_and_records_error() -> Result<()> {
         );
 
         let store = Store::new(&app.paths);
-        let states = store.load_integration_states()?;
+        let states = store.integration_state().load_integration_states()?;
         assert_eq!(
             states
                 .iter()
@@ -251,7 +253,8 @@ fn init_writes_quoted_windows_string_commands_for_spaced_paths() -> Result<()> {
         let app = AppContext::discover()?;
         commands::init::run(&app).await?;
 
-        let expected_stop = integrations::platform_shell_command(&app, SourceKind::Claude, "Stop");
+        let expected_stop =
+            integrations::HookTarget::current(&app).shell_command(SourceKind::Claude, "Stop");
         let claude_settings: serde_json::Value = serde_json::from_slice(&fs::read(
             fixture.home.join(".claude").join("settings.json"),
         )?)?;

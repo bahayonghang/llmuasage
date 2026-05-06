@@ -6,7 +6,7 @@ use std::{
 };
 
 use anyhow::Result;
-use llmusage::{app::AppContext, commands, models::SourceKind, query, store::Store};
+use llmusage::{app::AppContext, commands, models::SourceKind, query::Dashboard, store::Store};
 use rusqlite::Connection;
 use tempfile::TempDir;
 
@@ -32,18 +32,18 @@ fn sync_hot_run_and_append_remain_incremental() -> Result<()> {
 
         commands::sync::run(&app).await?;
         let store = Store::new(&app.paths);
-        let first_overview = query::load_overview(&store)?;
-        let first_sync_status = store.load_source_sync_statuses()?;
+        let first_overview = Dashboard::open(&store)?.overview()?;
+        let first_sync_status = store.sync_status().load_source_sync_statuses()?;
         assert_eq!(first_sync_status.len(), 3);
 
         commands::sync::run(&app).await?;
-        let second_overview = query::load_overview(&store)?;
+        let second_overview = Dashboard::open(&store)?.overview()?;
         assert_eq!(
             first_overview.total.total_tokens,
             second_overview.total.total_tokens
         );
 
-        let hot_status = store.load_source_sync_statuses()?;
+        let hot_status = store.sync_status().load_source_sync_statuses()?;
         let claude_status = hot_status
             .iter()
             .find(|item| item.source == "claude")
@@ -59,7 +59,7 @@ fn sync_hot_run_and_append_remain_incremental() -> Result<()> {
         fixture.append_claude("session.jsonl", 44, "2026-04-22T03:00:00Z")?;
         commands::sync::run(&app).await?;
 
-        let third_overview = query::load_overview(&store)?;
+        let third_overview = Dashboard::open(&store)?.overview()?;
         assert!(third_overview.total.total_tokens > second_overview.total.total_tokens);
         let count = usage_event_count(&app.paths.db_path)?;
         assert_eq!(count, 5);
@@ -91,13 +91,13 @@ fn sync_replay_replaces_old_file_totals() -> Result<()> {
         commands::sync::run(&app).await?;
 
         let store = Store::new(&app.paths);
-        let first_total = query::load_overview(&store)?.total.total_tokens;
+        let first_total = Dashboard::open(&store)?.overview()?.total.total_tokens;
         assert_eq!(first_total, 120);
 
         fixture.replace_codex("rollout-reset.jsonl", 45, "2026-04-22T04:00:00Z")?;
         commands::sync::run(&app).await?;
 
-        let replaced_total = query::load_overview(&store)?.total.total_tokens;
+        let replaced_total = Dashboard::open(&store)?.overview()?.total.total_tokens;
         assert_eq!(replaced_total, 45);
         assert_eq!(usage_event_count(&app.paths.db_path)?, 1);
         Ok::<_, anyhow::Error>(())
@@ -129,8 +129,9 @@ fn source_breakdown_matches_bucket_totals() -> Result<()> {
         commands::sync::run(&app).await?;
 
         let store = Store::new(&app.paths);
-        let overview = query::load_overview(&store)?;
-        let sources = query::load_source_breakdown(&store)?;
+        let dashboard = Dashboard::open(&store)?;
+        let overview = dashboard.overview()?;
+        let sources = dashboard.source_breakdown()?;
         let total_from_sources = sources.iter().map(|item| item.total_tokens).sum::<i64>();
         assert_eq!(overview.total.total_tokens, total_from_sources);
         Ok::<_, anyhow::Error>(())
@@ -275,14 +276,14 @@ fn opencode_replaced_db_resets_high_water() -> Result<()> {
         commands::sync::run(&app).await?;
 
         let store = Store::new(&app.paths);
-        let first_cursor = store.load_opencode_cursor()?;
+        let first_cursor = store.cursors().load_opencode_cursor()?;
         assert_ne!(first_cursor.inode, 0);
         assert_eq!(usage_event_count(&app.paths.db_path)?, 1);
 
         fixture.replace_opencode_db("msg-replaced", 1776823100000, 48)?;
         commands::sync::run(&app).await?;
 
-        let second_cursor = store.load_opencode_cursor()?;
+        let second_cursor = store.cursors().load_opencode_cursor()?;
         assert_ne!(second_cursor.inode, first_cursor.inode);
         assert_eq!(second_cursor.last_time_created, 1776823100000);
         assert_eq!(usage_event_count(&app.paths.db_path)?, 2);
@@ -371,10 +372,12 @@ fn doctor_warns_on_recovered_aborted_runs() -> Result<()> {
     let app = AppContext::discover()?;
     let store = Store::new(&app.paths);
     store.bootstrap()?;
-    store.record_run_start("sync")?;
-    store.recover_running_runs(&["sync", "hook-run"])?;
+    store.run_log().record_run_start("sync")?;
+    store
+        .run_log()
+        .recover_running_runs(&["sync", "hook-run"])?;
 
-    let health = query::load_health(&store)?;
+    let health = Dashboard::open(&store)?.health()?;
     assert!(
         health
             .recent_failures

@@ -22,3 +22,24 @@ Recent history uses Conventional Commits with scope and emoji, often in Chinese,
 
 ## Security & Generated Files
 Do not commit local usage data, SQLite files, or user config copied from `~/.llmusage/`. Do not hand-edit generated directories: `target/`, `docs/node_modules/`, `docs/.vitepress/cache/`, or `docs/.vitepress/dist/`.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues at github.com/bahayonghang/llmuasage via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Canonical defaults — `needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context. Read these before working on any non-trivial change:
+
+- [`CONTEXT.md`](CONTEXT.md) — terminology and source-anchor map for the 11 domain concepts (Source, SourceParser, Integration, HookTarget, Cursor, Bucket, SyncShard, SyncRunWriter, Store, Registry, RunLog).
+- [`docs/adr/0001-source-registry-and-parser-trait.md`](docs/adr/0001-source-registry-and-parser-trait.md) — why `SourceParser` trait + `sources::registered_*` registry, with deletion-test arguments.
+- [`docs/adr/0002-sync-shard-as-commit-protocol.md`](docs/adr/0002-sync-shard-as-commit-protocol.md) — why `SyncShard` + `commit_shard` fixes the implicit reset → events → cursor protocol.
+- [`docs/adr/0003-store-facade-vs-substores.md`](docs/adr/0003-store-facade-vs-substores.md) — why `Store` is a façade with 5 borrowed views (`CursorStore` / `IntegrationStateStore` / `RunLog` / `SyncStatusStore` / `TriggerStore`).
+
+Process notes for agents: see `docs/agents/domain.md`.
