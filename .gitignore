@@ -1,5 +1,12 @@
 ref/
 .omc/
+.agents/
+.claude/
+.codex/
+.opencode/
+.cursor/
+.trellis/
+
 
 # Added by cargo
 
