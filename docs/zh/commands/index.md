@@ -69,7 +69,7 @@
 
 ### `llmusage serve`
 
-在 `127.0.0.1` 启动本地分析页和 JSON API。
+在 `127.0.0.1` 启动本地分析页和 JSON API，并默认用系统浏览器打开分析页。
 
 ![llmusage 本地 web 分析页概览](/screenshots/web-dashboard-overview.png)
 

@@ -62,6 +62,6 @@ cargo run -- init`r`ncargo run -- sync`r`ncargo run -- --json`r`ncargo run -- se
 
 说明：
 
-- `serve` 只监听 `127.0.0.1`
+- `serve` 只监听 `127.0.0.1`，并会默认用系统浏览器打开分析页
 - `export html` 生成离线静态报告
 - 报表命令都是只读 SQLite 视图，不会自动 sync`r`n- `status`、`diagnostics`、`doctor` 都是只读命令

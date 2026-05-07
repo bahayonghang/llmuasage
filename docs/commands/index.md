@@ -69,7 +69,7 @@ Runs read-only health checks over wrapper presence, integration drift, OpenCode 
 
 ### `llmusage serve`
 
-Starts the local dashboard and JSON API on `127.0.0.1`.
+Starts the local dashboard and JSON API on `127.0.0.1`, then opens the dashboard in the default browser.
 
 ![llmusage web dashboard overview](/screenshots/web-dashboard-overview.png)
 

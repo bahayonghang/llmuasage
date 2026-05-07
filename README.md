@@ -62,6 +62,6 @@ cargo run -- init`r`ncargo run -- sync`r`ncargo run -- --json`r`ncargo run -- se
 
 Notes:
 
-- `serve` only binds to `127.0.0.1`
+- `serve` only binds to `127.0.0.1` and opens the dashboard in your default browser
 - `export html` generates an offline static report
 - report commands are read-only SQLite views and do not auto-sync`r`n- `status`, `diagnostics`, and `doctor` are read-only commands
