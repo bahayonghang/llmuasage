@@ -18,7 +18,7 @@
 - `--timezone UTC|local|+08:00`
 - `--all` 显示完整 daily 历史；默认只显示今天
 - `--compact`
-- `--source codex|claude|opencode`
+- `--source codex|claude|opencode|gemini`
 
 ### `llmusage monthly`
 
@@ -47,11 +47,11 @@
 
 ### `llmusage init`
 
-初始化本地运行时、创建 SQLite、生成 hook 包装器，并安装 Codex / Claude / OpenCode 三类集成。
+初始化本地运行时、创建 SQLite、生成 hook 包装器，并安装 Codex / Claude / OpenCode / Gemini 集成。
 
 ### `llmusage sync`
 
-顺序执行三类本地解析器，把增量结果写入 30 分钟 bucket。使用 `--rebuild` 会先清空可重建的 usage rows、bucket、project 和 cursor，再重新解析本地真源。
+顺序执行 Codex、Claude、OpenCode、Gemini 本地解析器，把增量结果写入 30 分钟 bucket。可用 `--source codex|claude|opencode|gemini` 限定来源；使用 `--rebuild` 会先清空可重建的 usage rows、bucket、project 和 cursor，再重新解析本地真源。默认进度写入 stderr，stdout 保留最终摘要；`--json-events` 则在 stdout 输出 NDJSON 生命周期/进度事件。
 
 ### `llmusage status`
 
@@ -59,11 +59,11 @@
 
 ### `llmusage diagnostics`
 
-输出机器可读 JSON，包括路径、集成状态、SQLite、cursor、来源统计、健康检查和最近运行记录。
+输出机器可读 JSON，包括路径、集成状态、SQLite、cursor、来源统计、source-file 归档诊断、健康检查和最近运行记录。`--forget-file <PATH>` 可把源文件标记为用户主动忽略；同一路径出现在多个来源时需要配合 `--source`。
 
 ### `llmusage doctor`
 
-只读健康检查，覆盖包装器缺失、集成漂移、OpenCode DB 缺失、最近失败等问题。
+默认执行只读健康检查，覆盖包装器缺失、集成漂移、本地真源存在性、最近失败等问题。`--refresh-pricing <file>` 是唯一写入模式：导入本地价格 JSON 快照、重算本地成本，并记录 `pricing_catalog_version`。
 
 ## 本地界面命令
 

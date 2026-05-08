@@ -33,11 +33,13 @@ pub trait SourceParser: Send + Sync {
         store: &'a Store,
         writer: &'a mut SyncRunWriter,
         parallelism: usize,
+        cancel: &'a CancellationToken,
+        progress: Option<ProgressSink<'a>>,
     ) -> Pin<Box<dyn Future<Output = Result<SourceSyncStats>> + Send + 'a>>;
 }
 ```
 
-每个源用空 ZST `pub struct CodexParser` / `ClaudeParser` / `OpencodeParser`，`impl SourceParser` 内 `Box::pin(sync_xxx(...))` 直接复用现有 async 函数体，并发结构、shard 切分逻辑零改动。原 `pub async fn sync_codex / sync_claude / sync_opencode` 降为 module 私有 `async fn`。
+每个源用空 ZST `pub struct CodexParser` / `ClaudeParser` / `OpencodeParser`，`impl SourceParser` 内 `Box::pin(sync_xxx(...))` 直接复用现有 async 函数体，并发结构、shard 切分逻辑零改动。原 `pub async fn sync_codex / sync_claude / sync_opencode` 降为 module 私有 `async fn`。`cancel` 是 0.5.0 M2 为 JobRegistry cancel SLA 追加的跨源取消令牌，parser 在文件/分页边界检查，已写 events/cursors 不回滚。`progress` 是 0.5.0 patch 为默认 CLI/NDJSON 可见性追加的可选回调：parser 在发现文件数后发 `SourceStarted`，每个 shard/page commit 后发 `Progress`；`None` 保持无 UI 调用面。
 
 ### 2. 抽出 `Integration` trait（阶段 4）
 
@@ -100,7 +102,7 @@ match source {
 
 ### 备选 C：trait 分裂为 `BatchedParser` / `StreamingParser`
 
-否决（实施期评估后）：阶段 2 的 `commit_shard` 已把 OpenCode 流式 vs Codex/Claude 批式的差异完全压到 writer 内部。三者签名都是 `(store, writer, parallelism) -> SourceSyncStats`，trait 统一签名是自然结果，分裂会引入两套 driver。
+否决（实施期评估后）：阶段 2 的 `commit_shard` 已把 OpenCode 流式 vs Codex/Claude 批式的差异完全压到 writer 内部。三者签名都是 `(store, writer, parallelism, cancel, progress) -> SourceSyncStats`，trait 统一签名是自然结果，分裂会引入两套 driver。
 
 ### 备选 D：`registered_parsers()` 返回 `&'static [&'static dyn SourceParser]`
 
@@ -130,3 +132,22 @@ match source {
 
 - 阶段 3 完成时：`rtk cargo build` / `cargo fmt --check` / `clippy -D warnings` / `cargo test --test-threads=1` 全绿（35/35 测试）。
 - 阶段 4 完成时：同上（35/35 测试）；`tests/local_flow.rs::init_writes_quoted_windows_string_commands_for_spaced_paths` 走新 `HookTarget` 路径无回归。
+
+## 0.5.0 更新：取消令牌例外
+
+0.5.0 M2 为满足 JobRegistry cancel 1.5s SLA，允许对 `SourceParser::parse` 与 `parsers::driver::drive` 做一次破坏性签名扩展，追加 `cancel: &tokio_util::sync::CancellationToken` 参数。0.5.0 patch 为解决默认 `llmusage sync` 卡住无反馈，又追加 `progress: Option<ProgressSink<'a>>`，但它是可选观测通道，不改变 parser 的写入职责。
+
+这不是新增源路径的一般性要求，而是任务取消协议的跨源基础设施变更。实施时必须同步更新：
+
+- `CONTEXT.md` 的 SourceParser 签名。
+- 三个 parser 实现（Codex / Claude / Opencode）。
+- `commands/sync.rs` 与 JobRegistry 的调用链。
+- 对应 cancel 集测。
+
+进度回调的同步更新面同上，并额外要求：
+
+- `sync --json-events` stdout 继续只输出 NDJSON，包含 bootstrap / migration / lock / source 事件。
+- 默认 CLI 进度只写 stderr，不能污染最终 stdout 摘要。
+- parser 只在发现文件数、shard/page 提交边界发事件，不把 SQLite migration 进度写入数据库。
+
+后续新增源仍保持原决策精神：通过 Registry 注册 parser/integration，不在 driver 或命令层硬编码 source fan-out。

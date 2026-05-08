@@ -18,7 +18,7 @@ Useful options:
 - `--project <label|hash|ref>`
 - `--timezone UTC|local|+08:00`
 - `--compact`
-- `--source codex|claude|opencode`
+- `--source codex|claude|opencode|gemini`
 
 ### `llmusage monthly`
 
@@ -47,11 +47,11 @@ Prints one hook/status-bar friendly line using the local DB. It reads hook JSON 
 
 ### `llmusage init`
 
-Creates the local runtime, bootstraps SQLite, writes hook wrappers, and installs the supported integrations.
+Creates the local runtime, bootstraps SQLite, writes hook wrappers, and installs the supported Codex / Claude / OpenCode / Gemini integrations.
 
 ### `llmusage sync`
 
-Runs the local parsers for Codex, Claude, and OpenCode, then updates the 30-minute buckets. Use `--rebuild` to clear rebuildable usage rows, buckets, projects, and cursors before reparsing local sources.
+Runs the local parsers for Codex, Claude, OpenCode, and Gemini, then updates the 30-minute buckets. Use `--source codex|claude|opencode|gemini` to restrict the run, and `--rebuild` to clear rebuildable usage rows, buckets, projects, and cursors before reparsing local sources. Default progress is written to stderr so stdout keeps the final summary; `--json-events` instead emits NDJSON lifecycle/progress events on stdout.
 
 ### `llmusage status`
 
@@ -59,11 +59,11 @@ Prints a human-readable summary: DB path, buckets, last sync, source totals, int
 
 ### `llmusage diagnostics`
 
-Emits machine-readable JSON for paths, integrations, SQLite state, cursors, source totals, health checks, and recent runs.
+Emits machine-readable JSON for paths, integrations, SQLite state, cursors, source totals, source-file archive diagnostics, health checks, and recent runs. `--forget-file <PATH>` marks a source file as intentionally ignored; use `--source` when the same path exists under multiple sources.
 
 ### `llmusage doctor`
 
-Runs read-only health checks over wrapper presence, integration drift, OpenCode DB presence, and recent failures.
+Runs read-only health checks over wrapper presence, integration drift, local source presence, and recent failures. `--refresh-pricing <file>` is the one write mode: it imports a local pricing JSON snapshot, recomputes local costs, and records `pricing_catalog_version`.
 
 ## Local UI commands
 
