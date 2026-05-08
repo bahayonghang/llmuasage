@@ -1,7 +1,25 @@
 [package]
 name = "llmusage"
-version = "0.4.1"
+version = "0.5.0"
 edition = "2024"
+description = "Local-first AI CLI usage analytics with Rust, SQLite, hooks, and zero upload."
+repository = "https://github.com/bahayonghang/llmuasage"
+homepage = "https://github.com/bahayonghang/llmuasage"
+documentation = "https://docs.rs/llmusage"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "llmusage"
+path = "src/lib.rs"
+
+[[bin]]
+name = "llmusage"
+path = "src/main.rs"
+
+[features]
+default = []
+testing = ["dep:tempfile"]
 
 [dependencies]
 anyhow = "1.0"
@@ -9,12 +27,15 @@ axum = { version = "0.8", features = ["http1", "json", "tokio"] }
 chrono = { version = "0.4", features = ["clock", "serde"] }
 clap = { version = "4.5", features = ["derive"] }
 crossterm = "0.29"
+dashmap = "6.1"
 dirs = "6.0"
 fs4 = "1.1.0"
 ratatui = "0.30.0"
 rusqlite = { version = "0.39.0", features = ["bundled", "chrono"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+base64 = "0.22"
+thiserror = "2.0"
 sha2 = "0.11.0"
 tokio = { version = "1.52.2", features = [
     "macros",
@@ -22,10 +43,12 @@ tokio = { version = "1.52.2", features = [
     "rt-multi-thread",
     "signal",
 ] }
+tokio-util = "0.7"
 toml_edit = "0.25.11"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 walkdir = "2.5"
+tempfile = { version = "3.23", optional = true }
 
 [dev-dependencies]
 tempfile = "3.23"

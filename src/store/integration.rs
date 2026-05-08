@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::Result;
+use crate::error::Result;
 use rusqlite::{Connection, params};
 use serde_json::Value;
 

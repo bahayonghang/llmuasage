@@ -24,17 +24,17 @@ export function renderProjects(context) {
   const rowsHtml = projectRows
     .slice(0, 6)
     .map((row) => {
-      const totalTokens = Number(row.total_tokens || 0);
-      const widthPct = ratio(totalTokens, max);
+      const total_tokens = Number(row.total_tokens || 0);
+      const widthPct = ratio(total_tokens, max);
       const projectName = row.project_label || row.project_name || '--';
-      const projectRef = row.project_ref || row.project_hash || row.project_url || '--';
+      const project_ref = row.project_ref || row.project_hash || row.project_url || '--';
 
       return `
         <div class="project-row">
           <div class="project-name">${escapeHtml(projectName)}</div>
-          <div class="project-url">${escapeHtml(projectRef)}</div>
+          <div class="project-url">${escapeHtml(project_ref)}</div>
           <div class="project-bar-wrap"><div class="project-bar-track"><div class="project-bar-fill" style="width: ${widthPct}%"></div></div></div>
-          <div class="project-value">${formatCompact(totalTokens)}</div>
+          <div class="project-value">${formatCompact(total_tokens)}</div>
         </div>
       `;
     })

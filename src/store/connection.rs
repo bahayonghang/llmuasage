@@ -1,10 +1,9 @@
 use std::time::Duration;
 
-use anyhow::Result;
 use rusqlite::Connection;
 
 use super::Store;
-use crate::paths::AppPaths;
+use crate::{error::Result, paths::AppPaths};
 
 #[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -13,10 +12,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 static OPEN_CONNECTION_CALLS: AtomicUsize = AtomicUsize::new(0);
 
 impl Store {
-    pub fn new(paths: &AppPaths) -> Self {
-        Self {
+    pub fn new(paths: &AppPaths) -> Result<Self> {
+        Ok(Self {
             paths: paths.clone(),
-        }
+        })
     }
 
     pub fn open_connection(&self) -> Result<Connection> {

@@ -13,6 +13,8 @@ pub enum SourceKind {
     Claude,
     /// OpenCode local SQLite usage database.
     Opencode,
+    /// Gemini CLI local chat session JSON artifacts.
+    Gemini,
 }
 
 impl SourceKind {
@@ -22,6 +24,18 @@ impl SourceKind {
             Self::Codex => "codex",
             Self::Claude => "claude",
             Self::Opencode => "opencode",
+            Self::Gemini => "gemini",
+        }
+    }
+
+    /// Parses the lowercase identifier produced by [`Self::as_str`].
+    pub fn parse_id(value: &str) -> Option<Self> {
+        match value {
+            "codex" => Some(Self::Codex),
+            "claude" => Some(Self::Claude),
+            "opencode" => Some(Self::Opencode),
+            "gemini" => Some(Self::Gemini),
+            _ => None,
         }
     }
 }
@@ -35,15 +49,23 @@ impl Display for SourceKind {
 /// Token counters stored on usage events and aggregated buckets.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UsageTokens {
-    /// Non-cached input/prompt tokens.
+    /// Non-cached prompt/input tokens.
+    #[serde(default)]
     pub input_tokens: i64,
-    /// Cached or reused input tokens billed separately by some providers.
-    pub cached_input_tokens: i64,
+    /// Cache-read prompt tokens, formerly persisted as `cached_input_tokens`.
+    #[serde(default, alias = "cached_input_tokens")]
+    pub cache_read_tokens: i64,
+    /// Cache-creation prompt tokens. Non-Anthropic sources normally keep this at 0.
+    #[serde(default)]
+    pub cache_creation_tokens: i64,
     /// Output/completion tokens excluding reasoning-only fields.
+    #[serde(default)]
     pub output_tokens: i64,
     /// Extra reasoning tokens reported separately by providers that expose them.
+    #[serde(default)]
     pub reasoning_output_tokens: i64,
     /// Total tokens for the event or bucket after source-specific normalization.
+    #[serde(default)]
     pub total_tokens: i64,
 }
 

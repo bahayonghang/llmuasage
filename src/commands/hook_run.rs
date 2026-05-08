@@ -1,7 +1,12 @@
 use anyhow::Result;
 use tracing::info;
 
-use crate::{app::AppContext, models::SourceKind, store::Store, util::now_utc};
+use crate::{
+    app::AppContext,
+    models::SourceKind,
+    store::{HolderKind, Store},
+    util::now_utc,
+};
 
 use super::sync::run_once;
 
@@ -18,15 +23,17 @@ pub async fn run(app: &AppContext, source: SourceKind, trigger: &str, _auto: boo
     info!(source = %source, trigger, "开始处理 hook-run 信号");
 
     // 1.1 先落 trigger_state，再尝试拿全局 worker 锁
-    let store = Store::new(&app.paths);
+    let store = Store::new(&app.paths)?;
     store.bootstrap()?;
     let signaled_at = now_utc();
     store
         .triggers()
         .upsert_trigger_state(source, trigger, &signaled_at)?;
+    #[allow(deprecated)]
     let Some(_lock) = store.acquire_worker_lock()? else {
         return Ok(());
     };
+    debug_assert_eq!(_lock.meta().holder_kind, HolderKind::Hook.as_str());
     store
         .run_log()
         .recover_running_runs(&["sync", "hook-run"])?;

@@ -19,7 +19,7 @@ use super::report_args::{CostSourceArg, StatuslineArgs};
 pub async fn run(app: &AppContext, args: StatuslineArgs) -> Result<()> {
     debug!("starting statusline output");
     let hook_input = read_hook_input()?;
-    let store = Store::new(&app.paths);
+    let store = Store::new(&app.paths)?;
     store.bootstrap()?;
     let cache_path = app
         .paths

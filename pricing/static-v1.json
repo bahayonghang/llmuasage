@@ -1,0 +1,54 @@
+{
+  "version": "static-v1",
+  "models": [
+    {
+      "source": "codex",
+      "matchers": ["gpt-5-mini"],
+      "input_per_mtok": 0.25,
+      "cached_per_mtok": 0.025,
+      "output_per_mtok": 2.0
+    },
+    {
+      "source": "codex",
+      "matchers": ["gpt-5", "o3", "o4"],
+      "input_per_mtok": 1.25,
+      "cached_per_mtok": 0.125,
+      "output_per_mtok": 10.0
+    },
+    {
+      "source": "claude",
+      "matchers": ["opus"],
+      "input_per_mtok": 15.0,
+      "cached_per_mtok": 1.5,
+      "output_per_mtok": 75.0
+    },
+    {
+      "source": "claude",
+      "matchers": ["sonnet", "claude-3-7"],
+      "input_per_mtok": 3.0,
+      "cached_per_mtok": 0.3,
+      "output_per_mtok": 15.0
+    },
+    {
+      "source": "claude",
+      "matchers": ["haiku"],
+      "input_per_mtok": 0.8,
+      "cached_per_mtok": 0.08,
+      "output_per_mtok": 4.0
+    },
+    {
+      "source": "opencode",
+      "matchers": ["gpt", "o3", "o4"],
+      "input_per_mtok": 1.25,
+      "cached_per_mtok": 0.125,
+      "output_per_mtok": 10.0
+    },
+    {
+      "source": "opencode",
+      "matchers": ["claude-sonnet", "sonnet"],
+      "input_per_mtok": 3.0,
+      "cached_per_mtok": 0.3,
+      "output_per_mtok": 15.0
+    }
+  ]
+}

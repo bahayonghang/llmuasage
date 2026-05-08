@@ -1,21 +1,105 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-use crate::models::SourceKind;
+use crate::{models::SourceKind, store::MigrationProgress};
 
 pub mod claude;
 pub mod codex;
 pub mod driver;
 pub mod file_state;
+pub mod gemini;
 pub mod opencode;
 pub mod source_parser;
 
 pub use claude::ClaudeParser;
 pub use codex::CodexParser;
+pub use gemini::GeminiParser;
 pub use opencode::OpencodeParser;
-pub use source_parser::SourceParser;
+pub use source_parser::{ProgressSink, SourceParser};
+
+/// Progress and lifecycle events emitted by sync/import flows.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", tag = "event")]
+pub enum SyncEvent {
+    /// Sync job has started.
+    Started { job_id: String, files_total: u64 },
+    /// Runtime directories and SQLite bootstrap are about to run.
+    BootstrapStarted,
+    /// One SQLite schema migration has started.
+    MigrationStarted {
+        version: u32,
+        name: String,
+        latest_version: u32,
+    },
+    /// One SQLite schema migration has committed.
+    MigrationFinished {
+        version: u32,
+        name: String,
+        elapsed_ms: u64,
+    },
+    /// Caller is waiting for the global SQLite sync worker lock.
+    LockWaiting { timeout_ms: u64 },
+    /// Global SQLite sync worker lock was acquired.
+    LockAcquired { wait_ms: u64 },
+    /// A source parser is about to run.
+    SourceStarted {
+        source: SourceKind,
+        files_total: u64,
+    },
+    /// Throttled source progress snapshot. The current M2 implementation emits
+    /// at most one per source at the parser boundary; parser-internal file
+    /// progress is wired later with cancellation granularity.
+    Progress {
+        source: SourceKind,
+        files_scanned: u64,
+        records_imported: u64,
+        current_file: Option<String>,
+    },
+    /// Recent-window scan finished for one source (D27).
+    RecentReady { source: SourceKind },
+    /// One source completed with final stats.
+    SourceFinished {
+        source: SourceKind,
+        stats: SourceSyncStats,
+    },
+    /// Full sync completed.
+    Finished { summary: SyncSummaryEvent },
+    /// Sync failed.
+    Failed { error: String },
+    /// Sync was cancelled.
+    Cancelled,
+}
+
+impl From<MigrationProgress> for SyncEvent {
+    fn from(value: MigrationProgress) -> Self {
+        match value.elapsed_ms {
+            Some(elapsed_ms) => SyncEvent::MigrationFinished {
+                version: value.version,
+                name: value.name.to_string(),
+                elapsed_ms,
+            },
+            None => SyncEvent::MigrationStarted {
+                version: value.version,
+                name: value.name.to_string(),
+                latest_version: crate::store::latest_schema_version(),
+            },
+        }
+    }
+}
+
+/// Lightweight serializable sync summary used in [`SyncEvent::Finished`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct SyncSummaryEvent {
+    /// Number of source parsers that ran.
+    pub sources: usize,
+    /// Total normalized events seen before SQLite dedupe.
+    pub total_seen: usize,
+    /// Total newly inserted events.
+    pub total_inserted: usize,
+}
 
 /// Per-source sync metrics reported after a parser + write cycle completes.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SourceSyncStats {
     /// Source these stats belong to.
     pub source: SourceKind,

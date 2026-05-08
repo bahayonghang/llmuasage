@@ -15,7 +15,7 @@ pub async fn run(app: &AppContext, purge: bool) -> Result<()> {
      */
     info!("开始执行本地卸载");
 
-    let store = Store::new(&app.paths);
+    let store = Store::new(&app.paths)?;
     store.bootstrap()?;
     let run_id = store.run_log().record_run_start("uninstall")?;
     let actions = integrations::uninstall_all(app, &store)?;

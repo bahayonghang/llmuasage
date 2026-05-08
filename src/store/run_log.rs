@@ -1,4 +1,4 @@
-use anyhow::Result;
+use crate::error::Result;
 use rusqlite::{Connection, params, params_from_iter, types::Value as SqlValue};
 
 use super::{RunRecord, Store};

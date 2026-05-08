@@ -9,21 +9,27 @@ use crate::{
 mod connection;
 mod cursor;
 mod integration;
-mod lease;
+mod lock;
+mod migrations;
 mod run_log;
 mod schema;
+mod source_file;
 mod sync_status;
 mod sync_writer;
 mod trigger;
 
 pub use cursor::CursorStore;
 pub use integration::IntegrationStateStore;
+pub use migrations::{
+    MigrationProgress, MigrationProgressEvent, latest_schema_version, read_schema_version,
+};
 pub use run_log::RunLog;
+pub use source_file::{SourceFileStateCounts, SourceFileStore};
 pub use sync_status::SyncStatusStore;
 pub use trigger::TriggerStore;
 
 const WORKER_LOCK_NAME: &str = "sync-worker";
-const WORKER_LEASE_MINUTES: i64 = 30;
+const WORKER_LOCK_LEASE_MINUTES: i64 = 30;
 
 /// Incremental cursor for file-backed JSONL sources.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -169,11 +175,66 @@ pub struct SourceSyncStatus {
     pub updated_at: String,
 }
 
-/// Guard object that owns the global sync worker lease until drop.
+/// Caller family recorded on the global sync worker lock row.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HolderKind {
+    /// Interactive/manual CLI command such as `llmusage sync`.
+    Cli,
+    /// Library/Tauri/HTTP job caller.
+    Library,
+    /// Tool hook caller; intentionally uses non-blocking acquisition.
+    Hook,
+}
+
+impl HolderKind {
+    /// Stable lowercase identifier persisted to SQLite and rendered in status.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Cli => "cli",
+            Self::Library => "library",
+            Self::Hook => "hook",
+        }
+    }
+}
+
+impl std::fmt::Display for HolderKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Metadata for the current global sync worker lock holder.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkerLockMeta {
+    /// Process id that acquired the lock.
+    pub holder_pid: i64,
+    /// Caller family that acquired the lock.
+    pub holder_kind: String,
+    /// RFC 3339 acquisition timestamp.
+    pub acquired_at: String,
+    /// RFC 3339 lease expiry timestamp.
+    pub lease_expires_at: String,
+    /// Last refresh timestamp.
+    pub updated_at: String,
+}
+
+impl WorkerLockMeta {
+    /// Compact identity string used by `LlmusageError::LockBusy`.
+    pub fn holder_identity(&self) -> String {
+        format!(
+            "{}:{}@{}",
+            self.holder_kind, self.holder_pid, self.acquired_at
+        )
+    }
+}
+
+/// Guard object that owns the global sync worker lock until drop.
 pub struct WorkerLock {
     store: Store,
     lock_name: String,
     owner_id: String,
+    meta: WorkerLockMeta,
 }
 
 /// Main SQLite-backed store façade used across commands, parsers, and queries.
@@ -208,11 +269,111 @@ impl Store {
     pub fn triggers(&self) -> TriggerStore<'_> {
         TriggerStore::new(self)
     }
+
+    /// Recomputes and persists per-event cost columns from the embedded
+    /// static pricing catalog (D6/F1.3). Returns the number of `usage_event`
+    /// rows updated. Single transaction so a partial run never leaves the
+    /// table half-priced.
+    pub fn recompute_costs(&self) -> crate::error::Result<usize> {
+        self.recompute_costs_with(crate::query::pricing_catalog::PricingCatalog::static_v1())
+    }
+
+    /// Recomputes costs against a caller-supplied catalog. doctor uses
+    /// this to drive a recompute through a litellm snapshot loaded from
+    /// `~/.llmusage/pricing/`.
+    pub fn recompute_costs_with(
+        &self,
+        catalog: &crate::query::pricing_catalog::PricingCatalog,
+    ) -> crate::error::Result<usize> {
+        use rusqlite::params;
+
+        let mut conn = self.open_connection()?;
+        let tx = conn.transaction()?;
+
+        let rows: Vec<(String, String, String, i64, i64, i64, i64)> = {
+            let mut stmt = tx.prepare(
+                r#"
+                SELECT event_key, source, model,
+                       COALESCE(input_tokens, 0),
+                       COALESCE(cache_read_tokens, 0),
+                       COALESCE(output_tokens, 0),
+                       COALESCE(reasoning_output_tokens, 0)
+                FROM usage_event
+                "#,
+            )?;
+            let mapped = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                ))
+            })?;
+            mapped.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+
+        let mut updated = 0usize;
+        {
+            let mut update_stmt = tx.prepare(
+                r#"
+                UPDATE usage_event
+                SET cost_with_cache_usd = ?2,
+                    cost_without_cache_usd = ?3,
+                    pricing_status = ?4,
+                    pricing_source = ?5,
+                    pricing_rate = ?6
+                WHERE event_key = ?1
+                "#,
+            )?;
+            for (event_key, source, model, input, cache_read, output, reasoning) in rows {
+                let breakdown = crate::query::pricing::compute_cost_with(
+                    catalog, &source, &model, input, cache_read, output, reasoning,
+                );
+                update_stmt.execute(params![
+                    event_key,
+                    breakdown.cost_with_cache_usd,
+                    breakdown.cost_without_cache_usd,
+                    breakdown.pricing_status.as_str(),
+                    breakdown.pricing_source,
+                    breakdown.pricing_rate,
+                ])?;
+                updated += 1;
+            }
+        }
+        tx.commit()?;
+        Ok(updated)
+    }
 }
 
 /// Single-connection writer used by sync to batch event/cursor updates transactionally.
 pub struct SyncRunWriter {
     conn: Connection,
+    run_started_at: String,
+    raw_archive_enabled: bool,
+}
+
+impl SyncRunWriter {
+    /// Returns the RFC 3339 timestamp captured when this writer was started.
+    ///
+    /// Used by the `source_file` state machine: every shard commit stamps
+    /// `last_seen_at = run_started_at` so a single later
+    /// `update_missing_with_conn(source, run_started_at)` call can flip stale
+    /// `live` rows to `missing` without race conditions across parsers.
+    pub fn run_started_at(&self) -> &str {
+        &self.run_started_at
+    }
+
+    /// Returns whether this writer captures raw archive payloads at commit
+    /// time. The flag is snapshotted from `meta('raw_archive_enabled')` once
+    /// at [`Store::begin_sync_run`]; mid-run toggles only take effect on the
+    /// next sync run, so a single sync either persists every raw record or
+    /// none.
+    pub fn raw_archive_enabled(&self) -> bool {
+        self.raw_archive_enabled
+    }
 }
 
 /// Atomic per-shard payload committed by [`SyncRunWriter::commit_shard`].
@@ -232,6 +393,15 @@ pub struct SyncShard {
     pub events: Vec<UsageEvent>,
     /// File cursors to persist after events land. Empty for streaming sources.
     pub cursors: Vec<FileCursor>,
+    /// File paths observed during the parser pass, regardless of whether they
+    /// produced new events. The writer marks each one `state='live'` in the
+    /// `source_file` table so the driver can later flip unseen files to
+    /// `missing`. Empty for streaming sources without per-file identity.
+    pub seen_file_paths: Vec<String>,
+    /// Optional raw payloads keyed by `event_key`. Only consumed when
+    /// `Store::raw_archive_enabled` is true; otherwise dropped silently
+    /// (D11 / F1.5). Parsers that never serialize raw rows leave this empty.
+    pub raw_records: Vec<RawRecord>,
 }
 
 impl SyncShard {
@@ -242,7 +412,46 @@ impl SyncShard {
             reset_path_hashes: Vec::new(),
             events: Vec::new(),
             cursors: Vec::new(),
+            seen_file_paths: Vec::new(),
+            raw_records: Vec::new(),
         }
+    }
+}
+
+/// One opt-in raw archive entry written to `usage_event_raw`.
+///
+/// `event_key` matches `usage_event.event_key` 1:1 so consumers can join back
+/// to the normalized row. `raw_json` is the parser-specific serialization of
+/// the upstream record (e.g. an OpenCode SQLite row rendered as JSON).
+#[derive(Debug, Clone)]
+pub struct RawRecord {
+    /// Same `event_key` value as the corresponding `usage_event` row.
+    pub event_key: String,
+    /// JSON-encoded payload describing the upstream row. Parser-specific
+    /// shape; consumers should treat it as opaque text.
+    pub raw_json: String,
+}
+
+/// Options controlling one [`Store::bootstrap_with`] call.
+///
+/// Currently exposes only the raw archive opt-in (D11 / F1.5). The struct is
+/// `#[non_exhaustive]` so adding new bootstrap-time toggles in 0.5.x patches
+/// stays SemVer-additive.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct BootstrapOptions {
+    /// When `Some(true)` / `Some(false)`, persist the corresponding
+    /// `meta('raw_archive_enabled', …)` value during bootstrap. `None` keeps
+    /// whatever value the meta row already holds (or the migration-installed
+    /// default `'0'` on a freshly created database).
+    pub enable_raw_archive: Option<bool>,
+}
+
+impl BootstrapOptions {
+    /// Toggles the raw archive flag during bootstrap.
+    pub fn with_raw_archive(mut self, enabled: bool) -> Self {
+        self.enable_raw_archive = Some(enabled);
+        self
     }
 }
 
@@ -253,6 +462,8 @@ pub struct ShardCommitStats {
     pub events_inserted: usize,
     /// Wall-clock milliseconds spent inside the commit (reset + events + cursors).
     pub write_ms: u64,
+    /// Number of source files observed and marked live by this shard.
+    pub files_seen: usize,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -268,4 +479,5 @@ struct BucketRollup {
     project_label: Option<String>,
     project_ref: Option<String>,
     tokens: UsageTokens,
+    event_count: i64,
 }

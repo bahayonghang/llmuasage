@@ -1,4 +1,4 @@
-use anyhow::Result;
+use crate::error::Result;
 use rusqlite::params;
 
 use super::{SourceSyncStatus, Store};
@@ -106,6 +106,42 @@ impl<'a> SyncStatusStore<'a> {
             }
         }
         tx.commit()?;
+        Ok(())
+    }
+
+    /// Marks the source's recent-window scan as completed (D27 / F6).
+    ///
+    /// This is intentionally separate from the per-run stats upsert so a
+    /// `RecentReady` signal can update `recent_completed_at` immediately after
+    /// one source finishes, before the whole sync job is done.
+    pub fn mark_recent_completed(
+        &self,
+        source: crate::models::SourceKind,
+        at: String,
+    ) -> Result<()> {
+        let conn = self.store.open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO source_sync_status(
+                source,
+                files_processed,
+                changed_files,
+                bytes_scanned,
+                events_seen,
+                events_replayed,
+                events_inserted,
+                parse_ms,
+                write_ms,
+                lock_wait_ms,
+                updated_at,
+                recent_completed_at
+            ) VALUES (?1, 0, 0, 0, 0, 0, 0, 0, 0, 0, ?2, ?2)
+            ON CONFLICT(source) DO UPDATE SET
+                recent_completed_at = excluded.recent_completed_at,
+                updated_at = excluded.updated_at
+            "#,
+            params![source.as_str(), at],
+        )?;
         Ok(())
     }
 }

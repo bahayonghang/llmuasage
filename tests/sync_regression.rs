@@ -2,11 +2,20 @@ use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
+    sync::mpsc,
+    thread,
+    time::Duration,
 };
 
 use anyhow::Result;
-use llmusage::{app::AppContext, commands, models::SourceKind, query::Dashboard, store::Store};
+use llmusage::{
+    app::AppContext,
+    commands,
+    models::SourceKind,
+    query::Dashboard,
+    store::{HolderKind, Store},
+};
 use rusqlite::Connection;
 use tempfile::TempDir;
 
@@ -31,13 +40,13 @@ fn sync_hot_run_and_append_remain_incremental() -> Result<()> {
         let app = AppContext::discover()?;
 
         commands::sync::run(&app).await?;
-        let store = Store::new(&app.paths);
-        let first_overview = Dashboard::open(&store)?.overview()?;
+        let store = Store::new(&app.paths)?;
+        let first_overview = Dashboard::open(&store)?.overview(&Default::default())?;
         let first_sync_status = store.sync_status().load_source_sync_statuses()?;
-        assert_eq!(first_sync_status.len(), 3);
+        assert_eq!(first_sync_status.len(), 4);
 
         commands::sync::run(&app).await?;
-        let second_overview = Dashboard::open(&store)?.overview()?;
+        let second_overview = Dashboard::open(&store)?.overview(&Default::default())?;
         assert_eq!(
             first_overview.total.total_tokens,
             second_overview.total.total_tokens
@@ -59,7 +68,7 @@ fn sync_hot_run_and_append_remain_incremental() -> Result<()> {
         fixture.append_claude("session.jsonl", 44, "2026-04-22T03:00:00Z")?;
         commands::sync::run(&app).await?;
 
-        let third_overview = Dashboard::open(&store)?.overview()?;
+        let third_overview = Dashboard::open(&store)?.overview(&Default::default())?;
         assert!(third_overview.total.total_tokens > second_overview.total.total_tokens);
         let count = usage_event_count(&app.paths.db_path)?;
         assert_eq!(count, 5);
@@ -90,14 +99,20 @@ fn sync_replay_replaces_old_file_totals() -> Result<()> {
         let app = AppContext::discover()?;
         commands::sync::run(&app).await?;
 
-        let store = Store::new(&app.paths);
-        let first_total = Dashboard::open(&store)?.overview()?.total.total_tokens;
+        let store = Store::new(&app.paths)?;
+        let first_total = Dashboard::open(&store)?
+            .overview(&Default::default())?
+            .total
+            .total_tokens;
         assert_eq!(first_total, 120);
 
         fixture.replace_codex("rollout-reset.jsonl", 45, "2026-04-22T04:00:00Z")?;
         commands::sync::run(&app).await?;
 
-        let replaced_total = Dashboard::open(&store)?.overview()?.total.total_tokens;
+        let replaced_total = Dashboard::open(&store)?
+            .overview(&Default::default())?
+            .total
+            .total_tokens;
         assert_eq!(replaced_total, 45);
         assert_eq!(usage_event_count(&app.paths.db_path)?, 1);
         Ok::<_, anyhow::Error>(())
@@ -128,10 +143,10 @@ fn source_breakdown_matches_bucket_totals() -> Result<()> {
         let app = AppContext::discover()?;
         commands::sync::run(&app).await?;
 
-        let store = Store::new(&app.paths);
+        let store = Store::new(&app.paths)?;
         let dashboard = Dashboard::open(&store)?;
-        let overview = dashboard.overview()?;
-        let sources = dashboard.source_breakdown()?;
+        let overview = dashboard.overview(&Default::default())?;
+        let sources = dashboard.source_breakdown(&Default::default())?;
         let total_from_sources = sources.iter().map(|item| item.total_tokens).sum::<i64>();
         assert_eq!(overview.total.total_tokens, total_from_sources);
         Ok::<_, anyhow::Error>(())
@@ -142,7 +157,7 @@ fn source_breakdown_matches_bucket_totals() -> Result<()> {
 }
 
 #[test]
-fn sqlite_worker_lease_is_exclusive() -> Result<()> {
+fn sqlite_worker_lock_is_exclusive() -> Result<()> {
     /*
      * ========================================================================
      * 步骤4：验证 SQLite 租约锁排他
@@ -154,16 +169,204 @@ fn sqlite_worker_lease_is_exclusive() -> Result<()> {
      */
     let fixture = Fixture::new()?;
     let app = AppContext::discover()?;
-    let store = Store::new(&app.paths);
+    let store = Store::new(&app.paths)?;
     store.bootstrap()?;
 
-    let first = store.acquire_worker_lock()?;
-    assert!(first.is_some());
+    let first = store.acquire_worker_lock_with(Duration::from_millis(1), HolderKind::Cli)?;
+    let holder = store
+        .current_worker_lock()?
+        .expect("current lock holder should be visible");
+    assert_eq!(holder.holder_kind, "cli");
+    assert!(holder.holder_pid > 0);
+    assert!(holder.acquired_at.contains('T'));
+    let second = store.acquire_worker_lock_with(Duration::from_millis(1), HolderKind::Library);
+    assert!(matches!(
+        second,
+        Err(llmusage::LlmusageError::LockBusy { .. })
+    ));
+    drop(first);
+    let third = store.acquire_worker_lock_with(Duration::from_millis(1), HolderKind::Library)?;
+    assert_eq!(third.meta().holder_kind, "library");
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn legacy_nonblocking_worker_lock_records_hook_kind() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let app = AppContext::discover()?;
+    let store = Store::new(&app.paths)?;
+    store.bootstrap()?;
+
+    #[allow(deprecated)]
+    let first = store
+        .acquire_worker_lock()?
+        .expect("legacy hook lock should acquire");
+    assert_eq!(first.meta().holder_kind, "hook");
+    #[allow(deprecated)]
     let second = store.acquire_worker_lock()?;
     assert!(second.is_none());
-    drop(first);
-    let third = store.acquire_worker_lock()?;
-    assert!(third.is_some());
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn hook_run_skips_when_sync_holds_lock() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let app = AppContext::discover()?;
+    let store = Store::new(&app.paths)?;
+    store.bootstrap()?;
+    let _lock = store.acquire_worker_lock_with(Duration::from_millis(1), HolderKind::Cli)?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        commands::hook_run::run(&app, SourceKind::Codex, "manual-test", false).await?;
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    let conn = Connection::open(&app.paths.db_path)?;
+    let hook_runs: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM run_log WHERE command='hook-run'",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(hook_runs, 0);
+    let (started_at, finished_at) = trigger_worker_times(&app.paths.db_path, "codex")?;
+    assert!(started_at.is_none());
+    assert!(finished_at.is_none());
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn status_renders_lock_holder() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let app = AppContext::discover()?;
+    let store = Store::new(&app.paths)?;
+    store.bootstrap()?;
+    let _lock = store.acquire_worker_lock_with(Duration::from_millis(1), HolderKind::Cli)?;
+
+    let output = Command::new(env!("CARGO_BIN_EXE_llmusage"))
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .arg("status")
+        .env("HOME", &fixture.home)
+        .env("USERPROFILE", &fixture.home)
+        .env("CODEX_HOME", &fixture.codex_home)
+        .env("OPENCODE_HOME", &fixture.opencode_home)
+        .env("RUST_LOG", "off")
+        .output()?;
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("- Worker lock: holder=cli:"));
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn sync_blocks_when_hook_run_holds_lock_then_proceeds() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_codex("rollout-wait.jsonl", 77, "2026-04-22T01:12:00Z")?;
+    let app = AppContext::discover()?;
+    let store = Store::new(&app.paths)?;
+    store.bootstrap()?;
+    let lock = {
+        #[allow(deprecated)]
+        store
+            .acquire_worker_lock()?
+            .expect("hook-style lock should acquire")
+    };
+    let (ready_tx, ready_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let home = fixture.home.clone();
+    let codex_home = fixture.codex_home.clone();
+    let opencode_home = fixture.opencode_home.clone();
+    let handle = thread::spawn(move || -> Result<std::process::Output> {
+        let child = Command::new(env!("CARGO_BIN_EXE_llmusage"))
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .arg("sync")
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .env("CODEX_HOME", &codex_home)
+            .env("OPENCODE_HOME", &opencode_home)
+            .env("RUST_LOG", "off")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        ready_tx.send(()).expect("send ready");
+        release_rx.recv().expect("wait release signal");
+        drop(lock);
+        Ok(child.wait_with_output()?)
+    });
+
+    ready_rx.recv_timeout(Duration::from_secs(5))?;
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(usage_event_count(&app.paths.db_path)?, 0);
+    release_tx.send(())?;
+    let output = handle.join().expect("sync thread should not panic")?;
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(usage_event_count(&app.paths.db_path)?, 1);
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn v0_db_with_worker_lease_table_rename_to_worker_lock_succeeds() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let app = AppContext::discover()?;
+    fs::create_dir_all(&app.paths.root_dir)?;
+    let conn = Connection::open(&app.paths.db_path)?;
+    conn.execute_batch(
+        r#"
+        CREATE TABLE worker_lease (
+            lock_name TEXT PRIMARY KEY,
+            owner_id TEXT NOT NULL,
+            lease_expires_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        INSERT INTO worker_lease(lock_name, owner_id, lease_expires_at, updated_at)
+        VALUES ('sync-worker', 'legacy-owner', '2000-01-01T00:00:00Z', '1999-12-31T23:59:59Z');
+        "#,
+    )?;
+    drop(conn);
+
+    let store = Store::new(&app.paths)?;
+    store.bootstrap()?;
+
+    let conn = Connection::open(&app.paths.db_path)?;
+    let worker_lock_columns = table_columns(&conn, "worker_lock")?;
+    assert!(
+        worker_lock_columns
+            .iter()
+            .any(|column| column == "holder_pid")
+    );
+    assert!(
+        worker_lock_columns
+            .iter()
+            .any(|column| column == "holder_kind")
+    );
+    assert!(
+        worker_lock_columns
+            .iter()
+            .any(|column| column == "acquired_at")
+    );
+    let legacy_table_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='worker_lease'",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(legacy_table_count, 0);
+    assert_eq!(
+        llmusage::store::read_schema_version(&conn)?,
+        llmusage::store::latest_schema_version()
+    );
+
+    let lock = store.acquire_worker_lock_with(Duration::from_millis(1), HolderKind::Cli)?;
+    assert_eq!(lock.meta().holder_kind, "cli");
 
     fixture.restore_env();
     Ok(())
@@ -207,7 +410,7 @@ fn bootstrap_migrates_legacy_usage_event_before_session_index() -> Result<()> {
     )?;
     drop(conn);
 
-    let store = Store::new(&app.paths);
+    let store = Store::new(&app.paths)?;
     store.bootstrap()?;
 
     let conn = Connection::open(&app.paths.db_path)?;
@@ -216,6 +419,17 @@ fn bootstrap_migrates_legacy_usage_event_before_session_index() -> Result<()> {
     assert!(columns.iter().any(|column| column == "session_label"));
     assert!(columns.iter().any(|column| column == "source_path_hash"));
     assert_eq!(usage_event_count(&app.paths.db_path)?, 1);
+    assert_eq!(
+        llmusage::store::read_schema_version(&conn)?,
+        llmusage::store::latest_schema_version()
+    );
+    assert!(
+        app.paths
+            .backups_dir
+            .join("llmusage.db.pre-0.5.0")
+            .is_file(),
+        "v0 bootstrap should keep a pre-0.5.0 backup"
+    );
 
     let session_index_count = conn.query_row(
         r#"
@@ -275,7 +489,7 @@ fn opencode_replaced_db_resets_high_water() -> Result<()> {
         let app = AppContext::discover()?;
         commands::sync::run(&app).await?;
 
-        let store = Store::new(&app.paths);
+        let store = Store::new(&app.paths)?;
         let first_cursor = store.cursors().load_opencode_cursor()?;
         assert_ne!(first_cursor.inode, 0);
         assert_eq!(usage_event_count(&app.paths.db_path)?, 1);
@@ -370,7 +584,7 @@ fn export_failure_marks_run_failed_immediately() -> Result<()> {
 fn doctor_warns_on_recovered_aborted_runs() -> Result<()> {
     let fixture = Fixture::new()?;
     let app = AppContext::discover()?;
-    let store = Store::new(&app.paths);
+    let store = Store::new(&app.paths)?;
     store.bootstrap()?;
     store.run_log().record_run_start("sync")?;
     store

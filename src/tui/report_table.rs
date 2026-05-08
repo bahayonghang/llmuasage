@@ -108,7 +108,7 @@ pub fn render_session_table(
                 format_count(row.totals.input_tokens),
                 format_count(row.totals.output_tokens),
                 format_count(row.totals.reasoning_output_tokens),
-                format_count(row.totals.cached_input_tokens),
+                format_count(row.totals.cache_read_tokens),
                 format_count(row.totals.total_tokens),
                 format_cost(row.totals.estimated_cost_usd),
                 row.last_activity_at.clone(),
@@ -172,7 +172,7 @@ pub fn render_blocks_table(rows: &[BlockReportRow], compact: bool) -> String {
                     format_count(row.totals.input_tokens),
                     format_count(row.totals.output_tokens),
                     format_count(row.totals.reasoning_output_tokens),
-                    format_count(row.totals.cached_input_tokens),
+                    format_count(row.totals.cache_read_tokens),
                     format_count(row.totals.total_tokens),
                     format_count(row.burn_rate_tokens_per_hour.round() as i64),
                     format_count(row.projected_total_tokens),
@@ -278,7 +278,7 @@ fn period_row(
     row.push(format_count(totals.output_tokens));
     if !compact {
         row.push(format_count(totals.reasoning_output_tokens));
-        row.push(format_count(totals.cached_input_tokens));
+        row.push(format_count(totals.cache_read_tokens));
         row.push(format_count(totals.total_tokens));
     }
     row.push(format_cost(totals.estimated_cost_usd));
@@ -295,7 +295,7 @@ fn period_total_row(totals: &TokenTotals, compact: bool, show_project: bool) -> 
     row.push(format_count(totals.output_tokens));
     if !compact {
         row.push(format_count(totals.reasoning_output_tokens));
-        row.push(format_count(totals.cached_input_tokens));
+        row.push(format_count(totals.cache_read_tokens));
         row.push(format_count(totals.total_tokens));
     }
     row.push(format_cost(totals.estimated_cost_usd));
@@ -321,7 +321,7 @@ fn session_total_row(totals: &TokenTotals, compact: bool) -> Vec<String> {
             format_count(totals.input_tokens),
             format_count(totals.output_tokens),
             format_count(totals.reasoning_output_tokens),
-            format_count(totals.cached_input_tokens),
+            format_count(totals.cache_read_tokens),
             format_count(totals.total_tokens),
             format_cost(totals.estimated_cost_usd),
             String::new(),
@@ -346,7 +346,7 @@ fn append_breakdowns(
         row.push(format_count(item.output_tokens));
         if !compact {
             row.push(format_count(item.reasoning_output_tokens));
-            row.push(format_count(item.cached_input_tokens));
+            row.push(format_count(item.cache_read_tokens));
             row.push(format_count(item.total_tokens));
         }
         row.push(format_cost(item.estimated_cost_usd));
@@ -608,7 +608,7 @@ mod tests {
             input_tokens: 1234,
             output_tokens: 56,
             reasoning_output_tokens: 7,
-            cached_input_tokens: 890,
+            cache_read_tokens: 890,
             total_tokens: 2187,
             estimated_cost_usd: 3.5,
         };

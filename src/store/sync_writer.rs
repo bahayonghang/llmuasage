@@ -3,7 +3,7 @@ use std::{
     time::Instant,
 };
 
-use anyhow::Result;
+use crate::error::Result;
 use tracing::info;
 
 use super::{
@@ -34,8 +34,13 @@ impl Store {
          */
         info!("开始建立 sync 单写入端");
         let conn = self.open_connection()?;
-        info!("完成 sync 单写入端建立");
-        Ok(SyncRunWriter { conn })
+        let raw_archive_enabled = self.raw_archive_enabled()?;
+        info!(raw_archive_enabled, "完成 sync 单写入端建立");
+        Ok(SyncRunWriter {
+            conn,
+            run_started_at: crate::util::now_utc_millis(),
+            raw_archive_enabled,
+        })
     }
 }
 
@@ -71,10 +76,12 @@ impl SyncRunWriter {
                     hour_start,
                     COALESCE(project_hash, ''),
                     SUM(input_tokens),
-                    SUM(cached_input_tokens),
+                    SUM(cache_read_tokens),
+                    SUM(cache_creation_tokens),
                     SUM(output_tokens),
                     SUM(reasoning_output_tokens),
-                    SUM(total_tokens)
+                    SUM(total_tokens),
+                    COUNT(*)
                 FROM usage_event
                 WHERE source = ?1 AND event_key LIKE ?2
                 GROUP BY model, hour_start, COALESCE(project_hash, '')
@@ -85,11 +92,13 @@ impl SyncRunWriter {
                 UPDATE usage_bucket_30m
                 SET
                     input_tokens = input_tokens - ?5,
-                    cached_input_tokens = cached_input_tokens - ?6,
-                    output_tokens = output_tokens - ?7,
-                    reasoning_output_tokens = reasoning_output_tokens - ?8,
-                    total_tokens = total_tokens - ?9,
-                    updated_at = ?10
+                    cache_read_tokens = cache_read_tokens - ?6,
+                    cache_creation_tokens = cache_creation_tokens - ?7,
+                    output_tokens = output_tokens - ?8,
+                    reasoning_output_tokens = reasoning_output_tokens - ?9,
+                    total_tokens = total_tokens - ?10,
+                    event_count = event_count - ?11,
+                    updated_at = ?12
                 WHERE source = ?1 AND model = ?2 AND hour_start = ?3 AND project_hash = ?4
                 "#,
             )?;
@@ -98,10 +107,12 @@ impl SyncRunWriter {
                 DELETE FROM usage_bucket_30m
                 WHERE source = ?1 AND model = ?2 AND hour_start = ?3 AND project_hash = ?4
                   AND input_tokens <= 0
-                  AND cached_input_tokens <= 0
+                  AND cache_read_tokens <= 0
+                  AND cache_creation_tokens <= 0
                   AND output_tokens <= 0
                   AND reasoning_output_tokens <= 0
                   AND total_tokens <= 0
+                  AND event_count <= 0
                 "#,
             )?;
             let mut delete_event_stmt = tx.prepare_cached(
@@ -124,31 +135,37 @@ impl SyncRunWriter {
                             row.get::<_, String>(2)?,
                             UsageTokens {
                                 input_tokens: row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
-                                cached_input_tokens: row
+                                cache_read_tokens: row
                                     .get::<_, Option<i64>>(4)?
                                     .unwrap_or_default(),
-                                output_tokens: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
-                                reasoning_output_tokens: row
-                                    .get::<_, Option<i64>>(6)?
+                                cache_creation_tokens: row
+                                    .get::<_, Option<i64>>(5)?
                                     .unwrap_or_default(),
-                                total_tokens: row.get::<_, Option<i64>>(7)?.unwrap_or_default(),
+                                output_tokens: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
+                                reasoning_output_tokens: row
+                                    .get::<_, Option<i64>>(7)?
+                                    .unwrap_or_default(),
+                                total_tokens: row.get::<_, Option<i64>>(8)?.unwrap_or_default(),
                             },
+                            row.get::<_, Option<i64>>(9)?.unwrap_or_default(),
                         ))
                     },
                 )?;
                 let aggregates = rows.collect::<rusqlite::Result<Vec<_>>>()?;
 
-                for (model, hour_start, project_hash, tokens) in aggregates {
+                for (model, hour_start, project_hash, tokens, event_count) in aggregates {
                     update_bucket_stmt.execute(rusqlite::params![
                         source.as_str(),
                         model,
                         hour_start,
                         project_hash,
                         tokens.input_tokens,
-                        tokens.cached_input_tokens,
+                        tokens.cache_read_tokens,
+                        tokens.cache_creation_tokens,
                         tokens.output_tokens,
                         tokens.reasoning_output_tokens,
                         tokens.total_tokens,
+                        event_count,
                         updated_at,
                     ])?;
                     delete_zero_stmt.execute(rusqlite::params![
@@ -193,11 +210,11 @@ impl SyncRunWriter {
                 r#"
                 INSERT OR IGNORE INTO usage_event(
                     event_key, source, model, event_at, hour_start,
-                    input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens, total_tokens,
+                    input_tokens, cache_read_tokens, cache_creation_tokens, output_tokens, reasoning_output_tokens, total_tokens,
                     project_hash, project_label, project_ref, path_hash,
                     session_id, session_label, source_path_hash,
                     created_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
                 "#,
             )?;
             let mut projects = HashMap::new();
@@ -212,7 +229,8 @@ impl SyncRunWriter {
                     event.event_at,
                     event.hour_start,
                     event.tokens.input_tokens,
-                    event.tokens.cached_input_tokens,
+                    event.tokens.cache_read_tokens,
+                    event.tokens.cache_creation_tokens,
                     event.tokens.output_tokens,
                     event.tokens.reasoning_output_tokens,
                     event.tokens.total_tokens,
@@ -358,6 +376,8 @@ impl SyncRunWriter {
             resets = shard.reset_path_hashes.len(),
             events = shard.events.len(),
             cursors = shard.cursors.len(),
+            seen_files = shard.seen_file_paths.len(),
+            raw_records = shard.raw_records.len(),
             "开始提交 shard"
         );
 
@@ -375,7 +395,19 @@ impl SyncRunWriter {
         if !shard.cursors.is_empty() {
             self.write_cursor_batch(shard.source, &shard.cursors)?;
         }
+        // 7.3 把本轮看到的候选文件登记为 source_file.state='live'
+        //     （D15 / ADR 0006）。OpenCode 等无 file 身份的源传空 vec。
+        if !shard.seen_file_paths.is_empty() {
+            self.write_source_file_seen(shard.source, &shard.seen_file_paths)?;
+        }
+        // 7.4 raw archive opt-in（D11 / F1.5）：开关关时丢弃 raw_records，
+        //     避免 parser 端必须同步判定开关；开关开时与 event 共享 commit
+        //     周期落库（INSERT OR IGNORE 保证 event_key 重复时幂等）。
+        if self.raw_archive_enabled && !shard.raw_records.is_empty() {
+            self.write_raw_records_batch(&shard.raw_records)?;
+        }
 
+        stats.files_seen = shard.seen_file_paths.len();
         stats.write_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
         info!(
             source = %shard.source,
@@ -384,6 +416,37 @@ impl SyncRunWriter {
             "完成 shard 提交"
         );
         Ok(stats)
+    }
+
+    fn write_raw_records_batch(&mut self, records: &[super::RawRecord]) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare_cached(
+                r#"
+                INSERT OR IGNORE INTO usage_event_raw(
+                    event_key, raw_json, created_at
+                ) VALUES (?1, ?2, ?3)
+                "#,
+            )?;
+            let now = now_utc();
+            for record in records {
+                stmt.execute(rusqlite::params![record.event_key, record.raw_json, now])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn write_source_file_seen(&mut self, source: SourceKind, file_paths: &[String]) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        super::source_file::upsert_live_in_tx(
+            &tx,
+            source.as_str(),
+            file_paths,
+            &self.run_started_at,
+        )?;
+        tx.commit()?;
+        Ok(())
     }
 }
 
@@ -409,12 +472,15 @@ fn roll_up_bucket(buckets: &mut HashMap<BucketKey, BucketRollup>, event: &UsageE
             .as_ref()
             .and_then(|value| value.project_ref.clone()),
         tokens: UsageTokens::default(),
+        event_count: 0,
     });
     entry.tokens.input_tokens += event.tokens.input_tokens;
-    entry.tokens.cached_input_tokens += event.tokens.cached_input_tokens;
+    entry.tokens.cache_read_tokens += event.tokens.cache_read_tokens;
+    entry.tokens.cache_creation_tokens += event.tokens.cache_creation_tokens;
     entry.tokens.output_tokens += event.tokens.output_tokens;
     entry.tokens.reasoning_output_tokens += event.tokens.reasoning_output_tokens;
     entry.tokens.total_tokens += event.tokens.total_tokens;
+    entry.event_count += 1;
 }
 
 fn flush_projects_tx(
@@ -470,20 +536,24 @@ fn flush_buckets_tx(
             project_label,
             project_ref,
             input_tokens,
-            cached_input_tokens,
+            cache_read_tokens,
+            cache_creation_tokens,
             output_tokens,
             reasoning_output_tokens,
             total_tokens,
+            event_count,
             updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
         ON CONFLICT(source, model, hour_start, project_hash) DO UPDATE SET
             project_label = excluded.project_label,
             project_ref = excluded.project_ref,
             input_tokens = usage_bucket_30m.input_tokens + excluded.input_tokens,
-            cached_input_tokens = usage_bucket_30m.cached_input_tokens + excluded.cached_input_tokens,
+            cache_read_tokens = usage_bucket_30m.cache_read_tokens + excluded.cache_read_tokens,
+            cache_creation_tokens = usage_bucket_30m.cache_creation_tokens + excluded.cache_creation_tokens,
             output_tokens = usage_bucket_30m.output_tokens + excluded.output_tokens,
             reasoning_output_tokens = usage_bucket_30m.reasoning_output_tokens + excluded.reasoning_output_tokens,
             total_tokens = usage_bucket_30m.total_tokens + excluded.total_tokens,
+            event_count = usage_bucket_30m.event_count + excluded.event_count,
             updated_at = excluded.updated_at
         "#,
     )?;
@@ -497,10 +567,12 @@ fn flush_buckets_tx(
             rollup.project_label,
             rollup.project_ref,
             rollup.tokens.input_tokens,
-            rollup.tokens.cached_input_tokens,
+            rollup.tokens.cache_read_tokens,
+            rollup.tokens.cache_creation_tokens,
             rollup.tokens.output_tokens,
             rollup.tokens.reasoning_output_tokens,
             rollup.tokens.total_tokens,
+            rollup.event_count,
             updated_at,
         ])?;
     }
@@ -540,7 +612,8 @@ mod tests {
             hour_start: "2026-05-01T10:00:00Z".to_string(),
             tokens: UsageTokens {
                 input_tokens: 1,
-                cached_input_tokens: 0,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
                 output_tokens: 0,
                 reasoning_output_tokens: 0,
                 total_tokens: total,
@@ -576,7 +649,7 @@ mod tests {
     fn commit_shard_runs_reset_then_events_then_cursor() -> anyhow::Result<()> {
         let temp = TempDir::new()?;
         let paths = build_paths(temp.path());
-        let store = Store::new(&paths);
+        let store = Store::new(&paths)?;
         store.bootstrap()?;
 
         let mut writer = store.begin_sync_run()?;
@@ -586,6 +659,8 @@ mod tests {
             reset_path_hashes: Vec::new(),
             events: vec![build_event("seed", "pathA", 100)],
             cursors: Vec::new(),
+            seen_file_paths: Vec::new(),
+            raw_records: Vec::new(),
         })?;
         assert_eq!(seed.events_inserted, 1);
 
@@ -597,6 +672,8 @@ mod tests {
             reset_path_hashes: vec!["pathA".to_string()],
             events: new_events,
             cursors: vec![build_cursor("pathA")],
+            seen_file_paths: Vec::new(),
+            raw_records: Vec::new(),
         })?;
         assert_eq!(stats.events_inserted, 5);
 

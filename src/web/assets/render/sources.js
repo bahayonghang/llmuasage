@@ -24,23 +24,23 @@ export function renderSources(context) {
   const rowsHtml = sourceRows
     .slice(0, 4)
     .map((row) => {
-      const totalTokens = Number(row.total_tokens || 0);
-      const widthPct = ratio(totalTokens, max);
-      const sharePct = ((totalTokens / totals.totalTokens) * 100).toFixed(1);
-      const lastEventAt = row.last_event_at ? row.last_event_at.slice(11, 19) : '--';
+      const total_tokens = Number(row.total_tokens || 0);
+      const widthPct = ratio(total_tokens, max);
+      const sharePct = ((total_tokens / totals.total_tokens) * 100).toFixed(1);
+      const last_event_at = row.last_event_at ? row.last_event_at.slice(11, 19) : '--';
 
       return `
         <div class="source-row">
           <div>
             <div class="src-name">${escapeHtml(row.source || '--')}</div>
-            <div class="src-meta">${lastEventAt}</div>
+            <div class="src-meta">${last_event_at}</div>
           </div>
           <div>
             <div class="src-bar-track"><div class="src-bar-fill" style="width: ${widthPct}%"></div></div>
-            <div class="src-meta">${formatNumber(totalTokens)} Token</div>
+            <div class="src-meta">${formatNumber(total_tokens)} Token</div>
           </div>
           <div>
-            <div class="src-value">${formatCompact(totalTokens)}</div>
+            <div class="src-value">${formatCompact(total_tokens)}</div>
             <div class="src-pct">${sharePct}%</div>
           </div>
         </div>

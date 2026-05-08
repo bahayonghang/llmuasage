@@ -12,6 +12,7 @@ use crate::{app::AppContext, models::SourceKind, sources, store::Store, util::no
 
 pub mod claude;
 pub mod codex;
+pub mod gemini;
 pub mod hook_target;
 pub mod integration;
 pub mod opencode;
@@ -109,14 +110,14 @@ pub fn backup_file(original: &Path, backups_dir: &Path, stem: &str) -> Result<Pa
 }
 
 pub fn record_probe(store: &Store, probe: &IntegrationProbe) -> Result<()> {
-    store.integration_state().record_integration_state(
+    Ok(store.integration_state().record_integration_state(
         probe.source,
         "probe",
         &probe.status,
         probe.config_path.as_deref().map(Path::new),
         None,
         Some(&json!({ "detail": probe.detail })),
-    )
+    )?)
 }
 
 pub fn record_action(
@@ -128,14 +129,14 @@ pub fn record_action(
     config_path: Option<&Path>,
     backup_path: Option<&Path>,
 ) -> Result<()> {
-    store.integration_state().record_integration_state(
+    Ok(store.integration_state().record_integration_state(
         source,
         install_type,
         status,
         config_path,
         backup_path,
         Some(&json!({ "detail": detail })),
-    )
+    )?)
 }
 
 fn collect_install_result(

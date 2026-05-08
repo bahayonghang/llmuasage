@@ -17,7 +17,7 @@ pub async fn run(app: &AppContext, port: Option<u16>) -> Result<()> {
      */
     info!("开始启动本地 Web UI 服务");
 
-    let store = Store::new(&app.paths);
+    let store = Store::new(&app.paths)?;
     store.bootstrap()?;
     let run_id = store.run_log().record_run_start("serve")?;
     let addr = web::serve(store.clone(), port).await?;
@@ -97,12 +97,7 @@ impl BrowserLaunchPlan {
         match platform {
             BrowserPlatform::Windows => Self {
                 program: "cmd",
-                args: vec![
-                    "/C".into(),
-                    "start".into(),
-                    String::new(),
-                    url.to_owned(),
-                ],
+                args: vec!["/C".into(), "start".into(), String::new(), url.to_owned()],
             },
             BrowserPlatform::MacOs => Self {
                 program: "open",
@@ -152,8 +147,7 @@ mod tests {
 
     #[test]
     fn unix_browser_launch_plan_uses_xdg_open() {
-        let plan =
-            BrowserLaunchPlan::for_platform(BrowserPlatform::Unix, "http://127.0.0.1:37421");
+        let plan = BrowserLaunchPlan::for_platform(BrowserPlatform::Unix, "http://127.0.0.1:37421");
         assert_eq!(plan.program, "xdg-open");
         assert_eq!(plan.args, vec!["http://127.0.0.1:37421".to_string()]);
     }

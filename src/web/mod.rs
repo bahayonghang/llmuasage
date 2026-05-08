@@ -6,14 +6,20 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::{Html, IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::net::TcpListener;
 use tracing::{error, info};
 
-use crate::{query::Dashboard, store::Store};
+use crate::{
+    error::Result as LlmusageResult,
+    models::SourceKind,
+    query::{Dashboard, LogsQuery, QueryFilter},
+    store::Store,
+    sync::{JobRegistry, SyncOptions},
+};
 
 mod assets;
 mod brand;
@@ -22,6 +28,7 @@ mod shell;
 #[derive(Clone)]
 pub struct WebState {
     pub store: Store,
+    pub jobs: JobRegistry,
 }
 
 pub async fn serve(store: Store, preferred_port: Option<u16>) -> Result<SocketAddr> {
@@ -37,7 +44,10 @@ pub async fn serve(store: Store, preferred_port: Option<u16>) -> Result<SocketAd
     info!("开始组装本地 Web UI 路由");
 
     // 1.1 创建状态并收敛根页面、资源和 API 路由
-    let state = WebState { store };
+    let state = WebState {
+        store,
+        jobs: JobRegistry::default(),
+    };
     let app = Router::new()
         .route("/", get(index_live))
         .route("/assets/{*path}", get(asset_file))
@@ -47,6 +57,14 @@ pub async fn serve(store: Store, preferred_port: Option<u16>) -> Result<SocketAd
         .route("/api/sources", get(api_sources))
         .route("/api/projects", get(api_projects))
         .route("/api/costs", get(api_costs))
+        .route("/api/home_overview", get(api_home_overview))
+        .route("/api/heatmap", get(api_heatmap))
+        .route("/api/logs", get(api_logs))
+        .route("/api/diagnostics", get(api_diagnostics))
+        .route("/api/diagnostics/forget", post(api_diagnostics_forget))
+        .route("/api/jobs", post(api_jobs_start))
+        .route("/api/jobs/{id}", get(api_jobs_get))
+        .route("/api/jobs/{id}/cancel", post(api_jobs_cancel))
         .route("/api/health", get(api_health))
         .with_state(state);
 
@@ -113,7 +131,7 @@ async fn asset_file(Path(path): Path<String>) -> Response {
 async fn api_overview(State(state): State<WebState>) -> Response {
     api_json(
         "/api/overview",
-        load_via_dashboard(&state, |d| d.overview()),
+        load_via_dashboard(&state, |d| d.overview(&Default::default())),
     )
 }
 
@@ -124,48 +142,277 @@ async fn api_trends(
     let window = params.get("window").map(String::as_str).unwrap_or("day");
     api_json(
         "/api/trends",
-        load_via_dashboard(&state, |d| d.trends(window)),
+        load_via_dashboard(&state, |d| {
+            #[allow(deprecated)]
+            d.trends(window, &Default::default())
+        }),
     )
 }
 
 async fn api_models(State(state): State<WebState>) -> Response {
     api_json(
         "/api/models",
-        load_via_dashboard(&state, |d| d.model_breakdown()),
+        load_via_dashboard(&state, |d| d.model_breakdown(&Default::default())),
     )
 }
 
 async fn api_sources(State(state): State<WebState>) -> Response {
     api_json(
         "/api/sources",
-        load_via_dashboard(&state, |d| d.source_breakdown()),
+        load_via_dashboard(&state, |d| d.source_breakdown(&Default::default())),
     )
 }
 
 async fn api_projects(State(state): State<WebState>) -> Response {
     api_json(
         "/api/projects",
-        load_via_dashboard(&state, |d| d.project_breakdown()),
+        load_via_dashboard(&state, |d| d.project_breakdown(&Default::default())),
     )
 }
 
 async fn api_costs(State(state): State<WebState>) -> Response {
     api_json(
         "/api/costs",
-        load_via_dashboard(&state, |d| d.cost_breakdown()),
+        load_via_dashboard(&state, |d| d.cost_breakdown(&Default::default())),
     )
+}
+
+async fn api_home_overview(State(state): State<WebState>) -> Response {
+    api_json(
+        "/api/home_overview",
+        load_via_dashboard(&state, |d| d.home_overview(&Default::default())),
+    )
+}
+
+async fn api_heatmap(
+    State(state): State<WebState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let days = params
+        .get("days")
+        .and_then(|raw| raw.parse::<u32>().ok())
+        .unwrap_or(365);
+    let source = params.get("source").and_then(|raw| match raw.as_str() {
+        "codex" => Some(crate::models::SourceKind::Codex),
+        "claude" => Some(crate::models::SourceKind::Claude),
+        "opencode" => Some(crate::models::SourceKind::Opencode),
+        _ => None,
+    });
+    let filter = crate::query::QueryFilter {
+        source,
+        ..Default::default()
+    };
+    api_json(
+        "/api/heatmap",
+        load_via_dashboard(&state, |d| d.heatmap(&filter, days)),
+    )
+}
+
+async fn api_logs(
+    State(state): State<WebState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let source = params
+        .get("source")
+        .and_then(|raw| SourceKind::parse_id(raw.trim()));
+    let model = params
+        .get("model")
+        .map(|raw| raw.trim().to_string())
+        .filter(|raw| !raw.is_empty());
+    let cursor = params
+        .get("cursor")
+        .map(|raw| raw.trim().to_string())
+        .filter(|raw| !raw.is_empty());
+
+    if let Some(cursor) = cursor.as_deref()
+        && crate::query::logs::try_decode_cursor(cursor).is_none()
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": {
+                    "code": "invalid_cursor",
+                    "message": "logs cursor 必须是 base64url(JSON{event_at,event_key})",
+                }
+            })),
+        )
+            .into_response();
+    }
+
+    let filter = QueryFilter {
+        source,
+        model,
+        since: params
+            .get("since")
+            .and_then(|raw| chrono::NaiveDate::parse_from_str(raw.trim(), "%Y-%m-%d").ok()),
+        until: params
+            .get("until")
+            .and_then(|raw| chrono::NaiveDate::parse_from_str(raw.trim(), "%Y-%m-%d").ok()),
+        ..Default::default()
+    };
+    let query = LogsQuery {
+        filter,
+        page_size: params
+            .get("page_size")
+            .and_then(|raw| raw.parse::<u32>().ok())
+            .unwrap_or(50),
+        cursor,
+        include_total: parse_bool_query(params.get("include_total")),
+        include_raw_json: parse_bool_query(
+            params
+                .get("include_raw")
+                .or_else(|| params.get("include_raw_json")),
+        ),
+    };
+
+    api_json("/api/logs", load_via_dashboard(&state, |d| d.logs(&query)))
 }
 
 async fn api_health(State(state): State<WebState>) -> Response {
     api_json("/api/health", load_via_dashboard(&state, |d| d.health()))
 }
 
-fn load_via_dashboard<T>(state: &WebState, f: impl FnOnce(&Dashboard) -> Result<T>) -> Result<T> {
+async fn api_diagnostics(State(state): State<WebState>) -> Response {
+    api_json(
+        "/api/diagnostics",
+        load_via_dashboard(&state, |d| d.diagnostics()),
+    )
+}
+
+#[derive(Debug, Deserialize)]
+struct ForgetRequest {
+    /// Absolute file path the user wants llmusage to forget.
+    file_path: String,
+    /// Source identifier (`codex` / `claude` / `opencode`). Required when the
+    /// same path could exist in multiple sources.
+    source: Option<String>,
+}
+
+async fn api_diagnostics_forget(
+    State(state): State<WebState>,
+    Json(payload): Json<ForgetRequest>,
+) -> Response {
+    let Some(source_str) = payload.source.as_deref() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": {
+                    "code": "missing_source",
+                    "message": "POST /api/diagnostics/forget 必须显式传 source 字段",
+                }
+            })),
+        )
+            .into_response();
+    };
+    let Some(source) = SourceKind::parse_id(source_str) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": {
+                    "code": "unknown_source",
+                    "message": format!("未知 source: {source_str}"),
+                }
+            })),
+        )
+            .into_response();
+    };
+
+    match state
+        .store
+        .mark_source_file_deleted(source, &payload.file_path)
+    {
+        Ok(()) => Json(json!({
+            "ok": true,
+            "source": source.as_str(),
+            "file_path": payload.file_path,
+        }))
+        .into_response(),
+        Err(err) => {
+            error!(endpoint = "/api/diagnostics/forget", error = %err, "forget failed");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": {
+                        "code": "internal_error",
+                        "message": "登记 forget 失败",
+                        "detail": err.to_string(),
+                    }
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+async fn api_jobs_start(
+    State(state): State<WebState>,
+    Json(options): Json<SyncOptions>,
+) -> Response {
+    let (job_id, _rx) = state.jobs.start(&state.store, options);
+    let Some(snapshot) = state.jobs.snapshot(&job_id) else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "error": {
+                    "code": "job_not_found",
+                    "message": "刚创建的 job 未能在 registry 中找到",
+                }
+            })),
+        )
+            .into_response();
+    };
+    Json(json!({
+        "job_id": job_id,
+        "snapshot": snapshot,
+    }))
+    .into_response()
+}
+
+async fn api_jobs_get(State(state): State<WebState>, Path(id): Path<String>) -> Response {
+    match state.jobs.snapshot(&id) {
+        Some(snapshot) => Json(json!(snapshot)).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "error": {
+                    "code": "job_not_found",
+                    "message": format!("未知 job: {id}"),
+                }
+            })),
+        )
+            .into_response(),
+    }
+}
+
+async fn api_jobs_cancel(State(state): State<WebState>, Path(id): Path<String>) -> Response {
+    if !state.jobs.cancel(&id) {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "error": {
+                    "code": "job_not_found",
+                    "message": format!("未知 job: {id}"),
+                }
+            })),
+        )
+            .into_response();
+    }
+    Json(json!({
+        "ok": true,
+        "snapshot": state.jobs.snapshot(&id),
+    }))
+    .into_response()
+}
+
+fn load_via_dashboard<T>(
+    state: &WebState,
+    f: impl FnOnce(&Dashboard) -> LlmusageResult<T>,
+) -> LlmusageResult<T> {
     let dashboard = Dashboard::open(&state.store)?;
     f(&dashboard)
 }
 
-fn api_json<T>(endpoint: &'static str, result: Result<T>) -> Response
+fn api_json<T>(endpoint: &'static str, result: LlmusageResult<T>) -> Response
 where
     T: Serialize,
 {
@@ -189,12 +436,102 @@ where
     }
 }
 
+fn parse_bool_query(value: Option<&String>) -> bool {
+    value
+        .map(|raw| raw.trim().to_ascii_lowercase())
+        .is_some_and(|raw| matches!(raw.as_str(), "1" | "true" | "yes" | "on"))
+}
+
 #[cfg(test)]
 mod tests {
-    use anyhow::anyhow;
-    use axum::{body::to_bytes, http::StatusCode};
+    use std::{
+        fs,
+        io::{Read, Write},
+        net::SocketAddr,
+        time::Duration,
+    };
 
-    use super::{api_json, asset_manifest, live_index_html, snapshot_index_html};
+    use axum::{body::to_bytes, http::StatusCode};
+    use tempfile::TempDir;
+
+    use crate::{AppPaths, LlmusageError, store::Store, sync::SyncOptions};
+
+    use super::{api_json, asset_manifest, live_index_html, serve, snapshot_index_html};
+
+    fn make_store() -> anyhow::Result<(TempDir, Store)> {
+        let temp = TempDir::new()?;
+        let paths = AppPaths::with_root(temp.path().join(".llmusage"))?;
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+        Ok((temp, store))
+    }
+
+    async fn route_json(
+        addr: SocketAddr,
+        method: &str,
+        path: &str,
+        body: Option<String>,
+    ) -> anyhow::Result<(StatusCode, serde_json::Value)> {
+        let method = method.to_string();
+        let path = path.to_string();
+        let raw = tokio::task::spawn_blocking(move || {
+            let mut stream = std::net::TcpStream::connect(addr)?;
+            stream.set_read_timeout(Some(Duration::from_secs(10)))?;
+            stream.set_write_timeout(Some(Duration::from_secs(10)))?;
+            let body = body.unwrap_or_default();
+            let request = format!(
+                "{method} {path} HTTP/1.1\r\n\
+                 Host: {addr}\r\n\
+                 Content-Type: application/json\r\n\
+                 Accept: application/json\r\n\
+                 Content-Length: {}\r\n\
+                 Connection: close\r\n\r\n\
+                 {body}",
+                body.len()
+            );
+            stream.write_all(request.as_bytes())?;
+            let mut raw = String::new();
+            stream.read_to_string(&mut raw)?;
+            Ok::<_, anyhow::Error>(raw)
+        })
+        .await??;
+
+        let (head, body) = raw
+            .split_once("\r\n\r\n")
+            .ok_or_else(|| anyhow::anyhow!("invalid HTTP response: {raw:?}"))?;
+        let status_code = head
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .and_then(|raw| raw.parse::<u16>().ok())
+            .ok_or_else(|| anyhow::anyhow!("invalid status line: {head:?}"))?;
+        let body = decode_http_body(head, body)?;
+        let payload = serde_json::from_str(&body)?;
+        Ok((StatusCode::from_u16(status_code)?, payload))
+    }
+
+    fn decode_http_body(head: &str, body: &str) -> anyhow::Result<String> {
+        if !head
+            .to_ascii_lowercase()
+            .contains("transfer-encoding: chunked")
+        {
+            return Ok(body.to_string());
+        }
+        let mut rest = body;
+        let mut decoded = String::new();
+        while let Some((size_hex, after_size)) = rest.split_once("\r\n") {
+            let size = usize::from_str_radix(size_hex.trim(), 16)?;
+            if size == 0 {
+                break;
+            }
+            if after_size.len() < size + 2 {
+                return Err(anyhow::anyhow!("truncated chunked response"));
+            }
+            decoded.push_str(&after_size[..size]);
+            rest = &after_size[size + 2..];
+        }
+        Ok(decoded)
+    }
 
     #[test]
     fn live_shell_uses_module_entry() {
@@ -438,7 +775,8 @@ mod tests {
 
     #[test]
     fn api_error_payload_is_structured_json() {
-        let response = api_json::<serde_json::Value>("/api/test", Err(anyhow!("boom")));
+        let response =
+            api_json::<serde_json::Value>("/api/test", Err(LlmusageError::NotInitialized));
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
         let runtime = tokio::runtime::Runtime::new().expect("runtime");
@@ -450,6 +788,110 @@ mod tests {
         let payload: serde_json::Value = serde_json::from_slice(&body).expect("json payload");
         assert_eq!(payload["error"]["code"], "internal_error");
         assert_eq!(payload["error"]["endpoint"], "/api/test");
-        assert_eq!(payload["error"]["detail"], "boom");
+        assert!(
+            payload["error"]["detail"]
+                .as_str()
+                .unwrap()
+                .contains("llmusage init")
+        );
+    }
+
+    #[tokio::test]
+    async fn api_logs_rejects_malformed_cursor() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let addr = serve(store, Some(0)).await?;
+        let (status, payload) =
+            route_json(addr, "GET", "/api/logs?cursor=not-base64-json", None).await?;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(payload["error"]["code"], "invalid_cursor");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn api_jobs_start_get_cancel_and_not_found() -> anyhow::Result<()> {
+        let (temp, store) = make_store()?;
+        let home = temp.path().join("home");
+        let codex_home = temp.path().join("codex-home");
+        fs::create_dir_all(&home)?;
+        fs::create_dir_all(codex_home.join("sessions"))?;
+        let _env = EnvGuard::set([
+            ("HOME", home.to_string_lossy().to_string()),
+            ("USERPROFILE", home.to_string_lossy().to_string()),
+            ("CODEX_HOME", codex_home.to_string_lossy().to_string()),
+        ]);
+        let addr = serve(store, Some(0)).await?;
+
+        let body = serde_json::to_string(&SyncOptions {
+            source: Some("codex".to_string()),
+            ..Default::default()
+        })?;
+        let (status, payload) = route_json(addr, "POST", "/api/jobs", Some(body)).await?;
+        assert_eq!(status, StatusCode::OK);
+        let job_id = payload["job_id"]
+            .as_str()
+            .expect("job_id string")
+            .to_string();
+        assert_eq!(payload["snapshot"]["job_id"], job_id);
+        assert!(payload["snapshot"]["status"].is_string());
+
+        let (status, snapshot) =
+            route_json(addr, "GET", &format!("/api/jobs/{job_id}"), None).await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(snapshot["job_id"], job_id);
+
+        let (status, cancelled) = route_json(
+            addr,
+            "POST",
+            &format!("/api/jobs/{job_id}/cancel"),
+            Some("{}".into()),
+        )
+        .await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(cancelled["ok"], true);
+        assert_eq!(cancelled["snapshot"]["job_id"], job_id);
+
+        let (status, missing_get) = route_json(addr, "GET", "/api/jobs/missing-job", None).await?;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(missing_get["error"]["code"], "job_not_found");
+
+        let (status, missing_cancel) = route_json(
+            addr,
+            "POST",
+            "/api/jobs/missing-job/cancel",
+            Some("{}".into()),
+        )
+        .await?;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(missing_cancel["error"]["code"], "job_not_found");
+        Ok(())
+    }
+
+    struct EnvGuard {
+        saved: Vec<(&'static str, Option<std::ffi::OsString>)>,
+    }
+
+    impl EnvGuard {
+        fn set(values: impl IntoIterator<Item = (&'static str, String)>) -> Self {
+            let mut saved = Vec::new();
+            for (key, value) in values {
+                saved.push((key, std::env::var_os(key)));
+                unsafe { std::env::set_var(key, value) };
+            }
+            Self { saved }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (key, value) in self.saved.drain(..).rev() {
+                unsafe {
+                    if let Some(value) = value {
+                        std::env::set_var(key, value);
+                    } else {
+                        std::env::remove_var(key);
+                    }
+                }
+            }
+        }
     }
 }

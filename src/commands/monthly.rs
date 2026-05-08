@@ -7,7 +7,7 @@ use super::report_args::MonthlyArgs;
 
 pub async fn run(app: &AppContext, args: MonthlyArgs) -> Result<()> {
     debug!("starting monthly report output");
-    let store = Store::new(&app.paths);
+    let store = Store::new(&app.paths)?;
     store.bootstrap()?;
     let filter = args.common.to_filter(None)?;
     let report = reports::load_monthly_report(&store, &filter)?;

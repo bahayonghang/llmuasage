@@ -16,13 +16,14 @@ pub async fn run(app: &AppContext) -> Result<()> {
     info!("开始输出状态摘要");
 
     // 1.1 读取概览、来源、健康和实时集成探针
-    let store = Store::new(&app.paths);
+    let store = Store::new(&app.paths)?;
     store.bootstrap()?;
     let dashboard = Dashboard::open(&store)?;
-    let overview = dashboard.overview()?;
-    let sources = dashboard.source_breakdown()?;
+    let overview = dashboard.overview(&Default::default())?;
+    let sources = dashboard.source_breakdown(&Default::default())?;
     let health = dashboard.health()?;
     let probes = integrations::probe_all(app)?;
+    let lock = store.current_worker_lock()?;
 
     // 1.2 打印人读摘要
     println!("Status:");
@@ -49,6 +50,15 @@ pub async fn run(app: &AppContext) -> Result<()> {
             "- Integration {}: {} ({})",
             probe.source, probe.status, probe.detail
         );
+    }
+    if let Some(lock) = lock {
+        println!(
+            "- Worker lock: holder={} expires={}",
+            lock.holder_identity(),
+            lock.lease_expires_at
+        );
+    } else {
+        println!("- Worker lock: idle");
     }
     if let Some(run) = health.recent_failures.first() {
         println!(

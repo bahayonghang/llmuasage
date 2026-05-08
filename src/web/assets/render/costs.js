@@ -45,14 +45,14 @@ export function renderCosts(context) {
   const tableHtml = costRows
     .slice(0, 5)
     .map((row) => {
-      const totalTokens = Number(row.total_tokens || 0);
+      const total_tokens = Number(row.total_tokens || 0);
       const cost = Number(row.estimated_cost_usd || 0);
 
       return `
         <tr>
           <td class="name-cell">${escapeHtml(row.model || '--')}</td>
           <td>${escapeHtml(row.source || '--')}</td>
-          <td class="r">${formatCompact(totalTokens)}</td>
+          <td class="r">${formatCompact(total_tokens)}</td>
           <td class="r">${formatUsd(cost)}</td>
         </tr>
       `;

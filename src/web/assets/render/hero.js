@@ -21,11 +21,11 @@ export function renderHero(context) {
   const { ledgerSummary } = context;
   const heroCopy = UI_COPY.hero;
   const metaItems = [
-    { label: heroCopy.rows.generatedAt, value: ledgerSummary.generatedAt || '--' },
-    { label: heroCopy.rows.lastSyncAt, value: ledgerSummary.lastSyncAt || '--' },
+    { label: heroCopy.rows.generated_at, value: ledgerSummary.generated_at || '--' },
+    { label: heroCopy.rows.last_sync_at, value: ledgerSummary.last_sync_at || '--' },
     {
       label: heroCopy.rows.sourceCount,
-      value: `${ledgerSummary.activeSources} · ${heroCopy.sourceSuffix}`,
+      value: `${ledgerSummary.active_sources} · ${heroCopy.sourceSuffix}`,
     },
   ];
 
@@ -41,8 +41,8 @@ export function renderHero(context) {
 
   // 1.2 填充 status-panel
   const { health } = context;
-  const panelTone = ledgerSummary.failureCount > 0 ? 'warn' : 'good';
-  const statusLabel = ledgerSummary.failureCount > 0 ? heroCopy.statusWarn : heroCopy.statusOk;
+  const panelTone = ledgerSummary.failure_count > 0 ? 'warn' : 'good';
+  const statusLabel = ledgerSummary.failure_count > 0 ? heroCopy.statusWarn : heroCopy.statusOk;
 
   const integrationRows = (health.integrations || [])
     .slice(0, 3)
@@ -70,7 +70,7 @@ export function renderHero(context) {
     <div class="status-grid">
       <div class="status-cell">
         <div class="status-cell-label">${escapeHtml(heroCopy.cell.integrations)}</div>
-        <div class="status-cell-value">${health.readyIntegrations} / ${health.totalIntegrations}</div>
+        <div class="status-cell-value">${health.ready_integrations} / ${health.total_integrations}</div>
       </div>
       <div class="status-cell">
         <div class="status-cell-label">${escapeHtml(heroCopy.cell.cursors)}</div>
@@ -78,7 +78,7 @@ export function renderHero(context) {
       </div>
       <div class="status-cell">
         <div class="status-cell-label">${escapeHtml(heroCopy.cell.failures)}</div>
-        <div class="status-cell-value">${ledgerSummary.failureCount}</div>
+        <div class="status-cell-value">${ledgerSummary.failure_count}</div>
       </div>
     </div>
     <div class="status-list">
@@ -113,7 +113,7 @@ export function renderHero(context) {
 
   const endpointSync = document.getElementById('endpoint-sync');
   if (endpointSync) {
-    endpointSync.textContent = ledgerSummary.lastSyncAt || '--';
+    endpointSync.textContent = ledgerSummary.last_sync_at || '--';
   }
 
   logger.info('完成首屏 hero 区渲染');

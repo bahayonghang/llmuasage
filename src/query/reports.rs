@@ -5,19 +5,13 @@ use chrono::{DateTime, Duration, FixedOffset, Local, NaiveDate, Offset, Timelike
 use rusqlite::Connection;
 use serde::Serialize;
 
+pub use super::ReportTimezone;
 use crate::{models::SourceKind, query::pricing, store::Store};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortOrder {
     Asc,
     Desc,
-}
-
-#[derive(Debug, Clone)]
-pub enum ReportTimezone {
-    Utc,
-    Local,
-    Fixed(FixedOffset),
 }
 
 #[derive(Debug, Clone)]
@@ -47,10 +41,9 @@ pub struct BlockReportOptions {
 }
 
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 pub struct TokenTotals {
     pub input_tokens: i64,
-    pub cached_input_tokens: i64,
+    pub cache_read_tokens: i64,
     pub output_tokens: i64,
     pub reasoning_output_tokens: i64,
     pub total_tokens: i64,
@@ -58,12 +51,11 @@ pub struct TokenTotals {
 }
 
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 pub struct ModelCostBreakdown {
     pub source: String,
     pub model: String,
     pub input_tokens: i64,
-    pub cached_input_tokens: i64,
+    pub cache_read_tokens: i64,
     pub output_tokens: i64,
     pub reasoning_output_tokens: i64,
     pub total_tokens: i64,
@@ -71,7 +63,6 @@ pub struct ModelCostBreakdown {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, PartialOrd, Ord)]
-#[serde(rename_all = "camelCase")]
 pub struct ProjectSummary {
     pub project_hash: String,
     pub project_label: String,
@@ -79,7 +70,6 @@ pub struct ProjectSummary {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 pub struct DailyReportRow {
     pub date: String,
     pub source: Option<String>,
@@ -91,7 +81,6 @@ pub struct DailyReportRow {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 pub struct MonthlyReportRow {
     pub month: String,
     pub source: Option<String>,
@@ -102,7 +91,6 @@ pub struct MonthlyReportRow {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 pub struct SessionReportRow {
     pub session_id: String,
     pub session_label: Option<String>,
@@ -117,7 +105,6 @@ pub struct SessionReportRow {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 pub struct BlockReportRow {
     pub block_id: String,
     pub start_at: String,
@@ -168,7 +155,6 @@ pub struct BlocksReport {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 pub struct StatuslineSummary {
     pub today: TokenTotals,
     pub active_block: Option<BlockReportRow>,
@@ -184,7 +170,7 @@ struct EventRow {
     local_at: DateTime<FixedOffset>,
     local_date: NaiveDate,
     input_tokens: i64,
-    cached_input_tokens: i64,
+    cache_read_tokens: i64,
     output_tokens: i64,
     reasoning_output_tokens: i64,
     total_tokens: i64,
@@ -216,14 +202,14 @@ impl Aggregate {
             &event.source,
             &event.model,
             event.input_tokens,
-            event.cached_input_tokens,
+            event.cache_read_tokens,
             event.output_tokens,
             event.reasoning_output_tokens,
         );
         add_tokens(
             &mut self.totals,
             event.input_tokens,
-            event.cached_input_tokens,
+            event.cache_read_tokens,
             event.output_tokens,
             event.reasoning_output_tokens,
             event.total_tokens,
@@ -237,7 +223,7 @@ impl Aggregate {
         add_tokens(
             entry,
             event.input_tokens,
-            event.cached_input_tokens,
+            event.cache_read_tokens,
             event.output_tokens,
             event.reasoning_output_tokens,
             event.total_tokens,
@@ -259,7 +245,7 @@ impl Aggregate {
                 source: source.clone(),
                 model: model.clone(),
                 input_tokens: totals.input_tokens,
-                cached_input_tokens: totals.cached_input_tokens,
+                cache_read_tokens: totals.cache_read_tokens,
                 output_tokens: totals.output_tokens,
                 reasoning_output_tokens: totals.reasoning_output_tokens,
                 total_tokens: totals.total_tokens,
@@ -272,14 +258,14 @@ impl Aggregate {
 fn add_tokens(
     totals: &mut TokenTotals,
     input_tokens: i64,
-    cached_input_tokens: i64,
+    cache_read_tokens: i64,
     output_tokens: i64,
     reasoning_output_tokens: i64,
     total_tokens: i64,
     cost: f64,
 ) {
     totals.input_tokens += input_tokens;
-    totals.cached_input_tokens += cached_input_tokens;
+    totals.cache_read_tokens += cache_read_tokens;
     totals.output_tokens += output_tokens;
     totals.reasoning_output_tokens += reasoning_output_tokens;
     totals.total_tokens += total_tokens;
@@ -580,14 +566,14 @@ fn add_totals_from_event(totals: &mut TokenTotals, event: &EventRow) {
         &event.source,
         &event.model,
         event.input_tokens,
-        event.cached_input_tokens,
+        event.cache_read_tokens,
         event.output_tokens,
         event.reasoning_output_tokens,
     );
     add_tokens(
         totals,
         event.input_tokens,
-        event.cached_input_tokens,
+        event.cache_read_tokens,
         event.output_tokens,
         event.reasoning_output_tokens,
         event.total_tokens,
@@ -624,7 +610,7 @@ fn load_events(conn: &Connection) -> Result<Vec<EventRow>> {
             model,
             event_at,
             input_tokens,
-            cached_input_tokens,
+            cache_read_tokens,
             output_tokens,
             reasoning_output_tokens,
             total_tokens,
@@ -655,7 +641,7 @@ fn load_events(conn: &Connection) -> Result<Vec<EventRow>> {
             model: row.get(2)?,
             event_utc,
             input_tokens: row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
-            cached_input_tokens: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
+            cache_read_tokens: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
             output_tokens: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
             reasoning_output_tokens: row.get::<_, Option<i64>>(7)?.unwrap_or_default(),
             total_tokens: row.get::<_, Option<i64>>(8)?.unwrap_or_default(),
@@ -681,7 +667,7 @@ struct RawEventRow {
     model: String,
     event_utc: DateTime<Utc>,
     input_tokens: i64,
-    cached_input_tokens: i64,
+    cache_read_tokens: i64,
     output_tokens: i64,
     reasoning_output_tokens: i64,
     total_tokens: i64,
@@ -704,7 +690,7 @@ impl RawEventRow {
             local_date: local_at.date_naive(),
             local_at,
             input_tokens: self.input_tokens,
-            cached_input_tokens: self.cached_input_tokens,
+            cache_read_tokens: self.cache_read_tokens,
             output_tokens: self.output_tokens,
             reasoning_output_tokens: self.reasoning_output_tokens,
             total_tokens: self.total_tokens,
@@ -947,7 +933,7 @@ mod tests {
                 root_dir,
                 bin_dir,
             };
-            let store = Store::new(&paths);
+            let store = Store::new(&paths)?;
             store.bootstrap()?;
             Ok(Self { _temp: temp, store })
         }
@@ -958,7 +944,7 @@ mod tests {
                 r#"
                 INSERT INTO usage_event(
                     event_key, source, model, event_at, hour_start,
-                    input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens, total_tokens,
+                    input_tokens, cache_read_tokens, output_tokens, reasoning_output_tokens, total_tokens,
                     project_hash, project_label, project_ref, path_hash, session_id, session_label, source_path_hash, created_at
                 ) VALUES (?1, ?2, ?3, ?4, ?4, ?5, 0, 0, 0, ?5, ?6, ?7, NULL, ?8, NULLIF(?9, ''), NULL, CASE WHEN ?9 = '' THEN NULL ELSE ?8 END, ?4)
                 "#,

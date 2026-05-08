@@ -15,7 +15,7 @@ pub async fn run(app: &AppContext) -> Result<()> {
      */
     info!("开始启动本地 TUI");
 
-    let store = Store::new(&app.paths);
+    let store = Store::new(&app.paths)?;
     store.bootstrap()?;
     tui::run_terminal(&store)?;
 

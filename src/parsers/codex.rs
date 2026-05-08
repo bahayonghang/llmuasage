@@ -10,13 +10,14 @@ use std::{
 use anyhow::Result;
 use serde_json::Value;
 use tokio::task;
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 use walkdir::WalkDir;
 
 use crate::{
     models::{SessionInfo, SourceKind, UsageEvent, UsageTokens},
     parsers::{
-        SourceParser, SourceSyncStats,
+        ProgressSink, SourceParser, SourceSyncStats, SyncEvent,
         file_state::{
             CandidateFile, FileReplayMode, decide_file_replay, finalize_cursor, should_rescan_file,
         },
@@ -39,6 +40,7 @@ struct CodexShardOutput {
     events_seen: usize,
     events_replayed: usize,
     bytes_scanned: u64,
+    seen_file_paths: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -63,8 +65,10 @@ impl SourceParser for CodexParser {
         store: &'a Store,
         writer: &'a mut SyncRunWriter,
         parallelism: usize,
+        cancel: &'a CancellationToken,
+        progress: Option<ProgressSink<'a>>,
     ) -> Pin<Box<dyn Future<Output = Result<SourceSyncStats>> + Send + 'a>> {
-        Box::pin(sync_codex(store, writer, parallelism))
+        Box::pin(sync_codex(store, writer, parallelism, cancel, progress))
     }
 }
 
@@ -72,6 +76,8 @@ async fn sync_codex(
     store: &Store,
     writer: &mut SyncRunWriter,
     parallelism: usize,
+    cancel: &CancellationToken,
+    mut progress: Option<ProgressSink<'_>>,
 ) -> Result<SourceSyncStats> {
     /*
      * ========================================================================
@@ -93,6 +99,13 @@ async fn sync_codex(
     let sessions_dir = codex_home.join("sessions");
     let files = list_rollout_files(&sessions_dir);
     let total_files = files.len();
+    emit_progress(
+        &mut progress,
+        SyncEvent::SourceStarted {
+            source: SourceKind::Codex,
+            files_total: total_files as u64,
+        },
+    );
     let cursor_map = store.cursors().load_file_cursors(SourceKind::Codex)?;
 
     let mut shards = std::collections::HashMap::<PathBuf, Vec<CandidateFile>>::new();
@@ -117,6 +130,7 @@ async fn sync_codex(
     let mut bytes_scanned = 0u64;
     let mut inserted = 0usize;
     let mut write_ms = 0u64;
+    let mut files_scanned = 0usize;
     let mut plans = shards
         .into_values()
         .map(|files| CodexShardPlan { files })
@@ -125,6 +139,9 @@ async fn sync_codex(
 
     let width = parallelism.max(1);
     for batch in plans.chunks(width) {
+        if cancel.is_cancelled() {
+            break;
+        }
         let mut tasks = Vec::new();
         for plan in batch {
             let plan = plan.clone();
@@ -132,6 +149,9 @@ async fn sync_codex(
         }
 
         for task in tasks {
+            if cancel.is_cancelled() {
+                break;
+            }
             let shard = task.await??;
             events_seen += shard.events_seen;
             events_replayed += shard.events_replayed;
@@ -143,9 +163,21 @@ async fn sync_codex(
                 reset_path_hashes: shard.reset_path_hashes,
                 events: shard.events,
                 cursors: shard.cursors,
+                seen_file_paths: shard.seen_file_paths,
+                raw_records: Vec::new(),
             })?;
+            files_scanned += commit.files_seen;
             inserted += commit.events_inserted;
             write_ms += commit.write_ms;
+            emit_progress(
+                &mut progress,
+                SyncEvent::Progress {
+                    source: SourceKind::Codex,
+                    files_scanned: files_scanned as u64,
+                    records_imported: inserted as u64,
+                    current_file: None,
+                },
+            );
         }
     }
 
@@ -171,6 +203,12 @@ async fn sync_codex(
         "完成 Codex rollout 真源解析"
     );
     Ok(stats)
+}
+
+fn emit_progress(sink: &mut Option<ProgressSink<'_>>, event: SyncEvent) {
+    if let Some(sink) = sink.as_mut() {
+        sink(event);
+    }
 }
 
 fn list_rollout_files(sessions_dir: &Path) -> Vec<PathBuf> {
@@ -199,11 +237,15 @@ fn parse_codex_shard(plan: CodexShardPlan) -> Result<CodexShardOutput> {
         events_seen: 0,
         events_replayed: 0,
         bytes_scanned: 0,
+        seen_file_paths: Vec::new(),
     };
 
     for candidate in plan.files {
         let existing = candidate.existing.clone();
         let decision = decide_file_replay(candidate)?;
+        output
+            .seen_file_paths
+            .push(decision.snapshot.path.to_string_lossy().to_string());
         let path_hash = hash_string(&decision.snapshot.path.to_string_lossy());
         let (last_total, last_model) = if decision.replay_mode == FileReplayMode::Append {
             (
@@ -356,7 +398,7 @@ fn parse_rollout_file(
         let delta = pick_delta(last_usage, total_usage, totals.as_ref());
         if delta.total_tokens == 0
             && delta.input_tokens == 0
-            && delta.cached_input_tokens == 0
+            && delta.cache_read_tokens == 0
             && delta.output_tokens == 0
             && delta.reasoning_output_tokens == 0
         {
@@ -425,8 +467,8 @@ fn pick_delta(
         }
         return UsageTokens {
             input_tokens: (total.input_tokens - previous_total.input_tokens).max(0),
-            cached_input_tokens: (total.cached_input_tokens - previous_total.cached_input_tokens)
-                .max(0),
+            cache_read_tokens: (total.cache_read_tokens - previous_total.cache_read_tokens).max(0),
+            cache_creation_tokens: 0,
             output_tokens: (total.output_tokens - previous_total.output_tokens).max(0),
             reasoning_output_tokens: (total.reasoning_output_tokens
                 - previous_total.reasoning_output_tokens)
@@ -445,10 +487,11 @@ fn parse_usage_tokens(value: &Value) -> Option<UsageTokens> {
             .get("input_tokens")
             .and_then(Value::as_i64)
             .unwrap_or_default(),
-        cached_input_tokens: object
-            .get("cached_input_tokens")
+        cache_read_tokens: object
+            .get("cache_read_tokens")
             .and_then(Value::as_i64)
             .unwrap_or_default(),
+        cache_creation_tokens: 0,
         output_tokens: object
             .get("output_tokens")
             .and_then(Value::as_i64)

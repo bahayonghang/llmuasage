@@ -13,6 +13,18 @@ pub fn now_utc() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
+/// Higher-resolution UTC timestamp for internal sync ordering.
+///
+/// Sync runs may fire back-to-back inside the same wall-clock second (e.g.
+/// during integration tests or rapid `--rebuild` cycles). The `source_file`
+/// state machine compares `last_seen_at` against the run's `run_started_at`
+/// to flip stale `live` rows to `missing`; second-resolution loses fidelity
+/// when two runs share the same second. Use millisecond resolution for
+/// internal timestamps that participate in such comparisons.
+pub fn now_utc_millis() -> String {
+    Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+}
+
 pub fn resolve_home_dir() -> PathBuf {
     std::env::var("HOME")
         .ok()

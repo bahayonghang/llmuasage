@@ -24,11 +24,11 @@ const UI_COPY_ZH = Object.freeze({
     statusUnknown: '未知',
     sourceSuffix: 'codex / claude',
     rows: Object.freeze({
-      generatedAt: '生成时间',
-      lastSyncAt: '最近同步',
-      lastExportAt: '最近导出',
+      generated_at: '生成时间',
+      last_sync_at: '最近同步',
+      last_export_at: '最近导出',
       sourceCount: '来源数',
-      failureCount: '失败记录',
+      failure_count: '失败记录',
       topModel: '用量最高模型',
     }),
     cell: Object.freeze({
@@ -98,10 +98,10 @@ const UI_COPY_ZH = Object.freeze({
       collapseLabel: '收起完整排行',
       headers: Object.freeze({
         model: '模型',
-        totalTokens: '总用量',
-        inputShare: '输入占比',
-        outputShare: '输出占比',
-        cachedShare: '缓存占比',
+        total_tokens: '总用量',
+        input_share: '输入占比',
+        output_share: '输出占比',
+        cached_share: '缓存占比',
       }),
     }),
     sources: Object.freeze({
@@ -116,7 +116,7 @@ const UI_COPY_ZH = Object.freeze({
       collapseLabel: '收起全部来源',
       headers: Object.freeze({
         source: '来源',
-        lastEventAt: '最近记录',
+        last_event_at: '最近记录',
       }),
     }),
     projects: Object.freeze({
@@ -144,7 +144,7 @@ const UI_COPY_ZH = Object.freeze({
       headers: Object.freeze({
         model: '模型',
         source: '来源',
-        estimatedCostUsd: '估算成本',
+        estimated_cost_usd: '估算成本',
       }),
     }),
     health: Object.freeze({
@@ -180,11 +180,11 @@ const UI_COPY_EN = Object.freeze({
     statusUnknown: 'Unknown',
     sourceSuffix: 'codex / claude',
     rows: Object.freeze({
-      generatedAt: 'Generated',
-      lastSyncAt: 'Last sync',
-      lastExportAt: 'Last export',
+      generated_at: 'Generated',
+      last_sync_at: 'Last sync',
+      last_export_at: 'Last export',
       sourceCount: 'Sources',
-      failureCount: 'Failures',
+      failure_count: 'Failures',
       topModel: 'Top model',
     }),
     cell: Object.freeze({
@@ -254,10 +254,10 @@ const UI_COPY_EN = Object.freeze({
       collapseLabel: 'Collapse ranking',
       headers: Object.freeze({
         model: 'Model',
-        totalTokens: 'Tokens',
-        inputShare: 'Input %',
-        outputShare: 'Output %',
-        cachedShare: 'Cached %',
+        total_tokens: 'Tokens',
+        input_share: 'Input %',
+        output_share: 'Output %',
+        cached_share: 'Cached %',
       }),
     }),
     sources: Object.freeze({
@@ -272,7 +272,7 @@ const UI_COPY_EN = Object.freeze({
       collapseLabel: 'Collapse sources',
       headers: Object.freeze({
         source: 'Source',
-        lastEventAt: 'Last seen',
+        last_event_at: 'Last seen',
       }),
     }),
     projects: Object.freeze({
@@ -300,7 +300,7 @@ const UI_COPY_EN = Object.freeze({
       headers: Object.freeze({
         model: 'Model',
         source: 'Source',
-        estimatedCostUsd: 'Est. cost',
+        estimated_cost_usd: 'Est. cost',
       }),
     }),
     health: Object.freeze({

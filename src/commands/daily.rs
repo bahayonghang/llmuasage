@@ -7,7 +7,7 @@ use super::report_args::DailyArgs;
 
 pub async fn run(app: &AppContext, args: DailyArgs) -> Result<()> {
     debug!("starting daily report output");
-    let store = Store::new(&app.paths);
+    let store = Store::new(&app.paths)?;
     store.bootstrap()?;
     let mut filter = args.common.to_filter(args.project.clone())?;
     if args.all && (filter.since.is_some() || filter.until.is_some()) {

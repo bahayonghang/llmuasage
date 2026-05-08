@@ -3,11 +3,12 @@ use std::{future::Future, path::PathBuf, pin::Pin, time::Instant};
 use anyhow::Result;
 use rusqlite::{Connection, params};
 use serde_json::Value;
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::{
     models::{SessionInfo, SourceKind, UsageEvent, UsageTokens},
-    parsers::{SourceParser, SourceSyncStats},
+    parsers::{ProgressSink, SourceParser, SourceSyncStats, SyncEvent},
     project::ProjectResolver,
     store::{Store, SyncRunWriter, SyncShard},
     util::{bucket_start_from_rfc3339, file_identity, normalize_model, now_utc, resolve_home_dir},
@@ -39,8 +40,10 @@ impl SourceParser for OpencodeParser {
         store: &'a Store,
         writer: &'a mut SyncRunWriter,
         parallelism: usize,
+        cancel: &'a CancellationToken,
+        progress: Option<ProgressSink<'a>>,
     ) -> Pin<Box<dyn Future<Output = Result<SourceSyncStats>> + Send + 'a>> {
-        Box::pin(sync_opencode(store, writer, parallelism))
+        Box::pin(sync_opencode(store, writer, parallelism, cancel, progress))
     }
 }
 
@@ -48,6 +51,8 @@ async fn sync_opencode(
     store: &Store,
     writer: &mut SyncRunWriter,
     _parallelism: usize,
+    cancel: &CancellationToken,
+    mut progress: Option<ProgressSink<'_>>,
 ) -> Result<SourceSyncStats> {
     /*
      * ========================================================================
@@ -73,6 +78,13 @@ async fn sync_opencode(
         source: SourceKind::Opencode,
         ..SourceSyncStats::default()
     };
+    emit_progress(
+        &mut progress,
+        SyncEvent::SourceStarted {
+            source: SourceKind::Opencode,
+            files_total: 1,
+        },
+    );
 
     if !db_path.is_file() {
         cursor.sqlite_status = "missing-db".to_string();
@@ -97,6 +109,7 @@ async fn sync_opencode(
 
     let connection = Connection::open(&db_path)?;
     let mut resolver = ProjectResolver::default();
+    let raw_archive_enabled = store.raw_archive_enabled()?;
     let mut latest_time = cursor.last_time_created;
     let mut latest_ids = cursor.last_processed_ids.clone();
     let mut seen_rows = 0usize;
@@ -113,12 +126,16 @@ async fn sync_opencode(
         .unwrap_or_default();
 
     loop {
+        if cancel.is_cancelled() {
+            break;
+        }
         let rows = load_opencode_page(&connection, page_last_time, &page_last_id)?;
         if rows.is_empty() {
             break;
         }
 
         let mut page_events = Vec::new();
+        let mut page_raw = Vec::new();
         for row in rows {
             page_last_time = row.time_created;
             page_last_id = row.id.clone();
@@ -142,9 +159,23 @@ async fn sync_opencode(
                 latest_ids.push(row.id.clone());
             }
 
+            // 序列化 OpenCode SQLite row 为 JSON（D11 / F1.5）。仅在 raw archive
+            // 开关打开时持有；否则丢弃，避免 commit_shard 同事务多写。
+            let raw_payload = if raw_archive_enabled {
+                Some(serialize_opencode_row(&row))
+            } else {
+                None
+            };
+
             let Some(event) = row_to_event(&row, &mut resolver)? else {
                 continue;
             };
+            if let Some(raw_json) = raw_payload {
+                page_raw.push(crate::store::RawRecord {
+                    event_key: event.event_key.clone(),
+                    raw_json,
+                });
+            }
             page_events.push(event);
         }
 
@@ -157,10 +188,21 @@ async fn sync_opencode(
                 reset_path_hashes: Vec::new(),
                 events: page_events,
                 cursors: Vec::new(),
+                seen_file_paths: Vec::new(),
+                raw_records: page_raw,
             })?;
             inserted += commit.events_inserted;
             write_ms += commit.write_ms;
         }
+        emit_progress(
+            &mut progress,
+            SyncEvent::Progress {
+                source: SourceKind::Opencode,
+                files_scanned: seen_rows as u64,
+                records_imported: inserted as u64,
+                current_file: Some(db_path.display().to_string()),
+            },
+        );
     }
 
     cursor.last_time_created = latest_time;
@@ -185,6 +227,12 @@ async fn sync_opencode(
         "完成 OpenCode SQLite 真源解析"
     );
     Ok(stats)
+}
+
+fn emit_progress(sink: &mut Option<ProgressSink<'_>>, event: SyncEvent) {
+    if let Some(sink) = sink.as_mut() {
+        sink(event);
+    }
 }
 
 fn load_opencode_page(
@@ -245,7 +293,7 @@ fn row_to_event(row: &OpencodeRow, resolver: &mut ProjectResolver) -> Result<Opt
     let tokens = normalize_opencode_tokens(value.get("tokens"));
     if tokens.total_tokens == 0
         && tokens.input_tokens == 0
-        && tokens.cached_input_tokens == 0
+        && tokens.cache_read_tokens == 0
         && tokens.output_tokens == 0
     {
         return Ok(None);
@@ -326,7 +374,7 @@ fn normalize_opencode_tokens(value: Option<&Value>) -> UsageTokens {
             .and_then(|cache| cache.get("write"))
             .and_then(Value::as_i64)
             .unwrap_or_default();
-    let cached_input_tokens = value
+    let cache_read_tokens = value
         .get("cache")
         .and_then(|cache| cache.get("read"))
         .and_then(Value::as_i64)
@@ -342,9 +390,52 @@ fn normalize_opencode_tokens(value: Option<&Value>) -> UsageTokens {
 
     UsageTokens {
         input_tokens,
-        cached_input_tokens,
+        cache_read_tokens,
+        cache_creation_tokens: 0,
         output_tokens,
         reasoning_output_tokens,
         total_tokens: input_tokens + output_tokens + reasoning_output_tokens,
     }
+}
+
+/// Renders one OpenCode SQLite row as a JSON document for the raw archive
+/// (D11 / F1.5). The shape is deliberately stable and minimal: we serialize
+/// only the columns the parser already reads, plus the parsed `data` payload
+/// nested under `data` so consumers do not need to re-parse the inner JSON.
+///
+/// On `data` parse failure the original string is preserved verbatim under
+/// `data_text`, so a malformed upstream row still lands in the archive.
+fn serialize_opencode_row(row: &OpencodeRow) -> String {
+    let parsed = serde_json::from_str::<Value>(&row.data).ok();
+    let mut payload = serde_json::Map::new();
+    payload.insert("id".to_string(), Value::String(row.id.clone()));
+    if let Some(session_id) = row.session_id.as_deref() {
+        payload.insert(
+            "session_id".to_string(),
+            Value::String(session_id.to_string()),
+        );
+    }
+    payload.insert(
+        "time_created".to_string(),
+        Value::Number(serde_json::Number::from(row.time_created)),
+    );
+    if let Some(role) = row.role.as_deref() {
+        payload.insert("role".to_string(), Value::String(role.to_string()));
+    }
+    if let Some(worktree) = row.project_worktree.as_deref() {
+        payload.insert(
+            "project_worktree".to_string(),
+            Value::String(worktree.to_string()),
+        );
+    }
+    match parsed {
+        Some(value) => {
+            payload.insert("data".to_string(), value);
+        }
+        None => {
+            payload.insert("data_text".to_string(), Value::String(row.data.clone()));
+        }
+    }
+    serde_json::to_string(&Value::Object(payload))
+        .unwrap_or_else(|_| serde_json::json!({"id": row.id}).to_string())
 }

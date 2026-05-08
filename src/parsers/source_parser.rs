@@ -2,12 +2,16 @@ use std::future::Future;
 use std::pin::Pin;
 
 use anyhow::Result;
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     models::SourceKind,
-    parsers::SourceSyncStats,
+    parsers::{SourceSyncStats, SyncEvent},
     store::{Store, SyncRunWriter},
 };
+
+/// Parser-local progress callback supplied by the sync driver.
+pub type ProgressSink<'a> = &'a mut (dyn FnMut(SyncEvent) + Send);
 
 /// Erased async parser interface used by the sync driver.
 ///
@@ -43,5 +47,7 @@ pub trait SourceParser: Send + Sync {
         store: &'a Store,
         writer: &'a mut SyncRunWriter,
         parallelism: usize,
+        cancel: &'a CancellationToken,
+        progress: Option<ProgressSink<'a>>,
     ) -> Pin<Box<dyn Future<Output = Result<SourceSyncStats>> + Send + 'a>>;
 }

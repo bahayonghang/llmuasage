@@ -29,7 +29,7 @@ export function renderHealth(context) {
       <div class="health-summary">
         <article class="health-chip">
           <div class="health-chip-label">${escapeHtml(healthCopy.chips.integrations)}</div>
-          <div class="health-chip-value mono">${formatNumber(context.health.readyIntegrations)} / ${formatNumber(context.health.totalIntegrations)}</div>
+          <div class="health-chip-value mono">${formatNumber(context.health.ready_integrations)} / ${formatNumber(context.health.total_integrations)}</div>
         </article>
         <article class="health-chip">
           <div class="health-chip-label">${escapeHtml(healthCopy.chips.cursors)}</div>

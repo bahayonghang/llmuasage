@@ -21,10 +21,10 @@ export function renderModels(context) {
   const barHtml = modelRows
     .slice(0, 8)
     .map((row) => {
-      const totalTokens = Number(row.total_tokens || 0);
-      const widthPct = ratio(totalTokens, max);
+      const total_tokens = Number(row.total_tokens || 0);
+      const widthPct = ratio(total_tokens, max);
       const label = row.model || '--';
-      const value = formatNumber(totalTokens);
+      const value = formatNumber(total_tokens);
 
       return `
         <div class="bar-row">
@@ -42,14 +42,14 @@ export function renderModels(context) {
   const tableHtml = modelRows
     .slice(0, 8)
     .map((row) => {
-      const totalTokens = Number(row.total_tokens || 0);
-      const inputTokens = Number(row.input_tokens || 0);
-      const outputTokens = Number(row.output_tokens || 0) + Number(row.reasoning_output_tokens || 0);
-      const cachedTokens = Number(row.cached_input_tokens || 0);
+      const total_tokens = Number(row.total_tokens || 0);
+      const input_tokens = Number(row.input_tokens || 0);
+      const output_tokens = Number(row.output_tokens || 0) + Number(row.reasoning_output_tokens || 0);
+      const cached_tokens = Number(row.cache_read_tokens || 0);
 
-      const inputPct = formatPercent(inputTokens, totalTokens);
-      const outputPct = formatPercent(outputTokens, totalTokens);
-      const cachedPct = formatPercent(cachedTokens, totalTokens);
+      const inputPct = formatPercent(input_tokens, total_tokens);
+      const outputPct = formatPercent(output_tokens, total_tokens);
+      const cachedPct = formatPercent(cached_tokens, total_tokens);
 
       const inputClass = parseFloat(inputPct) > 95 ? 'pct high' : 'pct';
       const outputClass = parseFloat(outputPct) < 5 ? 'pct low' : 'pct';
@@ -58,7 +58,7 @@ export function renderModels(context) {
       return `
         <tr>
           <td class="name-cell">${escapeHtml(row.model || '--')}</td>
-          <td class="r">${formatNumber(totalTokens)}</td>
+          <td class="r">${formatNumber(total_tokens)}</td>
           <td class="r"><span class="${inputClass}">${inputPct}</span></td>
           <td class="r"><span class="${outputClass}">${outputPct}</span></td>
           <td class="r"><span class="${cachedClass}">${cachedPct}</span></td>

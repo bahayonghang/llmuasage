@@ -41,13 +41,13 @@ fn local_flow_installs_syncs_exports_and_uninstalls() -> Result<()> {
         );
 
         commands::sync::run(&app).await?;
-        let store = llmusage::store::Store::new(&app.paths);
+        let store = llmusage::store::Store::new(&app.paths)?;
         let dashboard = Dashboard::open(&store)?;
-        let overview = dashboard.overview()?;
+        let overview = dashboard.overview(&Default::default())?;
         assert_eq!(overview.source_count, 3);
         assert!(overview.total.total_tokens >= 344);
 
-        let projects = dashboard.project_breakdown()?;
+        let projects = dashboard.project_breakdown(&Default::default())?;
         assert!(!projects.is_empty());
 
         let html_out = fixture.root.path().join("html-out");
@@ -127,9 +127,14 @@ fn local_flow_installs_syncs_exports_and_uninstalls() -> Result<()> {
         assert!(web::snapshot_index_html().contains("data-mode=\"snapshot\""));
         assert!(web::live_index_html().contains("type=\"module\""));
 
-        commands::diagnostics::run(&app, Some(fixture.root.path().join("diagnostics.json")))
-            .await?;
-        commands::doctor::run(&app, true).await?;
+        commands::diagnostics::run(
+            &app,
+            Some(fixture.root.path().join("diagnostics.json")),
+            None,
+            None,
+        )
+        .await?;
+        commands::doctor::run(&app, true, None).await?;
 
         commands::uninstall::run(&app, false).await?;
         let codex_restored = fs::read_to_string(fixture.codex_home.join("config.toml"))?;
@@ -172,7 +177,7 @@ fn claude_install_reports_invalid_settings_shapes() -> Result<()> {
         let fixture = Fixture::new()?;
         fs::write(fixture.home.join(".claude").join("settings.json"), raw)?;
         let app = AppContext::discover()?;
-        let store = Store::new(&app.paths);
+        let store = Store::new(&app.paths)?;
         store.bootstrap()?;
 
         let err = integrations::claude::install(&app, &store).expect_err("shape should fail");
@@ -214,7 +219,7 @@ fn init_continues_when_claude_install_fails_and_records_error() -> Result<()> {
             "{\"hooks\":\"invalid\"}"
         );
 
-        let store = Store::new(&app.paths);
+        let store = Store::new(&app.paths)?;
         let states = store.integration_state().load_integration_states()?;
         assert_eq!(
             states

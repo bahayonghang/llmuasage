@@ -17,7 +17,7 @@ pub async fn run_html(app: &AppContext, out: Option<PathBuf>) -> Result<()> {
      */
     info!("开始导出静态 HTML 报告");
 
-    let store = Store::new(&app.paths);
+    let store = Store::new(&app.paths)?;
     store.bootstrap()?;
     let output_dir = out.unwrap_or_else(|| app.paths.exports_dir.join("latest"));
     let exported_dir = super::run_tracked(

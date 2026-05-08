@@ -1,165 +1,130 @@
 use std::fs;
 
-use anyhow::Result;
-use rusqlite::Connection;
+use rusqlite::OptionalExtension;
 use tracing::info;
 
-use super::Store;
+use super::{BootstrapOptions, Store, migrations};
+use crate::error::Result;
+
+const META_RAW_ARCHIVE_KEY: &str = "raw_archive_enabled";
 
 impl Store {
     pub fn bootstrap(&self) -> Result<()> {
+        self.bootstrap_with(BootstrapOptions::default())
+    }
+
+    /// Bootstraps the store while exposing migration lifecycle progress.
+    pub fn bootstrap_with_migration_events(
+        &self,
+        sink: Option<migrations::MigrationEventSink<'_>>,
+    ) -> Result<()> {
+        self.bootstrap_with_events(BootstrapOptions::default(), sink)
+    }
+
+    /// Bootstraps the store and applies optional configuration via
+    /// [`BootstrapOptions`]. Currently the only knob is the raw archive flag
+    /// (D11 / F1.5); setting it here lets ccr-ui or library callers express
+    /// the toggle as part of their first contact with the database.
+    pub fn bootstrap_with(&self, options: BootstrapOptions) -> Result<()> {
+        self.bootstrap_with_events(options, None)
+    }
+
+    fn bootstrap_with_events(
+        &self,
+        options: BootstrapOptions,
+        migration_sink: Option<migrations::MigrationEventSink<'_>>,
+    ) -> Result<()> {
         /*
          * ========================================================================
          * 步骤1：初始化本地目录与 SQLite schema
          * ========================================================================
          * 目标：
          * 1) 建立 llmusage 运行目录、备份目录与导出目录
-         * 2) 创建 SQLite 真源与全部核心表
-         * 3) 补齐新字段和增量锁表，兼容已有 DB
+         * 2) 通过 migration runner 创建或升级 SQLite schema
+         * 3) 0.4.x v0 老库升级前保留一次自动备份
+         * 4) 按 BootstrapOptions 落实 raw archive 开关（默认保持当前值）
          */
         info!("开始初始化本地目录与 SQLite schema");
 
-        // 1.1 建立本地运行目录
         fs::create_dir_all(&self.paths.root_dir)?;
         fs::create_dir_all(&self.paths.bin_dir)?;
         fs::create_dir_all(&self.paths.backups_dir)?;
         fs::create_dir_all(&self.paths.exports_dir)?;
 
-        // 1.2 打开数据库并应用 schema + 迁移
-        let conn = self.open_connection()?;
-        conn.execute_batch(
-            r#"
-            CREATE TABLE IF NOT EXISTS source_cursor (
-                source TEXT NOT NULL,
-                cursor_key TEXT NOT NULL,
-                file_path TEXT,
-                file_fingerprint TEXT,
-                file_size INTEGER,
-                file_mtime_ns INTEGER,
-                tail_signature TEXT,
-                inode INTEGER,
-                offset INTEGER,
-                last_total_json TEXT,
-                last_model TEXT,
-                last_time_created INTEGER,
-                last_processed_ids_json TEXT,
-                sqlite_status TEXT,
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY (source, cursor_key)
-            );
-            CREATE TABLE IF NOT EXISTS usage_event (
-                event_key TEXT PRIMARY KEY,
-                source TEXT NOT NULL,
-                model TEXT NOT NULL,
-                event_at TEXT NOT NULL,
-                hour_start TEXT NOT NULL,
-                input_tokens INTEGER NOT NULL,
-                cached_input_tokens INTEGER NOT NULL,
-                output_tokens INTEGER NOT NULL,
-                reasoning_output_tokens INTEGER NOT NULL,
-                total_tokens INTEGER NOT NULL,
-                project_hash TEXT,
-                project_label TEXT,
-                project_ref TEXT,
-                path_hash TEXT,
-                session_id TEXT,
-                session_label TEXT,
-                source_path_hash TEXT,
-                created_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS usage_bucket_30m (
-                source TEXT NOT NULL,
-                model TEXT NOT NULL,
-                hour_start TEXT NOT NULL,
-                project_hash TEXT NOT NULL DEFAULT '',
-                project_label TEXT,
-                project_ref TEXT,
-                input_tokens INTEGER NOT NULL,
-                cached_input_tokens INTEGER NOT NULL,
-                output_tokens INTEGER NOT NULL,
-                reasoning_output_tokens INTEGER NOT NULL,
-                total_tokens INTEGER NOT NULL,
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY (source, model, hour_start, project_hash)
-            );
-            CREATE TABLE IF NOT EXISTS project_dim (
-                project_hash TEXT PRIMARY KEY,
-                project_label TEXT NOT NULL,
-                project_ref TEXT,
-                repo_root_hash TEXT NOT NULL,
-                path_hash TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS integration_install (
-                source TEXT PRIMARY KEY,
-                install_type TEXT NOT NULL,
-                status TEXT NOT NULL,
-                config_path TEXT,
-                backup_path TEXT,
-                details_json TEXT,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS run_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                command TEXT NOT NULL,
-                status TEXT NOT NULL,
-                summary TEXT,
-                error TEXT,
-                started_at TEXT NOT NULL,
-                finished_at TEXT,
-                duration_ms INTEGER
-            );
-            CREATE TABLE IF NOT EXISTS trigger_state (
-                source TEXT PRIMARY KEY,
-                last_signal_at TEXT NOT NULL,
-                trigger TEXT NOT NULL,
-                last_worker_started_at TEXT,
-                last_worker_finished_at TEXT,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS worker_lease (
-                lock_name TEXT PRIMARY KEY,
-                owner_id TEXT NOT NULL,
-                lease_expires_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS source_sync_status (
-                source TEXT PRIMARY KEY,
-                files_processed INTEGER NOT NULL,
-                changed_files INTEGER NOT NULL,
-                bytes_scanned INTEGER NOT NULL,
-                events_seen INTEGER NOT NULL,
-                events_replayed INTEGER NOT NULL,
-                events_inserted INTEGER NOT NULL,
-                parse_ms INTEGER NOT NULL,
-                write_ms INTEGER NOT NULL,
-                lock_wait_ms INTEGER NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_usage_bucket_30m_hour_start
-                ON usage_bucket_30m(hour_start);
-            CREATE INDEX IF NOT EXISTS idx_usage_event_source_event_at
-                ON usage_event(source, event_at);
-            CREATE INDEX IF NOT EXISTS idx_usage_event_source_event_key
-                ON usage_event(source, event_key);
-            "#,
-        )?;
-        ensure_column(&conn, "source_cursor", "file_fingerprint", "TEXT")?;
-        ensure_column(&conn, "source_cursor", "file_size", "INTEGER")?;
-        ensure_column(&conn, "source_cursor", "file_mtime_ns", "INTEGER")?;
-        ensure_column(&conn, "source_cursor", "tail_signature", "TEXT")?;
-        ensure_column(&conn, "usage_event", "session_id", "TEXT")?;
-        ensure_column(&conn, "usage_event", "session_label", "TEXT")?;
-        ensure_column(&conn, "usage_event", "source_path_hash", "TEXT")?;
-        ensure_column(&conn, "run_log", "duration_ms", "INTEGER")?;
-        conn.execute_batch(
-            r#"
-            CREATE INDEX IF NOT EXISTS idx_usage_event_session
-                ON usage_event(source, session_id, event_at);
-            "#,
-        )?;
+        let mut conn = self.open_connection()?;
+        if migrations::read_schema_version(&conn)? == 0 && self.paths.db_path.is_file() {
+            self.backup_pre_0_5_0_db()?;
+        }
+        migrations::run_migrations_with_events(&mut conn, migration_sink)?;
 
-        info!("完成本地目录与 SQLite schema 初始化");
+        if let Some(enabled) = options.enable_raw_archive {
+            write_meta_flag(&conn, META_RAW_ARCHIVE_KEY, enabled)?;
+        }
+
+        info!(
+            version = migrations::latest_schema_version(),
+            "完成本地目录与 SQLite schema 初始化"
+        );
+        Ok(())
+    }
+
+    /// Reads the persisted raw archive flag (D11 / F1.5).
+    ///
+    /// Returns `false` if the meta row is missing or unrecognised. The
+    /// migration v7 seeds `'0'` so a freshly bootstrapped database always
+    /// reports `false` here.
+    pub fn raw_archive_enabled(&self) -> Result<bool> {
+        let conn = self.open_connection()?;
+        read_meta_flag(&conn, META_RAW_ARCHIVE_KEY)
+    }
+
+    /// Persists the raw archive flag without touching schema.
+    pub fn set_raw_archive(&self, enabled: bool) -> Result<()> {
+        let conn = self.open_connection()?;
+        write_meta_flag(&conn, META_RAW_ARCHIVE_KEY, enabled)
+    }
+
+    /// Reads a raw string value from the `meta` table.
+    pub fn meta_value(&self, key: &str) -> Result<Option<String>> {
+        let conn = self.open_connection()?;
+        read_meta_value(&conn, key)
+    }
+
+    /// Persists a raw string value into the `meta` table.
+    pub fn set_meta_value(&self, key: &str, value: &str) -> Result<()> {
+        let conn = self.open_connection()?;
+        write_meta_value(&conn, key, value)
+    }
+
+    /// Deletes rebuildable usage state for exactly one source (D20 / F3.3).
+    ///
+    /// `project_dim` is intentionally preserved because projects can be shared
+    /// by multiple sources and are cheap stale metadata until the next full GC.
+    pub fn reset_for_source(&self, source: crate::models::SourceKind) -> Result<()> {
+        info!(source = %source, "开始按源清空可重建用量数据");
+        let mut conn = self.open_connection()?;
+        let tx = conn.transaction()?;
+        {
+            let source = source.as_str();
+            tx.execute("DELETE FROM usage_event WHERE source = ?1", [source])?;
+            tx.execute("DELETE FROM usage_bucket_30m WHERE source = ?1", [source])?;
+            tx.execute("DELETE FROM source_cursor WHERE source = ?1", [source])?;
+            tx.execute("DELETE FROM source_sync_status WHERE source = ?1", [source])?;
+            tx.execute("DELETE FROM source_file WHERE source = ?1", [source])?;
+            tx.execute(
+                r#"
+                DELETE FROM usage_event_raw
+                WHERE event_key IN (
+                    SELECT raw.event_key
+                    FROM usage_event_raw raw
+                    WHERE raw.event_key LIKE ?1
+                )
+                "#,
+                [format!("{source}:%")],
+            )?;
+        }
+        tx.commit()?;
+        info!(source = %source, "完成按源清空可重建用量数据");
         Ok(())
     }
 
@@ -183,25 +148,50 @@ impl Store {
             DELETE FROM project_dim;
             DELETE FROM source_cursor;
             DELETE FROM source_sync_status;
+            DELETE FROM usage_event_raw;
             "#,
         )?;
 
         info!("完成清空可重建用量数据");
         Ok(())
     }
+
+    fn backup_pre_0_5_0_db(&self) -> Result<()> {
+        fs::create_dir_all(&self.paths.backups_dir)?;
+        let backup_path = self.paths.backups_dir.join("llmusage.db.pre-0.5.0");
+        if !backup_path.exists() {
+            fs::copy(&self.paths.db_path, &backup_path)?;
+        }
+        Ok(())
+    }
 }
 
-fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str) -> Result<()> {
-    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
-    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
-    let existing = rows.collect::<rusqlite::Result<Vec<_>>>()?;
-    if existing.iter().any(|item| item == column) {
-        return Ok(());
-    }
+fn read_meta_flag(conn: &rusqlite::Connection, key: &str) -> Result<bool> {
+    let raw = read_meta_value(conn, key)?;
+    Ok(matches!(raw.as_deref(), Some("1")))
+}
 
+fn write_meta_flag(conn: &rusqlite::Connection, key: &str, enabled: bool) -> Result<()> {
+    let value = if enabled { "1" } else { "0" };
+    write_meta_value(conn, key, value)
+}
+
+fn read_meta_value(conn: &rusqlite::Connection, key: &str) -> Result<Option<String>> {
+    Ok(conn
+        .query_row("SELECT value FROM meta WHERE key = ?1", [key], |row| {
+            row.get::<_, String>(0)
+        })
+        .optional()?)
+}
+
+fn write_meta_value(conn: &rusqlite::Connection, key: &str, value: &str) -> Result<()> {
     conn.execute(
-        &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
-        [],
+        r#"
+        INSERT INTO meta(key, value)
+        VALUES (?1, ?2)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        "#,
+        rusqlite::params![key, value],
     )?;
     Ok(())
 }

@@ -16,7 +16,7 @@ pub async fn run(app: &AppContext) -> Result<()> {
     info!("开始初始化本地运行时并安装集成");
 
     // 1.1 建立本地 store 与 run_log
-    let store = Store::new(&app.paths);
+    let store = Store::new(&app.paths)?;
     store.bootstrap()?;
     let run_id = store.run_log().record_run_start("init")?;
 

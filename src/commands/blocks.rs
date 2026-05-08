@@ -7,7 +7,7 @@ use super::report_args::BlocksArgs;
 
 pub async fn run(app: &AppContext, args: BlocksArgs) -> Result<()> {
     debug!("starting blocks report output");
-    let store = Store::new(&app.paths);
+    let store = Store::new(&app.paths)?;
     store.bootstrap()?;
     let filter = args.common.to_filter(None)?;
     let options = args.to_options();

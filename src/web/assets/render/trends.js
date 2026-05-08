@@ -97,15 +97,15 @@ export function renderTrends(context) {
   const sourceRows = (context.panels.sources || [])
     .slice(0, 2)
     .map((row) => {
-      const totalTokens = Number(row.total_tokens || 0);
-      const sharePct = context.totals.totalTokens
-        ? ((totalTokens / context.totals.totalTokens) * 100).toFixed(1)
+      const total_tokens = Number(row.total_tokens || 0);
+      const sharePct = context.totals.total_tokens
+        ? ((total_tokens / context.totals.total_tokens) * 100).toFixed(1)
         : '0.0';
 
       return `
         <tr>
           <td>${escapeHtml(row.source || '--')}</td>
-          <td class="r">${formatNumber(totalTokens)}</td>
+          <td class="r">${formatNumber(total_tokens)}</td>
           <td class="r">${sharePct}%</td>
         </tr>
       `;

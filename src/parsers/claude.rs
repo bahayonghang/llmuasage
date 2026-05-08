@@ -10,13 +10,14 @@ use std::{
 use anyhow::Result;
 use serde_json::Value;
 use tokio::task;
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 use walkdir::WalkDir;
 
 use crate::{
     models::{SessionInfo, SourceKind, UsageEvent, UsageTokens},
     parsers::{
-        SourceParser, SourceSyncStats,
+        ProgressSink, SourceParser, SourceSyncStats, SyncEvent,
         file_state::{
             CandidateFile, FileReplayMode, decide_file_replay, finalize_cursor, should_rescan_file,
         },
@@ -39,6 +40,7 @@ struct ClaudeShardOutput {
     events_seen: usize,
     events_replayed: usize,
     bytes_scanned: u64,
+    seen_file_paths: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -61,8 +63,10 @@ impl SourceParser for ClaudeParser {
         store: &'a Store,
         writer: &'a mut SyncRunWriter,
         parallelism: usize,
+        cancel: &'a CancellationToken,
+        progress: Option<ProgressSink<'a>>,
     ) -> Pin<Box<dyn Future<Output = Result<SourceSyncStats>> + Send + 'a>> {
-        Box::pin(sync_claude(store, writer, parallelism))
+        Box::pin(sync_claude(store, writer, parallelism, cancel, progress))
     }
 }
 
@@ -70,6 +74,8 @@ async fn sync_claude(
     store: &Store,
     writer: &mut SyncRunWriter,
     parallelism: usize,
+    cancel: &CancellationToken,
+    mut progress: Option<ProgressSink<'_>>,
 ) -> Result<SourceSyncStats> {
     /*
      * ========================================================================
@@ -88,6 +94,13 @@ async fn sync_claude(
     let projects_dir = home_dir.join(".claude").join("projects");
     let files = list_project_logs(&projects_dir);
     let total_files = files.len();
+    emit_progress(
+        &mut progress,
+        SyncEvent::SourceStarted {
+            source: SourceKind::Claude,
+            files_total: total_files as u64,
+        },
+    );
     let cursor_map = store.cursors().load_file_cursors(SourceKind::Claude)?;
 
     let mut shards = std::collections::HashMap::<PathBuf, Vec<CandidateFile>>::new();
@@ -112,6 +125,7 @@ async fn sync_claude(
     let mut bytes_scanned = 0u64;
     let mut inserted = 0usize;
     let mut write_ms = 0u64;
+    let mut files_scanned = 0usize;
     let mut plans = shards
         .into_values()
         .map(|files| ClaudeShardPlan { files })
@@ -120,6 +134,9 @@ async fn sync_claude(
 
     let width = parallelism.max(1);
     for batch in plans.chunks(width) {
+        if cancel.is_cancelled() {
+            break;
+        }
         let mut tasks = Vec::new();
         for plan in batch {
             let plan = plan.clone();
@@ -127,6 +144,9 @@ async fn sync_claude(
         }
 
         for task in tasks {
+            if cancel.is_cancelled() {
+                break;
+            }
             let shard = task.await??;
             events_seen += shard.events_seen;
             events_replayed += shard.events_replayed;
@@ -138,9 +158,21 @@ async fn sync_claude(
                 reset_path_hashes: shard.reset_path_hashes,
                 events: shard.events,
                 cursors: shard.cursors,
+                seen_file_paths: shard.seen_file_paths,
+                raw_records: Vec::new(),
             })?;
+            files_scanned += commit.files_seen;
             inserted += commit.events_inserted;
             write_ms += commit.write_ms;
+            emit_progress(
+                &mut progress,
+                SyncEvent::Progress {
+                    source: SourceKind::Claude,
+                    files_scanned: files_scanned as u64,
+                    records_imported: inserted as u64,
+                    current_file: None,
+                },
+            );
         }
     }
 
@@ -166,6 +198,12 @@ async fn sync_claude(
         "完成 Claude 项目真源解析"
     );
     Ok(stats)
+}
+
+fn emit_progress(sink: &mut Option<ProgressSink<'_>>, event: SyncEvent) {
+    if let Some(sink) = sink.as_mut() {
+        sink(event);
+    }
 }
 
 fn list_project_logs(projects_dir: &Path) -> Vec<PathBuf> {
@@ -194,11 +232,15 @@ fn parse_claude_shard(plan: ClaudeShardPlan) -> Result<ClaudeShardOutput> {
         events_seen: 0,
         events_replayed: 0,
         bytes_scanned: 0,
+        seen_file_paths: Vec::new(),
     };
 
     for candidate in plan.files {
         let existing = candidate.existing.clone();
         let decision = decide_file_replay(candidate)?;
+        output
+            .seen_file_paths
+            .push(decision.snapshot.path.to_string_lossy().to_string());
         let project =
             resolver.resolve(decision.snapshot.path.parent().unwrap_or(Path::new(".")))?;
         let path_hash = hash_string(&decision.snapshot.path.to_string_lossy());
@@ -295,7 +337,8 @@ fn parse_project_file(
         if tokens.total_tokens == 0
             && tokens.input_tokens == 0
             && tokens.output_tokens == 0
-            && tokens.cached_input_tokens == 0
+            && tokens.cache_read_tokens == 0
+            && tokens.cache_creation_tokens == 0
         {
             continue;
         }
@@ -347,30 +390,70 @@ fn normalize_claude_usage(value: &Value) -> UsageTokens {
     let input_tokens = value
         .get("input_tokens")
         .and_then(Value::as_i64)
-        .unwrap_or_default()
-        + value
-            .get("cache_creation_input_tokens")
-            .and_then(Value::as_i64)
-            .unwrap_or_default();
-
-    let output_tokens = value
-        .get("output_tokens")
+        .unwrap_or_default();
+    let cache_creation_tokens = value
+        .get("cache_creation_input_tokens")
         .and_then(Value::as_i64)
         .unwrap_or_default();
-    let cached_input_tokens = value
+    let cache_read_tokens = value
         .get("cache_read_input_tokens")
+        .and_then(Value::as_i64)
+        .unwrap_or_default();
+    let output_tokens = value
+        .get("output_tokens")
         .and_then(Value::as_i64)
         .unwrap_or_default();
     let total_tokens = value
         .get("total_tokens")
         .and_then(Value::as_i64)
-        .unwrap_or(input_tokens + output_tokens);
+        .unwrap_or(input_tokens + cache_creation_tokens + cache_read_tokens + output_tokens);
 
     UsageTokens {
         input_tokens,
-        cached_input_tokens,
+        cache_read_tokens,
+        cache_creation_tokens,
         output_tokens,
         reasoning_output_tokens: 0,
         total_tokens,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_claude_usage;
+    use serde_json::json;
+
+    /// Validates D8: Claude's `cache_creation_input_tokens` populates the
+    /// dedicated `cache_creation_tokens` column instead of being merged back
+    /// into `input_tokens`, and that `cache_read_input_tokens` flows into
+    /// `cache_read_tokens` 1:1.
+    #[test]
+    fn claude_parser_separates_cache_read_and_creation() {
+        let usage = json!({
+            "input_tokens": 100,
+            "cache_creation_input_tokens": 30,
+            "cache_read_input_tokens": 50,
+            "output_tokens": 200,
+        });
+        let tokens = normalize_claude_usage(&usage);
+        assert_eq!(tokens.input_tokens, 100);
+        assert_eq!(tokens.cache_creation_tokens, 30);
+        assert_eq!(tokens.cache_read_tokens, 50);
+        assert_eq!(tokens.output_tokens, 200);
+        assert_eq!(tokens.total_tokens, 100 + 30 + 50 + 200);
+    }
+
+    /// Validates the fallback total formula picks up every component when the
+    /// upstream payload omits `total_tokens`.
+    #[test]
+    fn claude_parser_total_falls_back_to_component_sum_when_missing() {
+        let usage = json!({
+            "input_tokens": 10,
+            "cache_creation_input_tokens": 4,
+            "cache_read_input_tokens": 2,
+            "output_tokens": 5,
+        });
+        let tokens = normalize_claude_usage(&usage);
+        assert_eq!(tokens.total_tokens, 21);
     }
 }

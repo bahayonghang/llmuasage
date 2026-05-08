@@ -78,46 +78,46 @@ export function buildContext({ overview, trends, models, sources, projects, cost
   }, null);
   const trendAverage = trendAscending.length ? Math.round(trendTotal / trendAscending.length) : 0;
   const trendActive = trendAscending.filter((row) => Number(row?.total_tokens || 0) > 0).length;
-  const totalCost = costRows.reduce(
+  const total_cost = costRows.reduce(
     (sum, row) => sum + Number(row?.estimated_cost_usd || 0),
     0,
   );
-  const readyIntegrations = integrationRows.filter(
+  const ready_integrations = integrationRows.filter(
     (row) => statusTone(row?.status) === 'good',
   ).length;
 
   // 1.3 派生图表与表格数据，避免 render 层重复计算
-  const modelTableRows = modelRows.slice(0, PANEL_LIMITS.modelTable).map((row) => {
-    const outputTokens = Number(row.output_tokens || 0) + Number(row.reasoning_output_tokens || 0);
+  const model_table_rows = modelRows.slice(0, PANEL_LIMITS.modelTable).map((row) => {
+    const output_tokens = Number(row.output_tokens || 0) + Number(row.reasoning_output_tokens || 0);
     return {
       model: row.model,
-      totalTokens: formatNumber(row.total_tokens),
-      inputShare: formatPercent(row.input_tokens, row.total_tokens),
-      outputShare: formatPercent(outputTokens, row.total_tokens),
-      cachedShare: formatPercent(row.cached_input_tokens, row.total_tokens),
+      total_tokens: formatNumber(row.total_tokens),
+      input_share: formatPercent(row.input_tokens, row.total_tokens),
+      output_share: formatPercent(output_tokens, row.total_tokens),
+      cached_share: formatPercent(row.cache_read_tokens, row.total_tokens),
     };
   });
 
-  const sourceTableRows = sourceRows.slice(0, PANEL_LIMITS.sourceTable).map((row) => ({
+  const source_table_rows = sourceRows.slice(0, PANEL_LIMITS.sourceTable).map((row) => ({
     source: row.source,
-    lastEventAt: row.last_event_at || '尚未记录',
-    totalTokens: formatNumber(row.total_tokens),
+    last_event_at: row.last_event_at || '尚未记录',
+    total_tokens: formatNumber(row.total_tokens),
   }));
 
-  const costTableRows = costRows.slice(0, PANEL_LIMITS.costTable).map((row) => ({
+  const cost_table_rows = costRows.slice(0, PANEL_LIMITS.costTable).map((row) => ({
     model: row.model,
     source: row.source,
-    estimatedCostUsd: formatUsd(row.estimated_cost_usd),
+    estimated_cost_usd: formatUsd(row.estimated_cost_usd),
   }));
 
   const context = {
     overview: overview || {},
     ledgerSummary: {
-      generatedAt: overview?.generated_at,
-      lastSyncAt: overview?.last_sync_at,
-      lastExportAt: overview?.last_export_at,
-      activeSources: overview?.source_count ?? sourceRows.length,
-      failureCount: failureRows.length,
+      generated_at: overview?.generated_at,
+      last_sync_at: overview?.last_sync_at,
+      last_export_at: overview?.last_export_at,
+      active_sources: overview?.source_count ?? sourceRows.length,
+      failure_count: failureRows.length,
     },
     leaders: {
       model: modelRows[0] ?? null,
@@ -136,30 +136,30 @@ export function buildContext({ overview, trends, models, sources, projects, cost
     },
     panels: {
       models: modelRows,
-      modelTableRows,
+      model_table_rows,
       sources: sourceRows,
-      sourceTableRows,
+      source_table_rows,
       projects: projectRows,
       costs: costRows,
-      costTableRows,
+      cost_table_rows,
     },
     health: {
       integrations: integrationRows,
       cursors: cursorRows,
       failures: failureRows,
-      readyIntegrations,
-      totalIntegrations: integrationRows.length,
+      ready_integrations,
+      total_integrations: integrationRows.length,
     },
     totals: {
-      totalTokens: Number(overview?.total?.total_tokens || 0),
-      totalTokensCompact: formatCompact(overview?.total?.total_tokens || 0),
-      totalTokensRaw: formatNumber(overview?.total?.total_tokens || 0),
-      last24hTokens: Number(overview?.last_24h?.total_tokens || 0),
-      last24hTokensCompact: formatCompact(overview?.last_24h?.total_tokens || 0),
-      last24hTokensRaw: formatNumber(overview?.last_24h?.total_tokens || 0),
-      totalCost,
-      totalCostCompact: formatCompactCurrency(totalCost),
-      totalCostRaw: formatUsd(totalCost),
+      total_tokens: Number(overview?.total?.total_tokens || 0),
+      total_tokens_compact: formatCompact(overview?.total?.total_tokens || 0),
+      total_tokens_raw: formatNumber(overview?.total?.total_tokens || 0),
+      last_24h_tokens: Number(overview?.last_24h?.total_tokens || 0),
+      last_24h_tokens_compact: formatCompact(overview?.last_24h?.total_tokens || 0),
+      last_24h_tokens_raw: formatNumber(overview?.last_24h?.total_tokens || 0),
+      total_cost,
+      total_cost_compact: formatCompactCurrency(total_cost),
+      total_cost_raw: formatUsd(total_cost),
     },
   };
 
@@ -183,25 +183,25 @@ export function buildKpis(context) {
     {
       featured: true,
       label: '总用量 · TOTAL',
-      value: totals.totalTokensCompact,
+      value: totals.total_tokens_compact,
       unit: '',
       foot: [
-        `累计 Token · ${totals.totalTokensRaw}`,
+        `累计 Token · ${totals.total_tokens_raw}`,
         `用量最高模型 · ${leaders.model?.model || '--'}`,
       ],
     },
     {
       label: '近 24 小时',
-      value: totals.last24hTokensCompact,
+      value: totals.last_24h_tokens_compact,
       unit: '',
       foot: [
-        `原始值 · ${totals.last24hTokensRaw}`,
+        `原始值 · ${totals.last_24h_tokens_raw}`,
         `平均每段 · ${formatCompact(context.trend.average)} / ${context.trend.active} 段`,
       ],
     },
     {
       label: '来源数',
-      value: String(ledgerSummary.activeSources),
+      value: String(ledgerSummary.active_sources),
       unit: '',
       foot: [
         `主要来源 · ${leaders.source?.source || '--'}`,
@@ -210,10 +210,10 @@ export function buildKpis(context) {
     },
     {
       label: '估算成本',
-      value: totals.totalCostCompact,
+      value: totals.total_cost_compact,
       unit: '',
       foot: [
-        `累计成本 · ${totals.totalCostRaw}`,
+        `累计成本 · ${totals.total_cost_raw}`,
         `最高 · ${leaders.cost?.source || '--'} · ${leaders.cost?.model || '--'}`,
       ],
     },
@@ -264,7 +264,7 @@ export function buildCostStats(context) {
   return [
     {
       label: '月内累计',
-      value: totals.totalCostCompact,
+      value: totals.total_cost_compact,
       foot: '+$3.4K vs. 上月同期',
     },
     {

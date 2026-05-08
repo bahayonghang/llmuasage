@@ -9,10 +9,10 @@
 
 use crate::{
     integrations::{
-        Integration, claude::ClaudeIntegration, codex::CodexIntegration,
+        Integration, claude::ClaudeIntegration, codex::CodexIntegration, gemini::GeminiIntegration,
         opencode::OpencodeIntegration,
     },
-    parsers::{ClaudeParser, CodexParser, OpencodeParser, SourceParser},
+    parsers::{ClaudeParser, CodexParser, GeminiParser, OpencodeParser, SourceParser},
 };
 
 /// 工厂：当前 build 支持的所有 sync parser。
@@ -21,6 +21,7 @@ pub fn registered_parsers() -> Vec<Box<dyn SourceParser>> {
         Box::new(CodexParser),
         Box::new(ClaudeParser),
         Box::new(OpencodeParser),
+        Box::new(GeminiParser),
     ]
 }
 
@@ -30,5 +31,6 @@ pub fn registered_integrations() -> Vec<Box<dyn Integration>> {
         Box::new(CodexIntegration),
         Box::new(ClaudeIntegration),
         Box::new(OpencodeIntegration),
+        Box::new(GeminiIntegration),
     ]
 }

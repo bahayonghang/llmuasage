@@ -7,7 +7,7 @@ use super::report_args::SessionArgs;
 
 pub async fn run(app: &AppContext, args: SessionArgs) -> Result<()> {
     debug!("starting session report output");
-    let store = Store::new(&app.paths);
+    let store = Store::new(&app.paths)?;
     store.bootstrap()?;
     let filter = args.common.to_filter(args.project.clone())?;
 

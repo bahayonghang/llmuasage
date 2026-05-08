@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use anyhow::Result;
+use crate::error::Result;
 use rusqlite::{OptionalExtension, params};
 
 use super::{FileCursor, OpencodeCursor, Store};

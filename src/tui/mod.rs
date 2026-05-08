@@ -23,8 +23,8 @@ pub mod report_table;
 
 pub fn run_terminal(store: &Store) -> Result<()> {
     let dashboard = Dashboard::open(store)?;
-    let overview = dashboard.overview()?;
-    let sources = dashboard.source_breakdown()?;
+    let overview = dashboard.overview(&Default::default())?;
+    let sources = dashboard.source_breakdown(&Default::default())?;
     let health = dashboard.health()?;
 
     enable_raw_mode()?;

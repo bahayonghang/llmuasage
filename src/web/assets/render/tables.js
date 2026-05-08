@@ -87,17 +87,17 @@ function renderModels(context, uiState) {
   const tableHtml = renderTable(
     [
       { key: 'model', label: modelCopy.headers.model },
-      { key: 'totalTokens', label: modelCopy.headers.totalTokens, align: 'right' },
-      { key: 'inputShare', label: modelCopy.headers.inputShare, align: 'right' },
-      { key: 'outputShare', label: modelCopy.headers.outputShare, align: 'right' },
-      { key: 'cachedShare', label: modelCopy.headers.cachedShare, align: 'right' },
+      { key: 'total_tokens', label: modelCopy.headers.total_tokens, align: 'right' },
+      { key: 'input_share', label: modelCopy.headers.input_share, align: 'right' },
+      { key: 'output_share', label: modelCopy.headers.output_share, align: 'right' },
+      { key: 'cached_share', label: modelCopy.headers.cached_share, align: 'right' },
     ],
-    context.panels.modelTableRows.map((row) => ({
+    context.panels.model_table_rows.map((row) => ({
       model: escapeHtml(row.model),
-      totalTokens: `<span class="mono">${escapeHtml(row.totalTokens)}</span>`,
-      inputShare: `<span class="mono">${escapeHtml(row.inputShare)}</span>`,
-      outputShare: `<span class="mono">${escapeHtml(row.outputShare)}</span>`,
-      cachedShare: `<span class="mono">${escapeHtml(row.cachedShare)}</span>`,
+      total_tokens: `<span class="mono">${escapeHtml(row.total_tokens)}</span>`,
+      input_share: `<span class="mono">${escapeHtml(row.input_share)}</span>`,
+      output_share: `<span class="mono">${escapeHtml(row.output_share)}</span>`,
+      cached_share: `<span class="mono">${escapeHtml(row.cached_share)}</span>`,
     })),
     modelCopy.emptyTable,
   );
@@ -146,11 +146,11 @@ function renderSources(context, uiState) {
   document.getElementById('sources-table').innerHTML = renderTable(
     [
       { key: 'source', label: sourceCopy.headers.source },
-      { key: 'lastEventAt', label: sourceCopy.headers.lastEventAt },
+      { key: 'last_event_at', label: sourceCopy.headers.last_event_at },
     ],
-    context.panels.sourceTableRows.map((row) => ({
-      source: `${escapeHtml(row.source)}<small>${escapeHtml(row.totalTokens)} Token</small>`,
-      lastEventAt: `<span class="mono">${escapeHtml(row.lastEventAt)}</span>`,
+    context.panels.source_table_rows.map((row) => ({
+      source: `${escapeHtml(row.source)}<small>${escapeHtml(row.total_tokens)} Token</small>`,
+      last_event_at: `<span class="mono">${escapeHtml(row.last_event_at)}</span>`,
     })),
     sourceCopy.emptyTable,
   );
@@ -217,12 +217,12 @@ function renderCosts(context, uiState) {
     [
       { key: 'model', label: costCopy.headers.model },
       { key: 'source', label: costCopy.headers.source },
-      { key: 'estimatedCostUsd', label: costCopy.headers.estimatedCostUsd, align: 'right' },
+      { key: 'estimated_cost_usd', label: costCopy.headers.estimated_cost_usd, align: 'right' },
     ],
-    context.panels.costTableRows.map((row) => ({
+    context.panels.cost_table_rows.map((row) => ({
       model: escapeHtml(row.model),
       source: escapeHtml(row.source),
-      estimatedCostUsd: `<span class="mono">${escapeHtml(row.estimatedCostUsd)}</span>`,
+      estimated_cost_usd: `<span class="mono">${escapeHtml(row.estimated_cost_usd)}</span>`,
     })),
     costCopy.emptyTable,
   );

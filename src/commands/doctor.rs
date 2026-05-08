@@ -1,8 +1,11 @@
-use anyhow::Result;
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result};
+use chrono::Utc;
 use serde::Serialize;
 use tracing::info;
 
-use crate::{app::AppContext, integrations, store::Store};
+use crate::{app::AppContext, integrations, query::PricingCatalog, store::Store};
 
 #[derive(Debug, Clone, Serialize)]
 struct DoctorCheck {
@@ -11,7 +14,60 @@ struct DoctorCheck {
     detail: String,
 }
 
-pub async fn run(app: &AppContext, json: bool) -> Result<()> {
+pub async fn run(app: &AppContext, json: bool, refresh_pricing: Option<PathBuf>) -> Result<()> {
+    if let Some(path) = refresh_pricing {
+        return refresh_pricing_catalog(app, &path).await;
+    }
+    diagnostics(app, json).await
+}
+
+/// Validates a local litellm pricing snapshot, copies it to
+/// `~/.llmusage/pricing/litellm-snapshot-YYYY-MM.json`, and recomputes the
+/// per-event cost columns. URLs are refused; PRD §1.2 explicitly excludes
+/// remote price fetching from 0.5.x.
+async fn refresh_pricing_catalog(app: &AppContext, source_path: &Path) -> Result<()> {
+    info!(path = %source_path.display(), "刷新定价快照");
+
+    if let Some(raw) = source_path.to_str()
+        && (raw.starts_with("http://") || raw.starts_with("https://"))
+    {
+        anyhow::bail!("llmusage 0.5.x 不支持从 URL 拉取定价快照；请下载 JSON 后传本地路径");
+    }
+    if !source_path.is_file() {
+        anyhow::bail!("定价快照路径不存在或不是文件: {}", source_path.display());
+    }
+
+    // 用 catalog loader 校验 schema 同时拿到 catalog 实例，下一步直接驱动 recompute。
+    let catalog = PricingCatalog::load_snapshot(source_path)?;
+
+    let pricing_dir = app.paths.root_dir.join("pricing");
+    std::fs::create_dir_all(&pricing_dir)
+        .with_context(|| format!("创建定价目录失败: {}", pricing_dir.display()))?;
+    let stamp = Utc::now().format("%Y-%m");
+    let target = pricing_dir.join(format!("litellm-snapshot-{stamp}.json"));
+    std::fs::copy(source_path, &target)
+        .with_context(|| format!("写入定价快照失败: {}", target.display()))?;
+
+    let store = Store::new(&app.paths)?;
+    store.bootstrap()?;
+    let updated = store.recompute_costs_with(&catalog)?;
+    store.set_meta_value("pricing_catalog_version", &catalog.version)?;
+    info!(
+        updated,
+        catalog = catalog.version,
+        snapshot = %target.display(),
+        "定价快照已落盘并重算"
+    );
+    println!(
+        "已写入 {} 并按 catalog `{}` 重算 {} 条事件的成本列",
+        target.display(),
+        catalog.version,
+        updated
+    );
+    Ok(())
+}
+
+async fn diagnostics(app: &AppContext, json: bool) -> Result<()> {
     /*
      * ========================================================================
      * 步骤1：基于本地真源执行健康检查
@@ -24,7 +80,7 @@ pub async fn run(app: &AppContext, json: bool) -> Result<()> {
     info!("开始执行 doctor 健康检查");
 
     // 1.1 读取探针结果、最近运行结果与关键文件存在性
-    let store = Store::new(&app.paths);
+    let store = Store::new(&app.paths)?;
     store.bootstrap()?;
     let probes = integrations::probe_all(app)?;
     let recent_runs = store.run_log().recent_runs(10)?;
@@ -73,6 +129,7 @@ pub async fn run(app: &AppContext, json: bool) -> Result<()> {
                 crate::models::SourceKind::Codex => "codex.notify",
                 crate::models::SourceKind::Claude => "claude.hooks",
                 crate::models::SourceKind::Opencode => "opencode.plugin",
+                crate::models::SourceKind::Gemini => "gemini.hooks",
             },
             status: if probe.status == "ready" {
                 "ok"
