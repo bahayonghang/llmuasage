@@ -178,6 +178,7 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
                     rebuild,
                     source,
                     recent_days,
+                    parallelism: None,
                     json_events,
                 },
             )

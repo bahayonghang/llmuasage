@@ -76,6 +76,9 @@ pub struct SyncOptions {
     pub recent_days: Option<u32>,
     /// Restrict import to one source string.
     pub source: Option<String>,
+    /// Optional parser concurrency override. Values below 1 are ignored by the
+    /// sync runner; callers can use this to throttle library/API imports.
+    pub parallelism: Option<usize>,
 }
 
 impl JobRegistry {
@@ -180,6 +183,7 @@ async fn run_job(
             .as_deref()
             .and_then(crate::models::SourceKind::parse_id),
         recent_days: options.recent_days,
+        parallelism: options.parallelism,
         json_events: false,
     };
     let app = AppContext {
@@ -327,6 +331,21 @@ mod tests {
         assert_eq!(snapshot.job_id, job_id);
         assert_eq!(snapshot.status, JobStatus::Running);
         drop(rx);
+        Ok(())
+    }
+
+    #[test]
+    fn sync_options_accepts_parallelism_without_breaking_source_json() -> anyhow::Result<()> {
+        let options: SyncOptions = serde_json::from_str(
+            r#"{"source":"codex","recent_days":7,"parallelism":2,"rebuild":false}"#,
+        )?;
+        assert_eq!(options.source.as_deref(), Some("codex"));
+        assert_eq!(options.recent_days, Some(7));
+        assert_eq!(options.parallelism, Some(2));
+
+        let payload = serde_json::to_value(&options)?;
+        assert_eq!(payload["source"], "codex");
+        assert_eq!(payload["parallelism"], 2);
         Ok(())
     }
 }

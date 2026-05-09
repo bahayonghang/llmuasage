@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use chrono::Utc;
 use serde::Serialize;
 use tracing::info;
 
@@ -22,7 +21,7 @@ pub async fn run(app: &AppContext, json: bool, refresh_pricing: Option<PathBuf>)
 }
 
 /// Validates a local litellm pricing snapshot, copies it to
-/// `~/.llmusage/pricing/litellm-snapshot-YYYY-MM.json`, and recomputes the
+/// `~/.llmusage/pricing/<catalog-version>.json`, and recomputes the
 /// per-event cost columns. URLs are refused; PRD §1.2 explicitly excludes
 /// remote price fetching from 0.5.x.
 async fn refresh_pricing_catalog(app: &AppContext, source_path: &Path) -> Result<()> {
@@ -43,15 +42,13 @@ async fn refresh_pricing_catalog(app: &AppContext, source_path: &Path) -> Result
     let pricing_dir = app.paths.root_dir.join("pricing");
     std::fs::create_dir_all(&pricing_dir)
         .with_context(|| format!("创建定价目录失败: {}", pricing_dir.display()))?;
-    let stamp = Utc::now().format("%Y-%m");
-    let target = pricing_dir.join(format!("litellm-snapshot-{stamp}.json"));
+    let target = pricing_dir.join(format!("{}.json", catalog.version));
     std::fs::copy(source_path, &target)
         .with_context(|| format!("写入定价快照失败: {}", target.display()))?;
 
     let store = Store::new(&app.paths)?;
     store.bootstrap()?;
     let updated = store.recompute_costs_with(&catalog)?;
-    store.set_meta_value("pricing_catalog_version", &catalog.version)?;
     info!(
         updated,
         catalog = catalog.version,

@@ -32,6 +32,8 @@ pub struct HomeOverviewSummary {
     pub total_sessions: i64,
     pub total_requests: i64,
     pub total_tokens: i64,
+    pub total_cost_usd: f64,
+    pub cache_efficiency: f64,
     pub active_days: i64,
     pub platforms: i64,
 }
@@ -108,6 +110,9 @@ fn load_summary(conn: &Connection, filter: &QueryFilter) -> Result<HomeOverviewS
             COUNT(DISTINCT source || ':' || COALESCE(NULLIF(session_id, ''), NULLIF(source_path_hash, ''), event_key)),
             COUNT(*),
             COALESCE(SUM(total_tokens), 0),
+            COALESCE(SUM(cost_with_cache_usd), 0.0),
+            COALESCE(SUM(input_tokens), 0),
+            COALESCE(SUM(cache_read_tokens), 0),
             COUNT(DISTINCT date(event_at, '{modifier}')),
             COUNT(DISTINCT source)
         FROM usage_event
@@ -118,12 +123,21 @@ fn load_summary(conn: &Connection, filter: &QueryFilter) -> Result<HomeOverviewS
 
     Ok(
         conn.query_row(&sql, params_from_iter(sql_filter.params().iter()), |row| {
+            let input_tokens = row.get::<_, Option<i64>>(4)?.unwrap_or_default();
+            let cache_read_tokens = row.get::<_, Option<i64>>(5)?.unwrap_or_default();
+            let cache_denominator = input_tokens + cache_read_tokens;
             Ok(HomeOverviewSummary {
                 total_sessions: row.get::<_, Option<i64>>(0)?.unwrap_or_default(),
                 total_requests: row.get::<_, Option<i64>>(1)?.unwrap_or_default(),
                 total_tokens: row.get::<_, Option<i64>>(2)?.unwrap_or_default(),
-                active_days: row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
-                platforms: row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
+                total_cost_usd: row.get::<_, Option<f64>>(3)?.unwrap_or_default(),
+                cache_efficiency: if cache_denominator == 0 {
+                    0.0
+                } else {
+                    cache_read_tokens as f64 / cache_denominator as f64
+                },
+                active_days: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
+                platforms: row.get::<_, Option<i64>>(7)?.unwrap_or_default(),
             })
         })?,
     )

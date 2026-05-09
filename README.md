@@ -8,7 +8,7 @@ The goal is simple: use hooks and a local SQLite database to track multiple AI c
 
 Thanks to [vibeusage](https://github.com/victorGPT/vibeusage) for the original idea. `llmusage` is a Rust rewrite and improvement built on that foundation, with a stricter local-first path.
 
-Current 0.5.0 coverage:
+Current 0.5.1 coverage:
 
 - Codex `config.toml notify`
 - Claude `Stop` / `SessionEnd` hooks
@@ -70,19 +70,20 @@ Notes:
 - `export html` generates an offline static report
 - report commands are read-only SQLite views and do not auto-sync
 - `status` and `diagnostics` are read-only unless `diagnostics --forget-file` is used
-- `doctor` is read-only unless `--refresh-pricing <file>` is used; pricing refresh only reads a local JSON file and writes local SQLite metadata/costs
+- `doctor` is read-only unless `--refresh-pricing <file>` is used; pricing refresh only reads a local JSON file, stores it under `~/.llmusage/pricing/<catalog-version>.json`, and writes local SQLite metadata/costs
 
-## 0.5.0 highlights
+## 0.5.1 highlights
 
-- ccr-ui-facing read APIs: `Dashboard::overview`, `home_overview`, `heatmap`, `logs`, archive diagnostics, and source-file forget support.
+- ccr-ui-facing read APIs: `Dashboard::overview`, `trends_daily`, `home_overview`, `heatmap`, `logs`, archive diagnostics, and source-file forget support.
+- Persisted cost fields are now the query/report source of truth: normal sync writes event/bucket cost metadata, `doctor --refresh-pricing <file>` recomputes both events and buckets from a local snapshot, and reports/dashboard payloads expose total cost, cache efficiency, daily cost, model dual-cost/pricing metadata, project cost, and log cost/id/recorded-at fields.
 - In-process import jobs through `JobRegistry` with progress snapshots and cancellation.
 - Full schema migrations from v0/v1 through v10, including cache split, cost metadata, source-file state, raw archive, worker lock metadata, Gemini registration, and `pricing_catalog_version`.
 - Stable snake_case JSON across CLI reports, HTTP API, and static exports.
 - Public `LlmusageError` and `testing::Fixture` surfaces for downstream adapters.
 
-## Library API (0.5.0)
+## Library API (0.5.1)
 
-The 0.5.0 line exposes a SemVer-stable library surface for desktop adapters such as ccr-ui:
+The 0.5.x line exposes a SemVer-stable library surface for desktop adapters such as ccr-ui:
 
 ```rust
 use llmusage::{
@@ -103,6 +104,7 @@ fn load_ccr_ui(store: &Store) -> Result<()> {
     let filter = QueryFilter::default();
     let dashboard = Dashboard::open(store)?;
     let _overview = dashboard.overview(&filter)?;
+    let _daily = dashboard.trends_daily(&filter)?;
     let _home = dashboard.home_overview(&filter)?;
     let _heatmap = dashboard.heatmap(&filter, 365)?;
     let _logs = dashboard.logs(&Default::default())?;
@@ -111,7 +113,7 @@ fn load_ccr_ui(store: &Store) -> Result<()> {
 ```
 
 Path resolution order is `--home <PATH>` first, then `LLMUSAGE_HOME`, then `~/.llmusage`.
-The ccr-ui surface now includes filtered dashboard/home/heatmap/log queries, archive diagnostics from the `source_file` state machine, and `JobRegistry::start/get/cancel` for in-process import jobs. Use `Store::acquire_worker_lock_with` when embedding sync so CLI, library, and hook workers share one local lock.
+The ccr-ui surface now includes filtered dashboard/home/daily-trend/heatmap/log queries, archive diagnostics from the `source_file` state machine, persisted cost/pricing/cache fields, and `JobRegistry::start/get/cancel` for in-process import jobs. Use `Store::acquire_worker_lock_with` when embedding sync so CLI, library, and hook workers share one local lock.
 
 For downstream integration tests, depend on the local crate with the testing
 feature and use the isolated fixture helpers:

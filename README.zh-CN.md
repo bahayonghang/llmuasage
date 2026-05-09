@@ -8,7 +8,7 @@
 
 感谢 [vibeusage](https://github.com/victorGPT/vibeusage) 提供思路。`llmusage` 在它的基础上用 Rust 做了重构和改进，并把本地优先这条边界收得更紧。
 
-当前 0.5.0 覆盖：
+当前 0.5.1 覆盖：
 
 - Codex `config.toml notify`
 - Claude `Stop` / `SessionEnd` hooks
@@ -70,19 +70,20 @@ cargo run -- serve
 - `export html` 生成离线静态报告
 - 报表命令都是只读 SQLite 视图，不会自动 sync
 - `status` 和普通 `diagnostics` 是只读命令；`diagnostics --forget-file` 会写入本地忽略状态
-- 普通 `doctor` 是只读命令；`doctor --refresh-pricing <file>` 只读取本地 JSON 并写入本地 SQLite 价格元信息/成本
+- 普通 `doctor` 是只读命令；`doctor --refresh-pricing <file>` 只读取本地 JSON，把快照保存到 `~/.llmusage/pricing/<catalog-version>.json`，并写入本地 SQLite 价格元信息/成本
 
-## 0.5.0 重点
+## 0.5.1 重点
 
-- 面向 ccr-ui 的只读 API：`Dashboard::overview`、`home_overview`、`heatmap`、`logs`、归档诊断与源文件 forget。
+- 面向 ccr-ui 的只读 API：`Dashboard::overview`、`trends_daily`、`home_overview`、`heatmap`、`logs`、归档诊断与源文件 forget。
+- 持久化成本列成为报表/查询真源：常规 sync 写入 event/bucket 成本元信息，`doctor --refresh-pricing <file>` 用本地快照同步重算 event 与 bucket，报表和 dashboard payload 暴露总成本、cache efficiency、每日成本、模型双价/pricing 元信息、项目成本以及日志 cost/id/recorded_at 字段。
 - `JobRegistry` 提供进程内导入任务、进度快照与取消。
 - v0/v1 到 v10 的完整 schema migration，覆盖 cache split、成本元信息、source_file 状态机、raw archive、worker lock 元信息、Gemini 注册与 `pricing_catalog_version`。
 - CLI 报表、HTTP API、静态导出的 JSON 字段统一 snake_case。
 - 为下游适配层提供公共 `LlmusageError` 和 `testing::Fixture`。
 
-## 库 API（0.5.0）
+## 库 API（0.5.1）
 
-0.5.0 为 ccr-ui 这类桌面适配层提供 SemVer-stable 的库表面：
+0.5.x 为 ccr-ui 这类桌面适配层提供 SemVer-stable 的库表面：
 
 ```rust
 use llmusage::{
@@ -103,6 +104,7 @@ fn load_ccr_ui(store: &Store) -> Result<()> {
     let filter = QueryFilter::default();
     let dashboard = Dashboard::open(store)?;
     let _overview = dashboard.overview(&filter)?;
+    let _daily = dashboard.trends_daily(&filter)?;
     let _home = dashboard.home_overview(&filter)?;
     let _heatmap = dashboard.heatmap(&filter, 365)?;
     let _logs = dashboard.logs(&Default::default())?;
@@ -111,7 +113,7 @@ fn load_ccr_ui(store: &Store) -> Result<()> {
 ```
 
 路径解析顺序是 `--home <PATH>` 优先，其次 `LLMUSAGE_HOME`，最后 `~/.llmusage`。
-M0 提供首个 ccr-ui 只读通车面：带 `QueryFilter` 的 `Dashboard::overview(&filter)` 和 `Dashboard::home_overview(&filter)`。`home_overview.archive.by_source` 到 M2 的 `source_file` 状态机上线前仍为空；`JobRegistry::start` 到 M2 前也仍是惰性占位。
+ccr-ui 表面包含带 `QueryFilter` 的 dashboard/home/daily-trend/heatmap/log 查询、来自 `source_file` 状态机的归档诊断、持久化 cost/pricing/cache 字段，以及 `JobRegistry::start/get/cancel` 进程内导入任务。
 
 下游适配层（如 ccr-ui）写集成测试时，可在 dev-dependencies 中启用测试夹具：
 

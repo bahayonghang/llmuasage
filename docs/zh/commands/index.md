@@ -6,7 +6,7 @@
 
 ### `llmusage` / `llmusage daily`
 
-按天展示 token 与估算成本。没有子命令时，`llmusage` 等价于 `llmusage daily`。
+按天展示 token 与估算成本；估算成本读取持久化 cache-aware `cost_with_cache_usd` 列。没有子命令时，`llmusage` 等价于 `llmusage daily`。
 
 常用参数：
 
@@ -51,7 +51,7 @@
 
 ### `llmusage sync`
 
-顺序执行 Codex、Claude、OpenCode、Gemini 本地解析器，把增量结果写入 30 分钟 bucket。可用 `--source codex|claude|opencode|gemini` 限定来源；使用 `--rebuild` 会先清空可重建的 usage rows、bucket、project 和 cursor，再重新解析本地真源。默认进度写入 stderr，stdout 保留最终摘要；`--json-events` 则在 stdout 输出 NDJSON 生命周期/进度事件。
+顺序执行 Codex、Claude、OpenCode、Gemini 本地解析器，把增量结果写入 30 分钟 bucket，包括持久化 cost/pricing rollup。可用 `--source codex|claude|opencode|gemini` 限定来源；使用 `--rebuild` 会先清空可重建的 usage rows、bucket、project 和 cursor，再重新解析本地真源。默认进度写入 stderr，stdout 保留最终摘要；`--json-events` 则在 stdout 输出 NDJSON 生命周期/进度事件。
 
 ### `llmusage status`
 
@@ -63,7 +63,7 @@
 
 ### `llmusage doctor`
 
-默认执行只读健康检查，覆盖包装器缺失、集成漂移、本地真源存在性、最近失败等问题。`--refresh-pricing <file>` 是唯一写入模式：导入本地价格 JSON 快照、重算本地成本，并记录 `pricing_catalog_version`。
+默认执行只读健康检查，覆盖包装器缺失、集成漂移、本地真源存在性、最近失败等问题。`--refresh-pricing <file>` 是唯一写入模式：导入本地价格 JSON 快照，保存为 `~/.llmusage/pricing/<catalog-version>.json`，重算 event 与 bucket 成本，并记录 `pricing_catalog_version`。
 
 ## 本地界面命令
 

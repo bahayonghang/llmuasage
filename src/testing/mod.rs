@@ -97,14 +97,29 @@ impl Fixture {
                 event.created_at.unwrap_or(event.event_at),
             ],
         )?;
-        let breakdown = pricing::compute_cost(
-            event.source,
-            event.model,
-            event.input_tokens,
-            event.cache_read_tokens,
-            event.output_tokens,
-            event.reasoning_output_tokens,
-        );
+        let breakdown = if event.pricing_status == "unpriced"
+            && event.pricing_source.is_none()
+            && event.pricing_rate.is_none()
+            && event.cost_with_cache_usd == 0.0
+            && event.cost_without_cache_usd == 0.0
+        {
+            pricing::compute_cost(
+                event.source,
+                event.model,
+                event.input_tokens,
+                event.cache_read_tokens,
+                event.output_tokens,
+                event.reasoning_output_tokens,
+            )
+        } else {
+            pricing::CostBreakdown {
+                cost_with_cache_usd: event.cost_with_cache_usd,
+                cost_without_cache_usd: event.cost_without_cache_usd,
+                pricing_status: parse_seed_pricing_status(event.pricing_status),
+                pricing_source: event.pricing_source.map(str::to_string),
+                pricing_rate: event.pricing_rate.map(str::to_string),
+            }
+        };
         conn.execute(
             r#"
             INSERT INTO usage_bucket_30m(
@@ -123,6 +138,18 @@ impl Fixture {
                 total_tokens = total_tokens + excluded.total_tokens,
                 cost_with_cache_usd = cost_with_cache_usd + excluded.cost_with_cache_usd,
                 cost_without_cache_usd = cost_without_cache_usd + excluded.cost_without_cache_usd,
+                pricing_status = CASE
+                    WHEN pricing_status = excluded.pricing_status THEN pricing_status
+                    ELSE 'mixed'
+                END,
+                pricing_source = CASE
+                    WHEN pricing_source IS excluded.pricing_source THEN pricing_source
+                    ELSE 'mixed'
+                END,
+                pricing_rate = CASE
+                    WHEN pricing_rate IS excluded.pricing_rate THEN pricing_rate
+                    ELSE 'mixed'
+                END,
                 event_count = event_count + excluded.event_count,
                 updated_at = excluded.updated_at
             "#,
@@ -139,8 +166,8 @@ impl Fixture {
                 event.output_tokens,
                 event.reasoning_output_tokens,
                 event.total_tokens,
-                event.cost_with_cache_usd,
-                event.cost_without_cache_usd,
+                breakdown.cost_with_cache_usd,
+                breakdown.cost_without_cache_usd,
                 breakdown.pricing_status.as_str(),
                 breakdown.pricing_source,
                 breakdown.pricing_rate,
@@ -208,6 +235,14 @@ impl Fixture {
             self.seed_event(seed)?;
         }
         Ok(())
+    }
+}
+
+fn parse_seed_pricing_status(raw: &str) -> pricing::PricingStatus {
+    match raw {
+        "static" => pricing::PricingStatus::Static,
+        "snapshot" => pricing::PricingStatus::Snapshot,
+        _ => pricing::PricingStatus::Unpriced,
     }
 }
 

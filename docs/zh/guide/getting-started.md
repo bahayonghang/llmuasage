@@ -36,7 +36,7 @@ llmusage serve
 - 不带子命令的 `llmusage` 会从本地 DB 输出 daily 报表。也可以使用 `llmusage daily --json`、`llmusage monthly`、`llmusage session`、`llmusage blocks` 查看其他报表。
 - `serve` 在 `127.0.0.1` 上启动本地分析页，并默认用系统浏览器打开它。
 
-报表命令都是只读操作，不上传数据，也不会自动 sync；源数据变化后请重新运行 `llmusage sync`。可用 `--source codex|claude|opencode|gemini` 限定报表或同步来源。升级后如果需要重新填充 session/source-file metadata，可运行 `llmusage sync --rebuild`。
+报表命令都是只读操作，不上传数据，也不会自动 sync；源数据变化后请重新运行 `llmusage sync`。可用 `--source codex|claude|opencode|gemini` 限定报表或同步来源。升级后如果需要重新填充 session/source-file metadata，可运行 `llmusage sync --rebuild`。如果维护本地价格快照，可运行 `llmusage doctor --refresh-pricing <file>`；llmusage 会把快照保存到 `~/.llmusage/pricing/<catalog-version>.json`，重算 event/bucket 成本，并让后续 sync 继续使用该本地 catalog。
 
 ## 回归检查
 
@@ -67,6 +67,7 @@ fn load_ccr_ui(store: &Store) -> Result<()> {
     let filter = QueryFilter::default();
     let dashboard = Dashboard::open(store)?;
     let _overview = dashboard.overview(&filter)?;
+    let _daily = dashboard.trends_daily(&filter)?;
     let _home = dashboard.home_overview(&filter)?;
     let _heatmap = dashboard.heatmap(&filter, 365)?;
     let _logs = dashboard.logs(&Default::default())?;
@@ -75,7 +76,7 @@ fn load_ccr_ui(store: &Store) -> Result<()> {
 ```
 
 运行根目录解析顺序是 `--home <PATH>` > `LLMUSAGE_HOME` > `~/.llmusage`。
-0.5.0 的 ccr-ui 表面包含 `Dashboard::overview`、`home_overview`、`heatmap`、`logs`、来自 `source_file` 状态机的归档诊断，以及通过 `JobRegistry` 暴露的进程内导入任务。CLI 与 library 入口共用运行根目录解析顺序：`--home <PATH>` > `LLMUSAGE_HOME` > `~/.llmusage`。
+0.5.x 的 ccr-ui 表面包含 `Dashboard::overview`、`trends_daily`、`home_overview`、`heatmap`、`logs`、来自 `source_file` 状态机的归档诊断、持久化 cost/pricing/cache 字段，以及通过 `JobRegistry` 暴露的进程内导入任务。CLI 与 library 入口共用运行根目录解析顺序：`--home <PATH>` > `LLMUSAGE_HOME` > `~/.llmusage`。
 
 下游适配层可在集成测试中启用测试夹具：
 

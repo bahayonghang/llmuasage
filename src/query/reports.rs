@@ -6,7 +6,7 @@ use rusqlite::Connection;
 use serde::Serialize;
 
 pub use super::ReportTimezone;
-use crate::{models::SourceKind, query::pricing, store::Store};
+use crate::{models::SourceKind, store::Store};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortOrder {
@@ -174,6 +174,7 @@ struct EventRow {
     output_tokens: i64,
     reasoning_output_tokens: i64,
     total_tokens: i64,
+    cost_with_cache_usd: f64,
     project: Option<ProjectSummary>,
     session_id: Option<String>,
     session_label: Option<String>,
@@ -198,14 +199,6 @@ type SessionGroup = (
 
 impl Aggregate {
     fn add_event(&mut self, event: &EventRow) {
-        let cost = pricing::estimate_cost_usd(
-            &event.source,
-            &event.model,
-            event.input_tokens,
-            event.cache_read_tokens,
-            event.output_tokens,
-            event.reasoning_output_tokens,
-        );
         add_tokens(
             &mut self.totals,
             event.input_tokens,
@@ -213,7 +206,7 @@ impl Aggregate {
             event.output_tokens,
             event.reasoning_output_tokens,
             event.total_tokens,
-            cost,
+            event.cost_with_cache_usd,
         );
         self.models.insert(event.model.clone());
         let entry = self
@@ -227,7 +220,7 @@ impl Aggregate {
             event.output_tokens,
             event.reasoning_output_tokens,
             event.total_tokens,
-            cost,
+            event.cost_with_cache_usd,
         );
     }
 
@@ -562,14 +555,6 @@ pub fn today_for_timezone(timezone: &ReportTimezone) -> NaiveDate {
 }
 
 fn add_totals_from_event(totals: &mut TokenTotals, event: &EventRow) {
-    let cost = pricing::estimate_cost_usd(
-        &event.source,
-        &event.model,
-        event.input_tokens,
-        event.cache_read_tokens,
-        event.output_tokens,
-        event.reasoning_output_tokens,
-    );
     add_tokens(
         totals,
         event.input_tokens,
@@ -577,7 +562,7 @@ fn add_totals_from_event(totals: &mut TokenTotals, event: &EventRow) {
         event.output_tokens,
         event.reasoning_output_tokens,
         event.total_tokens,
-        cost,
+        event.cost_with_cache_usd,
     );
 }
 
@@ -614,6 +599,7 @@ fn load_events(conn: &Connection) -> Result<Vec<EventRow>> {
             output_tokens,
             reasoning_output_tokens,
             total_tokens,
+            cost_with_cache_usd,
             project_hash,
             project_label,
             project_ref,
@@ -645,12 +631,13 @@ fn load_events(conn: &Connection) -> Result<Vec<EventRow>> {
             output_tokens: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
             reasoning_output_tokens: row.get::<_, Option<i64>>(7)?.unwrap_or_default(),
             total_tokens: row.get::<_, Option<i64>>(8)?.unwrap_or_default(),
-            project_hash: row.get(9)?,
-            project_label: row.get(10)?,
-            project_ref: row.get(11)?,
-            session_id: row.get(12)?,
-            session_label: row.get(13)?,
-            source_path_hash: row.get(14)?,
+            cost_with_cache_usd: row.get::<_, Option<f64>>(9)?.unwrap_or_default(),
+            project_hash: row.get(10)?,
+            project_label: row.get(11)?,
+            project_ref: row.get(12)?,
+            session_id: row.get(13)?,
+            session_label: row.get(14)?,
+            source_path_hash: row.get(15)?,
         })
     })?;
     let raw = rows.collect::<rusqlite::Result<Vec<_>>>()?;
@@ -671,6 +658,7 @@ struct RawEventRow {
     output_tokens: i64,
     reasoning_output_tokens: i64,
     total_tokens: i64,
+    cost_with_cache_usd: f64,
     project_hash: Option<String>,
     project_label: Option<String>,
     project_ref: Option<String>,
@@ -694,6 +682,7 @@ impl RawEventRow {
             output_tokens: self.output_tokens,
             reasoning_output_tokens: self.reasoning_output_tokens,
             total_tokens: self.total_tokens,
+            cost_with_cache_usd: self.cost_with_cache_usd,
             project: normalize_project(self.project_hash, self.project_label, self.project_ref),
             session_id: self.session_id,
             session_label: self.session_label,

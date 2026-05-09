@@ -21,8 +21,9 @@ pub mod web;
 pub use error::{LlmusageError, Result};
 pub use paths::AppPaths;
 pub use query::{
-    Dashboard, DiagnosticsPayload, HomeOverviewPayload, LogRecord, LogsPage, LogsQuery,
-    QueryFilter, ReportTimezone, SourceDiagnostics,
+    DailyTrendPoint, Dashboard, DiagnosticsPayload, HomeOverviewPayload, LogRecord, LogsPage,
+    LogsQuery, ModelBreakdown, OverviewPayload, ProjectBreakdown, QueryFilter, ReportTimezone,
+    SourceDiagnostics,
 };
 
 use anyhow::Result as AnyhowResult;

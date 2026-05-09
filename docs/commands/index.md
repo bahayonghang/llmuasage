@@ -6,7 +6,7 @@ Report commands read `~/.llmusage/llmusage.db` only. They do **not** trigger `sy
 
 ### `llmusage` / `llmusage daily`
 
-Shows today's token and estimated-cost totals in the selected timezone. With no subcommand, `llmusage` is equivalent to `llmusage daily`; use `--all` for full daily history.
+Shows today's token and estimated-cost totals in the selected timezone. Estimated costs read the persisted cache-aware `cost_with_cache_usd` column. With no subcommand, `llmusage` is equivalent to `llmusage daily`; use `--all` for full daily history.
 
 Useful options:
 
@@ -51,7 +51,7 @@ Creates the local runtime, bootstraps SQLite, writes hook wrappers, and installs
 
 ### `llmusage sync`
 
-Runs the local parsers for Codex, Claude, OpenCode, and Gemini, then updates the 30-minute buckets. Use `--source codex|claude|opencode|gemini` to restrict the run, and `--rebuild` to clear rebuildable usage rows, buckets, projects, and cursors before reparsing local sources. Default progress is written to stderr so stdout keeps the final summary; `--json-events` instead emits NDJSON lifecycle/progress events on stdout.
+Runs the local parsers for Codex, Claude, OpenCode, and Gemini, then updates the 30-minute buckets including persisted cost/pricing rollups. Use `--source codex|claude|opencode|gemini` to restrict the run, and `--rebuild` to clear rebuildable usage rows, buckets, projects, and cursors before reparsing local sources. Default progress is written to stderr so stdout keeps the final summary; `--json-events` instead emits NDJSON lifecycle/progress events on stdout.
 
 ### `llmusage status`
 
@@ -63,7 +63,7 @@ Emits machine-readable JSON for paths, integrations, SQLite state, cursors, sour
 
 ### `llmusage doctor`
 
-Runs read-only health checks over wrapper presence, integration drift, local source presence, and recent failures. `--refresh-pricing <file>` is the one write mode: it imports a local pricing JSON snapshot, recomputes local costs, and records `pricing_catalog_version`.
+Runs read-only health checks over wrapper presence, integration drift, local source presence, and recent failures. `--refresh-pricing <file>` is the one write mode: it imports a local pricing JSON snapshot, stores it as `~/.llmusage/pricing/<catalog-version>.json`, recomputes event and bucket costs, and records `pricing_catalog_version`.
 
 ## Local UI commands
 

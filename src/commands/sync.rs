@@ -29,6 +29,7 @@ pub struct SyncRunOptions {
     pub rebuild: bool,
     pub source: Option<SourceKind>,
     pub recent_days: Option<u32>,
+    pub parallelism: Option<usize>,
     pub json_events: bool,
 }
 
@@ -313,9 +314,10 @@ pub async fn run_once_with_cancel(
     info!("开始执行 sync 三阶段流水线");
 
     // 2.1 计算并发度并按 source 顺序解析 + 即时写入
-    let parallelism = std::thread::available_parallelism()
+    let default_parallelism = std::thread::available_parallelism()
         .map(|value| value.get().min(4))
         .unwrap_or(1);
+    let parallelism = options.parallelism.unwrap_or(default_parallelism).max(1);
     let mut writer = store.begin_sync_run()?;
     let parsers = sources::registered_parsers()
         .into_iter()

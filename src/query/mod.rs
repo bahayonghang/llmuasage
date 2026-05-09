@@ -75,6 +75,10 @@ pub struct OverviewPayload {
     pub total_events: i64,
     /// Usage event count restricted to the last 24 hours.
     pub last_24h_events: i64,
+    /// Estimated lifetime cost using persisted `cost_with_cache_usd` buckets.
+    pub total_cost_usd: f64,
+    /// Cross-source cache read ratio for the filtered lifetime total.
+    pub cache_efficiency: f64,
     /// Last successful sync/hook-run finish time.
     pub last_sync_at: Option<String>,
     /// Last successful HTML export finish time.
@@ -110,6 +114,8 @@ pub struct DailyTrendPoint {
     pub total_tokens: i64,
     /// Number of underlying usage events for the day.
     pub event_count: i64,
+    /// Estimated cost for the day using cache-aware pricing.
+    pub cost_with_cache_usd: f64,
 }
 
 /// Per-model aggregate shown in dashboard breakdowns.
@@ -129,6 +135,18 @@ pub struct ModelBreakdown {
     pub total_tokens: i64,
     /// Number of underlying usage events contributing to this row.
     pub event_count: i64,
+    /// Estimated cost using cache-aware pricing.
+    pub cost_with_cache_usd: f64,
+    /// Estimated cost if cache reads were billed as regular input.
+    pub cost_without_cache_usd: f64,
+    /// Estimated cache savings compared with no-cache pricing.
+    pub cache_savings_usd: f64,
+    /// Aggregated pricing status for this model (`static`, `snapshot`, `unpriced`, or `mixed`).
+    pub pricing_status: String,
+    /// Aggregated pricing catalog/source label, or `mixed` when multiple values contributed.
+    pub pricing_source: Option<String>,
+    /// Aggregated pricing rate JSON, or `mixed` when multiple rates contributed.
+    pub pricing_rate: Option<String>,
 }
 
 /// Per-source aggregate plus freshest observed event time.
@@ -157,6 +175,12 @@ pub struct ProjectBreakdown {
     pub total_tokens: i64,
     /// Number of underlying usage events for the project.
     pub event_count: i64,
+    /// Estimated project cost using cache-aware pricing.
+    pub total_cost_usd: f64,
+    /// Display-safe project path surrogate. Raw filesystem paths are not
+    /// persisted by llmusage; adapters that need a path-like display can use
+    /// this stable project reference/label.
+    pub project_path: Option<String>,
 }
 
 /// Cost estimate line for one `(source, model)` pair.
@@ -168,7 +192,7 @@ pub struct CostLine {
     pub model: String,
     /// Summed total tokens for the pair.
     pub total_tokens: i64,
-    /// Estimated USD cost using the built-in static price catalog.
+    /// Estimated USD cost using the persisted cache-aware cost column.
     pub estimated_cost_usd: f64,
     /// Number of underlying usage events for the pair.
     pub event_count: i64,
@@ -291,6 +315,8 @@ impl Dashboard {
         let last_24h = query_token_summary(&self.conn, filter, Some(&cutoff))?;
         let total_events = query_event_count(&self.conn, filter, None)?;
         let last_24h_events = query_event_count(&self.conn, filter, Some(&cutoff))?;
+        let total_cost_usd = query_cost_with_cache(&self.conn, filter, None)?;
+        let cache_efficiency = total.cache_efficiency();
         let bucket_filter = filter.bucket_filter(None);
         let source_count_sql = format!(
             "SELECT COUNT(DISTINCT source) FROM usage_bucket_30m{}",
@@ -329,6 +355,8 @@ impl Dashboard {
             bucket_count,
             total_events,
             last_24h_events,
+            total_cost_usd,
+            cache_efficiency,
             last_sync_at,
             last_export_at,
         })
@@ -403,7 +431,8 @@ impl Dashboard {
                 COALESCE(SUM(cache_creation_tokens), 0),
                 COALESCE(SUM(output_tokens), 0) + COALESCE(SUM(reasoning_output_tokens), 0),
                 COALESCE(SUM(total_tokens), 0),
-                COALESCE(SUM(event_count), 0)
+                COALESCE(SUM(event_count), 0),
+                COALESCE(SUM(cost_with_cache_usd), 0.0)
             FROM usage_bucket_30m
             {}
             GROUP BY local_date
@@ -421,6 +450,7 @@ impl Dashboard {
                 output_tokens: row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
                 total_tokens: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
                 event_count: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
+                cost_with_cache_usd: row.get::<_, Option<f64>>(7)?.unwrap_or_default(),
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -438,7 +468,21 @@ impl Dashboard {
                 SUM(output_tokens),
                 SUM(reasoning_output_tokens),
                 SUM(total_tokens),
-                SUM(event_count)
+                SUM(event_count),
+                SUM(cost_with_cache_usd),
+                SUM(cost_without_cache_usd),
+                CASE
+                    WHEN COUNT(DISTINCT pricing_status) = 1 THEN MAX(pricing_status)
+                    ELSE 'mixed'
+                END,
+                CASE
+                    WHEN COUNT(DISTINCT COALESCE(pricing_source, '__llmusage_null__')) = 1 THEN MAX(pricing_source)
+                    ELSE 'mixed'
+                END,
+                CASE
+                    WHEN COUNT(DISTINCT COALESCE(pricing_rate, '__llmusage_null__')) = 1 THEN MAX(pricing_rate)
+                    ELSE 'mixed'
+                END
             FROM usage_bucket_30m
             {}
             GROUP BY model
@@ -448,6 +492,8 @@ impl Dashboard {
         );
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt.query_map(params_from_iter(sql_filter.params().iter()), |row| {
+            let cost_with_cache_usd = row.get::<_, Option<f64>>(7)?.unwrap_or_default();
+            let cost_without_cache_usd = row.get::<_, Option<f64>>(8)?.unwrap_or_default();
             Ok(ModelBreakdown {
                 model: row.get(0)?,
                 input_tokens: row.get::<_, Option<i64>>(1)?.unwrap_or_default(),
@@ -456,6 +502,14 @@ impl Dashboard {
                 reasoning_output_tokens: row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
                 total_tokens: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
                 event_count: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
+                cost_with_cache_usd,
+                cost_without_cache_usd,
+                cache_savings_usd: (cost_without_cache_usd - cost_with_cache_usd).max(0.0),
+                pricing_status: row
+                    .get::<_, Option<String>>(9)?
+                    .unwrap_or_else(|| "unpriced".to_string()),
+                pricing_source: row.get(10)?,
+                pricing_rate: row.get(11)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -515,7 +569,8 @@ impl Dashboard {
                 MAX(project_label),
                 MAX(project_ref),
                 SUM(total_tokens),
-                SUM(event_count)
+                SUM(event_count),
+                SUM(cost_with_cache_usd)
             FROM usage_bucket_30m
             {}
             GROUP BY project_hash
@@ -525,14 +580,19 @@ impl Dashboard {
         );
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt.query_map(params_from_iter(sql_filter.params().iter()), |row| {
+            let project_label = row
+                .get::<_, Option<String>>(1)?
+                .unwrap_or_else(|| "unknown-project".to_string());
+            let project_ref = row.get::<_, Option<String>>(2)?;
+            let project_path = project_ref.clone().or_else(|| Some(project_label.clone()));
             Ok(ProjectBreakdown {
                 project_hash: row.get(0)?,
-                project_label: row
-                    .get::<_, Option<String>>(1)?
-                    .unwrap_or_else(|| "unknown-project".to_string()),
-                project_ref: row.get(2)?,
+                project_label,
+                project_ref,
                 total_tokens: row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
                 event_count: row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
+                total_cost_usd: row.get::<_, Option<f64>>(5)?.unwrap_or_default(),
+                project_path,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -551,6 +611,7 @@ impl Dashboard {
                 SUM(output_tokens),
                 SUM(reasoning_output_tokens),
                 SUM(total_tokens),
+                SUM(cost_with_cache_usd),
                 SUM(event_count)
             FROM usage_bucket_30m
             {}
@@ -563,20 +624,9 @@ impl Dashboard {
         let rows = stmt.query_map(params_from_iter(sql_filter.params().iter()), |row| {
             let source: String = row.get(0)?;
             let model: String = row.get(1)?;
-            let input_tokens = row.get::<_, Option<i64>>(2)?.unwrap_or_default();
-            let cache_read_tokens = row.get::<_, Option<i64>>(3)?.unwrap_or_default();
-            let output_tokens = row.get::<_, Option<i64>>(4)?.unwrap_or_default();
-            let reasoning_output_tokens = row.get::<_, Option<i64>>(5)?.unwrap_or_default();
             let total_tokens = row.get::<_, Option<i64>>(6)?.unwrap_or_default();
-            let event_count = row.get::<_, Option<i64>>(7)?.unwrap_or_default();
-            let estimated_cost_usd = pricing::estimate_cost_usd(
-                &source,
-                &model,
-                input_tokens,
-                cache_read_tokens,
-                output_tokens,
-                reasoning_output_tokens,
-            );
+            let estimated_cost_usd = row.get::<_, Option<f64>>(7)?.unwrap_or_default();
+            let event_count = row.get::<_, Option<i64>>(8)?.unwrap_or_default();
 
             Ok(CostLine {
                 source,
@@ -729,6 +779,26 @@ fn query_event_count(conn: &Connection, filter: &QueryFilter, cutoff: Option<&st
         sql_filter.where_sql()
     );
     scalar_i64(conn, &sql, params_from_iter(sql_filter.params().iter()))
+}
+
+fn query_cost_with_cache(
+    conn: &Connection,
+    filter: &QueryFilter,
+    cutoff: Option<&str>,
+) -> Result<f64> {
+    let mut sql_filter = filter.bucket_filter(None);
+    if let Some(cutoff) = cutoff {
+        sql_filter.push("hour_start >= ?", cutoff);
+    }
+    let sql = format!(
+        "SELECT COALESCE(SUM(cost_with_cache_usd), 0.0) FROM usage_bucket_30m{}",
+        sql_filter.where_sql()
+    );
+    Ok(
+        conn.query_row(&sql, params_from_iter(sql_filter.params().iter()), |row| {
+            row.get::<_, f64>(0)
+        })?,
+    )
 }
 
 fn map_token_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<TokenSummary> {
@@ -927,6 +997,60 @@ mod tests {
         assert_eq!(super::TokenSummary::default().cache_efficiency(), 0.0);
     }
 
+    /// Validates the 0.5.1 ccr-ui field contract: overview, daily trends,
+    /// model/project breakdowns, and logs all expose persisted cost/cache/
+    /// pricing fields without requiring downstream adapters to re-SUM them.
+    #[test]
+    fn dashboard_ccr_ui_contract_exposes_cost_cache_and_pricing_fields() -> Result<()> {
+        let fixture = Fixture::new()?;
+        fixture.seed_dashboard(12)?;
+        let dashboard = Dashboard::open(fixture.store())?;
+
+        let overview = dashboard.overview(&QueryFilter::default())?;
+        assert!(overview.total_cost_usd > 0.0);
+        assert_eq!(overview.cache_efficiency, overview.total.cache_efficiency());
+
+        let trend = dashboard
+            .trends_daily(&QueryFilter::default())?
+            .into_iter()
+            .next()
+            .expect("seeded trend");
+        assert!(trend.cost_with_cache_usd > 0.0);
+
+        let model = dashboard
+            .model_breakdown(&QueryFilter::default())?
+            .into_iter()
+            .find(|row| row.model == "gpt-5")
+            .expect("gpt-5 model row");
+        assert!(model.cost_with_cache_usd > 0.0);
+        assert!(model.cost_without_cache_usd >= model.cost_with_cache_usd);
+        assert!(model.cache_savings_usd >= 0.0);
+        assert_eq!(model.pricing_status, "static");
+        assert_eq!(model.pricing_source.as_deref(), Some("static-v1"));
+        assert!(model.pricing_rate.is_some());
+
+        let project = dashboard
+            .project_breakdown(&QueryFilter::default())?
+            .into_iter()
+            .next()
+            .expect("seeded project row");
+        assert!(project.total_cost_usd > 0.0);
+        assert!(project.project_path.is_some());
+
+        let logs = dashboard.logs(&crate::LogsQuery {
+            page_size: 1,
+            ..Default::default()
+        })?;
+        let record = logs.records.first().expect("seeded log row");
+        assert_eq!(record.id, record.event_key);
+        assert!(!record.recorded_at.is_empty());
+        assert!(record.cost_usd >= 0.0);
+        assert_eq!(record.cost_usd, record.cost_with_cache_usd);
+        assert!(!record.pricing_status.is_empty());
+
+        Ok(())
+    }
+
     /// Validates D24/F1.4: overview surfaces an event count that matches the
     /// number of seeded usage events, and breakdown rows expose the same
     /// totals so dashboards no longer need to re-COUNT in the UI layer.
@@ -938,6 +1062,7 @@ mod tests {
 
         let overview = dashboard.overview(&QueryFilter::default())?;
         assert_eq!(overview.total_events, 48);
+        assert!(overview.total_cost_usd > 0.0);
 
         let model_total: i64 = dashboard
             .model_breakdown(&QueryFilter::default())?
@@ -1064,20 +1189,21 @@ mod tests {
     #[test]
     fn refresh_pricing_recomputes_all_costs() -> Result<()> {
         let fixture = Fixture::new()?;
+        fixture.seed_event(crate::testing::SeedEvent {
+            event_key: "codex:k1",
+            source: "codex",
+            model: "gpt-5",
+            event_at: "2026-05-01T00:00:00Z",
+            hour_start: Some("2026-05-01T00:00:00Z"),
+            input_tokens: 1_000_000,
+            cache_read_tokens: 200_000,
+            output_tokens: 500_000,
+            reasoning_output_tokens: 0,
+            total_tokens: 1_700_000,
+            created_at: Some("2026-05-01T00:00:00Z"),
+            ..Default::default()
+        })?;
         let conn = fixture.store().open_connection()?;
-        conn.execute(
-            r#"
-            INSERT INTO usage_event(
-                event_key, source, model, event_at, hour_start,
-                input_tokens, cache_read_tokens, cache_creation_tokens,
-                output_tokens, reasoning_output_tokens, total_tokens, created_at
-            )
-            VALUES ('codex:k1', 'codex', 'gpt-5', '2026-05-01T00:00:00Z',
-                    '2026-05-01T00:00:00Z', 1000000, 200000, 0, 500000, 0, 1700000,
-                    '2026-05-01T00:00:00Z')
-            "#,
-            [],
-        )?;
 
         let updated = fixture.store().recompute_costs()?;
         assert_eq!(updated, 1);
@@ -1096,6 +1222,19 @@ mod tests {
         assert!(cost_without > cost_with);
         assert_eq!(status, "static");
         assert_eq!(source, "static-v1");
+        let (bucket_cost_with, bucket_status, bucket_source): (f64, String, String) = conn
+            .query_row(
+                r#"
+                SELECT cost_with_cache_usd, pricing_status, COALESCE(pricing_source, '')
+                FROM usage_bucket_30m
+                WHERE source = 'codex' AND model = 'gpt-5' AND hour_start = '2026-05-01T00:00:00Z'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )?;
+        assert!((bucket_cost_with - cost_with).abs() < 1e-9);
+        assert_eq!(bucket_status, "static");
+        assert_eq!(bucket_source, "static-v1");
         Ok(())
     }
 
@@ -1110,20 +1249,19 @@ mod tests {
         use tempfile::NamedTempFile;
 
         let fixture = Fixture::new()?;
+        fixture.seed_event(crate::testing::SeedEvent {
+            event_key: "codex:snap",
+            source: "codex",
+            model: "gpt-5",
+            event_at: "2026-05-01T00:00:00Z",
+            hour_start: Some("2026-05-01T00:00:00Z"),
+            input_tokens: 500_000,
+            output_tokens: 100_000,
+            total_tokens: 600_000,
+            created_at: Some("2026-05-01T00:00:00Z"),
+            ..Default::default()
+        })?;
         let conn = fixture.store().open_connection()?;
-        conn.execute(
-            r#"
-            INSERT INTO usage_event(
-                event_key, source, model, event_at, hour_start,
-                input_tokens, cache_read_tokens, cache_creation_tokens,
-                output_tokens, reasoning_output_tokens, total_tokens, created_at
-            )
-            VALUES ('codex:snap', 'codex', 'gpt-5', '2026-05-01T00:00:00Z',
-                    '2026-05-01T00:00:00Z', 500000, 0, 0, 100000, 0, 600000,
-                    '2026-05-01T00:00:00Z')
-            "#,
-            [],
-        )?;
 
         let mut tmp = NamedTempFile::new()?;
         writeln!(
@@ -1159,6 +1297,18 @@ mod tests {
         assert_eq!(source, "litellm-snapshot-2026-05");
         // 0.5M input @ 2.0 + 0 cache_read + 0.1M output @ 20.0 = 1.0 + 2.0 = 3.0
         assert!((cost_with - 3.0).abs() < 1e-6);
+        let (bucket_status, bucket_source, bucket_cost): (String, String, f64) = conn.query_row(
+            r#"
+            SELECT pricing_status, COALESCE(pricing_source, ''), cost_with_cache_usd
+            FROM usage_bucket_30m
+            WHERE source = 'codex' AND model = 'gpt-5' AND hour_start = '2026-05-01T00:00:00Z'
+            "#,
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        assert_eq!(bucket_status, "snapshot");
+        assert_eq!(bucket_source, "litellm-snapshot-2026-05");
+        assert!((bucket_cost - 3.0).abs() < 1e-6);
         Ok(())
     }
 

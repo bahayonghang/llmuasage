@@ -53,6 +53,7 @@ pub async fn serve(store: Store, preferred_port: Option<u16>) -> Result<SocketAd
         .route("/assets/{*path}", get(asset_file))
         .route("/api/overview", get(api_overview))
         .route("/api/trends", get(api_trends))
+        .route("/api/trends_daily", get(api_trends_daily))
         .route("/api/models", get(api_models))
         .route("/api/sources", get(api_sources))
         .route("/api/projects", get(api_projects))
@@ -146,6 +147,13 @@ async fn api_trends(
             #[allow(deprecated)]
             d.trends(window, &Default::default())
         }),
+    )
+}
+
+async fn api_trends_daily(State(state): State<WebState>) -> Response {
+    api_json(
+        "/api/trends_daily",
+        load_via_dashboard(&state, |d| d.trends_daily(&Default::default())),
     )
 }
 
@@ -804,6 +812,40 @@ mod tests {
             route_json(addr, "GET", "/api/logs?cursor=not-base64-json", None).await?;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(payload["error"]["code"], "invalid_cursor");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn api_trends_daily_exposes_daily_cost_series() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let conn = store.open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_bucket_30m(
+                source, model, hour_start, project_hash, project_label, project_ref,
+                input_tokens, cache_read_tokens, cache_creation_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source,
+                event_count, updated_at
+            )
+            VALUES ('codex', 'gpt-5', '2026-05-01T00:00:00Z', '', NULL, NULL,
+                    10, 2, 0, 5, 1, 18, 0.25, 0.30, 'static', 'static-v1',
+                    1, '2026-05-01T00:00:00Z')
+            "#,
+            [],
+        )?;
+        drop(conn);
+
+        let addr = serve(store, Some(0)).await?;
+        let (status, payload) = route_json(addr, "GET", "/api/trends_daily", None).await?;
+        assert_eq!(status, StatusCode::OK);
+        let first = payload
+            .as_array()
+            .and_then(|rows| rows.first())
+            .expect("trend row");
+        assert_eq!(first["date"], "2026-05-01");
+        assert_eq!(first["event_count"], 1);
+        assert_eq!(first["cost_with_cache_usd"], 0.25);
         Ok(())
     }
 

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.1 - 2026-05-09
+
+### Fixed
+
+- Persist cost/pricing metadata during normal sync writes instead of leaving new `usage_event` and `usage_bucket_30m` rows at zero/unpriced until a manual refresh.
+- Recompute bucket cost/pricing in `doctor --refresh-pricing <file>` alongside per-event rows, persist the local snapshot as `~/.llmusage/pricing/<catalog-version>.json`, and keep later sync writes on that active local catalog.
+- Make report commands and dashboard cost breakdowns read persisted cost columns instead of recomputing static-v1 costs at query time.
+- Expose ccr-ui adapter fields on dashboard/log payloads: `total_cost_usd`, `cache_efficiency`, daily cost, model dual-cost/pricing metadata, project cost/path surrogate, log `id`, `recorded_at`, event cost/pricing, and nested log token data.
+- Add `/api/trends_daily` for the full per-day trend series while retaining the legacy `/api/trends?window=` route.
+- Accept optional `parallelism` in `SyncOptions` for embedded/API import jobs while preserving the existing string `source` field.
+
+### Local-only boundary
+
+- Pricing remains local-only: no remote pricing fetch, no upload queue, and no raw local path exposure were added. `project_path` is a display-safe project reference/label surrogate.
+
 ## 0.5.0 - 2026-05-08
 
 ### Added

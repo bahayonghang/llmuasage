@@ -285,15 +285,17 @@ impl Store {
         &self,
         catalog: &crate::query::pricing_catalog::PricingCatalog,
     ) -> crate::error::Result<usize> {
+        use std::collections::HashMap;
+
         use rusqlite::params;
 
         let mut conn = self.open_connection()?;
         let tx = conn.transaction()?;
 
-        let rows: Vec<(String, String, String, i64, i64, i64, i64)> = {
+        let rows: Vec<PricingRecomputeRow> = {
             let mut stmt = tx.prepare(
                 r#"
-                SELECT event_key, source, model,
+                SELECT event_key, source, model, hour_start, COALESCE(project_hash, ''),
                        COALESCE(input_tokens, 0),
                        COALESCE(cache_read_tokens, 0),
                        COALESCE(output_tokens, 0),
@@ -302,20 +304,23 @@ impl Store {
                 "#,
             )?;
             let mapped = stmt.query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, i64>(3)?,
-                    row.get::<_, i64>(4)?,
-                    row.get::<_, i64>(5)?,
-                    row.get::<_, i64>(6)?,
-                ))
+                Ok(PricingRecomputeRow {
+                    event_key: row.get(0)?,
+                    source: row.get(1)?,
+                    model: row.get(2)?,
+                    hour_start: row.get(3)?,
+                    project_hash: row.get(4)?,
+                    input_tokens: row.get(5)?,
+                    cache_read_tokens: row.get(6)?,
+                    output_tokens: row.get(7)?,
+                    reasoning_output_tokens: row.get(8)?,
+                })
             })?;
             mapped.collect::<rusqlite::Result<Vec<_>>>()?
         };
 
         let mut updated = 0usize;
+        let mut buckets: HashMap<BucketKey, PricingRollup> = HashMap::new();
         {
             let mut update_stmt = tx.prepare(
                 r#"
@@ -328,21 +333,91 @@ impl Store {
                 WHERE event_key = ?1
                 "#,
             )?;
-            for (event_key, source, model, input, cache_read, output, reasoning) in rows {
+            for row in rows {
                 let breakdown = crate::query::pricing::compute_cost_with(
-                    catalog, &source, &model, input, cache_read, output, reasoning,
+                    catalog,
+                    &row.source,
+                    &row.model,
+                    row.input_tokens,
+                    row.cache_read_tokens,
+                    row.output_tokens,
+                    row.reasoning_output_tokens,
                 );
                 update_stmt.execute(params![
-                    event_key,
+                    row.event_key,
                     breakdown.cost_with_cache_usd,
                     breakdown.cost_without_cache_usd,
                     breakdown.pricing_status.as_str(),
                     breakdown.pricing_source,
                     breakdown.pricing_rate,
                 ])?;
+                buckets
+                    .entry(BucketKey {
+                        source: row.source,
+                        model: row.model,
+                        hour_start: row.hour_start,
+                        project_hash: row.project_hash,
+                    })
+                    .or_default()
+                    .add(&breakdown);
                 updated += 1;
             }
         }
+        {
+            let mut update_bucket_stmt = tx.prepare(
+                r#"
+                UPDATE usage_bucket_30m
+                SET cost_with_cache_usd = ?5,
+                    cost_without_cache_usd = ?6,
+                    pricing_status = ?7,
+                    pricing_source = ?8,
+                    pricing_rate = ?9
+                WHERE source = ?1 AND model = ?2 AND hour_start = ?3 AND project_hash = ?4
+                "#,
+            )?;
+            let mut clear_empty_bucket_stmt = tx.prepare(
+                r#"
+                UPDATE usage_bucket_30m
+                SET cost_with_cache_usd = 0.0,
+                    cost_without_cache_usd = 0.0,
+                    pricing_status = 'unpriced',
+                    pricing_source = NULL,
+                    pricing_rate = NULL
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM usage_event e
+                    WHERE e.source = usage_bucket_30m.source
+                      AND e.model = usage_bucket_30m.model
+                      AND e.hour_start = usage_bucket_30m.hour_start
+                      AND COALESCE(e.project_hash, '') = usage_bucket_30m.project_hash
+                )
+                "#,
+            )?;
+
+            for (key, pricing) in buckets {
+                update_bucket_stmt.execute(params![
+                    key.source,
+                    key.model,
+                    key.hour_start,
+                    key.project_hash,
+                    pricing.cost_with_cache_usd(),
+                    pricing.cost_without_cache_usd(),
+                    pricing.pricing_status(),
+                    pricing.pricing_source(),
+                    pricing.pricing_rate(),
+                ])?;
+            }
+            clear_empty_bucket_stmt.execute([])?;
+        }
+        let catalog_version = catalog.version.as_str();
+        tx.execute(
+            r#"
+            INSERT INTO meta(key, value)
+            VALUES ('pricing_catalog_version', ?1)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            "#,
+            [catalog_version],
+        )?;
         tx.commit()?;
         Ok(updated)
     }
@@ -353,6 +428,7 @@ pub struct SyncRunWriter {
     conn: Connection,
     run_started_at: String,
     raw_archive_enabled: bool,
+    pricing_catalog: crate::query::PricingCatalog,
 }
 
 impl SyncRunWriter {
@@ -475,9 +551,99 @@ struct BucketKey {
 }
 
 #[derive(Debug, Clone)]
+struct PricingRecomputeRow {
+    event_key: String,
+    source: String,
+    model: String,
+    hour_start: String,
+    project_hash: String,
+    input_tokens: i64,
+    cache_read_tokens: i64,
+    output_tokens: i64,
+    reasoning_output_tokens: i64,
+}
+
+#[derive(Debug, Clone)]
 struct BucketRollup {
     project_label: Option<String>,
     project_ref: Option<String>,
     tokens: UsageTokens,
+    pricing: PricingRollup,
     event_count: i64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(super) struct PricingRollup {
+    cost_with_cache_usd: f64,
+    cost_without_cache_usd: f64,
+    pricing_status: MetadataRollup,
+    pricing_source: MetadataRollup,
+    pricing_rate: MetadataRollup,
+}
+
+#[derive(Debug, Clone, Default)]
+struct MetadataRollup {
+    seen: bool,
+    mixed: bool,
+    value: Option<String>,
+}
+
+impl PricingRollup {
+    pub(super) fn add(&mut self, cost: &crate::query::pricing::CostBreakdown) {
+        self.cost_with_cache_usd += cost.cost_with_cache_usd;
+        self.cost_without_cache_usd += cost.cost_without_cache_usd;
+        self.pricing_status.add(Some(cost.pricing_status.as_str()));
+        self.pricing_source.add(cost.pricing_source.as_deref());
+        self.pricing_rate.add(cost.pricing_rate.as_deref());
+    }
+
+    pub(super) fn cost_with_cache_usd(&self) -> f64 {
+        self.cost_with_cache_usd
+    }
+
+    pub(super) fn cost_without_cache_usd(&self) -> f64 {
+        self.cost_without_cache_usd
+    }
+
+    pub(super) fn pricing_status(&self) -> String {
+        self.pricing_status.value_or_unpriced()
+    }
+
+    pub(super) fn pricing_source(&self) -> Option<String> {
+        self.pricing_source.value_or_none()
+    }
+
+    pub(super) fn pricing_rate(&self) -> Option<String> {
+        self.pricing_rate.value_or_none()
+    }
+}
+
+impl MetadataRollup {
+    fn add(&mut self, value: Option<&str>) {
+        let value = value.map(str::to_string);
+        if !self.seen {
+            self.seen = true;
+            self.value = value;
+            return;
+        }
+        if self.value != value {
+            self.mixed = true;
+        }
+    }
+
+    fn value_or_unpriced(&self) -> String {
+        if self.mixed {
+            "mixed".to_string()
+        } else {
+            self.value.clone().unwrap_or_else(|| "unpriced".to_string())
+        }
+    }
+
+    fn value_or_none(&self) -> Option<String> {
+        if self.mixed {
+            Some("mixed".to_string())
+        } else {
+            self.value.clone()
+        }
+    }
 }

@@ -15,8 +15,8 @@
 2. `llmusage hook-run` 先记录 trigger，再尝试拿全局锁
 3. worker 按注册顺序消费 Codex、Claude、OpenCode、Gemini 本地 parser
 4. 每个 parser 发出 `SyncShard` 批次；writer 在同一提交协议里 reset 被替换文件、写 event、更新 cursor、标记 source-file 状态
-5. 新事件写入 `usage_event`；可选 raw archive 写入 `usage_event_raw`
-6. 30 分钟 UTC 聚合写入 `usage_bucket_30m`
+5. 新事件带持久化 cache-aware 成本/pricing 元信息写入 `usage_event`；可选 raw archive 写入 `usage_event_raw`
+6. 30 分钟 UTC 聚合（含成本/pricing rollup）写入 `usage_bucket_30m`
 7. 报表命令、本地 Web UI、TUI、静态导出都从同一个 SQLite 读数据
 
 ## 本地优先边界
@@ -31,11 +31,11 @@
 
 ## 报表层
 
-`daily`、`monthly`、`session`、`blocks`、`statusline` 都是只读 SQLite 视图。它们复用 `usage_event` 作为报表真源，并把成本字段明确标为 `estimated_cost_usd`。session 报表优先使用 `session_id` metadata；旧数据库没有该字段时会使用稳定的源文件 fallback。`statusline` 可能在 `~/.llmusage/statusline-cache/` 写入很小的本地缓存；不会上传，也不会调用网络 API。
+`daily`、`monthly`、`session`、`blocks`、`statusline` 都是只读 SQLite 视图。它们复用 `usage_event` 作为报表真源，并把成本字段明确标为 `estimated_cost_usd`；从 0.5.1 起该值读取持久化 `cost_with_cache_usd`，不再查询时按 static-v1 重算。session 报表优先使用 `session_id` metadata；旧数据库没有该字段时会使用稳定的源文件 fallback。`statusline` 可能在 `~/.llmusage/statusline-cache/` 写入很小的本地缓存；不会上传，也不会调用网络 API。
 
 
-## 0.5.0 集成表面
+## 0.5.x 集成表面
 
-ccr-ui 适配层保持薄包装：`Dashboard::overview`、`home_overview`、`heatmap`、`logs`、`diagnostics` 与 `JobRegistry` 都读写同一个本地 SQLite 状态。CLI 报表、HTTP API、静态导出快照的 JSON 字段统一 snake_case。schema migration 显式推进到 v10；v10 记录 `pricing_catalog_version`，方便下游 UI 区分静态 catalog 与刷新后的本地价格快照。
+ccr-ui 适配层保持薄包装：`Dashboard::overview`、`trends_daily`、`home_overview`、`heatmap`、`logs`、`diagnostics` 与 `JobRegistry` 都读写同一个本地 SQLite 状态。CLI 报表、HTTP API、静态导出快照的 JSON 字段统一 snake_case。schema migration 显式推进到 v10；v10 记录 `pricing_catalog_version`，0.5.1 会把活动本地快照保存到 `~/.llmusage/pricing/<catalog-version>.json`，让后续 sync 继续使用同一本地 catalog。
 
 `worker_lock` 串行化 CLI、hook、library worker。CLI/library sync 通过 `Store::acquire_worker_lock_with` 等待；高频 hook-run 保留旧的非阻塞路径，锁被占用时直接跳过。

@@ -42,6 +42,8 @@ pub struct LogsPage {
 /// One normalized usage event row returned by [`Dashboard::logs`].
 #[derive(Debug, Clone, Serialize)]
 pub struct LogRecord {
+    /// Alias used by ccr-ui row identity. Equals [`Self::event_key`].
+    pub id: String,
     /// Stable event key used as cursor tie-breaker and row identity.
     pub event_key: String,
     /// Source identifier (`codex` / `claude` / `opencode`).
@@ -52,6 +54,8 @@ pub struct LogRecord {
     pub model: String,
     /// RFC 3339 event timestamp.
     pub event_at: String,
+    /// RFC 3339 ingestion timestamp from `usage_event.created_at`.
+    pub recorded_at: String,
     /// Non-cache prompt tokens.
     pub input_tokens: i64,
     /// Cache-read prompt tokens.
@@ -64,6 +68,18 @@ pub struct LogRecord {
     pub reasoning_output_tokens: i64,
     /// Normalized total tokens.
     pub total_tokens: i64,
+    /// Alias for the cache-aware event cost.
+    pub cost_usd: f64,
+    /// Cache-aware event cost.
+    pub cost_with_cache_usd: f64,
+    /// Event cost if cache reads were billed as regular input.
+    pub cost_without_cache_usd: f64,
+    /// Pricing status (`static`, `snapshot`, or `unpriced`).
+    pub pricing_status: String,
+    /// Pricing catalog/source label when matched.
+    pub pricing_source: Option<String>,
+    /// Pricing rate JSON when matched.
+    pub pricing_rate: Option<String>,
     /// Stable project hash if available.
     pub project_hash: Option<String>,
     /// Human-readable project label if available.
@@ -72,6 +88,8 @@ pub struct LogRecord {
     pub project_ref: Option<String>,
     /// Raw project path when the parser could preserve it.
     pub project_path: Option<String>,
+    /// Full token object for ccr-ui UsageRecordV2 adapters.
+    pub token: LogTokenBreakdown,
     /// Event path hash from the source file / project.
     pub path_hash: Option<String>,
     /// Stable source path hash used to group sessions by local file.
@@ -85,6 +103,17 @@ pub struct LogRecord {
     /// Optional raw archive JSON. Present only when `include_raw_json=true`
     /// and raw archive was enabled before sync.
     pub raw_json: Option<String>,
+}
+
+/// Token breakdown nested on [`LogRecord`] for adapter-friendly JSON.
+#[derive(Debug, Clone, Serialize)]
+pub struct LogTokenBreakdown {
+    pub input_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_creation_tokens: i64,
+    pub output_tokens: i64,
+    pub reasoning_output_tokens: i64,
+    pub total_tokens: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -143,6 +172,11 @@ pub(crate) fn load(dashboard: &Dashboard, query: &LogsQuery) -> Result<LogsPage>
             e.output_tokens,
             e.reasoning_output_tokens,
             e.total_tokens,
+            e.cost_with_cache_usd,
+            e.cost_without_cache_usd,
+            e.pricing_status,
+            e.pricing_source,
+            e.pricing_rate,
             e.project_hash,
             e.project_label,
             e.project_ref,
@@ -151,6 +185,7 @@ pub(crate) fn load(dashboard: &Dashboard, query: &LogsQuery) -> Result<LogsPage>
             e.source_path_hash,
             e.session_id,
             e.session_label,
+            e.created_at,
             {raw_column}
         FROM usage_event e
         LEFT JOIN usage_event_raw r ON r.event_key = e.event_key
@@ -168,28 +203,53 @@ pub(crate) fn load(dashboard: &Dashboard, query: &LogsQuery) -> Result<LogsPage>
     let rows = stmt.query_map(params_from_iter(params.iter()), |row| {
         let event_key: String = row.get(0)?;
         let source: String = row.get(1)?;
+        let input_tokens = row.get(4)?;
+        let cache_read_tokens = row.get(5)?;
+        let cache_creation_tokens = row.get(6)?;
+        let output_tokens = row.get(7)?;
+        let reasoning_output_tokens = row.get(8)?;
+        let total_tokens = row.get(9)?;
+        let cost_with_cache_usd = row.get::<_, Option<f64>>(10)?.unwrap_or_default();
         Ok(LogRecord {
+            id: event_key.clone(),
             event_key: event_key.clone(),
             source: source.clone(),
             platform: source,
             model: row.get(2)?,
             event_at: row.get(3)?,
-            input_tokens: row.get(4)?,
-            cache_read_tokens: row.get(5)?,
-            cache_creation_tokens: row.get(6)?,
-            output_tokens: row.get(7)?,
-            reasoning_output_tokens: row.get(8)?,
-            total_tokens: row.get(9)?,
-            project_hash: row.get(10)?,
-            project_label: row.get(11)?,
-            project_ref: row.get(12)?,
-            project_path: row.get(13)?,
-            path_hash: row.get(14)?,
-            source_path_hash: row.get(15)?,
+            input_tokens,
+            cache_read_tokens,
+            cache_creation_tokens,
+            output_tokens,
+            reasoning_output_tokens,
+            total_tokens,
+            cost_usd: cost_with_cache_usd,
+            cost_with_cache_usd,
+            cost_without_cache_usd: row.get::<_, Option<f64>>(11)?.unwrap_or_default(),
+            pricing_status: row
+                .get::<_, Option<String>>(12)?
+                .unwrap_or_else(|| "unpriced".to_string()),
+            pricing_source: row.get(13)?,
+            pricing_rate: row.get(14)?,
+            project_hash: row.get(15)?,
+            project_label: row.get(16)?,
+            project_ref: row.get(17)?,
+            project_path: row.get(18)?,
+            token: LogTokenBreakdown {
+                input_tokens,
+                cache_read_tokens,
+                cache_creation_tokens,
+                output_tokens,
+                reasoning_output_tokens,
+                total_tokens,
+            },
+            path_hash: row.get(19)?,
+            source_path_hash: row.get(20)?,
             source_id: event_key,
-            session_id: row.get(16)?,
-            session_label: row.get(17)?,
-            raw_json: row.get(18)?,
+            session_id: row.get(21)?,
+            session_label: row.get(22)?,
+            recorded_at: row.get(23)?,
+            raw_json: row.get(24)?,
         })
     })?;
     let mut records = rows.collect::<rusqlite::Result<Vec<_>>>()?;

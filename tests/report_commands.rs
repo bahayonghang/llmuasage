@@ -31,6 +31,7 @@ fn report_commands_emit_stable_json_from_sqlite() -> Result<()> {
         project_ref: Some("example/project-a"),
         session_id: Some("session-a"),
         source_path_hash: Some("source-a"),
+        ..SeedEvent::default()
     })?;
     fixture.seed_event(SeedEvent {
         event_key: "claude:source-b:fingerprint-b:1",
@@ -47,6 +48,7 @@ fn report_commands_emit_stable_json_from_sqlite() -> Result<()> {
         project_ref: Some("example/project-b"),
         session_id: Some("session-b"),
         source_path_hash: Some("source-b"),
+        ..SeedEvent::default()
     })?;
 
     let daily = fixture.json(&[
@@ -144,6 +146,7 @@ fn daily_defaults_to_today_and_all_restores_history() -> Result<()> {
         project_ref: Some("example/project-a"),
         session_id: Some("session-today"),
         source_path_hash: Some("today-source"),
+        ..SeedEvent::default()
     })?;
     fixture.seed_event(SeedEvent {
         event_key: "codex:yesterday:1",
@@ -160,6 +163,7 @@ fn daily_defaults_to_today_and_all_restores_history() -> Result<()> {
         project_ref: Some("example/project-a"),
         session_id: Some("session-yesterday"),
         source_path_hash: Some("yesterday-source"),
+        ..SeedEvent::default()
     })?;
 
     let default_daily = fixture.json(&["--json", "--timezone", "UTC"])?;
@@ -210,6 +214,7 @@ fn daily_human_output_uses_box_table_and_compact_columns() -> Result<()> {
         project_ref: Some("example/project-a"),
         session_id: Some("session-a"),
         source_path_hash: Some("source-a"),
+        ..SeedEvent::default()
     })?;
 
     let output = fixture.output(&["--timezone", "UTC"])?;
@@ -273,6 +278,7 @@ fn doctor_refresh_pricing_writes_catalog_version_meta() -> Result<()> {
         project_ref: Some("example/project-a"),
         session_id: Some("pricing-meta-session"),
         source_path_hash: Some("pricing-meta-source"),
+        ..SeedEvent::default()
     })?;
     let snapshot = fixture.home.join("pricing-snapshot.json");
     std::fs::write(
@@ -299,6 +305,74 @@ fn doctor_refresh_pricing_writes_catalog_version_meta() -> Result<()> {
         store.meta_value("pricing_catalog_version")?.as_deref(),
         Some("litellm-snapshot-2026-05")
     );
+    assert!(
+        fixture
+            .paths
+            .root_dir
+            .join("pricing")
+            .join("litellm-snapshot-2026-05.json")
+            .is_file()
+    );
+
+    let conn = Connection::open(&fixture.paths.db_path)?;
+    let (event_status, event_source, event_cost): (String, String, f64) = conn.query_row(
+        r#"
+        SELECT pricing_status, COALESCE(pricing_source, ''), cost_with_cache_usd
+        FROM usage_event
+        WHERE event_key = 'codex:pricing-meta:1'
+        "#,
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )?;
+    assert_eq!(event_status, "snapshot");
+    assert_eq!(event_source, "litellm-snapshot-2026-05");
+    assert!((event_cost - 3.0).abs() < 1e-6);
+
+    let (bucket_status, bucket_source, bucket_cost): (String, String, f64) = conn.query_row(
+        r#"
+        SELECT pricing_status, COALESCE(pricing_source, ''), cost_with_cache_usd
+        FROM usage_bucket_30m
+        WHERE source = 'codex' AND model = 'gpt-5'
+        "#,
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )?;
+    assert_eq!(bucket_status, "snapshot");
+    assert_eq!(bucket_source, "litellm-snapshot-2026-05");
+    assert!((bucket_cost - 3.0).abs() < 1e-6);
+    Ok(())
+}
+
+#[test]
+fn report_commands_use_persisted_cost_columns() -> Result<()> {
+    let fixture = ReportCliFixture::new()?;
+    let today = Utc::now().date_naive();
+    let today_display = today.format("%Y-%m-%d").to_string();
+    let today_event = format!("{today_display}T12:00:00Z");
+    fixture.seed_event(SeedEvent {
+        event_key: "codex:persisted-cost:1",
+        source: "codex",
+        model: "gpt-5",
+        event_at: &today_event,
+        input_tokens: 500_000,
+        cache_read_tokens: 0,
+        output_tokens: 100_000,
+        reasoning_output_tokens: 0,
+        total_tokens: 600_000,
+        cost_with_cache_usd: 42.5,
+        cost_without_cache_usd: 45.0,
+        pricing_status: "snapshot",
+        pricing_source: Some("manual-test"),
+        project_hash: "project-a",
+        project_label: "Project A",
+        project_ref: Some("example/project-a"),
+        session_id: Some("session-a"),
+        source_path_hash: Some("source-a"),
+    })?;
+
+    let daily = fixture.json(&["daily", "--all", "--json", "--timezone", "UTC"])?;
+    assert_eq!(daily["totals"]["estimated_cost_usd"].as_f64(), Some(42.5));
+    assert_eq!(daily["daily"][0]["estimated_cost_usd"].as_f64(), Some(42.5));
     Ok(())
 }
 
@@ -352,6 +426,7 @@ fn cli_json_outputs_all_snake_case() -> Result<()> {
         project_ref: Some("example/project-a"),
         session_id: Some("session-a"),
         source_path_hash: Some("source-a"),
+        ..SeedEvent::default()
     })?;
 
     for args in [
@@ -436,9 +511,10 @@ impl ReportCliFixture {
             INSERT INTO usage_event(
                 event_key, source, model, event_at, hour_start,
                 input_tokens, cache_read_tokens, output_tokens, reasoning_output_tokens, total_tokens,
+                cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source,
                 project_hash, project_label, project_ref, path_hash,
                 session_id, session_label, source_path_hash, created_at
-            ) VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14, ?15, ?4)
+            ) VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?18, ?19, ?4)
             "#,
             params![
                 event.event_key,
@@ -450,12 +526,62 @@ impl ReportCliFixture {
                 event.output_tokens,
                 event.reasoning_output_tokens,
                 event.total_tokens,
+                event.cost_with_cache_usd,
+                event.cost_without_cache_usd,
+                event.pricing_status,
+                event.pricing_source,
                 event.project_hash,
                 event.project_label,
                 event.project_ref,
                 event.source_path_hash.unwrap_or(event.event_key),
                 event.session_id,
                 event.source_path_hash,
+            ],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_bucket_30m(
+                source, model, hour_start, project_hash, project_label, project_ref,
+                input_tokens, cache_read_tokens, cache_creation_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source,
+                event_count, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 1, ?3)
+            ON CONFLICT(source, model, hour_start, project_hash) DO UPDATE SET
+                input_tokens = input_tokens + excluded.input_tokens,
+                cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens,
+                output_tokens = output_tokens + excluded.output_tokens,
+                reasoning_output_tokens = reasoning_output_tokens + excluded.reasoning_output_tokens,
+                total_tokens = total_tokens + excluded.total_tokens,
+                cost_with_cache_usd = cost_with_cache_usd + excluded.cost_with_cache_usd,
+                cost_without_cache_usd = cost_without_cache_usd + excluded.cost_without_cache_usd,
+                pricing_status = CASE
+                    WHEN pricing_status = excluded.pricing_status THEN pricing_status
+                    ELSE 'mixed'
+                END,
+                pricing_source = CASE
+                    WHEN pricing_source IS excluded.pricing_source THEN pricing_source
+                    ELSE 'mixed'
+                END,
+                event_count = event_count + excluded.event_count,
+                updated_at = excluded.updated_at
+            "#,
+            params![
+                event.source,
+                event.model,
+                event.event_at,
+                event.project_hash,
+                event.project_label,
+                event.project_ref,
+                event.input_tokens,
+                event.cache_read_tokens,
+                event.output_tokens,
+                event.reasoning_output_tokens,
+                event.total_tokens,
+                event.cost_with_cache_usd,
+                event.cost_without_cache_usd,
+                event.pricing_status,
+                event.pricing_source,
             ],
         )?;
         Ok(())
@@ -509,4 +635,33 @@ struct SeedEvent<'a> {
     project_ref: Option<&'a str>,
     session_id: Option<&'a str>,
     source_path_hash: Option<&'a str>,
+    cost_with_cache_usd: f64,
+    cost_without_cache_usd: f64,
+    pricing_status: &'a str,
+    pricing_source: Option<&'a str>,
+}
+
+impl Default for SeedEvent<'_> {
+    fn default() -> Self {
+        Self {
+            event_key: "codex:test:1",
+            source: "codex",
+            model: "gpt-5",
+            event_at: "2026-05-01T00:00:00Z",
+            input_tokens: 0,
+            cache_read_tokens: 0,
+            output_tokens: 0,
+            reasoning_output_tokens: 0,
+            total_tokens: 0,
+            project_hash: "project-a",
+            project_label: "Project A",
+            project_ref: None,
+            session_id: None,
+            source_path_hash: None,
+            cost_with_cache_usd: 0.0,
+            cost_without_cache_usd: 0.0,
+            pricing_status: "unpriced",
+            pricing_source: None,
+        }
+    }
 }
