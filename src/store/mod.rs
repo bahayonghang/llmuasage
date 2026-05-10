@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     models::{SourceKind, UsageEvent, UsageTokens},
     paths::AppPaths,
+    query::pricing::{PRICING_MIXED, PRICING_UNPRICED},
 };
 
 mod connection;
@@ -270,12 +271,12 @@ impl Store {
         TriggerStore::new(self)
     }
 
-    /// Recomputes and persists per-event cost columns from the embedded
-    /// static pricing catalog (D6/F1.3). Returns the number of `usage_event`
-    /// rows updated. Single transaction so a partial run never leaves the
-    /// table half-priced.
+    /// Recomputes and persists per-event cost columns from the active pricing
+    /// catalog (D6/F1.3). Returns the number of `usage_event` rows updated.
+    /// Single transaction so a partial run never leaves the table half-priced.
     pub fn recompute_costs(&self) -> crate::error::Result<usize> {
-        self.recompute_costs_with(crate::query::pricing_catalog::PricingCatalog::static_v1())
+        let catalog = self.active_pricing_catalog()?;
+        self.recompute_costs_with(&catalog)
     }
 
     /// Recomputes costs against a caller-supplied catalog. doctor uses
@@ -375,14 +376,9 @@ impl Store {
                 WHERE source = ?1 AND model = ?2 AND hour_start = ?3 AND project_hash = ?4
                 "#,
             )?;
-            let mut clear_empty_bucket_stmt = tx.prepare(
+            let mut delete_empty_bucket_stmt = tx.prepare(
                 r#"
-                UPDATE usage_bucket_30m
-                SET cost_with_cache_usd = 0.0,
-                    cost_without_cache_usd = 0.0,
-                    pricing_status = 'unpriced',
-                    pricing_source = NULL,
-                    pricing_rate = NULL
+                DELETE FROM usage_bucket_30m
                 WHERE NOT EXISTS (
                     SELECT 1
                     FROM usage_event e
@@ -407,7 +403,7 @@ impl Store {
                     pricing.pricing_rate(),
                 ])?;
             }
-            clear_empty_bucket_stmt.execute([])?;
+            delete_empty_bucket_stmt.execute([])?;
         }
         let catalog_version = catalog.version.as_str();
         tx.execute(
@@ -633,15 +629,17 @@ impl MetadataRollup {
 
     fn value_or_unpriced(&self) -> String {
         if self.mixed {
-            "mixed".to_string()
+            PRICING_MIXED.to_string()
         } else {
-            self.value.clone().unwrap_or_else(|| "unpriced".to_string())
+            self.value
+                .clone()
+                .unwrap_or_else(|| PRICING_UNPRICED.to_string())
         }
     }
 
     fn value_or_none(&self) -> Option<String> {
         if self.mixed {
-            Some("mixed".to_string())
+            Some(PRICING_MIXED.to_string())
         } else {
             self.value.clone()
         }

@@ -11,8 +11,12 @@ use super::{
     SyncShard,
 };
 use crate::{
+    error::LlmusageError,
     models::{ProjectInfo, SourceKind, UsageEvent, UsageTokens},
-    query::{PricingCatalog, pricing, pricing::CostBreakdown},
+    query::{
+        PricingCatalog, pricing,
+        pricing::{CostBreakdown, PRICING_MIXED, PRICING_UNPRICED},
+    },
     util::now_utc,
 };
 
@@ -37,9 +41,7 @@ impl Store {
         info!("开始建立 sync 单写入端");
         let conn = self.open_connection()?;
         let raw_archive_enabled = self.raw_archive_enabled()?;
-        let pricing_catalog = self
-            .load_active_pricing_catalog()
-            .unwrap_or_else(|_| PricingCatalog::static_v1().clone());
+        let pricing_catalog = self.active_pricing_catalog()?;
         info!(raw_archive_enabled, "完成 sync 单写入端建立");
         Ok(SyncRunWriter {
             conn,
@@ -51,7 +53,13 @@ impl Store {
 }
 
 impl Store {
-    fn load_active_pricing_catalog(&self) -> Result<PricingCatalog> {
+    /// Loads the catalog currently selected by `meta('pricing_catalog_version')`.
+    ///
+    /// Missing metadata keeps the embedded static catalog. Once metadata points
+    /// at a local snapshot, load failures are returned to the caller instead of
+    /// silently falling back to `static-v1`; otherwise new sync/recompute work
+    /// would be priced against a catalog the user did not select.
+    pub fn active_pricing_catalog(&self) -> Result<PricingCatalog> {
         let Some(version) = self.meta_value("pricing_catalog_version")? else {
             return Ok(PricingCatalog::static_v1().clone());
         };
@@ -64,13 +72,24 @@ impl Store {
             .root_dir
             .join("pricing")
             .join(format!("{version}.json"));
-        if snapshot_path.is_file() {
-            let catalog = PricingCatalog::load_snapshot(&snapshot_path)?;
-            if catalog.version == version {
-                return Ok(catalog);
+        let catalog = PricingCatalog::load_snapshot(&snapshot_path).map_err(|source| {
+            LlmusageError::ConfigInvalid {
+                detail: format!(
+                    "failed to load active pricing catalog `{version}` from {}: {source}",
+                    snapshot_path.display()
+                ),
             }
+        })?;
+        if catalog.version != version {
+            return Err(LlmusageError::ConfigInvalid {
+                detail: format!(
+                    "pricing catalog metadata points to `{version}` but snapshot {} declares `{}`",
+                    snapshot_path.display(),
+                    catalog.version
+                ),
+            });
         }
-        Ok(PricingCatalog::static_v1().clone())
+        Ok(catalog)
     }
 }
 
@@ -115,7 +134,7 @@ impl SyncRunWriter {
                     SUM(cost_without_cache_usd),
                     COUNT(*)
                 FROM usage_event
-                WHERE source = ?1 AND event_key LIKE ?2
+                WHERE source = ?1 AND source_path_hash = ?2
                 GROUP BY model, hour_start, COALESCE(project_hash, '')
                 "#,
             )?;
@@ -146,11 +165,13 @@ impl SyncRunWriter {
                   AND output_tokens <= 0
                   AND reasoning_output_tokens <= 0
                   AND total_tokens <= 0
+                  AND cost_with_cache_usd <= 0.0
+                  AND cost_without_cache_usd <= 0.0
                   AND event_count <= 0
                 "#,
             )?;
             let mut delete_event_stmt = tx.prepare_cached(
-                "DELETE FROM usage_event WHERE source = ?1 AND event_key LIKE ?2",
+                "DELETE FROM usage_event WHERE source = ?1 AND source_path_hash = ?2",
             )?;
             let updated_at = now_utc();
             let mut touched_buckets = Vec::new();
@@ -160,9 +181,8 @@ impl SyncRunWriter {
                     continue;
                 }
 
-                let prefix = format!("{}:{}:%", source.as_str(), path_hash);
                 let rows = aggregate_stmt.query_map(
-                    rusqlite::params![source.as_str(), prefix],
+                    rusqlite::params![source.as_str(), path_hash],
                     |row| {
                         Ok((
                             row.get::<_, String>(0)?,
@@ -202,9 +222,9 @@ impl SyncRunWriter {
                 {
                     update_bucket_stmt.execute(rusqlite::params![
                         source.as_str(),
-                        model,
-                        hour_start,
-                        project_hash,
+                        &model,
+                        &hour_start,
+                        &project_hash,
                         tokens.input_tokens,
                         tokens.cache_read_tokens,
                         tokens.cache_creation_tokens,
@@ -216,17 +236,18 @@ impl SyncRunWriter {
                         event_count,
                         updated_at,
                     ])?;
-                    touched_buckets.push((model.clone(), hour_start.clone(), project_hash.clone()));
-                    delete_zero_stmt.execute(rusqlite::params![
+                    let deleted_empty_bucket = delete_zero_stmt.execute(rusqlite::params![
                         source.as_str(),
-                        model,
-                        hour_start,
-                        project_hash,
+                        &model,
+                        &hour_start,
+                        &project_hash,
                     ])?;
+                    if deleted_empty_bucket == 0 {
+                        touched_buckets.push((model, hour_start, project_hash));
+                    }
                 }
 
-                let prefix = format!("{}:{}:%", source.as_str(), path_hash);
-                delete_event_stmt.execute(rusqlite::params![source.as_str(), prefix])?;
+                delete_event_stmt.execute(rusqlite::params![source.as_str(), path_hash])?;
             }
 
             refresh_bucket_pricing_after_reset_tx(
@@ -415,7 +436,11 @@ impl SyncRunWriter {
                         .last_total
                         .as_ref()
                         .map(serde_json::to_string)
-                        .transpose()?,
+                        .transpose()
+                        .map_err(|source| LlmusageError::Parse {
+                            context: "file cursor token snapshot",
+                            source,
+                        })?,
                     cursor.last_model,
                     cursor.updated_at,
                 ])?;
@@ -603,7 +628,7 @@ fn flush_buckets_tx(
         return Ok(());
     }
 
-    let mut stmt = tx.prepare_cached(
+    let sql = format!(
         r#"
         INSERT INTO usage_bucket_30m(
             source,
@@ -639,20 +664,21 @@ fn flush_buckets_tx(
             cost_without_cache_usd = usage_bucket_30m.cost_without_cache_usd + excluded.cost_without_cache_usd,
             pricing_status = CASE
                 WHEN usage_bucket_30m.pricing_status = excluded.pricing_status THEN usage_bucket_30m.pricing_status
-                ELSE 'mixed'
+                ELSE '{PRICING_MIXED}'
             END,
             pricing_source = CASE
                 WHEN usage_bucket_30m.pricing_source IS excluded.pricing_source THEN usage_bucket_30m.pricing_source
-                ELSE 'mixed'
+                ELSE '{PRICING_MIXED}'
             END,
             pricing_rate = CASE
                 WHEN usage_bucket_30m.pricing_rate IS excluded.pricing_rate THEN usage_bucket_30m.pricing_rate
-                ELSE 'mixed'
+                ELSE '{PRICING_MIXED}'
             END,
             event_count = usage_bucket_30m.event_count + excluded.event_count,
             updated_at = excluded.updated_at
-        "#,
-    )?;
+        "#
+    );
+    let mut stmt = tx.prepare_cached(&sql)?;
     let updated_at = now_utc();
     for (key, rollup) in buckets {
         stmt.execute(rusqlite::params![
@@ -727,7 +753,7 @@ fn refresh_bucket_pricing_after_reset_tx(
                     cost_without_cache_usd: row.get::<_, Option<f64>>(1)?.unwrap_or_default(),
                     pricing_status: match row
                         .get::<_, Option<String>>(2)?
-                        .unwrap_or_else(|| "unpriced".to_string())
+                        .unwrap_or_else(|| PRICING_UNPRICED.to_string())
                         .as_str()
                     {
                         "static" => pricing::PricingStatus::Static,
@@ -762,7 +788,7 @@ fn refresh_bucket_pricing_after_reset_tx(
 mod tests {
     use super::*;
     use crate::{
-        models::{SourceKind, UsageEvent, UsageTokens},
+        models::{SessionInfo, SourceKind, UsageEvent, UsageTokens},
         paths::AppPaths,
         store::FileCursor,
     };
@@ -798,7 +824,11 @@ mod tests {
                 total_tokens: total * 2,
             },
             project: None,
-            session: None,
+            session: Some(SessionInfo {
+                session_id: format!("session:{path_hash}"),
+                session_label: None,
+                source_path_hash: Some(path_hash.to_string()),
+            }),
         }
     }
 
@@ -820,7 +850,7 @@ mod tests {
     /// Validates the reset → events → cursor protocol is upheld in a single shard:
     /// 1) seed one event under `path_hash_a` with total=100,
     /// 2) commit a shard that resets `path_hash_a` and writes 5 fresh events
-    ///    summing to 300 tokens plus a single cursor row.
+    ///    summing to `2 * (10 + 20 + 30 + 40 + 50)` tokens plus a single cursor row.
     ///
     /// Asserts the seeded event is gone, the bucket reflects only the new events,
     /// and the cursor lands.
@@ -873,9 +903,10 @@ mod tests {
             [],
             |row| row.get(0),
         )?;
+        let expected_total: i64 = 2 * (10 + 20 + 30 + 40 + 50);
         assert_eq!(
-            bucket_total, 300,
-            "bucket 总 tokens 应等于第二次写入 events 的总和 2*(10+20+30+40+50)"
+            bucket_total, expected_total,
+            "bucket 总 tokens 应等于第二次写入 events 的总和"
         );
 
         let cursor_count: i64 = conn.query_row(
@@ -946,39 +977,28 @@ mod tests {
         })?;
 
         let conn = store.open_connection()?;
-        let (event_cost, bucket_cost, bucket_status, bucket_source, event_count): (
-            f64,
-            f64,
-            String,
-            String,
-            i64,
-        ) = conn.query_row(
-            r#"
+        let (bucket_cost, bucket_status, bucket_source, event_count): (f64, String, String, i64) =
+            conn.query_row(
+                r#"
             SELECT
-                COALESCE(SUM(e.cost_with_cache_usd), 0.0),
                 b.cost_with_cache_usd,
                 b.pricing_status,
                 COALESCE(b.pricing_source, ''),
                 b.event_count
             FROM usage_bucket_30m b
-            LEFT JOIN usage_event e
-              ON e.source = b.source
-             AND e.model = b.model
-             AND e.hour_start = b.hour_start
-             AND COALESCE(e.project_hash, '') = b.project_hash
             WHERE b.source = 'codex' AND b.model = 'gpt-5'
-            GROUP BY b.cost_with_cache_usd, b.pricing_status, b.pricing_source, b.event_count
+            "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )?;
+        let event_cost: f64 = conn.query_row(
+            r#"
+            SELECT COALESCE(SUM(cost_with_cache_usd), 0.0)
+            FROM usage_event
+            WHERE source = 'codex' AND model = 'gpt-5'
             "#,
             [],
-            |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                ))
-            },
+            |row| row.get(0),
         )?;
         assert!(bucket_cost > 0.0);
         assert!(
@@ -1061,6 +1081,60 @@ mod tests {
         assert_eq!(status, "snapshot");
         assert_eq!(source, "litellm-snapshot-2026-05");
         assert!((cost - 3.0).abs() < 1e-6);
+
+        Ok(())
+    }
+
+    #[test]
+    fn begin_sync_run_propagates_invalid_snapshot_error() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = build_paths(temp.path());
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+
+        let pricing_dir = paths.root_dir.join("pricing");
+        std::fs::create_dir_all(&pricing_dir)?;
+        std::fs::write(pricing_dir.join("broken-snapshot.json"), "{not-json")?;
+        store.set_meta_value("pricing_catalog_version", "broken-snapshot")?;
+
+        let err = match store.begin_sync_run() {
+            Ok(_) => panic!("invalid active pricing snapshot must not fall back to static-v1"),
+            Err(err) => err,
+        };
+        assert!(
+            err.to_string().contains("broken-snapshot"),
+            "unexpected error shape: {err}"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn active_pricing_catalog_rejects_version_mismatch() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = build_paths(temp.path());
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+
+        let pricing_dir = paths.root_dir.join("pricing");
+        std::fs::create_dir_all(&pricing_dir)?;
+        std::fs::write(
+            pricing_dir.join("expected-version.json"),
+            r#"{
+                "version": "actual-version",
+                "models": []
+            }"#,
+        )?;
+        store.set_meta_value("pricing_catalog_version", "expected-version")?;
+
+        let err = store
+            .active_pricing_catalog()
+            .expect_err("metadata/catalog version mismatch must be explicit");
+        assert!(
+            err.to_string().contains("expected-version")
+                && err.to_string().contains("actual-version"),
+            "unexpected error: {err}"
+        );
 
         Ok(())
     }

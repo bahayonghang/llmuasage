@@ -82,12 +82,6 @@ pub enum LlmusageError {
 /// Convenient result alias for public llmusage APIs.
 pub type Result<T, E = LlmusageError> = std::result::Result<T, E>;
 
-impl From<serde_json::Error> for LlmusageError {
-    fn from(value: serde_json::Error) -> Self {
-        Self::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, value))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

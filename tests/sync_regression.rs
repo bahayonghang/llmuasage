@@ -581,6 +581,44 @@ fn export_failure_marks_run_failed_immediately() -> Result<()> {
 }
 
 #[test]
+fn sync_failure_from_invalid_active_pricing_snapshot_marks_run_failed() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_codex("bad-pricing.jsonl", 120, "2026-04-22T01:12:00Z")?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let pricing_dir = app.paths.root_dir.join("pricing");
+        fs::create_dir_all(&pricing_dir)?;
+        fs::write(pricing_dir.join("broken-snapshot.json"), "{not-json")?;
+        store.set_meta_value("pricing_catalog_version", "broken-snapshot")?;
+
+        let err = commands::sync::run(&app)
+            .await
+            .expect_err("invalid active pricing snapshot should fail sync");
+        assert!(
+            err.to_string().contains("broken-snapshot"),
+            "unexpected sync error: {err:#}"
+        );
+
+        let run = latest_run_record(&app.paths.db_path, "sync")?;
+        assert_failed_run(&run);
+        assert!(
+            run.error
+                .as_deref()
+                .is_some_and(|value| value.contains("broken-snapshot")),
+            "run_log error should identify the active snapshot: {run:?}"
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
 fn doctor_warns_on_recovered_aborted_runs() -> Result<()> {
     let fixture = Fixture::new()?;
     let app = AppContext::discover()?;

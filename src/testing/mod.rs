@@ -10,7 +10,7 @@ use tempfile::TempDir;
 use crate::{
     error::Result,
     paths::AppPaths,
-    query::pricing,
+    query::pricing::{self, PRICING_MIXED, PRICING_UNPRICED},
     store::{BootstrapOptions, Store},
 };
 
@@ -97,7 +97,7 @@ impl Fixture {
                 event.created_at.unwrap_or(event.event_at),
             ],
         )?;
-        let breakdown = if event.pricing_status == "unpriced"
+        let breakdown = if event.pricing_status == PRICING_UNPRICED
             && event.pricing_source.is_none()
             && event.pricing_rate.is_none()
             && event.cost_with_cache_usd == 0.0
@@ -120,7 +120,7 @@ impl Fixture {
                 pricing_rate: event.pricing_rate.map(str::to_string),
             }
         };
-        conn.execute(
+        let bucket_sql = format!(
             r#"
             INSERT INTO usage_bucket_30m(
                 source, model, hour_start, project_hash, project_label, project_ref,
@@ -140,19 +140,22 @@ impl Fixture {
                 cost_without_cache_usd = cost_without_cache_usd + excluded.cost_without_cache_usd,
                 pricing_status = CASE
                     WHEN pricing_status = excluded.pricing_status THEN pricing_status
-                    ELSE 'mixed'
+                    ELSE '{PRICING_MIXED}'
                 END,
                 pricing_source = CASE
                     WHEN pricing_source IS excluded.pricing_source THEN pricing_source
-                    ELSE 'mixed'
+                    ELSE '{PRICING_MIXED}'
                 END,
                 pricing_rate = CASE
                     WHEN pricing_rate IS excluded.pricing_rate THEN pricing_rate
-                    ELSE 'mixed'
+                    ELSE '{PRICING_MIXED}'
                 END,
                 event_count = event_count + excluded.event_count,
                 updated_at = excluded.updated_at
-            "#,
+            "#
+        );
+        conn.execute(
+            &bucket_sql,
             params![
                 event.source,
                 event.model,
@@ -242,6 +245,7 @@ fn parse_seed_pricing_status(raw: &str) -> pricing::PricingStatus {
     match raw {
         "static" => pricing::PricingStatus::Static,
         "snapshot" => pricing::PricingStatus::Snapshot,
+        PRICING_UNPRICED => pricing::PricingStatus::Unpriced,
         _ => pricing::PricingStatus::Unpriced,
     }
 }
@@ -291,7 +295,7 @@ impl Default for SeedEvent<'_> {
             total_tokens: 1,
             cost_with_cache_usd: 0.0,
             cost_without_cache_usd: 0.0,
-            pricing_status: "unpriced",
+            pricing_status: PRICING_UNPRICED,
             pricing_source: None,
             pricing_rate: None,
             project_hash: "project-test",

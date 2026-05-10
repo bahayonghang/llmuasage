@@ -17,21 +17,21 @@
     },
     {
       "source": "claude",
-      "matchers": ["opus"],
+      "matchers": ["claude-opus", "opus"],
       "input_per_mtok": 15.0,
       "cached_per_mtok": 1.5,
       "output_per_mtok": 75.0
     },
     {
       "source": "claude",
-      "matchers": ["sonnet", "claude-3-7"],
+      "matchers": ["claude-sonnet", "sonnet", "claude-3-7"],
       "input_per_mtok": 3.0,
       "cached_per_mtok": 0.3,
       "output_per_mtok": 15.0
     },
     {
       "source": "claude",
-      "matchers": ["haiku"],
+      "matchers": ["claude-haiku", "haiku"],
       "input_per_mtok": 0.8,
       "cached_per_mtok": 0.08,
       "output_per_mtok": 4.0

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::error::Result;
+use crate::error::{LlmusageError, Result};
 use rusqlite::{Connection, params};
 use serde_json::Value;
 
@@ -48,7 +48,13 @@ impl<'a> IntegrationStateStore<'a> {
                 status,
                 config_path.map(|path| path.to_string_lossy().to_string()),
                 backup_path.map(|path| path.to_string_lossy().to_string()),
-                details.map(serde_json::to_string).transpose()?,
+                details
+                    .map(serde_json::to_string)
+                    .transpose()
+                    .map_err(|source| LlmusageError::Parse {
+                        context: "integration details",
+                        source,
+                    })?,
                 now_utc(),
             ],
         )?;

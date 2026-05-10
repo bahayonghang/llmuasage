@@ -2,6 +2,9 @@ use serde::{Deserialize, Serialize};
 
 use super::pricing_catalog::PricingCatalog;
 
+pub const PRICING_MIXED: &str = "mixed";
+pub const PRICING_UNPRICED: &str = "unpriced";
+
 /// Pricing status reported alongside a [`CostBreakdown`] (D6/F1.3).
 ///
 /// `Static` matches succeed against the embedded v1 catalog; `Snapshot`
@@ -21,7 +24,7 @@ impl PricingStatus {
         match self {
             Self::Static => "static",
             Self::Snapshot => "snapshot",
-            Self::Unpriced => "unpriced",
+            Self::Unpriced => PRICING_UNPRICED,
         }
     }
 }
@@ -101,10 +104,12 @@ pub fn compute_cost_with(
         cost_without_cache_usd,
         pricing_status: catalog.status,
         pricing_source: Some(catalog.version.clone()),
-        pricing_rate: Some(format!(
-            r#"{{"input_per_mtok":{:.4},"cached_per_mtok":{:.4},"output_per_mtok":{:.4}}}"#,
-            pricing.input_per_mtok, pricing.cached_per_mtok, pricing.output_per_mtok
-        )),
+        pricing_rate: serde_json::to_string(&serde_json::json!({
+            "input_per_mtok": pricing.input_per_mtok,
+            "cached_per_mtok": pricing.cached_per_mtok,
+            "output_per_mtok": pricing.output_per_mtok,
+        }))
+        .ok(),
     }
 }
 
@@ -133,7 +138,8 @@ pub fn estimate_cost_usd(
 
 #[cfg(test)]
 mod tests {
-    use super::{PricingStatus, compute_cost};
+    use super::{PricingStatus, compute_cost, compute_cost_with};
+    use crate::query::pricing_catalog::{PricingCatalog, PricingEntry};
 
     /// Validates D6: a Codex/`gpt-5` event picks up the static-v1 rate row,
     /// produces non-zero cost columns, and stamps `pricing_source` for
@@ -147,6 +153,29 @@ mod tests {
         // Without-cache lower-bounds: cache_read priced at full input rate.
         assert!(cost.cost_without_cache_usd > cost.cost_with_cache_usd);
         assert!(cost.pricing_rate.is_some());
+    }
+
+    #[test]
+    fn pricing_rate_preserves_low_precision_rates() {
+        let catalog = PricingCatalog {
+            version: "precision-test".to_string(),
+            status: PricingStatus::Snapshot,
+            models: vec![PricingEntry {
+                source: "codex".to_string(),
+                matchers: vec!["low-cache".to_string()],
+                input_per_mtok: 0.0005,
+                cached_per_mtok: 0.00005,
+                output_per_mtok: 0.005,
+            }],
+        };
+        let cost = compute_cost_with(&catalog, "codex", "low-cache", 1_000, 1_000, 1_000, 0);
+        let pricing_rate = cost
+            .pricing_rate
+            .expect("matched row should carry pricing_rate");
+        assert!(
+            pricing_rate.contains("0.00005"),
+            "pricing_rate should not round low precision rates to zero: {pricing_rate}"
+        );
     }
 
     /// Validates D6 fallthrough: an unknown model returns 0 cost and

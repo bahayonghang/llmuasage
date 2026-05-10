@@ -23,7 +23,7 @@ pub use home_overview::{
     HomeOverviewSummary,
 };
 pub use logs::{LogRecord, LogsPage, LogsQuery};
-pub use pricing::{CostBreakdown, PricingStatus};
+pub use pricing::{CostBreakdown, PRICING_MIXED, PRICING_UNPRICED, PricingStatus};
 pub use pricing_catalog::PricingCatalog;
 
 /// Aggregated token counters returned by overview and trend queries.
@@ -364,14 +364,9 @@ impl Dashboard {
 
     /// Loads aggregated trend points for the requested window (`day`, `week`, `month`, or `all`).
     ///
-    /// Deprecated since 0.5.0 in favour of [`Dashboard::trends_daily`], which
-    /// returns a per-day series with full token breakdown and event count.
-    /// Retained for the legacy 4-window snapshot/HTML export and the
-    /// `/api/trends?window=` HTTP route.
-    #[deprecated(
-        since = "0.5.0",
-        note = "use Dashboard::trends_daily for richer per-day data"
-    )]
+    /// Retained for the legacy `/api/trends?window=` HTTP route.
+    /// New surfaces should prefer [`Dashboard::trends_daily`] for full token
+    /// breakdown and event counts.
     pub fn trends(&self, window: &str, filter: &QueryFilter) -> Result<Vec<TrendPoint>> {
         let mut sql_filter = filter.bucket_filter(None);
         let cutoff = match window {
@@ -473,15 +468,15 @@ impl Dashboard {
                 SUM(cost_without_cache_usd),
                 CASE
                     WHEN COUNT(DISTINCT pricing_status) = 1 THEN MAX(pricing_status)
-                    ELSE 'mixed'
+                    ELSE '{PRICING_MIXED}'
                 END,
                 CASE
                     WHEN COUNT(DISTINCT COALESCE(pricing_source, '__llmusage_null__')) = 1 THEN MAX(pricing_source)
-                    ELSE 'mixed'
+                    ELSE '{PRICING_MIXED}'
                 END,
                 CASE
                     WHEN COUNT(DISTINCT COALESCE(pricing_rate, '__llmusage_null__')) = 1 THEN MAX(pricing_rate)
-                    ELSE 'mixed'
+                    ELSE '{PRICING_MIXED}'
                 END
             FROM usage_bucket_30m
             {}
@@ -507,7 +502,7 @@ impl Dashboard {
                 cache_savings_usd: (cost_without_cache_usd - cost_with_cache_usd).max(0.0),
                 pricing_status: row
                     .get::<_, Option<String>>(9)?
-                    .unwrap_or_else(|| "unpriced".to_string()),
+                    .unwrap_or_else(|| PRICING_UNPRICED.to_string()),
                 pricing_source: row.get(10)?,
                 pricing_rate: row.get(11)?,
             })
@@ -720,9 +715,9 @@ impl Dashboard {
     /// Builds the full dashboard snapshot used by static HTML export.
     ///
     /// The snapshot still embeds the legacy four-window trends (`day`/`week`/
-    /// `month`/`all`) for backwards-compat HTML export. New surfaces should
-    /// call [`Dashboard::trends_daily`] directly.
-    #[allow(deprecated)]
+    /// `month`/`all`) for backwards-compat HTML export. It intentionally uses
+    /// the legacy scalar trend shape because `/api/trends?window=` still
+    /// exposes that contract.
     pub fn snapshot(&self, filter: &QueryFilter) -> Result<DashboardSnapshot> {
         Ok(DashboardSnapshot {
             overview: self.overview(filter)?,
@@ -886,7 +881,6 @@ mod tests {
     use crate::{models::SourceKind, store::Store, testing::Fixture};
 
     #[test]
-    #[allow(deprecated)]
     fn dashboard_snapshot_uses_single_connection_and_matches_individual_methods() -> Result<()> {
         let fixture = Fixture::new()?;
         fixture.seed_dashboard(180)?;
@@ -1309,6 +1303,123 @@ mod tests {
         assert_eq!(bucket_status, "snapshot");
         assert_eq!(bucket_source, "litellm-snapshot-2026-05");
         assert!((bucket_cost - 3.0).abs() < 1e-6);
+        Ok(())
+    }
+
+    /// Validates C2 on the recompute path: the no-arg recompute entrypoint uses
+    /// the same active catalog resolver as sync, so an active local snapshot
+    /// does not diverge back to the embedded static catalog.
+    #[test]
+    fn recompute_costs_uses_active_pricing_catalog() -> Result<()> {
+        let fixture = Fixture::new()?;
+        fixture.seed_event(crate::testing::SeedEvent {
+            event_key: "codex:active-snap",
+            source: "codex",
+            model: "gpt-5",
+            event_at: "2026-05-01T00:00:00Z",
+            hour_start: Some("2026-05-01T00:00:00Z"),
+            input_tokens: 500_000,
+            output_tokens: 100_000,
+            total_tokens: 600_000,
+            created_at: Some("2026-05-01T00:00:00Z"),
+            ..Default::default()
+        })?;
+        let pricing_dir = fixture.paths().root_dir.join("pricing");
+        std::fs::create_dir_all(&pricing_dir)?;
+        std::fs::write(
+            pricing_dir.join("litellm-snapshot-2026-05.json"),
+            r#"{
+                "version": "litellm-snapshot-2026-05",
+                "models": [
+                    {
+                        "source": "codex",
+                        "matchers": ["gpt-5"],
+                        "input_per_mtok": 2.0,
+                        "cached_per_mtok": 0.2,
+                        "output_per_mtok": 20.0
+                    }
+                ]
+            }"#,
+        )?;
+        fixture
+            .store()
+            .set_meta_value("pricing_catalog_version", "litellm-snapshot-2026-05")?;
+
+        let updated = fixture.store().recompute_costs()?;
+        assert_eq!(updated, 1);
+
+        let conn = fixture.store().open_connection()?;
+        let (status, source, cost): (String, String, f64) = conn.query_row(
+            r#"
+            SELECT pricing_status, COALESCE(pricing_source, ''), cost_with_cache_usd
+            FROM usage_event WHERE event_key = 'codex:active-snap'
+            "#,
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        assert_eq!(status, "snapshot");
+        assert_eq!(source, "litellm-snapshot-2026-05");
+        assert!((cost - 3.0).abs() < 1e-6);
+        Ok(())
+    }
+
+    #[test]
+    fn recompute_costs_deletes_orphan_buckets() -> Result<()> {
+        let fixture = Fixture::new()?;
+        fixture.seed_event(crate::testing::SeedEvent {
+            event_key: "codex:live-bucket",
+            source: "codex",
+            model: "gpt-5",
+            event_at: "2026-05-01T00:00:00Z",
+            hour_start: Some("2026-05-01T00:00:00Z"),
+            input_tokens: 1_000,
+            output_tokens: 500,
+            total_tokens: 1_500,
+            created_at: Some("2026-05-01T00:00:00Z"),
+            ..Default::default()
+        })?;
+        let conn = fixture.store().open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_bucket_30m(
+                source, model, hour_start, project_hash, project_label, project_ref,
+                input_tokens, cache_read_tokens, cache_creation_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source, pricing_rate,
+                event_count, updated_at
+            ) VALUES ('codex', 'gpt-5', '2026-05-02T00:00:00Z', '', NULL, NULL,
+                0, 0, 0, 0, 0, 0,
+                42.0, 42.0, 'static', 'static-v1', '{}',
+                0, '2026-05-02T00:00:00Z')
+            "#,
+            [],
+        )?;
+
+        let before: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_bucket_30m WHERE source = 'codex'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(before, 2);
+
+        let updated = fixture.store().recompute_costs()?;
+        assert_eq!(updated, 1);
+
+        let after: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_bucket_30m WHERE source = 'codex'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(after, 1, "orphan bucket should be deleted, not zeroed");
+        let orphan_count: i64 = conn.query_row(
+            r#"
+            SELECT COUNT(*) FROM usage_bucket_30m
+            WHERE source = 'codex' AND model = 'gpt-5' AND hour_start = '2026-05-02T00:00:00Z'
+            "#,
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(orphan_count, 0);
         Ok(())
     }
 

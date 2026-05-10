@@ -143,10 +143,7 @@ async fn api_trends(
     let window = params.get("window").map(String::as_str).unwrap_or("day");
     api_json(
         "/api/trends",
-        load_via_dashboard(&state, |d| {
-            #[allow(deprecated)]
-            d.trends(window, &Default::default())
-        }),
+        load_via_dashboard(&state, |d| d.trends(window, &Default::default())),
     )
 }
 

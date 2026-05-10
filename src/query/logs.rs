@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 
-use super::{Dashboard, QueryFilter};
+use super::{Dashboard, PRICING_UNPRICED, QueryFilter};
 
 const DEFAULT_PAGE_SIZE: u32 = 50;
 const MAX_PAGE_SIZE: u32 = 500;
@@ -228,7 +228,7 @@ pub(crate) fn load(dashboard: &Dashboard, query: &LogsQuery) -> Result<LogsPage>
             cost_without_cache_usd: row.get::<_, Option<f64>>(11)?.unwrap_or_default(),
             pricing_status: row
                 .get::<_, Option<String>>(12)?
-                .unwrap_or_else(|| "unpriced".to_string()),
+                .unwrap_or_else(|| PRICING_UNPRICED.to_string()),
             pricing_source: row.get(13)?,
             pricing_rate: row.get(14)?,
             project_hash: row.get(15)?,

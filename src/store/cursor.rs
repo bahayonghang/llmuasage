@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::error::Result;
+use crate::error::{LlmusageError, Result};
 use rusqlite::{OptionalExtension, params};
 
 use super::{FileCursor, OpencodeCursor, Store};
@@ -114,7 +114,12 @@ impl<'a> CursorStore<'a> {
             params![
                 cursor.inode as i64,
                 cursor.last_time_created,
-                serde_json::to_string(&cursor.last_processed_ids)?,
+                serde_json::to_string(&cursor.last_processed_ids).map_err(|source| {
+                    LlmusageError::Parse {
+                        context: "opencode cursor",
+                        source,
+                    }
+                })?,
                 cursor.sqlite_status,
                 cursor.updated_at,
             ],

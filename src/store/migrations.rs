@@ -4,7 +4,10 @@ use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde::Serialize;
 use tracing::info;
 
-use crate::error::{LlmusageError, Result};
+use crate::{
+    error::{LlmusageError, Result},
+    query::PRICING_UNPRICED,
+};
 
 /// Migration function signature. Each migration owns one SQLite transaction.
 pub type MigrationFn = fn(&Transaction<'_>) -> Result<()>;
@@ -350,7 +353,7 @@ fn m_003_add_cost_breakdown(tx: &Transaction<'_>) -> Result<()> {
             tx,
             table,
             "pricing_status",
-            "TEXT NOT NULL DEFAULT 'unpriced'",
+            &format!("TEXT NOT NULL DEFAULT '{PRICING_UNPRICED}'"),
         )?;
         ensure_column(tx, table, "pricing_source", "TEXT")?;
         ensure_column(tx, table, "pricing_rate", "TEXT")?;
