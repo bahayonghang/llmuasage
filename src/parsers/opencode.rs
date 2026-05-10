@@ -7,11 +7,12 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::{
+    integrations,
     models::{SessionInfo, SourceKind, UsageEvent, UsageTokens},
     parsers::{ProgressSink, SourceParser, SourceSyncStats, SyncEvent},
     project::ProjectResolver,
     store::{Store, SyncRunWriter, SyncShard},
-    util::{bucket_start_from_rfc3339, file_identity, normalize_model, now_utc, resolve_home_dir},
+    util::{bucket_start_from_rfc3339, file_identity, normalize_model, now_utc},
 };
 
 const OPENCODE_PAGE_SIZE: i64 = 1000;
@@ -67,12 +68,7 @@ async fn sync_opencode(
 
     // 1.1 定位本地 DB 并读取当前 cursor
     let parse_started = Instant::now();
-    let home_dir = resolve_home_dir();
-    let data_home = dirs::data_local_dir().unwrap_or_else(|| home_dir.join(".local").join("share"));
-    let opencode_home = std::env::var("OPENCODE_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| data_home.join("opencode"));
-    let db_path = opencode_home.join("opencode.db");
+    let db_path = integrations::opencode::resolve_db_path();
     let mut cursor = store.cursors().load_opencode_cursor()?;
     let mut stats = SourceSyncStats {
         source: SourceKind::Opencode,

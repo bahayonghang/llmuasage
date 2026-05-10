@@ -81,14 +81,7 @@ async fn diagnostics(app: &AppContext, json: bool) -> Result<()> {
     store.bootstrap()?;
     let probes = integrations::probe_all(app)?;
     let recent_runs = store.run_log().recent_runs(10)?;
-    let opencode_db_path = std::env::var("OPENCODE_HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| {
-            dirs::data_local_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join("opencode")
-        })
-        .join("opencode.db");
+    let opencode_db_path = integrations::opencode::resolve_db_path();
 
     let mut checks = vec![
         DoctorCheck {

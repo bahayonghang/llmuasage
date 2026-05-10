@@ -1,4 +1,7 @@
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use anyhow::Result;
 
@@ -129,6 +132,40 @@ pub fn uninstall(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
     })
 }
 
+fn official_storage_dir(home_dir: &Path) -> PathBuf {
+    home_dir.join(".local").join("share").join("opencode")
+}
+
+fn legacy_storage_dir(home_dir: &Path) -> PathBuf {
+    dirs::data_local_dir()
+        .unwrap_or_else(|| home_dir.join(".local").join("share"))
+        .join("opencode")
+}
+
+pub(crate) fn resolve_default_storage_dir(home_dir: &Path) -> PathBuf {
+    let official = official_storage_dir(home_dir);
+    if official.exists() {
+        return official;
+    }
+
+    let legacy = legacy_storage_dir(home_dir);
+    if legacy.exists() {
+        return legacy;
+    }
+
+    official
+}
+
+pub(crate) fn resolve_db_path() -> PathBuf {
+    std::env::var("OPENCODE_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            let home_dir = crate::util::resolve_home_dir();
+            resolve_default_storage_dir(&home_dir)
+        })
+        .join("opencode.db")
+}
+
 fn resolve_plugin_path(_app: &AppContext) -> PathBuf {
     let config_dir = std::env::var("OPENCODE_CONFIG_DIR")
         .map(PathBuf::from)
@@ -156,4 +193,30 @@ fn build_plugin(app: &AppContext) -> String {
            }};\n\
          }};\n"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_storage_prefers_official_home_data_dir() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let official = temp.path().join(".local").join("share").join("opencode");
+        let legacy = temp.path().join("legacy").join("opencode");
+        std::fs::create_dir_all(&official).expect("official dir");
+        std::fs::create_dir_all(&legacy).expect("legacy dir");
+
+        assert_eq!(resolve_default_storage_dir(temp.path()), official);
+    }
+
+    #[test]
+    fn default_storage_falls_back_to_official_even_when_absent() {
+        let temp = tempfile::tempdir().expect("temp dir");
+
+        assert_eq!(
+            resolve_default_storage_dir(temp.path()),
+            temp.path().join(".local").join("share").join("opencode"),
+        );
+    }
 }
