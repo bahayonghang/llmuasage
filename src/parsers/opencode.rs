@@ -85,6 +85,7 @@ async fn sync_opencode(
     if !db_path.is_file() {
         cursor.sqlite_status = "missing-db".to_string();
         cursor.updated_at = now_utc();
+        stats.absent = true;
         stats.last_error = Some("OpenCode SQLite DB 缺失".to_string());
         store.cursors().save_opencode_cursor(&cursor)?;
         return Ok(stats);

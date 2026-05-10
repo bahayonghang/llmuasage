@@ -13,6 +13,7 @@ use llmusage::{
     app::AppContext,
     commands,
     models::SourceKind,
+    parsers::SourceSyncStats,
     query::Dashboard,
     store::{HolderKind, Store},
 };
@@ -505,6 +506,86 @@ fn opencode_replaced_db_resets_high_water() -> Result<()> {
     })?;
 
     fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn opencode_missing_db_reports_absent_without_failing_sync() -> Result<()> {
+    let fixture = Fixture::new()?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+
+        let summary = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Opencode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+        assert_eq!(summary.sources.len(), 1);
+        assert_eq!(summary.total_seen, 0);
+        assert_eq!(summary.total_inserted, 0);
+        let stats = &summary.sources[0];
+        assert_eq!(stats.source, SourceKind::Opencode);
+        assert!(stats.absent);
+        assert_eq!(stats.last_error.as_deref(), Some("OpenCode SQLite DB 缺失"));
+        assert_eq!(stats.events_seen, 0);
+        assert_eq!(stats.events_inserted, 0);
+
+        let cursor = store.cursors().load_opencode_cursor()?;
+        assert_eq!(cursor.sqlite_status, "missing-db");
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn source_sync_stats_absent_wire_contract_is_backward_compatible() -> Result<()> {
+    let default_value = serde_json::to_value(SourceSyncStats {
+        source: SourceKind::Opencode,
+        ..SourceSyncStats::default()
+    })?;
+    assert_eq!(default_value["absent"], false);
+
+    let absent_value = serde_json::to_value(SourceSyncStats {
+        source: SourceKind::Opencode,
+        absent: true,
+        last_error: Some("OpenCode SQLite DB 缺失".to_string()),
+        ..SourceSyncStats::default()
+    })?;
+    assert_eq!(absent_value["absent"], true);
+
+    let legacy_json = serde_json::json!({
+        "source": "opencode",
+        "files_processed": 0,
+        "changed_files": 0,
+        "bytes_scanned": 0,
+        "events_seen": 0,
+        "events_replayed": 0,
+        "events_inserted": 0,
+        "parse_ms": 0,
+        "write_ms": 0,
+        "lock_wait_ms": 0,
+        "last_error": "OpenCode SQLite DB 缺失"
+    });
+    let legacy_stats: SourceSyncStats = serde_json::from_value(legacy_json)?;
+    assert!(!legacy_stats.absent);
+    assert_eq!(legacy_stats.source, SourceKind::Opencode);
+    assert_eq!(
+        legacy_stats.last_error.as_deref(),
+        Some("OpenCode SQLite DB 缺失")
+    );
     Ok(())
 }
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.3 - 2026-05-10
+
+### Fixed
+
+- Add `SourceSyncStats.absent` as a typed sync-contract flag for optional local sources that are missing without failing sync.
+- Mark missing OpenCode `opencode.db` as `absent = true` while preserving the existing `last_error` message and successful skipped-source summary semantics.
+
 ## 0.5.1 - 2026-05-09
 
 ### Fixed

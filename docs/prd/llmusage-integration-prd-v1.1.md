@@ -430,6 +430,12 @@ pub enum SyncEvent {
 
 `Progress` 至少 200ms 节流一次。
 
+`SourceSyncStats` 同步契约（0.5.3 起）包含 `absent: bool`。该字段表示可选本地真源不存在但同步未失败，
+例如 `OPENCODE_HOME` 已存在但 `opencode.db` 缺失时，OpenCode parser 会返回
+`absent = true`、`last_error = Some("OpenCode SQLite DB 缺失")`、`events_seen = 0`、
+`events_inserted = 0`，并继续走 `SourceFinished` / 成功 summary。旧 JSON 缺少 `absent` 时按
+`false` 反序列化；ccr-ui 适配层应优先读取该 typed flag，不再嗅探 `last_error` 文案判断 absent。
+
 #### F3.2 入口
 
 ```rust

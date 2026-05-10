@@ -121,6 +121,9 @@ pub struct SourceSyncStats {
     pub write_ms: u64,
     /// Time spent waiting for the global sync worker lock in milliseconds.
     pub lock_wait_ms: u64,
+    /// True when an optional local source is absent rather than failed.
+    #[serde(default)]
+    pub absent: bool,
     /// Optional last parse error surfaced for diagnostics.
     pub last_error: Option<String>,
 }
@@ -138,6 +141,7 @@ impl Default for SourceSyncStats {
             parse_ms: 0,
             write_ms: 0,
             lock_wait_ms: 0,
+            absent: false,
             last_error: None,
         }
     }
