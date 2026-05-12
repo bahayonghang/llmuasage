@@ -25,7 +25,7 @@ pub use migrations::{
     MigrationProgress, MigrationProgressEvent, latest_schema_version, read_schema_version,
 };
 pub use run_log::RunLog;
-pub use source_file::{SourceFileStateCounts, SourceFileStore};
+pub use source_file::{LossyRebuildRisk, SourceFileStateCounts, SourceFileStore};
 pub use sync_status::SyncStatusStore;
 pub use trigger::TriggerStore;
 

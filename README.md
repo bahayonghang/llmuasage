@@ -38,7 +38,7 @@ Common report options include `--since YYYYMMDD`, `--until YYYYMMDD`, `--json`, 
 Operational commands:
 
 - `llmusage init`
-- `llmusage sync` (`--rebuild` reparses local sources and rebuilds usage rows/buckets; progress is printed to stderr, while `--json-events` prints NDJSON lifecycle/progress events to stdout)
+- `llmusage sync` (`--rebuild` reparses local sources and rebuilds usage rows/buckets; it is refused by default if imported file-backed history has missing source files; pass `--allow-lossy-rebuild` only to explicitly clear unrebuildable history; progress is printed to stderr, while `--json-events` prints NDJSON lifecycle/progress events to stdout)
 - `llmusage status`
 - `llmusage diagnostics` (`--forget-file <PATH>` can mark a source file as intentionally ignored)
 - `llmusage doctor` (`--refresh-pricing <file>` imports a local pricing snapshot and recomputes costs)
@@ -69,6 +69,7 @@ Notes:
 - `serve` only binds to `127.0.0.1` and opens the dashboard in your default browser
 - `export html` generates an offline static report
 - report commands are read-only SQLite views and do not auto-sync
+- normal `sync` keeps imported usage history when a source file is missing; diagnostics may report `source_file.missing`, but usage rows are not deleted
 - `status` and `diagnostics` are read-only unless `diagnostics --forget-file` is used
 - `doctor` is read-only unless `--refresh-pricing <file>` is used; pricing refresh only reads a local JSON file, stores it under `~/.llmusage/pricing/<catalog-version>.json`, and writes local SQLite metadata/costs
 

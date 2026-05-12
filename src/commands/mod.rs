@@ -56,6 +56,10 @@ pub enum Commands {
         /// Rebuild usage rows and buckets from local source files/DBs.
         #[arg(long)]
         rebuild: bool,
+        /// Allow `--rebuild` to delete imported usage when original source
+        /// files are missing. Without this, lossy rebuilds are refused.
+        #[arg(long, requires = "rebuild")]
+        allow_lossy_rebuild: bool,
         /// Restrict sync to one local source.
         #[arg(long, value_enum)]
         source: Option<SourceKind>,
@@ -168,6 +172,7 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
         Some(Commands::Init) => init::run(&app).await,
         Some(Commands::Sync {
             rebuild,
+            allow_lossy_rebuild,
             source,
             recent_days,
             json_events,
@@ -180,6 +185,7 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
                     recent_days,
                     parallelism: None,
                     json_events,
+                    allow_lossy_rebuild,
                 },
             )
             .await

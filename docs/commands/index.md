@@ -26,7 +26,7 @@ Groups the same local usage rows by month and supports JSON, breakdown, date ran
 
 ### `llmusage session`
 
-Groups usage by source session. Use `--id <session_id>` to inspect one session and `--project` to restrict the list to a project. Older databases without session metadata use a stable source-file fallback; run `llmusage sync --rebuild` to repopulate session ids from local sources.
+Groups usage by source session. Use `--id <session_id>` to inspect one session and `--project` to restrict the list to a project. Older databases without session metadata use a stable source-file fallback; run `llmusage sync --rebuild` to repopulate session ids from local sources only while those source files are still present.
 
 ### `llmusage blocks`
 
@@ -51,7 +51,7 @@ Creates the local runtime, bootstraps SQLite, writes hook wrappers, and installs
 
 ### `llmusage sync`
 
-Runs the local parsers for Codex, Claude, OpenCode, and Gemini, then updates the 30-minute buckets including persisted cost/pricing rollups. Use `--source codex|claude|opencode|gemini` to restrict the run, and `--rebuild` to clear rebuildable usage rows, buckets, projects, and cursors before reparsing local sources. Default progress is written to stderr so stdout keeps the final summary; `--json-events` instead emits NDJSON lifecycle/progress events on stdout.
+Runs the local parsers for Codex, Claude, OpenCode, and Gemini, then updates the 30-minute buckets including persisted cost/pricing rollups. Use `--source codex|claude|opencode|gemini` to restrict the run, and `--rebuild` to clear rebuildable usage rows, buckets, projects, and cursors before reparsing local sources. Before deleting usage, rebuild preflights file-backed sources: if imported events depend on source files that are now missing, the command is refused by default. Regular `llmusage sync` is safe in that state; it marks source files as missing for diagnostics but keeps usage history. Pass `--allow-lossy-rebuild` with `--rebuild` only when you intentionally accept clearing unrebuildable history. Default progress is written to stderr so stdout keeps the final summary; `--json-events` instead emits NDJSON lifecycle/progress events on stdout.
 
 ### `llmusage status`
 
@@ -59,7 +59,7 @@ Prints a human-readable summary: DB path, buckets, last sync, source totals, int
 
 ### `llmusage diagnostics`
 
-Emits machine-readable JSON for paths, integrations, SQLite state, cursors, source totals, source-file archive diagnostics, health checks, and recent runs. `--forget-file <PATH>` marks a source file as intentionally ignored; use `--source` when the same path exists under multiple sources.
+Emits machine-readable JSON for paths, integrations, SQLite state, cursors, source totals, source-file archive diagnostics, health checks, and recent runs. Source archive rows include `missing_file_count`, `protected_event_count`, and `lossy_rebuild_risk` so callers can distinguish missing raw source files from lost imported usage. `--forget-file <PATH>` marks a source file as intentionally ignored; use `--source` when the same path exists under multiple sources.
 
 ### `llmusage doctor`
 

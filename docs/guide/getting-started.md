@@ -36,7 +36,7 @@ llmusage serve
 - `llmusage` without a subcommand prints today's daily report from the local DB. Use `llmusage daily --all` for full history, or `llmusage monthly`, `llmusage session`, and `llmusage blocks` for other report views.
 - `serve` starts the browser dashboard on `127.0.0.1` and opens it in your default browser.
 
-Report commands are read-only and never upload data. They also do not auto-sync; run `llmusage sync` again when source data changes. Use `--source codex|claude|opencode|gemini` to restrict reports or sync. If you need to repopulate new session/source-file metadata after upgrading, run `llmusage sync --rebuild`. If you maintain a local pricing snapshot, run `llmusage doctor --refresh-pricing <file>`; llmusage stores it under `~/.llmusage/pricing/<catalog-version>.json`, recomputes event/bucket costs, and keeps later sync writes on that local catalog.
+Report commands are read-only and never upload data. They also do not auto-sync; run `llmusage sync` again when source data changes. Use `--source codex|claude|opencode|gemini` to restrict reports or sync. If you need to repopulate new session/source-file metadata after upgrading, run `llmusage sync --rebuild` while the original source files are still present. If a Codex/Claude/Gemini file was already cleaned up, normal `llmusage sync` keeps the imported history and diagnostics will show missing source files; `--rebuild` is refused unless you add `--allow-lossy-rebuild` to explicitly clear unrebuildable history. If you maintain a local pricing snapshot, run `llmusage doctor --refresh-pricing <file>`; llmusage stores it under `~/.llmusage/pricing/<catalog-version>.json`, recomputes event/bucket costs, and keeps later sync writes on that local catalog.
 
 ## Verify the repo
 

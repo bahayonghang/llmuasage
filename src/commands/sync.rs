@@ -3,7 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use tracing::info;
 
 use tokio::sync::mpsc;
@@ -31,6 +31,7 @@ pub struct SyncRunOptions {
     pub recent_days: Option<u32>,
     pub parallelism: Option<usize>,
     pub json_events: bool,
+    pub allow_lossy_rebuild: bool,
 }
 
 pub async fn run(app: &AppContext) -> Result<()> {
@@ -106,16 +107,7 @@ async fn run_with_human_events(
     let summary_result = super::run_tracked(
         store,
         command_name,
-        async {
-            if options.rebuild {
-                if let Some(source) = options.source {
-                    store.reset_for_source(source)?;
-                } else {
-                    store.reset_usage_data()?;
-                }
-            }
-            run_once_with_options(app, store, lock_wait_ms, options, Some(&mut tx)).await
-        },
+        async { run_once_with_options(app, store, lock_wait_ms, options, Some(&mut tx)).await },
         |item| {
             Some(format!(
                 "sources={} seen={} inserted={}",
@@ -202,16 +194,7 @@ async fn run_with_json_events(
         let summary = super::run_tracked(
             store,
             command_name,
-            async {
-                if options.rebuild {
-                    if let Some(source) = options.source {
-                        store.reset_for_source(source)?;
-                    } else {
-                        store.reset_usage_data()?;
-                    }
-                }
-                run_once_with_options(app, store, lock_wait_ms, options, Some(&mut tx)).await
-            },
+            async { run_once_with_options(app, store, lock_wait_ms, options, Some(&mut tx)).await },
             |item| {
                 Some(format!(
                     "sources={} seen={} inserted={}",
@@ -313,6 +296,10 @@ pub async fn run_once_with_cancel(
      */
     info!("开始执行 sync 三阶段流水线");
 
+    if options.rebuild {
+        reset_for_rebuild(store, options)?;
+    }
+
     // 2.1 计算并发度并按 source 顺序解析 + 即时写入
     let default_parallelism = std::thread::available_parallelism()
         .map(|value| value.get().min(4))
@@ -371,6 +358,62 @@ pub async fn run_once_with_cancel(
         total_seen,
         total_inserted,
     })
+}
+
+fn reset_for_rebuild(store: &Store, options: &SyncRunOptions) -> Result<()> {
+    assert_lossless_rebuild(store, options)?;
+    if let Some(source) = options.source {
+        store.reset_for_source(source)?;
+    } else {
+        store.reset_usage_data()?;
+    }
+    Ok(())
+}
+
+fn assert_lossless_rebuild(store: &Store, options: &SyncRunOptions) -> Result<()> {
+    if options.allow_lossy_rebuild {
+        return Ok(());
+    }
+
+    let risks = rebuild_guard_sources(options.source)
+        .into_iter()
+        .filter_map(|source| {
+            let risk = store.source_files().lossy_rebuild_risk(source).ok()?;
+            risk.has_risk().then_some(risk)
+        })
+        .collect::<Vec<_>>();
+    if risks.is_empty() {
+        return Ok(());
+    }
+
+    let details = risks
+        .iter()
+        .map(|risk| {
+            format!(
+                "{}: missing_files={} protected_events={}",
+                risk.source, risk.missing_file_count, risk.protected_event_count
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    bail!(
+        "Refusing lossy sync --rebuild because imported usage has missing source files ({details}). \
+Regular `llmusage sync` is safe: it marks missing source files for diagnostics but does not delete usage history. \
+`llmusage sync --rebuild` first deletes rebuildable usage rows and cannot reconstruct records whose original source files are gone. \
+Restore the source files or pass --allow-lossy-rebuild to explicitly accept clearing unrebuildable history."
+    );
+}
+
+fn rebuild_guard_sources(source: Option<SourceKind>) -> Vec<SourceKind> {
+    source.map_or_else(
+        || {
+            sources::registered_parsers()
+                .into_iter()
+                .map(|parser| parser.source())
+                .collect()
+        },
+        |source| vec![source],
+    )
 }
 
 struct HumanProgress {

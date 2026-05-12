@@ -26,7 +26,7 @@
 
 ### `llmusage session`
 
-按来源会话聚合用量。使用 `--id <session_id>` 查看单个会话，使用 `--project` 按项目过滤。旧数据库没有 session metadata 时会使用稳定的源文件 fallback；运行 `llmusage sync --rebuild` 可从本地真源重新填充 session id。
+按来源会话聚合用量。使用 `--id <session_id>` 查看单个会话，使用 `--project` 按项目过滤。旧数据库没有 session metadata 时会使用稳定的源文件 fallback；只有本地真源文件仍在时，才建议运行 `llmusage sync --rebuild` 重新填充 session id。
 
 ### `llmusage blocks`
 
@@ -51,7 +51,7 @@
 
 ### `llmusage sync`
 
-顺序执行 Codex、Claude、OpenCode、Gemini 本地解析器，把增量结果写入 30 分钟 bucket，包括持久化 cost/pricing rollup。可用 `--source codex|claude|opencode|gemini` 限定来源；使用 `--rebuild` 会先清空可重建的 usage rows、bucket、project 和 cursor，再重新解析本地真源。默认进度写入 stderr，stdout 保留最终摘要；`--json-events` 则在 stdout 输出 NDJSON 生命周期/进度事件。
+顺序执行 Codex、Claude、OpenCode、Gemini 本地解析器，把增量结果写入 30 分钟 bucket，包括持久化 cost/pricing rollup。可用 `--source codex|claude|opencode|gemini` 限定来源；使用 `--rebuild` 会先清空可重建的 usage rows、bucket、project 和 cursor，再重新解析本地真源。删除前会对文件型来源做预检：如果已导入事件依赖的源文件现在缺失，默认拒绝执行。普通 `llmusage sync` 在这种状态下是安全的，只会把源文件标记为 missing 供 diagnostics 使用，不会删除 usage history。只有明确接受清掉不可重建历史时，才把 `--allow-lossy-rebuild` 与 `--rebuild` 一起传入。默认进度写入 stderr，stdout 保留最终摘要；`--json-events` 则在 stdout 输出 NDJSON 生命周期/进度事件。
 
 ### `llmusage status`
 
@@ -59,7 +59,7 @@
 
 ### `llmusage diagnostics`
 
-输出机器可读 JSON，包括路径、集成状态、SQLite、cursor、来源统计、source-file 归档诊断、健康检查和最近运行记录。`--forget-file <PATH>` 可把源文件标记为用户主动忽略；同一路径出现在多个来源时需要配合 `--source`。
+输出机器可读 JSON，包括路径、集成状态、SQLite、cursor、来源统计、source-file 归档诊断、健康检查和最近运行记录。来源归档行包含 `missing_file_count`、`protected_event_count` 与 `lossy_rebuild_risk`，用于区分“原始源文件缺失”和“已导入 usage 丢失”。`--forget-file <PATH>` 可把源文件标记为用户主动忽略；同一路径出现在多个来源时需要配合 `--source`。
 
 ### `llmusage doctor`
 

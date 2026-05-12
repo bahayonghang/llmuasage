@@ -124,6 +124,131 @@ fn sync_replay_replaces_old_file_totals() -> Result<()> {
 }
 
 #[test]
+fn codex_missing_history_survives_regular_sync_and_blocks_rebuild_by_default() -> Result<()> {
+    /*
+     * ========================================================================
+     * 步骤2.5：验证 Codex 历史文件删除后的 rebuild 保护
+     * ========================================================================
+     * 目标：
+     * 1) 首次 sync 导入 Codex rollout 后删除原始文件
+     * 2) 普通 sync 只标记 source_file.missing，不删除 usage history
+     * 3) sync --rebuild --source codex 默认拒绝 lossy reset
+     */
+    let fixture = Fixture::new()?;
+    fixture.seed_codex("rollout-lossy.jsonl", 120, "2026-04-22T01:12:00Z")?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        commands::sync::run(&app).await?;
+        let store = Store::new(&app.paths)?;
+        let first_total = Dashboard::open(&store)?
+            .overview(&Default::default())?
+            .total
+            .total_tokens;
+        let first_count = usage_event_count(&app.paths.db_path)?;
+        assert_eq!(first_total, 120);
+        assert_eq!(first_count, 1);
+
+        fixture.remove_codex("rollout-lossy.jsonl")?;
+        commands::sync::run(&app).await?;
+
+        let after_regular = Dashboard::open(&store)?.overview(&Default::default())?;
+        assert_eq!(after_regular.total.total_tokens, first_total);
+        assert_eq!(usage_event_count(&app.paths.db_path)?, first_count);
+        let source_counts = store.source_files().counts(SourceKind::Codex)?;
+        assert_eq!(source_counts.missing, 1);
+        let diagnostics = Dashboard::open(&store)?.diagnostics()?;
+        let codex = diagnostics
+            .by_source
+            .iter()
+            .find(|row| row.source == "codex")
+            .expect("codex diagnostics row");
+        assert_eq!(codex.missing_file_count, 1);
+        assert_eq!(codex.protected_event_count, 1);
+        assert!(codex.lossy_rebuild_risk);
+
+        let blocked = commands::sync::run_with_options(
+            &app,
+            commands::sync::SyncRunOptions {
+                rebuild: true,
+                source: Some(SourceKind::Codex),
+                ..Default::default()
+            },
+        )
+        .await;
+        let err = blocked.expect_err("lossy rebuild should be refused by default");
+        assert!(
+            err.to_string().contains("Refusing lossy sync --rebuild"),
+            "{err:#}"
+        );
+        assert_eq!(usage_event_count(&app.paths.db_path)?, first_count);
+        assert_eq!(
+            Dashboard::open(&store)?
+                .overview(&Default::default())?
+                .total
+                .total_tokens,
+            first_total
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn codex_lossy_rebuild_can_be_explicitly_allowed() -> Result<()> {
+    /*
+     * ========================================================================
+     * 步骤2.6：验证显式逃生口保留 destructive rebuild 语义
+     * ========================================================================
+     * 目标：
+     * 1) 构造 Codex 已导入但原始文件缺失的 lossy 状态
+     * 2) 加 --allow-lossy-rebuild 后允许 reset + 重扫
+     * 3) 因源文件已不在磁盘上，Codex usage 被显式清空
+     */
+    let fixture = Fixture::new()?;
+    fixture.seed_codex("rollout-lossy-allowed.jsonl", 120, "2026-04-22T01:12:00Z")?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        commands::sync::run(&app).await?;
+        assert_eq!(usage_event_count(&app.paths.db_path)?, 1);
+
+        fixture.remove_codex("rollout-lossy-allowed.jsonl")?;
+        commands::sync::run(&app).await?;
+
+        commands::sync::run_with_options(
+            &app,
+            commands::sync::SyncRunOptions {
+                rebuild: true,
+                source: Some(SourceKind::Codex),
+                allow_lossy_rebuild: true,
+                ..Default::default()
+            },
+        )
+        .await?;
+
+        let store = Store::new(&app.paths)?;
+        assert_eq!(usage_event_count(&app.paths.db_path)?, 0);
+        assert_eq!(
+            Dashboard::open(&store)?
+                .overview(&Default::default())?
+                .total
+                .total_tokens,
+            0
+        );
+        assert_eq!(store.source_files().counts(SourceKind::Codex)?.missing, 0);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
 fn source_breakdown_matches_bucket_totals() -> Result<()> {
     /*
      * ========================================================================
@@ -933,6 +1058,18 @@ impl Fixture {
         ]
         .join("\n");
         fs::write(path, payload)?;
+        Ok(())
+    }
+
+    fn remove_codex(&self, name: &str) -> Result<()> {
+        let path = self
+            .codex_home
+            .join("sessions")
+            .join("2026")
+            .join("04")
+            .join("22")
+            .join(name);
+        fs::remove_file(path)?;
         Ok(())
     }
 

@@ -243,6 +243,17 @@ pub struct SourceDiagnostics {
     pub missing_files: u64,
     /// Number of `source_file` rows currently in `deleted_by_user` state.
     pub deleted_files: u64,
+    /// Number of tracked source files that are currently absent on disk.
+    ///
+    /// This is an immediate filesystem check used by the lossy rebuild guard;
+    /// it can be non-zero before a normal sync has swept `state='missing'`.
+    pub missing_file_count: u64,
+    /// Number of imported usage rows that would be protected from a default
+    /// lossy `sync --rebuild` because at least one source file is absent.
+    pub protected_event_count: u64,
+    /// True when the default `sync --rebuild` guard would refuse this source
+    /// until files are restored or `--allow-lossy-rebuild` is passed.
+    pub lossy_rebuild_risk: bool,
     /// Last RFC 3339 time the recent-window scan reached the cutoff.
     pub recent_completed_at: Option<String>,
     /// Last RFC 3339 time the history scan reached the earliest file.
@@ -841,16 +852,59 @@ fn load_source_diagnostics(conn: &Connection) -> Result<Vec<SourceDiagnostics>> 
         "#,
     )?;
     let rows = stmt.query_map([], |row| {
+        let source = row.get::<_, String>(0)?;
+        let missing_file_count = missing_source_file_count(conn, &source)?;
+        let total_events = if missing_file_count > 0 {
+            source_event_count(conn, &source)?
+        } else {
+            0
+        };
         Ok(SourceDiagnostics {
-            source: row.get(0)?,
+            source,
             live_files: row.get::<_, Option<i64>>(1)?.unwrap_or_default().max(0) as u64,
             missing_files: row.get::<_, Option<i64>>(2)?.unwrap_or_default().max(0) as u64,
             deleted_files: row.get::<_, Option<i64>>(3)?.unwrap_or_default().max(0) as u64,
+            missing_file_count,
+            protected_event_count: if missing_file_count > 0 {
+                total_events
+            } else {
+                0
+            },
+            lossy_rebuild_risk: missing_file_count > 0 && total_events > 0,
             recent_completed_at: row.get(4)?,
             history_completed_at: row.get(5)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn source_event_count(conn: &Connection, source: &str) -> rusqlite::Result<u64> {
+    Ok(conn
+        .query_row(
+            "SELECT COUNT(*) FROM usage_event WHERE source = ?1",
+            [source],
+            |row| row.get::<_, i64>(0),
+        )?
+        .max(0) as u64)
+}
+
+fn missing_source_file_count(conn: &Connection, source: &str) -> rusqlite::Result<u64> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT file_path
+        FROM source_file
+        WHERE source = ?1
+        "#,
+    )?;
+    let rows = stmt.query_map([source], |row| row.get::<_, String>(0))?;
+    let mut count = 0u64;
+    for row in rows {
+        let path = row?;
+        if !std::path::Path::new(&path).exists() {
+            count += 1;
+        }
+    }
+    Ok(count)
 }
 
 fn scalar_i64<P>(conn: &Connection, sql: &str, params: P) -> Result<i64>

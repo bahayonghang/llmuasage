@@ -38,7 +38,7 @@
 运维命令：
 
 - `llmusage init`
-- `llmusage sync`（`--rebuild` 会重新解析本地真源并重建用量行/bucket；默认进度写入 stderr，`--json-events` 会在 stdout 输出 NDJSON 生命周期/进度事件）
+- `llmusage sync`（`--rebuild` 会重新解析本地真源并重建用量行/bucket；如果已导入的文件型历史存在缺失源文件，默认会拒绝执行；只有显式传 `--allow-lossy-rebuild` 才会清掉不可重建历史；默认进度写入 stderr，`--json-events` 会在 stdout 输出 NDJSON 生命周期/进度事件）
 - `llmusage status`
 - `llmusage diagnostics`（`--forget-file <PATH>` 可把源文件标记为用户主动忽略）
 - `llmusage doctor`（`--refresh-pricing <file>` 导入本地价格快照并重算成本）
@@ -69,6 +69,7 @@ cargo run -- serve
 - `serve` 只监听 `127.0.0.1`，并会默认用系统浏览器打开分析页
 - `export html` 生成离线静态报告
 - 报表命令都是只读 SQLite 视图，不会自动 sync
+- 普通 `sync` 遇到源文件缺失时会保留已导入 usage history；diagnostics 里出现 `source_file.missing` 不代表 usage 行已被删除
 - `status` 和普通 `diagnostics` 是只读命令；`diagnostics --forget-file` 会写入本地忽略状态
 - 普通 `doctor` 是只读命令；`doctor --refresh-pricing <file>` 只读取本地 JSON，把快照保存到 `~/.llmusage/pricing/<catalog-version>.json`，并写入本地 SQLite 价格元信息/成本
 

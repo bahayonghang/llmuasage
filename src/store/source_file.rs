@@ -20,6 +20,8 @@
 //! - any              + user mark  → deleted_by_user (cursor row also dropped)
 //! - deleted_by_user  + observed   → live (resurrect)
 
+use std::{collections::HashSet, path::Path};
+
 use rusqlite::{Connection, Transaction, params};
 use serde::Serialize;
 
@@ -43,6 +45,32 @@ pub struct SourceFileStateCounts {
     pub missing: u64,
     /// Number of rows currently in `deleted_by_user` state.
     pub deleted: u64,
+}
+
+/// Per-source rebuild safety signal derived from persisted source-file rows.
+///
+/// A source is lossy to rebuild when it has imported `usage_event` rows and at
+/// least one source file previously tracked by `source_file.file_path` is no
+/// longer present on disk. In that case a source-level rebuild would delete
+/// rows before the parser can re-read every historical input.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct LossyRebuildRisk {
+    /// Source this risk row belongs to.
+    pub source: SourceKind,
+    /// Number of `source_file` paths for this source that are missing on disk
+    /// at the time of inspection. This is independent from the persisted
+    /// `state='missing'` count, which is only updated after sync sweeps.
+    pub missing_file_count: u64,
+    /// Number of imported rows that the lossy rebuild guard protects from a
+    /// source-level destructive reset. Zero means the guard will not block.
+    pub protected_event_count: u64,
+}
+
+impl LossyRebuildRisk {
+    /// Returns true when a destructive rebuild should be refused by default.
+    pub fn has_risk(&self) -> bool {
+        self.missing_file_count > 0 && self.protected_event_count > 0
+    }
 }
 
 /// Borrowed view onto the `source_file` surface of [`Store`].
@@ -72,6 +100,36 @@ impl<'a> SourceFileStore<'a> {
     pub fn sweep_missing(&self, source: SourceKind, run_started_at: &str) -> Result<usize> {
         let conn = self.store.open_connection()?;
         update_missing_with_conn(&conn, source.as_str(), run_started_at)
+    }
+
+    /// Computes whether rebuilding one source would discard imported usage
+    /// that cannot be reconstructed from the current filesystem.
+    pub fn lossy_rebuild_risk(&self, source: SourceKind) -> Result<LossyRebuildRisk> {
+        let conn = self.store.open_connection()?;
+        lossy_rebuild_risk_with_conn(&conn, source)
+    }
+
+    /// Computes rebuild risk rows for every source currently tracked in
+    /// `source_file`, ordered by source id. Unknown legacy source ids are
+    /// ignored so diagnostics stays forward-compatible with old data.
+    pub fn lossy_rebuild_risks(&self) -> Result<Vec<LossyRebuildRisk>> {
+        let conn = self.store.open_connection()?;
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT DISTINCT source
+            FROM source_file
+            ORDER BY source ASC
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let mut risks = Vec::new();
+        for row in rows {
+            let raw = row?;
+            if let Some(source) = SourceKind::parse_id(&raw) {
+                risks.push(lossy_rebuild_risk_with_conn(&conn, source)?);
+            }
+        }
+        Ok(risks)
     }
 }
 
@@ -103,6 +161,48 @@ pub(crate) fn counts_with_conn(conn: &Connection, source: &str) -> Result<Source
         }
     }
     Ok(counts)
+}
+
+fn lossy_rebuild_risk_with_conn(conn: &Connection, source: SourceKind) -> Result<LossyRebuildRisk> {
+    let source_id = source.as_str();
+    let total_events = conn
+        .query_row(
+            "SELECT COUNT(*) FROM usage_event WHERE source = ?1",
+            [source_id],
+            |row| row.get::<_, i64>(0),
+        )?
+        .max(0) as u64;
+
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT file_path
+        FROM source_file
+        WHERE source = ?1
+        "#,
+    )?;
+    let rows = stmt.query_map([source_id], |row| row.get::<_, String>(0))?;
+
+    let mut seen_paths = HashSet::<String>::new();
+    let mut missing_file_count = 0u64;
+    for row in rows {
+        let file_path = row?;
+        if !seen_paths.insert(file_path.clone()) {
+            continue;
+        }
+        if !Path::new(&file_path).exists() {
+            missing_file_count += 1;
+        }
+    }
+
+    Ok(LossyRebuildRisk {
+        source,
+        missing_file_count,
+        protected_event_count: if missing_file_count > 0 {
+            total_events
+        } else {
+            0
+        },
+    })
 }
 
 /// Upserts `source_file` rows to the `live` state inside the given transaction.

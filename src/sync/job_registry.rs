@@ -185,6 +185,7 @@ async fn run_job(
         recent_days: options.recent_days,
         parallelism: options.parallelism,
         json_events: false,
+        allow_lossy_rebuild: false,
     };
     let app = AppContext {
         paths: store.paths.clone(),
