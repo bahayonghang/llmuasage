@@ -578,16 +578,45 @@ where
 
 fn load_filtered_events(store: &Store, filter: &ReportFilter) -> Result<Vec<EventRow>> {
     let conn = store.open_connection()?;
-    let rows = load_events(&conn)?;
+    let rows = load_events_filtered(&conn, filter)?;
     Ok(rows
         .into_iter()
-        .map(|event| event.clone_with_timezone(&filter.timezone))
-        .filter(|event| filter_event(event, filter))
+        .filter(|event| filter_event_post_sql(event, filter))
         .collect())
 }
 
-fn load_events(conn: &Connection) -> Result<Vec<EventRow>> {
-    let mut stmt = conn.prepare(
+/// Loads events with date/source filters pushed down to SQL for performance.
+/// Project filtering remains in Rust because it requires fuzzy matching.
+fn load_events_filtered(conn: &Connection, filter: &ReportFilter) -> Result<Vec<EventRow>> {
+    let mut clauses = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+    if let Some(source) = filter.source {
+        clauses.push("source = ?".to_string());
+        params.push(Box::new(source.as_str().to_string()));
+    }
+    if let Some(since) = filter.since {
+        // Convert local date start to UTC for SQL comparison
+        let utc_start = local_date_to_utc_start(since, &filter.timezone);
+        clauses.push("event_at >= ?".to_string());
+        params.push(Box::new(utc_start));
+    }
+    if let Some(until) = filter.until {
+        // Convert local date end (exclusive next day) to UTC for SQL comparison
+        if let Some(exclusive) = until.succ_opt() {
+            let utc_end = local_date_to_utc_start(exclusive, &filter.timezone);
+            clauses.push("event_at < ?".to_string());
+            params.push(Box::new(utc_end));
+        }
+    }
+
+    let where_clause = if clauses.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", clauses.join(" AND "))
+    };
+
+    let sql = format!(
         r#"
         SELECT
             event_key,
@@ -607,10 +636,14 @@ fn load_events(conn: &Connection) -> Result<Vec<EventRow>> {
             session_label,
             source_path_hash
         FROM usage_event
+        {where_clause}
         ORDER BY event_at ASC, event_key ASC
-        "#,
-    )?;
-    let rows = stmt.query_map([], |row| {
+        "#
+    );
+
+    let mut stmt = conn.prepare(&sql)?;
+    let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let rows = stmt.query_map(param_refs.as_slice(), |row| {
         let event_at: String = row.get(3)?;
         let event_utc = DateTime::parse_from_rfc3339(&event_at)
             .map(|value| value.with_timezone(&Utc))
@@ -643,8 +676,36 @@ fn load_events(conn: &Connection) -> Result<Vec<EventRow>> {
     let raw = rows.collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(raw
         .into_iter()
-        .map(|event| event.with_timezone(&ReportTimezone::Utc))
+        .map(|event| event.with_timezone(&filter.timezone))
         .collect())
+}
+
+/// Converts a local NaiveDate midnight to a UTC RFC 3339 string for SQL filtering.
+fn local_date_to_utc_start(date: NaiveDate, timezone: &ReportTimezone) -> String {
+    use chrono::{Offset, SecondsFormat, TimeZone, offset::LocalResult};
+    let local_start = date.and_hms_opt(0, 0, 0).expect("midnight is always valid");
+    let offset = match timezone {
+        ReportTimezone::Utc => Utc.fix(),
+        ReportTimezone::Local => Local::now().offset().fix(),
+        ReportTimezone::Fixed(offset) => *offset,
+    };
+    let utc = match offset.from_local_datetime(&local_start) {
+        LocalResult::Single(value) => value.with_timezone(&Utc),
+        LocalResult::Ambiguous(earliest, _) => earliest.with_timezone(&Utc),
+        LocalResult::None => offset.from_utc_datetime(&local_start).with_timezone(&Utc),
+    };
+    utc.to_rfc3339_opts(SecondsFormat::Secs, true)
+}
+
+/// Post-SQL filter for conditions not pushed to the database (project fuzzy match).
+fn filter_event_post_sql(event: &EventRow, filter: &ReportFilter) -> bool {
+    // Date and source are already filtered in SQL; only project needs Rust-side check.
+    if let Some(project_filter) = &filter.project
+        && !project_matches(event.project.as_ref(), project_filter)
+    {
+        return false;
+    }
+    true
 }
 
 #[derive(Debug, Clone)]
@@ -688,44 +749,6 @@ impl RawEventRow {
             session_label: self.session_label,
             source_path_hash: self.source_path_hash,
         }
-    }
-}
-
-fn filter_event(event: &EventRow, filter: &ReportFilter) -> bool {
-    if let Some(source) = filter.source
-        && event.source != source.as_str()
-    {
-        return false;
-    }
-    if let Some(since) = filter.since
-        && event.local_date < since
-    {
-        return false;
-    }
-    if let Some(until) = filter.until
-        && event.local_date > until
-    {
-        return false;
-    }
-    if let Some(project_filter) = &filter.project
-        && !project_matches(event.project.as_ref(), project_filter)
-    {
-        return false;
-    }
-    true
-}
-
-trait EventTimezoneExt {
-    fn clone_with_timezone(&self, timezone: &ReportTimezone) -> EventRow;
-}
-
-impl EventTimezoneExt for EventRow {
-    fn clone_with_timezone(&self, timezone: &ReportTimezone) -> EventRow {
-        let local_at = apply_timezone(self.event_utc, timezone);
-        let mut cloned = self.clone();
-        cloned.local_at = local_at;
-        cloned.local_date = local_at.date_naive();
-        cloned
     }
 }
 
