@@ -113,18 +113,20 @@ fn read_window_signature(
 }
 
 fn digest_to_hex(digest: impl AsRef<[u8]>) -> String {
-    digest
-        .as_ref()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    use std::fmt::Write;
+    let bytes = digest.as_ref();
+    let mut hex = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        let _ = write!(hex, "{byte:02x}");
+    }
+    hex
 }
 
 pub fn metadata_inode(metadata: &Metadata) -> u64 {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        return metadata.ino();
+        metadata.ino()
     }
 
     #[cfg(windows)]
@@ -135,18 +137,12 @@ pub fn metadata_inode(metadata: &Metadata) -> u64 {
             .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|value| value.as_secs())
             .unwrap_or_default();
-        return metadata.len() ^ modified;
+        metadata.len() ^ modified
     }
 
-    #[allow(unreachable_code)]
+    #[cfg(not(any(unix, windows)))]
     {
-        let modified = metadata
-            .modified()
-            .ok()
-            .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|value| value.as_secs())
-            .unwrap_or_default();
-        metadata.len() ^ modified
+        compile_error!("metadata_inode is not implemented for this platform");
     }
 }
 

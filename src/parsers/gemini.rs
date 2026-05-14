@@ -338,6 +338,10 @@ fn parse_gemini_shard(plan: GeminiShardPlan) -> Result<GeminiShardOutput> {
         if existing.is_some() && decision.replay_mode == FileReplayMode::Reparse {
             output.events_replayed += parsed.events.len();
         }
+        // Gemini files are single JSON documents (not JSONL). Any size/mtime
+        // change means the entire document was rewritten, so we always reset
+        // the old events for files that had a prior cursor — regardless of
+        // the replay_mode decision. This ensures idempotent full-file replay.
         if existing.is_some() {
             output.reset_path_hashes.push(path_hash);
         }
