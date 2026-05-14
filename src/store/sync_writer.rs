@@ -628,7 +628,9 @@ fn flush_buckets_tx(
         return Ok(());
     }
 
-    let sql = format!(
+    // Use a static SQL string with an extra parameter (?20) for the PRICING_MIXED
+    // sentinel value, avoiding format! interpolation into SQL text.
+    let mut stmt = tx.prepare_cached(
         r#"
         INSERT INTO usage_bucket_30m(
             source,
@@ -664,21 +666,20 @@ fn flush_buckets_tx(
             cost_without_cache_usd = usage_bucket_30m.cost_without_cache_usd + excluded.cost_without_cache_usd,
             pricing_status = CASE
                 WHEN usage_bucket_30m.pricing_status = excluded.pricing_status THEN usage_bucket_30m.pricing_status
-                ELSE '{PRICING_MIXED}'
+                ELSE ?20
             END,
             pricing_source = CASE
                 WHEN usage_bucket_30m.pricing_source IS excluded.pricing_source THEN usage_bucket_30m.pricing_source
-                ELSE '{PRICING_MIXED}'
+                ELSE ?20
             END,
             pricing_rate = CASE
                 WHEN usage_bucket_30m.pricing_rate IS excluded.pricing_rate THEN usage_bucket_30m.pricing_rate
-                ELSE '{PRICING_MIXED}'
+                ELSE ?20
             END,
             event_count = usage_bucket_30m.event_count + excluded.event_count,
             updated_at = excluded.updated_at
-        "#
-    );
-    let mut stmt = tx.prepare_cached(&sql)?;
+        "#,
+    )?;
     let updated_at = now_utc();
     for (key, rollup) in buckets {
         stmt.execute(rusqlite::params![
@@ -701,6 +702,7 @@ fn flush_buckets_tx(
             rollup.pricing.pricing_rate(),
             rollup.event_count,
             updated_at,
+            PRICING_MIXED,
         ])?;
     }
     Ok(())

@@ -282,6 +282,12 @@ impl Store {
     /// Recomputes costs against a caller-supplied catalog. doctor uses
     /// this to drive a recompute through a litellm snapshot loaded from
     /// `~/.llmusage/pricing/`.
+    ///
+    /// Uses paged processing to avoid loading the entire `usage_event` table
+    /// into memory. Each page of events is updated within a savepoint so a
+    /// crash mid-run leaves the database in a consistent (partially updated)
+    /// state. The final bucket reconciliation and catalog version write happen
+    /// in a single closing transaction.
     pub fn recompute_costs_with(
         &self,
         catalog: &crate::query::pricing_catalog::PricingCatalog,
@@ -290,80 +296,102 @@ impl Store {
 
         use rusqlite::params;
 
+        const PAGE_SIZE: usize = 5000;
+
         let mut conn = self.open_connection()?;
-        let tx = conn.transaction()?;
 
-        let rows: Vec<PricingRecomputeRow> = {
-            let mut stmt = tx.prepare(
-                r#"
-                SELECT event_key, source, model, hour_start, COALESCE(project_hash, ''),
-                       COALESCE(input_tokens, 0),
-                       COALESCE(cache_read_tokens, 0),
-                       COALESCE(output_tokens, 0),
-                       COALESCE(reasoning_output_tokens, 0)
-                FROM usage_event
-                "#,
-            )?;
-            let mapped = stmt.query_map([], |row| {
-                Ok(PricingRecomputeRow {
-                    event_key: row.get(0)?,
-                    source: row.get(1)?,
-                    model: row.get(2)?,
-                    hour_start: row.get(3)?,
-                    project_hash: row.get(4)?,
-                    input_tokens: row.get(5)?,
-                    cache_read_tokens: row.get(6)?,
-                    output_tokens: row.get(7)?,
-                    reasoning_output_tokens: row.get(8)?,
-                })
-            })?;
-            mapped.collect::<rusqlite::Result<Vec<_>>>()?
-        };
-
+        // Pass 1: page through usage_event rows and update cost columns.
+        // We use event_key as a cursor for keyset pagination (it's the PK).
         let mut updated = 0usize;
+        let mut last_event_key = String::new();
         let mut buckets: HashMap<BucketKey, PricingRollup> = HashMap::new();
-        {
-            let mut update_stmt = tx.prepare(
-                r#"
-                UPDATE usage_event
-                SET cost_with_cache_usd = ?2,
-                    cost_without_cache_usd = ?3,
-                    pricing_status = ?4,
-                    pricing_source = ?5,
-                    pricing_rate = ?6
-                WHERE event_key = ?1
-                "#,
-            )?;
-            for row in rows {
-                let breakdown = crate::query::pricing::compute_cost_with(
-                    catalog,
-                    &row.source,
-                    &row.model,
-                    row.input_tokens,
-                    row.cache_read_tokens,
-                    row.output_tokens,
-                    row.reasoning_output_tokens,
-                );
-                update_stmt.execute(params![
-                    row.event_key,
-                    breakdown.cost_with_cache_usd,
-                    breakdown.cost_without_cache_usd,
-                    breakdown.pricing_status.as_str(),
-                    breakdown.pricing_source,
-                    breakdown.pricing_rate,
-                ])?;
-                buckets
-                    .entry(BucketKey {
-                        source: row.source,
-                        model: row.model,
-                        hour_start: row.hour_start,
-                        project_hash: row.project_hash,
+
+        loop {
+            let tx = conn.transaction()?;
+            let page: Vec<PricingRecomputeRow> = {
+                let mut stmt = tx.prepare(
+                    r#"
+                    SELECT event_key, source, model, hour_start, COALESCE(project_hash, ''),
+                           COALESCE(input_tokens, 0),
+                           COALESCE(cache_read_tokens, 0),
+                           COALESCE(output_tokens, 0),
+                           COALESCE(reasoning_output_tokens, 0)
+                    FROM usage_event
+                    WHERE event_key > ?1
+                    ORDER BY event_key ASC
+                    LIMIT ?2
+                    "#,
+                )?;
+                let mapped = stmt.query_map(params![&last_event_key, PAGE_SIZE as i64], |row| {
+                    Ok(PricingRecomputeRow {
+                        event_key: row.get(0)?,
+                        source: row.get(1)?,
+                        model: row.get(2)?,
+                        hour_start: row.get(3)?,
+                        project_hash: row.get(4)?,
+                        input_tokens: row.get(5)?,
+                        cache_read_tokens: row.get(6)?,
+                        output_tokens: row.get(7)?,
+                        reasoning_output_tokens: row.get(8)?,
                     })
-                    .or_default()
-                    .add(&breakdown);
-                updated += 1;
+                })?;
+                mapped.collect::<rusqlite::Result<Vec<_>>>()?
+            };
+
+            if page.is_empty() {
+                tx.commit()?;
+                break;
             }
+
+            {
+                let mut update_stmt = tx.prepare(
+                    r#"
+                    UPDATE usage_event
+                    SET cost_with_cache_usd = ?2,
+                        cost_without_cache_usd = ?3,
+                        pricing_status = ?4,
+                        pricing_source = ?5,
+                        pricing_rate = ?6
+                    WHERE event_key = ?1
+                    "#,
+                )?;
+                for row in &page {
+                    let breakdown = crate::query::pricing::compute_cost_with(
+                        catalog,
+                        &row.source,
+                        &row.model,
+                        row.input_tokens,
+                        row.cache_read_tokens,
+                        row.output_tokens,
+                        row.reasoning_output_tokens,
+                    );
+                    update_stmt.execute(params![
+                        row.event_key,
+                        breakdown.cost_with_cache_usd,
+                        breakdown.cost_without_cache_usd,
+                        breakdown.pricing_status.as_str(),
+                        breakdown.pricing_source,
+                        breakdown.pricing_rate,
+                    ])?;
+                    buckets
+                        .entry(BucketKey {
+                            source: row.source.clone(),
+                            model: row.model.clone(),
+                            hour_start: row.hour_start.clone(),
+                            project_hash: row.project_hash.clone(),
+                        })
+                        .or_default()
+                        .add(&breakdown);
+                    updated += 1;
+                }
+            }
+
+            last_event_key = page.last().unwrap().event_key.clone();
+            tx.commit()?;
         }
+
+        // Pass 2: reconcile bucket pricing and write catalog version atomically.
+        let tx = conn.transaction()?;
         {
             let mut update_bucket_stmt = tx.prepare(
                 r#"
