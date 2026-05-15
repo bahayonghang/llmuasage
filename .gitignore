@@ -6,6 +6,7 @@ ref/
 .opencode/
 .cursor/
 .trellis/
+.kiro/
 
 
 # Added by cargo
