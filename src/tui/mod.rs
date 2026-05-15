@@ -1,138 +1,181 @@
-use std::io::{self, Stdout};
+use std::io;
 
 use anyhow::Result;
 use crossterm::{
-    event::{self, Event, KeyCode},
+    cursor,
+    event::{self, Event, KeyEventKind},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{
-    Terminal,
-    backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout},
-    text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
-};
+use ratatui::{Terminal, backend::CrosstermBackend};
 
-use crate::{
-    query::{self, Dashboard},
-    store::Store,
-};
+use crate::{query::Dashboard, store::Store};
 
+pub mod app;
+pub mod draw;
+pub mod input;
+pub mod nav_bar;
+pub mod panels;
 pub mod report_table;
+pub mod theme;
 
-pub fn run_terminal(store: &Store) -> Result<()> {
-    let dashboard = Dashboard::open(store)?;
-    let overview = dashboard.overview(&Default::default())?;
-    let sources = dashboard.source_breakdown(&Default::default())?;
-    let health = dashboard.health()?;
+use app::{AppState, Panel};
+use input::{Action, handle_key_event};
 
+/// Main entry point for the interactive terminal dashboard.
+pub fn run_dashboard(store: &Store) -> Result<()> {
+    // 1. Install panic hook BEFORE enabling raw mode
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = disable_raw_mode();
+        let _ = execute!(io::stdout(), LeaveAlternateScreen, cursor::Show);
+        default_hook(info);
+    }));
+
+    // 2. Setup
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let draw_result = draw_loop(&mut terminal, &overview, &sources, &health);
+    // 3. Run event loop
+    let result = event_loop(&mut terminal, store);
 
+    // 4. Cleanup (always runs)
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
-    draw_result
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, cursor::Show)?;
+
+    // 5. Restore default panic hook
+    let _ = std::panic::take_hook();
+
+    result
 }
 
-fn draw_loop(
-    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
-    overview: &query::OverviewPayload,
-    sources: &[query::SourceBreakdown],
-    health: &query::HealthPayload,
-) -> Result<()> {
+/// Backwards-compatible wrapper for existing callers.
+pub fn run_terminal(store: &Store) -> Result<()> {
+    run_dashboard(store)
+}
+
+fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Store) -> Result<()> {
+    let dashboard = Dashboard::open(store)?;
+    let mut state = AppState::new();
+
+    // Load overview data initially (default panel)
+    load_panel_data(&dashboard, &mut state, Panel::Overview);
+
     loop {
-        terminal.draw(|frame| {
-            let areas = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(8),
-                    Constraint::Length(10),
-                    Constraint::Min(8),
-                ])
-                .split(frame.area());
+        // Draw frame
+        terminal.draw(|frame| draw::draw(frame, &state))?;
 
-            let overview_lines = vec![
-                Line::from(vec![Span::raw(format!(
-                    "累计 tokens: {}",
-                    overview.total.total_tokens
-                ))]),
-                Line::from(vec![Span::raw(format!(
-                    "24h tokens: {}",
-                    overview.last_24h.total_tokens
-                ))]),
-                Line::from(vec![Span::raw(format!(
-                    "来源数: {}    bucket 数: {}",
-                    overview.source_count, overview.bucket_count
-                ))]),
-                Line::from(vec![Span::raw(format!(
-                    "最近同步: {}",
-                    overview.last_sync_at.as_deref().unwrap_or("never")
-                ))]),
-            ];
-            frame.render_widget(
-                Paragraph::new(overview_lines)
-                    .block(Block::default().borders(Borders::ALL).title("总览"))
-                    .wrap(Wrap { trim: true }),
-                areas[0],
-            );
+        // Read next event (only handle Press to avoid double-fire on Windows)
+        let ev = event::read()?;
+        let key = match ev {
+            Event::Key(k) if k.kind == KeyEventKind::Press => k,
+            _ => continue,
+        };
 
-            let source_lines = sources
-                .iter()
-                .map(|item| {
-                    Line::from(vec![Span::raw(format!(
-                        "{}  {}  {}",
-                        item.source,
-                        item.total_tokens,
-                        item.last_event_at.as_deref().unwrap_or("never")
-                    ))])
-                })
-                .collect::<Vec<_>>();
-            frame.render_widget(
-                Paragraph::new(source_lines)
-                    .block(Block::default().borders(Borders::ALL).title("来源"))
-                    .wrap(Wrap { trim: true }),
-                areas[1],
-            );
+        let action = handle_key_event(key, state.active_panel);
 
-            let health_lines = health
-                .integrations
-                .iter()
-                .map(|item| {
-                    Line::from(vec![Span::raw(format!("{}  {}", item.source, item.status))])
-                })
-                .chain(health.recent_failures.iter().map(|item| {
-                    Line::from(vec![Span::raw(format!(
-                        "FAIL {}  {}",
-                        item.command,
-                        item.error.as_deref().unwrap_or("")
-                    ))])
-                }))
-                .collect::<Vec<_>>();
-            frame.render_widget(
-                Paragraph::new(health_lines)
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .title("健康 / 按 q 退出"),
-                    )
-                    .wrap(Wrap { trim: true }),
-                areas[2],
-            );
-        })?;
-
-        if let Event::Key(key) = event::read()?
-            && matches!(key.code, KeyCode::Char('q') | KeyCode::Esc)
-        {
-            break;
+        match action {
+            Action::Quit => break,
+            Action::SwitchPanel(p) => {
+                state.active_panel = p;
+                load_panel_data(&dashboard, &mut state, p);
+            }
+            Action::NextPanel => {
+                let p = state.active_panel.next();
+                state.active_panel = p;
+                load_panel_data(&dashboard, &mut state, p);
+            }
+            Action::PrevPanel => {
+                let p = state.active_panel.prev();
+                state.active_panel = p;
+                load_panel_data(&dashboard, &mut state, p);
+            }
+            Action::ScrollDown => {
+                state.scroll[state.active_panel as usize].scroll_down();
+            }
+            Action::ScrollUp => {
+                state.scroll[state.active_panel as usize].scroll_up();
+            }
+            Action::NextWindow => {
+                state.time_window = state.time_window.next();
+                // Invalidate trends cache so it reloads with new window
+                state.trends = None;
+                let panel = state.active_panel;
+                load_panel_data(&dashboard, &mut state, panel);
+            }
+            Action::PrevWindow => {
+                state.time_window = state.time_window.prev();
+                state.trends = None;
+                let panel = state.active_panel;
+                load_panel_data(&dashboard, &mut state, panel);
+            }
+            Action::None => {}
         }
     }
 
     Ok(())
+}
+
+/// Load data for a panel only when the cached value is `None`.
+fn load_panel_data(dashboard: &Dashboard, state: &mut AppState, panel: Panel) {
+    match panel {
+        Panel::Overview => {
+            if state.overview.is_none() {
+                state.overview = Some(dashboard.overview(&state.filter).map_err(|e| e.to_string()));
+            }
+        }
+        Panel::Trends => {
+            if state.trends.is_none() {
+                state.trends = Some(
+                    dashboard
+                        .trends(state.time_window.as_query_str(), &state.filter)
+                        .map_err(|e| e.to_string()),
+                );
+            }
+        }
+        Panel::Models => {
+            if state.models.is_none() {
+                state.models = Some(
+                    dashboard
+                        .model_breakdown(&state.filter)
+                        .map_err(|e| e.to_string()),
+                );
+            }
+        }
+        Panel::Sources => {
+            if state.sources.is_none() {
+                state.sources = Some(
+                    dashboard
+                        .source_breakdown(&state.filter)
+                        .map_err(|e| e.to_string()),
+                );
+            }
+        }
+        Panel::Projects => {
+            if state.projects.is_none() {
+                state.projects = Some(
+                    dashboard
+                        .project_breakdown(&state.filter)
+                        .map_err(|e| e.to_string()),
+                );
+            }
+        }
+        Panel::Cost => {
+            if state.costs.is_none() {
+                state.costs = Some(
+                    dashboard
+                        .cost_breakdown(&state.filter)
+                        .map_err(|e| e.to_string()),
+                );
+            }
+        }
+        Panel::Health => {
+            if state.health.is_none() {
+                state.health = Some(dashboard.health().map_err(|e| e.to_string()));
+            }
+        }
+    }
 }

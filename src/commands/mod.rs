@@ -7,6 +7,7 @@ use crate::{app::AppContext, models::SourceKind};
 
 pub mod blocks;
 pub mod daily;
+pub mod dash;
 pub mod diagnostics;
 pub mod doctor;
 pub mod export;
@@ -99,6 +100,10 @@ pub enum Commands {
         #[arg(long)]
         port: Option<u16>,
     },
+    /// Interactive terminal dashboard (replaces `tui`).
+    Dash,
+    /// Deprecated: use `dash` instead.
+    #[command(hide = true)]
     Tui,
     Export {
         #[command(subcommand)]
@@ -201,7 +206,8 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
             refresh_pricing,
         }) => doctor::run(&app, json, refresh_pricing).await,
         Some(Commands::Serve { port }) => serve::run(&app, port).await,
-        Some(Commands::Tui) => tui::run(&app).await,
+        Some(Commands::Dash) => dash::run(&app, false).await,
+        Some(Commands::Tui) => dash::run(&app, true).await,
         Some(Commands::Export { command }) => match command {
             ExportCommand::Html { out } => export::run_html(&app, out).await,
         },
