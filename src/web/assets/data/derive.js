@@ -54,9 +54,12 @@ export function buildContext({ overview, trends, models, sources, projects, cost
   logger.info('开始构建页面上下文');
 
   // 1.1 规范化并排序趋势、排行和健康数据
-  const trendAscending = normalizeTrendRows(trends);
-  const trendLedgerRows = [...trendAscending].reverse();
-  const trendSpotlightRows = trendLedgerRows.slice(0, PANEL_LIMITS.trendSpotlight);
+  const chronologicalRows = normalizeTrendRows(trends);
+  const recentRowsDesc = [...chronologicalRows].reverse();
+  const spotlightRows = recentRowsDesc
+    .slice(0, PANEL_LIMITS.trendSpotlight)
+    .reverse();
+  const tableRows = recentRowsDesc.slice(0, PANEL_LIMITS.trendTable);
   const modelRows = sortDesc(models, (row) => row?.total_tokens);
   const sourceRows = sortDesc(sources, (row) => row?.total_tokens);
   const projectRows = sortDesc(projects, (row) => row?.total_tokens);
@@ -66,18 +69,18 @@ export function buildContext({ overview, trends, models, sources, projects, cost
   const failureRows = normalizeRows(health?.recent_failures);
 
   // 1.2 计算账本摘要、趋势聚合和健康聚合
-  const trendTotal = trendAscending.reduce(
+  const trendTotal = chronologicalRows.reduce(
     (sum, row) => sum + Number(row?.total_tokens || 0),
     0,
   );
-  const trendPeak = trendAscending.reduce((best, row) => {
+  const trendPeak = chronologicalRows.reduce((best, row) => {
     if (!best || Number(row?.total_tokens || 0) > Number(best?.total_tokens || 0)) {
       return row;
     }
     return best;
   }, null);
-  const trendAverage = trendAscending.length ? Math.round(trendTotal / trendAscending.length) : 0;
-  const trendActive = trendAscending.filter((row) => Number(row?.total_tokens || 0) > 0).length;
+  const trendAverage = chronologicalRows.length ? Math.round(trendTotal / chronologicalRows.length) : 0;
+  const trendActive = chronologicalRows.filter((row) => Number(row?.total_tokens || 0) > 0).length;
   const total_cost = costRows.reduce(
     (sum, row) => sum + Number(row?.estimated_cost_usd || 0),
     0,
@@ -130,9 +133,11 @@ export function buildContext({ overview, trends, models, sources, projects, cost
       peak: trendPeak,
       average: trendAverage,
       active: trendActive,
-      spotlightRows: trendSpotlightRows,
-      ledgerRows: trendLedgerRows,
-      tableRows: trendSpotlightRows.slice(0, PANEL_LIMITS.trendTable),
+      chronologicalRows,
+      recentRowsDesc,
+      spotlightRows,
+      ledgerRows: recentRowsDesc,
+      tableRows,
     },
     panels: {
       models: modelRows,

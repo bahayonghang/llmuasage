@@ -2,3 +2,72 @@
   width: 100%;
   display: block;
 }
+
+.trends-chart-svg {
+  min-height: 220px;
+}
+
+.trend-grid-lines {
+  stroke: rgba(255, 255, 255, 0.08);
+  stroke-dasharray: 2 4;
+}
+
+.trend-baseline {
+  stroke: rgba(240, 235, 225, 0.28);
+  stroke-width: 1.2;
+}
+
+.trend-bar-hit {
+  fill: transparent;
+}
+
+.trend-bar {
+  fill: #d06047;
+  opacity: 0.86;
+  transition: fill 0.16s ease, opacity 0.16s ease;
+}
+
+.trend-bar.is-peak {
+  fill: #f08a6e;
+  opacity: 1;
+}
+
+.trend-bar-group:hover .trend-bar {
+  fill: #f5a890;
+  opacity: 1;
+}
+
+.trend-peak-label {
+  fill: #ffd0c2;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: rgba(26, 24, 21, 0.92);
+  stroke-width: 3px;
+}
+
+.trend-axis-label {
+  fill: #aaa195;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 9.5px;
+}
+
+.trend-empty-title {
+  fill: var(--dark-text);
+  font-family: 'Inter', 'Noto Sans SC', system-ui, sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.trend-empty-copy {
+  fill: var(--dark-muted);
+  font-family: 'Inter', 'Noto Sans SC', system-ui, sans-serif;
+  font-size: 12px;
+}
+
+@media (max-width: 720px) {
+  .trends-chart-svg {
+    min-width: 560px;
+  }
+}

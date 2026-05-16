@@ -457,6 +457,7 @@ mod tests {
     };
 
     use axum::{body::to_bytes, http::StatusCode};
+    use chrono::{Duration as ChronoDuration, SecondsFormat, Utc};
     use tempfile::TempDir;
 
     use crate::{AppPaths, LlmusageError, store::Store, sync::SyncOptions};
@@ -779,6 +780,61 @@ mod tests {
     }
 
     #[test]
+    fn trend_context_keeps_chart_chronological_and_table_recent_first() {
+        let derive_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "data/derive.js")
+            .expect("derive.js asset")
+            .body;
+        assert!(derive_js.contains("const chronologicalRows = normalizeTrendRows(trends);"));
+        assert!(derive_js.contains("const recentRowsDesc = [...chronologicalRows].reverse();"));
+        assert!(
+            derive_js.contains(
+                "const spotlightRows = recentRowsDesc\n    .slice(0, PANEL_LIMITS.trendSpotlight)\n    .reverse();"
+            ),
+            "spotlight chart rows must take the latest N records, then restore chronological order"
+        );
+        assert!(
+            derive_js
+                .contains("const tableRows = recentRowsDesc.slice(0, PANEL_LIMITS.trendTable);")
+        );
+        assert!(derive_js.contains("chronologicalRows,"));
+        assert!(derive_js.contains("recentRowsDesc,"));
+    }
+
+    #[test]
+    fn trend_renderer_uses_derived_spotlight_rows_without_reslicing_ledger() {
+        let trends_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "render/trends.js")
+            .expect("render/trends.js asset")
+            .body;
+        assert!(trends_js.contains("const spotlightRows = context.trend.spotlightRows || [];"));
+        assert!(
+            !trends_js.contains("trendLedgerRows.slice"),
+            "render layer must not derive chart rows from ledger rows"
+        );
+        assert!(
+            !trends_js.contains("ledgerRows.slice"),
+            "render layer must not reslice latest-first ledger rows for the chart"
+        );
+        assert!(trends_js.contains("trend-empty-title"));
+    }
+
+    #[test]
+    fn trend_chart_assets_expose_peak_and_empty_styles() {
+        let charts_css = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "charts.css")
+            .expect("charts.css asset")
+            .body;
+        assert!(charts_css.contains(".trend-bar.is-peak"));
+        assert!(charts_css.contains(".trend-peak-label"));
+        assert!(charts_css.contains(".trend-empty-title"));
+        assert!(charts_css.contains("min-width: 560px"));
+    }
+
+    #[test]
     fn api_error_payload_is_structured_json() {
         let response =
             api_json::<serde_json::Value>("/api/test", Err(LlmusageError::NotInitialized));
@@ -843,6 +899,55 @@ mod tests {
         assert_eq!(first["date"], "2026-05-01");
         assert_eq!(first["event_count"], 1);
         assert_eq!(first["cost_with_cache_usd"], 0.25);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn api_trends_day_returns_labels_ascending_from_unordered_buckets() -> anyhow::Result<()>
+    {
+        let (_temp, store) = make_store()?;
+        let conn = store.open_connection()?;
+        let base = Utc::now() - ChronoDuration::hours(3);
+        let expected_labels = [0, 1, 2].map(|offset| {
+            (base + ChronoDuration::hours(offset)).to_rfc3339_opts(SecondsFormat::Secs, true)
+        });
+        for (hour_start, total_tokens) in [
+            (&expected_labels[2], 30),
+            (&expected_labels[0], 10),
+            (&expected_labels[1], 20),
+        ] {
+            conn.execute(
+                r#"
+                INSERT INTO usage_bucket_30m(
+                    source, model, hour_start, project_hash, project_label, project_ref,
+                    input_tokens, cache_read_tokens, cache_creation_tokens,
+                    output_tokens, reasoning_output_tokens, total_tokens,
+                    event_count, updated_at
+                )
+                VALUES ('codex', 'gpt-5', ?1, '', NULL, NULL,
+                        ?2, 0, 0, 0, 0, ?2, 1, ?1)
+                "#,
+                rusqlite::params![hour_start, total_tokens],
+            )?;
+        }
+        drop(conn);
+
+        let addr = serve(store, Some(0)).await?;
+        let (status, payload) = route_json(addr, "GET", "/api/trends?window=day", None).await?;
+        assert_eq!(status, StatusCode::OK);
+        let rows = payload.as_array().expect("trend array");
+        let actual_labels = rows
+            .iter()
+            .map(|row| row["label"].as_str().expect("label").to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual_labels,
+            vec![
+                expected_labels[0].clone(),
+                expected_labels[1].clone(),
+                expected_labels[2].clone()
+            ]
+        );
         Ok(())
     }
 

@@ -45,26 +45,41 @@ export function renderTrends(context) {
   const W = 720;
   const baseline = 200;
   const colW = spotlightRows.length ? W / spotlightRows.length : W;
-  const barW = colW * 0.55;
+  const barW = Math.min(46, Math.max(14, colW * 0.58));
 
   let bars = '';
   let labels = '';
 
-  spotlightRows.forEach((row, i) => {
-    const value = Number(row.total_tokens || 0);
-    const h = (value / max) * (baseline - 20);
-    const x = i * colW + (colW - barW) / 2;
-    const y = baseline - h;
-    const isMax = value === max;
+  if (!spotlightRows.length) {
+    bars = `
+      <text class="trend-empty-title" x="${W / 2}" y="96" text-anchor="middle">暂无趋势数据</text>
+      <text class="trend-empty-copy" x="${W / 2}" y="118" text-anchor="middle">运行同步后将显示最近 10 个时段</text>
+    `;
+  } else {
+    spotlightRows.forEach((row, i) => {
+      const value = Number(row.total_tokens || 0);
+      const h = (value / max) * (baseline - 24);
+      const x = i * colW + (colW - barW) / 2;
+      const y = baseline - h;
+      const isMax = value === max;
+      const valueLabel = formatCompact(value);
+      const timeLabel = compactTrendLabel(row.label);
 
-    bars += `<rect x="${x}" y="${y}" width="${barW}" height="${h}" rx="3" fill="${isMax ? '#e87155' : '#c8553d'}" opacity="${isMax ? 1 : 0.85}"/>`;
+      bars += `
+        <g class="trend-bar-group" aria-label="${escapeHtml(`${row.label || '--'} · ${valueLabel} Token`)}">
+          <rect class="trend-bar-hit" x="${x - 4}" y="24" width="${barW + 8}" height="${baseline - 24}" rx="8"></rect>
+          <rect class="trend-bar ${isMax ? 'is-peak' : ''}" x="${x}" y="${y}" width="${barW}" height="${h}" rx="5"></rect>
+          <title>${escapeHtml(`${row.label || '--'} · ${formatNumber(value)} Token`)}</title>
+        </g>
+      `;
 
-    if (isMax) {
-      bars += `<text x="${x + barW / 2}" y="${y - 6}" fill="#f5a890" font-family="JetBrains Mono" font-size="10" text-anchor="middle">${formatCompact(value)}</text>`;
-    }
+      if (isMax) {
+        bars += `<text class="trend-peak-label" x="${x + barW / 2}" y="${Math.max(18, y - 7)}" text-anchor="middle">${escapeHtml(valueLabel)}</text>`;
+      }
 
-    labels += `<text x="${x + barW / 2}" y="216" text-anchor="middle">${escapeHtml(compactTrendLabel(row.label))}</text>`;
-  });
+      labels += `<text class="trend-axis-label" x="${x + barW / 2}" y="216" text-anchor="middle">${escapeHtml(timeLabel)}</text>`;
+    });
+  }
 
   document.getElementById('trends-bars').innerHTML = bars;
   document.getElementById('trends-labels').innerHTML = labels;

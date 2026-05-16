@@ -527,6 +527,8 @@ nav a.active .badge {
   border: 1px solid var(--dark-line);
   border-radius: 12px;
   padding: 20px;
+  overflow-x: auto;
+  scrollbar-color: rgba(240, 235, 225, 0.22) transparent;
 }
 
 .trends-chart-head {
@@ -554,9 +556,10 @@ nav a.active .badge {
   width: 8px;
   height: 8px;
   border-radius: 2px;
-  background: var(--accent);
+  background: linear-gradient(180deg, #f08a6e, #d06047);
   margin-right: 5px;
   vertical-align: middle;
+  box-shadow: 0 0 0 1px rgba(240, 138, 110, 0.28);
 }
 
 .data-table {

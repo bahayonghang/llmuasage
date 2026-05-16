@@ -207,15 +207,15 @@ fn html_shell(mode: &str) -> String {
               <span><span class="legend-dot"></span><span data-i18n="shell.trends.legend.tokens">用量 (Token)</span></span>
             </div>
           </div>
-          <svg class="chart-svg" viewBox="0 0 720 220" preserveAspectRatio="none" id="trends-chart">
-            <g stroke="rgba(255,255,255,0.06)" stroke-dasharray="2 4">
+          <svg class="chart-svg trends-chart-svg" viewBox="0 0 720 220" preserveAspectRatio="none" id="trends-chart" role="img" aria-label="最近 10 个时段用量趋势">
+            <g class="trend-grid-lines">
               <line x1="0" y1="40" x2="720" y2="40"/>
               <line x1="0" y1="80" x2="720" y2="80"/>
               <line x1="0" y1="120" x2="720" y2="120"/>
               <line x1="0" y1="160" x2="720" y2="160"/>
             </g>
             <g id="trends-bars" fill="#c8553d"></g>
-            <line x1="0" y1="200" x2="720" y2="200" stroke="rgba(255,255,255,0.15)"/>
+            <line class="trend-baseline" x1="0" y1="200" x2="720" y2="200"/>
             <g id="trends-labels" fill="#8d867a" font-family="JetBrains Mono, monospace" font-size="9.5"></g>
           </svg>
         </div>
