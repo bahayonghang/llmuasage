@@ -403,17 +403,25 @@ fn normalize_claude_usage(value: &Value) -> UsageTokens {
         .get("output_tokens")
         .and_then(Value::as_i64)
         .unwrap_or_default();
-    let total_tokens = value
-        .get("total_tokens")
+    let reasoning_output_tokens = value
+        .get("reasoning_output_tokens")
+        .or_else(|| value.get("thinking_output_tokens"))
         .and_then(Value::as_i64)
-        .unwrap_or(input_tokens + cache_creation_tokens + cache_read_tokens + output_tokens);
+        .unwrap_or_default();
+    let total_tokens = value.get("total_tokens").and_then(Value::as_i64).unwrap_or(
+        input_tokens
+            + cache_creation_tokens
+            + cache_read_tokens
+            + output_tokens
+            + reasoning_output_tokens,
+    );
 
     UsageTokens {
         input_tokens,
         cache_read_tokens,
         cache_creation_tokens,
         output_tokens,
-        reasoning_output_tokens: 0,
+        reasoning_output_tokens,
         total_tokens,
     }
 }
@@ -441,6 +449,7 @@ mod tests {
         assert_eq!(tokens.cache_read_tokens, 50);
         assert_eq!(tokens.output_tokens, 200);
         assert_eq!(tokens.total_tokens, 100 + 30 + 50 + 200);
+        assert_eq!(tokens.reasoning_output_tokens, 0);
     }
 
     /// Validates the fallback total formula picks up every component when the
@@ -455,5 +464,35 @@ mod tests {
         });
         let tokens = normalize_claude_usage(&usage);
         assert_eq!(tokens.total_tokens, 21);
+    }
+
+    #[test]
+    fn claude_parser_reads_official_reasoning_field_when_present() {
+        let usage = json!({
+            "input_tokens": 10,
+            "cache_creation_input_tokens": 4,
+            "cache_read_input_tokens": 2,
+            "output_tokens": 5,
+            "reasoning_output_tokens": 7,
+        });
+
+        let tokens = normalize_claude_usage(&usage);
+
+        assert_eq!(tokens.reasoning_output_tokens, 7);
+        assert_eq!(tokens.total_tokens, 28);
+    }
+
+    #[test]
+    fn claude_parser_accepts_thinking_output_tokens_alias() {
+        let usage = json!({
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "thinking_output_tokens": 3,
+        });
+
+        let tokens = normalize_claude_usage(&usage);
+
+        assert_eq!(tokens.reasoning_output_tokens, 3);
+        assert_eq!(tokens.total_tokens, 18);
     }
 }

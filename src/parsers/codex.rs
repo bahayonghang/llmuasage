@@ -481,28 +481,87 @@ fn pick_delta(
 }
 
 fn parse_usage_tokens(value: &Value) -> Option<UsageTokens> {
-    let object = value.as_object()?;
+    value.as_object()?;
     Some(UsageTokens {
-        input_tokens: object
-            .get("input_tokens")
-            .and_then(Value::as_i64)
-            .unwrap_or_default(),
-        cache_read_tokens: object
-            .get("cache_read_tokens")
-            .and_then(Value::as_i64)
+        input_tokens: read_i64(value, "input_tokens").unwrap_or_default(),
+        cache_read_tokens: read_i64(value, "cache_read_tokens")
+            .or_else(|| read_i64(value, "cached_input_tokens"))
             .unwrap_or_default(),
         cache_creation_tokens: 0,
-        output_tokens: object
-            .get("output_tokens")
-            .and_then(Value::as_i64)
-            .unwrap_or_default(),
-        reasoning_output_tokens: object
-            .get("reasoning_output_tokens")
-            .and_then(Value::as_i64)
-            .unwrap_or_default(),
-        total_tokens: object
-            .get("total_tokens")
-            .and_then(Value::as_i64)
-            .unwrap_or_default(),
+        output_tokens: read_i64(value, "output_tokens").unwrap_or_default(),
+        reasoning_output_tokens: read_i64(value, "reasoning_output_tokens").unwrap_or_default(),
+        total_tokens: read_i64(value, "total_tokens").unwrap_or_default(),
     })
+}
+
+fn read_i64(value: &Value, key: &str) -> Option<i64> {
+    value.get(key).and_then(Value::as_i64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_usage_tokens, pick_delta};
+    use crate::models::UsageTokens;
+    use serde_json::json;
+
+    #[test]
+    fn codex_parser_accepts_cached_input_tokens_alias() {
+        let usage = json!({
+            "input_tokens": 100,
+            "cached_input_tokens": 42,
+            "output_tokens": 8,
+            "reasoning_output_tokens": 3,
+            "total_tokens": 153
+        });
+
+        let tokens = parse_usage_tokens(&usage).expect("usage tokens");
+
+        assert_eq!(tokens.input_tokens, 100);
+        assert_eq!(tokens.cache_read_tokens, 42);
+        assert_eq!(tokens.output_tokens, 8);
+        assert_eq!(tokens.reasoning_output_tokens, 3);
+        assert_eq!(tokens.total_tokens, 153);
+    }
+
+    #[test]
+    fn codex_parser_keeps_legacy_cache_read_tokens() {
+        let usage = json!({
+            "input_tokens": 100,
+            "cache_read_tokens": 7,
+            "cached_input_tokens": 42,
+            "output_tokens": 8,
+            "total_tokens": 115
+        });
+
+        let tokens = parse_usage_tokens(&usage).expect("usage tokens");
+
+        assert_eq!(tokens.cache_read_tokens, 7);
+    }
+
+    #[test]
+    fn codex_total_delta_diffs_cached_input_tokens() {
+        let total = json!({
+            "input_tokens": 150,
+            "cached_input_tokens": 75,
+            "output_tokens": 25,
+            "reasoning_output_tokens": 5,
+            "total_tokens": 255
+        });
+        let previous = UsageTokens {
+            input_tokens: 100,
+            cache_read_tokens: 50,
+            output_tokens: 10,
+            reasoning_output_tokens: 2,
+            total_tokens: 162,
+            ..UsageTokens::default()
+        };
+
+        let delta = pick_delta(None, Some(&total), Some(&previous));
+
+        assert_eq!(delta.input_tokens, 50);
+        assert_eq!(delta.cache_read_tokens, 25);
+        assert_eq!(delta.output_tokens, 15);
+        assert_eq!(delta.reasoning_output_tokens, 3);
+        assert_eq!(delta.total_tokens, 93);
+    }
 }

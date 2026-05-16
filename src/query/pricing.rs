@@ -156,6 +156,17 @@ mod tests {
     }
 
     #[test]
+    fn pricing_static_v1_hits_current_gpt5_dotted_variants() {
+        for model in ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"] {
+            let cost = compute_cost("codex", model, 1_000_000, 200_000, 500_000, 0);
+
+            assert_eq!(cost.pricing_status, PricingStatus::Static, "{model}");
+            assert_eq!(cost.pricing_source.as_deref(), Some("static-v1"));
+            assert!(cost.cost_with_cache_usd > 0.0, "{model}");
+        }
+    }
+
+    #[test]
     fn pricing_rate_preserves_low_precision_rates() {
         let catalog = PricingCatalog {
             version: "precision-test".to_string(),

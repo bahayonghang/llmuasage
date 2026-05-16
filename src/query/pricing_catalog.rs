@@ -15,8 +15,8 @@ use crate::error::{LlmusageError, Result};
 const STATIC_V1_JSON: &str = include_str!("../../pricing/static-v1.json");
 
 /// One rate row inside a [`PricingCatalog`]. Matchers run as
-/// case-insensitive exact or dash-delimited prefix checks against the
-/// normalized model name.
+/// case-insensitive exact, dash-delimited prefix, or controlled dot-delimited
+/// suffix checks against the normalized model name.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PricingEntry {
     pub source: String,
@@ -73,9 +73,11 @@ impl PricingCatalog {
     }
 
     /// Finds the most specific entry whose matcher is either an exact model
-    /// match or a dash-delimited prefix for the requested source. This avoids
-    /// accidental substring matches such as `gpt` matching `not-gpt` or `gpt2`,
-    /// while still letting `gpt-5-mini` override the broader `gpt-5` row.
+    /// match, a dash-delimited prefix, or a controlled dot-delimited suffix
+    /// for the requested source. This avoids accidental substring matches such
+    /// as `gpt` matching `not-gpt` or `gpt2`, while still letting
+    /// `gpt-5-mini` override the broader `gpt-5` row and `gpt-5` cover
+    /// current dotted variants such as `gpt-5.5`.
     pub fn find(&self, source: &str, model: &str) -> Option<&PricingEntry> {
         let normalized = model.to_ascii_lowercase();
         self.models
@@ -138,7 +140,18 @@ fn matcher_matches(matcher: &str, normalized_model: &str) -> bool {
     if matcher.is_empty() {
         return false;
     }
-    normalized_model == matcher || normalized_model.starts_with(&format!("{matcher}-"))
+    normalized_model == matcher
+        || normalized_model.starts_with(&format!("{matcher}-"))
+        || dot_suffix_matches(&matcher, normalized_model)
+}
+
+fn dot_suffix_matches(matcher: &str, normalized_model: &str) -> bool {
+    if !normalized_model.starts_with(&format!("{matcher}.")) {
+        return false;
+    }
+    matcher
+        .rsplit_once('-')
+        .is_some_and(|(_, suffix)| suffix.chars().all(|ch| ch.is_ascii_digit()))
 }
 
 fn same_matcher(left: &str, right: &str) -> bool {
@@ -166,12 +179,16 @@ mod tests {
         assert_eq!(catalog.version, "static-v1");
         assert_eq!(catalog.status, PricingStatus::Static);
         assert!(catalog.find("codex", "gpt-5").is_some());
+        assert!(catalog.find("codex", "gpt-5.5").is_some());
+        assert!(catalog.find("codex", "gpt-5.4").is_some());
+        assert!(catalog.find("codex", "gpt-5.4-mini").is_some());
         assert!(catalog.find("codex", "o3-mini").is_some());
         assert!(catalog.find("claude", "claude-opus-4-1").is_some());
         assert!(catalog.find("claude", "claude-sonnet-4-5").is_some());
         assert!(catalog.find("opencode", "gpt-5").is_some());
         assert!(catalog.find("codex", "made-up-model").is_none());
         assert!(catalog.find("codex", "not-gpt-5").is_none());
+        assert!(catalog.find("codex", "gpt-50").is_none());
         assert!(catalog.find("opencode", "gpt2").is_none());
     }
 
@@ -182,6 +199,16 @@ mod tests {
             .find("codex", "gpt-5-mini-2026-05-01")
             .expect("dash-delimited minor variant should match gpt-5-mini");
         assert_eq!(entry.input_per_mtok, 0.25);
+
+        let dotted = catalog
+            .find("codex", "gpt-5.4")
+            .expect("dot-delimited GPT-5 variant should match gpt-5");
+        assert_eq!(dotted.input_per_mtok, 1.25);
+
+        let dotted_mini = catalog
+            .find("codex", "gpt-5.4-mini")
+            .expect("dot-delimited GPT-5 mini variant should match gpt-5");
+        assert_eq!(dotted_mini.input_per_mtok, 1.25);
 
         let base = catalog
             .find("codex", "gpt-5")
