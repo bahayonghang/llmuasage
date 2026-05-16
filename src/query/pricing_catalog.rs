@@ -120,7 +120,7 @@ impl PricingCatalog {
     /// `gpt-5-mini` override the broader `gpt-5` row and `gpt-5` cover
     /// current dotted variants such as `gpt-5.5`.
     pub fn find(&self, source: &str, model: &str) -> Option<&PricingEntry> {
-        let normalized = model.to_ascii_lowercase();
+        let candidates = model_candidates(model);
         self.models
             .iter()
             .filter(|entry| entry.source.eq_ignore_ascii_case(source))
@@ -128,8 +128,12 @@ impl PricingCatalog {
                 entry
                     .matchers
                     .iter()
-                    .filter(|matcher| matcher_matches(matcher, &normalized))
-                    .map(|matcher| (entry, matcher.len()))
+                    .filter_map(|matcher| {
+                        candidates
+                            .iter()
+                            .any(|candidate| matcher_matches(matcher, candidate))
+                            .then_some((entry, matcher.len()))
+                    })
                     .max_by_key(|(_, matcher_len)| *matcher_len)
             })
             .max_by_key(|(_, matcher_len)| *matcher_len)
@@ -302,9 +306,9 @@ fn read_reasoning_policy(value: &Value) -> ReasoningPolicy {
 
 fn native_matchers(model_id: &str, raw_entry: &Value) -> Vec<String> {
     let mut values = Vec::new();
-    push_matcher(&mut values, model_id);
+    push_normalized_matcher(&mut values, model_id);
     if let Some(model) = raw_entry.get("model").and_then(Value::as_str) {
-        push_matcher(&mut values, model);
+        push_normalized_matcher(&mut values, model);
     }
     values
 }
@@ -325,6 +329,17 @@ fn push_matcher(values: &mut Vec<String>, raw: &str) {
         if !normalized.is_empty() && !values.iter().any(|value| value == &normalized) {
             values.push(normalized);
         }
+    }
+}
+
+fn push_normalized_matcher(values: &mut Vec<String>, raw: &str) {
+    push_matcher(values, raw);
+    let normalized = normalize_litellm_model_id(raw);
+    if normalized != raw.trim().to_ascii_lowercase() {
+        push_matcher(values, &normalized);
+    }
+    for alias in pricing_aliases(&normalized) {
+        push_matcher(values, alias);
     }
 }
 
@@ -357,7 +372,7 @@ fn read_f64(value: &Value, key: &str) -> Option<f64> {
 }
 
 fn matcher_matches(matcher: &str, normalized_model: &str) -> bool {
-    let matcher = matcher.to_ascii_lowercase();
+    let matcher = normalize_model_candidate(matcher);
     if matcher.is_empty() {
         return false;
     }
@@ -366,7 +381,65 @@ fn matcher_matches(matcher: &str, normalized_model: &str) -> bool {
         || dot_suffix_matches(&matcher, normalized_model)
 }
 
+fn model_candidates(model: &str) -> Vec<String> {
+    let normalized = normalize_model_candidate(model);
+    let mut candidates = Vec::new();
+    push_candidate(&mut candidates, normalized.as_str());
+    for alias in pricing_aliases(&normalized) {
+        push_candidate(&mut candidates, alias);
+    }
+    candidates
+}
+
+fn push_candidate(values: &mut Vec<String>, candidate: &str) {
+    if !candidate.is_empty() && !values.iter().any(|value| value == candidate) {
+        values.push(candidate.to_string());
+    }
+}
+
+fn normalize_model_candidate(model: &str) -> String {
+    let stripped = model
+        .trim()
+        .to_ascii_lowercase()
+        .rsplit_once('/')
+        .map(|(_, model)| model.to_string())
+        .unwrap_or_else(|| model.trim().to_ascii_lowercase());
+    normalize_litellm_model_id(&stripped)
+}
+
+fn normalize_litellm_model_id(model: &str) -> String {
+    let mut normalized = model.trim().to_ascii_lowercase();
+    for suffix in ["-thinking", "-latest"] {
+        if let Some(stripped) = normalized.strip_suffix(suffix) {
+            normalized = stripped.to_string();
+        }
+    }
+    normalized
+        .chars()
+        .map(|ch| match ch {
+            '.' | '_' | ':' => '-',
+            _ => ch,
+        })
+        .collect()
+}
+
+fn pricing_aliases(model: &str) -> &'static [&'static str] {
+    match model {
+        "gpt-5-codex" => &["gpt-5"],
+        "gemini-3-pro-high" => &["gemini-3-pro-preview"],
+        _ => &[],
+    }
+}
+
 fn dot_suffix_matches(matcher: &str, normalized_model: &str) -> bool {
+    if normalized_model.starts_with(&format!("{matcher}-"))
+        && normalized_model[matcher.len() + 1..]
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_digit())
+    {
+        return true;
+    }
     if !normalized_model.starts_with(&format!("{matcher}.")) {
         return false;
     }
@@ -376,8 +449,8 @@ fn dot_suffix_matches(matcher: &str, normalized_model: &str) -> bool {
 }
 
 fn same_matcher(left: &str, right: &str) -> bool {
-    let left = left.to_ascii_lowercase();
-    let right = right.to_ascii_lowercase();
+    let left = normalize_model_candidate(left);
+    let right = normalize_model_candidate(right);
     !left.is_empty() && left == right
 }
 
@@ -407,6 +480,14 @@ mod tests {
         assert!(catalog.find("claude", "claude-opus-4-1").is_some());
         assert!(catalog.find("claude", "claude-sonnet-4-5").is_some());
         assert!(catalog.find("opencode", "gpt-5").is_some());
+        assert!(catalog.find("codex", "gpt-5-codex").is_some());
+        assert!(catalog.find("opencode", "claude.sonnet.4.5").is_some());
+        assert!(
+            catalog
+                .find("opencode", "anthropic/claude-sonnet-4-5")
+                .is_some()
+        );
+        assert!(catalog.find("opencode", "gemini-3-pro-high").is_some());
         assert!(catalog.find("codex", "made-up-model").is_none());
         assert!(catalog.find("codex", "not-gpt-5").is_none());
         assert!(catalog.find("codex", "gpt-50").is_none());
@@ -435,6 +516,25 @@ mod tests {
             .find("codex", "gpt-5")
             .expect("exact matcher should still match base model");
         assert_eq!(base.input_per_mtok, 1.25);
+    }
+
+    #[test]
+    fn pricing_catalog_matches_known_provider_aliases() {
+        let catalog = PricingCatalog::static_v1();
+        let codex = catalog
+            .find("codex", "gpt-5-codex")
+            .expect("Codex-specific GPT-5 alias should match gpt-5");
+        assert_eq!(codex.input_per_mtok, 1.25);
+
+        let claude = catalog
+            .find("opencode", "anthropic/claude.sonnet.4.5")
+            .expect("provider-prefixed dotted Claude IDs should normalize");
+        assert_eq!(claude.output_per_mtok, 15.0);
+
+        let gemini = catalog
+            .find("opencode", "gemini-3-pro-high")
+            .expect("Gemini high alias should match preview pricing");
+        assert_eq!(gemini.input_per_mtok, 2.0);
     }
 
     /// Litellm snapshots loaded from disk inherit the snapshot status and
@@ -513,6 +613,12 @@ mod tests {
         assert!((claude.cached_per_mtok - 0.3).abs() < 1e-12);
         assert!((claude.cache_creation_per_mtok() - 3.75).abs() < 1e-12);
         assert_eq!(claude.reasoning_policy, ReasoningPolicy::IncludedInOutput);
+        assert!(
+            catalog
+                .find("opencode", "anthropic/claude.sonnet.4.5")
+                .is_some(),
+            "native snapshot provider-prefixed candidates should normalize for OpenCode"
+        );
 
         Ok(())
     }

@@ -468,7 +468,9 @@ fn pick_delta(
         return UsageTokens {
             input_tokens: (total.input_tokens - previous_total.input_tokens).max(0),
             cache_read_tokens: (total.cache_read_tokens - previous_total.cache_read_tokens).max(0),
-            cache_creation_tokens: 0,
+            cache_creation_tokens: (total.cache_creation_tokens
+                - previous_total.cache_creation_tokens)
+                .max(0),
             output_tokens: (total.output_tokens - previous_total.output_tokens).max(0),
             reasoning_output_tokens: (total.reasoning_output_tokens
                 - previous_total.reasoning_output_tokens)
@@ -507,6 +509,23 @@ fn parse_usage_tokens(value: &Value) -> Option<UsageTokens> {
     } else {
         raw_input_tokens
     };
+    let cache_creation_tokens = read_i64(value, "cache_creation_tokens")
+        .or_else(|| read_i64(value, "cache_creation_input_tokens"))
+        .or_else(|| read_nested_i64(value, &["input_tokens_details", "cache_creation_tokens"]))
+        .or_else(|| read_nested_i64(value, &["prompt_tokens_details", "cache_creation_tokens"]))
+        .or_else(|| {
+            read_nested_i64(
+                value,
+                &["usage", "input_tokens_details", "cache_creation_tokens"],
+            )
+        })
+        .or_else(|| {
+            read_nested_i64(
+                value,
+                &["usage", "prompt_tokens_details", "cache_creation_tokens"],
+            )
+        })
+        .unwrap_or_default();
     let output_tokens = read_i64(value, "output_tokens")
         .or_else(|| read_i64(value, "completion_tokens"))
         .unwrap_or_default();
@@ -527,12 +546,17 @@ fn parse_usage_tokens(value: &Value) -> Option<UsageTokens> {
             )
         })
         .unwrap_or_default();
-    let total_tokens = read_i64(value, "total_tokens")
-        .unwrap_or(input_tokens + cache_read_tokens + output_tokens + reasoning_output_tokens);
+    let total_tokens = read_i64(value, "total_tokens").unwrap_or(
+        input_tokens
+            + cache_creation_tokens
+            + cache_read_tokens
+            + output_tokens
+            + reasoning_output_tokens,
+    );
     Some(UsageTokens {
         input_tokens,
         cache_read_tokens,
-        cache_creation_tokens: 0,
+        cache_creation_tokens,
         output_tokens,
         reasoning_output_tokens,
         total_tokens,
@@ -688,6 +712,25 @@ mod tests {
     }
 
     #[test]
+    fn codex_usage_preserves_cache_creation_tokens() {
+        let usage = json!({
+            "input_tokens": 100,
+            "cache_creation_input_tokens": 12,
+            "cached_input_tokens": 42,
+            "output_tokens": 8,
+            "reasoning_output_tokens": 2
+        });
+        let tokens = parse_usage_tokens(&usage).expect("usage tokens");
+
+        assert_eq!(tokens.input_tokens, 100);
+        assert_eq!(tokens.cache_creation_tokens, 12);
+        assert_eq!(tokens.cache_read_tokens, 42);
+        assert_eq!(tokens.output_tokens, 8);
+        assert_eq!(tokens.reasoning_output_tokens, 2);
+        assert_eq!(tokens.total_tokens, 164);
+    }
+
+    #[test]
     fn codex_total_delta_diffs_cached_input_tokens() {
         let total = json!({
             "input_tokens": 150,
@@ -698,16 +741,17 @@ mod tests {
         });
         let previous = UsageTokens {
             input_tokens: 100,
+            cache_creation_tokens: 4,
             cache_read_tokens: 50,
             output_tokens: 10,
             reasoning_output_tokens: 2,
             total_tokens: 162,
-            ..UsageTokens::default()
         };
 
         let delta = pick_delta(None, Some(&total), Some(&previous));
 
         assert_eq!(delta.input_tokens, 50);
+        assert_eq!(delta.cache_creation_tokens, 0);
         assert_eq!(delta.cache_read_tokens, 25);
         assert_eq!(delta.output_tokens, 15);
         assert_eq!(delta.reasoning_output_tokens, 3);

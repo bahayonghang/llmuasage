@@ -365,12 +365,12 @@ fn normalize_opencode_tokens(value: Option<&Value>) -> UsageTokens {
     let input_tokens = value
         .get("input")
         .and_then(Value::as_i64)
-        .unwrap_or_default()
-        + value
-            .get("cache")
-            .and_then(|cache| cache.get("write"))
-            .and_then(Value::as_i64)
-            .unwrap_or_default();
+        .unwrap_or_default();
+    let cache_creation_tokens = value
+        .get("cache")
+        .and_then(|cache| cache.get("write"))
+        .and_then(Value::as_i64)
+        .unwrap_or_default();
     let cache_read_tokens = value
         .get("cache")
         .and_then(|cache| cache.get("read"))
@@ -388,10 +388,14 @@ fn normalize_opencode_tokens(value: Option<&Value>) -> UsageTokens {
     UsageTokens {
         input_tokens,
         cache_read_tokens,
-        cache_creation_tokens: 0,
+        cache_creation_tokens,
         output_tokens,
         reasoning_output_tokens,
-        total_tokens: input_tokens + output_tokens + reasoning_output_tokens,
+        total_tokens: input_tokens
+            + cache_creation_tokens
+            + cache_read_tokens
+            + output_tokens
+            + reasoning_output_tokens,
     }
 }
 
@@ -435,4 +439,30 @@ fn serialize_opencode_row(row: &OpencodeRow) -> String {
     }
     serde_json::to_string(&Value::Object(payload))
         .unwrap_or_else(|_| serde_json::json!({"id": row.id}).to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_opencode_tokens;
+    use serde_json::json;
+
+    #[test]
+    fn opencode_cache_write_maps_to_cache_creation_not_input() {
+        let tokens = normalize_opencode_tokens(Some(&json!({
+            "input": 100,
+            "output": 30,
+            "reasoning": 7,
+            "cache": {
+                "write": 40,
+                "read": 20
+            }
+        })));
+
+        assert_eq!(tokens.input_tokens, 100);
+        assert_eq!(tokens.cache_creation_tokens, 40);
+        assert_eq!(tokens.cache_read_tokens, 20);
+        assert_eq!(tokens.output_tokens, 30);
+        assert_eq!(tokens.reasoning_output_tokens, 7);
+        assert_eq!(tokens.total_tokens, 197);
+    }
 }
