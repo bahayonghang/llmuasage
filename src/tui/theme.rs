@@ -2,7 +2,11 @@
 //!
 //! Design: dark background with blue/cyan accent tones (similar to lazygit/btop).
 
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::{
+    style::{Color, Modifier, Style},
+    text::Span,
+    widgets::{Block, Borders},
+};
 
 // ── Palette ──────────────────────────────────────────────────────────────────
 
@@ -35,6 +39,15 @@ pub const ROW_ALT_BG: Color = Color::Rgb(30, 30, 40);
 
 /// KPI card colors (one per card).
 pub const KPI_COLORS: [Color; 4] = [Color::Cyan, Color::Green, Color::Yellow, Color::Magenta];
+
+/// Primary bar color for the trends cockpit.
+pub const TREND_BAR_FG: Color = Color::Blue;
+
+/// Peak/high-water mark color for the trends cockpit.
+pub const TREND_PEAK_FG: Color = Color::Yellow;
+
+/// Axis and helper line color for trend charts.
+pub const TREND_AUX_FG: Color = Color::DarkGray;
 
 // ── Style constructors ───────────────────────────────────────────────────────
 
@@ -84,4 +97,40 @@ pub fn error_style() -> Style {
 /// Style for muted/placeholder text.
 pub fn muted_style() -> Style {
     Style::default().fg(MUTED_FG)
+}
+
+/// Shared bordered block for dashboard panels.
+pub fn panel_block(title: &str) -> Block<'_> {
+    Block::default()
+        .borders(Borders::ALL)
+        .border_style(block_border_style())
+        .title(Span::styled(format!(" {title} "), block_title_style()))
+}
+
+/// Shared mini-card block for trend summary metrics.
+pub fn trend_card_block(title: &str, color: Color) -> Block<'_> {
+    Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(color))
+        .title(Span::styled(
+            format!(" {title} "),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ))
+}
+
+/// Style for ordinary trend bars.
+pub fn trend_bar_style() -> Style {
+    Style::default().fg(TREND_BAR_FG)
+}
+
+/// Style for the peak trend bar and peak value.
+pub fn trend_peak_style() -> Style {
+    Style::default()
+        .fg(TREND_PEAK_FG)
+        .add_modifier(Modifier::BOLD)
+}
+
+/// Style for trend axes, labels, and secondary hints.
+pub fn trend_aux_style() -> Style {
+    Style::default().fg(TREND_AUX_FG)
 }

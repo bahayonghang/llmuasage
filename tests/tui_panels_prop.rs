@@ -10,10 +10,10 @@ use ratatui::{Terminal, backend::TestBackend, layout::Rect};
 
 use llmusage::query::{
     CostLine, CursorHealth, HealthPayload, ModelBreakdown, OverviewPayload, ProjectBreakdown,
-    SourceBreakdown, TokenSummary,
+    SourceBreakdown, TokenSummary, TrendPoint,
 };
 use llmusage::store::{IntegrationState, RunRecord};
-use llmusage::tui::app::ScrollState;
+use llmusage::tui::app::{ScrollState, TimeWindow};
 
 /// Format a number with thousands separators (matching panel rendering).
 fn format_number(n: i64) -> String {
@@ -230,7 +230,134 @@ fn arb_health_payload() -> impl Strategy<Value = HealthPayload> {
         })
 }
 
+fn arb_trend_points() -> impl Strategy<Value = Vec<TrendPoint>> {
+    proptest::collection::vec(
+        ("2026-05-(0[1-9]|1[0-9]|2[0-8])", 0i64..1_000_000).prop_map(|(label, tokens)| {
+            TrendPoint {
+                label,
+                total_tokens: tokens,
+            }
+        }),
+        0..35,
+    )
+}
+
+fn render_trends_text(
+    points: Vec<TrendPoint>,
+    window: TimeWindow,
+    width: u16,
+    height: u16,
+) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    let area = Rect::new(0, 0, width, height);
+    let data: Option<Result<Vec<TrendPoint>, String>> = Some(Ok(points));
+
+    terminal
+        .draw(|frame| {
+            llmusage::tui::panels::trends::render(frame, area, &data, window);
+        })
+        .unwrap();
+
+    buffer_text(&terminal)
+}
+
 // ─── Property Tests ───────────────────────────────────────────────────────────
+
+#[test]
+fn trends_week_labels_are_short_dates_not_truncated_years() {
+    let points = (10..=16)
+        .map(|day| TrendPoint {
+            label: format!("2026-05-{day:02}"),
+            total_tokens: i64::from(day) * 1_000,
+        })
+        .collect();
+
+    let text = render_trends_text(points, TimeWindow::Week7d, 120, 28);
+
+    assert!(
+        text.contains("05-16"),
+        "expected short MM-DD label in trends output: {text}"
+    );
+    assert!(
+        !text.contains("2026-05-16"),
+        "full date labels should not leak into the TUI chart/table: {text}"
+    );
+    assert!(
+        !text.contains("202 202"),
+        "truncated repeated year labels should not appear: {text}"
+    );
+}
+
+#[test]
+fn trends_window_labels_use_window_specific_short_formats() {
+    let cases = [
+        (
+            TimeWindow::Day24h,
+            TrendPoint {
+                label: "2026-05-16T09:30:00Z".to_string(),
+                total_tokens: 12_000,
+            },
+            "09:30",
+        ),
+        (
+            TimeWindow::Week7d,
+            TrendPoint {
+                label: "2026-05-16".to_string(),
+                total_tokens: 12_000,
+            },
+            "05-16",
+        ),
+        (
+            TimeWindow::Month30d,
+            TrendPoint {
+                label: "2026-05-16".to_string(),
+                total_tokens: 12_000,
+            },
+            "05-16",
+        ),
+        (
+            TimeWindow::All,
+            TrendPoint {
+                label: "2026-05".to_string(),
+                total_tokens: 12_000,
+            },
+            "2026-05",
+        ),
+    ];
+
+    for (window, point, expected_label) in cases {
+        let text = render_trends_text(vec![point], window, 96, 24);
+        assert!(
+            text.contains(expected_label),
+            "expected {expected_label} for {window:?}, got: {text}"
+        );
+    }
+}
+
+#[test]
+fn trends_empty_data_renders_placeholder() {
+    let text = render_trends_text(Vec::new(), TimeWindow::Week7d, 80, 18);
+    assert!(
+        text.contains("暂无趋势数据"),
+        "empty trend data should show placeholder: {text}"
+    );
+}
+
+#[test]
+fn trends_small_terminal_does_not_panic() {
+    let points = (1..=30)
+        .map(|day| TrendPoint {
+            label: format!("2026-05-{day:02}"),
+            total_tokens: i64::from(day) * 100,
+        })
+        .collect();
+
+    let text = render_trends_text(points, TimeWindow::Month30d, 30, 8);
+    assert!(
+        text.contains("趋势"),
+        "small terminal should render a shell"
+    );
+}
 
 // Feature: terminal-dashboard, Property 2: Overview panel renders all required fields
 // **Validates: Requirements 3.1, 3.2**
@@ -275,6 +402,32 @@ proptest! {
                 "Missing last_sync_at '{}' in output", ts),
             None => prop_assert!(text.contains("从未同步"),
                 "Missing '从未同步' placeholder in output"),
+        }
+    }
+}
+
+// Feature: terminal-dashboard, Property 4.5: Trends panel renders safely for
+// random series and includes the dashboard shell / empty placeholder.
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(100))]
+
+    #[test]
+    fn prop_trends_panel_renders_without_panic(
+        points in arb_trend_points(),
+        window in prop_oneof![
+            Just(TimeWindow::Day24h),
+            Just(TimeWindow::Week7d),
+            Just(TimeWindow::Month30d),
+            Just(TimeWindow::All),
+        ],
+    ) {
+        let text = render_trends_text(points.clone(), window, 100, 26);
+
+        prop_assert!(text.contains("趋势"),
+            "Trends panel shell should render for any generated series");
+        if points.is_empty() {
+            prop_assert!(text.contains("暂无趋势数据"),
+                "Empty trend series should render placeholder");
         }
     }
 }
