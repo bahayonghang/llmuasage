@@ -33,7 +33,7 @@ llmusage serve
 
 - `init` 建立 `~/.llmusage/`、创建 `llmusage.db`、生成 hook 包装器并安装 Codex / Claude / OpenCode / Gemini 集成。
 - `sync` 增量解析本地真源并写入 SQLite。人读进度默认写入 stderr；脚本需要生命周期/进度事件时可用 `--json-events` 输出 NDJSON。
-- 不带子命令的 `llmusage` 会从本地 DB 输出 daily 报表。也可以使用 `llmusage daily --json`、`llmusage monthly`、`llmusage session`、`llmusage blocks` 查看其他报表。
+- 不带子命令的 `llmusage` 会从本地 DB 输出过去 7 个自然日（包含今天）的 daily 报表，并按 Codex、Claude 以及其他有数据的 Source 分彩色表，表之间用 `---` 分隔。human daily 表使用 `K` / `M` / `B` token 短格式，并通过 `Notes` 标注未定价/未上报等元信息；`NO_COLOR=1` 会禁用 ANSI 样式，`llmusage daily --json` 保持稳定的聚合 JSON 结构。也可以使用 `llmusage daily --all`、`llmusage monthly`、`llmusage session`、`llmusage blocks` 查看其他报表。
 - `serve` 在 `127.0.0.1` 上启动本地分析页，并默认用系统浏览器打开它。
 
 报表命令都是只读操作，不上传数据，也不会自动 sync；源数据变化后请重新运行 `llmusage sync`。可用 `--source codex|claude|opencode|gemini` 限定报表或同步来源。升级后如果需要重新填充 session/source-file metadata，请只在原始源文件仍存在时运行 `llmusage sync --rebuild`。如果 Codex/Claude/Gemini 文件已经被清理，普通 `llmusage sync` 会保留已导入历史并在 diagnostics 中显示缺失源文件；`--rebuild` 默认拒绝，除非加 `--allow-lossy-rebuild` 明确清掉不可重建历史。如果维护本地价格快照，可运行 `llmusage doctor --refresh-pricing <file>`；llmusage 会把快照保存到 `~/.llmusage/pricing/<catalog-version>.json`，重算 event/bucket 成本，并让后续 sync 继续使用该本地 catalog。

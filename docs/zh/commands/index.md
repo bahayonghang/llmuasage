@@ -6,7 +6,9 @@
 
 ### `llmusage` / `llmusage daily`
 
-按天展示 token 与估算成本；估算成本读取持久化 cache-aware `cost_with_cache_usd` 列。没有子命令时，`llmusage` 等价于 `llmusage daily`。
+按天展示过去 7 个自然日（包含今天）的 token 与估算成本；估算成本读取持久化 cache-aware `cost_with_cache_usd` 列。没有子命令时，`llmusage` 等价于 `llmusage daily`。
+
+human 输出按 Source 优先分表：Codex 与 Claude 各一张彩色 daily 表，如果 OpenCode / Gemini 有匹配数据则继续追加，表之间用 `---` 分隔。daily human 表使用 `Date / Conv / Models / Input / Cache / Output / Reason / All / Cost / Notes`，token 采用 `K` / `M` / `B` 短格式；`NO_COLOR=1` 会禁用 ANSI 样式，`--json` 输出保持稳定的聚合 snake_case payload，不受 human 表格样式影响。`Notes` 会标注未定价模型和 Claude reasoning token 未上报等来源侧缺口。
 
 常用参数：
 
@@ -16,7 +18,7 @@
 - `--instances` 按项目分组 daily 行
 - `--project <label|hash|ref>`
 - `--timezone UTC|local|+08:00`
-- `--all` 显示完整 daily 历史；默认只显示今天
+- `--all` 显示完整 daily 历史；默认显示过去 7 个自然日（包含今天）
 - `--compact`
 - `--source codex|claude|opencode|gemini`
 

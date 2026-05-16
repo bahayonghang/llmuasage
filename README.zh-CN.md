@@ -31,7 +31,7 @@
 - `llmusage blocks`
 - `llmusage statusline`
 
-`llmusage` / `llmusage daily` 默认按所选时区只显示今天；需要完整 daily 历史时使用 `--all`，需要指定范围时使用 `--since YYYYMMDD` / `--until YYYYMMDD`。
+`llmusage` / `llmusage daily` 默认按所选时区显示过去 7 个自然日（包含今天）；human 输出会按 Source 分彩色表（优先 Codex、Claude，有 OpenCode/Gemini 数据时继续追加），表之间用 `---` 分隔，token 使用 K/M/B 短格式；`NO_COLOR=1` 会禁用 ANSI 样式，JSON 输出保持 snake_case 和聚合 daily payload 不变。`Notes` 列会标注未定价模型以及 Claude reasoning token 未上报等来源侧缺口。需要完整 daily 历史时使用 `--all`，需要指定范围时使用 `--since YYYYMMDD` / `--until YYYYMMDD`。
 
 常用报表参数包括 `--since YYYYMMDD`、`--until YYYYMMDD`、`--json`、`--breakdown`、`--order asc|desc`、`--timezone UTC|local|+08:00`、`--locale en-US|zh-CN|ja-JP`、`--compact`、`--source codex|claude|opencode|gemini`。
 
