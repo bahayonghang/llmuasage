@@ -215,10 +215,14 @@ impl Fixture {
             let event_at = format!("2026-04-{day:02}T{hour:02}:15:00Z");
             let input_tokens = 10 + (idx % 7) as i64;
             let cache_read_tokens = (idx % 3) as i64;
+            let cache_creation_tokens = (idx % 4) as i64;
             let output_tokens = 5 + (idx % 5) as i64;
             let reasoning_output_tokens = (idx % 2) as i64;
-            let total_tokens =
-                input_tokens + cache_read_tokens + output_tokens + reasoning_output_tokens;
+            let total_tokens = input_tokens
+                + cache_read_tokens
+                + cache_creation_tokens
+                + output_tokens
+                + reasoning_output_tokens;
             let updated_at = format!("2026-05-05T00:{:02}:00Z", idx % 60);
             let seed = SeedEvent {
                 event_key: &event_key,
@@ -228,6 +232,7 @@ impl Fixture {
                 hour_start: Some(&hour_start),
                 input_tokens,
                 cache_read_tokens,
+                cache_creation_tokens,
                 output_tokens,
                 reasoning_output_tokens,
                 total_tokens,
@@ -324,6 +329,7 @@ mod tests {
         let fixture = Fixture::new()?;
         fixture.seed_event(SeedEvent {
             event_key: "codex:test:1",
+            input_tokens: 42,
             total_tokens: 42,
             ..SeedEvent::default()
         })?;

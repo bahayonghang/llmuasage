@@ -43,6 +43,7 @@ pub struct BlockReportOptions {
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
 pub struct TokenTotals {
     pub input_tokens: i64,
+    pub cache_creation_tokens: i64,
     pub cache_read_tokens: i64,
     pub output_tokens: i64,
     pub reasoning_output_tokens: i64,
@@ -55,6 +56,7 @@ pub struct ModelCostBreakdown {
     pub source: String,
     pub model: String,
     pub input_tokens: i64,
+    pub cache_creation_tokens: i64,
     pub cache_read_tokens: i64,
     pub output_tokens: i64,
     pub reasoning_output_tokens: i64,
@@ -180,16 +182,47 @@ struct EventRow {
     local_at: DateTime<FixedOffset>,
     local_date: NaiveDate,
     input_tokens: i64,
+    cache_creation_tokens: i64,
     cache_read_tokens: i64,
     output_tokens: i64,
     reasoning_output_tokens: i64,
-    total_tokens: i64,
     cost_with_cache_usd: f64,
     pricing_status: String,
     project: Option<ProjectSummary>,
     session_id: Option<String>,
     session_label: Option<String>,
     source_path_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TokenComponents {
+    input_tokens: i64,
+    cache_creation_tokens: i64,
+    cache_read_tokens: i64,
+    output_tokens: i64,
+    reasoning_output_tokens: i64,
+}
+
+impl TokenComponents {
+    fn total_tokens(self) -> i64 {
+        self.input_tokens
+            + self.cache_creation_tokens
+            + self.cache_read_tokens
+            + self.output_tokens
+            + self.reasoning_output_tokens
+    }
+}
+
+impl From<&EventRow> for TokenComponents {
+    fn from(event: &EventRow) -> Self {
+        Self {
+            input_tokens: event.input_tokens,
+            cache_creation_tokens: event.cache_creation_tokens,
+            cache_read_tokens: event.cache_read_tokens,
+            output_tokens: event.output_tokens,
+            reasoning_output_tokens: event.reasoning_output_tokens,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -213,15 +246,8 @@ type SessionGroup = (
 
 impl Aggregate {
     fn add_event(&mut self, event: &EventRow) {
-        add_tokens(
-            &mut self.totals,
-            event.input_tokens,
-            event.cache_read_tokens,
-            event.output_tokens,
-            event.reasoning_output_tokens,
-            event.total_tokens,
-            event.cost_with_cache_usd,
-        );
+        let tokens = TokenComponents::from(event);
+        add_tokens(&mut self.totals, tokens, event.cost_with_cache_usd);
         self.models.insert(event.model.clone());
         self.conversations.insert(event_session_id(event));
         self.pricing_statuses.insert(event.pricing_status.clone());
@@ -230,15 +256,7 @@ impl Aggregate {
             .breakdowns
             .entry((event.source.clone(), event.model.clone()))
             .or_default();
-        add_tokens(
-            entry,
-            event.input_tokens,
-            event.cache_read_tokens,
-            event.output_tokens,
-            event.reasoning_output_tokens,
-            event.total_tokens,
-            event.cost_with_cache_usd,
-        );
+        add_tokens(entry, tokens, event.cost_with_cache_usd);
     }
 
     fn model_names(&self) -> Vec<String> {
@@ -259,6 +277,7 @@ impl Aggregate {
                 source: source.clone(),
                 model: model.clone(),
                 input_tokens: totals.input_tokens,
+                cache_creation_tokens: totals.cache_creation_tokens,
                 cache_read_tokens: totals.cache_read_tokens,
                 output_tokens: totals.output_tokens,
                 reasoning_output_tokens: totals.reasoning_output_tokens,
@@ -280,20 +299,13 @@ impl Aggregate {
     }
 }
 
-fn add_tokens(
-    totals: &mut TokenTotals,
-    input_tokens: i64,
-    cache_read_tokens: i64,
-    output_tokens: i64,
-    reasoning_output_tokens: i64,
-    total_tokens: i64,
-    cost: f64,
-) {
-    totals.input_tokens += input_tokens;
-    totals.cache_read_tokens += cache_read_tokens;
-    totals.output_tokens += output_tokens;
-    totals.reasoning_output_tokens += reasoning_output_tokens;
-    totals.total_tokens += total_tokens;
+fn add_tokens(totals: &mut TokenTotals, tokens: TokenComponents, cost: f64) {
+    totals.input_tokens += tokens.input_tokens;
+    totals.cache_creation_tokens += tokens.cache_creation_tokens;
+    totals.cache_read_tokens += tokens.cache_read_tokens;
+    totals.output_tokens += tokens.output_tokens;
+    totals.reasoning_output_tokens += tokens.reasoning_output_tokens;
+    totals.total_tokens += tokens.total_tokens();
     totals.estimated_cost_usd += cost;
 }
 
@@ -651,11 +663,7 @@ pub fn today_for_timezone(timezone: &ReportTimezone) -> NaiveDate {
 fn add_totals_from_event(totals: &mut TokenTotals, event: &EventRow) {
     add_tokens(
         totals,
-        event.input_tokens,
-        event.cache_read_tokens,
-        event.output_tokens,
-        event.reasoning_output_tokens,
-        event.total_tokens,
+        TokenComponents::from(event),
         event.cost_with_cache_usd,
     );
 }
@@ -718,10 +726,10 @@ fn load_events_filtered(conn: &Connection, filter: &ReportFilter) -> Result<Vec<
             model,
             event_at,
             input_tokens,
+            cache_creation_tokens,
             cache_read_tokens,
             output_tokens,
             reasoning_output_tokens,
-            total_tokens,
             cost_with_cache_usd,
             pricing_status,
             project_hash,
@@ -755,10 +763,10 @@ fn load_events_filtered(conn: &Connection, filter: &ReportFilter) -> Result<Vec<
             model: row.get(2)?,
             event_utc,
             input_tokens: row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
-            cache_read_tokens: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
-            output_tokens: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
-            reasoning_output_tokens: row.get::<_, Option<i64>>(7)?.unwrap_or_default(),
-            total_tokens: row.get::<_, Option<i64>>(8)?.unwrap_or_default(),
+            cache_creation_tokens: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
+            cache_read_tokens: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
+            output_tokens: row.get::<_, Option<i64>>(7)?.unwrap_or_default(),
+            reasoning_output_tokens: row.get::<_, Option<i64>>(8)?.unwrap_or_default(),
             cost_with_cache_usd: row.get::<_, Option<f64>>(9)?.unwrap_or_default(),
             pricing_status: row
                 .get::<_, Option<String>>(10)?
@@ -813,10 +821,10 @@ struct RawEventRow {
     model: String,
     event_utc: DateTime<Utc>,
     input_tokens: i64,
+    cache_creation_tokens: i64,
     cache_read_tokens: i64,
     output_tokens: i64,
     reasoning_output_tokens: i64,
-    total_tokens: i64,
     cost_with_cache_usd: f64,
     pricing_status: String,
     project_hash: Option<String>,
@@ -838,10 +846,10 @@ impl RawEventRow {
             local_date: local_at.date_naive(),
             local_at,
             input_tokens: self.input_tokens,
+            cache_creation_tokens: self.cache_creation_tokens,
             cache_read_tokens: self.cache_read_tokens,
             output_tokens: self.output_tokens,
             reasoning_output_tokens: self.reasoning_output_tokens,
-            total_tokens: self.total_tokens,
             cost_with_cache_usd: self.cost_with_cache_usd,
             pricing_status: self.pricing_status,
             project: normalize_project(self.project_hash, self.project_label, self.project_ref),

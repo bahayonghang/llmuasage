@@ -109,9 +109,14 @@ fn load_summary(conn: &Connection, filter: &QueryFilter) -> Result<HomeOverviewS
         SELECT
             COUNT(DISTINCT source || ':' || COALESCE(NULLIF(session_id, ''), NULLIF(source_path_hash, ''), event_key)),
             COUNT(*),
-            COALESCE(SUM(total_tokens), 0),
+            COALESCE(SUM(input_tokens), 0) +
+                COALESCE(SUM(cache_creation_tokens), 0) +
+                COALESCE(SUM(cache_read_tokens), 0) +
+                COALESCE(SUM(output_tokens), 0) +
+                COALESCE(SUM(reasoning_output_tokens), 0),
             COALESCE(SUM(cost_with_cache_usd), 0.0),
             COALESCE(SUM(input_tokens), 0),
+            COALESCE(SUM(cache_creation_tokens), 0),
             COALESCE(SUM(cache_read_tokens), 0),
             COUNT(DISTINCT date(event_at, '{modifier}')),
             COUNT(DISTINCT source)
@@ -124,8 +129,9 @@ fn load_summary(conn: &Connection, filter: &QueryFilter) -> Result<HomeOverviewS
     Ok(
         conn.query_row(&sql, params_from_iter(sql_filter.params().iter()), |row| {
             let input_tokens = row.get::<_, Option<i64>>(4)?.unwrap_or_default();
-            let cache_read_tokens = row.get::<_, Option<i64>>(5)?.unwrap_or_default();
-            let cache_denominator = input_tokens + cache_read_tokens;
+            let cache_creation_tokens = row.get::<_, Option<i64>>(5)?.unwrap_or_default();
+            let cache_read_tokens = row.get::<_, Option<i64>>(6)?.unwrap_or_default();
+            let cache_denominator = input_tokens + cache_creation_tokens + cache_read_tokens;
             Ok(HomeOverviewSummary {
                 total_sessions: row.get::<_, Option<i64>>(0)?.unwrap_or_default(),
                 total_requests: row.get::<_, Option<i64>>(1)?.unwrap_or_default(),
@@ -136,8 +142,8 @@ fn load_summary(conn: &Connection, filter: &QueryFilter) -> Result<HomeOverviewS
                 } else {
                     cache_read_tokens as f64 / cache_denominator as f64
                 },
-                active_days: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
-                platforms: row.get::<_, Option<i64>>(7)?.unwrap_or_default(),
+                active_days: row.get::<_, Option<i64>>(7)?.unwrap_or_default(),
+                platforms: row.get::<_, Option<i64>>(8)?.unwrap_or_default(),
             })
         })?,
     )
@@ -154,7 +160,11 @@ fn load_by_platform(
             source,
             COUNT(DISTINCT source || ':' || COALESCE(NULLIF(session_id, ''), NULLIF(source_path_hash, ''), event_key)),
             COUNT(*),
-            COALESCE(SUM(total_tokens), 0)
+            COALESCE(SUM(input_tokens), 0) +
+                COALESCE(SUM(cache_creation_tokens), 0) +
+                COALESCE(SUM(cache_read_tokens), 0) +
+                COALESCE(SUM(output_tokens), 0) +
+                COALESCE(SUM(reasoning_output_tokens), 0)
         FROM usage_event
         {}
         GROUP BY source
@@ -192,7 +202,11 @@ fn load_series(conn: &Connection, filter: &QueryFilter) -> Result<Vec<HomeOvervi
             source,
             COUNT(DISTINCT source || ':' || COALESCE(NULLIF(session_id, ''), NULLIF(source_path_hash, ''), event_key)),
             COUNT(*),
-            COALESCE(SUM(total_tokens), 0)
+            COALESCE(SUM(input_tokens), 0) +
+                COALESCE(SUM(cache_creation_tokens), 0) +
+                COALESCE(SUM(cache_read_tokens), 0) +
+                COALESCE(SUM(output_tokens), 0) +
+                COALESCE(SUM(reasoning_output_tokens), 0)
         FROM usage_event
         {}
         GROUP BY local_date, source

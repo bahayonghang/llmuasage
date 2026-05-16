@@ -31,6 +31,8 @@ pub use pricing_catalog::PricingCatalog;
 pub struct TokenSummary {
     /// Sum of non-cache read tokens.
     pub input_tokens: i64,
+    /// Sum of cache-creation prompt tokens.
+    pub cache_creation_tokens: i64,
     /// Sum of cached/reused input tokens.
     pub cache_read_tokens: i64,
     /// Sum of non-reasoning output tokens.
@@ -49,7 +51,7 @@ impl TokenSummary {
 
     /// Cross-source cache reuse ratio, returning `0.0` when no input was used.
     pub fn cache_efficiency(&self) -> f64 {
-        let denominator = self.input_tokens + self.cache_read_tokens;
+        let denominator = self.input_tokens + self.cache_creation_tokens + self.cache_read_tokens;
         if denominator == 0 {
             0.0
         } else {
@@ -125,6 +127,8 @@ pub struct ModelBreakdown {
     pub model: String,
     /// Summed non-cache read tokens.
     pub input_tokens: i64,
+    /// Summed cache creation tokens.
+    pub cache_creation_tokens: i64,
     /// Summed cache read tokens.
     pub cache_read_tokens: i64,
     /// Summed output tokens.
@@ -400,7 +404,12 @@ impl Dashboard {
         };
         let sql = format!(
             r#"
-            SELECT {label_expr} AS label, SUM(total_tokens) AS total_tokens
+            SELECT {label_expr} AS label,
+                   COALESCE(SUM(input_tokens), 0) +
+                       COALESCE(SUM(cache_creation_tokens), 0) +
+                       COALESCE(SUM(cache_read_tokens), 0) +
+                       COALESCE(SUM(output_tokens), 0) +
+                       COALESCE(SUM(reasoning_output_tokens), 0) AS total_tokens
             FROM usage_bucket_30m
             {}
             GROUP BY label
@@ -436,7 +445,11 @@ impl Dashboard {
                 COALESCE(SUM(cache_read_tokens), 0),
                 COALESCE(SUM(cache_creation_tokens), 0),
                 COALESCE(SUM(output_tokens), 0) + COALESCE(SUM(reasoning_output_tokens), 0),
-                COALESCE(SUM(total_tokens), 0),
+                COALESCE(SUM(input_tokens), 0) +
+                    COALESCE(SUM(cache_creation_tokens), 0) +
+                    COALESCE(SUM(cache_read_tokens), 0) +
+                    COALESCE(SUM(output_tokens), 0) +
+                    COALESCE(SUM(reasoning_output_tokens), 0),
                 COALESCE(SUM(event_count), 0),
                 COALESCE(SUM(cost_with_cache_usd), 0.0)
             FROM usage_bucket_30m
@@ -470,10 +483,12 @@ impl Dashboard {
             SELECT
                 model,
                 SUM(input_tokens),
+                SUM(cache_creation_tokens),
                 SUM(cache_read_tokens),
                 SUM(output_tokens),
                 SUM(reasoning_output_tokens),
-                SUM(total_tokens),
+                SUM(input_tokens) + SUM(cache_creation_tokens) + SUM(cache_read_tokens) +
+                    SUM(output_tokens) + SUM(reasoning_output_tokens),
                 SUM(event_count),
                 SUM(cost_with_cache_usd),
                 SUM(cost_without_cache_usd),
@@ -492,30 +507,34 @@ impl Dashboard {
             FROM usage_bucket_30m
             {}
             GROUP BY model
-            ORDER BY SUM(total_tokens) DESC, model ASC
+            ORDER BY
+                SUM(input_tokens) + SUM(cache_creation_tokens) + SUM(cache_read_tokens) +
+                    SUM(output_tokens) + SUM(reasoning_output_tokens) DESC,
+                model ASC
             "#,
             sql_filter.where_sql()
         );
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt.query_map(params_from_iter(sql_filter.params().iter()), |row| {
-            let cost_with_cache_usd = row.get::<_, Option<f64>>(7)?.unwrap_or_default();
-            let cost_without_cache_usd = row.get::<_, Option<f64>>(8)?.unwrap_or_default();
+            let cost_with_cache_usd = row.get::<_, Option<f64>>(8)?.unwrap_or_default();
+            let cost_without_cache_usd = row.get::<_, Option<f64>>(9)?.unwrap_or_default();
             Ok(ModelBreakdown {
                 model: row.get(0)?,
                 input_tokens: row.get::<_, Option<i64>>(1)?.unwrap_or_default(),
-                cache_read_tokens: row.get::<_, Option<i64>>(2)?.unwrap_or_default(),
-                output_tokens: row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
-                reasoning_output_tokens: row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
-                total_tokens: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
-                event_count: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
+                cache_creation_tokens: row.get::<_, Option<i64>>(2)?.unwrap_or_default(),
+                cache_read_tokens: row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
+                output_tokens: row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
+                reasoning_output_tokens: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
+                total_tokens: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
+                event_count: row.get::<_, Option<i64>>(7)?.unwrap_or_default(),
                 cost_with_cache_usd,
                 cost_without_cache_usd,
                 cache_savings_usd: (cost_without_cache_usd - cost_with_cache_usd).max(0.0),
                 pricing_status: row
-                    .get::<_, Option<String>>(9)?
+                    .get::<_, Option<String>>(10)?
                     .unwrap_or_else(|| PRICING_UNPRICED.to_string()),
-                pricing_source: row.get(10)?,
-                pricing_rate: row.get(11)?,
+                pricing_source: row.get(11)?,
+                pricing_rate: row.get(12)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -535,7 +554,10 @@ impl Dashboard {
                 last_event.last_event_at,
                 totals.event_count
             FROM (
-                SELECT source, SUM(total_tokens) AS total_tokens, SUM(event_count) AS event_count
+                SELECT source,
+                       SUM(input_tokens) + SUM(cache_creation_tokens) + SUM(cache_read_tokens) +
+                           SUM(output_tokens) + SUM(reasoning_output_tokens) AS total_tokens,
+                       SUM(event_count) AS event_count
                 FROM usage_bucket_30m
                 {}
                 GROUP BY source
@@ -574,13 +596,17 @@ impl Dashboard {
                 project_hash,
                 MAX(project_label),
                 MAX(project_ref),
-                SUM(total_tokens),
+                SUM(input_tokens) + SUM(cache_creation_tokens) + SUM(cache_read_tokens) +
+                    SUM(output_tokens) + SUM(reasoning_output_tokens),
                 SUM(event_count),
                 SUM(cost_with_cache_usd)
             FROM usage_bucket_30m
             {}
             GROUP BY project_hash
-            ORDER BY SUM(total_tokens) DESC, MAX(project_label) ASC
+            ORDER BY
+                SUM(input_tokens) + SUM(cache_creation_tokens) + SUM(cache_read_tokens) +
+                    SUM(output_tokens) + SUM(reasoning_output_tokens) DESC,
+                MAX(project_label) ASC
             "#,
             sql_filter.where_sql()
         );
@@ -613,16 +639,22 @@ impl Dashboard {
                 source,
                 model,
                 SUM(input_tokens),
+                SUM(cache_creation_tokens),
                 SUM(cache_read_tokens),
                 SUM(output_tokens),
                 SUM(reasoning_output_tokens),
-                SUM(total_tokens),
+                SUM(input_tokens) + SUM(cache_creation_tokens) + SUM(cache_read_tokens) +
+                    SUM(output_tokens) + SUM(reasoning_output_tokens),
                 SUM(cost_with_cache_usd),
                 SUM(event_count)
             FROM usage_bucket_30m
             {}
             GROUP BY source, model
-            ORDER BY SUM(total_tokens) DESC, source ASC, model ASC
+            ORDER BY
+                SUM(input_tokens) + SUM(cache_creation_tokens) + SUM(cache_read_tokens) +
+                    SUM(output_tokens) + SUM(reasoning_output_tokens) DESC,
+                source ASC,
+                model ASC
             "#,
             sql_filter.where_sql()
         );
@@ -630,9 +662,9 @@ impl Dashboard {
         let rows = stmt.query_map(params_from_iter(sql_filter.params().iter()), |row| {
             let source: String = row.get(0)?;
             let model: String = row.get(1)?;
-            let total_tokens = row.get::<_, Option<i64>>(6)?.unwrap_or_default();
-            let estimated_cost_usd = row.get::<_, Option<f64>>(7)?.unwrap_or_default();
-            let event_count = row.get::<_, Option<i64>>(8)?.unwrap_or_default();
+            let total_tokens = row.get::<_, Option<i64>>(7)?.unwrap_or_default();
+            let estimated_cost_usd = row.get::<_, Option<f64>>(8)?.unwrap_or_default();
+            let event_count = row.get::<_, Option<i64>>(9)?.unwrap_or_default();
 
             Ok(CostLine {
                 source,
@@ -758,10 +790,15 @@ fn query_token_summary(
         r#"
         SELECT
             COALESCE(SUM(input_tokens), 0),
+            COALESCE(SUM(cache_creation_tokens), 0),
             COALESCE(SUM(cache_read_tokens), 0),
             COALESCE(SUM(output_tokens), 0),
             COALESCE(SUM(reasoning_output_tokens), 0),
-            COALESCE(SUM(total_tokens), 0)
+            COALESCE(SUM(input_tokens), 0) +
+                COALESCE(SUM(cache_creation_tokens), 0) +
+                COALESCE(SUM(cache_read_tokens), 0) +
+                COALESCE(SUM(output_tokens), 0) +
+                COALESCE(SUM(reasoning_output_tokens), 0)
         FROM usage_bucket_30m
         {}
         "#,
@@ -810,10 +847,11 @@ fn query_cost_with_cache(
 fn map_token_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<TokenSummary> {
     Ok(TokenSummary {
         input_tokens: row.get(0)?,
-        cache_read_tokens: row.get(1)?,
-        output_tokens: row.get(2)?,
-        reasoning_output_tokens: row.get(3)?,
-        total_tokens: row.get(4)?,
+        cache_creation_tokens: row.get(1)?,
+        cache_read_tokens: row.get(2)?,
+        output_tokens: row.get(3)?,
+        reasoning_output_tokens: row.get(4)?,
+        total_tokens: row.get(5)?,
     })
 }
 

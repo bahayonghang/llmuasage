@@ -171,7 +171,8 @@ pub(crate) fn load(dashboard: &Dashboard, query: &LogsQuery) -> Result<LogsPage>
             e.cache_creation_tokens,
             e.output_tokens,
             e.reasoning_output_tokens,
-            e.total_tokens,
+            e.input_tokens + e.cache_creation_tokens + e.cache_read_tokens +
+                e.output_tokens + e.reasoning_output_tokens,
             e.cost_with_cache_usd,
             e.cost_without_cache_usd,
             e.pricing_status,

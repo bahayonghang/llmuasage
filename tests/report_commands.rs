@@ -22,6 +22,7 @@ fn report_commands_emit_stable_json_from_sqlite() -> Result<()> {
         model: "gpt-5",
         event_at: &today_first_event,
         input_tokens: 100,
+        cache_creation_tokens: 30,
         cache_read_tokens: 10,
         output_tokens: 20,
         reasoning_output_tokens: 5,
@@ -65,7 +66,12 @@ fn report_commands_emit_stable_json_from_sqlite() -> Result<()> {
         daily["daily"][0]["date"].as_str(),
         Some(today_display.as_str())
     );
-    assert_eq!(daily["totals"]["total_tokens"].as_i64(), Some(385));
+    assert_eq!(daily["totals"]["cache_creation_tokens"].as_i64(), Some(30));
+    assert_eq!(
+        daily["daily"][0]["cache_creation_tokens"].as_i64(),
+        Some(30)
+    );
+    assert_eq!(daily["totals"]["total_tokens"].as_i64(), Some(415));
     assert!(daily["daily"][0].get("conversation_count").is_none());
     assert!(daily["daily"][0].get("conversationCount").is_none());
 
@@ -85,7 +91,11 @@ fn report_commands_emit_stable_json_from_sqlite() -> Result<()> {
         monthly["monthly"][0]["month"].as_str(),
         Some(today_month.as_str())
     );
-    assert_eq!(monthly["totals"]["total_tokens"].as_i64(), Some(385));
+    assert_eq!(
+        monthly["totals"]["cache_creation_tokens"].as_i64(),
+        Some(30)
+    );
+    assert_eq!(monthly["totals"]["total_tokens"].as_i64(), Some(415));
 
     let session = fixture.json(&[
         "session",
@@ -99,7 +109,11 @@ fn report_commands_emit_stable_json_from_sqlite() -> Result<()> {
         session["session"]["session_id"].as_str(),
         Some("codex:session-a")
     );
-    assert_eq!(session["session"]["total_tokens"].as_i64(), Some(135));
+    assert_eq!(
+        session["session"]["cache_creation_tokens"].as_i64(),
+        Some(30)
+    );
+    assert_eq!(session["session"]["total_tokens"].as_i64(), Some(165));
 
     let blocks = fixture.json(&[
         "blocks",
@@ -209,12 +223,17 @@ fn daily_defaults_to_last_7_days_and_all_restores_history() -> Result<()> {
 }
 
 #[test]
-fn daily_human_output_uses_source_tables_compact_tokens_and_no_default_info_logs() -> Result<()> {
+fn daily_human_output_uses_aggregate_ccusage_style_columns_and_no_default_info_logs() -> Result<()>
+{
     let fixture = ReportCliFixture::new()?;
     let today = Utc::now().date_naive();
     let six_days_ago = today - Duration::days(6);
     let today_display = today.format("%Y-%m-%d").to_string();
+    let today_year = today.format("%Y").to_string();
+    let today_month_day = today.format("%m-%d").to_string();
     let six_days_ago_display = six_days_ago.format("%Y-%m-%d").to_string();
+    let six_days_ago_year = six_days_ago.format("%Y").to_string();
+    let six_days_ago_month_day = six_days_ago.format("%m-%d").to_string();
     let today_event = format!("{today_display}T12:00:00Z");
     let six_days_ago_event = format!("{six_days_ago_display}T12:00:00Z");
     fixture.seed_event(SeedEvent {
@@ -223,10 +242,11 @@ fn daily_human_output_uses_source_tables_compact_tokens_and_no_default_info_logs
         model: "gpt-5.4",
         event_at: &today_event,
         input_tokens: 978_050,
+        cache_creation_tokens: 333_333,
         cache_read_tokens: 5_370_000,
         output_tokens: 40_330_000_000,
         reasoning_output_tokens: 12_345,
-        total_tokens: 40_336_360_395,
+        total_tokens: 40_336_693_728,
         project_hash: "project-a",
         project_label: "Project A",
         project_ref: Some("example/project-a"),
@@ -293,28 +313,38 @@ fn daily_human_output_uses_source_tables_compact_tokens_and_no_default_info_logs
     assert!(output.status.success(), "{output:?}");
     let stdout = String::from_utf8(output.stdout)?;
     let stderr = String::from_utf8(output.stderr)?;
-    assert!(stdout.contains("Codex daily usage"));
-    assert!(stdout.contains("Claude daily usage"));
-    assert!(stdout.contains("---\nClaude daily usage"));
-    assert!(stdout.contains(&today_display));
-    assert!(stdout.contains(&six_days_ago_display));
+    assert!(stdout.contains("LLM Usage Report - Daily"));
+    assert!(!stdout.contains("Codex daily usage"));
+    assert!(!stdout.contains("Claude daily usage"));
+    assert!(!stdout.contains("---\nClaude daily usage"));
+    assert!(!stdout.contains(&today_display));
+    assert!(stdout.contains(&today_year));
+    assert!(stdout.contains(&today_month_day));
+    assert!(!stdout.contains(&six_days_ago_display));
+    assert!(stdout.contains(&six_days_ago_year));
+    assert!(stdout.contains(&six_days_ago_month_day));
     assert!(stdout.contains('\u{250C}'));
-    assert!(stdout.contains("Conv"));
-    assert!(stdout.contains("Cache"));
-    assert!(stdout.contains("Reason"));
-    assert!(stdout.contains("All"));
-    assert!(stdout.contains("Notes"));
-    assert!(stdout.contains("unpriced"));
-    assert!(stdout.contains("reason not reported"));
+    assert!(stdout.contains("Cache Create"));
+    assert!(stdout.contains("Cache Read"));
+    assert!(stdout.contains("Total Tokens"));
+    assert!(stdout.contains("Cost (USD)"));
+    assert!(!stdout.contains("Conv"));
+    assert!(!stdout.contains("Reason"));
+    assert!(!stdout.contains("Notes"));
+    assert!(!stdout.contains("unpriced"));
+    assert!(!stdout.contains("reason not reported"));
     assert!(stdout.contains("gpt-5.4"));
     assert!(stdout.contains("sonnet-4"));
-    assert!(stdout.contains("978.05K"));
-    assert!(stdout.contains("5.37M"));
-    assert!(stdout.contains("40.33B"));
-    assert!(stdout.contains("TOTAL"));
+    assert!(stdout.contains("6,349,050"));
+    assert!(stdout.contains("333,333"));
+    assert!(stdout.contains("6,348,050"));
+    assert!(stdout.contains("40,330,123,000"));
+    assert!(stdout.contains("40,343,165,778"));
+    assert!(stdout.contains("40,343,167,778"));
+    assert!(stdout.contains("Total"));
     assert!(!stdout.contains("Total:"));
-    assert!(!stdout.contains("978,050"));
-    assert!(!stdout.contains("5,370,000"));
+    assert!(!stdout.contains("978.05K"));
+    assert!(!stdout.contains("5.37M"));
     assert!(!stdout.contains("\u{1b}["));
     assert!(!stderr.contains("INFO"));
     assert!(!stderr.contains("开始初始化本地目录与 SQLite schema"));
@@ -324,7 +354,7 @@ fn daily_human_output_uses_source_tables_compact_tokens_and_no_default_info_logs
     assert!(colored.status.success(), "{colored:?}");
     let colored_stdout = String::from_utf8(colored.stdout)?;
     assert!(colored_stdout.contains("\u{1b}["));
-    assert!(colored_stdout.contains("Codex daily usage"));
+    assert!(colored_stdout.contains("LLM Usage Report - Daily"));
 
     Ok(())
 }
@@ -584,10 +614,11 @@ fn cli_json_outputs_all_snake_case() -> Result<()> {
         model: "gpt-5",
         event_at: &today_event,
         input_tokens: 10,
+        cache_creation_tokens: 4,
         cache_read_tokens: 1,
         output_tokens: 2,
         reasoning_output_tokens: 3,
-        total_tokens: 16,
+        total_tokens: 20,
         project_hash: "project-a",
         project_label: "Project A",
         project_ref: Some("example/project-a"),

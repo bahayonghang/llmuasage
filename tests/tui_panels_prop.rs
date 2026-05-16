@@ -78,15 +78,23 @@ fn buffer_text(terminal: &Terminal<TestBackend>) -> String {
 // ─── Strategies ───────────────────────────────────────────────────────────────
 
 fn arb_token_summary() -> impl Strategy<Value = TokenSummary> {
-    (0i64..100_000, 0i64..100_000, 0i64..100_000, 0i64..100_000).prop_map(
-        |(input, cache, output, reasoning)| TokenSummary {
-            input_tokens: input,
-            cache_read_tokens: cache,
-            output_tokens: output,
-            reasoning_output_tokens: reasoning,
-            total_tokens: input + cache + output + reasoning,
-        },
+    (
+        0i64..100_000,
+        0i64..100_000,
+        0i64..100_000,
+        0i64..100_000,
+        0i64..100_000,
     )
+        .prop_map(
+            |(input, cache_creation, cache, output, reasoning)| TokenSummary {
+                input_tokens: input,
+                cache_creation_tokens: cache_creation,
+                cache_read_tokens: cache,
+                output_tokens: output,
+                reasoning_output_tokens: reasoning,
+                total_tokens: input + cache_creation + cache + output + reasoning,
+            },
+        )
 }
 
 fn arb_overview_payload() -> impl Strategy<Value = OverviewPayload> {
@@ -123,6 +131,7 @@ fn arb_model_breakdown() -> impl Strategy<Value = ModelBreakdown> {
         |(model, tokens, events, cost)| ModelBreakdown {
             model,
             input_tokens: 0,
+            cache_creation_tokens: 0,
             cache_read_tokens: 0,
             output_tokens: 0,
             reasoning_output_tokens: 0,

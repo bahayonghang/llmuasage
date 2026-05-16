@@ -8,7 +8,7 @@ Report commands read `~/.llmusage/llmusage.db` only. They do **not** trigger `sy
 
 Shows token and estimated-cost totals for the last 7 calendar days in the selected timezone, including today. Estimated costs read the persisted cache-aware `cost_with_cache_usd` column. With no subcommand, `llmusage` is equivalent to `llmusage daily`; use `--all` for full daily history.
 
-Human output is source-first: Codex and Claude render as separate colored daily tables, followed by OpenCode and Gemini tables when those sources have matching rows. Tables are separated with `---`. The daily human table uses `Date / Conv / Models / Input / Cache / Output / Reason / All / Cost / Notes`, formats token counts with `K` / `M` / `B`, respects `NO_COLOR=1`, and keeps `--json` output unchanged as the stable aggregate snake_case payload. `Notes` marks unpriced models and source-reported gaps such as Claude reasoning tokens not being reported.
+Human output is aggregate-first: all matching sources render into one ccusage-style daily table headed `LLM Usage Report - Daily`. The default columns are `Date / Models / Input / Output / Cache Create / Cache Read / Total Tokens / Cost (USD)`, token counts use full comma grouping on wide terminals, models render as multi-line `- model` lists, and `NO_COLOR=1` disables ANSI styling. Source separation is available through `--source` filtering and `--breakdown` per-source/model rows. `--json` stays the stable aggregate snake_case payload and includes `cache_creation_tokens`.
 
 Useful options:
 

@@ -85,7 +85,11 @@ fn load_observed(
         SELECT
             date(hour_start, '{modifier}') AS local_date,
             COALESCE(SUM(event_count), 0),
-            COALESCE(SUM(total_tokens), 0)
+            COALESCE(SUM(input_tokens), 0) +
+                COALESCE(SUM(cache_creation_tokens), 0) +
+                COALESCE(SUM(cache_read_tokens), 0) +
+                COALESCE(SUM(output_tokens), 0) +
+                COALESCE(SUM(reasoning_output_tokens), 0)
         FROM usage_bucket_30m
         {}
         GROUP BY local_date

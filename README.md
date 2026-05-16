@@ -31,7 +31,7 @@ Report-first commands (read local SQLite only; run `llmusage sync` first if data
 - `llmusage blocks`
 - `llmusage statusline`
 
-`llmusage` / `llmusage daily` defaults to the last 7 calendar days in the selected timezone, including today. Human output is split into one colored table per source (Codex, Claude, then OpenCode/Gemini when present), separated with `---`, and uses compact K/M/B token units; `NO_COLOR=1` disables ANSI styling and JSON output stays snake_case with the aggregate daily payload. The `Notes` column marks unpriced models and source-reported gaps such as Claude reasoning tokens not being reported. Use `--all` for full daily history, or `--since YYYYMMDD` / `--until YYYYMMDD` for an explicit range.
+`llmusage` / `llmusage daily` defaults to the last 7 calendar days in the selected timezone, including today. Human output now uses one aggregate ccusage-style table with `Date / Models / Input / Output / Cache Create / Cache Read / Total Tokens / Cost (USD)`, grouped comma-separated token counts, and multi-line model lists; `NO_COLOR=1` disables ANSI styling. JSON output stays aggregate snake_case and includes `cache_creation_tokens`. Use `--all` for full daily history, `--since YYYYMMDD` / `--until YYYYMMDD` for an explicit range, `--source` to filter one local source, or `--breakdown` to include per-source/model details.
 
 Common report options include `--since YYYYMMDD`, `--until YYYYMMDD`, `--json`, `--breakdown`, `--order asc|desc`, `--timezone UTC|local|+08:00`, `--locale en-US|zh-CN|ja-JP`, `--compact`, and `--source codex|claude|opencode|gemini`.
 

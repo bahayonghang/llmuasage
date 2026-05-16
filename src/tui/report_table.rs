@@ -54,6 +54,31 @@ pub fn render_daily_table(
     render_table(&columns, &table_rows)
 }
 
+pub fn render_daily_summary_table(
+    rows: &[DailyReportRow],
+    totals: Option<&TokenTotals>,
+    compact: bool,
+    color_mode: ColorMode,
+) -> String {
+    let compact = compact_mode(compact);
+    let mut table_rows = Vec::new();
+    for row in rows {
+        table_rows.push(daily_summary_row(row, compact));
+        append_daily_summary_breakdowns(&mut table_rows, &row.model_breakdowns, compact);
+    }
+    if let Some(totals) = totals {
+        table_rows.push(daily_summary_total_row(totals, compact));
+    }
+    render_table_styled(
+        &daily_summary_columns(compact),
+        &table_rows,
+        Some(DailyTableStyle {
+            source: SourceKind::Codex,
+            color_mode,
+        }),
+    )
+}
+
 pub fn render_daily_source_table(rows: &[DailyReportRow], totals: Option<&TokenTotals>) -> String {
     render_table(
         &daily_source_columns(),
@@ -322,6 +347,22 @@ fn daily_source_columns() -> Vec<Column> {
     ]
 }
 
+fn daily_summary_columns(compact: bool) -> Vec<Column> {
+    let mut columns = vec![
+        column("Date", Align::Left),
+        column("Models", Align::Left),
+        column("Input", Align::Right),
+        column("Output", Align::Right),
+    ];
+    if !compact {
+        columns.push(column("Cache Create", Align::Right));
+        columns.push(column("Cache Read", Align::Right));
+        columns.push(column("Total Tokens", Align::Right));
+    }
+    columns.push(column("Cost (USD)", Align::Right));
+    columns
+}
+
 fn daily_source_table_rows(
     rows: &[DailyReportRow],
     totals: Option<&TokenTotals>,
@@ -409,6 +450,22 @@ fn daily_source_row(row: &DailyReportRow) -> Vec<String> {
     ]
 }
 
+fn daily_summary_row(row: &DailyReportRow, compact: bool) -> Vec<String> {
+    let mut cells = vec![
+        format_daily_date(&row.date),
+        format_models(&row.models_used),
+        format_count(row.totals.input_tokens),
+        format_count(row.totals.output_tokens),
+    ];
+    if !compact {
+        cells.push(format_count(row.totals.cache_creation_tokens));
+        cells.push(format_count(row.totals.cache_read_tokens));
+        cells.push(format_count(row.totals.total_tokens));
+    }
+    cells.push(format_cost(row.totals.estimated_cost_usd));
+    cells
+}
+
 fn period_total_row(totals: &TokenTotals, compact: bool, show_project: bool) -> Vec<String> {
     let mut row = vec!["Total".to_string()];
     if show_project {
@@ -424,6 +481,22 @@ fn period_total_row(totals: &TokenTotals, compact: bool, show_project: bool) -> 
     }
     row.push(format_cost(totals.estimated_cost_usd));
     row
+}
+
+fn daily_summary_total_row(totals: &TokenTotals, compact: bool) -> Vec<String> {
+    let mut cells = vec![
+        "Total".to_string(),
+        String::new(),
+        format_count(totals.input_tokens),
+        format_count(totals.output_tokens),
+    ];
+    if !compact {
+        cells.push(format_count(totals.cache_creation_tokens));
+        cells.push(format_count(totals.cache_read_tokens));
+        cells.push(format_count(totals.total_tokens));
+    }
+    cells.push(format_cost(totals.estimated_cost_usd));
+    cells
 }
 
 fn daily_source_total_row(
@@ -511,6 +584,32 @@ fn append_daily_source_breakdowns(rows: &mut Vec<Vec<String>>, breakdowns: &[Mod
             format_cost(item.estimated_cost_usd),
             String::new(),
         ]);
+    }
+}
+
+fn append_daily_summary_breakdowns(
+    rows: &mut Vec<Vec<String>>,
+    breakdowns: &[ModelCostBreakdown],
+    compact: bool,
+) {
+    for item in breakdowns {
+        let mut cells = vec![
+            format!(
+                "\u{2514}\u{2500} {}:{}",
+                item.source,
+                format_model_name(&item.model)
+            ),
+            String::new(),
+            format_count(item.input_tokens),
+            format_count(item.output_tokens),
+        ];
+        if !compact {
+            cells.push(format_count(item.cache_creation_tokens));
+            cells.push(format_count(item.cache_read_tokens));
+            cells.push(format_count(item.total_tokens));
+        }
+        cells.push(format_cost(item.estimated_cost_usd));
+        rows.push(cells);
     }
 }
 
@@ -777,6 +876,16 @@ fn format_models_inline(models: &[String]) -> String {
         .join(", ")
 }
 
+fn format_daily_date(date: &str) -> String {
+    let Some((year, month_day)) = date.split_once('-') else {
+        return date.to_string();
+    };
+    if month_day.len() != 5 {
+        return date.to_string();
+    }
+    format!("{year}\n{month_day}")
+}
+
 fn format_model_name(model: &str) -> String {
     let (prefix, model) = model
         .strip_prefix("[pi] ")
@@ -909,10 +1018,11 @@ mod tests {
     fn usage_table_uses_box_borders_and_total_row() {
         let totals = TokenTotals {
             input_tokens: 1234,
+            cache_creation_tokens: 111,
             output_tokens: 56,
             reasoning_output_tokens: 7,
             cache_read_tokens: 890,
-            total_tokens: 2187,
+            total_tokens: 2298,
             estimated_cost_usd: 3.5,
         };
         let row = DailyReportRow {
@@ -929,24 +1039,67 @@ mod tests {
             notes: ReportNotes::default(),
         };
 
-        let table = render_daily_table(&[row], Some(&totals), false, false);
+        let table = render_daily_summary_table(&[row], Some(&totals), false, ColorMode::Never);
 
         assert!(table.contains('\u{250C}'));
+        assert!(table.contains("Cache Create"));
         assert!(table.contains("Cache Read"));
         assert!(table.contains("Total Tokens"));
         assert!(table.contains("- sonnet-4"));
         assert!(table.contains("Total"));
         assert!(table.contains("$3.50"));
+        assert!(!table.contains("Reasoning"));
+    }
+
+    #[test]
+    fn daily_summary_table_uses_ccusage_style_columns_and_grouped_counts() {
+        let totals = TokenTotals {
+            input_tokens: 978_050,
+            cache_creation_tokens: 333_333,
+            cache_read_tokens: 5_370_000,
+            output_tokens: 40_330_000_000,
+            reasoning_output_tokens: 12_345,
+            total_tokens: 40_336_693_728,
+            estimated_cost_usd: 3.5,
+        };
+        let row = DailyReportRow {
+            date: "2026-05-05".to_string(),
+            source: None,
+            project: None,
+            totals: totals.clone(),
+            models_used: vec!["gpt-5.4".to_string()],
+            model_breakdowns: Vec::new(),
+            conversation_count: 1,
+            notes: ReportNotes::default(),
+        };
+
+        let table = render_daily_summary_table(&[row], Some(&totals), false, ColorMode::Never);
+
+        assert!(table.contains("Cache Create"));
+        assert!(table.contains("Cache Read"));
+        assert!(table.contains("Total Tokens"));
+        assert!(table.contains("Cost (USD)"));
+        assert!(table.contains("2026"));
+        assert!(table.contains("05-05"));
+        assert!(!table.contains("2026-05-05"));
+        assert!(table.contains("333,333"));
+        assert!(table.contains("5,370,000"));
+        assert!(table.contains("40,336,693,728"));
+        assert!(!table.contains("Conv"));
+        assert!(!table.contains("Reasoning"));
+        assert!(!table.contains("Notes"));
+        assert!(!table.contains("978.05K"));
     }
 
     #[test]
     fn daily_source_table_uses_lightweight_daily_columns() {
         let totals = TokenTotals {
             input_tokens: 978_050,
+            cache_creation_tokens: 333_333,
             cache_read_tokens: 5_370_000,
             output_tokens: 40_330,
             reasoning_output_tokens: 12_000,
-            total_tokens: 6_400_380,
+            total_tokens: 6_733_713,
             estimated_cost_usd: 3.5,
         };
         let row = DailyReportRow {

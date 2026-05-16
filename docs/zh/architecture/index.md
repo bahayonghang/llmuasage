@@ -31,7 +31,7 @@
 
 ## 报表层
 
-`daily`、`monthly`、`session`、`blocks`、`statusline` 都是只读 SQLite 视图。它们复用 `usage_event` 作为报表真源，并把成本字段明确标为 `estimated_cost_usd`；从 0.5.1 起该值读取持久化 `cost_with_cache_usd`，不再查询时按 static-v1 重算。daily human 渲染会把匹配行按 Source 分彩色表，表之间用 `---` 分隔，基于 `session_id` 和源文件 fallback 计算仅用于展示的会话数，并用 `Notes` 标注未定价/未上报等元信息；JSON payload 仍保持聚合与 snake_case。session 报表优先使用 `session_id` metadata；旧数据库没有该字段时会使用稳定的源文件 fallback。`statusline` 可能在 `~/.llmusage/statusline-cache/` 写入很小的本地缓存；不会上传，也不会调用网络 API。
+`daily`、`monthly`、`session`、`blocks`、`statusline` 都是只读 SQLite 视图。它们复用 `usage_event` 作为报表真源，并把成本字段明确标为 `estimated_cost_usd`；从 0.5.1 起该值读取持久化 `cost_with_cache_usd`，不再查询时按 static-v1 重算。daily human 渲染默认是一张聚合的 ccusage 风格表，展示 `Input / Output / Cache Create / Cache Read / Total Tokens / Cost (USD)`；Source 维度通过过滤器和 breakdown 明细保留，JSON payload 仍保持聚合与 snake_case。session 报表优先使用 `session_id` metadata；旧数据库没有该字段时会使用稳定的源文件 fallback。`statusline` 可能在 `~/.llmusage/statusline-cache/` 写入很小的本地缓存；不会上传，也不会调用网络 API。
 
 
 ## 0.5.x 集成表面

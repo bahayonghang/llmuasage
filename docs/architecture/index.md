@@ -31,7 +31,7 @@ Project labels come from the local git remote when present. Only hashed local pa
 
 ## Report layer
 
-`daily`, `monthly`, `session`, `blocks`, and `statusline` are read-only SQLite views. They reuse `usage_event` as the report source of truth and keep costs labeled as `estimated_cost_usd`; since 0.5.1 that value is read from persisted `cost_with_cache_usd` rather than recomputed at query time. Daily human rendering groups matching rows into colored per-source tables separated with `---`, adds a display-only conversation count based on `session_id` with source-file fallback, and uses `Notes` for unpriced / not-reported metadata; JSON payloads stay aggregate and snake_case. Session reports use `session_id` metadata when available and fall back to stable source-file keys for older databases. `statusline` may write a tiny local cache under `~/.llmusage/statusline-cache/`; it does not upload or call network APIs.
+`daily`, `monthly`, `session`, `blocks`, and `statusline` are read-only SQLite views. They reuse `usage_event` as the report source of truth and keep costs labeled as `estimated_cost_usd`; since 0.5.1 that value is read from persisted `cost_with_cache_usd` rather than recomputed at query time. Daily human rendering now defaults to one aggregate ccusage-style table with `Input / Output / Cache Create / Cache Read / Total Tokens / Cost (USD)`; source separation remains available through filters and breakdown rows, while JSON payloads stay aggregate and snake_case. Session reports use `session_id` metadata when available and fall back to stable source-file keys for older databases. `statusline` may write a tiny local cache under `~/.llmusage/statusline-cache/`; it does not upload or call network APIs.
 
 
 ## 0.5.x integration surface

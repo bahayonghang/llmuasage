@@ -31,7 +31,7 @@
 - `llmusage blocks`
 - `llmusage statusline`
 
-`llmusage` / `llmusage daily` 默认按所选时区显示过去 7 个自然日（包含今天）；human 输出会按 Source 分彩色表（优先 Codex、Claude，有 OpenCode/Gemini 数据时继续追加），表之间用 `---` 分隔，token 使用 K/M/B 短格式；`NO_COLOR=1` 会禁用 ANSI 样式，JSON 输出保持 snake_case 和聚合 daily payload 不变。`Notes` 列会标注未定价模型以及 Claude reasoning token 未上报等来源侧缺口。需要完整 daily 历史时使用 `--all`，需要指定范围时使用 `--since YYYYMMDD` / `--until YYYYMMDD`。
+`llmusage` / `llmusage daily` 默认按所选时区显示过去 7 个自然日（包含今天）；human 输出改为一张聚合的 ccusage 风格表，列为 `Date / Models / Input / Output / Cache Create / Cache Read / Total Tokens / Cost (USD)`，token 使用完整逗号分隔数字，模型以多行列表展示；`NO_COLOR=1` 会禁用 ANSI 样式。JSON 输出保持聚合 snake_case，并包含 `cache_creation_tokens`。需要完整 daily 历史时使用 `--all`，需要指定范围时使用 `--since YYYYMMDD` / `--until YYYYMMDD`，可用 `--source` 过滤单个本地来源，或用 `--breakdown` 输出按来源/模型拆分的明细。
 
 常用报表参数包括 `--since YYYYMMDD`、`--until YYYYMMDD`、`--json`、`--breakdown`、`--order asc|desc`、`--timezone UTC|local|+08:00`、`--locale en-US|zh-CN|ja-JP`、`--compact`、`--source codex|claude|opencode|gemini`。
 
