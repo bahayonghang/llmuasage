@@ -33,9 +33,11 @@
 
 `daily`、`monthly`、`session`、`blocks`、`statusline` 都是只读 SQLite 视图。它们复用 `usage_event` 作为报表真源，并把成本字段明确标为 `estimated_cost_usd`；从 0.5.1 起该值读取持久化 `cost_with_cache_usd`，不再查询时按 static-v1 重算。daily human 渲染默认是一张聚合的 ccusage 风格表，展示 `Input / Output / Cache Create / Cache Read / Total Tokens / Cost (USD)`；Source 维度通过过滤器和 breakdown 明细保留，JSON payload 仍保持聚合与 snake_case。session 报表优先使用 `session_id` metadata；旧数据库没有该字段时会使用稳定的源文件 fallback。`statusline` 可能在 `~/.llmusage/statusline-cache/` 写入很小的本地缓存；不会上传，也不会调用网络 API。
 
+Web Dashboard 也是只读查询表面。live `llmusage serve` 优先调用 `/api/dashboard`，让 overview、day/week/month/all 趋势、模型/来源/项目/成本排行、health 和归档 diagnostics 都来自同一个 `Dashboard::snapshot(&QueryFilter)` 连接。旧的 `/api/overview`、`/api/trends`、`/api/models`、`/api/sources`、`/api/projects`、`/api/costs` 仍保持稳定，并接受同一套 filter query 参数用于兼容。
+
 
 ## 0.5.x 集成表面
 
-ccr-ui 适配层保持薄包装：`Dashboard::overview`、`trends_daily`、`home_overview`、`heatmap`、`logs`、`diagnostics` 与 `JobRegistry` 都读写同一个本地 SQLite 状态。CLI 报表、HTTP API、静态导出快照的 JSON 字段统一 snake_case。schema migration 显式推进到 v10；v10 记录 `pricing_catalog_version`，0.5.1 会把活动本地快照保存到 `~/.llmusage/pricing/<catalog-version>.json`，让后续 sync 继续使用同一本地 catalog。
+ccr-ui 适配层保持薄包装：`Dashboard::snapshot`、`overview`、`trends_daily`、`home_overview`、`heatmap`、`logs`、`diagnostics` 与 `JobRegistry` 都读写同一个本地 SQLite 状态。CLI 报表、HTTP API、静态导出快照的 JSON 字段统一 snake_case。schema migration 显式推进到 v10；v10 记录 `pricing_catalog_version`，0.5.1 会把活动本地快照保存到 `~/.llmusage/pricing/<catalog-version>.json`，让后续 sync 继续使用同一本地 catalog。
 
 `worker_lock` 串行化 CLI、hook、library worker。CLI/library sync 通过 `Store::acquire_worker_lock_with` 等待；高频 hook-run 保留旧的非阻塞路径，锁被占用时直接跳过。

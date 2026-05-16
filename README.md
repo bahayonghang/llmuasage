@@ -49,7 +49,7 @@ Operational commands:
 
 Web dashboard:
 
-Below is the local browser dashboard served by `llmusage serve`.
+Below is the local browser dashboard served by `llmusage serve`. The first screen keeps the active time/source/model filter, KPI strip, activity trend, project/model/source/cost rankings, sync/export actions, and diagnostic signals in one local-only view.
 
 ![llmusage web dashboard overview](./docs/public/screenshots/web-dashboard-overview.png)
 
@@ -67,7 +67,8 @@ cargo run -- serve
 Notes:
 
 - `serve` only binds to `127.0.0.1` and opens the dashboard in your default browser
-- `export html` generates an offline static report
+- `serve` supports one-shot snapshot loading, URL-restored filters, optional 30s/60s auto-refresh, and in-process sync jobs with progress/cancel state
+- `export html` generates an offline static report with the same dashboard shell; snapshot mode disables live-only sync/refresh actions
 - report commands are read-only SQLite views and do not auto-sync
 - normal `sync` keeps imported usage history when a source file is missing; diagnostics may report `source_file.missing`, but usage rows are not deleted
 - `status` and `diagnostics` are read-only unless `diagnostics --forget-file` is used
@@ -104,6 +105,7 @@ fn open_store(root: std::path::PathBuf) -> Result<Store> {
 fn load_ccr_ui(store: &Store) -> Result<()> {
     let filter = QueryFilter::default();
     let dashboard = Dashboard::open(store)?;
+    let _snapshot = dashboard.snapshot(&filter)?;
     let _overview = dashboard.overview(&filter)?;
     let _daily = dashboard.trends_daily(&filter)?;
     let _home = dashboard.home_overview(&filter)?;

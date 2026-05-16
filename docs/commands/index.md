@@ -71,7 +71,7 @@ Runs read-only health checks over wrapper presence, integration drift, local sou
 
 ### `llmusage serve`
 
-Starts the local dashboard and JSON API on `127.0.0.1`, then opens the dashboard in the default browser.
+Starts the local dashboard and JSON API on `127.0.0.1`, then opens the dashboard in the default browser. The dashboard uses `/api/dashboard` for an initial single-connection snapshot and keeps overview, trends, model/source/project/cost rankings, health, and diagnostics on the same `source` / `model` / `since` / `until` / `window` filter. Live mode also exposes JSON export, optional 30s/60s auto-refresh, and sync job start/cancel/progress controls.
 
 ![llmusage web dashboard overview](/screenshots/web-dashboard-overview.png)
 
@@ -86,6 +86,8 @@ Writes a static bundle:
 - `index.html`
 - `snapshot.json`
 - `assets/*`
+
+The exported bundle reuses the same dashboard shell and embeds the captured filter in `snapshot.json`; live-only sync and auto-refresh controls are disabled with an explanation.
 
 ## Removal
 

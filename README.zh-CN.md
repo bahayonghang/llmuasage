@@ -49,7 +49,7 @@
 
 Web 分析页：
 
-下面这张图就是 `llmusage serve` 启动后的本地浏览器分析页。
+下面这张图就是 `llmusage serve` 启动后的本地浏览器分析页。首屏会把当前时间/来源/模型筛选、KPI、活动趋势、项目/模型/来源/成本排行、同步/导出动作和诊断线索放在同一个本地只读视图里。
 
 ![llmusage 本地 web 分析页概览](./docs/public/screenshots/web-dashboard-overview.png)
 
@@ -67,7 +67,8 @@ cargo run -- serve
 说明：
 
 - `serve` 只监听 `127.0.0.1`，并会默认用系统浏览器打开分析页
-- `export html` 生成离线静态报告
+- `serve` 支持单快照加载、URL 恢复筛选、可选 30s/60s 自动刷新，以及带进度/取消状态的进程内同步任务
+- `export html` 生成同一套 Dashboard shell 的离线静态报告；离线快照会禁用实时 sync/refresh 控件
 - 报表命令都是只读 SQLite 视图，不会自动 sync
 - 普通 `sync` 遇到源文件缺失时会保留已导入 usage history；diagnostics 里出现 `source_file.missing` 不代表 usage 行已被删除
 - `status` 和普通 `diagnostics` 是只读命令；`diagnostics --forget-file` 会写入本地忽略状态
@@ -104,6 +105,7 @@ fn open_store(root: std::path::PathBuf) -> Result<Store> {
 fn load_ccr_ui(store: &Store) -> Result<()> {
     let filter = QueryFilter::default();
     let dashboard = Dashboard::open(store)?;
+    let _snapshot = dashboard.snapshot(&filter)?;
     let _overview = dashboard.overview(&filter)?;
     let _daily = dashboard.trends_daily(&filter)?;
     let _home = dashboard.home_overview(&filter)?;
