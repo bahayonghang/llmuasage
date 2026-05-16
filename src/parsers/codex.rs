@@ -482,20 +482,73 @@ fn pick_delta(
 
 fn parse_usage_tokens(value: &Value) -> Option<UsageTokens> {
     value.as_object()?;
+    let raw_input_tokens = read_i64(value, "input_tokens")
+        .or_else(|| read_i64(value, "prompt_tokens"))
+        .unwrap_or_default();
+    let explicit_cache_read_tokens = read_i64(value, "cache_read_tokens")
+        .or_else(|| read_i64(value, "cached_input_tokens"))
+        .or_else(|| read_i64(value, "cache_read_input_tokens"));
+    let nested_cache_read_tokens =
+        read_nested_i64(value, &["prompt_tokens_details", "cached_tokens"])
+            .or_else(|| read_nested_i64(value, &["input_tokens_details", "cached_tokens"]))
+            .or_else(|| {
+                read_nested_i64(value, &["usage", "prompt_tokens_details", "cached_tokens"])
+            })
+            .or_else(|| {
+                read_nested_i64(value, &["usage", "input_tokens_details", "cached_tokens"])
+            });
+    let cache_read_tokens = explicit_cache_read_tokens
+        .or(nested_cache_read_tokens)
+        .unwrap_or_default();
+    let input_tokens = if explicit_cache_read_tokens.is_some() {
+        raw_input_tokens
+    } else if nested_cache_read_tokens.is_some() {
+        (raw_input_tokens - cache_read_tokens).max(0)
+    } else {
+        raw_input_tokens
+    };
+    let output_tokens = read_i64(value, "output_tokens")
+        .or_else(|| read_i64(value, "completion_tokens"))
+        .unwrap_or_default();
+    let reasoning_output_tokens = read_i64(value, "reasoning_output_tokens")
+        .or_else(|| read_i64(value, "reasoning_tokens"))
+        .or_else(|| read_nested_i64(value, &["completion_tokens_details", "reasoning_tokens"]))
+        .or_else(|| read_nested_i64(value, &["output_tokens_details", "reasoning_tokens"]))
+        .or_else(|| {
+            read_nested_i64(
+                value,
+                &["usage", "completion_tokens_details", "reasoning_tokens"],
+            )
+        })
+        .or_else(|| {
+            read_nested_i64(
+                value,
+                &["usage", "output_tokens_details", "reasoning_tokens"],
+            )
+        })
+        .unwrap_or_default();
+    let total_tokens = read_i64(value, "total_tokens")
+        .unwrap_or(input_tokens + cache_read_tokens + output_tokens + reasoning_output_tokens);
     Some(UsageTokens {
-        input_tokens: read_i64(value, "input_tokens").unwrap_or_default(),
-        cache_read_tokens: read_i64(value, "cache_read_tokens")
-            .or_else(|| read_i64(value, "cached_input_tokens"))
-            .unwrap_or_default(),
+        input_tokens,
+        cache_read_tokens,
         cache_creation_tokens: 0,
-        output_tokens: read_i64(value, "output_tokens").unwrap_or_default(),
-        reasoning_output_tokens: read_i64(value, "reasoning_output_tokens").unwrap_or_default(),
-        total_tokens: read_i64(value, "total_tokens").unwrap_or_default(),
+        output_tokens,
+        reasoning_output_tokens,
+        total_tokens,
     })
 }
 
 fn read_i64(value: &Value, key: &str) -> Option<i64> {
     value.get(key).and_then(Value::as_i64)
+}
+
+fn read_nested_i64(value: &Value, path: &[&str]) -> Option<i64> {
+    let mut current = value;
+    for key in path {
+        current = current.get(*key)?;
+    }
+    current.as_i64()
 }
 
 #[cfg(test)]
@@ -536,6 +589,102 @@ mod tests {
         let tokens = parse_usage_tokens(&usage).expect("usage tokens");
 
         assert_eq!(tokens.cache_read_tokens, 7);
+    }
+
+    #[test]
+    fn codex_parser_reads_nested_cached_tokens_as_cache_read_and_non_cached_input() {
+        let usage = json!({
+            "input_tokens": 100,
+            "prompt_tokens_details": {
+                "cached_tokens": 42
+            },
+            "output_tokens": 8,
+            "total_tokens": 150
+        });
+
+        let tokens = parse_usage_tokens(&usage).expect("usage tokens");
+
+        assert_eq!(tokens.input_tokens, 58);
+        assert_eq!(tokens.cache_read_tokens, 42);
+        assert_eq!(tokens.output_tokens, 8);
+    }
+
+    #[test]
+    fn codex_parser_reads_cache_read_input_tokens_alias() {
+        let usage = json!({
+            "input_tokens": 100,
+            "cache_read_input_tokens": 24,
+            "output_tokens": 8,
+        });
+
+        let tokens = parse_usage_tokens(&usage).expect("usage tokens");
+
+        assert_eq!(tokens.input_tokens, 100);
+        assert_eq!(tokens.cache_read_tokens, 24);
+        assert_eq!(tokens.total_tokens, 132);
+    }
+
+    #[test]
+    fn codex_parser_reads_nested_usage_cached_tokens() {
+        let usage = json!({
+            "input_tokens": 100,
+            "usage": {
+                "input_tokens_details": {
+                    "cached_tokens": 24
+                }
+            },
+            "output_tokens": 8,
+        });
+
+        let tokens = parse_usage_tokens(&usage).expect("usage tokens");
+
+        assert_eq!(tokens.input_tokens, 76);
+        assert_eq!(tokens.cache_read_tokens, 24);
+        assert_eq!(tokens.total_tokens, 108);
+    }
+
+    #[test]
+    fn codex_parser_reads_nested_reasoning_without_adding_to_output() {
+        let usage = json!({
+            "prompt_tokens": 100,
+            "completion_tokens": 30,
+            "usage": {
+                "completion_tokens_details": {
+                    "reasoning_tokens": 9
+                }
+            }
+        });
+
+        let tokens = parse_usage_tokens(&usage).expect("usage tokens");
+
+        assert_eq!(tokens.input_tokens, 100);
+        assert_eq!(tokens.output_tokens, 30);
+        assert_eq!(tokens.reasoning_output_tokens, 9);
+        assert_eq!(tokens.total_tokens, 139);
+    }
+
+    #[test]
+    fn codex_parser_clamps_cached_tokens_above_input() {
+        let usage = json!({
+            "prompt_tokens": 30,
+            "usage": {
+                "prompt_tokens_details": {
+                    "cached_tokens": 42
+                }
+            },
+            "completion_tokens": 8,
+            "completion_tokens_details": {
+                "reasoning_tokens": 2
+            }
+        });
+
+        let tokens = parse_usage_tokens(&usage).expect("usage tokens");
+
+        assert_eq!(tokens.input_tokens, 0);
+        assert_eq!(tokens.cache_read_tokens, 42);
+        assert_eq!(tokens.output_tokens, 8);
+        assert_eq!(tokens.reasoning_output_tokens, 2);
+        assert_eq!(tokens.total_tokens, 52);
     }
 
     #[test]

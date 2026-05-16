@@ -106,10 +106,13 @@ impl Fixture {
             pricing::compute_cost(
                 event.source,
                 event.model,
-                event.input_tokens,
-                event.cache_read_tokens,
-                event.output_tokens,
-                event.reasoning_output_tokens,
+                pricing::CostTokens {
+                    input: event.input_tokens,
+                    cache_read: event.cache_read_tokens,
+                    cache_creation: event.cache_creation_tokens,
+                    output: event.output_tokens,
+                    reasoning_output: event.reasoning_output_tokens,
+                },
             )
         } else {
             pricing::CostBreakdown {

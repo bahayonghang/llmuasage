@@ -314,6 +314,7 @@ impl Store {
                     SELECT event_key, source, model, hour_start, COALESCE(project_hash, ''),
                            COALESCE(input_tokens, 0),
                            COALESCE(cache_read_tokens, 0),
+                           COALESCE(cache_creation_tokens, 0),
                            COALESCE(output_tokens, 0),
                            COALESCE(reasoning_output_tokens, 0)
                     FROM usage_event
@@ -331,8 +332,9 @@ impl Store {
                         project_hash: row.get(4)?,
                         input_tokens: row.get(5)?,
                         cache_read_tokens: row.get(6)?,
-                        output_tokens: row.get(7)?,
-                        reasoning_output_tokens: row.get(8)?,
+                        cache_creation_tokens: row.get(7)?,
+                        output_tokens: row.get(8)?,
+                        reasoning_output_tokens: row.get(9)?,
                     })
                 })?;
                 mapped.collect::<rusqlite::Result<Vec<_>>>()?
@@ -360,10 +362,13 @@ impl Store {
                         catalog,
                         &row.source,
                         &row.model,
-                        row.input_tokens,
-                        row.cache_read_tokens,
-                        row.output_tokens,
-                        row.reasoning_output_tokens,
+                        crate::query::pricing::CostTokens {
+                            input: row.input_tokens,
+                            cache_read: row.cache_read_tokens,
+                            cache_creation: row.cache_creation_tokens,
+                            output: row.output_tokens,
+                            reasoning_output: row.reasoning_output_tokens,
+                        },
                     );
                     update_stmt.execute(params![
                         row.event_key,
@@ -583,6 +588,7 @@ struct PricingRecomputeRow {
     project_hash: String,
     input_tokens: i64,
     cache_read_tokens: i64,
+    cache_creation_tokens: i64,
     output_tokens: i64,
     reasoning_output_tokens: i64,
 }

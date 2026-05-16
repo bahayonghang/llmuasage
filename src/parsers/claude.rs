@@ -391,10 +391,9 @@ fn normalize_claude_usage(value: &Value) -> UsageTokens {
         .get("input_tokens")
         .and_then(Value::as_i64)
         .unwrap_or_default();
-    let cache_creation_tokens = value
-        .get("cache_creation_input_tokens")
-        .and_then(Value::as_i64)
-        .unwrap_or_default();
+    let cache_creation_tokens = read_i64(value, "cache_creation_input_tokens")
+        + read_i64(value, "cache_creation_input_tokens_5m")
+        + read_i64(value, "cache_creation_input_tokens_1h");
     let cache_read_tokens = value
         .get("cache_read_input_tokens")
         .and_then(Value::as_i64)
@@ -424,6 +423,10 @@ fn normalize_claude_usage(value: &Value) -> UsageTokens {
         reasoning_output_tokens,
         total_tokens,
     }
+}
+
+fn read_i64(value: &Value, key: &str) -> i64 {
+    value.get(key).and_then(Value::as_i64).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -494,5 +497,22 @@ mod tests {
 
         assert_eq!(tokens.reasoning_output_tokens, 3);
         assert_eq!(tokens.total_tokens, 18);
+    }
+
+    #[test]
+    fn claude_parser_sums_cache_creation_ttl_subfields() {
+        let usage = json!({
+            "input_tokens": 10,
+            "cache_creation_input_tokens_5m": 4,
+            "cache_creation_input_tokens_1h": 6,
+            "cache_read_input_tokens": 2,
+            "output_tokens": 5,
+        });
+
+        let tokens = normalize_claude_usage(&usage);
+
+        assert_eq!(tokens.cache_creation_tokens, 10);
+        assert_eq!(tokens.cache_read_tokens, 2);
+        assert_eq!(tokens.total_tokens, 27);
     }
 }

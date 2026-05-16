@@ -934,6 +934,8 @@ mod tests {
     use super::{Dashboard, QueryFilter, ReportTimezone};
     use crate::{models::SourceKind, store::Store, testing::Fixture};
 
+    const EPSILON: f64 = 1e-9;
+
     #[test]
     fn dashboard_snapshot_uses_single_connection_and_matches_individual_methods() -> Result<()> {
         let fixture = Fixture::new()?;
@@ -1283,6 +1285,85 @@ mod tests {
         assert!((bucket_cost_with - cost_with).abs() < 1e-9);
         assert_eq!(bucket_status, "static");
         assert_eq!(bucket_source, "static-v1");
+        Ok(())
+    }
+
+    #[test]
+    fn recompute_costs_prices_codex_and_claude_cache_channels() -> Result<()> {
+        let fixture = Fixture::new()?;
+        fixture.seed_event(crate::testing::SeedEvent {
+            event_key: "codex:cache",
+            source: "codex",
+            model: "gpt-5.5",
+            event_at: "2026-05-01T00:00:00Z",
+            hour_start: Some("2026-05-01T00:00:00Z"),
+            input_tokens: 1_000_000,
+            cache_read_tokens: 2_000_000,
+            output_tokens: 3_000_000,
+            reasoning_output_tokens: 4_000_000,
+            total_tokens: 10_000_000,
+            created_at: Some("2026-05-01T00:00:00Z"),
+            ..Default::default()
+        })?;
+        fixture.seed_event(crate::testing::SeedEvent {
+            event_key: "claude:cache",
+            source: "claude",
+            model: "claude-sonnet-4-5",
+            event_at: "2026-05-01T00:00:00Z",
+            hour_start: Some("2026-05-01T00:00:00Z"),
+            input_tokens: 1_000_000,
+            cache_read_tokens: 2_000_000,
+            cache_creation_tokens: 3_000_000,
+            output_tokens: 4_000_000,
+            reasoning_output_tokens: 5_000_000,
+            total_tokens: 15_000_000,
+            created_at: Some("2026-05-01T00:00:00Z"),
+            ..Default::default()
+        })?;
+
+        let updated = fixture.store().recompute_costs()?;
+        assert_eq!(updated, 2);
+
+        let conn = fixture.store().open_connection()?;
+        let (codex_cost, codex_without, codex_status): (f64, f64, String) = conn.query_row(
+            r#"
+            SELECT cost_with_cache_usd, cost_without_cache_usd, pricing_status
+            FROM usage_event
+            WHERE event_key = 'codex:cache'
+            "#,
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        assert!((codex_cost - 31.5).abs() < EPSILON);
+        assert!((codex_without - 33.75).abs() < EPSILON);
+        assert_eq!(codex_status, "static");
+
+        let (claude_cost, claude_without, claude_status): (f64, f64, String) = conn.query_row(
+            r#"
+            SELECT cost_with_cache_usd, cost_without_cache_usd, pricing_status
+            FROM usage_event
+            WHERE event_key = 'claude:cache'
+            "#,
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        assert!((claude_cost - 72.6).abs() < EPSILON);
+        assert!((claude_without - 78.0).abs() < EPSILON);
+        assert_eq!(claude_status, "static");
+
+        let (bucket_cost, bucket_tokens, bucket_status): (f64, i64, String) = conn.query_row(
+            r#"
+            SELECT cost_with_cache_usd, total_tokens, pricing_status
+            FROM usage_bucket_30m
+            WHERE source = 'claude' AND model = 'claude-sonnet-4-5'
+            "#,
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        assert!((bucket_cost - claude_cost).abs() < EPSILON);
+        assert_eq!(bucket_tokens, 15_000_000);
+        assert_eq!(bucket_status, "static");
+
         Ok(())
     }
 

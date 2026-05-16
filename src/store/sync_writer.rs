@@ -304,10 +304,13 @@ impl SyncRunWriter {
                     &self.pricing_catalog,
                     event.source.as_str(),
                     &event.model,
-                    event.tokens.input_tokens,
-                    event.tokens.cache_read_tokens,
-                    event.tokens.output_tokens,
-                    event.tokens.reasoning_output_tokens,
+                    pricing::CostTokens {
+                        input: event.tokens.input_tokens,
+                        cache_read: event.tokens.cache_read_tokens,
+                        cache_creation: event.tokens.cache_creation_tokens,
+                        output: event.tokens.output_tokens,
+                        reasoning_output: event.tokens.reasoning_output_tokens,
+                    },
                 );
                 let changed = event_stmt.execute(rusqlite::params![
                     event.event_key,
@@ -1083,6 +1086,78 @@ mod tests {
         assert_eq!(status, "snapshot");
         assert_eq!(source, "litellm-snapshot-2026-05");
         assert!((cost - 3.0).abs() < 1e-6);
+
+        Ok(())
+    }
+
+    #[test]
+    fn commit_shard_prices_claude_cache_creation_and_read_channels() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = build_paths(temp.path());
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+
+        let mut writer = store.begin_sync_run()?;
+        writer.commit_shard(SyncShard {
+            source: SourceKind::Claude,
+            reset_path_hashes: Vec::new(),
+            events: vec![UsageEvent {
+                event_key: "claude:pathCache:1".to_string(),
+                source: SourceKind::Claude,
+                model: "claude-sonnet-4-5".to_string(),
+                event_at: "2026-05-01T10:00:00Z".to_string(),
+                hour_start: "2026-05-01T10:00:00Z".to_string(),
+                tokens: UsageTokens {
+                    input_tokens: 1_000_000,
+                    cache_read_tokens: 2_000_000,
+                    cache_creation_tokens: 3_000_000,
+                    output_tokens: 4_000_000,
+                    reasoning_output_tokens: 5_000_000,
+                    total_tokens: 15_000_000,
+                },
+                project: None,
+                session: Some(SessionInfo {
+                    session_id: "session:pathCache".to_string(),
+                    session_label: None,
+                    source_path_hash: Some("pathCache".to_string()),
+                }),
+            }],
+            cursors: Vec::new(),
+            seen_file_paths: Vec::new(),
+            raw_records: Vec::new(),
+        })?;
+
+        let conn = store.open_connection()?;
+        let (event_cost, without_cache, status, source): (f64, f64, String, String) = conn
+            .query_row(
+                r#"
+            SELECT cost_with_cache_usd, cost_without_cache_usd,
+                   pricing_status, COALESCE(pricing_source, '')
+            FROM usage_event
+            WHERE event_key = 'claude:pathCache:1'
+            "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )?;
+        assert!((event_cost - 72.6).abs() < 1e-9);
+        assert!((without_cache - 78.0).abs() < 1e-9);
+        assert_eq!(status, "static");
+        assert_eq!(source, "static-v1");
+
+        let (bucket_cost, cache_creation, cache_read, bucket_status): (f64, i64, i64, String) =
+            conn.query_row(
+                r#"
+            SELECT cost_with_cache_usd, cache_creation_tokens, cache_read_tokens, pricing_status
+            FROM usage_bucket_30m
+            WHERE source = 'claude' AND model = 'claude-sonnet-4-5'
+            "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )?;
+        assert!((bucket_cost - event_cost).abs() < 1e-9);
+        assert_eq!(cache_creation, 3_000_000);
+        assert_eq!(cache_read, 2_000_000);
+        assert_eq!(bucket_status, "static");
 
         Ok(())
     }

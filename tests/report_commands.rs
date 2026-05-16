@@ -435,6 +435,78 @@ fn doctor_refresh_pricing_writes_catalog_version_meta() -> Result<()> {
 }
 
 #[test]
+fn doctor_refresh_pricing_accepts_native_litellm_snapshot() -> Result<()> {
+    let fixture = ReportCliFixture::new()?;
+    fixture.seed_event(SeedEvent {
+        event_key: "codex:native-pricing:1",
+        source: "codex",
+        model: "gpt-5.5",
+        event_at: "2026-05-01T00:00:00Z",
+        input_tokens: 1_000_000,
+        cache_read_tokens: 2_000_000,
+        output_tokens: 3_000_000,
+        reasoning_output_tokens: 4_000_000,
+        total_tokens: 10_000_000,
+        project_hash: "project-native",
+        project_label: "Project Native",
+        session_id: Some("native-pricing-session"),
+        source_path_hash: Some("native-pricing-source"),
+        ..SeedEvent::default()
+    })?;
+
+    let snapshot = fixture.home.join("native-litellm.json");
+    std::fs::write(
+        &snapshot,
+        r#"{
+            "models": {
+                "gpt-5": {
+                    "litellm_provider": "openai",
+                    "input_cost_per_token": 0.00000125,
+                    "output_cost_per_token": 0.000010,
+                    "cache_creation_input_token_cost": 0.00000125,
+                    "cache_read_input_token_cost": 0.000000125,
+                    "output_cost_per_reasoning_token": 0.000010
+                }
+            }
+        }"#,
+    )?;
+
+    let output = fixture.output(&["doctor", "--refresh-pricing", snapshot.to_str().unwrap()])?;
+    assert!(output.status.success(), "{output:?}");
+
+    let store = Store::new(&fixture.paths)?;
+    assert_eq!(
+        store.meta_value("pricing_catalog_version")?.as_deref(),
+        Some("native-litellm")
+    );
+
+    let conn = Connection::open(&fixture.paths.db_path)?;
+    let (status, source, event_cost, bucket_cost): (String, String, f64, f64) = conn.query_row(
+        r#"
+        SELECT
+            e.pricing_status,
+            COALESCE(e.pricing_source, ''),
+            e.cost_with_cache_usd,
+            b.cost_with_cache_usd
+        FROM usage_event e
+        JOIN usage_bucket_30m b
+          ON b.source = e.source
+         AND b.model = e.model
+         AND b.hour_start = e.hour_start
+         AND b.project_hash = COALESCE(e.project_hash, '')
+        WHERE e.event_key = 'codex:native-pricing:1'
+        "#,
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+    )?;
+    assert_eq!(status, "snapshot");
+    assert_eq!(source, "native-litellm");
+    assert!((event_cost - 31.5).abs() < 1e-6);
+    assert!((bucket_cost - event_cost).abs() < 1e-9);
+    Ok(())
+}
+
+#[test]
 fn report_commands_use_persisted_cost_columns() -> Result<()> {
     let fixture = ReportCliFixture::new()?;
     let today = Utc::now().date_naive();
@@ -459,6 +531,7 @@ fn report_commands_use_persisted_cost_columns() -> Result<()> {
         project_ref: Some("example/project-a"),
         session_id: Some("session-a"),
         source_path_hash: Some("source-a"),
+        ..SeedEvent::default()
     })?;
 
     let daily = fixture.json(&["daily", "--all", "--json", "--timezone", "UTC"])?;
@@ -613,11 +686,19 @@ impl ReportCliFixture {
             r#"
             INSERT INTO usage_event(
                 event_key, source, model, event_at, hour_start,
-                input_tokens, cache_read_tokens, output_tokens, reasoning_output_tokens, total_tokens,
+                input_tokens, cache_read_tokens, cache_creation_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
                 cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source,
                 project_hash, project_label, project_ref, path_hash,
                 session_id, session_label, source_path_hash, created_at
-            ) VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?18, ?19, ?4)
+            ) VALUES (
+                ?1, ?2, ?3, ?4, ?4,
+                ?5, ?6, ?7,
+                ?8, ?9, ?10,
+                ?11, ?12, ?13, ?14,
+                ?15, ?16, ?17, ?18,
+                ?19, ?19, ?20, ?4
+            )
             "#,
             params![
                 event.event_key,
@@ -626,6 +707,7 @@ impl ReportCliFixture {
                 event.event_at,
                 event.input_tokens,
                 event.cache_read_tokens,
+                event.cache_creation_tokens,
                 event.output_tokens,
                 event.reasoning_output_tokens,
                 event.total_tokens,
@@ -649,10 +731,11 @@ impl ReportCliFixture {
                 output_tokens, reasoning_output_tokens, total_tokens,
                 cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source,
                 event_count, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 1, ?3)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, 1, ?3)
             ON CONFLICT(source, model, hour_start, project_hash) DO UPDATE SET
                 input_tokens = input_tokens + excluded.input_tokens,
                 cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens,
+                cache_creation_tokens = cache_creation_tokens + excluded.cache_creation_tokens,
                 output_tokens = output_tokens + excluded.output_tokens,
                 reasoning_output_tokens = reasoning_output_tokens + excluded.reasoning_output_tokens,
                 total_tokens = total_tokens + excluded.total_tokens,
@@ -678,6 +761,7 @@ impl ReportCliFixture {
                 event.project_ref,
                 event.input_tokens,
                 event.cache_read_tokens,
+                event.cache_creation_tokens,
                 event.output_tokens,
                 event.reasoning_output_tokens,
                 event.total_tokens,
@@ -729,6 +813,7 @@ struct SeedEvent<'a> {
     event_at: &'a str,
     input_tokens: i64,
     cache_read_tokens: i64,
+    cache_creation_tokens: i64,
     output_tokens: i64,
     reasoning_output_tokens: i64,
     total_tokens: i64,
@@ -752,6 +837,7 @@ impl Default for SeedEvent<'_> {
             event_at: "2026-05-01T00:00:00Z",
             input_tokens: 0,
             cache_read_tokens: 0,
+            cache_creation_tokens: 0,
             output_tokens: 0,
             reasoning_output_tokens: 0,
             total_tokens: 0,
