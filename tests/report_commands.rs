@@ -66,6 +66,8 @@ fn report_commands_emit_stable_json_from_sqlite() -> Result<()> {
         Some(today_display.as_str())
     );
     assert_eq!(daily["totals"]["total_tokens"].as_i64(), Some(385));
+    assert!(daily["daily"][0].get("conversation_count").is_none());
+    assert!(daily["daily"][0].get("conversationCount").is_none());
 
     let projects = fixture.json(&[
         "daily",
@@ -121,94 +123,110 @@ fn report_commands_emit_stable_json_from_sqlite() -> Result<()> {
 }
 
 #[test]
-fn daily_defaults_to_today_and_all_restores_history() -> Result<()> {
+fn daily_defaults_to_last_7_days_and_all_restores_history() -> Result<()> {
     let fixture = ReportCliFixture::new()?;
     let today = Utc::now().date_naive();
-    let yesterday = today - Duration::days(1);
-    let today_display = today.format("%Y-%m-%d").to_string();
-    let yesterday_arg = yesterday.format("%Y%m%d").to_string();
+    let six_days_ago = today - Duration::days(6);
+    let seven_days_ago = today - Duration::days(7);
     let today_arg = today.format("%Y%m%d").to_string();
-    let today_event = format!("{today_display}T12:00:00Z");
-    let yesterday_event = format!("{}T12:00:00Z", yesterday.format("%Y-%m-%d"));
+    let six_days_ago_arg = six_days_ago.format("%Y%m%d").to_string();
+    let expected_default_dates = (0..=6)
+        .map(|offset| {
+            (today - Duration::days(offset))
+                .format("%Y-%m-%d")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
 
-    fixture.seed_event(SeedEvent {
-        event_key: "codex:today:1",
-        source: "codex",
-        model: "gpt-5",
-        event_at: &today_event,
-        input_tokens: 10,
-        cache_read_tokens: 1,
-        output_tokens: 2,
-        reasoning_output_tokens: 3,
-        total_tokens: 16,
-        project_hash: "project-a",
-        project_label: "Project A",
-        project_ref: Some("example/project-a"),
-        session_id: Some("session-today"),
-        source_path_hash: Some("today-source"),
-        ..SeedEvent::default()
-    })?;
-    fixture.seed_event(SeedEvent {
-        event_key: "codex:yesterday:1",
-        source: "codex",
-        model: "gpt-5",
-        event_at: &yesterday_event,
-        input_tokens: 20,
-        cache_read_tokens: 2,
-        output_tokens: 4,
-        reasoning_output_tokens: 6,
-        total_tokens: 32,
-        project_hash: "project-a",
-        project_label: "Project A",
-        project_ref: Some("example/project-a"),
-        session_id: Some("session-yesterday"),
-        source_path_hash: Some("yesterday-source"),
-        ..SeedEvent::default()
-    })?;
+    for offset in 0..=7 {
+        let date = today - Duration::days(offset);
+        let date_display = date.format("%Y-%m-%d").to_string();
+        let event_at = format!("{date_display}T12:00:00Z");
+        let event_key = format!("codex:day-{offset}:1");
+        let session_id = format!("session-day-{offset}");
+        let source_path_hash = format!("source-day-{offset}");
+        fixture.seed_event(SeedEvent {
+            event_key: &event_key,
+            source: "codex",
+            model: "gpt-5",
+            event_at: &event_at,
+            input_tokens: 10,
+            cache_read_tokens: 0,
+            output_tokens: 0,
+            reasoning_output_tokens: 0,
+            total_tokens: 10,
+            project_hash: "project-a",
+            project_label: "Project A",
+            project_ref: Some("example/project-a"),
+            session_id: Some(&session_id),
+            source_path_hash: Some(&source_path_hash),
+            ..SeedEvent::default()
+        })?;
+    }
 
     let default_daily = fixture.json(&["--json", "--timezone", "UTC"])?;
-    assert_eq!(default_daily["daily"].as_array().map(Vec::len), Some(1));
-    assert_eq!(
-        default_daily["daily"][0]["date"].as_str(),
-        Some(today_display.as_str())
-    );
-    assert_eq!(default_daily["totals"]["total_tokens"].as_i64(), Some(16));
+    let default_dates = daily_dates(&default_daily);
+    assert_eq!(default_dates, expected_default_dates);
+    assert!(!default_dates.contains(&seven_days_ago.format("%Y-%m-%d").to_string()));
+    assert_eq!(default_daily["totals"]["total_tokens"].as_i64(), Some(70));
 
     let all_daily = fixture.json(&["--all", "--json", "--timezone", "UTC"])?;
-    assert_eq!(all_daily["daily"].as_array().map(Vec::len), Some(2));
-    assert_eq!(all_daily["totals"]["total_tokens"].as_i64(), Some(48));
+    assert_eq!(all_daily["daily"].as_array().map(Vec::len), Some(8));
+    assert_eq!(all_daily["totals"]["total_tokens"].as_i64(), Some(80));
 
     let range_daily = fixture.json(&[
         "daily",
         "--since",
-        &yesterday_arg,
+        &six_days_ago_arg,
         "--until",
         &today_arg,
         "--json",
         "--timezone",
         "UTC",
     ])?;
-    assert_eq!(range_daily["daily"].as_array().map(Vec::len), Some(2));
+    assert_eq!(daily_dates(&range_daily), expected_default_dates);
+
+    let explicit_old_range = fixture.json(&[
+        "daily",
+        "--since",
+        &seven_days_ago.format("%Y%m%d").to_string(),
+        "--until",
+        &seven_days_ago.format("%Y%m%d").to_string(),
+        "--json",
+        "--timezone",
+        "UTC",
+    ])?;
+    assert_eq!(
+        daily_dates(&explicit_old_range),
+        vec![seven_days_ago.format("%Y-%m-%d").to_string()]
+    );
+    assert_eq!(
+        explicit_old_range["totals"]["total_tokens"].as_i64(),
+        Some(10)
+    );
 
     Ok(())
 }
 
 #[test]
-fn daily_human_output_uses_box_table_and_compact_columns() -> Result<()> {
+fn daily_human_output_uses_source_tables_compact_tokens_and_no_default_info_logs() -> Result<()> {
     let fixture = ReportCliFixture::new()?;
     let today = Utc::now().date_naive();
+    let six_days_ago = today - Duration::days(6);
     let today_display = today.format("%Y-%m-%d").to_string();
+    let six_days_ago_display = six_days_ago.format("%Y-%m-%d").to_string();
     let today_event = format!("{today_display}T12:00:00Z");
+    let six_days_ago_event = format!("{six_days_ago_display}T12:00:00Z");
     fixture.seed_event(SeedEvent {
         event_key: "codex:today:human",
         source: "codex",
-        model: "claude-sonnet-4-20250514",
+        model: "gpt-5.4",
         event_at: &today_event,
-        input_tokens: 1234,
-        cache_read_tokens: 890,
-        output_tokens: 56,
-        reasoning_output_tokens: 7,
-        total_tokens: 2187,
+        input_tokens: 978_050,
+        cache_read_tokens: 5_370_000,
+        output_tokens: 40_330_000_000,
+        reasoning_output_tokens: 12_345,
+        total_tokens: 40_336_360_395,
         project_hash: "project-a",
         project_label: "Project A",
         project_ref: Some("example/project-a"),
@@ -216,24 +234,97 @@ fn daily_human_output_uses_box_table_and_compact_columns() -> Result<()> {
         source_path_hash: Some("source-a"),
         ..SeedEvent::default()
     })?;
+    fixture.seed_event(SeedEvent {
+        event_key: "codex:today:human-second",
+        source: "codex",
+        model: "gpt-5.4",
+        event_at: &today_event,
+        input_tokens: 1_000,
+        cache_read_tokens: 0,
+        output_tokens: 0,
+        reasoning_output_tokens: 0,
+        total_tokens: 1_000,
+        project_hash: "project-a",
+        project_label: "Project A",
+        project_ref: Some("example/project-a"),
+        session_id: Some("session-b"),
+        source_path_hash: Some("source-b"),
+        ..SeedEvent::default()
+    })?;
+    fixture.seed_event(SeedEvent {
+        event_key: "codex:six-days-ago:human",
+        source: "codex",
+        model: "gpt-5.4",
+        event_at: &six_days_ago_event,
+        input_tokens: 2_000,
+        cache_read_tokens: 0,
+        output_tokens: 0,
+        reasoning_output_tokens: 0,
+        total_tokens: 2_000,
+        project_hash: "project-a",
+        project_label: "Project A",
+        project_ref: Some("example/project-a"),
+        session_id: Some("session-old"),
+        source_path_hash: Some("source-old"),
+        ..SeedEvent::default()
+    })?;
+    fixture.seed_event(SeedEvent {
+        event_key: "claude:today:human",
+        source: "claude",
+        model: "claude-sonnet-4-20250514",
+        event_at: &today_event,
+        input_tokens: 5_370_000,
+        cache_read_tokens: 978_050,
+        output_tokens: 123_000,
+        reasoning_output_tokens: 0,
+        total_tokens: 6_471_050,
+        project_hash: "project-b",
+        project_label: "Project B",
+        project_ref: Some("example/project-b"),
+        session_id: Some("session-c"),
+        source_path_hash: Some("source-c"),
+        ..SeedEvent::default()
+    })?;
 
-    let output = fixture.output_with_env(&["--timezone", "UTC"], &[("COLUMNS", "120")])?;
+    let output = fixture.output_with_env(
+        &["--timezone", "UTC"],
+        &[("COLUMNS", "120"), ("NO_COLOR", "1")],
+    )?;
     assert!(output.status.success(), "{output:?}");
     let stdout = String::from_utf8(output.stdout)?;
+    let stderr = String::from_utf8(output.stderr)?;
+    assert!(stdout.contains("Codex daily usage"));
+    assert!(stdout.contains("Claude daily usage"));
+    assert!(stdout.contains("---\nClaude daily usage"));
+    assert!(stdout.contains(&today_display));
+    assert!(stdout.contains(&six_days_ago_display));
     assert!(stdout.contains('\u{250C}'));
-    assert!(stdout.contains("Cache Read"));
-    assert!(stdout.contains("Total Tokens"));
-    assert!(stdout.contains("- sonnet-4"));
-    assert!(stdout.contains("Total"));
+    assert!(stdout.contains("Conv"));
+    assert!(stdout.contains("Cache"));
+    assert!(stdout.contains("Reason"));
+    assert!(stdout.contains("All"));
+    assert!(stdout.contains("Notes"));
+    assert!(stdout.contains("unpriced"));
+    assert!(stdout.contains("reason not reported"));
+    assert!(stdout.contains("gpt-5.4"));
+    assert!(stdout.contains("sonnet-4"));
+    assert!(stdout.contains("978.05K"));
+    assert!(stdout.contains("5.37M"));
+    assert!(stdout.contains("40.33B"));
+    assert!(stdout.contains("TOTAL"));
     assert!(!stdout.contains("Total:"));
+    assert!(!stdout.contains("978,050"));
+    assert!(!stdout.contains("5,370,000"));
+    assert!(!stdout.contains("\u{1b}["));
+    assert!(!stderr.contains("INFO"));
+    assert!(!stderr.contains("开始初始化本地目录与 SQLite schema"));
 
-    let compact = fixture.output_with_env(&["--timezone", "UTC"], &[("COLUMNS", "80")])?;
-    assert!(compact.status.success(), "{compact:?}");
-    let compact_stdout = String::from_utf8(compact.stdout)?;
-    assert!(compact_stdout.contains('\u{250C}'));
-    assert!(!compact_stdout.contains("Cache Read"));
-    assert!(!compact_stdout.contains("Total Tokens"));
-    assert!(compact_stdout.contains("Cost (USD)"));
+    let colored =
+        fixture.output_with_env(&["--timezone", "UTC"], &[("LLMUSAGE_FORCE_COLOR", "1")])?;
+    assert!(colored.status.success(), "{colored:?}");
+    let colored_stdout = String::from_utf8(colored.stdout)?;
+    assert!(colored_stdout.contains("\u{1b}["));
+    assert!(colored_stdout.contains("Codex daily usage"));
 
     Ok(())
 }
@@ -391,6 +482,9 @@ fn report_help_and_legacy_help_still_parse() -> Result<()> {
         let output = fixture.output(&args)?;
         assert!(output.status.success(), "{args:?}: {output:?}");
     }
+    let daily_help = fixture.output(&["daily", "--help"])?;
+    let daily_help_stdout = String::from_utf8(daily_help.stdout)?;
+    assert!(daily_help_stdout.contains("last 7 days"));
     Ok(())
 }
 
@@ -460,6 +554,15 @@ fn assert_json_has_no_camel_case_keys(value: &serde_json::Value) {
         }
         _ => {}
     }
+}
+
+fn daily_dates(value: &serde_json::Value) -> Vec<String> {
+    value["daily"]
+        .as_array()
+        .expect("daily array")
+        .iter()
+        .map(|row| row["date"].as_str().expect("daily row date").to_string())
+        .collect()
 }
 
 fn has_camel_case_boundary(value: &str) -> bool {
@@ -611,8 +714,7 @@ impl ReportCliFixture {
             .env("HOME", &self.home)
             .env("USERPROFILE", &self.home)
             .env("CODEX_HOME", self.home.join(".codex"))
-            .env("OPENCODE_HOME", self.home.join("opencode"))
-            .env("RUST_LOG", "off");
+            .env("OPENCODE_HOME", self.home.join("opencode"));
         for (key, value) in envs {
             command.env(key, value);
         }

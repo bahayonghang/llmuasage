@@ -4,7 +4,9 @@ use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
 /// Supported local usage sources that `llmusage` can ingest.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, ValueEnum)]
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, ValueEnum,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceKind {
     /// OpenAI Codex local rollout/session artifacts.

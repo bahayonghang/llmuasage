@@ -73,7 +73,7 @@ pub struct DailyArgs {
     #[command(flatten)]
     pub common: ReportCommonArgs,
 
-    /// Show the full daily history instead of defaulting to today.
+    /// Show the full daily history instead of the default last 7 days.
     #[arg(long)]
     pub all: bool,
 

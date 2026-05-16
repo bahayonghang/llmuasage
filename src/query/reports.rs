@@ -62,6 +62,12 @@ pub struct ModelCostBreakdown {
     pub estimated_cost_usd: f64,
 }
 
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+pub struct ReportNotes {
+    pub unpriced: bool,
+    pub reason_not_reported: bool,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ProjectSummary {
     pub project_hash: String,
@@ -78,6 +84,10 @@ pub struct DailyReportRow {
     pub totals: TokenTotals,
     pub models_used: Vec<String>,
     pub model_breakdowns: Vec<ModelCostBreakdown>,
+    #[serde(skip_serializing)]
+    pub conversation_count: usize,
+    #[serde(skip_serializing)]
+    pub notes: ReportNotes,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -175,6 +185,7 @@ struct EventRow {
     reasoning_output_tokens: i64,
     total_tokens: i64,
     cost_with_cache_usd: f64,
+    pricing_status: String,
     project: Option<ProjectSummary>,
     session_id: Option<String>,
     session_label: Option<String>,
@@ -186,6 +197,9 @@ struct Aggregate {
     totals: TokenTotals,
     breakdowns: BTreeMap<(String, String), TokenTotals>,
     models: BTreeSet<String>,
+    conversations: BTreeSet<String>,
+    pricing_statuses: BTreeSet<String>,
+    sources: BTreeSet<String>,
 }
 
 type SessionGroup = (
@@ -209,6 +223,9 @@ impl Aggregate {
             event.cost_with_cache_usd,
         );
         self.models.insert(event.model.clone());
+        self.conversations.insert(event_session_id(event));
+        self.pricing_statuses.insert(event.pricing_status.clone());
+        self.sources.insert(event.source.clone());
         let entry = self
             .breakdowns
             .entry((event.source.clone(), event.model.clone()))
@@ -228,6 +245,10 @@ impl Aggregate {
         self.models.iter().cloned().collect()
     }
 
+    fn conversation_count(&self) -> usize {
+        self.conversations.len()
+    }
+
     fn model_breakdowns(&self, include: bool) -> Vec<ModelCostBreakdown> {
         if !include {
             return Vec::new();
@@ -245,6 +266,17 @@ impl Aggregate {
                 estimated_cost_usd: totals.estimated_cost_usd,
             })
             .collect()
+    }
+
+    fn notes(&self) -> ReportNotes {
+        ReportNotes {
+            unpriced: self
+                .pricing_statuses
+                .iter()
+                .any(|status| status == "unpriced"),
+            reason_not_reported: self.sources.iter().any(|source| source == "claude")
+                && self.totals.reasoning_output_tokens == 0,
+        }
     }
 }
 
@@ -286,10 +318,70 @@ pub fn load_daily_report(store: &Store, filter: &ReportFilter) -> Result<DailyRe
             totals: aggregate.totals.clone(),
             models_used: aggregate.model_names(),
             model_breakdowns: aggregate.model_breakdowns(filter.breakdown),
+            conversation_count: aggregate.conversation_count(),
+            notes: aggregate.notes(),
         })
         .collect::<Vec<_>>();
     sort_by_key(&mut daily, filter.order, |row| row.date.clone());
     Ok(DailyReport { daily, totals })
+}
+
+pub fn load_daily_reports_by_source(
+    store: &Store,
+    filter: &ReportFilter,
+) -> Result<Vec<(SourceKind, DailyReport)>> {
+    let events = load_filtered_events(store, filter)?;
+    let mut source_groups: BTreeMap<SourceKind, BTreeMap<String, Aggregate>> = BTreeMap::new();
+    let mut source_totals: BTreeMap<SourceKind, TokenTotals> = BTreeMap::new();
+
+    for event in &events {
+        let Some(source) = SourceKind::parse_id(&event.source) else {
+            continue;
+        };
+        source_groups
+            .entry(source)
+            .or_default()
+            .entry(event.local_date.format("%Y-%m-%d").to_string())
+            .or_default()
+            .add_event(event);
+        add_totals_from_event(source_totals.entry(source).or_default(), event);
+    }
+
+    let source_order = [
+        SourceKind::Codex,
+        SourceKind::Claude,
+        SourceKind::Opencode,
+        SourceKind::Gemini,
+    ];
+    let mut reports = Vec::new();
+    for source in source_order {
+        let Some(groups) = source_groups.remove(&source) else {
+            continue;
+        };
+        let mut daily = groups
+            .into_iter()
+            .map(|(date, aggregate)| DailyReportRow {
+                date,
+                source: Some(source.as_str().to_string()),
+                project: None,
+                totals: aggregate.totals.clone(),
+                models_used: aggregate.model_names(),
+                model_breakdowns: aggregate.model_breakdowns(filter.breakdown),
+                conversation_count: aggregate.conversation_count(),
+                notes: aggregate.notes(),
+            })
+            .collect::<Vec<_>>();
+        sort_by_key(&mut daily, filter.order, |row| row.date.clone());
+        reports.push((
+            source,
+            DailyReport {
+                daily,
+                totals: source_totals.remove(&source).unwrap_or_default(),
+            },
+        ));
+    }
+
+    Ok(reports)
 }
 
 pub fn load_daily_project_report(
@@ -316,6 +408,8 @@ pub fn load_daily_project_report(
             totals: aggregate.totals.clone(),
             models_used: aggregate.model_names(),
             model_breakdowns: aggregate.model_breakdowns(filter.breakdown),
+            conversation_count: aggregate.conversation_count(),
+            notes: aggregate.notes(),
         });
     }
     for rows in projects.values_mut() {
@@ -629,6 +723,7 @@ fn load_events_filtered(conn: &Connection, filter: &ReportFilter) -> Result<Vec<
             reasoning_output_tokens,
             total_tokens,
             cost_with_cache_usd,
+            pricing_status,
             project_hash,
             project_label,
             project_ref,
@@ -665,12 +760,15 @@ fn load_events_filtered(conn: &Connection, filter: &ReportFilter) -> Result<Vec<
             reasoning_output_tokens: row.get::<_, Option<i64>>(7)?.unwrap_or_default(),
             total_tokens: row.get::<_, Option<i64>>(8)?.unwrap_or_default(),
             cost_with_cache_usd: row.get::<_, Option<f64>>(9)?.unwrap_or_default(),
-            project_hash: row.get(10)?,
-            project_label: row.get(11)?,
-            project_ref: row.get(12)?,
-            session_id: row.get(13)?,
-            session_label: row.get(14)?,
-            source_path_hash: row.get(15)?,
+            pricing_status: row
+                .get::<_, Option<String>>(10)?
+                .unwrap_or_else(|| crate::query::pricing::PRICING_UNPRICED.to_string()),
+            project_hash: row.get(11)?,
+            project_label: row.get(12)?,
+            project_ref: row.get(13)?,
+            session_id: row.get(14)?,
+            session_label: row.get(15)?,
+            source_path_hash: row.get(16)?,
         })
     })?;
     let raw = rows.collect::<rusqlite::Result<Vec<_>>>()?;
@@ -720,6 +818,7 @@ struct RawEventRow {
     reasoning_output_tokens: i64,
     total_tokens: i64,
     cost_with_cache_usd: f64,
+    pricing_status: String,
     project_hash: Option<String>,
     project_label: Option<String>,
     project_ref: Option<String>,
@@ -744,6 +843,7 @@ impl RawEventRow {
             reasoning_output_tokens: self.reasoning_output_tokens,
             total_tokens: self.total_tokens,
             cost_with_cache_usd: self.cost_with_cache_usd,
+            pricing_status: self.pricing_status,
             project: normalize_project(self.project_hash, self.project_label, self.project_ref),
             session_id: self.session_id,
             session_label: self.session_label,
@@ -957,8 +1057,9 @@ mod tests {
                 INSERT INTO usage_event(
                     event_key, source, model, event_at, hour_start,
                     input_tokens, cache_read_tokens, output_tokens, reasoning_output_tokens, total_tokens,
+                    pricing_status,
                     project_hash, project_label, project_ref, path_hash, session_id, session_label, source_path_hash, created_at
-                ) VALUES (?1, ?2, ?3, ?4, ?4, ?5, 0, 0, 0, ?5, ?6, ?7, NULL, ?8, NULLIF(?9, ''), NULL, CASE WHEN ?9 = '' THEN NULL ELSE ?8 END, ?4)
+                ) VALUES (?1, ?2, ?3, ?4, ?4, ?5, 0, 0, 0, ?5, 'unpriced', ?6, ?7, NULL, ?8, NULLIF(?9, ''), NULL, CASE WHEN ?9 = '' THEN NULL ELSE ?8 END, ?4)
                 "#,
                 params![
                     event.event_key,

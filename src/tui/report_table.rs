@@ -1,8 +1,12 @@
 use std::collections::BTreeSet;
+use std::fmt::Write as _;
 
+use crossterm::style::{Color, Stylize, style};
+
+use crate::models::SourceKind;
 use crate::query::reports::{
     BlockReportRow, DailyReportRow, ModelCostBreakdown, MonthlyReportRow, ProjectSummary,
-    SessionReportRow, TokenTotals,
+    ReportNotes, SessionReportRow, TokenTotals,
 };
 
 const COMPACT_THRESHOLD: usize = 100;
@@ -48,6 +52,33 @@ pub fn render_daily_table(
     }
     let columns = period_columns("Date", compact, show_project);
     render_table(&columns, &table_rows)
+}
+
+pub fn render_daily_source_table(rows: &[DailyReportRow], totals: Option<&TokenTotals>) -> String {
+    render_table(
+        &daily_source_columns(),
+        &daily_source_table_rows(rows, totals),
+    )
+}
+
+pub fn render_daily_source_table_styled(
+    source: SourceKind,
+    rows: &[DailyReportRow],
+    totals: Option<&TokenTotals>,
+    color_mode: ColorMode,
+) -> String {
+    render_table_styled(
+        &daily_source_columns(),
+        &daily_source_table_rows(rows, totals),
+        Some(DailyTableStyle { source, color_mode }),
+    )
+}
+
+pub fn render_source_title(source: SourceKind, title: &str, color_mode: ColorMode) -> String {
+    if !color_mode.enabled() {
+        return title.to_string();
+    }
+    style(title).with(source_color(source)).bold().to_string()
 }
 
 pub fn render_monthly_table(
@@ -213,8 +244,50 @@ pub fn format_count(value: i64) -> String {
     }
 }
 
+pub fn format_token_compact(value: i64) -> String {
+    let sign = if value < 0 { "-" } else { "" };
+    let abs = value.unsigned_abs() as f64;
+    let (scaled, suffix) = if abs >= 1_000_000_000.0 {
+        (abs / 1_000_000_000.0, "B")
+    } else if abs >= 1_000_000.0 {
+        (abs / 1_000_000.0, "M")
+    } else if abs >= 1_000.0 {
+        (abs / 1_000.0, "K")
+    } else {
+        return value.to_string();
+    };
+    format!("{sign}{scaled:.2}{suffix}")
+}
+
 pub fn format_cost(value: f64) -> String {
     format!("${value:.2}")
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorMode {
+    Auto,
+    Always,
+    Never,
+}
+
+impl ColorMode {
+    pub fn from_env() -> Self {
+        if env_flag("LLMUSAGE_FORCE_COLOR") || env_flag("CLICOLOR_FORCE") {
+            return Self::Always;
+        }
+        if std::env::var_os("NO_COLOR").is_some() || env_flag("LLMUSAGE_NO_COLOR") {
+            return Self::Never;
+        }
+        Self::Auto
+    }
+
+    fn enabled(self) -> bool {
+        match self {
+            Self::Always => true,
+            Self::Never => false,
+            Self::Auto => stdout_is_terminal(),
+        }
+    }
 }
 
 fn period_columns(first_header: &'static str, compact: bool, show_project: bool) -> Vec<Column> {
@@ -232,6 +305,42 @@ fn period_columns(first_header: &'static str, compact: bool, show_project: bool)
     }
     columns.push(column("Cost (USD)", Align::Right));
     columns
+}
+
+fn daily_source_columns() -> Vec<Column> {
+    vec![
+        column("Date", Align::Left),
+        column("Conv", Align::Right),
+        column("Models", Align::Left),
+        column("Input", Align::Right),
+        column("Cache", Align::Right),
+        column("Output", Align::Right),
+        column("Reason", Align::Right),
+        column("All", Align::Right),
+        column("Cost", Align::Right),
+        column("Notes", Align::Left),
+    ]
+}
+
+fn daily_source_table_rows(
+    rows: &[DailyReportRow],
+    totals: Option<&TokenTotals>,
+) -> Vec<Vec<String>> {
+    let mut table_rows = Vec::new();
+    for row in rows {
+        table_rows.push(daily_source_row(row));
+        append_daily_source_breakdowns(&mut table_rows, &row.model_breakdowns);
+    }
+    if let Some(totals) = totals {
+        let conversation_count = rows.iter().map(|row| row.conversation_count).sum::<usize>();
+        let notes = rows.iter().fold(ReportNotes::default(), |mut notes, row| {
+            notes.unpriced |= row.notes.unpriced;
+            notes.reason_not_reported |= row.notes.reason_not_reported;
+            notes
+        });
+        table_rows.push(daily_source_total_row(totals, conversation_count, &notes));
+    }
+    table_rows
 }
 
 fn session_columns(compact: bool) -> Vec<Column> {
@@ -285,6 +394,21 @@ fn period_row(
     row
 }
 
+fn daily_source_row(row: &DailyReportRow) -> Vec<String> {
+    vec![
+        row.date.clone(),
+        row.conversation_count.to_string(),
+        format_models_inline(&row.models_used),
+        format_token_compact(row.totals.input_tokens),
+        format_token_compact(row.totals.cache_read_tokens),
+        format_token_compact(row.totals.output_tokens),
+        format_token_compact(row.totals.reasoning_output_tokens),
+        format_token_compact(row.totals.total_tokens),
+        format_cost(row.totals.estimated_cost_usd),
+        format_notes(&row.notes),
+    ]
+}
+
 fn period_total_row(totals: &TokenTotals, compact: bool, show_project: bool) -> Vec<String> {
     let mut row = vec!["Total".to_string()];
     if show_project {
@@ -300,6 +424,25 @@ fn period_total_row(totals: &TokenTotals, compact: bool, show_project: bool) -> 
     }
     row.push(format_cost(totals.estimated_cost_usd));
     row
+}
+
+fn daily_source_total_row(
+    totals: &TokenTotals,
+    conversation_count: usize,
+    notes: &ReportNotes,
+) -> Vec<String> {
+    vec![
+        "TOTAL".to_string(),
+        conversation_count.to_string(),
+        String::new(),
+        format_token_compact(totals.input_tokens),
+        format_token_compact(totals.cache_read_tokens),
+        format_token_compact(totals.output_tokens),
+        format_token_compact(totals.reasoning_output_tokens),
+        format_token_compact(totals.total_tokens),
+        format_cost(totals.estimated_cost_usd),
+        format_notes(notes),
+    ]
 }
 
 fn session_total_row(totals: &TokenTotals, compact: bool) -> Vec<String> {
@@ -354,7 +497,38 @@ fn append_breakdowns(
     }
 }
 
+fn append_daily_source_breakdowns(rows: &mut Vec<Vec<String>>, breakdowns: &[ModelCostBreakdown]) {
+    for item in breakdowns {
+        rows.push(vec![
+            format!("\u{2514}\u{2500} {}", format_model_name(&item.model)),
+            String::new(),
+            item.source.clone(),
+            format_token_compact(item.input_tokens),
+            format_token_compact(item.cache_read_tokens),
+            format_token_compact(item.output_tokens),
+            format_token_compact(item.reasoning_output_tokens),
+            format_token_compact(item.total_tokens),
+            format_cost(item.estimated_cost_usd),
+            String::new(),
+        ]);
+    }
+}
+
 fn render_table(columns: &[Column], rows: &[Vec<String>]) -> String {
+    render_table_styled(columns, rows, None)
+}
+
+#[derive(Clone, Copy)]
+struct DailyTableStyle {
+    source: SourceKind,
+    color_mode: ColorMode,
+}
+
+fn render_table_styled(
+    columns: &[Column],
+    rows: &[Vec<String>],
+    style_options: Option<DailyTableStyle>,
+) -> String {
     if rows.is_empty() {
         return "No usage data matched the report filters.".to_string();
     }
@@ -387,10 +561,15 @@ fn render_table(columns: &[Column], rows: &[Vec<String>]) -> String {
             .map(|column| column.header.to_string())
             .collect::<Vec<_>>(),
         &widths,
+        style_options.and_then(|style| style.header_style()),
     );
     push_border(&mut out, '\u{251C}', '\u{253C}', '\u{2524}', &widths);
     for (idx, row) in rows.iter().enumerate() {
-        push_row(&mut out, columns, row, &widths);
+        let is_total = row
+            .first()
+            .is_some_and(|cell| cell == "TOTAL" || cell == "Total");
+        let row_style = style_options.and_then(|style| style.row_style(is_total));
+        push_row(&mut out, columns, row, &widths, row_style);
         let is_last = idx + 1 == rows.len();
         if is_last {
             push_border(&mut out, '\u{2514}', '\u{2534}', '\u{2518}', &widths);
@@ -414,7 +593,13 @@ fn push_border(out: &mut String, left: char, sep: char, right: char, widths: &[u
     out.push('\n');
 }
 
-fn push_row(out: &mut String, columns: &[Column], row: &[String], widths: &[usize]) {
+fn push_row(
+    out: &mut String,
+    columns: &[Column],
+    row: &[String],
+    widths: &[usize],
+    row_style: Option<RowStyle>,
+) {
     let split_cells = widths
         .iter()
         .enumerate()
@@ -435,12 +620,70 @@ fn push_row(out: &mut String, columns: &[Column], row: &[String], widths: &[usiz
                 .map(|column| column.align)
                 .unwrap_or(Align::Left);
             out.push(' ');
-            out.push_str(&pad(&clipped, *width, align));
+            push_styled_padded(out, &clipped, *width, align, row_style, idx);
             out.push(' ');
             out.push('\u{2502}');
         }
         out.push('\n');
     }
+}
+
+#[derive(Clone, Copy)]
+struct RowStyle {
+    color: Color,
+    bold: bool,
+    notes_dim: bool,
+}
+
+impl DailyTableStyle {
+    fn header_style(self) -> Option<RowStyle> {
+        self.color_mode.enabled().then_some(RowStyle {
+            color: source_color(self.source),
+            bold: true,
+            notes_dim: false,
+        })
+    }
+
+    fn row_style(self, is_total: bool) -> Option<RowStyle> {
+        if !(is_total && self.color_mode.enabled()) {
+            return None;
+        }
+        Some(RowStyle {
+            color: source_color(self.source),
+            bold: true,
+            notes_dim: true,
+        })
+    }
+}
+
+fn push_styled_padded(
+    out: &mut String,
+    value: &str,
+    width: usize,
+    align: Align,
+    row_style: Option<RowStyle>,
+    column_idx: usize,
+) {
+    let len = value.chars().count();
+    let padding = width.saturating_sub(len);
+    let (left, right) = match align {
+        Align::Left => (String::new(), " ".repeat(padding)),
+        Align::Right => (" ".repeat(padding), String::new()),
+    };
+    out.push_str(&left);
+    if let Some(row_style) = row_style {
+        let mut content = style(value).with(row_style.color);
+        if row_style.bold {
+            content = content.bold();
+        }
+        if row_style.notes_dim && column_idx + 1 == 10 {
+            content = content.dim();
+        }
+        let _ = write!(out, "{content}");
+    } else {
+        out.push_str(value);
+    }
+    out.push_str(&right);
 }
 
 fn fit_widths(columns: &[Column], widths: &mut [usize], terminal_width: usize) {
@@ -481,16 +724,15 @@ fn cell_lines(value: &str) -> Vec<String> {
     }
 }
 
-fn pad(value: &str, width: usize, align: Align) -> String {
-    let len = value.chars().count();
-    if len >= width {
-        return value.to_string();
+fn format_notes(notes: &ReportNotes) -> String {
+    let mut labels = Vec::new();
+    if notes.unpriced {
+        labels.push("unpriced");
     }
-    let padding = " ".repeat(width - len);
-    match align {
-        Align::Left => format!("{value}{padding}"),
-        Align::Right => format!("{padding}{value}"),
+    if notes.reason_not_reported {
+        labels.push("reason not reported");
     }
+    labels.join("; ")
 }
 
 fn column(header: &'static str, align: Align) -> Column {
@@ -520,6 +762,19 @@ fn format_models(models: &[String]) -> String {
         lines.push(format!("- +{} more", models.len() - MAX_MODELS_DISPLAYED));
     }
     lines.join("\n")
+}
+
+fn format_models_inline(models: &[String]) -> String {
+    if models.is_empty() {
+        return "-".to_string();
+    }
+    models
+        .iter()
+        .map(|model| format_model_name(model))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn format_model_name(model: &str) -> String {
@@ -579,6 +834,39 @@ fn terminal_width() -> usize {
         .max(60)
 }
 
+fn source_color(source: SourceKind) -> Color {
+    match source {
+        SourceKind::Codex => Color::Cyan,
+        SourceKind::Claude => Color::Magenta,
+        SourceKind::Opencode => Color::Green,
+        SourceKind::Gemini => Color::Blue,
+    }
+}
+
+fn env_flag(key: &str) -> bool {
+    std::env::var(key)
+        .map(|value| {
+            let value = value.trim();
+            !value.is_empty()
+                && !value.eq_ignore_ascii_case("0")
+                && !value.eq_ignore_ascii_case("false")
+                && !value.eq_ignore_ascii_case("no")
+                && !value.eq_ignore_ascii_case("off")
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(not(test))]
+fn stdout_is_terminal() -> bool {
+    use std::io::IsTerminal;
+    std::io::stdout().is_terminal()
+}
+
+#[cfg(test)]
+fn stdout_is_terminal() -> bool {
+    false
+}
+
 #[cfg(not(test))]
 fn detected_terminal_width() -> Option<usize> {
     crossterm::terminal::size()
@@ -611,6 +899,13 @@ mod tests {
     }
 
     #[test]
+    fn token_compact_format_uses_short_units() {
+        assert_eq!(format_token_compact(978_050), "978.05K");
+        assert_eq!(format_token_compact(5_370_000), "5.37M");
+        assert_eq!(format_token_compact(40_330_000_000), "40.33B");
+    }
+
+    #[test]
     fn usage_table_uses_box_borders_and_total_row() {
         let totals = TokenTotals {
             input_tokens: 1234,
@@ -630,6 +925,8 @@ mod tests {
                 "gpt-5.4".to_string(),
             ],
             model_breakdowns: Vec::new(),
+            conversation_count: 1,
+            notes: ReportNotes::default(),
         };
 
         let table = render_daily_table(&[row], Some(&totals), false, false);
@@ -640,5 +937,84 @@ mod tests {
         assert!(table.contains("- sonnet-4"));
         assert!(table.contains("Total"));
         assert!(table.contains("$3.50"));
+    }
+
+    #[test]
+    fn daily_source_table_uses_lightweight_daily_columns() {
+        let totals = TokenTotals {
+            input_tokens: 978_050,
+            cache_read_tokens: 5_370_000,
+            output_tokens: 40_330,
+            reasoning_output_tokens: 12_000,
+            total_tokens: 6_400_380,
+            estimated_cost_usd: 3.5,
+        };
+        let row = DailyReportRow {
+            date: "2026-05-05".to_string(),
+            source: Some("codex".to_string()),
+            project: None,
+            totals: totals.clone(),
+            models_used: vec![
+                "claude-sonnet-4-20250514".to_string(),
+                "gpt-5.4".to_string(),
+            ],
+            model_breakdowns: Vec::new(),
+            conversation_count: 2,
+            notes: ReportNotes {
+                unpriced: false,
+                reason_not_reported: true,
+            },
+        };
+
+        let table = render_daily_source_table(&[row], Some(&totals));
+
+        assert!(table.contains("Conv"));
+        assert!(table.contains("Cache"));
+        assert!(table.contains("Reason"));
+        assert!(table.contains("All"));
+        assert!(table.contains("Notes"));
+        assert!(table.contains("reason not reported"));
+        assert!(table.contains("978.05K"));
+        assert!(table.contains("5.37M"));
+        assert!(table.contains("sonnet-4, gpt-5.4") || table.contains("gpt-5.4, sonnet-4"));
+        assert!(table.contains("TOTAL"));
+    }
+
+    #[test]
+    fn daily_source_table_can_force_ansi_styles() {
+        let totals = TokenTotals {
+            input_tokens: 1,
+            total_tokens: 1,
+            ..TokenTotals::default()
+        };
+        let row = DailyReportRow {
+            date: "2026-05-05".to_string(),
+            source: Some("codex".to_string()),
+            project: None,
+            totals: totals.clone(),
+            models_used: vec!["gpt-5.4".to_string()],
+            model_breakdowns: Vec::new(),
+            conversation_count: 1,
+            notes: ReportNotes::default(),
+        };
+
+        let title = render_source_title(SourceKind::Codex, "Codex daily usage", ColorMode::Always);
+        let table = render_daily_source_table_styled(
+            SourceKind::Codex,
+            &[row],
+            Some(&totals),
+            ColorMode::Always,
+        );
+
+        assert!(title.contains("\u{1b}["));
+        assert!(table.contains("\u{1b}["));
+        assert!(
+            render_source_title(SourceKind::Codex, "Codex daily usage", ColorMode::Never)
+                .contains("Codex daily usage")
+        );
+        assert!(
+            !render_daily_source_table_styled(SourceKind::Codex, &[], None, ColorMode::Never)
+                .contains("\u{1b}[")
+        );
     }
 }
