@@ -10,19 +10,20 @@ const logger = window.console;
  * 1) 填充项目数标签
  * 2) 填充项目行（前 6 个）
  */
-export function renderProjects(context) {
+export function renderProjects(context, state = {}) {
   logger.info('开始渲染项目排行区');
 
   const { panels } = context;
   const projectRows = panels.projects || [];
+  const expanded = Boolean(state?.expanded?.projects);
+  const visibleRows = expanded ? projectRows : projectRows.slice(0, 6);
   const max = Number(projectRows[0]?.total_tokens || 1);
 
   // 1.1 填充项目数标签
   document.getElementById('projects-count').textContent = `${projectRows.length} 个项目`;
 
   // 1.2 填充项目行
-  const rowsHtml = projectRows
-    .slice(0, 6)
+  const rowsHtml = visibleRows
     .map((row) => {
       const total_tokens = Number(row.total_tokens || 0);
       const widthPct = ratio(total_tokens, max);

@@ -8,6 +8,7 @@ use axum::{
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
+use chrono::{FixedOffset, NaiveDate};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::net::TcpListener;
@@ -51,6 +52,7 @@ pub async fn serve(store: Store, preferred_port: Option<u16>) -> Result<SocketAd
     let app = Router::new()
         .route("/", get(index_live))
         .route("/assets/{*path}", get(asset_file))
+        .route("/api/dashboard", get(api_dashboard))
         .route("/api/overview", get(api_overview))
         .route("/api/trends", get(api_trends))
         .route("/api/trends_daily", get(api_trends_daily))
@@ -129,10 +131,25 @@ async fn asset_file(Path(path): Path<String>) -> Response {
     }
 }
 
-async fn api_overview(State(state): State<WebState>) -> Response {
+async fn api_dashboard(
+    State(state): State<WebState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let filter = dashboard_filter_from_params(&params);
+    api_json(
+        "/api/dashboard",
+        load_via_dashboard(&state, |d| d.snapshot(&filter)),
+    )
+}
+
+async fn api_overview(
+    State(state): State<WebState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let filter = dashboard_filter_from_params(&params);
     api_json(
         "/api/overview",
-        load_via_dashboard(&state, |d| d.overview(&Default::default())),
+        load_via_dashboard(&state, |d| d.overview(&filter)),
     )
 }
 
@@ -141,51 +158,76 @@ async fn api_trends(
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
     let window = params.get("window").map(String::as_str).unwrap_or("day");
+    let filter = dashboard_filter_from_params_without_window(&params);
     api_json(
         "/api/trends",
-        load_via_dashboard(&state, |d| d.trends(window, &Default::default())),
+        load_via_dashboard(&state, |d| d.trends(window, &filter)),
     )
 }
 
-async fn api_trends_daily(State(state): State<WebState>) -> Response {
+async fn api_trends_daily(
+    State(state): State<WebState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let filter = dashboard_filter_from_params(&params);
     api_json(
         "/api/trends_daily",
-        load_via_dashboard(&state, |d| d.trends_daily(&Default::default())),
+        load_via_dashboard(&state, |d| d.trends_daily(&filter)),
     )
 }
 
-async fn api_models(State(state): State<WebState>) -> Response {
+async fn api_models(
+    State(state): State<WebState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let filter = dashboard_filter_from_params(&params);
     api_json(
         "/api/models",
-        load_via_dashboard(&state, |d| d.model_breakdown(&Default::default())),
+        load_via_dashboard(&state, |d| d.model_breakdown(&filter)),
     )
 }
 
-async fn api_sources(State(state): State<WebState>) -> Response {
+async fn api_sources(
+    State(state): State<WebState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let filter = dashboard_filter_from_params(&params);
     api_json(
         "/api/sources",
-        load_via_dashboard(&state, |d| d.source_breakdown(&Default::default())),
+        load_via_dashboard(&state, |d| d.source_breakdown(&filter)),
     )
 }
 
-async fn api_projects(State(state): State<WebState>) -> Response {
+async fn api_projects(
+    State(state): State<WebState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let filter = dashboard_filter_from_params(&params);
     api_json(
         "/api/projects",
-        load_via_dashboard(&state, |d| d.project_breakdown(&Default::default())),
+        load_via_dashboard(&state, |d| d.project_breakdown(&filter)),
     )
 }
 
-async fn api_costs(State(state): State<WebState>) -> Response {
+async fn api_costs(
+    State(state): State<WebState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let filter = dashboard_filter_from_params(&params);
     api_json(
         "/api/costs",
-        load_via_dashboard(&state, |d| d.cost_breakdown(&Default::default())),
+        load_via_dashboard(&state, |d| d.cost_breakdown(&filter)),
     )
 }
 
-async fn api_home_overview(State(state): State<WebState>) -> Response {
+async fn api_home_overview(
+    State(state): State<WebState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let filter = dashboard_filter_from_params(&params);
     api_json(
         "/api/home_overview",
-        load_via_dashboard(&state, |d| d.home_overview(&Default::default())),
+        load_via_dashboard(&state, |d| d.home_overview(&filter)),
     )
 }
 
@@ -197,16 +239,7 @@ async fn api_heatmap(
         .get("days")
         .and_then(|raw| raw.parse::<u32>().ok())
         .unwrap_or(365);
-    let source = params.get("source").and_then(|raw| match raw.as_str() {
-        "codex" => Some(crate::models::SourceKind::Codex),
-        "claude" => Some(crate::models::SourceKind::Claude),
-        "opencode" => Some(crate::models::SourceKind::Opencode),
-        _ => None,
-    });
-    let filter = crate::query::QueryFilter {
-        source,
-        ..Default::default()
-    };
+    let filter = dashboard_filter_from_params(&params);
     api_json(
         "/api/heatmap",
         load_via_dashboard(&state, |d| d.heatmap(&filter, days)),
@@ -217,13 +250,6 @@ async fn api_logs(
     State(state): State<WebState>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
-    let source = params
-        .get("source")
-        .and_then(|raw| SourceKind::parse_id(raw.trim()));
-    let model = params
-        .get("model")
-        .map(|raw| raw.trim().to_string())
-        .filter(|raw| !raw.is_empty());
     let cursor = params
         .get("cursor")
         .map(|raw| raw.trim().to_string())
@@ -244,17 +270,7 @@ async fn api_logs(
             .into_response();
     }
 
-    let filter = QueryFilter {
-        source,
-        model,
-        since: params
-            .get("since")
-            .and_then(|raw| chrono::NaiveDate::parse_from_str(raw.trim(), "%Y-%m-%d").ok()),
-        until: params
-            .get("until")
-            .and_then(|raw| chrono::NaiveDate::parse_from_str(raw.trim(), "%Y-%m-%d").ok()),
-        ..Default::default()
-    };
+    let filter = dashboard_filter_from_params(&params);
     let query = LogsQuery {
         filter,
         page_size: params
@@ -417,6 +433,119 @@ fn load_via_dashboard<T>(
     f(&dashboard)
 }
 
+fn dashboard_filter_from_params(params: &HashMap<String, String>) -> QueryFilter {
+    let mut filter = dashboard_filter_from_params_without_window(params);
+
+    if filter.since.is_none() && filter.until.is_none() {
+        apply_window_filter(params.get("window").map(String::as_str), &mut filter);
+    }
+
+    filter
+}
+
+fn dashboard_filter_from_params_without_window(params: &HashMap<String, String>) -> QueryFilter {
+    QueryFilter {
+        source: params
+            .get("source")
+            .and_then(|raw| SourceKind::parse_id(raw.trim())),
+        model: query_string(params, "model"),
+        since: query_date(params, "since"),
+        until: query_date(params, "until"),
+        project_hash: query_string(params, "project_hash")
+            .or_else(|| query_string(params, "project")),
+        timezone: query_timezone(params.get("timezone").or_else(|| params.get("tz"))),
+    }
+}
+
+fn query_string(params: &HashMap<String, String>, key: &str) -> Option<String> {
+    params
+        .get(key)
+        .map(|raw| raw.trim().to_string())
+        .filter(|raw| !raw.is_empty() && !raw.eq_ignore_ascii_case("all"))
+}
+
+fn query_date(params: &HashMap<String, String>, key: &str) -> Option<NaiveDate> {
+    params
+        .get(key)
+        .and_then(|raw| NaiveDate::parse_from_str(raw.trim(), "%Y-%m-%d").ok())
+}
+
+fn query_timezone(value: Option<&String>) -> crate::query::ReportTimezone {
+    let Some(raw) = value
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    else {
+        return crate::query::ReportTimezone::Local;
+    };
+    if raw.eq_ignore_ascii_case("utc") || raw == "Z" {
+        return crate::query::ReportTimezone::Utc;
+    }
+    if raw.eq_ignore_ascii_case("local") {
+        return crate::query::ReportTimezone::Local;
+    }
+    parse_fixed_offset(raw)
+        .map(crate::query::ReportTimezone::Fixed)
+        .unwrap_or(crate::query::ReportTimezone::Local)
+}
+
+fn parse_fixed_offset(raw: &str) -> Option<FixedOffset> {
+    let normalized = raw
+        .strip_prefix("UTC")
+        .or_else(|| raw.strip_prefix("utc"))
+        .unwrap_or(raw);
+    let sign = normalized.chars().next()?;
+    if !matches!(sign, '+' | '-') {
+        return None;
+    }
+    let rest = &normalized[sign.len_utf8()..];
+    let (hours, minutes) = if let Some((hours, minutes)) = rest.split_once(':') {
+        (hours.parse::<i32>().ok()?, minutes.parse::<i32>().ok()?)
+    } else if rest.len() == 4 {
+        (
+            rest[..2].parse::<i32>().ok()?,
+            rest[2..].parse::<i32>().ok()?,
+        )
+    } else {
+        (rest.parse::<i32>().ok()?, 0)
+    };
+    if hours > 23 || minutes > 59 {
+        return None;
+    }
+    let seconds = hours * 3600 + minutes * 60;
+    if sign == '-' {
+        FixedOffset::west_opt(seconds)
+    } else {
+        FixedOffset::east_opt(seconds)
+    }
+}
+
+fn apply_window_filter(window: Option<&str>, filter: &mut QueryFilter) {
+    let Some(window) = window.map(str::trim).filter(|value| !value.is_empty()) else {
+        return;
+    };
+    let today = chrono::Local::now().date_naive();
+    match window {
+        "today" => {
+            filter.since = Some(today);
+            filter.until = Some(today);
+        }
+        "day" | "24h" => {
+            filter.since = today.pred_opt();
+            filter.until = Some(today);
+        }
+        "week" | "7d" => {
+            filter.since = today.checked_sub_days(chrono::Days::new(6));
+            filter.until = Some(today);
+        }
+        "month" | "30d" => {
+            filter.since = today.checked_sub_days(chrono::Days::new(29));
+            filter.until = Some(today);
+        }
+        "all" => {}
+        _ => {}
+    }
+}
+
 fn api_json<T>(endpoint: &'static str, result: LlmusageResult<T>) -> Response
 where
     T: Serialize,
@@ -543,6 +672,8 @@ mod tests {
     fn live_shell_uses_module_entry() {
         let html = live_index_html();
         assert!(html.contains("data-mode=\"live\""));
+        assert!(html.contains("data-app-version=\""));
+        assert!(html.contains("data-supported-sources=\"codex, claude, opencode, gemini\""));
         assert!(html.contains("type=\"module\""));
         assert!(html.contains("assets/app.js"));
         assert!(html.contains("assets/base.css"));
@@ -561,6 +692,29 @@ mod tests {
         assert!(html.contains("id=\"projects\""));
         assert!(html.contains("id=\"cost\""));
         assert!(html.contains("id=\"status\""));
+        assert!(html.contains("id=\"insights-card\""));
+        assert!(html.contains("id=\"filter-rail\""));
+        assert!(html.contains("data-filter=\"source\""));
+        assert!(html.contains("data-filter=\"model\""));
+        assert!(html.contains("id=\"auto-refresh\""));
+        assert!(html.contains("data-refresh-interval=\"30000\""));
+        assert!(html.contains("data-refresh-interval=\"60000\""));
+    }
+
+    #[test]
+    fn dashboard_shell_uses_runtime_metadata_and_real_toggle_controls() {
+        let html = live_index_html();
+        assert!(html.contains(&format!("v{} · local", env!("CARGO_PKG_VERSION"))));
+        assert!(html.contains(&format!(
+            "llmusage v{} · local build",
+            env!("CARGO_PKG_VERSION")
+        )));
+        assert!(html.contains("data-toggle-panel=\"models\""));
+        assert!(html.contains("data-toggle-panel=\"projects\""));
+        assert!(html.contains("data-toggle-panel=\"costs\""));
+        assert!(html.contains("aria-expanded=\"false\""));
+        assert!(!html.contains(&["v0.", "4.2"].concat()));
+        assert!(!html.contains(&["2026", ".05", ".06"].concat()));
     }
 
     #[test]
@@ -601,6 +755,7 @@ mod tests {
                 "render/sources.js",
                 "render/projects.js",
                 "render/costs.js",
+                "render/insights.js",
                 "render/charts.js",
                 "render/tables.js",
                 "render/health.js",
@@ -658,6 +813,55 @@ mod tests {
     }
 
     #[test]
+    fn dashboard_assets_remove_demo_metrics_and_stale_metadata() {
+        let selected_bodies = asset_manifest()
+            .iter()
+            .filter(|asset| {
+                matches!(
+                    asset.path,
+                    "app.js" | "copy.js" | "data/derive.js" | "render/hero.js"
+                )
+            })
+            .map(|asset| asset.body)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        for stale in [
+            ["+$3", ".4K"].concat(),
+            ["$", "4", ",", "400"].concat(),
+            format!("${}", "182.40"),
+            ["~$", "28K"].concat(),
+            ["v0.", "4.2"].concat(),
+            ["2026", ".05", ".06"].concat(),
+            ["source", "Suffix"].concat(),
+            ["codex", " / ", "claude"].concat(),
+            ["projects", "-anchor"].concat(),
+        ] {
+            assert!(
+                !selected_bodies.contains(&stale),
+                "found stale dashboard literal: {stale}"
+            );
+        }
+
+        assert!(selected_bodies.contains("cache_savings_usd"));
+        assert!(selected_bodies.contains("supportedSources"));
+    }
+
+    #[test]
+    fn app_entry_wires_real_panel_toggles_and_project_navigation() {
+        let app_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "app.js")
+            .expect("app.js asset")
+            .body;
+        assert!(app_js.contains("setupPanelToggles(state)"));
+        assert!(app_js.contains("state.expanded[panel] = !state.expanded[panel]"));
+        assert!(app_js.contains("syncPanelToggleControls(context, dashboardState)"));
+        assert!(app_js.contains("document.getElementById('projects')?.scrollIntoView"));
+        assert!(!app_js.contains(&["projects", "-anchor"].concat()));
+    }
+
+    #[test]
     fn fetch_layer_reads_structured_error_payloads() {
         let fetch_js = asset_manifest()
             .iter()
@@ -675,9 +879,24 @@ mod tests {
             .find(|asset| asset.path == "app.js")
             .expect("app.js asset")
             .body;
-        assert!(app_js.contains("loadSection(state, 'overview', '/api/overview')"));
-        assert!(app_js.contains("loadTrendWindow(state, state.trendWindow)"));
+        assert!(app_js.contains("loadDashboardSnapshot(state)"));
+        assert!(app_js.contains("syncUrlFromState(state)"));
+        assert!(app_js.contains("state.filters = currentFilterInputs()"));
         assert!(!app_js.contains("window.LLMUSAGE_DATA"));
+    }
+
+    #[test]
+    fn fetch_layer_prefers_dashboard_snapshot_with_legacy_fallback_helpers() {
+        let fetch_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "data/fetch.js")
+            .expect("fetch.js asset")
+            .body;
+        assert!(fetch_js.contains("export async function loadDashboardSnapshot"));
+        assert!(fetch_js.contains("loadJson(`/api/dashboard${buildFilterQuery(state)}`)"));
+        assert!(fetch_js.contains("export async function loadSection"));
+        assert!(fetch_js.contains("回退到旧分段 API"));
+        assert!(fetch_js.contains("snapshot.json"));
     }
 
     #[test]
@@ -705,6 +924,8 @@ mod tests {
             "data-i18n=\"shell.nav.item.cost\"",
             "data-i18n=\"shell.btn.export\"",
             "data-i18n=\"shell.btn.sync\"",
+            "data-i18n=\"shell.filters.apply\"",
+            "data-i18n=\"shell.filters.reset\"",
             "data-i18n=\"shell.endpoint.lastSync\"",
             "data-i18n=\"shell.crumb.local\"",
             "data-i18n=\"shell.tag.local\"",
@@ -712,6 +933,14 @@ mod tests {
         ] {
             assert!(html.contains(key), "missing i18n key in shell HTML: {key}");
         }
+        assert!(
+            !html.contains("data-i18n=\"shell.brand.sub\""),
+            "brand version is runtime metadata and must not be overwritten by static i18n"
+        );
+        assert!(
+            !html.contains("data-i18n=\"shell.footer.build\""),
+            "footer version is runtime metadata and must not be overwritten by static i18n"
+        );
     }
 
     #[test]
@@ -774,9 +1003,84 @@ mod tests {
             .body;
         assert!(app_js.contains("setupThemeToggle"));
         assert!(app_js.contains("setupLocaleToggle"));
+        assert!(app_js.contains("setupSyncJob(state)"));
+        assert!(app_js.contains("setupAutoRefresh(state)"));
+        assert!(app_js.contains("renderInsights(context)"));
         assert!(app_js.contains("initTheme()"));
         assert!(app_js.contains("applyDomI18n(document)"));
         assert!(app_js.contains("onLocaleChange"));
+    }
+
+    #[test]
+    fn app_entry_wires_auto_refresh_controls() {
+        let app_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "app.js")
+            .expect("app.js asset")
+            .body;
+        let copy_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "copy.js")
+            .expect("copy.js asset")
+            .body;
+
+        assert!(app_js.contains("AUTO_REFRESH_STORAGE_KEY"));
+        assert!(app_js.contains("window.setInterval"));
+        assert!(app_js.contains("data-refresh-interval"));
+        assert!(app_js.contains("document.hidden"));
+        assert!(app_js.contains("state.activeJobSnapshot?.status === 'running'"));
+        assert!(app_js.contains("shell.refresh.snapshotDisabled"));
+        assert!(copy_js.contains("shell.refresh.label"));
+        assert!(copy_js.contains("shell.refresh.failed"));
+    }
+
+    #[test]
+    fn app_entry_wires_sync_job_lifecycle() {
+        let app_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "app.js")
+            .expect("app.js asset")
+            .body;
+        assert!(app_js.contains("postJson('/api/jobs', syncOptionsFromState(state))"));
+        assert!(app_js.contains("/api/jobs/${encodeURIComponent(state.activeJobId)}/cancel"));
+        assert!(app_js.contains("pollJobUntilTerminal(state, state.activeJobId)"));
+        assert!(app_js.contains("await reloadDashboard(state)"));
+        assert!(app_js.contains("shell.sync.snapshotDisabled"));
+    }
+
+    #[test]
+    fn dashboard_assets_surface_diagnostics_insights_without_fake_claims() {
+        let fetch_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "data/fetch.js")
+            .expect("fetch.js asset")
+            .body;
+        let derive_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "data/derive.js")
+            .expect("derive.js asset")
+            .body;
+        let insights_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "render/insights.js")
+            .expect("insights.js asset")
+            .body;
+        let copy_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "copy.js")
+            .expect("copy.js asset")
+            .body;
+
+        assert!(fetch_js.contains("diagnostics: snapshot?.diagnostics"));
+        assert!(fetch_js.contains("loadSection(state, 'diagnostics', '/api/diagnostics')"));
+        assert!(derive_js.contains("function buildInsights"));
+        assert!(derive_js.contains("cache_efficiency"));
+        assert!(derive_js.contains("pricing_status"));
+        assert!(derive_js.contains("lossy_rebuild_risk"));
+        assert!(derive_js.contains("普通 sync 不会删除已导入历史"));
+        assert!(insights_js.contains("insight-note"));
+        assert!(copy_js.contains("not final diagnoses"));
+        assert!(copy_js.contains("不是最终诊断"));
     }
 
     #[test]
@@ -947,6 +1251,241 @@ mod tests {
                 expected_labels[1].clone(),
                 expected_labels[2].clone()
             ]
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn dashboard_apis_share_filter_query_parameters() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let conn = store.open_connection()?;
+        for (source, model, hour_start, tokens, cost, project_hash) in [
+            (
+                "codex",
+                "gpt-5",
+                "2026-05-01T00:00:00Z",
+                10,
+                0.10,
+                "project-a",
+            ),
+            (
+                "claude",
+                "sonnet",
+                "2026-05-01T00:00:00Z",
+                20,
+                0.20,
+                "project-b",
+            ),
+            (
+                "codex",
+                "gpt-5",
+                "2026-05-03T00:00:00Z",
+                30,
+                0.30,
+                "project-a",
+            ),
+        ] {
+            conn.execute(
+                r#"
+                INSERT INTO usage_bucket_30m(
+                    source, model, hour_start, project_hash, project_label, project_ref,
+                    input_tokens, cache_read_tokens, cache_creation_tokens,
+                    output_tokens, reasoning_output_tokens, total_tokens,
+                    cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source,
+                    event_count, updated_at
+                )
+                VALUES (?1, ?2, ?3, ?6, ?6, NULL,
+                        ?4, 0, 0, 0, 0, ?4,
+                        ?5, ?5, 'static', 'static-v1',
+                        1, ?3)
+                "#,
+                rusqlite::params![source, model, hour_start, tokens, cost, project_hash],
+            )?;
+        }
+        drop(conn);
+
+        let addr = serve(store, Some(0)).await?;
+        let filter = "source=codex&model=gpt-5&since=2026-05-02&until=2026-05-03&timezone=UTC";
+
+        let (status, overview) =
+            route_json(addr, "GET", &format!("/api/overview?{filter}"), None).await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(overview["total"]["total_tokens"], 30);
+        assert_eq!(overview["total_events"], 1);
+        assert_eq!(overview["total_cost_usd"], 0.30);
+
+        let (status, models) =
+            route_json(addr, "GET", &format!("/api/models?{filter}"), None).await?;
+        assert_eq!(status, StatusCode::OK);
+        let models = models.as_array().expect("models array");
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0]["model"], "gpt-5");
+        assert_eq!(models[0]["total_tokens"], 30);
+
+        let (status, projects) =
+            route_json(addr, "GET", &format!("/api/projects?{filter}"), None).await?;
+        assert_eq!(status, StatusCode::OK);
+        let projects = projects.as_array().expect("projects array");
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0]["project_hash"], "project-a");
+
+        let (status, costs) =
+            route_json(addr, "GET", &format!("/api/costs?{filter}"), None).await?;
+        assert_eq!(status, StatusCode::OK);
+        let costs = costs.as_array().expect("costs array");
+        assert_eq!(costs.len(), 1);
+        assert_eq!(costs[0]["source"], "codex");
+        assert_eq!(costs[0]["estimated_cost_usd"], 0.30);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn api_dashboard_returns_single_snapshot_with_filter() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let conn = store.open_connection()?;
+        for (source, model, project_hash, project_label, tokens, cost) in [
+            ("codex", "gpt-5", "project-a", "Project A", 10, 0.10),
+            ("claude", "sonnet", "project-b", "Project B", 20, 0.20),
+        ] {
+            conn.execute(
+                r#"
+                INSERT INTO usage_bucket_30m(
+                    source, model, hour_start, project_hash, project_label, project_ref,
+                    input_tokens, cache_read_tokens, cache_creation_tokens,
+                    output_tokens, reasoning_output_tokens, total_tokens,
+                    cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source,
+                    event_count, updated_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, NULL,
+                        ?6, 0, 0, 0, 0, ?7,
+                        ?8, ?9, 'static', 'static-v1',
+                        1, ?3)
+                "#,
+                rusqlite::params![
+                    source,
+                    model,
+                    "2026-05-01T00:00:00Z",
+                    project_hash,
+                    project_label,
+                    tokens,
+                    tokens,
+                    cost,
+                    cost
+                ],
+            )?;
+        }
+        drop(conn);
+
+        let addr = serve(store, Some(0)).await?;
+        let (status, payload) = route_json(
+            addr,
+            "GET",
+            "/api/dashboard?source=codex&timezone=UTC",
+            None,
+        )
+        .await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(payload["overview"]["total"]["total_tokens"], 10);
+        assert_eq!(payload["models"][0]["model"], "gpt-5");
+        assert_eq!(payload["sources"][0]["source"], "codex");
+        assert_eq!(payload["projects"][0]["project_hash"], "project-a");
+        assert_eq!(payload["costs"][0]["source"], "codex");
+        assert!(payload["health"].is_object());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn api_dashboard_applies_window_to_snapshot_sections() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let conn = store.open_connection()?;
+        let stale =
+            (Utc::now() - ChronoDuration::days(20)).to_rfc3339_opts(SecondsFormat::Secs, true);
+        let fresh =
+            (Utc::now() - ChronoDuration::hours(2)).to_rfc3339_opts(SecondsFormat::Secs, true);
+        for (hour_start, tokens, model) in [(&stale, 10, "old-model"), (&fresh, 40, "fresh-model")]
+        {
+            conn.execute(
+                r#"
+                INSERT INTO usage_bucket_30m(
+                    source, model, hour_start, project_hash, project_label, project_ref,
+                    input_tokens, cache_read_tokens, cache_creation_tokens,
+                    output_tokens, reasoning_output_tokens, total_tokens,
+                    cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source,
+                    event_count, updated_at
+                )
+                VALUES ('codex', ?3, ?1, ?3, ?3, NULL,
+                        ?2, 0, 0, 0, 0, ?2,
+                        ?2 * 0.01, ?2 * 0.01, 'static', 'static-v1',
+                        1, ?1)
+                "#,
+                rusqlite::params![hour_start, tokens, model],
+            )?;
+        }
+        drop(conn);
+
+        let addr = serve(store, Some(0)).await?;
+        let (status, payload) = route_json(
+            addr,
+            "GET",
+            "/api/dashboard?window=day&source=codex&timezone=UTC",
+            None,
+        )
+        .await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(payload["overview"]["total"]["total_tokens"], 40);
+        assert_eq!(payload["models"].as_array().expect("models").len(), 1);
+        assert_eq!(payload["models"][0]["model"], "fresh-model");
+        assert_eq!(payload["costs"][0]["model"], "fresh-model");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn api_dashboard_embeds_archive_diagnostics_for_insights() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let conn = store.open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO source_file(source, file_path, state, last_seen_at, last_state_change_at)
+            VALUES ('codex', ?1, 'missing', NULL, '2026-05-01T00:00:00Z')
+            "#,
+            [r"D:\missing\codex.jsonl"],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_event(
+                event_key, source, model, event_at, hour_start,
+                input_tokens, cache_creation_tokens, cache_read_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                project_hash, project_label, project_ref, path_hash,
+                session_id, session_label, source_path_hash, created_at,
+                cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source, pricing_rate
+            )
+            VALUES ('codex:event:diagnostics', 'codex', 'gpt-5',
+                    '2026-05-01T00:00:00Z', '2026-05-01T00:00:00Z',
+                    10, 0, 0, 0, 0, 10,
+                    'project-a', 'Project A', NULL, 'path-a',
+                    NULL, NULL, NULL, '2026-05-01T00:00:00Z',
+                    0.1, 0.1, 'static', 'static-v1', NULL)
+            "#,
+            [],
+        )?;
+        drop(conn);
+
+        let addr = serve(store, Some(0)).await?;
+        let (status, payload) = route_json(addr, "GET", "/api/dashboard", None).await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(payload["diagnostics"]["by_source"][0]["source"], "codex");
+        assert_eq!(
+            payload["diagnostics"]["by_source"][0]["missing_file_count"],
+            1
+        );
+        assert_eq!(
+            payload["diagnostics"]["by_source"][0]["protected_event_count"],
+            1
+        );
+        assert_eq!(
+            payload["diagnostics"]["by_source"][0]["lossy_rebuild_risk"],
+            true
         );
         Ok(())
     }

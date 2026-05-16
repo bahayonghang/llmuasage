@@ -303,6 +303,8 @@ pub struct DashboardSnapshot {
     pub costs: Vec<CostLine>,
     /// Integration/cursor/run health payload.
     pub health: HealthPayload,
+    /// Archive/source-file diagnostics plus recent failed run records.
+    pub diagnostics: DiagnosticsPayload,
 }
 
 /// Read-side façade backed by a single SQLite connection. All eight dashboard
@@ -773,6 +775,7 @@ impl Dashboard {
             projects: self.project_breakdown(filter)?,
             costs: self.cost_breakdown(filter)?,
             health: self.health()?,
+            diagnostics: self.diagnostics()?,
         })
     }
 }

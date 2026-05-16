@@ -13,16 +13,17 @@ const logger = window.console;
  * 3) 填充 4 个成本统计卡
  * 4) 填充失败记录和集成状态
  */
-export function renderCosts(context) {
+export function renderCosts(context, state = {}) {
   logger.info('开始渲染成本估算区');
 
   const { panels, health, ledgerSummary } = context;
   const costRows = panels.costs || [];
+  const expanded = Boolean(state?.expanded?.costs);
+  const visibleCostRows = expanded ? costRows : costRows.slice(0, 5);
   const max = Number(costRows[0]?.estimated_cost_usd || 1);
 
   // 1.1 填充成本条形图
-  const barHtml = costRows
-    .slice(0, 5)
+  const barHtml = visibleCostRows
     .map((row) => {
       const cost = Number(row.estimated_cost_usd || 0);
       const widthPct = ratio(cost, max);
@@ -42,8 +43,7 @@ export function renderCosts(context) {
   document.getElementById('costs-bars').innerHTML = barHtml;
 
   // 1.2 填充成本表格
-  const tableHtml = costRows
-    .slice(0, 5)
+  const tableHtml = visibleCostRows
     .map((row) => {
       const total_tokens = Number(row.total_tokens || 0);
       const cost = Number(row.estimated_cost_usd || 0);

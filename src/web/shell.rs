@@ -23,6 +23,12 @@ fn html_shell(mode: &str) -> String {
     } else {
         ("仅本地", "shell.tag.local")
     };
+    let app_version = env!("CARGO_PKG_VERSION");
+    let supported_sources = crate::sources::registered_parsers()
+        .into_iter()
+        .map(|parser| parser.source().as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
 
     format!(
         r##"<!DOCTYPE html>
@@ -51,7 +57,7 @@ fn html_shell(mode: &str) -> String {
 <link rel="stylesheet" href="assets/components.css" />
 <link rel="stylesheet" href="assets/charts.css" />
 </head>
-<body data-mode="{mode}">
+<body data-mode="{mode}" data-app-version="{app_version}" data-supported-sources="{supported_sources}">
 
 <div class="app">
   <!-- Sidebar -->
@@ -60,7 +66,7 @@ fn html_shell(mode: &str) -> String {
       <div class="brand-mark">{brand_mark}</div>
       <div>
         <div class="brand-name">llmusage</div>
-        <div class="brand-sub" data-i18n="shell.brand.sub">v0.4.2 · local</div>
+        <div class="brand-sub">v{app_version} · local</div>
       </div>
     </div>
 
@@ -154,6 +160,12 @@ fn html_shell(mode: &str) -> String {
           <svg class="i" viewBox="0 0 24 24" style="width: 13px; height: 13px;"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
           <span data-i18n="shell.btn.export">导出 JSON</span>
         </button>
+        <div class="refresh-toggle" id="auto-refresh" role="group" data-i18n-attr="aria-label=shell.refresh.aria">
+          <span class="refresh-label" data-i18n="shell.refresh.label">刷新</span>
+          <button type="button" data-refresh-interval="0" aria-pressed="true" data-i18n="shell.refresh.off">关闭</button>
+          <button type="button" data-refresh-interval="30000" aria-pressed="false">30s</button>
+          <button type="button" data-refresh-interval="60000" aria-pressed="false">60s</button>
+        </div>
         <button class="btn btn-primary" id="btn-sync">
           <svg class="i" viewBox="0 0 24 24" style="width: 13px; height: 13px;"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15A9 9 0 1 1 18 6.36L23 10"/></svg>
           <span data-i18n="shell.btn.sync">同步</span>
@@ -175,6 +187,31 @@ fn html_shell(mode: &str) -> String {
 
         <!-- Run summary card -->
         <div class="status-panel" id="status-panel"></div>
+      </div>
+
+      <div class="filter-rail" id="filter-rail" aria-label="Dashboard filters">
+        <div class="filter-group">
+          <label for="filter-source" data-i18n="shell.filters.source">来源</label>
+          <select id="filter-source" data-filter="source">
+            <option value="all" data-i18n="shell.filters.allSources">全部来源</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label for="filter-model" data-i18n="shell.filters.model">模型</label>
+          <input id="filter-model" data-filter="model" type="search" placeholder="all models" data-i18n-attr="placeholder=shell.filters.modelPlaceholder" />
+        </div>
+        <div class="filter-group">
+          <label for="filter-since" data-i18n="shell.filters.since">起始日期</label>
+          <input id="filter-since" data-filter="since" type="date" />
+        </div>
+        <div class="filter-group">
+          <label for="filter-until" data-i18n="shell.filters.until">结束日期</label>
+          <input id="filter-until" data-filter="until" type="date" />
+        </div>
+        <div class="filter-actions">
+          <button class="btn" id="filters-apply" type="button" data-i18n="shell.filters.apply">应用筛选</button>
+          <button class="btn" id="filters-reset" type="button" data-i18n="shell.filters.reset">重置</button>
+        </div>
       </div>
 
       <!-- KPI cards -->
@@ -245,7 +282,7 @@ fn html_shell(mode: &str) -> String {
           <div id="models-bars"></div>
           <div id="models-table"></div>
 
-          <button class="show-more" data-toggle-panel="models" data-i18n="shell.models.expand">展开完整排行 →</button>
+          <button class="show-more" type="button" data-toggle-panel="models" aria-expanded="false" data-i18n="shell.models.expand">展开完整排行 →</button>
         </div>
 
         <div>
@@ -270,7 +307,7 @@ fn html_shell(mode: &str) -> String {
 
             <div class="project-list" id="projects-rows"></div>
 
-            <button class="show-more" data-toggle-panel="projects" data-i18n="shell.projects.expand">展开全部项目 →</button>
+            <button class="show-more" type="button" data-toggle-panel="projects" aria-expanded="false" data-i18n="shell.projects.expand">展开全部项目 →</button>
           </div>
         </div>
       </div>
@@ -294,12 +331,19 @@ fn html_shell(mode: &str) -> String {
           <div id="costs-bars" style="margin-top: 18px;"></div>
           <div id="costs-table"></div>
 
-          <button class="show-more" data-toggle-panel="costs" data-i18n="shell.cost.expand">展开全部成本项 →</button>
+          <button class="show-more" type="button" data-toggle-panel="costs" aria-expanded="false" data-i18n="shell.cost.expand">展开全部成本项 →</button>
         </div>
 
         <div id="status" class="block" style="margin: 0;">
           <div class="panel">
             <div class="cost-grid" id="costs-stats"></div>
+
+            <div style="border-top: 1px dashed var(--line); padding-top: 18px;">
+              <div class="section-eyebrow" data-i18n="shell.insights.eyebrow">INSIGHTS</div>
+              <h3 style="font-size: 16px; font-weight: 600; margin: 4px 0 6px;" data-i18n="shell.insights.title">诊断线索</h3>
+              <p class="panel-sub" data-i18n="shell.insights.sub">信号只表示可能的下一步，不代表最终诊断。</p>
+              <div id="insights-card"></div>
+            </div>
 
             <div style="border-top: 1px dashed var(--line); padding-top: 18px;">
               <div class="section-eyebrow" data-i18n="shell.failures.eyebrow">FAILURES</div>
@@ -318,7 +362,7 @@ fn html_shell(mode: &str) -> String {
     </section>
 
     <footer class="foot">
-      <span data-i18n="shell.footer.build">llmusage v0.4.2 · build 2026.05.06</span>
+      <span>llmusage v{app_version} · local build</span>
       <span><a href="#overview" data-i18n="shell.footer.backToTop">回到顶部 ↑</a></span>
     </footer>
   </main>
@@ -328,6 +372,8 @@ fn html_shell(mode: &str) -> String {
 </body>
 </html>"##,
         mode = mode,
+        app_version = app_version,
+        supported_sources = supported_sources,
         environment_chip = environment_chip,
         environment_chip_key = environment_chip_key,
         brand_mark = super::brand::BRAND_MARK_SVG

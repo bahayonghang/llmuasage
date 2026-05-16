@@ -10,16 +10,17 @@ const logger = window.console;
  * 1) 填充模型用量条形图（前 8 个）
  * 2) 填充模型用量表格
  */
-export function renderModels(context) {
+export function renderModels(context, state = {}) {
   logger.info('开始渲染模型分布区');
 
   const { panels } = context;
   const modelRows = panels.models || [];
+  const expanded = Boolean(state?.expanded?.models);
+  const visibleRows = expanded ? modelRows : modelRows.slice(0, 8);
   const max = Number(modelRows[0]?.total_tokens || 1);
 
   // 1.1 填充模型用量条形图
-  const barHtml = modelRows
-    .slice(0, 8)
+  const barHtml = visibleRows
     .map((row) => {
       const total_tokens = Number(row.total_tokens || 0);
       const widthPct = ratio(total_tokens, max);
@@ -39,8 +40,7 @@ export function renderModels(context) {
   document.getElementById('models-bars').innerHTML = barHtml;
 
   // 1.2 填充模型用量表格
-  const tableHtml = modelRows
-    .slice(0, 8)
+  const tableHtml = visibleRows
     .map((row) => {
       const total_tokens = Number(row.total_tokens || 0);
       const input_tokens = Number(row.input_tokens || 0);

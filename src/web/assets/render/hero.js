@@ -4,6 +4,15 @@ import { buildKpis } from '../data/derive.js';
 
 const logger = window.console;
 
+function supportedSourcesLabel() {
+  const value = document.body?.dataset?.supportedSources || '';
+  return value
+    .split(',')
+    .map((source) => source.trim())
+    .filter(Boolean)
+    .join(' / ') || '--';
+}
+
 /*
  * ========================================================================
  * 步骤1：渲染首屏 hero 区
@@ -25,7 +34,7 @@ export function renderHero(context) {
     { label: heroCopy.rows.last_sync_at, value: ledgerSummary.last_sync_at || '--' },
     {
       label: heroCopy.rows.sourceCount,
-      value: `${ledgerSummary.active_sources} · ${heroCopy.sourceSuffix}`,
+      value: `${ledgerSummary.active_sources} · ${supportedSourcesLabel()}`,
     },
   ];
 

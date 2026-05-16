@@ -26,11 +26,137 @@ function normalizeRows(rows) {
   return Array.isArray(rows) ? rows : [];
 }
 
+function positiveRows(rows, select) {
+  return normalizeRows(rows).filter((row) => Number(select(row) || 0) > 0);
+}
+
 function normalizeTrendRows(rows) {
   return normalizeRows(rows).map((row) => ({
     label: row?.label ?? row?.time_bucket ?? '--',
     total_tokens: Number(row?.total_tokens || 0),
   }));
+}
+
+function hasPricingConcern(status) {
+  const normalized = String(status || '').toLowerCase();
+  return normalized === 'mixed' || normalized === 'unpriced';
+}
+
+function staleSourceRows(rows) {
+  const cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
+  return normalizeRows(rows).filter((row) => {
+    if (!row?.last_event_at) return false;
+    const timestamp = Date.parse(row.last_event_at);
+    return Number.isFinite(timestamp) && timestamp < cutoff;
+  });
+}
+
+function buildInsights({ overview, modelRows, projectRows, costRows, sourceRows, diagnosticsRows, failureRows }) {
+  const insights = [];
+  const cacheEfficiency = Number(overview?.cache_efficiency || 0);
+  const totalTokens = Number(overview?.total?.total_tokens || 0);
+  const pricingConcernRows = modelRows.filter((row) => hasPricingConcern(row?.pricing_status));
+  const lossyRows = diagnosticsRows.filter((row) => row?.lossy_rebuild_risk);
+  const missingRows = diagnosticsRows.filter(
+    (row) => Number(row?.missing_file_count || row?.missing_files || 0) > 0 && !row?.lossy_rebuild_risk,
+  );
+  const staleRows = staleSourceRows(sourceRows);
+  const topCost = costRows.find((row) => Number(row?.estimated_cost_usd || 0) > 0) || null;
+  const topModel = modelRows[0] || null;
+  const topProject = projectRows[0] || null;
+
+  if (totalTokens > 0 && cacheEfficiency < 0.05) {
+    insights.push({
+      tone: 'warn',
+      label: '缓存线索',
+      title: '缓存复用率偏低',
+      evidence: `当前窗口 cache efficiency ${(cacheEfficiency * 100).toFixed(1)}%。`,
+      action: '可检查提示复用、长上下文缓存或模型缓存支持；这是线索，不是最终诊断。',
+    });
+  }
+
+  if (pricingConcernRows.length > 0) {
+    const row = pricingConcernRows[0];
+    insights.push({
+      tone: 'warn',
+      label: '定价可靠性',
+      title: '存在 mixed / unpriced 成本项',
+      evidence: `${pricingConcernRows.length} 个模型聚合项含不完整定价，示例 ${row.model || '--'} · ${row.pricing_status || '--'}。`,
+      action: '成本估算可用于趋势判断；对账前先刷新 pricing snapshot 或检查未命中模型。',
+    });
+  }
+
+  if (failureRows.length > 0) {
+    const row = failureRows[0];
+    insights.push({
+      tone: 'warn',
+      label: '同步失败',
+      title: '最近有失败运行',
+      evidence: `${failureRows.length} 条失败记录，最近命令 ${row.command || '--'}。`,
+      action: '打开最近失败详情或重新运行 sync；完成后 Dashboard 会刷新当前筛选窗口。',
+    });
+  }
+
+  if (lossyRows.length > 0) {
+    const row = lossyRows[0];
+    insights.push({
+      tone: 'warn',
+      label: '保留边界',
+      title: '检测到 lossy rebuild 风险',
+      evidence: `${row.source || '--'} 缺失 ${formatNumber(row.missing_file_count)} 个源文件，默认保护 ${formatNumber(row.protected_event_count)} 条已导入事件。`,
+      action: '普通 sync 不会删除已导入历史；只有 sync --rebuild 可能触发保护，除非显式 allow-lossy-rebuild。',
+    });
+  } else if (missingRows.length > 0) {
+    const row = missingRows[0];
+    insights.push({
+      tone: 'neutral',
+      label: '源文件状态',
+      title: '有源文件缺失记录',
+      evidence: `${row.source || '--'} 当前记录 ${formatNumber(row.missing_file_count || row.missing_files)} 个缺失文件。`,
+      action: '这通常只影响 diagnostics；普通 sync 会保留已导入 usage 历史。',
+    });
+  }
+
+  if (staleRows.length > 0) {
+    const row = staleRows[0];
+    insights.push({
+      tone: 'neutral',
+      label: '来源新鲜度',
+      title: '某些来源近期无新事件',
+      evidence: `${row.source || '--'} 最近事件 ${row.last_event_at || '--'}。`,
+      action: '如果该来源仍在使用，可检查 hook/integration 是否启用。',
+    });
+  }
+
+  if (topCost) {
+    insights.push({
+      tone: 'good',
+      label: '成本主因',
+      title: '当前窗口主要成本来源',
+      evidence: `${topCost.source || '--'} · ${topCost.model || '--'} 约 ${formatUsd(topCost.estimated_cost_usd)}。`,
+      action: '优先从这个来源/模型组合排查成本变化。',
+    });
+  } else if (topModel && Number(topModel.total_tokens || 0) > 0) {
+    insights.push({
+      tone: 'neutral',
+      label: '用量主因',
+      title: '当前窗口主要模型来源',
+      evidence: `${topModel.model || '--'} 使用 ${formatNumber(topModel.total_tokens)} tokens。`,
+      action: '无可用成本时，先用 token 排名定位主要消耗。',
+    });
+  }
+
+  if (topProject && Number(topProject.total_tokens || 0) > 0) {
+    insights.push({
+      tone: 'neutral',
+      label: '项目聚焦',
+      title: '当前窗口主项目',
+      evidence: `${topProject.project_label || topProject.project_hash || '--'} 使用 ${formatNumber(topProject.total_tokens)} tokens。`,
+      action: '若要降低用量，先从该项目的会话模式和模型选择入手。',
+    });
+  }
+
+  return insights.slice(0, 6);
 }
 
 function sortDesc(rows, select) {
@@ -50,7 +176,7 @@ function sortDesc(rows, select) {
  * 2) 固定 Top N、图表序列和对比表行
  * 3) 为各面板补齐总量、峰值、占比和紧凑显示值
  */
-export function buildContext({ overview, trends, models, sources, projects, costs, health }) {
+export function buildContext({ overview, trends, models, sources, projects, costs, health, diagnostics }) {
   logger.info('开始构建页面上下文');
 
   // 1.1 规范化并排序趋势、排行和健康数据
@@ -64,9 +190,14 @@ export function buildContext({ overview, trends, models, sources, projects, cost
   const sourceRows = sortDesc(sources, (row) => row?.total_tokens);
   const projectRows = sortDesc(projects, (row) => row?.total_tokens);
   const costRows = sortDesc(costs, (row) => row?.estimated_cost_usd);
+  const pricedCostRows = positiveRows(costRows, (row) => row?.estimated_cost_usd);
+  const pricedModelRows = positiveRows(modelRows, (row) => row?.cost_with_cache_usd);
   const integrationRows = normalizeRows(health?.integrations);
   const cursorRows = normalizeRows(health?.cursors);
+  const diagnosticRows = normalizeRows(diagnostics?.by_source);
+  const diagnosticFailureRows = normalizeRows(diagnostics?.recent_failures);
   const failureRows = normalizeRows(health?.recent_failures);
+  const combinedFailureRows = failureRows.length ? failureRows : diagnosticFailureRows;
 
   // 1.2 计算账本摘要、趋势聚合和健康聚合
   const trendTotal = chronologicalRows.reduce(
@@ -85,6 +216,17 @@ export function buildContext({ overview, trends, models, sources, projects, cost
     (sum, row) => sum + Number(row?.estimated_cost_usd || 0),
     0,
   );
+  const total_cache_savings = modelRows.reduce(
+    (sum, row) => sum + Number(row?.cache_savings_usd || 0),
+    0,
+  );
+  const cost_event_count = costRows.reduce(
+    (sum, row) => sum + Number(row?.event_count || 0),
+    0,
+  );
+  const average_cost_per_event = cost_event_count > 0 ? total_cost / cost_event_count : 0;
+  const top_cost_row = pricedCostRows[0] || costRows[0] || null;
+  const top_model_cost_row = pricedModelRows[0] || modelRows[0] || null;
   const ready_integrations = integrationRows.filter(
     (row) => statusTone(row?.status) === 'good',
   ).length;
@@ -120,7 +262,7 @@ export function buildContext({ overview, trends, models, sources, projects, cost
       last_sync_at: overview?.last_sync_at,
       last_export_at: overview?.last_export_at,
       active_sources: overview?.source_count ?? sourceRows.length,
-      failure_count: failureRows.length,
+      failure_count: combinedFailureRows.length,
     },
     leaders: {
       model: modelRows[0] ?? null,
@@ -151,10 +293,24 @@ export function buildContext({ overview, trends, models, sources, projects, cost
     health: {
       integrations: integrationRows,
       cursors: cursorRows,
-      failures: failureRows,
+      failures: combinedFailureRows,
       ready_integrations,
       total_integrations: integrationRows.length,
     },
+    diagnostics: {
+      archive_root: diagnostics?.archive_root || '',
+      by_source: diagnosticRows,
+      recent_failures: diagnosticFailureRows,
+    },
+    insights: buildInsights({
+      overview,
+      modelRows,
+      projectRows,
+      costRows,
+      sourceRows,
+      diagnosticsRows: diagnosticRows,
+      failureRows: combinedFailureRows,
+    }),
     totals: {
       total_tokens: Number(overview?.total?.total_tokens || 0),
       total_tokens_compact: formatCompact(overview?.total?.total_tokens || 0),
@@ -165,6 +321,16 @@ export function buildContext({ overview, trends, models, sources, projects, cost
       total_cost,
       total_cost_compact: formatCompactCurrency(total_cost),
       total_cost_raw: formatUsd(total_cost),
+      total_cache_savings,
+      total_cache_savings_raw: formatUsd(total_cache_savings),
+      average_cost_per_event,
+      average_cost_per_event_raw: formatUsd(average_cost_per_event),
+      cost_event_count,
+      priced_cost_rows: pricedCostRows.length,
+      top_cost_raw: top_cost_row ? formatUsd(top_cost_row.estimated_cost_usd) : '--',
+      top_cost_label: top_cost_row ? `${top_cost_row.source || '--'} · ${top_cost_row.model || '--'}` : '--',
+      top_model_cost_raw: top_model_cost_row ? formatUsd(top_model_cost_row.cost_with_cache_usd) : '--',
+      top_model_cost_label: top_model_cost_row?.model || '--',
     },
   };
 
@@ -265,27 +431,32 @@ export function buildTrendStats(context) {
  */
 export function buildCostStats(context) {
   const { totals } = context;
+  const hasCostData = totals.priced_cost_rows > 0 || totals.total_cost > 0;
+  const cacheSavingsValue = totals.total_cache_savings > 0 ? totals.total_cache_savings_raw : '--';
+  const cacheSavingsFoot = totals.total_cache_savings > 0
+    ? '基于 cost_without_cache_usd 与真实缓存成本差值'
+    : '暂无可估算的缓存节省数据';
 
   return [
     {
-      label: '月内累计',
-      value: totals.total_cost_compact,
-      foot: '+$3.4K vs. 上月同期',
+      label: '当前累计',
+      value: hasCostData ? totals.total_cost_compact : '--',
+      foot: `来自 ${totals.priced_cost_rows} 个有成本的来源/模型项`,
     },
     {
-      label: '日均',
-      value: '$4,400',
-      foot: '7 天滑动平均',
+      label: '平均每事件',
+      value: hasCostData ? totals.average_cost_per_event_raw : '--',
+      foot: totals.cost_event_count > 0 ? `${formatNumber(totals.cost_event_count)} 个事件` : '暂无事件成本数据',
     },
     {
-      label: '最贵单次',
-      value: '$182.40',
-      foot: 'opus-4-6 · 单段',
+      label: '最高成本项',
+      value: hasCostData ? totals.top_cost_raw : '--',
+      foot: totals.top_cost_label,
     },
     {
       label: '缓存节省',
-      value: '~$28K',
-      foot: '基于命中率估算',
+      value: cacheSavingsValue,
+      foot: cacheSavingsFoot,
     },
   ];
 }

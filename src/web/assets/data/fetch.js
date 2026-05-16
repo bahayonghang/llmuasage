@@ -44,12 +44,82 @@ export async function ensureSnapshot(state) {
   return state.snapshot;
 }
 
+export function buildFilterQuery(state, options = {}) {
+  const params = new URLSearchParams();
+  const filter = state?.filters || {};
+  const includeWindow = options.includeWindow !== false;
+
+  if (includeWindow && state?.trendWindow) {
+    params.set('window', state.trendWindow);
+  }
+  for (const key of ['source', 'model', 'since', 'until', 'project_hash', 'timezone']) {
+    const value = filter[key];
+    if (value && value !== 'all') {
+      params.set(key, value);
+    }
+  }
+
+  const query = params.toString();
+  return query ? `?${query}` : '';
+}
+
+function snapshotTrendRows(snapshot, windowName) {
+  return snapshot?.[`${windowName}_trends`] || [];
+}
+
+export async function loadDashboardSnapshot(state) {
+  if (state.mode === 'snapshot') {
+    const snapshot = await ensureSnapshot(state);
+    return {
+      overview: snapshot?.overview,
+      trends: snapshotTrendRows(snapshot, state.trendWindow),
+      models: snapshot?.models,
+      sources: snapshot?.sources,
+      projects: snapshot?.projects,
+      costs: snapshot?.costs,
+      health: snapshot?.health,
+      diagnostics: snapshot?.diagnostics,
+    };
+  }
+
+  let snapshot;
+  try {
+    snapshot = await loadJson(`/api/dashboard${buildFilterQuery(state)}`);
+  } catch (error) {
+    if (error.status !== 404) {
+      throw error;
+    }
+    logger.warn('/api/dashboard 不可用，回退到旧分段 API', error);
+    const [overview, trends, models, sources, projects, costs, health, diagnostics] = await Promise.all([
+      loadSection(state, 'overview', '/api/overview'),
+      loadTrendWindow(state, state.trendWindow),
+      loadSection(state, 'models', '/api/models'),
+      loadSection(state, 'sources', '/api/sources'),
+      loadSection(state, 'projects', '/api/projects'),
+      loadSection(state, 'costs', '/api/costs'),
+      loadSection(state, 'health', '/api/health'),
+      loadSection(state, 'diagnostics', '/api/diagnostics'),
+    ]);
+    return { overview, trends, models, sources, projects, costs, health, diagnostics };
+  }
+  return {
+    overview: snapshot?.overview,
+    trends: snapshotTrendRows(snapshot, state.trendWindow),
+    models: snapshot?.models,
+    sources: snapshot?.sources,
+    projects: snapshot?.projects,
+    costs: snapshot?.costs,
+    health: snapshot?.health,
+    diagnostics: snapshot?.diagnostics,
+  };
+}
+
 export async function loadSection(state, section, path) {
   if (state.mode === 'snapshot') {
     const snapshot = await ensureSnapshot(state);
     return snapshot?.[section];
   }
-  return loadJson(path);
+  return loadJson(`${path}${buildFilterQuery(state)}`);
 }
 
 export async function loadTrendWindow(state, windowName) {
@@ -57,5 +127,5 @@ export async function loadTrendWindow(state, windowName) {
     const snapshot = await ensureSnapshot(state);
     return snapshot?.[`${windowName}_trends`];
   }
-  return loadJson(`/api/trends?window=${windowName}`);
+  return loadJson(`/api/trends${buildFilterQuery({ ...state, trendWindow: windowName })}`);
 }

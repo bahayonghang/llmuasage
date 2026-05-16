@@ -1,4 +1,11 @@
-export { loadJson, ensureSnapshot, loadSection, loadTrendWindow } from './data/fetch.js';
+export {
+  loadJson,
+  ensureSnapshot,
+  loadSection,
+  loadTrendWindow,
+  loadDashboardSnapshot,
+  buildFilterQuery,
+} from './data/fetch.js';
 export {
   escapeHtml,
   formatNumber,

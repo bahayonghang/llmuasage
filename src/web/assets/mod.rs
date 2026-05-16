@@ -125,6 +125,11 @@ const ASSET_MANIFEST: &[WebAsset] = &[
         body: include_str!("render/costs.js"),
     },
     WebAsset {
+        path: "render/insights.js",
+        content_type: "application/javascript; charset=utf-8",
+        body: include_str!("render/insights.js"),
+    },
+    WebAsset {
         path: "render/charts.js",
         content_type: "application/javascript; charset=utf-8",
         body: include_str!("render/charts.js"),
