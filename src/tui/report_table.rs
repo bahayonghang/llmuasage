@@ -574,13 +574,21 @@ fn terminal_width() -> usize {
     std::env::var("COLUMNS")
         .ok()
         .and_then(|value| value.parse().ok())
-        .or_else(|| {
-            crossterm::terminal::size()
-                .ok()
-                .map(|(width, _)| width as usize)
-        })
+        .or_else(detected_terminal_width)
         .unwrap_or(120)
         .max(60)
+}
+
+#[cfg(not(test))]
+fn detected_terminal_width() -> Option<usize> {
+    crossterm::terminal::size()
+        .ok()
+        .map(|(width, _)| width as usize)
+}
+
+#[cfg(test)]
+fn detected_terminal_width() -> Option<usize> {
+    None
 }
 
 #[cfg(test)]

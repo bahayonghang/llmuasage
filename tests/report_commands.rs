@@ -217,7 +217,7 @@ fn daily_human_output_uses_box_table_and_compact_columns() -> Result<()> {
         ..SeedEvent::default()
     })?;
 
-    let output = fixture.output(&["--timezone", "UTC"])?;
+    let output = fixture.output_with_env(&["--timezone", "UTC"], &[("COLUMNS", "120")])?;
     assert!(output.status.success(), "{output:?}");
     let stdout = String::from_utf8(output.stdout)?;
     assert!(stdout.contains('\u{250C}'));
