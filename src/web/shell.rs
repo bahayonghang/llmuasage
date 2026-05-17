@@ -98,6 +98,10 @@ fn html_shell(mode: &str) -> String {
         <span class="nav-icon"><svg class="i" viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v11H3z"/></svg></span>
         <span data-i18n="shell.nav.item.projects">项目排行</span>
       </a>
+      <a href="#behavior" data-target="behavior">
+        <span class="nav-icon"><svg class="i" viewBox="0 0 24 24"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 16v-5"/><path d="M12 16V8"/><path d="M16 16v-7"/></svg></span>
+        <span data-i18n="shell.nav.item.behavior">行为分析</span>
+      </a>
     </nav>
 
     <div class="nav-label" data-i18n="shell.nav.label.ops">运营</div>
@@ -309,6 +313,62 @@ fn html_shell(mode: &str) -> String {
 
             <button class="show-more" type="button" data-toggle-panel="projects" aria-expanded="false" data-i18n="shell.projects.expand">展开全部项目 →</button>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Behavior -->
+    <section id="behavior" class="block">
+      <div class="section-head">
+        <div>
+          <div class="section-eyebrow" data-i18n="shell.behavior.eyebrow">BEHAVIOR</div>
+          <h2 class="section-title" data-i18n="shell.behavior.title">行为分析</h2>
+          <div class="section-desc" data-i18n="shell.behavior.sub">基于同步阶段提取的 normalized turn/tool facts；低样本或未支持来源会显式显示降级状态。</div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="panel">
+          <div style="display: flex; justify-content: space-between; align-items: baseline;">
+            <div>
+              <div class="panel-title" data-i18n="shell.behavior.activity.title">Activity</div>
+              <div class="panel-sub" data-i18n="shell.behavior.activity.sub">按 turn category 聚合 turns、one-shot 与 retry</div>
+            </div>
+            <span class="tag" id="activity-support">--</span>
+          </div>
+          <div id="activity-bars" style="margin-top: 18px;"></div>
+          <div id="activity-table"></div>
+        </div>
+
+        <div class="panel">
+          <div style="display: flex; justify-content: space-between; align-items: baseline;">
+            <div>
+              <div class="panel-title" data-i18n="shell.behavior.tools.title">Tools</div>
+              <div class="panel-sub" data-i18n="shell.behavior.tools.sub">Core tools / shell / MCP / agent actions</div>
+            </div>
+            <span class="tag" id="tools-support">--</span>
+          </div>
+          <div id="tools-bars" style="margin-top: 18px;"></div>
+          <div id="tools-table"></div>
+        </div>
+      </div>
+
+      <div class="grid-2" style="margin-top: 18px;">
+        <div class="panel">
+          <div>
+            <div class="panel-title" data-i18n="shell.behavior.optimize.title">Optimize</div>
+            <div class="panel-sub" data-i18n="shell.behavior.optimize.sub">只读浪费检测；不会自动执行删除、归档或重写。</div>
+          </div>
+          <div id="optimize-summary" class="mini-stat-grid"></div>
+          <div id="optimize-findings" class="finding-list"></div>
+        </div>
+
+        <div class="panel">
+          <div>
+            <div class="panel-title" data-i18n="shell.behavior.compare.title">Compare</div>
+            <div class="panel-sub" data-i18n="shell.behavior.compare.sub">按模型对比成本、one-shot、retry 与工作风格；低样本显式提示。</div>
+          </div>
+          <div id="compare-panel"></div>
         </div>
       </div>
     </section>

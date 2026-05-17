@@ -63,6 +63,8 @@ async fn three_entries_lead_to_consistent_state() -> Result<()> {
                 "/codex/c.jsonl".to_string(),
             ],
             raw_records: Vec::new(),
+            turns: Vec::new(),
+            tool_calls: Vec::new(),
         })?;
         writer.finish_sync_run()?;
     }
@@ -83,6 +85,8 @@ async fn three_entries_lead_to_consistent_state() -> Result<()> {
             cursors: Vec::new(),
             seen_file_paths: vec!["/codex/a.jsonl".to_string(), "/codex/b.jsonl".to_string()],
             raw_records: Vec::new(),
+            turns: Vec::new(),
+            tool_calls: Vec::new(),
         })?;
         writer.finish_sync_run()?;
 
@@ -142,6 +146,8 @@ async fn deleted_then_seen_again_resurrects_to_live() -> Result<()> {
             cursors: Vec::new(),
             seen_file_paths: vec!["/claude/proj/log.jsonl".to_string()],
             raw_records: Vec::new(),
+            turns: Vec::new(),
+            tool_calls: Vec::new(),
         })?;
         writer.finish_sync_run()?;
     }
@@ -163,6 +169,8 @@ async fn deleted_then_seen_again_resurrects_to_live() -> Result<()> {
             cursors: Vec::new(),
             seen_file_paths: vec!["/claude/proj/log.jsonl".to_string()],
             raw_records: Vec::new(),
+            turns: Vec::new(),
+            tool_calls: Vec::new(),
         })?;
         writer.finish_sync_run()?;
     }

@@ -15,9 +15,10 @@ use tracing::info;
 use walkdir::WalkDir;
 
 use crate::{
-    models::{SessionInfo, SourceKind, UsageEvent, UsageTokens},
+    models::{SessionInfo, SourceKind, UsageEvent, UsageTokens, UsageToolCall, UsageTurn},
     parsers::{
         ProgressSink, SourceParser, SourceSyncStats, SyncEvent,
+        behavior::{extract_codex_tools, tool_calls_from_evidence, turn_from_tools},
         file_state::{
             CandidateFile, FileReplayMode, decide_file_replay, finalize_cursor, should_rescan_file,
         },
@@ -35,6 +36,8 @@ struct CodexShardPlan {
 #[derive(Debug)]
 struct CodexShardOutput {
     events: Vec<UsageEvent>,
+    turns: Vec<UsageTurn>,
+    tool_calls: Vec<UsageToolCall>,
     cursors: Vec<crate::store::FileCursor>,
     reset_path_hashes: Vec<String>,
     events_seen: usize,
@@ -49,6 +52,8 @@ struct RolloutParseResult {
     last_total: Option<UsageTokens>,
     last_model: Option<String>,
     events: Vec<UsageEvent>,
+    turns: Vec<UsageTurn>,
+    tool_calls: Vec<UsageToolCall>,
 }
 
 /// Codex rollout parser. Owns the per-file scan + per-shard commit pipeline
@@ -165,6 +170,8 @@ async fn sync_codex(
                 cursors: shard.cursors,
                 seen_file_paths: shard.seen_file_paths,
                 raw_records: Vec::new(),
+                turns: shard.turns,
+                tool_calls: shard.tool_calls,
             })?;
             files_scanned += commit.files_seen;
             inserted += commit.events_inserted;
@@ -232,6 +239,8 @@ fn parse_codex_shard(plan: CodexShardPlan) -> Result<CodexShardOutput> {
     let mut resolver = ProjectResolver::default();
     let mut output = CodexShardOutput {
         events: Vec::new(),
+        turns: Vec::new(),
+        tool_calls: Vec::new(),
         cursors: Vec::new(),
         reset_path_hashes: Vec::new(),
         events_seen: 0,
@@ -279,6 +288,8 @@ fn parse_codex_shard(plan: CodexShardPlan) -> Result<CodexShardOutput> {
             output.reset_path_hashes.push(path_hash);
         }
         output.events.extend(parsed.events);
+        output.turns.extend(parsed.turns);
+        output.tool_calls.extend(parsed.tool_calls);
         output.cursors.push(finalize_cursor(
             &decision.snapshot.path,
             &decision.snapshot,
@@ -308,6 +319,8 @@ fn parse_rollout_file(
             last_total,
             last_model,
             events: Vec::new(),
+            turns: Vec::new(),
+            tool_calls: Vec::new(),
         });
     }
 
@@ -333,6 +346,9 @@ fn parse_rollout_file(
     let mut current_cwd: Option<String> = None;
     let mut line = String::new();
     let mut events = Vec::new();
+    let mut turns = Vec::new();
+    let mut tool_calls = Vec::new();
+    let mut pending_tools = Vec::new();
 
     loop {
         line.clear();
@@ -345,6 +361,9 @@ fn parse_rollout_file(
         if !line.contains("token_count")
             && !line.contains("turn_context")
             && !line.contains("session_meta")
+            && !line.contains("function_call")
+            && !line.contains("tool_call")
+            && !line.contains("recipient_name")
         {
             continue;
         }
@@ -386,6 +405,11 @@ fn parse_rollout_file(
             continue;
         }
 
+        let extracted_tools = extract_codex_tools(&value);
+        if !extracted_tools.is_empty() {
+            pending_tools.extend(extracted_tools);
+        }
+
         let Some((timestamp, info)) = extract_token_count(&value) else {
             continue;
         };
@@ -412,7 +436,7 @@ fn parse_rollout_file(
             totals = Some(next_total);
         }
 
-        events.push(UsageEvent {
+        let event = UsageEvent {
             event_key: format!("codex:{path_hash}:{file_fingerprint}:{offset}"),
             source: SourceKind::Codex,
             model: normalize_model(model.as_deref()),
@@ -421,7 +445,11 @@ fn parse_rollout_file(
             tokens: delta,
             project: current_project.clone(),
             session: current_session.clone(),
-        });
+        };
+        let tools = std::mem::take(&mut pending_tools);
+        turns.push(turn_from_tools(&event, &tools));
+        tool_calls.extend(tool_calls_from_evidence(&event, tools));
+        events.push(event);
     }
 
     Ok(RolloutParseResult {
@@ -429,6 +457,8 @@ fn parse_rollout_file(
         last_total: totals,
         last_model: model,
         events,
+        turns,
+        tool_calls,
     })
 }
 
@@ -577,9 +607,12 @@ fn read_nested_i64(value: &Value, path: &[&str]) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_usage_tokens, pick_delta};
+    use super::{parse_rollout_file, parse_usage_tokens, pick_delta};
     use crate::models::UsageTokens;
+    use anyhow::Result;
     use serde_json::json;
+    use std::{fs, io::Write};
+    use tempfile::TempDir;
 
     #[test]
     fn codex_parser_accepts_cached_input_tokens_alias() {
@@ -756,5 +789,77 @@ mod tests {
         assert_eq!(delta.output_tokens, 15);
         assert_eq!(delta.reasoning_output_tokens, 3);
         assert_eq!(delta.total_tokens, 93);
+    }
+
+    #[test]
+    fn codex_parser_attaches_pending_tool_calls_to_next_token_event() -> Result<()> {
+        let temp = TempDir::new()?;
+        let path = temp.path().join("rollout-test.jsonl");
+        let mut file = fs::File::create(&path)?;
+        writeln!(
+            file,
+            "{}",
+            json!({
+                "type": "session_meta",
+                "payload": {"id":"session-a","model":"gpt-5"}
+            })
+        )?;
+        writeln!(
+            file,
+            "{}",
+            json!({
+                "type": "response_item",
+                "payload": {
+                    "item": {
+                        "type": "function_call",
+                        "name": "functions.shell_command",
+                        "arguments": {"command":"cargo test behavior"}
+                    }
+                }
+            })
+        )?;
+        writeln!(
+            file,
+            "{}",
+            json!({
+                "timestamp":"2026-05-01T00:00:00Z",
+                "payload": {
+                    "type":"token_count",
+                    "info": {
+                        "last_token_usage": {
+                            "input_tokens": 10,
+                            "output_tokens": 5,
+                            "total_tokens": 15
+                        }
+                    }
+                }
+            })
+        )?;
+
+        let mut resolver = crate::project::ProjectResolver::default();
+        let parsed = parse_rollout_file(
+            &path,
+            "path-hash",
+            "fingerprint",
+            0,
+            None,
+            None,
+            &mut resolver,
+        )?;
+
+        assert_eq!(parsed.events.len(), 1);
+        assert_eq!(parsed.turns.len(), 1);
+        assert_eq!(parsed.turns[0].category.as_str(), "testing");
+        assert_eq!(parsed.tool_calls.len(), 1);
+        assert_eq!(parsed.tool_calls[0].tool_name, "functions.shell_command");
+        assert_eq!(parsed.tool_calls[0].tool_kind.as_str(), "bash");
+        assert!(
+            parsed.tool_calls[0]
+                .safe_preview
+                .as_deref()
+                .unwrap()
+                .contains("cargo test")
+        );
+        Ok(())
     }
 }

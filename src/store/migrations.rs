@@ -53,6 +53,7 @@ pub const MIGRATIONS: &[(u32, &str, MigrationFn)] = &[
     (8, "add_worker_lock_meta", m_008_add_worker_lock_meta),
     (9, "add_gemini_source", m_009_add_gemini_source),
     (10, "add_pricing_meta", m_010_add_pricing_meta),
+    (11, "add_behavior_facts", m_011_add_behavior_facts),
 ];
 
 /// Returns the newest schema version known to this binary.
@@ -277,6 +278,7 @@ fn m_001_baseline(tx: &Transaction<'_>) -> Result<()> {
             events_seen INTEGER NOT NULL,
             events_replayed INTEGER NOT NULL,
             events_inserted INTEGER NOT NULL,
+            stored_events INTEGER NOT NULL DEFAULT 0,
             parse_ms INTEGER NOT NULL,
             write_ms INTEGER NOT NULL,
             lock_wait_ms INTEGER NOT NULL,
@@ -430,6 +432,12 @@ fn m_005_add_source_file(tx: &Transaction<'_>) -> Result<()> {
 fn m_006_add_recent_history(tx: &Transaction<'_>) -> Result<()> {
     ensure_column(tx, "source_sync_status", "recent_completed_at", "TEXT")?;
     ensure_column(tx, "source_sync_status", "history_completed_at", "TEXT")?;
+    ensure_column(
+        tx,
+        "source_sync_status",
+        "stored_events",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
     Ok(())
 }
 
@@ -523,6 +531,67 @@ fn m_010_add_pricing_meta(tx: &Transaction<'_>) -> Result<()> {
         [crate::query::pricing_catalog::PricingCatalog::static_v1()
             .version
             .as_str()],
+    )?;
+    Ok(())
+}
+
+fn m_011_add_behavior_facts(tx: &Transaction<'_>) -> Result<()> {
+    tx.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS usage_turn (
+            turn_key TEXT PRIMARY KEY,
+            source TEXT NOT NULL,
+            session_id TEXT,
+            source_path_hash TEXT,
+            project_hash TEXT,
+            primary_model TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            category TEXT NOT NULL,
+            has_edits INTEGER NOT NULL DEFAULT 0,
+            retries INTEGER NOT NULL DEFAULT 0,
+            one_shot INTEGER NOT NULL DEFAULT 0,
+            call_count INTEGER NOT NULL DEFAULT 0,
+            input_tokens INTEGER NOT NULL DEFAULT 0,
+            cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+            cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+            output_tokens INTEGER NOT NULL DEFAULT 0,
+            reasoning_output_tokens INTEGER NOT NULL DEFAULT 0,
+            total_tokens INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS usage_tool_call (
+            tool_call_key TEXT PRIMARY KEY,
+            turn_key TEXT,
+            event_key TEXT,
+            source TEXT NOT NULL,
+            session_id TEXT,
+            source_path_hash TEXT,
+            project_hash TEXT,
+            model TEXT,
+            occurred_at TEXT NOT NULL,
+            tool_name TEXT NOT NULL,
+            tool_kind TEXT NOT NULL,
+            mcp_server TEXT,
+            mcp_tool TEXT,
+            input_fingerprint TEXT,
+            safe_preview TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_usage_turn_source_started
+            ON usage_turn(source, started_at);
+        CREATE INDEX IF NOT EXISTS idx_usage_turn_category_started
+            ON usage_turn(category, started_at);
+        CREATE INDEX IF NOT EXISTS idx_usage_turn_model_started
+            ON usage_turn(primary_model, started_at);
+        CREATE INDEX IF NOT EXISTS idx_usage_turn_event_key_expr
+            ON usage_turn(substr(turn_key, 6));
+        CREATE INDEX IF NOT EXISTS idx_usage_tool_call_source_occurred
+            ON usage_tool_call(source, occurred_at);
+        CREATE INDEX IF NOT EXISTS idx_usage_tool_call_kind_name
+            ON usage_tool_call(tool_kind, tool_name);
+        CREATE INDEX IF NOT EXISTS idx_usage_tool_call_turn
+            ON usage_tool_call(turn_key);
+        "#,
     )?;
     Ok(())
 }
@@ -638,6 +707,12 @@ pub(crate) fn run_migrations_for_test_with_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pragma_columns(conn: &Connection, table: &str) -> anyhow::Result<Vec<String>> {
+        let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
 
     fn create_marker(tx: &Transaction<'_>) -> Result<()> {
         tx.execute_batch("CREATE TABLE marker(id INTEGER PRIMARY KEY);")?;
@@ -893,6 +968,39 @@ mod tests {
             value,
             crate::query::pricing_catalog::PricingCatalog::static_v1().version
         );
+        Ok(())
+    }
+
+    #[test]
+    fn migration_v11_creates_behavior_fact_tables() -> anyhow::Result<()> {
+        let mut conn = Connection::open_in_memory()?;
+        run_migrations_for_test(
+            &mut conn,
+            &[(11, "add_behavior_facts", m_011_add_behavior_facts)],
+        )?;
+
+        for table in ["usage_turn", "usage_tool_call"] {
+            let exists: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                [table],
+                |row| row.get(0),
+            )?;
+            assert_eq!(exists, 1, "{table} should be created");
+        }
+
+        let turn_columns = pragma_columns(&conn, "usage_turn")?;
+        assert!(turn_columns.contains(&"category".to_string()));
+        assert!(turn_columns.contains(&"one_shot".to_string()));
+        let turn_event_expr_index: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_usage_turn_event_key_expr'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(turn_event_expr_index, 1);
+        let columns = pragma_columns(&conn, "usage_tool_call")?;
+        assert!(columns.contains(&"tool_kind".to_string()));
+        assert!(columns.contains(&"safe_preview".to_string()));
+        assert_eq!(read_schema_version(&conn)?, 11);
         Ok(())
     }
 }

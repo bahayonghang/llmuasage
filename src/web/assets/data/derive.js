@@ -176,7 +176,7 @@ function sortDesc(rows, select) {
  * 2) 固定 Top N、图表序列和对比表行
  * 3) 为各面板补齐总量、峰值、占比和紧凑显示值
  */
-export function buildContext({ overview, trends, models, sources, projects, costs, health, diagnostics }) {
+export function buildContext({ overview, trends, models, sources, projects, costs, activity, tools, optimize, compare, health, diagnostics }) {
   logger.info('开始构建页面上下文');
 
   // 1.1 规范化并排序趋势、排行和健康数据
@@ -190,6 +190,8 @@ export function buildContext({ overview, trends, models, sources, projects, cost
   const sourceRows = sortDesc(sources, (row) => row?.total_tokens);
   const projectRows = sortDesc(projects, (row) => row?.total_tokens);
   const costRows = sortDesc(costs, (row) => row?.estimated_cost_usd);
+  const activityRows = sortDesc(activity?.breakdown, (row) => row?.turns);
+  const toolRows = sortDesc(tools?.breakdown, (row) => row?.calls);
   const pricedCostRows = positiveRows(costRows, (row) => row?.estimated_cost_usd);
   const pricedModelRows = positiveRows(modelRows, (row) => row?.cost_with_cache_usd);
   const integrationRows = normalizeRows(health?.integrations);
@@ -289,6 +291,12 @@ export function buildContext({ overview, trends, models, sources, projects, cost
       projects: projectRows,
       costs: costRows,
       cost_table_rows,
+      activity: activityRows,
+      tools: toolRows,
+      optimize: optimize || { support: { supported: false, level: 'no_data' }, findings: [] },
+      compare: compare || { support: { supported: false, level: 'no_data' }, candidates: [] },
+      activity_support: activity?.support || { supported: false, level: 'no_data' },
+      tools_support: tools?.support || { supported: false, level: 'no_data' },
     },
     health: {
       integrations: integrationRows,

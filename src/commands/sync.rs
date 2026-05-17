@@ -14,7 +14,7 @@ use crate::{
     models::SourceKind,
     parsers::{SourceSyncStats, SyncEvent, SyncSummaryEvent, driver},
     sources,
-    store::{HolderKind, MigrationProgressEvent, SourceSyncStatus, Store},
+    store::{HolderKind, MigrationProgressEvent, SourceFileInventory, SourceSyncStatus, Store},
 };
 
 #[derive(Debug, Clone)]
@@ -22,6 +22,7 @@ pub struct SyncSummary {
     pub sources: Vec<SourceSyncStats>,
     pub total_seen: usize,
     pub total_inserted: usize,
+    pub stored_events: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -110,10 +111,11 @@ async fn run_with_human_events(
         async { run_once_with_options(app, store, lock_wait_ms, options, Some(&mut tx)).await },
         |item| {
             Some(format!(
-                "sources={} seen={} inserted={}",
+                "sources={} seen={} inserted_delta={} stored_events={}",
                 item.sources.len(),
                 item.total_seen,
-                item.total_inserted
+                item.total_inserted,
+                item.stored_events
             ))
         },
     )
@@ -197,10 +199,11 @@ async fn run_with_json_events(
             async { run_once_with_options(app, store, lock_wait_ms, options, Some(&mut tx)).await },
             |item| {
                 Some(format!(
-                    "sources={} seen={} inserted={}",
+                    "sources={} seen={} inserted_delta={} stored_events={}",
                     item.sources.len(),
                     item.total_seen,
-                    item.total_inserted
+                    item.total_inserted,
+                    item.stored_events
                 ))
             },
         )
@@ -217,6 +220,7 @@ async fn run_with_json_events(
                     sources: summary.sources.len(),
                     total_seen: summary.total_seen,
                     total_inserted: summary.total_inserted,
+                    stored_events: summary.stored_events,
                 },
             })
             .await?;
@@ -240,17 +244,18 @@ fn print_summary(summary: &SyncSummary, options: &SyncRunOptions) {
     }
     for item in &summary.sources {
         println!(
-            "- {}: files={} changed={} seen={} inserted={}",
+            "- {}: files={} changed={} seen={} inserted_delta={} stored_events={}",
             item.source,
             item.files_processed,
             item.changed_files,
             item.events_seen,
-            item.events_inserted
+            item.events_inserted,
+            item.stored_events
         );
     }
     println!(
-        "- totals: seen={} inserted={}",
-        summary.total_seen, summary.total_inserted
+        "- totals: seen={} inserted_delta={} stored_events={}",
+        summary.total_seen, summary.total_inserted, summary.stored_events
     );
 }
 
@@ -314,6 +319,7 @@ pub async fn run_once_with_cancel(
                 .is_none_or(|source| parser.source() == source)
         })
         .collect::<Vec<_>>();
+    let source_file_inventories = collect_source_file_inventories(&parsers);
     let sources = driver::drive_with_events(driver::DriveContext {
         parsers: &parsers,
         store,
@@ -321,6 +327,7 @@ pub async fn run_once_with_cancel(
         parallelism,
         lock_wait_ms,
         recent_days: options.recent_days,
+        source_file_inventories,
         sender,
         cancel,
     })
@@ -328,10 +335,12 @@ pub async fn run_once_with_cancel(
     let mut total_seen = 0usize;
     let mut total_inserted = 0usize;
     let mut sync_statuses = Vec::new();
+    let mut source_stats = Vec::with_capacity(sources.len());
 
-    for source in &sources {
+    for mut source in sources {
         total_seen += source.events_seen;
         total_inserted += source.events_inserted;
+        source.stored_events = stored_events_for_source(store, source.source)?;
         sync_statuses.push(SourceSyncStatus {
             source: source.source.as_str().to_string(),
             files_processed: source.files_processed as i64,
@@ -340,24 +349,111 @@ pub async fn run_once_with_cancel(
             events_seen: source.events_seen as i64,
             events_replayed: source.events_replayed as i64,
             events_inserted: source.events_inserted as i64,
+            stored_events: source.stored_events as i64,
             parse_ms: source.parse_ms as i64,
             write_ms: source.write_ms as i64,
             lock_wait_ms: source.lock_wait_ms as i64,
             updated_at: crate::util::now_utc(),
         });
+        source_stats.push(source);
     }
     writer.finish_sync_run()?;
     store
         .sync_status()
         .save_source_sync_statuses(&sync_statuses)?;
 
-    let stats = sources;
+    let stored_events = stored_event_count(store, options.source)?;
+    let stats = source_stats;
     info!("完成 sync 三阶段流水线");
     Ok(SyncSummary {
         sources: stats,
         total_seen,
         total_inserted,
+        stored_events,
     })
+}
+
+fn collect_source_file_inventories(
+    parsers: &[Box<dyn crate::parsers::SourceParser>],
+) -> Vec<SourceFileInventory> {
+    parsers
+        .iter()
+        .filter_map(|parser| {
+            let source = parser.source();
+            enumerate_source_files(source)
+                .map(|file_paths| SourceFileInventory { source, file_paths })
+        })
+        .collect()
+}
+
+fn enumerate_source_files(source: SourceKind) -> Option<Vec<String>> {
+    let home_dir = crate::util::resolve_home_dir();
+    let paths = match source {
+        SourceKind::Codex => {
+            let codex_home = std::env::var("CODEX_HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| home_dir.join(".codex"));
+            list_matching_files(codex_home.join("sessions"), |name, _path| {
+                name.starts_with("rollout-") && name.ends_with(".jsonl")
+            })
+        }
+        SourceKind::Claude => {
+            list_matching_files(home_dir.join(".claude").join("projects"), |name, _path| {
+                name.ends_with(".jsonl")
+            })
+        }
+        SourceKind::Gemini => {
+            list_matching_files(home_dir.join(".gemini").join("tmp"), |name, path| {
+                name.starts_with("session-")
+                    && name.ends_with(".json")
+                    && path
+                        .parent()
+                        .and_then(|parent| parent.file_name())
+                        .and_then(|value| value.to_str())
+                        == Some("chats")
+            })
+        }
+        SourceKind::Opencode => return None,
+    };
+    Some(paths)
+}
+
+fn list_matching_files(
+    root: std::path::PathBuf,
+    predicate: impl Fn(&str, &std::path::Path) -> bool,
+) -> Vec<String> {
+    let mut files = walkdir::WalkDir::new(root)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_file())
+        .map(|entry| entry.into_path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|value| value.to_str())
+                .is_some_and(|name| predicate(name, path))
+        })
+        .map(|path| path.to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+    files.sort();
+    files
+}
+
+fn stored_event_count(store: &Store, source: Option<SourceKind>) -> Result<usize> {
+    let conn = store.open_connection()?;
+    let count: i64 = if let Some(source) = source {
+        conn.query_row(
+            "SELECT COUNT(*) FROM usage_event WHERE source = ?1",
+            [source.as_str()],
+            |row| row.get(0),
+        )?
+    } else {
+        conn.query_row("SELECT COUNT(*) FROM usage_event", [], |row| row.get(0))?
+    };
+    Ok(count.max(0) as usize)
+}
+
+fn stored_events_for_source(store: &Store, source: SourceKind) -> Result<usize> {
+    stored_event_count(store, Some(source))
 }
 
 fn reset_for_rebuild(store: &Store, options: &SyncRunOptions) -> Result<()> {

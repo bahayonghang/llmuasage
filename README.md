@@ -49,7 +49,14 @@ Operational commands:
 
 Web dashboard:
 
-Below is the local browser dashboard served by `llmusage serve`. The first screen keeps the active time/source/model filter, KPI strip, activity trend, project/model/source/cost rankings, sync/export actions, and diagnostic signals in one local-only view.
+Below is the local browser dashboard served by `llmusage serve`. The first screen keeps the active time/source/model filter, KPI strip, activity trend, project/model/source/cost rankings, behavior analytics, sync/export actions, and diagnostic signals in one local-only view.
+
+The behavior section is powered by normalized facts extracted during `sync`:
+
+- Activity and Tools aggregate local turn/tool facts without storing full prompts, assistant messages, or file contents.
+- Optimize is a read-only recommendation panel for patterns such as low Read/Edit ratio, repeated reads, generated/dependency reads, and session outliers; it never deletes, archives, rewrites, or auto-cleans anything.
+- Compare picks or accepts two models and shows directional cost, cache, one-shot, retry, category, and working-style metrics with explicit low-sample warnings.
+- Source support is intentionally explicit: Claude and Codex can emit richer tool facts; Gemini and OpenCode currently degrade to conservative turn facts when source logs do not expose tool-level evidence.
 
 ![llmusage web dashboard overview](./docs/public/screenshots/web-dashboard-overview.png)
 
@@ -70,6 +77,7 @@ Notes:
 - `serve` supports one-shot snapshot loading, URL-restored filters, optional 30s/60s auto-refresh, and in-process sync jobs with progress/cancel state
 - `export html` generates an offline static report with the same dashboard shell; snapshot mode disables live-only sync/refresh actions
 - report commands are read-only SQLite views and do not auto-sync
+- behavior analytics is local-only and read-only at query time; it uses normalized `usage_turn` / `usage_tool_call` rows produced during sync instead of parsing raw transcripts in the browser
 - normal `sync` keeps imported usage history when a source file is missing; diagnostics may report `source_file.missing`, but usage rows are not deleted
 - `status` and `diagnostics` are read-only unless `diagnostics --forget-file` is used
 - `doctor` is read-only unless `--refresh-pricing <file>` is used; pricing refresh only reads a local JSON file, stores it under `~/.llmusage/pricing/<catalog-version>.json`, and writes local SQLite metadata/costs
@@ -79,7 +87,7 @@ Notes:
 - ccr-ui-facing read APIs: `Dashboard::overview`, `trends_daily`, `home_overview`, `heatmap`, `logs`, archive diagnostics, and source-file forget support.
 - Persisted cost fields are now the query/report source of truth: normal sync writes event/bucket cost metadata, `doctor --refresh-pricing <file>` recomputes both events and buckets from a local snapshot, and reports/dashboard payloads expose total cost, cache efficiency, daily cost, model dual-cost/pricing metadata, project cost, and log cost/id/recorded-at fields.
 - In-process import jobs through `JobRegistry` with progress snapshots and cancellation.
-- Full schema migrations from v0/v1 through v10, including cache split, cost metadata, source-file state, raw archive, worker lock metadata, Gemini registration, and `pricing_catalog_version`.
+- Full schema migrations from v0/v1 through v11, including cache split, cost metadata, source-file state, raw archive, worker lock metadata, Gemini registration, `pricing_catalog_version`, and normalized behavior facts.
 - Stable snake_case JSON across CLI reports, HTTP API, and static exports.
 - Public `LlmusageError` and `testing::Fixture` surfaces for downstream adapters.
 
@@ -110,13 +118,17 @@ fn load_ccr_ui(store: &Store) -> Result<()> {
     let _daily = dashboard.trends_daily(&filter)?;
     let _home = dashboard.home_overview(&filter)?;
     let _heatmap = dashboard.heatmap(&filter, 365)?;
+    let _activity = dashboard.activity_breakdown(&filter)?;
+    let _tools = dashboard.tool_breakdown(&filter)?;
+    let _optimize = dashboard.optimize(&filter)?;
+    let _compare = dashboard.model_compare(&filter, None, None)?;
     let _logs = dashboard.logs(&Default::default())?;
     Ok(())
 }
 ```
 
 Path resolution order is `--home <PATH>` first, then `LLMUSAGE_HOME`, then `~/.llmusage`.
-The ccr-ui surface now includes filtered dashboard/home/daily-trend/heatmap/log queries, archive diagnostics from the `source_file` state machine, persisted cost/pricing/cache fields, and `JobRegistry::start/get/cancel` for in-process import jobs. Use `Store::acquire_worker_lock_with` when embedding sync so CLI, library, and hook workers share one local lock.
+The ccr-ui surface now includes filtered dashboard/home/daily-trend/heatmap/log queries, archive diagnostics from the `source_file` state machine, persisted cost/pricing/cache fields, behavior activity/tool/optimize/compare payloads, and `JobRegistry::start/get/cancel` for in-process import jobs. Use `Store::acquire_worker_lock_with` when embedding sync so CLI, library, and hook workers share one local lock.
 
 For downstream integration tests, depend on the local crate with the testing
 feature and use the isolated fixture helpers:

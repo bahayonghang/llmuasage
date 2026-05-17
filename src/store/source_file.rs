@@ -102,6 +102,29 @@ impl<'a> SourceFileStore<'a> {
         update_missing_with_conn(&conn, source.as_str(), run_started_at)
     }
 
+    /// Marks all candidate files enumerated for this source as observed before
+    /// running the missing sweep.
+    ///
+    /// Incremental parsers only commit shards for files that changed. Without
+    /// this all-candidate inventory, a hot sync would leave unchanged files
+    /// with an older `last_seen_at` and the sweep would incorrectly mark them
+    /// `missing`.
+    pub fn mark_inventory_seen(
+        &self,
+        source: SourceKind,
+        file_paths: &[String],
+        seen_at: &str,
+    ) -> Result<()> {
+        if file_paths.is_empty() {
+            return Ok(());
+        }
+        let mut conn = self.store.open_connection()?;
+        let tx = conn.transaction()?;
+        upsert_live_in_tx(&tx, source.as_str(), file_paths, seen_at)?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Computes whether rebuilding one source would discard imported usage
     /// that cannot be reconstructed from the current filesystem.
     pub fn lossy_rebuild_risk(&self, source: SourceKind) -> Result<LossyRebuildRisk> {

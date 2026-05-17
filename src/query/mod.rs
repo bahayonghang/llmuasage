@@ -1,5 +1,7 @@
+use std::collections::BTreeMap;
+
 use chrono::{Duration, SecondsFormat, Utc};
-use rusqlite::{Connection, params_from_iter};
+use rusqlite::{Connection, OptionalExtension, params_from_iter};
 use serde::Serialize;
 
 use crate::{
@@ -202,6 +204,231 @@ pub struct CostLine {
     pub event_count: i64,
 }
 
+/// Support/degradation metadata for behavior analytics.
+#[derive(Debug, Clone, Serialize)]
+pub struct BehaviorSupport {
+    /// Whether at least one normalized behavior row is available for the filter.
+    pub supported: bool,
+    /// Machine-readable source support level.
+    pub level: String,
+    /// Human-readable explanation suitable for empty or degraded states.
+    pub reason: Option<String>,
+}
+
+/// Activity category aggregate powered by `usage_turn`.
+#[derive(Debug, Clone, Serialize)]
+pub struct ActivityBreakdown {
+    /// Deterministic category id, e.g. `coding` or `exploration`.
+    pub category: String,
+    /// Number of normalized turns in this category.
+    pub turns: i64,
+    /// Turns with at least one edit/write action.
+    pub edit_turns: i64,
+    /// Edit turns without a detected retry.
+    pub one_shot_turns: i64,
+    /// Sum of deterministic retry estimates.
+    pub retries: i64,
+    /// Number of API calls/events represented by the turns.
+    pub call_count: i64,
+    /// Summed tokens attributed to the turns.
+    pub total_tokens: i64,
+    /// Estimated cost attributed to this category by joining persisted event cost
+    /// on `(source, session_id, source_path_hash, primary_model, started_at)`.
+    pub estimated_cost_usd: f64,
+    /// `one_shot_turns / edit_turns`, or 0 when there are no edit turns.
+    pub one_shot_rate: f64,
+    /// `retries / turns`, or 0 when there are no turns.
+    pub retry_rate: f64,
+}
+
+/// Top-level activity analytics payload.
+#[derive(Debug, Clone, Serialize)]
+pub struct ActivityPayload {
+    /// Support/degradation metadata.
+    pub support: BehaviorSupport,
+    /// Category aggregates ordered by attributed cost/tokens/turns.
+    pub breakdown: Vec<ActivityBreakdown>,
+}
+
+/// Tool/action aggregate powered by `usage_tool_call`.
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolBreakdown {
+    /// Coarse tool/action family.
+    pub tool_kind: String,
+    /// Source tool name or MCP tool name.
+    pub tool_name: String,
+    /// MCP server name when applicable.
+    pub mcp_server: Option<String>,
+    /// Number of normalized calls.
+    pub calls: i64,
+    /// Distinct turns touched by this tool when turn keys are available.
+    pub turn_count: i64,
+    /// Distinct sessions touched by this tool.
+    pub session_count: i64,
+    /// Estimated cost attributed through parent events when available.
+    pub estimated_cost_usd: f64,
+    /// Share of all calls in the current filter.
+    pub call_share: f64,
+    /// First observed call timestamp.
+    pub first_seen_at: Option<String>,
+    /// Last observed call timestamp.
+    pub last_seen_at: Option<String>,
+}
+
+/// Top-level tool analytics payload.
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolsPayload {
+    /// Support/degradation metadata.
+    pub support: BehaviorSupport,
+    /// Tool aggregates ordered by calls/cost/name.
+    pub breakdown: Vec<ToolBreakdown>,
+}
+
+/// One read-only optimization finding derived from normalized local facts.
+#[derive(Debug, Clone, Serialize)]
+pub struct OptimizeFinding {
+    /// Stable detector id.
+    pub id: String,
+    /// Human-readable finding title.
+    pub title: String,
+    /// `high`, `medium`, or `low`.
+    pub severity: String,
+    /// Evidence summary with bounded, display-safe values.
+    pub evidence: String,
+    /// Read-only recommendation. llmusage never executes it automatically.
+    pub recommendation: String,
+    /// Rough token-savings estimate; use as a prioritization hint only.
+    pub estimated_savings_tokens: i64,
+    /// Rough USD-savings estimate using already persisted local costs.
+    pub estimated_savings_usd: f64,
+}
+
+/// Read-only behavior optimization payload.
+#[derive(Debug, Clone, Serialize)]
+pub struct OptimizePayload {
+    /// Support/degradation metadata.
+    pub support: BehaviorSupport,
+    /// Simple health score after detector penalties.
+    pub score: i64,
+    /// Letter grade derived from [`Self::score`].
+    pub grade: String,
+    /// Sum of detector token-savings estimates.
+    pub estimated_savings_tokens: i64,
+    /// Sum of detector USD-savings estimates.
+    pub estimated_savings_usd: f64,
+    /// Findings ordered by severity and estimated savings.
+    pub findings: Vec<OptimizeFinding>,
+}
+
+/// Candidate model row for model comparison.
+#[derive(Debug, Clone, Serialize)]
+pub struct CompareModelCandidate {
+    /// Normalized model name.
+    pub model: String,
+    /// Number of usage events/calls observed for the model.
+    pub calls: i64,
+    /// Normalized behavior turns observed for the model.
+    pub turns: i64,
+    /// Edit/write turns observed for the model.
+    pub edit_turns: i64,
+    /// Summed tokens from usage buckets.
+    pub total_tokens: i64,
+    /// Summed persisted cache-aware cost.
+    pub estimated_cost_usd: f64,
+    /// True when the sample is too small for confident behavioral comparison.
+    pub low_sample: bool,
+}
+
+/// Per-model comparison statistics.
+#[derive(Debug, Clone, Serialize)]
+pub struct ModelCompareStats {
+    /// Normalized model name.
+    pub model: String,
+    /// Number of usage events/calls.
+    pub calls: i64,
+    /// Number of normalized turns.
+    pub turns: i64,
+    /// Number of edit/write turns.
+    pub edit_turns: i64,
+    /// Number of one-shot edit/write turns.
+    pub one_shot_turns: i64,
+    /// Sum of deterministic retry estimates.
+    pub retries: i64,
+    /// Summed tokens.
+    pub total_tokens: i64,
+    /// Summed cache-aware cost.
+    pub estimated_cost_usd: f64,
+    /// Cache read ratio across persisted bucket tokens.
+    pub cache_efficiency: f64,
+    /// Cost per usage event/call.
+    pub cost_per_call: f64,
+    /// Cost per edit/write turn.
+    pub cost_per_edit_turn: f64,
+    /// One-shot edit/write rate.
+    pub one_shot_rate: f64,
+    /// Retry estimate per turn.
+    pub retry_rate: f64,
+    /// Average normalized tool calls per turn.
+    pub avg_tools_per_turn: f64,
+    /// Delegation-category turn share.
+    pub delegation_rate: f64,
+    /// Planning-category turn share.
+    pub planning_rate: f64,
+    /// True when calls or edit turns are below the comparison threshold.
+    pub low_sample: bool,
+}
+
+/// Side-by-side scalar comparison metric.
+#[derive(Debug, Clone, Serialize)]
+pub struct CompareMetric {
+    /// Stable metric id.
+    pub id: String,
+    /// Human-readable label.
+    pub label: String,
+    /// Value for model A.
+    pub model_a_value: f64,
+    /// Value for model B.
+    pub model_b_value: f64,
+    /// Whether a higher value is generally better for this metric.
+    pub higher_is_better: bool,
+}
+
+/// Category-level one-shot comparison.
+#[derive(Debug, Clone, Serialize)]
+pub struct CategoryCompareRow {
+    /// Activity category.
+    pub category: String,
+    /// Edit/write turns for model A in this category.
+    pub model_a_edit_turns: i64,
+    /// One-shot rate for model A in this category.
+    pub model_a_one_shot_rate: f64,
+    /// Edit/write turns for model B in this category.
+    pub model_b_edit_turns: i64,
+    /// One-shot rate for model B in this category.
+    pub model_b_one_shot_rate: f64,
+}
+
+/// Model-pair comparison payload.
+#[derive(Debug, Clone, Serialize)]
+pub struct ModelComparePayload {
+    /// Support/degradation metadata.
+    pub support: BehaviorSupport,
+    /// Available model candidates for the current filter.
+    pub candidates: Vec<CompareModelCandidate>,
+    /// Chosen left-hand model stats.
+    pub model_a: Option<ModelCompareStats>,
+    /// Chosen right-hand model stats.
+    pub model_b: Option<ModelCompareStats>,
+    /// Performance/efficiency metrics.
+    pub metrics: Vec<CompareMetric>,
+    /// Category head-to-head rows.
+    pub category_head_to_head: Vec<CategoryCompareRow>,
+    /// Working style metrics.
+    pub working_style: Vec<CompareMetric>,
+    /// Warning shown for no-data, insufficient models, or low-sample comparisons.
+    pub warning: Option<String>,
+}
+
 /// Cursor freshness row used in health views.
 #[derive(Debug, Clone, Serialize)]
 pub struct CursorHealth {
@@ -298,6 +525,46 @@ pub struct DashboardSnapshot {
     /// Per-source breakdown table.
     pub sources: Vec<SourceBreakdown>,
     /// Per-project ranking table.
+    pub projects: Vec<ProjectBreakdown>,
+    /// Per-source/model cost estimate table.
+    pub costs: Vec<CostLine>,
+    /// Behavior activity categories. Empty with `support.supported=false` when
+    /// the database has no normalized turn facts for the current filter.
+    pub activity: ActivityPayload,
+    /// Tool/action breakdowns. Empty with `support.supported=false` when the
+    /// database has no normalized tool facts for the current filter.
+    pub tools: ToolsPayload,
+    /// Read-only behavior optimization findings. Empty/degraded when behavior
+    /// facts are unavailable.
+    pub optimize: OptimizePayload,
+    /// Default model comparison payload. If fewer than two models are present
+    /// it carries candidates plus an explicit warning.
+    pub compare: ModelComparePayload,
+    /// Integration/cursor/run health payload.
+    pub health: HealthPayload,
+    /// Archive/source-file diagnostics plus recent failed run records.
+    pub diagnostics: DiagnosticsPayload,
+}
+
+/// Dashboard snapshot core sections that must stay responsive even when
+/// behavior analytics degrades.
+#[derive(Debug, Clone, Serialize)]
+pub struct DashboardCoreSnapshot {
+    /// Top-level totals and recent status.
+    pub overview: OverviewPayload,
+    /// 24h-style trend rows.
+    pub day_trends: Vec<TrendPoint>,
+    /// 7d-style trend rows.
+    pub week_trends: Vec<TrendPoint>,
+    /// 30d-style trend rows.
+    pub month_trends: Vec<TrendPoint>,
+    /// All-time trend rows.
+    pub all_trends: Vec<TrendPoint>,
+    /// Per-model cost/token table.
+    pub models: Vec<ModelBreakdown>,
+    /// Per-source cost/token table.
+    pub sources: Vec<SourceBreakdown>,
+    /// Per-project cost/token table.
     pub projects: Vec<ProjectBreakdown>,
     /// Per-source/model cost estimate table.
     pub costs: Vec<CostLine>,
@@ -679,6 +946,685 @@ impl Dashboard {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// Loads activity category aggregates from normalized `usage_turn` facts.
+    ///
+    /// This intentionally does not read raw JSONL or frontend-owned data. Cost
+    /// is attribution-only: the query joins persisted `usage_event` cost rows
+    /// that match the conservative one-event turn identity.
+    pub fn activity_breakdown(&self, filter: &QueryFilter) -> Result<ActivityPayload> {
+        let turn_filter = filter.turn_filter(Some("t"));
+        let support = behavior_support(&self.conn, "usage_turn", filter.turn_filter(None))?;
+        let sql = format!(
+            r#"
+            SELECT
+                t.category,
+                COUNT(*) AS turns,
+                COALESCE(SUM(t.has_edits), 0) AS edit_turns,
+                COALESCE(SUM(t.one_shot), 0) AS one_shot_turns,
+                COALESCE(SUM(t.retries), 0) AS retries,
+                COALESCE(SUM(t.call_count), 0) AS call_count,
+                COALESCE(SUM(t.total_tokens), 0) AS total_tokens,
+                COALESCE(SUM(e.cost_with_cache_usd), 0.0) AS estimated_cost_usd
+            FROM usage_turn t
+            LEFT JOIN usage_event e
+                ON e.event_key = substr(t.turn_key, 6)
+            {}
+            GROUP BY t.category
+            ORDER BY estimated_cost_usd DESC, total_tokens DESC, turns DESC, t.category ASC
+            "#,
+            turn_filter.where_sql()
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(turn_filter.params().iter()), |row| {
+            let turns = row.get::<_, Option<i64>>(1)?.unwrap_or_default();
+            let edit_turns = row.get::<_, Option<i64>>(2)?.unwrap_or_default();
+            let one_shot_turns = row.get::<_, Option<i64>>(3)?.unwrap_or_default();
+            let retries = row.get::<_, Option<i64>>(4)?.unwrap_or_default();
+            Ok(ActivityBreakdown {
+                category: row.get(0)?,
+                turns,
+                edit_turns,
+                one_shot_turns,
+                retries,
+                call_count: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
+                total_tokens: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
+                estimated_cost_usd: row.get::<_, Option<f64>>(7)?.unwrap_or_default(),
+                one_shot_rate: ratio(one_shot_turns, edit_turns),
+                retry_rate: ratio(retries, turns),
+            })
+        })?;
+        Ok(ActivityPayload {
+            support,
+            breakdown: rows.collect::<rusqlite::Result<Vec<_>>>()?,
+        })
+    }
+
+    /// Loads tool/action aggregates from normalized `usage_tool_call` facts.
+    pub fn tool_breakdown(&self, filter: &QueryFilter) -> Result<ToolsPayload> {
+        let tool_filter = filter.tool_filter(Some("tc"));
+        let support = behavior_support(&self.conn, "usage_tool_call", filter.tool_filter(None))?;
+        let total_calls = scalar_i64(
+            &self.conn,
+            &format!(
+                "SELECT COUNT(*) FROM usage_tool_call tc{}",
+                tool_filter.where_sql()
+            ),
+            params_from_iter(tool_filter.params().iter()),
+        )?;
+        let sql = format!(
+            r#"
+            SELECT
+                tc.tool_kind,
+                tc.tool_name,
+                tc.mcp_server,
+                COUNT(*) AS calls,
+                COUNT(DISTINCT tc.turn_key) AS turn_count,
+                COUNT(DISTINCT tc.session_id) AS session_count,
+                COALESCE(SUM(e.cost_with_cache_usd), 0.0) AS estimated_cost_usd,
+                MIN(tc.occurred_at) AS first_seen_at,
+                MAX(tc.occurred_at) AS last_seen_at
+            FROM usage_tool_call tc
+            LEFT JOIN usage_event e ON e.event_key = tc.event_key
+            {}
+            GROUP BY tc.tool_kind, tc.tool_name, tc.mcp_server
+            ORDER BY calls DESC, estimated_cost_usd DESC, tc.tool_kind ASC, tc.tool_name ASC
+            LIMIT 50
+            "#,
+            tool_filter.where_sql()
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(tool_filter.params().iter()), |row| {
+            let calls = row.get::<_, Option<i64>>(3)?.unwrap_or_default();
+            let turn_count = row.get::<_, Option<i64>>(4)?.unwrap_or_default();
+            let session_count = row.get::<_, Option<i64>>(5)?.unwrap_or_default();
+            Ok(ToolBreakdown {
+                tool_kind: row.get(0)?,
+                tool_name: row.get(1)?,
+                mcp_server: row.get(2)?,
+                calls,
+                turn_count: turn_count.min(calls),
+                session_count: session_count.min(calls),
+                estimated_cost_usd: row.get::<_, Option<f64>>(6)?.unwrap_or_default(),
+                call_share: ratio(calls, total_calls),
+                first_seen_at: row.get(7)?,
+                last_seen_at: row.get(8)?,
+            })
+        })?;
+        Ok(ToolsPayload {
+            support,
+            breakdown: rows.collect::<rusqlite::Result<Vec<_>>>()?,
+        })
+    }
+
+    /// Loads read-only behavior optimization findings.
+    ///
+    /// The detectors are intentionally conservative and only use normalized
+    /// `usage_turn` / `usage_tool_call` rows plus persisted event costs. They
+    /// never inspect raw transcripts and never execute cleanup actions.
+    pub fn optimize(&self, filter: &QueryFilter) -> Result<OptimizePayload> {
+        let support = behavior_support(&self.conn, "usage_turn", filter.turn_filter(None))?;
+        if !support.supported {
+            return Ok(OptimizePayload {
+                support,
+                score: 100,
+                grade: "A".to_string(),
+                estimated_savings_tokens: 0,
+                estimated_savings_usd: 0.0,
+                findings: Vec::new(),
+            });
+        }
+
+        let mut findings = Vec::new();
+        if let Some(finding) = self.detect_low_read_edit_ratio(filter)? {
+            findings.push(finding);
+        }
+        if let Some(finding) = self.detect_duplicate_reads(filter)? {
+            findings.push(finding);
+        }
+        if let Some(finding) = self.detect_junk_reads(filter)? {
+            findings.push(finding);
+        }
+        if let Some(finding) = self.detect_session_outlier(filter)? {
+            findings.push(finding);
+        }
+
+        findings.sort_by(|left, right| {
+            severity_rank(&right.severity)
+                .cmp(&severity_rank(&left.severity))
+                .then_with(|| {
+                    right
+                        .estimated_savings_tokens
+                        .cmp(&left.estimated_savings_tokens)
+                })
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        let estimated_savings_tokens = findings
+            .iter()
+            .map(|finding| finding.estimated_savings_tokens)
+            .sum();
+        let estimated_savings_usd = findings
+            .iter()
+            .map(|finding| finding.estimated_savings_usd)
+            .sum();
+        let penalty = findings
+            .iter()
+            .map(|finding| match finding.severity.as_str() {
+                "high" => 25,
+                "medium" => 15,
+                _ => 7,
+            })
+            .sum::<i64>();
+        let score = (100 - penalty).clamp(0, 100);
+
+        Ok(OptimizePayload {
+            support,
+            score,
+            grade: health_grade(score).to_string(),
+            estimated_savings_tokens,
+            estimated_savings_usd,
+            findings,
+        })
+    }
+
+    fn detect_low_read_edit_ratio(&self, filter: &QueryFilter) -> Result<Option<OptimizeFinding>> {
+        let tool_filter = filter.tool_filter(Some("tc"));
+        let sql = format!(
+            r#"
+            SELECT
+                COALESCE(SUM(CASE WHEN tc.tool_kind IN ('read', 'search') THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN tc.tool_kind = 'edit' THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN tc.tool_kind = 'edit' THEN e.total_tokens ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN tc.tool_kind = 'edit' THEN e.cost_with_cache_usd ELSE 0.0 END), 0.0)
+            FROM usage_tool_call tc
+            LEFT JOIN usage_event e ON e.event_key = tc.event_key
+            {}
+            "#,
+            tool_filter.where_sql()
+        );
+        let (read_calls, edit_calls, edit_tokens, edit_cost): (i64, i64, i64, f64) = self
+            .conn
+            .query_row(&sql, params_from_iter(tool_filter.params().iter()), |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })?;
+        if edit_calls < 3 {
+            return Ok(None);
+        }
+        let read_edit_ratio = read_calls as f64 / edit_calls as f64;
+        if read_edit_ratio >= 0.5 {
+            return Ok(None);
+        }
+        Ok(Some(OptimizeFinding {
+            id: "low_read_edit_ratio".to_string(),
+            title: "Low Read/Edit ratio".to_string(),
+            severity: if read_edit_ratio < 0.25 {
+                "high"
+            } else {
+                "medium"
+            }
+            .to_string(),
+            evidence: format!(
+                "{read_calls} read/search calls for {edit_calls} edit calls in this filter."
+            ),
+            recommendation:
+                "Review files before larger edit runs; this is a read-only signal, not an automatic rewrite."
+                    .to_string(),
+            estimated_savings_tokens: (edit_tokens / 5).max(0),
+            estimated_savings_usd: (edit_cost * 0.20).max(0.0),
+        }))
+    }
+
+    fn detect_duplicate_reads(&self, filter: &QueryFilter) -> Result<Option<OptimizeFinding>> {
+        let mut tool_filter = filter.tool_filter(Some("tc"));
+        tool_filter.push_raw("tc.tool_kind IN ('read', 'search')");
+        tool_filter.push_raw("tc.session_id IS NOT NULL");
+        let sql = format!(
+            r#"
+            SELECT
+                tc.session_id,
+                COALESCE(tc.input_fingerprint, tc.safe_preview, tc.tool_name) AS target,
+                COUNT(*) AS calls,
+                COALESCE(SUM(e.total_tokens), 0) AS tokens,
+                COALESCE(SUM(e.cost_with_cache_usd), 0.0) AS cost
+            FROM usage_tool_call tc
+            LEFT JOIN usage_event e ON e.event_key = tc.event_key
+            {}
+            GROUP BY tc.session_id, target
+            HAVING calls > 1
+            ORDER BY calls DESC, tokens DESC
+            LIMIT 1
+            "#,
+            tool_filter.where_sql()
+        );
+        let row = self
+            .conn
+            .query_row(&sql, params_from_iter(tool_filter.params().iter()), |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?.unwrap_or_default(),
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, f64>(4)?,
+                ))
+            })
+            .optional()?;
+        let Some((session_id, target, calls, tokens, cost)) = row else {
+            return Ok(None);
+        };
+        Ok(Some(OptimizeFinding {
+            id: "duplicate_reads".to_string(),
+            title: "Repeated reads in one session".to_string(),
+            severity: if calls >= 5 { "high" } else { "medium" }.to_string(),
+            evidence: format!(
+                "Session {session_id} read/search target `{}` {calls} times.",
+                safe_short(&target, 72)
+            ),
+            recommendation:
+                "Cache the relevant facts in notes or inspect a narrower range before rereading the same target."
+                    .to_string(),
+            estimated_savings_tokens: (tokens * (calls - 1) / calls).max(0),
+            estimated_savings_usd: (cost * (calls - 1) as f64 / calls as f64).max(0.0),
+        }))
+    }
+
+    fn detect_junk_reads(&self, filter: &QueryFilter) -> Result<Option<OptimizeFinding>> {
+        let mut tool_filter = filter.tool_filter(Some("tc"));
+        tool_filter.push_raw(
+            r#"
+            tc.tool_kind IN ('read', 'search')
+            AND (
+                LOWER(COALESCE(tc.safe_preview, '')) LIKE '%node_modules%'
+                OR LOWER(COALESCE(tc.safe_preview, '')) LIKE '%/target/%'
+                OR LOWER(COALESCE(tc.safe_preview, '')) LIKE '%\target\%'
+                OR LOWER(COALESCE(tc.safe_preview, '')) LIKE '%/dist/%'
+                OR LOWER(COALESCE(tc.safe_preview, '')) LIKE '%\dist\%'
+                OR LOWER(COALESCE(tc.safe_preview, '')) LIKE '%/build/%'
+                OR LOWER(COALESCE(tc.safe_preview, '')) LIKE '%\build\%'
+            )
+            "#,
+        );
+        let sql = format!(
+            r#"
+            SELECT
+                COUNT(*) AS calls,
+                COALESCE(SUM(e.total_tokens), 0) AS tokens,
+                COALESCE(SUM(e.cost_with_cache_usd), 0.0) AS cost,
+                MAX(COALESCE(tc.safe_preview, tc.tool_name)) AS example
+            FROM usage_tool_call tc
+            LEFT JOIN usage_event e ON e.event_key = tc.event_key
+            {}
+            "#,
+            tool_filter.where_sql()
+        );
+        let (calls, tokens, cost, example): (i64, i64, f64, Option<String>) =
+            self.conn
+                .query_row(&sql, params_from_iter(tool_filter.params().iter()), |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                })?;
+        if calls == 0 {
+            return Ok(None);
+        }
+        Ok(Some(OptimizeFinding {
+            id: "junk_reads".to_string(),
+            title: "Generated or dependency reads".to_string(),
+            severity: if calls >= 5 { "high" } else { "low" }.to_string(),
+            evidence: format!(
+                "{calls} read/search calls touched generated or dependency-looking paths; example `{}`.",
+                safe_short(example.as_deref().unwrap_or("--"), 72)
+            ),
+            recommendation:
+                "Prefer source directories and ignore generated/dependency folders in manual investigation."
+                    .to_string(),
+            estimated_savings_tokens: (tokens / 2).max(0),
+            estimated_savings_usd: (cost * 0.50).max(0.0),
+        }))
+    }
+
+    fn detect_session_outlier(&self, filter: &QueryFilter) -> Result<Option<OptimizeFinding>> {
+        let turn_filter = filter.turn_filter(Some("t"));
+        let sql = format!(
+            r#"
+            SELECT
+                t.session_id,
+                COUNT(*) AS turns,
+                COALESCE(SUM(t.total_tokens), 0) AS tokens,
+                COALESCE(SUM(e.cost_with_cache_usd), 0.0) AS cost
+            FROM usage_turn t
+            LEFT JOIN usage_event e ON e.event_key = substr(t.turn_key, 6)
+            {}
+            GROUP BY t.session_id
+            HAVING t.session_id IS NOT NULL
+            ORDER BY tokens DESC
+            LIMIT 1
+            "#,
+            turn_filter.where_sql()
+        );
+        let top = self
+            .conn
+            .query_row(&sql, params_from_iter(turn_filter.params().iter()), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, f64>(3)?,
+                ))
+            })
+            .optional()?;
+        let Some((session_id, turns, tokens, cost)) = top else {
+            return Ok(None);
+        };
+        let total_tokens = scalar_i64(
+            &self.conn,
+            &format!(
+                "SELECT COALESCE(SUM(t.total_tokens), 0) FROM usage_turn t{}",
+                turn_filter.where_sql()
+            ),
+            params_from_iter(turn_filter.params().iter()),
+        )?;
+        if total_tokens <= 0 || tokens * 100 / total_tokens < 40 || turns < 3 {
+            return Ok(None);
+        }
+        Ok(Some(OptimizeFinding {
+            id: "session_outlier".to_string(),
+            title: "One session dominates behavior cost".to_string(),
+            severity: "medium".to_string(),
+            evidence: format!(
+                "Session {session_id} accounts for {:.1}% of turn tokens in this filter.",
+                tokens as f64 * 100.0 / total_tokens as f64
+            ),
+            recommendation:
+                "Inspect this session before optimizing globally; long context or repeated retries may be local to it."
+                    .to_string(),
+            estimated_savings_tokens: (tokens / 4).max(0),
+            estimated_savings_usd: (cost * 0.25).max(0.0),
+        }))
+    }
+
+    /// Loads model candidates for behavior comparison.
+    pub fn compare_models(&self, filter: &QueryFilter) -> Result<Vec<CompareModelCandidate>> {
+        compare_model_candidates(&self.conn, filter)
+    }
+
+    /// Loads a model-pair comparison. When either model is omitted, the top two
+    /// candidates in the current filter are chosen automatically.
+    pub fn model_compare(
+        &self,
+        filter: &QueryFilter,
+        model_a: Option<&str>,
+        model_b: Option<&str>,
+    ) -> Result<ModelComparePayload> {
+        let candidates = self.compare_models(filter)?;
+        if candidates.len() < 2 {
+            return Ok(ModelComparePayload {
+                support: BehaviorSupport {
+                    supported: false,
+                    level: "insufficient_models".to_string(),
+                    reason: Some(
+                        "At least two models with local usage are required for comparison."
+                            .to_string(),
+                    ),
+                },
+                candidates,
+                model_a: None,
+                model_b: None,
+                metrics: Vec::new(),
+                category_head_to_head: Vec::new(),
+                working_style: Vec::new(),
+                warning: Some("Need at least two models in the current filter.".to_string()),
+            });
+        }
+
+        let selected_a = model_a
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(candidates[0].model.as_str());
+        let selected_b = model_b
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| {
+                candidates
+                    .iter()
+                    .find(|candidate| candidate.model != selected_a)
+                    .map(|candidate| candidate.model.as_str())
+                    .unwrap_or(candidates[1].model.as_str())
+            });
+
+        let stats_a = self.model_compare_stats(filter, selected_a)?;
+        let stats_b = self.model_compare_stats(filter, selected_b)?;
+        let (support, warning) = match (&stats_a, &stats_b) {
+            (Some(left), Some(right)) => {
+                let warning = if left.low_sample || right.low_sample {
+                    Some(
+                        "Low sample: compare directionally until each model has more calls/edit turns."
+                            .to_string(),
+                    )
+                } else {
+                    None
+                };
+                (
+                    BehaviorSupport {
+                        supported: true,
+                        level: if warning.is_some() {
+                            "low_sample"
+                        } else {
+                            "normalized"
+                        }
+                        .to_string(),
+                        reason: warning.clone(),
+                    },
+                    warning,
+                )
+            }
+            _ => (
+                BehaviorSupport {
+                    supported: false,
+                    level: "missing_model".to_string(),
+                    reason: Some("One selected model has no data in this filter.".to_string()),
+                },
+                Some("One selected model has no data in this filter.".to_string()),
+            ),
+        };
+
+        let metrics = match (&stats_a, &stats_b) {
+            (Some(left), Some(right)) => compare_metrics(left, right),
+            _ => Vec::new(),
+        };
+        let working_style = match (&stats_a, &stats_b) {
+            (Some(left), Some(right)) => working_style_metrics(left, right),
+            _ => Vec::new(),
+        };
+        let category_head_to_head = match (&stats_a, &stats_b) {
+            (Some(left), Some(right)) => {
+                self.category_compare(filter, &left.model, &right.model)?
+            }
+            _ => Vec::new(),
+        };
+
+        Ok(ModelComparePayload {
+            support,
+            candidates,
+            model_a: stats_a,
+            model_b: stats_b,
+            metrics,
+            category_head_to_head,
+            working_style,
+            warning,
+        })
+    }
+
+    fn model_compare_stats(
+        &self,
+        filter: &QueryFilter,
+        model: &str,
+    ) -> Result<Option<ModelCompareStats>> {
+        let mut model_filter = filter.clone();
+        model_filter.model = Some(model.to_string());
+
+        let bucket_filter = model_filter.bucket_filter(Some("b"));
+        let token_sql = format!(
+            r#"
+            SELECT
+                COALESCE(SUM(b.event_count), 0),
+                COALESCE(SUM(b.total_tokens), 0),
+                COALESCE(SUM(b.cost_with_cache_usd), 0.0),
+                COALESCE(SUM(b.input_tokens), 0),
+                COALESCE(SUM(b.cache_creation_tokens), 0),
+                COALESCE(SUM(b.cache_read_tokens), 0)
+            FROM usage_bucket_30m b
+            {}
+            "#,
+            bucket_filter.where_sql()
+        );
+        let (calls, total_tokens, cost, input, cache_creation, cache_read): (
+            i64,
+            i64,
+            f64,
+            i64,
+            i64,
+            i64,
+        ) = self.conn.query_row(
+            &token_sql,
+            params_from_iter(bucket_filter.params().iter()),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
+        )?;
+        if calls == 0 {
+            return Ok(None);
+        }
+
+        let turn_filter = model_filter.turn_filter(Some("t"));
+        let turn_sql = format!(
+            r#"
+            SELECT
+                COUNT(*),
+                COALESCE(SUM(t.has_edits), 0),
+                COALESCE(SUM(t.one_shot), 0),
+                COALESCE(SUM(t.retries), 0),
+                COALESCE(SUM(CASE WHEN t.category = 'delegation' THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN t.category = 'planning' THEN 1 ELSE 0 END), 0)
+            FROM usage_turn t
+            {}
+            "#,
+            turn_filter.where_sql()
+        );
+        let (turns, edit_turns, one_shot_turns, retries, delegation_turns, planning_turns): (
+            i64,
+            i64,
+            i64,
+            i64,
+            i64,
+            i64,
+        ) = self.conn.query_row(
+            &turn_sql,
+            params_from_iter(turn_filter.params().iter()),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
+        )?;
+
+        let tool_filter = model_filter.tool_filter(Some("tc"));
+        let tool_calls = scalar_i64(
+            &self.conn,
+            &format!(
+                "SELECT COUNT(*) FROM usage_tool_call tc{}",
+                tool_filter.where_sql()
+            ),
+            params_from_iter(tool_filter.params().iter()),
+        )?;
+        let cache_efficiency = ratio(cache_read, input + cache_creation + cache_read);
+        Ok(Some(ModelCompareStats {
+            model: model.to_string(),
+            calls,
+            turns,
+            edit_turns,
+            one_shot_turns,
+            retries,
+            total_tokens,
+            estimated_cost_usd: cost,
+            cache_efficiency,
+            cost_per_call: ratio_f64(cost, calls),
+            cost_per_edit_turn: ratio_f64(cost, edit_turns),
+            one_shot_rate: ratio(one_shot_turns, edit_turns),
+            retry_rate: ratio(retries, turns),
+            avg_tools_per_turn: ratio(tool_calls, turns),
+            delegation_rate: ratio(delegation_turns, turns),
+            planning_rate: ratio(planning_turns, turns),
+            low_sample: calls < 20 || edit_turns < 10,
+        }))
+    }
+
+    fn category_compare(
+        &self,
+        filter: &QueryFilter,
+        model_a: &str,
+        model_b: &str,
+    ) -> Result<Vec<CategoryCompareRow>> {
+        let mut rows_by_category: BTreeMap<String, (i64, i64, i64, i64)> = BTreeMap::new();
+        for (index, model) in [model_a, model_b].into_iter().enumerate() {
+            let mut model_filter = filter.clone();
+            model_filter.model = Some(model.to_string());
+            let turn_filter = model_filter.turn_filter(Some("t"));
+            let sql = format!(
+                r#"
+                SELECT
+                    t.category,
+                    COALESCE(SUM(t.has_edits), 0) AS edit_turns,
+                    COALESCE(SUM(t.one_shot), 0) AS one_shot_turns
+                FROM usage_turn t
+                {}
+                GROUP BY t.category
+                HAVING edit_turns > 0
+                "#,
+                turn_filter.where_sql()
+            );
+            let mut stmt = self.conn.prepare(&sql)?;
+            let rows = stmt.query_map(params_from_iter(turn_filter.params().iter()), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })?;
+            for row in rows {
+                let (category, edit_turns, one_shot_turns) = row?;
+                let entry = rows_by_category.entry(category).or_default();
+                if index == 0 {
+                    entry.0 = edit_turns;
+                    entry.1 = one_shot_turns;
+                } else {
+                    entry.2 = edit_turns;
+                    entry.3 = one_shot_turns;
+                }
+            }
+        }
+        Ok(rows_by_category
+            .into_iter()
+            .map(
+                |(category, (a_edits, a_one_shot, b_edits, b_one_shot))| CategoryCompareRow {
+                    category,
+                    model_a_edit_turns: a_edits,
+                    model_a_one_shot_rate: ratio(a_one_shot, a_edits),
+                    model_b_edit_turns: b_edits,
+                    model_b_one_shot_rate: ratio(b_one_shot, b_edits),
+                },
+            )
+            .collect())
+    }
+
     /// Loads the ccr-ui home overview payload from the same dashboard connection.
     pub fn home_overview(&self, filter: &QueryFilter) -> Result<HomeOverviewPayload> {
         home_overview::load(self, filter)
@@ -764,7 +1710,32 @@ impl Dashboard {
     /// the legacy scalar trend shape because `/api/trends?window=` still
     /// exposes that contract.
     pub fn snapshot(&self, filter: &QueryFilter) -> Result<DashboardSnapshot> {
+        let core = self.core_snapshot(filter)?;
         Ok(DashboardSnapshot {
+            overview: core.overview,
+            day_trends: core.day_trends,
+            week_trends: core.week_trends,
+            month_trends: core.month_trends,
+            all_trends: core.all_trends,
+            models: core.models,
+            sources: core.sources,
+            projects: core.projects,
+            costs: core.costs,
+            activity: self.activity_breakdown(filter)?,
+            tools: self.tool_breakdown(filter)?,
+            optimize: self.optimize(filter)?,
+            compare: self.model_compare(filter, None, None)?,
+            health: core.health,
+            diagnostics: core.diagnostics,
+        })
+    }
+
+    /// Builds the core dashboard sections without behavior analytics.
+    ///
+    /// Web handlers use this to return the first screen even when
+    /// Activity/Tools/Optimize/Compare time out or fail.
+    pub fn core_snapshot(&self, filter: &QueryFilter) -> Result<DashboardCoreSnapshot> {
+        Ok(DashboardCoreSnapshot {
             overview: self.overview(filter)?,
             day_trends: self.trends("day", filter)?,
             week_trends: self.trends("week", filter)?,
@@ -778,6 +1749,201 @@ impl Dashboard {
             diagnostics: self.diagnostics()?,
         })
     }
+}
+
+fn behavior_support(
+    conn: &Connection,
+    table: &str,
+    filter: crate::query::filter::SqlFilter,
+) -> Result<BehaviorSupport> {
+    let count = scalar_i64(
+        conn,
+        &format!("SELECT COUNT(*) FROM {table}{}", filter.where_sql()),
+        params_from_iter(filter.params().iter()),
+    )?;
+    Ok(if count > 0 {
+        BehaviorSupport {
+            supported: true,
+            level: "normalized".to_string(),
+            reason: None,
+        }
+    } else {
+        BehaviorSupport {
+            supported: false,
+            level: "no_data".to_string(),
+            reason: Some(
+                "No normalized behavior facts match this filter; run sync with a parser that emits behavior facts."
+                    .to_string(),
+            ),
+        }
+    })
+}
+
+fn compare_model_candidates(
+    conn: &Connection,
+    filter: &QueryFilter,
+) -> Result<Vec<CompareModelCandidate>> {
+    let bucket_filter = filter.bucket_filter(Some("b"));
+    let sql = format!(
+        r#"
+        SELECT
+            b.model,
+            COALESCE(SUM(b.event_count), 0) AS calls,
+            COALESCE(SUM(b.total_tokens), 0) AS total_tokens,
+            COALESCE(SUM(b.cost_with_cache_usd), 0.0) AS estimated_cost_usd
+        FROM usage_bucket_30m b
+        {}
+        GROUP BY b.model
+        ORDER BY estimated_cost_usd DESC, total_tokens DESC, calls DESC, b.model ASC
+        LIMIT 25
+        "#,
+        bucket_filter.where_sql()
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params_from_iter(bucket_filter.params().iter()), |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<i64>>(1)?.unwrap_or_default(),
+            row.get::<_, Option<i64>>(2)?.unwrap_or_default(),
+            row.get::<_, Option<f64>>(3)?.unwrap_or_default(),
+        ))
+    })?;
+    let mut candidates = Vec::new();
+    for row in rows {
+        let (model, calls, total_tokens, estimated_cost_usd) = row?;
+        let mut model_filter = filter.clone();
+        model_filter.model = Some(model.clone());
+        let turn_filter = model_filter.turn_filter(Some("t"));
+        let (turns, edit_turns): (i64, i64) = conn.query_row(
+            &format!(
+                "SELECT COUNT(*), COALESCE(SUM(t.has_edits), 0) FROM usage_turn t{}",
+                turn_filter.where_sql()
+            ),
+            params_from_iter(turn_filter.params().iter()),
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        candidates.push(CompareModelCandidate {
+            model,
+            calls,
+            turns,
+            edit_turns,
+            total_tokens,
+            estimated_cost_usd,
+            low_sample: calls < 20 || edit_turns < 10,
+        });
+    }
+    Ok(candidates)
+}
+
+fn severity_rank(severity: &str) -> i64 {
+    match severity {
+        "high" => 3,
+        "medium" => 2,
+        _ => 1,
+    }
+}
+
+fn health_grade(score: i64) -> &'static str {
+    match score {
+        90..=100 => "A",
+        80..=89 => "B",
+        70..=79 => "C",
+        60..=69 => "D",
+        _ => "F",
+    }
+}
+
+fn safe_short(value: &str, max_chars: usize) -> String {
+    let mut out = value.chars().take(max_chars).collect::<String>();
+    if value.chars().count() > max_chars {
+        out.push('…');
+    }
+    out
+}
+
+fn ratio(numerator: i64, denominator: i64) -> f64 {
+    if denominator <= 0 {
+        0.0
+    } else {
+        numerator as f64 / denominator as f64
+    }
+}
+
+fn ratio_f64(numerator: f64, denominator: i64) -> f64 {
+    if denominator <= 0 {
+        0.0
+    } else {
+        numerator / denominator as f64
+    }
+}
+
+fn compare_metrics(left: &ModelCompareStats, right: &ModelCompareStats) -> Vec<CompareMetric> {
+    vec![
+        CompareMetric {
+            id: "one_shot_rate".to_string(),
+            label: "One-shot rate".to_string(),
+            model_a_value: left.one_shot_rate,
+            model_b_value: right.one_shot_rate,
+            higher_is_better: true,
+        },
+        CompareMetric {
+            id: "retry_rate".to_string(),
+            label: "Retry rate".to_string(),
+            model_a_value: left.retry_rate,
+            model_b_value: right.retry_rate,
+            higher_is_better: false,
+        },
+        CompareMetric {
+            id: "cost_per_call".to_string(),
+            label: "Cost / call".to_string(),
+            model_a_value: left.cost_per_call,
+            model_b_value: right.cost_per_call,
+            higher_is_better: false,
+        },
+        CompareMetric {
+            id: "cost_per_edit_turn".to_string(),
+            label: "Cost / edit".to_string(),
+            model_a_value: left.cost_per_edit_turn,
+            model_b_value: right.cost_per_edit_turn,
+            higher_is_better: false,
+        },
+        CompareMetric {
+            id: "cache_efficiency".to_string(),
+            label: "Cache efficiency".to_string(),
+            model_a_value: left.cache_efficiency,
+            model_b_value: right.cache_efficiency,
+            higher_is_better: true,
+        },
+    ]
+}
+
+fn working_style_metrics(
+    left: &ModelCompareStats,
+    right: &ModelCompareStats,
+) -> Vec<CompareMetric> {
+    vec![
+        CompareMetric {
+            id: "delegation_rate".to_string(),
+            label: "Delegation".to_string(),
+            model_a_value: left.delegation_rate,
+            model_b_value: right.delegation_rate,
+            higher_is_better: true,
+        },
+        CompareMetric {
+            id: "planning_rate".to_string(),
+            label: "Planning".to_string(),
+            model_a_value: left.planning_rate,
+            model_b_value: right.planning_rate,
+            higher_is_better: true,
+        },
+        CompareMetric {
+            id: "tools_per_turn".to_string(),
+            label: "Tools / turn".to_string(),
+            model_a_value: left.avg_tools_per_turn,
+            model_b_value: right.avg_tools_per_turn,
+            higher_is_better: true,
+        },
+    ]
 }
 
 fn query_token_summary(
@@ -964,6 +2130,59 @@ where
     Ok(conn
         .query_row(sql, params, |row| row.get(0))
         .unwrap_or(None))
+}
+
+#[cfg(test)]
+pub(crate) fn activity_query_plan_for_test(
+    conn: &Connection,
+    filter: &QueryFilter,
+) -> Result<Vec<String>> {
+    let turn_filter = filter.turn_filter(Some("t"));
+    let sql = format!(
+        r#"
+        EXPLAIN QUERY PLAN
+        SELECT
+            t.category,
+            COALESCE(SUM(e.cost_with_cache_usd), 0.0) AS estimated_cost_usd
+        FROM usage_turn t
+        LEFT JOIN usage_event e
+            ON e.event_key = substr(t.turn_key, 6)
+        {}
+        GROUP BY t.category
+        "#,
+        turn_filter.where_sql()
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params_from_iter(turn_filter.params().iter()), |row| {
+        row.get::<_, String>(3)
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+#[cfg(test)]
+pub(crate) fn session_outlier_query_plan_for_test(
+    conn: &Connection,
+    filter: &QueryFilter,
+) -> Result<Vec<String>> {
+    let turn_filter = filter.turn_filter(Some("t"));
+    let sql = format!(
+        r#"
+        EXPLAIN QUERY PLAN
+        SELECT
+            t.session_id,
+            COALESCE(SUM(e.cost_with_cache_usd), 0.0) AS cost
+        FROM usage_turn t
+        LEFT JOIN usage_event e ON e.event_key = substr(t.turn_key, 6)
+        {}
+        GROUP BY t.session_id
+        "#,
+        turn_filter.where_sql()
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params_from_iter(turn_filter.params().iter()), |row| {
+        row.get::<_, String>(3)
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 #[cfg(test)]
@@ -1175,6 +2394,381 @@ mod tests {
             .map(|row| row.event_count)
             .sum();
         assert_eq!(cost_total, 48);
+        Ok(())
+    }
+
+    #[test]
+    fn behavior_queries_return_activity_and_tool_breakdowns() -> Result<()> {
+        let fixture = Fixture::new()?;
+        fixture.seed_event(crate::testing::SeedEvent {
+            event_key: "codex:behavior:1",
+            event_at: "2026-05-01T00:00:00Z",
+            hour_start: Some("2026-05-01T00:00:00Z"),
+            input_tokens: 100,
+            output_tokens: 50,
+            total_tokens: 150,
+            cost_with_cache_usd: 0.42,
+            cost_without_cache_usd: 0.42,
+            pricing_status: "static",
+            pricing_source: Some("static-v1"),
+            session_id: Some("session-behavior"),
+            source_path_hash: Some("path-behavior"),
+            ..Default::default()
+        })?;
+        let conn = fixture.store().open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_turn(
+                turn_key, source, session_id, source_path_hash, project_hash,
+                primary_model, started_at, category, has_edits, retries,
+                one_shot, call_count, input_tokens, cache_read_tokens,
+                cache_creation_tokens, output_tokens, reasoning_output_tokens,
+                total_tokens, created_at
+            ) VALUES ('turn:codex:behavior:1', 'codex', 'session-behavior',
+                'path-behavior', 'project-test', 'gpt-5', '2026-05-01T00:00:00Z',
+                'coding', 1, 0, 1, 1, 100, 0, 0, 50, 0, 150, '2026-05-01T00:00:00Z')
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_tool_call(
+                tool_call_key, turn_key, event_key, source, session_id,
+                source_path_hash, project_hash, model, occurred_at, tool_name,
+                tool_kind, mcp_server, mcp_tool, input_fingerprint, safe_preview, created_at
+            ) VALUES ('tool:codex:behavior:1', 'turn:codex:behavior:1',
+                'codex:behavior:1', 'codex', 'session-behavior', 'path-behavior',
+                'project-test', 'gpt-5', '2026-05-01T00:00:00Z', 'Edit', 'edit',
+                NULL, NULL, 'fp-edit', 'Edit src/lib.rs', '2026-05-01T00:00:00Z')
+            "#,
+            [],
+        )?;
+        drop(conn);
+
+        let dashboard = Dashboard::open(fixture.store())?;
+        let activity = dashboard.activity_breakdown(&QueryFilter {
+            source: Some(SourceKind::Codex),
+            model: Some("gpt-5".to_string()),
+            ..Default::default()
+        })?;
+        assert!(activity.support.supported);
+        assert_eq!(activity.breakdown.len(), 1);
+        assert_eq!(activity.breakdown[0].category, "coding");
+        assert_eq!(activity.breakdown[0].turns, 1);
+        assert_eq!(activity.breakdown[0].one_shot_rate, 1.0);
+        assert_eq!(activity.breakdown[0].estimated_cost_usd, 0.42);
+
+        let tools = dashboard.tool_breakdown(&QueryFilter {
+            source: Some(SourceKind::Codex),
+            model: Some("gpt-5".to_string()),
+            ..Default::default()
+        })?;
+        assert!(tools.support.supported);
+        assert_eq!(tools.breakdown.len(), 1);
+        assert_eq!(tools.breakdown[0].tool_kind, "edit");
+        assert_eq!(tools.breakdown[0].tool_name, "Edit");
+        assert_eq!(tools.breakdown[0].calls, 1);
+        assert_eq!(tools.breakdown[0].call_share, 1.0);
+        assert_eq!(tools.breakdown[0].estimated_cost_usd, 0.42);
+        Ok(())
+    }
+
+    #[test]
+    fn behavior_event_join_query_plan_uses_event_key_index() -> Result<()> {
+        let fixture = Fixture::new()?;
+        let conn = fixture.store().open_connection()?;
+        for idx in 0..2_000 {
+            fixture.seed_event(crate::testing::SeedEvent {
+                event_key: &format!("codex:plan:{idx}"),
+                source: "codex",
+                model: "gpt-5",
+                event_at: "2026-05-01T00:00:00Z",
+                hour_start: Some("2026-05-01T00:00:00Z"),
+                input_tokens: 10,
+                output_tokens: 5,
+                total_tokens: 15,
+                cost_with_cache_usd: 0.01,
+                cost_without_cache_usd: 0.01,
+                pricing_status: "static",
+                pricing_source: Some("static-v1"),
+                source_path_hash: Some("path-plan"),
+                session_id: Some("session-plan"),
+                ..crate::testing::SeedEvent::default()
+            })?;
+            conn.execute(
+                r#"
+                INSERT INTO usage_turn(
+                    turn_key, source, session_id, source_path_hash, project_hash,
+                    primary_model, started_at, category, has_edits, retries,
+                    one_shot, call_count, input_tokens, cache_read_tokens,
+                    cache_creation_tokens, output_tokens, reasoning_output_tokens,
+                    total_tokens, created_at
+                ) VALUES (?1, 'codex', 'session-plan', 'path-plan',
+                    'project-test', 'gpt-5', '2026-05-01T00:00:00Z', 'coding',
+                    1, 0, 1, 1, 10, 0, 0, 5, 0, 15, '2026-05-01T00:00:00Z')
+                "#,
+                [format!("turn:codex:plan:{idx}")],
+            )?;
+        }
+
+        let filter = QueryFilter {
+            source: Some(SourceKind::Codex),
+            ..QueryFilter::default()
+        };
+        for plan in [
+            super::activity_query_plan_for_test(&conn, &filter)?,
+            super::session_outlier_query_plan_for_test(&conn, &filter)?,
+        ] {
+            let details = plan.join("\n");
+            assert!(
+                details.contains("USING INDEX sqlite_autoindex_usage_event_1")
+                    || details.contains("USING COVERING INDEX sqlite_autoindex_usage_event_1"),
+                "usage_event join must probe event_key index, plan was:\n{details}"
+            );
+            assert!(
+                !details.contains("SCAN e"),
+                "usage_event join must not full-scan e, plan was:\n{details}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn behavior_queries_return_explicit_no_data_support() -> Result<()> {
+        let fixture = Fixture::new()?;
+        let dashboard = Dashboard::open(fixture.store())?;
+
+        let activity = dashboard.activity_breakdown(&QueryFilter::default())?;
+        let tools = dashboard.tool_breakdown(&QueryFilter::default())?;
+
+        assert!(!activity.support.supported);
+        assert_eq!(activity.support.level, "no_data");
+        assert!(activity.breakdown.is_empty());
+        assert!(!tools.support.supported);
+        assert_eq!(tools.support.level, "no_data");
+        assert!(tools.breakdown.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn optimize_returns_read_only_findings_from_behavior_facts() -> Result<()> {
+        let fixture = Fixture::new()?;
+        for index in 0..8 {
+            let event_key = format!("codex:optimize:{index}");
+            fixture.seed_event(crate::testing::SeedEvent {
+                event_key: &event_key,
+                source: "codex",
+                model: "gpt-5",
+                event_at: "2026-05-01T00:00:00Z",
+                hour_start: Some("2026-05-01T00:00:00Z"),
+                input_tokens: 100,
+                output_tokens: 50,
+                total_tokens: 150,
+                cost_with_cache_usd: 0.10,
+                cost_without_cache_usd: 0.10,
+                pricing_status: "static",
+                pricing_source: Some("static-v1"),
+                session_id: Some("session-optimize"),
+                source_path_hash: Some("path-optimize"),
+                created_at: Some("2026-05-01T00:00:00Z"),
+                ..Default::default()
+            })?;
+        }
+        let conn = fixture.store().open_connection()?;
+        for index in 0..8 {
+            conn.execute(
+                r#"
+                INSERT INTO usage_turn(
+                    turn_key, source, session_id, source_path_hash, project_hash,
+                    primary_model, started_at, category, has_edits, retries,
+                    one_shot, call_count, input_tokens, cache_read_tokens,
+                    cache_creation_tokens, output_tokens, reasoning_output_tokens,
+                    total_tokens, created_at
+                ) VALUES (?1, 'codex', 'session-optimize', 'path-optimize',
+                    'project-test', 'gpt-5', '2026-05-01T00:00:00Z', 'coding',
+                    1, 0, 1, 1, 100, 0, 0, 50, 0, 150, '2026-05-01T00:00:00Z')
+                "#,
+                [format!("turn:codex:optimize:{index}")],
+            )?;
+            conn.execute(
+                r#"
+                INSERT INTO usage_tool_call(
+                    tool_call_key, turn_key, event_key, source, session_id,
+                    source_path_hash, project_hash, model, occurred_at, tool_name,
+                    tool_kind, mcp_server, mcp_tool, input_fingerprint, safe_preview, created_at
+                ) VALUES (?1, ?2, ?3, 'codex', 'session-optimize', 'path-optimize',
+                    'project-test', 'gpt-5', '2026-05-01T00:00:00Z', 'Edit', 'edit',
+                    NULL, NULL, ?4, 'Edit src/lib.rs', '2026-05-01T00:00:00Z')
+                "#,
+                rusqlite::params![
+                    format!("tool:edit:{index}"),
+                    format!("turn:codex:optimize:{index}"),
+                    format!("codex:optimize:{index}"),
+                    format!("fp-edit-{index}")
+                ],
+            )?;
+        }
+        for index in 0..3 {
+            conn.execute(
+                r#"
+                INSERT INTO usage_tool_call(
+                    tool_call_key, turn_key, event_key, source, session_id,
+                    source_path_hash, project_hash, model, occurred_at, tool_name,
+                    tool_kind, mcp_server, mcp_tool, input_fingerprint, safe_preview, created_at
+                ) VALUES (?1, 'turn:codex:optimize:0', 'codex:optimize:0',
+                    'codex', 'session-optimize', 'path-optimize', 'project-test',
+                    'gpt-5', '2026-05-01T00:00:00Z', 'Read', 'read',
+                    NULL, NULL, 'fp-node-modules', 'Read node_modules/pkg/index.js',
+                    '2026-05-01T00:00:00Z')
+                "#,
+                [format!("tool:read:{index}")],
+            )?;
+        }
+        drop(conn);
+
+        let optimize = Dashboard::open(fixture.store())?.optimize(&QueryFilter {
+            source: Some(SourceKind::Codex),
+            model: Some("gpt-5".to_string()),
+            ..Default::default()
+        })?;
+
+        assert!(optimize.support.supported);
+        assert!(optimize.score < 100);
+        assert!(
+            optimize
+                .findings
+                .iter()
+                .any(|finding| finding.id == "low_read_edit_ratio")
+        );
+        assert!(
+            optimize
+                .findings
+                .iter()
+                .any(|finding| finding.id == "duplicate_reads")
+        );
+        assert!(
+            optimize
+                .findings
+                .iter()
+                .any(|finding| finding.id == "junk_reads")
+        );
+        assert!(optimize.estimated_savings_tokens > 0);
+        assert!(optimize.findings.iter().all(|finding| {
+            !finding
+                .recommendation
+                .to_ascii_lowercase()
+                .contains("delete")
+        }));
+        Ok(())
+    }
+
+    #[test]
+    fn compare_returns_candidates_metrics_and_low_sample_warning() -> Result<()> {
+        let fixture = Fixture::new()?;
+        for (index, model, category, has_edits, one_shot, retries) in [
+            (0, "gpt-5", "coding", 1, 1, 0),
+            (1, "gpt-5", "planning", 0, 0, 0),
+            (2, "sonnet", "coding", 1, 0, 1),
+            (3, "sonnet", "delegation", 1, 1, 0),
+        ] {
+            let event_key = format!("codex:compare:{index}");
+            fixture.seed_event(crate::testing::SeedEvent {
+                event_key: &event_key,
+                source: "codex",
+                model,
+                event_at: "2026-05-01T00:00:00Z",
+                hour_start: Some("2026-05-01T00:00:00Z"),
+                input_tokens: 100 + index * 10,
+                cache_read_tokens: 10,
+                output_tokens: 50,
+                total_tokens: 160 + index * 10,
+                cost_with_cache_usd: 0.10 + (index as f64 * 0.01),
+                cost_without_cache_usd: 0.10 + (index as f64 * 0.01),
+                pricing_status: "static",
+                pricing_source: Some("static-v1"),
+                session_id: Some("session-compare"),
+                source_path_hash: Some("path-compare"),
+                created_at: Some("2026-05-01T00:00:00Z"),
+                ..Default::default()
+            })?;
+            let conn = fixture.store().open_connection()?;
+            conn.execute(
+                r#"
+                INSERT INTO usage_turn(
+                    turn_key, source, session_id, source_path_hash, project_hash,
+                    primary_model, started_at, category, has_edits, retries,
+                    one_shot, call_count, input_tokens, cache_read_tokens,
+                    cache_creation_tokens, output_tokens, reasoning_output_tokens,
+                    total_tokens, created_at
+                ) VALUES (?1, 'codex', 'session-compare', 'path-compare',
+                    'project-test', ?2, '2026-05-01T00:00:00Z', ?3,
+                    ?4, ?5, ?6, 1, 100, 10, 0, 50, 0, 160, '2026-05-01T00:00:00Z')
+                "#,
+                rusqlite::params![
+                    format!("turn:{event_key}"),
+                    model,
+                    category,
+                    has_edits,
+                    retries,
+                    one_shot
+                ],
+            )?;
+            conn.execute(
+                r#"
+                INSERT INTO usage_tool_call(
+                    tool_call_key, turn_key, event_key, source, session_id,
+                    source_path_hash, project_hash, model, occurred_at, tool_name,
+                    tool_kind, mcp_server, mcp_tool, input_fingerprint, safe_preview, created_at
+                ) VALUES (?1, ?2, ?3, 'codex', 'session-compare', 'path-compare',
+                    'project-test', ?4, '2026-05-01T00:00:00Z', 'Edit', 'edit',
+                    NULL, NULL, ?5, 'Edit src/lib.rs', '2026-05-01T00:00:00Z')
+                "#,
+                rusqlite::params![
+                    format!("tool:{event_key}"),
+                    format!("turn:{event_key}"),
+                    event_key,
+                    model,
+                    format!("fp-{index}")
+                ],
+            )?;
+        }
+
+        let dashboard = Dashboard::open(fixture.store())?;
+        let candidates = dashboard.compare_models(&QueryFilter::default())?;
+        assert_eq!(candidates.len(), 2);
+        assert!(candidates.iter().all(|candidate| candidate.low_sample));
+
+        let compare =
+            dashboard.model_compare(&QueryFilter::default(), Some("gpt-5"), Some("sonnet"))?;
+        assert!(compare.support.supported);
+        assert_eq!(compare.support.level, "low_sample");
+        assert!(
+            compare
+                .warning
+                .as_deref()
+                .unwrap_or("")
+                .contains("Low sample")
+        );
+        assert_eq!(compare.model_a.as_ref().unwrap().model, "gpt-5");
+        assert_eq!(compare.model_b.as_ref().unwrap().model, "sonnet");
+        assert!(
+            compare
+                .metrics
+                .iter()
+                .any(|metric| metric.id == "one_shot_rate")
+        );
+        assert!(
+            compare
+                .working_style
+                .iter()
+                .any(|metric| metric.id == "delegation_rate")
+        );
+        assert!(
+            compare
+                .category_head_to_head
+                .iter()
+                .any(|row| row.category == "coding")
+        );
         Ok(())
     }
 

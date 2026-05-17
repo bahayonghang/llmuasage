@@ -12,7 +12,7 @@ use super::{
 };
 use crate::{
     error::LlmusageError,
-    models::{ProjectInfo, SourceKind, UsageEvent, UsageTokens},
+    models::{ProjectInfo, SourceKind, UsageEvent, UsageTokens, UsageToolCall, UsageTurn},
     query::{
         PricingCatalog, pricing,
         pricing::{CostBreakdown, PRICING_MIXED, PRICING_UNPRICED},
@@ -477,6 +477,8 @@ impl SyncRunWriter {
             cursors = shard.cursors.len(),
             seen_files = shard.seen_file_paths.len(),
             raw_records = shard.raw_records.len(),
+            turns = shard.turns.len(),
+            tool_calls = shard.tool_calls.len(),
             "开始提交 shard"
         );
 
@@ -505,16 +507,147 @@ impl SyncRunWriter {
         if self.raw_archive_enabled && !shard.raw_records.is_empty() {
             self.write_raw_records_batch(&shard.raw_records)?;
         }
+        // 7.5 行为事实是 usage_event/bucket 之外的独立 normalized 表。
+        //     reset 同源文件时先清掉旧 path_hash 关联事实，随后 INSERT OR IGNORE
+        //     新事实；未支持行为提取的 parser 可继续传空 vec。
+        if !shard.reset_path_hashes.is_empty() {
+            self.reset_behavior_facts_batch(shard.source, &shard.reset_path_hashes)?;
+        }
+        if !shard.turns.is_empty() {
+            stats.turns_inserted += self.write_turn_batch(&shard.turns)?;
+        }
+        if !shard.tool_calls.is_empty() {
+            stats.tool_calls_inserted += self.write_tool_call_batch(&shard.tool_calls)?;
+        }
 
         stats.files_seen = shard.seen_file_paths.len();
         stats.write_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
         info!(
             source = %shard.source,
             inserted = stats.events_inserted,
+            turns_inserted = stats.turns_inserted,
+            tool_calls_inserted = stats.tool_calls_inserted,
             write_ms = stats.write_ms,
             "完成 shard 提交"
         );
         Ok(stats)
+    }
+
+    fn reset_behavior_facts_batch(
+        &mut self,
+        source: SourceKind,
+        path_hashes: &[String],
+    ) -> Result<()> {
+        if path_hashes.is_empty() {
+            return Ok(());
+        }
+        let mut unique = HashSet::new();
+        let tx = self.conn.transaction()?;
+        {
+            let mut delete_tool_stmt = tx.prepare_cached(
+                "DELETE FROM usage_tool_call WHERE source = ?1 AND source_path_hash = ?2",
+            )?;
+            let mut delete_turn_stmt = tx.prepare_cached(
+                "DELETE FROM usage_turn WHERE source = ?1 AND source_path_hash = ?2",
+            )?;
+            for path_hash in path_hashes {
+                if !unique.insert(path_hash.clone()) {
+                    continue;
+                }
+                delete_tool_stmt.execute(rusqlite::params![source.as_str(), path_hash])?;
+                delete_turn_stmt.execute(rusqlite::params![source.as_str(), path_hash])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn write_turn_batch(&mut self, turns: &[UsageTurn]) -> Result<usize> {
+        let tx = self.conn.transaction()?;
+        let inserted = {
+            let mut stmt = tx.prepare_cached(
+                r#"
+                INSERT OR IGNORE INTO usage_turn(
+                    turn_key, source, session_id, source_path_hash, project_hash,
+                    primary_model, started_at, category, has_edits, retries,
+                    one_shot, call_count, input_tokens, cache_read_tokens,
+                    cache_creation_tokens, output_tokens, reasoning_output_tokens,
+                    total_tokens, created_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                          ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+                "#,
+            )?;
+            let now = now_utc();
+            let mut inserted = 0usize;
+            for turn in turns {
+                inserted += stmt.execute(rusqlite::params![
+                    turn.turn_key,
+                    turn.source.as_str(),
+                    turn.session_id,
+                    turn.source_path_hash,
+                    turn.project_hash,
+                    turn.primary_model,
+                    turn.started_at,
+                    turn.category.as_str(),
+                    bool_to_i64(turn.has_edits),
+                    turn.retries,
+                    bool_to_i64(turn.one_shot),
+                    turn.call_count,
+                    turn.tokens.input_tokens,
+                    turn.tokens.cache_read_tokens,
+                    turn.tokens.cache_creation_tokens,
+                    turn.tokens.output_tokens,
+                    turn.tokens.reasoning_output_tokens,
+                    turn.tokens.total_tokens,
+                    now,
+                ])?;
+            }
+            inserted
+        };
+        tx.commit()?;
+        Ok(inserted)
+    }
+
+    fn write_tool_call_batch(&mut self, tool_calls: &[UsageToolCall]) -> Result<usize> {
+        let tx = self.conn.transaction()?;
+        let inserted = {
+            let mut stmt = tx.prepare_cached(
+                r#"
+                INSERT OR IGNORE INTO usage_tool_call(
+                    tool_call_key, turn_key, event_key, source, session_id,
+                    source_path_hash, project_hash, model, occurred_at, tool_name,
+                    tool_kind, mcp_server, mcp_tool, input_fingerprint,
+                    safe_preview, created_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                          ?13, ?14, ?15, ?16)
+                "#,
+            )?;
+            let now = now_utc();
+            let mut inserted = 0usize;
+            for call in tool_calls {
+                inserted += stmt.execute(rusqlite::params![
+                    call.tool_call_key,
+                    call.turn_key,
+                    call.event_key,
+                    call.source.as_str(),
+                    call.session_id,
+                    call.source_path_hash,
+                    call.project_hash,
+                    call.model,
+                    call.occurred_at,
+                    call.tool_name,
+                    call.tool_kind.as_str(),
+                    call.mcp_server,
+                    call.mcp_tool,
+                    call.input_fingerprint,
+                    call.safe_preview,
+                    now,
+                ])?;
+            }
+            inserted
+        };
+        tx.commit()?;
+        Ok(inserted)
     }
 
     fn write_raw_records_batch(&mut self, records: &[super::RawRecord]) -> Result<()> {
@@ -547,6 +680,10 @@ impl SyncRunWriter {
         tx.commit()?;
         Ok(())
     }
+}
+
+fn bool_to_i64(value: bool) -> i64 {
+    if value { 1 } else { 0 }
 }
 
 fn roll_up_bucket(
@@ -793,7 +930,10 @@ fn refresh_bucket_pricing_after_reset_tx(
 mod tests {
     use super::*;
     use crate::{
-        models::{SessionInfo, SourceKind, UsageEvent, UsageTokens},
+        models::{
+            ActivityCategory, SessionInfo, SourceKind, ToolKind, UsageEvent, UsageTokens,
+            UsageToolCall, UsageTurn,
+        },
         paths::AppPaths,
         store::FileCursor,
     };
@@ -852,6 +992,35 @@ mod tests {
         }
     }
 
+    fn build_tool_call(event: &UsageEvent, tool_name: &str) -> UsageToolCall {
+        UsageToolCall {
+            tool_call_key: format!("tool:{}:{tool_name}", event.event_key),
+            turn_key: Some(format!("turn:{}", event.event_key)),
+            event_key: Some(event.event_key.clone()),
+            source: event.source,
+            session_id: event
+                .session
+                .as_ref()
+                .map(|session| session.session_id.clone()),
+            source_path_hash: event
+                .session
+                .as_ref()
+                .and_then(|session| session.source_path_hash.clone()),
+            project_hash: event
+                .project
+                .as_ref()
+                .map(|project| project.project_hash.clone()),
+            model: Some(event.model.clone()),
+            occurred_at: event.event_at.clone(),
+            tool_name: tool_name.to_string(),
+            tool_kind: ToolKind::Read,
+            mcp_server: None,
+            mcp_tool: None,
+            input_fingerprint: Some(format!("fp:{tool_name}")),
+            safe_preview: Some(format!("{tool_name} preview")),
+        }
+    }
+
     /// Validates the reset → events → cursor protocol is upheld in a single shard:
     /// 1) seed one event under `path_hash_a` with total=100,
     /// 2) commit a shard that resets `path_hash_a` and writes 5 fresh events
@@ -875,6 +1044,8 @@ mod tests {
             cursors: Vec::new(),
             seen_file_paths: Vec::new(),
             raw_records: Vec::new(),
+            turns: Vec::new(),
+            tool_calls: Vec::new(),
         })?;
         assert_eq!(seed.events_inserted, 1);
 
@@ -888,6 +1059,8 @@ mod tests {
             cursors: vec![build_cursor("pathA")],
             seen_file_paths: Vec::new(),
             raw_records: Vec::new(),
+            turns: Vec::new(),
+            tool_calls: Vec::new(),
         })?;
         assert_eq!(stats.events_inserted, 5);
 
@@ -925,6 +1098,97 @@ mod tests {
     }
 
     #[test]
+    fn commit_shard_writes_behavior_facts_and_resets_them_by_source_path() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = build_paths(temp.path());
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+
+        let mut writer = store.begin_sync_run()?;
+        let first_event = build_event("first", "pathBehavior", 10);
+        let first_turn = UsageTurn {
+            category: ActivityCategory::Exploration,
+            ..UsageTurn::from_event(&first_event, ActivityCategory::Exploration)
+        };
+        let first_tool = build_tool_call(&first_event, "Read");
+        let stats = writer.commit_shard(SyncShard {
+            source: SourceKind::Codex,
+            reset_path_hashes: Vec::new(),
+            events: vec![first_event],
+            cursors: Vec::new(),
+            seen_file_paths: Vec::new(),
+            raw_records: Vec::new(),
+            turns: vec![first_turn],
+            tool_calls: vec![first_tool],
+        })?;
+        assert_eq!(stats.events_inserted, 1);
+        assert_eq!(stats.turns_inserted, 1);
+        assert_eq!(stats.tool_calls_inserted, 1);
+
+        let conn = store.open_connection()?;
+        let turn_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_turn WHERE source_path_hash = 'pathBehavior'",
+            [],
+            |row| row.get(0),
+        )?;
+        let tool_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_tool_call WHERE source_path_hash = 'pathBehavior'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(turn_count, 1);
+        assert_eq!(tool_count, 1);
+        drop(conn);
+
+        let replacement_event = build_event("replacement", "pathBehavior", 20);
+        writer.commit_shard(SyncShard {
+            source: SourceKind::Codex,
+            reset_path_hashes: vec!["pathBehavior".to_string()],
+            events: vec![replacement_event.clone()],
+            cursors: Vec::new(),
+            seen_file_paths: Vec::new(),
+            raw_records: Vec::new(),
+            turns: vec![UsageTurn {
+                category: ActivityCategory::Coding,
+                has_edits: true,
+                one_shot: true,
+                ..UsageTurn::from_event(&replacement_event, ActivityCategory::Coding)
+            }],
+            tool_calls: vec![UsageToolCall {
+                tool_kind: ToolKind::Edit,
+                ..build_tool_call(&replacement_event, "Edit")
+            }],
+        })?;
+
+        let conn = store.open_connection()?;
+        let (turn_count, category): (i64, String) = conn.query_row(
+            "SELECT COUNT(*), MAX(category) FROM usage_turn WHERE source_path_hash = 'pathBehavior'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let (tool_count, tool_kind): (i64, String) = conn.query_row(
+            "SELECT COUNT(*), MAX(tool_kind) FROM usage_tool_call WHERE source_path_hash = 'pathBehavior'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let bucket_total: i64 = conn.query_row(
+            "SELECT total_tokens FROM usage_bucket_30m WHERE source = 'codex'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(turn_count, 1);
+        assert_eq!(category, "coding");
+        assert_eq!(tool_count, 1);
+        assert_eq!(tool_kind, "edit");
+        assert_eq!(
+            bucket_total, 40,
+            "behavior reset must not break usage_event bucket replacement"
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn commit_shard_persists_costs_and_recomputes_bucket_pricing_after_reset() -> anyhow::Result<()>
     {
         let temp = TempDir::new()?;
@@ -947,6 +1211,8 @@ mod tests {
             cursors: Vec::new(),
             seen_file_paths: Vec::new(),
             raw_records: Vec::new(),
+            turns: Vec::new(),
+            tool_calls: Vec::new(),
         })?;
         assert_eq!(seed.events_inserted, 2);
 
@@ -979,6 +1245,8 @@ mod tests {
             cursors: Vec::new(),
             seen_file_paths: Vec::new(),
             raw_records: Vec::new(),
+            turns: Vec::new(),
+            tool_calls: Vec::new(),
         })?;
 
         let conn = store.open_connection()?;
@@ -1071,6 +1339,8 @@ mod tests {
             cursors: Vec::new(),
             seen_file_paths: Vec::new(),
             raw_records: Vec::new(),
+            turns: Vec::new(),
+            tool_calls: Vec::new(),
         })?;
 
         let conn = store.open_connection()?;
@@ -1125,6 +1395,8 @@ mod tests {
             cursors: Vec::new(),
             seen_file_paths: Vec::new(),
             raw_records: Vec::new(),
+            turns: Vec::new(),
+            tool_calls: Vec::new(),
         })?;
 
         let conn = store.open_connection()?;

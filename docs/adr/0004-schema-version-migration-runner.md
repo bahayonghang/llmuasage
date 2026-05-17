@@ -1,7 +1,7 @@
 # ADR 0004 — schema_version + 自家 versioned migration runner
 
 - 状态：拟稿（0.5.0 sprint M0- 落地）
-- 落地阶段：M0- 落 runner + v1 baseline；M1/M2/M3 随功能追加 v2-v10；M0- 不单独发布 rc
+- 落地阶段：M0- 落 runner + v1 baseline；M1/M2/M3 随功能追加 v2-v10；0.6.x 追加 v11 行为事实表；M0- 不单独发布 rc
 - 落地日期：TBD
 - 相关代码：`src/store/schema.rs`、`src/store/migrations.rs`（新）、`src/store/mod.rs::bootstrap`
 - 相关术语：Migration / SchemaVersion / Store（见仓库根目录 CONTEXT.md）
@@ -26,7 +26,7 @@
 
 ### 2. `MIGRATIONS: &[(u32, &str, fn(&Transaction) -> Result<()>)]`
 
-编译期常量数组，按版本号升序。每个 migration 是 `fn(&Transaction)`，不允许跨步引用其他 migration 的内部函数。数组可随阶段增长：M0- 只有 v1 baseline；M1 追加 v2-v4；M2 追加 v5-v7；M3 追加 v8-v10。
+编译期常量数组，按版本号升序。每个 migration 是 `fn(&Transaction)`，不允许跨步引用其他 migration 的内部函数。数组可随阶段增长：M0- 只有 v1 baseline；M1 追加 v2-v4；M2 追加 v5-v7；M3 追加 v8-v10；0.6.x 追加 v11。
 
 ```rust
 const MIGRATIONS: &[(u32, &str, MigFn)] = &[
@@ -40,6 +40,7 @@ const MIGRATIONS: &[(u32, &str, MigFn)] = &[
     (8,  "add_worker_lock_meta",m_008_worker_lock_meta),
     (9,  "add_gemini",          m_009_gemini),
     (10, "add_pricing_meta",    m_010_pricing_meta),
+    (11, "add_behavior_facts",   m_011_behavior_facts),
 ];
 ```
 
@@ -116,6 +117,17 @@ DSL schema builder。否决：DSL 学习成本高，团队习惯手写 SQL。
 - baseline (v1) 必须严格 idempotent，否则全新 install 与升级路径会分叉。CI 必须有"在 v1 跑两遍"的回归测试。
 - 失败回滚后用户必须手动恢复（无 down migration）。文档需明确"down migration 故意不实现"。
 
+## 0.6.x 更新：v11 行为事实表
+
+0.6.x 为 dashboard Activity / Tools / Optimize / Compare 增加 migration v11：
+
+- `usage_turn`：turn-level normalized 行为事实，保存 source/session/path/model/category/one-shot/retry/token 汇总等字段。
+- `usage_tool_call`：tool/action-level normalized 行为事实，保存 tool kind、MCP server/tool、safe preview、input fingerprint 等字段。
+- v11 只追加行为分析事实表和索引，不改变 `usage_event` / `usage_bucket_30m` 的成本与用量主路径语义。
+- `SyncShard` 和 `SyncRunWriter::commit_shard` 负责将 parser 提取的行为事实与同一 `source_path_hash` 的 reset 保持幂等。
+
+这延续本 ADR 的核心约束：所有 schema 变更仍通过 `MIGRATIONS` 追加真实版本号，`schema_version` 当前可推进到 11；不使用空 migration 占位。
+
 ## 验证
 
 - M0- 单测：`migration_runner_runs_in_order_from_v0_to_v1_baseline`
@@ -131,3 +143,4 @@ DSL schema builder。否决：DSL 学习成本高，团队习惯手写 SQL。
   - backups/llmusage.db.pre-0.5.0 存在
   - usage_event 既有行的 cache_read_tokens 等于原 cached_input_tokens
   - cost_with_cache_usd 被 backfill（不是 0）
+- 0.6.x 行为事实表单测：`migration_v11_creates_behavior_fact_tables`，断言 `usage_turn` / `usage_tool_call` 存在且 `schema_version == 11`。

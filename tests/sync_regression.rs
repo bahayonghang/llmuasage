@@ -82,6 +82,63 @@ fn sync_hot_run_and_append_remain_incremental() -> Result<()> {
 }
 
 #[test]
+fn hot_sync_keeps_unchanged_source_files_live_and_reports_stored_events() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_codex("rollout-a.jsonl", 120, "2026-04-22T01:12:00Z")?;
+    fixture.seed_codex("rollout-b.jsonl", 80, "2026-04-22T02:12:00Z")?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+
+        let first = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Codex),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(first.total_inserted, 2);
+        assert_eq!(first.stored_events, 2);
+        assert_eq!(first.sources[0].stored_events, 2);
+
+        let counts = store.source_files().counts(SourceKind::Codex)?;
+        assert_eq!(counts.live, 2);
+        assert_eq!(counts.missing, 0);
+
+        let second = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Codex),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(second.total_inserted, 0);
+        assert_eq!(second.stored_events, 2);
+        assert_eq!(second.sources[0].changed_files, 0);
+        assert_eq!(second.sources[0].stored_events, 2);
+
+        let counts = store.source_files().counts(SourceKind::Codex)?;
+        assert_eq!(counts.live, 2);
+        assert_eq!(counts.missing, 0, "unchanged-but-present files stay live");
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
 fn sync_replay_replaces_old_file_totals() -> Result<()> {
     /*
      * ========================================================================

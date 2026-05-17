@@ -27,6 +27,7 @@ impl<'a> SyncStatusStore<'a> {
                 events_seen,
                 events_replayed,
                 events_inserted,
+                stored_events,
                 parse_ms,
                 write_ms,
                 lock_wait_ms,
@@ -44,10 +45,11 @@ impl<'a> SyncStatusStore<'a> {
                 events_seen: row.get(4)?,
                 events_replayed: row.get(5)?,
                 events_inserted: row.get(6)?,
-                parse_ms: row.get(7)?,
-                write_ms: row.get(8)?,
-                lock_wait_ms: row.get(9)?,
-                updated_at: row.get(10)?,
+                stored_events: row.get(7)?,
+                parse_ms: row.get(8)?,
+                write_ms: row.get(9)?,
+                lock_wait_ms: row.get(10)?,
+                updated_at: row.get(11)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -71,11 +73,12 @@ impl<'a> SyncStatusStore<'a> {
                     events_seen,
                     events_replayed,
                     events_inserted,
+                    stored_events,
                     parse_ms,
                     write_ms,
                     lock_wait_ms,
                     updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
                 ON CONFLICT(source) DO UPDATE SET
                     files_processed = excluded.files_processed,
                     changed_files = excluded.changed_files,
@@ -83,6 +86,7 @@ impl<'a> SyncStatusStore<'a> {
                     events_seen = excluded.events_seen,
                     events_replayed = excluded.events_replayed,
                     events_inserted = excluded.events_inserted,
+                    stored_events = excluded.stored_events,
                     parse_ms = excluded.parse_ms,
                     write_ms = excluded.write_ms,
                     lock_wait_ms = excluded.lock_wait_ms,
@@ -98,6 +102,7 @@ impl<'a> SyncStatusStore<'a> {
                     status.events_seen,
                     status.events_replayed,
                     status.events_inserted,
+                    status.stored_events,
                     status.parse_ms,
                     status.write_ms,
                     status.lock_wait_ms,
@@ -130,12 +135,13 @@ impl<'a> SyncStatusStore<'a> {
                 events_seen,
                 events_replayed,
                 events_inserted,
+                stored_events,
                 parse_ms,
                 write_ms,
                 lock_wait_ms,
                 updated_at,
                 recent_completed_at
-            ) VALUES (?1, 0, 0, 0, 0, 0, 0, 0, 0, 0, ?2, ?2)
+            ) VALUES (?1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ?2, ?2)
             ON CONFLICT(source) DO UPDATE SET
                 recent_completed_at = excluded.recent_completed_at,
                 updated_at = excluded.updated_at

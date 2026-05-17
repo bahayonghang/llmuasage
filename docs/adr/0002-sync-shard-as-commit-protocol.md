@@ -120,3 +120,19 @@ OpenCode 是流式（page-by-page）：每页 events 一次 `commit_shard`，`re
 - 阶段 2 完成时：`rtk cargo build` / `cargo fmt --check` / `clippy -D warnings` / `cargo test --test-threads=1` 全绿（35/35 测试）。
 - 新单测：`store::sync_writer::tests::commit_shard_runs_reset_then_events_then_cursor` 在 `TempDir` 内 store 上 seed 1 个 event → reset 同 path_hash → 写 5 个新 events + 1 个 cursor，断言 reset 在前（`event_count == 5`）、bucket 总 tokens=150、cursor 落库。
 - 安全网：`tests/sync_regression.rs` 6 个测试通过——三源 append / replace / inode-rotate 路径未回归。
+
+## 0.6.x 更新：行为事实作为 shard 附属事实
+
+0.6.x 为支持 Dashboard Activity / Tools / Optimize / Compare，在 `SyncShard` 上追加 `turns: Vec<UsageTurn>` 与 `tool_calls: Vec<UsageToolCall>`，并在 `ShardCommitStats` 上追加 `turns_inserted` / `tool_calls_inserted`。
+
+这不改变 ADR 的核心决策：parser 仍只构造 shard，不能直接写 SQLite；`SyncRunWriter::commit_shard` 仍是唯一写入协议入口。新增行为事实的约束是：
+
+- `usage_event` / `usage_bucket_30m` 仍是成本与用量主路径，行为事实不能污染 bucket 语义。
+- `turns` / `tool_calls` 可为空，source 不支持工具级证据时由 query/API 显式返回 no_data / degraded。
+- 对同一 `source_path_hash` 做 reset 时，writer 同时清理旧 `usage_turn` / `usage_tool_call`，再写入新 facts，保持整文件重放幂等。
+- `UsageToolCall.safe_preview` 只能保存 bounded 安全摘要；完整 prompt、assistant text 和文件内容不得进入行为事实表。
+
+验证补充：
+
+- `store::sync_writer::tests::commit_shard_writes_behavior_facts_and_resets_them_by_source_path`
+- `store::migrations::tests::migration_v11_creates_behavior_fact_tables`

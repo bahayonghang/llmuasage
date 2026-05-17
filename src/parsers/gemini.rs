@@ -15,7 +15,9 @@ use tracing::info;
 use walkdir::WalkDir;
 
 use crate::{
-    models::{ProjectInfo, SessionInfo, SourceKind, UsageEvent, UsageTokens},
+    models::{
+        ActivityCategory, ProjectInfo, SessionInfo, SourceKind, UsageEvent, UsageTokens, UsageTurn,
+    },
     parsers::{
         ProgressSink, SourceParser, SourceSyncStats, SyncEvent,
         file_state::{
@@ -62,6 +64,7 @@ struct GeminiShardPlan {
 #[derive(Debug)]
 struct GeminiShardOutput {
     events: Vec<UsageEvent>,
+    turns: Vec<UsageTurn>,
     cursors: Vec<crate::store::FileCursor>,
     reset_path_hashes: Vec<String>,
     events_seen: usize,
@@ -74,6 +77,7 @@ struct GeminiShardOutput {
 struct GeminiParseResult {
     end_offset: u64,
     events: Vec<UsageEvent>,
+    turns: Vec<UsageTurn>,
 }
 
 async fn sync_gemini(
@@ -175,6 +179,8 @@ async fn sync_gemini(
                 cursors: shard.cursors,
                 seen_file_paths: shard.seen_file_paths,
                 raw_records: Vec::new(),
+                turns: shard.turns,
+                tool_calls: Vec::new(),
             })?;
             files_scanned += commit.files_seen;
             inserted += commit.events_inserted;
@@ -293,6 +299,7 @@ fn parse_gemini_shard(plan: GeminiShardPlan) -> Result<GeminiShardOutput> {
     let mut resolver = ProjectResolver::default();
     let mut output = GeminiShardOutput {
         events: Vec::new(),
+        turns: Vec::new(),
         cursors: Vec::new(),
         reset_path_hashes: Vec::new(),
         events_seen: 0,
@@ -347,6 +354,7 @@ fn parse_gemini_shard(plan: GeminiShardPlan) -> Result<GeminiShardOutput> {
         }
 
         output.events.extend(parsed.events);
+        output.turns.extend(parsed.turns);
         output.cursors.push(finalize_cursor(
             &decision.snapshot.path,
             &decision.snapshot,
@@ -424,12 +432,14 @@ fn parse_session_file(
         return Ok(GeminiParseResult {
             end_offset,
             events: Vec::new(),
+            turns: Vec::new(),
         });
     };
 
     let messages = collect_messages(&value);
     let session_id = extract_session_id(&value).unwrap_or(fallback_session_id);
     let mut events = Vec::new();
+    let mut turns = Vec::new();
 
     for (index, message) in messages.iter().enumerate() {
         let Some(timestamp) = extract_timestamp(message) else {
@@ -453,7 +463,7 @@ fn parse_session_file(
 
         let model = normalize_model(extract_model(message, &value).as_deref());
 
-        events.push(UsageEvent {
+        let event = UsageEvent {
             event_key: format!("gemini:{path_hash}:{file_fingerprint}:{index}"),
             source: SourceKind::Gemini,
             model,
@@ -466,10 +476,16 @@ fn parse_session_file(
                 session_label: session_label.clone(),
                 source_path_hash: Some(path_hash.to_string()),
             }),
-        });
+        };
+        turns.push(UsageTurn::from_event(&event, ActivityCategory::General));
+        events.push(event);
     }
 
-    Ok(GeminiParseResult { end_offset, events })
+    Ok(GeminiParseResult {
+        end_offset,
+        events,
+        turns,
+    })
 }
 
 /// Walks the loaded session JSON and returns the message array.

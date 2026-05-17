@@ -249,6 +249,7 @@ async fn run_job(
                     sources: summary.sources.len(),
                     total_seen: summary.total_seen,
                     total_inserted: summary.total_inserted,
+                    stored_events: summary.stored_events,
                 },
             };
             let _ = internal_tx.send(event).await;
@@ -295,10 +296,11 @@ fn finish_state(
 
 fn summary_text(summary: &SyncSummary) -> String {
     format!(
-        "sources={} seen={} inserted={}",
+        "sources={} seen={} inserted_delta={} stored_events={}",
         summary.sources.len(),
         summary.total_seen,
-        summary.total_inserted
+        summary.total_inserted,
+        summary.stored_events
     )
 }
 

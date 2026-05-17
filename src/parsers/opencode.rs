@@ -8,7 +8,7 @@ use tracing::info;
 
 use crate::{
     integrations,
-    models::{SessionInfo, SourceKind, UsageEvent, UsageTokens},
+    models::{ActivityCategory, SessionInfo, SourceKind, UsageEvent, UsageTokens, UsageTurn},
     parsers::{ProgressSink, SourceParser, SourceSyncStats, SyncEvent},
     project::ProjectResolver,
     store::{Store, SyncRunWriter, SyncShard},
@@ -132,6 +132,7 @@ async fn sync_opencode(
         }
 
         let mut page_events = Vec::new();
+        let mut page_turns = Vec::new();
         let mut page_raw = Vec::new();
         for row in rows {
             page_last_time = row.time_created;
@@ -173,6 +174,7 @@ async fn sync_opencode(
                     raw_json,
                 });
             }
+            page_turns.push(UsageTurn::from_event(&event, ActivityCategory::General));
             page_events.push(event);
         }
 
@@ -187,6 +189,8 @@ async fn sync_opencode(
                 cursors: Vec::new(),
                 seen_file_paths: Vec::new(),
                 raw_records: page_raw,
+                turns: page_turns,
+                tool_calls: Vec::new(),
             })?;
             inserted += commit.events_inserted;
             write_ms += commit.write_ms;

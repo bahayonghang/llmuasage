@@ -60,6 +60,14 @@ impl QueryFilter {
         self.sql_filter(alias, "event_at")
     }
 
+    pub(crate) fn turn_filter(&self, alias: Option<&str>) -> SqlFilter {
+        self.sql_filter_with_model_column(alias, "started_at", "primary_model")
+    }
+
+    pub(crate) fn tool_filter(&self, alias: Option<&str>) -> SqlFilter {
+        self.sql_filter(alias, "occurred_at")
+    }
+
     pub(crate) fn local_time_modifier(&self) -> String {
         let seconds = self.timezone.fixed_offset().local_minus_utc();
         if seconds >= 0 {
@@ -70,6 +78,15 @@ impl QueryFilter {
     }
 
     fn sql_filter(&self, alias: Option<&str>, time_column: &str) -> SqlFilter {
+        self.sql_filter_with_model_column(alias, time_column, "model")
+    }
+
+    fn sql_filter_with_model_column(
+        &self,
+        alias: Option<&str>,
+        time_column: &str,
+        model_column: &str,
+    ) -> SqlFilter {
         let mut filter = SqlFilter::default();
 
         if let Some(source) = self.source {
@@ -84,7 +101,10 @@ impl QueryFilter {
             .map(str::trim)
             .filter(|v| !v.is_empty())
         {
-            filter.push(format!("{} = ?", column(alias, "model")), model.to_string());
+            filter.push(
+                format!("{} = ?", column(alias, model_column)),
+                model.to_string(),
+            );
         }
         if let Some(project_hash) = self
             .project_hash

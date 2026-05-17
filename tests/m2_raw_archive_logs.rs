@@ -73,6 +73,8 @@ fn seed_source_file(store: &Store, source: SourceKind, path: &str) -> Result<()>
         cursors: Vec::new(),
         seen_file_paths: vec![path.to_string()],
         raw_records: Vec::new(),
+        turns: Vec::new(),
+        tool_calls: Vec::new(),
     })?;
     writer.finish_sync_run()?;
     Ok(())
@@ -107,6 +109,8 @@ fn seed_resettable_row(store: &Store, source: SourceKind, key_suffix: &str) -> R
             event_key,
             raw_json: r#"{"raw":true}"#.to_string(),
         }],
+        turns: Vec::new(),
+        tool_calls: Vec::new(),
     })?;
     writer.finish_sync_run()?;
     Ok(())
@@ -131,6 +135,8 @@ fn raw_archive_off_by_default() -> Result<()> {
             event_key: "codex:raw-off".to_string(),
             raw_json: r#"{"secret":"local-only"}"#.to_string(),
         }],
+        turns: Vec::new(),
+        tool_calls: Vec::new(),
     })?;
     writer.finish_sync_run()?;
 
@@ -163,6 +169,8 @@ fn raw_archive_opt_in_is_returned_by_logs() -> Result<()> {
             event_key: "codex:raw-on".to_string(),
             raw_json: r#"{"payload":"retained"}"#.to_string(),
         }],
+        turns: Vec::new(),
+        tool_calls: Vec::new(),
     })?;
     writer.finish_sync_run()?;
 
@@ -196,6 +204,8 @@ fn logs_cursor_round_trip() -> Result<()> {
         cursors: Vec::new(),
         seen_file_paths: Vec::new(),
         raw_records: Vec::new(),
+        turns: Vec::new(),
+        tool_calls: Vec::new(),
     })?;
     writer.finish_sync_run()?;
 
@@ -484,6 +494,7 @@ async fn file_boundary_cancel_preserves_written_events() -> Result<()> {
         parallelism: 1,
         lock_wait_ms: 0,
         recent_days: None,
+        source_file_inventories: Vec::new(),
         sender: Some(&mut tx),
         cancel: &cancel,
     })
@@ -624,6 +635,8 @@ impl SourceParser for CancelAfterFilesParser {
                     cursors: vec![build_file_cursor(&file_path, index)],
                     seen_file_paths: vec![file_path],
                     raw_records: Vec::new(),
+                    turns: Vec::new(),
+                    tool_calls: Vec::new(),
                 })?;
                 stats.files_processed += 1;
                 stats.changed_files += 1;

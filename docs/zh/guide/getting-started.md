@@ -34,7 +34,7 @@ llmusage serve
 - `init` 建立 `~/.llmusage/`、创建 `llmusage.db`、生成 hook 包装器并安装 Codex / Claude / OpenCode / Gemini 集成。
 - `sync` 增量解析本地真源并写入 SQLite。人读进度默认写入 stderr；脚本需要生命周期/进度事件时可用 `--json-events` 输出 NDJSON。
 - 不带子命令的 `llmusage` 会从本地 DB 输出过去 7 个自然日（包含今天）的 daily 报表，并默认聚合为一张 ccusage 风格表。默认列展示 `Input`、`Output`、`Cache Create`、`Cache Read`、`Total Tokens` 和 `Cost (USD)`；宽屏下 token 使用完整逗号分隔数字，`NO_COLOR=1` 会禁用 ANSI 样式。`llmusage daily --json` 保持稳定的聚合 snake_case JSON 结构，并包含 `cache_creation_tokens`。也可以使用 `llmusage daily --all` 查看完整历史，或用 `--source` / `--breakdown` 查看来源和模型明细，`llmusage monthly`、`llmusage session`、`llmusage blocks` 提供其他报表。
-- `serve` 在 `127.0.0.1` 上启动本地分析页，并默认用系统浏览器打开它。首屏用同一个筛选后的 Dashboard 快照驱动 KPI、趋势、排行、health 和 diagnostics 面板；live 模式可以把当前视图导出为 JSON、启动带取消/进度状态的 sync job，或开启 30s/60s 自动刷新。
+- `serve` 在 `127.0.0.1` 上启动本地分析页，并默认用系统浏览器打开它。首屏用同一个筛选后的 Dashboard 快照驱动 KPI、趋势、排行、行为分析、health 和 diagnostics 面板；live 模式可以把当前视图导出为 JSON、启动带取消/进度状态的 sync job，或开启 30s/60s 自动刷新。行为分析读取 sync 阶段提取的 normalized `usage_turn` / `usage_tool_call`，不会在浏览器端解析 raw transcript；Activity/Tools/Optimize/Compare 在来源缺少工具级证据时会显式降级。Optimize 只读展示建议，不会执行清理动作。
 
 报表命令都是只读操作，不上传数据，也不会自动 sync；源数据变化后请重新运行 `llmusage sync`。可用 `--source codex|claude|opencode|gemini` 限定报表或同步来源。升级后如果需要重新填充 session/source-file metadata，请只在原始源文件仍存在时运行 `llmusage sync --rebuild`。如果 Codex/Claude/Gemini 文件已经被清理，普通 `llmusage sync` 会保留已导入历史并在 diagnostics 中显示缺失源文件；`--rebuild` 默认拒绝，除非加 `--allow-lossy-rebuild` 明确清掉不可重建历史。如果维护本地价格快照，可运行 `llmusage doctor --refresh-pricing <file>`；llmusage 会把快照保存到 `~/.llmusage/pricing/<catalog-version>.json`，重算 event/bucket 成本，并让后续 sync 继续使用该本地 catalog。
 
@@ -71,13 +71,17 @@ fn load_ccr_ui(store: &Store) -> Result<()> {
     let _daily = dashboard.trends_daily(&filter)?;
     let _home = dashboard.home_overview(&filter)?;
     let _heatmap = dashboard.heatmap(&filter, 365)?;
+    let _activity = dashboard.activity_breakdown(&filter)?;
+    let _tools = dashboard.tool_breakdown(&filter)?;
+    let _optimize = dashboard.optimize(&filter)?;
+    let _compare = dashboard.model_compare(&filter, None, None)?;
     let _logs = dashboard.logs(&Default::default())?;
     Ok(())
 }
 ```
 
 运行根目录解析顺序是 `--home <PATH>` > `LLMUSAGE_HOME` > `~/.llmusage`。
-0.5.x 的 ccr-ui 表面包含 `Dashboard::overview`、`trends_daily`、`home_overview`、`heatmap`、`logs`、来自 `source_file` 状态机的归档诊断、持久化 cost/pricing/cache 字段，以及通过 `JobRegistry` 暴露的进程内导入任务。CLI 与 library 入口共用运行根目录解析顺序：`--home <PATH>` > `LLMUSAGE_HOME` > `~/.llmusage`。
+0.5.x 的 ccr-ui 表面包含 `Dashboard::overview`、`trends_daily`、`home_overview`、`heatmap`、`logs`、activity/tool/optimize/compare payload、来自 `source_file` 状态机的归档诊断、持久化 cost/pricing/cache 字段，以及通过 `JobRegistry` 暴露的进程内导入任务。CLI 与 library 入口共用运行根目录解析顺序：`--home <PATH>` > `LLMUSAGE_HOME` > `~/.llmusage`。
 
 下游适配层可在集成测试中启用测试夹具：
 

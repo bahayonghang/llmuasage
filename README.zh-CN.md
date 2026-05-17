@@ -49,7 +49,14 @@
 
 Web 分析页：
 
-下面这张图就是 `llmusage serve` 启动后的本地浏览器分析页。首屏会把当前时间/来源/模型筛选、KPI、活动趋势、项目/模型/来源/成本排行、同步/导出动作和诊断线索放在同一个本地只读视图里。
+下面这张图就是 `llmusage serve` 启动后的本地浏览器分析页。首屏会把当前时间/来源/模型筛选、KPI、活动趋势、项目/模型/来源/成本排行、行为分析、同步/导出动作和诊断线索放在同一个本地只读视图里。
+
+行为分析区由 `sync` 阶段提取的 normalized facts 驱动：
+
+- Activity 和 Tools 聚合本地 turn/tool facts，不保存完整 prompt、assistant 消息或文件内容。
+- Optimize 是只读建议面板，用于提示低 Read/Edit 比、重复读取、生成物/依赖目录读取、session outlier 等模式；不会自动删除、归档、重写或清理任何内容。
+- Compare 会自动选择或接受两个模型，展示成本、cache、one-shot、retry、category 和工作风格指标，并明确提示低样本。
+- 来源支持会显式降级：Claude/Codex 可产出更丰富的工具事实；Gemini/OpenCode 在源日志不提供工具级证据时只保守地产出 turn facts。
 
 ![llmusage 本地 web 分析页概览](./docs/public/screenshots/web-dashboard-overview.png)
 
@@ -70,6 +77,7 @@ cargo run -- serve
 - `serve` 支持单快照加载、URL 恢复筛选、可选 30s/60s 自动刷新，以及带进度/取消状态的进程内同步任务
 - `export html` 生成同一套 Dashboard shell 的离线静态报告；离线快照会禁用实时 sync/refresh 控件
 - 报表命令都是只读 SQLite 视图，不会自动 sync
+- 行为分析在查询时仍是本地只读；它读取 sync 预提取的 `usage_turn` / `usage_tool_call`，不会在浏览器端解析 raw transcript
 - 普通 `sync` 遇到源文件缺失时会保留已导入 usage history；diagnostics 里出现 `source_file.missing` 不代表 usage 行已被删除
 - `status` 和普通 `diagnostics` 是只读命令；`diagnostics --forget-file` 会写入本地忽略状态
 - 普通 `doctor` 是只读命令；`doctor --refresh-pricing <file>` 只读取本地 JSON，把快照保存到 `~/.llmusage/pricing/<catalog-version>.json`，并写入本地 SQLite 价格元信息/成本
@@ -79,7 +87,7 @@ cargo run -- serve
 - 面向 ccr-ui 的只读 API：`Dashboard::overview`、`trends_daily`、`home_overview`、`heatmap`、`logs`、归档诊断与源文件 forget。
 - 持久化成本列成为报表/查询真源：常规 sync 写入 event/bucket 成本元信息，`doctor --refresh-pricing <file>` 用本地快照同步重算 event 与 bucket，报表和 dashboard payload 暴露总成本、cache efficiency、每日成本、模型双价/pricing 元信息、项目成本以及日志 cost/id/recorded_at 字段。
 - `JobRegistry` 提供进程内导入任务、进度快照与取消。
-- v0/v1 到 v10 的完整 schema migration，覆盖 cache split、成本元信息、source_file 状态机、raw archive、worker lock 元信息、Gemini 注册与 `pricing_catalog_version`。
+- v0/v1 到 v11 的完整 schema migration，覆盖 cache split、成本元信息、source_file 状态机、raw archive、worker lock 元信息、Gemini 注册、`pricing_catalog_version` 与 normalized behavior facts。
 - CLI 报表、HTTP API、静态导出的 JSON 字段统一 snake_case。
 - 为下游适配层提供公共 `LlmusageError` 和 `testing::Fixture`。
 
@@ -110,13 +118,17 @@ fn load_ccr_ui(store: &Store) -> Result<()> {
     let _daily = dashboard.trends_daily(&filter)?;
     let _home = dashboard.home_overview(&filter)?;
     let _heatmap = dashboard.heatmap(&filter, 365)?;
+    let _activity = dashboard.activity_breakdown(&filter)?;
+    let _tools = dashboard.tool_breakdown(&filter)?;
+    let _optimize = dashboard.optimize(&filter)?;
+    let _compare = dashboard.model_compare(&filter, None, None)?;
     let _logs = dashboard.logs(&Default::default())?;
     Ok(())
 }
 ```
 
 路径解析顺序是 `--home <PATH>` 优先，其次 `LLMUSAGE_HOME`，最后 `~/.llmusage`。
-ccr-ui 表面包含带 `QueryFilter` 的 dashboard/home/daily-trend/heatmap/log 查询、来自 `source_file` 状态机的归档诊断、持久化 cost/pricing/cache 字段，以及 `JobRegistry::start/get/cancel` 进程内导入任务。
+ccr-ui 表面包含带 `QueryFilter` 的 dashboard/home/daily-trend/heatmap/log 查询、来自 `source_file` 状态机的归档诊断、持久化 cost/pricing/cache 字段、行为 activity/tool/optimize/compare payload，以及 `JobRegistry::start/get/cancel` 进程内导入任务。
 
 下游适配层（如 ccr-ui）写集成测试时，可在 dev-dependencies 中启用测试夹具：
 

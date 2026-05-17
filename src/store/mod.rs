@@ -2,7 +2,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    models::{SourceKind, UsageEvent, UsageTokens},
+    models::{SourceKind, UsageEvent, UsageTokens, UsageToolCall, UsageTurn},
     paths::AppPaths,
     query::pricing::{PRICING_MIXED, PRICING_UNPRICED},
 };
@@ -166,6 +166,9 @@ pub struct SourceSyncStatus {
     pub events_replayed: i64,
     /// Newly inserted events after SQLite dedupe.
     pub events_inserted: i64,
+    /// Total imported events currently stored for this source after the run.
+    #[serde(default)]
+    pub stored_events: i64,
     /// Parser wall-clock time in milliseconds.
     pub parse_ms: i64,
     /// SQLite write wall-clock time in milliseconds.
@@ -507,6 +510,13 @@ pub struct SyncShard {
     /// `Store::raw_archive_enabled` is true; otherwise dropped silently
     /// (D11 / F1.5). Parsers that never serialize raw rows leave this empty.
     pub raw_records: Vec<RawRecord>,
+    /// Normalized turn-level behavior facts. Parsers can leave this empty until
+    /// they support behavior extraction; the writer keeps this independent from
+    /// `usage_event`/`usage_bucket_30m` so existing cost dashboards stay stable.
+    pub turns: Vec<UsageTurn>,
+    /// Normalized tool/action facts. These power Activity/Tools/Optimize/Compare
+    /// views without requiring raw archive to be enabled.
+    pub tool_calls: Vec<UsageToolCall>,
 }
 
 impl SyncShard {
@@ -519,8 +529,24 @@ impl SyncShard {
             cursors: Vec::new(),
             seen_file_paths: Vec::new(),
             raw_records: Vec::new(),
+            turns: Vec::new(),
+            tool_calls: Vec::new(),
         }
     }
+}
+
+/// Candidate source files observed by a parser during one sync run.
+///
+/// File-backed parsers enumerate every existing candidate file before deciding
+/// which files changed enough to parse. The sync driver uses this all-candidate
+/// set for the `source_file` missing sweep so unchanged-but-present files are
+/// not mistaken for deleted history.
+#[derive(Debug, Clone)]
+pub struct SourceFileInventory {
+    /// Source this inventory belongs to.
+    pub source: SourceKind,
+    /// Absolute candidate file paths observed on disk in this run.
+    pub file_paths: Vec<String>,
 }
 
 /// One opt-in raw archive entry written to `usage_event_raw`.
@@ -569,6 +595,10 @@ pub struct ShardCommitStats {
     pub write_ms: u64,
     /// Number of source files observed and marked live by this shard.
     pub files_seen: usize,
+    /// Newly inserted normalized behavior turns.
+    pub turns_inserted: usize,
+    /// Newly inserted normalized tool/action rows.
+    pub tool_calls_inserted: usize,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]

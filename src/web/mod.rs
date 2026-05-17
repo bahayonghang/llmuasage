@@ -1,4 +1,4 @@
-use std::{collections::HashMap, net::SocketAddr};
+use std::{collections::HashMap, future::Future, net::SocketAddr, time::Duration};
 
 use anyhow::Result;
 use axum::{
@@ -15,12 +15,18 @@ use tokio::net::TcpListener;
 use tracing::{error, info};
 
 use crate::{
-    error::Result as LlmusageResult,
+    error::{LlmusageError, Result as LlmusageResult},
     models::SourceKind,
-    query::{Dashboard, LogsQuery, QueryFilter},
+    query::{
+        ActivityPayload, BehaviorSupport, Dashboard, LogsQuery, ModelComparePayload,
+        OptimizePayload, QueryFilter, ToolsPayload,
+    },
     store::Store,
     sync::{JobRegistry, SyncOptions},
 };
+
+const WEB_API_TIMEOUT: Duration = Duration::from_secs(5);
+const WEB_BEHAVIOR_API_TIMEOUT: Duration = Duration::from_secs(1);
 
 mod assets;
 mod brand;
@@ -60,6 +66,11 @@ pub async fn serve(store: Store, preferred_port: Option<u16>) -> Result<SocketAd
         .route("/api/sources", get(api_sources))
         .route("/api/projects", get(api_projects))
         .route("/api/costs", get(api_costs))
+        .route("/api/activity", get(api_activity))
+        .route("/api/tools", get(api_tools))
+        .route("/api/optimize", get(api_optimize))
+        .route("/api/compare/models", get(api_compare_models))
+        .route("/api/compare", get(api_compare))
         .route("/api/home_overview", get(api_home_overview))
         .route("/api/heatmap", get(api_heatmap))
         .route("/api/logs", get(api_logs))
@@ -136,10 +147,11 @@ async fn api_dashboard(
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
     let filter = dashboard_filter_from_params(&params);
-    api_json(
+    api_json_async(
         "/api/dashboard",
-        load_via_dashboard(&state, |d| d.snapshot(&filter)),
+        load_dashboard_snapshot_resilient(state, filter),
     )
+    .await
 }
 
 async fn api_overview(
@@ -147,22 +159,27 @@ async fn api_overview(
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
     let filter = dashboard_filter_from_params(&params);
-    api_json(
+    api_json_async(
         "/api/overview",
-        load_via_dashboard(&state, |d| d.overview(&filter)),
+        load_via_dashboard(state, move |d| d.overview(&filter)),
     )
+    .await
 }
 
 async fn api_trends(
     State(state): State<WebState>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
-    let window = params.get("window").map(String::as_str).unwrap_or("day");
+    let window = params
+        .get("window")
+        .cloned()
+        .unwrap_or_else(|| "day".to_string());
     let filter = dashboard_filter_from_params_without_window(&params);
-    api_json(
+    api_json_async(
         "/api/trends",
-        load_via_dashboard(&state, |d| d.trends(window, &filter)),
+        load_via_dashboard(state, move |d| d.trends(&window, &filter)),
     )
+    .await
 }
 
 async fn api_trends_daily(
@@ -170,10 +187,11 @@ async fn api_trends_daily(
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
     let filter = dashboard_filter_from_params(&params);
-    api_json(
+    api_json_async(
         "/api/trends_daily",
-        load_via_dashboard(&state, |d| d.trends_daily(&filter)),
+        load_via_dashboard(state, move |d| d.trends_daily(&filter)),
     )
+    .await
 }
 
 async fn api_models(
@@ -181,10 +199,11 @@ async fn api_models(
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
     let filter = dashboard_filter_from_params(&params);
-    api_json(
+    api_json_async(
         "/api/models",
-        load_via_dashboard(&state, |d| d.model_breakdown(&filter)),
+        load_via_dashboard(state, move |d| d.model_breakdown(&filter)),
     )
+    .await
 }
 
 async fn api_sources(
@@ -192,10 +211,11 @@ async fn api_sources(
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
     let filter = dashboard_filter_from_params(&params);
-    api_json(
+    api_json_async(
         "/api/sources",
-        load_via_dashboard(&state, |d| d.source_breakdown(&filter)),
+        load_via_dashboard(state, move |d| d.source_breakdown(&filter)),
     )
+    .await
 }
 
 async fn api_projects(
@@ -203,10 +223,11 @@ async fn api_projects(
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
     let filter = dashboard_filter_from_params(&params);
-    api_json(
+    api_json_async(
         "/api/projects",
-        load_via_dashboard(&state, |d| d.project_breakdown(&filter)),
+        load_via_dashboard(state, move |d| d.project_breakdown(&filter)),
     )
+    .await
 }
 
 async fn api_costs(
@@ -214,10 +235,85 @@ async fn api_costs(
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
     let filter = dashboard_filter_from_params(&params);
-    api_json(
+    api_json_async(
         "/api/costs",
-        load_via_dashboard(&state, |d| d.cost_breakdown(&filter)),
+        load_via_dashboard(state, move |d| d.cost_breakdown(&filter)),
     )
+    .await
+}
+
+async fn api_activity(
+    State(state): State<WebState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let filter = dashboard_filter_from_params(&params);
+    api_json_async(
+        "/api/activity",
+        load_behavior_api(
+            state,
+            move |d| d.activity_breakdown(&filter),
+            degraded_activity,
+        ),
+    )
+    .await
+}
+
+async fn api_tools(
+    State(state): State<WebState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let filter = dashboard_filter_from_params(&params);
+    api_json_async(
+        "/api/tools",
+        load_behavior_api(state, move |d| d.tool_breakdown(&filter), degraded_tools),
+    )
+    .await
+}
+
+async fn api_optimize(
+    State(state): State<WebState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let filter = dashboard_filter_from_params(&params);
+    api_json_async(
+        "/api/optimize",
+        load_behavior_api(state, move |d| d.optimize(&filter), degraded_optimize),
+    )
+    .await
+}
+
+async fn api_compare_models(
+    State(state): State<WebState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let filter = dashboard_filter_from_params(&params);
+    api_json_async(
+        "/api/compare/models",
+        load_via_dashboard(state, move |d| d.compare_models(&filter)),
+    )
+    .await
+}
+
+async fn api_compare(
+    State(state): State<WebState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let filter = dashboard_filter_from_params(&params);
+    api_json_async(
+        "/api/compare",
+        load_behavior_api(
+            state,
+            move |d| {
+                d.model_compare(
+                    &filter,
+                    params.get("model_a").map(String::as_str),
+                    params.get("model_b").map(String::as_str),
+                )
+            },
+            degraded_compare,
+        ),
+    )
+    .await
 }
 
 async fn api_home_overview(
@@ -225,10 +321,11 @@ async fn api_home_overview(
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
     let filter = dashboard_filter_from_params(&params);
-    api_json(
+    api_json_async(
         "/api/home_overview",
-        load_via_dashboard(&state, |d| d.home_overview(&filter)),
+        load_via_dashboard(state, move |d| d.home_overview(&filter)),
     )
+    .await
 }
 
 async fn api_heatmap(
@@ -240,10 +337,11 @@ async fn api_heatmap(
         .and_then(|raw| raw.parse::<u32>().ok())
         .unwrap_or(365);
     let filter = dashboard_filter_from_params(&params);
-    api_json(
+    api_json_async(
         "/api/heatmap",
-        load_via_dashboard(&state, |d| d.heatmap(&filter, days)),
+        load_via_dashboard(state, move |d| d.heatmap(&filter, days)),
     )
+    .await
 }
 
 async fn api_logs(
@@ -286,18 +384,23 @@ async fn api_logs(
         ),
     };
 
-    api_json("/api/logs", load_via_dashboard(&state, |d| d.logs(&query)))
+    api_json_async(
+        "/api/logs",
+        load_via_dashboard(state, move |d| d.logs(&query)),
+    )
+    .await
 }
 
 async fn api_health(State(state): State<WebState>) -> Response {
-    api_json("/api/health", load_via_dashboard(&state, |d| d.health()))
+    api_json_async("/api/health", load_via_dashboard(state, |d| d.health())).await
 }
 
 async fn api_diagnostics(State(state): State<WebState>) -> Response {
-    api_json(
+    api_json_async(
         "/api/diagnostics",
-        load_via_dashboard(&state, |d| d.diagnostics()),
+        load_via_dashboard(state, |d| d.diagnostics()),
     )
+    .await
 }
 
 #[derive(Debug, Deserialize)]
@@ -425,12 +528,167 @@ async fn api_jobs_cancel(State(state): State<WebState>, Path(id): Path<String>) 
     .into_response()
 }
 
-fn load_via_dashboard<T>(
-    state: &WebState,
-    f: impl FnOnce(&Dashboard) -> LlmusageResult<T>,
-) -> LlmusageResult<T> {
-    let dashboard = Dashboard::open(&state.store)?;
-    f(&dashboard)
+async fn load_via_dashboard<T, F>(state: WebState, f: F) -> LlmusageResult<T>
+where
+    T: Send + 'static,
+    F: FnOnce(&Dashboard) -> LlmusageResult<T> + Send + 'static,
+{
+    load_via_dashboard_with_timeout(state, WEB_API_TIMEOUT, f).await
+}
+
+async fn load_via_dashboard_with_timeout<T, F>(
+    state: WebState,
+    timeout: Duration,
+    f: F,
+) -> LlmusageResult<T>
+where
+    T: Send + 'static,
+    F: FnOnce(&Dashboard) -> LlmusageResult<T> + Send + 'static,
+{
+    with_timeout(
+        timeout,
+        tokio::task::spawn_blocking(move || {
+            let dashboard = Dashboard::open(&state.store)?;
+            f(&dashboard)
+        }),
+    )
+    .await
+}
+
+async fn load_behavior_api<T, F, D>(state: WebState, f: F, degraded: D) -> LlmusageResult<T>
+where
+    T: Send + 'static,
+    F: FnOnce(&Dashboard) -> LlmusageResult<T> + Send + 'static,
+    D: FnOnce(String) -> T,
+{
+    match load_via_dashboard_with_timeout(state, WEB_BEHAVIOR_API_TIMEOUT, f).await {
+        Ok(value) => Ok(value),
+        Err(err) => Ok(degraded(err.to_string())),
+    }
+}
+
+async fn with_timeout<T>(
+    duration: Duration,
+    task: tokio::task::JoinHandle<LlmusageResult<T>>,
+) -> LlmusageResult<T>
+where
+    T: Send + 'static,
+{
+    match tokio::time::timeout(duration, task).await {
+        Ok(joined) => joined.map_err(|err| LlmusageError::ConfigInvalid {
+            detail: format!("blocking dashboard task failed: {err}"),
+        })?,
+        Err(_) => Err(LlmusageError::ConfigInvalid {
+            detail: format!(
+                "dashboard query exceeded {} ms timeout",
+                duration.as_millis()
+            ),
+        }),
+    }
+}
+
+async fn load_dashboard_snapshot_resilient(
+    state: WebState,
+    filter: QueryFilter,
+) -> LlmusageResult<serde_json::Value> {
+    let core = load_via_dashboard(state.clone(), {
+        let filter = filter.clone();
+        move |dashboard| dashboard.core_snapshot(&filter)
+    })
+    .await?;
+
+    let activity_filter = filter.clone();
+    let activity = load_behavior_api(
+        state.clone(),
+        move |dashboard| dashboard.activity_breakdown(&activity_filter),
+        degraded_activity,
+    );
+    let tools_filter = filter.clone();
+    let tools = load_behavior_api(
+        state.clone(),
+        move |dashboard| dashboard.tool_breakdown(&tools_filter),
+        degraded_tools,
+    );
+    let optimize_filter = filter.clone();
+    let optimize = load_behavior_api(
+        state.clone(),
+        move |dashboard| dashboard.optimize(&optimize_filter),
+        degraded_optimize,
+    );
+    let compare = load_behavior_api(
+        state,
+        move |dashboard| dashboard.model_compare(&filter, None, None),
+        degraded_compare,
+    );
+    let (activity, tools, optimize, compare) = tokio::join!(activity, tools, optimize, compare);
+    let activity = activity?;
+    let tools = tools?;
+    let optimize = optimize?;
+    let compare = compare?;
+
+    Ok(json!({
+        "overview": core.overview,
+        "day_trends": core.day_trends,
+        "week_trends": core.week_trends,
+        "month_trends": core.month_trends,
+        "all_trends": core.all_trends,
+        "models": core.models,
+        "sources": core.sources,
+        "projects": core.projects,
+        "costs": core.costs,
+        "activity": activity,
+        "tools": tools,
+        "optimize": optimize,
+        "compare": compare,
+        "health": core.health,
+        "diagnostics": core.diagnostics,
+    }))
+}
+
+fn degraded_support(reason: String) -> BehaviorSupport {
+    BehaviorSupport {
+        supported: false,
+        level: "degraded".to_string(),
+        reason: Some(reason),
+    }
+}
+
+fn degraded_activity(reason: String) -> ActivityPayload {
+    ActivityPayload {
+        support: degraded_support(reason),
+        breakdown: Vec::new(),
+    }
+}
+
+fn degraded_tools(reason: String) -> ToolsPayload {
+    ToolsPayload {
+        support: degraded_support(reason),
+        breakdown: Vec::new(),
+    }
+}
+
+fn degraded_optimize(reason: String) -> OptimizePayload {
+    OptimizePayload {
+        support: degraded_support(reason),
+        score: 100,
+        grade: "A".to_string(),
+        estimated_savings_tokens: 0,
+        estimated_savings_usd: 0.0,
+        findings: Vec::new(),
+    }
+}
+
+fn degraded_compare(reason: String) -> ModelComparePayload {
+    ModelComparePayload {
+        support: degraded_support(reason.clone()),
+        candidates: Vec::new(),
+        model_a: None,
+        model_b: None,
+        metrics: Vec::new(),
+        category_head_to_head: Vec::new(),
+        working_style: Vec::new(),
+        warning: Some(reason),
+    }
 }
 
 fn dashboard_filter_from_params(params: &HashMap<String, String>) -> QueryFilter {
@@ -546,6 +804,14 @@ fn apply_window_filter(window: Option<&str>, filter: &mut QueryFilter) {
     }
 }
 
+async fn api_json_async<T, Fut>(endpoint: &'static str, result: Fut) -> Response
+where
+    T: Serialize,
+    Fut: Future<Output = LlmusageResult<T>>,
+{
+    api_json(endpoint, result.await)
+}
+
 fn api_json<T>(endpoint: &'static str, result: LlmusageResult<T>) -> Response
 where
     T: Serialize,
@@ -582,7 +848,7 @@ mod tests {
         fs,
         io::{Read, Write},
         net::SocketAddr,
-        time::Duration,
+        time::{Duration, Instant},
     };
 
     use axum::{body::to_bytes, http::StatusCode};
@@ -645,6 +911,46 @@ mod tests {
         Ok((StatusCode::from_u16(status_code)?, payload))
     }
 
+    async fn route_text(
+        addr: SocketAddr,
+        method: &str,
+        path: &str,
+    ) -> anyhow::Result<(StatusCode, String)> {
+        let method = method.to_string();
+        let path = path.to_string();
+        let raw = tokio::task::spawn_blocking(move || {
+            let mut stream = std::net::TcpStream::connect(addr)?;
+            stream.set_read_timeout(Some(Duration::from_secs(10)))?;
+            stream.set_write_timeout(Some(Duration::from_secs(10)))?;
+            let request = format!(
+                "{method} {path} HTTP/1.1\r\n\
+                 Host: {addr}\r\n\
+                 Accept: */*\r\n\
+                 Content-Length: 0\r\n\
+                 Connection: close\r\n\r\n"
+            );
+            stream.write_all(request.as_bytes())?;
+            let mut raw = String::new();
+            stream.read_to_string(&mut raw)?;
+            Ok::<_, anyhow::Error>(raw)
+        })
+        .await??;
+
+        let (head, body) = raw
+            .split_once("\r\n\r\n")
+            .ok_or_else(|| anyhow::anyhow!("invalid HTTP response: {raw:?}"))?;
+        let status_code = head
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .and_then(|raw| raw.parse::<u16>().ok())
+            .ok_or_else(|| anyhow::anyhow!("invalid status line: {head:?}"))?;
+        Ok((
+            StatusCode::from_u16(status_code)?,
+            decode_http_body(head, body)?,
+        ))
+    }
+
     fn decode_http_body(head: &str, body: &str) -> anyhow::Result<String> {
         if !head
             .to_ascii_lowercase()
@@ -690,6 +996,12 @@ mod tests {
         assert!(html.contains("id=\"models\""));
         assert!(html.contains("id=\"sources\""));
         assert!(html.contains("id=\"projects\""));
+        assert!(html.contains("id=\"behavior\""));
+        assert!(html.contains("id=\"activity-table\""));
+        assert!(html.contains("id=\"tools-table\""));
+        assert!(html.contains("id=\"optimize-summary\""));
+        assert!(html.contains("id=\"optimize-findings\""));
+        assert!(html.contains("id=\"compare-panel\""));
         assert!(html.contains("id=\"cost\""));
         assert!(html.contains("id=\"status\""));
         assert!(html.contains("id=\"insights-card\""));
@@ -754,6 +1066,7 @@ mod tests {
                 "render/models.js",
                 "render/sources.js",
                 "render/projects.js",
+                "render/behavior.js",
                 "render/costs.js",
                 "render/insights.js",
                 "render/charts.js",
@@ -921,7 +1234,10 @@ mod tests {
         for key in [
             "data-i18n=\"shell.nav.item.usage\"",
             "data-i18n=\"shell.nav.item.trend\"",
+            "data-i18n=\"shell.nav.item.behavior\"",
             "data-i18n=\"shell.nav.item.cost\"",
+            "data-i18n=\"shell.behavior.optimize.title\"",
+            "data-i18n=\"shell.behavior.compare.title\"",
             "data-i18n=\"shell.btn.export\"",
             "data-i18n=\"shell.btn.sync\"",
             "data-i18n=\"shell.filters.apply\"",
@@ -1049,6 +1365,46 @@ mod tests {
     }
 
     #[test]
+    fn app_entry_binds_core_controls_before_dashboard_data_load() {
+        let app_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "app.js")
+            .expect("app.js asset")
+            .body;
+        let before_load = app_js
+            .split("state.rawData = await loadDashboardData(state);")
+            .next()
+            .expect("main load marker");
+        for marker in [
+            "setupNavigation()",
+            "setupFilterControls(state)",
+            "setupPanelToggles(state)",
+            "setupSyncJob(state)",
+            "setupThemeToggle()",
+            "setupLocaleToggle(state)",
+        ] {
+            assert!(
+                before_load.contains(marker),
+                "{marker} must be bound before dashboard data can fail"
+            );
+        }
+    }
+
+    #[test]
+    fn fetch_layer_degrades_behavior_sections_without_blocking_core() {
+        let fetch_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "data/fetch.js")
+            .expect("fetch.js asset")
+            .body;
+        assert!(fetch_js.contains("loadOptionalSection(state, 'activity'"));
+        assert!(fetch_js.contains("loadOptionalSection(state, 'tools'"));
+        assert!(fetch_js.contains("loadOptionalSection(state, 'optimize'"));
+        assert!(fetch_js.contains("loadOptionalSection(state, 'compare'"));
+        assert!(fetch_js.contains("level: 'degraded'"));
+    }
+
+    #[test]
     fn dashboard_assets_surface_diagnostics_insights_without_fake_claims() {
         let fetch_js = asset_manifest()
             .iter()
@@ -1159,6 +1515,62 @@ mod tests {
                 .unwrap()
                 .contains("llmusage init")
         );
+    }
+
+    #[tokio::test]
+    async fn api_dashboard_returns_core_snapshot_when_behavior_sections_are_degraded()
+    -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let conn = store.open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_bucket_30m(
+                source, model, hour_start, project_hash, project_label, project_ref,
+                input_tokens, cache_read_tokens, cache_creation_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source,
+                event_count, updated_at
+            )
+            VALUES ('codex', 'gpt-5', '2026-05-01T00:00:00Z', 'project-a', 'Project A', NULL,
+                    10, 0, 0, 0, 0, 10, 0.1, 0.1, 'static', 'static-v1',
+                    1, '2026-05-01T00:00:00Z')
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_turn(
+                turn_key, source, session_id, source_path_hash, project_hash,
+                primary_model, started_at, category, has_edits, retries,
+                one_shot, call_count, input_tokens, cache_read_tokens,
+                cache_creation_tokens, output_tokens, reasoning_output_tokens,
+                total_tokens, created_at
+            ) VALUES ('broken-turn', 'codex', 'session-a', 'path-a',
+                'project-a', 'gpt-5', '2026-05-01T00:00:00Z', 'coding',
+                1, 0, 1, 1, 10, 0, 0, 0, 0, 10, '2026-05-01T00:00:00Z')
+            "#,
+            [],
+        )?;
+        conn.execute("DROP TABLE usage_turn", [])?;
+        conn.execute(
+            "UPDATE meta SET value = '999' WHERE key = 'schema_version'",
+            [],
+        )?;
+        drop(conn);
+
+        let addr = serve(store, Some(0)).await?;
+        let (status, payload) = route_json(addr, "GET", "/api/dashboard", None).await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(payload["overview"]["total"]["total_tokens"], 10);
+        assert_eq!(payload["activity"]["support"]["level"], "degraded");
+        assert!(
+            payload["activity"]["breakdown"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(payload["models"].as_array().unwrap().len() == 1);
+        Ok(())
     }
 
     #[tokio::test]
@@ -1336,6 +1748,305 @@ mod tests {
         assert_eq!(costs.len(), 1);
         assert_eq!(costs[0]["source"], "codex");
         assert_eq!(costs[0]["estimated_cost_usd"], 0.30);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn behavior_apis_return_activity_tools_and_snapshot_fields() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let conn = store.open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_event(
+                event_key, source, model, event_at, hour_start,
+                input_tokens, cache_creation_tokens, cache_read_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                project_hash, project_label, project_ref, path_hash,
+                session_id, session_label, source_path_hash, created_at,
+                cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source, pricing_rate
+            )
+            VALUES ('codex:behavior:web', 'codex', 'gpt-5',
+                    '2026-05-01T00:00:00Z', '2026-05-01T00:00:00Z',
+                    100, 0, 0, 50, 0, 150,
+                    'project-a', 'Project A', NULL, 'path-a',
+                    'session-a', NULL, 'path-a', '2026-05-01T00:00:00Z',
+                    0.5, 0.5, 'static', 'static-v1', NULL)
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_bucket_30m(
+                source, model, hour_start, project_hash, project_label, project_ref,
+                input_tokens, cache_read_tokens, cache_creation_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source,
+                event_count, updated_at
+            )
+            VALUES ('codex', 'gpt-5', '2026-05-01T00:00:00Z', 'project-a', 'Project A', NULL,
+                    100, 0, 0, 50, 0, 150, 0.5, 0.5, 'static', 'static-v1',
+                    1, '2026-05-01T00:00:00Z')
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_turn(
+                turn_key, source, session_id, source_path_hash, project_hash,
+                primary_model, started_at, category, has_edits, retries,
+                one_shot, call_count, input_tokens, cache_read_tokens,
+                cache_creation_tokens, output_tokens, reasoning_output_tokens,
+                total_tokens, created_at
+            ) VALUES ('turn:codex:behavior:web', 'codex', 'session-a', 'path-a',
+                'project-a', 'gpt-5', '2026-05-01T00:00:00Z', 'coding',
+                1, 0, 1, 1, 100, 0, 0, 50, 0, 150, '2026-05-01T00:00:00Z')
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_tool_call(
+                tool_call_key, turn_key, event_key, source, session_id,
+                source_path_hash, project_hash, model, occurred_at, tool_name,
+                tool_kind, mcp_server, mcp_tool, input_fingerprint, safe_preview, created_at
+            ) VALUES ('tool:codex:behavior:web', 'turn:codex:behavior:web',
+                'codex:behavior:web', 'codex', 'session-a', 'path-a',
+                'project-a', 'gpt-5', '2026-05-01T00:00:00Z', 'Edit', 'edit',
+                NULL, NULL, 'fp-edit', 'Edit src/web/mod.rs', '2026-05-01T00:00:00Z')
+            "#,
+            [],
+        )?;
+        drop(conn);
+
+        let addr = serve(store, Some(0)).await?;
+        let filter = "source=codex&model=gpt-5&timezone=UTC";
+
+        let (status, activity) =
+            route_json(addr, "GET", &format!("/api/activity?{filter}"), None).await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(activity["support"]["supported"], true);
+        assert_eq!(activity["breakdown"][0]["category"], "coding");
+        assert_eq!(activity["breakdown"][0]["one_shot_rate"], 1.0);
+
+        let (status, tools) =
+            route_json(addr, "GET", &format!("/api/tools?{filter}"), None).await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(tools["support"]["supported"], true);
+        assert_eq!(tools["breakdown"][0]["tool_kind"], "edit");
+        assert_eq!(tools["breakdown"][0]["call_share"], 1.0);
+
+        let (status, dashboard) =
+            route_json(addr, "GET", &format!("/api/dashboard?{filter}"), None).await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(dashboard["activity"]["breakdown"][0]["category"], "coding");
+        assert_eq!(dashboard["tools"]["breakdown"][0]["tool_name"], "Edit");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn static_assets_respond_while_behavior_api_is_scanning_large_table() -> anyhow::Result<()>
+    {
+        let (_temp, store) = make_store()?;
+        {
+            let conn = store.open_connection()?;
+            let tx = conn.unchecked_transaction()?;
+            for idx in 0..5_000 {
+                tx.execute(
+                    r#"
+                    INSERT INTO usage_turn(
+                        turn_key, source, session_id, source_path_hash, project_hash,
+                        primary_model, started_at, category, has_edits, retries,
+                        one_shot, call_count, input_tokens, cache_read_tokens,
+                        cache_creation_tokens, output_tokens, reasoning_output_tokens,
+                        total_tokens, created_at
+                    ) VALUES (?1, 'codex', 'session-large', 'path-large',
+                        'project-large', 'gpt-5', '2026-05-01T00:00:00Z', 'coding',
+                        1, 0, 1, 1, 10, 0, 0, 5, 0, 15, '2026-05-01T00:00:00Z')
+                    "#,
+                    [format!("turn:large:{idx}")],
+                )?;
+            }
+            tx.commit()?;
+        }
+        let addr = serve(store, Some(0)).await?;
+
+        let api_addr = addr;
+        let activity = tokio::spawn(async move {
+            route_json(api_addr, "GET", "/api/activity?source=codex", None).await
+        });
+        let started = Instant::now();
+        let (asset_status, asset_body) = route_text(addr, "GET", "/assets/app.js").await?;
+        assert_eq!(asset_status, StatusCode::OK);
+        assert!(asset_body.contains("llmusage dashboard"));
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "asset response should not wait behind behavior query"
+        );
+        let (activity_status, payload) = activity.await??;
+        assert_eq!(activity_status, StatusCode::OK);
+        assert!(payload["support"]["supported"].as_bool().unwrap_or(false));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn optimize_and_compare_apis_return_explicit_behavior_payloads() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let conn = store.open_connection()?;
+        for (index, model, event_key, turn_key, tool_kind, tool_name, preview) in [
+            (
+                0,
+                "gpt-5",
+                "codex:behavior:compare:a",
+                "turn:codex:behavior:compare:a",
+                "edit",
+                "Edit",
+                "Edit src/lib.rs",
+            ),
+            (
+                1,
+                "sonnet",
+                "codex:behavior:compare:b",
+                "turn:codex:behavior:compare:b",
+                "read",
+                "Read",
+                "Read node_modules/pkg/index.js",
+            ),
+            (
+                2,
+                "sonnet",
+                "codex:behavior:compare:c",
+                "turn:codex:behavior:compare:c",
+                "read",
+                "Read",
+                "Read node_modules/pkg/index.js",
+            ),
+        ] {
+            conn.execute(
+                r#"
+                INSERT INTO usage_event(
+                    event_key, source, model, event_at, hour_start,
+                    input_tokens, cache_creation_tokens, cache_read_tokens,
+                    output_tokens, reasoning_output_tokens, total_tokens,
+                    project_hash, project_label, project_ref, path_hash,
+                    session_id, session_label, source_path_hash, created_at,
+                    cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source, pricing_rate
+                )
+                VALUES (?1, 'codex', ?2,
+                        '2026-05-01T00:00:00Z', '2026-05-01T00:00:00Z',
+                        100, 0, 10, 50, 0, 160,
+                        'project-a', 'Project A', NULL, 'path-a',
+                        'session-a', NULL, 'path-a', '2026-05-01T00:00:00Z',
+                        0.2, 0.2, 'static', 'static-v1', NULL)
+                "#,
+                rusqlite::params![event_key, model],
+            )?;
+            conn.execute(
+                r#"
+                INSERT INTO usage_bucket_30m(
+                    source, model, hour_start, project_hash, project_label, project_ref,
+                    input_tokens, cache_read_tokens, cache_creation_tokens,
+                    output_tokens, reasoning_output_tokens, total_tokens,
+                    cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source,
+                    event_count, updated_at
+                )
+                VALUES ('codex', ?1, '2026-05-01T00:00:00Z', 'project-a', 'Project A', NULL,
+                        100, 10, 0, 50, 0, 160, 0.2, 0.2, 'static', 'static-v1',
+                        1, '2026-05-01T00:00:00Z')
+                ON CONFLICT(source, model, hour_start, project_hash) DO UPDATE SET
+                    input_tokens = input_tokens + excluded.input_tokens,
+                    cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens,
+                    output_tokens = output_tokens + excluded.output_tokens,
+                    total_tokens = total_tokens + excluded.total_tokens,
+                    cost_with_cache_usd = cost_with_cache_usd + excluded.cost_with_cache_usd,
+                    cost_without_cache_usd = cost_without_cache_usd + excluded.cost_without_cache_usd,
+                    event_count = event_count + excluded.event_count,
+                    updated_at = excluded.updated_at
+                "#,
+                [model],
+            )?;
+            conn.execute(
+                r#"
+                INSERT INTO usage_turn(
+                    turn_key, source, session_id, source_path_hash, project_hash,
+                    primary_model, started_at, category, has_edits, retries,
+                    one_shot, call_count, input_tokens, cache_read_tokens,
+                    cache_creation_tokens, output_tokens, reasoning_output_tokens,
+                    total_tokens, created_at
+                ) VALUES (?1, 'codex', 'session-a', 'path-a',
+                    'project-a', ?2, '2026-05-01T00:00:00Z', 'coding',
+                    ?3, ?4, ?5, 1, 100, 10, 0, 50, 0, 160, '2026-05-01T00:00:00Z')
+                "#,
+                rusqlite::params![
+                    turn_key,
+                    model,
+                    i64::from(index == 0),
+                    i64::from(index == 1),
+                    i64::from(index == 0)
+                ],
+            )?;
+            conn.execute(
+                r#"
+                INSERT INTO usage_tool_call(
+                    tool_call_key, turn_key, event_key, source, session_id,
+                    source_path_hash, project_hash, model, occurred_at, tool_name,
+                    tool_kind, mcp_server, mcp_tool, input_fingerprint, safe_preview, created_at
+                ) VALUES (?1, ?2, ?3, 'codex', 'session-a', 'path-a',
+                    'project-a', ?4, '2026-05-01T00:00:00Z', ?5, ?6,
+                    NULL, NULL, 'fp-shared', ?7, '2026-05-01T00:00:00Z')
+                "#,
+                rusqlite::params![
+                    format!("tool:behavior:compare:{index}"),
+                    turn_key,
+                    event_key,
+                    model,
+                    tool_name,
+                    tool_kind,
+                    preview
+                ],
+            )?;
+        }
+        drop(conn);
+
+        let addr = serve(store, Some(0)).await?;
+
+        let (status, optimize) =
+            route_json(addr, "GET", "/api/optimize?source=codex&timezone=UTC", None).await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(optimize["support"]["supported"], true);
+        assert!(
+            optimize["findings"]
+                .as_array()
+                .expect("findings")
+                .iter()
+                .any(|finding| finding["id"] == "duplicate_reads" || finding["id"] == "junk_reads")
+        );
+
+        let (status, candidates) = route_json(
+            addr,
+            "GET",
+            "/api/compare/models?source=codex&timezone=UTC",
+            None,
+        )
+        .await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(candidates.as_array().expect("candidates").len(), 2);
+
+        let (status, compare) = route_json(
+            addr,
+            "GET",
+            "/api/compare?source=codex&model_a=gpt-5&model_b=sonnet&timezone=UTC",
+            None,
+        )
+        .await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(compare["support"]["level"], "low_sample");
+        assert!(
+            compare["metrics"]
+                .as_array()
+                .expect("metrics")
+                .iter()
+                .any(|metric| metric["id"] == "one_shot_rate")
+        );
         Ok(())
     }
 

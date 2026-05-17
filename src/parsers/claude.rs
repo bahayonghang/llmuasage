@@ -15,9 +15,10 @@ use tracing::info;
 use walkdir::WalkDir;
 
 use crate::{
-    models::{SessionInfo, SourceKind, UsageEvent, UsageTokens},
+    models::{SessionInfo, SourceKind, UsageEvent, UsageTokens, UsageToolCall, UsageTurn},
     parsers::{
         ProgressSink, SourceParser, SourceSyncStats, SyncEvent,
+        behavior::{extract_claude_tools, tool_calls_from_evidence, turn_from_tools},
         file_state::{
             CandidateFile, FileReplayMode, decide_file_replay, finalize_cursor, should_rescan_file,
         },
@@ -35,6 +36,8 @@ struct ClaudeShardPlan {
 #[derive(Debug)]
 struct ClaudeShardOutput {
     events: Vec<UsageEvent>,
+    turns: Vec<UsageTurn>,
+    tool_calls: Vec<UsageToolCall>,
     cursors: Vec<crate::store::FileCursor>,
     reset_path_hashes: Vec<String>,
     events_seen: usize,
@@ -47,6 +50,8 @@ struct ClaudeShardOutput {
 struct ClaudeParseResult {
     end_offset: u64,
     events: Vec<UsageEvent>,
+    turns: Vec<UsageTurn>,
+    tool_calls: Vec<UsageToolCall>,
 }
 
 /// Claude project log parser. Owns the per-file scan + per-shard commit
@@ -160,6 +165,8 @@ async fn sync_claude(
                 cursors: shard.cursors,
                 seen_file_paths: shard.seen_file_paths,
                 raw_records: Vec::new(),
+                turns: shard.turns,
+                tool_calls: shard.tool_calls,
             })?;
             files_scanned += commit.files_seen;
             inserted += commit.events_inserted;
@@ -227,6 +234,8 @@ fn parse_claude_shard(plan: ClaudeShardPlan) -> Result<ClaudeShardOutput> {
     let mut resolver = ProjectResolver::default();
     let mut output = ClaudeShardOutput {
         events: Vec::new(),
+        turns: Vec::new(),
+        tool_calls: Vec::new(),
         cursors: Vec::new(),
         reset_path_hashes: Vec::new(),
         events_seen: 0,
@@ -262,6 +271,8 @@ fn parse_claude_shard(plan: ClaudeShardPlan) -> Result<ClaudeShardOutput> {
             output.reset_path_hashes.push(path_hash);
         }
         output.events.extend(parsed.events);
+        output.turns.extend(parsed.turns);
+        output.tool_calls.extend(parsed.tool_calls);
         output.cursors.push(finalize_cursor(
             &decision.snapshot.path,
             &decision.snapshot,
@@ -287,6 +298,8 @@ fn parse_project_file(
         return Ok(ClaudeParseResult {
             end_offset: file_len,
             events: Vec::new(),
+            turns: Vec::new(),
+            tool_calls: Vec::new(),
         });
     }
 
@@ -303,6 +316,8 @@ fn parse_project_file(
         .unwrap_or_else(|| path_hash.to_string());
     let mut line = String::new();
     let mut events = Vec::new();
+    let mut turns = Vec::new();
+    let mut tool_calls = Vec::new();
 
     loop {
         line.clear();
@@ -358,7 +373,7 @@ fn parse_project_file(
             .unwrap_or(fallback_session_id.as_str())
             .to_string();
 
-        events.push(UsageEvent {
+        let event = UsageEvent {
             event_key: format!("claude:{path_hash}:{file_fingerprint}:{offset}"),
             source: SourceKind::Claude,
             model: normalize_model(
@@ -377,12 +392,18 @@ fn parse_project_file(
                 session_label: fallback_session_label.clone(),
                 source_path_hash: Some(path_hash.to_string()),
             }),
-        });
+        };
+        let tools = extract_claude_tools(&value);
+        turns.push(turn_from_tools(&event, &tools));
+        tool_calls.extend(tool_calls_from_evidence(&event, tools));
+        events.push(event);
     }
 
     Ok(ClaudeParseResult {
         end_offset: offset,
         events,
+        turns,
+        tool_calls,
     })
 }
 
@@ -431,8 +452,11 @@ fn read_i64(value: &Value, key: &str) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_claude_usage;
+    use super::{normalize_claude_usage, parse_project_file};
+    use anyhow::Result;
     use serde_json::json;
+    use std::{fs, io::Write};
+    use tempfile::TempDir;
 
     /// Validates D8: Claude's `cache_creation_input_tokens` populates the
     /// dedicated `cache_creation_tokens` column instead of being merged back
@@ -514,5 +538,54 @@ mod tests {
         assert_eq!(tokens.cache_creation_tokens, 10);
         assert_eq!(tokens.cache_read_tokens, 2);
         assert_eq!(tokens.total_tokens, 27);
+    }
+
+    #[test]
+    fn claude_parser_emits_tool_facts_and_coding_turns() -> Result<()> {
+        let temp = TempDir::new()?;
+        let path = temp.path().join("session.jsonl");
+        let mut file = fs::File::create(&path)?;
+        writeln!(
+            file,
+            "{}",
+            json!({
+                "type": "assistant",
+                "sessionId": "session-a",
+                "timestamp": "2026-05-01T00:00:00Z",
+                "message": {
+                    "model": "claude-sonnet-4-5",
+                    "content": [
+                        {"type":"tool_use","name":"Edit","input":{"file_path":"src/lib.rs","old_string":"private text","new_string":"new private text"}},
+                        {"type":"tool_use","name":"Bash","input":{"command":"cargo test behavior"}}
+                    ],
+                    "usage": {"input_tokens": 10, "output_tokens": 5}
+                }
+            })
+        )?;
+
+        let parsed = parse_project_file(&path, "path-hash", "fingerprint", 0, None)?;
+
+        assert_eq!(parsed.events.len(), 1);
+        assert_eq!(parsed.turns.len(), 1);
+        assert_eq!(parsed.turns[0].category.as_str(), "coding");
+        assert!(parsed.turns[0].has_edits);
+        assert_eq!(parsed.tool_calls.len(), 2);
+        assert_eq!(parsed.tool_calls[0].tool_name, "Edit");
+        assert_eq!(parsed.tool_calls[0].tool_kind.as_str(), "edit");
+        assert!(
+            parsed.tool_calls[0]
+                .safe_preview
+                .as_deref()
+                .unwrap()
+                .contains("src/lib.rs")
+        );
+        assert!(
+            !parsed.tool_calls[0]
+                .safe_preview
+                .as_deref()
+                .unwrap()
+                .contains("private text")
+        );
+        Ok(())
     }
 }

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{models::SourceKind, store::MigrationProgress};
 
+pub(crate) mod behavior;
 pub mod claude;
 pub mod codex;
 pub mod driver;
@@ -94,8 +95,11 @@ pub struct SyncSummaryEvent {
     pub sources: usize,
     /// Total normalized events seen before SQLite dedupe.
     pub total_seen: usize,
-    /// Total newly inserted events.
+    /// Total newly inserted events during this incremental sync run.
     pub total_inserted: usize,
+    /// Total imported events currently stored in the database after the run.
+    #[serde(default)]
+    pub stored_events: usize,
 }
 
 /// Per-source sync metrics reported after a parser + write cycle completes.
@@ -115,6 +119,9 @@ pub struct SourceSyncStats {
     pub events_replayed: usize,
     /// Number of newly inserted events after SQLite dedupe.
     pub events_inserted: usize,
+    /// Total imported events currently stored for this source after the run.
+    #[serde(default)]
+    pub stored_events: usize,
     /// Parser wall-clock time in milliseconds.
     pub parse_ms: u64,
     /// SQLite write wall-clock time in milliseconds.
@@ -138,6 +145,7 @@ impl Default for SourceSyncStats {
             events_seen: 0,
             events_replayed: 0,
             events_inserted: 0,
+            stored_events: 0,
             parse_ms: 0,
             write_ms: 0,
             lock_wait_ms: 0,

@@ -7,6 +7,7 @@ import { renderSources } from './render/sources.js';
 import { renderProjects } from './render/projects.js';
 import { renderCosts } from './render/costs.js';
 import { renderInsights } from './render/insights.js';
+import { renderBehavior } from './render/behavior.js';
 import { applyDomI18n, bindI18nDomSync } from './i18n.js';
 import { initTheme, toggleTheme } from './theme.js';
 import { setRenderer, setRuntimeState } from './runtime.js';
@@ -56,6 +57,14 @@ async function main() {
   setRuntimeState(state);
   setRenderer(renderDashboard);
   syncFilterControls(state);
+  setupNavigation();
+  setupFilterControls(state);
+  setupPanelToggles(state);
+  setupExport(state);
+  setupSyncJob(state);
+  setupAutoRefresh(state);
+  setupThemeToggle();
+  setupLocaleToggle(state);
 
   try {
     // 1.2 先加载首屏需要的全部数据
@@ -64,17 +73,7 @@ async function main() {
     // 1.3 首次渲染
     renderDashboard(state.rawData);
 
-    // 1.4 绑定交互
-    setupNavigation();
-    setupFilterControls(state);
-    setupPanelToggles(state);
-    setupExport(state);
-    setupSyncJob(state);
-    setupAutoRefresh(state);
-    setupThemeToggle();
-    setupLocaleToggle(state);
-
-    // 1.5 切语言时基于已有 rawData 直接重渲，不再请求接口
+    // 1.4 切语言时基于已有 rawData 直接重渲，不再请求接口
     onLocaleChange(() => {
       if (state.rawData) {
         renderDashboard(state.rawData);
@@ -85,8 +84,6 @@ async function main() {
   } catch (error) {
     logger.error('llmusage dashboard 数据加载失败', error);
     renderBootstrapError(error);
-    setupThemeToggle();
-    setupLocaleToggle(state);
     onLocaleChange(() => renderBootstrapError(error));
   }
 }
@@ -106,6 +103,7 @@ function renderDashboard(rawData) {
   renderModels(context, dashboardState);
   renderSources(context);
   renderProjects(context, dashboardState);
+  renderBehavior(context);
   renderCosts(context, dashboardState);
   renderInsights(context);
   syncPanelToggleControls(context, dashboardState);
@@ -235,7 +233,7 @@ function escapeHtml(value) {
  * 2) 当区域进入视口时，高亮对应侧边栏链接
  */
 function setupNavigation() {
-  const sections = ['overview', 'trends', 'models', 'sources', 'projects', 'cost', 'status'];
+  const sections = ['overview', 'trends', 'models', 'sources', 'projects', 'behavior', 'cost', 'status'];
   const navLinks = document.querySelectorAll('aside nav a');
 
   function setActive(id) {
@@ -367,6 +365,7 @@ async function reloadDashboard(state) {
     state.rawData = await loadDashboardData(state);
     syncUrlFromState(state);
     renderDashboard(state.rawData);
+    updateSyncButton(state);
     return state.rawData;
   })();
 

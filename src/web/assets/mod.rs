@@ -120,6 +120,11 @@ const ASSET_MANIFEST: &[WebAsset] = &[
         body: include_str!("render/projects.js"),
     },
     WebAsset {
+        path: "render/behavior.js",
+        content_type: "application/javascript; charset=utf-8",
+        body: include_str!("render/behavior.js"),
+    },
+    WebAsset {
         path: "render/costs.js",
         content_type: "application/javascript; charset=utf-8",
         body: include_str!("render/costs.js"),

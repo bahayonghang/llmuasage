@@ -4,7 +4,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use super::{SourceParser, SourceSyncStats, SyncEvent};
-use crate::store::{Store, SyncRunWriter};
+use crate::store::{SourceFileInventory, Store, SyncRunWriter};
 
 /// Drives a fixed list of [`SourceParser`] implementations against the shared
 /// writer in registration order.
@@ -35,6 +35,7 @@ pub async fn drive(
         parallelism,
         lock_wait_ms,
         recent_days: None,
+        source_file_inventories: Vec::new(),
         sender: None,
         cancel: &CancellationToken::new(),
     })
@@ -50,6 +51,7 @@ pub struct DriveContext<'a, 'b> {
     pub parallelism: usize,
     pub lock_wait_ms: u64,
     pub recent_days: Option<u32>,
+    pub source_file_inventories: Vec<SourceFileInventory>,
     pub sender: Option<&'b mut mpsc::Sender<SyncEvent>>,
     pub cancel: &'a CancellationToken,
 }
@@ -94,7 +96,21 @@ pub async fn drive_with_events(mut ctx: DriveContext<'_, '_>) -> Result<Vec<Sour
         stats.lock_wait_ms = ctx.lock_wait_ms;
         let source = parser.source();
 
-        // 1.2 把本轮没扫到、上次还是 live 的文件改成 missing
+        // 1.2 先登记本轮枚举到的全部候选文件，再把没扫到、
+        //     上次还是 live 的文件改成 missing。commit_shard 只看到
+        //     changed/reparsed 文件；这里的 inventory 才是 missing sweep
+        //     的候选全集。
+        if let Some(inventory) = ctx
+            .source_file_inventories
+            .iter()
+            .find(|inventory| inventory.source == source)
+        {
+            ctx.store.source_files().mark_inventory_seen(
+                source,
+                &inventory.file_paths,
+                &run_started_at,
+            )?;
+        }
         let swept = ctx
             .store
             .source_files()

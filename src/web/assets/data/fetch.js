@@ -77,6 +77,10 @@ export async function loadDashboardSnapshot(state) {
       sources: snapshot?.sources,
       projects: snapshot?.projects,
       costs: snapshot?.costs,
+      activity: snapshot?.activity,
+      tools: snapshot?.tools,
+      optimize: snapshot?.optimize,
+      compare: snapshot?.compare,
       health: snapshot?.health,
       diagnostics: snapshot?.diagnostics,
     };
@@ -86,21 +90,22 @@ export async function loadDashboardSnapshot(state) {
   try {
     snapshot = await loadJson(`/api/dashboard${buildFilterQuery(state)}`);
   } catch (error) {
-    if (error.status !== 404) {
-      throw error;
-    }
     logger.warn('/api/dashboard 不可用，回退到旧分段 API', error);
-    const [overview, trends, models, sources, projects, costs, health, diagnostics] = await Promise.all([
+    const [overview, trends, models, sources, projects, costs, activity, tools, optimize, compare, health, diagnostics] = await Promise.all([
       loadSection(state, 'overview', '/api/overview'),
       loadTrendWindow(state, state.trendWindow),
       loadSection(state, 'models', '/api/models'),
       loadSection(state, 'sources', '/api/sources'),
       loadSection(state, 'projects', '/api/projects'),
       loadSection(state, 'costs', '/api/costs'),
+      loadOptionalSection(state, 'activity', '/api/activity', emptyActivity),
+      loadOptionalSection(state, 'tools', '/api/tools', emptyTools),
+      loadOptionalSection(state, 'optimize', '/api/optimize', emptyOptimize),
+      loadOptionalSection(state, 'compare', '/api/compare', emptyCompare),
       loadSection(state, 'health', '/api/health'),
       loadSection(state, 'diagnostics', '/api/diagnostics'),
     ]);
-    return { overview, trends, models, sources, projects, costs, health, diagnostics };
+    return { overview, trends, models, sources, projects, costs, activity, tools, optimize, compare, health, diagnostics };
   }
   return {
     overview: snapshot?.overview,
@@ -109,6 +114,10 @@ export async function loadDashboardSnapshot(state) {
     sources: snapshot?.sources,
     projects: snapshot?.projects,
     costs: snapshot?.costs,
+    activity: snapshot?.activity,
+    tools: snapshot?.tools,
+    optimize: snapshot?.optimize,
+    compare: snapshot?.compare,
     health: snapshot?.health,
     diagnostics: snapshot?.diagnostics,
   };
@@ -122,10 +131,63 @@ export async function loadSection(state, section, path) {
   return loadJson(`${path}${buildFilterQuery(state)}`);
 }
 
+async function loadOptionalSection(state, section, path, fallback) {
+  try {
+    return await loadSection(state, section, path);
+  } catch (error) {
+    logger.warn(`${path} degraded`, error);
+    return fallbackFor(error, fallback);
+  }
+}
+
 export async function loadTrendWindow(state, windowName) {
   if (state.mode === 'snapshot') {
     const snapshot = await ensureSnapshot(state);
     return snapshot?.[`${windowName}_trends`];
   }
   return loadJson(`/api/trends${buildFilterQuery({ ...state, trendWindow: windowName })}`);
+}
+
+function degradedSupport(error) {
+  return {
+    supported: false,
+    level: 'degraded',
+    reason: error?.message || 'Behavior analytics timed out or failed; core usage data is still available.',
+  };
+}
+
+function fallbackFor(error, fallback) {
+  return typeof fallback === 'function' ? fallback(error) : fallback;
+}
+
+function emptyActivity(error) {
+  return { support: degradedSupport(error), breakdown: [] };
+}
+
+function emptyTools(error) {
+  return { support: degradedSupport(error), breakdown: [] };
+}
+
+function emptyOptimize(error) {
+  return {
+    support: degradedSupport(error),
+    score: 100,
+    grade: 'A',
+    estimated_savings_tokens: 0,
+    estimated_savings_usd: 0,
+    findings: [],
+  };
+}
+
+function emptyCompare(error) {
+  return {
+    support: degradedSupport(error),
+    candidates: [],
+    model_a: null,
+    model_b: null,
+    metrics: [],
+    category_head_to_head: [],
+    working_style: [],
+    warning: error?.message || 'Behavior model comparison is degraded.',
+  };
 }
