@@ -107,8 +107,8 @@ ccr-ui 侧只剩两件事：**调 query 层组装响应** + **包装 sync 任务
 - Gemini CLI 还能开 `telemetry.target=local` 写 `.gemini/telemetry.log`（含 `gemini_cli.token.usage` counter），但这条路径需要用户主动 opt-in 且 schema 与 OTLP 强绑定，留作未来增强。v1 不引入。
 
 **其他配置**
-- `models.rs::SourceKind::Gemini`（`as_str() == "gemini"`）。
-- `sources::registered_parsers / registered_integrations` 注册新源。
+- `domain::models::SourceKind::Gemini`（`as_str() == "gemini"`）。
+- `registry::registered_parsers / registered_integrations` 注册新源。
 - `pricing.rs` 加 Gemini 档位（`gemini-2.5-pro / gemini-2.5-flash / gemini-2.0-flash` 等）。
 - `usage_bucket_30m` schema 无需改动，靠 `source` 列区分。
 

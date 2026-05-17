@@ -264,7 +264,7 @@ testing = []   # 暴露 src/testing/Fixture（D16）
 
 可选 hook（推荐安装）：`~/.gemini/settings.json::hooks.SessionEnd`，调用 `~/.llmusage/bin/llmusage-hook.cmd|sh`，与 Claude/Codex 一致复用 `hook_target.rs`（D14）。
 
-注册：`SourceKind::Gemini`（`as_str() == "gemini"`），`sources::registered_parsers / registered_integrations` 各加一行。
+注册：`SourceKind::Gemini`（`as_str() == "gemini"`），`registry::registered_parsers / registered_integrations` 各加一行。
 
 #### F1.2 cache 拆分（D8）
 

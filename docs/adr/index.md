@@ -6,7 +6,7 @@ ADRs are append-only. To revise a past decision, write a new ADR that supersedes
 
 ## Index
 
-- [0001 — `SourceParser` trait + `sources::registered_*` registry](./0001-source-registry-and-parser-trait)
+- [0001 — `SourceParser` trait + `registry::registered_*` registry](./0001-source-registry-and-parser-trait)
 - [0002 — `SyncShard` as commit protocol](./0002-sync-shard-as-commit-protocol)
 - [0003 — `Store` façade with borrowed views](./0003-store-facade-vs-substores)
 - [0004 — Schema version migration runner](./0004-schema-version-migration-runner)
