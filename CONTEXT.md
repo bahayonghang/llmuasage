@@ -171,6 +171,7 @@ view 全部是 `pub struct XxxStore<'a> { store: &'a Store }` 借用形态。跨
 | [0006](docs/adr/0006-source-file-state-machine.md) | source_file 三态状态机 | SourceFile, FileState, Cursor |
 | [0007](docs/adr/0007-llmusage-error-surface.md) | LlmusageError 公共错误表面 | LlmusageError |
 | v11 behavior facts | Activity / Tools / Optimize / Compare normalized 行为事实 | UsageTurn, UsageToolCall, SyncShard, QueryFilter |
+| v12 source_sync_status repair | 修复 schema_version 已推进但 `source_sync_status.stored_events` 缺失的历史库漂移 | Migration, SchemaVersion, Store |
 
 ADR 与本文档冲突时以 ADR 为准；同时本文档与 ADR 都需要更新。
 
@@ -198,6 +199,7 @@ ADR 与本文档冲突时以 ADR 为准；同时本文档与 ADR 都需要更新
 - M0- 只允许推进到 v1 baseline。
 - v2-v10 随 M1/M2/M3 的真实 migration 逐步追加。
 - 0.5.0 final 才要求 schema_version == 10。
+- 0.6.x 行为事实追加 v11；v12 只做 `source_sync_status` 历史列兼容修复，不重建表、不删除数据。
 
 ## 14. Job
 

@@ -1,7 +1,7 @@
 # ADR 0004 — schema_version + 自家 versioned migration runner
 
 - 状态：拟稿（0.5.0 sprint M0- 落地）
-- 落地阶段：M0- 落 runner + v1 baseline；M1/M2/M3 随功能追加 v2-v10；0.6.x 追加 v11 行为事实表；M0- 不单独发布 rc
+- 落地阶段：M0- 落 runner + v1 baseline；M1/M2/M3 随功能追加 v2-v10；0.6.x 追加 v11 行为事实表；v12 修复 `source_sync_status` 历史列漂移；M0- 不单独发布 rc
 - 落地日期：TBD
 - 相关代码：`src/store/schema.rs`、`src/store/migrations.rs`（新）、`src/store/mod.rs::bootstrap`
 - 相关术语：Migration / SchemaVersion / Store（见仓库根目录 CONTEXT.md）
@@ -26,7 +26,7 @@
 
 ### 2. `MIGRATIONS: &[(u32, &str, fn(&Transaction) -> Result<()>)]`
 
-编译期常量数组，按版本号升序。每个 migration 是 `fn(&Transaction)`，不允许跨步引用其他 migration 的内部函数。数组可随阶段增长：M0- 只有 v1 baseline；M1 追加 v2-v4；M2 追加 v5-v7；M3 追加 v8-v10；0.6.x 追加 v11。
+编译期常量数组，按版本号升序。每个 migration 是 `fn(&Transaction)`，不允许跨步引用其他 migration 的内部函数。数组可随阶段增长：M0- 只有 v1 baseline；M1 追加 v2-v4；M2 追加 v5-v7；M3 追加 v8-v10；0.6.x 追加 v11，兼容修复追加 v12。
 
 ```rust
 const MIGRATIONS: &[(u32, &str, MigFn)] = &[
@@ -41,6 +41,8 @@ const MIGRATIONS: &[(u32, &str, MigFn)] = &[
     (9,  "add_gemini",          m_009_gemini),
     (10, "add_pricing_meta",    m_010_pricing_meta),
     (11, "add_behavior_facts",   m_011_behavior_facts),
+    (12, "repair_source_sync_status_history_columns",
+                                      m_012_repair_source_sync_status_history_columns),
 ];
 ```
 
@@ -126,7 +128,13 @@ DSL schema builder。否决：DSL 学习成本高，团队习惯手写 SQL。
 - v11 只追加行为分析事实表和索引，不改变 `usage_event` / `usage_bucket_30m` 的成本与用量主路径语义。
 - `SyncShard` 和 `SyncRunWriter::commit_shard` 负责将 parser 提取的行为事实与同一 `source_path_hash` 的 reset 保持幂等。
 
-这延续本 ADR 的核心约束：所有 schema 变更仍通过 `MIGRATIONS` 追加真实版本号，`schema_version` 当前可推进到 11；不使用空 migration 占位。
+这延续本 ADR 的核心约束：所有 schema 变更仍通过 `MIGRATIONS` 追加真实版本号，不使用空 migration 占位。
+
+## 2026-05-17 更新：v12 `source_sync_status` 兼容修复
+
+真实用户库出现 `meta('schema_version') == 11`，但物理表 `source_sync_status` 缺少 `stored_events` 列的漂移状态。原因是 `stored_events` 曾作为 v6 `add_recent_history` 的幂等 `ensure_column` 追加；如果某个历史构建已经把库推进到 v6+ / v11，却没有该列，当前 runner 会跳过所有已完成版本，后续 `SyncStatusStore::save_source_sync_statuses` 无条件写入 `stored_events` 时触发 SQLite `no column named stored_events`。
+
+v12 是真实兼容修复 migration：重新以幂等方式确保 `recent_completed_at`、`history_completed_at` 与 `stored_events` 三个 `source_sync_status` 历史列存在，并将 `schema_version` 推进到 12。该修复不重建表、不删除数据、不改变 `usage_event` / `usage_bucket_30m` 语义。
 
 ## 验证
 
@@ -144,3 +152,4 @@ DSL schema builder。否决：DSL 学习成本高，团队习惯手写 SQL。
   - usage_event 既有行的 cache_read_tokens 等于原 cached_input_tokens
   - cost_with_cache_usd 被 backfill（不是 0）
 - 0.6.x 行为事实表单测：`migration_v11_creates_behavior_fact_tables`，断言 `usage_turn` / `usage_tool_call` 存在且 `schema_version == 11`。
+- v12 兼容修复单测：`migration_v12_repairs_source_sync_status_columns_on_drifted_v11_db`，断言漂移 v11 库升级后 `stored_events` 存在、既有行默认值为 0，且 `schema_version == 12`。

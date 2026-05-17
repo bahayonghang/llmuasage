@@ -54,6 +54,11 @@ pub const MIGRATIONS: &[(u32, &str, MigrationFn)] = &[
     (9, "add_gemini_source", m_009_add_gemini_source),
     (10, "add_pricing_meta", m_010_add_pricing_meta),
     (11, "add_behavior_facts", m_011_add_behavior_facts),
+    (
+        12,
+        "repair_source_sync_status_history_columns",
+        m_012_repair_source_sync_status_history_columns,
+    ),
 ];
 
 /// Returns the newest schema version known to this binary.
@@ -596,6 +601,18 @@ fn m_011_add_behavior_facts(tx: &Transaction<'_>) -> Result<()> {
     Ok(())
 }
 
+fn m_012_repair_source_sync_status_history_columns(tx: &Transaction<'_>) -> Result<()> {
+    ensure_column(tx, "source_sync_status", "recent_completed_at", "TEXT")?;
+    ensure_column(tx, "source_sync_status", "history_completed_at", "TEXT")?;
+    ensure_column(
+        tx,
+        "source_sync_status",
+        "stored_events",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    Ok(())
+}
+
 fn ensure_column(tx: &Transaction<'_>, table: &str, column: &str, definition: &str) -> Result<()> {
     if table_has_column(tx, table, column)? {
         return Ok(());
@@ -1001,6 +1018,115 @@ mod tests {
         assert!(columns.contains(&"tool_kind".to_string()));
         assert!(columns.contains(&"safe_preview".to_string()));
         assert_eq!(read_schema_version(&conn)?, 11);
+        Ok(())
+    }
+
+    #[test]
+    fn migration_v12_repairs_source_sync_status_columns_on_drifted_v11_db() -> anyhow::Result<()> {
+        let mut conn = Connection::open_in_memory()?;
+        conn.execute_batch(
+            r#"
+            CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            INSERT INTO meta(key, value) VALUES ('schema_version', '11');
+            CREATE TABLE source_sync_status (
+                source TEXT PRIMARY KEY,
+                files_processed INTEGER NOT NULL,
+                changed_files INTEGER NOT NULL,
+                bytes_scanned INTEGER NOT NULL,
+                events_seen INTEGER NOT NULL,
+                events_replayed INTEGER NOT NULL,
+                events_inserted INTEGER NOT NULL,
+                parse_ms INTEGER NOT NULL,
+                write_ms INTEGER NOT NULL,
+                lock_wait_ms INTEGER NOT NULL,
+                updated_at TEXT NOT NULL,
+                recent_completed_at TEXT,
+                history_completed_at TEXT
+            );
+            INSERT INTO source_sync_status(
+                source,
+                files_processed,
+                changed_files,
+                bytes_scanned,
+                events_seen,
+                events_replayed,
+                events_inserted,
+                parse_ms,
+                write_ms,
+                lock_wait_ms,
+                updated_at,
+                recent_completed_at,
+                history_completed_at
+            ) VALUES (
+                'codex',
+                10,
+                2,
+                4096,
+                100,
+                90,
+                5,
+                7,
+                11,
+                13,
+                '2026-05-17T00:00:00Z',
+                '2026-05-17T00:00:00Z',
+                '2026-05-17T00:00:00Z'
+            );
+            "#,
+        )?;
+
+        run_migrations_with_events(&mut conn, None)?;
+
+        assert_eq!(read_schema_version(&conn)?, latest_schema_version());
+        let columns = pragma_columns(&conn, "source_sync_status")?;
+        assert!(columns.contains(&"recent_completed_at".to_string()));
+        assert!(columns.contains(&"history_completed_at".to_string()));
+        assert!(columns.contains(&"stored_events".to_string()));
+        let stored_events: i64 = conn.query_row(
+            "SELECT stored_events FROM source_sync_status WHERE source='codex'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(stored_events, 0);
+
+        conn.execute(
+            r#"
+            INSERT INTO source_sync_status(
+                source,
+                files_processed,
+                changed_files,
+                bytes_scanned,
+                events_seen,
+                events_replayed,
+                events_inserted,
+                stored_events,
+                parse_ms,
+                write_ms,
+                lock_wait_ms,
+                updated_at
+            ) VALUES (
+                'claude',
+                1,
+                1,
+                128,
+                2,
+                2,
+                2,
+                42,
+                3,
+                5,
+                8,
+                '2026-05-17T00:01:00Z'
+            )
+            "#,
+            [],
+        )?;
+        let inserted: i64 = conn.query_row(
+            "SELECT stored_events FROM source_sync_status WHERE source='claude'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(inserted, 42);
         Ok(())
     }
 }
