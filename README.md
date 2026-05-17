@@ -42,8 +42,9 @@ Operational commands:
 - `llmusage status`
 - `llmusage diagnostics` (`--forget-file <PATH>` can mark a source file as intentionally ignored)
 - `llmusage doctor` (`--refresh-pricing <file>` imports a local pricing snapshot and recomputes costs)
+- `llmusage dash`
 - `llmusage serve`
-- `llmusage tui`
+- `llmusage tui` (deprecated alias for `dash`)
 - `llmusage export html`
 - `llmusage uninstall`
 
@@ -60,6 +61,10 @@ The behavior section is powered by normalized facts extracted during `sync`:
 
 ![llmusage web dashboard overview](./docs/public/screenshots/web-dashboard-overview.png)
 
+Terminal dashboard:
+
+- `llmusage dash` opens the terminal TUI. Its top navigation now includes `8:行为`, a read-only behavior summary that reuses the same Activity / Tools / Optimize / Compare dashboard queries and shows no-data, degraded, insufficient-models, and low-sample states instead of pretending missing facts are zeroes.
+
 Development:
 
 ```powershell
@@ -68,6 +73,7 @@ cargo test
 cargo run -- init
 cargo run -- sync
 cargo run -- --json
+cargo run -- dash
 cargo run -- serve
 ```
 

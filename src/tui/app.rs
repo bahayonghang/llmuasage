@@ -1,9 +1,9 @@
 use crate::query::{
-    CostLine, HealthPayload, ModelBreakdown, OverviewPayload, ProjectBreakdown, QueryFilter,
-    SourceBreakdown, TrendPoint,
+    ActivityPayload, CostLine, HealthPayload, ModelBreakdown, ModelComparePayload, OptimizePayload,
+    OverviewPayload, ProjectBreakdown, QueryFilter, SourceBreakdown, ToolsPayload, TrendPoint,
 };
 
-/// The seven dashboard panels in fixed display order.
+/// The eight dashboard panels in fixed display order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Panel {
@@ -14,10 +14,11 @@ pub enum Panel {
     Projects = 4,
     Cost = 5,
     Health = 6,
+    Behavior = 7,
 }
 
 impl Panel {
-    pub const COUNT: usize = 7;
+    pub const COUNT: usize = 8;
 
     pub fn from_index(i: usize) -> Option<Self> {
         match i {
@@ -28,7 +29,17 @@ impl Panel {
             4 => Some(Self::Projects),
             5 => Some(Self::Cost),
             6 => Some(Self::Health),
+            7 => Some(Self::Behavior),
             _ => None,
+        }
+    }
+
+    pub fn from_digit_char(c: char) -> Option<Self> {
+        let digit = c.to_digit(10)? as usize;
+        if (1..=Self::COUNT).contains(&digit) {
+            Self::from_index(digit - 1)
+        } else {
+            None
         }
     }
 
@@ -39,6 +50,15 @@ impl Panel {
     pub fn prev(self) -> Self {
         Self::from_index((self as usize + Self::COUNT - 1) % Self::COUNT).unwrap()
     }
+}
+
+/// Combined behavior analytics payload for the terminal dashboard.
+#[derive(Debug, Clone)]
+pub struct BehaviorPanelPayload {
+    pub activity: ActivityPayload,
+    pub tools: ToolsPayload,
+    pub optimize: OptimizePayload,
+    pub compare: ModelComparePayload,
 }
 
 /// Time window for the trends panel.
@@ -126,6 +146,7 @@ pub struct AppState {
     pub projects: Option<Result<Vec<ProjectBreakdown>, String>>,
     pub costs: Option<Result<Vec<CostLine>, String>>,
     pub health: Option<Result<HealthPayload, String>>,
+    pub behavior: Option<Result<BehaviorPanelPayload, String>>,
 }
 
 impl Default for AppState {
@@ -152,6 +173,7 @@ impl AppState {
             projects: None,
             costs: None,
             health: None,
+            behavior: None,
         }
     }
 }
@@ -161,7 +183,7 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
-    /// Generate a valid panel index (0..7).
+    /// Generate a valid panel index.
     fn arb_panel_index() -> impl Strategy<Value = usize> {
         0..Panel::COUNT
     }
@@ -176,17 +198,17 @@ mod tests {
         ]
     }
 
-    /// Navigation action: digit key (1-7), Tab, or Shift+Tab.
+    /// Navigation action: digit key (1..=Panel::COUNT), Tab, or Shift+Tab.
     #[derive(Debug, Clone)]
     enum NavAction {
-        Digit(usize), // 1-7 (maps to panel 0-6)
+        Digit(usize), // 1..=Panel::COUNT (maps to panel 0..COUNT-1)
         Tab,
         ShiftTab,
     }
 
     fn arb_nav_action() -> impl Strategy<Value = NavAction> {
         prop_oneof![
-            (1..=7usize).prop_map(NavAction::Digit),
+            (1..=Panel::COUNT).prop_map(NavAction::Digit),
             Just(NavAction::Tab),
             Just(NavAction::ShiftTab),
         ]
@@ -205,8 +227,8 @@ mod tests {
             let panel = Panel::from_index(current).unwrap();
             let expected = match &action {
                 NavAction::Digit(n) => *n - 1,
-                NavAction::Tab => (current + 1) % 7,
-                NavAction::ShiftTab => (current + 6) % 7,
+                NavAction::Tab => (current + 1) % Panel::COUNT,
+                NavAction::ShiftTab => (current + Panel::COUNT - 1) % Panel::COUNT,
             };
 
             let result = match action {

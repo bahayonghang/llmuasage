@@ -9,11 +9,13 @@ use proptest::prelude::*;
 use ratatui::{Terminal, backend::TestBackend, layout::Rect};
 
 use llmusage::query::{
-    CostLine, CursorHealth, HealthPayload, ModelBreakdown, OverviewPayload, ProjectBreakdown,
-    SourceBreakdown, TokenSummary, TrendPoint,
+    ActivityBreakdown, ActivityPayload, BehaviorSupport, CategoryCompareRow, CompareMetric,
+    CompareModelCandidate, CostLine, CursorHealth, HealthPayload, ModelBreakdown,
+    ModelComparePayload, ModelCompareStats, OptimizeFinding, OptimizePayload, OverviewPayload,
+    ProjectBreakdown, SourceBreakdown, TokenSummary, ToolBreakdown, ToolsPayload, TrendPoint,
 };
 use llmusage::store::{IntegrationState, RunRecord};
-use llmusage::tui::app::{ScrollState, TimeWindow};
+use llmusage::tui::app::{BehaviorPanelPayload, Panel, ScrollState, TimeWindow};
 
 /// Format a number with thousands separators (matching panel rendering).
 fn format_number(n: i64) -> String {
@@ -270,7 +272,165 @@ fn render_trends_text(
     buffer_text(&terminal)
 }
 
+fn support(supported: bool, level: &str, reason: Option<&str>) -> BehaviorSupport {
+    BehaviorSupport {
+        supported,
+        level: level.to_string(),
+        reason: reason.map(str::to_string),
+    }
+}
+
+fn compare_stats(model: &str, calls: i64, edit_turns: i64, cost: f64) -> ModelCompareStats {
+    ModelCompareStats {
+        model: model.to_string(),
+        calls,
+        turns: calls / 2,
+        edit_turns,
+        one_shot_turns: edit_turns / 2,
+        retries: calls / 10,
+        total_tokens: calls * 1_000,
+        estimated_cost_usd: cost,
+        cache_efficiency: 0.42,
+        cost_per_call: cost / calls as f64,
+        cost_per_edit_turn: cost / edit_turns.max(1) as f64,
+        one_shot_rate: 0.5,
+        retry_rate: 0.1,
+        avg_tools_per_turn: 2.0,
+        delegation_rate: 0.2,
+        planning_rate: 0.3,
+        low_sample: false,
+    }
+}
+
+fn sample_behavior_payload() -> BehaviorPanelPayload {
+    BehaviorPanelPayload {
+        activity: ActivityPayload {
+            support: support(true, "normalized", None),
+            breakdown: vec![ActivityBreakdown {
+                category: "coding".to_string(),
+                turns: 12,
+                edit_turns: 8,
+                one_shot_turns: 5,
+                retries: 2,
+                call_count: 14,
+                total_tokens: 42_000,
+                estimated_cost_usd: 1.25,
+                one_shot_rate: 0.625,
+                retry_rate: 0.166,
+            }],
+        },
+        tools: ToolsPayload {
+            support: support(true, "normalized", None),
+            breakdown: vec![ToolBreakdown {
+                tool_kind: "read".to_string(),
+                tool_name: "Read".to_string(),
+                mcp_server: Some("filesystem".to_string()),
+                calls: 7,
+                turn_count: 4,
+                session_count: 2,
+                estimated_cost_usd: 0.42,
+                call_share: 0.35,
+                first_seen_at: Some("2026-05-17T00:00:00Z".to_string()),
+                last_seen_at: Some("2026-05-17T01:00:00Z".to_string()),
+            }],
+        },
+        optimize: OptimizePayload {
+            support: support(true, "normalized", None),
+            score: 72,
+            grade: "C".to_string(),
+            estimated_savings_tokens: 8_000,
+            estimated_savings_usd: 0.8,
+            findings: vec![OptimizeFinding {
+                id: "duplicate_reads".to_string(),
+                title: "Repeated reads".to_string(),
+                severity: "medium".to_string(),
+                evidence: "Read called repeatedly for same path".to_string(),
+                recommendation: "Cache context before re-reading".to_string(),
+                estimated_savings_tokens: 8_000,
+                estimated_savings_usd: 0.8,
+            }],
+        },
+        compare: ModelComparePayload {
+            support: support(true, "normalized", None),
+            candidates: vec![
+                CompareModelCandidate {
+                    model: "gpt-5".to_string(),
+                    calls: 80,
+                    turns: 40,
+                    edit_turns: 30,
+                    total_tokens: 80_000,
+                    estimated_cost_usd: 5.5,
+                    low_sample: false,
+                },
+                CompareModelCandidate {
+                    model: "sonnet".to_string(),
+                    calls: 70,
+                    turns: 35,
+                    edit_turns: 25,
+                    total_tokens: 70_000,
+                    estimated_cost_usd: 4.5,
+                    low_sample: false,
+                },
+            ],
+            model_a: Some(compare_stats("gpt-5", 80, 30, 5.5)),
+            model_b: Some(compare_stats("sonnet", 70, 25, 4.5)),
+            metrics: vec![CompareMetric {
+                id: "one_shot_rate".to_string(),
+                label: "One-shot rate".to_string(),
+                model_a_value: 0.5,
+                model_b_value: 0.44,
+                higher_is_better: true,
+            }],
+            category_head_to_head: vec![CategoryCompareRow {
+                category: "coding".to_string(),
+                model_a_edit_turns: 30,
+                model_a_one_shot_rate: 0.5,
+                model_b_edit_turns: 25,
+                model_b_one_shot_rate: 0.44,
+            }],
+            working_style: Vec::new(),
+            warning: None,
+        },
+    }
+}
+
+fn render_behavior_text(payload: BehaviorPanelPayload, width: u16, height: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    let area = Rect::new(0, 0, width, height);
+    let data: Option<Result<BehaviorPanelPayload, String>> = Some(Ok(payload));
+
+    terminal
+        .draw(|frame| {
+            llmusage::tui::panels::behavior::render(frame, area, &data);
+        })
+        .unwrap();
+
+    buffer_text(&terminal)
+}
+
+fn render_nav_text(active_panel: Panel, width: u16, height: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    let area = Rect::new(0, 0, width, height);
+
+    terminal
+        .draw(|frame| {
+            llmusage::tui::nav_bar::render(frame, area, active_panel);
+        })
+        .unwrap();
+
+    buffer_text(&terminal)
+}
+
 // ─── Property Tests ───────────────────────────────────────────────────────────
+
+#[test]
+fn nav_bar_renders_behavior_panel_shortcut() {
+    let text = render_nav_text(Panel::Behavior, 120, 3);
+    assert!(
+        text.contains("8:行为"),
+        "nav bar should expose behavior panel as 8:行为, got: {text}"
+    );
+}
 
 #[test]
 fn trends_week_labels_are_short_dates_not_truncated_years() {
@@ -365,6 +525,99 @@ fn trends_small_terminal_does_not_panic() {
     assert!(
         text.contains("趋势"),
         "small terminal should render a shell"
+    );
+}
+
+#[test]
+fn behavior_panel_renders_all_behavior_sections_and_sample_rows() {
+    let text = render_behavior_text(sample_behavior_payload(), 160, 40);
+
+    for expected in [
+        "行为",
+        "Activity",
+        "Tools",
+        "Optimize",
+        "Compare",
+        "coding",
+        "Read",
+        "gpt-5",
+        "sonnet",
+        "Repeated reads",
+    ] {
+        assert!(
+            text.contains(expected),
+            "expected behavior panel to contain '{expected}', got: {text}"
+        );
+    }
+}
+
+#[test]
+fn behavior_panel_renders_no_data_degraded_and_compare_warnings() {
+    let mut payload = sample_behavior_payload();
+    payload.activity = ActivityPayload {
+        support: support(
+            false,
+            "no_data",
+            Some("No normalized behavior facts match this filter."),
+        ),
+        breakdown: Vec::new(),
+    };
+    payload.tools = ToolsPayload {
+        support: support(false, "degraded", Some("Tool-level evidence unavailable.")),
+        breakdown: Vec::new(),
+    };
+    payload.optimize = OptimizePayload {
+        support: support(
+            false,
+            "no_data",
+            Some("No behavior facts for optimization."),
+        ),
+        score: 100,
+        grade: "A".to_string(),
+        estimated_savings_tokens: 0,
+        estimated_savings_usd: 0.0,
+        findings: Vec::new(),
+    };
+    payload.compare = ModelComparePayload {
+        support: support(
+            false,
+            "insufficient_models",
+            Some("At least two models with local usage are required for comparison."),
+        ),
+        candidates: vec![CompareModelCandidate {
+            model: "gpt-5".to_string(),
+            calls: 1,
+            turns: 1,
+            edit_turns: 0,
+            total_tokens: 1_000,
+            estimated_cost_usd: 0.05,
+            low_sample: true,
+        }],
+        model_a: None,
+        model_b: None,
+        metrics: Vec::new(),
+        category_head_to_head: Vec::new(),
+        working_style: Vec::new(),
+        warning: Some("Need at least two models in the current filter.".to_string()),
+    };
+
+    let text = render_behavior_text(payload, 160, 40);
+
+    for expected in [
+        "no-data",
+        "degraded",
+        "insufficient-models",
+        "暂不计算 score",
+        "At least two",
+    ] {
+        assert!(
+            text.contains(expected),
+            "expected degraded behavior panel to contain '{expected}', got: {text}"
+        );
+    }
+    assert!(
+        !text.contains("Score 100"),
+        "unsupported optimize state must not present no-data as a perfect score: {text}"
     );
 }
 

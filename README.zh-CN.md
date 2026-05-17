@@ -42,8 +42,9 @@
 - `llmusage status`
 - `llmusage diagnostics`（`--forget-file <PATH>` 可把源文件标记为用户主动忽略）
 - `llmusage doctor`（`--refresh-pricing <file>` 导入本地价格快照并重算成本）
+- `llmusage dash`
 - `llmusage serve`
-- `llmusage tui`
+- `llmusage tui`（`dash` 的已废弃别名）
 - `llmusage export html`
 - `llmusage uninstall`
 
@@ -60,6 +61,10 @@ Web 分析页：
 
 ![llmusage 本地 web 分析页概览](./docs/public/screenshots/web-dashboard-overview.png)
 
+终端分析页：
+
+- `llmusage dash` 会打开终端 TUI。顶部导航现在包含 `8:行为`，用同一套 Activity / Tools / Optimize / Compare dashboard 查询展示只读行为摘要，并明确显示 no-data、degraded、insufficient-models、low-sample 状态，不把缺失事实伪装成 0。
+
 开发：
 
 ```powershell
@@ -68,6 +73,7 @@ cargo test
 cargo run -- init
 cargo run -- sync
 cargo run -- --json
+cargo run -- dash
 cargo run -- serve
 ```
 

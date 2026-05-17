@@ -19,7 +19,7 @@ pub mod panels;
 pub mod report_table;
 pub mod theme;
 
-use app::{AppState, Panel};
+use app::{AppState, BehaviorPanelPayload, Panel};
 use input::{Action, handle_key_event};
 
 /// Main entry point for the interactive terminal dashboard.
@@ -177,5 +177,30 @@ fn load_panel_data(dashboard: &Dashboard, state: &mut AppState, panel: Panel) {
                 state.health = Some(dashboard.health().map_err(|e| e.to_string()));
             }
         }
+        Panel::Behavior => {
+            if state.behavior.is_none() {
+                state.behavior = Some(load_behavior_panel_data(dashboard, state));
+            }
+        }
     }
+}
+
+fn load_behavior_panel_data(
+    dashboard: &Dashboard,
+    state: &AppState,
+) -> Result<BehaviorPanelPayload, String> {
+    Ok(BehaviorPanelPayload {
+        activity: dashboard
+            .activity_breakdown(&state.filter)
+            .map_err(|e| e.to_string())?,
+        tools: dashboard
+            .tool_breakdown(&state.filter)
+            .map_err(|e| e.to_string())?,
+        optimize: dashboard
+            .optimize(&state.filter)
+            .map_err(|e| e.to_string())?,
+        compare: dashboard
+            .model_compare(&state.filter, None, None)
+            .map_err(|e| e.to_string())?,
+    })
 }

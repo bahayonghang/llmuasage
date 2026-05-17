@@ -10,7 +10,9 @@ use super::app::Panel;
 use super::theme;
 
 /// Panel labels in display order.
-const LABELS: [&str; Panel::COUNT] = ["概览", "趋势", "模型", "来源", "项目", "成本", "健康"];
+const LABELS: [&str; Panel::COUNT] = [
+    "概览", "趋势", "模型", "来源", "项目", "成本", "健康", "行为",
+];
 
 /// Render a horizontal navigation bar showing all panel labels with the active one highlighted.
 pub fn render(frame: &mut Frame, area: Rect, active_panel: Panel) {

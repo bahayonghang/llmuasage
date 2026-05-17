@@ -47,5 +47,6 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
             &state.scroll[Panel::Cost as usize],
         ),
         Panel::Health => panels::health::render(frame, content_area, &state.health),
+        Panel::Behavior => panels::behavior::render(frame, content_area, &state.behavior),
     }
 }

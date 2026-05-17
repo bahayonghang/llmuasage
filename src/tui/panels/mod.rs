@@ -1,3 +1,4 @@
+pub mod behavior;
 pub mod cost;
 pub mod health;
 pub mod models;
