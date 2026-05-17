@@ -6,7 +6,7 @@ use super::{IntegrationAction, IntegrationProbe};
 
 /// Local third-party integration (Codex `notify`, Claude hooks, OpenCode plugin, …).
 ///
-/// 把 "系统支持哪些 integration" 收敛到 `crate::sources::registered_integrations()`
+/// 把 "系统支持哪些 integration" 收敛到 `crate::registry::registered_integrations()`
 /// 的单点工厂。新增源时只在工厂处加一行；`probe_all` / `install_all` /
 /// `uninstall_all` 自动 fan-out。
 pub trait Integration: Send + Sync {

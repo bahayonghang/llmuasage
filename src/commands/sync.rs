@@ -13,7 +13,7 @@ use crate::{
     app::AppContext,
     models::SourceKind,
     parsers::{SourceSyncStats, SyncEvent, SyncSummaryEvent, driver},
-    sources,
+    registry,
     store::{HolderKind, MigrationProgressEvent, SourceFileInventory, SourceSyncStatus, Store},
 };
 
@@ -311,7 +311,7 @@ pub async fn run_once_with_cancel(
         .unwrap_or(1);
     let parallelism = options.parallelism.unwrap_or(default_parallelism).max(1);
     let mut writer = store.begin_sync_run()?;
-    let parsers = sources::registered_parsers()
+    let parsers = registry::registered_parsers()
         .into_iter()
         .filter(|parser| {
             options
@@ -503,7 +503,7 @@ Restore the source files or pass --allow-lossy-rebuild to explicitly accept clea
 fn rebuild_guard_sources(source: Option<SourceKind>) -> Vec<SourceKind> {
     source.map_or_else(
         || {
-            sources::registered_parsers()
+            registry::registered_parsers()
                 .into_iter()
                 .map(|parser| parser.source())
                 .collect()
