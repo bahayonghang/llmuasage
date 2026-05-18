@@ -4,38 +4,54 @@ layout: home
 hero:
   name: "llmusage"
   text: "本地优先的 AI CLI 用量分析"
-  tagline: "用 hook、SQLite 和 Rust 追踪 Codex、Claude、OpenCode，全程不上传。"
+  tagline: "用 hook、SQLite 和 Rust 追踪 Codex、Claude、OpenCode、Gemini，全程不上传。"
   actions:
     - theme: brand
-      text: 快速开始
+      text: 从指南开始
       link: /zh/guide/getting-started
+    - theme: alt
+      text: 查看 Dashboard 文档
+      link: /zh/dashboard/
     - theme: alt
       text: English Docs
       link: /
 
 features:
   - title: 全本地数据链路
-    details: 外部工具只触发本地 hook 或 plugin，解析、聚合、展示都在本机完成。
+    details: 外部工具只触发本地 hook 或 plugin；解析、聚合、展示都在本机完成。
   - title: SQLite 单一真源
-    details: cursor、usage event、30 分钟 bucket、集成状态和运行日志都放在一个本地数据库里。
-  - title: 一套查询层复用三种界面
-    details: 浏览器分析页、TUI 和静态 HTML 导出共用同一套查询结果。
+    details: cursor、usage event、30 分钟 bucket、行为事实、source-file 诊断和 run log 都放在本地数据库里。
+  - title: 一套查询层复用四种界面
+    details: 命令行报表、llmusage dash、llmusage serve 和 export html 共用同一套查询结果。
 ---
 
-## v1 功能
+## 按任务选择入口
 
-- Codex `notify`
-- Claude `Stop` / `SessionEnd`
-- OpenCode `session.updated`
-- 本地 Web UI
-- TUI 运维面板
-- 静态 HTML 导出
+| 任务 | 入口 |
+| --- | --- |
+| 安装并初始化本地 hook | [安装与初始化](./guide/install-and-init) |
+| 导入本地用量 | [第一次同步](./guide/first-sync) |
+| 查看 token 与成本报表 | [第一次报表](./guide/first-report) |
+| 使用浏览器 Dashboard | [Dashboard](./dashboard/) |
+| 导出静态报告 | [导出 HTML](./guide/export-html) |
+| 检查破坏性边界 | [安全说明](./safety/) |
+| 查精确参数 | [CLI 参考](./reference/cli) |
 
-## Web 分析页预览
+## Dashboard 预览
 
-下面这张图就是 `llmusage serve` 暴露出来的本地浏览器分析页。
+`llmusage serve` 会在 `127.0.0.1` 启动本地浏览器 Dashboard。
 
-![llmusage 本地 web 分析页概览](/screenshots/web-dashboard-overview.png)
+![llmusage 本地 Web Dashboard 概览](/screenshots/web-dashboard-overview.png)
+
+<small>截图来自 `llmusage serve` 启动的脱敏本地 fixture，不是真实用户数据。</small>
+
+## 当前产品表面
+
+- 版本：`0.6.3`。
+- 来源：Codex、Claude Code、OpenCode、Gemini。
+- 报表命令：`daily`、`monthly`、`session`、`blocks`、`statusline`。
+- 本地界面命令：`dash`、`serve`、`export html`。
+- 安全/运维命令：`status`、`diagnostics`、`doctor`、`uninstall`。
 
 ## 开发命令
 

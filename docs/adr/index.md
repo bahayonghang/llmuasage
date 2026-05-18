@@ -1,8 +1,8 @@
 # Architecture Decision Records
 
-Local design decisions that shape how llmusage is structured. Each ADR captures one decision: the context, the choice, the alternatives that were rejected, and a deletion-test argument for why the new shape is deeper than the previous one.
+Local design decisions that shape how llmusage is structured. Each ADR captures one decision: context, chosen design, rejected alternatives, consequences, and verification.
 
-ADRs are append-only. To revise a past decision, write a new ADR that supersedes it; do not edit the old one beyond a `Superseded-by` header.
+ADRs are engineering records, not end-user tutorials. Start with [Architecture](../architecture/) for the current system map, then open ADRs when you need the design rationale.
 
 ## Index
 
@@ -16,5 +16,6 @@ ADRs are append-only. To revise a past decision, write a new ADR that supersedes
 
 ## Companion docs
 
-- [`CONTEXT.md`](https://github.com/bahayonghang/llmuasage/blob/main/CONTEXT.md) — domain glossary at the repo root. Every ADR references its terms back into `CONTEXT.md`.
-- [Architecture overview](../architecture/) — runtime layout and data flow.
+- [`CONTEXT.md`](https://github.com/bahayonghang/llmuasage/blob/main/CONTEXT.md) — repo-level domain glossary.
+- [Architecture overview](../architecture/) — current runtime, sync, query, dashboard, and migration map.
+- [PRD archive](../prd/) — historical plans and audits.

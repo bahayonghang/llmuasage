@@ -1,43 +1,81 @@
 # Architecture
 
+This page explains the current 0.6.x shape. For decision records, see [ADR](../adr/). For historical product plans, see the [PRD archive](../prd/).
+
 ## Runtime layout
 
-The runtime state lives under `~/.llmusage/`:
+The runtime state lives under `~/.llmusage/` unless overridden by `--home <PATH>` or `LLMUSAGE_HOME`.
 
-- `llmusage.db` stores schema metadata, cursors, events, buckets, project metadata, source-file diagnostics, integration state, trigger state, pricing metadata, worker lock metadata, and run logs.
-- `bin/llmusage-hook.cmd` and `bin/llmusage-hook.sh` are the local wrappers called by external tools.
+- `llmusage.db` stores schema metadata, cursors, events, 30-minute buckets, behavior facts, project metadata, source-file diagnostics, integration state, trigger state, pricing metadata, worker lock metadata, and run logs.
+- `bin/llmusage-hook.cmd` and `bin/llmusage-hook.sh` are local wrappers called by external tools.
 - `exports/` stores static HTML reports.
 - `backups/` stores integration config backups used by uninstall.
+- `pricing/` stores local pricing snapshots imported by `doctor --refresh-pricing`.
 
-## Data flow
+## Source registry
 
-1. A tool-specific hook or plugin triggers `llmusage hook-run`.
-2. `hook-run` records the trigger signal and tries to acquire the global worker lock.
-3. The worker runs the registered local parsers in sequence: Codex, Claude, OpenCode, and Gemini.
-4. Each parser emits `SyncShard` batches; the writer resets replaced file rows, writes events, updates cursors, and stamps source-file state in one commit protocol.
-5. New events are written into `usage_event` with persisted cache-aware cost/pricing metadata; optional raw archive rows stay in `usage_event_raw`.
-6. 30-minute UTC aggregates, including cost/pricing rollups, are upserted into `usage_bucket_30m`.
-7. Report commands, query endpoints, TUI, and local exports read the same SQLite database.
+`SourceKind` currently includes Codex, Claude, OpenCode, and Gemini. The registry is the single fan-out point for parsers and integrations:
+
+- `registered_parsers()` powers `llmusage sync`.
+- `registered_integrations()` powers `init`, `doctor`, and `uninstall`-style integration flows.
+
+Adding a source means adding a `SourceKind` variant plus a registered `SourceParser` and `Integration`.
+
+## Sync flow
+
+1. A tool-specific hook or plugin triggers `llmusage hook-run`, or the user runs `llmusage sync`.
+2. The command bootstraps/migrates SQLite and acquires the local `worker_lock`.
+3. The driver walks registered parsers in source order: Codex, Claude, OpenCode, Gemini.
+4. Each parser emits `SyncShard` values.
+5. `SyncRunWriter::commit_shard` performs reset, event write, cursor write, raw archive write, behavior fact write, and source-file stamping as the commit protocol.
+6. The store saves per-source sync status and run-log records.
+
+`SyncShard` is the parser/writer boundary. Parsers do not write SQLite directly.
+
+## Query and dashboard flow
+
+Report commands, TUI, web dashboard, and HTML export all read local SQLite through the query layer.
+
+`Dashboard::snapshot(&QueryFilter)` is the primary dashboard seam. `llmusage serve` prefers `/api/dashboard` so overview, trend series, model/source/project/cost rankings, health, and diagnostics are loaded from one core snapshot. Activity, Tools, Optimize, and Compare are behavior sections that may degrade independently when source facts are unavailable or queries time out.
+
+## Behavior facts
+
+The 0.6.x line adds normalized behavior tables:
+
+- `usage_turn`: turn-level facts for Activity, Optimize, and Compare.
+- `usage_tool_call`: bounded tool/action facts for Tools, Optimize, and Compare.
+
+Privacy boundary: behavior facts must not store full prompts, full assistant text, or file contents. `safe_preview` is bounded display text only.
+
+## Store façade
+
+`Store` is a façade for paths, connections, worker locks, bootstrap, rebuild/reset, and sync writer creation. Domain stores are exposed as borrowed views such as `CursorStore`, `RunLog`, `SyncStatusStore`, `TriggerStore`, and `SourceFileStore`.
+
+## JobRegistry
+
+`JobRegistry` is an in-process sync job registry for library/web adapters. It provides start/get/cancel snapshots, but it is not durable across process restarts. Durable recovery remains in SQLite usage rows, cursors, source-file diagnostics, and run logs.
+
+## Schema migrations
+
+Schema migrations are explicit and versioned. The current line includes:
+
+- baseline migrations for the original usage tables,
+- cache/cost/pricing metadata,
+- source-file state,
+- raw archive opt-in,
+- worker lock metadata,
+- Gemini registration,
+- `pricing_catalog_version`,
+- behavior fact tables,
+- compatibility repair for historical `source_sync_status.stored_events` drift.
+
+`schema_version` alone is not treated as a complete safety proof; compatibility repairs can be idempotent migrations when deployed databases drift.
 
 ## Local-only guarantees
 
-- No device token
-- No account login
-- No upload queue
-- No remote API calls
-- No GitHub public visibility probe
-
-Project labels come from the local git remote when present. Only hashed local paths are stored. Pricing refreshes use a user-provided local JSON file; llmusage does not fetch pricing data from the network.
-
-## Report layer
-
-`daily`, `monthly`, `session`, `blocks`, and `statusline` are read-only SQLite views. They reuse `usage_event` as the report source of truth and keep costs labeled as `estimated_cost_usd`; since 0.5.1 that value is read from persisted `cost_with_cache_usd` rather than recomputed at query time. Daily human rendering now defaults to one aggregate ccusage-style table with `Input / Output / Cache Create / Cache Read / Total Tokens / Cost (USD)`; source separation remains available through filters and breakdown rows, while JSON payloads stay aggregate and snake_case. Session reports use `session_id` metadata when available and fall back to stable source-file keys for older databases. `statusline` may write a tiny local cache under `~/.llmusage/statusline-cache/`; it does not upload or call network APIs.
-
-The Web dashboard is also a read-side surface. Live `llmusage serve` prefers `/api/dashboard` so overview, day/week/month/all trend series, model/source/project/cost rankings, health, and archive diagnostics are built from one `Dashboard::snapshot(&QueryFilter)` connection. Legacy `/api/overview`, `/api/trends`, `/api/models`, `/api/sources`, `/api/projects`, and `/api/costs` remain stable and accept the same filter query parameters for compatibility.
-
-
-## 0.5.x integration surface
-
-The ccr-ui adapter surface is intentionally thin: `Dashboard::snapshot`, `overview`, `trends_daily`, `home_overview`, `heatmap`, `logs`, `diagnostics`, and `JobRegistry` all read or mutate the same local SQLite state. JSON fields are snake_case across CLI reports, HTTP API responses, and static export snapshots. Schema migrations are explicit and versioned through v10; v10 records `pricing_catalog_version`, while 0.5.1 persists the active local snapshot under `~/.llmusage/pricing/<catalog-version>.json` so later sync writes stay on the same local catalog.
-
-`worker_lock` serializes CLI, hook, and library workers. CLI/library sync waits through `Store::acquire_worker_lock_with`, while high-frequency hook-run keeps the legacy non-blocking path and skips if another worker is active.
+- No device token.
+- No account login.
+- No upload queue.
+- No remote usage API call.
+- Pricing refresh reads a user-provided local JSON file.
+- Browser dashboard binds to `127.0.0.1`.

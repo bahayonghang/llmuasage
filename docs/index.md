@@ -4,42 +4,56 @@ layout: home
 hero:
   name: "llmusage"
   text: "Local-first analytics for AI coding CLIs"
-  tagline: "Track Codex, Claude, and OpenCode with hooks, SQLite, and zero upload."
+  tagline: "Track Codex, Claude, OpenCode, and Gemini with hooks, SQLite, and zero upload."
   actions:
     - theme: brand
-      text: Getting Started
+      text: Start the guide
       link: /guide/getting-started
+    - theme: alt
+      text: Open the dashboard docs
+      link: /dashboard/
     - theme: alt
       text: 中文文档
       link: /zh/
 
 features:
   - title: Local-only data path
-    details: Hooks and plugins trigger local parsing. No login, no sync service, no remote API.
-  - title: SQLite as the single source of truth
-    details: Cursors, usage events, 30-minute buckets, integration state, and run logs all live in one local database.
-  - title: One query model, three surfaces
-    details: The same query layer powers the browser dashboard, TUI view, and static HTML export.
+    details: Hooks and plugins trigger local parsing. No login, no sync service, no remote usage API.
+  - title: SQLite as the source of truth
+    details: Cursors, usage events, 30-minute buckets, behavior facts, source-file diagnostics, and run logs live in one local database.
+  - title: One query model, four surfaces
+    details: The same query layer powers reports, llmusage dash, llmusage serve, and export html.
 ---
 
-## What ships in v1
+## Choose your task
 
-- Codex `notify` integration
-- Claude `Stop` and `SessionEnd` hooks
-- OpenCode `session.updated` plugin
-- Local Web UI on `127.0.0.1`
-- TUI status surface
-- Offline HTML export
+| Task | Start here |
+| --- | --- |
+| Install and initialize local hooks | [Install and initialize](./guide/install-and-init) |
+| Import local usage | [First sync](./guide/first-sync) |
+| Read token and cost reports | [First report](./guide/first-report) |
+| Use the browser dashboard | [Dashboard](./dashboard/) |
+| Export a static report | [Export HTML](./guide/export-html) |
+| Check destructive boundaries | [Safety](./safety/) |
+| Look up exact flags | [CLI reference](./reference/cli) |
 
 ## Dashboard preview
 
-This is the local browser dashboard exposed by `llmusage serve`.
+`llmusage serve` starts a local dashboard on `127.0.0.1`.
 
 ![llmusage web dashboard overview](/screenshots/web-dashboard-overview.png)
 
-## Development workflow
+<small>Sanitized local fixture served by `llmusage serve`; not real user data.</small>
 
-Use the root `justfile`:
+## Current product surface
+
+- Version `0.6.3`.
+- Sources: Codex, Claude Code, OpenCode, Gemini.
+- Report commands: `daily`, `monthly`, `session`, `blocks`, `statusline`.
+- Local UI commands: `dash`, `serve`, `export html`.
+- Safety commands: `status`, `diagnostics`, `doctor`, `uninstall`.
+
+## Development workflow
 
 ```powershell
 just install
