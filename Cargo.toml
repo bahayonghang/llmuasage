@@ -17,6 +17,11 @@ path = "src/lib.rs"
 name = "llmusage"
 path = "src/main.rs"
 
+[[example]]
+name = "docs_dashboard_serve"
+path = "examples/docs_dashboard_serve.rs"
+required-features = ["testing"]
+
 [features]
 default = []
 testing = ["dep:tempfile"]
