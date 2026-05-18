@@ -126,7 +126,7 @@ main {
   text-transform: uppercase;
   letter-spacing: 0.1em;
   font-weight: 600;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
 }
 
 .filter-group input,
@@ -171,7 +171,7 @@ main {
   color: var(--accent);
   font-weight: 600;
   margin-bottom: 6px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
 }
 
 .section-title {

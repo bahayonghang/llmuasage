@@ -32,7 +32,7 @@
 .brand-sub {
   font-size: 11px;
   color: var(--muted);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   margin-top: 1px;
 }
 
@@ -91,7 +91,7 @@ nav a .badge {
   margin-left: auto;
   font-size: 10.5px;
   color: var(--muted);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
 }
 
 nav a.active .badge {
@@ -138,7 +138,7 @@ nav a.active .badge {
 }
 
 .endpoint-host {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 500;
 }
@@ -222,8 +222,10 @@ nav a.active .badge {
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  font: 600 11px/1 'JetBrains Mono', monospace;
-  padding: 6px 8px;
+  font: 600 11px/1 var(--font-mono);
+  min-height: 32px;
+  padding: 6px 9px;
+  white-space: nowrap;
 }
 
 .refresh-toggle button:hover {
@@ -249,7 +251,7 @@ nav a.active .badge {
   padding: 3px 8px;
   border-radius: 5px;
   font-size: 10.5px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-weight: 500;
   background: var(--surface-2);
   color: var(--ink-2);
@@ -342,7 +344,7 @@ nav a.active .badge {
 }
 
 .status-cell-value {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 19px;
   font-weight: 500;
   letter-spacing: -0.02em;
@@ -370,13 +372,13 @@ nav a.active .badge {
 }
 
 .status-row-name {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-weight: 500;
 }
 
 .status-row-time {
   color: var(--dark-muted);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
 }
 
@@ -431,7 +433,7 @@ nav a.active .badge {
 }
 
 .kpi-value {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 32px;
   font-weight: 500;
   letter-spacing: -0.025em;
@@ -522,13 +524,15 @@ nav a.active .badge {
   background: transparent;
   color: var(--dark-muted);
   border: none;
+  min-height: 32px;
   padding: 6px 13px;
   border-radius: 7px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
+  white-space: nowrap;
 }
 
 .seg button:hover {
@@ -561,11 +565,11 @@ nav a.active .badge {
   text-transform: uppercase;
   font-weight: 600;
   margin-bottom: 8px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
 }
 
 .trends-stat-value {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 28px;
   letter-spacing: -0.02em;
   font-weight: 500;
@@ -642,7 +646,7 @@ nav a.active .badge {
 .data-table tbody td {
   padding: 9px 10px;
   border-bottom: 1px solid var(--dark-line);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   color: var(--dark-text);
 }
 
@@ -684,7 +688,7 @@ nav a.active .badge {
 }
 
 .bar-row .name {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   color: var(--ink-2);
   white-space: nowrap;
   overflow: hidden;
@@ -749,7 +753,7 @@ nav a.active .badge {
 .panel-table tbody td {
   padding: 11px 8px;
   border-bottom: 1px solid var(--line-2);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   color: var(--ink-2);
 }
 
@@ -803,7 +807,7 @@ nav a.active .badge {
   display: block;
   margin: 5px 0 3px;
   color: var(--ink);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 18px;
   font-weight: 600;
 }
@@ -920,7 +924,7 @@ nav a.active .badge {
 }
 
 .source-row .src-name {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-weight: 600;
   font-size: 13px;
 }
@@ -941,11 +945,11 @@ nav a.active .badge {
   font-size: 11px;
   color: var(--muted);
   margin-top: 5px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
 }
 
 .source-row .src-value {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-weight: 500;
   font-size: 14px;
   text-align: right;
@@ -956,7 +960,7 @@ nav a.active .badge {
   color: var(--muted);
   margin-top: 2px;
   text-align: right;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
 }
 
 /* Project rows */
@@ -984,13 +988,13 @@ nav a.active .badge {
 }
 
 .project-name {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-weight: 500;
   color: var(--ink);
 }
 
 .project-url {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 11.5px;
   color: var(--muted);
   white-space: nowrap;
@@ -1015,7 +1019,7 @@ nav a.active .badge {
 }
 
 .project-value {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   font-weight: 500;
   min-width: 70px;
@@ -1040,7 +1044,7 @@ nav a.active .badge {
 }
 
 .cost-stat-value {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 24px;
   font-weight: 500;
   letter-spacing: -0.02em;
@@ -1050,7 +1054,7 @@ nav a.active .badge {
   font-size: 11px;
   color: var(--muted);
   margin-top: 6px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
 }
 
 /* Insight / diagnostic signals */
@@ -1095,7 +1099,7 @@ nav a.active .badge {
 }
 
 .insight-label {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--accent);
   letter-spacing: 0.08em;
@@ -1134,13 +1138,17 @@ footer.foot {
   padding-top: 24px;
   border-top: 1px solid var(--line);
   display: flex;
+  align-items: center;
   justify-content: space-between;
   font-size: 11.5px;
   color: var(--muted);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
 }
 
 footer.foot a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
   color: var(--ink-2);
   text-decoration: none;
 }
@@ -1203,7 +1211,7 @@ svg.i {
 }
 
 .toggle-btn .toggle-glyph {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-weight: 600;
   font-size: 11.5px;
   color: var(--accent);
@@ -1212,7 +1220,7 @@ svg.i {
 }
 
 .toggle-btn .toggle-label {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;

@@ -111,7 +111,7 @@ export function renderCosts(context, state = {}) {
         return `
         <div style="padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; font-size: 12px;">
           <div style="display: flex; justify-content: space-between; gap: 8px;">
-            <div style="font-family: 'JetBrains Mono', monospace; font-weight: 500;">${escapeHtml(label)}</div>
+            <div style="font-family: var(--font-mono); font-weight: 500;">${escapeHtml(label)}</div>
             <div style="color: var(--muted);">${escapeHtml(statusLabel)}</div>
           </div>
           <div style="color: var(--muted); margin-top: 4px;">${escapeHtml(detail)}</div>

@@ -39,7 +39,7 @@
 
 .trend-peak-label {
   fill: #ffd0c2;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 10.5px;
   font-weight: 600;
   paint-order: stroke;
@@ -49,20 +49,20 @@
 
 .trend-axis-label {
   fill: #aaa195;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 9.5px;
 }
 
 .trend-empty-title {
   fill: var(--dark-text);
-  font-family: 'Inter', 'Noto Sans SC', system-ui, sans-serif;
+  font-family: var(--font-sans);
   font-size: 15px;
   font-weight: 600;
 }
 
 .trend-empty-copy {
   fill: var(--dark-muted);
-  font-family: 'Inter', 'Noto Sans SC', system-ui, sans-serif;
+  font-family: var(--font-sans);
   font-size: 12px;
 }
 

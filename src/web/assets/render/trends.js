@@ -137,7 +137,7 @@ export function renderTrends(context) {
       </tbody>
     </table>
     <div style="background: rgba(200,85,61,0.08); border: 1px solid rgba(200,85,61,0.25); border-radius: 10px; padding: 14px 16px; margin-top: 14px;">
-      <div style="font-size: 10.5px; color: var(--accent); letter-spacing: 0.12em; text-transform: uppercase; font-weight: 600; font-family: 'JetBrains Mono', monospace; margin-bottom: 6px;">观察</div>
+      <div style="font-size: 10.5px; color: var(--accent); letter-spacing: 0.12em; text-transform: uppercase; font-weight: 600; font-family: var(--font-mono); margin-bottom: 6px;">观察</div>
       <div style="font-size: 12.5px; color: var(--dark-text); line-height: 1.5;">当前窗口峰值出现在 <span class="mono" style="color: #f5a890">${escapeHtml(context.trend.peak?.label || '--')}</span>，总用量约 <span class="mono" style="color: #f5a890">${escapeHtml(formatCompact(context.trend.peak?.total_tokens || 0))}</span> Token；当前主来源为 <span class="mono" style="color: #f5a890">${escapeHtml(context.leaders.source?.source || '--')}</span>。</div>
     </div>
   `;
