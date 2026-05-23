@@ -15,6 +15,12 @@ import { setRenderer, setRuntimeState } from './runtime.js';
 const logger = window.console;
 const DEFAULT_TREND_WINDOW = 'day';
 const VALID_TREND_WINDOWS = new Set(['day', 'week', 'month', 'all']);
+const DEFAULT_RANGE_PRESET = '1d';
+const CUSTOM_RANGE_PRESET = 'custom';
+const VALID_RANGE_PRESETS = new Set(['1d', '7d', '30d', 'all', CUSTOM_RANGE_PRESET]);
+const RANGE_TO_TREND_WINDOW = Object.freeze({ '1d': 'day', '7d': 'week', '30d': 'month', all: 'all' });
+const TREND_WINDOW_TO_RANGE = Object.freeze({ day: '1d', week: '7d', month: '30d', all: 'all' });
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const AUTO_REFRESH_STORAGE_KEY = 'llmusage:autoRefreshMs';
 const VALID_AUTO_REFRESH_MS = new Set([0, 30000, 60000]);
 let dashboardState = null;
@@ -41,6 +47,7 @@ async function main() {
   const state = {
     mode: document.body?.dataset?.mode === 'snapshot' ? 'snapshot' : 'live',
     trendWindow: initialTrendWindowFromUrl(),
+    rangePreset: initialRangePresetFromUrl(),
     filters: readFiltersFromUrl(),
     autoRefreshMs: readAutoRefreshPreference(),
     autoRefreshTimer: null,
@@ -128,8 +135,25 @@ function readFiltersFromUrl() {
 
 function initialTrendWindowFromUrl() {
   const params = new URLSearchParams(window.location.search || '');
-  const requestedWindow = params.get('window') || DEFAULT_TREND_WINDOW;
-  return VALID_TREND_WINDOWS.has(requestedWindow) ? requestedWindow : DEFAULT_TREND_WINDOW;
+  const requestedWindow = params.get('window');
+  if (VALID_TREND_WINDOWS.has(requestedWindow)) {
+    return requestedWindow;
+  }
+  return RANGE_TO_TREND_WINDOW[params.get('range')] || DEFAULT_TREND_WINDOW;
+}
+
+function initialRangePresetFromUrl() {
+  const params = new URLSearchParams(window.location.search || '');
+  if (params.get('since') || params.get('until')) {
+    return CUSTOM_RANGE_PRESET;
+  }
+
+  const requestedRange = params.get('range');
+  if (VALID_RANGE_PRESETS.has(requestedRange) && requestedRange !== CUSTOM_RANGE_PRESET) {
+    return requestedRange;
+  }
+
+  return TREND_WINDOW_TO_RANGE[params.get('window')] || DEFAULT_RANGE_PRESET;
 }
 
 function readAutoRefreshPreference() {
@@ -298,6 +322,7 @@ function syncFilterControls(state, context = null) {
   document.querySelectorAll('[data-window]').forEach((button) => {
     button.classList.toggle('active', button.dataset.window === state.trendWindow);
   });
+  syncRangePresetControls(state);
 
   const filters = state.filters || {};
   const snapshotMode = state.mode === 'snapshot';
@@ -328,14 +353,16 @@ function syncFilterControls(state, context = null) {
     }
   }
 
-  document.querySelectorAll('#filter-rail [data-filter], #filters-apply, #filters-reset').forEach((el) => {
-    el.disabled = snapshotMode;
-    if (snapshotMode) {
-      el.setAttribute('title', getShellCopy('shell.filters.snapshotDisabled'));
-    } else {
-      el.removeAttribute('title');
-    }
-  });
+  document
+    .querySelectorAll('#filter-rail [data-filter], #filter-rail [data-range-preset], #filters-apply, #filters-reset')
+    .forEach((el) => {
+      el.disabled = snapshotMode;
+      if (snapshotMode) {
+        el.setAttribute('title', getShellCopy('shell.filters.snapshotDisabled'));
+      } else {
+        el.removeAttribute('title');
+      }
+    });
 }
 
 function currentFilterInputs() {
@@ -344,9 +371,271 @@ function currentFilterInputs() {
   if (source && source !== 'all') filters.source = source;
   for (const key of ['model', 'since', 'until']) {
     const value = document.querySelector(`[data-filter="${key}"]`)?.value?.trim();
-    if (value) filters[key] = value;
+    if (!value) continue;
+    if (key === 'since' || key === 'until') {
+      const normalized = normalizeIsoDateValue(value);
+      if (normalized) filters[key] = normalized;
+    } else {
+      filters[key] = value;
+    }
   }
   return filters;
+}
+
+function normalizeRangePreset(value) {
+  return VALID_RANGE_PRESETS.has(value) ? value : DEFAULT_RANGE_PRESET;
+}
+
+function syncRangePresetControls(state) {
+  const activePreset = normalizeRangePreset(state?.rangePreset);
+  document.querySelectorAll('[data-range-preset]').forEach((button) => {
+    const active = activePreset !== CUSTOM_RANGE_PRESET && button.dataset.rangePreset === activePreset;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+}
+
+function setCustomRangeFromInputs(state) {
+  const hasDate = Boolean(
+    document.querySelector('[data-filter="since"]')?.value?.trim() ||
+      document.querySelector('[data-filter="until"]')?.value?.trim(),
+  );
+  state.rangePreset = hasDate ? CUSTOM_RANGE_PRESET : DEFAULT_RANGE_PRESET;
+  syncRangePresetControls(state);
+}
+
+function normalizeIsoDateValue(value) {
+  const parsed = parseIsoDate(value);
+  return parsed ? formatIsoDate(parsed) : null;
+}
+
+function parseIsoDate(value) {
+  const raw = String(value || '').trim();
+  if (!ISO_DATE_PATTERN.test(raw)) return null;
+  const [year, month, day] = raw.split('-').map((part) => Number(part));
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    return null;
+  }
+  return date;
+}
+
+function formatIsoDate(date) {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function utcMonthStart(date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
+}
+
+function addUtcMonths(date, delta) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + delta, 1));
+}
+
+function localTodayAsUtcDate() {
+  const now = new Date();
+  return new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+}
+
+function sameUtcDate(a, b) {
+  return Boolean(
+    a &&
+      b &&
+      a.getUTCFullYear() === b.getUTCFullYear() &&
+      a.getUTCMonth() === b.getUTCMonth() &&
+      a.getUTCDate() === b.getUTCDate(),
+  );
+}
+
+function datePickerLocale() {
+  return getLocale() === 'zh' ? 'zh-CN' : 'en-US';
+}
+
+function datePickerMonthTitle(date) {
+  return new Intl.DateTimeFormat(datePickerLocale(), {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(date);
+}
+
+function datePickerWeekdays() {
+  const value = getShellCopy('shell.date.weekdays');
+  return value.split('|').filter(Boolean);
+}
+
+const datePickerState = {
+  popover: null,
+  input: null,
+  state: null,
+  month: null,
+};
+
+function ensureDatePickerPopover() {
+  if (datePickerState.popover) return datePickerState.popover;
+  const popover = document.createElement('div');
+  popover.className = 'date-picker-popover';
+  popover.setAttribute('role', 'dialog');
+  popover.setAttribute('aria-modal', 'false');
+  popover.addEventListener('click', handleDatePickerClick);
+  document.body.appendChild(popover);
+  datePickerState.popover = popover;
+  return popover;
+}
+
+function openDatePicker(input, state) {
+  if (input.disabled) return;
+  const selected = parseIsoDate(input.value) || localTodayAsUtcDate();
+  datePickerState.input = input;
+  datePickerState.state = state;
+  datePickerState.month = utcMonthStart(selected);
+  ensureDatePickerPopover();
+  renderDatePicker();
+}
+
+function closeDatePicker() {
+  datePickerState.popover?.remove();
+  datePickerState.popover = null;
+  datePickerState.input = null;
+  datePickerState.state = null;
+  datePickerState.month = null;
+}
+
+function positionDatePicker() {
+  const { popover, input } = datePickerState;
+  if (!popover || !input) return;
+  const rect = input.getBoundingClientRect();
+  const width = popover.offsetWidth || 260;
+  const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+  const top = Math.min(rect.bottom + 6, window.innerHeight - popover.offsetHeight - 8);
+  popover.style.left = `${left}px`;
+  popover.style.top = `${Math.max(8, top)}px`;
+}
+
+function renderDatePicker() {
+  const { popover, input } = datePickerState;
+  if (!popover || !input) return;
+
+  const selected = parseIsoDate(input.value);
+  const today = localTodayAsUtcDate();
+  const month = datePickerState.month || utcMonthStart(selected || today);
+  const firstDay = month.getUTCDay();
+  const gridStart = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth(), 1 - firstDay));
+  const weekdays = datePickerWeekdays();
+
+  let cells = weekdays
+    .map((day) => `<div class="date-picker-weekday">${escapeHtml(day)}</div>`)
+    .join('');
+
+  for (let index = 0; index < 42; index += 1) {
+    const day = new Date(Date.UTC(gridStart.getUTCFullYear(), gridStart.getUTCMonth(), gridStart.getUTCDate() + index));
+    const iso = formatIsoDate(day);
+    const classes = ['date-picker-day'];
+    if (day.getUTCMonth() !== month.getUTCMonth()) classes.push('is-outside');
+    if (sameUtcDate(day, today)) classes.push('is-today');
+    if (sameUtcDate(day, selected)) classes.push('is-selected');
+    cells += `<button type="button" class="${classes.join(' ')}" data-date-value="${iso}">${day.getUTCDate()}</button>`;
+  }
+
+  popover.innerHTML = `
+    <div class="date-picker-head">
+      <button class="date-picker-nav" type="button" data-date-nav="-1" aria-label="${escapeHtml(getShellCopy('shell.date.prevMonth'))}">‹</button>
+      <div class="date-picker-title">${escapeHtml(datePickerMonthTitle(month))}</div>
+      <button class="date-picker-nav" type="button" data-date-nav="1" aria-label="${escapeHtml(getShellCopy('shell.date.nextMonth'))}">›</button>
+    </div>
+    <div class="date-picker-grid">${cells}</div>
+    <div class="date-picker-actions">
+      <button type="button" data-date-action="clear">${escapeHtml(getShellCopy('shell.date.clear'))}</button>
+      <button type="button" data-date-action="today">${escapeHtml(getShellCopy('shell.date.today'))}</button>
+    </div>
+  `;
+  positionDatePicker();
+}
+
+function handleDatePickerClick(event) {
+  const nav = event.target.closest('[data-date-nav]');
+  if (nav) {
+    datePickerState.month = addUtcMonths(datePickerState.month || localTodayAsUtcDate(), Number(nav.dataset.dateNav || 0));
+    renderDatePicker();
+    return;
+  }
+
+  const action = event.target.closest('[data-date-action]')?.dataset?.dateAction;
+  if (action === 'clear') {
+    datePickerState.input.value = '';
+    datePickerState.input.dispatchEvent(new Event('input', { bubbles: true }));
+    closeDatePicker();
+    return;
+  }
+  if (action === 'today') {
+    datePickerState.input.value = formatIsoDate(localTodayAsUtcDate());
+    datePickerState.input.dispatchEvent(new Event('input', { bubbles: true }));
+    closeDatePicker();
+    return;
+  }
+
+  const day = event.target.closest('[data-date-value]');
+  if (day) {
+    datePickerState.input.value = day.dataset.dateValue;
+    datePickerState.input.dispatchEvent(new Event('input', { bubbles: true }));
+    closeDatePicker();
+  }
+}
+
+function setupDateInputs(state) {
+  document.querySelectorAll('[data-date-input]').forEach((input) => {
+    input.addEventListener('focus', () => openDatePicker(input, state));
+    input.addEventListener('click', () => openDatePicker(input, state));
+    input.addEventListener('input', () => setCustomRangeFromInputs(state));
+    input.addEventListener('change', () => {
+      const normalized = normalizeIsoDateValue(input.value);
+      if (normalized) input.value = normalized;
+      setCustomRangeFromInputs(state);
+    });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') closeDatePicker();
+    });
+  });
+
+  document.addEventListener('click', (event) => {
+    if (!datePickerState.popover) return;
+    if (event.target.closest('.date-picker-popover') || event.target.closest('[data-date-input]')) return;
+    closeDatePicker();
+  });
+  window.addEventListener('resize', positionDatePicker);
+  window.addEventListener('scroll', positionDatePicker, true);
+  onLocaleChange(renderDatePicker);
+}
+
+function setupRangePresetControls(state) {
+  syncRangePresetControls(state);
+  const group = document.getElementById('range-presets');
+  if (!group || state.mode === 'snapshot') return;
+
+  group.addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-range-preset]');
+    if (!button || button.disabled) return;
+    const preset = button.dataset.rangePreset;
+    if (!VALID_RANGE_PRESETS.has(preset) || preset === CUSTOM_RANGE_PRESET) return;
+
+    try {
+      const filters = currentFilterInputs();
+      delete filters.since;
+      delete filters.until;
+      state.filters = filters;
+      state.rangePreset = preset;
+      state.trendWindow = RANGE_TO_TREND_WINDOW[preset] || state.trendWindow;
+      closeDatePicker();
+      await reloadDashboard(state);
+      syncFilterControls(state);
+    } catch (error) {
+      logger.error('快捷时间范围切换失败', error);
+      renderBootstrapError(error);
+    }
+  });
 }
 
 function syncUrlFromState(state) {
@@ -449,6 +738,8 @@ function setupAutoRefresh(state) {
 function setupFilterControls(state) {
   populateSourceFilter();
   setupTrendSegments(state);
+  setupRangePresetControls(state);
+  setupDateInputs(state);
 
   const apply = document.getElementById('filters-apply');
   const reset = document.getElementById('filters-reset');
@@ -461,6 +752,13 @@ function setupFilterControls(state) {
   apply?.addEventListener('click', async () => {
     try {
       state.filters = currentFilterInputs();
+      if (state.filters.since || state.filters.until) {
+        state.rangePreset = CUSTOM_RANGE_PRESET;
+      } else if (state.rangePreset === CUSTOM_RANGE_PRESET) {
+        state.rangePreset = DEFAULT_RANGE_PRESET;
+        state.trendWindow = DEFAULT_TREND_WINDOW;
+      }
+      closeDatePicker();
       await reloadDashboard(state);
     } catch (error) {
       logger.error('筛选加载失败', error);
@@ -471,7 +769,9 @@ function setupFilterControls(state) {
   reset?.addEventListener('click', async () => {
     try {
       state.filters = {};
+      state.rangePreset = DEFAULT_RANGE_PRESET;
       state.trendWindow = DEFAULT_TREND_WINDOW;
+      closeDatePicker();
       await reloadDashboard(state);
       syncFilterControls(state);
     } catch (error) {
@@ -576,7 +876,13 @@ function setupTrendSegments(state) {
 
     try {
       state.trendWindow = nextWindow;
+      state.rangePreset = TREND_WINDOW_TO_RANGE[nextWindow] || DEFAULT_RANGE_PRESET;
+      state.filters = currentFilterInputs();
+      delete state.filters.since;
+      delete state.filters.until;
+      closeDatePicker();
       await reloadDashboard(state);
+      syncFilterControls(state);
     } catch (error) {
       logger.error('趋势窗口切换失败', error);
       renderBootstrapError(error);
@@ -611,6 +917,7 @@ function setupExport(state) {
       mode: state.mode,
       source: window.location.host,
       trend_window: state.trendWindow,
+      range_preset: state.rangePreset,
       filter: state.filters || {},
       app: { name: 'llmusage', version: appVersion() },
       data: state.rawData,
@@ -647,6 +954,10 @@ function syncOptionsFromState(state) {
     options.source = state.filters.source;
   }
   const recentDays = {
+    '1d': 1,
+    '7d': 7,
+    '30d': 30,
+  }[state.rangePreset] || {
     day: 1,
     week: 7,
     month: 30,

@@ -52,6 +52,9 @@ export function buildFilterQuery(state, options = {}) {
   if (includeWindow && state?.trendWindow) {
     params.set('window', state.trendWindow);
   }
+  if (!filter.since && !filter.until && state?.rangePreset && state.rangePreset !== 'custom') {
+    params.set('range', state.rangePreset);
+  }
   for (const key of ['source', 'model', 'since', 'until', 'project_hash', 'timezone']) {
     const value = filter[key];
     if (value && value !== 'all') {

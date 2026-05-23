@@ -204,13 +204,22 @@ fn html_shell(mode: &str) -> String {
           <label for="filter-model" data-i18n="shell.filters.model">模型</label>
           <input id="filter-model" data-filter="model" type="search" placeholder="all models" data-i18n-attr="placeholder=shell.filters.modelPlaceholder" />
         </div>
+        <div class="filter-group filter-range-group">
+          <label id="range-presets-label" data-i18n="shell.filters.range">时间范围</label>
+          <div class="range-presets" id="range-presets" role="group" aria-labelledby="range-presets-label" data-i18n-attr="aria-label=shell.filters.rangeAria">
+            <button type="button" data-range-preset="1d" aria-pressed="true" data-i18n="shell.filters.range.1d">近 1 天</button>
+            <button type="button" data-range-preset="7d" aria-pressed="false" data-i18n="shell.filters.range.7d">近 7 天</button>
+            <button type="button" data-range-preset="30d" aria-pressed="false" data-i18n="shell.filters.range.30d">近 30 天</button>
+            <button type="button" data-range-preset="all" aria-pressed="false" data-i18n="shell.filters.range.all">全部</button>
+          </div>
+        </div>
         <div class="filter-group">
           <label for="filter-since" data-i18n="shell.filters.since">起始日期</label>
-          <input id="filter-since" data-filter="since" type="date" />
+          <input id="filter-since" data-filter="since" data-date-input type="text" inputmode="numeric" autocomplete="off" placeholder="YYYY-MM-DD" data-i18n-attr="placeholder=shell.filters.datePlaceholder" />
         </div>
         <div class="filter-group">
           <label for="filter-until" data-i18n="shell.filters.until">结束日期</label>
-          <input id="filter-until" data-filter="until" type="date" />
+          <input id="filter-until" data-filter="until" data-date-input type="text" inputmode="numeric" autocomplete="off" placeholder="YYYY-MM-DD" data-i18n-attr="placeholder=shell.filters.datePlaceholder" />
         </div>
         <div class="filter-actions">
           <button class="btn" id="filters-apply" type="button" data-i18n="shell.filters.apply">应用筛选</button>

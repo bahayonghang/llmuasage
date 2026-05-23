@@ -695,7 +695,11 @@ fn dashboard_filter_from_params(params: &HashMap<String, String>) -> QueryFilter
     let mut filter = dashboard_filter_from_params_without_window(params);
 
     if filter.since.is_none() && filter.until.is_none() {
-        apply_window_filter(params.get("window").map(String::as_str), &mut filter);
+        let range = params
+            .get("range")
+            .or_else(|| params.get("window"))
+            .map(String::as_str);
+        apply_window_filter(range, &mut filter);
     }
 
     filter
@@ -787,7 +791,7 @@ fn apply_window_filter(window: Option<&str>, filter: &mut QueryFilter) {
             filter.since = Some(today);
             filter.until = Some(today);
         }
-        "day" | "24h" => {
+        "day" | "24h" | "1d" => {
             filter.since = today.pred_opt();
             filter.until = Some(today);
         }
@@ -1008,6 +1012,11 @@ mod tests {
         assert!(html.contains("id=\"filter-rail\""));
         assert!(html.contains("data-filter=\"source\""));
         assert!(html.contains("data-filter=\"model\""));
+        assert!(html.contains("data-range-preset=\"1d\""));
+        assert!(html.contains("data-range-preset=\"7d\""));
+        assert!(html.contains("data-range-preset=\"30d\""));
+        assert!(html.contains("data-date-input type=\"text\""));
+        assert!(!html.contains("type=\"date\""));
         assert!(html.contains("id=\"auto-refresh\""));
         assert!(html.contains("data-refresh-interval=\"30000\""));
         assert!(html.contains("data-refresh-interval=\"60000\""));
@@ -1195,6 +1204,9 @@ mod tests {
         assert!(app_js.contains("loadDashboardSnapshot(state)"));
         assert!(app_js.contains("syncUrlFromState(state)"));
         assert!(app_js.contains("state.filters = currentFilterInputs()"));
+        assert!(app_js.contains("setupRangePresetControls(state)"));
+        assert!(app_js.contains("setupDateInputs(state)"));
+        assert!(app_js.contains("date-picker-popover"));
         assert!(!app_js.contains("window.LLMUSAGE_DATA"));
     }
 
@@ -1208,6 +1220,8 @@ mod tests {
         assert!(fetch_js.contains("export async function loadDashboardSnapshot"));
         assert!(fetch_js.contains("loadJson(`/api/dashboard${buildFilterQuery(state)}`)"));
         assert!(fetch_js.contains("export async function loadSection"));
+        assert!(fetch_js.contains("state?.rangePreset"));
+        assert!(fetch_js.contains("params.set('range', state.rangePreset)"));
         assert!(fetch_js.contains("回退到旧分段 API"));
         assert!(fetch_js.contains("snapshot.json"));
     }
@@ -1240,6 +1254,10 @@ mod tests {
             "data-i18n=\"shell.behavior.compare.title\"",
             "data-i18n=\"shell.btn.export\"",
             "data-i18n=\"shell.btn.sync\"",
+            "data-i18n=\"shell.filters.range\"",
+            "data-i18n=\"shell.filters.range.1d\"",
+            "data-i18n=\"shell.filters.range.7d\"",
+            "data-i18n=\"shell.filters.range.30d\"",
             "data-i18n=\"shell.filters.apply\"",
             "data-i18n=\"shell.filters.reset\"",
             "data-i18n=\"shell.endpoint.lastSync\"",
@@ -2147,6 +2165,18 @@ mod tests {
         assert_eq!(payload["models"].as_array().expect("models").len(), 1);
         assert_eq!(payload["models"][0]["model"], "fresh-model");
         assert_eq!(payload["costs"][0]["model"], "fresh-model");
+
+        let (status, payload) = route_json(
+            addr,
+            "GET",
+            "/api/dashboard?window=all&range=1d&source=codex&timezone=UTC",
+            None,
+        )
+        .await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(payload["overview"]["total"]["total_tokens"], 40);
+        assert_eq!(payload["models"].as_array().expect("models").len(), 1);
+        assert_eq!(payload["models"][0]["model"], "fresh-model");
         Ok(())
     }
 

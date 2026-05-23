@@ -16,8 +16,10 @@ const logger = window.console;
 export function applyDomI18n(root = document) {
   logger.info('开始应用 DOM i18n');
 
-  // 1.1 同步 <html data-locale>，CSS 选择器靠它
-  document.documentElement?.setAttribute('data-locale', getLocale());
+  // 1.1 同步 <html data-locale>/<html lang>，CSS 选择器与可访问性靠它
+  const locale = getLocale();
+  document.documentElement?.setAttribute('data-locale', locale);
+  document.documentElement?.setAttribute('lang', locale === 'zh' ? 'zh-CN' : 'en');
 
   // 1.2 文本节点
   root.querySelectorAll('[data-i18n]').forEach((el) => {

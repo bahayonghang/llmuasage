@@ -105,7 +105,7 @@ main {
 
 .filter-rail {
   display: grid;
-  grid-template-columns: minmax(150px, 0.95fr) minmax(180px, 1.2fr) minmax(150px, 0.9fr) minmax(150px, 0.9fr) auto;
+  grid-template-columns: minmax(150px, 0.9fr) minmax(180px, 1.15fr) minmax(260px, 1.35fr) minmax(150px, 0.85fr) minmax(150px, 0.85fr) auto;
   gap: 10px;
   align-items: end;
   padding: 14px;
@@ -153,6 +153,158 @@ main {
   gap: 8px;
   align-items: center;
   justify-content: flex-end;
+}
+
+.filter-range-group {
+  min-width: 270px;
+}
+
+.range-presets {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 3px;
+  width: 100%;
+  min-height: 34px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+
+.range-presets button {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  padding: 5px 6px;
+  white-space: nowrap;
+}
+
+.range-presets button:hover:not(:disabled) {
+  color: var(--ink-2);
+}
+
+.range-presets button.active {
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  box-shadow: 0 1px 0 rgba(154, 62, 43, 0.08), 0 6px 14px rgba(200, 85, 61, 0.12);
+}
+
+.range-presets button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.date-picker-popover {
+  position: fixed;
+  z-index: 80;
+  width: 268px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink-2);
+  box-shadow: var(--shadow-soft);
+}
+
+.date-picker-head {
+  display: grid;
+  grid-template-columns: 32px 1fr 32px;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.date-picker-title {
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.date-picker-nav,
+.date-picker-actions button,
+.date-picker-day {
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.date-picker-nav {
+  min-height: 30px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 18px;
+}
+
+.date-picker-nav:hover,
+.date-picker-actions button:hover,
+.date-picker-day:hover {
+  border-color: var(--line);
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+
+.date-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+}
+
+.date-picker-weekday {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.date-picker-day {
+  min-height: 30px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.date-picker-day.is-outside {
+  color: var(--muted-2);
+  opacity: 0.72;
+}
+
+.date-picker-day.is-today {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+.date-picker-day.is-selected {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+}
+
+.date-picker-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.date-picker-actions button {
+  min-height: 30px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 5px 9px;
 }
 
 .section-head {
