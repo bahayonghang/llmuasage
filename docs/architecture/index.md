@@ -14,7 +14,7 @@ The runtime state lives under `~/.llmusage/` unless overridden by `--home <PATH>
 
 ## Source registry
 
-`SourceKind` currently includes Codex, Claude, OpenCode, and Gemini. The registry is the single fan-out point for parsers and integrations:
+`SourceKind` currently includes Codex, Claude, OpenCode, and Gemini. The Gemini variant also covers Google Antigravity while preserving `gemini` as the stable stored id. The registry is the single fan-out point for parsers and integrations:
 
 - `registered_parsers()` powers `llmusage sync`.
 - `registered_integrations()` powers `init`, `doctor`, and `uninstall`-style integration flows.
@@ -64,7 +64,7 @@ Schema migrations are explicit and versioned. The current line includes:
 - source-file state,
 - raw archive opt-in,
 - worker lock metadata,
-- Gemini registration,
+- Gemini registration (also used for Google Antigravity compatibility),
 - `pricing_catalog_version`,
 - behavior fact tables,
 - compatibility repair for historical `source_sync_status.stored_events` drift.

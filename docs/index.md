@@ -4,7 +4,7 @@ layout: home
 hero:
   name: "llmusage"
   text: "Local-first analytics for AI coding CLIs"
-  tagline: "Track Codex, Claude, OpenCode, and Gemini with hooks, SQLite, and zero upload."
+  tagline: "Track Codex, Claude, OpenCode, and Google Antigravity/Gemini with hooks, SQLite, and zero upload."
   actions:
     - theme: brand
       text: Start the guide
@@ -47,8 +47,8 @@ features:
 
 ## Current product surface
 
-- Version `0.6.3`.
-- Sources: Codex, Claude Code, OpenCode, Gemini.
+- Version `0.6.5`.
+- Sources: Codex, Claude Code, OpenCode, Google Antigravity/Gemini (`gemini` stable id).
 - Report commands: `daily`, `monthly`, `session`, `blocks`, `statusline`.
 - Local UI commands: `dash`, `serve`, `export html`.
 - Safety commands: `status`, `diagnostics`, `doctor`, `uninstall`.

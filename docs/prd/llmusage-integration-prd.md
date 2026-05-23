@@ -78,6 +78,9 @@ ccr-ui 侧只剩两件事：**调 query 层组装响应** + **包装 sync 任务
 
 ### F1 数据模型扩展
 
+
+
+> 2026-05-23 update note: Google has transitioned personal Gemini CLI usage toward Antigravity CLI. llmusage keeps `SourceKind::Gemini` / `source = "gemini"` as the compatibility boundary, preserves the legacy `~/.gemini/tmp/<projectHash>/chats/session-*.json` parser, and adds Antigravity hook integration through `~/.gemini/config/hooks.json::Stop`. Antigravity transcript token import is not claimed until a stable usage-bearing artifact is verified.
 #### F1.1 新增 Gemini 源
 
 **主数据源：session transcript JSON**

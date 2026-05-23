@@ -15,7 +15,7 @@
 - `Codex`：OpenAI Codex 本地 rollout / session JSONL。
 - `Claude`：Claude Code 本地 project JSONL。
 - `Opencode`：OpenCode 本地 SQLite。
-- `Gemini`：Gemini CLI 本地 chat session JSON。
+- `Gemini`：Google Antigravity / Gemini CLI 本地用量源。稳定持久化 id 仍为 `gemini`；Antigravity 作为兼容输入/集成表面映射到同一 Source。
 
 所有跨边界的字符串形式必须经过 `SourceKind::as_str()`，禁止散写 `"codex"` / `"claude"` / `"opencode"` / `"gemini"` 字面量。
 

@@ -17,9 +17,10 @@ llmusage sync --source codex
 llmusage sync --source claude
 llmusage sync --source opencode
 llmusage sync --source gemini
+# antigravity is accepted as an input alias, but output/source ids remain gemini
 ```
 
-The accepted source values match `cargo run -- --help`: `codex`, `claude`, `opencode`, and `gemini`.
+The accepted source values match `cargo run -- --help`: `codex`, `claude`, `opencode`, and `gemini` (`antigravity` is an alias for the Google source).
 
 ## Emit NDJSON progress
 

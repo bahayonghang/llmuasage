@@ -14,7 +14,7 @@
 
 ## Source Registry
 
-`SourceKind` 当前包含 Codex、Claude、OpenCode、Gemini。Registry 是 parser 与 integration 的唯一 fan-out 点：
+`SourceKind` 当前包含 Codex、Claude、OpenCode、Gemini；Gemini variant 同时覆盖 Google Antigravity，并保留 `gemini` 作为稳定持久化 id。Registry 是 parser 与 integration 的唯一 fan-out 点：
 
 - `registered_parsers()` 驱动 `llmusage sync`。
 - `registered_integrations()` 驱动 `init`、`doctor` 和 `uninstall` 类集成流程。
@@ -64,7 +64,7 @@ Schema migration 显式按版本推进。当前线包含：
 - source-file state，
 - raw archive opt-in，
 - worker lock metadata，
-- Gemini 注册，
+- Gemini 注册（同时用于 Google Antigravity 兼容），
 - `pricing_catalog_version`，
 - 行为事实表，
 - 对历史 `source_sync_status.stored_events` 漂移的兼容修复。

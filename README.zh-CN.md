@@ -2,9 +2,9 @@
 
 [English](./README.md) · [文档](https://bahayonghang.github.io/llmuasage/zh/)
 
-本地优先的 AI CLI 用量分析工具。`llmusage` 会把本机 Codex、Claude Code、OpenCode、Gemini 的本地记录解析进本地 SQLite，然后提供命令行报表、终端 Dashboard、浏览器 Dashboard 和离线 HTML 导出；不上传、不登录、不调用云端用量 API。
+本地优先的 AI CLI 用量分析工具。`llmusage` 会把本机 Codex、Claude Code、OpenCode、Google Antigravity/Gemini 的本地记录解析进本地 SQLite，然后提供命令行报表、终端 Dashboard、浏览器 Dashboard 和离线 HTML 导出；不上传、不登录、不调用云端用量 API。
 
-> 当前 crate 版本：`0.6.3`。
+> 当前 crate 版本：`0.6.5`。
 
 ![llmusage 本地 Web Dashboard 概览](./docs/public/screenshots/web-dashboard-overview.png)
 
@@ -49,7 +49,7 @@ llmusage serve
 | Codex | OpenAI Codex rollout/session JSONL 与 `config.toml notify` |
 | Claude | Claude Code project JSONL 与 `Stop` / `SessionEnd` hooks |
 | OpenCode | OpenCode 本地 SQLite 用量库与 `session.updated` plugin event |
-| Gemini | Gemini CLI `SessionEnd` hook 与 `~/.gemini/tmp/*/chats/session-*.json` |
+| Antigravity / Gemini | Antigravity CLI `Stop` hook（`~/.gemini/config/hooks.json`）、旧 Gemini CLI `SessionEnd` hook，以及旧 `~/.gemini/tmp/*/chats/session-*.json` 导入（`--source gemini` 仍是稳定 id） |
 
 ## 常用命令
 

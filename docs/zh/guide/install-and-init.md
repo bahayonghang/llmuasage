@@ -30,9 +30,9 @@ llmusage init
 | Codex | `config.toml notify` | OpenAI Codex rollout/session JSONL |
 | Claude | `Stop` / `SessionEnd` hooks | Claude Code project JSONL |
 | OpenCode | `session.updated` plugin event | OpenCode 本地 SQLite 用量库 |
-| Gemini | `SessionEnd` hook | `~/.gemini/tmp/*/chats/session-*.json` |
+| Antigravity / Gemini | Antigravity `Stop` hook 与旧 Gemini `SessionEnd` hook | Antigravity hook 触发元数据；旧 `~/.gemini/tmp/*/chats/session-*.json` 导入 |
 
-如果某个工具没有安装，llmusage 会记录探测/安装状态，并继续处理可见来源。
+如果某个工具没有安装，llmusage 会记录探测/安装状态，并继续处理可见来源。Google 来源继续使用 `gemini` 作为稳定 CLI/API/SQLite id；检测到 Antigravity 配置目录时会写入 `~/.gemini/config/hooks.json`，旧 Gemini CLI 仍保留支持。
 
 ## 运行时根目录优先级
 
