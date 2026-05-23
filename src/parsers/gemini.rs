@@ -29,8 +29,12 @@ use crate::{
     util::{bucket_start_from_rfc3339, hash_string, normalize_model, resolve_home_dir},
 };
 
-/// Parses Gemini CLI local chat session JSON files
+/// Parses Google legacy Gemini CLI local chat session JSON files
 /// (`~/.gemini/tmp/<projectHash>/chats/session-*.json`).
+///
+/// Antigravity hook integration shares the stable `gemini` source id, but
+/// Antigravity transcript token extraction is intentionally not guessed until
+/// a stable usage-bearing artifact is verified.
 ///
 /// Gemini sessions are single JSON documents (not JSONL), so this parser always
 /// fully reparses a file once its size or mtime changes. The cursor is still
@@ -96,7 +100,7 @@ async fn sync_gemini(
      * 2) 用 ~/.gemini/projects.json 反查 projectHash → cwd
      * 3) 返回 event / cursor / reset 指令给单 writer 统一落库
      */
-    info!("开始同步 Gemini chat 会话真源");
+    info!("开始同步 Google Gemini legacy chat 会话真源");
 
     // 1.1 构建按 projectHash 分片的候选文件计划
     let parse_started = Instant::now();
@@ -216,7 +220,7 @@ async fn sync_gemini(
         changed_files = stats.changed_files,
         events_seen = stats.events_seen,
         bytes_scanned = stats.bytes_scanned,
-        "完成 Gemini chat 会话真源解析"
+        "完成 Google Gemini legacy chat 会话真源解析"
     );
     Ok(stats)
 }

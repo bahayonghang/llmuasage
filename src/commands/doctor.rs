@@ -119,7 +119,7 @@ async fn diagnostics(app: &AppContext, json: bool) -> Result<()> {
                 crate::models::SourceKind::Codex => "codex.notify",
                 crate::models::SourceKind::Claude => "claude.hooks",
                 crate::models::SourceKind::Opencode => "opencode.plugin",
-                crate::models::SourceKind::Gemini => "gemini.hooks",
+                crate::models::SourceKind::Gemini => "google.hooks",
             },
             status: if probe.status == "ready" {
                 "ok"

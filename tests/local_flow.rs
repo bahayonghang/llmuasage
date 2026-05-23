@@ -302,6 +302,60 @@ fn init_writes_quoted_windows_string_commands_for_spaced_paths() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn gemini_install_supports_antigravity_hooks_json() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fs::create_dir_all(fixture.home.join(".gemini").join("config"))?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        commands::init::run(&app).await?;
+
+        let expected_stop =
+            integrations::HookTarget::current(&app).shell_command(SourceKind::Gemini, "Stop");
+        let hooks: serde_json::Value = serde_json::from_slice(&fs::read(
+            fixture
+                .home
+                .join(".gemini")
+                .join("config")
+                .join("hooks.json"),
+        )?)?;
+        let stop_commands = hooks
+            .get("Stop")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|hook| hook.get("command").and_then(serde_json::Value::as_str))
+            .collect::<Vec<_>>();
+        assert!(
+            stop_commands
+                .iter()
+                .any(|command| *command == expected_stop)
+        );
+
+        commands::uninstall::run(&app, false).await?;
+        let restored_hooks: serde_json::Value = serde_json::from_slice(&fs::read(
+            fixture
+                .home
+                .join(".gemini")
+                .join("config")
+                .join("hooks.json"),
+        )?)?;
+        let remaining = restored_hooks
+            .get("Stop")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len)
+            .unwrap_or_default();
+        assert_eq!(remaining, 0);
+
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
 struct Fixture {
     root: TempDir,
     home: PathBuf,

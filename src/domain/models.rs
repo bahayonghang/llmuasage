@@ -15,7 +15,8 @@ pub enum SourceKind {
     Claude,
     /// OpenCode local SQLite usage database.
     Opencode,
-    /// Gemini CLI local chat session JSON artifacts.
+    /// Google Antigravity / Gemini CLI local usage artifacts.
+    #[value(alias = "antigravity")]
     Gemini,
 }
 
@@ -36,7 +37,7 @@ impl SourceKind {
             "codex" => Some(Self::Codex),
             "claude" => Some(Self::Claude),
             "opencode" => Some(Self::Opencode),
-            "gemini" => Some(Self::Gemini),
+            "gemini" | "antigravity" => Some(Self::Gemini),
             _ => None,
         }
     }
@@ -362,4 +363,16 @@ pub struct UsageToolCall {
     pub input_fingerprint: Option<String>,
     /// Short safe preview that must not contain full prompts or full file text.
     pub safe_preview: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_kind_antigravity_alias_keeps_stable_id() {
+        let source = SourceKind::parse_id("antigravity").expect("alias should parse");
+        assert_eq!(source, SourceKind::Gemini);
+        assert_eq!(source.as_str(), "gemini");
+    }
 }
