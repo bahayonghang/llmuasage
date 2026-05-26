@@ -10,6 +10,7 @@ use crate::{
     util::now_utc,
 };
 
+mod explorer;
 pub mod filter;
 mod heatmap;
 mod home_overview;
@@ -18,6 +19,11 @@ pub mod pricing;
 pub mod pricing_catalog;
 pub mod reports;
 
+pub use explorer::{
+    ExplorerDimension, ExplorerFilters, ExplorerGranularity, ExplorerMetric, ExplorerPayload,
+    ExplorerQuery, ExplorerRow, ExplorerSeriesPoint, ExplorerSupport, ExplorerTokenType,
+    ExplorerTotals,
+};
 pub use filter::{QueryFilter, ReportTimezone};
 pub use heatmap::HeatmapPoint;
 pub use home_overview::{
@@ -250,7 +256,7 @@ pub struct ActivityPayload {
     pub breakdown: Vec<ActivityBreakdown>,
 }
 
-/// Tool/action aggregate powered by `usage_tool_call`.
+/// Tool/action aggregate powered by `usage_tool_call` plus attributed event cost.
 #[derive(Debug, Clone, Serialize)]
 pub struct ToolBreakdown {
     /// Coarse tool/action family.
@@ -265,7 +271,7 @@ pub struct ToolBreakdown {
     pub turn_count: i64,
     /// Distinct sessions touched by this tool.
     pub session_count: i64,
-    /// Estimated cost attributed through parent events when available.
+    /// Estimated cost attributed through parent events after shared-event split.
     pub estimated_cost_usd: f64,
     /// Share of all calls in the current filter.
     pub call_share: f64,
@@ -282,6 +288,25 @@ pub struct ToolsPayload {
     pub support: BehaviorSupport,
     /// Tool aggregates ordered by calls/cost/name.
     pub breakdown: Vec<ToolBreakdown>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+struct AttributedToolRow {
+    tool_kind: String,
+    tool_name: String,
+    mcp_server: Option<String>,
+    calls: i64,
+    turn_count: i64,
+    session_count: i64,
+    estimated_cost_usd: f64,
+    input_tokens: f64,
+    cache_read_tokens: f64,
+    cache_creation_tokens: f64,
+    output_tokens: f64,
+    reasoning_output_tokens: f64,
+    first_seen_at: Option<String>,
+    last_seen_at: Option<String>,
 }
 
 /// One read-only optimization finding derived from normalized local facts.
@@ -540,6 +565,9 @@ pub struct DashboardSnapshot {
     /// Default model comparison payload. If fewer than two models are present
     /// it carries candidates plus an explicit warning.
     pub compare: ModelComparePayload,
+    /// Default Cost Explorer slice captured for live dashboard bootstrap and
+    /// static HTML exports.
+    pub explorer: ExplorerPayload,
     /// Integration/cursor/run health payload.
     pub health: HealthPayload,
     /// Archive/source-file diagnostics plus recent failed run records.
@@ -999,61 +1027,169 @@ impl Dashboard {
         })
     }
 
-    /// Loads tool/action aggregates from normalized `usage_tool_call` facts.
+    /// Loads attributed tool/action aggregates from normalized behavior facts.
+    ///
+    /// Shared-event cost is split across sibling tool calls, and cost-bearing
+    /// turns without any tool calls are surfaced as a `(non-tool)` bucket.
     pub fn tool_breakdown(&self, filter: &QueryFilter) -> Result<ToolsPayload> {
+        let support = behavior_support(&self.conn, "usage_event", filter.event_filter(None))?;
+        if !support.supported {
+            return Ok(ToolsPayload {
+                support,
+                breakdown: Vec::new(),
+            });
+        }
+
+        let rows = self.tool_attribution_rows(filter)?;
+        let total_calls: i64 = rows.iter().map(|row| row.calls).sum();
+        let breakdown = rows
+            .into_iter()
+            .map(|row| ToolBreakdown {
+                tool_kind: row.tool_kind,
+                tool_name: row.tool_name,
+                mcp_server: row.mcp_server,
+                calls: row.calls,
+                turn_count: row.turn_count,
+                session_count: row.session_count,
+                estimated_cost_usd: row.estimated_cost_usd,
+                call_share: ratio(row.calls, total_calls),
+                first_seen_at: row.first_seen_at,
+                last_seen_at: row.last_seen_at,
+            })
+            .collect();
+        Ok(ToolsPayload { support, breakdown })
+    }
+
+    fn tool_attribution_rows(&self, filter: &QueryFilter) -> Result<Vec<AttributedToolRow>> {
+        let event_filter = filter.event_filter(Some("e"));
         let tool_filter = filter.tool_filter(Some("tc"));
-        let support = behavior_support(&self.conn, "usage_tool_call", filter.tool_filter(None))?;
-        let total_calls = scalar_i64(
-            &self.conn,
-            &format!(
-                "SELECT COUNT(*) FROM usage_tool_call tc{}",
-                tool_filter.where_sql()
-            ),
-            params_from_iter(tool_filter.params().iter()),
-        )?;
         let sql = format!(
             r#"
+            WITH filtered_events AS (
+                SELECT
+                    e.event_key,
+                    e.event_at,
+                    e.session_id,
+                    COALESCE(e.cost_with_cache_usd, 0.0) AS cost_with_cache_usd,
+                    COALESCE(e.input_tokens, 0) AS input_tokens,
+                    COALESCE(e.cache_read_tokens, 0) AS cache_read_tokens,
+                    COALESCE(e.cache_creation_tokens, 0) AS cache_creation_tokens,
+                    COALESCE(e.output_tokens, 0) AS output_tokens,
+                    COALESCE(e.reasoning_output_tokens, 0) AS reasoning_output_tokens
+                FROM usage_event e
+                {event_where}
+            ),
+            filtered_tools AS (
+                SELECT
+                    tc.tool_call_key,
+                    tc.event_key,
+                    tc.turn_key,
+                    tc.session_id,
+                    tc.occurred_at,
+                    tc.tool_kind,
+                    tc.tool_name,
+                    tc.mcp_server
+                FROM usage_tool_call tc
+                {tool_where}
+            ),
+            event_tool_counts AS (
+                SELECT
+                    tc.event_key,
+                    COUNT(*) AS tool_count
+                FROM filtered_tools tc
+                WHERE tc.event_key IS NOT NULL
+                GROUP BY tc.event_key
+            ),
+            attributed_rows AS (
+                SELECT
+                    tc.tool_kind AS tool_kind,
+                    tc.tool_name AS tool_name,
+                    tc.mcp_server AS mcp_server,
+                    COALESCE(tc.turn_key, 'turn:' || tc.event_key) AS turn_key,
+                    COALESCE(tc.session_id, e.session_id) AS session_id,
+                    tc.occurred_at AS occurred_at,
+                    1 AS call_count,
+                    COALESCE(e.cost_with_cache_usd, 0.0) / ec.tool_count AS estimated_cost_usd,
+                    COALESCE(e.input_tokens, 0) * (1.0 / ec.tool_count) AS input_tokens,
+                    COALESCE(e.cache_read_tokens, 0) * (1.0 / ec.tool_count) AS cache_read_tokens,
+                    COALESCE(e.cache_creation_tokens, 0) * (1.0 / ec.tool_count) AS cache_creation_tokens,
+                    COALESCE(e.output_tokens, 0) * (1.0 / ec.tool_count) AS output_tokens,
+                    COALESCE(e.reasoning_output_tokens, 0) * (1.0 / ec.tool_count) AS reasoning_output_tokens
+                FROM filtered_tools tc
+                JOIN usage_event e ON e.event_key = tc.event_key
+                JOIN event_tool_counts ec ON ec.event_key = tc.event_key
+
+                UNION ALL
+
+                SELECT
+                    '(non-tool)' AS tool_kind,
+                    '(non-tool)' AS tool_name,
+                    NULL AS mcp_server,
+                    'turn:' || e.event_key AS turn_key,
+                    e.session_id AS session_id,
+                    e.event_at AS occurred_at,
+                    0 AS call_count,
+                    COALESCE(e.cost_with_cache_usd, 0.0) AS estimated_cost_usd,
+                    COALESCE(e.input_tokens, 0) AS input_tokens,
+                    COALESCE(e.cache_read_tokens, 0) AS cache_read_tokens,
+                    COALESCE(e.cache_creation_tokens, 0) AS cache_creation_tokens,
+                    COALESCE(e.output_tokens, 0) AS output_tokens,
+                    COALESCE(e.reasoning_output_tokens, 0) AS reasoning_output_tokens
+                FROM filtered_events e
+                LEFT JOIN filtered_tools tc ON tc.event_key = e.event_key
+                WHERE tc.tool_call_key IS NULL
+            )
             SELECT
-                tc.tool_kind,
-                tc.tool_name,
-                tc.mcp_server,
-                COUNT(*) AS calls,
-                COUNT(DISTINCT tc.turn_key) AS turn_count,
-                COUNT(DISTINCT tc.session_id) AS session_count,
-                COALESCE(SUM(e.cost_with_cache_usd), 0.0) AS estimated_cost_usd,
-                MIN(tc.occurred_at) AS first_seen_at,
-                MAX(tc.occurred_at) AS last_seen_at
-            FROM usage_tool_call tc
-            LEFT JOIN usage_event e ON e.event_key = tc.event_key
-            {}
-            GROUP BY tc.tool_kind, tc.tool_name, tc.mcp_server
-            ORDER BY calls DESC, estimated_cost_usd DESC, tc.tool_kind ASC, tc.tool_name ASC
+                tool_kind,
+                tool_name,
+                mcp_server,
+                COALESCE(SUM(call_count), 0) AS calls,
+                COUNT(DISTINCT turn_key) AS turn_count,
+                COUNT(DISTINCT session_id) AS session_count,
+                COALESCE(SUM(estimated_cost_usd), 0.0) AS estimated_cost_usd,
+                COALESCE(SUM(input_tokens), 0.0) AS input_tokens,
+                COALESCE(SUM(cache_read_tokens), 0.0) AS cache_read_tokens,
+                COALESCE(SUM(cache_creation_tokens), 0.0) AS cache_creation_tokens,
+                COALESCE(SUM(output_tokens), 0.0) AS output_tokens,
+                COALESCE(SUM(reasoning_output_tokens), 0.0) AS reasoning_output_tokens,
+                MIN(occurred_at) AS first_seen_at,
+                MAX(occurred_at) AS last_seen_at
+            FROM attributed_rows
+            GROUP BY tool_kind, tool_name, mcp_server
+            ORDER BY calls DESC, estimated_cost_usd DESC, tool_kind ASC, tool_name ASC
             LIMIT 50
             "#,
-            tool_filter.where_sql()
+            event_where = event_filter.where_sql(),
+            tool_where = tool_filter.where_sql()
         );
         let mut stmt = self.conn.prepare(&sql)?;
-        let rows = stmt.query_map(params_from_iter(tool_filter.params().iter()), |row| {
-            let calls = row.get::<_, Option<i64>>(3)?.unwrap_or_default();
-            let turn_count = row.get::<_, Option<i64>>(4)?.unwrap_or_default();
-            let session_count = row.get::<_, Option<i64>>(5)?.unwrap_or_default();
-            Ok(ToolBreakdown {
-                tool_kind: row.get(0)?,
-                tool_name: row.get(1)?,
-                mcp_server: row.get(2)?,
-                calls,
-                turn_count: turn_count.min(calls),
-                session_count: session_count.min(calls),
-                estimated_cost_usd: row.get::<_, Option<f64>>(6)?.unwrap_or_default(),
-                call_share: ratio(calls, total_calls),
-                first_seen_at: row.get(7)?,
-                last_seen_at: row.get(8)?,
-            })
-        })?;
-        Ok(ToolsPayload {
-            support,
-            breakdown: rows.collect::<rusqlite::Result<Vec<_>>>()?,
-        })
+        let rows = stmt.query_map(
+            params_from_iter(
+                event_filter
+                    .params()
+                    .iter()
+                    .chain(tool_filter.params().iter()),
+            ),
+            |row| {
+                Ok(AttributedToolRow {
+                    tool_kind: row.get(0)?,
+                    tool_name: row.get(1)?,
+                    mcp_server: row.get(2)?,
+                    calls: row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
+                    turn_count: row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
+                    session_count: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
+                    estimated_cost_usd: row.get::<_, Option<f64>>(6)?.unwrap_or_default(),
+                    input_tokens: row.get::<_, Option<f64>>(7)?.unwrap_or_default(),
+                    cache_read_tokens: row.get::<_, Option<f64>>(8)?.unwrap_or_default(),
+                    cache_creation_tokens: row.get::<_, Option<f64>>(9)?.unwrap_or_default(),
+                    output_tokens: row.get::<_, Option<f64>>(10)?.unwrap_or_default(),
+                    reasoning_output_tokens: row.get::<_, Option<f64>>(11)?.unwrap_or_default(),
+                    first_seen_at: row.get(12)?,
+                    last_seen_at: row.get(13)?,
+                })
+            },
+        )?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     /// Loads read-only behavior optimization findings.
@@ -1661,6 +1797,11 @@ impl Dashboard {
         heatmap::load(self, filter, days)
     }
 
+    /// Loads the flexible Cost Explorer-style aggregate for the requested slice.
+    pub fn explorer(&self, query: &ExplorerQuery) -> Result<ExplorerPayload> {
+        explorer::load(self, query)
+    }
+
     /// Loads cursor-paginated usage log rows (F4.3 / D26).
     pub fn logs(&self, query: &LogsQuery) -> Result<LogsPage> {
         logs::load(self, query)
@@ -1725,6 +1866,10 @@ impl Dashboard {
             tools: self.tool_breakdown(filter)?,
             optimize: self.optimize(filter)?,
             compare: self.model_compare(filter, None, None)?,
+            explorer: self.explorer(&ExplorerQuery {
+                filter: filter.clone(),
+                ..Default::default()
+            })?,
             health: core.health,
             diagnostics: core.diagnostics,
         })
@@ -2400,22 +2545,38 @@ mod tests {
     #[test]
     fn behavior_queries_return_activity_and_tool_breakdowns() -> Result<()> {
         let fixture = Fixture::new()?;
+        let conn = fixture.store().open_connection()?;
+
         fixture.seed_event(crate::testing::SeedEvent {
-            event_key: "codex:behavior:1",
+            event_key: "codex:behavior:multi-tool",
             event_at: "2026-05-01T00:00:00Z",
             hour_start: Some("2026-05-01T00:00:00Z"),
-            input_tokens: 100,
-            output_tokens: 50,
-            total_tokens: 150,
-            cost_with_cache_usd: 0.42,
-            cost_without_cache_usd: 0.42,
+            input_tokens: 120,
+            output_tokens: 60,
+            total_tokens: 180,
+            cost_with_cache_usd: 1.00,
+            cost_without_cache_usd: 1.00,
             pricing_status: "static",
             pricing_source: Some("static-v1"),
             session_id: Some("session-behavior"),
             source_path_hash: Some("path-behavior"),
             ..Default::default()
         })?;
-        let conn = fixture.store().open_connection()?;
+        fixture.seed_event(crate::testing::SeedEvent {
+            event_key: "codex:behavior:non-tool",
+            event_at: "2026-05-02T01:00:00Z",
+            hour_start: Some("2026-05-02T01:00:00Z"),
+            input_tokens: 80,
+            output_tokens: 20,
+            total_tokens: 100,
+            cost_with_cache_usd: 0.25,
+            cost_without_cache_usd: 0.25,
+            pricing_status: "static",
+            pricing_source: Some("static-v1"),
+            session_id: Some("session-behavior"),
+            source_path_hash: Some("path-behavior"),
+            ..Default::default()
+        })?;
         conn.execute(
             r#"
             INSERT INTO usage_turn(
@@ -2424,9 +2585,23 @@ mod tests {
                 one_shot, call_count, input_tokens, cache_read_tokens,
                 cache_creation_tokens, output_tokens, reasoning_output_tokens,
                 total_tokens, created_at
-            ) VALUES ('turn:codex:behavior:1', 'codex', 'session-behavior',
+            ) VALUES ('turn:codex:behavior:multi-tool', 'codex', 'session-behavior',
                 'path-behavior', 'project-test', 'gpt-5', '2026-05-01T00:00:00Z',
                 'coding', 1, 0, 1, 1, 100, 0, 0, 50, 0, 150, '2026-05-01T00:00:00Z')
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_turn(
+                turn_key, source, session_id, source_path_hash, project_hash,
+                primary_model, started_at, category, has_edits, retries,
+                one_shot, call_count, input_tokens, cache_read_tokens,
+                cache_creation_tokens, output_tokens, reasoning_output_tokens,
+                total_tokens, created_at
+            ) VALUES ('turn:codex:behavior:non-tool', 'codex', 'session-behavior',
+                'path-behavior', 'project-test', 'gpt-5', '2026-05-02T01:00:00Z',
+                'coding', 0, 0, 0, 1, 80, 0, 0, 20, 0, 100, '2026-05-02T01:00:00Z')
             "#,
             [],
         )?;
@@ -2436,10 +2611,25 @@ mod tests {
                 tool_call_key, turn_key, event_key, source, session_id,
                 source_path_hash, project_hash, model, occurred_at, tool_name,
                 tool_kind, mcp_server, mcp_tool, input_fingerprint, safe_preview, created_at
-            ) VALUES ('tool:codex:behavior:1', 'turn:codex:behavior:1',
-                'codex:behavior:1', 'codex', 'session-behavior', 'path-behavior',
-                'project-test', 'gpt-5', '2026-05-01T00:00:00Z', 'Edit', 'edit',
+            ) VALUES ('tool:codex:behavior:multi-tool:edit',
+                'turn:codex:behavior:multi-tool', 'codex:behavior:multi-tool', 'codex',
+                'session-behavior', 'path-behavior', 'project-test', 'gpt-5',
+                '2026-05-01T00:00:00Z', 'Edit', 'edit',
                 NULL, NULL, 'fp-edit', 'Edit src/lib.rs', '2026-05-01T00:00:00Z')
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_tool_call(
+                tool_call_key, turn_key, event_key, source, session_id,
+                source_path_hash, project_hash, model, occurred_at, tool_name,
+                tool_kind, mcp_server, mcp_tool, input_fingerprint, safe_preview, created_at
+            ) VALUES ('tool:codex:behavior:multi-tool:read',
+                'turn:codex:behavior:multi-tool', 'codex:behavior:multi-tool', 'codex',
+                'session-behavior', 'path-behavior', 'project-test', 'gpt-5',
+                '2026-05-01T00:00:00Z', 'Read', 'read',
+                NULL, NULL, 'fp-read', 'Read src/lib.rs', '2026-05-01T00:00:00Z')
             "#,
             [],
         )?;
@@ -2454,9 +2644,9 @@ mod tests {
         assert!(activity.support.supported);
         assert_eq!(activity.breakdown.len(), 1);
         assert_eq!(activity.breakdown[0].category, "coding");
-        assert_eq!(activity.breakdown[0].turns, 1);
+        assert_eq!(activity.breakdown[0].turns, 2);
         assert_eq!(activity.breakdown[0].one_shot_rate, 1.0);
-        assert_eq!(activity.breakdown[0].estimated_cost_usd, 0.42);
+        assert_eq!(activity.breakdown[0].estimated_cost_usd, 1.25);
 
         let tools = dashboard.tool_breakdown(&QueryFilter {
             source: Some(SourceKind::Codex),
@@ -2464,12 +2654,88 @@ mod tests {
             ..Default::default()
         })?;
         assert!(tools.support.supported);
-        assert_eq!(tools.breakdown.len(), 1);
-        assert_eq!(tools.breakdown[0].tool_kind, "edit");
-        assert_eq!(tools.breakdown[0].tool_name, "Edit");
-        assert_eq!(tools.breakdown[0].calls, 1);
-        assert_eq!(tools.breakdown[0].call_share, 1.0);
-        assert_eq!(tools.breakdown[0].estimated_cost_usd, 0.42);
+        assert_eq!(tools.breakdown.len(), 3);
+        let total_cost: f64 = tools
+            .breakdown
+            .iter()
+            .map(|row| row.estimated_cost_usd)
+            .sum();
+        assert!((total_cost - 1.25).abs() < f64::EPSILON);
+
+        let edit = tools
+            .breakdown
+            .iter()
+            .find(|row| row.tool_name == "Edit")
+            .expect("edit row");
+        assert_eq!(edit.tool_kind, "edit");
+        assert_eq!(edit.calls, 1);
+        assert_eq!(edit.turn_count, 1);
+        assert_eq!(edit.session_count, 1);
+        assert_eq!(edit.call_share, 0.5);
+        assert_eq!(edit.estimated_cost_usd, 0.5);
+
+        let read = tools
+            .breakdown
+            .iter()
+            .find(|row| row.tool_name == "Read")
+            .expect("read row");
+        assert_eq!(read.tool_kind, "read");
+        assert_eq!(read.calls, 1);
+        assert_eq!(read.turn_count, 1);
+        assert_eq!(read.session_count, 1);
+        assert_eq!(read.call_share, 0.5);
+        assert_eq!(read.estimated_cost_usd, 0.5);
+
+        let non_tool = tools
+            .breakdown
+            .iter()
+            .find(|row| row.tool_name == "(non-tool)")
+            .expect("non-tool row");
+        assert_eq!(non_tool.tool_kind, "(non-tool)");
+        assert_eq!(non_tool.calls, 0);
+        assert_eq!(non_tool.turn_count, 1);
+        assert_eq!(non_tool.session_count, 1);
+        assert_eq!(non_tool.call_share, 0.0);
+        assert_eq!(non_tool.estimated_cost_usd, 0.25);
+
+        let day_one = dashboard.tool_breakdown(&QueryFilter {
+            source: Some(SourceKind::Codex),
+            model: Some("gpt-5".to_string()),
+            since: Some(NaiveDate::from_ymd_opt(2026, 5, 1).unwrap()),
+            until: Some(NaiveDate::from_ymd_opt(2026, 5, 1).unwrap()),
+            timezone: ReportTimezone::Utc,
+            ..Default::default()
+        })?;
+        assert_eq!(day_one.breakdown.len(), 2);
+        let day_one_cost: f64 = day_one
+            .breakdown
+            .iter()
+            .map(|row| row.estimated_cost_usd)
+            .sum();
+        assert!((day_one_cost - 1.0).abs() < f64::EPSILON);
+        assert!(
+            day_one
+                .breakdown
+                .iter()
+                .all(|row| row.tool_name != "(non-tool)")
+        );
+
+        let day_two = dashboard.tool_breakdown(&QueryFilter {
+            source: Some(SourceKind::Codex),
+            model: Some("gpt-5".to_string()),
+            since: Some(NaiveDate::from_ymd_opt(2026, 5, 2).unwrap()),
+            until: Some(NaiveDate::from_ymd_opt(2026, 5, 2).unwrap()),
+            timezone: ReportTimezone::Utc,
+            ..Default::default()
+        })?;
+        assert_eq!(day_two.breakdown.len(), 1);
+        let day_two_cost: f64 = day_two
+            .breakdown
+            .iter()
+            .map(|row| row.estimated_cost_usd)
+            .sum();
+        assert!((day_two_cost - 0.25).abs() < f64::EPSILON);
+        assert_eq!(day_two.breakdown[0].tool_name, "(non-tool)");
         Ok(())
     }
 

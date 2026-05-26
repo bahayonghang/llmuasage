@@ -94,6 +94,13 @@ fn local_flow_installs_syncs_exports_and_uninstalls() -> Result<()> {
             html_out
                 .join("assets")
                 .join("render")
+                .join("explorer.js")
+                .is_file()
+        );
+        assert!(
+            html_out
+                .join("assets")
+                .join("render")
                 .join("charts.js")
                 .is_file()
         );
@@ -122,6 +129,10 @@ fn local_flow_installs_syncs_exports_and_uninstalls() -> Result<()> {
         assert!(exported_index.contains("<title>llmusage · 本地用量概览</title>"));
         assert!(exported_index.contains(">本地用量概览</strong>"));
         assert!(exported_index.contains("用量趋势"));
+        assert!(exported_index.contains("Cost Explorer"));
+        let snapshot_json = fs::read_to_string(html_out.join("snapshot.json"))?;
+        let snapshot: serde_json::Value = serde_json::from_str(&snapshot_json)?;
+        assert!(snapshot["explorer"].is_object());
         assert!(!exported_index.contains("llmusage 本地账本"));
         assert!(web::live_index_html().contains("data-mode=\"live\""));
         assert!(web::snapshot_index_html().contains("data-mode=\"snapshot\""));

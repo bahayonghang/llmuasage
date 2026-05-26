@@ -5,6 +5,8 @@ export {
   loadTrendWindow,
   loadDashboardSnapshot,
   buildFilterQuery,
+  buildExplorerQuery,
+  loadExplorer,
 } from './data/fetch.js';
 export {
   escapeHtml,

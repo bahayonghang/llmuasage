@@ -102,6 +102,10 @@ fn html_shell(mode: &str) -> String {
         <span class="nav-icon"><svg class="i" viewBox="0 0 24 24"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 16v-5"/><path d="M12 16V8"/><path d="M16 16v-7"/></svg></span>
         <span data-i18n="shell.nav.item.behavior">行为分析</span>
       </a>
+      <a href="#explorer" data-target="explorer">
+        <span class="nav-icon"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-5-5"/><path d="M8 11h6M11 8v6"/></svg></span>
+        <span data-i18n="shell.nav.item.explorer">切片分析</span>
+      </a>
     </nav>
 
     <div class="nav-label" data-i18n="shell.nav.label.ops">运营</div>
@@ -378,6 +382,118 @@ fn html_shell(mode: &str) -> String {
             <div class="panel-sub" data-i18n="shell.behavior.compare.sub">按模型对比成本、one-shot、retry 与工作风格；低样本显式提示。</div>
           </div>
           <div id="compare-panel"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Explorer -->
+    <section id="explorer" class="block">
+      <div class="section-head">
+        <div>
+          <div class="section-eyebrow" data-i18n="shell.explorer.eyebrow">EXPLORER</div>
+          <h2 class="section-title" data-i18n="shell.explorer.title">Cost Explorer</h2>
+          <div class="section-desc" data-i18n="shell.explorer.sub">按时间粒度、指标、维度与工具过滤做本地切片分析；结果来自后端聚合，不在前端透视原始行。</div>
+        </div>
+        <span class="tag" id="explorer-support">--</span>
+      </div>
+
+      <div class="panel explorer-workbench">
+        <div class="explorer-controls" id="explorer-controls">
+          <div class="filter-group">
+            <label for="explorer-metric" data-i18n="shell.explorer.metric">指标</label>
+            <select id="explorer-metric" data-explorer-control="metric">
+              <option value="attributed_cost_usd" data-i18n="shell.explorer.metric.cost">归因成本</option>
+              <option value="calls" data-i18n="shell.explorer.metric.calls">调用数</option>
+              <option value="turns" data-i18n="shell.explorer.metric.turns">Turns</option>
+              <option value="sessions" data-i18n="shell.explorer.metric.sessions">会话数</option>
+              <option value="total_tokens" data-i18n="shell.explorer.metric.tokens">总 Token</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label for="explorer-group-by" data-i18n="shell.explorer.groupBy">分组</label>
+            <select id="explorer-group-by" data-explorer-control="groupBy">
+              <option value="source" data-i18n="shell.explorer.group.source">来源</option>
+              <option value="model" data-i18n="shell.explorer.group.model">模型</option>
+              <option value="project" data-i18n="shell.explorer.group.project">项目</option>
+              <option value="session" data-i18n="shell.explorer.group.session">会话</option>
+              <option value="tool" data-i18n="shell.explorer.group.tool">工具</option>
+              <option value="tool_kind" data-i18n="shell.explorer.group.toolKind">工具类型</option>
+              <option value="is_tool" data-i18n="shell.explorer.group.isTool">工具/非工具</option>
+              <option value="token_type" data-i18n="shell.explorer.group.tokenType">Token 类型</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label for="explorer-granularity" data-i18n="shell.explorer.granularity">粒度</label>
+            <select id="explorer-granularity" data-explorer-control="granularity">
+              <option value="total" data-i18n="shell.explorer.granularity.total">总计</option>
+              <option value="day" data-i18n="shell.explorer.granularity.day">按日</option>
+              <option value="week" data-i18n="shell.explorer.granularity.week">按周</option>
+              <option value="month" data-i18n="shell.explorer.granularity.month">按月</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label for="explorer-limit" data-i18n="shell.explorer.limit">Top N</label>
+            <input id="explorer-limit" data-explorer-control="limit" type="number" min="1" max="50" step="1" />
+          </div>
+          <div class="filter-group">
+            <label for="explorer-session" data-i18n="shell.explorer.session">会话过滤</label>
+            <input id="explorer-session" data-explorer-control="sessionId" type="search" placeholder="session id" data-i18n-attr="placeholder=shell.explorer.sessionPlaceholder" />
+          </div>
+          <div class="filter-group">
+            <label for="explorer-tool-name" data-i18n="shell.explorer.tool">工具过滤</label>
+            <input id="explorer-tool-name" data-explorer-control="toolName" type="search" placeholder="Read / Bash / Edit" data-i18n-attr="placeholder=shell.explorer.toolPlaceholder" />
+          </div>
+          <div class="filter-group">
+            <label for="explorer-tool-kind" data-i18n="shell.explorer.toolKind">工具类型</label>
+            <select id="explorer-tool-kind" data-explorer-control="toolKind">
+              <option value="" data-i18n="shell.explorer.all">全部</option>
+              <option value="read">read</option>
+              <option value="edit">edit</option>
+              <option value="shell">shell</option>
+              <option value="mcp">mcp</option>
+              <option value="agent">agent</option>
+              <option value="(non-tool)">(non-tool)</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label for="explorer-token-type" data-i18n="shell.explorer.tokenType">Token 类型</label>
+            <select id="explorer-token-type" data-explorer-control="tokenType">
+              <option value="" data-i18n="shell.explorer.all">全部</option>
+              <option value="input">input</option>
+              <option value="cache_read">cache_read</option>
+              <option value="cache_creation">cache_creation</option>
+              <option value="output">output</option>
+              <option value="reasoning_output">reasoning_output</option>
+            </select>
+          </div>
+          <label class="explorer-check">
+            <input id="explorer-include-other" data-explorer-control="includeOther" type="checkbox" />
+            <span data-i18n="shell.explorer.includeOther">合并 Other</span>
+          </label>
+          <label class="explorer-check">
+            <input id="explorer-include-non-tool" data-explorer-control="includeNonTool" type="checkbox" />
+            <span data-i18n="shell.explorer.includeNonTool">包含非工具</span>
+          </label>
+          <div class="explorer-actions">
+            <button class="btn btn-primary" id="explorer-apply" type="button" data-i18n="shell.explorer.apply">运行分析</button>
+            <button class="btn" id="explorer-reset" type="button" data-i18n="shell.explorer.reset">重置</button>
+          </div>
+        </div>
+
+        <div id="explorer-summary" class="explorer-summary"></div>
+        <div id="explorer-warning"></div>
+        <div class="explorer-results-grid">
+          <div>
+            <div class="panel-title" data-i18n="shell.explorer.rowsTitle">维度排行</div>
+            <div class="panel-sub" data-i18n="shell.explorer.rowsSub">按当前指标排序，Top N 之外可合并为 Other。</div>
+            <div id="explorer-bars" style="margin-top: 18px;"></div>
+            <div id="explorer-rows"></div>
+          </div>
+          <div>
+            <div class="panel-title" data-i18n="shell.explorer.seriesTitle">时间序列</div>
+            <div class="panel-sub" data-i18n="shell.explorer.seriesSub">按所选粒度返回，可用于 snapshot/export 离线查看。</div>
+            <div id="explorer-series"></div>
+          </div>
         </div>
       </div>
     </section>

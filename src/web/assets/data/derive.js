@@ -26,6 +26,41 @@ function normalizeRows(rows) {
   return Array.isArray(rows) ? rows : [];
 }
 
+function emptyExplorerPayload() {
+  return {
+    support: { supported: false, level: 'no_data', strategy: 'none' },
+    warning: null,
+    granularity: 'day',
+    metric: 'attributed_cost_usd',
+    group_by: 'source',
+    limit: 8,
+    include_other: true,
+    totals: { value: 0 },
+    rows: [],
+    series: [],
+  };
+}
+
+function normalizeExplorer(explorer) {
+  const payload = explorer || emptyExplorerPayload();
+  const rows = sortDesc(payload.rows, (row) => row?.value);
+  const series = normalizeRows(payload.series).map((point) => ({
+    bucket: point?.bucket || '--',
+    key: point?.key || '',
+    label: point?.label || point?.key || '--',
+    value: Number(point?.value || 0),
+    is_other: Boolean(point?.is_other),
+  }));
+  return {
+    ...emptyExplorerPayload(),
+    ...payload,
+    support: payload.support || emptyExplorerPayload().support,
+    totals: payload.totals || { value: 0 },
+    rows,
+    series,
+  };
+}
+
 function positiveRows(rows, select) {
   return normalizeRows(rows).filter((row) => Number(select(row) || 0) > 0);
 }
@@ -176,7 +211,7 @@ function sortDesc(rows, select) {
  * 2) 固定 Top N、图表序列和对比表行
  * 3) 为各面板补齐总量、峰值、占比和紧凑显示值
  */
-export function buildContext({ overview, trends, models, sources, projects, costs, activity, tools, optimize, compare, health, diagnostics }) {
+export function buildContext({ overview, trends, models, sources, projects, costs, activity, tools, optimize, compare, explorer, health, diagnostics }) {
   logger.info('开始构建页面上下文');
 
   // 1.1 规范化并排序趋势、排行和健康数据
@@ -200,6 +235,7 @@ export function buildContext({ overview, trends, models, sources, projects, cost
   const diagnosticFailureRows = normalizeRows(diagnostics?.recent_failures);
   const failureRows = normalizeRows(health?.recent_failures);
   const combinedFailureRows = failureRows.length ? failureRows : diagnosticFailureRows;
+  const explorerPayload = normalizeExplorer(explorer);
 
   // 1.2 计算账本摘要、趋势聚合和健康聚合
   const trendTotal = chronologicalRows.reduce(
@@ -295,6 +331,7 @@ export function buildContext({ overview, trends, models, sources, projects, cost
       tools: toolRows,
       optimize: optimize || { support: { supported: false, level: 'no_data' }, findings: [] },
       compare: compare || { support: { supported: false, level: 'no_data' }, candidates: [] },
+      explorer: explorerPayload,
       activity_support: activity?.support || { supported: false, level: 'no_data' },
       tools_support: tools?.support || { supported: false, level: 'no_data' },
     },

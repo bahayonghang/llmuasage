@@ -1,5 +1,5 @@
 import { UI_COPY, getLocale, getShellCopy, onLocaleChange, setLocale } from './copy.js';
-import { buildContext, buildFilterQuery, loadDashboardSnapshot } from './data.js';
+import { buildContext, buildExplorerQuery, buildFilterQuery, loadDashboardSnapshot, loadExplorer } from './data.js';
 import { renderHero } from './render/hero.js';
 import { renderTrends } from './render/trends.js';
 import { renderModels } from './render/models.js';
@@ -8,6 +8,7 @@ import { renderProjects } from './render/projects.js';
 import { renderCosts } from './render/costs.js';
 import { renderInsights } from './render/insights.js';
 import { renderBehavior } from './render/behavior.js';
+import { renderExplorer } from './render/explorer.js';
 import { applyDomI18n, bindI18nDomSync } from './i18n.js';
 import { initTheme, toggleTheme } from './theme.js';
 import { setRenderer, setRuntimeState } from './runtime.js';
@@ -23,6 +24,18 @@ const TREND_WINDOW_TO_RANGE = Object.freeze({ day: '1d', week: '7d', month: '30d
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const AUTO_REFRESH_STORAGE_KEY = 'llmusage:autoRefreshMs';
 const VALID_AUTO_REFRESH_MS = new Set([0, 30000, 60000]);
+const DEFAULT_EXPLORER = Object.freeze({
+  granularity: 'day',
+  metric: 'attributed_cost_usd',
+  groupBy: 'source',
+  sessionId: '',
+  toolName: '',
+  toolKind: '',
+  tokenType: '',
+  limit: 8,
+  includeOther: true,
+  includeNonTool: true,
+});
 let dashboardState = null;
 
 /*
@@ -49,6 +62,7 @@ async function main() {
     trendWindow: initialTrendWindowFromUrl(),
     rangePreset: initialRangePresetFromUrl(),
     filters: readFiltersFromUrl(),
+    explorer: initialExplorerStateFromUrl(),
     autoRefreshMs: readAutoRefreshPreference(),
     autoRefreshTimer: null,
     reloadPromise: null,
@@ -66,6 +80,7 @@ async function main() {
   syncFilterControls(state);
   setupNavigation();
   setupFilterControls(state);
+  setupExplorerControls(state);
   setupPanelToggles(state);
   setupExport(state);
   setupSyncJob(state);
@@ -98,6 +113,14 @@ async function main() {
 async function loadDashboardData(state) {
   logger.info('开始加载 dashboard 数据');
   const snapshot = await loadDashboardSnapshot(state);
+  if (state.mode !== 'snapshot') {
+    try {
+      snapshot.explorer = await loadExplorer(state);
+    } catch (error) {
+      logger.warn('/api/explorer degraded', error);
+      snapshot.explorer = degradedExplorerPayload(error);
+    }
+  }
   logger.info('完成 dashboard 数据加载');
   return snapshot;
 }
@@ -111,6 +134,7 @@ function renderDashboard(rawData) {
   renderSources(context);
   renderProjects(context, dashboardState);
   renderBehavior(context);
+  renderExplorer(context, dashboardState);
   renderCosts(context, dashboardState);
   renderInsights(context);
   syncPanelToggleControls(context, dashboardState);
@@ -156,6 +180,32 @@ function initialRangePresetFromUrl() {
   return TREND_WINDOW_TO_RANGE[params.get('window')] || DEFAULT_RANGE_PRESET;
 }
 
+function initialExplorerStateFromUrl() {
+  const params = new URLSearchParams(window.location.search || '');
+  const next = { ...DEFAULT_EXPLORER };
+  if (params.get('granularity')) next.granularity = params.get('granularity');
+  if (params.get('metric')) next.metric = params.get('metric');
+  if (params.get('group_by')) next.groupBy = params.get('group_by');
+  if (params.get('session_id') || params.get('session')) {
+    next.sessionId = params.get('session_id') || params.get('session');
+  }
+  if (params.get('tool_name') || params.get('tool')) {
+    next.toolName = params.get('tool_name') || params.get('tool');
+  }
+  if (params.get('tool_kind')) next.toolKind = params.get('tool_kind');
+  if (params.get('token_type')) next.tokenType = params.get('token_type');
+  if (params.get('limit')) {
+    next.limit = clampExplorerLimit(params.get('limit'));
+  }
+  if (params.has('include_other')) {
+    next.includeOther = parseQueryBool(params.get('include_other'));
+  }
+  if (params.has('is_tool')) {
+    next.includeNonTool = !parseQueryBool(params.get('is_tool'));
+  }
+  return next;
+}
+
 function readAutoRefreshPreference() {
   try {
     const stored = Number(window.localStorage?.getItem(AUTO_REFRESH_STORAGE_KEY) || 0);
@@ -163,6 +213,26 @@ function readAutoRefreshPreference() {
   } catch (_) {
     return 0;
   }
+}
+
+function degradedExplorerPayload(error) {
+  return {
+    support: {
+      supported: false,
+      level: 'degraded',
+      reason: error?.message || 'Explorer query failed; fixed dashboard panels are still available.',
+      strategy: 'unknown',
+    },
+    warning: error?.message || 'Explorer query failed.',
+    granularity: 'day',
+    metric: 'attributed_cost_usd',
+    group_by: 'source',
+    limit: 8,
+    include_other: true,
+    totals: { value: 0 },
+    rows: [],
+    series: [],
+  };
 }
 
 function persistAutoRefreshPreference(value) {
@@ -257,7 +327,7 @@ function escapeHtml(value) {
  * 2) 当区域进入视口时，高亮对应侧边栏链接
  */
 function setupNavigation() {
-  const sections = ['overview', 'trends', 'models', 'sources', 'projects', 'behavior', 'cost', 'status'];
+  const sections = ['overview', 'trends', 'models', 'sources', 'projects', 'behavior', 'explorer', 'cost', 'status'];
   const navLinks = document.querySelectorAll('aside nav a');
 
   function setActive(id) {
@@ -380,6 +450,16 @@ function currentFilterInputs() {
     }
   }
   return filters;
+}
+
+function parseQueryBool(value) {
+  return !['0', 'false', 'no', 'off'].includes(String(value || '').trim().toLowerCase());
+}
+
+function clampExplorerLimit(value) {
+  const parsed = Number.parseInt(String(value || ''), 10);
+  if (!Number.isFinite(parsed)) return DEFAULT_EXPLORER.limit;
+  return Math.max(1, Math.min(50, parsed));
 }
 
 function normalizeRangePreset(value) {
@@ -641,7 +721,13 @@ function setupRangePresetControls(state) {
 function syncUrlFromState(state) {
   if (state.mode === 'snapshot') return;
   const query = buildFilterQuery(state);
-  const next = `${window.location.pathname}${query}${window.location.hash || ''}`;
+  const params = new URLSearchParams(query.slice(1));
+  const explorerParams = new URLSearchParams(buildExplorerQuery(state).slice(1));
+  for (const [key, value] of explorerParams.entries()) {
+    params.set(key, value);
+  }
+  const mergedQuery = params.toString();
+  const next = `${window.location.pathname}${mergedQuery ? `?${mergedQuery}` : ''}${window.location.hash || ''}`;
   window.history.replaceState(null, '', next);
 }
 
@@ -782,6 +868,107 @@ function setupFilterControls(state) {
 
   rail?.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
+      event.preventDefault();
+      apply?.click();
+    }
+  });
+}
+
+function syncExplorerControls(state) {
+  if (!state) return;
+  const explorer = { ...DEFAULT_EXPLORER, ...(state.explorer || {}) };
+  const snapshotMode = state.mode === 'snapshot';
+  const values = {
+    metric: explorer.metric,
+    groupBy: explorer.groupBy,
+    granularity: explorer.granularity,
+    limit: clampExplorerLimit(explorer.limit),
+    sessionId: explorer.sessionId || '',
+    toolName: explorer.toolName || '',
+    toolKind: explorer.toolKind || '',
+    tokenType: explorer.tokenType || '',
+    includeOther: explorer.includeOther !== false,
+    includeNonTool: explorer.includeNonTool !== false,
+  };
+
+  for (const [key, value] of Object.entries(values)) {
+    const control = document.querySelector(`[data-explorer-control="${key}"]`);
+    if (!control) continue;
+    if (control.type === 'checkbox') {
+      control.checked = Boolean(value);
+    } else if (document.activeElement !== control) {
+      control.value = String(value);
+    }
+  }
+
+  document
+    .querySelectorAll('#explorer-controls [data-explorer-control], #explorer-apply, #explorer-reset')
+    .forEach((el) => {
+      el.disabled = snapshotMode;
+      if (snapshotMode) {
+        el.setAttribute('title', getShellCopy('shell.explorer.snapshotDisabled'));
+      } else {
+        el.removeAttribute('title');
+      }
+    });
+}
+
+function currentExplorerInputs() {
+  const valueFor = (key) => document.querySelector(`[data-explorer-control="${key}"]`)?.value?.trim() || '';
+  return {
+    granularity: valueFor('granularity') || DEFAULT_EXPLORER.granularity,
+    metric: valueFor('metric') || DEFAULT_EXPLORER.metric,
+    groupBy: valueFor('groupBy') || DEFAULT_EXPLORER.groupBy,
+    sessionId: valueFor('sessionId'),
+    toolName: valueFor('toolName'),
+    toolKind: valueFor('toolKind'),
+    tokenType: valueFor('tokenType'),
+    limit: clampExplorerLimit(valueFor('limit')),
+    includeOther: document.querySelector('[data-explorer-control="includeOther"]')?.checked !== false,
+    includeNonTool: document.querySelector('[data-explorer-control="includeNonTool"]')?.checked !== false,
+  };
+}
+
+async function reloadExplorer(state) {
+  if (state.mode === 'snapshot') return state.rawData?.explorer;
+  try {
+    const explorer = await loadExplorer(state);
+    state.rawData = { ...(state.rawData || {}), explorer };
+    syncUrlFromState(state);
+    renderDashboard(state.rawData);
+    return explorer;
+  } catch (error) {
+    logger.error('Explorer 加载失败', error);
+    const explorer = degradedExplorerPayload(error);
+    state.rawData = { ...(state.rawData || {}), explorer };
+    renderDashboard(state.rawData);
+    return explorer;
+  }
+}
+
+function setupExplorerControls(state) {
+  syncExplorerControls(state);
+  const controls = document.getElementById('explorer-controls');
+  const apply = document.getElementById('explorer-apply');
+  const reset = document.getElementById('explorer-reset');
+
+  if (!controls || state.mode === 'snapshot') {
+    return;
+  }
+
+  apply?.addEventListener('click', async () => {
+    state.explorer = currentExplorerInputs();
+    await reloadExplorer(state);
+  });
+
+  reset?.addEventListener('click', async () => {
+    state.explorer = { ...DEFAULT_EXPLORER };
+    syncExplorerControls(state);
+    await reloadExplorer(state);
+  });
+
+  controls.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.target.closest('button')) {
       event.preventDefault();
       apply?.click();
     }

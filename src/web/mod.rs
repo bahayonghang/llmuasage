@@ -18,8 +18,9 @@ use crate::{
     error::{LlmusageError, Result as LlmusageResult},
     models::SourceKind,
     query::{
-        ActivityPayload, BehaviorSupport, Dashboard, LogsQuery, ModelComparePayload,
-        OptimizePayload, QueryFilter, ToolsPayload,
+        ActivityPayload, BehaviorSupport, Dashboard, ExplorerDimension, ExplorerFilters,
+        ExplorerGranularity, ExplorerMetric, ExplorerQuery, ExplorerTokenType, LogsQuery,
+        ModelComparePayload, OptimizePayload, QueryFilter, ToolsPayload,
     },
     store::Store,
     sync::{JobRegistry, SyncOptions},
@@ -68,6 +69,7 @@ pub async fn serve(store: Store, preferred_port: Option<u16>) -> Result<SocketAd
         .route("/api/costs", get(api_costs))
         .route("/api/activity", get(api_activity))
         .route("/api/tools", get(api_tools))
+        .route("/api/explorer", get(api_explorer))
         .route("/api/optimize", get(api_optimize))
         .route("/api/compare/models", get(api_compare_models))
         .route("/api/compare", get(api_compare))
@@ -266,6 +268,34 @@ async fn api_tools(
     api_json_async(
         "/api/tools",
         load_behavior_api(state, move |d| d.tool_breakdown(&filter), degraded_tools),
+    )
+    .await
+}
+
+async fn api_explorer(
+    State(state): State<WebState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let query = match explorer_query_from_params(&params) {
+        Ok(query) => query,
+        Err(detail) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": {
+                        "code": "invalid_query",
+                        "message": "Explorer 查询参数无效",
+                        "detail": detail,
+                        "endpoint": "/api/explorer",
+                    }
+                })),
+            )
+                .into_response();
+        }
+    };
+    api_json_async(
+        "/api/explorer",
+        load_via_dashboard(state, move |dashboard| dashboard.explorer(&query)),
     )
     .await
 }
@@ -615,15 +645,24 @@ async fn load_dashboard_snapshot_resilient(
         move |dashboard| dashboard.optimize(&optimize_filter),
         degraded_optimize,
     );
+    let explorer_filter = filter.clone();
+    let explorer = load_via_dashboard(state.clone(), move |dashboard| {
+        dashboard.explorer(&ExplorerQuery {
+            filter: explorer_filter,
+            ..Default::default()
+        })
+    });
     let compare = load_behavior_api(
         state,
         move |dashboard| dashboard.model_compare(&filter, None, None),
         degraded_compare,
     );
-    let (activity, tools, optimize, compare) = tokio::join!(activity, tools, optimize, compare);
+    let (activity, tools, optimize, explorer, compare) =
+        tokio::join!(activity, tools, optimize, explorer, compare);
     let activity = activity?;
     let tools = tools?;
     let optimize = optimize?;
+    let explorer = explorer?;
     let compare = compare?;
 
     Ok(json!({
@@ -639,6 +678,7 @@ async fn load_dashboard_snapshot_resilient(
         "activity": activity,
         "tools": tools,
         "optimize": optimize,
+        "explorer": explorer,
         "compare": compare,
         "health": core.health,
         "diagnostics": core.diagnostics,
@@ -717,6 +757,58 @@ fn dashboard_filter_from_params_without_window(params: &HashMap<String, String>)
             .or_else(|| query_string(params, "project")),
         timezone: query_timezone(params.get("timezone").or_else(|| params.get("tz"))),
     }
+}
+
+fn explorer_query_from_params(
+    params: &HashMap<String, String>,
+) -> std::result::Result<ExplorerQuery, String> {
+    let filter = dashboard_filter_from_params(params);
+    let granularity = match params.get("granularity").map(String::as_str) {
+        Some(raw) => ExplorerGranularity::parse(raw)
+            .ok_or_else(|| format!("unsupported granularity: {raw}"))?,
+        None => ExplorerGranularity::Day,
+    };
+    let metric = match params.get("metric").map(String::as_str) {
+        Some(raw) => {
+            ExplorerMetric::parse(raw).ok_or_else(|| format!("unsupported metric: {raw}"))?
+        }
+        None => ExplorerMetric::AttributedCostUsd,
+    };
+    let group_by = match params.get("group_by").map(String::as_str) {
+        Some(raw) => {
+            ExplorerDimension::parse(raw).ok_or_else(|| format!("unsupported group_by: {raw}"))?
+        }
+        None => ExplorerDimension::Source,
+    };
+    let token_type = match params.get("token_type").map(String::as_str) {
+        Some(raw) => Some(
+            ExplorerTokenType::parse(raw)
+                .ok_or_else(|| format!("unsupported token_type: {raw}"))?,
+        ),
+        None => None,
+    };
+    let limit = params
+        .get("limit")
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .unwrap_or(8);
+
+    Ok(ExplorerQuery {
+        filter,
+        granularity,
+        metric,
+        group_by,
+        filters: ExplorerFilters {
+            session_id: query_string(params, "session_id")
+                .or_else(|| query_string(params, "session")),
+            tool_name: query_string(params, "tool_name").or_else(|| query_string(params, "tool")),
+            tool_kind: query_string(params, "tool_kind"),
+            is_tool: params.get("is_tool").map(|raw| parse_bool_query(Some(raw))),
+            token_type,
+        },
+        limit,
+        include_other: !params.contains_key("include_other")
+            || parse_bool_query(params.get("include_other")),
+    })
 }
 
 fn query_string(params: &HashMap<String, String>, key: &str) -> Option<String> {
@@ -1076,6 +1168,7 @@ mod tests {
                 "render/sources.js",
                 "render/projects.js",
                 "render/behavior.js",
+                "render/explorer.js",
                 "render/costs.js",
                 "render/insights.js",
                 "render/charts.js",
@@ -1249,9 +1342,14 @@ mod tests {
             "data-i18n=\"shell.nav.item.usage\"",
             "data-i18n=\"shell.nav.item.trend\"",
             "data-i18n=\"shell.nav.item.behavior\"",
+            "data-i18n=\"shell.nav.item.explorer\"",
             "data-i18n=\"shell.nav.item.cost\"",
             "data-i18n=\"shell.behavior.optimize.title\"",
             "data-i18n=\"shell.behavior.compare.title\"",
+            "data-i18n=\"shell.explorer.title\"",
+            "data-i18n=\"shell.explorer.metric\"",
+            "data-i18n=\"shell.explorer.groupBy\"",
+            "data-i18n=\"shell.explorer.apply\"",
             "data-i18n=\"shell.btn.export\"",
             "data-i18n=\"shell.btn.sync\"",
             "data-i18n=\"shell.filters.range\"",
@@ -1339,6 +1437,8 @@ mod tests {
         assert!(app_js.contains("setupLocaleToggle"));
         assert!(app_js.contains("setupSyncJob(state)"));
         assert!(app_js.contains("setupAutoRefresh(state)"));
+        assert!(app_js.contains("setupExplorerControls(state)"));
+        assert!(app_js.contains("renderExplorer(context, dashboardState)"));
         assert!(app_js.contains("renderInsights(context)"));
         assert!(app_js.contains("initTheme()"));
         assert!(app_js.contains("applyDomI18n(document)"));
@@ -1396,6 +1496,7 @@ mod tests {
         for marker in [
             "setupNavigation()",
             "setupFilterControls(state)",
+            "setupExplorerControls(state)",
             "setupPanelToggles(state)",
             "setupSyncJob(state)",
             "setupThemeToggle()",
@@ -1418,8 +1519,65 @@ mod tests {
         assert!(fetch_js.contains("loadOptionalSection(state, 'activity'"));
         assert!(fetch_js.contains("loadOptionalSection(state, 'tools'"));
         assert!(fetch_js.contains("loadOptionalSection(state, 'optimize'"));
+        assert!(fetch_js.contains("loadOptionalExplorer(state)"));
         assert!(fetch_js.contains("loadOptionalSection(state, 'compare'"));
         assert!(fetch_js.contains("level: 'degraded'"));
+    }
+
+    #[test]
+    fn dashboard_assets_wire_explorer_workbench_without_frontend_pivoting() {
+        let app_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "app.js")
+            .expect("app.js asset")
+            .body;
+        let fetch_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "data/fetch.js")
+            .expect("fetch.js asset")
+            .body;
+        let derive_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "data/derive.js")
+            .expect("derive.js asset")
+            .body;
+        let explorer_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "render/explorer.js")
+            .expect("render/explorer.js asset")
+            .body;
+        let copy_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "copy.js")
+            .expect("copy.js asset")
+            .body;
+        let components_css = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "components.css")
+            .expect("components.css asset")
+            .body;
+
+        assert!(app_js.contains("DEFAULT_EXPLORER"));
+        assert!(app_js.contains("currentExplorerInputs()"));
+        assert!(app_js.contains("await loadExplorer(state)"));
+        assert!(app_js.contains("shell.explorer.snapshotDisabled"));
+        assert!(fetch_js.contains("export function buildExplorerQuery"));
+        assert!(fetch_js.contains("export async function loadExplorer"));
+        assert!(fetch_js.contains("snapshot?.explorer"));
+        assert!(fetch_js.contains("loadJson(`/api/explorer${buildExplorerQuery(state)}`)"));
+        assert!(fetch_js.contains("return await loadExplorer(state);"));
+        assert!(!fetch_js.contains("loadOptionalSection(state, 'explorer'"));
+        assert!(derive_js.contains("const explorerPayload = normalizeExplorer(explorer);"));
+        assert!(derive_js.contains("explorer: explorerPayload"));
+        assert!(explorer_js.contains("renderExplorer"));
+        assert!(explorer_js.contains("context?.panels?.explorer"));
+        assert!(
+            !explorer_js.contains("fetch("),
+            "Explorer renderer must render backend payloads, not fetch or pivot raw data"
+        );
+        assert!(copy_js.contains("shell.explorer.includeNonTool"));
+        assert!(components_css.contains(".explorer-controls"));
+        assert!(components_css.contains(".explorer-results-grid"));
     }
 
     #[test]
@@ -1783,12 +1941,31 @@ mod tests {
                 session_id, session_label, source_path_hash, created_at,
                 cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source, pricing_rate
             )
-            VALUES ('codex:behavior:web', 'codex', 'gpt-5',
+            VALUES ('codex:behavior:web:multi-tool', 'codex', 'gpt-5',
                     '2026-05-01T00:00:00Z', '2026-05-01T00:00:00Z',
                     100, 0, 0, 50, 0, 150,
                     'project-a', 'Project A', NULL, 'path-a',
                     'session-a', NULL, 'path-a', '2026-05-01T00:00:00Z',
-                    0.5, 0.5, 'static', 'static-v1', NULL)
+                    1.0, 1.0, 'static', 'static-v1', NULL)
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_event(
+                event_key, source, model, event_at, hour_start,
+                input_tokens, cache_creation_tokens, cache_read_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                project_hash, project_label, project_ref, path_hash,
+                session_id, session_label, source_path_hash, created_at,
+                cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source, pricing_rate
+            )
+            VALUES ('codex:behavior:web:non-tool', 'codex', 'gpt-5',
+                    '2026-05-02T01:00:00Z', '2026-05-02T01:00:00Z',
+                    80, 0, 0, 20, 0, 100,
+                    'project-a', 'Project A', NULL, 'path-a',
+                    'session-a', NULL, 'path-a', '2026-05-02T01:00:00Z',
+                    0.25, 0.25, 'static', 'static-v1', NULL)
             "#,
             [],
         )?;
@@ -1802,8 +1979,8 @@ mod tests {
                 event_count, updated_at
             )
             VALUES ('codex', 'gpt-5', '2026-05-01T00:00:00Z', 'project-a', 'Project A', NULL,
-                    100, 0, 0, 50, 0, 150, 0.5, 0.5, 'static', 'static-v1',
-                    1, '2026-05-01T00:00:00Z')
+                    180, 0, 0, 70, 0, 250, 1.25, 1.25, 'static', 'static-v1',
+                    2, '2026-05-01T00:00:00Z')
             "#,
             [],
         )?;
@@ -1815,9 +1992,23 @@ mod tests {
                 one_shot, call_count, input_tokens, cache_read_tokens,
                 cache_creation_tokens, output_tokens, reasoning_output_tokens,
                 total_tokens, created_at
-            ) VALUES ('turn:codex:behavior:web', 'codex', 'session-a', 'path-a',
+            ) VALUES ('turn:codex:behavior:web:multi-tool', 'codex', 'session-a', 'path-a',
                 'project-a', 'gpt-5', '2026-05-01T00:00:00Z', 'coding',
                 1, 0, 1, 1, 100, 0, 0, 50, 0, 150, '2026-05-01T00:00:00Z')
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_turn(
+                turn_key, source, session_id, source_path_hash, project_hash,
+                primary_model, started_at, category, has_edits, retries,
+                one_shot, call_count, input_tokens, cache_read_tokens,
+                cache_creation_tokens, output_tokens, reasoning_output_tokens,
+                total_tokens, created_at
+            ) VALUES ('turn:codex:behavior:web:non-tool', 'codex', 'session-a', 'path-a',
+                'project-a', 'gpt-5', '2026-05-01T01:00:00Z', 'coding',
+                0, 0, 0, 1, 80, 0, 0, 20, 0, 100, '2026-05-01T01:00:00Z')
             "#,
             [],
         )?;
@@ -1827,10 +2018,23 @@ mod tests {
                 tool_call_key, turn_key, event_key, source, session_id,
                 source_path_hash, project_hash, model, occurred_at, tool_name,
                 tool_kind, mcp_server, mcp_tool, input_fingerprint, safe_preview, created_at
-            ) VALUES ('tool:codex:behavior:web', 'turn:codex:behavior:web',
-                'codex:behavior:web', 'codex', 'session-a', 'path-a',
+            ) VALUES ('tool:codex:behavior:web:edit', 'turn:codex:behavior:web:multi-tool',
+                'codex:behavior:web:multi-tool', 'codex', 'session-a', 'path-a',
                 'project-a', 'gpt-5', '2026-05-01T00:00:00Z', 'Edit', 'edit',
                 NULL, NULL, 'fp-edit', 'Edit src/web/mod.rs', '2026-05-01T00:00:00Z')
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_tool_call(
+                tool_call_key, turn_key, event_key, source, session_id,
+                source_path_hash, project_hash, model, occurred_at, tool_name,
+                tool_kind, mcp_server, mcp_tool, input_fingerprint, safe_preview, created_at
+            ) VALUES ('tool:codex:behavior:web:read', 'turn:codex:behavior:web:multi-tool',
+                'codex:behavior:web:multi-tool', 'codex', 'session-a', 'path-a',
+                'project-a', 'gpt-5', '2026-05-01T00:00:00Z', 'Read', 'read',
+                NULL, NULL, 'fp-read', 'Read src/web/mod.rs', '2026-05-01T00:00:00Z')
             "#,
             [],
         )?;
@@ -1850,14 +2054,175 @@ mod tests {
             route_json(addr, "GET", &format!("/api/tools?{filter}"), None).await?;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(tools["support"]["supported"], true);
-        assert_eq!(tools["breakdown"][0]["tool_kind"], "edit");
-        assert_eq!(tools["breakdown"][0]["call_share"], 1.0);
+        let tool_rows = tools["breakdown"].as_array().expect("tool rows");
+        assert_eq!(tool_rows.len(), 3);
+        let total_cost: f64 = tool_rows
+            .iter()
+            .map(|row| row["estimated_cost_usd"].as_f64().unwrap_or_default())
+            .sum();
+        assert!((total_cost - 1.25).abs() < f64::EPSILON);
+        let edit = tool_rows
+            .iter()
+            .find(|row| row["tool_name"] == "Edit")
+            .expect("edit row");
+        assert_eq!(edit["tool_kind"], "edit");
+        assert_eq!(edit["call_share"], 0.5);
+        assert_eq!(edit["estimated_cost_usd"], 0.5);
+        let non_tool = tool_rows
+            .iter()
+            .find(|row| row["tool_name"] == "(non-tool)")
+            .expect("non-tool row");
+        assert_eq!(non_tool["tool_kind"], "(non-tool)");
+        assert_eq!(non_tool["calls"], 0);
+        assert_eq!(non_tool["turn_count"], 1);
+        assert_eq!(non_tool["estimated_cost_usd"], 0.25);
 
         let (status, dashboard) =
             route_json(addr, "GET", &format!("/api/dashboard?{filter}"), None).await?;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(dashboard["activity"]["breakdown"][0]["category"], "coding");
-        assert_eq!(dashboard["tools"]["breakdown"][0]["tool_name"], "Edit");
+        assert_eq!(
+            dashboard["activity"]["breakdown"][0]["estimated_cost_usd"],
+            1.25
+        );
+        assert_eq!(dashboard["tools"]["breakdown"].as_array().unwrap().len(), 3);
+
+        let day_two_filter = "source=codex&model=gpt-5&since=2026-05-02&until=2026-05-02";
+        let (status, tools_day_two) =
+            route_json(addr, "GET", &format!("/api/tools?{day_two_filter}"), None).await?;
+        assert_eq!(status, StatusCode::OK);
+        let day_two_rows = tools_day_two["breakdown"].as_array().expect("day two rows");
+        assert_eq!(day_two_rows.len(), 1);
+        assert_eq!(day_two_rows[0]["tool_name"], "(non-tool)");
+        assert_eq!(day_two_rows[0]["estimated_cost_usd"], 0.25);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn explorer_api_returns_grouped_rows_and_series() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let conn = store.open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_event(
+                event_key, source, model, event_at, hour_start,
+                input_tokens, cache_creation_tokens, cache_read_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                project_hash, project_label, project_ref, path_hash,
+                session_id, session_label, source_path_hash, created_at,
+                cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source, pricing_rate
+            )
+            VALUES ('codex:explorer:web:a', 'codex', 'gpt-5',
+                    '2026-05-01T00:00:00Z', '2026-05-01T00:00:00Z',
+                    120, 0, 0, 60, 0, 180,
+                    'project-a', 'Project A', NULL, 'path-a',
+                    'session-a', 'Session A', 'path-a', '2026-05-01T00:00:00Z',
+                    1.0, 1.0, 'static', 'static-v1', NULL)
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_event(
+                event_key, source, model, event_at, hour_start,
+                input_tokens, cache_creation_tokens, cache_read_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                project_hash, project_label, project_ref, path_hash,
+                session_id, session_label, source_path_hash, created_at,
+                cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source, pricing_rate
+            )
+            VALUES ('codex:explorer:web:b', 'codex', 'gpt-5',
+                    '2026-05-02T00:00:00Z', '2026-05-02T00:00:00Z',
+                    90, 0, 0, 30, 0, 120,
+                    'project-a', 'Project A', NULL, 'path-b',
+                    'session-b', 'Session B', 'path-b', '2026-05-02T00:00:00Z',
+                    0.6, 0.6, 'static', 'static-v1', NULL)
+            "#,
+            [],
+        )?;
+        for (tool_call_key, event_key, session_id, occurred_at, tool_name, tool_kind) in [
+            (
+                "tool:explorer:web:read:a",
+                "codex:explorer:web:a",
+                "session-a",
+                "2026-05-01T00:00:00Z",
+                "Read",
+                "read",
+            ),
+            (
+                "tool:explorer:web:edit:a",
+                "codex:explorer:web:a",
+                "session-a",
+                "2026-05-01T00:00:00Z",
+                "Edit",
+                "edit",
+            ),
+            (
+                "tool:explorer:web:read:b",
+                "codex:explorer:web:b",
+                "session-b",
+                "2026-05-02T00:00:00Z",
+                "Read",
+                "read",
+            ),
+        ] {
+            conn.execute(
+                r#"
+                INSERT INTO usage_tool_call(
+                    tool_call_key, turn_key, event_key, source, session_id,
+                    source_path_hash, project_hash, model, occurred_at, tool_name,
+                    tool_kind, mcp_server, mcp_tool, input_fingerprint, safe_preview, created_at
+                ) VALUES (?1, ?2, ?3, 'codex', ?4, ?4, 'project-a', 'gpt-5',
+                    ?5, ?6, ?7, NULL, NULL, ?1, ?6, ?5)
+                "#,
+                rusqlite::params![
+                    tool_call_key,
+                    format!("turn:{event_key}"),
+                    event_key,
+                    session_id,
+                    occurred_at,
+                    tool_name,
+                    tool_kind
+                ],
+            )?;
+        }
+        drop(conn);
+
+        let addr = serve(store, Some(0)).await?;
+        let (status, payload) = route_json(
+            addr,
+            "GET",
+            "/api/explorer?source=codex&metric=attributed_cost_usd&group_by=session&granularity=day&tool_name=Read&timezone=UTC",
+            None,
+        )
+        .await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(payload["support"]["level"], "normalized");
+        assert_eq!(payload["metric"], "attributed_cost_usd");
+        assert_eq!(payload["group_by"], "session");
+        assert_eq!(payload["totals"]["value"], 1.1);
+        let rows = payload["rows"].as_array().expect("rows");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["key"], "session-b");
+        assert_eq!(rows[0]["value"], 0.6);
+        assert_eq!(rows[1]["key"], "session-a");
+        assert_eq!(rows[1]["value"], 0.5);
+        assert_eq!(payload["series"].as_array().expect("series").len(), 2);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn explorer_api_rejects_invalid_metric_values() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let addr = serve(store, Some(0)).await?;
+        let (status, payload) = route_json(addr, "GET", "/api/explorer?metric=bogus", None).await?;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(payload["error"]["code"], "invalid_query");
+        assert!(
+            payload["error"]["detail"]
+                .as_str()
+                .is_some_and(|detail| detail.contains("unsupported metric"))
+        );
         Ok(())
     }
 

@@ -66,6 +66,36 @@ export function buildFilterQuery(state, options = {}) {
   return query ? `?${query}` : '';
 }
 
+export function buildExplorerQuery(state) {
+  const params = new URLSearchParams(buildFilterQuery(state, { includeWindow: false }).slice(1));
+  const explorer = state?.explorer || {};
+
+  params.set('granularity', explorer.granularity || 'day');
+  params.set('metric', explorer.metric || 'attributed_cost_usd');
+  params.set('group_by', explorer.groupBy || 'source');
+  params.set('limit', String(explorer.limit || 8));
+  params.set('include_other', explorer.includeOther === false ? 'false' : 'true');
+
+  if (explorer.includeNonTool === false) {
+    params.set('is_tool', 'true');
+  }
+  if (explorer.sessionId) {
+    params.set('session_id', explorer.sessionId);
+  }
+  if (explorer.toolName) {
+    params.set('tool_name', explorer.toolName);
+  }
+  if (explorer.toolKind) {
+    params.set('tool_kind', explorer.toolKind);
+  }
+  if (explorer.tokenType) {
+    params.set('token_type', explorer.tokenType);
+  }
+
+  const query = params.toString();
+  return query ? `?${query}` : '';
+}
+
 function snapshotTrendRows(snapshot, windowName) {
   return snapshot?.[`${windowName}_trends`] || [];
 }
@@ -83,6 +113,7 @@ export async function loadDashboardSnapshot(state) {
       activity: snapshot?.activity,
       tools: snapshot?.tools,
       optimize: snapshot?.optimize,
+      explorer: snapshot?.explorer,
       compare: snapshot?.compare,
       health: snapshot?.health,
       diagnostics: snapshot?.diagnostics,
@@ -94,7 +125,7 @@ export async function loadDashboardSnapshot(state) {
     snapshot = await loadJson(`/api/dashboard${buildFilterQuery(state)}`);
   } catch (error) {
     logger.warn('/api/dashboard 不可用，回退到旧分段 API', error);
-    const [overview, trends, models, sources, projects, costs, activity, tools, optimize, compare, health, diagnostics] = await Promise.all([
+    const [overview, trends, models, sources, projects, costs, activity, tools, optimize, explorer, compare, health, diagnostics] = await Promise.all([
       loadSection(state, 'overview', '/api/overview'),
       loadTrendWindow(state, state.trendWindow),
       loadSection(state, 'models', '/api/models'),
@@ -104,11 +135,12 @@ export async function loadDashboardSnapshot(state) {
       loadOptionalSection(state, 'activity', '/api/activity', emptyActivity),
       loadOptionalSection(state, 'tools', '/api/tools', emptyTools),
       loadOptionalSection(state, 'optimize', '/api/optimize', emptyOptimize),
+      loadOptionalExplorer(state),
       loadOptionalSection(state, 'compare', '/api/compare', emptyCompare),
       loadSection(state, 'health', '/api/health'),
       loadSection(state, 'diagnostics', '/api/diagnostics'),
     ]);
-    return { overview, trends, models, sources, projects, costs, activity, tools, optimize, compare, health, diagnostics };
+    return { overview, trends, models, sources, projects, costs, activity, tools, optimize, explorer, compare, health, diagnostics };
   }
   return {
     overview: snapshot?.overview,
@@ -120,6 +152,7 @@ export async function loadDashboardSnapshot(state) {
     activity: snapshot?.activity,
     tools: snapshot?.tools,
     optimize: snapshot?.optimize,
+    explorer: snapshot?.explorer,
     compare: snapshot?.compare,
     health: snapshot?.health,
     diagnostics: snapshot?.diagnostics,
@@ -143,12 +176,29 @@ async function loadOptionalSection(state, section, path, fallback) {
   }
 }
 
+async function loadOptionalExplorer(state) {
+  try {
+    return await loadExplorer(state);
+  } catch (error) {
+    logger.warn('/api/explorer degraded', error);
+    return fallbackFor(error, emptyExplorer);
+  }
+}
+
 export async function loadTrendWindow(state, windowName) {
   if (state.mode === 'snapshot') {
     const snapshot = await ensureSnapshot(state);
     return snapshot?.[`${windowName}_trends`];
   }
   return loadJson(`/api/trends${buildFilterQuery({ ...state, trendWindow: windowName })}`);
+}
+
+export async function loadExplorer(state) {
+  if (state.mode === 'snapshot') {
+    const snapshot = await ensureSnapshot(state);
+    return snapshot?.explorer;
+  }
+  return loadJson(`/api/explorer${buildExplorerQuery(state)}`);
 }
 
 function degradedSupport(error) {
@@ -179,6 +229,26 @@ function emptyOptimize(error) {
     estimated_savings_tokens: 0,
     estimated_savings_usd: 0,
     findings: [],
+  };
+}
+
+function emptyExplorer(error) {
+  return {
+    support: {
+      supported: false,
+      level: 'degraded',
+      reason: error?.message || 'Explorer query is degraded; fixed dashboard panels are still available.',
+      strategy: 'unknown',
+    },
+    warning: error?.message || 'Explorer query is degraded.',
+    granularity: 'day',
+    metric: 'attributed_cost_usd',
+    group_by: 'source',
+    limit: 8,
+    include_other: true,
+    totals: { value: 0 },
+    rows: [],
+    series: [],
   };
 }
 

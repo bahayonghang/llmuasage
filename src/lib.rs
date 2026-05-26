@@ -51,9 +51,11 @@ pub use api::error::{LlmusageError, Result};
 pub use query::{
     ActivityBreakdown, ActivityPayload, BehaviorSupport, CategoryCompareRow, CompareMetric,
     CompareModelCandidate, DailyTrendPoint, Dashboard, DashboardCoreSnapshot, DiagnosticsPayload,
-    HomeOverviewPayload, LogRecord, LogsPage, LogsQuery, ModelBreakdown, ModelComparePayload,
-    ModelCompareStats, OptimizeFinding, OptimizePayload, OverviewPayload, ProjectBreakdown,
-    QueryFilter, ReportTimezone, SourceDiagnostics, ToolBreakdown, ToolsPayload,
+    ExplorerDimension, ExplorerFilters, ExplorerGranularity, ExplorerMetric, ExplorerPayload,
+    ExplorerQuery, ExplorerRow, ExplorerSeriesPoint, ExplorerSupport, ExplorerTokenType,
+    ExplorerTotals, HomeOverviewPayload, LogRecord, LogsPage, LogsQuery, ModelBreakdown,
+    ModelComparePayload, ModelCompareStats, OptimizeFinding, OptimizePayload, OverviewPayload,
+    ProjectBreakdown, QueryFilter, ReportTimezone, SourceDiagnostics, ToolBreakdown, ToolsPayload,
 };
 pub use runtime::paths::AppPaths;
 
