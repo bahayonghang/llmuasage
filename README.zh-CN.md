@@ -64,6 +64,8 @@ llmusage export html --out .\llmusage-report
 
 报表命令只是只读 SQLite 查询；如果数据库过旧，先运行 `llmusage sync`。
 
+浏览器 Dashboard 包含行为面板和本地 Cost Explorer workbench，可按时间 × 指标 × 分组做切片分析，并支持工具/非工具成本归因与离线快照导出。
+
 ## 安全默认值
 
 - 不需要账号登录、device token、上传队列或远端用量 API。

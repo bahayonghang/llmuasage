@@ -20,7 +20,10 @@ Path resolution for CLI entrypoints is `--home <PATH>` first, then `LLMUSAGE_HOM
 ## Dashboard queries
 
 ```rust
-use llmusage::{Dashboard, QueryFilter, Result, Store};
+use llmusage::{
+    store::Store, Dashboard, ExplorerDimension, ExplorerFilters, ExplorerGranularity,
+    ExplorerMetric, ExplorerQuery, QueryFilter, Result,
+};
 
 fn load_dashboard(store: &Store) -> Result<()> {
     let filter = QueryFilter::default();
@@ -30,11 +33,25 @@ fn load_dashboard(store: &Store) -> Result<()> {
     let _tools = dashboard.tool_breakdown(&filter)?;
     let _optimize = dashboard.optimize(&filter)?;
     let _compare = dashboard.model_compare(&filter, None, None)?;
+    let _explorer = dashboard.explorer(&ExplorerQuery {
+        filter,
+        granularity: ExplorerGranularity::Day,
+        metric: ExplorerMetric::AttributedCostUsd,
+        group_by: ExplorerDimension::Session,
+        filters: ExplorerFilters {
+            tool_name: Some("Read".to_string()),
+            ..Default::default()
+        },
+        limit: 8,
+        include_other: true,
+    })?;
     Ok(())
 }
 ```
 
-`Dashboard::snapshot(&QueryFilter)` is the stable seam used by the web dashboard and static export. Behavior queries use normalized `usage_turn` and `usage_tool_call` facts and may report explicit degraded/no-data support states.
+`Dashboard::snapshot(&QueryFilter)` is the stable seam used by the web dashboard and static export. It includes the fixed dashboard sections plus the default Explorer payload. Use `Dashboard::explorer(&ExplorerQuery)` for custom Cost Explorer queries such as metric/group-by changes, Top N/Other, session filters, tool filters, and token component filters.
+
+Behavior and Explorer queries use normalized `usage_turn` and `usage_tool_call` facts when a chosen metric or dimension needs them. They may report explicit `normalized`, `no_data`, `degraded`, or `unsupported` support states instead of pretending missing facts are zero.
 
 ## In-process sync jobs
 

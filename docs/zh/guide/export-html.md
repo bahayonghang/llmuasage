@@ -18,11 +18,11 @@ llmusage export html --out .\llmusage-report
 - `snapshot.json`
 - `assets/*`
 
-该 bundle 复用 `llmusage serve` 的 Dashboard shell，但从 `snapshot.json` 加载数据，而不是访问 live HTTP endpoints。
+该 bundle 复用 `llmusage serve` 的 Dashboard shell，但从 `snapshot.json` 加载数据，而不是访问 live HTTP endpoints。`snapshot.json` 包含固定 Dashboard 区块和默认 Cost Explorer payload。
 
 ## 快照行为
 
-静态导出保留导出时的筛选和数据。实时 sync job、自动刷新等 live-only 控件会被禁用并显示说明。
+静态导出保留导出时的筛选和数据。实时 sync job、自动刷新和自定义 Explorer 重新查询等 live-only 控件会被禁用并显示说明。
 
 ## 推荐流程
 

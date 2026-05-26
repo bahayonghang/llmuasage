@@ -36,14 +36,16 @@
 
 报表命令、TUI、Web Dashboard 和 HTML export 都通过 query 层读取本地 SQLite。
 
-`Dashboard::snapshot(&QueryFilter)` 是主要 Dashboard seam。`llmusage serve` 优先使用 `/api/dashboard`，用一个核心快照加载 overview、trend series、model/source/project/cost 排行、health 和 diagnostics。Activity、Tools、Optimize、Compare 是行为区块；当来源事实不可用或查询超时时，可以独立降级。
+`Dashboard::snapshot(&QueryFilter)` 是主要 Dashboard seam。`llmusage serve` 优先使用 `/api/dashboard`，用一个核心快照加载 overview、trend series、model/source/project/cost 排行、health、diagnostics 和默认 Explorer payload。Activity、Tools、Optimize、Explorer、Compare 是行为/查询区块；当来源事实不可用或查询超时时，可以独立降级。
+
+自定义 Cost Explorer 查询使用 `Dashboard::explorer(&ExplorerQuery)` 和 `/api/explorer` endpoint。Explorer 叠加在固定 Dashboard snapshot 之上：它支持时间粒度、指标、分组、Top N/Other、session/tool/token 过滤，但仍返回后端聚合后的 rows 和 series，不让浏览器透视原始事件。查询层会根据所选指标和维度选择 event、turn 或 tool-attribution 策略，每个 payload 都携带 `normalized`、`no_data`、`degraded` 或 `unsupported` 等 support metadata。
 
 ## 行为事实
 
 0.6.x line 增加标准化行为表：
 
-- `usage_turn`：Activity、Optimize、Compare 使用的 turn-level facts。
-- `usage_tool_call`：Tools、Optimize、Compare 使用的 bounded tool/action facts。
+- `usage_turn`：Activity、Optimize、Compare 和 turn-backed Explorer 查询使用的 turn-level facts。
+- `usage_tool_call`：Tools、Optimize、Compare 和 tool-attribution Explorer 查询使用的 bounded tool/action facts。
 
 隐私边界：行为事实不得保存完整 prompt、完整 assistant 文本或文件内容。`safe_preview` 只能是有界展示文本。
 

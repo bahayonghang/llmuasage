@@ -20,7 +20,10 @@ CLI 入口的路径解析顺序是 `--home <PATH>`、`LLMUSAGE_HOME`、`~/.llmus
 ## Dashboard 查询
 
 ```rust
-use llmusage::{Dashboard, QueryFilter, Result, Store};
+use llmusage::{
+    store::Store, Dashboard, ExplorerDimension, ExplorerFilters, ExplorerGranularity,
+    ExplorerMetric, ExplorerQuery, QueryFilter, Result,
+};
 
 fn load_dashboard(store: &Store) -> Result<()> {
     let filter = QueryFilter::default();
@@ -30,11 +33,25 @@ fn load_dashboard(store: &Store) -> Result<()> {
     let _tools = dashboard.tool_breakdown(&filter)?;
     let _optimize = dashboard.optimize(&filter)?;
     let _compare = dashboard.model_compare(&filter, None, None)?;
+    let _explorer = dashboard.explorer(&ExplorerQuery {
+        filter,
+        granularity: ExplorerGranularity::Day,
+        metric: ExplorerMetric::AttributedCostUsd,
+        group_by: ExplorerDimension::Session,
+        filters: ExplorerFilters {
+            tool_name: Some("Read".to_string()),
+            ..Default::default()
+        },
+        limit: 8,
+        include_other: true,
+    })?;
     Ok(())
 }
 ```
 
-`Dashboard::snapshot(&QueryFilter)` 是 Web Dashboard 和静态导出的稳定 seam。行为查询使用 `usage_turn` 与 `usage_tool_call`，并可能返回显式 degraded/no-data 支持状态。
+`Dashboard::snapshot(&QueryFilter)` 是 Web Dashboard 和静态导出的稳定 seam。它包含固定 Dashboard 区块和默认 Explorer payload。自定义 Cost Explorer 查询使用 `Dashboard::explorer(&ExplorerQuery)`，用于切换 metric/group-by、Top N/Other、session 筛选、tool 筛选和 token component 筛选。
+
+行为查询和 Explorer 在所选指标或维度需要时会使用标准化 `usage_turn` 与 `usage_tool_call` facts。它们会返回显式 `normalized`、`no_data`、`degraded` 或 `unsupported` 支持状态，而不是把缺失事实伪装成 0。
 
 ## 进程内 sync jobs
 

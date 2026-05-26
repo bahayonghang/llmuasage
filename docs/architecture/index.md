@@ -36,14 +36,16 @@ Adding a source means adding a `SourceKind` variant plus a registered `SourcePar
 
 Report commands, TUI, web dashboard, and HTML export all read local SQLite through the query layer.
 
-`Dashboard::snapshot(&QueryFilter)` is the primary dashboard seam. `llmusage serve` prefers `/api/dashboard` so overview, trend series, model/source/project/cost rankings, health, and diagnostics are loaded from one core snapshot. Activity, Tools, Optimize, and Compare are behavior sections that may degrade independently when source facts are unavailable or queries time out.
+`Dashboard::snapshot(&QueryFilter)` is the primary dashboard seam. `llmusage serve` prefers `/api/dashboard` so overview, trend series, model/source/project/cost rankings, health, diagnostics, and the default Explorer payload are loaded from one core snapshot. Activity, Tools, Optimize, Explorer, and Compare are behavior/query sections that may degrade independently when source facts are unavailable or queries time out.
+
+Custom Cost Explorer queries use `Dashboard::explorer(&ExplorerQuery)` and the `/api/explorer` endpoint. Explorer is additive to the fixed dashboard snapshot: it supports time granularity, metric, group-by, Top N/Other, and session/tool/token filters, but it still returns backend-aggregated rows and series rather than asking the browser to pivot raw events. Query execution chooses an event, turn, or tool-attribution strategy based on the selected metric and dimension, and every payload carries support metadata such as `normalized`, `no_data`, `degraded`, or `unsupported`.
 
 ## Behavior facts
 
 The 0.6.x line adds normalized behavior tables:
 
-- `usage_turn`: turn-level facts for Activity, Optimize, and Compare.
-- `usage_tool_call`: bounded tool/action facts for Tools, Optimize, and Compare.
+- `usage_turn`: turn-level facts for Activity, Optimize, Compare, and turn-backed Explorer queries.
+- `usage_tool_call`: bounded tool/action facts for Tools, Optimize, Compare, and tool-attribution Explorer queries.
 
 Privacy boundary: behavior facts must not store full prompts, full assistant text, or file contents. `safe_preview` is bounded display text only.
 

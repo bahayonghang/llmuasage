@@ -64,6 +64,8 @@ llmusage export html --out .\llmusage-report
 
 Report commands are read-only SQLite queries; run `llmusage sync` when the database is stale.
 
+The browser dashboard includes behavior panels and a local Cost Explorer workbench for time × metric × group-by slicing, including tool/non-tool cost attribution and offline snapshot export.
+
 ## Safety defaults
 
 - No account login, device token, upload queue, or remote usage API call.
