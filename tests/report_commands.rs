@@ -1,4 +1,4 @@
-use std::{path::PathBuf, process::Command};
+use std::{fs, path::PathBuf, process::Command};
 
 use anyhow::{Result, bail};
 use chrono::{Duration, Utc};
@@ -575,6 +575,10 @@ fn report_help_and_legacy_help_still_parse() -> Result<()> {
     let fixture = ReportCliFixture::new()?;
     for args in [
         vec!["--help"],
+        vec!["-h"],
+        vec!["help"],
+        vec!["help", "--zh"],
+        vec!["help", "daily"],
         vec!["daily", "--help"],
         vec!["monthly", "--help"],
         vec!["session", "--help"],
@@ -585,9 +589,52 @@ fn report_help_and_legacy_help_still_parse() -> Result<()> {
         let output = fixture.output(&args)?;
         assert!(output.status.success(), "{args:?}: {output:?}");
     }
+
+    for args in [
+        ["--help"].as_slice(),
+        ["-h"].as_slice(),
+        ["help"].as_slice(),
+    ] {
+        let output = fixture.output(args)?;
+        let stdout = String::from_utf8(output.stdout)?;
+        assert!(stdout.contains("┌"), "{args:?}: {stdout}");
+        assert!(stdout.contains("│ Command"), "{args:?}: {stdout}");
+        assert!(stdout.contains("│ Option"), "{args:?}: {stdout}");
+        assert!(stdout.contains("Report options:"), "{args:?}: {stdout}");
+        assert!(stdout.contains("│ Goal"), "{args:?}: {stdout}");
+        assert!(stdout.contains("llmusage help --zh"), "{args:?}: {stdout}");
+        assert!(!stdout.contains("| --- |"), "{args:?}: {stdout}");
+    }
+
+    let zh_help = fixture.output(&["help", "--zh"])?;
+    let zh_help_stdout = String::from_utf8(zh_help.stdout)?;
+    assert!(zh_help_stdout.contains("┌"));
+    assert!(zh_help_stdout.contains("│ 命令"));
+    assert!(zh_help_stdout.contains("全局参数"));
+    assert!(zh_help_stdout.contains("报表参数"));
+    assert!(zh_help_stdout.contains("示例"));
+    assert!(zh_help_stdout.contains("llmusage help daily"));
+
+    let fresh_home = fixture.home.join("fresh-help-home");
+    fs::create_dir_all(&fresh_home)?;
+    let help_home = fresh_home.to_string_lossy().into_owned();
+    let top_help_without_runtime =
+        fixture.output_with_env(&["help"], &[("LLMUSAGE_HOME", &help_home)])?;
+    assert!(top_help_without_runtime.status.success());
+    assert!(
+        !fresh_home.join("llmusage.db").exists(),
+        "top-level help should not initialize the database"
+    );
+
     let daily_help = fixture.output(&["daily", "--help"])?;
     let daily_help_stdout = String::from_utf8(daily_help.stdout)?;
     assert!(daily_help_stdout.contains("last 7 days"));
+    assert!(daily_help_stdout.contains("Usage: llmusage"));
+
+    let legacy_help = fixture.output(&["help", "daily"])?;
+    let legacy_help_stdout = String::from_utf8(legacy_help.stdout)?;
+    assert!(legacy_help_stdout.contains("last 7 days"));
+    assert!(legacy_help_stdout.contains("Usage: llmusage"));
     Ok(())
 }
 

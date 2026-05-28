@@ -64,6 +64,10 @@ use clap::Parser;
 
 pub async fn run() -> AnyhowResult<()> {
     runtime::logging::init_logging()?;
+    if let Some(language) = commands::help::is_top_level_help_request(std::env::args().skip(1)) {
+        print!("{}", commands::help::top_level_help(language));
+        return Ok(());
+    }
     let cli = commands::Cli::parse();
     let app = runtime::app::AppContext::with_cli_home(cli.home.clone())?;
     commands::dispatch(app, cli).await

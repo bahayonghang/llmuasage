@@ -11,6 +11,7 @@ pub mod dash;
 pub mod diagnostics;
 pub mod doctor;
 pub mod export;
+pub mod help;
 pub mod hook_run;
 pub mod init;
 pub mod monthly;
