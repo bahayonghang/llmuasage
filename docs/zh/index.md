@@ -4,7 +4,7 @@ layout: home
 hero:
   name: "llmusage"
   text: "本地优先的 AI CLI 用量分析"
-  tagline: "用 hook、SQLite 和 Rust 追踪 Codex、Claude、OpenCode、Google Antigravity/Gemini，全程不上传。"
+  tagline: "用 hook、SQLite 和 Rust 追踪 Codex、Claude、OpenCode、Google Antigravity，全程不上传。"
   actions:
     - theme: brand
       text: 从指南开始
@@ -47,8 +47,8 @@ features:
 
 ## 当前产品表面
 
-- 版本：`0.6.5`。
-- 来源：Codex、Claude Code、OpenCode、Google Antigravity/Gemini（稳定 id 仍为 `gemini`）。
+- 版本：`0.7.0`。
+- 来源：Codex、Claude Code、OpenCode、Google Antigravity（source id 为 `antigravity`）。
 - 报表命令：`daily`、`monthly`、`session`、`blocks`、`statusline`。
 - 本地界面命令：`dash`、`serve`、`export html`。
 - 安全/运维命令：`status`、`diagnostics`、`doctor`、`uninstall`。

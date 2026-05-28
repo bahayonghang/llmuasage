@@ -37,7 +37,7 @@ pub enum LlmusageError {
     #[error("parse {context}: {source}")]
     Parse {
         /// Short human-facing identifier for what was being parsed
-        /// (e.g. `"pricing snapshot"`, `"gemini session.json"`).
+        /// (e.g. `"pricing snapshot"`, `"antigravity hook payload"`).
         context: &'static str,
         /// Original parse failure cause.
         #[source]
@@ -69,7 +69,7 @@ pub enum LlmusageError {
     /// is for callers that want to bail out rather than silently zero-fill.
     #[error("pricing missing for {source_id}:{model}")]
     PricingMissing {
-        /// Source identifier (`codex` / `claude` / `opencode` / `gemini`).
+        /// Source identifier (`codex` / `claude` / `opencode` / `antigravity`).
         ///
         /// Named `source_id` rather than `source` because thiserror treats a
         /// field literally named `source` as the error chain link.
@@ -156,10 +156,10 @@ mod tests {
     #[test]
     fn pricing_missing_variant_identifies_source_and_model() {
         let err = LlmusageError::PricingMissing {
-            source_id: "gemini".to_string(),
+            source_id: "antigravity".to_string(),
             model: "gemini-2.5-pro".to_string(),
         };
         let rendered = err.to_string();
-        assert!(rendered.contains("gemini:gemini-2.5-pro"));
+        assert!(rendered.contains("antigravity:gemini-2.5-pro"));
     }
 }

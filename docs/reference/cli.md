@@ -1,6 +1,6 @@
 # CLI reference
 
-This page is aligned with `cargo run -- --help`, `cargo run -- serve --help`, and `cargo run -- export html --help` for version `0.6.5`. Top-level help is rendered as a compact table; command-specific help still uses the clap output.
+This page is aligned with `cargo run -- --help`, `cargo run -- serve --help`, and `cargo run -- export html --help` for version `0.7.0`. Top-level help is rendered as a compact table; command-specific help still uses the clap output.
 
 ## Top-level help
 
@@ -30,7 +30,7 @@ Usage: llmusage [OPTIONS] [COMMAND]
 | `--timezone UTC\|local\|+08:00` | Report timezone |
 | `--locale <LOCALE>` | Lightweight locale selector for titles and number formatting |
 | `--compact` | Use a narrower table layout |
-| `--source codex\|claude\|opencode\|gemini` | Restrict reports or sync to one source; `antigravity` is accepted as an alias for `gemini` |
+| `--source codex\|claude\|opencode\|antigravity` | Restrict reports or sync to one source |
 | `--all` | Show full daily history instead of the default last 7 days |
 | `--instances` | Group daily rows by project/instance |
 | `--project <PROJECT>` | Filter by project label, hash, or reference |
@@ -103,7 +103,6 @@ Creates the local runtime and installs/probes integrations.
 
 ```powershell
 llmusage sync
-llmusage sync --source gemini
 llmusage sync --source antigravity
 llmusage sync --recent-days 1
 llmusage sync --json-events

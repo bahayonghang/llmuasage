@@ -1,6 +1,6 @@
 # CLI 参考
 
-本页按版本 `0.6.5` 的 `cargo run -- --help`、`cargo run -- serve --help`、`cargo run -- export html --help` 对齐。顶层 help 使用紧凑表格；子命令 help 继续使用 clap 输出。
+本页按版本 `0.7.0` 的 `cargo run -- --help`、`cargo run -- serve --help`、`cargo run -- export html --help` 对齐。顶层 help 使用紧凑表格；子命令 help 继续使用 clap 输出。
 
 ## 顶层 help
 
@@ -30,7 +30,7 @@ Usage: llmusage [OPTIONS] [COMMAND]
 | `--timezone UTC\|local\|+08:00` | 报表时区 |
 | `--locale <LOCALE>` | 标题和数字格式的轻量 locale 选择 |
 | `--compact` | 使用更窄的表格布局 |
-| `--source codex\|claude\|opencode\|gemini` | 报表或同步限制到一个来源；`antigravity` 可作为 `gemini` 的输入别名 |
+| `--source codex\|claude\|opencode\|antigravity` | 报表或同步限制到一个来源 |
 | `--all` | daily 显示完整历史，而不是默认最近 7 天 |
 | `--instances` | daily 按项目/实例分组 |
 | `--project <PROJECT>` | 按项目 label、hash 或 reference 过滤 |
@@ -103,7 +103,6 @@ llmusage init
 
 ```powershell
 llmusage sync
-llmusage sync --source gemini
 llmusage sync --source antigravity
 llmusage sync --recent-days 1
 llmusage sync --json-events

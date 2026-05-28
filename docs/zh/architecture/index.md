@@ -14,21 +14,26 @@
 
 ## Source Registry
 
-`SourceKind` 当前包含 Codex、Claude、OpenCode、Gemini；Gemini variant 同时覆盖 Google Antigravity，并保留 `gemini` 作为稳定持久化 id。Registry 是 parser 与 integration 的唯一 fan-out 点：
+`SourceKind` 当前包含 Codex、Claude、OpenCode、Antigravity。`antigravity` 是稳定 CLI/API/SQLite 来源 id；`gemini-*` 字符串仍只是模型 id。
+
+`SourceDescriptor` 是来源能力注册表，声明每个来源的稳定 id、别名、激活方式（`hook`、`plugin`、`passive` 或 `hybrid`）、parser/integration 能力、token 质量标签和本地隐私边界。Registry 是 parser、integration 与 descriptor 的唯一 fan-out 点：
 
 - `registered_parsers()` 驱动 `llmusage sync`。
 - `registered_integrations()` 驱动 `init`、`doctor` 和 `uninstall` 类集成流程。
+- `registered_source_descriptors()` 驱动 capability/status 语义，并用测试防止 parser/integration 漂移。
 
-新增来源意味着新增 `SourceKind` variant，并注册一个 `SourceParser` 与一个 `Integration`。
+新增来源意味着新增 `SourceKind` variant 和 descriptor。只有 descriptor 的能力声明与测试证据支持时，才新增 parser 或 integration。Passive reader 写入 usage 行之前还必须具备真实本地样本、fixture 覆盖、sync-twice 幂等、cursor/rebuild 行为、token 质量声明和隐私审查。
 
 ## 同步流程
 
 1. 工具专属 hook/plugin 触发 `llmusage hook-run`，或用户运行 `llmusage sync`。
 2. 命令 bootstrap/migrate SQLite，并获取本地 `worker_lock`。
-3. driver 按来源顺序执行注册 parser：Codex、Claude、OpenCode、Gemini。
+3. 手动 sync 按来源顺序执行注册 parser：Codex、Claude、OpenCode。Antigravity 在有验证过的 transcript schema 前仅作为 hook/integration 来源。hook-run sync 会限制到触发来源，避免一个 hook 导入所有 parser-backed 来源。
 4. 每个 parser 产出 `SyncShard`。
 5. `SyncRunWriter::commit_shard` 执行 reset、event 写入、cursor 写入、raw archive 写入、行为事实写入和 source-file 标记。
 6. Store 保存 per-source sync status 与 run-log 记录。
+
+Codex `notify` 是 singleton integration。llmusage 安装时会备份不同的原 notify，并在自身 hook 处理后 best-effort 链式启动；递归/自身命令会被跳过，链式命令失败不会阻塞 hook 成功。
 
 `SyncShard` 是 parser/writer 边界。Parser 不直接写 SQLite。
 
@@ -66,9 +71,10 @@ Schema migration 显式按版本推进。当前线包含：
 - source-file state，
 - raw archive opt-in，
 - worker lock metadata，
-- Gemini 注册（同时用于 Google Antigravity 兼容），
+- Antigravity 来源注册，
 - `pricing_catalog_version`，
 - 行为事实表，
+- v13 `gemini` → `antigravity` 来源 id cutover，
 - 对历史 `source_sync_status.stored_events` 漂移的兼容修复。
 
 `schema_version` 本身不被当成完整安全证明；部署数据库发生漂移时，可以通过幂等兼容 migration 修复。

@@ -14,21 +14,26 @@ The runtime state lives under `~/.llmusage/` unless overridden by `--home <PATH>
 
 ## Source registry
 
-`SourceKind` currently includes Codex, Claude, OpenCode, and Gemini. The Gemini variant also covers Google Antigravity while preserving `gemini` as the stable stored id. The registry is the single fan-out point for parsers and integrations:
+`SourceKind` currently includes Codex, Claude, OpenCode, and Antigravity. `antigravity` is the stable CLI/API/SQLite source id; `gemini-*` strings remain model ids only.
+
+`SourceDescriptor` is the source capability registry. It declares each source's stable id, aliases, activation mode (`hook`, `plugin`, `passive`, or `hybrid`), parser/integration capabilities, token-quality label, and local privacy boundary. The registry is the single fan-out point for parsers, integrations, and source descriptors:
 
 - `registered_parsers()` powers `llmusage sync`.
 - `registered_integrations()` powers `init`, `doctor`, and `uninstall`-style integration flows.
+- `registered_source_descriptors()` powers capability/status semantics and guards parser/integration drift.
 
-Adding a source means adding a `SourceKind` variant plus a registered `SourceParser` and `Integration`.
+Adding a source means adding a `SourceKind` variant plus a descriptor. A parser or integration is added only when the descriptor's capability declaration and tests justify it. Passive readers also require real local samples, fixture coverage, sync-twice idempotency, cursor/rebuild behavior, token-quality declaration, and privacy review before they can write usage rows.
 
 ## Sync flow
 
 1. A tool-specific hook or plugin triggers `llmusage hook-run`, or the user runs `llmusage sync`.
 2. The command bootstraps/migrates SQLite and acquires the local `worker_lock`.
-3. The driver walks registered parsers in source order: Codex, Claude, OpenCode, Gemini.
+3. A manual sync walks registered parsers in source order: Codex, Claude, and OpenCode. Antigravity is hook/integration-only until a verified transcript schema exists. A hook-run sync is filtered to the triggering source so one hook does not import every parser-backed source.
 4. Each parser emits `SyncShard` values.
 5. `SyncRunWriter::commit_shard` performs reset, event write, cursor write, raw archive write, behavior fact write, and source-file stamping as the commit protocol.
 6. The store saves per-source sync status and run-log records.
+
+Codex `notify` is a singleton integration. llmusage backs up a distinct original notify during install and chains it best-effort after llmusage hook handling, skipping recursive/self commands and never blocking hook success on the chained command.
 
 `SyncShard` is the parser/writer boundary. Parsers do not write SQLite directly.
 
@@ -66,9 +71,10 @@ Schema migrations are explicit and versioned. The current line includes:
 - source-file state,
 - raw archive opt-in,
 - worker lock metadata,
-- Gemini registration (also used for Google Antigravity compatibility),
+- Antigravity source registration,
 - `pricing_catalog_version`,
 - behavior fact tables,
+- v13 `gemini` → `antigravity` source-id cutover,
 - compatibility repair for historical `source_sync_status.stored_events` drift.
 
 `schema_version` alone is not treated as a complete safety proof; compatibility repairs can be idempotent migrations when deployed databases drift.

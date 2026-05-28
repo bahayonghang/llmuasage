@@ -315,7 +315,7 @@ const ENGLISH_COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "sync",
-        "Import local Codex, Claude, OpenCode, and Gemini/Antigravity usage artifacts.",
+        "Import local Codex, Claude, OpenCode, and Antigravity usage artifacts.",
     ),
     (
         "status",
@@ -379,7 +379,7 @@ const ENGLISH_REPORT_OPTIONS: &[(&str, &str)] = &[
     ("--compact", "Use a narrower table layout."),
     (
         "--source <SOURCE>",
-        "Restrict reports or sync to codex, claude, opencode, or gemini; antigravity aliases to gemini.",
+        "Restrict reports or sync to codex, claude, opencode, or antigravity.",
     ),
     (
         "--all",
@@ -428,7 +428,7 @@ const CHINESE_COMMANDS: &[(&str, &str)] = &[
     ("init", "创建本地运行时并安装/探测支持的集成。"),
     (
         "sync",
-        "导入本地 Codex、Claude、OpenCode 与 Gemini/Antigravity 用量记录。",
+        "导入本地 Codex、Claude、OpenCode 与 Antigravity 用量记录。",
     ),
     ("status", "输出数据库、来源、集成与最近运行状态。"),
     ("diagnostics", "输出诊断 JSON，或显式忽略某个来源文件。"),
@@ -471,7 +471,7 @@ const CHINESE_REPORT_OPTIONS: &[(&str, &str)] = &[
     ("--compact", "使用更窄的表格布局。"),
     (
         "--source <SOURCE>",
-        "报表或同步限制到 codex、claude、opencode 或 gemini；antigravity 是 gemini 的别名。",
+        "报表或同步限制到 codex、claude、opencode 或 antigravity。",
     ),
     ("--all", "daily 显示完整历史，而不是默认最近 7 天。"),
     ("-i, --instances", "daily 按项目/实例分组。"),

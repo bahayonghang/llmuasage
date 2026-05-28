@@ -9,6 +9,8 @@ const adrItems = [
   { text: "0005 — In-memory JobRegistry", link: "/adr/0005-job-registry-in-memory" },
   { text: "0006 — Source file state machine", link: "/adr/0006-source-file-state-machine" },
   { text: "0007 — Error surface", link: "/adr/0007-llmusage-error-surface" },
+  { text: "0008 — Source capability registry", link: "/adr/0008-source-capability-registry" },
+  { text: "0009 — Antigravity source cutover", link: "/adr/0009-antigravity-source-cutover" },
 ];
 
 const enSidebar = [

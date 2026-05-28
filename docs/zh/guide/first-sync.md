@@ -16,11 +16,11 @@ llmusage sync
 llmusage sync --source codex
 llmusage sync --source claude
 llmusage sync --source opencode
-llmusage sync --source gemini
-# antigravity 可作为输入别名；输出/source id 仍为 gemini
+llmusage sync --source antigravity
+# gemini 不再作为来源 id；gemini-* 模型名保持不变
 ```
 
-合法来源与 `cargo run -- --help` 一致：`codex`、`claude`、`opencode`、`gemini`（`antigravity` 是 Google 来源别名）。
+合法来源与 `cargo run -- --help` 一致：`codex`、`claude`、`opencode`、`antigravity`。`gemini` 不再作为来源 id；`gemini-*` 仍只是模型名前缀。
 
 ## 输出 NDJSON 进度
 

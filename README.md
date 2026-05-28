@@ -2,7 +2,7 @@
 
 [简体中文](./README.zh-CN.md) · [Docs](https://bahayonghang.github.io/llmuasage/)
 
-Local-first usage analytics for AI coding CLIs. `llmusage` reads local Codex, Claude Code, OpenCode, and Google Antigravity/Gemini artifacts into a local SQLite database, then renders reports, a terminal dashboard, a browser dashboard, and offline HTML exports without upload or login.
+Local-first usage analytics for AI coding CLIs. `llmusage` reads local Codex, Claude Code, OpenCode, and Google Antigravity artifacts into a local SQLite database, then renders reports, a terminal dashboard, a browser dashboard, and offline HTML exports without upload or login.
 
 > Current crate version: `0.6.5`.
 
@@ -51,7 +51,7 @@ What this does:
 | Codex | OpenAI Codex rollout/session JSONL and `config.toml notify` |
 | Claude | Claude Code project JSONL plus `Stop` / `SessionEnd` hooks |
 | OpenCode | OpenCode local SQLite usage database plus `session.updated` plugin event |
-| Antigravity / Gemini | Antigravity CLI `Stop` hook in `~/.gemini/config/hooks.json`, legacy Gemini CLI `SessionEnd` hook, and legacy `~/.gemini/tmp/*/chats/session-*.json` import (`--source gemini` remains the stable id) |
+| Antigravity | Antigravity CLI `Stop` hook in `~/.gemini/config/hooks.json` (`--source antigravity`); no transcript parser is registered until a verified token-bearing schema exists |
 
 ## Common commands
 

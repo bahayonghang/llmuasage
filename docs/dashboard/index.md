@@ -36,7 +36,7 @@ Dashboard filters map to the shared `QueryFilter` used by the Rust query layer.
 
 | Filter | Meaning |
 | --- | --- |
-| `source` | `codex`, `claude`, `opencode`, or `gemini` (`antigravity` input aliases to `gemini`) |
+| `source` | `codex`, `claude`, `opencode`, or `antigravity` |
 | `model` | Exact model string from normalized events |
 | `since` / `until` | Date range for dashboard queries |
 | `window` | Quick window such as day/week/month/all |
@@ -103,7 +103,7 @@ Common states:
 - `insufficient_models`: model comparison needs at least two model candidates.
 - `low_sample`: comparison exists but the sample is too small for a strong claim.
 - `unsupported`: the selected Explorer metric/dimension/filter combination is not meaningful.
-- source-limited facts: Gemini/Antigravity and OpenCode can degrade to conservative turn facts when source logs do not expose tool-level evidence.
+- source-limited facts: Antigravity and OpenCode can degrade to conservative turn facts when source logs do not expose tool-level evidence.
 
 Core `/api/dashboard` data should remain responsive even when Activity, Tools, Optimize, Explorer, or Compare is degraded.
 

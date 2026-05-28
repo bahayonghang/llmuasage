@@ -23,7 +23,7 @@ just install
 llmusage init
 ```
 
-`init` 会创建运行时目录、初始化 SQLite、写入 hook 包装器，并在本地配置存在时安装 Codex、Claude Code、OpenCode、Google Antigravity/Gemini 集成。
+`init` 会创建运行时目录、初始化 SQLite、写入 hook 包装器，并在本地配置存在时安装 Codex、Claude Code、OpenCode、Google Antigravity 集成。
 
 默认路径：
 
@@ -61,7 +61,7 @@ llmusage
 自动化场景使用 JSON：
 
 ```powershell
-llmusage daily --json --source gemini
+llmusage daily --json --source antigravity
 ```
 
 ## 5. 打开本地 Dashboard

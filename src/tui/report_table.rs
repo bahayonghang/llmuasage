@@ -948,7 +948,7 @@ fn source_color(source: SourceKind) -> Color {
         SourceKind::Codex => Color::Cyan,
         SourceKind::Claude => Color::Magenta,
         SourceKind::Opencode => Color::Green,
-        SourceKind::Gemini => Color::Blue,
+        SourceKind::Antigravity => Color::Blue,
     }
 }
 

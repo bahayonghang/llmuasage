@@ -7,13 +7,11 @@ pub mod claude;
 pub mod codex;
 pub mod driver;
 pub mod file_state;
-pub mod gemini;
 pub mod opencode;
 pub mod source_parser;
 
 pub use claude::ClaudeParser;
 pub use codex::CodexParser;
-pub use gemini::GeminiParser;
 pub use opencode::OpencodeParser;
 pub use source_parser::{ProgressSink, SourceParser};
 

@@ -13,6 +13,8 @@ ADRs are engineering records, not end-user tutorials. Start with [Architecture](
 - [0005 — In-memory job registry](./0005-job-registry-in-memory)
 - [0006 — Source file state machine](./0006-source-file-state-machine)
 - [0007 — Public `LlmusageError` surface](./0007-llmusage-error-surface)
+- [0008 — Source Capability Registry and passive-reader gate](./0008-source-capability-registry)
+- [0009 — Antigravity source cutover](./0009-antigravity-source-cutover)
 
 ## Companion docs
 

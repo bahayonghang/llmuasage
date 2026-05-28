@@ -16,11 +16,11 @@ Human progress is written to stderr. The final summary stays on stdout.
 llmusage sync --source codex
 llmusage sync --source claude
 llmusage sync --source opencode
-llmusage sync --source gemini
-# antigravity is accepted as an input alias, but output/source ids remain gemini
+llmusage sync --source antigravity
+# gemini is no longer accepted as a source id; gemini-* model names are unchanged
 ```
 
-The accepted source values match `cargo run -- --help`: `codex`, `claude`, `opencode`, and `gemini` (`antigravity` is an alias for the Google source).
+The accepted source values match `cargo run -- --help`: `codex`, `claude`, `opencode`, and `antigravity`. `gemini` is intentionally not accepted as a source id; `gemini-*` remains a model-name prefix only.
 
 ## Emit NDJSON progress
 

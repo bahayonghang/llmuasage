@@ -18,6 +18,7 @@ pub mod monthly;
 pub mod report_args;
 pub mod serve;
 pub mod session;
+pub mod source_status;
 pub mod status;
 pub mod statusline;
 pub mod sync;
@@ -218,5 +219,28 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
             trigger,
             auto,
         }) => hook_run::run(&app, source, &trigger, auto).await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::{Cli, Commands};
+
+    #[test]
+    fn source_filter_accepts_antigravity_and_rejects_gemini() {
+        let cli = Cli::try_parse_from(["llmusage", "sync", "--source", "antigravity"])
+            .expect("antigravity should be accepted");
+        match cli.command {
+            Some(Commands::Sync { source, .. }) => {
+                assert_eq!(source.map(|value| value.as_str()), Some("antigravity"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let err = Cli::try_parse_from(["llmusage", "sync", "--source", "gemini"])
+            .expect_err("gemini source id should be rejected");
+        assert!(err.to_string().contains("antigravity"));
     }
 }

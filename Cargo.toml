@@ -1,6 +1,6 @@
 [package]
 name = "llmusage"
-version = "0.6.6"
+version = "0.7.0"
 edition = "2024"
 description = "Local-first AI CLI usage analytics with Rust, SQLite, hooks, and zero upload."
 repository = "https://github.com/bahayonghang/llmuasage"
@@ -36,9 +36,9 @@ dashmap = "6.1"
 dirs = "6.0"
 fs4 = "1.1.0"
 ratatui = "0.30.0"
-rusqlite = { version = "0.39.0", features = ["bundled", "chrono"] }
+rusqlite = { version = "0.40.0", features = ["bundled", "chrono"] }
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde_json = "1.0.150"
 base64 = "0.22"
 thiserror = "2.0"
 sha2 = "0.11.0"
@@ -52,7 +52,7 @@ tokio-util = "0.7"
 toml_edit = "0.25.11"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-unicode-width = "0.2"
+unicode-width = "0.2.2"
 walkdir = "2.5"
 tempfile = { version = "3.23", optional = true }
 

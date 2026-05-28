@@ -167,6 +167,36 @@ pub fn uninstall(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
     })
 }
 
+pub fn original_notify(app: &AppContext) -> Result<Option<Vec<String>>> {
+    let backup_value_path = app.paths.backups_dir.join("codex_notify_original.json");
+    if !backup_value_path.is_file() {
+        return Ok(None);
+    }
+
+    let backup_json: serde_json::Value = serde_json::from_slice(&fs::read(backup_value_path)?)?;
+    Ok(backup_json
+        .get("notify")
+        .and_then(|value| value.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str().map(str::to_string))
+                .collect::<Vec<_>>()
+        })
+        .filter(|values| !values.is_empty()))
+}
+
+pub fn should_chain_original_notify(current: &[String], original: &[String]) -> bool {
+    !original.is_empty() && current != original && !is_llmusage_notify(original)
+}
+
+fn is_llmusage_notify(args: &[String]) -> bool {
+    args.iter().any(|arg| arg.contains("llmusage-hook"))
+        || args
+            .windows(2)
+            .any(|window| window[0] == "--source" && window[1] == SourceKind::Codex.as_str())
+}
+
 fn resolve_codex_config(_app: &AppContext) -> PathBuf {
     let home_dir = resolve_home_dir();
     std::env::var("CODEX_HOME")
@@ -185,4 +215,47 @@ fn read_notify(config_path: &PathBuf) -> Result<Option<Vec<String>>> {
             .collect::<Vec<_>>()
     });
     Ok(notify)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SourceKind, should_chain_original_notify};
+
+    #[test]
+    fn chaining_skips_empty_self_and_current_notify() {
+        let current = vec![
+            "cmd".to_string(),
+            "/c".to_string(),
+            "llmusage-hook.cmd".to_string(),
+        ];
+        assert!(!should_chain_original_notify(&current, &[]));
+        assert!(!should_chain_original_notify(&current, &current));
+        assert!(!should_chain_original_notify(
+            &current,
+            &[
+                "cmd".to_string(),
+                "/c".to_string(),
+                "llmusage-hook.cmd".to_string()
+            ],
+        ));
+        assert!(!should_chain_original_notify(
+            &current,
+            &[
+                "--source".to_string(),
+                SourceKind::Codex.as_str().to_string()
+            ],
+        ));
+    }
+
+    #[test]
+    fn chaining_allows_distinct_user_notify() {
+        let current = vec![
+            "cmd".to_string(),
+            "/c".to_string(),
+            "llmusage-hook.cmd".to_string(),
+        ];
+        let original = vec!["echo".to_string(), "hello".to_string()];
+
+        assert!(should_chain_original_notify(&current, &original));
+    }
 }

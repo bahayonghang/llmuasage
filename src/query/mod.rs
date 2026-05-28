@@ -491,7 +491,7 @@ pub struct HealthPayload {
 ///   file. `None` until full-history sweeps are tracked.
 #[derive(Debug, Clone, Serialize)]
 pub struct SourceDiagnostics {
-    /// Source identifier (`codex` / `claude` / `opencode` / `gemini`).
+    /// Source identifier (`codex` / `claude` / `opencode` / `antigravity`).
     pub source: String,
     /// Number of `source_file` rows currently in `live` state.
     pub live_files: u64,
@@ -3465,13 +3465,13 @@ mod tests {
         fixture.seed_dashboard(12)?;
         let payload = Dashboard::open(fixture.store())?.home_overview(&Default::default())?;
 
-        for source in ["claude", "codex", "gemini", "opencode"] {
+        for source in ["claude", "codex", "antigravity", "opencode"] {
             assert!(payload.by_platform.contains_key(source));
         }
         assert!(payload.by_platform["codex"].requests > 0);
         assert!(payload.by_platform["claude"].requests > 0);
         assert!(payload.by_platform["opencode"].requests > 0);
-        assert_eq!(payload.by_platform["gemini"].requests, 0);
+        assert_eq!(payload.by_platform["antigravity"].requests, 0);
         assert!(!payload.series.is_empty());
         Ok(())
     }

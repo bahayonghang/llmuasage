@@ -6,7 +6,7 @@ use serde::Serialize;
 use super::{Dashboard, DiagnosticsPayload, QueryFilter};
 use crate::{error::Result, util::now_utc};
 
-const HOME_PLATFORMS: [&str; 4] = ["claude", "codex", "gemini", "opencode"];
+const HOME_PLATFORMS: [&str; 4] = ["claude", "codex", "antigravity", "opencode"];
 
 /// Homepage-oriented usage payload consumed by ccr-ui's home overview adapter.
 #[derive(Debug, Clone, Serialize)]
@@ -52,7 +52,7 @@ pub struct HomeOverviewSeriesItem {
     pub date: String,
     pub claude: HomeOverviewPlatformStats,
     pub codex: HomeOverviewPlatformStats,
-    pub gemini: HomeOverviewPlatformStats,
+    pub antigravity: HomeOverviewPlatformStats,
     pub opencode: HomeOverviewPlatformStats,
 }
 
@@ -239,7 +239,7 @@ fn load_series(conn: &Connection, filter: &QueryFilter) -> Result<Vec<HomeOvervi
         match source.as_str() {
             "claude" => item.claude = stats,
             "codex" => item.codex = stats,
-            "gemini" => item.gemini = stats,
+            "antigravity" => item.antigravity = stats,
             "opencode" => item.opencode = stats,
             _ => {}
         }

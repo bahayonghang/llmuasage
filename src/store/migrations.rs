@@ -51,13 +51,18 @@ pub const MIGRATIONS: &[(u32, &str, MigrationFn)] = &[
     (6, "add_recent_history", m_006_add_recent_history),
     (7, "add_raw_archive", m_007_add_raw_archive),
     (8, "add_worker_lock_meta", m_008_add_worker_lock_meta),
-    (9, "add_gemini_source", m_009_add_gemini_source),
+    (9, "add_antigravity_source", m_009_add_antigravity_source),
     (10, "add_pricing_meta", m_010_add_pricing_meta),
     (11, "add_behavior_facts", m_011_add_behavior_facts),
     (
         12,
         "repair_source_sync_status_history_columns",
         m_012_repair_source_sync_status_history_columns,
+    ),
+    (
+        13,
+        "cutover_gemini_source_to_antigravity",
+        m_013_cutover_gemini_source_to_antigravity,
     ),
 ];
 
@@ -514,11 +519,11 @@ fn m_008_add_worker_lock_meta(tx: &Transaction<'_>) -> Result<()> {
     Ok(())
 }
 
-fn m_009_add_gemini_source(tx: &Transaction<'_>) -> Result<()> {
+fn m_009_add_antigravity_source(tx: &Transaction<'_>) -> Result<()> {
     tx.execute(
         r#"
         INSERT INTO meta(key, value)
-        VALUES ('source.gemini.enabled', '1')
+        VALUES ('source.antigravity.enabled', '1')
         ON CONFLICT(key) DO NOTHING
         "#,
         [],
@@ -536,6 +541,44 @@ fn m_010_add_pricing_meta(tx: &Transaction<'_>) -> Result<()> {
         [crate::query::pricing_catalog::PricingCatalog::static_v1()
             .version
             .as_str()],
+    )?;
+    Ok(())
+}
+
+fn m_013_cutover_gemini_source_to_antigravity(tx: &Transaction<'_>) -> Result<()> {
+    for table in [
+        "usage_event",
+        "usage_bucket_30m",
+        "source_cursor",
+        "source_file",
+        "source_sync_status",
+        "integration_install",
+        "trigger_state",
+        "usage_turn",
+        "usage_tool_call",
+    ] {
+        if table_exists(tx, table)? && table_has_column(tx, table, "source")? {
+            tx.execute(
+                &format!("UPDATE {table} SET source = 'antigravity' WHERE source = 'gemini'"),
+                [],
+            )?;
+        }
+    }
+
+    tx.execute_batch(
+        r#"
+        INSERT INTO meta(key, value)
+        SELECT 'source.antigravity.enabled', value
+        FROM meta
+        WHERE key = 'source.gemini.enabled'
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+
+        INSERT INTO meta(key, value)
+        VALUES ('source.antigravity.enabled', '1')
+        ON CONFLICT(key) DO NOTHING;
+
+        DELETE FROM meta WHERE key = 'source.gemini.enabled';
+        "#,
     )?;
     Ok(())
 }
@@ -1127,6 +1170,137 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(inserted, 42);
+        Ok(())
+    }
+
+    #[test]
+    fn migration_v13_moves_gemini_source_rows_to_antigravity() -> anyhow::Result<()> {
+        let mut conn = Connection::open_in_memory()?;
+        run_migrations_for_test(
+            &mut conn,
+            &[
+                (1, "baseline", m_001_baseline),
+                (2, "add_cache_split", m_002_add_cache_split),
+                (3, "add_cost_breakdown", m_003_add_cost_breakdown),
+                (4, "add_event_count_proj", m_004_add_event_count_proj),
+                (5, "add_source_file", m_005_add_source_file),
+                (6, "add_recent_history", m_006_add_recent_history),
+                (7, "add_raw_archive", m_007_add_raw_archive),
+                (8, "add_worker_lock_meta", m_008_add_worker_lock_meta),
+                (9, "add_antigravity_source", m_009_add_antigravity_source),
+                (10, "add_pricing_meta", m_010_add_pricing_meta),
+                (11, "add_behavior_facts", m_011_add_behavior_facts),
+                (
+                    12,
+                    "repair_source_sync_status_history_columns",
+                    m_012_repair_source_sync_status_history_columns,
+                ),
+            ],
+        )?;
+        conn.execute_batch(
+            r#"
+            INSERT INTO meta(key, value) VALUES ('source.gemini.enabled', '1')
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+            INSERT INTO usage_event(
+                event_key, source, model, event_at, hour_start,
+                input_tokens, cache_read_tokens, cache_creation_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens, created_at
+            ) VALUES (
+                'gemini:legacy:1', 'gemini', 'gemini-2.5-pro',
+                '2026-05-01T00:00:00Z', '2026-05-01T00:00:00Z',
+                1, 0, 0, 2, 0, 3, '2026-05-01T00:00:00Z'
+            );
+            INSERT INTO usage_bucket_30m(
+                source, model, hour_start, project_hash,
+                input_tokens, cache_read_tokens, cache_creation_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                updated_at
+            ) VALUES (
+                'gemini', 'gemini-2.5-pro', '2026-05-01T00:00:00Z', '',
+                1, 0, 0, 2, 0, 3, '2026-05-01T00:00:00Z'
+            );
+            INSERT INTO source_cursor(source, cursor_key, updated_at)
+                VALUES ('gemini', 'cursor-1', '2026-05-01T00:00:00Z');
+            INSERT INTO source_file(source, file_path, state, last_state_change_at)
+                VALUES ('gemini', '/tmp/legacy.json', 'live', '2026-05-01T00:00:00Z');
+            INSERT INTO source_sync_status(
+                source, files_processed, changed_files, bytes_scanned,
+                events_seen, events_replayed, events_inserted, stored_events,
+                parse_ms, write_ms, lock_wait_ms, updated_at
+            ) VALUES (
+                'gemini', 1, 1, 100, 1, 1, 1, 1, 1, 1, 1, '2026-05-01T00:00:00Z'
+            );
+            INSERT INTO integration_install(source, install_type, status, updated_at)
+                VALUES ('gemini', 'init', 'ready', '2026-05-01T00:00:00Z');
+            INSERT INTO trigger_state(source, last_signal_at, trigger, updated_at)
+                VALUES ('gemini', '2026-05-01T00:00:00Z', 'Stop', '2026-05-01T00:00:00Z');
+            INSERT INTO usage_turn(
+                turn_key, source, primary_model, started_at, category, created_at
+            ) VALUES (
+                'turn:gemini:legacy:1', 'gemini', 'gemini-2.5-pro',
+                '2026-05-01T00:00:00Z', 'general', '2026-05-01T00:00:00Z'
+            );
+            INSERT INTO usage_tool_call(
+                tool_call_key, source, occurred_at, tool_name, tool_kind, created_at
+            ) VALUES (
+                'tool:gemini:legacy:1', 'gemini', '2026-05-01T00:00:00Z',
+                'unknown', 'other', '2026-05-01T00:00:00Z'
+            );
+            "#,
+        )?;
+
+        run_migrations_for_test(
+            &mut conn,
+            &[(
+                13,
+                "cutover_gemini_source_to_antigravity",
+                m_013_cutover_gemini_source_to_antigravity,
+            )],
+        )?;
+
+        for table in [
+            "usage_event",
+            "usage_bucket_30m",
+            "source_cursor",
+            "source_file",
+            "source_sync_status",
+            "integration_install",
+            "trigger_state",
+            "usage_turn",
+            "usage_tool_call",
+        ] {
+            let legacy_count: i64 = conn.query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE source='gemini'"),
+                [],
+                |row| row.get(0),
+            )?;
+            let cutover_count: i64 = conn.query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE source='antigravity'"),
+                [],
+                |row| row.get(0),
+            )?;
+            assert_eq!(legacy_count, 0, "{table} should not retain gemini rows");
+            assert_eq!(cutover_count, 1, "{table} should retain migrated row");
+        }
+
+        let meta_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM meta WHERE key='source.gemini.enabled'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(meta_count, 0);
+        let value: String = conn.query_row(
+            "SELECT value FROM meta WHERE key='source.antigravity.enabled'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(value, "1");
+        let event_key: String = conn.query_row(
+            "SELECT event_key FROM usage_event WHERE source='antigravity'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(event_key, "gemini:legacy:1");
         Ok(())
     }
 }

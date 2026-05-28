@@ -314,9 +314,37 @@ fn init_writes_quoted_windows_string_commands_for_spaced_paths() -> Result<()> {
 }
 
 #[test]
-fn gemini_install_supports_antigravity_hooks_json() -> Result<()> {
+fn antigravity_install_cleans_legacy_gemini_hooks() -> Result<()> {
     let fixture = Fixture::new()?;
     fs::create_dir_all(fixture.home.join(".gemini").join("config"))?;
+    let user_antigravity_command = "echo user-antigravity";
+    let legacy_antigravity_command = "llmusage-hook --source gemini --trigger Stop --auto";
+    fs::write(
+        fixture
+            .home
+            .join(".gemini")
+            .join("config")
+            .join("hooks.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "Stop": [
+                { "type": "command", "command": user_antigravity_command },
+                { "type": "command", "command": legacy_antigravity_command }
+            ]
+        }))?,
+    )?;
+    let user_legacy_settings_command = "echo user-legacy-gemini";
+    let legacy_settings_command = "llmusage-hook --source gemini --trigger SessionEnd --auto";
+    fs::write(
+        fixture.home.join(".gemini").join("settings.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "hooks": {
+                "SessionEnd": [
+                    { "hooks": [{ "type": "command", "command": user_legacy_settings_command }] },
+                    { "hooks": [{ "type": "command", "command": legacy_settings_command }] }
+                ]
+            }
+        }))?,
+    )?;
 
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
@@ -324,7 +352,7 @@ fn gemini_install_supports_antigravity_hooks_json() -> Result<()> {
         commands::init::run(&app).await?;
 
         let expected_stop =
-            integrations::HookTarget::current(&app).shell_command(SourceKind::Gemini, "Stop");
+            integrations::HookTarget::current(&app).shell_command(SourceKind::Antigravity, "Stop");
         let hooks: serde_json::Value = serde_json::from_slice(&fs::read(
             fixture
                 .home
@@ -344,6 +372,26 @@ fn gemini_install_supports_antigravity_hooks_json() -> Result<()> {
                 .iter()
                 .any(|command| *command == expected_stop)
         );
+        assert!(expected_stop.contains("--source antigravity"));
+        assert!(!expected_stop.contains("--source gemini"));
+        assert!(stop_commands.contains(&user_antigravity_command));
+        assert!(!stop_commands.contains(&legacy_antigravity_command));
+
+        let legacy_settings: serde_json::Value = serde_json::from_slice(&fs::read(
+            fixture.home.join(".gemini").join("settings.json"),
+        )?)?;
+        let session_end_commands = legacy_settings
+            .get("hooks")
+            .and_then(|hooks| hooks.get("SessionEnd"))
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| entry.get("hooks").and_then(serde_json::Value::as_array))
+            .flatten()
+            .filter_map(|hook| hook.get("command").and_then(serde_json::Value::as_str))
+            .collect::<Vec<_>>();
+        assert!(session_end_commands.contains(&user_legacy_settings_command));
+        assert!(!session_end_commands.contains(&legacy_settings_command));
 
         commands::uninstall::run(&app, false).await?;
         let restored_hooks: serde_json::Value = serde_json::from_slice(&fs::read(
@@ -358,7 +406,42 @@ fn gemini_install_supports_antigravity_hooks_json() -> Result<()> {
             .and_then(serde_json::Value::as_array)
             .map(Vec::len)
             .unwrap_or_default();
-        assert_eq!(remaining, 0);
+        assert_eq!(remaining, 1);
+        let restored_commands = restored_hooks
+            .get("Stop")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|hook| hook.get("command").and_then(serde_json::Value::as_str))
+            .collect::<Vec<_>>();
+        assert_eq!(restored_commands, vec![user_antigravity_command]);
+
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn hook_run_syncs_only_triggered_source() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_codex()?;
+    fixture.seed_claude()?;
+    fixture.seed_opencode()?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+
+        commands::hook_run::run(&app, SourceKind::Claude, "Stop", true).await?;
+
+        let store = Store::new(&app.paths)?;
+        let dashboard = Dashboard::open(&store)?;
+        let sources = dashboard.source_breakdown(&Default::default())?;
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].source, "claude");
+        assert!(sources[0].total_tokens > 0);
 
         Ok::<_, anyhow::Error>(())
     })?;

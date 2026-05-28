@@ -801,7 +801,7 @@ fn hook_run_failure_marks_run_failed_and_finishes_worker() -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let app = AppContext::discover()?;
-        let err = commands::hook_run::run(&app, SourceKind::Codex, "manual-test", false)
+        let err = commands::hook_run::run(&app, SourceKind::Opencode, "manual-test", false)
             .await
             .expect_err("hook-run should fail");
         assert!(!err.to_string().trim().is_empty());
@@ -809,7 +809,7 @@ fn hook_run_failure_marks_run_failed_and_finishes_worker() -> Result<()> {
         let run = latest_run_record(&app.paths.db_path, "hook-run")?;
         assert_failed_run(&run);
 
-        let (started_at, finished_at) = trigger_worker_times(&app.paths.db_path, "codex")?;
+        let (started_at, finished_at) = trigger_worker_times(&app.paths.db_path, "opencode")?;
         assert!(started_at.is_some());
         assert!(finished_at.is_some());
         Ok::<_, anyhow::Error>(())

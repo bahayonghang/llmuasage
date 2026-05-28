@@ -319,6 +319,20 @@ pub async fn run_once_with_cancel(
                 .is_none_or(|source| parser.source() == source)
         })
         .collect::<Vec<_>>();
+    let parserless_sources = match options.source {
+        Some(source)
+            if registry::source_descriptor(source)
+                .is_some_and(|descriptor| !descriptor.capabilities.parser) =>
+        {
+            vec![source]
+        }
+        Some(_) => Vec::new(),
+        None => registry::registered_source_descriptors()
+            .iter()
+            .filter(|descriptor| !descriptor.capabilities.parser)
+            .map(|descriptor| descriptor.kind)
+            .collect(),
+    };
     let source_file_inventories = collect_source_file_inventories(&parsers);
     let sources = driver::drive_with_events(driver::DriveContext {
         parsers: &parsers,
@@ -356,6 +370,29 @@ pub async fn run_once_with_cancel(
             updated_at: crate::util::now_utc(),
         });
         source_stats.push(source);
+    }
+    for source in parserless_sources {
+        let stored_events = stored_events_for_source(store, source)?;
+        sync_statuses.push(SourceSyncStatus {
+            source: source.as_str().to_string(),
+            files_processed: 0,
+            changed_files: 0,
+            bytes_scanned: 0,
+            events_seen: 0,
+            events_replayed: 0,
+            events_inserted: 0,
+            stored_events: stored_events as i64,
+            parse_ms: 0,
+            write_ms: 0,
+            lock_wait_ms: lock_wait_ms as i64,
+            updated_at: crate::util::now_utc(),
+        });
+        source_stats.push(SourceSyncStats {
+            source,
+            stored_events,
+            lock_wait_ms,
+            ..SourceSyncStats::default()
+        });
     }
     writer.finish_sync_run()?;
     store
@@ -402,18 +439,8 @@ fn enumerate_source_files(source: SourceKind) -> Option<Vec<String>> {
                 name.ends_with(".jsonl")
             })
         }
-        SourceKind::Gemini => {
-            list_matching_files(home_dir.join(".gemini").join("tmp"), |name, path| {
-                name.starts_with("session-")
-                    && name.ends_with(".json")
-                    && path
-                        .parent()
-                        .and_then(|parent| parent.file_name())
-                        .and_then(|value| value.to_str())
-                        == Some("chats")
-            })
-        }
         SourceKind::Opencode => return None,
+        SourceKind::Antigravity => return None,
     };
     Some(paths)
 }
@@ -609,6 +636,6 @@ fn source_label(source: SourceKind) -> &'static str {
         SourceKind::Codex => "Codex",
         SourceKind::Claude => "Claude",
         SourceKind::Opencode => "OpenCode",
-        SourceKind::Gemini => "Gemini",
+        SourceKind::Antigravity => "Antigravity",
     }
 }

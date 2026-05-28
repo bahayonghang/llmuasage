@@ -350,7 +350,7 @@ fn native_sources(model_id: &str, provider: Option<&str>) -> Vec<String> {
         return vec!["claude".to_string(), "opencode".to_string()];
     }
     if provider.contains("google") || provider.contains("gemini") || model.contains("gemini") {
-        return vec!["gemini".to_string(), "opencode".to_string()];
+        return vec!["antigravity".to_string(), "opencode".to_string()];
     }
     if provider.contains("openai")
         || model.starts_with("gpt")

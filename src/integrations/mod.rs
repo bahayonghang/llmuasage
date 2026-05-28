@@ -10,9 +10,9 @@ use tracing::info;
 
 use crate::{app::AppContext, models::SourceKind, registry, store::Store, util::now_utc};
 
+pub mod antigravity;
 pub mod claude;
 pub mod codex;
-pub mod gemini;
 pub mod hook_target;
 pub mod integration;
 pub mod opencode;

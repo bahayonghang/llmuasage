@@ -23,7 +23,7 @@ This installs docs dependencies under `docs/` and installs the CLI with `cargo i
 llmusage init
 ```
 
-`init` creates the runtime root, bootstraps SQLite, writes hook wrappers, and installs supported integrations for Codex, Claude Code, OpenCode, and Google Antigravity/Gemini when their local config files are present.
+`init` creates the runtime root, bootstraps SQLite, writes hook wrappers, and installs supported integrations for Codex, Claude Code, OpenCode, and Google Antigravity when their local config files are present.
 
 Default paths:
 
@@ -61,7 +61,7 @@ With no subcommand, `llmusage` is the `daily` report. It shows the last 7 calend
 Use JSON for automation:
 
 ```powershell
-llmusage daily --json --source gemini
+llmusage daily --json --source antigravity
 ```
 
 ## 5. Open local dashboards

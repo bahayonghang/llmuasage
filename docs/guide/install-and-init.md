@@ -30,9 +30,9 @@ llmusage init
 | Codex | `config.toml notify` | OpenAI Codex rollout/session JSONL |
 | Claude | `Stop` / `SessionEnd` hooks | Claude Code project JSONL |
 | OpenCode | `session.updated` plugin event | OpenCode local SQLite usage database |
-| Antigravity / Gemini | Antigravity `Stop` hook plus legacy Gemini `SessionEnd` hook | Antigravity hook trigger metadata; legacy `~/.gemini/tmp/*/chats/session-*.json` import |
+| Antigravity | Antigravity `Stop` hook in `~/.gemini/config/hooks.json` | Hook trigger metadata only; transcript import is intentionally absent until a verified schema exists |
 
-If a tool is not installed on the machine, llmusage records the probe/install state and continues with the sources it can see. The Google source keeps `gemini` as its stable CLI/API/SQLite id; Antigravity is installed through `~/.gemini/config/hooks.json` when an Antigravity config directory is present, while legacy Gemini CLI remains supported.
+If a tool is not installed on the machine, llmusage records the probe/install state and continues with the sources it can see. The Google local CLI source id is `antigravity`; `gemini` is not accepted as a source id. During init/uninstall, llmusage best-effort removes only llmusage-owned legacy `--source gemini` hook commands while preserving user hooks.
 
 ## Runtime root precedence
 

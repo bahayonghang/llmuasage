@@ -363,7 +363,7 @@ pub fn load_daily_reports_by_source(
         SourceKind::Codex,
         SourceKind::Claude,
         SourceKind::Opencode,
-        SourceKind::Gemini,
+        SourceKind::Antigravity,
     ];
     let mut reports = Vec::new();
     for source in source_order {

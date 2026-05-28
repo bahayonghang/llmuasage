@@ -24,9 +24,9 @@ fn html_shell(mode: &str) -> String {
         ("仅本地", "shell.tag.local")
     };
     let app_version = env!("CARGO_PKG_VERSION");
-    let supported_sources = crate::registry::registered_parsers()
-        .into_iter()
-        .map(|parser| parser.source().as_str())
+    let supported_sources = crate::registry::registered_source_descriptors()
+        .iter()
+        .map(|descriptor| descriptor.stable_id)
         .collect::<Vec<_>>()
         .join(", ");
 

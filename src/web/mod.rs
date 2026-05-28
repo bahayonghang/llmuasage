@@ -1075,7 +1075,7 @@ mod tests {
         let html = live_index_html();
         assert!(html.contains("data-mode=\"live\""));
         assert!(html.contains("data-app-version=\""));
-        assert!(html.contains("data-supported-sources=\"codex, claude, opencode, gemini\""));
+        assert!(html.contains("data-supported-sources=\"codex, claude, opencode, antigravity\""));
         assert!(html.contains("type=\"module\""));
         assert!(html.contains("assets/app.js"));
         assert!(html.contains("assets/base.css"));

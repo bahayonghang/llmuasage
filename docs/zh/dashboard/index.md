@@ -36,7 +36,7 @@ Dashboard 筛选器映射到 Rust 查询层共享的 `QueryFilter`。
 
 | 筛选 | 含义 |
 | --- | --- |
-| `source` | `codex`、`claude`、`opencode` 或 `gemini`（`antigravity` 输入别名会映射到 `gemini`） |
+| `source` | `codex`、`claude`、`opencode` 或 `antigravity` |
 | `model` | 标准化事件中的精确模型名 |
 | `since` / `until` | Dashboard 查询日期范围 |
 | `window` | day/week/month/all 等快速窗口 |
@@ -103,7 +103,7 @@ Dashboard 必须显式展示能力缺口，不能把缺失数据伪装成 0。
 - `insufficient_models`：模型比较至少需要两个模型候选。
 - `low_sample`：可以比较，但样本太少，不能给强结论。
 - `unsupported`：所选 Explorer 指标、维度或筛选组合没有明确语义。
-- 来源能力限制：Gemini/Antigravity 和 OpenCode 在源日志不暴露工具级证据时，会退化为保守 turn facts。
+- 来源能力限制：Antigravity 和 OpenCode 在源日志不暴露工具级证据时，会退化为保守 turn facts。
 
 Activity、Tools、Optimize、Explorer、Compare 降级时，核心 `/api/dashboard` 数据仍应保持可响应。
 

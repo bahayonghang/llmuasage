@@ -15,9 +15,8 @@ pub enum SourceKind {
     Claude,
     /// OpenCode local SQLite usage database.
     Opencode,
-    /// Google Antigravity / Gemini CLI local usage artifacts.
-    #[value(alias = "antigravity")]
-    Gemini,
+    /// Google Antigravity local usage hook source.
+    Antigravity,
 }
 
 impl SourceKind {
@@ -27,19 +26,13 @@ impl SourceKind {
             Self::Codex => "codex",
             Self::Claude => "claude",
             Self::Opencode => "opencode",
-            Self::Gemini => "gemini",
+            Self::Antigravity => "antigravity",
         }
     }
 
     /// Parses the lowercase identifier produced by [`Self::as_str`].
     pub fn parse_id(value: &str) -> Option<Self> {
-        match value {
-            "codex" => Some(Self::Codex),
-            "claude" => Some(Self::Claude),
-            "opencode" => Some(Self::Opencode),
-            "gemini" | "antigravity" => Some(Self::Gemini),
-            _ => None,
-        }
+        crate::domain::source_descriptor::parse_source_id(value)
     }
 }
 
@@ -370,9 +363,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn source_kind_antigravity_alias_keeps_stable_id() {
-        let source = SourceKind::parse_id("antigravity").expect("alias should parse");
-        assert_eq!(source, SourceKind::Gemini);
-        assert_eq!(source.as_str(), "gemini");
+    fn source_kind_antigravity_is_stable_id() {
+        let source = SourceKind::parse_id("antigravity").expect("source should parse");
+        assert_eq!(source, SourceKind::Antigravity);
+        assert_eq!(source.as_str(), "antigravity");
+        assert!(SourceKind::parse_id("gemini").is_none());
     }
 }
