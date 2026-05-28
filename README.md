@@ -24,6 +24,8 @@ Or run directly while developing:
 cargo run -- --help
 ```
 
+Top-level help is table-oriented for quick scanning. Use `llmusage help --zh` for Chinese help, and `llmusage help <COMMAND>` or `llmusage <COMMAND> --help` for command-specific clap help.
+
 The runtime lives under `~/.llmusage/` by default. Override it with `--home <PATH>` or `LLMUSAGE_HOME`.
 
 ## Fast path
@@ -58,6 +60,7 @@ llmusage daily --source codex --since 20260501 --until 20260518
 llmusage monthly --breakdown
 llmusage session --project my-repo
 llmusage blocks --active
+llmusage help --zh
 llmusage dash
 llmusage export html --out .\llmusage-report
 ```

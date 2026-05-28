@@ -24,6 +24,8 @@ just install
 cargo run -- --help
 ```
 
+顶层 help 现在使用表格形式，方便快速浏览。中文顶层 help 可用 `llmusage help --zh`；子命令旧版 clap help 仍可用 `llmusage help <COMMAND>` 或 `llmusage <COMMAND> --help`。
+
 默认运行时目录是 `~/.llmusage/`。可用 `--home <PATH>` 或 `LLMUSAGE_HOME` 覆盖。
 
 ## 最短路径
@@ -58,6 +60,7 @@ llmusage daily --source codex --since 20260501 --until 20260518
 llmusage monthly --breakdown
 llmusage session --project my-repo
 llmusage blocks --active
+llmusage help --zh
 llmusage dash
 llmusage export html --out .\llmusage-report
 ```

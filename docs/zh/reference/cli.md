@@ -1,6 +1,17 @@
 # CLI 参考
 
-本页按版本 `0.6.5` 的 `cargo run -- --help`、`cargo run -- serve --help`、`cargo run -- export html --help` 对齐。
+本页按版本 `0.6.5` 的 `cargo run -- --help`、`cargo run -- serve --help`、`cargo run -- export html --help` 对齐。顶层 help 使用紧凑表格；子命令 help 继续使用 clap 输出。
+
+## 顶层 help
+
+```powershell
+llmusage help
+llmusage --help
+llmusage -h
+llmusage help --zh
+```
+
+`llmusage help`、`llmusage --help`、`llmusage -h` 输出英文表格 help；`llmusage help --zh` 输出中文表格 help。子命令旧版 clap help 仍使用 `llmusage help <COMMAND>` 或 `llmusage <COMMAND> --help`。
 
 ## 全局参数
 

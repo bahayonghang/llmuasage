@@ -1,6 +1,17 @@
 # CLI reference
 
-This page is aligned with `cargo run -- --help`, `cargo run -- serve --help`, and `cargo run -- export html --help` for version `0.6.5`.
+This page is aligned with `cargo run -- --help`, `cargo run -- serve --help`, and `cargo run -- export html --help` for version `0.6.5`. Top-level help is rendered as a compact table; command-specific help still uses the clap output.
+
+## Top-level help
+
+```powershell
+llmusage help
+llmusage --help
+llmusage -h
+llmusage help --zh
+```
+
+`llmusage help`, `llmusage --help`, and `llmusage -h` print the English table help. `llmusage help --zh` prints the Chinese table help. Use `llmusage help <COMMAND>` or `llmusage <COMMAND> --help` for the legacy command-specific clap help.
 
 ## Global options
 
