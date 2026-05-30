@@ -75,6 +75,14 @@ impl Store {
     /// Returns the current non-expired worker lock holder, if any.
     pub fn current_worker_lock(&self) -> Result<Option<WorkerLockMeta>> {
         let conn = self.open_connection()?;
+        Self::current_worker_lock_with_conn(&conn)
+    }
+
+    /// Returns the current non-expired worker lock holder using an existing
+    /// connection.
+    pub(crate) fn current_worker_lock_with_conn(
+        conn: &rusqlite::Connection,
+    ) -> Result<Option<WorkerLockMeta>> {
         let meta = conn
             .query_row(
                 r#"

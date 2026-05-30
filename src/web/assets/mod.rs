@@ -100,6 +100,11 @@ const ASSET_MANIFEST: &[WebAsset] = &[
         body: include_str!("render/hero.js"),
     },
     WebAsset {
+        path: "render/sync-command-center.js",
+        content_type: "application/javascript; charset=utf-8",
+        body: include_str!("render/sync-command-center.js"),
+    },
+    WebAsset {
         path: "render/trends.js",
         content_type: "application/javascript; charset=utf-8",
         body: include_str!("render/trends.js"),

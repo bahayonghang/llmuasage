@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{Duration, SecondsFormat, Utc};
 use rusqlite::{Connection, OptionalExtension, params_from_iter};
@@ -532,11 +532,91 @@ pub struct DiagnosticsPayload {
     pub recent_failures: Vec<RunRecord>,
 }
 
+/// Top dashboard sync command-center payload. It answers ordinary sync safety
+/// separately from lossy rebuild risk and exposes only structured facts.
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncCommandCenterPayload {
+    pub mode: String,
+    pub tone: String,
+    pub headline_key: String,
+    pub reason_key: String,
+    pub generated_at: String,
+    pub current_job: Option<SyncCurrentJobPayload>,
+    pub last_run: Option<SyncLastRunPayload>,
+    pub safety: SyncSafetyPayload,
+    pub metrics: SyncMetricsPayload,
+    pub sources: Vec<SyncSourcePayload>,
+    pub actions: Vec<SyncActionPayload>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncCurrentJobPayload {
+    pub job_id: String,
+    pub status: String,
+    pub last_event: Option<String>,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub error_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncLastRunPayload {
+    pub status: String,
+    pub command: String,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub error_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncSafetyPayload {
+    pub ordinary_sync_safe: bool,
+    pub worker_lock: String,
+    pub worker_lock_holder: Option<String>,
+    pub lossy_rebuild_risk: bool,
+    pub risk_sources: Vec<String>,
+    pub recent_failures: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncMetricsPayload {
+    pub events_seen: i64,
+    pub inserted_delta: i64,
+    pub stored_events: i64,
+    pub sources_ready: i64,
+    pub sources_total: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncSourcePayload {
+    pub source: String,
+    pub status: String,
+    pub tone: String,
+    pub events_seen: i64,
+    pub events_inserted: i64,
+    pub stored_events: i64,
+    pub updated_at: Option<String>,
+    pub share: f64,
+    pub error_key: Option<String>,
+    pub lossy_rebuild_risk: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncActionPayload {
+    pub id: String,
+    pub label_key: String,
+    pub primary: bool,
+    pub disabled: bool,
+    pub reason_key: Option<String>,
+}
+
 /// Full snapshot embedded into exported HTML bundles.
 #[derive(Debug, Clone, Serialize)]
 pub struct DashboardSnapshot {
     /// Headline overview metrics.
     pub overview: OverviewPayload,
+    /// Structured top-of-page sync safety and latest-run summary.
+    pub sync_command_center: SyncCommandCenterPayload,
     /// Last 24 hours trend series.
     pub day_trends: Vec<TrendPoint>,
     /// Last 7 days trend series.
@@ -580,6 +660,8 @@ pub struct DashboardSnapshot {
 pub struct DashboardCoreSnapshot {
     /// Top-level totals and recent status.
     pub overview: OverviewPayload,
+    /// Structured top-of-page sync safety and latest-run summary.
+    pub sync_command_center: SyncCommandCenterPayload,
     /// 24h-style trend rows.
     pub day_trends: Vec<TrendPoint>,
     /// 7d-style trend rows.
@@ -1844,6 +1926,157 @@ impl Dashboard {
         })
     }
 
+    /// Builds the top-of-dashboard sync command center payload.
+    pub fn sync_command_center(&self, filter: &QueryFilter) -> Result<SyncCommandCenterPayload> {
+        let diagnostics = self.diagnostics()?;
+        let statuses = load_sync_statuses_with_conn(&self.conn, filter)?;
+        let recent_runs = self.store.run_log().recent_runs_with_conn(&self.conn, 10)?;
+        let current_lock = Store::current_worker_lock_with_conn(&self.conn)?;
+        let recent_failures = recent_runs
+            .iter()
+            .filter(|run| matches!(run.command.as_str(), "sync" | "sync --rebuild" | "hook-run"))
+            .filter(|run| RunRecord::counts_as_failure(run))
+            .count();
+        let selected_source = filter.source.map(|source| source.as_str().to_string());
+        let risk_sources = diagnostics
+            .by_source
+            .iter()
+            .filter(|source| {
+                selected_source
+                    .as_deref()
+                    .is_none_or(|selected| source.source == selected)
+            })
+            .filter(|source| source.lossy_rebuild_risk)
+            .map(|source| source.source.clone())
+            .collect::<Vec<_>>();
+        let risk_set = risk_sources.iter().cloned().collect::<BTreeSet<_>>();
+        let inserted_total = statuses.iter().map(|row| row.events_inserted).sum::<i64>();
+        let seen_total = statuses.iter().map(|row| row.events_seen).sum::<i64>();
+        let stored_total = statuses.iter().map(|row| row.stored_events).sum::<i64>();
+        let ready_total = statuses
+            .iter()
+            .filter(|row| row.last_error.is_none() && row.stored_events > 0)
+            .count() as i64;
+        let sources_total = statuses.len() as i64;
+        let max_stored = statuses
+            .iter()
+            .map(|row| row.stored_events)
+            .max()
+            .unwrap_or_default()
+            .max(1);
+        let last_run = recent_runs
+            .iter()
+            .find(|run| matches!(run.command.as_str(), "sync" | "sync --rebuild" | "hook-run"))
+            .map(|run| SyncLastRunPayload {
+                status: run.status.clone(),
+                command: run.command.clone(),
+                started_at: run.started_at.clone(),
+                finished_at: run.finished_at.clone(),
+                error_key: RunRecord::counts_as_failure(run)
+                    .then(|| "syncCenter.reason.lastRunFailed".to_string()),
+            });
+        let worker_lock = if current_lock.is_some() {
+            "busy"
+        } else {
+            "available"
+        }
+        .to_string();
+        let worker_lock_holder = current_lock.as_ref().map(|lock| lock.holder_identity());
+        let lossy_rebuild_risk = !risk_sources.is_empty();
+        let tone = if worker_lock == "busy" || recent_failures > 0 || lossy_rebuild_risk {
+            "warn"
+        } else {
+            "good"
+        };
+        let headline_key = if worker_lock == "busy" {
+            "syncCenter.headline.busy"
+        } else if recent_failures > 0 {
+            "syncCenter.headline.failed"
+        } else if lossy_rebuild_risk {
+            "syncCenter.headline.rebuildRisk"
+        } else {
+            "syncCenter.headline.ready"
+        };
+        let reason_key = if lossy_rebuild_risk {
+            "syncCenter.reason.rebuildRisk"
+        } else if statuses.is_empty() {
+            "syncCenter.reason.empty"
+        } else {
+            "syncCenter.reason.ready"
+        };
+
+        Ok(SyncCommandCenterPayload {
+            mode: "live".to_string(),
+            tone: tone.to_string(),
+            headline_key: headline_key.to_string(),
+            reason_key: reason_key.to_string(),
+            generated_at: now_utc(),
+            current_job: None,
+            last_run,
+            safety: SyncSafetyPayload {
+                ordinary_sync_safe: worker_lock != "busy",
+                worker_lock: worker_lock.clone(),
+                worker_lock_holder,
+                lossy_rebuild_risk,
+                risk_sources,
+                recent_failures,
+            },
+            metrics: SyncMetricsPayload {
+                events_seen: seen_total,
+                inserted_delta: inserted_total,
+                stored_events: stored_total,
+                sources_ready: ready_total,
+                sources_total,
+            },
+            sources: statuses
+                .into_iter()
+                .map(|row| {
+                    let source_risk = risk_set.contains(&row.source);
+                    let status = if row.last_error.is_some() {
+                        "error"
+                    } else if source_risk {
+                        "rebuild_risk"
+                    } else if row.stored_events > 0 || row.events_seen > 0 {
+                        "ok"
+                    } else {
+                        "idle"
+                    };
+                    let tone = match status {
+                        "error" | "rebuild_risk" => "warn",
+                        "ok" => "good",
+                        _ => "neutral",
+                    };
+                    SyncSourcePayload {
+                        source: row.source,
+                        status: status.to_string(),
+                        tone: tone.to_string(),
+                        events_seen: row.events_seen,
+                        events_inserted: row.events_inserted,
+                        stored_events: row.stored_events,
+                        updated_at: Some(row.updated_at),
+                        share: (row.stored_events as f64 / max_stored as f64).clamp(0.0, 1.0),
+                        error_key: row
+                            .last_error
+                            .is_some()
+                            .then(|| "syncCenter.reason.sourceError".to_string()),
+                        lossy_rebuild_risk: source_risk,
+                    }
+                })
+                .collect(),
+            actions: vec![SyncActionPayload {
+                id: "sync".to_string(),
+                label_key: "syncCenter.action.sync".to_string(),
+                primary: true,
+                disabled: worker_lock == "busy",
+                reason_key: if worker_lock == "busy" {
+                    Some("syncCenter.action.busy".to_string())
+                } else {
+                    None
+                },
+            }],
+        })
+    }
+
     /// Builds the full dashboard snapshot used by static HTML export.
     ///
     /// The snapshot still embeds the legacy four-window trends (`day`/`week`/
@@ -1854,6 +2087,7 @@ impl Dashboard {
         let core = self.core_snapshot(filter)?;
         Ok(DashboardSnapshot {
             overview: core.overview,
+            sync_command_center: core.sync_command_center,
             day_trends: core.day_trends,
             week_trends: core.week_trends,
             month_trends: core.month_trends,
@@ -1882,6 +2116,7 @@ impl Dashboard {
     pub fn core_snapshot(&self, filter: &QueryFilter) -> Result<DashboardCoreSnapshot> {
         Ok(DashboardCoreSnapshot {
             overview: self.overview(filter)?,
+            sync_command_center: self.sync_command_center(filter)?,
             day_trends: self.trends("day", filter)?,
             week_trends: self.trends("week", filter)?,
             month_trends: self.trends("month", filter)?,
@@ -2167,6 +2402,42 @@ fn map_token_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<TokenSummary> 
         reasoning_output_tokens: row.get(4)?,
         total_tokens: row.get(5)?,
     })
+}
+
+#[derive(Debug)]
+struct SyncStatusRow {
+    source: String,
+    events_seen: i64,
+    events_inserted: i64,
+    stored_events: i64,
+    updated_at: String,
+    last_error: Option<String>,
+}
+
+fn load_sync_statuses_with_conn(
+    conn: &Connection,
+    filter: &QueryFilter,
+) -> Result<Vec<SyncStatusRow>> {
+    let source = filter.source.map(|source| source.as_str().to_string());
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT source, events_seen, events_inserted, stored_events, updated_at
+        FROM source_sync_status
+        WHERE (?1 IS NULL OR source = ?1)
+        ORDER BY stored_events DESC, source ASC
+        "#,
+    )?;
+    let rows = stmt.query_map([source], |row| {
+        Ok(SyncStatusRow {
+            source: row.get(0)?,
+            events_seen: row.get(1)?,
+            events_inserted: row.get(2)?,
+            stored_events: row.get(3)?,
+            updated_at: row.get(4)?,
+            last_error: None,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 /// Loads `SourceDiagnostics` rows by joining the per-source state counts in

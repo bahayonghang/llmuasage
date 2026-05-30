@@ -1,6 +1,7 @@
 import { UI_COPY, getLocale, getShellCopy, onLocaleChange, setLocale } from './copy.js';
 import { buildContext, buildExplorerQuery, buildFilterQuery, loadDashboardSnapshot, loadExplorer } from './data.js';
 import { renderHero } from './render/hero.js';
+import { renderSyncCommandCenter } from './render/sync-command-center.js';
 import { renderTrends } from './render/trends.js';
 import { renderModels } from './render/models.js';
 import { renderSources } from './render/sources.js';
@@ -128,6 +129,7 @@ async function loadDashboardData(state) {
 function renderDashboard(rawData) {
   const context = buildContext(rawData);
 
+  renderSyncCommandCenter(context, dashboardState);
   renderHero(context);
   renderTrends(context);
   renderModels(context, dashboardState);
@@ -139,6 +141,12 @@ function renderDashboard(rawData) {
   renderInsights(context);
   syncPanelToggleControls(context, dashboardState);
   syncFilterControls(dashboardState, context);
+}
+
+function refreshSyncCommandCenter(state = dashboardState) {
+  if (!state?.rawData) return;
+  const context = buildContext(state.rawData);
+  renderSyncCommandCenter(context, state);
 }
 
 function appVersion() {
@@ -1234,6 +1242,7 @@ async function pollJobUntilTerminal(state, jobId) {
     snapshot = await getJson(`/api/jobs/${encodeURIComponent(jobId)}`);
     state.activeJobSnapshot = snapshot;
     updateSyncButton(state, snapshot);
+    refreshSyncCommandCenter(state);
   }
   return snapshot;
 }
@@ -1252,6 +1261,7 @@ function setupSyncJob(state) {
         const payload = await postJson(`/api/jobs/${encodeURIComponent(state.activeJobId)}/cancel`, {});
         state.activeJobSnapshot = payload.snapshot;
         updateSyncButton(state, state.activeJobSnapshot);
+        refreshSyncCommandCenter(state);
         return;
       }
 
@@ -1260,9 +1270,11 @@ function setupSyncJob(state) {
       state.activeJobId = payload.job_id;
       state.activeJobSnapshot = payload.snapshot;
       updateSyncButton(state, state.activeJobSnapshot);
+      refreshSyncCommandCenter(state);
 
       const terminal = await pollJobUntilTerminal(state, state.activeJobId);
       updateSyncButton(state, terminal);
+      refreshSyncCommandCenter(state);
       if (terminal?.status === 'completed') {
         await reloadDashboard(state);
       }
@@ -1271,11 +1283,12 @@ function setupSyncJob(state) {
       const endpointSync = document.getElementById('endpoint-sync');
       if (endpointSync) endpointSync.textContent = error?.message || getShellCopy('shell.sync.failed');
     } finally {
-      if (state.activeJobSnapshot?.status !== 'failed') {
+      if (!['failed', 'cancelled'].includes(state.activeJobSnapshot?.status)) {
         state.activeJobId = null;
         state.activeJobSnapshot = null;
       }
       updateSyncButton(state);
+      refreshSyncCommandCenter(state);
     }
   });
 }

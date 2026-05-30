@@ -183,6 +183,13 @@ fn html_shell(mode: &str) -> String {
 
     <!-- Hero + Status -->
     <section id="overview" class="block">
+      <div class="sync-command-center" id="sync-command-center" aria-live="polite">
+        <div class="sync-command-center-empty">
+          <div class="section-eyebrow" data-i18n="shell.syncCenter.eyebrow">SYNC</div>
+          <div data-i18n="shell.syncCenter.loading">正在读取同步状态…</div>
+        </div>
+      </div>
+
       <div class="hero">
         <div>
           <div class="section-eyebrow" style="margin-bottom: 10px;" data-i18n="shell.hero.eyebrow">DASHBOARD</div>

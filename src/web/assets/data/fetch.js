@@ -117,6 +117,7 @@ export async function loadDashboardSnapshot(state) {
       compare: snapshot?.compare,
       health: snapshot?.health,
       diagnostics: snapshot?.diagnostics,
+      sync_command_center: snapshot?.sync_command_center,
     };
   }
 
@@ -140,7 +141,7 @@ export async function loadDashboardSnapshot(state) {
       loadSection(state, 'health', '/api/health'),
       loadSection(state, 'diagnostics', '/api/diagnostics'),
     ]);
-    return { overview, trends, models, sources, projects, costs, activity, tools, optimize, explorer, compare, health, diagnostics };
+    return { overview, trends, models, sources, projects, costs, activity, tools, optimize, explorer, compare, health, diagnostics, sync_command_center: null };
   }
   return {
     overview: snapshot?.overview,
@@ -156,6 +157,7 @@ export async function loadDashboardSnapshot(state) {
     compare: snapshot?.compare,
     health: snapshot?.health,
     diagnostics: snapshot?.diagnostics,
+    sync_command_center: snapshot?.sync_command_center,
   };
 }
 

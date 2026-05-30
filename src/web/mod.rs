@@ -667,6 +667,7 @@ async fn load_dashboard_snapshot_resilient(
 
     Ok(json!({
         "overview": core.overview,
+        "sync_command_center": core.sync_command_center,
         "day_trends": core.day_trends,
         "week_trends": core.week_trends,
         "month_trends": core.month_trends,
@@ -1140,6 +1141,135 @@ mod tests {
     }
 
     #[test]
+    fn dashboard_shell_and_assets_wire_sync_command_center() {
+        let html = live_index_html();
+        assert!(html.contains("id=\"sync-command-center\""));
+        assert!(html.contains("data-i18n=\"shell.syncCenter.eyebrow\""));
+
+        let app_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "app.js")
+            .expect("app.js asset")
+            .body;
+        assert!(app_js.contains(
+            "import { renderSyncCommandCenter } from './render/sync-command-center.js';"
+        ));
+        assert!(app_js.contains("renderSyncCommandCenter(context, dashboardState)"));
+        assert!(app_js.contains("refreshSyncCommandCenter(state)"));
+
+        let renderer = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "render/sync-command-center.js")
+            .expect("sync command center renderer asset")
+            .body;
+        assert!(renderer.contains("export function renderSyncCommandCenter"));
+        assert!(renderer.contains("activeJobSnapshot?.last_event"));
+        assert!(renderer.contains("document.getElementById('btn-sync')?.click()"));
+        assert!(renderer.contains("sync-command-center-segmented-bar"));
+        assert!(renderer.contains("sourceSegmentedBar(center)"));
+        assert!(renderer.contains("sync-command-center-secondary"));
+        assert!(renderer.contains("sync-command-center-status"));
+        assert!(renderer.contains("last_run"));
+        assert!(renderer.contains("current_job"));
+        assert!(renderer.contains("activeJobSnapshot?.status !== 'running'"));
+        assert!(renderer.contains("return { kind, source, summary, stats }"));
+        assert!(renderer.contains("copy.sourceShareAria"));
+        assert!(renderer.contains("statusLabels"));
+        for forbidden in [
+            "snapshot.error",
+            "current.error",
+            "last_run.error",
+            "source.last_error",
+        ] {
+            assert!(
+                !renderer.contains(forbidden),
+                "sync command center renderer must not expose raw error marker: {forbidden}"
+            );
+        }
+        assert!(renderer.contains("error_key"));
+
+        let copy_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "copy.js")
+            .expect("copy.js asset")
+            .body;
+        assert!(copy_js.contains("syncCenter.headline.ready"));
+        assert!(copy_js.contains("insertedDelta"));
+        assert!(copy_js.contains("rebuild_risk"));
+        assert!(copy_js.contains("available"));
+        assert!(copy_js.contains("sourceShareAria"));
+        assert!(copy_js.contains("statusLabels"));
+        assert!(copy_js.contains("syncCenter.reason.sourceError"));
+    }
+
+    #[test]
+    fn sync_command_center_does_not_parse_human_summary_strings() {
+        let app_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "app.js")
+            .expect("app.js asset")
+            .body;
+        let renderer = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "render/sync-command-center.js")
+            .expect("sync command center renderer asset")
+            .body;
+        let combined = format!("{app_js}\n{renderer}");
+
+        for forbidden in [
+            "summary.match",
+            "summary.split",
+            "split('inserted_delta')",
+            "split(\"inserted_delta\")",
+            "inserted_delta=",
+            "stored_events=",
+        ] {
+            assert!(
+                !combined.contains(forbidden),
+                "forbidden summary parsing marker: {forbidden}"
+            );
+        }
+        assert!(renderer.contains("total_inserted"));
+        assert!(renderer.contains("stored_events"));
+        assert!(!renderer.contains("snapshot.summary"));
+        assert!(!renderer.contains("last_run.summary"));
+        for forbidden in [
+            "snapshot.error",
+            "current.error",
+            "last_run.error",
+            "source.last_error",
+        ] {
+            assert!(
+                !renderer.contains(forbidden),
+                "forbidden raw error marker: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn dashboard_assets_style_sync_command_center_responsively() {
+        let components_css = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "components.css")
+            .expect("components.css asset")
+            .body;
+        let layout_css = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "layout.css")
+            .expect("layout.css asset")
+            .body;
+
+        assert!(components_css.contains(".sync-command-center"));
+        assert!(components_css.contains(".sync-command-center-segments"));
+        assert!(components_css.contains(".sync-command-center-source[data-tone='warn']"));
+        assert!(components_css.contains(".sync-command-center-action .btn"));
+        assert!(components_css.contains(".sync-command-center-metric .mini-label"));
+        assert!(components_css.contains("var(--danger,"));
+        assert!(layout_css.contains(".sync-command-center-grid"));
+        assert!(layout_css.contains("@media (max-width: 720px)"));
+    }
+
+    #[test]
     fn asset_manifest_contains_required_files() {
         let paths = asset_manifest()
             .iter()
@@ -1163,6 +1293,7 @@ mod tests {
                 "data/derive.js",
                 "render.js",
                 "render/hero.js",
+                "render/sync-command-center.js",
                 "render/trends.js",
                 "render/models.js",
                 "render/sources.js",
@@ -1285,6 +1416,30 @@ mod tests {
             .body;
         assert!(fetch_js.contains("payload?.error?.detail"));
         assert!(fetch_js.contains("response.clone().json()"));
+    }
+
+    #[test]
+    fn dashboard_data_layers_pass_through_sync_command_center() {
+        let fetch_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "data/fetch.js")
+            .expect("fetch.js asset")
+            .body;
+        let derive_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "data/derive.js")
+            .expect("derive.js asset")
+            .body;
+
+        assert!(fetch_js.contains("sync_command_center: snapshot?.sync_command_center"));
+        assert!(fetch_js.contains("sync_command_center: null"));
+        assert!(derive_js.contains("sync_command_center"));
+        assert!(derive_js.contains("function normalizeSyncCommandCenter"));
+        assert!(
+            derive_js
+                .contains("syncCommandCenter: normalizeSyncCommandCenter(sync_command_center)")
+        );
+        assert!(!derive_js.contains("last_error"));
     }
 
     #[test]
@@ -2593,6 +2748,177 @@ mod tests {
             payload["diagnostics"]["by_source"][0]["lossy_rebuild_risk"],
             true
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn api_dashboard_embeds_sync_command_center_contract() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let conn = store.open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO source_sync_status(
+                source, files_processed, changed_files, bytes_scanned,
+                events_seen, events_replayed, events_inserted, stored_events,
+                parse_ms, write_ms, lock_wait_ms, updated_at
+            ) VALUES
+                ('codex', 2, 1, 2048, 7, 0, 5, 42, 10, 4, 0, '2026-05-29T00:01:00Z'),
+                ('claude', 1, 0, 1024, 0, 0, 0, 11, 3, 1, 0, '2026-05-29T00:02:00Z')
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO source_file(source, file_path, state, last_seen_at, last_state_change_at)
+            VALUES ('codex', ?1, 'missing', NULL, '2026-05-29T00:00:00Z')
+            "#,
+            [r"D:\missing\codex.jsonl"],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_event(
+                event_key, source, model, event_at, hour_start,
+                input_tokens, cache_creation_tokens, cache_read_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                project_hash, project_label, project_ref, path_hash,
+                session_id, session_label, source_path_hash, created_at,
+                cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source, pricing_rate
+            ) VALUES ('codex:event:sync-center', 'codex', 'gpt-5',
+                '2026-05-29T00:00:00Z', '2026-05-29T00:00:00Z',
+                10, 0, 0, 0, 0, 10,
+                'project-a', 'Project A', NULL, 'path-a',
+                NULL, NULL, NULL, '2026-05-29T00:00:00Z',
+                0.1, 0.1, 'static', 'static-v1', NULL)
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO run_log(command, status, summary, error, started_at, finished_at, duration_ms)
+            VALUES ('sync', 'success', 'human summary that must not be parsed', NULL,
+                    '2026-05-29T00:00:00Z', '2026-05-29T00:03:00Z', 180000)
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO run_log(command, status, summary, error, started_at, finished_at, duration_ms)
+            VALUES ('sync', 'failed', 'failed human summary that must not be parsed', ?1,
+                    '2026-05-29T00:04:00Z', '2026-05-29T00:05:00Z', 60000)
+            "#,
+            [r"failed while reading D:\Users\alice\.llmusage\secret.jsonl: raw token abc123"],
+        )?;
+        drop(conn);
+
+        let addr = serve(store, Some(0)).await?;
+        let (status, payload) = route_json(
+            addr,
+            "GET",
+            "/api/dashboard?source=codex&timezone=UTC",
+            None,
+        )
+        .await?;
+        assert_eq!(status, StatusCode::OK);
+
+        let center = &payload["sync_command_center"];
+        assert_eq!(center["mode"], "live");
+        assert_eq!(center["tone"], "warn");
+        assert_eq!(center["safety"]["ordinary_sync_safe"], true);
+        assert_eq!(center["safety"]["lossy_rebuild_risk"], true);
+        assert_eq!(center["safety"]["risk_sources"][0], "codex");
+        assert_eq!(center["last_run"]["status"], "failed");
+        assert_eq!(center["last_run"]["finished_at"], "2026-05-29T00:05:00Z");
+        assert_eq!(
+            center["last_run"]["error_key"],
+            "syncCenter.reason.lastRunFailed"
+        );
+        assert!(center["last_run"].get("error").is_none());
+        assert!(center["last_run"].get("summary").is_none());
+        let last_run_text = serde_json::to_string(&center["last_run"])?;
+        assert!(!last_run_text.contains("D:\\Users\\alice"));
+        assert!(!last_run_text.contains("secret.jsonl"));
+        assert!(!last_run_text.contains("abc123"));
+        assert_eq!(center["metrics"]["inserted_delta"], 5);
+        assert_eq!(center["metrics"]["stored_events"], 42);
+        assert_eq!(center["sources"][0]["source"], "codex");
+        assert_eq!(center["sources"][0]["events_inserted"], 5);
+        assert!(center["sources"][0]["share"].as_f64().unwrap() > 0.0);
+        assert!(center["sources"][0].get("last_error").is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn api_dashboard_sync_command_center_filters_rebuild_risk_by_source() -> anyhow::Result<()>
+    {
+        let (_temp, store) = make_store()?;
+        let conn = store.open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO source_sync_status(
+                source, files_processed, changed_files, bytes_scanned,
+                events_seen, events_replayed, events_inserted, stored_events,
+                parse_ms, write_ms, lock_wait_ms, updated_at
+            ) VALUES
+                ('codex', 1, 1, 2048, 3, 0, 3, 30, 10, 4, 0, '2026-05-29T00:01:00Z'),
+                ('claude', 1, 0, 1024, 1, 0, 1, 10, 3, 1, 0, '2026-05-29T00:02:00Z')
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO source_file(source, file_path, state, last_seen_at, last_state_change_at)
+            VALUES ('claude', ?1, 'missing', NULL, '2026-05-29T00:00:00Z')
+            "#,
+            [r"D:\missing\claude.jsonl"],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_event(
+                event_key, source, model, event_at, hour_start,
+                input_tokens, cache_creation_tokens, cache_read_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                project_hash, project_label, project_ref, path_hash,
+                session_id, session_label, source_path_hash, created_at,
+                cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source, pricing_rate
+            ) VALUES
+                ('codex:event:sync-center-filter', 'codex', 'gpt-5',
+                    '2026-05-29T00:00:00Z', '2026-05-29T00:00:00Z',
+                    10, 0, 0, 0, 0, 10,
+                    'project-a', 'Project A', NULL, 'path-a',
+                    NULL, NULL, NULL, '2026-05-29T00:00:00Z',
+                    0.1, 0.1, 'static', 'static-v1', NULL),
+                ('claude:event:sync-center-filter-risk', 'claude', 'claude-sonnet',
+                    '2026-05-29T00:00:00Z', '2026-05-29T00:00:00Z',
+                    20, 0, 0, 0, 0, 20,
+                    'project-b', 'Project B', NULL, 'path-b',
+                    NULL, NULL, NULL, '2026-05-29T00:00:00Z',
+                    0.2, 0.2, 'static', 'static-v1', NULL)
+            "#,
+            [],
+        )?;
+        drop(conn);
+
+        let addr = serve(store, Some(0)).await?;
+        let (status, payload) = route_json(
+            addr,
+            "GET",
+            "/api/dashboard?source=codex&timezone=UTC",
+            None,
+        )
+        .await?;
+        assert_eq!(status, StatusCode::OK);
+
+        let center = &payload["sync_command_center"];
+        assert_eq!(center["safety"]["lossy_rebuild_risk"], false);
+        assert!(
+            center["safety"]["risk_sources"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        let sources = center["sources"].as_array().unwrap();
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0]["source"], "codex");
         Ok(())
     }
 

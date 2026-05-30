@@ -103,6 +103,15 @@ main {
   gap: 14px;
 }
 
+.sync-command-center-grid,
+.sync-command-center-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.sync-command-center-sources {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .filter-rail {
   display: grid;
   grid-template-columns: minmax(150px, 0.9fr) minmax(180px, 1.15fr) minmax(260px, 1.35fr) minmax(150px, 0.85fr) minmax(150px, 0.85fr) auto;
@@ -391,6 +400,12 @@ section.block {
     grid-template-columns: repeat(2, 1fr);
   }
 
+  .sync-command-center-grid,
+  .sync-command-center-metrics,
+  .sync-command-center-sources {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .filter-rail {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -430,6 +445,23 @@ section.block {
   .kpi-grid,
   .trends-stats,
   .cost-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sync-command-center-main,
+  .sync-command-center-head {
+    flex-direction: column;
+  }
+
+  .sync-command-center-action,
+  .sync-command-center-action .btn,
+  .sync-command-center-action .btn-primary {
+    width: 100%;
+  }
+
+  .sync-command-center-grid,
+  .sync-command-center-metrics,
+  .sync-command-center-sources {
     grid-template-columns: 1fr;
   }
 }

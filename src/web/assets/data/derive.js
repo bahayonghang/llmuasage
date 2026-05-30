@@ -61,6 +61,48 @@ function normalizeExplorer(explorer) {
   };
 }
 
+function normalizeSyncCommandCenter(payload) {
+  const metrics = payload?.metrics || {};
+  const safety = payload?.safety || {};
+  return {
+    mode: payload?.mode || 'live',
+    tone: payload?.tone || 'neutral',
+    headline_key: payload?.headline_key || 'syncCenter.headline.empty',
+    reason_key: payload?.reason_key || 'syncCenter.reason.empty',
+    generated_at: payload?.generated_at || '',
+    current_job: payload?.current_job || null,
+    last_run: payload?.last_run || null,
+    safety: {
+      ordinary_sync_safe: safety?.ordinary_sync_safe !== false,
+      worker_lock: safety?.worker_lock || 'unknown',
+      worker_lock_holder: safety?.worker_lock_holder || null,
+      lossy_rebuild_risk: Boolean(safety?.lossy_rebuild_risk),
+      risk_sources: normalizeRows(safety?.risk_sources),
+      recent_failures: Number(safety?.recent_failures || 0),
+    },
+    metrics: {
+      events_seen: Number(metrics?.events_seen || 0),
+      inserted_delta: Number(metrics?.inserted_delta || 0),
+      stored_events: Number(metrics?.stored_events || 0),
+      sources_ready: Number(metrics?.sources_ready || 0),
+      sources_total: Number(metrics?.sources_total || 0),
+    },
+    sources: normalizeRows(payload?.sources).map((row) => ({
+      source: row?.source || '--',
+      status: row?.status || 'idle',
+      tone: row?.tone || 'neutral',
+      events_seen: Number(row?.events_seen || 0),
+      events_inserted: Number(row?.events_inserted || 0),
+        stored_events: Number(row?.stored_events || 0),
+        updated_at: row?.updated_at || '',
+        share: Math.max(0, Math.min(1, Number(row?.share || 0))),
+        error_key: row?.error_key || null,
+        lossy_rebuild_risk: Boolean(row?.lossy_rebuild_risk),
+      })),
+    actions: normalizeRows(payload?.actions),
+  };
+}
+
 function positiveRows(rows, select) {
   return normalizeRows(rows).filter((row) => Number(select(row) || 0) > 0);
 }
@@ -211,7 +253,7 @@ function sortDesc(rows, select) {
  * 2) 固定 Top N、图表序列和对比表行
  * 3) 为各面板补齐总量、峰值、占比和紧凑显示值
  */
-export function buildContext({ overview, trends, models, sources, projects, costs, activity, tools, optimize, compare, explorer, health, diagnostics }) {
+export function buildContext({ overview, trends, models, sources, projects, costs, activity, tools, optimize, compare, explorer, health, diagnostics, sync_command_center }) {
   logger.info('开始构建页面上下文');
 
   // 1.1 规范化并排序趋势、排行和健康数据
@@ -302,6 +344,7 @@ export function buildContext({ overview, trends, models, sources, projects, cost
       active_sources: overview?.source_count ?? sourceRows.length,
       failure_count: combinedFailureRows.length,
     },
+    syncCommandCenter: normalizeSyncCommandCenter(sync_command_center),
     leaders: {
       model: modelRows[0] ?? null,
       source: sourceRows[0] ?? null,
