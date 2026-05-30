@@ -1,0 +1,11 @@
+{
+  "htmlHasHost": true,
+  "htmlHostBeforeHero": true,
+  "apiHasCenter": true,
+  "ordinarySyncSafe": true,
+  "noCostDeltaClaim": true,
+  "noTokenDeltaClaim": true,
+  "actionId": "sync",
+  "hasLastRun": true,
+  "sourceCount": 0
+}
