@@ -4,7 +4,7 @@
 
 Local-first usage analytics for AI coding CLIs. `llmusage` reads local Codex, Claude Code, OpenCode, and Google Antigravity artifacts into a local SQLite database, then renders reports, a terminal dashboard, a browser dashboard, and offline HTML exports without upload or login.
 
-> Current crate version: `0.6.5`.
+> Current crate version: `0.7.1`.
 
 ![llmusage web dashboard overview](./docs/public/screenshots/web-dashboard-overview.png)
 
@@ -27,6 +27,7 @@ cargo run -- --help
 Top-level help is table-oriented for quick scanning. Use `llmusage help --zh` for Chinese help, and `llmusage help <COMMAND>` or `llmusage <COMMAND> --help` for command-specific clap help.
 
 The runtime lives under `~/.llmusage/` by default. Override it with `--home <PATH>` or `LLMUSAGE_HOME`.
+Structured runtime logs are local-only NDJSON at `~/.llmusage/logs/llmusage.ndjson`. Control file logging with `LLMUSAGE_LOG=off|error|warn|info|debug|trace` (default: `warn`); `RUST_LOG` continues to control console stderr logging.
 
 ## Fast path
 
@@ -62,6 +63,7 @@ llmusage session --project my-repo
 llmusage blocks --active
 llmusage help --zh
 llmusage dash
+llmusage logs --limit 50 --level warn
 llmusage export html --out .\llmusage-report
 ```
 
@@ -75,6 +77,7 @@ The browser dashboard includes behavior panels and a local Cost Explorer workben
 - Normal `llmusage sync` keeps imported usage when original source files are missing.
 - `llmusage sync --rebuild` refuses lossy rebuilds unless you also pass `--allow-lossy-rebuild`.
 - `llmusage diagnostics --forget-file <PATH> --source <SOURCE>` is the explicit write path for intentionally ignored source files.
+- `llmusage logs` queries local runtime logs and recent command audit rows without changing report stdout or `sync --json-events` stdout contracts.
 - `llmusage doctor --refresh-pricing <file>` reads a local pricing snapshot; URLs are refused.
 
 ## Documentation

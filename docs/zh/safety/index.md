@@ -19,6 +19,7 @@
 | `~/.llmusage/bin/llmusage-hook.sh` | POSIX hook wrapper |
 | `~/.llmusage/backups/` | 卸载时使用的集成配置备份 |
 | `~/.llmusage/exports/` | 静态 HTML 导出 |
+| `~/.llmusage/logs/llmusage.ndjson` | 本地结构化运行诊断和命令追踪 |
 | `~/.llmusage/pricing/` | `doctor --refresh-pricing` 导入的本地价格快照 |
 
 运行时根目录优先级：`--home <PATH>` > `LLMUSAGE_HOME` > `~/.llmusage`。
@@ -28,6 +29,10 @@
 `llmusage` 不创建账号会话、device token、上传队列或远端用量 API 调用。报表、Dashboard 和导出都读取本地 SQLite。
 
 项目 label 在本地推导。需要稳定分组的敏感路径维度会存为 hash。
+
+运行诊断也只保存在本地。`LLMUSAGE_LOG` 控制 NDJSON 日志文件（`off`、`error`、`warn`、`info`、`debug`、`trace`，默认 `warn`），`RUST_LOG` 控制控制台 stderr。运行日志会记录命令标签、run id、source、模块 target 和错误摘要；不会主动记录 prompt、response 或原始 source JSON。路径可能出现在人读错误摘要中，因此 diagnostics bundle 仍应当作本地排障材料处理。
+
+可用 `llmusage logs --limit 50 --level warn` 查询最近运行日志和 SQLite `run_log` 记录。该命令只读取本地文件/数据库，不上传数据。活动日志文件采用保守上限：启动时如果超过 10 MiB，会轮转为 `llmusage.ndjson.old`；不再需要的旧日志可手动删除。
 
 ## 普通 sync 保留数据
 

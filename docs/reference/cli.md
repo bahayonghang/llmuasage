@@ -1,6 +1,6 @@
 # CLI reference
 
-This page is aligned with `cargo run -- --help`, `cargo run -- serve --help`, and `cargo run -- export html --help` for version `0.7.0`. Top-level help is rendered as a compact table; command-specific help still uses the clap output.
+This page is aligned with `cargo run -- --help`, `cargo run -- serve --help`, and `cargo run -- export html --help` for version `0.7.1`. Top-level help is rendered as a compact table; command-specific help still uses the clap output.
 
 ## Top-level help
 
@@ -34,6 +34,17 @@ Usage: llmusage [OPTIONS] [COMMAND]
 | `--all` | Show full daily history instead of the default last 7 days |
 | `--instances` | Group daily rows by project/instance |
 | `--project <PROJECT>` | Filter by project label, hash, or reference |
+
+## Runtime logging
+
+`llmusage` writes structured runtime diagnostics to `~/.llmusage/logs/llmusage.ndjson` by default. The file is local-only and uses one JSON object per line.
+
+| Environment variable | Meaning |
+| --- | --- |
+| `LLMUSAGE_LOG=off\|error\|warn\|info\|debug\|trace` | Controls the local NDJSON log file; default is `warn` |
+| `RUST_LOG=...` | Continues to control console stderr logging |
+
+File logging does not write to report stdout and does not change `sync --json-events` stdout. The first implementation keeps one active log file and rotates it to `llmusage.ndjson.old` when it is over 10 MiB on startup.
 
 ## Report commands
 
@@ -141,6 +152,16 @@ llmusage doctor --refresh-pricing .\litellm-prices.json
 ```
 
 Runs health checks. `--refresh-pricing <PATH>` copies a local LiteLLM pricing snapshot into `~/.llmusage/pricing/` and recomputes per-event costs. URLs are refused.
+
+### `llmusage logs`
+
+```powershell
+llmusage logs
+llmusage logs --limit 50 --level warn
+llmusage logs --command sync --json
+```
+
+Queries local structured runtime log entries and recent SQLite `run_log` command records. Filters are applied to the local runtime log file and the `run_log` command label; no usage raw JSON, prompts, or responses are dumped.
 
 ## Local UI commands
 

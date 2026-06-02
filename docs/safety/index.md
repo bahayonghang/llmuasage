@@ -19,6 +19,7 @@ Common files and directories:
 | `~/.llmusage/bin/llmusage-hook.sh` | POSIX hook wrapper |
 | `~/.llmusage/backups/` | Integration config backups used by uninstall |
 | `~/.llmusage/exports/` | Static HTML exports |
+| `~/.llmusage/logs/llmusage.ndjson` | Local structured runtime diagnostics and command tracing |
 | `~/.llmusage/pricing/` | Local pricing snapshots imported with `doctor --refresh-pricing` |
 
 Runtime root precedence: `--home <PATH>` > `LLMUSAGE_HOME` > `~/.llmusage`.
@@ -28,6 +29,10 @@ Runtime root precedence: `--home <PATH>` > `LLMUSAGE_HOME` > `~/.llmusage`.
 `llmusage` does not create an account session, device token, upload queue, or remote usage API call. Report, dashboard, and export surfaces read local SQLite.
 
 Project labels are derived locally. Sensitive path dimensions are stored as hashes where the schema needs stable grouping.
+
+Runtime diagnostics stay local. `LLMUSAGE_LOG` controls the NDJSON log file (`off`, `error`, `warn`, `info`, `debug`, or `trace`; default `warn`), while `RUST_LOG` controls console stderr. Runtime log events include command labels, run ids, sources, module targets, and error summaries; they do not intentionally record prompts, responses, or raw source JSON. Paths may appear in human error summaries, so treat diagnostics bundles as local troubleshooting artifacts.
+
+Use `llmusage logs --limit 50 --level warn` to query recent runtime log entries and SQLite `run_log` records. The command reads only local files/database rows and does not upload anything. The active log file is capped conservatively by rotating to `llmusage.ndjson.old` when it is over 10 MiB on startup; delete old local logs manually if you no longer need them.
 
 ## Normal sync is retention-safe
 

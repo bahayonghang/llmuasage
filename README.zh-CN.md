@@ -4,7 +4,7 @@
 
 本地优先的 AI CLI 用量分析工具。`llmusage` 会把本机 Codex、Claude Code、OpenCode、Google Antigravity 的本地记录解析进本地 SQLite，然后提供命令行报表、终端 Dashboard、浏览器 Dashboard 和离线 HTML 导出；不上传、不登录、不调用云端用量 API。
 
-> 当前 crate 版本：`0.6.5`。
+> 当前 crate 版本：`0.7.1`。
 
 ![llmusage 本地 Web Dashboard 概览](./docs/public/screenshots/web-dashboard-overview.png)
 
@@ -27,6 +27,7 @@ cargo run -- --help
 顶层 help 现在使用表格形式，方便快速浏览。中文顶层 help 可用 `llmusage help --zh`；子命令旧版 clap help 仍可用 `llmusage help <COMMAND>` 或 `llmusage <COMMAND> --help`。
 
 默认运行时目录是 `~/.llmusage/`。可用 `--home <PATH>` 或 `LLMUSAGE_HOME` 覆盖。
+结构化运行日志只写本地 NDJSON：`~/.llmusage/logs/llmusage.ndjson`。文件日志可用 `LLMUSAGE_LOG=off|error|warn|info|debug|trace` 控制（默认 `warn`）；`RUST_LOG` 继续只控制控制台 stderr 日志。
 
 ## 最短路径
 
@@ -62,6 +63,7 @@ llmusage session --project my-repo
 llmusage blocks --active
 llmusage help --zh
 llmusage dash
+llmusage logs --limit 50 --level warn
 llmusage export html --out .\llmusage-report
 ```
 
@@ -75,6 +77,7 @@ llmusage export html --out .\llmusage-report
 - 普通 `llmusage sync` 遇到原始源文件缺失时会保留已导入 usage。
 - `llmusage sync --rebuild` 默认拒绝有损重建，除非同时传入 `--allow-lossy-rebuild`。
 - `llmusage diagnostics --forget-file <PATH> --source <SOURCE>` 是显式忽略源文件的写入入口。
+- `llmusage logs` 查询本地运行日志和最近命令审计记录，不改变报表 stdout 或 `sync --json-events` stdout 合同。
 - `llmusage doctor --refresh-pricing <file>` 只读取本地价格快照；URL 会被拒绝。
 
 ## 文档

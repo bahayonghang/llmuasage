@@ -1,6 +1,6 @@
 # CLI 参考
 
-本页按版本 `0.7.0` 的 `cargo run -- --help`、`cargo run -- serve --help`、`cargo run -- export html --help` 对齐。顶层 help 使用紧凑表格；子命令 help 继续使用 clap 输出。
+本页按版本 `0.7.1` 的 `cargo run -- --help`、`cargo run -- serve --help`、`cargo run -- export html --help` 对齐。顶层 help 使用紧凑表格；子命令 help 继续使用 clap 输出。
 
 ## 顶层 help
 
@@ -34,6 +34,17 @@ Usage: llmusage [OPTIONS] [COMMAND]
 | `--all` | daily 显示完整历史，而不是默认最近 7 天 |
 | `--instances` | daily 按项目/实例分组 |
 | `--project <PROJECT>` | 按项目 label、hash 或 reference 过滤 |
+
+## 运行时日志
+
+`llmusage` 默认把结构化运行诊断写到 `~/.llmusage/logs/llmusage.ndjson`。该文件只保存在本地，每行一个 JSON 对象。
+
+| 环境变量 | 含义 |
+| --- | --- |
+| `LLMUSAGE_LOG=off\|error\|warn\|info\|debug\|trace` | 控制本地 NDJSON 日志文件；默认 `warn` |
+| `RUST_LOG=...` | 继续控制控制台 stderr 日志 |
+
+文件日志不会写入报表 stdout，也不会改变 `sync --json-events` stdout。初版保留一个活动日志文件；启动时如果超过 10 MiB，会轮转为 `llmusage.ndjson.old`。
 
 ## 报表命令
 
@@ -141,6 +152,16 @@ llmusage doctor --refresh-pricing .\litellm-prices.json
 ```
 
 执行健康检查。`--refresh-pricing <PATH>` 会把本地 LiteLLM 价格快照复制到 `~/.llmusage/pricing/` 并重算 event 成本；URL 会被拒绝。
+
+### `llmusage logs`
+
+```powershell
+llmusage logs
+llmusage logs --limit 50 --level warn
+llmusage logs --command sync --json
+```
+
+查询本地结构化运行日志和 SQLite `run_log` 最近命令记录。过滤条件会应用到本地运行日志文件和 `run_log` 命令标签；不会倾倒 usage raw JSON、prompt 或 response。
 
 ## 本地界面命令
 
