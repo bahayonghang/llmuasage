@@ -81,6 +81,9 @@ async fn diagnostics(app: &AppContext, json: bool) -> Result<()> {
     store.bootstrap()?;
     let probes = integrations::probe_all(app)?;
     let recent_runs = store.run_log().recent_runs(10)?;
+    let logs = crate::logging::runtime_status(&app.paths)?;
+    let logging_disabled =
+        std::env::var("LLMUSAGE_LOG").is_ok_and(|value| value.eq_ignore_ascii_case("off"));
     let opencode_db_path = integrations::opencode::resolve_db_path();
 
     let mut checks = vec![
@@ -112,6 +115,36 @@ async fn diagnostics(app: &AppContext, json: bool) -> Result<()> {
             detail: format!("OpenCode DB: {}", opencode_db_path.display()),
         },
     ];
+
+    checks.push(DoctorCheck {
+        id: "logs.file",
+        status: if logging_disabled || logs.exists {
+            "ok"
+        } else {
+            "warn"
+        },
+        detail: if logging_disabled {
+            format!("structured runtime logging disabled; path: {}", logs.path)
+        } else {
+            format!(
+                "structured runtime log: {} ({} bytes)",
+                logs.path, logs.size_bytes
+            )
+        },
+    });
+
+    checks.push(DoctorCheck {
+        id: "logs.recent_errors",
+        status: if logs.recent_error_count == 0 {
+            "ok"
+        } else {
+            "warn"
+        },
+        detail: format!(
+            "{} ERROR entries in the recent local log scan",
+            logs.recent_error_count
+        ),
+    });
 
     for probe in probes {
         checks.push(DoctorCheck {

@@ -2,6 +2,7 @@ use std::{future::Future, path::PathBuf};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use tracing::{error, info};
 
 use crate::{app::AppContext, models::SourceKind};
 
@@ -14,6 +15,7 @@ pub mod export;
 pub mod help;
 pub mod hook_run;
 pub mod init;
+pub mod logs;
 pub mod monthly;
 pub mod report_args;
 pub mod serve;
@@ -98,6 +100,21 @@ pub enum Commands {
         #[arg(long, value_name = "PATH")]
         refresh_pricing: Option<PathBuf>,
     },
+    /// Query local structured runtime logs and recent run records.
+    Logs {
+        /// Number of recent log entries and run_log records to return.
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+        /// Minimum tracing level to include.
+        #[arg(long, value_parser = ["error", "warn", "info", "debug", "trace"])]
+        level: Option<String>,
+        /// Restrict to one tracked command label, such as `sync`.
+        #[arg(long)]
+        command: Option<String>,
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
     Serve {
         #[arg(long)]
         port: Option<u16>,
@@ -145,12 +162,20 @@ where
     S: FnOnce(&T) -> Option<String>,
 {
     let run_id = store.run_log().record_run_start(command)?;
+    info!(command, run_id, "run started");
     match body.await {
         Ok(value) => {
             let summary = success_summary(&value);
             store
                 .run_log()
                 .finish_run(run_id, "success", summary.as_deref(), None)?;
+            info!(
+                command,
+                run_id,
+                status = "success",
+                summary = summary.as_deref().unwrap_or(""),
+                "run finished"
+            );
             Ok(value)
         }
         Err(err) => {
@@ -163,6 +188,13 @@ where
                     "记录 {command} 失败 run_log 时也失败: {finish_err}"
                 )));
             }
+            error!(
+                command,
+                run_id,
+                status = "failed",
+                error = %err,
+                "run failed"
+            );
             Err(err)
         }
     }
@@ -207,6 +239,12 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
             json,
             refresh_pricing,
         }) => doctor::run(&app, json, refresh_pricing).await,
+        Some(Commands::Logs {
+            limit,
+            level,
+            command,
+            json,
+        }) => logs::run(&app, limit, level, command, json).await,
         Some(Commands::Serve { port }) => serve::run(&app, port).await,
         Some(Commands::Dash) => dash::run(&app, false).await,
         Some(Commands::Tui) => dash::run(&app, true).await,

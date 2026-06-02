@@ -15,6 +15,10 @@ pub struct AppPaths {
     pub backups_dir: PathBuf,
     /// Default export output directory.
     pub exports_dir: PathBuf,
+    /// Directory for local structured runtime logs.
+    pub logs_dir: PathBuf,
+    /// Default structured runtime log file.
+    pub log_file_path: PathBuf,
     /// Windows hook wrapper path.
     pub hook_cmd_path: PathBuf,
     /// POSIX hook wrapper path.
@@ -67,16 +71,19 @@ impl AppPaths {
         let bin_dir = root_dir.join("bin");
         let backups_dir = root_dir.join("backups");
         let exports_dir = root_dir.join("exports");
+        let logs_dir = root_dir.join("logs");
 
         Self {
             db_path: root_dir.join("llmusage.db"),
             hook_cmd_path: bin_dir.join("llmusage-hook.cmd"),
             hook_sh_path: bin_dir.join("llmusage-hook.sh"),
             lock_path: root_dir.join("worker.lock"),
+            log_file_path: logs_dir.join("llmusage.ndjson"),
             root_dir,
             bin_dir,
             backups_dir,
             exports_dir,
+            logs_dir,
         }
     }
 }

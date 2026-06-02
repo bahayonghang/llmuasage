@@ -1,4 +1,8 @@
-use std::{fs, path::PathBuf, process::Command};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 use anyhow::{Result, bail};
 use chrono::{Duration, Utc};
@@ -356,6 +360,191 @@ fn daily_human_output_uses_aggregate_ccusage_style_columns_and_no_default_info_l
     assert!(colored_stdout.contains("\u{1b}["));
     assert!(colored_stdout.contains("LLM Usage Report - Daily"));
 
+    Ok(())
+}
+
+#[test]
+fn logging_runtime_writes_ndjson_file() -> Result<()> {
+    let fixture = ReportCliFixture::new()?;
+    let output = fixture.output_with_env(
+        &["doctor"],
+        &[("LLMUSAGE_LOG", "info"), ("RUST_LOG", "off")],
+    )?;
+    assert!(output.status.success(), "{output:?}");
+
+    let entries = read_log_json_lines(&fixture.paths.log_file_path)?;
+    assert!(
+        entries.iter().any(|entry| {
+            entry["level"] == "INFO"
+                && entry["fields"]["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("doctor"))
+        }),
+        "expected INFO doctor event in {}: {entries:#?}",
+        fixture.paths.log_file_path.display()
+    );
+    Ok(())
+}
+
+#[test]
+fn report_stdout_is_not_polluted_by_logging() -> Result<()> {
+    let fixture = ReportCliFixture::new()?;
+    fixture.seed_event(SeedEvent {
+        event_key: "codex:stdout-clean:1",
+        source: "codex",
+        model: "gpt-5",
+        event_at: "2026-05-01T00:00:00Z",
+        input_tokens: 10,
+        total_tokens: 10,
+        project_hash: "project-a",
+        project_label: "Project A",
+        session_id: Some("stdout-clean-session"),
+        source_path_hash: Some("stdout-clean-source"),
+        ..SeedEvent::default()
+    })?;
+
+    let output = fixture.output_with_env(
+        &["daily", "--json", "--timezone", "UTC"],
+        &[("LLMUSAGE_LOG", "info"), ("RUST_LOG", "off")],
+    )?;
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8(output.stdout)?;
+    let parsed: serde_json::Value = serde_json::from_str(&stdout)?;
+    assert!(parsed["daily"].is_array());
+    assert!(!stdout.contains("INFO"), "{stdout}");
+    assert!(!stdout.contains("开始初始化本地目录"), "{stdout}");
+    assert!(fixture.paths.log_file_path.is_file());
+    Ok(())
+}
+
+#[test]
+fn logs_command_filters_level_and_command() -> Result<()> {
+    let fixture = ReportCliFixture::new()?;
+    fs::create_dir_all(&fixture.paths.logs_dir)?;
+    fs::write(
+        &fixture.paths.log_file_path,
+        [
+            r#"{"timestamp":"2026-06-02T00:00:00Z","level":"INFO","target":"test","fields":{"message":"sync info","command":"sync","run_id":1}}"#,
+            r#"{"timestamp":"2026-06-02T00:01:00Z","level":"WARN","target":"test","fields":{"message":"sync warn","command":"sync","source":"codex","run_id":2,"error":"warning only"}}"#,
+            r#"{"timestamp":"2026-06-02T00:02:00Z","level":"ERROR","target":"test","fields":{"message":"doctor error","command":"doctor","run_id":3,"error":"doctor failed"}}"#,
+        ]
+        .join("\n")
+            + "\n",
+    )?;
+
+    let store = Store::new(&fixture.paths)?;
+    let sync_run = store.run_log().record_run_start("sync")?;
+    store
+        .run_log()
+        .finish_run(sync_run, "success", Some("human sync summary"), None)?;
+    let doctor_run = store.run_log().record_run_start("doctor")?;
+    store
+        .run_log()
+        .finish_run(doctor_run, "failed", None, Some("doctor failed"))?;
+
+    let payload = fixture.json_with_env(
+        &[
+            "logs",
+            "--limit",
+            "10",
+            "--level",
+            "warn",
+            "--command",
+            "sync",
+            "--json",
+        ],
+        &[("LLMUSAGE_LOG", "off"), ("RUST_LOG", "off")],
+    )?;
+    let entries = payload["entries"].as_array().expect("entries array");
+    assert_eq!(entries.len(), 1, "{payload:#}");
+    assert_eq!(entries[0]["level"], "WARN");
+    assert_eq!(entries[0]["command"], "sync");
+    assert_eq!(entries[0]["source"], "codex");
+    assert_eq!(entries[0]["error"], "warning only");
+
+    let runs = payload["recent_runs"]
+        .as_array()
+        .expect("recent_runs array");
+    assert_eq!(runs.len(), 1, "{payload:#}");
+    assert_eq!(runs[0]["command"], "sync");
+    assert_eq!(runs[0]["summary"], "human sync summary");
+    Ok(())
+}
+
+#[test]
+fn diagnostics_includes_logs_summary_without_dumping_entries() -> Result<()> {
+    let fixture = ReportCliFixture::new()?;
+    fs::create_dir_all(&fixture.paths.logs_dir)?;
+    fs::write(
+        &fixture.paths.log_file_path,
+        r#"{"timestamp":"2026-06-02T00:02:00Z","level":"ERROR","target":"test","fields":{"message":"sync failed","command":"sync","error":"redacted summary"}}"#,
+    )?;
+
+    let payload = fixture.json_with_env(
+        &["diagnostics"],
+        &[("LLMUSAGE_LOG", "off"), ("RUST_LOG", "off")],
+    )?;
+    let expected_log_path = fixture.paths.log_file_path.to_string_lossy().to_string();
+    assert_eq!(
+        payload["paths"]["log_file_path"].as_str(),
+        Some(expected_log_path.as_str())
+    );
+    assert_eq!(payload["logs"]["exists"].as_bool(), Some(true));
+    assert_eq!(payload["logs"]["recent_error_count"].as_u64(), Some(1));
+    assert!(
+        payload["logs"].get("entries").is_none(),
+        "diagnostics should expose only log summary, not dump log contents"
+    );
+    Ok(())
+}
+
+#[test]
+fn run_tracked_records_failure_for_sync_rebuild() -> Result<()> {
+    let fixture = ReportCliFixture::new()?;
+    fixture.seed_event(SeedEvent {
+        event_key: "codex:rebuild-failure:1",
+        source: "codex",
+        model: "gpt-5",
+        event_at: "2026-05-01T00:00:00Z",
+        input_tokens: 10,
+        total_tokens: 10,
+        project_hash: "project-a",
+        project_label: "Project A",
+        session_id: Some("rebuild-failure-session"),
+        source_path_hash: Some("rebuild-failure-source"),
+        ..SeedEvent::default()
+    })?;
+    let missing_source = fixture.home.join("missing-codex-source.jsonl");
+    let conn = Connection::open(&fixture.paths.db_path)?;
+    conn.execute(
+        r#"
+        INSERT INTO source_file(source, file_path, state, last_seen_at, last_state_change_at)
+        VALUES ('codex', ?1, 'missing', NULL, '2026-06-02T00:00:00Z')
+        "#,
+        [missing_source.to_string_lossy().to_string()],
+    )?;
+    drop(conn);
+
+    let output = fixture.output_with_env(
+        &["sync", "--rebuild", "--source", "codex"],
+        &[("LLMUSAGE_LOG", "off"), ("RUST_LOG", "off")],
+    )?;
+    assert!(!output.status.success(), "{output:?}");
+
+    let store = Store::new(&fixture.paths)?;
+    let recent = store.run_log().recent_runs(5)?;
+    let failed = recent
+        .iter()
+        .find(|run| run.command == "sync --rebuild")
+        .expect("sync --rebuild run should be recorded");
+    assert_eq!(failed.status, "failed");
+    assert!(
+        failed
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("Refusing lossy sync --rebuild")),
+        "{failed:#?}"
+    );
     Ok(())
 }
 
@@ -738,18 +927,8 @@ impl ReportCliFixture {
         let temp = TempDir::new()?;
         let home = temp.path().join("home");
         let root_dir = home.join(".llmusage");
-        let bin_dir = root_dir.join("bin");
         std::fs::create_dir_all(&home)?;
-        let paths = AppPaths {
-            db_path: root_dir.join("llmusage.db"),
-            hook_cmd_path: bin_dir.join("llmusage-hook.cmd"),
-            hook_sh_path: bin_dir.join("llmusage-hook.sh"),
-            lock_path: root_dir.join("worker.lock"),
-            backups_dir: root_dir.join("backups"),
-            exports_dir: root_dir.join("exports"),
-            root_dir,
-            bin_dir,
-        };
+        let paths = AppPaths::with_root(root_dir)?;
         Store::new(&paths)?.bootstrap()?;
         Ok(Self {
             _temp: temp,
@@ -853,7 +1032,11 @@ impl ReportCliFixture {
     }
 
     fn json(&self, args: &[&str]) -> Result<serde_json::Value> {
-        let output = self.output(args)?;
+        self.json_with_env(args, &[])
+    }
+
+    fn json_with_env(&self, args: &[&str], envs: &[(&str, &str)]) -> Result<serde_json::Value> {
+        let output = self.output_with_env(args, envs)?;
         if !output.status.success() {
             bail!("command failed: {output:?}");
         }
@@ -882,6 +1065,14 @@ impl ReportCliFixture {
         }
         Ok(command.output()?)
     }
+}
+
+fn read_log_json_lines(path: &Path) -> Result<Vec<serde_json::Value>> {
+    let raw = fs::read_to_string(path)?;
+    raw.lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| Ok(serde_json::from_str(line)?))
+        .collect()
 }
 
 struct SeedEvent<'a> {

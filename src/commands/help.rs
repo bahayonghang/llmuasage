@@ -329,6 +329,10 @@ const ENGLISH_COMMANDS: &[(&str, &str)] = &[
         "doctor",
         "Run health checks and optionally refresh pricing from a local file.",
     ),
+    (
+        "logs",
+        "Query local structured runtime logs and recent run records.",
+    ),
     ("dash", "Open the interactive terminal dashboard."),
     ("serve", "Start the local browser dashboard on 127.0.0.1."),
     ("export html", "Write an offline dashboard bundle."),
@@ -433,6 +437,7 @@ const CHINESE_COMMANDS: &[(&str, &str)] = &[
     ("status", "输出数据库、来源、集成与最近运行状态。"),
     ("diagnostics", "输出诊断 JSON，或显式忽略某个来源文件。"),
     ("doctor", "运行健康检查，也可从本地文件刷新价格。"),
+    ("logs", "查询本地结构化运行日志与最近命令记录。"),
     ("dash", "打开交互式终端 Dashboard。"),
     ("serve", "在 127.0.0.1 启动本地浏览器 Dashboard。"),
     ("export html", "写入离线 Dashboard bundle。"),

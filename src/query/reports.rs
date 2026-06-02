@@ -1042,17 +1042,7 @@ mod tests {
         fn new() -> Result<Self> {
             let temp = TempDir::new()?;
             let root_dir = temp.path().join(".llmusage");
-            let bin_dir = root_dir.join("bin");
-            let paths = AppPaths {
-                db_path: root_dir.join("llmusage.db"),
-                hook_cmd_path: bin_dir.join("llmusage-hook.cmd"),
-                hook_sh_path: bin_dir.join("llmusage-hook.sh"),
-                lock_path: root_dir.join("worker.lock"),
-                backups_dir: root_dir.join("backups"),
-                exports_dir: root_dir.join("exports"),
-                root_dir,
-                bin_dir,
-            };
+            let paths = AppPaths::with_root(root_dir)?;
             let store = Store::new(&paths)?;
             store.bootstrap()?;
             Ok(Self { _temp: temp, store })

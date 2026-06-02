@@ -50,6 +50,7 @@ impl Store {
         fs::create_dir_all(&self.paths.bin_dir)?;
         fs::create_dir_all(&self.paths.backups_dir)?;
         fs::create_dir_all(&self.paths.exports_dir)?;
+        fs::create_dir_all(&self.paths.logs_dir)?;
 
         let mut conn = self.open_connection()?;
         if migrations::read_schema_version(&conn)? == 0 && self.paths.db_path.is_file() {

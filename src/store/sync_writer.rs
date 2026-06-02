@@ -940,17 +940,7 @@ mod tests {
     use tempfile::TempDir;
 
     fn build_paths(root: &std::path::Path) -> AppPaths {
-        let root_dir = root.to_path_buf();
-        AppPaths {
-            db_path: root_dir.join("llmusage.db"),
-            hook_cmd_path: root_dir.join("hook.cmd"),
-            hook_sh_path: root_dir.join("hook.sh"),
-            lock_path: root_dir.join("worker.lock"),
-            bin_dir: root_dir.join("bin"),
-            backups_dir: root_dir.join("backups"),
-            exports_dir: root_dir.join("exports"),
-            root_dir,
-        }
+        AppPaths::with_root(root.to_path_buf()).expect("test paths")
     }
 
     fn build_event(suffix: &str, path_hash: &str, total: i64) -> UsageEvent {

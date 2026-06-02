@@ -18,18 +18,15 @@ pub async fn run(app: &AppContext) -> Result<()> {
     // 1.1 建立本地 store 与 run_log
     let store = Store::new(&app.paths)?;
     store.bootstrap()?;
-    let run_id = store.run_log().record_run_start("init")?;
 
     // 1.2 安装三类本地 hook / plugin
-    let actions = integrations::install_all(app, &store)?;
-    let summary = actions
-        .iter()
-        .map(|item| format!("{}={}", item.source, item.status))
-        .collect::<Vec<_>>()
-        .join(", ");
-    store
-        .run_log()
-        .finish_run(run_id, "success", Some(&summary), None)?;
+    let actions = super::run_tracked(
+        &store,
+        "init",
+        async { integrations::install_all(app, &store) },
+        |actions| Some(integration_summary(actions)),
+    )
+    .await?;
 
     println!("Init finished:");
     for action in actions {
@@ -38,4 +35,12 @@ pub async fn run(app: &AppContext) -> Result<()> {
 
     info!("完成本地运行时初始化与集成安装");
     Ok(())
+}
+
+fn integration_summary(actions: &[crate::integrations::IntegrationAction]) -> String {
+    actions
+        .iter()
+        .map(|item| format!("{}={}", item.source, item.status))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
