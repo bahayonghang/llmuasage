@@ -2,10 +2,31 @@
 
 The crate exposes a small adapter surface for local desktop integrations and tests. It is still local-first: adapters read or mutate the same local SQLite runtime that the CLI uses.
 
+## Stability contract
+
+Prefer the root façade for embedding:
+
+```rust
+use llmusage::{
+    AppPaths, Dashboard, JobRegistry, QueryFilter, ReportTimezone, Result, SourceKind, Store,
+    SyncOptions,
+};
+```
+
+The compatible stable set is:
+
+- Runtime/store: `AppPaths`, `Store`, `BootstrapOptions`, `HolderKind`, `WorkerLock`
+- Query: `Dashboard`, `QueryFilter`, `ReportTimezone`, dashboard payloads, Explorer payload/query types, logs payload/query types
+- Sync jobs: `JobRegistry`, `SyncOptions`, `JobSnapshot`, `JobStatus`, `JobEvent`
+- Domain/error: `SourceKind`, `LlmusageError`, `Result`
+- Test helpers when `features = ["testing"]`: `Fixture`, `SeedEvent`
+
+Broad modules such as `commands`, `parsers`, `integrations`, `runtime`, `web`, and `tui` remain public for the 0.7.x compatibility window, but they are implementation namespaces rather than the recommended adapter API. Future minor/major releases may move internals behind narrower modules after downstream callers migrate to the façade above.
+
 ## Open a store
 
 ```rust
-use llmusage::{paths::AppPaths, store::Store, Result};
+use llmusage::{AppPaths, Result, Store};
 
 fn open_store(root: std::path::PathBuf) -> Result<Store> {
     let paths = AppPaths::with_root(root)?;
@@ -21,8 +42,8 @@ Path resolution for CLI entrypoints is `--home <PATH>` first, then `LLMUSAGE_HOM
 
 ```rust
 use llmusage::{
-    store::Store, Dashboard, ExplorerDimension, ExplorerFilters, ExplorerGranularity,
-    ExplorerMetric, ExplorerQuery, QueryFilter, Result,
+    Dashboard, ExplorerDimension, ExplorerFilters, ExplorerGranularity, ExplorerMetric,
+    ExplorerQuery, QueryFilter, Result, Store,
 };
 
 fn load_dashboard(store: &Store) -> Result<()> {

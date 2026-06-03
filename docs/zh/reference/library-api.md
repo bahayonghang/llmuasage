@@ -2,10 +2,31 @@
 
 crate 暴露了一组较小的适配层接口，用于本地桌面集成和测试。它仍遵循本地优先边界：适配层读写的是 CLI 使用的同一个本地 SQLite 运行时。
 
+## 稳定性约定
+
+嵌入时优先使用 root façade：
+
+```rust
+use llmusage::{
+    AppPaths, Dashboard, JobRegistry, QueryFilter, ReportTimezone, Result, SourceKind, Store,
+    SyncOptions,
+};
+```
+
+当前兼容稳定集合是：
+
+- Runtime/store：`AppPaths`、`Store`、`BootstrapOptions`、`HolderKind`、`WorkerLock`
+- Query：`Dashboard`、`QueryFilter`、`ReportTimezone`、Dashboard payload、Explorer payload/query 类型、logs payload/query 类型
+- Sync jobs：`JobRegistry`、`SyncOptions`、`JobSnapshot`、`JobStatus`、`JobEvent`
+- Domain/error：`SourceKind`、`LlmusageError`、`Result`
+- 启用 `features = ["testing"]` 时的测试辅助：`Fixture`、`SeedEvent`
+
+`commands`、`parsers`、`integrations`、`runtime`、`web`、`tui` 等宽模块在 0.7.x 兼容窗口内仍保持 public，但它们是实现命名空间，不是推荐的适配层 API。下游迁移到上述 façade 后，后续 minor/major 版本可再把内部表面收窄。
+
 ## 打开 Store
 
 ```rust
-use llmusage::{paths::AppPaths, store::Store, Result};
+use llmusage::{AppPaths, Result, Store};
 
 fn open_store(root: std::path::PathBuf) -> Result<Store> {
     let paths = AppPaths::with_root(root)?;
@@ -21,8 +42,8 @@ CLI 入口的路径解析顺序是 `--home <PATH>`、`LLMUSAGE_HOME`、`~/.llmus
 
 ```rust
 use llmusage::{
-    store::Store, Dashboard, ExplorerDimension, ExplorerFilters, ExplorerGranularity,
-    ExplorerMetric, ExplorerQuery, QueryFilter, Result,
+    Dashboard, ExplorerDimension, ExplorerFilters, ExplorerGranularity, ExplorerMetric,
+    ExplorerQuery, QueryFilter, Result, Store,
 };
 
 fn load_dashboard(store: &Store) -> Result<()> {
