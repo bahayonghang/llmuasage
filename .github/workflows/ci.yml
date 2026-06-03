@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  ci:
+    name: Rust and docs
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Check release version references
+        shell: pwsh
+        run: |
+          $cargoToml = Get-Content -Raw Cargo.toml
+          $match = [regex]::Match($cargoToml, '(?m)^version = "([^"]+)"')
+          if (-not $match.Success) {
+            throw "Could not read package.version from Cargo.toml"
+          }
+          $version = $match.Groups[1].Value
+          $files = @(
+            "README.md",
+            "README.zh-CN.md",
+            "docs/index.md",
+            "docs/zh/index.md",
+            "docs/reference/cli.md",
+            "docs/zh/reference/cli.md"
+          )
+          foreach ($file in $files) {
+            $content = Get-Content -Raw $file
+            if (-not $content.Contains($version)) {
+              throw "$file does not mention Cargo package version $version"
+            }
+          }
+          if (-not (Test-Path "docs/package-lock.json")) {
+            throw "docs/package-lock.json is required for reproducible docs installs"
+          }
+
+      - name: Rust format
+        run: cargo fmt --check
+
+      - name: Rust clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Rust tests
+        run: cargo test -- --test-threads=1
+
+      - name: Rust docs
+        shell: pwsh
+        run: |
+          $env:RUSTDOCFLAGS = "-D warnings"
+          cargo doc --no-deps
+
+      - name: Install docs dependencies
+        run: npm ci --prefix docs
+
+      - name: Build docs
+        run: npm --prefix docs run docs:build
