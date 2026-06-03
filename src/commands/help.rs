@@ -374,7 +374,7 @@ const ENGLISH_REPORT_OPTIONS: &[(&str, &str)] = &[
     ("--order asc|desc", "Sort report rows by period/activity."),
     (
         "--timezone <TZ>",
-        "Report timezone: UTC, local, or a fixed offset like +08:00. Alias: -z.",
+        "Report timezone: UTC, local (current fixed offset), or a fixed offset like +08:00. Alias: -z.",
     ),
     (
         "--locale <LOCALE>",
@@ -467,7 +467,7 @@ const CHINESE_REPORT_OPTIONS: &[(&str, &str)] = &[
     ("--order asc|desc", "按周期/活动排序报表行。"),
     (
         "--timezone <TZ>",
-        "报表时区：UTC、local 或 +08:00 这类固定偏移；别名：-z。",
+        "报表时区：UTC、local（当前固定偏移）或 +08:00 这类固定偏移；别名：-z。",
     ),
     (
         "--locale <LOCALE>",

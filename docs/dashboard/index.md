@@ -40,7 +40,7 @@ Dashboard filters map to the shared `QueryFilter` used by the Rust query layer.
 | `model` | Exact model string from normalized events |
 | `since` / `until` | Date range for dashboard queries |
 | `window` | Quick window such as day/week/month/all |
-| `timezone` | `UTC`, `local`, or a fixed offset such as `+08:00` |
+| `timezone` | `UTC`, `local`, or a fixed offset such as `+08:00`; `local` means the machine's current fixed local offset, not an IANA/DST-aware timezone |
 
 The URL preserves filters so a refreshed page or shared local URL keeps the same view.
 

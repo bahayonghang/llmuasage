@@ -56,7 +56,7 @@ llmusage sync --source codex
 llmusage
 ```
 
-With no subcommand, `llmusage` is the `daily` report. It shows the last 7 calendar days in the selected timezone, including today.
+With no subcommand, `llmusage` is the `daily` report. It shows the last 7 calendar days in the selected timezone, including today. `--timezone local` uses the machine's current fixed local offset; pass a fixed offset such as `--timezone +08:00` for reproducible historical grouping.
 
 Use JSON for automation:
 

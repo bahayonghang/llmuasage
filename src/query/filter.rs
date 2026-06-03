@@ -11,7 +11,10 @@ use crate::models::SourceKind;
 pub enum ReportTimezone {
     /// Interpret dates as UTC calendar days.
     Utc,
-    /// Interpret dates with the machine's current local offset.
+    /// Interpret dates with the machine's current local UTC offset.
+    ///
+    /// This is a fixed-offset snapshot taken when the query runs, not an
+    /// IANA/DST-aware timezone. Historical dates use the same current offset.
     Local,
     /// Interpret dates with a caller-provided fixed offset.
     Fixed(FixedOffset),
@@ -208,6 +211,8 @@ fn column(alias: Option<&str>, name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{QueryFilter, ReportTimezone};
+    use chrono::{FixedOffset, Local, NaiveDate, Offset, TimeZone, Utc, offset::LocalResult};
+    use rusqlite::types::Value;
 
     #[test]
     fn default_filter_timezone_is_local() {
@@ -215,5 +220,61 @@ mod tests {
             QueryFilter::default().timezone,
             ReportTimezone::Local
         ));
+    }
+
+    #[test]
+    fn fixed_timezone_date_bounds_use_fixed_offset_without_dst_rules() {
+        let filter = QueryFilter {
+            since: Some(NaiveDate::from_ymd_opt(2026, 3, 8).unwrap()),
+            until: Some(NaiveDate::from_ymd_opt(2026, 3, 8).unwrap()),
+            timezone: ReportTimezone::Fixed(FixedOffset::west_opt(8 * 3600).unwrap()),
+            ..QueryFilter::default()
+        };
+
+        let sql_filter = filter.event_filter(None);
+
+        assert_eq!(
+            sql_filter.where_sql(),
+            " WHERE event_at >= ? AND event_at < ?"
+        );
+        assert_eq!(
+            sql_filter.params(),
+            &[
+                Value::Text("2026-03-08T08:00:00Z".to_string()),
+                Value::Text("2026-03-09T08:00:00Z".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn local_timezone_date_bounds_use_current_fixed_offset_snapshot() {
+        let date = NaiveDate::from_ymd_opt(2026, 11, 1).unwrap();
+        let filter = QueryFilter {
+            since: Some(date),
+            until: Some(date),
+            timezone: ReportTimezone::Local,
+            ..QueryFilter::default()
+        };
+        let current_offset = Local::now().offset().fix();
+        let expected_start = local_midnight_to_utc_text(date, current_offset);
+        let expected_end = local_midnight_to_utc_text(date.succ_opt().unwrap(), current_offset);
+
+        let sql_filter = filter.event_filter(None);
+
+        assert_eq!(
+            sql_filter.params(),
+            &[Value::Text(expected_start), Value::Text(expected_end)],
+            "`local` must use one current fixed offset for all date bounds"
+        );
+    }
+
+    fn local_midnight_to_utc_text(date: NaiveDate, offset: FixedOffset) -> String {
+        let local_start = date.and_hms_opt(0, 0, 0).expect("midnight is always valid");
+        let utc = match offset.from_local_datetime(&local_start) {
+            LocalResult::Single(value) => value.with_timezone(&Utc),
+            LocalResult::Ambiguous(earliest, _) => earliest.with_timezone(&Utc),
+            LocalResult::None => offset.from_utc_datetime(&local_start).with_timezone(&Utc),
+        };
+        utc.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
     }
 }

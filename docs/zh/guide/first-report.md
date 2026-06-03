@@ -9,7 +9,7 @@ llmusage
 llmusage daily
 ```
 
-没有子命令时，`llmusage` 等价于 `llmusage daily`。默认 daily 报表显示所选时区下最近 7 个自然日（包含今天）。
+没有子命令时，`llmusage` 等价于 `llmusage daily`。默认 daily 报表显示所选时区下最近 7 个自然日（包含今天）。`--timezone local` 使用本机当前固定本地偏移；如果需要跨机器可复现的历史分组，请显式传入 `--timezone +08:00` 这类固定偏移。
 
 常用筛选：
 

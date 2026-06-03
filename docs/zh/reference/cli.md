@@ -27,7 +27,7 @@ Usage: llmusage [OPTIONS] [COMMAND]
 | `--json` | 支持的报表命令输出稳定 JSON |
 | `--breakdown` | 在支持处包含按模型拆分的行或 payload |
 | `--order asc\|desc` | 按周期/活动排序报表行 |
-| `--timezone UTC\|local\|+08:00` | 报表时区 |
+| `--timezone UTC\|local\|+08:00` | 报表时区。`local` 使用本机当前固定本地偏移，不是 IANA/DST 感知时区。 |
 | `--locale <LOCALE>` | 标题和数字格式的轻量 locale 选择 |
 | `--compact` | 使用更窄的表格布局 |
 | `--source codex\|claude\|opencode\|antigravity` | 报表或同步限制到一个来源 |

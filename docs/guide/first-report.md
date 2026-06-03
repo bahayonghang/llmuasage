@@ -9,7 +9,7 @@ llmusage
 llmusage daily
 ```
 
-With no subcommand, `llmusage` is equivalent to `llmusage daily`. The default daily report shows the last 7 calendar days in the selected timezone, including today.
+With no subcommand, `llmusage` is equivalent to `llmusage daily`. The default daily report shows the last 7 calendar days in the selected timezone, including today. `--timezone local` uses the machine's current fixed local offset; use an explicit fixed offset such as `--timezone +08:00` when you need reproducible historical grouping across machines.
 
 Useful filters:
 

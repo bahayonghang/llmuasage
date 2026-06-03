@@ -27,7 +27,7 @@ Usage: llmusage [OPTIONS] [COMMAND]
 | `--json` | Emit stable JSON for supported report commands |
 | `--breakdown` | Include per-model breakdown rows or payloads where supported |
 | `--order asc\|desc` | Sort report rows by period/activity |
-| `--timezone UTC\|local\|+08:00` | Report timezone |
+| `--timezone UTC\|local\|+08:00` | Report timezone. `local` uses the machine's current fixed local offset; it is not an IANA/DST-aware timezone. |
 | `--locale <LOCALE>` | Lightweight locale selector for titles and number formatting |
 | `--compact` | Use a narrower table layout |
 | `--source codex\|claude\|opencode\|antigravity` | Restrict reports or sync to one source |

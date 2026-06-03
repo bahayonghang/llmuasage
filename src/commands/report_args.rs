@@ -33,7 +33,7 @@ pub struct ReportCommonArgs {
     #[arg(long, value_enum, default_value_t = ReportOrderArg::Desc)]
     pub order: ReportOrderArg,
 
-    /// Report timezone: UTC, local, or a fixed offset such as +08:00.
+    /// Report timezone: UTC, local (current fixed offset), or a fixed offset such as +08:00.
     #[arg(short = 'z', long, default_value = "local", value_parser = parse_timezone)]
     pub timezone: String,
 
@@ -233,7 +233,7 @@ fn parse_timezone_value(value: &str) -> Result<reports::ReportTimezone> {
         return Ok(reports::ReportTimezone::Fixed(offset));
     }
     Err(anyhow!(
-        "timezone must be UTC, local, or a fixed offset like +08:00"
+        "timezone must be UTC, local (current fixed offset), or a fixed offset like +08:00"
     ))
 }
 

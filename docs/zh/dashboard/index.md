@@ -40,7 +40,7 @@ Dashboard 筛选器映射到 Rust 查询层共享的 `QueryFilter`。
 | `model` | 标准化事件中的精确模型名 |
 | `since` / `until` | Dashboard 查询日期范围 |
 | `window` | day/week/month/all 等快速窗口 |
-| `timezone` | `UTC`、`local` 或 `+08:00` 这样的固定偏移 |
+| `timezone` | `UTC`、`local` 或 `+08:00` 这样的固定偏移；`local` 表示本机当前固定本地偏移，不是 IANA/DST 感知时区 |
 
 URL 会保留筛选，刷新页面或复制本地 URL 时仍保持同一视图。
 
