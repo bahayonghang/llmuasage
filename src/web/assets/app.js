@@ -1199,6 +1199,9 @@ function jobStatusLabel(snapshot) {
   if (status === 'running') {
     return getShellCopy('shell.sync.running');
   }
+  if (status === 'cancelling') {
+    return getShellCopy('shell.sync.cancelling');
+  }
   if (status === 'completed') {
     return getShellCopy('shell.sync.completed');
   }
@@ -1216,7 +1219,7 @@ function updateSyncButton(state, snapshot = state.activeJobSnapshot) {
   if (!btn) return;
 
   const snapshotMode = state.mode === 'snapshot';
-  const running = snapshot?.status === 'running';
+  const running = ['running', 'cancelling'].includes(snapshot?.status);
   btn.disabled = snapshotMode;
   btn.dataset.jobStatus = snapshot?.status || 'idle';
   btn.title = snapshotMode ? getShellCopy('shell.sync.snapshotDisabled') : snapshot?.summary || '';

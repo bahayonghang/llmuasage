@@ -241,6 +241,13 @@ pub struct WorkerLock {
     meta: WorkerLockMeta,
 }
 
+/// RAII guard that keeps a held [`WorkerLock`] lease fresh until dropped.
+#[must_use]
+pub struct WorkerLockHeartbeat {
+    stop_tx: Option<std::sync::mpsc::Sender<()>>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
 /// Main SQLite-backed store façade used across commands, parsers, and queries.
 #[derive(Debug, Clone)]
 pub struct Store {

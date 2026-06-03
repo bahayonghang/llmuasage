@@ -44,12 +44,12 @@ function centerWithJobOverlay(center, snapshot) {
   const current_job = structuredJobSnapshot(snapshot);
   if (!current_job) return center;
 
-  if (snapshot.status === 'running') {
+  if (snapshot.status === 'running' || snapshot.status === 'cancelling') {
     return {
       ...(center || {}),
       tone: 'running',
       headline_key: 'syncCenter.headline.running',
-      reason_key: 'syncCenter.reason.running',
+      reason_key: snapshot.status === 'cancelling' ? 'syncCenter.reason.cancelling' : 'syncCenter.reason.running',
       current_job,
     };
   }

@@ -14,7 +14,7 @@ use crate::{
     models::SourceKind,
     parsers::{SourceSyncStats, SyncEvent, SyncSummaryEvent, driver},
     registry,
-    store::{HolderKind, MigrationProgressEvent, SourceFileInventory, SourceSyncStatus, Store},
+    store::{HolderKind, MigrationProgressEvent, SourceSyncStatus, Store},
 };
 
 #[derive(Debug, Clone)]
@@ -85,6 +85,7 @@ async fn run_with_human_events(
     progress.render(&SyncEvent::LockWaiting { timeout_ms: 30_000 });
     let lock_started = Instant::now();
     let lock = store.acquire_worker_lock_with(Duration::from_secs(30), HolderKind::Cli)?;
+    let heartbeat = lock.start_default_heartbeat();
     let lock_wait_ms = lock_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
     progress.render(&SyncEvent::LockAcquired {
         wait_ms: lock_wait_ms,
@@ -130,6 +131,7 @@ async fn run_with_human_events(
     drop(tx);
     let _ = reporter.await;
     let summary = summary_result?;
+    drop(heartbeat);
     drop(lock);
     print_summary(&summary, options);
 
@@ -180,6 +182,7 @@ async fn run_with_json_events(
             .await?;
         let lock_started = Instant::now();
         let lock = store.acquire_worker_lock_with(Duration::from_secs(30), HolderKind::Cli)?;
+        let heartbeat = lock.start_default_heartbeat();
         let lock_wait_ms = lock_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
         tx.send(SyncEvent::LockAcquired {
             wait_ms: lock_wait_ms,
@@ -208,6 +211,7 @@ async fn run_with_json_events(
             },
         )
         .await?;
+        drop(heartbeat);
         drop(lock);
         Ok::<SyncSummary, anyhow::Error>(summary)
     }
@@ -333,7 +337,6 @@ pub async fn run_once_with_cancel(
             .map(|descriptor| descriptor.kind)
             .collect(),
     };
-    let source_file_inventories = collect_source_file_inventories(&parsers);
     let sources = driver::drive_with_events(driver::DriveContext {
         parsers: &parsers,
         store,
@@ -341,7 +344,6 @@ pub async fn run_once_with_cancel(
         parallelism,
         lock_wait_ms,
         recent_days: options.recent_days,
-        source_file_inventories,
         sender,
         cancel,
     })
@@ -408,61 +410,6 @@ pub async fn run_once_with_cancel(
         total_inserted,
         stored_events,
     })
-}
-
-fn collect_source_file_inventories(
-    parsers: &[Box<dyn crate::parsers::SourceParser>],
-) -> Vec<SourceFileInventory> {
-    parsers
-        .iter()
-        .filter_map(|parser| {
-            let source = parser.source();
-            enumerate_source_files(source)
-                .map(|file_paths| SourceFileInventory { source, file_paths })
-        })
-        .collect()
-}
-
-fn enumerate_source_files(source: SourceKind) -> Option<Vec<String>> {
-    let home_dir = crate::util::resolve_home_dir();
-    let paths = match source {
-        SourceKind::Codex => {
-            let codex_home = std::env::var("CODEX_HOME")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|_| home_dir.join(".codex"));
-            list_matching_files(codex_home.join("sessions"), |name, _path| {
-                name.starts_with("rollout-") && name.ends_with(".jsonl")
-            })
-        }
-        SourceKind::Claude => {
-            list_matching_files(home_dir.join(".claude").join("projects"), |name, _path| {
-                name.ends_with(".jsonl")
-            })
-        }
-        SourceKind::Opencode => return None,
-        SourceKind::Antigravity => return None,
-    };
-    Some(paths)
-}
-
-fn list_matching_files(
-    root: std::path::PathBuf,
-    predicate: impl Fn(&str, &std::path::Path) -> bool,
-) -> Vec<String> {
-    let mut files = walkdir::WalkDir::new(root)
-        .into_iter()
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| entry.file_type().is_file())
-        .map(|entry| entry.into_path())
-        .filter(|path| {
-            path.file_name()
-                .and_then(|value| value.to_str())
-                .is_some_and(|name| predicate(name, path))
-        })
-        .map(|path| path.to_string_lossy().to_string())
-        .collect::<Vec<_>>();
-    files.sort();
-    files
 }
 
 fn stored_event_count(store: &Store, source: Option<SourceKind>) -> Result<usize> {

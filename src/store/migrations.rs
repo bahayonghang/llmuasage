@@ -18,7 +18,7 @@ pub type MigrationFn = fn(&Transaction<'_>) -> Result<()>;
 pub struct MigrationProgress {
     /// Schema version being applied.
     pub version: u32,
-    /// Stable migration name from [`MIGRATIONS`].
+    /// Stable migration name from the migration table.
     pub name: &'static str,
     /// Elapsed wall-clock time for finished events.
     pub elapsed_ms: Option<u64>,

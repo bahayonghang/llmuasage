@@ -8,6 +8,7 @@ pub mod codex;
 pub mod driver;
 pub mod file_state;
 pub mod opencode;
+pub(crate) mod source_files;
 pub mod source_parser;
 
 pub use claude::ClaudeParser;

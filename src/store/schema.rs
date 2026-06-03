@@ -107,6 +107,8 @@ impl Store {
         let tx = conn.transaction()?;
         {
             let source = source.as_str();
+            tx.execute("DELETE FROM usage_tool_call WHERE source = ?1", [source])?;
+            tx.execute("DELETE FROM usage_turn WHERE source = ?1", [source])?;
             tx.execute("DELETE FROM usage_event WHERE source = ?1", [source])?;
             tx.execute("DELETE FROM usage_bucket_30m WHERE source = ?1", [source])?;
             tx.execute("DELETE FROM source_cursor WHERE source = ?1", [source])?;
@@ -144,6 +146,8 @@ impl Store {
         let conn = self.open_connection()?;
         conn.execute_batch(
             r#"
+            DELETE FROM usage_tool_call;
+            DELETE FROM usage_turn;
             DELETE FROM usage_event;
             DELETE FROM usage_bucket_30m;
             DELETE FROM project_dim;

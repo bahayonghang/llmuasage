@@ -12,7 +12,6 @@ use serde_json::Value;
 use tokio::task;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
-use walkdir::WalkDir;
 
 use crate::{
     models::{SessionInfo, SourceKind, UsageEvent, UsageTokens, UsageToolCall, UsageTurn},
@@ -22,10 +21,11 @@ use crate::{
         file_state::{
             CandidateFile, FileReplayMode, decide_file_replay, finalize_cursor, should_rescan_file,
         },
+        source_files,
     },
     project::ProjectResolver,
     store::{Store, SyncRunWriter, SyncShard},
-    util::{bucket_start_from_rfc3339, hash_string, normalize_model, resolve_home_dir},
+    util::{bucket_start_from_rfc3339, hash_string, normalize_model},
 };
 
 #[derive(Debug, Clone)]
@@ -97,12 +97,15 @@ async fn sync_codex(
 
     // 1.1 构建按日期目录分片的候选文件计划
     let parse_started = Instant::now();
-    let home_dir = resolve_home_dir();
-    let codex_home = std::env::var("CODEX_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| home_dir.join(".codex"));
-    let sessions_dir = codex_home.join("sessions");
-    let files = list_rollout_files(&sessions_dir);
+    let listing = source_files::list_codex_session_files();
+    let inventory_paths = listing.file_paths();
+    store.source_files().mark_inventory_seen(
+        SourceKind::Codex,
+        &inventory_paths,
+        writer.run_started_at(),
+    )?;
+    let inventory_error = listing.error_summary();
+    let files = listing.paths;
     let total_files = files.len();
     emit_progress(
         &mut progress,
@@ -116,7 +119,10 @@ async fn sync_codex(
     let mut shards = std::collections::HashMap::<PathBuf, Vec<CandidateFile>>::new();
     let mut changed_files = 0usize;
     for file_path in files {
-        let key = file_path.parent().unwrap_or(&sessions_dir).to_path_buf();
+        let key = file_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."));
         let existing = file_path
             .to_str()
             .and_then(|raw| cursor_map.get(raw).cloned());
@@ -197,6 +203,7 @@ async fn sync_codex(
         events_replayed,
         events_inserted: inserted,
         write_ms,
+        last_error: inventory_error,
         ..SourceSyncStats::default()
     };
     let total_elapsed = parse_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
@@ -216,23 +223,6 @@ fn emit_progress(sink: &mut Option<ProgressSink<'_>>, event: SyncEvent) {
     if let Some(sink) = sink.as_mut() {
         sink(event);
     }
-}
-
-fn list_rollout_files(sessions_dir: &Path) -> Vec<PathBuf> {
-    let mut files = WalkDir::new(sessions_dir)
-        .into_iter()
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| entry.file_type().is_file())
-        .map(|entry| entry.into_path())
-        .filter(|path| {
-            path.file_name()
-                .and_then(|value| value.to_str())
-                .map(|value| value.starts_with("rollout-") && value.ends_with(".jsonl"))
-                .unwrap_or(false)
-        })
-        .collect::<Vec<_>>();
-    files.sort();
-    files
 }
 
 fn parse_codex_shard(plan: CodexShardPlan) -> Result<CodexShardOutput> {

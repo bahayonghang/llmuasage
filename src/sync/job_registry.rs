@@ -1,4 +1,6 @@
 use std::{
+    error::Error,
+    fmt,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -26,12 +28,20 @@ pub use crate::parsers::SyncEvent as JobEvent;
 pub enum JobStatus {
     /// The job is present in the registry and considered running.
     Running,
+    /// Cancellation has been requested and the worker is unwinding.
+    Cancelling,
     /// The job finished successfully.
     Completed,
     /// The job failed.
     Failed,
     /// Cancellation was requested.
     Cancelled,
+}
+
+impl JobStatus {
+    fn is_active(self) -> bool {
+        matches!(self, Self::Running | Self::Cancelling)
+    }
 }
 
 /// Stable snapshot returned to adapters that poll a job.
@@ -64,7 +74,29 @@ struct JobState {
 #[derive(Debug, Clone, Default)]
 pub struct JobRegistry {
     inner: Arc<DashMap<JobId, Arc<Mutex<JobState>>>>,
+    admission: Arc<Mutex<()>>,
 }
+
+/// Error returned when the in-process sync job admission policy rejects a start
+/// request instead of spawning another waiter.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct JobStartRejected {
+    /// Currently active job that owns the single in-process sync slot.
+    pub active_job_id: JobId,
+}
+
+impl fmt::Display for JobStartRejected {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "sync job already active: {}",
+            self.active_job_id.as_str()
+        )
+    }
+}
+
+impl Error for JobStartRejected {}
 
 /// Options accepted by the usage import job starter.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -82,8 +114,42 @@ pub struct SyncOptions {
 }
 
 impl JobRegistry {
-    /// Starts a real in-process sync task and returns its id plus a progress receiver.
+    /// Starts a real in-process sync task when the in-process admission slot is
+    /// available and returns its id plus a progress receiver.
+    pub fn try_start(
+        &self,
+        store: &Store,
+        options: SyncOptions,
+    ) -> Result<(JobId, mpsc::Receiver<JobEvent>), JobStartRejected> {
+        let _admission = self
+            .admission
+            .lock()
+            .expect("job registry admission mutex poisoned");
+        if let Some(active) = self.active_job_id() {
+            return Err(JobStartRejected {
+                active_job_id: active,
+            });
+        }
+
+        Ok(self.spawn_start(store, options))
+    }
+
+    /// Starts a real in-process sync task and returns its id plus a progress
+    /// receiver. If the registry is already running/cancelling one job, this
+    /// compatibility wrapper returns a terminal failed snapshot instead of
+    /// spawning another lock waiter.
     pub fn start(&self, store: &Store, options: SyncOptions) -> (JobId, mpsc::Receiver<JobEvent>) {
+        match self.try_start(store, options) {
+            Ok(started) => started,
+            Err(rejected) => self.insert_rejected_snapshot(rejected),
+        }
+    }
+
+    fn spawn_start(
+        &self,
+        store: &Store,
+        options: SyncOptions,
+    ) -> (JobId, mpsc::Receiver<JobEvent>) {
         let job_id = new_job_id();
         let (tx, rx) = mpsc::channel(128);
         let now = crate::util::now_utc();
@@ -112,6 +178,31 @@ impl JobRegistry {
         (job_id, rx)
     }
 
+    fn insert_rejected_snapshot(
+        &self,
+        rejected: JobStartRejected,
+    ) -> (JobId, mpsc::Receiver<JobEvent>) {
+        let job_id = new_job_id();
+        let (_tx, rx) = mpsc::channel(1);
+        let now = crate::util::now_utc();
+        let message = rejected.to_string();
+        let state = JobState {
+            snapshot: JobSnapshot {
+                job_id: job_id.clone(),
+                status: JobStatus::Failed,
+                summary: Some("sync job start rejected by admission policy".to_string()),
+                last_event: None,
+                error: Some(message),
+                started_at: now.clone(),
+                finished_at: Some(now),
+            },
+            cancel: CancellationToken::new(),
+        };
+        self.inner
+            .insert(job_id.clone(), Arc::new(Mutex::new(state)));
+        (job_id, rx)
+    }
+
     /// Returns a cloned job snapshot without holding the mutex across caller work.
     pub fn snapshot(&self, id: &str) -> Option<JobSnapshot> {
         self.inner
@@ -128,8 +219,11 @@ impl JobRegistry {
             return false;
         };
         state.cancel.cancel();
-        state.snapshot.status = JobStatus::Cancelled;
-        state.snapshot.finished_at = Some(crate::util::now_utc());
+        if state.snapshot.status == JobStatus::Running {
+            state.snapshot.status = JobStatus::Cancelling;
+            state.snapshot.summary = Some("cancellation requested".to_string());
+            state.snapshot.finished_at = None;
+        }
         true
     }
 
@@ -151,9 +245,11 @@ impl JobRegistry {
                 .iter()
                 .filter(|snapshot| {
                     snapshot.status != JobStatus::Running
+                        && snapshot.status != JobStatus::Cancelling
                         && snapshots
                             .iter()
                             .filter(|item| item.status != JobStatus::Running)
+                            .filter(|item| item.status != JobStatus::Cancelling)
                             .position(|item| item.job_id == snapshot.job_id)
                             .is_some_and(|index| index >= limit)
                 })
@@ -165,6 +261,17 @@ impl JobRegistry {
             snapshots.retain(|snapshot| self.inner.contains_key(&snapshot.job_id));
         }
         snapshots
+    }
+
+    fn active_job_id(&self) -> Option<JobId> {
+        self.inner.iter().find_map(|entry| {
+            let state = entry.lock().ok()?;
+            state
+                .snapshot
+                .status
+                .is_active()
+                .then(|| state.snapshot.job_id.clone())
+        })
     }
 }
 
@@ -210,9 +317,9 @@ async fn run_job(
         .send(SyncEvent::LockWaiting { timeout_ms: 30_000 })
         .await;
     let lock_started = Instant::now();
-    let result = match store.acquire_worker_lock_with(Duration::from_secs(30), HolderKind::Library)
-    {
-        Ok(lock) => {
+    let result = match acquire_worker_lock_for_job(&store, Duration::from_secs(30), &cancel).await {
+        Ok(Some(lock)) => {
+            let heartbeat = lock.start_default_heartbeat();
             let lock_wait_ms = lock_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
             let _ = internal_tx
                 .send(SyncEvent::LockAcquired {
@@ -228,8 +335,21 @@ async fn run_job(
                 &cancel,
             )
             .await;
+            drop(heartbeat);
             drop(lock);
             result
+        }
+        Ok(None) => {
+            let _ = internal_tx.send(SyncEvent::Cancelled).await;
+            finish_state(
+                &state,
+                JobStatus::Cancelled,
+                Some("cancellation requested".to_string()),
+                None,
+            );
+            drop(internal_tx);
+            let _ = event_forwarder.await;
+            return;
         }
         Err(err) => Err(anyhow::Error::new(err)),
     };
@@ -272,6 +392,30 @@ async fn run_job(
     }
     drop(internal_tx);
     let _ = event_forwarder.await;
+}
+
+async fn acquire_worker_lock_for_job(
+    store: &Store,
+    timeout: Duration,
+    cancel: &CancellationToken,
+) -> crate::error::Result<Option<crate::store::WorkerLock>> {
+    let started = Instant::now();
+    loop {
+        if cancel.is_cancelled() {
+            return Ok(None);
+        }
+        if let Some(lock) = store.try_acquire_worker_lock_once(HolderKind::Library)? {
+            return Ok(Some(lock));
+        }
+        if started.elapsed() >= timeout {
+            let holder = store
+                .current_worker_lock()?
+                .map(|meta| meta.holder_identity())
+                .unwrap_or_default();
+            return Err(crate::error::LlmusageError::LockBusy { holder });
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 fn update_state_from_event(state: &Arc<Mutex<JobState>>, event: &SyncEvent) {
@@ -337,6 +481,125 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn start_rejects_extra_jobs_instead_of_spawning_lock_waiters() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = AppPaths::with_root(temp.path().to_path_buf())?;
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+        let blocker =
+            store.acquire_worker_lock_with(Duration::from_secs(0), HolderKind::Library)?;
+        let registry = JobRegistry::default();
+
+        let (active_job_id, mut active_rx) = registry.try_start(
+            &store,
+            SyncOptions {
+                source: Some("antigravity".to_string()),
+                ..Default::default()
+            },
+        )?;
+        wait_for_lock_waiting(&mut active_rx).await?;
+
+        let rejected = registry
+            .try_start(
+                &store,
+                SyncOptions {
+                    source: Some("antigravity".to_string()),
+                    ..Default::default()
+                },
+            )
+            .expect_err("second active job should be rejected");
+        assert_eq!(rejected.active_job_id, active_job_id);
+
+        for _ in 0..8 {
+            let (rejected_id, rejected_rx) = registry.start(
+                &store,
+                SyncOptions {
+                    source: Some("antigravity".to_string()),
+                    ..Default::default()
+                },
+            );
+            drop(rejected_rx);
+            let rejected_snapshot = registry
+                .snapshot(&rejected_id)
+                .expect("rejected snapshot should be retained");
+            assert_eq!(rejected_snapshot.status, JobStatus::Failed);
+            assert!(
+                rejected_snapshot
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.contains(&active_job_id))
+            );
+        }
+
+        let active_count = registry
+            .list_recent(100)
+            .into_iter()
+            .filter(|snapshot| snapshot.status.is_active())
+            .count();
+        assert_eq!(active_count, 1, "only one job should remain active");
+
+        assert!(registry.cancel(&active_job_id));
+        drop(blocker);
+        wait_for_status(
+            &registry,
+            &active_job_id,
+            JobStatus::Cancelled,
+            Duration::from_secs(2),
+        )
+        .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn lock_wait_cancel_finishes_without_later_running_sync() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = AppPaths::with_root(temp.path().to_path_buf())?;
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+        let blocker =
+            store.acquire_worker_lock_with(Duration::from_secs(0), HolderKind::Library)?;
+        let registry = JobRegistry::default();
+
+        let (job_id, mut rx) = registry.try_start(
+            &store,
+            SyncOptions {
+                source: Some("antigravity".to_string()),
+                ..Default::default()
+            },
+        )?;
+        wait_for_lock_waiting(&mut rx).await?;
+
+        let started = Instant::now();
+        assert!(registry.cancel(&job_id));
+        let requested = registry.snapshot(&job_id).expect("job snapshot");
+        assert_eq!(requested.status, JobStatus::Cancelling);
+        assert_eq!(requested.summary.as_deref(), Some("cancellation requested"));
+        assert!(requested.finished_at.is_none());
+
+        drop(blocker);
+        let cancelled = wait_for_status(
+            &registry,
+            &job_id,
+            JobStatus::Cancelled,
+            Duration::from_millis(1500),
+        )
+        .await?;
+        assert!(
+            started.elapsed() < Duration::from_millis(1500),
+            "lock-wait cancellation should finish within SLA"
+        );
+        assert!(matches!(cancelled.last_event, Some(SyncEvent::Cancelled)));
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert_eq!(
+            registry.snapshot(&job_id).expect("job snapshot").status,
+            JobStatus::Cancelled,
+            "cancelled lock-wait jobs must not later acquire the lock and complete"
+        );
+        assert_eq!(count_rows(&store, "source_sync_status")?, 0);
+        Ok(())
+    }
+
     #[test]
     fn sync_options_accepts_parallelism_without_breaking_source_json() -> anyhow::Result<()> {
         let options: SyncOptions = serde_json::from_str(
@@ -350,5 +613,49 @@ mod tests {
         assert_eq!(payload["source"], "codex");
         assert_eq!(payload["parallelism"], 2);
         Ok(())
+    }
+
+    async fn wait_for_lock_waiting(rx: &mut mpsc::Receiver<JobEvent>) -> anyhow::Result<()> {
+        let found = tokio::time::timeout(Duration::from_secs(2), async {
+            while let Some(event) = rx.recv().await {
+                if matches!(event, SyncEvent::LockWaiting { .. }) {
+                    return true;
+                }
+            }
+            false
+        })
+        .await?;
+        anyhow::ensure!(found, "job did not enter lock waiting state");
+        Ok(())
+    }
+
+    async fn wait_for_status(
+        registry: &JobRegistry,
+        job_id: &str,
+        expected: JobStatus,
+        timeout: Duration,
+    ) -> anyhow::Result<JobSnapshot> {
+        let started = Instant::now();
+        loop {
+            let snapshot = registry
+                .snapshot(job_id)
+                .ok_or_else(|| anyhow::anyhow!("missing job snapshot: {job_id}"))?;
+            if snapshot.status == expected {
+                return Ok(snapshot);
+            }
+            if started.elapsed() >= timeout {
+                anyhow::bail!(
+                    "job {job_id} did not reach {expected:?}; last status {:?}",
+                    snapshot.status
+                );
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    fn count_rows(store: &Store, table: &str) -> anyhow::Result<i64> {
+        let conn = store.open_connection()?;
+        let sql = format!("SELECT COUNT(*) FROM {table}");
+        Ok(conn.query_row(&sql, [], |row| row.get(0))?)
     }
 }

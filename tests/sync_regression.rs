@@ -396,6 +396,49 @@ fn legacy_nonblocking_worker_lock_records_hook_kind() -> Result<()> {
 }
 
 #[test]
+fn worker_lock_heartbeat_refreshes_existing_lease() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let app = AppContext::discover()?;
+    let store = Store::new(&app.paths)?;
+    store.bootstrap()?;
+
+    let lock = store.acquire_worker_lock_with(Duration::from_millis(1), HolderKind::Cli)?;
+    let stale_updated_at = "2000-01-01T00:00:00Z";
+    let stale_lease_expires_at = "2000-01-01T00:00:00Z";
+    let conn = Connection::open(&app.paths.db_path)?;
+    conn.execute(
+        "UPDATE worker_lock SET updated_at = ?1, lease_expires_at = ?2",
+        (stale_updated_at, stale_lease_expires_at),
+    )?;
+    drop(conn);
+
+    let heartbeat = lock.start_heartbeat(Duration::from_millis(10));
+    let mut refreshed = None;
+    for _ in 0..50 {
+        thread::sleep(Duration::from_millis(20));
+        let conn = Connection::open(&app.paths.db_path)?;
+        let row = conn.query_row(
+            "SELECT updated_at, lease_expires_at FROM worker_lock",
+            [],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )?;
+        if row.0 != stale_updated_at && row.1 != stale_lease_expires_at {
+            refreshed = Some(row);
+            break;
+        }
+    }
+    drop(heartbeat);
+    drop(lock);
+    assert!(
+        refreshed.is_some(),
+        "heartbeat should refresh updated_at and lease_expires_at before the lease can expire"
+    );
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
 fn hook_run_skips_when_sync_holds_lock() -> Result<()> {
     let fixture = Fixture::new()?;
     let app = AppContext::discover()?;

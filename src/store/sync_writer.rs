@@ -4,6 +4,7 @@ use std::{
 };
 
 use crate::error::Result;
+use rusqlite::{Transaction, TransactionBehavior};
 use tracing::info;
 
 use super::{
@@ -26,6 +27,30 @@ use crate::{
 /// SQLite batch sizing. Removing this constant is a deletion-test signal:
 /// each parser would have to reintroduce its own chunking constant.
 const EVENT_WRITE_BATCH_SIZE: usize = 1000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShardCommitFailpoint {
+    Reset,
+    Events,
+    Cursor,
+    SourceFile,
+    Raw,
+    BehaviorReset,
+    Turns,
+    ToolCalls,
+}
+
+fn fail_shard_commit_at(
+    active: Option<ShardCommitFailpoint>,
+    target: ShardCommitFailpoint,
+) -> Result<()> {
+    if active == Some(target) {
+        return Err(LlmusageError::ConfigInvalid {
+            detail: format!("test failpoint during shard commit: {target:?}"),
+        });
+    }
+    Ok(())
+}
 
 impl Store {
     pub fn begin_sync_run(&self) -> Result<SyncRunWriter> {
@@ -94,8 +119,8 @@ impl Store {
 }
 
 impl SyncRunWriter {
-    fn reset_file_events_batch(
-        &mut self,
+    fn reset_file_events_batch_tx(
+        tx: &Transaction<'_>,
         source: SourceKind,
         path_hashes: &[String],
     ) -> Result<()> {
@@ -114,9 +139,8 @@ impl SyncRunWriter {
          */
         info!(source = %source, count = path_hashes.len(), "开始清理重放旧事件");
 
-        // 4.1 在同一事务里扣减 bucket 并删除旧 event
+        // 4.1 在 shard 事务里扣减 bucket 并删除旧 event
         let mut unique = HashSet::new();
-        let tx = self.conn.transaction()?;
         {
             let mut aggregate_stmt = tx.prepare_cached(
                 r#"
@@ -251,19 +275,21 @@ impl SyncRunWriter {
             }
 
             refresh_bucket_pricing_after_reset_tx(
-                &tx,
+                tx,
                 source.as_str(),
                 &touched_buckets,
                 &updated_at,
             )?;
         }
-        tx.commit()?;
-
         info!(source = %source, "完成重放旧事件清理");
         Ok(())
     }
 
-    fn write_event_batch(&mut self, events: &[UsageEvent]) -> Result<usize> {
+    fn write_event_batch_tx(
+        tx: &Transaction<'_>,
+        pricing_catalog: &PricingCatalog,
+        events: &[UsageEvent],
+    ) -> Result<usize> {
         if events.is_empty() {
             return Ok(0);
         }
@@ -279,8 +305,7 @@ impl SyncRunWriter {
          */
         info!(batch = events.len(), "开始批量写入 usage_event");
 
-        // 5.1 在单事务中插入 event，并为新 event 做内存聚合
-        let tx = self.conn.transaction()?;
+        // 5.1 在 shard 事务中插入 event，并为新 event 做内存聚合
         let now = now_utc();
         let inserted = {
             let mut event_stmt = tx.prepare_cached(
@@ -301,7 +326,7 @@ impl SyncRunWriter {
 
             for event in events {
                 let cost = pricing::compute_cost_with(
-                    &self.pricing_catalog,
+                    pricing_catalog,
                     event.source.as_str(),
                     &event.model,
                     pricing::CostTokens {
@@ -369,17 +394,19 @@ impl SyncRunWriter {
             drop(event_stmt);
 
             // 5.2 将项目维表和 30 分钟桶一次性刷入
-            flush_projects_tx(&tx, &projects)?;
-            flush_buckets_tx(&tx, &buckets)?;
+            flush_projects_tx(tx, &projects)?;
+            flush_buckets_tx(tx, &buckets)?;
             inserted
         };
-        tx.commit()?;
-
         info!(batch = events.len(), inserted, "完成批量写入 usage_event");
         Ok(inserted)
     }
 
-    fn write_cursor_batch(&mut self, source: SourceKind, cursors: &[FileCursor]) -> Result<()> {
+    fn write_cursor_batch_tx(
+        tx: &Transaction<'_>,
+        source: SourceKind,
+        cursors: &[FileCursor],
+    ) -> Result<()> {
         if cursors.is_empty() {
             return Ok(());
         }
@@ -395,8 +422,7 @@ impl SyncRunWriter {
          */
         info!(source = %source, count = cursors.len(), "开始批量刷新 cursor");
 
-        // 6.1 用单事务 upsert 本轮发生变化的 cursor
-        let tx = self.conn.transaction()?;
+        // 6.1 用 shard 事务 upsert 本轮发生变化的 cursor
         {
             let mut stmt = tx.prepare_cached(
                 r#"
@@ -449,8 +475,6 @@ impl SyncRunWriter {
                 ])?;
             }
         }
-        tx.commit()?;
-
         info!(source = %source, "完成批量刷新 cursor");
         Ok(())
     }
@@ -461,6 +485,23 @@ impl SyncRunWriter {
     }
 
     pub fn commit_shard(&mut self, shard: SyncShard) -> Result<ShardCommitStats> {
+        self.commit_shard_inner(shard, None)
+    }
+
+    #[cfg(test)]
+    fn commit_shard_with_failpoint(
+        &mut self,
+        shard: SyncShard,
+        failpoint: ShardCommitFailpoint,
+    ) -> Result<ShardCommitStats> {
+        self.commit_shard_inner(shard, Some(failpoint))
+    }
+
+    fn commit_shard_inner(
+        &mut self,
+        shard: SyncShard,
+        failpoint: Option<ShardCommitFailpoint>,
+    ) -> Result<ShardCommitStats> {
         /*
          * ========================================================================
          * 步骤7：原子化提交单个 shard
@@ -485,40 +526,60 @@ impl SyncRunWriter {
         // 7.1 计时入口与累加器
         let started = Instant::now();
         let mut stats = ShardCommitStats::default();
+        let pricing_catalog = &self.pricing_catalog;
+        let raw_archive_enabled = self.raw_archive_enabled;
+        let run_started_at = self.run_started_at.clone();
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
 
         // 7.2 先清旧 event，再批写 event，最后落 cursor —— 顺序由协议保证
         if !shard.reset_path_hashes.is_empty() {
-            self.reset_file_events_batch(shard.source, &shard.reset_path_hashes)?;
+            Self::reset_file_events_batch_tx(&tx, shard.source, &shard.reset_path_hashes)?;
         }
+        fail_shard_commit_at(failpoint, ShardCommitFailpoint::Reset)?;
         for batch in shard.events.chunks(EVENT_WRITE_BATCH_SIZE) {
-            stats.events_inserted += self.write_event_batch(batch)?;
+            stats.events_inserted += Self::write_event_batch_tx(&tx, pricing_catalog, batch)?;
         }
+        fail_shard_commit_at(failpoint, ShardCommitFailpoint::Events)?;
         if !shard.cursors.is_empty() {
-            self.write_cursor_batch(shard.source, &shard.cursors)?;
+            Self::write_cursor_batch_tx(&tx, shard.source, &shard.cursors)?;
         }
+        fail_shard_commit_at(failpoint, ShardCommitFailpoint::Cursor)?;
         // 7.3 把本轮看到的候选文件登记为 source_file.state='live'
         //     （D15 / ADR 0006）。OpenCode 等无 file 身份的源传空 vec。
         if !shard.seen_file_paths.is_empty() {
-            self.write_source_file_seen(shard.source, &shard.seen_file_paths)?;
+            Self::write_source_file_seen_tx(
+                &tx,
+                shard.source,
+                &shard.seen_file_paths,
+                &run_started_at,
+            )?;
         }
+        fail_shard_commit_at(failpoint, ShardCommitFailpoint::SourceFile)?;
         // 7.4 raw archive opt-in（D11 / F1.5）：开关关时丢弃 raw_records，
         //     避免 parser 端必须同步判定开关；开关开时与 event 共享 commit
         //     周期落库（INSERT OR IGNORE 保证 event_key 重复时幂等）。
-        if self.raw_archive_enabled && !shard.raw_records.is_empty() {
-            self.write_raw_records_batch(&shard.raw_records)?;
+        if raw_archive_enabled && !shard.raw_records.is_empty() {
+            Self::write_raw_records_batch_tx(&tx, &shard.raw_records)?;
         }
+        fail_shard_commit_at(failpoint, ShardCommitFailpoint::Raw)?;
         // 7.5 行为事实是 usage_event/bucket 之外的独立 normalized 表。
         //     reset 同源文件时先清掉旧 path_hash 关联事实，随后 INSERT OR IGNORE
         //     新事实；未支持行为提取的 parser 可继续传空 vec。
         if !shard.reset_path_hashes.is_empty() {
-            self.reset_behavior_facts_batch(shard.source, &shard.reset_path_hashes)?;
+            Self::reset_behavior_facts_batch_tx(&tx, shard.source, &shard.reset_path_hashes)?;
         }
+        fail_shard_commit_at(failpoint, ShardCommitFailpoint::BehaviorReset)?;
         if !shard.turns.is_empty() {
-            stats.turns_inserted += self.write_turn_batch(&shard.turns)?;
+            stats.turns_inserted += Self::write_turn_batch_tx(&tx, &shard.turns)?;
         }
+        fail_shard_commit_at(failpoint, ShardCommitFailpoint::Turns)?;
         if !shard.tool_calls.is_empty() {
-            stats.tool_calls_inserted += self.write_tool_call_batch(&shard.tool_calls)?;
+            stats.tool_calls_inserted += Self::write_tool_call_batch_tx(&tx, &shard.tool_calls)?;
         }
+        fail_shard_commit_at(failpoint, ShardCommitFailpoint::ToolCalls)?;
+        tx.commit()?;
 
         stats.files_seen = shard.seen_file_paths.len();
         stats.write_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
@@ -533,8 +594,8 @@ impl SyncRunWriter {
         Ok(stats)
     }
 
-    fn reset_behavior_facts_batch(
-        &mut self,
+    fn reset_behavior_facts_batch_tx(
+        tx: &Transaction<'_>,
         source: SourceKind,
         path_hashes: &[String],
     ) -> Result<()> {
@@ -542,7 +603,6 @@ impl SyncRunWriter {
             return Ok(());
         }
         let mut unique = HashSet::new();
-        let tx = self.conn.transaction()?;
         {
             let mut delete_tool_stmt = tx.prepare_cached(
                 "DELETE FROM usage_tool_call WHERE source = ?1 AND source_path_hash = ?2",
@@ -558,12 +618,10 @@ impl SyncRunWriter {
                 delete_turn_stmt.execute(rusqlite::params![source.as_str(), path_hash])?;
             }
         }
-        tx.commit()?;
         Ok(())
     }
 
-    fn write_turn_batch(&mut self, turns: &[UsageTurn]) -> Result<usize> {
-        let tx = self.conn.transaction()?;
+    fn write_turn_batch_tx(tx: &Transaction<'_>, turns: &[UsageTurn]) -> Result<usize> {
         let inserted = {
             let mut stmt = tx.prepare_cached(
                 r#"
@@ -604,12 +662,13 @@ impl SyncRunWriter {
             }
             inserted
         };
-        tx.commit()?;
         Ok(inserted)
     }
 
-    fn write_tool_call_batch(&mut self, tool_calls: &[UsageToolCall]) -> Result<usize> {
-        let tx = self.conn.transaction()?;
+    fn write_tool_call_batch_tx(
+        tx: &Transaction<'_>,
+        tool_calls: &[UsageToolCall],
+    ) -> Result<usize> {
         let inserted = {
             let mut stmt = tx.prepare_cached(
                 r#"
@@ -646,12 +705,13 @@ impl SyncRunWriter {
             }
             inserted
         };
-        tx.commit()?;
         Ok(inserted)
     }
 
-    fn write_raw_records_batch(&mut self, records: &[super::RawRecord]) -> Result<()> {
-        let tx = self.conn.transaction()?;
+    fn write_raw_records_batch_tx(
+        tx: &Transaction<'_>,
+        records: &[super::RawRecord],
+    ) -> Result<()> {
         {
             let mut stmt = tx.prepare_cached(
                 r#"
@@ -665,19 +725,16 @@ impl SyncRunWriter {
                 stmt.execute(rusqlite::params![record.event_key, record.raw_json, now])?;
             }
         }
-        tx.commit()?;
         Ok(())
     }
 
-    fn write_source_file_seen(&mut self, source: SourceKind, file_paths: &[String]) -> Result<()> {
-        let tx = self.conn.transaction()?;
-        super::source_file::upsert_live_in_tx(
-            &tx,
-            source.as_str(),
-            file_paths,
-            &self.run_started_at,
-        )?;
-        tx.commit()?;
+    fn write_source_file_seen_tx(
+        tx: &Transaction<'_>,
+        source: SourceKind,
+        file_paths: &[String],
+        run_started_at: &str,
+    ) -> Result<()> {
+        super::source_file::upsert_live_in_tx(tx, source.as_str(), file_paths, run_started_at)?;
         Ok(())
     }
 }
@@ -935,7 +992,7 @@ mod tests {
             UsageToolCall, UsageTurn,
         },
         paths::AppPaths,
-        store::FileCursor,
+        store::{BootstrapOptions, FileCursor},
     };
     use tempfile::TempDir;
 
@@ -1009,6 +1066,157 @@ mod tests {
             input_fingerprint: Some(format!("fp:{tool_name}")),
             safe_preview: Some(format!("{tool_name} preview")),
         }
+    }
+
+    fn build_behavior_turn(event: &UsageEvent, category: ActivityCategory) -> UsageTurn {
+        UsageTurn {
+            category,
+            ..UsageTurn::from_event(event, category)
+        }
+    }
+
+    fn build_full_replacement_shard(path_hash: &str) -> SyncShard {
+        let replacement = build_event("replacement", path_hash, 20);
+        SyncShard {
+            source: SourceKind::Codex,
+            reset_path_hashes: vec![path_hash.to_string()],
+            events: vec![replacement.clone()],
+            cursors: vec![build_cursor(path_hash)],
+            seen_file_paths: vec![format!("/tmp/{path_hash}.jsonl")],
+            raw_records: vec![super::super::RawRecord {
+                event_key: replacement.event_key.clone(),
+                raw_json: r#"{"replacement":true}"#.to_string(),
+            }],
+            turns: vec![UsageTurn {
+                has_edits: true,
+                ..build_behavior_turn(&replacement, ActivityCategory::Coding)
+            }],
+            tool_calls: vec![UsageToolCall {
+                tool_kind: ToolKind::Edit,
+                ..build_tool_call(&replacement, "Edit")
+            }],
+        }
+    }
+
+    fn assert_seed_only_after_failed_shard(store: &Store, path_hash: &str) -> anyhow::Result<()> {
+        let conn = store.open_connection()?;
+        let seed_events: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_event WHERE event_key = ?1",
+            [format!("codex:{path_hash}:seed")],
+            |row| row.get(0),
+        )?;
+        let replacement_events: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_event WHERE event_key = ?1",
+            [format!("codex:{path_hash}:replacement")],
+            |row| row.get(0),
+        )?;
+        let (bucket_count, bucket_total): (i64, i64) = conn.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(total_tokens), 0) FROM usage_bucket_30m WHERE source = 'codex'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let cursor_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM source_cursor WHERE source = 'codex'",
+            [],
+            |row| row.get(0),
+        )?;
+        let source_file_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM source_file WHERE source = 'codex'",
+            [],
+            |row| row.get(0),
+        )?;
+        let replacement_raw_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_event_raw WHERE event_key = ?1",
+            [format!("codex:{path_hash}:replacement")],
+            |row| row.get(0),
+        )?;
+        let turn_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_turn WHERE source_path_hash = ?1",
+            [path_hash],
+            |row| row.get(0),
+        )?;
+        let edit_turn_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_turn WHERE source_path_hash = ?1 AND category = 'coding'",
+            [path_hash],
+            |row| row.get(0),
+        )?;
+        let tool_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_tool_call WHERE source_path_hash = ?1",
+            [path_hash],
+            |row| row.get(0),
+        )?;
+        let edit_tool_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_tool_call WHERE source_path_hash = ?1 AND tool_kind = 'edit'",
+            [path_hash],
+            |row| row.get(0),
+        )?;
+
+        assert_eq!(seed_events, 1, "seed event must remain after rollback");
+        assert_eq!(
+            replacement_events, 0,
+            "replacement event must not survive failed shard"
+        );
+        assert_eq!(bucket_count, 1, "seed bucket must remain");
+        assert_eq!(bucket_total, 20, "bucket should still reflect seed only");
+        assert_eq!(cursor_count, 0, "cursor write must roll back");
+        assert_eq!(source_file_count, 0, "source_file write must roll back");
+        assert_eq!(replacement_raw_count, 0, "raw write must roll back");
+        assert_eq!(turn_count, 1, "seed turn must remain after rollback");
+        assert_eq!(edit_turn_count, 0, "replacement turn must roll back");
+        assert_eq!(tool_count, 1, "seed tool call must remain after rollback");
+        assert_eq!(edit_tool_count, 0, "replacement tool call must roll back");
+        Ok(())
+    }
+
+    #[test]
+    fn commit_shard_rolls_back_every_stage_on_failure() -> anyhow::Result<()> {
+        let failpoints = [
+            ShardCommitFailpoint::Reset,
+            ShardCommitFailpoint::Events,
+            ShardCommitFailpoint::Cursor,
+            ShardCommitFailpoint::SourceFile,
+            ShardCommitFailpoint::Raw,
+            ShardCommitFailpoint::BehaviorReset,
+            ShardCommitFailpoint::Turns,
+            ShardCommitFailpoint::ToolCalls,
+        ];
+
+        for failpoint in failpoints {
+            let temp = TempDir::new()?;
+            let paths = build_paths(temp.path());
+            let store = Store::new(&paths)?;
+            store.bootstrap_with(BootstrapOptions::default().with_raw_archive(true))?;
+            let path_hash = "pathAtomic";
+            let seed = build_event("seed", path_hash, 10);
+            let mut writer = store.begin_sync_run()?;
+            writer.commit_shard(SyncShard {
+                source: SourceKind::Codex,
+                reset_path_hashes: Vec::new(),
+                events: vec![seed.clone()],
+                cursors: Vec::new(),
+                seen_file_paths: Vec::new(),
+                raw_records: vec![super::super::RawRecord {
+                    event_key: seed.event_key.clone(),
+                    raw_json: r#"{"seed":true}"#.to_string(),
+                }],
+                turns: vec![build_behavior_turn(&seed, ActivityCategory::Exploration)],
+                tool_calls: vec![build_tool_call(&seed, "Read")],
+            })?;
+
+            let err = writer
+                .commit_shard_with_failpoint(build_full_replacement_shard(path_hash), failpoint)
+                .expect_err("test failpoint should abort shard");
+            assert!(
+                err.to_string().contains("test failpoint"),
+                "unexpected error for {failpoint:?}: {err}"
+            );
+            drop(writer);
+
+            assert_seed_only_after_failed_shard(&store, path_hash)
+                .map_err(|err| err.context(format!("failpoint {failpoint:?}")))?;
+        }
+
+        Ok(())
     }
 
     /// Validates the reset → events → cursor protocol is upheld in a single shard:

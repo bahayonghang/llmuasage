@@ -12,7 +12,9 @@ use anyhow::Result;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use llmusage::{
     AppPaths, Dashboard, QueryFilter,
-    models::{SourceKind, UsageEvent, UsageTokens},
+    models::{
+        ActivityCategory, SourceKind, ToolKind, UsageEvent, UsageTokens, UsageToolCall, UsageTurn,
+    },
     parsers::{SourceParser, SourceSyncStats, SyncEvent, driver},
     store::{BootstrapOptions, FileCursor, RawRecord, Store, SyncRunWriter, SyncShard},
     sync::{JobRegistry, JobStatus, SyncOptions},
@@ -83,37 +85,76 @@ fn seed_source_file(store: &Store, source: SourceKind, path: &str) -> Result<()>
 fn seed_resettable_row(store: &Store, source: SourceKind, key_suffix: &str) -> Result<()> {
     let mut writer = store.begin_sync_run()?;
     let event_key = format!("{}:{key_suffix}", source.as_str());
+    let event = UsageEvent {
+        event_key: event_key.clone(),
+        source,
+        model: "gpt-5".to_string(),
+        event_at: "2026-05-08T00:00:00Z".to_string(),
+        hour_start: "2026-05-08T00:00:00Z".to_string(),
+        tokens: UsageTokens {
+            input_tokens: 1,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            output_tokens: 0,
+            reasoning_output_tokens: 0,
+            total_tokens: 1,
+        },
+        project: None,
+        session: None,
+    };
+    let turn = UsageTurn {
+        turn_key: format!("turn:{event_key}"),
+        source,
+        session_id: None,
+        source_path_hash: None,
+        project_hash: None,
+        primary_model: event.model.clone(),
+        started_at: event.event_at.clone(),
+        category: ActivityCategory::Exploration,
+        has_edits: false,
+        retries: 0,
+        one_shot: false,
+        call_count: 1,
+        tokens: event.tokens.clone(),
+    };
+    let tool_call = UsageToolCall {
+        tool_call_key: format!("tool:{event_key}:Read"),
+        turn_key: Some(turn.turn_key.clone()),
+        event_key: Some(event_key.clone()),
+        source,
+        session_id: None,
+        source_path_hash: None,
+        project_hash: None,
+        model: Some(event.model.clone()),
+        occurred_at: event.event_at.clone(),
+        tool_name: "Read".to_string(),
+        tool_kind: ToolKind::Read,
+        mcp_server: None,
+        mcp_tool: None,
+        input_fingerprint: Some(format!("fp:{key_suffix}")),
+        safe_preview: Some("Read preview".to_string()),
+    };
     writer.commit_shard(SyncShard {
         source,
         reset_path_hashes: Vec::new(),
-        events: vec![UsageEvent {
-            event_key: event_key.clone(),
-            source,
-            model: "gpt-5".to_string(),
-            event_at: "2026-05-08T00:00:00Z".to_string(),
-            hour_start: "2026-05-08T00:00:00Z".to_string(),
-            tokens: UsageTokens {
-                input_tokens: 1,
-                cache_read_tokens: 0,
-                cache_creation_tokens: 0,
-                output_tokens: 0,
-                reasoning_output_tokens: 0,
-                total_tokens: 1,
-            },
-            project: None,
-            session: None,
-        }],
+        events: vec![event],
         cursors: Vec::new(),
         seen_file_paths: vec![format!("/{}/{}.jsonl", source.as_str(), key_suffix)],
         raw_records: vec![RawRecord {
             event_key,
             raw_json: r#"{"raw":true}"#.to_string(),
         }],
-        turns: Vec::new(),
-        tool_calls: Vec::new(),
+        turns: vec![turn],
+        tool_calls: vec![tool_call],
     })?;
     writer.finish_sync_run()?;
     Ok(())
+}
+
+fn count_rows(store: &Store, table: &str, where_sql: &str) -> Result<i64> {
+    let conn = store.open_connection()?;
+    let sql = format!("SELECT COUNT(*) FROM {table} {where_sql}");
+    Ok(conn.query_row(&sql, [], |row| row.get(0))?)
 }
 
 /// Validates D11/F1.5 privacy default: raw archive schema exists after
@@ -406,10 +447,44 @@ fn reset_for_source_codex_keeps_claude_intact() -> Result<()> {
     )?;
     assert_eq!(codex_events, 0);
     assert_eq!(codex_raw, 0);
+    assert_eq!(
+        count_rows(&store, "usage_turn", "WHERE source = 'codex'")?,
+        0
+    );
+    assert_eq!(
+        count_rows(&store, "usage_tool_call", "WHERE source = 'codex'")?,
+        0
+    );
     assert_eq!(claude_events, 1);
     assert_eq!(claude_raw, 1);
+    assert_eq!(
+        count_rows(&store, "usage_turn", "WHERE source = 'claude'")?,
+        1
+    );
+    assert_eq!(
+        count_rows(&store, "usage_tool_call", "WHERE source = 'claude'")?,
+        1
+    );
     assert_eq!(store.source_files().counts(SourceKind::Codex)?.live, 0);
     assert_eq!(store.source_files().counts(SourceKind::Claude)?.live, 1);
+    Ok(())
+}
+
+#[test]
+fn reset_usage_data_clears_behavior_facts() -> Result<()> {
+    let temp = TempDir::new()?;
+    let paths = AppPaths::with_root(temp.path().join(".llmusage"))?;
+    let store = Store::new(&paths)?;
+    store.bootstrap_with(BootstrapOptions::default().with_raw_archive(true))?;
+    seed_resettable_row(&store, SourceKind::Codex, "reset-codex")?;
+    seed_resettable_row(&store, SourceKind::Claude, "reset-claude")?;
+
+    store.reset_usage_data()?;
+
+    assert_eq!(count_rows(&store, "usage_event", "")?, 0);
+    assert_eq!(count_rows(&store, "usage_event_raw", "")?, 0);
+    assert_eq!(count_rows(&store, "usage_turn", "")?, 0);
+    assert_eq!(count_rows(&store, "usage_tool_call", "")?, 0);
     Ok(())
 }
 
@@ -447,25 +522,46 @@ async fn start_run_complete_lifecycle_observable_via_snapshot() -> Result<()> {
     Ok(())
 }
 
-/// Validates cancellation is observable quickly. The parser may have no work in
-/// this fixture, but `cancel` must still switch the snapshot state without
-/// waiting for external cleanup.
+/// Validates cancellation is observable quickly without marking the job
+/// finished before the worker has actually observed the cancellation request.
 #[tokio::test]
 async fn cancel_within_1500ms() -> Result<()> {
     let (_tmp, store) = make_store()?;
+    let blocker = store
+        .acquire_worker_lock_with(Duration::from_secs(0), llmusage::store::HolderKind::Library)?;
     let registry = JobRegistry::default();
-    let (job_id, _rx) = registry.start(
+    let (job_id, mut rx) = registry.start(
         &store,
         SyncOptions {
-            source: Some("codex".to_string()),
+            source: Some("antigravity".to_string()),
             ..Default::default()
         },
     );
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while let Some(event) = rx.recv().await {
+            if matches!(event, SyncEvent::LockWaiting { .. }) {
+                return;
+            }
+        }
+    })
+    .await?;
 
     let started = std::time::Instant::now();
     assert!(registry.cancel(&job_id));
     let snapshot = registry.snapshot(&job_id).expect("job snapshot");
-    assert_eq!(snapshot.status, JobStatus::Cancelled);
+    assert_eq!(snapshot.status, JobStatus::Cancelling);
+    assert!(snapshot.finished_at.is_none());
+    drop(blocker);
+    loop {
+        let snapshot = registry.snapshot(&job_id).expect("job snapshot");
+        if snapshot.status == JobStatus::Cancelled {
+            break;
+        }
+        if started.elapsed() >= std::time::Duration::from_millis(1500) {
+            anyhow::bail!("job did not reach cancelled state within 1500ms");
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     assert!(started.elapsed() < std::time::Duration::from_millis(1500));
     Ok(())
 }
@@ -494,7 +590,6 @@ async fn file_boundary_cancel_preserves_written_events() -> Result<()> {
         parallelism: 1,
         lock_wait_ms: 0,
         recent_days: None,
-        source_file_inventories: Vec::new(),
         sender: Some(&mut tx),
         cancel: &cancel,
     })

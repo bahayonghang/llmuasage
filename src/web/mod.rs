@@ -1,10 +1,16 @@
-use std::{collections::HashMap, future::Future, net::SocketAddr, time::Duration};
+use std::{
+    collections::HashMap,
+    future::Future,
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use anyhow::Result;
 use axum::{
     Json, Router,
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode, header},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
@@ -12,6 +18,7 @@ use chrono::{FixedOffset, NaiveDate};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::net::TcpListener;
+use tokio::sync::Semaphore;
 use tracing::{error, info};
 
 use crate::{
@@ -28,6 +35,7 @@ use crate::{
 
 const WEB_API_TIMEOUT: Duration = Duration::from_secs(5);
 const WEB_BEHAVIOR_API_TIMEOUT: Duration = Duration::from_secs(1);
+const WEB_DASHBOARD_QUERY_PERMITS: usize = 4;
 
 mod assets;
 mod brand;
@@ -37,6 +45,22 @@ mod shell;
 pub struct WebState {
     pub store: Store,
     pub jobs: JobRegistry,
+    #[doc(hidden)]
+    pub dashboard_query_semaphore: Arc<Semaphore>,
+}
+
+impl WebState {
+    pub fn new(store: Store) -> Self {
+        Self::with_jobs_and_query_limit(store, JobRegistry::default(), WEB_DASHBOARD_QUERY_PERMITS)
+    }
+
+    fn with_jobs_and_query_limit(store: Store, jobs: JobRegistry, permits: usize) -> Self {
+        Self {
+            store,
+            jobs,
+            dashboard_query_semaphore: Arc::new(Semaphore::new(permits.max(1))),
+        }
+    }
 }
 
 pub async fn serve(store: Store, preferred_port: Option<u16>) -> Result<SocketAddr> {
@@ -52,10 +76,7 @@ pub async fn serve(store: Store, preferred_port: Option<u16>) -> Result<SocketAd
     info!("开始组装本地 Web UI 路由");
 
     // 1.1 创建状态并收敛根页面、资源和 API 路由
-    let state = WebState {
-        store,
-        jobs: JobRegistry::default(),
-    };
+    let state = WebState::new(store);
     let app = Router::new()
         .route("/", get(index_live))
         .route("/assets/{*path}", get(asset_file))
@@ -444,8 +465,12 @@ struct ForgetRequest {
 
 async fn api_diagnostics_forget(
     State(state): State<WebState>,
+    headers: HeaderMap,
     Json(payload): Json<ForgetRequest>,
 ) -> Response {
+    if let Some(response) = reject_non_local_write(&headers) {
+        return response;
+    }
     let Some(source_str) = payload.source.as_deref() else {
         return (
             StatusCode::BAD_REQUEST,
@@ -500,9 +525,28 @@ async fn api_diagnostics_forget(
 
 async fn api_jobs_start(
     State(state): State<WebState>,
+    headers: HeaderMap,
     Json(options): Json<SyncOptions>,
 ) -> Response {
-    let (job_id, _rx) = state.jobs.start(&state.store, options);
+    if let Some(response) = reject_non_local_write(&headers) {
+        return response;
+    }
+    let (job_id, _rx) = match state.jobs.try_start(&state.store, options) {
+        Ok(started) => started,
+        Err(rejected) => {
+            return (
+                StatusCode::CONFLICT,
+                Json(json!({
+                    "error": {
+                        "code": "sync_job_active",
+                        "message": "已有同步任务正在运行或取消中",
+                        "active_job_id": rejected.active_job_id,
+                    }
+                })),
+            )
+                .into_response();
+        }
+    };
     let Some(snapshot) = state.jobs.snapshot(&job_id) else {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -538,7 +582,14 @@ async fn api_jobs_get(State(state): State<WebState>, Path(id): Path<String>) -> 
     }
 }
 
-async fn api_jobs_cancel(State(state): State<WebState>, Path(id): Path<String>) -> Response {
+async fn api_jobs_cancel(
+    State(state): State<WebState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) = reject_non_local_write(&headers) {
+        return response;
+    }
     if !state.jobs.cancel(&id) {
         return (
             StatusCode::NOT_FOUND,
@@ -558,6 +609,93 @@ async fn api_jobs_cancel(State(state): State<WebState>, Path(id): Path<String>) 
     .into_response()
 }
 
+fn reject_non_local_write(headers: &HeaderMap) -> Option<Response> {
+    let Some(host) = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .map(normalize_authority)
+    else {
+        return Some(write_guard_error(
+            "invalid_host",
+            "本地写入 API 需要有效 Host header",
+            None,
+        ));
+    };
+    if !is_loopback_authority(&host) {
+        return Some(write_guard_error(
+            "invalid_host",
+            "本地写入 API 只接受 localhost/loopback Host",
+            Some(host),
+        ));
+    }
+
+    if let Some(origin) = headers
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
+    {
+        let Some(origin_authority) = origin_authority(origin) else {
+            return Some(write_guard_error(
+                "invalid_origin",
+                "本地写入 API 不接受无法解析的 Origin",
+                Some(origin.to_string()),
+            ));
+        };
+        if origin_authority != host {
+            return Some(write_guard_error(
+                "origin_mismatch",
+                "本地写入 API 只接受同源 Origin",
+                Some(origin.to_string()),
+            ));
+        }
+    }
+
+    None
+}
+
+fn write_guard_error(code: &str, message: &str, detail: Option<String>) -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(json!({
+            "error": {
+                "code": code,
+                "message": message,
+                "detail": detail,
+            }
+        })),
+    )
+        .into_response()
+}
+
+fn origin_authority(origin: &str) -> Option<String> {
+    let origin = origin.trim();
+    let rest = origin
+        .strip_prefix("http://")
+        .or_else(|| origin.strip_prefix("https://"))?;
+    let authority = rest
+        .split('/')
+        .next()
+        .map(normalize_authority)
+        .filter(|value| !value.is_empty())?;
+    Some(authority)
+}
+
+fn normalize_authority(raw: &str) -> String {
+    raw.trim().trim_end_matches('.').to_ascii_lowercase()
+}
+
+fn is_loopback_authority(authority: &str) -> bool {
+    let host = authority_host(authority);
+    host == "localhost" || host.parse::<IpAddr>().is_ok_and(|addr| addr.is_loopback())
+}
+
+fn authority_host(authority: &str) -> &str {
+    let authority = authority.rsplit('@').next().unwrap_or(authority);
+    if let Some(rest) = authority.strip_prefix('[') {
+        return rest.split(']').next().unwrap_or_default();
+    }
+    authority.split(':').next().unwrap_or_default()
+}
+
 async fn load_via_dashboard<T, F>(state: WebState, f: F) -> LlmusageResult<T>
 where
     T: Send + 'static,
@@ -575,9 +713,32 @@ where
     T: Send + 'static,
     F: FnOnce(&Dashboard) -> LlmusageResult<T> + Send + 'static,
 {
-    with_timeout(
+    let started = Instant::now();
+    let permit = match tokio::time::timeout(
         timeout,
+        state.dashboard_query_semaphore.clone().acquire_owned(),
+    )
+    .await
+    {
+        Ok(Ok(permit)) => permit,
+        Ok(Err(_)) => {
+            return Err(LlmusageError::ConfigInvalid {
+                detail: "dashboard query semaphore is closed".to_string(),
+            });
+        }
+        Err(_) => return Err(dashboard_timeout_error(timeout)),
+    };
+    let Some(remaining) = timeout.checked_sub(started.elapsed()) else {
+        return Err(dashboard_timeout_error(timeout));
+    };
+    if remaining.is_zero() {
+        return Err(dashboard_timeout_error(timeout));
+    }
+
+    with_timeout(
+        remaining,
         tokio::task::spawn_blocking(move || {
+            let _permit = permit;
             let dashboard = Dashboard::open(&state.store)?;
             f(&dashboard)
         }),
@@ -609,12 +770,22 @@ where
             detail: format!("blocking dashboard task failed: {err}"),
         })?,
         Err(_) => Err(LlmusageError::ConfigInvalid {
-            detail: format!(
-                "dashboard query exceeded {} ms timeout",
-                duration.as_millis()
-            ),
+            detail: dashboard_timeout_message(duration),
         }),
     }
+}
+
+fn dashboard_timeout_error(duration: Duration) -> LlmusageError {
+    LlmusageError::ConfigInvalid {
+        detail: dashboard_timeout_message(duration),
+    }
+}
+
+fn dashboard_timeout_message(duration: Duration) -> String {
+    format!(
+        "dashboard query exceeded {} ms timeout",
+        duration.as_millis()
+    )
 }
 
 async fn load_dashboard_snapshot_resilient(
@@ -945,6 +1116,10 @@ mod tests {
         fs,
         io::{Read, Write},
         net::SocketAddr,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
         time::{Duration, Instant},
     };
 
@@ -954,7 +1129,10 @@ mod tests {
 
     use crate::{AppPaths, LlmusageError, store::Store, sync::SyncOptions};
 
-    use super::{api_json, asset_manifest, live_index_html, serve, snapshot_index_html};
+    use super::{
+        WebState, api_json, asset_manifest, live_index_html, load_via_dashboard_with_timeout,
+        serve, snapshot_index_html,
+    };
 
     fn make_store() -> anyhow::Result<(TempDir, Store)> {
         let temp = TempDir::new()?;
@@ -970,8 +1148,22 @@ mod tests {
         path: &str,
         body: Option<String>,
     ) -> anyhow::Result<(StatusCode, serde_json::Value)> {
+        route_json_with_headers(addr, method, path, body, &[]).await
+    }
+
+    async fn route_json_with_headers(
+        addr: SocketAddr,
+        method: &str,
+        path: &str,
+        body: Option<String>,
+        headers: &[(&str, &str)],
+    ) -> anyhow::Result<(StatusCode, serde_json::Value)> {
         let method = method.to_string();
         let path = path.to_string();
+        let headers = headers
+            .iter()
+            .map(|(name, value)| format!("{name}: {value}\r\n"))
+            .collect::<String>();
         let raw = tokio::task::spawn_blocking(move || {
             let mut stream = std::net::TcpStream::connect(addr)?;
             stream.set_read_timeout(Some(Duration::from_secs(10)))?;
@@ -980,6 +1172,7 @@ mod tests {
             let request = format!(
                 "{method} {path} HTTP/1.1\r\n\
                  Host: {addr}\r\n\
+                 {headers}\
                  Content-Type: application/json\r\n\
                  Accept: application/json\r\n\
                  Content-Length: {}\r\n\
@@ -1004,7 +1197,8 @@ mod tests {
             .and_then(|raw| raw.parse::<u16>().ok())
             .ok_or_else(|| anyhow::anyhow!("invalid status line: {head:?}"))?;
         let body = decode_http_body(head, body)?;
-        let payload = serde_json::from_str(&body)?;
+        let payload = serde_json::from_str(&body)
+            .map_err(|err| anyhow::anyhow!("invalid JSON response body {body:?}: {err}"))?;
         Ok((StatusCode::from_u16(status_code)?, payload))
     }
 
@@ -1846,6 +2040,65 @@ mod tests {
                 .unwrap()
                 .contains("llmusage init")
         );
+    }
+
+    #[tokio::test]
+    async fn dashboard_queries_hold_semaphore_around_blocking_work() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let state = WebState::with_jobs_and_query_limit(store, Default::default(), 1);
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_active = Arc::new(AtomicUsize::new(0));
+
+        let query = |state: WebState| {
+            let active = Arc::clone(&active);
+            let max_active = Arc::clone(&max_active);
+            load_via_dashboard_with_timeout(state, Duration::from_secs(2), move |_dashboard| {
+                let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+                let mut observed = max_active.load(Ordering::SeqCst);
+                while current > observed {
+                    match max_active.compare_exchange(
+                        observed,
+                        current,
+                        Ordering::SeqCst,
+                        Ordering::SeqCst,
+                    ) {
+                        Ok(_) => break,
+                        Err(actual) => observed = actual,
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(100));
+                active.fetch_sub(1, Ordering::SeqCst);
+                Ok::<(), LlmusageError>(())
+            })
+        };
+
+        let (first, second) = tokio::join!(query(state.clone()), query(state));
+        first?;
+        second?;
+        assert_eq!(
+            max_active.load(Ordering::SeqCst),
+            1,
+            "dashboard blocking queries should be serialized by the test semaphore"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn write_apis_reject_cross_origin_posts() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let addr = serve(store, Some(0)).await?;
+
+        let (status, payload) = route_json_with_headers(
+            addr,
+            "POST",
+            "/api/jobs",
+            Some(serde_json::to_string(&SyncOptions::default())?),
+            &[("Origin", "http://evil.example")],
+        )
+        .await?;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(payload["error"]["code"], "origin_mismatch");
+        Ok(())
     }
 
     #[tokio::test]
