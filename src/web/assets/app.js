@@ -1,5 +1,13 @@
 import { UI_COPY, getLocale, getShellCopy, onLocaleChange, setLocale } from './copy.js';
-import { buildContext, buildExplorerQuery, buildFilterQuery, loadDashboardSnapshot, loadExplorer } from './data.js';
+import {
+  buildContext,
+  buildExplorerQuery,
+  buildFilterQuery,
+  clearLiveRequestCache,
+  loadDashboardCoreSnapshot,
+  loadDashboardSnapshot,
+  loadExplorer,
+} from './data.js';
 import { renderHero } from './render/hero.js';
 import { renderSyncCommandCenter } from './render/sync-command-center.js';
 import { renderTrends } from './render/trends.js';
@@ -67,6 +75,8 @@ async function main() {
     autoRefreshMs: readAutoRefreshPreference(),
     autoRefreshTimer: null,
     reloadPromise: null,
+    reloadGeneration: 0,
+    secondaryRefreshing: false,
     rawData: null,
     expanded: {
       models: false,
@@ -113,8 +123,9 @@ async function main() {
 
 async function loadDashboardData(state) {
   logger.info('开始加载 dashboard 数据');
-  const snapshot = await loadDashboardSnapshot(state);
-  if (state.mode !== 'snapshot') {
+  let snapshot = await loadDashboardSnapshot(state);
+  if (state.mode !== 'snapshot' && (!hasUsableExplorer(snapshot) || !isDefaultExplorerState(state))) {
+    snapshot = { ...snapshot };
     try {
       snapshot.explorer = await loadExplorer(state);
     } catch (error) {
@@ -124,6 +135,59 @@ async function loadDashboardData(state) {
   }
   logger.info('完成 dashboard 数据加载');
   return snapshot;
+}
+
+function hasUsableExplorer(snapshot) {
+  return Boolean(snapshot?.explorer?.support || snapshot?.explorer?.rows || snapshot?.explorer?.series);
+}
+
+function isDefaultExplorerState(state) {
+  const explorer = { ...DEFAULT_EXPLORER, ...(state?.explorer || {}) };
+  return (
+    explorer.granularity === DEFAULT_EXPLORER.granularity
+    && explorer.metric === DEFAULT_EXPLORER.metric
+    && explorer.groupBy === DEFAULT_EXPLORER.groupBy
+    && !explorer.sessionId
+    && !explorer.toolName
+    && !explorer.toolKind
+    && !explorer.tokenType
+    && clampExplorerLimit(explorer.limit) === DEFAULT_EXPLORER.limit
+    && explorer.includeOther !== false
+    && explorer.includeNonTool !== false
+  );
+}
+
+function stableFilterKey(filters = {}) {
+  const params = new URLSearchParams();
+  for (const key of ['source', 'model', 'project_hash', 'timezone']) {
+    if (filters[key]) {
+      params.set(key, filters[key]);
+    }
+  }
+  return params.toString();
+}
+
+function sameStableFilters(left, right) {
+  return stableFilterKey(left) === stableFilterKey(right);
+}
+
+function mergeCoreSnapshot(previous, core, options = {}) {
+  return {
+    ...(previous || {}),
+    overview: core?.overview,
+    trends: core?.trends,
+    models: core?.models,
+    sources: core?.sources,
+    projects: core?.projects,
+    costs: core?.costs,
+    health: core?.health,
+    diagnostics: core?.diagnostics,
+    sync_command_center: core?.sync_command_center,
+    _meta: {
+      ...((previous && previous._meta) || {}),
+      secondary_refreshing: Boolean(options.secondaryRefreshing),
+    },
+  };
 }
 
 function renderDashboard(rawData) {
@@ -713,6 +777,7 @@ function setupRangePresetControls(state) {
     if (!VALID_RANGE_PRESETS.has(preset) || preset === CUSTOM_RANGE_PRESET) return;
 
     try {
+      const previousFilters = { ...(state.filters || {}) };
       const filters = currentFilterInputs();
       delete filters.since;
       delete filters.until;
@@ -720,7 +785,12 @@ function setupRangePresetControls(state) {
       state.rangePreset = preset;
       state.trendWindow = RANGE_TO_TREND_WINDOW[preset] || state.trendWindow;
       closeDatePicker();
-      await reloadDashboard(state);
+      if (sameStableFilters(previousFilters, filters)) {
+        await reloadDashboardFastRange(state);
+      } else {
+        clearLiveRequestCache();
+        await reloadDashboard(state);
+      }
       syncFilterControls(state);
     } catch (error) {
       logger.error('快捷时间范围切换失败', error);
@@ -747,8 +817,20 @@ async function reloadDashboard(state) {
     return state.reloadPromise;
   }
 
+  const generation = ++state.reloadGeneration;
+  state.secondaryRefreshing = false;
   state.reloadPromise = (async () => {
-    state.rawData = await loadDashboardData(state);
+    const snapshot = await loadDashboardData(state);
+    if (generation !== state.reloadGeneration) {
+      return state.rawData;
+    }
+    state.rawData = {
+      ...snapshot,
+      _meta: {
+        ...((snapshot && snapshot._meta) || {}),
+        secondary_refreshing: false,
+      },
+    };
     syncUrlFromState(state);
     renderDashboard(state.rawData);
     updateSyncButton(state);
@@ -760,6 +842,66 @@ async function reloadDashboard(state) {
   } finally {
     state.reloadPromise = null;
   }
+}
+
+async function reloadDashboardFastRange(state) {
+  if (state.mode === 'snapshot') {
+    return reloadDashboard(state);
+  }
+
+  const generation = ++state.reloadGeneration;
+  const previous = state.rawData;
+  state.secondaryRefreshing = Boolean(previous);
+
+  const core = await loadDashboardCoreSnapshot(state);
+  if (generation !== state.reloadGeneration) {
+    return state.rawData;
+  }
+
+  state.rawData = mergeCoreSnapshot(previous, core, { secondaryRefreshing: state.secondaryRefreshing });
+  syncUrlFromState(state);
+  renderDashboard(state.rawData);
+  updateSyncButton(state);
+
+  const refreshSecondary = async () => {
+    try {
+      const full = await loadDashboardData(state);
+      if (generation !== state.reloadGeneration) {
+        return;
+      }
+      state.secondaryRefreshing = false;
+      state.rawData = {
+        ...full,
+        _meta: {
+          ...((full && full._meta) || {}),
+          secondary_refreshing: false,
+        },
+      };
+      renderDashboard(state.rawData);
+      updateSyncButton(state);
+    } catch (error) {
+      if (generation !== state.reloadGeneration) {
+        return;
+      }
+      state.secondaryRefreshing = false;
+      if (state.rawData) {
+        state.rawData = {
+          ...state.rawData,
+          _meta: {
+            ...((state.rawData && state.rawData._meta) || {}),
+            secondary_refreshing: false,
+          },
+        };
+        renderDashboard(state.rawData);
+      }
+      logger.error('次级面板刷新失败', error);
+      const endpointSync = document.getElementById('endpoint-sync');
+      if (endpointSync) endpointSync.textContent = error?.message || getShellCopy('shell.refresh.failed');
+    }
+  };
+
+  void refreshSecondary();
+  return state.rawData;
 }
 
 async function refreshDashboardInPlace(state) {
@@ -856,6 +998,7 @@ function setupFilterControls(state) {
         state.trendWindow = DEFAULT_TREND_WINDOW;
       }
       closeDatePicker();
+      clearLiveRequestCache();
       await reloadDashboard(state);
     } catch (error) {
       logger.error('筛选加载失败', error);
@@ -869,6 +1012,7 @@ function setupFilterControls(state) {
       state.rangePreset = DEFAULT_RANGE_PRESET;
       state.trendWindow = DEFAULT_TREND_WINDOW;
       closeDatePicker();
+      clearLiveRequestCache();
       await reloadDashboard(state);
       syncFilterControls(state);
     } catch (error) {
@@ -1073,13 +1217,19 @@ function setupTrendSegments(state) {
     }
 
     try {
+      const previousFilters = { ...(state.filters || {}) };
       state.trendWindow = nextWindow;
       state.rangePreset = TREND_WINDOW_TO_RANGE[nextWindow] || DEFAULT_RANGE_PRESET;
       state.filters = currentFilterInputs();
       delete state.filters.since;
       delete state.filters.until;
       closeDatePicker();
-      await reloadDashboard(state);
+      if (sameStableFilters(previousFilters, state.filters)) {
+        await reloadDashboardFastRange(state);
+      } else {
+        clearLiveRequestCache();
+        await reloadDashboard(state);
+      }
       syncFilterControls(state);
     } catch (error) {
       logger.error('趋势窗口切换失败', error);
@@ -1282,6 +1432,7 @@ function setupSyncJob(state) {
       updateSyncButton(state, terminal);
       refreshSyncCommandCenter(state);
       if (terminal?.status === 'completed') {
+        clearLiveRequestCache();
         await reloadDashboard(state);
       }
     } catch (error) {

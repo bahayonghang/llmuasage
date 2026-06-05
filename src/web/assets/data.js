@@ -4,9 +4,11 @@ export {
   loadSection,
   loadTrendWindow,
   loadDashboardSnapshot,
+  loadDashboardCoreSnapshot,
   buildFilterQuery,
   buildExplorerQuery,
   loadExplorer,
+  clearLiveRequestCache,
 } from './data/fetch.js';
 export {
   escapeHtml,

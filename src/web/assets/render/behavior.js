@@ -1,3 +1,4 @@
+import { getShellCopy } from '../copy.js';
 import { escapeHtml, formatCompact, formatNumber, formatUsd, ratio } from '../data.js';
 
 const logger = window.console;
@@ -16,6 +17,12 @@ function emptyState(support, fallback) {
       ${escapeHtml(reason)}
     </div>
   `;
+}
+
+function refreshNotice(refreshing) {
+  return refreshing
+    ? `<div class="empty-state stale-refresh-notice">${escapeHtml(getShellCopy('shell.refresh.secondaryStale'))}</div>`
+    : '';
 }
 
 function renderBars(rows, valueKey, labelFn, valueFn) {
@@ -227,9 +234,10 @@ export function renderBehavior(context) {
   const toolsSupport = panels.tools_support;
   const optimize = panels.optimize;
   const compare = panels.compare;
+  const refreshing = Boolean(panels.secondary_refreshing);
 
-  document.getElementById('activity-support').textContent = supportLabel(activitySupport);
-  document.getElementById('tools-support').textContent = supportLabel(toolsSupport);
+  document.getElementById('activity-support').textContent = refreshing ? 'refreshing' : supportLabel(activitySupport);
+  document.getElementById('tools-support').textContent = refreshing ? 'refreshing' : supportLabel(toolsSupport);
 
   document.getElementById('activity-bars').innerHTML = renderBars(
     activityRows,
@@ -240,7 +248,7 @@ export function renderBehavior(context) {
   document.getElementById('activity-table').innerHTML = renderActivityTable(
     activityRows,
     activitySupport,
-  );
+  ) + refreshNotice(refreshing);
 
   document.getElementById('tools-bars').innerHTML = renderBars(
     toolRows,
@@ -248,9 +256,15 @@ export function renderBehavior(context) {
     (row) => row.mcp_server ? `${row.mcp_server} / ${row.tool_name}` : row.tool_name || '--',
     (row) => `${formatCompact(row.calls)} calls`,
   );
-  document.getElementById('tools-table').innerHTML = renderToolsTable(toolRows, toolsSupport);
+  document.getElementById('tools-table').innerHTML = renderToolsTable(toolRows, toolsSupport) + refreshNotice(refreshing);
   renderOptimize(optimize);
   renderCompare(compare);
+  if (refreshing) {
+    const optimizeHost = document.getElementById('optimize-findings');
+    if (optimizeHost) optimizeHost.insertAdjacentHTML('afterbegin', refreshNotice(true));
+    const compareHost = document.getElementById('compare-panel');
+    if (compareHost) compareHost.insertAdjacentHTML('afterbegin', refreshNotice(true));
+  }
 
   logger.info('完成行为分析区渲染');
 }

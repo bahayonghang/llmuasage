@@ -253,7 +253,7 @@ function sortDesc(rows, select) {
  * 2) 固定 Top N、图表序列和对比表行
  * 3) 为各面板补齐总量、峰值、占比和紧凑显示值
  */
-export function buildContext({ overview, trends, models, sources, projects, costs, activity, tools, optimize, compare, explorer, health, diagnostics, sync_command_center }) {
+export function buildContext({ overview, trends, models, sources, projects, costs, activity, tools, optimize, compare, explorer, health, diagnostics, sync_command_center, _meta }) {
   logger.info('开始构建页面上下文');
 
   // 1.1 规范化并排序趋势、排行和健康数据
@@ -377,6 +377,7 @@ export function buildContext({ overview, trends, models, sources, projects, cost
       explorer: explorerPayload,
       activity_support: activity?.support || { supported: false, level: 'no_data' },
       tools_support: tools?.support || { supported: false, level: 'no_data' },
+      secondary_refreshing: Boolean(_meta?.secondary_refreshing),
     },
     health: {
       integrations: integrationRows,

@@ -1,3 +1,4 @@
+import { getShellCopy } from '../copy.js';
 import { escapeHtml, formatCompact, formatNumber, formatUsd, ratio } from '../data.js';
 
 const logger = window.console;
@@ -53,6 +54,12 @@ function formatMetric(metric, value) {
 
 function emptyState(message) {
   return `<div class="empty-state">${escapeHtml(message)}</div>`;
+}
+
+function refreshNotice(refreshing) {
+  return refreshing
+    ? `<div class="empty-state stale-refresh-notice">${escapeHtml(getShellCopy('shell.refresh.secondaryStale'))}</div>`
+    : '';
 }
 
 function renderSummary(explorer) {
@@ -180,11 +187,12 @@ export function renderExplorer(context, _state = {}) {
   const series = Array.isArray(explorer.series) ? explorer.series : [];
   const support = explorer.support || { supported: false, level: 'no_data' };
   const warning = explorer.warning || support.reason || '';
+  const refreshing = Boolean(context?.panels?.secondary_refreshing);
 
   const supportEl = document.getElementById('explorer-support');
   if (supportEl) {
-    supportEl.textContent = supportLabel(support);
-    supportEl.dataset.level = support.level || 'no_data';
+    supportEl.textContent = refreshing ? 'refreshing' : supportLabel(support);
+    supportEl.dataset.level = refreshing ? 'refreshing' : support.level || 'no_data';
     supportEl.title = support.reason || support.strategy || '';
   }
 
@@ -195,9 +203,9 @@ export function renderExplorer(context, _state = {}) {
 
   const warningHost = document.getElementById('explorer-warning');
   if (warningHost) {
-    warningHost.innerHTML = warning
-      ? `<div class="empty-state explorer-warning">${escapeHtml(warning)}</div>`
-      : '';
+    warningHost.innerHTML = `${refreshNotice(refreshing)}${
+      warning ? `<div class="empty-state explorer-warning">${escapeHtml(warning)}</div>` : ''
+    }`;
   }
 
   const bars = document.getElementById('explorer-bars');

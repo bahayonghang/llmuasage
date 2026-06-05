@@ -170,9 +170,10 @@ async fn api_dashboard(
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
     let filter = dashboard_filter_from_params(&params);
+    let scope = dashboard_scope_from_params(&params);
     api_json_async(
         "/api/dashboard",
-        load_dashboard_snapshot_resilient(state, filter),
+        load_dashboard_snapshot_resilient(state, filter, scope),
     )
     .await
 }
@@ -791,12 +792,17 @@ fn dashboard_timeout_message(duration: Duration) -> String {
 async fn load_dashboard_snapshot_resilient(
     state: WebState,
     filter: QueryFilter,
+    scope: DashboardScope,
 ) -> LlmusageResult<serde_json::Value> {
     let core = load_via_dashboard(state.clone(), {
         let filter = filter.clone();
         move |dashboard| dashboard.core_snapshot(&filter)
     })
     .await?;
+
+    if scope == DashboardScope::Core {
+        return Ok(dashboard_core_json(core));
+    }
 
     let activity_filter = filter.clone();
     let activity = load_behavior_api(
@@ -836,7 +842,32 @@ async fn load_dashboard_snapshot_resilient(
     let explorer = explorer?;
     let compare = compare?;
 
-    Ok(json!({
+    let mut payload = dashboard_core_json(core);
+    if let Some(object) = payload.as_object_mut() {
+        object.insert("activity".to_string(), json!(activity));
+        object.insert("tools".to_string(), json!(tools));
+        object.insert("optimize".to_string(), json!(optimize));
+        object.insert("explorer".to_string(), json!(explorer));
+        object.insert("compare".to_string(), json!(compare));
+    }
+    Ok(payload)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DashboardScope {
+    Full,
+    Core,
+}
+
+fn dashboard_scope_from_params(params: &HashMap<String, String>) -> DashboardScope {
+    match params.get("scope").map(String::as_str) {
+        Some("core") => DashboardScope::Core,
+        _ => DashboardScope::Full,
+    }
+}
+
+fn dashboard_core_json(core: crate::query::DashboardCoreSnapshot) -> serde_json::Value {
+    json!({
         "overview": core.overview,
         "sync_command_center": core.sync_command_center,
         "day_trends": core.day_trends,
@@ -847,14 +878,9 @@ async fn load_dashboard_snapshot_resilient(
         "sources": core.sources,
         "projects": core.projects,
         "costs": core.costs,
-        "activity": activity,
-        "tools": tools,
-        "optimize": optimize,
-        "explorer": explorer,
-        "compare": compare,
         "health": core.health,
         "diagnostics": core.diagnostics,
-    }))
+    })
 }
 
 fn degraded_support(reason: String) -> BehaviorSupport {
@@ -1658,12 +1684,60 @@ mod tests {
             .expect("fetch.js asset")
             .body;
         assert!(fetch_js.contains("export async function loadDashboardSnapshot"));
-        assert!(fetch_js.contains("loadJson(`/api/dashboard${buildFilterQuery(state)}`)"));
+        assert!(
+            fetch_js
+                .contains("loadLiveJson(`/api/dashboard${buildDashboardQuery(state, options)}`")
+        );
         assert!(fetch_js.contains("export async function loadSection"));
         assert!(fetch_js.contains("state?.rangePreset"));
         assert!(fetch_js.contains("params.set('range', state.rangePreset)"));
         assert!(fetch_js.contains("回退到旧分段 API"));
         assert!(fetch_js.contains("snapshot.json"));
+    }
+
+    #[test]
+    fn dashboard_assets_coalesce_cache_and_fast_refresh_ranges() {
+        let app_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "app.js")
+            .expect("app.js asset")
+            .body;
+        let fetch_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "data/fetch.js")
+            .expect("fetch.js asset")
+            .body;
+        let derive_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "data/derive.js")
+            .expect("derive.js asset")
+            .body;
+        let behavior_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "render/behavior.js")
+            .expect("render/behavior.js asset")
+            .body;
+        let explorer_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "render/explorer.js")
+            .expect("render/explorer.js asset")
+            .body;
+
+        assert!(fetch_js.contains("const LIVE_CACHE_TTL_MS = 10000"));
+        assert!(fetch_js.contains("const liveInflight = new Map()"));
+        assert!(fetch_js.contains("function normalizedRequestKey"));
+        assert!(fetch_js.contains("export function clearLiveRequestCache"));
+        assert!(fetch_js.contains("liveCacheEpoch += 1"));
+        assert!(fetch_js.contains("export async function loadDashboardCoreSnapshot"));
+        assert!(fetch_js.contains("scope: 'core'"));
+        assert!(app_js.contains("async function reloadDashboardFastRange"));
+        assert!(app_js.contains("loadDashboardCoreSnapshot(state)"));
+        assert!(app_js.contains("sameStableFilters(previousFilters"));
+        assert!(app_js.contains("clearLiveRequestCache()"));
+        assert!(app_js.contains("!hasUsableExplorer(snapshot) || !isDefaultExplorerState(state)"));
+        assert!(derive_js.contains("secondary_refreshing: Boolean(_meta?.secondary_refreshing)"));
+        assert!(behavior_js.contains("shell.refresh.secondaryStale"));
+        assert!(explorer_js.contains("shell.refresh.secondaryStale"));
     }
 
     #[test]
@@ -1826,6 +1900,7 @@ mod tests {
         assert!(app_js.contains("/api/jobs/${encodeURIComponent(state.activeJobId)}/cancel"));
         assert!(app_js.contains("pollJobUntilTerminal(state, state.activeJobId)"));
         assert!(app_js.contains("await reloadDashboard(state)"));
+        assert!(app_js.contains("clearLiveRequestCache()"));
         assert!(app_js.contains("shell.sync.snapshotDisabled"));
     }
 
@@ -1911,7 +1986,7 @@ mod tests {
         assert!(fetch_js.contains("export function buildExplorerQuery"));
         assert!(fetch_js.contains("export async function loadExplorer"));
         assert!(fetch_js.contains("snapshot?.explorer"));
-        assert!(fetch_js.contains("loadJson(`/api/explorer${buildExplorerQuery(state)}`)"));
+        assert!(fetch_js.contains("loadLiveJson(`/api/explorer${buildExplorerQuery(state)}`)"));
         assert!(fetch_js.contains("return await loadExplorer(state);"));
         assert!(!fetch_js.contains("loadOptionalSection(state, 'explorer'"));
         assert!(derive_js.contains("const explorerPayload = normalizeExplorer(explorer);"));
@@ -2891,6 +2966,47 @@ mod tests {
         assert_eq!(payload["projects"][0]["project_hash"], "project-a");
         assert_eq!(payload["costs"][0]["source"], "codex");
         assert!(payload["health"].is_object());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn api_dashboard_core_scope_omits_secondary_sections() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let conn = store.open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_bucket_30m(
+                source, model, hour_start, project_hash, project_label, project_ref,
+                input_tokens, cache_read_tokens, cache_creation_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source,
+                event_count, updated_at
+            )
+            VALUES ('codex', 'gpt-5', '2026-05-01T00:00:00Z', 'project-a', 'Project A', NULL,
+                    10, 0, 0, 0, 0, 10, 0.1, 0.1, 'static', 'static-v1',
+                    1, '2026-05-01T00:00:00Z')
+            "#,
+            [],
+        )?;
+        drop(conn);
+
+        let addr = serve(store, Some(0)).await?;
+        let (status, payload) = route_json(
+            addr,
+            "GET",
+            "/api/dashboard?scope=core&source=codex&timezone=UTC",
+            None,
+        )
+        .await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(payload["overview"]["total"]["total_tokens"], 10);
+        assert!(payload["models"].as_array().expect("models").len() == 1);
+        assert!(payload["health"].is_object());
+        assert!(payload["activity"].is_null());
+        assert!(payload["tools"].is_null());
+        assert!(payload["optimize"].is_null());
+        assert!(payload["explorer"].is_null());
+        assert!(payload["compare"].is_null());
         Ok(())
     }
 

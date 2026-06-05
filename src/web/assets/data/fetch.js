@@ -1,4 +1,8 @@
 const logger = window.console;
+const LIVE_CACHE_TTL_MS = 10000;
+const liveCache = new Map();
+const liveInflight = new Map();
+let liveCacheEpoch = 0;
 
 /*
  * ========================================================================
@@ -35,6 +39,51 @@ export async function loadJson(path) {
   const payload = await response.json();
   logger.info('完成页面 JSON 数据请求');
   return payload;
+}
+
+export function clearLiveRequestCache() {
+  liveCacheEpoch += 1;
+  liveCache.clear();
+  liveInflight.clear();
+}
+
+function normalizedRequestKey(path) {
+  const url = new URL(path, window.location.origin);
+  const params = new URLSearchParams(url.search);
+  params.sort();
+  const query = params.toString();
+  return `${url.pathname}${query ? `?${query}` : ''}`;
+}
+
+async function loadLiveJson(path, options = {}) {
+  const key = normalizedRequestKey(path);
+  const cacheable = options.cache !== false;
+  if (cacheable) {
+    const cached = liveCache.get(key);
+    if (cached && Date.now() - cached.receivedAt < LIVE_CACHE_TTL_MS) {
+      return cached.payload;
+    }
+  }
+
+  if (liveInflight.has(key)) {
+    return liveInflight.get(key);
+  }
+
+  const epoch = liveCacheEpoch;
+  const request = loadJson(path)
+    .then((payload) => {
+      if (cacheable && epoch === liveCacheEpoch) {
+        liveCache.set(key, { payload, receivedAt: Date.now() });
+      }
+      return payload;
+    })
+    .finally(() => {
+      if (liveInflight.get(key) === request) {
+        liveInflight.delete(key);
+      }
+    });
+  liveInflight.set(key, request);
+  return request;
 }
 
 export async function ensureSnapshot(state) {
@@ -100,7 +149,16 @@ function snapshotTrendRows(snapshot, windowName) {
   return snapshot?.[`${windowName}_trends`] || [];
 }
 
-export async function loadDashboardSnapshot(state) {
+function buildDashboardQuery(state, options = {}) {
+  const params = new URLSearchParams(buildFilterQuery(state).slice(1));
+  if (options.scope) {
+    params.set('scope', options.scope);
+  }
+  const query = params.toString();
+  return query ? `?${query}` : '';
+}
+
+export async function loadDashboardSnapshot(state, options = {}) {
   if (state.mode === 'snapshot') {
     const snapshot = await ensureSnapshot(state);
     return {
@@ -123,7 +181,7 @@ export async function loadDashboardSnapshot(state) {
 
   let snapshot;
   try {
-    snapshot = await loadJson(`/api/dashboard${buildFilterQuery(state)}`);
+    snapshot = await loadLiveJson(`/api/dashboard${buildDashboardQuery(state, options)}`, options);
   } catch (error) {
     logger.warn('/api/dashboard 不可用，回退到旧分段 API', error);
     const [overview, trends, models, sources, projects, costs, activity, tools, optimize, explorer, compare, health, diagnostics] = await Promise.all([
@@ -161,12 +219,16 @@ export async function loadDashboardSnapshot(state) {
   };
 }
 
+export async function loadDashboardCoreSnapshot(state, options = {}) {
+  return loadDashboardSnapshot(state, { ...options, scope: 'core' });
+}
+
 export async function loadSection(state, section, path) {
   if (state.mode === 'snapshot') {
     const snapshot = await ensureSnapshot(state);
     return snapshot?.[section];
   }
-  return loadJson(`${path}${buildFilterQuery(state)}`);
+  return loadLiveJson(`${path}${buildFilterQuery(state)}`);
 }
 
 async function loadOptionalSection(state, section, path, fallback) {
@@ -192,7 +254,7 @@ export async function loadTrendWindow(state, windowName) {
     const snapshot = await ensureSnapshot(state);
     return snapshot?.[`${windowName}_trends`];
   }
-  return loadJson(`/api/trends${buildFilterQuery({ ...state, trendWindow: windowName })}`);
+  return loadLiveJson(`/api/trends${buildFilterQuery({ ...state, trendWindow: windowName })}`);
 }
 
 export async function loadExplorer(state) {
@@ -200,7 +262,7 @@ export async function loadExplorer(state) {
     const snapshot = await ensureSnapshot(state);
     return snapshot?.explorer;
   }
-  return loadJson(`/api/explorer${buildExplorerQuery(state)}`);
+  return loadLiveJson(`/api/explorer${buildExplorerQuery(state)}`);
 }
 
 function degradedSupport(error) {
