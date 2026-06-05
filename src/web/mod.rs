@@ -1485,7 +1485,6 @@ mod tests {
                 "data/fetch.js",
                 "data/format.js",
                 "data/derive.js",
-                "render.js",
                 "render/hero.js",
                 "render/sync-command-center.js",
                 "render/trends.js",
@@ -1496,9 +1495,6 @@ mod tests {
                 "render/explorer.js",
                 "render/costs.js",
                 "render/insights.js",
-                "render/charts.js",
-                "render/tables.js",
-                "render/health.js",
                 "favicon.svg",
             ]
         );
@@ -1508,16 +1504,7 @@ mod tests {
     fn render_assets_use_updated_terms() {
         let selected_bodies = asset_manifest()
             .iter()
-            .filter(|asset| {
-                matches!(
-                    asset.path,
-                    "copy.js"
-                        | "render/hero.js"
-                        | "render/charts.js"
-                        | "render/tables.js"
-                        | "render/health.js"
-                )
-            })
+            .filter(|asset| matches!(asset.path, "copy.js" | "render/hero.js"))
             .map(|asset| asset.body)
             .collect::<Vec<_>>()
             .join("\n");

@@ -464,4 +464,14 @@ section.block {
   .sync-command-center-sources {
     grid-template-columns: 1fr;
   }
+
+  .range-presets button,
+  .seg button,
+  .refresh-toggle button {
+    min-height: 44px;
+  }
+
+  .toggle-btn {
+    height: 44px;
+  }
 }

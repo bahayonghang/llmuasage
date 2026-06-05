@@ -343,7 +343,6 @@ nav a.active .badge {
   border-color: rgba(200, 85, 61, 0.62);
   background: var(--accent);
   color: #fff8f2;
-  box-shadow: 0 12px 28px rgba(200, 85, 61, 0.26);
 }
 
 .sync-command-center-action .btn:hover:not(:disabled),
@@ -1058,21 +1057,20 @@ nav a.active .badge {
 .finding-card {
   padding: 13px 14px;
   border: 1px solid var(--line);
-  border-left: 3px solid var(--muted-2);
   border-radius: 10px;
   background: var(--surface-2);
 }
 
 .finding-card[data-severity='high'] {
-  border-left-color: var(--danger);
+  border-color: var(--danger);
 }
 
 .finding-card[data-severity='medium'] {
-  border-left-color: var(--warn);
+  border-color: var(--warn);
 }
 
 .finding-card[data-severity='low'] {
-  border-left-color: var(--accent);
+  border-color: var(--accent);
 }
 
 .finding-head {
@@ -1387,16 +1385,15 @@ nav a.active .badge {
   padding: 12px 14px;
   background: var(--surface-2);
   border: 1px solid var(--line);
-  border-left: 3px solid var(--muted-2);
   border-radius: 10px;
 }
 
 .insight-row[data-tone='warn'] {
-  border-left-color: var(--warn);
+  border-color: var(--warn);
 }
 
 .insight-row[data-tone='good'] {
-  border-left-color: var(--good);
+  border-color: var(--good);
 }
 
 .insight-row-head {
@@ -1570,4 +1567,47 @@ svg.i {
 
 .status-pill[data-tone='warn'] .pulse {
   background: #e3b372;
+}
+
+/* Panel / sub-panel headings (replaces inline <h3 style> in shell.rs) */
+.panel-title {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.018em;
+  margin: 4px 0;
+}
+
+.subpanel-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 4px 0 10px;
+}
+
+/* Trends "observation" callout (replaces inline styles in render/trends.js) */
+.trend-observation {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid rgba(200, 85, 61, 0.25);
+  border-radius: 10px;
+  background: rgba(200, 85, 61, 0.08);
+}
+
+.trend-observation-label {
+  margin-bottom: 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.trend-observation-body {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--dark-text);
+}
+
+.trend-observation-peak {
+  color: #f5a890;
 }

@@ -70,52 +70,52 @@ fn html_shell(mode: &str) -> String {
       </div>
     </div>
 
-    <div class="nav-label" data-i18n="shell.nav.label.overview">概览</div>
-    <nav>
+    <div class="nav-label" id="nav-label-overview" data-i18n="shell.nav.label.overview">概览</div>
+    <nav aria-labelledby="nav-label-overview">
       <a href="#overview" class="active" data-target="overview">
-        <span class="nav-icon"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></span>
+        <span class="nav-icon"><svg aria-hidden="true" class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></span>
         <span data-i18n="shell.nav.item.usage">用量概览</span>
         <span class="badge">4</span>
       </a>
       <a href="#trends" data-target="trends">
-        <span class="nav-icon"><svg class="i" viewBox="0 0 24 24"><polyline points="3,17 9,11 13,15 21,7"/><polyline points="14,7 21,7 21,14"/></svg></span>
+        <span class="nav-icon"><svg aria-hidden="true" class="i" viewBox="0 0 24 24"><polyline points="3,17 9,11 13,15 21,7"/><polyline points="14,7 21,7 21,14"/></svg></span>
         <span data-i18n="shell.nav.item.trend">用量趋势</span>
         <span class="badge">24h</span>
       </a>
     </nav>
 
-    <div class="nav-label" data-i18n="shell.nav.label.distribution">分布</div>
-    <nav>
+    <div class="nav-label" id="nav-label-distribution" data-i18n="shell.nav.label.distribution">分布</div>
+    <nav aria-labelledby="nav-label-distribution">
       <a href="#models" data-target="models">
-        <span class="nav-icon"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg></span>
+        <span class="nav-icon"><svg aria-hidden="true" class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg></span>
         <span data-i18n="shell.nav.item.models">模型分布</span>
       </a>
       <a href="#sources" data-target="sources">
-        <span class="nav-icon"><svg class="i" viewBox="0 0 24 24"><path d="M12 3l9 5v8l-9 5-9-5V8z"/><path d="M3 8l9 5 9-5M12 13v9"/></svg></span>
+        <span class="nav-icon"><svg aria-hidden="true" class="i" viewBox="0 0 24 24"><path d="M12 3l9 5v8l-9 5-9-5V8z"/><path d="M3 8l9 5 9-5M12 13v9"/></svg></span>
         <span data-i18n="shell.nav.item.sources">来源分布</span>
       </a>
       <a href="#projects" data-target="projects">
-        <span class="nav-icon"><svg class="i" viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v11H3z"/></svg></span>
+        <span class="nav-icon"><svg aria-hidden="true" class="i" viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v11H3z"/></svg></span>
         <span data-i18n="shell.nav.item.projects">项目排行</span>
       </a>
       <a href="#behavior" data-target="behavior">
-        <span class="nav-icon"><svg class="i" viewBox="0 0 24 24"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 16v-5"/><path d="M12 16V8"/><path d="M16 16v-7"/></svg></span>
+        <span class="nav-icon"><svg aria-hidden="true" class="i" viewBox="0 0 24 24"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 16v-5"/><path d="M12 16V8"/><path d="M16 16v-7"/></svg></span>
         <span data-i18n="shell.nav.item.behavior">行为分析</span>
       </a>
       <a href="#explorer" data-target="explorer">
-        <span class="nav-icon"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-5-5"/><path d="M8 11h6M11 8v6"/></svg></span>
+        <span class="nav-icon"><svg aria-hidden="true" class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-5-5"/><path d="M8 11h6M11 8v6"/></svg></span>
         <span data-i18n="shell.nav.item.explorer">切片分析</span>
       </a>
     </nav>
 
-    <div class="nav-label" data-i18n="shell.nav.label.ops">运营</div>
-    <nav>
+    <div class="nav-label" id="nav-label-ops" data-i18n="shell.nav.label.ops">运营</div>
+    <nav aria-labelledby="nav-label-ops">
       <a href="#cost" data-target="cost">
-        <span class="nav-icon"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M15 9h-4a2 2 0 100 4h2a2 2 0 110 4H9M12 7v2M12 15v2"/></svg></span>
+        <span class="nav-icon"><svg aria-hidden="true" class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M15 9h-4a2 2 0 100 4h2a2 2 0 110 4H9M12 7v2M12 15v2"/></svg></span>
         <span data-i18n="shell.nav.item.cost">成本估算</span>
       </a>
       <a href="#status" data-target="status">
-        <span class="nav-icon"><svg class="i" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
+        <span class="nav-icon"><svg aria-hidden="true" class="i" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
         <span data-i18n="shell.nav.item.status">运行状态</span>
       </a>
     </nav>
@@ -123,8 +123,8 @@ fn html_shell(mode: &str) -> String {
     <div class="sidebar-footer">
       <div class="sidebar-toggles" role="group" data-i18n-attr="aria-label=toolbar.group.aria">
         <button class="toggle-btn" id="toggle-theme" type="button" data-i18n-attr="aria-label=toolbar.theme.aria">
-          <svg class="i toggle-icon icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M5 19l1.5-1.5M17.5 6.5L19 5"/></svg>
-          <svg class="i toggle-icon icon-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          <svg aria-hidden="true" class="i toggle-icon icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M5 19l1.5-1.5M17.5 6.5L19 5"/></svg>
+          <svg aria-hidden="true" class="i toggle-icon icon-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
           <span class="toggle-label label-to-dark" data-i18n="toolbar.theme.toDark">深色</span>
           <span class="toggle-label label-to-light" data-i18n="toolbar.theme.toLight">浅色</span>
         </button>
@@ -161,11 +161,11 @@ fn html_shell(mode: &str) -> String {
       </div>
       <div class="topbar-actions">
         <span class="tag local">
-          <svg class="i" viewBox="0 0 24 24" style="width: 11px; height: 11px;"><path d="M12 22s-8-4.5-8-11a8 8 0 1116 0c0 6.5-8 11-8 11z"/><circle cx="12" cy="11" r="3"/></svg>
+          <svg aria-hidden="true" class="i" viewBox="0 0 24 24" style="width: 11px; height: 11px;"><path d="M12 22s-8-4.5-8-11a8 8 0 1116 0c0 6.5-8 11-8 11z"/><circle cx="12" cy="11" r="3"/></svg>
           <span data-i18n="{environment_chip_key}">{environment_chip}</span>
         </span>
         <button class="btn" id="btn-export">
-          <svg class="i" viewBox="0 0 24 24" style="width: 13px; height: 13px;"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          <svg aria-hidden="true" class="i" viewBox="0 0 24 24" style="width: 13px; height: 13px;"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
           <span data-i18n="shell.btn.export">导出 JSON</span>
         </button>
         <div class="refresh-toggle" id="auto-refresh" role="group" data-i18n-attr="aria-label=shell.refresh.aria">
@@ -175,7 +175,7 @@ fn html_shell(mode: &str) -> String {
           <button type="button" data-refresh-interval="60000" aria-pressed="false">60s</button>
         </div>
         <button class="btn btn-primary" id="btn-sync">
-          <svg class="i" viewBox="0 0 24 24" style="width: 13px; height: 13px;"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15A9 9 0 1 1 18 6.36L23 10"/></svg>
+          <svg aria-hidden="true" class="i" viewBox="0 0 24 24" style="width: 13px; height: 13px;"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15A9 9 0 1 1 18 6.36L23 10"/></svg>
           <span data-i18n="shell.btn.sync">同步</span>
         </button>
       </div>
@@ -192,7 +192,6 @@ fn html_shell(mode: &str) -> String {
 
       <div class="hero">
         <div>
-          <div class="section-eyebrow" style="margin-bottom: 10px;" data-i18n="shell.hero.eyebrow">DASHBOARD</div>
           <h1 class="hero-title" data-i18n-html="shell.hero.title.html">本地用量<span class="accent">概览</span></h1>
           <p class="hero-desc" data-i18n="shell.hero.desc">
             本地查看近期用量、成本估算和运行状态。所有数据存放在本机 SQLite 中，不依赖任何外部接口、不上报任何遥测，可放心断网使用。
@@ -247,15 +246,14 @@ fn html_shell(mode: &str) -> String {
       <div class="trends-card">
         <div class="trends-head">
           <div class="trends-title-block">
-            <div class="section-eyebrow" data-i18n="shell.trends.eyebrow">TRENDS</div>
-            <div class="trends-title" data-i18n="shell.trends.title">用量趋势</div>
+            <h2 class="trends-title" data-i18n="shell.trends.title">用量趋势</h2>
             <div class="trends-sub" data-i18n="shell.trends.sub">主图展示当前窗口内最近 10 条记录，完整明细可展开查看。</div>
           </div>
-          <div class="seg" id="seg">
-            <button class="active" data-window="day">24h</button>
-            <button data-window="week">7d</button>
-            <button data-window="month">30d</button>
-            <button data-window="all" data-i18n="seg.all">全部</button>
+          <div class="seg" id="seg" role="group" data-i18n-attr="aria-label=shell.trends.windowAria">
+            <button type="button" class="active" data-window="day" aria-pressed="true">24h</button>
+            <button type="button" data-window="week" aria-pressed="false">7d</button>
+            <button type="button" data-window="month" aria-pressed="false">30d</button>
+            <button type="button" data-window="all" aria-pressed="false" data-i18n="seg.all">全部</button>
           </div>
         </div>
 
@@ -277,7 +275,7 @@ fn html_shell(mode: &str) -> String {
             </g>
             <g id="trends-bars" fill="#c8553d"></g>
             <line class="trend-baseline" x1="0" y1="200" x2="720" y2="200"/>
-            <g id="trends-labels" fill="#8d867a" font-family="JetBrains Mono, monospace" font-size="9.5"></g>
+            <g id="trends-labels" fill="#8d867a" font-size="9.5"></g>
           </svg>
         </div>
 
@@ -292,7 +290,6 @@ fn html_shell(mode: &str) -> String {
     <section id="models" class="block">
       <div class="section-head">
         <div>
-          <div class="section-eyebrow" data-i18n="shell.models.eyebrow">MODELS</div>
           <h2 class="section-title" data-i18n="shell.models.title">模型用量分布</h2>
           <div class="section-desc" data-i18n="shell.models.sub">先看用量最高的模型，再按需展开完整排行。</div>
         </div>
@@ -311,9 +308,8 @@ fn html_shell(mode: &str) -> String {
 
         <div>
           <div class="panel" id="sources" style="margin-bottom: 24px;">
-            <div class="section-eyebrow" data-i18n="shell.sources.eyebrow">SOURCES</div>
             <div style="display: flex; justify-content: space-between; align-items: baseline;">
-              <h3 style="font-size: 18px; font-weight: 600; letter-spacing: -0.018em; margin: 4px 0 4px;" data-i18n="shell.sources.title">来源分布</h3>
+              <h3 class="panel-title" data-i18n="shell.sources.title">来源分布</h3>
               <span class="tag" id="sources-count">--</span>
             </div>
             <div class="panel-sub" data-i18n="shell.sources.sub">用量最高的 4 个来源</div>
@@ -322,9 +318,8 @@ fn html_shell(mode: &str) -> String {
           </div>
 
           <div class="panel" id="projects">
-            <div class="section-eyebrow" data-i18n="shell.projects.eyebrow">PROJECTS</div>
             <div style="display: flex; justify-content: space-between; align-items: baseline;">
-              <h3 style="font-size: 18px; font-weight: 600; letter-spacing: -0.018em; margin: 4px 0 4px;" data-i18n="shell.projects.title">项目排行</h3>
+              <h3 class="panel-title" data-i18n="shell.projects.title">项目排行</h3>
               <span class="tag" id="projects-count">--</span>
             </div>
             <div class="panel-sub" data-i18n="shell.projects.sub">按累计 Token 排序</div>
@@ -341,7 +336,6 @@ fn html_shell(mode: &str) -> String {
     <section id="behavior" class="block">
       <div class="section-head">
         <div>
-          <div class="section-eyebrow" data-i18n="shell.behavior.eyebrow">BEHAVIOR</div>
           <h2 class="section-title" data-i18n="shell.behavior.title">行为分析</h2>
           <div class="section-desc" data-i18n="shell.behavior.sub">基于同步阶段提取的 normalized turn/tool facts；低样本或未支持来源会显式显示降级状态。</div>
         </div>
@@ -397,7 +391,6 @@ fn html_shell(mode: &str) -> String {
     <section id="explorer" class="block">
       <div class="section-head">
         <div>
-          <div class="section-eyebrow" data-i18n="shell.explorer.eyebrow">EXPLORER</div>
           <h2 class="section-title" data-i18n="shell.explorer.title">Cost Explorer</h2>
           <div class="section-desc" data-i18n="shell.explorer.sub">按时间粒度、指标、维度与工具过滤做本地切片分析；结果来自后端聚合，不在前端透视原始行。</div>
         </div>
@@ -509,7 +502,6 @@ fn html_shell(mode: &str) -> String {
     <section id="cost" class="block">
       <div class="section-head">
         <div>
-          <div class="section-eyebrow" data-i18n="shell.cost.eyebrow">COST</div>
           <h2 class="section-title" data-i18n="shell.cost.title">成本估算</h2>
           <div class="section-desc" data-i18n="shell.cost.sub">基于公开计价表的本地估算。仅供参考，与账单存在差异。</div>
         </div>
@@ -531,21 +523,18 @@ fn html_shell(mode: &str) -> String {
             <div class="cost-grid" id="costs-stats"></div>
 
             <div style="border-top: 1px dashed var(--line); padding-top: 18px;">
-              <div class="section-eyebrow" data-i18n="shell.insights.eyebrow">INSIGHTS</div>
-              <h3 style="font-size: 16px; font-weight: 600; margin: 4px 0 6px;" data-i18n="shell.insights.title">诊断线索</h3>
+              <h3 class="subpanel-title" data-i18n="shell.insights.title">诊断线索</h3>
               <p class="panel-sub" data-i18n="shell.insights.sub">信号只表示可能的下一步，不代表最终诊断。</p>
               <div id="insights-card"></div>
             </div>
 
             <div style="border-top: 1px dashed var(--line); padding-top: 18px;">
-              <div class="section-eyebrow" data-i18n="shell.failures.eyebrow">FAILURES</div>
-              <h3 style="font-size: 16px; font-weight: 600; margin: 4px 0 12px;" data-i18n="shell.failures.title">最近失败</h3>
+              <h3 class="subpanel-title" data-i18n="shell.failures.title">最近失败</h3>
               <div id="failures-card"></div>
             </div>
 
             <div style="border-top: 1px dashed var(--line); padding-top: 18px; margin-top: 18px;">
-              <div class="section-eyebrow" data-i18n="shell.integrations.eyebrow">INTEGRATIONS</div>
-              <h3 style="font-size: 16px; font-weight: 600; margin: 4px 0 12px;" data-i18n="shell.integrations.title">集成状态</h3>
+              <h3 class="subpanel-title" data-i18n="shell.integrations.title">集成状态</h3>
               <div id="integrations-rows" style="display: grid; gap: 10px;"></div>
             </div>
           </div>

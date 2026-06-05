@@ -82,7 +82,6 @@ fn local_flow_installs_syncs_exports_and_uninstalls() -> Result<()> {
                 .join("derive.js")
                 .is_file()
         );
-        assert!(html_out.join("assets").join("render.js").is_file());
         assert!(
             html_out
                 .join("assets")
@@ -95,27 +94,6 @@ fn local_flow_installs_syncs_exports_and_uninstalls() -> Result<()> {
                 .join("assets")
                 .join("render")
                 .join("explorer.js")
-                .is_file()
-        );
-        assert!(
-            html_out
-                .join("assets")
-                .join("render")
-                .join("charts.js")
-                .is_file()
-        );
-        assert!(
-            html_out
-                .join("assets")
-                .join("render")
-                .join("tables.js")
-                .is_file()
-        );
-        assert!(
-            html_out
-                .join("assets")
-                .join("render")
-                .join("health.js")
                 .is_file()
         );
         let exported_index = fs::read_to_string(html_out.join("index.html"))?;

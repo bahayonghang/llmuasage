@@ -368,7 +368,8 @@ function setupNavigation() {
   document.querySelectorAll('a[data-target="projects"]').forEach((a) => {
     a.addEventListener('click', (e) => {
       e.preventDefault();
-      document.getElementById('projects')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      document.getElementById('projects')?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
       setActive('projects');
     });
   });
@@ -398,7 +399,9 @@ function syncFilterControls(state, context = null) {
   populateSourceFilter();
 
   document.querySelectorAll('[data-window]').forEach((button) => {
-    button.classList.toggle('active', button.dataset.window === state.trendWindow);
+    const active = button.dataset.window === state.trendWindow;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
   });
   syncRangePresetControls(state);
 

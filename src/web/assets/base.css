@@ -18,7 +18,7 @@
   --ink: #1c1a17;
   --ink-2: #3a352f;
   --ink-strong: #000000;
-  --muted: #8a8278;
+  --muted: #736b60; /* 由 #8a8278 调深以达 WCAG AA：在 --bg 上约 4.7:1（旧值 3.4:1） */
   --muted-2: #b8b0a4;
   --line: #e8e2d6;
   --line-2: #ece6db;
@@ -28,8 +28,10 @@
   --good: #4f7a5c;
   --good-soft: #dde8de;
   --warn: #c08a3b;
+  --danger: #b84a3a;
   --pct-low-bg: #eef0ec;
   --kpi-featured-grad: linear-gradient(180deg, var(--accent-soft), #f8e8e1);
+  --shadow-soft: 0 8px 20px rgba(26, 24, 21, 0.12);
   --dark: #1a1815;
   --dark-2: #25221e;
   --dark-line: #34302a;
@@ -54,8 +56,10 @@
   --good: #7faf8b;
   --good-soft: #233027;
   --warn: #d4a05c;
+  --danger: #e0654f;
   --pct-low-bg: #233027;
   --kpi-featured-grad: linear-gradient(180deg, #3a221c, #2a1814);
+  --shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.5);
   --dark: #1a1815;
   --dark-2: #25221e;
   --dark-line: #34302a;
@@ -89,4 +93,42 @@ body {
 .num {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * ========================================================================
+ * 统一键盘焦点环
+ * ========================================================================
+ * accent 2px 焦点环，覆盖所有交互元素。此前 .btn / nav a / .seg / 区间预设 /
+ * 刷新切换 / show-more / 日期选择器按钮等多依赖浏览器默认环——暗面对比不足，
+ * 也与设计系统的 accent 焦点约定不一致。输入框与 .toggle-btn 已有等价焦点样式，
+ * 同值不冲突。:focus-visible 只在键盘聚焦时显示，鼠标点击不受影响。
+ */
+a:focus-visible,
+button:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/*
+ * ========================================================================
+ * 减弱动效：尊重 prefers-reduced-motion
+ * ========================================================================
+ * 站内唯一持续动画是 .pulse（端点存活脉冲）；其余皆为状态过渡。
+ * reduce 时让脉冲静止、过渡近乎瞬时、关闭平滑滚动——语义由静态颜色与文本承载，不会丢失。
+ */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
