@@ -1360,6 +1360,9 @@ mod tests {
         assert!(renderer.contains("activeJobSnapshot?.last_event"));
         assert!(renderer.contains("document.getElementById('btn-sync')?.click()"));
         assert!(renderer.contains("sync-command-center-segmented-bar"));
+        assert!(renderer.contains("sync-command-center-details"));
+        assert!(renderer.contains("sync-command-center-detail-grid"));
+        assert!(renderer.contains("copy.detailsHint"));
         assert!(renderer.contains("sourceSegmentedBar(center)"));
         assert!(renderer.contains("sync-command-center-secondary"));
         assert!(renderer.contains("sync-command-center-status"));
@@ -1392,6 +1395,7 @@ mod tests {
         assert!(copy_js.contains("rebuild_risk"));
         assert!(copy_js.contains("available"));
         assert!(copy_js.contains("sourceShareAria"));
+        assert!(copy_js.contains("detailsHint"));
         assert!(copy_js.contains("statusLabels"));
         assert!(copy_js.contains("syncCenter.reason.sourceError"));
     }
@@ -1454,13 +1458,20 @@ mod tests {
             .body;
 
         assert!(components_css.contains(".sync-command-center"));
+        assert!(components_css.contains(".sync-command-center-details summary"));
+        assert!(components_css.contains(".sync-command-center-detail-grid"));
         assert!(components_css.contains(".sync-command-center-segments"));
         assert!(components_css.contains(".sync-command-center-source[data-tone='warn']"));
         assert!(components_css.contains(".sync-command-center-action .btn"));
         assert!(components_css.contains(".sync-command-center-metric .mini-label"));
+        assert!(
+            components_css
+                .contains(".explorer-controls,\n  .explorer-summary,\n  .explorer-results-grid")
+        );
         assert!(components_css.contains("var(--danger,"));
-        assert!(layout_css.contains(".sync-command-center-grid"));
+        assert!(layout_css.contains(".sync-command-center-detail-grid"));
         assert!(layout_css.contains("@media (max-width: 720px)"));
+        assert!(!components_css.contains("border-left-color: var(--sync-tone"));
     }
 
     #[test]
@@ -2003,7 +2014,7 @@ mod tests {
         assert!(charts_css.contains(".trend-bar.is-peak"));
         assert!(charts_css.contains(".trend-peak-label"));
         assert!(charts_css.contains(".trend-empty-title"));
-        assert!(charts_css.contains("min-width: 560px"));
+        assert!(charts_css.contains("min-width: 0"));
     }
 
     #[test]

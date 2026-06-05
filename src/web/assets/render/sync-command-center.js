@@ -336,6 +336,11 @@ export function renderSyncCommandCenter(context, state) {
   const tone = center?.tone || 'neutral';
   const copy = UI_COPY.sections.syncCenter;
   const workerLock = copy.workerLockState[center?.safety?.worker_lock] || center?.safety?.worker_lock || '--';
+  const detailsOpen = Boolean(running || center?.safety?.lossy_rebuild_risk || center?.safety?.worker_lock === 'busy');
+  const detailBlocks = [secondaryStatus(center, activeJobSnapshot, running), summaryRows(center, activeJobSnapshot, running)]
+    .filter(Boolean)
+    .join('');
+  const sourceSegments = sourceSegmentedBar(center);
 
   host.innerHTML = `
     <div class="sync-command-center-main" data-tone="${escapeHtml(tone)}">
@@ -352,11 +357,16 @@ export function renderSyncCommandCenter(context, state) {
       </div>
       ${actionButton(center, running)}
     </div>
-    ${secondaryStatus(center, activeJobSnapshot, running)}
-    ${summaryRows(center, activeJobSnapshot, running)}
     <div class="sync-command-center-metrics">${metricCards(center, running)}</div>
-    ${sourceSegmentedBar(center)}
-    <div class="sync-command-center-sources">${sourceCards(center)}</div>
+    <details class="sync-command-center-details" ${detailsOpen ? 'open' : ''}>
+      <summary>
+        <span>${escapeHtml(copy.details)}</span>
+        <span>${escapeHtml(copy.detailsHint)}</span>
+      </summary>
+      ${detailBlocks ? `<div class="sync-command-center-detail-grid">${detailBlocks}</div>` : ''}
+      ${sourceSegments}
+      <div class="sync-command-center-sources">${sourceCards(center)}</div>
+    </details>
   `;
 
   host.querySelectorAll('[data-sync-command-center-action]').forEach((button) => {

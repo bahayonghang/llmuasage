@@ -183,13 +183,6 @@ fn html_shell(mode: &str) -> String {
 
     <!-- Hero + Status -->
     <section id="overview" class="block">
-      <div class="sync-command-center" id="sync-command-center" aria-live="polite">
-        <div class="sync-command-center-empty">
-          <div class="section-eyebrow" data-i18n="shell.syncCenter.eyebrow">SYNC</div>
-          <div data-i18n="shell.syncCenter.loading">正在读取同步状态…</div>
-        </div>
-      </div>
-
       <div class="hero">
         <div>
           <h1 class="hero-title" data-i18n-html="shell.hero.title.html">本地用量<span class="accent">概览</span></h1>
@@ -239,6 +232,13 @@ fn html_shell(mode: &str) -> String {
 
       <!-- KPI cards -->
       <div class="kpi-grid" id="kpi-grid"></div>
+
+      <div class="sync-command-center" id="sync-command-center" aria-live="polite">
+        <div class="sync-command-center-empty">
+          <div class="section-eyebrow" data-i18n="shell.syncCenter.eyebrow">SYNC</div>
+          <div data-i18n="shell.syncCenter.loading">正在读取同步状态…</div>
+        </div>
+      </div>
     </section>
 
     <!-- Trends -->

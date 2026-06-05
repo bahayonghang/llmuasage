@@ -170,6 +170,8 @@ const UI_COPY_ZH = Object.freeze({
       actions: Object.freeze({
         sync: '立即同步',
       }),
+      details: '同步详情',
+      detailsHint: '查看来源与最近运行',
       metrics: Object.freeze({
         eventsSeen: '扫描事件',
         insertedDelta: '新增事件',
@@ -381,6 +383,8 @@ const UI_COPY_EN = Object.freeze({
       actions: Object.freeze({
         sync: 'Sync now',
       }),
+      details: 'Sync details',
+      detailsHint: 'View sources and latest run',
       metrics: Object.freeze({
         eventsSeen: 'Events seen',
         insertedDelta: 'Inserted delta',
