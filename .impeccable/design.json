@@ -1,0 +1,311 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-06-05",
+  "title": "Design System: llmusage",
+  "extensions": {
+    "colorMeta": {
+      "terracotta": {
+        "role": "primary",
+        "displayName": "Terracotta",
+        "canonical": "#c8553d",
+        "tonalRamp": [
+          "#3a160e",
+          "#5c2417",
+          "#7d3320",
+          "#9a3e2b",
+          "#c8553d",
+          "#d9755f",
+          "#eba18f",
+          "#f3dfd8"
+        ]
+      },
+      "sage": {
+        "role": "secondary",
+        "displayName": "Sage",
+        "canonical": "#4f7a5c",
+        "tonalRamp": [
+          "#12231a",
+          "#1f3b2a",
+          "#2f5640",
+          "#3f6a4d",
+          "#4f7a5c",
+          "#7faf8b",
+          "#aacdb4",
+          "#dde8de"
+        ]
+      },
+      "ochre": {
+        "role": "secondary",
+        "displayName": "Ochre",
+        "canonical": "#c08a3b",
+        "tonalRamp": [
+          "#2e1f0c",
+          "#4a3415",
+          "#6e4e20",
+          "#94692c",
+          "#c08a3b",
+          "#d4a05c",
+          "#e6c290",
+          "#f3e3c6"
+        ]
+      },
+      "brick": {
+        "role": "secondary",
+        "displayName": "Brick",
+        "canonical": "#b84a3a",
+        "tonalRamp": [
+          "#2f120d",
+          "#4c1d15",
+          "#6f2a1e",
+          "#923729",
+          "#b84a3a",
+          "#cf6d5e",
+          "#e3a193",
+          "#f3d4cc"
+        ]
+      },
+      "warm-paper": {
+        "role": "neutral",
+        "displayName": "Warm Paper",
+        "canonical": "#f6f3ee",
+        "tonalRamp": [
+          "#14120f",
+          "#1c1a17",
+          "#3a352f",
+          "#8a8278",
+          "#b8b0a4",
+          "#e8e2d6",
+          "#faf7f2",
+          "#ffffff"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "#1c1a17",
+        "tonalRamp": [
+          "#14120f",
+          "#1c1a17",
+          "#3a352f",
+          "#5c574e",
+          "#8a8278",
+          "#b8b0a4",
+          "#e8e2d6",
+          "#f6f3ee"
+        ]
+      },
+      "instrument-ink": {
+        "role": "neutral",
+        "displayName": "Instrument Ink",
+        "canonical": "#1a1815",
+        "tonalRamp": [
+          "#14120f",
+          "#1a1815",
+          "#25221e",
+          "#34302a",
+          "#5c574e",
+          "#8d867a",
+          "#d6cfc1",
+          "#f0ebe1"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Page H1 / hero title; one per view, one accent word."
+      },
+      "headline": { "displayName": "Headline", "purpose": "Section titles." },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Panel and sub-section headings."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Descriptions and prose; secondary copy in Muted."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Mono uppercase eyebrows, field labels, table headers."
+      },
+      "mono": {
+        "displayName": "Metric",
+        "purpose": "All numbers, units, IDs, table cells; tabular figures. The system signature."
+      }
+    },
+    "shadows": [
+      {
+        "name": "ambient-hero",
+        "value": "0 20px 50px rgba(26,24,21,0.24)",
+        "purpose": "The sync command center hero card only; the one truly floating surface."
+      },
+      {
+        "name": "accent-glow-action",
+        "value": "0 12px 28px rgba(200,85,61,0.26)",
+        "purpose": "Primary action button inside the sync command center."
+      },
+      {
+        "name": "preset-active",
+        "value": "0 1px 0 rgba(154,62,43,0.08), 0 6px 14px rgba(200,85,61,0.12)",
+        "purpose": "Active range-preset chip in the filter rail."
+      },
+      {
+        "name": "shadow-soft",
+        "value": "UNDEFINED",
+        "purpose": "Referenced via var(--shadow-soft) on the date popover and active toggles, but never declared in any stylesheet, so it currently no-ops. Intended as a quiet ambient lift; define it before relying on it."
+      }
+    ],
+    "motion": [
+      {
+        "name": "transition-fast",
+        "value": "0.15s ease",
+        "purpose": "Nav items, segmented toggles, show-more, chart bar hover."
+      },
+      {
+        "name": "transition-standard",
+        "value": "0.18s ease",
+        "purpose": "Buttons, KPI hover, theme/locale toggles, theme background/color swap."
+      },
+      {
+        "name": "pulse",
+        "value": "2s infinite (@keyframes pulse: expanding sage box-shadow ring)",
+        "purpose": "Live endpoint heartbeat dot and status pill."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "MISSING",
+        "purpose": "No prefers-reduced-motion alternative exists for pulse or transitions; add one to meet WCAG 2.1 AA."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "lg",
+        "value": "1100px",
+        "purpose": "Sidebar 248px to 220px; hero and grid-2 collapse to one column; KPI grid 4 to 2."
+      },
+      {
+        "name": "sm",
+        "value": "720px",
+        "purpose": "Sidebar becomes static (non-sticky); everything stacks to a single column."
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Ink-filled primary action (Sync). Hover deepens to pure black; no shadow.",
+      "html": "<button class='ds-btn-primary'>Sync</button>",
+      "css": ".ds-btn-primary{background:#1c1a17;color:#f6f3ee;border:1px solid #1c1a17;border-radius:8px;padding:7px 12px;font:500 12.5px/1 system-ui,-apple-system,'Segoe UI',sans-serif;display:inline-flex;align-items:center;gap:6px;cursor:pointer;transition:background-color .18s ease,border-color .18s ease}.ds-btn-primary:hover{background:#000}.ds-btn-primary:focus-visible{outline:2px solid #c8553d;outline-offset:2px}"
+    },
+    {
+      "name": "Default Button",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "Quiet secondary button on white surface; hover darkens the hairline border.",
+      "html": "<button class='ds-btn'>Export JSON</button>",
+      "css": ".ds-btn{background:#fff;color:#3a352f;border:1px solid #e8e2d6;border-radius:8px;padding:7px 12px;font:500 12.5px/1 system-ui,-apple-system,'Segoe UI',sans-serif;display:inline-flex;align-items:center;gap:6px;cursor:pointer;transition:border-color .18s ease,color .18s ease}.ds-btn:hover{border-color:#1c1a17;color:#1c1a17}.ds-btn:focus-visible{outline:2px solid #c8553d;outline-offset:2px}"
+    },
+    {
+      "name": "Local Tag",
+      "kind": "chip",
+      "refersTo": "tag-local",
+      "description": "Mono pill marking the local-only posture; Terracotta soft fill, deep text.",
+      "html": "<span class='ds-tag-local'>local</span>",
+      "css": ".ds-tag-local{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:5px;font:500 10.5px/1 ui-monospace,SFMono-Regular,Consolas,Menlo,monospace;background:#f3dfd8;color:#9a3e2b;border:1px solid rgba(200,85,61,.25)}"
+    },
+    {
+      "name": "KPI Card",
+      "kind": "card",
+      "refersTo": "kpi-card",
+      "description": "Single metric card; mono tabular value, uppercase label. Hover darkens border.",
+      "html": "<div class='ds-kpi'><div class='ds-kpi-label'>Total tokens</div><div class='ds-kpi-value'>1,284,907</div></div>",
+      "css": ".ds-kpi{background:#fff;border:1px solid #e8e2d6;border-radius:14px;padding:18px 20px;transition:border-color .18s ease}.ds-kpi:hover{border-color:#3a352f}.ds-kpi .ds-kpi-label{font:600 11.5px/1 system-ui,sans-serif;text-transform:uppercase;letter-spacing:.1em;color:#8a8278;margin-bottom:10px}.ds-kpi .ds-kpi-value{font:500 32px/1 ui-monospace,Consolas,Menlo,monospace;letter-spacing:-.025em;color:#1c1a17;font-variant-numeric:tabular-nums}"
+    },
+    {
+      "name": "Panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "The workhorse light container; white surface, hairline border, 14px radius.",
+      "html": "<div class='ds-panel'><div class='ds-panel-title'>Models</div><div class='ds-panel-sub'>Top by cumulative tokens</div></div>",
+      "css": ".ds-panel{background:#fff;border:1px solid #e8e2d6;border-radius:14px;padding:22px 24px}.ds-panel .ds-panel-title{font:600 14px/1.3 system-ui,sans-serif;color:#1c1a17;margin-bottom:4px}.ds-panel .ds-panel-sub{font:400 12px/1.4 system-ui,sans-serif;color:#8a8278}"
+    },
+    {
+      "name": "Instrument Card",
+      "kind": "custom",
+      "refersTo": "instrument-card",
+      "description": "The signature dark readout surface (trends/status/sync); dark in both themes, depth by contrast.",
+      "html": "<div class='ds-instrument'><div class='ds-eyebrow'>TRENDS</div><div class='ds-instrument-title'>Usage trend</div><div class='ds-instrument-sub'>Most recent 10 windows</div></div>",
+      "css": ".ds-instrument{background:#1a1815;color:#f0ebe1;border-radius:16px;padding:26px 28px}.ds-instrument .ds-eyebrow{font:600 10.5px/1 ui-monospace,Consolas,monospace;letter-spacing:.16em;text-transform:uppercase;color:#c8553d;margin-bottom:6px}.ds-instrument .ds-instrument-title{font:600 22px/1.1 system-ui,sans-serif;color:#f0ebe1}.ds-instrument .ds-instrument-sub{font:400 12.5px/1.5 system-ui,sans-serif;color:#8d867a;margin-top:4px}"
+    },
+    {
+      "name": "Data Bar Row",
+      "kind": "custom",
+      "refersTo": "bar-row",
+      "description": "Signature distribution row: mono name, Terracotta fill with a deep cap edge, mono tabular value.",
+      "html": "<div class='ds-bar-row'><span class='ds-bar-name'>claude-opus-4</span><div class='ds-bar-track'><div class='ds-bar-fill'></div></div><span class='ds-bar-num'>842k</span></div>",
+      "css": ".ds-bar-row{display:grid;grid-template-columns:140px 1fr 64px;gap:14px;align-items:center;padding:7px 0}.ds-bar-row .ds-bar-name{font:400 12.5px/1 ui-monospace,Consolas,monospace;color:#3a352f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ds-bar-track{height:6px;background:#f3dfd8;border-radius:3px;position:relative;overflow:hidden}.ds-bar-fill{height:100%;width:72%;background:#c8553d;border-radius:3px;position:relative}.ds-bar-fill::after{content:'';position:absolute;top:0;right:0;bottom:0;width:2px;background:#9a3e2b}.ds-bar-row .ds-bar-num{text-align:right;font:500 12px/1 ui-monospace,Consolas,monospace;color:#3a352f;font-variant-numeric:tabular-nums}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Local Instrument",
+    "overview": "llmusage looks like a precision meter that lives on your machine. The page is warm paper; the data lives on dark, calibrated readout panels set into it; every number is monospace. The split is the whole idea: the warm light surface is the housing you read in, and the dark instrument cards (trends, run status, the sync command center) are the lit display where the measurements actually appear. Depth comes from that contrast, not from drop shadows. The voice is trustworthy, precise, calm: costs are labeled estimates, low-sample sources degrade visibly, and the local-only posture is shown on the surface rather than asserted in copy. It rejects four neighbors: hype-y SaaS dashboards, dense neon-on-black ops cockpits, generic admin templates, and playful consumer-fintech trackers. It is a developer's measuring tool.",
+    "keyCharacteristics": [
+      "Warm paper light theme (#f6f3ee) and warm near-black dark theme (#14120f); full data-theme parity.",
+      "A single brand accent, Terracotta (#c8553d). Every other color is neutral or a status semantic.",
+      "Monospace carries all data; the sans carries prose and titles. The split is strict.",
+      "Dark instrument cards embedded in the light page; depth by contrast, not shadow.",
+      "Flat surfaces, 1px hairline borders, restrained radii (8-18px), pills reserved for toggles and tags.",
+      "Bilingual (EN / ZH) and theme-switchable, built to stay legible in all four combinations."
+    ],
+    "rules": [
+      {
+        "name": "The Single Voice Rule",
+        "body": "Terracotta is the only brand color and stays at roughly <=15% of any surface. Sage, Ochre, and Brick are status signals, never styling.",
+        "section": "colors"
+      },
+      {
+        "name": "The Instrument Rule",
+        "body": "Data-dense readouts render on the dark instrument family in every theme. Depth is the contrast between warm housing and dark display, not a shadow.",
+        "section": "colors"
+      },
+      {
+        "name": "The Mono-Data Rule",
+        "body": "Every number, unit, code-like token, ID, table cell, and label is set in the monospace face with tabular figures. The sans face is for prose and titles only.",
+        "section": "typography"
+      },
+      {
+        "name": "The One Accent Word Rule",
+        "body": "The hero title emphasizes exactly one word in Terracotta. Hierarchy otherwise comes from size and weight, not color.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat-By-Default Rule",
+        "body": "Surfaces are flat at rest. Separation is a 1px hairline or a tonal step. Shadow is reserved for the one hero card and overlays.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do set every number, unit, label, and table cell in the monospace face with tabular figures. The Mono-Data Rule is the system's signature.",
+      "Do keep data-dense readouts on the dark instrument family and let warm-vs-dark contrast create the depth.",
+      "Do hold Terracotta to <=15% of a surface: eyebrows, bar fills, links, active states, one featured KPI.",
+      "Do separate light surfaces with 1px line hairlines and the paper to raised to white tonal steps.",
+      "Do keep card radii in the 14-18px band; reserve 999px pills for toggles, tags, and badges.",
+      "Do verify body text hits 4.5:1 in both themes. Muted (#8a8278) on Warm Paper is ~3.5:1; nudge secondary body copy toward Ink-2 where it carries real content.",
+      "Do define the two referenced-but-missing tokens: --shadow-soft (soft lift for popovers and active toggles) and --danger (the Brick error color high-severity findings expect).",
+      "Do add a prefers-reduced-motion: reduce alternative for the endpoint pulse animation and the standard 0.15-0.18s transitions."
+    ],
+    "donts": [
+      "Don't build hype-y SaaS dashboards: no gradient hero-metric template, no supercharge-your-workflow copy, no vanity-metric theater.",
+      "Don't drift toward a dense neon-on-black ops cockpit (Datadog / Grafana). Every panel must answer a real question.",
+      "Don't ship generic admin-template identical card grids (icon + heading + text, repeated).",
+      "Don't adopt playful or gamified consumer-fintech treatments. This is a precise developer tool, not a money app.",
+      "Don't introduce a second brand hue. Terracotta is the only accent; Sage / Ochre / Brick are status semantics.",
+      "Don't set a metric in the sans face, or a sentence in mono.",
+      "Don't pair a 1px border with a wide drop shadow (the ghost-card pattern), and don't round any card past 18px.",
+      "Don't distinguish chart series by hue alone; the chart ramp is one accent. Use labels, position, or luminance.",
+      "Don't add a section eyebrow to a new section by reflex; the uppercase-mono eyebrow is already at saturation."
+    ]
+  }
+}
