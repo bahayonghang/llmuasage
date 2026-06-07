@@ -22,6 +22,14 @@ export function renderProjects(context, state = {}) {
   // 1.1 填充项目数标签
   document.getElementById('projects-count').textContent = `${projectRows.length} 个项目`;
 
+  if (!visibleRows.length) {
+    document.getElementById('projects-rows').innerHTML = `
+      <div class="empty-state compact">暂无项目数据。</div>
+    `;
+    logger.info('完成项目排行区渲染');
+    return;
+  }
+
   // 1.2 填充项目行
   const rowsHtml = visibleRows
     .map((row) => {

@@ -23,22 +23,24 @@ export function renderCosts(context, state = {}) {
   const max = Number(costRows[0]?.estimated_cost_usd || 1);
 
   // 1.1 填充成本条形图
-  const barHtml = visibleCostRows
-    .map((row) => {
-      const cost = Number(row.estimated_cost_usd || 0);
-      const widthPct = ratio(cost, max);
-      const label = `${row.source || '--'} · ${row.model || '--'}`;
-      const value = formatUsd(cost);
+  const barHtml = visibleCostRows.length
+    ? visibleCostRows
+        .map((row) => {
+          const cost = Number(row.estimated_cost_usd || 0);
+          const widthPct = ratio(cost, max);
+          const label = `${row.source || '--'} · ${row.model || '--'}`;
+          const value = formatUsd(cost);
 
-      return `
-        <div class="bar-row">
-          <div class="name">${escapeHtml(label)}</div>
-          <div class="bar-track"><div class="bar-fill" style="width: ${widthPct}%"></div></div>
-          <div class="num">${escapeHtml(value)}</div>
-        </div>
-      `;
-    })
-    .join('');
+          return `
+            <div class="bar-row">
+              <div class="name">${escapeHtml(label)}</div>
+              <div class="bar-track"><div class="bar-fill" style="width: ${widthPct}%"></div></div>
+              <div class="num">${escapeHtml(value)}</div>
+            </div>
+          `;
+        })
+        .join('')
+    : '<div class="empty-state compact">暂无成本估算数据。</div>';
 
   document.getElementById('costs-bars').innerHTML = barHtml;
 
@@ -59,21 +61,23 @@ export function renderCosts(context, state = {}) {
     })
     .join('');
 
-  document.getElementById('costs-table').innerHTML = `
-    <table class="panel-table">
-      <thead>
-        <tr>
-          <th>模型</th>
-          <th>来源</th>
-          <th class="r">总用量</th>
-          <th class="r">估算成本</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${tableHtml}
-      </tbody>
-    </table>
-  `;
+  document.getElementById('costs-table').innerHTML = visibleCostRows.length
+    ? `
+      <table class="panel-table">
+        <thead>
+          <tr>
+            <th>模型</th>
+            <th>来源</th>
+            <th class="r">总用量</th>
+            <th class="r">估算成本</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${tableHtml}
+        </tbody>
+      </table>
+    `
+    : '';
 
   // 1.3 填充 4 个成本统计卡
   const stats = buildCostStats(context);
@@ -95,8 +99,8 @@ export function renderCosts(context, state = {}) {
 
   if (failureRows.length === 0) {
     document.getElementById('failures-card').innerHTML = `
-      <div style="background: var(--surface-2); border: 1px dashed var(--line); border-radius: 10px; padding: 18px; text-align: center; color: var(--muted); font-size: 12.5px;">
-        <svg class="i" viewBox="0 0 24 24" style="width: 18px; height: 18px; color: var(--good); margin-bottom: 6px;"><polyline points="20 6 9 17 4 12"/></svg>
+      <div class="failure-empty">
+        <svg class="i" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
         <div>当前没有失败记录</div>
       </div>
     `;
@@ -109,19 +113,19 @@ export function renderCosts(context, state = {}) {
         const tone = statusTone(row.status);
         const statusLabel = tone === 'good' ? '成功' : row.status || '异常';
         return `
-        <div style="padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; font-size: 12px;">
-          <div style="display: flex; justify-content: space-between; gap: 8px;">
-            <div style="font-family: var(--font-mono); font-weight: 500;">${escapeHtml(label)}</div>
-            <div style="color: var(--muted);">${escapeHtml(statusLabel)}</div>
+        <div class="failure-card">
+          <div class="failure-card-head">
+            <div class="failure-card-name">${escapeHtml(label)}</div>
+            <div class="failure-card-status">${escapeHtml(statusLabel)}</div>
           </div>
-          <div style="color: var(--muted); margin-top: 4px;">${escapeHtml(detail)}</div>
+          <div class="failure-card-detail">${escapeHtml(detail)}</div>
         </div>
       `;
       })
       .join('');
 
     document.getElementById('failures-card').innerHTML = `
-      <div style="display: grid; gap: 10px;">
+      <div class="failure-list">
         ${failureHtml}
       </div>
     `;
@@ -135,10 +139,10 @@ export function renderCosts(context, state = {}) {
       const tone = statusTone(row.status);
       const statusLabel = tone === 'good' ? '● 正常' : `● ${row.status || '未知'}`;
       return `
-      <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px;">
-        <div>
-          <div class="mono" style="font-weight: 600; font-size: 13px;">${escapeHtml(row.source || '--')}</div>
-          <div style="font-size: 11px; color: var(--muted); margin-top: 2px;" class="mono">${escapeHtml(row.install_type || 'probe')} · ${escapeHtml(row.updated_at || '--')}</div>
+      <div class="integration-row">
+        <div class="integration-row-main">
+          <div class="mono integration-row-source">${escapeHtml(row.source || '--')}</div>
+          <div class="mono integration-row-meta">${escapeHtml(row.install_type || 'probe')} · ${escapeHtml(row.updated_at || '--')}</div>
         </div>
         <span class="tag ok">${escapeHtml(statusLabel)}</span>
       </div>
@@ -146,7 +150,9 @@ export function renderCosts(context, state = {}) {
     })
     .join('');
 
-  document.getElementById('integrations-rows').innerHTML = integrationHtml;
+  document.getElementById('integrations-rows').innerHTML = integrationHtml || `
+    <div class="empty-state compact">暂无集成状态。</div>
+  `;
 
   logger.info('完成成本估算区渲染');
 }

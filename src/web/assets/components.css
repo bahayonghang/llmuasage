@@ -123,17 +123,17 @@ nav a.active .badge {
   height: 8px;
   border-radius: 50%;
   background: var(--good);
-  box-shadow: 0 0 0 0 rgba(79, 122, 92, 0.6);
+  box-shadow: 0 0 0 0 color-mix(in oklab, var(--good) 62%, transparent);
   animation: pulse 2s infinite;
 }
 
 @keyframes pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(79, 122, 92, 0.5);
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--good) 52%, transparent);
   }
   50% {
-    box-shadow: 0 0 0 6px rgba(79, 122, 92, 0);
+    box-shadow: 0 0 0 6px color-mix(in oklab, var(--good) 0%, transparent);
   }
 }
 
@@ -262,13 +262,13 @@ nav a.active .badge {
 .tag.local {
   background: var(--accent-soft);
   color: var(--accent-deep);
-  border-color: rgba(200, 85, 61, 0.25);
+  border-color: color-mix(in oklab, var(--accent) 28%, transparent);
 }
 
 .tag.ok {
   background: var(--good-soft);
   color: var(--good);
-  border-color: rgba(79, 122, 92, 0.25);
+  border-color: color-mix(in oklab, var(--good) 28%, transparent);
 }
 
 /* Sync command center */
@@ -282,9 +282,7 @@ nav a.active .badge {
   padding: 14px 16px;
   border: 1px solid var(--dark-line);
   border-radius: 16px;
-  background:
-    radial-gradient(circle at 8% 0%, rgba(200, 85, 61, 0.18), transparent 32%),
-    linear-gradient(135deg, var(--dark), var(--dark-2));
+  background: linear-gradient(135deg, var(--dark), color-mix(in oklab, var(--dark-2) 78%, var(--dark)));
   color: var(--dark-text);
 }
 
@@ -293,9 +291,7 @@ nav a.active .badge {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.06), transparent 34%),
-    radial-gradient(circle at 88% 16%, rgba(79, 122, 92, 0.14), transparent 24%);
+  background: linear-gradient(90deg, color-mix(in oklab, var(--data-accent) 8%, transparent), transparent 36%);
 }
 
 .sync-command-center > * {
@@ -353,14 +349,14 @@ nav a.active .badge {
 .sync-command-center-action .btn,
 .sync-command-center-action .btn-primary {
   min-height: 34px;
-  border-color: rgba(200, 85, 61, 0.62);
+  border-color: color-mix(in oklab, var(--data-accent) 62%, transparent);
   background: var(--accent);
-  color: #fff8f2;
+  color: var(--ctp-base);
 }
 
 .sync-command-center-action .btn:hover:not(:disabled),
 .sync-command-center-action .btn-primary:hover:not(:disabled) {
-  border-color: rgba(243, 161, 138, 0.8);
+  border-color: color-mix(in oklab, var(--data-accent) 78%, transparent);
   background: var(--accent-deep);
   color: var(--dark-text);
 }
@@ -370,9 +366,9 @@ nav a.active .badge {
   display: grid;
   gap: 8px;
   padding: 10px;
-  border: 1px solid rgba(240, 235, 225, 0.08);
+  border: 1px solid color-mix(in oklab, var(--dark-text) 8%, transparent);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.035);
+  background: color-mix(in oklab, var(--dark-text) 4%, transparent);
 }
 
 .sync-command-center-status-row {
@@ -407,9 +403,9 @@ nav a.active .badge {
   align-items: baseline;
   min-width: 0;
   padding: 8px 10px;
-  border: 1px solid rgba(240, 235, 225, 0.08);
+  border: 1px solid color-mix(in oklab, var(--dark-text) 8%, transparent);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in oklab, var(--dark-text) 5%, transparent);
 }
 
 .sync-command-center-metric .mini-label,
@@ -435,7 +431,7 @@ nav a.active .badge {
 .sync-command-center-details {
   display: grid;
   gap: 10px;
-  border-top: 1px solid rgba(240, 235, 225, 0.08);
+  border-top: 1px solid color-mix(in oklab, var(--dark-text) 8%, transparent);
   padding-top: 10px;
 }
 
@@ -484,9 +480,9 @@ nav a.active .badge {
   display: flex;
   min-height: 12px;
   overflow: hidden;
-  border: 1px solid rgba(240, 235, 225, 0.1);
+  border: 1px solid color-mix(in oklab, var(--dark-text) 10%, transparent);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.07);
+  background: color-mix(in oklab, var(--dark-text) 7%, transparent);
 }
 
 .sync-command-center-segment {
@@ -498,31 +494,31 @@ nav a.active .badge {
 .sync-command-center-segment[data-tone='good'],
 .sync-command-center-source[data-tone='good'] {
   --sync-tone: var(--good);
-  --sync-tone-soft: rgba(79, 122, 92, 0.18);
+  --sync-tone-soft: color-mix(in oklab, var(--good) 18%, transparent);
 }
 
 .sync-command-center-segment[data-tone='warn'],
 .sync-command-center-source[data-tone='warn'] {
   --sync-tone: var(--warn);
-  --sync-tone-soft: rgba(192, 138, 59, 0.18);
+  --sync-tone-soft: color-mix(in oklab, var(--warn) 18%, transparent);
 }
 
 .sync-command-center-segment[data-tone='error'],
 .sync-command-center-source[data-tone='error'] {
-  --sync-tone: var(--danger, #b84a3a);
-  --sync-tone-soft: rgba(184, 74, 58, 0.2);
+  --sync-tone: var(--danger);
+  --sync-tone-soft: color-mix(in oklab, var(--danger) 20%, transparent);
 }
 
 .sync-command-center-segment[data-tone='running'],
 .sync-command-center-source[data-tone='running'] {
   --sync-tone: var(--accent);
-  --sync-tone-soft: rgba(200, 85, 61, 0.2);
+  --sync-tone-soft: color-mix(in oklab, var(--accent) 20%, transparent);
 }
 
 .sync-command-center-segment[data-tone='neutral'],
 .sync-command-center-source[data-tone='neutral'] {
   --sync-tone: var(--dark-muted);
-  --sync-tone-soft: rgba(255, 255, 255, 0.08);
+  --sync-tone-soft: color-mix(in oklab, var(--dark-text) 8%, transparent);
 }
 
 .sync-command-center-segment[data-tone] {
@@ -539,10 +535,10 @@ nav a.active .badge {
   gap: 6px;
   min-width: 0;
   padding: 10px;
-  border: 1px solid rgba(240, 235, 225, 0.1);
-  border-color: color-mix(in oklab, var(--sync-tone, var(--dark-line)) 44%, rgba(240, 235, 225, 0.1));
+  border: 1px solid color-mix(in oklab, var(--dark-text) 10%, transparent);
+  border-color: color-mix(in oklab, var(--sync-tone, var(--dark-line)) 44%, transparent);
   border-radius: 10px;
-  background: var(--sync-tone-soft, rgba(255, 255, 255, 0.04));
+  background: var(--sync-tone-soft, color-mix(in oklab, var(--dark-text) 4%, transparent));
 }
 
 .sync-command-center-source-head {
@@ -566,16 +562,16 @@ nav a.active .badge {
 }
 
 .sync-command-center-source-error {
-  color: #f2b4aa;
+  color: var(--danger);
   font-size: 12px;
   line-height: 1.45;
 }
 
 .sync-command-center-empty {
   padding: 12px;
-  border: 1px dashed rgba(240, 235, 225, 0.14);
+  border: 1px dashed color-mix(in oklab, var(--dark-text) 14%, transparent);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.035);
+  background: color-mix(in oklab, var(--dark-text) 4%, transparent);
 }
 
 /* Status panel */
@@ -593,7 +589,7 @@ nav a.active .badge {
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(circle at 80% 0%, rgba(200, 85, 61, 0.18), transparent 60%);
+  background: linear-gradient(180deg, color-mix(in oklab, var(--data-accent) 8%, transparent), transparent 42%);
   pointer-events: none;
 }
 
@@ -612,21 +608,28 @@ nav a.active .badge {
   color: var(--dark-muted);
 }
 
+.status-panel-title {
+  margin-top: 2px;
+  color: var(--dark-text);
+  font-size: 18px;
+  font-weight: 600;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: rgba(79, 122, 92, 0.18);
-  color: #a4c5ad;
+  background: color-mix(in oklab, var(--good) 18%, transparent);
+  color: var(--good);
   padding: 4px 10px;
   border-radius: 999px;
   font-size: 11px;
   font-weight: 500;
-  border: 1px solid rgba(79, 122, 92, 0.3);
+  border: 1px solid color-mix(in oklab, var(--good) 30%, transparent);
 }
 
 .status-pill .pulse {
-  background: #a4c5ad;
+  background: var(--good);
 }
 
 .status-grid {
@@ -699,7 +702,7 @@ nav a.active .badge {
 }
 
 .status-row-state {
-  color: #a4c5ad;
+  color: var(--good);
   font-size: 11px;
   display: flex;
   align-items: center;
@@ -710,7 +713,7 @@ nav a.active .badge {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #a4c5ad;
+  background: var(--good);
 }
 
 /* KPI cards */
@@ -729,7 +732,7 @@ nav a.active .badge {
 
 .kpi.featured {
   background: var(--kpi-featured-grad);
-  border-color: rgba(200, 85, 61, 0.3);
+  border-color: color-mix(in oklab, var(--data-accent) 32%, transparent);
 }
 
 .kpi-label {
@@ -801,7 +804,7 @@ nav a.active .badge {
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(200, 85, 61, 0.6), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--data-accent) 64%, transparent), transparent);
 }
 
 .trends-head {
@@ -904,7 +907,7 @@ nav a.active .badge {
   border-radius: 12px;
   padding: 20px;
   overflow-x: auto;
-  scrollbar-color: rgba(240, 235, 225, 0.22) transparent;
+  scrollbar-color: color-mix(in oklab, var(--dark-text) 22%, transparent) transparent;
 }
 
 .trends-chart-head {
@@ -932,10 +935,10 @@ nav a.active .badge {
   width: 8px;
   height: 8px;
   border-radius: 2px;
-  background: linear-gradient(180deg, #f08a6e, #d06047);
+  background: linear-gradient(180deg, var(--ctp-rosewater), var(--data-accent));
   margin-right: 5px;
   vertical-align: middle;
-  box-shadow: 0 0 0 1px rgba(240, 138, 110, 0.28);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--data-accent) 28%, transparent);
 }
 
 .data-table {
@@ -972,7 +975,7 @@ nav a.active .badge {
 }
 
 .data-table tbody tr:hover td {
-  background: rgba(255, 255, 255, 0.02);
+  background: color-mix(in oklab, var(--dark-text) 3%, transparent);
 }
 
 /* Panel */
@@ -981,6 +984,49 @@ nav a.active .badge {
   border: 1px solid var(--line);
   border-radius: 14px;
   padding: 22px 24px;
+  min-width: 0;
+}
+
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 14px;
+  min-width: 0;
+}
+
+.panel-head > div {
+  min-width: 0;
+}
+
+.panel-stack {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+
+.panel-bars {
+  margin-top: 18px;
+}
+
+.subpanel-section {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding-top: 18px;
+  border-top: 1px dashed var(--line);
+}
+
+.status-diagnostics-stack {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.cost-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
 }
 
 .panel-title {
@@ -1014,7 +1060,7 @@ nav a.active .badge {
 
 .bar-track {
   height: 6px;
-  background: var(--accent-soft);
+  background: var(--data-accent-soft);
   border-radius: 3px;
   position: relative;
   overflow: hidden;
@@ -1022,7 +1068,7 @@ nav a.active .badge {
 
 .bar-fill {
   height: 100%;
-  background: var(--accent);
+  background: var(--data-accent);
   border-radius: 3px;
   position: relative;
 }
@@ -1034,7 +1080,7 @@ nav a.active .badge {
   right: 0;
   bottom: 0;
   width: 2px;
-  background: var(--accent-deep);
+  background: var(--data-accent-deep);
 }
 
 .bar-row .num {
@@ -1096,6 +1142,24 @@ nav a.active .badge {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.empty-state.compact {
+  display: inline-flex;
+  width: min(100%, 48rem);
+  min-height: 0;
+  margin-top: 12px;
+  padding: 10px 12px;
+  align-items: center;
+}
+
+.bootstrap-error {
+  padding: 18px;
+  border: 1px dashed color-mix(in oklab, var(--danger) 36%, transparent);
+  border-radius: 14px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 13px;
 }
 
 .mini-stat-grid {
@@ -1236,7 +1300,7 @@ nav a.active .badge {
 
 .explorer-warning {
   margin-top: 0;
-  border-color: rgba(192, 138, 59, 0.35);
+  border-color: color-mix(in oklab, var(--warn) 36%, transparent);
   color: var(--ink-2);
 }
 
@@ -1246,9 +1310,9 @@ nav a.active .badge {
 
 .tag[data-level='degraded'],
 .tag[data-level='unsupported'] {
-  background: rgba(192, 138, 59, 0.14);
+  background: var(--warn-soft);
   color: var(--warn);
-  border-color: rgba(192, 138, 59, 0.3);
+  border-color: color-mix(in oklab, var(--warn) 30%, transparent);
 }
 
 .tag[data-level='no_data'] {
@@ -1327,14 +1391,14 @@ nav a.active .badge {
 
 .source-row .src-bar-track {
   height: 8px;
-  background: var(--accent-soft);
+  background: var(--data-accent-soft);
   border-radius: 4px;
   overflow: hidden;
 }
 
 .source-row .src-bar-fill {
   height: 100%;
-  background: var(--accent);
+  background: var(--data-accent);
 }
 
 .source-row .src-meta {
@@ -1410,7 +1474,7 @@ nav a.active .badge {
 
 .project-bar-fill {
   height: 100%;
-  background: var(--accent);
+  background: var(--data-accent);
   border-radius: 2px;
 }
 
@@ -1428,6 +1492,90 @@ nav a.active .badge {
   background: var(--surface-2);
   border: 1px solid var(--line);
   border-radius: 12px;
+}
+
+.failure-list,
+.integration-list {
+  display: grid;
+  gap: 10px;
+}
+
+.failure-empty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 18px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.failure-empty .i {
+  width: 18px;
+  height: 18px;
+  color: var(--good);
+}
+
+.failure-card {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 12px;
+}
+
+.failure-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.failure-card-name {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.failure-card-status,
+.failure-card-detail {
+  color: var(--muted);
+}
+
+.integration-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.integration-row-main {
+  min-width: 0;
+}
+
+.integration-row-source {
+  overflow: hidden;
+  font-weight: 600;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.integration-row-meta {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
 }
 
 .cost-stat-label {
@@ -1643,15 +1791,25 @@ svg.i {
   display: none;
 }
 
+@media (max-width: 1100px) {
+  .status-diagnostics-stack {
+    grid-template-columns: 1fr;
+  }
+
+  .cost-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 /* Status panel pill warn variant */
 .status-pill[data-tone='warn'] {
-  background: rgba(192, 138, 59, 0.18);
-  color: #e3b372;
-  border-color: rgba(192, 138, 59, 0.35);
+  background: color-mix(in oklab, var(--warn) 18%, transparent);
+  color: var(--warn);
+  border-color: color-mix(in oklab, var(--warn) 35%, transparent);
 }
 
 .status-pill[data-tone='warn'] .pulse {
-  background: #e3b372;
+  background: var(--warn);
 }
 
 /* Panel / sub-panel headings (replaces inline <h3 style> in shell.rs) */
@@ -1672,9 +1830,9 @@ svg.i {
 .trend-observation {
   margin-top: 14px;
   padding: 14px 16px;
-  border: 1px solid rgba(200, 85, 61, 0.25);
+  border: 1px solid color-mix(in oklab, var(--data-accent) 26%, transparent);
   border-radius: 10px;
-  background: rgba(200, 85, 61, 0.08);
+  background: color-mix(in oklab, var(--data-accent) 9%, transparent);
 }
 
 .trend-observation-label {
@@ -1694,7 +1852,7 @@ svg.i {
 }
 
 .trend-observation-peak {
-  color: #f5a890;
+  color: var(--ctp-rosewater);
 }
 
 @media (max-width: 720px) {
@@ -1770,5 +1928,43 @@ svg.i {
   .explorer-summary,
   .explorer-results-grid {
     grid-template-columns: 1fr;
+  }
+
+  .mini-stat-grid,
+  .cost-stat-grid,
+  .status-diagnostics-stack {
+    grid-template-columns: 1fr;
+  }
+
+  .bar-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 10px;
+  }
+
+  .bar-row .name {
+    grid-column: 1;
+  }
+
+  .bar-row .num {
+    grid-column: 2;
+  }
+
+  .bar-track {
+    grid-column: 1 / -1;
+  }
+
+  .project-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 12px;
+  }
+
+  .project-url,
+  .project-bar-wrap {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .project-value {
+    grid-column: 2;
   }
 }

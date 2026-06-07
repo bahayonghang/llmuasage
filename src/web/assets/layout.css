@@ -16,8 +16,10 @@ aside.sidebar {
 }
 
 main {
-  padding: 36px 48px 80px;
-  max-width: 1280px;
+  --dashboard-max: 1680px;
+  width: min(100%, var(--dashboard-max));
+  margin-inline: auto;
+  padding: 36px clamp(28px, 3vw, 56px) 80px;
   min-width: 0;
 }
 
@@ -208,7 +210,7 @@ main {
 .range-presets button.active {
   background: var(--accent-soft);
   color: var(--accent-deep);
-  box-shadow: 0 1px 0 rgba(154, 62, 43, 0.08), 0 6px 14px rgba(200, 85, 61, 0.12);
+  box-shadow: 0 1px 0 color-mix(in oklab, var(--accent) 10%, transparent), 0 6px 14px color-mix(in oklab, var(--accent) 14%, transparent);
 }
 
 .range-presets button:disabled {
@@ -363,6 +365,69 @@ main {
   align-items: start;
 }
 
+.distribution-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 18px;
+  align-items: start;
+}
+
+.distribution-grid > .panel {
+  min-width: 0;
+}
+
+.distribution-models {
+  grid-column: span 7;
+}
+
+.distribution-sources,
+.distribution-projects {
+  grid-column: span 5;
+}
+
+.distribution-projects {
+  grid-column: 1 / -1;
+}
+
+.behavior-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 18px;
+  align-items: stretch;
+}
+
+.behavior-grid > .panel {
+  min-width: 0;
+}
+
+.behavior-primary {
+  grid-column: span 6;
+}
+
+.behavior-secondary {
+  grid-column: 1 / -1;
+}
+
+.cost-status-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 18px;
+  align-items: start;
+}
+
+.cost-summary-panel {
+  grid-column: 1 / -1;
+  padding-bottom: 18px;
+}
+
+.cost-ranking-panel {
+  grid-column: 1 / -1;
+}
+
+.status-diagnostics-panel {
+  grid-column: 1 / -1;
+}
+
 .trends-bottom {
   display: grid;
   grid-template-columns: 1.4fr 1fr;
@@ -388,6 +453,7 @@ section.block {
   }
 
   main {
+    width: 100%;
     padding: 28px 30px 60px;
   }
 
@@ -397,6 +463,23 @@ section.block {
 
   .grid-2 {
     grid-template-columns: 1fr;
+  }
+
+  .distribution-grid,
+  .behavior-grid,
+  .cost-status-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .distribution-models,
+  .distribution-sources,
+  .distribution-projects,
+  .behavior-primary,
+  .behavior-secondary,
+  .cost-summary-panel,
+  .cost-ranking-panel,
+  .status-diagnostics-panel {
+    grid-column: auto;
   }
 
   .kpi-grid {
@@ -550,6 +633,7 @@ section.block {
   .kpi-grid,
   .trends-stats,
   .cost-grid,
+  .cost-stat-grid,
   .explorer-controls,
   .explorer-summary,
   .explorer-results-grid {

@@ -1,70 +1,131 @@
 /*
  * ========================================================================
- * 颜色 token：双主题（light / dark）
+ * 颜色 token：Catppuccin Latte / Mocha 双主题
  * ========================================================================
- * 1) 默认 :root 与 [data-theme="light"] 同值，保留旧行为
- * 2) [data-theme="dark"] 给出深色映射
- * 3) --dark / --dark-2 / --dark-line / --dark-text / --dark-muted 是
- *    trends-card / status-panel 的腔体配色，两个主题保持一致，避免双层暗色失去层次
- * 4) --ink-strong 取代旧 #000 字面值，方便随主题变深
+ * 1) 默认 :root 与 [data-theme="light"] 同值，映射 Catppuccin Latte
+ * 2) [data-theme="dark"] 映射 Catppuccin Mocha
+ * 3) --ctp-* 是 palette 源；--bg / --surface / --accent 等是消费端语义 token
+ * 4) --dark-* 是 instrument readout token，必须仍来自 Catppuccin，不保留旧棕黑 palette
  */
 :root,
 [data-theme='light'] {
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
-  --bg: #f6f3ee;
-  --surface: #ffffff;
-  --surface-2: #faf7f2;
-  --ink: #1c1a17;
-  --ink-2: #3a352f;
-  --ink-strong: #000000;
-  --muted: #736b60; /* 由 #8a8278 调深以达 WCAG AA：在 --bg 上约 4.7:1（旧值 3.4:1） */
-  --muted-2: #b8b0a4;
-  --line: #e8e2d6;
-  --line-2: #ece6db;
-  --accent: #c8553d;
-  --accent-soft: #f3dfd8;
-  --accent-deep: #9a3e2b;
-  --good: #4f7a5c;
-  --good-soft: #dde8de;
-  --warn: #c08a3b;
-  --danger: #b84a3a;
-  --pct-low-bg: #eef0ec;
-  --kpi-featured-grad: linear-gradient(180deg, var(--accent-soft), #f8e8e1);
-  --shadow-soft: 0 8px 20px rgba(26, 24, 21, 0.12);
-  --dark: #1a1815;
-  --dark-2: #25221e;
-  --dark-line: #34302a;
-  --dark-text: #f0ebe1;
-  --dark-muted: #8d867a;
+  --ctp-rosewater: #dc8a78;
+  --ctp-flamingo: #dd7878;
+  --ctp-pink: #ea76cb;
+  --ctp-mauve: #8839ef;
+  --ctp-red: #d20f39;
+  --ctp-maroon: #e64553;
+  --ctp-peach: #fe640b;
+  --ctp-yellow: #df8e1d;
+  --ctp-green: #40a02b;
+  --ctp-teal: #179299;
+  --ctp-sky: #04a5e5;
+  --ctp-sapphire: #209fb5;
+  --ctp-blue: #1e66f5;
+  --ctp-lavender: #7287fd;
+  --ctp-text: #4c4f69;
+  --ctp-subtext1: #5c5f77;
+  --ctp-subtext0: #6c6f85;
+  --ctp-overlay2: #7c7f93;
+  --ctp-overlay1: #8c8fa1;
+  --ctp-overlay0: #9ca0b0;
+  --ctp-surface2: #acb0be;
+  --ctp-surface1: #bcc0cc;
+  --ctp-surface0: #ccd0da;
+  --ctp-base: #eff1f5;
+  --ctp-mantle: #e6e9ef;
+  --ctp-crust: #dce0e8;
+  --bg: var(--ctp-mantle);
+  --surface: var(--ctp-base);
+  --surface-2: var(--ctp-crust);
+  --ink: var(--ctp-text);
+  --ink-2: var(--ctp-subtext1);
+  --ink-strong: #11111b;
+  --muted: var(--ctp-subtext0);
+  --muted-2: var(--ctp-overlay1);
+  --line: var(--ctp-surface0);
+  --line-2: color-mix(in oklab, var(--ctp-surface0) 62%, transparent);
+  --accent: var(--ctp-mauve);
+  --accent-soft: color-mix(in oklab, var(--ctp-mauve) 13%, var(--surface));
+  --accent-deep: color-mix(in oklab, var(--ctp-mauve) 78%, var(--ctp-text));
+  --data-accent: var(--ctp-peach);
+  --data-accent-soft: color-mix(in oklab, var(--ctp-peach) 14%, var(--surface));
+  --data-accent-deep: color-mix(in oklab, var(--ctp-peach) 70%, var(--ctp-text));
+  --good: var(--ctp-green);
+  --good-soft: color-mix(in oklab, var(--ctp-green) 13%, var(--surface));
+  --warn: var(--ctp-yellow);
+  --warn-soft: color-mix(in oklab, var(--ctp-yellow) 16%, var(--surface));
+  --danger: var(--ctp-red);
+  --danger-soft: color-mix(in oklab, var(--ctp-red) 12%, var(--surface));
+  --pct-low-bg: color-mix(in oklab, var(--ctp-green) 10%, var(--surface));
+  --kpi-featured-grad: linear-gradient(180deg, var(--data-accent-soft), color-mix(in oklab, var(--ctp-peach) 8%, var(--surface)));
+  --shadow-soft: 0 8px 20px rgba(76, 79, 105, 0.16);
+  --dark: #1e1e2e;
+  --dark-2: #313244;
+  --dark-line: #45475a;
+  --dark-text: #cdd6f4;
+  --dark-muted: #a6adc8;
 }
 
 [data-theme='dark'] {
-  --bg: #14120f;
-  --surface: #1c1a17;
-  --surface-2: #25221e;
-  --ink: #f0ebe1;
-  --ink-2: #d6cfc1;
+  --ctp-rosewater: #f5e0dc;
+  --ctp-flamingo: #f2cdcd;
+  --ctp-pink: #f5c2e7;
+  --ctp-mauve: #cba6f7;
+  --ctp-red: #f38ba8;
+  --ctp-maroon: #eba0ac;
+  --ctp-peach: #fab387;
+  --ctp-yellow: #f9e2af;
+  --ctp-green: #a6e3a1;
+  --ctp-teal: #94e2d5;
+  --ctp-sky: #89dceb;
+  --ctp-sapphire: #74c7ec;
+  --ctp-blue: #89b4fa;
+  --ctp-lavender: #b4befe;
+  --ctp-text: #cdd6f4;
+  --ctp-subtext1: #bac2de;
+  --ctp-subtext0: #a6adc8;
+  --ctp-overlay2: #9399b2;
+  --ctp-overlay1: #7f849c;
+  --ctp-overlay0: #6c7086;
+  --ctp-surface2: #585b70;
+  --ctp-surface1: #45475a;
+  --ctp-surface0: #313244;
+  --ctp-base: #1e1e2e;
+  --ctp-mantle: #181825;
+  --ctp-crust: #11111b;
+  --bg: var(--ctp-base);
+  --surface: var(--ctp-surface0);
+  --surface-2: var(--ctp-mantle);
+  --ink: var(--ctp-text);
+  --ink-2: var(--ctp-subtext1);
   --ink-strong: #ffffff;
-  --muted: #8d867a;
-  --muted-2: #5c574e;
-  --line: #2d2925;
-  --line-2: #353029;
-  --accent: #d96a52;
-  --accent-soft: #3a221c;
-  --accent-deep: #f3a18a;
-  --good: #7faf8b;
-  --good-soft: #233027;
-  --warn: #d4a05c;
-  --danger: #e0654f;
-  --pct-low-bg: #233027;
-  --kpi-featured-grad: linear-gradient(180deg, #3a221c, #2a1814);
-  --shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.5);
-  --dark: #1a1815;
-  --dark-2: #25221e;
-  --dark-line: #34302a;
-  --dark-text: #f0ebe1;
-  --dark-muted: #8d867a;
+  --muted: var(--ctp-subtext0);
+  --muted-2: var(--ctp-overlay1);
+  --line: var(--ctp-surface1);
+  --line-2: color-mix(in oklab, var(--ctp-surface1) 62%, transparent);
+  --accent: var(--ctp-mauve);
+  --accent-soft: color-mix(in oklab, var(--ctp-mauve) 16%, var(--surface));
+  --accent-deep: color-mix(in oklab, var(--ctp-mauve) 78%, var(--ctp-text));
+  --data-accent: var(--ctp-peach);
+  --data-accent-soft: color-mix(in oklab, var(--ctp-peach) 16%, var(--surface));
+  --data-accent-deep: color-mix(in oklab, var(--ctp-peach) 72%, var(--ctp-text));
+  --good: var(--ctp-green);
+  --good-soft: color-mix(in oklab, var(--ctp-green) 15%, var(--surface));
+  --warn: var(--ctp-yellow);
+  --warn-soft: color-mix(in oklab, var(--ctp-yellow) 15%, var(--surface));
+  --danger: var(--ctp-red);
+  --danger-soft: color-mix(in oklab, var(--ctp-red) 13%, var(--surface));
+  --pct-low-bg: color-mix(in oklab, var(--ctp-green) 14%, var(--surface));
+  --kpi-featured-grad: linear-gradient(180deg, var(--data-accent-soft), color-mix(in oklab, var(--ctp-peach) 7%, var(--surface)));
+  --shadow-soft: 0 8px 24px rgba(17, 17, 27, 0.58);
+  --dark: var(--ctp-mantle);
+  --dark-2: var(--ctp-surface0);
+  --dark-line: var(--ctp-surface1);
+  --dark-text: var(--ctp-text);
+  --dark-muted: var(--ctp-subtext0);
 }
 
 * {

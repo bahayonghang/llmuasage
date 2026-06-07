@@ -1494,7 +1494,8 @@ mod tests {
             components_css
                 .contains(".explorer-controls,\n  .explorer-summary,\n  .explorer-results-grid")
         );
-        assert!(components_css.contains("var(--danger,"));
+        assert!(components_css.contains("--sync-tone: var(--danger);"));
+        assert!(components_css.contains("color-mix(in oklab, var(--danger) 20%, transparent)"));
         assert!(layout_css.contains(".sync-command-center-detail-grid"));
         assert!(layout_css.contains("@media (max-width: 720px)"));
         assert!(!components_css.contains("border-left-color: var(--sync-tone"));

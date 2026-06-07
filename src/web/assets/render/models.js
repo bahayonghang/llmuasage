@@ -19,6 +19,15 @@ export function renderModels(context, state = {}) {
   const visibleRows = expanded ? modelRows : modelRows.slice(0, 8);
   const max = Number(modelRows[0]?.total_tokens || 1);
 
+  if (!visibleRows.length) {
+    document.getElementById('models-bars').innerHTML = `
+      <div class="empty-state compact">暂无模型用量数据。</div>
+    `;
+    document.getElementById('models-table').innerHTML = '';
+    logger.info('完成模型分布区渲染');
+    return;
+  }
+
   // 1.1 填充模型用量条形图
   const barHtml = visibleRows
     .map((row) => {

@@ -10,10 +10,10 @@ function supportLabel(support) {
   return support?.level || 'no_data';
 }
 
-function emptyState(support, fallback) {
+function emptyState(support, fallback, compact = false) {
   const reason = support?.reason || fallback;
   return `
-    <div class="empty-state">
+    <div class="empty-state${compact ? ' compact' : ''}">
       ${escapeHtml(reason)}
     </div>
   `;
@@ -48,7 +48,7 @@ function renderBars(rows, valueKey, labelFn, valueFn) {
 
 function renderActivityTable(rows, support) {
   if (!rows.length) {
-    return emptyState(support, '暂无 activity 数据。');
+    return emptyState(support, '暂无 activity 数据。', true);
   }
   const rowsHtml = rows
     .slice(0, 8)
@@ -80,7 +80,7 @@ function renderActivityTable(rows, support) {
 
 function renderToolsTable(rows, support) {
   if (!rows.length) {
-    return emptyState(support, '暂无 tool 数据。');
+    return emptyState(support, '暂无 tool 数据。', true);
   }
   const rowsHtml = rows
     .slice(0, 8)
@@ -148,6 +148,7 @@ function renderOptimize(optimize) {
     host.innerHTML = emptyState(
       support,
       '暂无 optimize finding；建议仅基于 normalized facts 生成，不会自动执行清理。',
+      true,
     );
     return;
   }
@@ -190,6 +191,7 @@ function renderCompare(compare) {
     host.innerHTML = emptyState(
       support,
       '至少需要两个模型才会显示 compare；低样本会以 warning 形式显式降级。',
+      true,
     );
     return;
   }
@@ -201,7 +203,7 @@ function renderCompare(compare) {
     </tr>
   `).join('');
   host.innerHTML = `
-    ${warning ? `<div class="empty-state">${escapeHtml(warning)}</div>` : ''}
+    ${warning ? `<div class="empty-state compact">${escapeHtml(warning)}</div>` : ''}
     <table class="panel-table">
       <thead>
         <tr>

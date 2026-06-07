@@ -72,7 +72,7 @@ export function renderHero(context) {
     <div class="status-panel-head">
       <div>
         <div class="status-eyebrow">${escapeHtml(heroCopy.statusEyebrow)}</div>
-        <div style="font-size: 18px; font-weight: 600; margin-top: 2px;">${escapeHtml(heroCopy.statusTitle)}</div>
+        <div class="status-panel-title">${escapeHtml(heroCopy.statusTitle)}</div>
       </div>
       <span class="status-pill" data-tone="${panelTone}"><span class="pulse"></span>${escapeHtml(statusLabel)}</span>
     </div>
@@ -108,7 +108,7 @@ export function renderHero(context) {
           ${kpi.foot.map((line) => `<span>${escapeHtml(line)}</span>`).join('')}
         </div>
         <svg class="kpi-spark" width="62" height="22" viewBox="0 0 62 22" fill="none">
-          <polyline points="0,18 10,16 18,10 26,12 34,4 42,7 50,3 62,1" stroke="#9a3e2b" stroke-width="1.5" fill="none"/>
+          <polyline points="0,18 10,16 18,10 26,12 34,4 42,7 50,3 62,1" stroke="var(--data-accent-deep)" stroke-width="1.5" fill="none"/>
         </svg>
       </div>
     `,

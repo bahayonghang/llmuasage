@@ -20,6 +20,14 @@ export function renderSources(context) {
   // 1.1 填充来源数标签
   document.getElementById('sources-count').textContent = `${sourceRows.length} 个来源`;
 
+  if (!sourceRows.length) {
+    document.getElementById('sources-rows').innerHTML = `
+      <div class="empty-state compact">暂无来源数据。</div>
+    `;
+    logger.info('完成来源分布区渲染');
+    return;
+  }
+
   // 1.2 填充来源行
   const rowsHtml = sourceRows
     .slice(0, 4)

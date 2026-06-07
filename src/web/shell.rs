@@ -286,7 +286,7 @@ fn html_shell(mode: &str) -> String {
       </div>
     </section>
 
-    <!-- Models + Sources/Projects side by side -->
+    <!-- Models + Sources/Projects distribution workbench -->
     <section id="models" class="block">
       <div class="section-head">
         <div>
@@ -295,39 +295,37 @@ fn html_shell(mode: &str) -> String {
         </div>
       </div>
 
-      <div class="grid-2">
-        <div class="panel">
+      <div class="distribution-grid">
+        <div class="panel distribution-models">
           <div class="panel-title" data-i18n="shell.models.panelTitle">用量最高的 8 个模型</div>
           <div class="panel-sub" data-i18n="shell.models.panelSub">单位：Token，按累计计算</div>
 
-          <div id="models-bars"></div>
+          <div class="panel-bars" id="models-bars"></div>
           <div id="models-table"></div>
 
           <button class="show-more" type="button" data-toggle-panel="models" aria-expanded="false" data-i18n="shell.models.expand">展开完整排行 →</button>
         </div>
 
-        <div>
-          <div class="panel" id="sources" style="margin-bottom: 24px;">
-            <div style="display: flex; justify-content: space-between; align-items: baseline;">
-              <h3 class="panel-title" data-i18n="shell.sources.title">来源分布</h3>
-              <span class="tag" id="sources-count">--</span>
-            </div>
-            <div class="panel-sub" data-i18n="shell.sources.sub">用量最高的 4 个来源</div>
-
-            <div class="source-rows" id="sources-rows"></div>
+        <div class="panel distribution-sources" id="sources">
+          <div class="panel-head">
+            <h3 class="panel-title" data-i18n="shell.sources.title">来源分布</h3>
+            <span class="tag" id="sources-count">--</span>
           </div>
+          <div class="panel-sub" data-i18n="shell.sources.sub">用量最高的 4 个来源</div>
 
-          <div class="panel" id="projects">
-            <div style="display: flex; justify-content: space-between; align-items: baseline;">
-              <h3 class="panel-title" data-i18n="shell.projects.title">项目排行</h3>
-              <span class="tag" id="projects-count">--</span>
-            </div>
-            <div class="panel-sub" data-i18n="shell.projects.sub">按累计 Token 排序</div>
+          <div class="source-rows" id="sources-rows"></div>
+        </div>
 
-            <div class="project-list" id="projects-rows"></div>
-
-            <button class="show-more" type="button" data-toggle-panel="projects" aria-expanded="false" data-i18n="shell.projects.expand">展开全部项目 →</button>
+        <div class="panel distribution-projects" id="projects">
+          <div class="panel-head">
+            <h3 class="panel-title" data-i18n="shell.projects.title">项目排行</h3>
+            <span class="tag" id="projects-count">--</span>
           </div>
+          <div class="panel-sub" data-i18n="shell.projects.sub">按累计 Token 排序</div>
+
+          <div class="project-list" id="projects-rows"></div>
+
+          <button class="show-more" type="button" data-toggle-panel="projects" aria-expanded="false" data-i18n="shell.projects.expand">展开全部项目 →</button>
         </div>
       </div>
     </section>
@@ -341,34 +339,32 @@ fn html_shell(mode: &str) -> String {
         </div>
       </div>
 
-      <div class="grid-2">
-        <div class="panel">
-          <div style="display: flex; justify-content: space-between; align-items: baseline;">
+      <div class="behavior-grid">
+        <div class="panel behavior-primary">
+          <div class="panel-head">
             <div>
               <div class="panel-title" data-i18n="shell.behavior.activity.title">Activity</div>
               <div class="panel-sub" data-i18n="shell.behavior.activity.sub">按 turn category 聚合 turns、one-shot 与 retry</div>
             </div>
             <span class="tag" id="activity-support">--</span>
           </div>
-          <div id="activity-bars" style="margin-top: 18px;"></div>
+          <div class="panel-bars" id="activity-bars"></div>
           <div id="activity-table"></div>
         </div>
 
-        <div class="panel">
-          <div style="display: flex; justify-content: space-between; align-items: baseline;">
+        <div class="panel behavior-primary">
+          <div class="panel-head">
             <div>
               <div class="panel-title" data-i18n="shell.behavior.tools.title">Tools</div>
               <div class="panel-sub" data-i18n="shell.behavior.tools.sub">Core tools / shell / MCP / agent actions</div>
             </div>
             <span class="tag" id="tools-support">--</span>
           </div>
-          <div id="tools-bars" style="margin-top: 18px;"></div>
+          <div class="panel-bars" id="tools-bars"></div>
           <div id="tools-table"></div>
         </div>
-      </div>
 
-      <div class="grid-2" style="margin-top: 18px;">
-        <div class="panel">
+        <div class="panel behavior-secondary">
           <div>
             <div class="panel-title" data-i18n="shell.behavior.optimize.title">Optimize</div>
             <div class="panel-sub" data-i18n="shell.behavior.optimize.sub">只读浪费检测；不会自动执行删除、归档或重写。</div>
@@ -377,7 +373,7 @@ fn html_shell(mode: &str) -> String {
           <div id="optimize-findings" class="finding-list"></div>
         </div>
 
-        <div class="panel">
+        <div class="panel behavior-secondary">
           <div>
             <div class="panel-title" data-i18n="shell.behavior.compare.title">Compare</div>
             <div class="panel-sub" data-i18n="shell.behavior.compare.sub">按模型对比成本、one-shot、retry 与工作风格；低样本显式提示。</div>
@@ -486,7 +482,7 @@ fn html_shell(mode: &str) -> String {
           <div>
             <div class="panel-title" data-i18n="shell.explorer.rowsTitle">维度排行</div>
             <div class="panel-sub" data-i18n="shell.explorer.rowsSub">按当前指标排序，Top N 之外可合并为 Other。</div>
-            <div id="explorer-bars" style="margin-top: 18px;"></div>
+            <div class="panel-bars" id="explorer-bars"></div>
             <div id="explorer-rows"></div>
           </div>
           <div>
@@ -507,35 +503,37 @@ fn html_shell(mode: &str) -> String {
         </div>
       </div>
 
-      <div class="grid-2">
-        <div class="panel">
+      <div class="cost-status-grid">
+        <div class="panel cost-summary-panel">
+          <div class="cost-stat-grid" id="costs-stats"></div>
+        </div>
+
+        <div class="panel cost-ranking-panel">
           <div class="panel-title" data-i18n="shell.cost.panelTitle">成本最高的 5 个 来源 / 模型 组合</div>
           <div class="panel-sub" data-i18n="shell.cost.panelSub">单位：USD</div>
 
-          <div id="costs-bars" style="margin-top: 18px;"></div>
+          <div class="panel-bars" id="costs-bars"></div>
           <div id="costs-table"></div>
 
           <button class="show-more" type="button" data-toggle-panel="costs" aria-expanded="false" data-i18n="shell.cost.expand">展开全部成本项 →</button>
         </div>
 
-        <div id="status" class="block" style="margin: 0;">
-          <div class="panel">
-            <div class="cost-grid" id="costs-stats"></div>
-
-            <div style="border-top: 1px dashed var(--line); padding-top: 18px;">
+        <div class="panel status-diagnostics-panel" id="status">
+          <div class="status-diagnostics-stack">
+            <div class="subpanel-section">
               <h3 class="subpanel-title" data-i18n="shell.insights.title">诊断线索</h3>
               <p class="panel-sub" data-i18n="shell.insights.sub">信号只表示可能的下一步，不代表最终诊断。</p>
               <div id="insights-card"></div>
             </div>
 
-            <div style="border-top: 1px dashed var(--line); padding-top: 18px;">
+            <div class="subpanel-section">
               <h3 class="subpanel-title" data-i18n="shell.failures.title">最近失败</h3>
               <div id="failures-card"></div>
             </div>
 
-            <div style="border-top: 1px dashed var(--line); padding-top: 18px; margin-top: 18px;">
+            <div class="subpanel-section">
               <h3 class="subpanel-title" data-i18n="shell.integrations.title">集成状态</h3>
-              <div id="integrations-rows" style="display: grid; gap: 10px;"></div>
+              <div id="integrations-rows" class="integration-list"></div>
             </div>
           </div>
         </div>

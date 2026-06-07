@@ -332,7 +332,7 @@ function renderBootstrapError(error) {
     <div class="status-panel-head">
       <div>
         <div class="status-eyebrow">${escapeHtml(UI_COPY.hero.statusEyebrow)}</div>
-        <div style="font-size: 18px; font-weight: 600; margin-top: 2px;">${escapeHtml(errorCopy.title)}</div>
+        <div class="status-panel-title">${escapeHtml(errorCopy.title)}</div>
       </div>
       <span class="status-pill" data-tone="warn"><span class="pulse"></span>${escapeHtml(errorCopy.pill)}</span>
     </div>
@@ -344,7 +344,7 @@ function renderBootstrapError(error) {
     </div>
   `;
   const errorBlock = `
-    <div style="padding: 18px; border: 1px dashed rgba(200,85,61,0.35); border-radius: 14px; color: #f5a890; font-size: 13px;">
+    <div class="bootstrap-error">
       ${escapeHtml(message)}
     </div>
   `;
