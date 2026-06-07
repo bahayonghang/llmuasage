@@ -282,7 +282,12 @@ fn init_writes_quoted_windows_string_commands_for_spaced_paths() -> Result<()> {
                 .join("plugin")
                 .join("llmusage-tracker.js"),
         )?;
-        assert!(plugin_body.contains("cmd /c \"\""));
+        let expected_opencode = integrations::HookTarget::current(&app)
+            .shell_command(SourceKind::Opencode, "session.updated");
+        assert!(plugin_body.contains(&expected_opencode));
+        if cfg!(windows) {
+            assert!(plugin_body.contains("cmd /c \"\""));
+        }
 
         Ok::<_, anyhow::Error>(())
     })?;

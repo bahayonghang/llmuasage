@@ -31,6 +31,49 @@ fn make_store() -> Result<(TempDir, Store)> {
     Ok((temp, store))
 }
 
+struct SourceEnvFixture {
+    _root: TempDir,
+    saved: Vec<(String, Option<String>)>,
+}
+
+impl SourceEnvFixture {
+    fn new() -> Result<Self> {
+        let root = TempDir::new()?;
+        let home = root.path().join("home");
+        let codex_home = home.join(".codex");
+        let opencode_home = root.path().join("opencode-home");
+        fs::create_dir_all(codex_home.join("sessions"))?;
+        fs::create_dir_all(&opencode_home)?;
+
+        let mut saved = Vec::new();
+        for key in ["HOME", "USERPROFILE", "CODEX_HOME", "OPENCODE_HOME"] {
+            saved.push((key.to_string(), std::env::var(key).ok()));
+        }
+        unsafe {
+            std::env::set_var("HOME", &home);
+            std::env::set_var("USERPROFILE", &home);
+            std::env::set_var("CODEX_HOME", &codex_home);
+            std::env::set_var("OPENCODE_HOME", &opencode_home);
+        }
+
+        Ok(Self { _root: root, saved })
+    }
+}
+
+impl Drop for SourceEnvFixture {
+    fn drop(&mut self) {
+        for (key, value) in &self.saved {
+            unsafe {
+                if let Some(value) = value {
+                    std::env::set_var(key, value);
+                } else {
+                    std::env::remove_var(key);
+                }
+            }
+        }
+    }
+}
+
 fn build_event(key: &str, event_at: &str, total_tokens: i64) -> UsageEvent {
     UsageEvent {
         event_key: key.to_string(),
@@ -323,6 +366,7 @@ async fn opencode_row_serialized_as_json_in_raw_table() -> Result<()> {
 /// waiting for a final full-history marker.
 #[tokio::test]
 async fn recent_ready_emitted_per_source_when_recent_days_set() -> Result<()> {
+    let _env = SourceEnvFixture::new()?;
     let (_tmp, store) = make_store()?;
     let app = llmusage::app::AppContext {
         paths: store.paths.clone(),
@@ -381,6 +425,7 @@ async fn recent_ready_emitted_per_source_when_recent_days_set() -> Result<()> {
 /// the selected source's file state, leaving unrelated sources intact.
 #[tokio::test]
 async fn source_filtered_sync_keeps_other_sources_intact() -> Result<()> {
+    let _env = SourceEnvFixture::new()?;
     let (_tmp, store) = make_store()?;
     seed_source_file(&store, SourceKind::Codex, "/codex/stale.jsonl")?;
     seed_source_file(&store, SourceKind::Claude, "/claude/keep.jsonl")?;
@@ -492,6 +537,7 @@ fn reset_usage_data_clears_behavior_facts() -> Result<()> {
 /// forwards observable events, and ends with a completed snapshot.
 #[tokio::test]
 async fn start_run_complete_lifecycle_observable_via_snapshot() -> Result<()> {
+    let _env = SourceEnvFixture::new()?;
     let (_tmp, store) = make_store()?;
     let registry = JobRegistry::default();
     let (job_id, mut rx) = registry.start(

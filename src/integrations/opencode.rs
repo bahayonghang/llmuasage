@@ -137,9 +137,24 @@ fn official_storage_dir(home_dir: &Path) -> PathBuf {
 }
 
 fn legacy_storage_dir(home_dir: &Path) -> PathBuf {
-    dirs::data_local_dir()
-        .unwrap_or_else(|| home_dir.join(".local").join("share"))
-        .join("opencode")
+    legacy_data_local_dir(home_dir).join("opencode")
+}
+
+fn legacy_data_local_dir(home_dir: &Path) -> PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        home_dir.join("Library").join("Application Support")
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        home_dir.join("AppData").join("Local")
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        home_dir.join(".local").join("share")
+    }
 }
 
 pub(crate) fn resolve_default_storage_dir(home_dir: &Path) -> PathBuf {
@@ -203,7 +218,7 @@ mod tests {
     fn default_storage_prefers_official_home_data_dir() {
         let temp = tempfile::tempdir().expect("temp dir");
         let official = temp.path().join(".local").join("share").join("opencode");
-        let legacy = temp.path().join("legacy").join("opencode");
+        let legacy = legacy_storage_dir(temp.path());
         std::fs::create_dir_all(&official).expect("official dir");
         std::fs::create_dir_all(&legacy).expect("legacy dir");
 
