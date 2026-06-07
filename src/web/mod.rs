@@ -1482,6 +1482,7 @@ mod tests {
             .find(|asset| asset.path == "layout.css")
             .expect("layout.css asset")
             .body;
+        let components_css_lf = components_css.replace("\r\n", "\n");
 
         assert!(components_css.contains(".sync-command-center"));
         assert!(components_css.contains(".sync-command-center-details summary"));
@@ -1491,7 +1492,7 @@ mod tests {
         assert!(components_css.contains(".sync-command-center-action .btn"));
         assert!(components_css.contains(".sync-command-center-metric .mini-label"));
         assert!(
-            components_css
+            components_css_lf
                 .contains(".explorer-controls,\n  .explorer-summary,\n  .explorer-results-grid")
         );
         assert!(components_css.contains("--sync-tone: var(--danger);"));
