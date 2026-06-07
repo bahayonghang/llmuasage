@@ -1,6 +1,6 @@
 [package]
 name = "llmusage"
-version = "0.7.1"
+version = "0.7.2"
 edition = "2024"
 description = "Local-first AI CLI usage analytics with Rust, SQLite, hooks, and zero upload."
 repository = "https://github.com/bahayonghang/llmuasage"
@@ -29,14 +29,14 @@ testing = ["dep:tempfile"]
 [dependencies]
 anyhow = "1.0"
 axum = { version = "0.8", features = ["http1", "json", "tokio"] }
-chrono = { version = "0.4", features = ["clock", "serde"] }
+chrono = { version = "0.4.45", features = ["clock", "serde"] }
 clap = { version = "4.5", features = ["derive"] }
 crossterm = "0.29"
-dashmap = "6.1"
+dashmap = "6.2.1"
 dirs = "6.0"
 fs4 = "1.1.0"
-ratatui = "0.30.0"
-rusqlite = { version = "0.40.0", features = ["bundled", "chrono"] }
+ratatui = "0.30.1"
+rusqlite = { version = "0.40.1", features = ["bundled", "chrono"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.150"
 base64 = "0.22"
