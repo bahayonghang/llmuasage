@@ -1,5 +1,6 @@
 ref/
 .omc/
+.omx/
 .agents/
 .claude/
 .codex/
