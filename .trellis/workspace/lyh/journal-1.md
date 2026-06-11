@@ -39,3 +39,39 @@ Implemented fast range switching for llmusage serve with core dashboard scope, l
 ### Next Steps
 
 - None - task complete
+
+
+## Session 2: Bootstrap Trellis Guidelines
+
+**Date**: 2026-06-12
+**Task**: Bootstrap Trellis Guidelines
+**Package**: ccexplorer
+**Branch**: `dev`
+
+### Summary
+
+Committed project cleanup, Trellis workflow metadata, and source-backed bootstrap guideline specs, then archived the bootstrap task.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0f26c83` | (see git log) |
+| `9cca110` | (see git log) |
+| `7bf6617` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
