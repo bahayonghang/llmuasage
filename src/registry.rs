@@ -8,7 +8,10 @@
 //! 必须重新硬列三连，新增第四个源会让两处 fan-out 各加一行。
 
 use crate::{
-    domain::source_descriptor::{self, SourceDescriptor},
+    domain::{
+        platform_monitor::{self, PlatformMonitorDescriptor},
+        source_descriptor::{self, SourceDescriptor},
+    },
     integrations::{
         Integration, antigravity::AntigravityIntegration, claude::ClaudeIntegration,
         codex::CodexIntegration, opencode::OpencodeIntegration,
@@ -28,6 +31,11 @@ pub fn registered_parsers() -> Vec<Box<dyn SourceParser>> {
 /// Current build's source descriptors in stable CLI/display order.
 pub fn registered_source_descriptors() -> &'static [SourceDescriptor] {
     source_descriptor::registered_source_descriptors()
+}
+
+/// Current build's source and monitor-only platform descriptors.
+pub fn registered_platform_monitors() -> &'static [PlatformMonitorDescriptor] {
+    platform_monitor::registered_platform_monitors()
 }
 
 /// Look up a descriptor by stable source kind.
@@ -124,6 +132,22 @@ mod tests {
         );
         assert_eq!(parse_source_id("gemini"), None);
         assert_eq!(parse_source_id("missing"), None);
+    }
+
+    #[test]
+    fn platform_monitors_cover_registered_sources() {
+        let monitored_sources = registered_platform_monitors()
+            .iter()
+            .filter_map(|descriptor| descriptor.source_kind)
+            .collect::<BTreeSet<_>>();
+
+        for descriptor in registered_source_descriptors() {
+            assert!(
+                monitored_sources.contains(&descriptor.kind),
+                "source {} missing platform monitor",
+                descriptor.stable_id
+            );
+        }
     }
 
     #[test]

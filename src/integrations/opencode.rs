@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     fs,
     path::{Path, PathBuf},
 };
@@ -13,6 +14,7 @@ use super::{
 
 const PLUGIN_MARKER: &str = "LLMUSAGE_LOCAL_PLUGIN";
 const PLUGIN_NAME: &str = "llmusage-tracker.js";
+const OPENCODE_DB_NAME: &str = "opencode.db";
 
 /// ZST handle implementing [`Integration`] for the OpenCode local plugin.
 pub struct OpencodeIntegration;
@@ -172,13 +174,120 @@ pub(crate) fn resolve_default_storage_dir(home_dir: &Path) -> PathBuf {
 }
 
 pub(crate) fn resolve_db_path() -> PathBuf {
-    std::env::var("OPENCODE_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            let home_dir = crate::util::resolve_home_dir();
-            resolve_default_storage_dir(&home_dir)
+    discover_db_paths().into_iter().next().unwrap_or_else(|| {
+        let home_dir = crate::util::resolve_home_dir();
+        resolve_default_storage_dir(&home_dir).join(OPENCODE_DB_NAME)
+    })
+}
+
+pub(crate) fn discover_db_paths() -> Vec<PathBuf> {
+    let home_dir = crate::util::resolve_home_dir();
+    discover_db_paths_with_home(&home_dir)
+}
+
+pub(crate) fn discover_db_paths_with_home(home_dir: &Path) -> Vec<PathBuf> {
+    if let Some(explicit) = env_path("OPENCODE_DB") {
+        return vec![explicit];
+    }
+
+    let roots = if let Some(opencode_home) = env_path("OPENCODE_HOME") {
+        vec![opencode_home]
+    } else {
+        candidate_storage_dirs(home_dir)
+    };
+
+    let mut discovered = Vec::new();
+    let mut seen = BTreeSet::new();
+    for root in &roots {
+        for candidate in discover_opencode_dbs(root) {
+            let key = candidate
+                .canonicalize()
+                .unwrap_or_else(|_| candidate.clone());
+            if seen.insert(key) {
+                discovered.push(candidate);
+            }
+        }
+    }
+
+    sort_opencode_dbs(&mut discovered);
+    if discovered.is_empty() {
+        let fallback_root = roots
+            .first()
+            .cloned()
+            .unwrap_or_else(|| resolve_default_storage_dir(home_dir));
+        discovered.push(fallback_root.join(OPENCODE_DB_NAME));
+    }
+    discovered
+}
+
+fn candidate_storage_dirs(home_dir: &Path) -> Vec<PathBuf> {
+    let mut roots = vec![official_storage_dir(home_dir)];
+    let legacy = legacy_storage_dir(home_dir);
+    if legacy != roots[0] {
+        roots.push(legacy);
+    }
+    roots
+}
+
+fn discover_opencode_dbs(data_dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(data_dir) else {
+        return Vec::new();
+    };
+    let mut dbs = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_file()
+                && path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(is_opencode_db_filename)
         })
-        .join("opencode.db")
+        .collect::<Vec<_>>();
+    sort_opencode_dbs(&mut dbs);
+    dbs
+}
+
+fn sort_opencode_dbs(paths: &mut [PathBuf]) {
+    paths.sort_by(|left, right| {
+        let left_name = left
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        let right_name = right
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        opencode_db_rank(left_name)
+            .cmp(&opencode_db_rank(right_name))
+            .then_with(|| left.cmp(right))
+    });
+}
+
+fn opencode_db_rank(name: &str) -> u8 {
+    if name == OPENCODE_DB_NAME { 0 } else { 1 }
+}
+
+fn is_opencode_db_filename(name: &str) -> bool {
+    let Some(stem) = name.strip_suffix(".db") else {
+        return false;
+    };
+    if stem == "opencode" {
+        return true;
+    }
+    let Some(channel) = stem.strip_prefix("opencode-") else {
+        return false;
+    };
+    !channel.is_empty()
+        && channel
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
+}
+
+fn env_path(name: &str) -> Option<PathBuf> {
+    std::env::var_os(name)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
 }
 
 fn resolve_plugin_path(_app: &AppContext) -> PathBuf {
@@ -233,5 +342,82 @@ mod tests {
             resolve_default_storage_dir(temp.path()),
             temp.path().join(".local").join("share").join("opencode"),
         );
+    }
+
+    #[test]
+    fn opencode_db_discovery_prefers_default_then_channel_dbs() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let data_dir = temp.path().join(".local").join("share").join("opencode");
+        std::fs::create_dir_all(&data_dir).expect("data dir");
+        std::fs::write(data_dir.join("opencode-stable.db"), "").expect("stable db");
+        std::fs::write(data_dir.join("opencode.db"), "").expect("default db");
+        std::fs::write(data_dir.join("opencode-nightly.db"), "").expect("nightly db");
+        std::fs::write(data_dir.join("opencode.db-wal"), "").expect("wal sidecar");
+        std::fs::write(data_dir.join("other.db"), "").expect("unrelated db");
+
+        let paths = discover_db_paths_with_home(temp.path());
+        let names = paths
+            .iter()
+            .filter_map(|path| path.file_name())
+            .map(|name| name.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            names,
+            vec![
+                "opencode.db".to_string(),
+                "opencode-nightly.db".to_string(),
+                "opencode-stable.db".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn opencode_db_discovery_falls_back_to_legacy_storage() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let legacy = legacy_storage_dir(temp.path());
+        std::fs::create_dir_all(&legacy).expect("legacy dir");
+        std::fs::write(legacy.join("opencode-stable.db"), "").expect("legacy db");
+
+        assert_eq!(
+            discover_db_paths_with_home(temp.path()),
+            vec![legacy.join("opencode-stable.db")]
+        );
+    }
+
+    #[test]
+    fn explicit_opencode_db_env_wins_over_discovery() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let explicit = temp.path().join("opencode-stable.db");
+        let _guard = EnvGuard::set("OPENCODE_DB", &explicit);
+
+        assert_eq!(discover_db_paths_with_home(temp.path()), vec![explicit]);
+    }
+
+    struct EnvGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &Path) -> Self {
+            let previous = std::env::var(key).ok();
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                if let Some(previous) = &self.previous {
+                    std::env::set_var(self.key, previous);
+                } else {
+                    std::env::remove_var(self.key);
+                }
+            }
+        }
     }
 }

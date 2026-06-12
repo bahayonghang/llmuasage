@@ -1,8 +1,12 @@
 pub mod behavior;
 pub mod cost;
+pub mod daily;
 pub mod health;
+pub mod hourly;
 pub mod models;
 pub mod overview;
 pub mod projects;
 pub mod sources;
+pub mod stats;
 pub mod trends;
+pub mod usage;

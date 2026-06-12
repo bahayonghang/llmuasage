@@ -10,6 +10,8 @@ llmusage sync
 
 Human progress is written to stderr. The final summary stays on stdout.
 
+The summary includes `files`, `changed`, `skipped`, `seen`, `committed`, and `stored_events` per source. For file-backed sources, `skipped` means the stored cursor, size, mtime, head fingerprint, tail signature, and offset show the artifact is unchanged. For OpenCode, `skipped` means the SQLite high-water cursor found no newer rows. `committed` is the newly inserted event delta after SQLite dedupe; `stored_events` is the durable total currently in the database.
+
 ## Import one source
 
 ```powershell
@@ -21,6 +23,8 @@ llmusage sync --source antigravity
 ```
 
 The accepted source values match `cargo run -- --help`: `codex`, `claude`, `opencode`, and `antigravity`. `gemini` is intentionally not accepted as a source id; `gemini-*` remains a model-name prefix only.
+
+Other platforms can appear in `llmusage source-status` or the `dash` source picker as monitor-only candidates. They stay parserless until sanitized fixtures, token semantics, sync-twice tests, cursor/fingerprint regression tests, and privacy review exist.
 
 ## Emit NDJSON progress
 
@@ -66,3 +70,5 @@ llmusage diagnostics --out .\llmusage-diagnostics.json
 - `source_file`: live/missing/deleted source-file state for diagnostics.
 - `source_cursor`: incremental cursors.
 - `run_log` and `source_sync_status`: operational status.
+
+Token quality labels are source descriptors, not runtime guesses: `precise` sources preserve input, output, cache read, cache creation/write, reasoning, and total channels; `total_only` sources do not claim subchannel precision; `estimated` sources are explicitly approximate; monitor-only or blocked sources are shown as unavailable/parserless instead of being imported.

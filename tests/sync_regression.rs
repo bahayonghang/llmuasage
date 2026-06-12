@@ -126,6 +126,7 @@ fn hot_sync_keeps_unchanged_source_files_live_and_reports_stored_events() -> Res
         assert_eq!(second.total_inserted, 0);
         assert_eq!(second.stored_events, 2);
         assert_eq!(second.sources[0].changed_files, 0);
+        assert_eq!(second.sources[0].skipped_files, 2);
         assert_eq!(second.sources[0].stored_events, 2);
 
         let counts = store.source_files().counts(SourceKind::Codex)?;
@@ -776,12 +777,93 @@ fn opencode_missing_db_reports_absent_without_failing_sync() -> Result<()> {
 }
 
 #[test]
+fn opencode_channel_db_without_opencode_home_is_imported() -> Result<()> {
+    let fixture = Fixture::new()?;
+    unsafe {
+        std::env::remove_var("OPENCODE_HOME");
+    }
+    let channel_db = fixture
+        .home
+        .join(".local")
+        .join("share")
+        .join("opencode")
+        .join("opencode-stable.db");
+    fixture.seed_opencode_at(&channel_db, "msg-stable", 1776823200000, 64)?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+
+        let summary = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Opencode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+        assert_eq!(summary.total_inserted, 1);
+        assert_eq!(usage_event_count(&app.paths.db_path)?, 1);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn opencode_explicit_db_env_is_imported() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let explicit_db = fixture
+        .home
+        .join("custom-opencode")
+        .join("opencode-nightly.db");
+    fixture.seed_opencode_at(&explicit_db, "msg-nightly", 1776823200000, 64)?;
+    unsafe {
+        std::env::set_var("OPENCODE_DB", &explicit_db);
+    }
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+
+        let summary = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Opencode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+        assert_eq!(summary.total_inserted, 1);
+        assert_eq!(usage_event_count(&app.paths.db_path)?, 1);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
 fn source_sync_stats_absent_wire_contract_is_backward_compatible() -> Result<()> {
     let default_value = serde_json::to_value(SourceSyncStats {
         source: SourceKind::Opencode,
         ..SourceSyncStats::default()
     })?;
     assert_eq!(default_value["absent"], false);
+    assert_eq!(default_value["skipped_files"], 0);
 
     let absent_value = serde_json::to_value(SourceSyncStats {
         source: SourceKind::Opencode,
@@ -806,6 +888,7 @@ fn source_sync_stats_absent_wire_contract_is_backward_compatible() -> Result<()>
     });
     let legacy_stats: SourceSyncStats = serde_json::from_value(legacy_json)?;
     assert!(!legacy_stats.absent);
+    assert_eq!(legacy_stats.skipped_files, 0);
     assert_eq!(legacy_stats.source, SourceKind::Opencode);
     assert_eq!(
         legacy_stats.last_error.as_deref(),
@@ -1061,7 +1144,13 @@ impl Fixture {
         fs::create_dir_all(&opencode_home)?;
 
         let mut saved = Vec::new();
-        for key in ["HOME", "USERPROFILE", "CODEX_HOME", "OPENCODE_HOME"] {
+        for key in [
+            "HOME",
+            "USERPROFILE",
+            "CODEX_HOME",
+            "OPENCODE_HOME",
+            "OPENCODE_DB",
+        ] {
             saved.push((key.to_string(), std::env::var(key).ok()));
         }
         unsafe {
@@ -1204,7 +1293,20 @@ impl Fixture {
 
     fn seed_opencode(&self, message_id: &str, time_created: i64, total_tokens: i64) -> Result<()> {
         let db_path = self.opencode_home.join("opencode.db");
-        let conn = Connection::open(&db_path)?;
+        self.seed_opencode_at(&db_path, message_id, time_created, total_tokens)
+    }
+
+    fn seed_opencode_at(
+        &self,
+        db_path: &Path,
+        message_id: &str,
+        time_created: i64,
+        total_tokens: i64,
+    ) -> Result<()> {
+        if let Some(parent) = db_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let conn = Connection::open(db_path)?;
         conn.execute_batch(
             r#"
             CREATE TABLE IF NOT EXISTS project(id TEXT PRIMARY KEY, worktree TEXT);

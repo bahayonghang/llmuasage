@@ -123,6 +123,8 @@ llmusage sync --rebuild --allow-lossy-rebuild
 
 导入本地来源。`--json-events` 在 stdout 写 NDJSON 生命周期事件。`--allow-lossy-rebuild` 必须配合 `--rebuild`。
 
+人读摘要会按来源显示 `files`、`changed`、`skipped`、`seen`、`committed` 和 `stored_events`。`skipped` 对文件型来源来自现有 cursor/fingerprint 证据，对 OpenCode 这种 DB 来源来自 SQLite 高水位 cursor。`committed` 是 SQLite 去重后本次新增写入数。
+
 ## 状态与诊断
 
 ### `llmusage status`
@@ -172,6 +174,8 @@ llmusage dash
 ```
 
 交互式终端 Dashboard。旧的隐藏 `tui` 命令是已废弃别名。
+
+快捷键：`tab`/`shift-tab` 或 `1`-`8` 切换视图，`j`/`k` 或方向键滚动，`h`/`l` 在适用视图切换时间窗口，`s` 打开来源选择器，`r` 刷新 Dashboard 数据，`R` 切换自动刷新，`x` 通过现有 sync worker lock 按当前来源筛选运行 sync，`?` 打开帮助/设置，`q` 退出。
 
 ### `llmusage serve`
 

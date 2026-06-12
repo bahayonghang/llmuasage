@@ -248,10 +248,11 @@ fn print_summary(summary: &SyncSummary, options: &SyncRunOptions) {
     }
     for item in &summary.sources {
         println!(
-            "- {}: files={} changed={} seen={} inserted_delta={} stored_events={}",
+            "- {}: files={} changed={} skipped={} seen={} committed={} stored_events={}",
             item.source,
             item.files_processed,
             item.changed_files,
+            item.skipped_files,
             item.events_seen,
             item.events_inserted,
             item.stored_events
@@ -265,6 +266,44 @@ fn print_summary(summary: &SyncSummary, options: &SyncRunOptions) {
 
 pub async fn run_once(_app: &AppContext, store: &Store, lock_wait_ms: u64) -> Result<SyncSummary> {
     run_once_with_options(_app, store, lock_wait_ms, &SyncRunOptions::default(), None).await
+}
+
+pub async fn run_store_once_with_options(
+    store: &Store,
+    options: &SyncRunOptions,
+) -> Result<SyncSummary> {
+    store.bootstrap()?;
+    let lock_started = Instant::now();
+    let lock = store.acquire_worker_lock_with(Duration::from_secs(30), HolderKind::Cli)?;
+    let heartbeat = lock.start_default_heartbeat();
+    let lock_wait_ms = lock_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+    store
+        .run_log()
+        .recover_running_runs(&["sync", "hook-run"])?;
+    let command_name = if options.rebuild {
+        "sync --rebuild"
+    } else {
+        "sync"
+    };
+    let cancel = CancellationToken::new();
+    let summary = super::run_tracked(
+        store,
+        command_name,
+        async { run_once_locked(store, lock_wait_ms, options, None, &cancel).await },
+        |item| {
+            Some(format!(
+                "sources={} seen={} inserted_delta={} stored_events={}",
+                item.sources.len(),
+                item.total_seen,
+                item.total_inserted,
+                item.stored_events
+            ))
+        },
+    )
+    .await?;
+    drop(heartbeat);
+    drop(lock);
+    Ok(summary)
 }
 
 pub async fn run_once_with_options(
@@ -287,6 +326,16 @@ pub async fn run_once_with_options(
 
 pub async fn run_once_with_cancel(
     _app: &AppContext,
+    store: &Store,
+    lock_wait_ms: u64,
+    options: &SyncRunOptions,
+    sender: Option<&mut mpsc::Sender<SyncEvent>>,
+    cancel: &CancellationToken,
+) -> Result<SyncSummary> {
+    run_once_locked(store, lock_wait_ms, options, sender, cancel).await
+}
+
+async fn run_once_locked(
     store: &Store,
     lock_wait_ms: u64,
     options: &SyncRunOptions,
@@ -565,9 +614,10 @@ fn human_progress_line(event: &SyncEvent) -> Option<String> {
             source_label(*source)
         )),
         SyncEvent::SourceFinished { source, stats } => Some(format!(
-            "{}: 完成，文件 {} 个，导入 {} 条",
+            "{}: 完成，文件 {} 个，跳过 {} 个，提交 {} 条",
             source_label(*source),
             stats.files_processed,
+            stats.skipped_files,
             stats.events_inserted
         )),
         SyncEvent::Failed { error } => Some(format!("同步失败：{error}")),

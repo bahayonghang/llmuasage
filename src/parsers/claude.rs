@@ -196,6 +196,7 @@ async fn sync_claude(
         source: SourceKind::Claude,
         files_processed: total_files,
         changed_files,
+        skipped_files: total_files.saturating_sub(changed_files),
         bytes_scanned,
         events_seen,
         events_replayed,
@@ -210,6 +211,7 @@ async fn sync_claude(
     info!(
         files_processed = stats.files_processed,
         changed_files = stats.changed_files,
+        skipped_files = stats.skipped_files,
         events_seen = stats.events_seen,
         bytes_scanned = stats.bytes_scanned,
         "完成 Claude 项目真源解析"

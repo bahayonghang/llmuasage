@@ -213,7 +213,8 @@ async fn sync_opencode(
     store.cursors().save_opencode_cursor(&cursor)?;
 
     stats.files_processed = 1;
-    stats.changed_files = usize::from(normalized_events_seen > 0);
+    stats.changed_files = usize::from(seen_rows > 0);
+    stats.skipped_files = usize::from(seen_rows == 0);
     stats.bytes_scanned = scanned_bytes;
     stats.events_seen = normalized_events_seen;
     stats.events_inserted = inserted;

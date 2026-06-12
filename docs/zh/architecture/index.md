@@ -24,6 +24,8 @@
 
 新增来源意味着新增 `SourceKind` variant 和 descriptor。只有 descriptor 的能力声明与测试证据支持时，才新增 parser 或 integration。Passive reader 写入 usage 行之前还必须具备真实本地样本、fixture 覆盖、sync-twice 幂等、cursor/rebuild 行为、token 质量声明和隐私审查。
 
+`PlatformMonitorDescriptor` 是更宽的监控目录，可以描述来自 tokscale 风格证据的 parserless 候选，包括 Gemini CLI、Cursor、Copilot、Zed、Kiro、Goose、Grok、Kimi/Qwen、Roo/Kilo/Cline、Codebuff、Crush、Warp/Oz、Amp、Hermes 和 Trae。Monitor descriptor 可以在 `source-status` 与 `dash` 中展示 detected/unavailable 根目录、parser 支持状态、隐私类别、token 质量和下一步动作，但它们不会作为 `SourceKind` 持久化，也不能写入 usage 行。
+
 ## 同步流程
 
 1. 工具专属 hook/plugin 触发 `llmusage hook-run`，或用户运行 `llmusage sync`。
@@ -36,6 +38,8 @@
 Codex `notify` 是 singleton integration。llmusage 安装时会备份不同的原 notify，并在自身 hook 处理后 best-effort 链式启动；递归/自身命令会被跳过，链式命令失败不会阻塞 hook 成功。
 
 `SyncShard` 是 parser/writer 边界。Parser 不直接写 SQLite。
+
+重复 sync 工作通过每个来源自己的 cursor 避免。Codex 和 Claude 会在重解析前比较文件大小、mtime、头部 fingerprint、尾部签名和 offset；OpenCode 会比较 DB 身份和 message 高水位 cursor。Sync stats 会把未变化工作显示为 skipped，把变化 artifact 显示为 parsed，把本次新增写入显示为 committed，把数据库持久总量显示为 stored events。
 
 ## 查询与 Dashboard 流程
 

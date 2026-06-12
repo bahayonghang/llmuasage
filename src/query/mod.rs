@@ -592,6 +592,9 @@ pub struct SyncSourcePayload {
     pub source: String,
     pub status: String,
     pub tone: String,
+    pub files_processed: i64,
+    pub changed_files: i64,
+    pub skipped_files: i64,
     pub events_seen: i64,
     pub events_inserted: i64,
     pub stored_events: i64,
@@ -2050,6 +2053,9 @@ impl Dashboard {
                         source: row.source,
                         status: status.to_string(),
                         tone: tone.to_string(),
+                        files_processed: row.files_processed,
+                        changed_files: row.changed_files,
+                        skipped_files: (row.files_processed - row.changed_files).max(0),
                         events_seen: row.events_seen,
                         events_inserted: row.events_inserted,
                         stored_events: row.stored_events,
@@ -2407,6 +2413,8 @@ fn map_token_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<TokenSummary> 
 #[derive(Debug)]
 struct SyncStatusRow {
     source: String,
+    files_processed: i64,
+    changed_files: i64,
     events_seen: i64,
     events_inserted: i64,
     stored_events: i64,
@@ -2421,7 +2429,8 @@ fn load_sync_statuses_with_conn(
     let source = filter.source.map(|source| source.as_str().to_string());
     let mut stmt = conn.prepare(
         r#"
-        SELECT source, events_seen, events_inserted, stored_events, updated_at
+        SELECT source, files_processed, changed_files, events_seen, events_inserted,
+               stored_events, updated_at
         FROM source_sync_status
         WHERE (?1 IS NULL OR source = ?1)
         ORDER BY stored_events DESC, source ASC
@@ -2430,10 +2439,12 @@ fn load_sync_statuses_with_conn(
     let rows = stmt.query_map([source], |row| {
         Ok(SyncStatusRow {
             source: row.get(0)?,
-            events_seen: row.get(1)?,
-            events_inserted: row.get(2)?,
-            stored_events: row.get(3)?,
-            updated_at: row.get(4)?,
+            files_processed: row.get(1)?,
+            changed_files: row.get(2)?,
+            events_seen: row.get(3)?,
+            events_inserted: row.get(4)?,
+            stored_events: row.get(5)?,
+            updated_at: row.get(6)?,
             last_error: None,
         })
     })?;

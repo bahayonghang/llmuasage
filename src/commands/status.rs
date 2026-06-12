@@ -26,6 +26,7 @@ pub async fn run(app: &AppContext) -> Result<()> {
     let health = dashboard.health()?;
     let probes = integrations::probe_all(app)?;
     let capability_statuses = source_status::build_source_capability_statuses(&probes, &sources);
+    let platform_statuses = source_status::build_platform_monitor_statuses();
     let lock = store.current_worker_lock()?;
 
     // 1.2 打印人读摘要
@@ -59,6 +60,20 @@ pub async fn run(app: &AppContext) -> Result<()> {
             status.total_tokens,
             status.last_event_at.as_deref().unwrap_or("never"),
             status.display_name
+        );
+    }
+    for platform in platform_statuses {
+        println!(
+            "- Platform monitor {}: status={} parser={} quality={} roots={}/{} privacy={} ({}) next={}",
+            platform.platform_id,
+            platform.probe_status,
+            platform.parser_status,
+            platform.quality.unwrap_or("unavailable"),
+            platform.roots_detected,
+            platform.roots_checked,
+            platform.privacy,
+            platform.display_name,
+            platform.next_action
         );
     }
     for probe in probes {

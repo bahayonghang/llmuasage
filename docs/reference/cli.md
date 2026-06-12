@@ -123,6 +123,8 @@ llmusage sync --rebuild --allow-lossy-rebuild
 
 Imports local sources. `--json-events` writes NDJSON lifecycle events to stdout. `--allow-lossy-rebuild` requires `--rebuild`.
 
+Human summaries include per-source `files`, `changed`, `skipped`, `seen`, `committed`, and `stored_events`. `skipped` is derived from existing cursor/fingerprint evidence for file-backed sources and from the OpenCode SQLite high-water cursor for DB-backed sync. `committed` is the newly inserted event delta after SQLite dedupe.
+
 ## Status and diagnostics
 
 ### `llmusage status`
@@ -172,6 +174,8 @@ llmusage dash
 ```
 
 Interactive terminal dashboard. The old hidden `tui` command is a deprecated alias.
+
+Controls: `tab`/`shift-tab` or `1`-`8` switch views, `j`/`k` or arrows scroll, `h`/`l` change the active time window where applicable, `s` opens the source picker, `r` refreshes dashboard data, `R` toggles auto-refresh, `x` runs sync through the existing sync worker lock for the current source filter, `?` opens help/settings, and `q` exits.
 
 ### `llmusage serve`
 

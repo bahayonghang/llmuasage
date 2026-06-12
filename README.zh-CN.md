@@ -54,6 +54,8 @@ llmusage serve
 | OpenCode | OpenCode 本地 SQLite 用量库与 `session.updated` plugin event |
 | Antigravity | Antigravity CLI `Stop` hook（`~/.gemini/config/hooks.json`，`--source antigravity`）；没有经过验证的 token schema 前不注册 transcript parser |
 
+`source-status` 和 `dash` 还会显示 Gemini CLI、Cursor、Copilot、Zed、Kiro、Goose、Grok、Kimi/Qwen、Roo/Kilo/Cline、Codebuff、Crush、Warp/Oz、Amp、Hermes、Trae 等仅监控平台。仅监控表示 llmusage 可以探测候选本地路径并说明为什么阻塞解析；不会写入 0 用量行，也不会写入未验证 token 行。
+
 ## 常用命令
 
 ```powershell
@@ -68,6 +70,8 @@ llmusage export html --out .\llmusage-report
 ```
 
 报表命令只是只读 SQLite 查询；如果数据库过旧，先运行 `llmusage sync`。
+
+`llmusage dash` 使用 tokscale 风格的终端 Dashboard。快捷键：`tab`/`shift-tab` 或 `1`-`8` 切换视图，`s` 打开来源选择器，`r` 刷新 Dashboard 数据，`R` 切换自动刷新，`x` 按当前来源筛选运行 sync，`?` 打开帮助/设置，`q` 退出。
 
 浏览器 Dashboard 包含行为面板和本地 Cost Explorer workbench，可按时间 × 指标 × 分组做切片分析，并支持工具/非工具成本归因与离线快照导出。
 

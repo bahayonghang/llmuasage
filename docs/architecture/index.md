@@ -24,6 +24,8 @@ The runtime state lives under `~/.llmusage/` unless overridden by `--home <PATH>
 
 Adding a source means adding a `SourceKind` variant plus a descriptor. A parser or integration is added only when the descriptor's capability declaration and tests justify it. Passive readers also require real local samples, fixture coverage, sync-twice idempotency, cursor/rebuild behavior, token-quality declaration, and privacy review before they can write usage rows.
 
+`PlatformMonitorDescriptor` is the wider monitoring catalog. It can describe parserless candidates from tokscale-style evidence, including Gemini CLI, Cursor, Copilot, Zed, Kiro, Goose, Grok, Kimi/Qwen, Roo/Kilo/Cline, Codebuff, Crush, Warp/Oz, Amp, Hermes, and Trae. Monitor descriptors may surface detected/unavailable roots, parser support, privacy class, token quality, and next action in `source-status` and `dash`, but they are not persisted as `SourceKind` and cannot write usage rows.
+
 ## Sync flow
 
 1. A tool-specific hook or plugin triggers `llmusage hook-run`, or the user runs `llmusage sync`.
@@ -36,6 +38,8 @@ Adding a source means adding a `SourceKind` variant plus a descriptor. A parser 
 Codex `notify` is a singleton integration. llmusage backs up a distinct original notify during install and chains it best-effort after llmusage hook handling, skipping recursive/self commands and never blocking hook success on the chained command.
 
 `SyncShard` is the parser/writer boundary. Parsers do not write SQLite directly.
+
+Repeated sync work is avoided through per-source cursors. Codex and Claude compare file size, mtime, head fingerprint, tail signature, and offset before reparsing; OpenCode compares DB identity and message high-water cursors. Sync stats expose unchanged work as skipped, changed artifacts as parsed, newly inserted rows as committed, and durable totals as stored events.
 
 ## Query and dashboard flow
 

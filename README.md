@@ -54,6 +54,8 @@ What this does:
 | OpenCode | OpenCode local SQLite usage database plus `session.updated` plugin event |
 | Antigravity | Antigravity CLI `Stop` hook in `~/.gemini/config/hooks.json` (`--source antigravity`); no transcript parser is registered until a verified token-bearing schema exists |
 
+`source-status` and `dash` also show monitor-only platform candidates such as Gemini CLI, Cursor, Copilot, Zed, Kiro, Goose, Grok, Kimi/Qwen, Roo/Kilo/Cline, Codebuff, Crush, Warp/Oz, Amp, Hermes, and Trae. Monitor-only means llmusage can probe candidate local roots and explain why parsing is blocked; it does not write zero usage rows or untrusted token rows.
+
 ## Common commands
 
 ```powershell
@@ -68,6 +70,8 @@ llmusage export html --out .\llmusage-report
 ```
 
 Report commands are read-only SQLite queries; run `llmusage sync` when the database is stale.
+
+`llmusage dash` uses a tokscale-style terminal dashboard. Keyboard controls: `tab`/`shift-tab` or `1`-`8` switch views, `s` opens the source picker, `r` refreshes dashboard data, `R` toggles auto-refresh, `x` runs sync for the current source filter, `?` opens help/settings, and `q` exits.
 
 The browser dashboard includes behavior panels and a local Cost Explorer workbench for time × metric × group-by slicing, including tool/non-tool cost attribution and offline snapshot export.
 

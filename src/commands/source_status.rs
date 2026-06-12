@@ -3,7 +3,10 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 use crate::{
-    domain::source_descriptor::{ActivationMode, SourceDescriptor, UsageQuality},
+    domain::{
+        platform_monitor::{self, ParserSupportStatus, PlatformProbe},
+        source_descriptor::{ActivationMode, SourceDescriptor, UsageQuality},
+    },
     integrations::IntegrationProbe,
     models::SourceKind,
     query::SourceBreakdown,
@@ -22,6 +25,22 @@ pub struct SourceCapabilityStatus {
     pub total_tokens: i64,
     pub last_event_at: Option<String>,
     pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct PlatformMonitorStatus {
+    pub platform_id: &'static str,
+    pub display_name: &'static str,
+    pub source: Option<SourceKind>,
+    pub probe_status: &'static str,
+    pub parser_status: &'static str,
+    pub quality: Option<&'static str>,
+    pub privacy: &'static str,
+    pub roots_checked: usize,
+    pub roots_detected: usize,
+    pub artifact_patterns: &'static [&'static str],
+    pub detail: String,
+    pub next_action: &'static str,
 }
 
 pub fn build_source_capability_statuses(
@@ -47,6 +66,30 @@ pub fn build_source_capability_statuses(
             source_status_from_parts(descriptor, probe, source_usage)
         })
         .collect()
+}
+
+pub fn build_platform_monitor_statuses() -> Vec<PlatformMonitorStatus> {
+    platform_monitor::probe_registered_platforms()
+        .into_iter()
+        .map(platform_monitor_status_from_probe)
+        .collect()
+}
+
+fn platform_monitor_status_from_probe(probe: PlatformProbe) -> PlatformMonitorStatus {
+    PlatformMonitorStatus {
+        platform_id: probe.platform_id,
+        display_name: probe.display_name,
+        source: probe.source_kind,
+        probe_status: probe.status.as_str(),
+        parser_status: parser_status_label(probe.parser_status),
+        quality: probe.quality,
+        privacy: probe.privacy,
+        roots_checked: probe.roots_checked,
+        roots_detected: probe.roots_detected,
+        artifact_patterns: probe.artifact_patterns,
+        detail: probe.detail,
+        next_action: probe.next_action,
+    }
 }
 
 fn source_status_from_parts(
@@ -113,9 +156,16 @@ fn quality_label(quality: UsageQuality) -> &'static str {
     }
 }
 
+fn parser_status_label(status: ParserSupportStatus) -> &'static str {
+    status.as_str()
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
+        domain::platform_monitor::{
+            ParserSupportStatus, PlatformProbe, PlatformProbeStatus, registered_platform_monitors,
+        },
         domain::source_descriptor::{
             ActivationMode, HookActivation, PrivacyClass, SourceCapabilities, SourceDescriptor,
             UsageQuality,
@@ -125,7 +175,7 @@ mod tests {
         query::SourceBreakdown,
     };
 
-    use super::source_status_from_parts;
+    use super::{platform_monitor_status_from_probe, source_status_from_parts};
 
     const TEST_DESCRIPTOR: SourceDescriptor = SourceDescriptor {
         kind: SourceKind::Codex,
@@ -178,5 +228,34 @@ mod tests {
         assert!(!status.configured);
         assert_eq!(status.status, "degraded_hook_missing");
         assert_eq!(status.total_tokens, 42);
+    }
+
+    #[test]
+    fn platform_status_keeps_monitor_only_platform_out_of_source_kind() {
+        let gemini = registered_platform_monitors()
+            .iter()
+            .find(|descriptor| descriptor.platform_id == "gemini")
+            .expect("gemini monitor should exist");
+        let probe = PlatformProbe {
+            platform_id: gemini.platform_id,
+            display_name: gemini.display_name,
+            source_kind: gemini.source_kind,
+            status: PlatformProbeStatus::Unavailable,
+            parser_status: ParserSupportStatus::BlockedNoSamples,
+            quality: None,
+            privacy: "local_artifacts",
+            roots_checked: 1,
+            roots_detected: 0,
+            artifact_patterns: gemini.artifact_patterns,
+            detail: "no candidate roots detected".to_string(),
+            next_action: gemini.next_action,
+        };
+
+        let status = platform_monitor_status_from_probe(probe);
+
+        assert_eq!(status.platform_id, "gemini");
+        assert_eq!(status.source, None);
+        assert_eq!(status.probe_status, "unavailable");
+        assert_eq!(status.parser_status, "blocked_no_samples");
     }
 }

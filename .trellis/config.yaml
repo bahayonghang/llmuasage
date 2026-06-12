@@ -111,6 +111,9 @@ channel:
 
 # Auto-detected monorepo packages
 packages:
+  llmusage:
+    path: .
+    git: true
   ccexplorer:
     path: ref/ccexplorer
     git: true
@@ -126,4 +129,4 @@ packages:
   vibeusage:
     path: ref/vibeusage
     git: true
-default_package: ccexplorer
+default_package: llmusage
