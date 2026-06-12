@@ -109,3 +109,38 @@ Implemented monitor-only source descriptors, skipped-file sync stats, tokscale-s
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: Optimize dash overview and warning styling
+
+**Date**: 2026-06-12
+**Task**: Optimize dash overview and warning styling
+**Package**: llmusage
+**Branch**: `dev`
+
+### Summary
+
+Committed the 0.8.0 version sync, enriched the terminal dash overview, styled the deprecated tui warning, archived the Trellis task, and recorded validation.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `790ff1a0428dbee8f8b2449c1bf1a301ec162b3e` | (see git log) |
+| `b696248bdd7616be1005e17332cba61f10927659` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
