@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 2
+- **Total Sessions**: 3
 - **Last Active**: 2026-06-12
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~77 | Active |
+| `journal-1.md` | ~111 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 3 | 2026-06-12 | Complete tokscale collection and TUI migration | `0b4d81f` | `dev` |
 | 2 | 2026-06-12 | Bootstrap Trellis Guidelines | `0f26c83`, `9cca110`, `7bf6617` | `dev` |
 | 1 | 2026-06-05 | Optimize serve dashboard range switching | `065fc4d` | `dev` |
 <!-- @@@/auto:session-history -->

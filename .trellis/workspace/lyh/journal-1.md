@@ -75,3 +75,37 @@ Committed project cleanup, Trellis workflow metadata, and source-backed bootstra
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: Complete tokscale collection and TUI migration
+
+**Date**: 2026-06-12
+**Task**: Complete tokscale collection and TUI migration
+**Package**: llmusage
+**Branch**: `dev`
+
+### Summary
+
+Implemented monitor-only source descriptors, skipped-file sync stats, tokscale-style TUI affordances, docs/spec updates, and completed full just ci validation.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0b4d81f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
