@@ -306,6 +306,14 @@ impl ColorMode {
         Self::Auto
     }
 
+    pub fn stderr_enabled(self) -> bool {
+        match self {
+            Self::Always => true,
+            Self::Never => false,
+            Self::Auto => stderr_is_terminal(),
+        }
+    }
+
     fn enabled(self) -> bool {
         match self {
             Self::Always => true,
@@ -973,6 +981,17 @@ fn stdout_is_terminal() -> bool {
 
 #[cfg(test)]
 fn stdout_is_terminal() -> bool {
+    false
+}
+
+#[cfg(not(test))]
+fn stderr_is_terminal() -> bool {
+    use std::io::IsTerminal;
+    std::io::stderr().is_terminal()
+}
+
+#[cfg(test)]
+fn stderr_is_terminal() -> bool {
     false
 }
 

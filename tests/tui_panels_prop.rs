@@ -438,6 +438,20 @@ fn render_usage_text(
     buffer_text(&terminal)
 }
 
+fn render_overview_text(payload: OverviewPayload, width: u16, height: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    let area = Rect::new(0, 0, width, height);
+    let data: Option<Result<OverviewPayload, String>> = Some(Ok(payload));
+
+    terminal
+        .draw(|frame| {
+            llmusage::tui::panels::overview::render(frame, area, &data);
+        })
+        .unwrap();
+
+    buffer_text(&terminal)
+}
+
 fn sample_overview_payload() -> OverviewPayload {
     OverviewPayload {
         generated_at: "2026-06-12T00:00:00Z".to_string(),
@@ -458,6 +472,42 @@ fn sample_overview_payload() -> OverviewPayload {
         cache_efficiency: 0.25,
         last_sync_at: Some("2026-06-12T00:00:00Z".to_string()),
         last_export_at: None,
+    }
+}
+
+#[test]
+fn overview_panel_renders_summary_sections_and_24h_pulse() {
+    let mut payload = sample_overview_payload();
+    payload.last_24h = TokenSummary {
+        input_tokens: 1_000,
+        cache_creation_tokens: 500,
+        cache_read_tokens: 1_000,
+        output_tokens: 2_000,
+        reasoning_output_tokens: 1_000,
+        total_tokens: 5_500,
+    };
+    payload.last_24h_events = 2;
+
+    let text = render_overview_text(payload, 120, 30);
+
+    for expected in [
+        "Token Mix",
+        "Recent Activity",
+        "Freshness",
+        "24h Pulse",
+        "Input",
+        "Cache read",
+        "Avg/event",
+        "Generated",
+        "All-time share",
+        "5,500",
+        "2,750",
+        "25.0%",
+    ] {
+        assert!(
+            text.contains(expected),
+            "overview panel should contain '{expected}', got: {text}"
+        );
     }
 }
 

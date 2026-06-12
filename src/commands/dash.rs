@@ -1,14 +1,30 @@
 use anyhow::Result;
+use crossterm::style::{Color, Stylize, style};
 use tracing::info;
 
+use crate::tui::report_table::ColorMode;
 use crate::{app::AppContext, store::Store, tui};
 
+const TUI_DEPRECATION_WARNING: &str = "warning: `tui` is deprecated, use `llmusage dash` instead";
+
 /// Returns the deprecation warning message if `deprecated` is true.
-pub fn deprecation_message(deprecated: bool) -> Option<&'static str> {
-    if deprecated {
-        Some("warning: `tui` is deprecated, use `llmusage dash` instead")
+pub fn deprecation_message(deprecated: bool) -> Option<String> {
+    deprecation_message_with_color(deprecated, ColorMode::from_env())
+}
+
+pub fn deprecation_message_with_color(deprecated: bool, color_mode: ColorMode) -> Option<String> {
+    if !deprecated {
+        return None;
+    }
+
+    if color_mode.stderr_enabled() {
+        let warning = style("warning:").with(Color::Yellow).bold();
+        let command = style("llmusage dash").with(Color::Cyan).bold();
+        Some(format!(
+            "{warning} `tui` is deprecated, use `{command}` instead"
+        ))
     } else {
-        None
+        Some(TUI_DEPRECATION_WARNING.to_string())
     }
 }
 
@@ -32,8 +48,9 @@ mod tests {
     use clap::Parser;
 
     use crate::commands::{Cli, Commands};
+    use crate::tui::report_table::ColorMode;
 
-    use super::deprecation_message;
+    use super::{TUI_DEPRECATION_WARNING, deprecation_message, deprecation_message_with_color};
 
     #[test]
     fn dash_parses_from_args() {
@@ -89,5 +106,20 @@ mod tests {
     fn no_deprecation_for_dash_variant() {
         // `Commands::Dash` is dispatched with `deprecated=false`.
         assert!(deprecation_message(false).is_none());
+    }
+
+    #[test]
+    fn deprecation_warning_can_force_ansi_styles() {
+        let message = deprecation_message_with_color(true, ColorMode::Always).unwrap();
+        assert!(message.contains("\u{1b}["));
+        assert!(message.contains("warning:"));
+        assert!(message.contains("llmusage dash"));
+    }
+
+    #[test]
+    fn deprecation_warning_can_disable_ansi_styles() {
+        let message = deprecation_message_with_color(true, ColorMode::Never).unwrap();
+        assert_eq!(message, TUI_DEPRECATION_WARNING);
+        assert!(!message.contains("\u{1b}["));
     }
 }
