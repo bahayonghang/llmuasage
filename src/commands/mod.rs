@@ -77,6 +77,9 @@ pub enum Commands {
         json_events: bool,
     },
     Status,
+    /// Show parser-backed source and monitor-only platform status.
+    #[command(name = "source-status")]
+    SourceStatus,
     Diagnostics {
         /// Write the diagnostics JSON dump to a file instead of stdout.
         #[arg(long)]
@@ -230,6 +233,7 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
             .await
         }
         Some(Commands::Status) => status::run(&app).await,
+        Some(Commands::SourceStatus) => source_status::run(&app).await,
         Some(Commands::Diagnostics {
             out,
             forget_file,
@@ -262,7 +266,7 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use clap::Parser;
+    use clap::{CommandFactory, Parser};
 
     use super::{Cli, Commands};
 
@@ -280,5 +284,21 @@ mod tests {
         let err = Cli::try_parse_from(["llmusage", "sync", "--source", "gemini"])
             .expect_err("gemini source id should be rejected");
         assert!(err.to_string().contains("antigravity"));
+    }
+
+    #[test]
+    fn source_status_parses_from_args() {
+        let cli =
+            Cli::try_parse_from(["llmusage", "source-status"]).expect("source-status should parse");
+        assert!(matches!(cli.command, Some(Commands::SourceStatus)));
+    }
+
+    #[test]
+    fn source_status_visible_in_help_text() {
+        let help = Cli::command().render_help().to_string();
+        assert!(
+            help.contains("source-status"),
+            "expected `source-status` in help output, got: {help}"
+        );
     }
 }

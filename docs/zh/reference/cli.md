@@ -135,6 +135,14 @@ llmusage status
 
 输出人读的数据库、来源、集成和最近运行摘要。
 
+### `llmusage source-status`
+
+```powershell
+llmusage source-status
+```
+
+输出解析器支持的来源与仅监控平台状态。
+
 ### `llmusage diagnostics`
 
 ```powershell

@@ -63,6 +63,7 @@ llmusage daily --source codex --since 20260501 --until 20260518
 llmusage monthly --breakdown
 llmusage session --project my-repo
 llmusage blocks --active
+llmusage source-status
 llmusage help --zh
 llmusage dash
 llmusage logs --limit 50 --level warn

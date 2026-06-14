@@ -1,16 +1,19 @@
 use std::collections::BTreeMap;
 
+use anyhow::Result;
 use serde::Serialize;
 
 use crate::{
+    app::AppContext,
     domain::{
         platform_monitor::{self, ParserSupportStatus, PlatformProbe},
         source_descriptor::{ActivationMode, SourceDescriptor, UsageQuality},
     },
-    integrations::IntegrationProbe,
+    integrations::{self, IntegrationProbe},
     models::SourceKind,
-    query::SourceBreakdown,
+    query::{Dashboard, SourceBreakdown},
     registry,
+    store::Store,
 };
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -43,6 +46,20 @@ pub struct PlatformMonitorStatus {
     pub next_action: &'static str,
 }
 
+pub async fn run(app: &AppContext) -> Result<()> {
+    let store = Store::new(&app.paths)?;
+    store.bootstrap()?;
+    let dashboard = Dashboard::open(&store)?;
+    let sources = dashboard.source_breakdown(&Default::default())?;
+    let probes = integrations::probe_all(app)?;
+    let capability_statuses = build_source_capability_statuses(&probes, &sources);
+    let platform_statuses = build_platform_monitor_statuses();
+
+    println!("Source status:");
+    print_human_statuses(&capability_statuses, &platform_statuses);
+    Ok(())
+}
+
 pub fn build_source_capability_statuses(
     probes: &[IntegrationProbe],
     sources: &[SourceBreakdown],
@@ -73,6 +90,39 @@ pub fn build_platform_monitor_statuses() -> Vec<PlatformMonitorStatus> {
         .into_iter()
         .map(platform_monitor_status_from_probe)
         .collect()
+}
+
+pub fn print_human_statuses(
+    capability_statuses: &[SourceCapabilityStatus],
+    platform_statuses: &[PlatformMonitorStatus],
+) {
+    for status in capability_statuses {
+        println!(
+            "- Source status {}: activation={} status={} configured={} quality={} total={} last={} ({})",
+            status.source,
+            status.activation,
+            status.status,
+            status.configured,
+            status.quality,
+            status.total_tokens,
+            status.last_event_at.as_deref().unwrap_or("never"),
+            status.display_name
+        );
+    }
+    for platform in platform_statuses {
+        println!(
+            "- Platform monitor {}: status={} parser={} quality={} roots={}/{} privacy={} ({}) next={}",
+            platform.platform_id,
+            platform.probe_status,
+            platform.parser_status,
+            platform.quality.unwrap_or("unavailable"),
+            platform.roots_detected,
+            platform.roots_checked,
+            platform.privacy,
+            platform.display_name,
+            platform.next_action
+        );
+    }
 }
 
 fn platform_monitor_status_from_probe(probe: PlatformProbe) -> PlatformMonitorStatus {

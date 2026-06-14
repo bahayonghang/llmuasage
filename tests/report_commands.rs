@@ -773,6 +773,7 @@ fn report_help_and_legacy_help_still_parse() -> Result<()> {
         vec!["session", "--help"],
         vec!["blocks", "--help"],
         vec!["statusline", "--help"],
+        vec!["source-status", "--help"],
         vec!["export", "html", "--help"],
     ] {
         let output = fixture.output(&args)?;
@@ -824,6 +825,22 @@ fn report_help_and_legacy_help_still_parse() -> Result<()> {
     let legacy_help_stdout = String::from_utf8(legacy_help.stdout)?;
     assert!(legacy_help_stdout.contains("last 7 days"));
     assert!(legacy_help_stdout.contains("Usage: llmusage"));
+    Ok(())
+}
+
+#[test]
+fn source_status_command_executes_against_fresh_runtime() -> Result<()> {
+    let fixture = ReportCliFixture::new()?;
+    let output = fixture.output_with_env(
+        &["source-status"],
+        &[("LLMUSAGE_LOG", "off"), ("RUST_LOG", "off")],
+    )?;
+    assert!(output.status.success(), "{output:?}");
+
+    let stdout = String::from_utf8(output.stdout)?;
+    assert!(stdout.contains("Source status:"), "{stdout}");
+    assert!(stdout.contains("- Source status codex:"), "{stdout}");
+    assert!(stdout.contains("- Platform monitor"), "{stdout}");
     Ok(())
 }
 

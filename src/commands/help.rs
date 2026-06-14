@@ -322,6 +322,10 @@ const ENGLISH_COMMANDS: &[(&str, &str)] = &[
         "Print database, source, integration, and recent-run status.",
     ),
     (
+        "source-status",
+        "Print parser-backed source and monitor-only platform status.",
+    ),
+    (
         "diagnostics",
         "Emit diagnostics JSON or forget an intentionally ignored source file.",
     ),
@@ -435,6 +439,7 @@ const CHINESE_COMMANDS: &[(&str, &str)] = &[
         "导入本地 Codex、Claude、OpenCode 与 Antigravity 用量记录。",
     ),
     ("status", "输出数据库、来源、集成与最近运行状态。"),
+    ("source-status", "输出解析器支持的来源与仅监控平台状态。"),
     ("diagnostics", "输出诊断 JSON，或显式忽略某个来源文件。"),
     ("doctor", "运行健康检查，也可从本地文件刷新价格。"),
     ("logs", "查询本地结构化运行日志与最近命令记录。"),
@@ -534,6 +539,7 @@ mod tests {
         let help = top_level_help_with_width(HelpLanguage::English, 80);
         assert!(help.contains("┌"));
         assert!(help.contains("│ Command"));
+        assert!(help.contains("source-status"));
         assert!(help.contains("Report options:"));
         assert!(help.contains("llmusage help --zh"));
         assert!(!help.contains("| --- |"));
@@ -544,6 +550,7 @@ mod tests {
     fn renders_chinese_with_unicode_width_wrapping() {
         let zh = top_level_help_with_width(HelpLanguage::Chinese, 70);
         assert!(zh.contains("│ 命令"));
+        assert!(zh.contains("source-status"));
         assert!(zh.contains("报表参数"));
         assert!(zh.contains("示例"));
         assert!(!zh.contains("| --- |"));

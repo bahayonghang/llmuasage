@@ -135,6 +135,14 @@ llmusage status
 
 Prints a human-readable database, source, integration, and recent-run summary.
 
+### `llmusage source-status`
+
+```powershell
+llmusage source-status
+```
+
+Prints parser-backed source and monitor-only platform status.
+
 ### `llmusage diagnostics`
 
 ```powershell

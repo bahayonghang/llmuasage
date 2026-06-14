@@ -49,33 +49,7 @@ pub async fn run(app: &AppContext) -> Result<()> {
             source.last_event_at.as_deref().unwrap_or("never")
         );
     }
-    for status in capability_statuses {
-        println!(
-            "- Source status {}: activation={} status={} configured={} quality={} total={} last={} ({})",
-            status.source,
-            status.activation,
-            status.status,
-            status.configured,
-            status.quality,
-            status.total_tokens,
-            status.last_event_at.as_deref().unwrap_or("never"),
-            status.display_name
-        );
-    }
-    for platform in platform_statuses {
-        println!(
-            "- Platform monitor {}: status={} parser={} quality={} roots={}/{} privacy={} ({}) next={}",
-            platform.platform_id,
-            platform.probe_status,
-            platform.parser_status,
-            platform.quality.unwrap_or("unavailable"),
-            platform.roots_detected,
-            platform.roots_checked,
-            platform.privacy,
-            platform.display_name,
-            platform.next_action
-        );
-    }
+    source_status::print_human_statuses(&capability_statuses, &platform_statuses);
     for probe in probes {
         println!(
             "- Integration {}: {} ({})",
