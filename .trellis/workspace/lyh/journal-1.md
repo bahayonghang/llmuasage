@@ -144,3 +144,37 @@ Committed the 0.8.0 version sync, enriched the terminal dash overview, styled th
 ### Next Steps
 
 - None - task complete
+
+
+## Session 5: Restore source-status CLI command
+
+**Date**: 2026-06-14
+**Task**: Restore source-status CLI command
+**Package**: llmusage
+**Branch**: `dev`
+
+### Summary
+
+Restored the documented source-status command, shared status rendering with status, updated CLI help/docs, and verified focused/full gates.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `617baa3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 4
-- **Last Active**: 2026-06-12
+- **Total Sessions**: 5
+- **Last Active**: 2026-06-14
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~146 | Active |
+| `journal-1.md` | ~180 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 5 | 2026-06-14 | Restore source-status CLI command | `617baa3` | `dev` |
 | 4 | 2026-06-12 | Optimize dash overview and warning styling | `790ff1a0428dbee8f8b2449c1bf1a301ec162b3e`, `b696248bdd7616be1005e17332cba61f10927659` | `dev` |
 | 3 | 2026-06-12 | Complete tokscale collection and TUI migration | `0b4d81f` | `dev` |
 | 2 | 2026-06-12 | Bootstrap Trellis Guidelines | `0f26c83`, `9cca110`, `7bf6617` | `dev` |
