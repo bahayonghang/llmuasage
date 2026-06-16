@@ -194,6 +194,17 @@ llmusage serve --port 37421
 
 Starts the local web dashboard and JSON API on `127.0.0.1`.
 
+### `llmusage codex-tracer`
+
+```powershell
+llmusage codex-tracer
+llmusage codex-tracer --port 9876
+llmusage codex-tracer --no-open
+llmusage codex-tracer --rebuild
+```
+
+Starts the Codex-only local dashboard. It reads rollout JSONL from `$CODEX_HOME/rollout/` or `~/.codex/rollout/`, writes a separate `codex-tracer.db`, and serves a dedicated browser UI with detailed token accounting and thread tracking.
+
 ### `llmusage export html`
 
 ```powershell

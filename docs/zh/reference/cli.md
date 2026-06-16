@@ -194,6 +194,17 @@ llmusage serve --port 37421
 
 在 `127.0.0.1` 启动本地 Web Dashboard 和 JSON API。
 
+### `llmusage codex-tracer`
+
+```powershell
+llmusage codex-tracer
+llmusage codex-tracer --port 9876
+llmusage codex-tracer --no-open
+llmusage codex-tracer --rebuild
+```
+
+启动只面向 Codex 的本地 Dashboard。它会从 `$CODEX_HOME/rollout/` 或 `~/.codex/rollout/` 读取 rollout JSONL，写入独立的 `codex-tracer.db`，并提供带细粒度 token 会计和线程追踪的专用浏览器界面。
+
 ### `llmusage export html`
 
 ```powershell

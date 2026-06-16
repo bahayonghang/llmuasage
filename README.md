@@ -66,6 +66,7 @@ llmusage blocks --active
 llmusage source-status
 llmusage help --zh
 llmusage dash
+llmusage codex-tracer
 llmusage logs --limit 50 --level warn
 llmusage export html --out .\llmusage-report
 ```
@@ -75,6 +76,17 @@ Report commands are read-only SQLite queries; run `llmusage sync` when the datab
 `llmusage dash` uses a tokscale-style terminal dashboard. Keyboard controls: `tab`/`shift-tab` or `1`-`8` switch views, `s` opens the source picker, `r` refreshes dashboard data, `R` toggles auto-refresh, `x` runs sync for the current source filter, `?` opens help/settings, and `q` exits.
 
 The browser dashboard includes behavior panels and a local Cost Explorer workbench for time × metric × group-by slicing, including tool/non-tool cost attribution and offline snapshot export.
+
+## Codex tracer
+
+```powershell
+llmusage codex-tracer
+llmusage codex-tracer --port 9876
+llmusage codex-tracer --no-open
+llmusage codex-tracer --rebuild
+```
+
+`codex-tracer` is a Codex-only local dashboard. It reads rollout JSONL from `$CODEX_HOME/rollout/` or `~/.codex/rollout/`, builds a separate `~/.llmusage/codex-tracer.db`, and serves a dedicated browser UI with detailed token accounting and thread tracking.
 
 ## Safety defaults
 
@@ -88,6 +100,7 @@ The browser dashboard includes behavior panels and a local Cost Explorer workben
 ## Documentation
 
 - [Guide](./docs/guide/getting-started.md)
+- [Codex tracer guide](./docs/guide/codex-tracer.md)
 - [Dashboard](./docs/dashboard/index.md)
 - [CLI reference](./docs/reference/cli.md)
 - [Safety](./docs/safety/index.md)

@@ -32,6 +32,7 @@ features:
 | Install and initialize local hooks | [Install and initialize](./guide/install-and-init) |
 | Import local usage | [First sync](./guide/first-sync) |
 | Read token and cost reports | [First report](./guide/first-report) |
+| Inspect Codex-only call details | [Codex Tracer](./guide/codex-tracer) |
 | Use the browser dashboard | [Dashboard](./dashboard/) |
 | Export a static report | [Export HTML](./guide/export-html) |
 | Check destructive boundaries | [Safety](./safety/) |

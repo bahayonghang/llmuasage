@@ -80,6 +80,14 @@ llmusage serve
 
 `serve` 只监听 `127.0.0.1`，会打印本地 URL，并尝试打开默认浏览器。
 
+Codex 专属浏览器 Dashboard：
+
+```powershell
+llmusage codex-tracer
+```
+
+当你需要独立的 `codex-tracer.db` 以及 Codex 专属调用/线程细节时，使用这个命令。
+
 ## 6. 导出离线报告
 
 ```powershell
@@ -92,6 +100,7 @@ llmusage export html --out .\llmusage-report
 
 - [第一次同步](./first-sync)：了解安全重建与 NDJSON 进度。
 - [第一次报表](./first-report)：了解报表筛选与表格语义。
+- [Codex Tracer](./codex-tracer)：了解专用 Codex Dashboard 与重建行为。
 - [Dashboard](../dashboard/)：了解 `llmusage serve`、行为面板和降级状态。
 - [安全说明](../safety/)：了解本地数据路径与破坏性边界。
 - [CLI 参考](../reference/cli)：查精确参数。

@@ -66,6 +66,7 @@ llmusage blocks --active
 llmusage source-status
 llmusage help --zh
 llmusage dash
+llmusage codex-tracer
 llmusage logs --limit 50 --level warn
 llmusage export html --out .\llmusage-report
 ```
@@ -75,6 +76,17 @@ llmusage export html --out .\llmusage-report
 `llmusage dash` 使用 tokscale 风格的终端 Dashboard。快捷键：`tab`/`shift-tab` 或 `1`-`8` 切换视图，`s` 打开来源选择器，`r` 刷新 Dashboard 数据，`R` 切换自动刷新，`x` 按当前来源筛选运行 sync，`?` 打开帮助/设置，`q` 退出。
 
 浏览器 Dashboard 包含行为面板和本地 Cost Explorer workbench，可按时间 × 指标 × 分组做切片分析，并支持工具/非工具成本归因与离线快照导出。
+
+## Codex Tracer
+
+```powershell
+llmusage codex-tracer
+llmusage codex-tracer --port 9876
+llmusage codex-tracer --no-open
+llmusage codex-tracer --rebuild
+```
+
+`codex-tracer` 是一个只面向 Codex 的本地 Dashboard。它会从 `$CODEX_HOME/rollout/` 或 `~/.codex/rollout/` 读取 rollout JSONL，构建独立的 `~/.llmusage/codex-tracer.db`，然后启动带细粒度 token 会计和线程追踪的专用浏览器界面。
 
 ## 安全默认值
 
@@ -88,6 +100,7 @@ llmusage export html --out .\llmusage-report
 ## 文档
 
 - [指南](./docs/zh/guide/getting-started.md)
+- [Codex Tracer 指南](./docs/zh/guide/codex-tracer.md)
 - [Dashboard](./docs/zh/dashboard/index.md)
 - [CLI 参考](./docs/zh/reference/cli.md)
 - [安全说明](./docs/zh/safety/index.md)

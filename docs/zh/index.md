@@ -32,6 +32,7 @@ features:
 | 安装并初始化本地 hook | [安装与初始化](./guide/install-and-init) |
 | 导入本地用量 | [第一次同步](./guide/first-sync) |
 | 查看 token 与成本报表 | [第一次报表](./guide/first-report) |
+| 查看 Codex 专属调用明细 | [Codex Tracer](./guide/codex-tracer) |
 | 使用浏览器 Dashboard | [Dashboard](./dashboard/) |
 | 导出静态报告 | [导出 HTML](./guide/export-html) |
 | 检查破坏性边界 | [安全说明](./safety/) |

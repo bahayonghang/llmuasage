@@ -80,6 +80,14 @@ llmusage serve
 
 `serve` binds to `127.0.0.1`, prints the local URL, and tries to open the default browser.
 
+Codex-only browser dashboard:
+
+```powershell
+llmusage codex-tracer
+```
+
+Use this when you want Codex-specific call and thread details in a dedicated `codex-tracer.db`.
+
 ## 6. Export an offline report
 
 ```powershell
@@ -92,6 +100,7 @@ The export writes a static dashboard snapshot with `index.html`, `snapshot.json`
 
 - [First sync](./first-sync) for safe rebuild behavior and NDJSON progress.
 - [First report](./first-report) for report filters and table semantics.
+- [Codex Tracer](./codex-tracer) for the dedicated Codex dashboard and rebuild behavior.
 - [Dashboard](../dashboard/) for `llmusage serve` filters, behavior panels, and degraded states.
 - [Safety](../safety/) for local data paths and destructive boundaries.
 - [CLI reference](../reference/cli) for exact flags.
