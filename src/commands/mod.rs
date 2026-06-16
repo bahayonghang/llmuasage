@@ -7,6 +7,7 @@ use tracing::{error, info};
 use crate::{app::AppContext, models::SourceKind};
 
 pub mod blocks;
+pub mod codex_tracer;
 pub mod daily;
 pub mod dash;
 pub mod diagnostics;
@@ -135,6 +136,19 @@ pub enum Commands {
         #[arg(long)]
         purge: bool,
     },
+    /// Codex-specific usage tracker with detailed token accounting and thread tracking.
+    #[command(name = "codex-tracer")]
+    CodexTracer {
+        /// Port to listen on (default: 8765)
+        #[arg(long, default_value_t = 8765)]
+        port: u16,
+        /// Don't automatically open browser
+        #[arg(long)]
+        no_open: bool,
+        /// Rebuild database from JSONL files
+        #[arg(long)]
+        rebuild: bool,
+    },
     #[command(name = "hook-run", hide = true)]
     HookRun {
         #[arg(long, value_enum)]
@@ -256,6 +270,11 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
             ExportCommand::Html { out } => export::run_html(&app, out).await,
         },
         Some(Commands::Uninstall { purge }) => uninstall::run(&app, purge).await,
+        Some(Commands::CodexTracer {
+            port,
+            no_open,
+            rebuild,
+        }) => codex_tracer::run(&app, port, !no_open, rebuild).await,
         Some(Commands::HookRun {
             source,
             trigger,

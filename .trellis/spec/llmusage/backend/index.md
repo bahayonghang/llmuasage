@@ -15,9 +15,10 @@ output, and dashboard/TUI consumers.
 
 ## Guidelines Index
 
-| Guide | Description | Status |
-|-------|-------------|--------|
-| [Source Sync Contracts](./source-sync-contracts.md) | Parser/source monitor boundaries and sync stats payload contracts | Documented |
+| Guide                                                 | Description                                                                     | Status     |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------- | ---------- |
+| [Source Sync Contracts](./source-sync-contracts.md)   | Parser/source monitor boundaries and sync stats payload contracts               | Documented |
+| [Codex Tracer Contracts](./codex-tracer-contracts.md) | Codex-specific usage tracker with detailed token accounting and thread tracking | Documented |
 
 ## Quality Check
 
