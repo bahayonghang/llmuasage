@@ -178,3 +178,38 @@ Restored the documented source-status command, shared status rendering with stat
 ### Next Steps
 
 - None - task complete
+
+
+## Session 6: Document codex-tracer usage
+
+**Date**: 2026-06-16
+**Task**: Document codex-tracer usage
+**Branch**: `dev`
+
+### Summary
+
+Added codex-tracer docs in English/Chinese, documented the embedded schema.sql contract, and archived the documentation subtask.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `28e5a06` | (see git log) |
+| `28abf32` | (see git log) |
+| `bd7e222` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

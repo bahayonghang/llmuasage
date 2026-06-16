@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 5
-- **Last Active**: 2026-06-14
+- **Total Sessions**: 6
+- **Last Active**: 2026-06-16
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~180 | Active |
+| `journal-1.md` | ~215 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 6 | 2026-06-16 | Document codex-tracer usage | `28e5a06`, `28abf32`, `bd7e222` | `dev` |
 | 5 | 2026-06-14 | Restore source-status CLI command | `617baa3` | `dev` |
 | 4 | 2026-06-12 | Optimize dash overview and warning styling | `790ff1a0428dbee8f8b2449c1bf1a301ec162b3e`, `b696248bdd7616be1005e17332cba61f10927659` | `dev` |
 | 3 | 2026-06-12 | Complete tokscale collection and TUI migration | `0b4d81f` | `dev` |
