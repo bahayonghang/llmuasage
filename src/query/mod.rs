@@ -2456,6 +2456,36 @@ fn load_sync_statuses_with_conn(
 /// `source_sync_status`. Rows show up for any source that appears in either
 /// table, sorted by source identifier.
 fn load_source_diagnostics(conn: &Connection) -> Result<Vec<SourceDiagnostics>> {
+    // Pre-load all source_file paths to avoid N+1 queries in the main loop
+    let mut file_paths_by_source: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    {
+        let mut stmt = conn.prepare("SELECT source, file_path FROM source_file")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (source, path) = row?;
+            file_paths_by_source.entry(source).or_default().push(path);
+        }
+    }
+
+    // Pre-load event counts per source
+    let mut event_counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    {
+        let mut stmt = conn.prepare("SELECT source, COUNT(*) FROM usage_event GROUP BY source")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?.max(0) as u64,
+            ))
+        })?;
+        for row in rows {
+            let (source, count) = row?;
+            event_counts.insert(source, count);
+        }
+    }
+
     let mut stmt = conn.prepare(
         r#"
         WITH file_states AS (
@@ -2487,9 +2517,17 @@ fn load_source_diagnostics(conn: &Connection) -> Result<Vec<SourceDiagnostics>> 
     )?;
     let rows = stmt.query_map([], |row| {
         let source = row.get::<_, String>(0)?;
-        let missing_file_count = missing_source_file_count(conn, &source)?;
+        let missing_file_count = file_paths_by_source
+            .get(&source)
+            .map(|paths| {
+                paths
+                    .iter()
+                    .filter(|path| !std::path::Path::new(path).exists())
+                    .count() as u64
+            })
+            .unwrap_or(0);
         let total_events = if missing_file_count > 0 {
-            source_event_count(conn, &source)?
+            *event_counts.get(&source).unwrap_or(&0)
         } else {
             0
         };
@@ -2510,35 +2548,6 @@ fn load_source_diagnostics(conn: &Connection) -> Result<Vec<SourceDiagnostics>> 
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
-}
-
-fn source_event_count(conn: &Connection, source: &str) -> rusqlite::Result<u64> {
-    Ok(conn
-        .query_row(
-            "SELECT COUNT(*) FROM usage_event WHERE source = ?1",
-            [source],
-            |row| row.get::<_, i64>(0),
-        )?
-        .max(0) as u64)
-}
-
-fn missing_source_file_count(conn: &Connection, source: &str) -> rusqlite::Result<u64> {
-    let mut stmt = conn.prepare(
-        r#"
-        SELECT file_path
-        FROM source_file
-        WHERE source = ?1
-        "#,
-    )?;
-    let rows = stmt.query_map([source], |row| row.get::<_, String>(0))?;
-    let mut count = 0u64;
-    for row in rows {
-        let path = row?;
-        if !std::path::Path::new(&path).exists() {
-            count += 1;
-        }
-    }
-    Ok(count)
 }
 
 fn scalar_i64<P>(conn: &Connection, sql: &str, params: P) -> Result<i64>
