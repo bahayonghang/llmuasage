@@ -29,6 +29,20 @@ src/commands/codex_tracer/
     └── dashboard_*.js  # 19 JavaScript modules
 ```
 
+### Convention: Embedded schema asset
+
+**What**: `schema.sql` is a checked-in runtime asset, not a generated file.
+
+**Why**: `store.rs` loads it with `include_str!("schema.sql")`, so the SQLite schema ships with the binary and stays reviewable as plain SQL.
+
+**Example**:
+```rust
+let schema = include_str!("schema.sql");
+conn.execute_batch(schema)?;
+```
+
+**Related**: Keep the schema file next to `store.rs` so the runtime contract and schema text move together.
+
 ### Data Flow
 
 ```
