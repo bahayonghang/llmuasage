@@ -108,25 +108,3 @@ channel:
 #
 # codex:
 #   dispatch_mode: inline  # or "sub-agent" to dispatch trellis-* sub-agents
-
-# Auto-detected monorepo packages
-packages:
-  llmusage:
-    path: .
-    git: true
-  ccexplorer:
-    path: ref/ccexplorer
-    git: true
-  ccusage-monorepo:
-    path: ref/ccusage
-    git: true
-  codeburn:
-    path: ref/codeburn
-    git: true
-  tokentracker-cli:
-    path: ref/TokenTracker
-    git: true
-  vibeusage:
-    path: ref/vibeusage
-    git: true
-default_package: llmusage
