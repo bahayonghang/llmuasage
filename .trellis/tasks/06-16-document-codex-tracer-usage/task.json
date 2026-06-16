@@ -1,7 +1,7 @@
 {
-  "id": "integrate-codex-tracker",
-  "name": "integrate-codex-tracker",
-  "title": "集成 codex-usage-tracker 到 llmusage",
+  "id": "document-codex-tracer-usage",
+  "name": "document-codex-tracer-usage",
+  "title": "Document codex-tracer usage and inspect schema asset",
   "description": "",
   "status": "in_progress",
   "dev_type": null,
@@ -18,10 +18,8 @@
   "commit": null,
   "pr_url": null,
   "subtasks": [],
-  "children": [
-    "06-16-document-codex-tracer-usage"
-  ],
-  "parent": null,
+  "children": [],
+  "parent": "06-16-integrate-codex-tracker",
   "relatedFiles": [],
   "notes": "",
   "meta": {}
