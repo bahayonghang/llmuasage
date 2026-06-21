@@ -707,6 +707,67 @@ fn opencode_high_water_handles_same_timestamp_ids() -> Result<()> {
 }
 
 #[test]
+fn opencode_part_tool_calls_land_in_usage_tool_call() -> Result<()> {
+    /*
+     * ========================================================================
+     * 步骤6：验证 OpenCode part 表工具调用进入 usage_tool_call
+     * ========================================================================
+     * 目标：
+     * 1) message + 两条 tool part（builtin read + MCP）sync 后落 usage_tool_call
+     * 2) MCP 工具按 `<server>_<tool>` 归类，mcp_server 正确
+     * 3) 重复 sync 幂等（part 全量重扫但 tool_call_key 去重）
+     */
+    let fixture = Fixture::new()?;
+    fixture.seed_opencode("msg-1", 1776823200000, 64)?;
+    fixture.seed_opencode_tool_part(
+        "prt-1",
+        "msg-1",
+        "session-1",
+        1776823200050,
+        serde_json::json!({
+            "id": "prt-1",
+            "messageID": "msg-1",
+            "sessionID": "session-1",
+            "type": "tool",
+            "tool": "read",
+            "state": { "status": "completed", "input": { "file_path": "src/lib.rs" } }
+        }),
+    )?;
+    fixture.seed_opencode_tool_part(
+        "prt-2",
+        "msg-1",
+        "session-1",
+        1776823200060,
+        serde_json::json!({
+            "id": "prt-2",
+            "messageID": "msg-1",
+            "sessionID": "session-1",
+            "type": "tool",
+            "tool": "context7_query-docs",
+            "state": { "status": "completed" }
+        }),
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        commands::sync::run(&app).await?;
+        assert_eq!(usage_tool_call_count(&app.paths.db_path)?, 2);
+        assert_eq!(
+            opencode_mcp_servers(&app.paths.db_path)?,
+            vec!["context7".to_string()]
+        );
+
+        commands::sync::run(&app).await?;
+        assert_eq!(usage_tool_call_count(&app.paths.db_path)?, 2);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
 fn opencode_replaced_db_resets_high_water() -> Result<()> {
     let fixture = Fixture::new()?;
     fixture.seed_opencode("msg-1", 1776823200000, 64)?;
@@ -1063,6 +1124,21 @@ fn usage_event_count(db_path: &Path) -> Result<i64> {
     Ok(count)
 }
 
+fn usage_tool_call_count(db_path: &Path) -> Result<i64> {
+    let conn = Connection::open(db_path)?;
+    let count = conn.query_row("SELECT COUNT(*) FROM usage_tool_call", [], |row| row.get(0))?;
+    Ok(count)
+}
+
+fn opencode_mcp_servers(db_path: &Path) -> Result<Vec<String>> {
+    let conn = Connection::open(db_path)?;
+    let mut stmt = conn.prepare(
+        "SELECT mcp_server FROM usage_tool_call WHERE tool_kind = 'mcp' AND mcp_server IS NOT NULL ORDER BY mcp_server",
+    )?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 fn table_columns(conn: &Connection, table: &str) -> Result<Vec<String>> {
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
     let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
@@ -1363,6 +1439,26 @@ impl Fixture {
             fs::remove_file(&db_path)?;
         }
         self.seed_opencode(message_id, time_created, total_tokens)
+    }
+
+    fn seed_opencode_tool_part(
+        &self,
+        part_id: &str,
+        message_id: &str,
+        session_id: &str,
+        time_created: i64,
+        data: serde_json::Value,
+    ) -> Result<()> {
+        let db_path = self.opencode_home.join("opencode.db");
+        let conn = Connection::open(&db_path)?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS part(id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, time_created INTEGER, data TEXT);",
+        )?;
+        conn.execute(
+            "INSERT OR REPLACE INTO part(id, message_id, session_id, time_created, data) VALUES (?1, ?2, ?3, ?4, ?5)",
+            (&part_id, &message_id, &session_id, &time_created, &data.to_string()),
+        )?;
+        Ok(())
     }
 }
 
