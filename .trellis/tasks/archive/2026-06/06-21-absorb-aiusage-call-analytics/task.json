@@ -1,0 +1,29 @@
+{
+  "id": "absorb-aiusage-call-analytics",
+  "name": "absorb-aiusage-call-analytics",
+  "title": "吸收 AIUsage 调用分析能力",
+  "description": "将 ref/AIUsage 的 Call Analytics 只读能力族吸收进 llmusage 的 behavior 模块。父任务承载需求集与跨子任务验收;不直接实现。范围:OpenCode 工具调用解析 + 零调用检测(僵尸技能/MCP)。明确排除 AIUsage 的 proxy/配额查询/协议转换(违反本地只读理念)。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-06-21",
+  "completedAt": "2026-06-21",
+  "branch": null,
+  "base_branch": "dev",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "06-21-opencode-tool-call-parsing",
+    "06-21-zero-call-detection"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
