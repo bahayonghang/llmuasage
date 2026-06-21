@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
 };
 
-use crate::query::{BehaviorSupport, ModelComparePayload, OptimizePayload};
+use crate::query::{BehaviorSupport, ModelComparePayload, OptimizePayload, ZombieReport};
 use crate::tui::{app::BehaviorPanelPayload, theme};
 
 /// Render the terminal behavior analytics summary.
@@ -39,7 +39,7 @@ fn render_payload(frame: &mut Frame, area: Rect, payload: &BehaviorPanelPayload)
 
     render_activity(frame, activity_area, payload);
     render_tools(frame, tools_area, payload);
-    render_optimize(frame, optimize_area, &payload.optimize);
+    render_optimize(frame, optimize_area, &payload.optimize, &payload.zombie);
     render_compare(frame, compare_area, &payload.compare);
 }
 
@@ -109,7 +109,12 @@ fn render_tools(frame: &mut Frame, area: Rect, payload: &BehaviorPanelPayload) {
     render_section(frame, area, "行为 · Tools 工具", lines);
 }
 
-fn render_optimize(frame: &mut Frame, area: Rect, payload: &OptimizePayload) {
+fn render_optimize(
+    frame: &mut Frame,
+    area: Rect,
+    payload: &OptimizePayload,
+    zombie: &ZombieReport,
+) {
     let mut lines = vec![support_line(&payload.support)];
     lines.push(Line::styled(
         "只读建议：llmusage 不会自动删除、归档、重写或清理任何内容。",
@@ -160,6 +165,36 @@ fn render_optimize(frame: &mut Frame, area: Rect, payload: &OptimizePayload) {
                 ])
             }));
         }
+    }
+
+    if zombie.zombies.is_empty() {
+        lines.push(Line::styled(
+            format!(
+                "僵尸技能/MCP：无（已扫描 {} 个已装项）",
+                zombie.installed_total
+            ),
+            theme::muted_style(),
+        ));
+    } else {
+        let preview = zombie
+            .zombies
+            .iter()
+            .take(3)
+            .map(|item| format!("{}:{}/{}", item.source, item.kind, item.name))
+            .collect::<Vec<_>>()
+            .join(" · ");
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("僵尸 {} ", zombie.zombies.len()),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(format!(
+                "装了从未调用（共 {} 已装）：{}（可清理候选；llmusage 不自动删除）",
+                zombie.installed_total, preview,
+            )),
+        ]));
     }
 
     render_section(frame, area, "行为 · Optimize 只读建议", lines);

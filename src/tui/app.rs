@@ -1,7 +1,7 @@
 use crate::query::{
     ActivityPayload, CostLine, DailyTrendPoint, HealthPayload, HeatmapPoint, ModelBreakdown,
     ModelComparePayload, OptimizePayload, OverviewPayload, ProjectBreakdown, QueryFilter,
-    SourceBreakdown, SyncCommandCenterPayload, ToolsPayload, TrendPoint,
+    SourceBreakdown, SyncCommandCenterPayload, ToolsPayload, TrendPoint, ZombieReport,
 };
 use crate::{domain::platform_monitor::PlatformProbe, models::SourceKind};
 
@@ -101,6 +101,7 @@ pub struct BehaviorPanelPayload {
     pub activity: ActivityPayload,
     pub tools: ToolsPayload,
     pub optimize: OptimizePayload,
+    pub zombie: ZombieReport,
     pub compare: ModelComparePayload,
 }
 

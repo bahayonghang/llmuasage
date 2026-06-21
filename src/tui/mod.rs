@@ -11,7 +11,7 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 
 use crate::{
     commands::sync::{self, SyncRunOptions},
-    query::Dashboard,
+    query::{Dashboard, InventoryRoots},
     store::Store,
 };
 
@@ -350,6 +350,9 @@ fn load_behavior_panel_data(
             .map_err(|e| e.to_string())?,
         optimize: dashboard
             .optimize(&state.filter)
+            .map_err(|e| e.to_string())?,
+        zombie: dashboard
+            .zombie_report(&InventoryRoots::discover())
             .map_err(|e| e.to_string())?,
         compare: dashboard
             .model_compare(&state.filter, None, None)

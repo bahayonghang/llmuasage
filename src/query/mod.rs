@@ -14,6 +14,7 @@ mod explorer;
 pub mod filter;
 mod heatmap;
 mod home_overview;
+pub mod inventory;
 pub(crate) mod logs;
 pub mod pricing;
 pub mod pricing_catalog;
@@ -30,6 +31,7 @@ pub use home_overview::{
     HomeOverviewBootstrap, HomeOverviewPayload, HomeOverviewPlatformStats, HomeOverviewSeriesItem,
     HomeOverviewSummary,
 };
+pub use inventory::{InstalledItem, InventoryKind, InventoryRoots, InventorySource};
 pub use logs::{LogRecord, LogsPage, LogsQuery};
 pub use pricing::{CostBreakdown, PRICING_MIXED, PRICING_UNPRICED, PricingStatus};
 pub use pricing_catalog::PricingCatalog;
@@ -343,6 +345,27 @@ pub struct OptimizePayload {
     pub estimated_savings_usd: f64,
     /// Findings ordered by severity and estimated savings.
     pub findings: Vec<OptimizeFinding>,
+}
+
+/// Read-only zero-call ("zombie") inventory report: locally installed skills and
+/// MCP servers that have no recorded call in `usage_tool_call`.
+#[derive(Debug, Clone, Serialize)]
+pub struct ZombieReport {
+    /// Total installed items scanned (skills + MCP across detected sources).
+    pub installed_total: usize,
+    /// Installed-but-never-called items, sorted by source/kind/name.
+    pub zombies: Vec<ZombieItem>,
+}
+
+/// One installed-but-never-called skill or MCP server.
+#[derive(Debug, Clone, Serialize)]
+pub struct ZombieItem {
+    /// Owning CLI (`claude` / `codex` / `opencode`).
+    pub source: String,
+    /// `skill` or `mcp`.
+    pub kind: String,
+    /// Skill name or MCP server name.
+    pub name: String,
 }
 
 /// Candidate model row for model comparison.
@@ -1345,6 +1368,57 @@ impl Dashboard {
             estimated_savings_usd,
             findings,
         })
+    }
+
+    /// Diffs locally-installed skills / MCP servers against the actually-called
+    /// set in `usage_tool_call`, returning never-called ("zombie") candidates.
+    ///
+    /// Read-only: this only reports candidates; llmusage never deletes or modifies
+    /// anything. Matching is by `(source, name)` — skills resolve to concrete names
+    /// only for Claude and OpenCode (Codex skills are not scanned), MCP matches by
+    /// `(source, server)` across all three CLIs.
+    pub fn zombie_report(&self, roots: &inventory::InventoryRoots) -> Result<ZombieReport> {
+        let installed = roots.scan();
+        let used_skills = self.used_tool_pairs("skill", "tool_name")?;
+        let used_mcp = self.used_tool_pairs("mcp", "mcp_server")?;
+
+        let mut zombies = Vec::new();
+        for item in &installed {
+            let used = match item.kind {
+                inventory::InventoryKind::Skill => &used_skills,
+                inventory::InventoryKind::Mcp => &used_mcp,
+            };
+            let key = (item.source.as_str().to_string(), item.name.clone());
+            if !used.contains(&key) {
+                zombies.push(ZombieItem {
+                    source: item.source.as_str().to_string(),
+                    kind: item.kind.as_str().to_string(),
+                    name: item.name.clone(),
+                });
+            }
+        }
+        Ok(ZombieReport {
+            installed_total: installed.len(),
+            zombies,
+        })
+    }
+
+    /// Distinct `(source, value)` pairs actually observed for a `tool_kind`.
+    /// `column` is a fixed identifier (`tool_name` / `mcp_server`), never user input.
+    fn used_tool_pairs(&self, tool_kind: &str, column: &str) -> Result<BTreeSet<(String, String)>> {
+        let sql = format!(
+            "SELECT DISTINCT source, {column} FROM usage_tool_call \
+             WHERE tool_kind = ?1 AND {column} IS NOT NULL AND {column} != ''"
+        );
+        let mut statement = self.conn.prepare(&sql)?;
+        let rows = statement.query_map([tool_kind], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut set = BTreeSet::new();
+        for row in rows {
+            set.insert(row?);
+        }
+        Ok(set)
     }
 
     fn detect_low_read_edit_ratio(&self, filter: &QueryFilter) -> Result<Option<OptimizeFinding>> {
@@ -3104,6 +3178,76 @@ mod tests {
         assert!(!tools.support.supported);
         assert_eq!(tools.support.level, "no_data");
         assert!(tools.breakdown.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn zombie_report_diffs_installed_against_used() -> Result<()> {
+        use super::InventoryRoots;
+
+        let fixture = Fixture::new()?;
+        let conn = fixture.store().open_connection()?;
+        let seed = |source: &str, kind: &str, name: &str, server: Option<&str>| -> Result<()> {
+            conn.execute(
+                r#"INSERT INTO usage_tool_call(
+                    tool_call_key, source, occurred_at, tool_name, tool_kind, mcp_server, created_at
+                ) VALUES (?1, ?2, '2026-05-01T00:00:00Z', ?3, ?4, ?5, '2026-05-01T00:00:00Z')"#,
+                rusqlite::params![
+                    format!("tc:{source}:{kind}:{name}"),
+                    source,
+                    name,
+                    kind,
+                    server
+                ],
+            )?;
+            Ok(())
+        };
+        // Used set: claude skill alpha, claude mcp context7, opencode skill gamma.
+        seed("claude", "skill", "alpha", None)?;
+        seed("claude", "mcp", "context7/search", Some("context7"))?;
+        seed("opencode", "skill", "gamma", None)?;
+
+        // Installed roots in a temp tree (superset of the used set).
+        let temp = tempfile::tempdir()?;
+        let root = temp.path();
+        let write = |rel: &str, body: &str| {
+            let path = root.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        };
+        write("claude/skills/alpha/SKILL.md", "x");
+        write("claude/skills/beta/SKILL.md", "x");
+        write(
+            "claude.json",
+            r#"{"mcpServers":{"context7":{},"playwright":{}}}"#,
+        );
+        write("opencode/skills/gamma/SKILL.md", "x");
+        write("opencode/skills/delta/SKILL.md", "x");
+        write("opencode/opencode.json", r#"{"mcp":{}}"#);
+        let roots = InventoryRoots {
+            claude_skills: root.join("claude/skills"),
+            claude_mcp_config: root.join("claude.json"),
+            codex_skills: root.join("codex/skills"),
+            codex_mcp_config: root.join("codex/config.toml"),
+            opencode_skills: root.join("opencode/skills"),
+            opencode_mcp_config: root.join("opencode/opencode.json"),
+        };
+
+        let report = Dashboard::open(fixture.store())?.zombie_report(&roots)?;
+        let zombies: std::collections::BTreeSet<(String, String, String)> = report
+            .zombies
+            .iter()
+            .map(|item| (item.source.clone(), item.kind.clone(), item.name.clone()))
+            .collect();
+
+        // Installed but never called → zombie candidates.
+        assert!(zombies.contains(&("claude".into(), "skill".into(), "beta".into())));
+        assert!(zombies.contains(&("claude".into(), "mcp".into(), "playwright".into())));
+        assert!(zombies.contains(&("opencode".into(), "skill".into(), "delta".into())));
+        // Actually-used items are never flagged.
+        assert!(!zombies.iter().any(|item| item.2 == "alpha"));
+        assert!(!zombies.iter().any(|item| item.2 == "context7"));
+        assert!(!zombies.iter().any(|item| item.2 == "gamma"));
         Ok(())
     }
 

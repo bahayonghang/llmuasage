@@ -15,7 +15,7 @@ use llmusage::query::{
     ModelBreakdown, ModelComparePayload, ModelCompareStats, OptimizeFinding, OptimizePayload,
     OverviewPayload, ProjectBreakdown, SourceBreakdown, SyncActionPayload,
     SyncCommandCenterPayload, SyncMetricsPayload, SyncSafetyPayload, SyncSourcePayload,
-    TokenSummary, ToolBreakdown, ToolsPayload, TrendPoint,
+    TokenSummary, ToolBreakdown, ToolsPayload, TrendPoint, ZombieItem, ZombieReport,
 };
 use llmusage::store::{IntegrationState, RunRecord};
 use llmusage::tui::app::{
@@ -680,6 +680,14 @@ fn sample_behavior_payload() -> BehaviorPanelPayload {
                 recommendation: "Cache context before re-reading".to_string(),
                 estimated_savings_tokens: 8_000,
                 estimated_savings_usd: 0.8,
+            }],
+        },
+        zombie: ZombieReport {
+            installed_total: 3,
+            zombies: vec![ZombieItem {
+                source: "claude".to_string(),
+                kind: "skill".to_string(),
+                name: "smart-search".to_string(),
             }],
         },
         compare: ModelComparePayload {
