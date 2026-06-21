@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 6
-- **Last Active**: 2026-06-16
+- **Total Sessions**: 7
+- **Last Active**: 2026-06-21
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~215 | Active |
+| `journal-1.md` | ~249 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 7 | 2026-06-21 | 吸收 AIUsage 调用分析能力：OpenCode 工具解析 + 零调用检测 | `b205b34`, `5cd63d8` | `dev` |
 | 6 | 2026-06-16 | Document codex-tracer usage | `28e5a06`, `28abf32`, `bd7e222` | `dev` |
 | 5 | 2026-06-14 | Restore source-status CLI command | `617baa3` | `dev` |
 | 4 | 2026-06-12 | Optimize dash overview and warning styling | `790ff1a0428dbee8f8b2449c1bf1a301ec162b3e`, `b696248bdd7616be1005e17332cba61f10927659` | `dev` |

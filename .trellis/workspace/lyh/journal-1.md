@@ -213,3 +213,37 @@ Added codex-tracer docs in English/Chinese, documented the embedded schema.sql c
 ### Next Steps
 
 - None - task complete
+
+
+## Session 7: 吸收 AIUsage 调用分析能力：OpenCode 工具解析 + 零调用检测
+
+**Date**: 2026-06-21
+**Task**: 吸收 AIUsage 调用分析能力：OpenCode 工具解析 + 零调用检测
+**Branch**: `dev`
+
+### Summary
+
+为 behavior 补齐 OpenCode part 表工具/MCP/skill 调用解析（归一化 UsageToolCall，关联 messageID/sessionID，幂等写入），并把 Claude Skill 名细分到 input.skill；新增 query/inventory 模块探测三家已装技能（SKILL.md）与 MCP 配置（JSON/TOML），Dashboard::zombie_report 按来源与已用集合求差标出僵尸候选，接入 TUI Optimize 只读建议区。CI 三关通过（fmt/clippy/test 332 passed）。明确排除 AIUsage 的 proxy/配额查询（违反本地只读）。Codex skill、成功率耗时、Web 渲染列为未来项。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b205b34` | (see git log) |
+| `5cd63d8` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
