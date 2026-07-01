@@ -168,6 +168,7 @@ pub fn render_session_table(
                 format_count(row.totals.total_tokens),
                 format_cost(row.totals.estimated_cost_usd),
                 row.last_activity_at.clone(),
+                format_active_span(row.active_minutes, row.span_minutes),
             ]);
         }
         append_breakdowns(&mut table_rows, &row.model_breakdowns, compact, true);
@@ -286,6 +287,25 @@ pub fn format_token_compact(value: i64) -> String {
 
 pub fn format_cost(value: f64) -> String {
     format!("${value:.2}")
+}
+
+/// Formats `active/span` durations for the session table, e.g. `1.2h/3.5h`.
+fn format_active_span(active_minutes: i64, span_minutes: i64) -> String {
+    format!(
+        "{}/{}",
+        format_minutes(active_minutes),
+        format_minutes(span_minutes)
+    )
+}
+
+fn format_minutes(minutes: i64) -> String {
+    if minutes <= 0 {
+        "0m".to_string()
+    } else if minutes < 60 {
+        format!("{minutes}m")
+    } else {
+        format!("{:.1}h", minutes as f64 / 60.0)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -415,6 +435,7 @@ fn session_columns(compact: bool) -> Vec<Column> {
             column("Total Tokens", Align::Right),
             column("Cost (USD)", Align::Right),
             column("Last Activity", Align::Left),
+            column("Active/Span", Align::Right),
         ]
     }
 }

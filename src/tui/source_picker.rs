@@ -15,7 +15,7 @@ pub fn render(frame: &mut Frame, viewport: Rect, state: &AppState) {
     let block = Block::default()
         .title(" Sources ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::ACCENT));
+        .border_style(Style::default().fg(theme::accent()));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -94,11 +94,11 @@ fn render_list(frame: &mut Frame, area: Rect, state: &AppState) {
         let style = if selected_row {
             Style::default()
                 .fg(Color::Black)
-                .bg(theme::ACCENT)
+                .bg(theme::accent())
                 .add_modifier(Modifier::BOLD)
         } else if active {
             Style::default()
-                .fg(theme::POSITIVE_FG)
+                .fg(theme::positive_fg())
                 .add_modifier(Modifier::BOLD)
         } else if probe.source_kind.is_none() {
             theme::muted_style()

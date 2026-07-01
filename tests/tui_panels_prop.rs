@@ -11,11 +11,12 @@ use ratatui::{Terminal, backend::TestBackend, layout::Rect};
 use llmusage::domain::platform_monitor::{ParserSupportStatus, PlatformProbe, PlatformProbeStatus};
 use llmusage::query::{
     ActivityBreakdown, ActivityPayload, BehaviorSupport, CategoryCompareRow, CompareMetric,
-    CompareModelCandidate, CostLine, CursorHealth, DailyTrendPoint, HealthPayload, HeatmapPoint,
-    ModelBreakdown, ModelComparePayload, ModelCompareStats, OptimizeFinding, OptimizePayload,
-    OverviewPayload, ProjectBreakdown, SourceBreakdown, SyncActionPayload,
-    SyncCommandCenterPayload, SyncMetricsPayload, SyncSafetyPayload, SyncSourcePayload,
-    TokenSummary, ToolBreakdown, ToolsPayload, TrendPoint, ZombieItem, ZombieReport,
+    CompareModelCandidate, ContextPressurePayload, CostLine, CursorHealth, DailyTrendPoint,
+    HealthPayload, HeatmapPoint, ModelBreakdown, ModelComparePayload, ModelCompareStats,
+    OptimizeFinding, OptimizePayload, OverviewPayload, ProjectBreakdown, SourceBreakdown,
+    SyncActionPayload, SyncCommandCenterPayload, SyncMetricsPayload, SyncSafetyPayload,
+    SyncSourcePayload, TokenSummary, ToolBreakdown, ToolsPayload, TrendPoint, ZombieItem,
+    ZombieReport,
 };
 use llmusage::store::{IntegrationState, RunRecord};
 use llmusage::tui::app::{
@@ -567,6 +568,13 @@ fn sample_stats_payload() -> StatsPanelPayload {
                 sqlite_status: None,
             }],
             recent_failures: Vec::new(),
+        },
+        context_pressure: ContextPressurePayload {
+            peak_percent: 0.42,
+            avg_percent: 0.18,
+            peak_model: Some("codex:gpt-5".to_string()),
+            priced_events: 12,
+            unpriced_events: 0,
         },
     }
 }

@@ -15,7 +15,7 @@ pub fn render(frame: &mut Frame, viewport: Rect, state: &AppState) {
     let block = Block::default()
         .title(" Help / Settings ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::ACCENT));
+        .border_style(Style::default().fg(theme::accent()));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -35,15 +35,15 @@ pub fn render(frame: &mut Frame, viewport: Rect, state: &AppState) {
         Paragraph::new(Line::from(vec![
             Span::styled("Theme ", theme::muted_style()),
             Span::styled(
-                "tokscale-dark",
+                theme::active_theme().name,
                 Style::default()
-                    .fg(theme::ACCENT)
+                    .fg(theme::accent())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(" • Source ", theme::muted_style()),
             Span::styled(
                 state.source_filter_label(),
-                Style::default().fg(theme::ACCENT),
+                Style::default().fg(theme::accent()),
             ),
         ])),
         rows[0],
@@ -54,12 +54,12 @@ pub fn render(frame: &mut Frame, viewport: Rect, state: &AppState) {
     );
 
     let lines = vec![
-        Line::from("tab / shift-tab: switch tabs    1-8: jump to tab"),
+        Line::from("tab / shift-tab: switch tabs    1-9: jump to tab"),
         Line::from("j/k or arrows: scroll            h/l: change time window"),
         Line::from("s: source picker                 a: all sources in picker"),
         Line::from("r: refresh dashboard cache       R: toggle auto refresh"),
-        Line::from("x: run sync for current source   ?: this dialog"),
-        Line::from("q or Esc: close dialog / quit dashboard"),
+        Line::from("x: run sync for current source   t: cycle theme"),
+        Line::from("?: this dialog                    q or Esc: close / quit"),
     ];
     frame.render_widget(Paragraph::new(lines).style(theme::muted_style()), rows[2]);
 

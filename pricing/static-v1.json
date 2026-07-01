@@ -6,56 +6,64 @@
       "matchers": ["gpt-5-mini"],
       "input_per_mtok": 0.25,
       "cached_per_mtok": 0.025,
-      "output_per_mtok": 2.0
+      "output_per_mtok": 2.0,
+      "context_window": 400000
     },
     {
       "source": "codex",
       "matchers": ["gpt-5", "o3", "o4"],
       "input_per_mtok": 1.25,
       "cached_per_mtok": 0.125,
-      "output_per_mtok": 10.0
+      "output_per_mtok": 10.0,
+      "context_window": 400000
     },
     {
       "source": "claude",
       "matchers": ["claude-opus", "opus"],
       "input_per_mtok": 15.0,
       "cached_per_mtok": 1.5,
-      "output_per_mtok": 75.0
+      "output_per_mtok": 75.0,
+      "context_window": 200000
     },
     {
       "source": "claude",
       "matchers": ["claude-sonnet", "sonnet", "claude-3-7"],
       "input_per_mtok": 3.0,
       "cached_per_mtok": 0.3,
-      "output_per_mtok": 15.0
+      "output_per_mtok": 15.0,
+      "context_window": 200000
     },
     {
       "source": "claude",
       "matchers": ["claude-haiku", "haiku"],
       "input_per_mtok": 0.8,
       "cached_per_mtok": 0.08,
-      "output_per_mtok": 4.0
+      "output_per_mtok": 4.0,
+      "context_window": 200000
     },
     {
       "source": "opencode",
       "matchers": ["gpt", "gpt-5", "gpt-5-codex", "o3", "o4"],
       "input_per_mtok": 1.25,
       "cached_per_mtok": 0.125,
-      "output_per_mtok": 10.0
+      "output_per_mtok": 10.0,
+      "context_window": 400000
     },
     {
       "source": "opencode",
       "matchers": ["claude-sonnet", "sonnet"],
       "input_per_mtok": 3.0,
       "cached_per_mtok": 0.3,
-      "output_per_mtok": 15.0
+      "output_per_mtok": 15.0,
+      "context_window": 200000
     },
     {
       "source": "opencode",
       "matchers": ["gemini-3-pro-preview"],
       "input_per_mtok": 2.0,
       "cached_per_mtok": 0.2,
-      "output_per_mtok": 12.0
+      "output_per_mtok": 12.0,
+      "context_window": 1000000
     }
   ]
 }

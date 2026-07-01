@@ -1,7 +1,9 @@
+use crate::query::reports::BlockReportRow;
 use crate::query::{
-    ActivityPayload, CostLine, DailyTrendPoint, HealthPayload, HeatmapPoint, ModelBreakdown,
-    ModelComparePayload, OptimizePayload, OverviewPayload, ProjectBreakdown, QueryFilter,
-    SourceBreakdown, SyncCommandCenterPayload, ToolsPayload, TrendPoint, ZombieReport,
+    ActivityPayload, ContextPressurePayload, CostLine, DailyTrendPoint, HealthPayload,
+    HeatmapPoint, ModelBreakdown, ModelComparePayload, OptimizePayload, OverviewPayload,
+    ProjectBreakdown, QueryFilter, SourceBreakdown, SyncCommandCenterPayload, ToolsPayload,
+    TrendPoint, ZombieReport,
 };
 use crate::{domain::platform_monitor::PlatformProbe, models::SourceKind};
 
@@ -19,10 +21,11 @@ pub enum Panel {
     Cost = 5,
     Health = 6,
     Behavior = 7,
+    Blocks = 8,
 }
 
 impl Panel {
-    pub const COUNT: usize = 8;
+    pub const COUNT: usize = 9;
 
     pub fn all() -> &'static [Self] {
         &[
@@ -34,6 +37,7 @@ impl Panel {
             Self::Cost,
             Self::Health,
             Self::Behavior,
+            Self::Blocks,
         ]
     }
 
@@ -47,6 +51,7 @@ impl Panel {
             5 => Some(Self::Cost),
             6 => Some(Self::Health),
             7 => Some(Self::Behavior),
+            8 => Some(Self::Blocks),
             _ => None,
         }
     }
@@ -78,6 +83,7 @@ impl Panel {
             Self::Cost => "Cost",
             Self::Health => "Stats",
             Self::Behavior => "Agents",
+            Self::Blocks => "Blocks",
         }
     }
 
@@ -91,6 +97,7 @@ impl Panel {
             Self::Cost => "Cost",
             Self::Health => "Sta",
             Self::Behavior => "Agt",
+            Self::Blocks => "Blk",
         }
     }
 }
@@ -112,6 +119,7 @@ pub struct StatsPanelPayload {
     pub heatmap: Vec<HeatmapPoint>,
     pub sources: Vec<SourceBreakdown>,
     pub health: HealthPayload,
+    pub context_pressure: ContextPressurePayload,
 }
 
 /// Time window for the trends panel.
@@ -235,6 +243,7 @@ pub struct AppState {
     pub health: Option<Result<HealthPayload, String>>,
     pub stats: Option<Result<StatsPanelPayload, String>>,
     pub behavior: Option<Result<BehaviorPanelPayload, String>>,
+    pub blocks: Option<Result<Vec<BlockReportRow>, String>>,
     pub platform_probes: Vec<PlatformProbe>,
     pub active_dialog: Option<ActiveDialog>,
     pub source_picker: SourcePickerState,
@@ -277,6 +286,7 @@ impl AppState {
             health: None,
             stats: None,
             behavior: None,
+            blocks: None,
             platform_probes: crate::domain::platform_monitor::probe_registered_platforms(),
             active_dialog: None,
             source_picker: SourcePickerState { selected: 0 },
@@ -370,6 +380,7 @@ impl AppState {
         self.health = None;
         self.stats = None;
         self.behavior = None;
+        self.blocks = None;
         for scroll in &mut self.scroll {
             scroll.offset = 0;
         }

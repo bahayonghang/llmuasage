@@ -80,7 +80,7 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[ProjectBreakdown], scrol
     )
     .header(header)
     .block(styled_block("项目"))
-    .row_highlight_style(Style::default().fg(theme::ACCENT));
+    .row_highlight_style(Style::default().fg(theme::accent()));
 
     frame.render_widget(table, area);
 }

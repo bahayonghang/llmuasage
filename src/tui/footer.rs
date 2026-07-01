@@ -11,7 +11,7 @@ use super::{app::AppState, theme};
 pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::BORDER_NORMAL));
+        .border_style(Style::default().fg(theme::border_normal()));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -35,13 +35,13 @@ fn render_controls(frame: &mut Frame, area: Rect, state: &AppState) {
         vec![
             Span::styled("tab/1-8", theme::muted_style()),
             Span::raw(" "),
-            Span::styled("s", Style::default().fg(theme::ACCENT)),
+            Span::styled("s", Style::default().fg(theme::accent())),
             Span::raw(" "),
-            Span::styled("r", Style::default().fg(theme::TREND_PEAK_FG)),
+            Span::styled("r", Style::default().fg(theme::trend_peak_fg())),
             Span::raw(" "),
-            Span::styled("R", Style::default().fg(theme::POSITIVE_FG)),
+            Span::styled("R", Style::default().fg(theme::positive_fg())),
             Span::raw(" "),
-            Span::styled("x", Style::default().fg(theme::POSITIVE_FG)),
+            Span::styled("x", Style::default().fg(theme::positive_fg())),
             Span::raw(" "),
             Span::styled("?", theme::muted_style()),
             Span::raw(" "),
@@ -51,11 +51,11 @@ fn render_controls(frame: &mut Frame, area: Rect, state: &AppState) {
         vec![
             Span::styled("tab/shift-tab or 1-8 view", theme::muted_style()),
             Span::styled(" • ", theme::muted_style()),
-            Span::styled("[s:source]", Style::default().fg(theme::ACCENT)),
+            Span::styled("[s:source]", Style::default().fg(theme::accent())),
             Span::styled(" • ", theme::muted_style()),
-            Span::styled("[r:refresh]", Style::default().fg(theme::TREND_PEAK_FG)),
+            Span::styled("[r:refresh]", Style::default().fg(theme::trend_peak_fg())),
             Span::styled(" ", theme::muted_style()),
-            Span::styled("[x:sync]", Style::default().fg(theme::POSITIVE_FG)),
+            Span::styled("[x:sync]", Style::default().fg(theme::positive_fg())),
             Span::styled(" ", theme::muted_style()),
             Span::styled(
                 if state.auto_refresh {
@@ -64,9 +64,9 @@ fn render_controls(frame: &mut Frame, area: Rect, state: &AppState) {
                     "[R:auto off]"
                 },
                 Style::default().fg(if state.auto_refresh {
-                    theme::POSITIVE_FG
+                    theme::positive_fg()
                 } else {
-                    theme::MUTED_FG
+                    theme::muted_fg()
                 }),
             ),
             Span::styled(" • [?] q", theme::muted_style()),
@@ -80,12 +80,12 @@ fn render_status(frame: &mut Frame, area: Rect, state: &AppState) {
     spans.push(Span::styled(
         "source ",
         Style::default()
-            .fg(theme::ACCENT)
+            .fg(theme::accent())
             .add_modifier(Modifier::BOLD),
     ));
     spans.push(Span::styled(
         state.source_filter_label(),
-        Style::default().fg(theme::ACCENT),
+        Style::default().fg(theme::accent()),
     ));
     spans.push(Span::styled(" • ", theme::muted_style()));
 
@@ -93,7 +93,7 @@ fn render_status(frame: &mut Frame, area: Rect, state: &AppState) {
         spans.push(Span::styled(
             message.clone(),
             Style::default()
-                .fg(theme::POSITIVE_FG)
+                .fg(theme::positive_fg())
                 .add_modifier(Modifier::BOLD),
         ));
     } else if let Some(Ok(overview)) = &state.overview {

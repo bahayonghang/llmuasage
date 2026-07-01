@@ -74,28 +74,28 @@ fn render_kpi_row(frame: &mut Frame, area: Rect, payload: &OverviewPayload) {
         kpi_cols[0],
         "累计 Tokens",
         &format_tokens(payload.total.total_tokens),
-        theme::KPI_COLORS[0],
+        theme::kpi_colors()[0],
     );
     render_kpi_card(
         frame,
         kpi_cols[1],
         "24h Tokens",
         &format_tokens(payload.last_24h.total_tokens),
-        theme::KPI_COLORS[1],
+        theme::kpi_colors()[1],
     );
     render_kpi_card(
         frame,
         kpi_cols[2],
         "累计成本",
         &format!("${:.2}", payload.total_cost_usd),
-        theme::KPI_COLORS[2],
+        theme::kpi_colors()[2],
     );
     render_kpi_card(
         frame,
         kpi_cols[3],
         "缓存命中率",
         &format!("{:.1}%", payload.cache_efficiency * 100.0),
-        theme::KPI_COLORS[3],
+        theme::kpi_colors()[3],
     );
 }
 
@@ -152,9 +152,9 @@ fn render_24h_pulse(frame: &mut Frame, area: Rect, payload: &OverviewPayload) {
 
 fn render_compact_metadata(frame: &mut Frame, area: Rect, payload: &OverviewPayload) {
     let meta_lines = vec![
-        metric_line("Sources", payload.source_count.to_string(), theme::ACCENT),
-        metric_line("Buckets", payload.bucket_count.to_string(), theme::ACCENT),
-        metric_line("Last sync", last_sync_text(payload), theme::ACCENT),
+        metric_line("Sources", payload.source_count.to_string(), theme::accent()),
+        metric_line("Buckets", payload.bucket_count.to_string(), theme::accent()),
+        metric_line("Last sync", last_sync_text(payload), theme::accent()),
     ];
     frame.render_widget(Paragraph::new(meta_lines), area);
 }

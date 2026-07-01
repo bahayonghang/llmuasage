@@ -17,6 +17,7 @@ pub enum Action {
     StartSync,
     OpenSourcePicker,
     OpenHelp,
+    CycleTheme,
     None,
 }
 
@@ -44,6 +45,7 @@ pub fn handle_key_event(key: KeyEvent, _active_panel: Panel) -> Action {
         KeyCode::Char('x') => Action::StartSync,
         KeyCode::Char('s') => Action::OpenSourcePicker,
         KeyCode::Char('?') => Action::OpenHelp,
+        KeyCode::Char('t') => Action::CycleTheme,
         KeyCode::Char(c) => Panel::from_digit_char(c)
             .map(Action::SwitchPanel)
             .unwrap_or(Action::None),
@@ -87,10 +89,7 @@ mod tests {
 
     #[test]
     fn digits_outside_panel_count_do_not_switch_panels() {
-        assert_eq!(
-            handle_key_event(char_key('9'), Panel::Overview),
-            Action::None
-        );
+        // With COUNT == 9, only '0' is outside the 1..=9 panel range.
         assert_eq!(
             handle_key_event(char_key('0'), Panel::Overview),
             Action::None

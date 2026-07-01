@@ -62,6 +62,12 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
             &state.scroll[Panel::Health as usize],
         ),
         Panel::Behavior => panels::behavior::render(frame, content_area, &state.behavior),
+        Panel::Blocks => panels::blocks::render(
+            frame,
+            content_area,
+            &state.blocks,
+            &state.scroll[Panel::Blocks as usize],
+        ),
     }
 
     footer::render(frame, footer_area, state);

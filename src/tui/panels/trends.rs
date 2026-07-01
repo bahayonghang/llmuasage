@@ -153,7 +153,7 @@ fn render_summary(frame: &mut Frame, area: Rect, points: &[TrendPoint], time_win
         "总量",
         &format_tokens(total),
         "tokens",
-        theme::KPI_COLORS[0],
+        theme::kpi_colors()[0],
     );
     render_card(
         frame,
@@ -161,7 +161,7 @@ fn render_summary(frame: &mut Frame, area: Rect, points: &[TrendPoint], time_win
         "峰值",
         &format_tokens(peak_tokens),
         &peak_label,
-        theme::TREND_PEAK_FG,
+        theme::trend_peak_fg(),
     );
     render_card(
         frame,
@@ -172,7 +172,7 @@ fn render_summary(frame: &mut Frame, area: Rect, points: &[TrendPoint], time_win
         },
         &format_tokens(average),
         "tokens",
-        theme::KPI_COLORS[2],
+        theme::kpi_colors()[2],
     );
     render_card(
         frame,
@@ -184,7 +184,7 @@ fn render_summary(frame: &mut Frame, area: Rect, points: &[TrendPoint], time_win
         },
         &active_count.to_string(),
         &format!("共 {}", points.len()),
-        theme::KPI_COLORS[1],
+        theme::kpi_colors()[1],
     );
 }
 

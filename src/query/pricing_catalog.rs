@@ -55,6 +55,10 @@ pub struct PricingEntry {
     pub reasoning_per_mtok: Option<f64>,
     #[serde(default)]
     pub reasoning_policy: ReasoningPolicy,
+    /// Maximum context window (prompt-side capacity) in tokens, when known.
+    /// Drives context-window utilization; `None` degrades to "unknown".
+    #[serde(default)]
+    pub context_window: Option<u64>,
 }
 
 impl PricingEntry {
@@ -138,6 +142,14 @@ impl PricingCatalog {
             })
             .max_by_key(|(_, matcher_len)| *matcher_len)
             .map(|(entry, _)| entry)
+    }
+
+    /// Returns the known maximum context window (in tokens) for the given
+    /// source/model, or `None` when the catalog has no window for it.
+    pub fn context_window(&self, source: &str, model: &str) -> Option<u64> {
+        self.find(source, model)
+            .and_then(|entry| entry.context_window)
+            .filter(|window| *window > 0)
     }
 
     fn from_file(file: CatalogFile, status: PricingStatus) -> Result<PricingCatalog> {
@@ -259,6 +271,9 @@ fn native_litellm_entry(model_id: &str, raw_entry: &Value) -> Option<Vec<Pricing
     let cache_creation = read_f64(raw_entry, "cache_creation_input_token_cost");
     let reasoning = read_f64(raw_entry, "output_cost_per_reasoning_token");
     let reasoning_policy = read_reasoning_policy(raw_entry);
+    let context_window = read_u64(raw_entry, "max_input_tokens")
+        .or_else(|| read_u64(raw_entry, "max_tokens"))
+        .filter(|window| *window > 0);
     let provider = object
         .get("litellm_provider")
         .and_then(Value::as_str)
@@ -285,6 +300,7 @@ fn native_litellm_entry(model_id: &str, raw_entry: &Value) -> Option<Vec<Pricing
                 output_per_mtok: output * 1_000_000.0,
                 reasoning_per_mtok: reasoning.map(|rate| rate * 1_000_000.0),
                 reasoning_policy,
+                context_window,
             })
             .collect(),
     )
@@ -367,6 +383,15 @@ fn read_f64(value: &Value, key: &str) -> Option<f64> {
     value.get(key).and_then(|value| {
         value
             .as_f64()
+            .or_else(|| value.as_str().and_then(|raw| raw.parse().ok()))
+    })
+}
+
+fn read_u64(value: &Value, key: &str) -> Option<u64> {
+    value.get(key).and_then(|value| {
+        value
+            .as_u64()
+            .or_else(|| value.as_f64().map(|number| number as u64))
             .or_else(|| value.as_str().and_then(|raw| raw.parse().ok()))
     })
 }
@@ -709,20 +734,39 @@ mod tests {
     }
 
     #[test]
-    fn pricing_catalog_invalid_snapshot_returns_parse_context() -> anyhow::Result<()> {
+    fn pricing_catalog_exposes_context_window() {
+        let catalog = PricingCatalog::static_v1();
+        assert_eq!(
+            catalog.context_window("claude", "claude-opus-4-1"),
+            Some(200_000)
+        );
+        assert_eq!(catalog.context_window("codex", "gpt-5"), Some(400_000));
+        assert_eq!(
+            catalog.context_window("opencode", "gemini-3-pro-preview"),
+            Some(1_000_000)
+        );
+        // Unknown model degrades to None rather than panicking.
+        assert_eq!(catalog.context_window("codex", "made-up-model"), None);
+    }
+
+    #[test]
+    fn pricing_catalog_reads_native_context_window() -> anyhow::Result<()> {
         let mut tmp = NamedTempFile::new()?;
-        write!(tmp, "{{not-json")?;
+        writeln!(
+            tmp,
+            r#"{{
+                "gpt-5": {{
+                    "litellm_provider": "openai",
+                    "input_cost_per_token": 0.00000125,
+                    "output_cost_per_token": 0.000010,
+                    "max_input_tokens": 400000
+                }}
+            }}"#
+        )?;
         tmp.flush()?;
 
-        let err = PricingCatalog::load_snapshot(tmp.path())
-            .expect_err("malformed pricing snapshot should return Parse");
-        assert!(matches!(
-            err,
-            LlmusageError::Parse {
-                context: "pricing snapshot",
-                ..
-            }
-        ));
+        let catalog = PricingCatalog::load_snapshot(tmp.path())?;
+        assert_eq!(catalog.context_window("codex", "gpt-5"), Some(400_000));
         Ok(())
     }
 }

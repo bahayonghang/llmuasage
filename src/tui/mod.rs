@@ -33,6 +33,11 @@ use input::{Action, DialogAction, handle_dialog_key_event, handle_key_event};
 
 /// Main entry point for the interactive terminal dashboard.
 pub fn run_dashboard(store: &Store) -> Result<()> {
+    // 0. Honor an optional initial theme from the environment.
+    if let Ok(name) = std::env::var("LLMUSAGE_THEME") {
+        theme::set_theme_by_name(&name);
+    }
+
     // 1. Install panic hook BEFORE enabling raw mode
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -160,6 +165,10 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
             Action::StartSync => run_sync_action(store, &dashboard, &mut state),
             Action::OpenSourcePicker => state.open_source_picker(),
             Action::OpenHelp => state.open_help(),
+            Action::CycleTheme => {
+                let name = theme::cycle_theme();
+                state.set_status(&format!("theme: {name}"));
+            }
             Action::None => {}
         }
     }
@@ -304,6 +313,12 @@ fn load_panel_data(dashboard: &Dashboard, state: &mut AppState, panel: Panel) {
                 state.behavior = Some(load_behavior_panel_data(dashboard, state));
             }
         }
+        Panel::Blocks => {
+            if state.blocks.is_none() {
+                state.blocks = Some(dashboard.blocks_report().map_err(|e| e.to_string()));
+                update_scroll_total(state, Panel::Blocks);
+            }
+        }
     }
 }
 
@@ -318,6 +333,7 @@ fn update_scroll_total(state: &mut AppState, panel: Panel) {
         Panel::Sources => state.daily.as_ref().and_then(ok_len),
         Panel::Projects => state.hourly.as_ref().and_then(ok_len),
         Panel::Cost => state.costs.as_ref().and_then(ok_len),
+        Panel::Blocks => state.blocks.as_ref().and_then(ok_len),
         Panel::Health => state
             .stats
             .as_ref()
@@ -375,5 +391,8 @@ fn load_stats_panel_data(
             .source_breakdown(&state.filter)
             .map_err(|e| e.to_string())?,
         health: dashboard.health().map_err(|e| e.to_string())?,
+        context_pressure: dashboard
+            .context_pressure(&state.filter)
+            .map_err(|e| e.to_string())?,
     })
 }

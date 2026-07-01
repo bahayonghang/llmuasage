@@ -1,8 +1,10 @@
 pub mod behavior;
+pub mod blocks;
 pub mod cost;
 pub mod daily;
 pub mod health;
 pub mod hourly;
+pub mod longtail;
 pub mod models;
 pub mod overview;
 pub mod projects;

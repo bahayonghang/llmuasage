@@ -106,6 +106,25 @@ pub struct TrendPoint {
     pub total_tokens: i64,
 }
 
+/// Context-window utilization summary produced by [`Dashboard::context_pressure`].
+///
+/// Percentages are prompt-side occupancy (`input + cache_read + cache_creation`)
+/// over the model's known maximum context window. Events whose model has no
+/// known window are excluded from the ratios and counted in `unpriced_events`.
+#[derive(Debug, Clone, Serialize)]
+pub struct ContextPressurePayload {
+    /// Highest single-event context occupancy ratio in [0, 1], if any priced.
+    pub peak_percent: f64,
+    /// Mean per-event context occupancy ratio in [0, 1] across priced events.
+    pub avg_percent: f64,
+    /// `source:model` label behind `peak_percent`, when known.
+    pub peak_model: Option<String>,
+    /// Events counted toward the ratios (model window known).
+    pub priced_events: i64,
+    /// Events skipped because the model window is unknown.
+    pub unpriced_events: i64,
+}
+
 /// One daily trend row produced by [`Dashboard::trends_daily`].
 ///
 /// Output tokens include reasoning tokens (D9): the API surface ccr-ui
@@ -943,6 +962,99 @@ impl Dashboard {
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Summarizes context-window utilization across the filtered event set.
+    ///
+    /// Grouped by `(source, model)` to avoid per-event scans: each group's peak
+    /// prompt tokens and summed prompt tokens are divided by the model's known
+    /// context window (from the static catalog). Groups whose model window is
+    /// unknown are excluded from the ratios and reported as `unpriced_events`.
+    pub fn context_pressure(&self, filter: &QueryFilter) -> Result<ContextPressurePayload> {
+        let event_filter = filter.event_filter(None);
+        let sql = format!(
+            r#"
+            SELECT
+                source,
+                model,
+                MAX(input_tokens + cache_read_tokens + cache_creation_tokens) AS peak_prompt,
+                SUM(input_tokens + cache_read_tokens + cache_creation_tokens) AS sum_prompt,
+                COUNT(*) AS event_count
+            FROM usage_event
+            {}
+            GROUP BY source, model
+            "#,
+            event_filter.where_sql()
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params_from_iter(event_filter.params().iter()), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<i64>>(2)?.unwrap_or_default(),
+                    row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
+                    row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        let catalog = PricingCatalog::static_v1();
+        let mut peak_percent = 0.0_f64;
+        let mut peak_model: Option<String> = None;
+        let mut ratio_sum = 0.0_f64;
+        let mut priced_events = 0_i64;
+        let mut unpriced_events = 0_i64;
+        for (source, model, peak_prompt, sum_prompt, event_count) in rows {
+            match catalog.context_window(&source, &model) {
+                Some(window) => {
+                    let window = window as f64;
+                    let group_peak = peak_prompt.max(0) as f64 / window;
+                    if group_peak > peak_percent {
+                        peak_percent = group_peak;
+                        peak_model = Some(format!("{source}:{model}"));
+                    }
+                    ratio_sum += sum_prompt.max(0) as f64 / window;
+                    priced_events += event_count;
+                }
+                None => unpriced_events += event_count,
+            }
+        }
+        let avg_percent = if priced_events > 0 {
+            ratio_sum / priced_events as f64
+        } else {
+            0.0
+        };
+        Ok(ContextPressurePayload {
+            peak_percent,
+            avg_percent,
+            peak_model,
+            priced_events,
+            unpriced_events,
+        })
+    }
+
+    /// Loads recent 5-hour rolling blocks (burn rate / projection) for the
+    /// interactive dashboard, reusing the CLI `blocks` report engine with
+    /// dashboard-friendly defaults (recent blocks, local time, 5h windows).
+    pub fn blocks_report(&self) -> anyhow::Result<Vec<reports::BlockReportRow>> {
+        let filter = reports::ReportFilter {
+            since: None,
+            until: None,
+            order: reports::SortOrder::Desc,
+            timezone: reports::ReportTimezone::Local,
+            locale: "en-US".to_string(),
+            source: None,
+            project: None,
+            breakdown: false,
+        };
+        let options = reports::BlockReportOptions {
+            active_only: false,
+            recent_only: true,
+            token_limit: None,
+            session_length_hours: 5.0,
+        };
+        Ok(reports::load_blocks_report(&self.store, &filter, &options)?.blocks)
     }
 
     /// Loads total token usage grouped by source plus each source's freshest event time.
@@ -2792,6 +2904,60 @@ mod tests {
     }
 
     #[test]
+    fn context_pressure_ratios_and_unpriced_split() -> Result<()> {
+        use crate::testing::SeedEvent;
+
+        let fixture = Fixture::new()?;
+        // Priced model (codex gpt-5, window 400_000): peak prompt 200_000 -> 50%.
+        fixture.seed_event(SeedEvent {
+            event_key: "codex:ctx:1",
+            model: "gpt-5",
+            input_tokens: 150_000,
+            cache_read_tokens: 50_000,
+            total_tokens: 200_000,
+            ..SeedEvent::default()
+        })?;
+        fixture.seed_event(SeedEvent {
+            event_key: "codex:ctx:2",
+            model: "gpt-5",
+            input_tokens: 40_000,
+            total_tokens: 40_000,
+            ..SeedEvent::default()
+        })?;
+        // Unknown-window model is excluded from ratios but counted as unpriced.
+        fixture.seed_event(SeedEvent {
+            event_key: "codex:ctx:3",
+            model: "mystery-model",
+            input_tokens: 999_999,
+            total_tokens: 999_999,
+            ..SeedEvent::default()
+        })?;
+
+        let dashboard = Dashboard::open(fixture.store())?;
+        let pressure = dashboard.context_pressure(&Default::default())?;
+
+        assert!((pressure.peak_percent - 0.5).abs() < 1e-9);
+        // avg = (200_000 + 40_000) / 400_000 / 2 priced events = 0.30
+        assert!((pressure.avg_percent - 0.30).abs() < 1e-9);
+        assert_eq!(pressure.priced_events, 2);
+        assert_eq!(pressure.unpriced_events, 1);
+        assert_eq!(pressure.peak_model.as_deref(), Some("codex:gpt-5"));
+        Ok(())
+    }
+
+    #[test]
+    fn context_pressure_empty_is_zero() -> Result<()> {
+        let fixture = Fixture::new()?;
+        let dashboard = Dashboard::open(fixture.store())?;
+        let pressure = dashboard.context_pressure(&Default::default())?;
+        assert_eq!(pressure.priced_events, 0);
+        assert_eq!(pressure.unpriced_events, 0);
+        assert_eq!(pressure.peak_percent, 0.0);
+        assert_eq!(pressure.avg_percent, 0.0);
+        Ok(())
+    }
+
+    #[test]
     fn overview_filter_by_date_range_clamps_correctly() -> Result<()> {
         let fixture = Fixture::new()?;
         fixture.seed_dashboard(72)?;
@@ -2802,7 +2968,6 @@ mod tests {
             until: Some(NaiveDate::from_ymd_opt(2026, 4, 2).unwrap()),
             ..Default::default()
         })?;
-
         assert_eq!(one_day.bucket_count, 24);
         assert!(one_day.total.total_tokens > 0);
         assert!(

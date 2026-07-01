@@ -18,7 +18,7 @@ pub fn render(frame: &mut Frame, area: Rect, active_panel: Panel) {
         if i > 0 {
             spans.push(Span::styled(
                 " │ ",
-                Style::default().fg(theme::BORDER_NORMAL),
+                Style::default().fg(theme::border_normal()),
             ));
         }
 
@@ -39,18 +39,18 @@ pub fn render(frame: &mut Frame, area: Rect, active_panel: Panel) {
     let line = Line::from(spans);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::BORDER_NORMAL))
+        .border_style(Style::default().fg(theme::border_normal()))
         .title(Span::styled(
             " llmusage ",
             Style::default()
-                .fg(theme::ACCENT)
+                .fg(theme::accent())
                 .add_modifier(Modifier::BOLD),
         ))
         .title_alignment(Alignment::Left)
         .title_top(
             Line::from(Span::styled(
                 " local usage ",
-                Style::default().fg(theme::MUTED_FG),
+                Style::default().fg(theme::muted_fg()),
             ))
             .right_aligned(),
         );

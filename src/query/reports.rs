@@ -110,6 +110,11 @@ pub struct SessionReportRow {
     pub source: Option<String>,
     pub first_activity_at: String,
     pub last_activity_at: String,
+    /// Wall-clock span (first→last activity) in minutes.
+    pub span_minutes: i64,
+    /// Gap-capped active minutes: adjacent-event gaps over 30 minutes are
+    /// treated as "away" and excluded, approximating hands-on time.
+    pub active_minutes: i64,
     #[serde(flatten)]
     pub totals: TokenTotals,
     pub models_used: Vec<String>,
@@ -644,6 +649,7 @@ pub fn load_session_report(
 ) -> Result<SessionListReport> {
     let wanted = session_id_filter.map(|value| value.to_ascii_lowercase());
     let mut groups: BTreeMap<String, SessionGroup> = BTreeMap::new();
+    let mut session_times: BTreeMap<String, Vec<DateTime<FixedOffset>>> = BTreeMap::new();
     let mut totals = TokenTotals::default();
 
     visit_filtered_events(store, filter, |event| {
@@ -655,6 +661,10 @@ pub fn load_session_report(
             }
         }
         let display_at = event.local_at.to_rfc3339();
+        session_times
+            .entry(session_id.clone())
+            .or_default()
+            .push(event.local_at);
         let entry = groups.entry(session_id).or_insert_with(|| {
             (
                 Aggregate::default(),
@@ -689,6 +699,10 @@ pub fn load_session_report(
         .into_iter()
         .map(
             |(session_id, (aggregate, project, session_label, source, first, last))| {
+                let (span_minutes, active_minutes) = session_times
+                    .get_mut(&session_id)
+                    .map(|times| session_time_span(times))
+                    .unwrap_or((0, 0));
                 SessionReportRow {
                     session_id,
                     session_label,
@@ -696,6 +710,8 @@ pub fn load_session_report(
                     source,
                     first_activity_at: first,
                     last_activity_at: last,
+                    span_minutes,
+                    active_minutes,
                     totals: aggregate.totals.clone(),
                     models_used: aggregate.model_names(),
                     model_breakdowns: aggregate.model_breakdowns(filter.breakdown),
@@ -707,6 +723,29 @@ pub fn load_session_report(
         row.last_activity_at.clone()
     });
     Ok(SessionListReport { sessions, totals })
+}
+
+const ACTIVE_GAP_CAP_MINUTES: i64 = 30;
+
+/// Returns `(span_minutes, active_minutes)` for a session's event times.
+///
+/// Span is last−first. Active sums adjacent-event gaps that do not exceed
+/// [`ACTIVE_GAP_CAP_MINUTES`], dropping idle stretches so the result
+/// approximates hands-on time rather than wall-clock presence.
+fn session_time_span(times: &mut [DateTime<FixedOffset>]) -> (i64, i64) {
+    if times.len() < 2 {
+        return (0, 0);
+    }
+    times.sort_unstable();
+    let span = (*times.last().unwrap() - times[0]).num_minutes().max(0);
+    let mut active = 0i64;
+    for pair in times.windows(2) {
+        let gap = (pair[1] - pair[0]).num_minutes();
+        if gap > 0 && gap <= ACTIVE_GAP_CAP_MINUTES {
+            active += gap;
+        }
+    }
+    (span, active)
 }
 
 pub fn load_single_session_report(
@@ -1342,6 +1381,44 @@ mod tests {
 
     use super::*;
     use crate::{paths::AppPaths, store::Store};
+
+    fn at(rfc3339: &str) -> DateTime<FixedOffset> {
+        DateTime::parse_from_rfc3339(rfc3339).unwrap()
+    }
+
+    #[test]
+    fn session_time_span_caps_idle_gaps() {
+        // 0m, +10m, +50m (40m gap dropped), +55m (5m kept).
+        let mut times = vec![
+            at("2026-05-01T10:00:00Z"),
+            at("2026-05-01T10:10:00Z"),
+            at("2026-05-01T10:50:00Z"),
+            at("2026-05-01T10:55:00Z"),
+        ];
+        let (span, active) = session_time_span(&mut times);
+        assert_eq!(span, 55);
+        // 10 (<=30) + 40 (dropped) + 5 (<=30) = 15 active.
+        assert_eq!(active, 15);
+    }
+
+    #[test]
+    fn session_time_span_handles_single_and_empty() {
+        assert_eq!(session_time_span(&mut []), (0, 0));
+        assert_eq!(session_time_span(&mut [at("2026-05-01T10:00:00Z")]), (0, 0));
+    }
+
+    #[test]
+    fn session_time_span_sorts_unordered_input() {
+        let mut times = vec![
+            at("2026-05-01T10:20:00Z"),
+            at("2026-05-01T10:00:00Z"),
+            at("2026-05-01T10:05:00Z"),
+        ];
+        let (span, active) = session_time_span(&mut times);
+        assert_eq!(span, 20);
+        // 5m + 15m, both <= 30 → 20 active.
+        assert_eq!(active, 20);
+    }
 
     #[test]
     fn daily_report_filters_and_groups_by_local_date() -> Result<()> {

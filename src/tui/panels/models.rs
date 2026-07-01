@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 use crate::query::ModelBreakdown;
+use crate::tui::panels::longtail;
 use crate::tui::theme;
 
 use super::super::app::ScrollState;
@@ -51,24 +52,50 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[ModelBreakdown], scroll:
     .style(theme::header_style())
     .bottom_margin(1);
 
-    let rows: Vec<Row> = items
+    // Fold the sub-2% long tail into one summary row on large breakdowns.
+    let total_tokens: i64 = items.iter().map(|item| item.total_tokens.max(0)).sum();
+    let values: Vec<i64> = items.iter().map(|item| item.total_tokens).collect();
+    let collapsed = longtail::collapse_tail(&values, total_tokens);
+    let shown = collapsed.map(|c| &items[..c.keep]).unwrap_or(items);
+
+    let mut rows: Vec<Row> = shown
         .iter()
         .skip(scroll.offset)
         .enumerate()
         .map(|(i, item)| {
+            let absolute = scroll.offset + i;
             let row = Row::new(vec![
                 Cell::from(item.model.clone()),
                 Cell::from(format_number(item.total_tokens)),
                 Cell::from(format_number(item.event_count)),
                 Cell::from(format!("{:.4}", item.cost_with_cache_usd)),
             ]);
-            if i % 2 == 1 {
+            if absolute == 0 {
+                // Rank #1 stands out in the accent color, bold.
+                row.style(
+                    Style::default()
+                        .fg(theme::accent())
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                )
+            } else if i % 2 == 1 {
                 row.style(theme::row_alt_style())
             } else {
                 row
             }
         })
         .collect();
+
+    if let Some(collapsed) = collapsed {
+        rows.push(
+            Row::new(vec![
+                Cell::from(longtail::summary_label(&collapsed)),
+                Cell::from(format_number(collapsed.hidden_value)),
+                Cell::from(String::new()),
+                Cell::from(String::new()),
+            ])
+            .style(theme::muted_style()),
+        );
+    }
 
     let table = Table::new(
         rows,
@@ -81,7 +108,7 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[ModelBreakdown], scroll:
     )
     .header(header)
     .block(styled_block("模型"))
-    .row_highlight_style(Style::default().fg(theme::ACCENT));
+    .row_highlight_style(Style::default().fg(theme::accent()));
 
     frame.render_widget(table, area);
 }

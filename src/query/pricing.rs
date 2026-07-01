@@ -185,6 +185,7 @@ mod tests {
                 output_per_mtok: 0.005,
                 reasoning_per_mtok: None,
                 reasoning_policy: Default::default(),
+                context_window: None,
             }],
         };
         let cost = compute_cost_with(
@@ -216,6 +217,7 @@ mod tests {
                 output_per_mtok: 15.0,
                 reasoning_per_mtok: Some(99.0),
                 reasoning_policy: ReasoningPolicy::IncludedInOutput,
+                context_window: None,
             }],
         };
 
@@ -244,6 +246,7 @@ mod tests {
                 output_per_mtok: 2.0,
                 reasoning_per_mtok: Some(4.0),
                 reasoning_policy: ReasoningPolicy::Separate,
+                context_window: None,
             }],
         };
 

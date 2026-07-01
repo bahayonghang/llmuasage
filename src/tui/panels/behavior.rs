@@ -56,7 +56,7 @@ fn render_activity(frame: &mut Frame, area: Rect, payload: &BehaviorPanelPayload
                 Span::styled(
                     format!("{} ", row.category),
                     Style::default()
-                        .fg(theme::ACCENT)
+                        .fg(theme::accent())
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(format!(
@@ -92,7 +92,7 @@ fn render_tools(frame: &mut Frame, area: Rect, payload: &BehaviorPanelPayload) {
                 Span::styled(
                     format!("{}/{}{} ", row.tool_kind, row.tool_name, server),
                     Style::default()
-                        .fg(theme::ACCENT)
+                        .fg(theme::accent())
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(format!(
@@ -220,7 +220,7 @@ fn render_compare(frame: &mut Frame, area: Rect, payload: &ModelComparePayload) 
                 Span::styled(
                     format!("{} vs {} ", left.model, right.model),
                     Style::default()
-                        .fg(theme::ACCENT)
+                        .fg(theme::accent())
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(format!(
@@ -243,7 +243,7 @@ fn render_compare(frame: &mut Frame, area: Rect, payload: &ModelComparePayload) 
                 Line::from(vec![
                     Span::styled(
                         format!("{} ", metric.label),
-                        Style::default().fg(theme::ACCENT),
+                        Style::default().fg(theme::accent()),
                     ),
                     Span::raw(format!(
                         "{} → {}{}",
@@ -261,7 +261,7 @@ fn render_compare(frame: &mut Frame, area: Rect, payload: &ModelComparePayload) 
                 lines.push(Line::from(vec![
                     Span::styled(
                         format!("category:{} ", category.category),
-                        Style::default().fg(theme::ACCENT),
+                        Style::default().fg(theme::accent()),
                     ),
                     Span::raw(format!(
                         "one-shot {} vs {}",
@@ -296,11 +296,11 @@ fn render_section(frame: &mut Frame, area: Rect, title: &str, lines: Vec<Line<'_
 fn section_block(title: &str) -> Block<'_> {
     Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::BORDER_NORMAL))
+        .border_style(Style::default().fg(theme::border_normal()))
         .title(Span::styled(
             format!(" {title} "),
             Style::default()
-                .fg(theme::ACCENT)
+                .fg(theme::accent())
                 .add_modifier(Modifier::BOLD),
         ))
 }
@@ -317,7 +317,7 @@ fn support_line(support: &BehaviorSupport) -> Line<'_> {
             .add_modifier(Modifier::BOLD)
     };
     let mut spans = vec![
-        Span::styled("状态 ", Style::default().fg(theme::ACCENT)),
+        Span::styled("状态 ", Style::default().fg(theme::accent())),
         Span::styled(level, status_style),
     ];
     if let Some(reason) = &support.reason {
