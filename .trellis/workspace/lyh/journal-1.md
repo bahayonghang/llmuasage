@@ -247,3 +247,36 @@ Added codex-tracer docs in English/Chinese, documented the embedded schema.sql c
 ### Next Steps
 
 - None - task complete
+
+
+## Session 8: Token 统计口径增强与 TUI 观感升级 (A+B)
+
+**Date**: 2026-07-01
+**Task**: Token 统计口径增强与 TUI 观感升级 (A+B)
+**Branch**: `dev`
+
+### Summary
+
+对标 ref/token-tracker：A) context window 利用率(查询期计算+pricing catalog 窗口)、longest streak、session gap-capped active/span；B) 多主题系统(default_dark 零回归+catppuccin_mocha, t 键/env 切换)、GitHub 7×N 热力图网格+分位分档、Models/Cost/Sources 长尾折叠、Blocks(burn-rate) 第 9 面板。354 测试通过，clippy/fmt 全绿，默认渲染零回归。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3d3e202` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
