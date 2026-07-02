@@ -15,6 +15,7 @@ ADRs are engineering records, not end-user tutorials. Start with [Architecture](
 - [0007 — Public `LlmusageError` surface](./0007-llmusage-error-surface)
 - [0008 — Source Capability Registry and passive-reader gate](./0008-source-capability-registry)
 - [0009 — Antigravity source cutover](./0009-antigravity-source-cutover)
+- [0010 — Provider label dimension for usage attribution](./0010-provider-label-dimension)
 
 ## Companion docs
 
