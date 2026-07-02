@@ -280,3 +280,39 @@ Added codex-tracer docs in English/Chinese, documented the embedded schema.sql c
 ### Next Steps
 
 - None - task complete
+
+
+## Session 9: provider_label 用量归因维度
+
+**Date**: 2026-07-02
+**Task**: provider_label 用量归因维度
+**Branch**: `dev`
+
+### Summary
+
+实现 provider_label schema v14、CCR provider map sync 归因、回归测试与 ADR
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `af58f0a` | (see git log) |
+| `b7d06be` | (see git log) |
+| `14bd284` | (see git log) |
+| `6d4d0d2` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

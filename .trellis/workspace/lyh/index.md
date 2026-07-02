@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 8
-- **Last Active**: 2026-07-01
+- **Total Sessions**: 9
+- **Last Active**: 2026-07-02
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~282 | Active |
+| `journal-1.md` | ~318 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 9 | 2026-07-02 | provider_label 用量归因维度 | `af58f0a`, `b7d06be`, `14bd284`, `6d4d0d2` | `dev` |
 | 8 | 2026-07-01 | Token 统计口径增强与 TUI 观感升级 (A+B) | `3d3e202` | `dev` |
 | 7 | 2026-06-21 | 吸收 AIUsage 调用分析能力：OpenCode 工具解析 + 零调用检测 | `b205b34`, `5cd63d8` | `dev` |
 | 6 | 2026-06-16 | Document codex-tracer usage | `28e5a06`, `28abf32`, `bd7e222` | `dev` |
