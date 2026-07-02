@@ -55,24 +55,25 @@ impl Fixture {
         conn.execute(
             r#"
             INSERT INTO usage_event(
-                event_key, source, model, event_at, hour_start,
+                event_key, source, provider_label, model, event_at, hour_start,
                 input_tokens, cache_read_tokens, cache_creation_tokens,
                 output_tokens, reasoning_output_tokens, total_tokens,
                 cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source, pricing_rate,
                 project_hash, project_label, project_ref, path_hash,
                 session_id, session_label, source_path_hash, created_at
             ) VALUES (
-                ?1, ?2, ?3, ?4, ?5,
-                ?6, ?7, ?8,
-                ?9, ?10, ?11,
-                ?12, ?13, ?14, ?15, ?16,
-                ?17, ?18, ?19, ?20,
-                ?21, ?22, ?23, ?24
+                ?1, ?2, ?3, ?4, ?5, ?6,
+                ?7, ?8, ?9,
+                ?10, ?11, ?12,
+                ?13, ?14, ?15, ?16, ?17,
+                ?18, ?19, ?20, ?21,
+                ?22, ?23, ?24, ?25
             )
             "#,
             params![
                 event.event_key,
                 event.source,
+                event.provider_label,
                 event.model,
                 event.event_at,
                 event.hour_start.unwrap_or(event.event_at),
@@ -126,13 +127,13 @@ impl Fixture {
         let bucket_sql = format!(
             r#"
             INSERT INTO usage_bucket_30m(
-                source, model, hour_start, project_hash, project_label, project_ref,
+                source, provider_label, model, hour_start, project_hash, project_label, project_ref,
                 input_tokens, cache_read_tokens, cache_creation_tokens,
                 output_tokens, reasoning_output_tokens, total_tokens,
                 cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source, pricing_rate,
                 event_count, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, 1, ?18)
-            ON CONFLICT(source, model, hour_start, project_hash) DO UPDATE SET
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, 1, ?19)
+            ON CONFLICT(source, provider_label, model, hour_start, project_hash) DO UPDATE SET
                 input_tokens = input_tokens + excluded.input_tokens,
                 cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens,
                 cache_creation_tokens = cache_creation_tokens + excluded.cache_creation_tokens,
@@ -161,6 +162,7 @@ impl Fixture {
             &bucket_sql,
             params![
                 event.source,
+                event.provider_label,
                 event.model,
                 event.hour_start.unwrap_or(event.event_at),
                 event.project_hash,
@@ -263,6 +265,7 @@ fn parse_seed_pricing_status(raw: &str) -> pricing::PricingStatus {
 pub struct SeedEvent<'a> {
     pub event_key: &'a str,
     pub source: &'a str,
+    pub provider_label: &'a str,
     pub model: &'a str,
     pub event_at: &'a str,
     pub hour_start: Option<&'a str>,
@@ -292,6 +295,7 @@ impl Default for SeedEvent<'_> {
         Self {
             event_key: "test:event",
             source: "codex",
+            provider_label: "",
             model: "gpt-5",
             event_at: "2026-05-08T00:00:00Z",
             hour_start: None,

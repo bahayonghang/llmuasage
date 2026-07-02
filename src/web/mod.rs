@@ -2809,16 +2809,16 @@ mod tests {
             conn.execute(
                 r#"
                 INSERT INTO usage_bucket_30m(
-                    source, model, hour_start, project_hash, project_label, project_ref,
+                    source, provider_label, model, hour_start, project_hash, project_label, project_ref,
                     input_tokens, cache_read_tokens, cache_creation_tokens,
                     output_tokens, reasoning_output_tokens, total_tokens,
                     cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source,
                     event_count, updated_at
                 )
-                VALUES ('codex', ?1, '2026-05-01T00:00:00Z', 'project-a', 'Project A', NULL,
+                VALUES ('codex', '', ?1, '2026-05-01T00:00:00Z', 'project-a', 'Project A', NULL,
                         100, 10, 0, 50, 0, 160, 0.2, 0.2, 'static', 'static-v1',
                         1, '2026-05-01T00:00:00Z')
-                ON CONFLICT(source, model, hour_start, project_hash) DO UPDATE SET
+                ON CONFLICT(source, provider_label, model, hour_start, project_hash) DO UPDATE SET
                     input_tokens = input_tokens + excluded.input_tokens,
                     cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens,
                     output_tokens = output_tokens + excluded.output_tokens,

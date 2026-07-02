@@ -462,6 +462,7 @@ mod tests {
         UsageEvent {
             event_key: "codex:path:offset".to_string(),
             source: SourceKind::Codex,
+            provider_label: String::new(),
             model: "gpt-5".to_string(),
             event_at: "2026-05-01T00:00:00Z".to_string(),
             hour_start: "2026-05-01T00:00:00Z".to_string(),

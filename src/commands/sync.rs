@@ -1,5 +1,6 @@
 use std::{
     io::{IsTerminal, Write},
+    path::PathBuf,
     time::{Duration, Instant},
 };
 
@@ -31,6 +32,7 @@ pub struct SyncRunOptions {
     pub source: Option<SourceKind>,
     pub recent_days: Option<u32>,
     pub parallelism: Option<usize>,
+    pub provider_map: Option<PathBuf>,
     pub json_events: bool,
     pub allow_lossy_rebuild: bool,
 }
@@ -363,7 +365,10 @@ async fn run_once_locked(
         .map(|value| value.get().min(4))
         .unwrap_or(1);
     let parallelism = options.parallelism.unwrap_or(default_parallelism).max(1);
-    let mut writer = store.begin_sync_run()?;
+    let provider_index = crate::domain::provider_map::ProviderIndex::resolve_for_sync(
+        options.provider_map.as_deref(),
+    )?;
+    let mut writer = store.begin_sync_run_with_provider_index(provider_index)?;
     let parsers = registry::registered_parsers()
         .into_iter()
         .filter(|parser| {

@@ -291,6 +291,7 @@ async fn run_job(
             .and_then(crate::models::SourceKind::parse_id),
         recent_days: options.recent_days,
         parallelism: options.parallelism,
+        provider_map: None,
         json_events: false,
         allow_lossy_rebuild: false,
     };

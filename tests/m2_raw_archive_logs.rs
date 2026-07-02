@@ -78,6 +78,7 @@ fn build_event(key: &str, event_at: &str, total_tokens: i64) -> UsageEvent {
     UsageEvent {
         event_key: key.to_string(),
         source: SourceKind::Codex,
+        provider_label: String::new(),
         model: "gpt-5".to_string(),
         event_at: event_at.to_string(),
         hour_start: event_at.to_string(),
@@ -131,6 +132,7 @@ fn seed_resettable_row(store: &Store, source: SourceKind, key_suffix: &str) -> R
     let event = UsageEvent {
         event_key: event_key.clone(),
         source,
+        provider_label: String::new(),
         model: "gpt-5".to_string(),
         event_at: "2026-05-08T00:00:00Z".to_string(),
         hour_start: "2026-05-08T00:00:00Z".to_string(),

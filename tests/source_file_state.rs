@@ -26,6 +26,7 @@ fn build_event(suffix: &str, path_hash: &str) -> UsageEvent {
     UsageEvent {
         event_key: format!("codex:{path_hash}:{suffix}"),
         source: SourceKind::Codex,
+        provider_label: String::new(),
         model: "gpt-5".to_string(),
         event_at: "2026-05-08T00:00:00Z".to_string(),
         hour_start: "2026-05-08T00:00:00Z".to_string(),

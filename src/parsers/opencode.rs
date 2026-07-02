@@ -367,6 +367,7 @@ fn row_to_event(row: &OpencodeRow, resolver: &mut ProjectResolver) -> Result<Opt
     Ok(Some(UsageEvent {
         event_key: format!("opencode:{}", row.id),
         source: SourceKind::Opencode,
+        provider_label: String::new(),
         model: normalize_model(
             value
                 .get("modelID")

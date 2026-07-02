@@ -98,6 +98,9 @@ pub struct UsageEvent {
     pub event_key: String,
     /// Source that produced the event.
     pub source: SourceKind,
+    /// Relay/provider label attributed at sync time. Empty string means unattributed.
+    #[serde(default)]
+    pub provider_label: String,
     /// Normalized model name used for grouping and cost estimation.
     pub model: String,
     /// Source event timestamp in RFC 3339 format.

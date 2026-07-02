@@ -140,6 +140,84 @@ fn hot_sync_keeps_unchanged_source_files_live_and_reports_stored_events() -> Res
 }
 
 #[test]
+fn default_ccr_provider_map_labels_sync_and_rebuild() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_codex(
+        "rollout-provider-default.jsonl",
+        120,
+        "2026-04-22T01:12:00Z",
+    )?;
+    fixture.write_provider_map(
+        r#"{"platform":"codex","provider":"anyrouter","activated_at":"2026-04-22T01:00:00Z","event":"activate"}"#,
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+
+        let first = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Codex),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(first.total_inserted, 1);
+        assert_provider_label(&app.paths.db_path, "anyrouter")?;
+
+        fixture.write_provider_map(
+            r#"{"platform":"codex","provider":"methink","activated_at":"2026-04-22T01:00:00Z","event":"activate"}"#,
+        )?;
+        let rebuilt = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                rebuild: true,
+                source: Some(SourceKind::Codex),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(rebuilt.total_inserted, 1);
+        assert_provider_label(&app.paths.db_path, "methink")?;
+
+        let explicit_map = fixture.home.join("explicit-provider-map.jsonl");
+        fs::write(
+            &explicit_map,
+            r#"{"platform":"codex","provider":"glm","activated_at":"2026-04-22T01:00:00Z","event":"activate"}"#,
+        )?;
+        let rebuilt_explicit = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                rebuild: true,
+                source: Some(SourceKind::Codex),
+                provider_map: Some(explicit_map),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(rebuilt_explicit.total_inserted, 1);
+        assert_provider_label(&app.paths.db_path, "glm")?;
+
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
 fn sync_replay_replaces_old_file_totals() -> Result<()> {
     /*
      * ========================================================================
@@ -1124,6 +1202,25 @@ fn usage_event_count(db_path: &Path) -> Result<i64> {
     Ok(count)
 }
 
+fn assert_provider_label(db_path: &Path, expected: &str) -> Result<()> {
+    let conn = Connection::open(db_path)?;
+    let event_labels = {
+        let mut stmt = conn.prepare("SELECT provider_label FROM usage_event ORDER BY event_key")?;
+        stmt.query_map([], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    assert_eq!(event_labels, vec![expected.to_string()]);
+
+    let bucket_labels = {
+        let mut stmt =
+            conn.prepare("SELECT provider_label FROM usage_bucket_30m ORDER BY provider_label")?;
+        stmt.query_map([], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    assert_eq!(bucket_labels, vec![expected.to_string()]);
+    Ok(())
+}
+
 fn usage_tool_call_count(db_path: &Path) -> Result<i64> {
     let conn = Connection::open(db_path)?;
     let count = conn.query_row("SELECT COUNT(*) FROM usage_tool_call", [], |row| row.get(0))?;
@@ -1205,6 +1302,7 @@ struct Fixture {
     _root: TempDir,
     home: PathBuf,
     codex_home: PathBuf,
+    ccr_root: PathBuf,
     opencode_home: PathBuf,
     saved: Vec<(String, Option<String>)>,
 }
@@ -1214,9 +1312,11 @@ impl Fixture {
         let root = TempDir::new()?;
         let home = root.path().join("home");
         let codex_home = home.join(".codex");
+        let ccr_root = home.join(".ccr");
         let opencode_home = root.path().join("opencode-home");
         fs::create_dir_all(&home)?;
         fs::create_dir_all(&codex_home)?;
+        fs::create_dir_all(&ccr_root)?;
         fs::create_dir_all(&opencode_home)?;
 
         let mut saved = Vec::new();
@@ -1224,6 +1324,7 @@ impl Fixture {
             "HOME",
             "USERPROFILE",
             "CODEX_HOME",
+            "CCR_ROOT",
             "OPENCODE_HOME",
             "OPENCODE_DB",
         ] {
@@ -1233,6 +1334,7 @@ impl Fixture {
             std::env::set_var("HOME", &home);
             std::env::set_var("USERPROFILE", &home);
             std::env::set_var("CODEX_HOME", &codex_home);
+            std::env::set_var("CCR_ROOT", &ccr_root);
             std::env::set_var("OPENCODE_HOME", &opencode_home);
         }
 
@@ -1243,6 +1345,7 @@ impl Fixture {
             _root: root,
             home,
             codex_home,
+            ccr_root,
             opencode_home,
             saved,
         })
@@ -1283,6 +1386,18 @@ impl Fixture {
         .join("\n");
         fs::write(sessions_dir.join(name), payload)?;
         Ok(())
+    }
+
+    fn write_provider_map(&self, contents: &str) -> Result<PathBuf> {
+        let path = self
+            .ccr_root
+            .join("analytics")
+            .join("provider_activation.jsonl");
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&path, contents)?;
+        Ok(path)
     }
 
     fn append_codex(&self, name: &str, total_tokens: i64, timestamp: &str) -> Result<()> {

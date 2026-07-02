@@ -959,24 +959,25 @@ impl ReportCliFixture {
         conn.execute(
             r#"
             INSERT INTO usage_event(
-                event_key, source, model, event_at, hour_start,
+                event_key, source, provider_label, model, event_at, hour_start,
                 input_tokens, cache_read_tokens, cache_creation_tokens,
                 output_tokens, reasoning_output_tokens, total_tokens,
                 cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source,
                 project_hash, project_label, project_ref, path_hash,
                 session_id, session_label, source_path_hash, created_at
             ) VALUES (
-                ?1, ?2, ?3, ?4, ?4,
-                ?5, ?6, ?7,
-                ?8, ?9, ?10,
-                ?11, ?12, ?13, ?14,
-                ?15, ?16, ?17, ?18,
-                ?19, ?19, ?20, ?4
+                ?1, ?2, ?3, ?4, ?5, ?5,
+                ?6, ?7, ?8,
+                ?9, ?10, ?11,
+                ?12, ?13, ?14, ?15,
+                ?16, ?17, ?18, ?19,
+                ?20, ?20, ?21, ?5
             )
             "#,
             params![
                 event.event_key,
                 event.source,
+                event.provider_label,
                 event.model,
                 event.event_at,
                 event.input_tokens,
@@ -1000,13 +1001,13 @@ impl ReportCliFixture {
         conn.execute(
             r#"
             INSERT INTO usage_bucket_30m(
-                source, model, hour_start, project_hash, project_label, project_ref,
+                source, provider_label, model, hour_start, project_hash, project_label, project_ref,
                 input_tokens, cache_read_tokens, cache_creation_tokens,
                 output_tokens, reasoning_output_tokens, total_tokens,
                 cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source,
                 event_count, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, 1, ?3)
-            ON CONFLICT(source, model, hour_start, project_hash) DO UPDATE SET
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, 1, ?4)
+            ON CONFLICT(source, provider_label, model, hour_start, project_hash) DO UPDATE SET
                 input_tokens = input_tokens + excluded.input_tokens,
                 cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens,
                 cache_creation_tokens = cache_creation_tokens + excluded.cache_creation_tokens,
@@ -1028,6 +1029,7 @@ impl ReportCliFixture {
             "#,
             params![
                 event.source,
+                event.provider_label,
                 event.model,
                 event.event_at,
                 event.project_hash,
@@ -1095,6 +1097,7 @@ fn read_log_json_lines(path: &Path) -> Result<Vec<serde_json::Value>> {
 struct SeedEvent<'a> {
     event_key: &'a str,
     source: &'a str,
+    provider_label: &'a str,
     model: &'a str,
     event_at: &'a str,
     input_tokens: i64,
@@ -1119,6 +1122,7 @@ impl Default for SeedEvent<'_> {
         Self {
             event_key: "codex:test:1",
             source: "codex",
+            provider_label: "",
             model: "gpt-5",
             event_at: "2026-05-01T00:00:00Z",
             input_tokens: 0,

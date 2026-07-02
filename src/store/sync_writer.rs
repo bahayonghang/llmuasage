@@ -12,6 +12,7 @@ use super::{
     SyncShard,
 };
 use crate::{
+    domain::provider_map::ProviderIndex,
     error::LlmusageError,
     models::{ProjectInfo, SourceKind, UsageEvent, UsageTokens, UsageToolCall, UsageTurn},
     query::{
@@ -54,6 +55,13 @@ fn fail_shard_commit_at(
 
 impl Store {
     pub fn begin_sync_run(&self) -> Result<SyncRunWriter> {
+        self.begin_sync_run_with_provider_index(None)
+    }
+
+    pub fn begin_sync_run_with_provider_index(
+        &self,
+        provider_index: Option<ProviderIndex>,
+    ) -> Result<SyncRunWriter> {
         /*
          * ========================================================================
          * 步骤3：建立单写入端
@@ -73,6 +81,7 @@ impl Store {
             run_started_at: crate::util::now_utc_millis(),
             raw_archive_enabled,
             pricing_catalog,
+            provider_index,
         })
     }
 }
@@ -145,6 +154,7 @@ impl SyncRunWriter {
             let mut aggregate_stmt = tx.prepare_cached(
                 r#"
                 SELECT
+                    COALESCE(provider_label, ''),
                     model,
                     hour_start,
                     COALESCE(project_hash, ''),
@@ -159,30 +169,38 @@ impl SyncRunWriter {
                     COUNT(*)
                 FROM usage_event
                 WHERE source = ?1 AND source_path_hash = ?2
-                GROUP BY model, hour_start, COALESCE(project_hash, '')
+                GROUP BY COALESCE(provider_label, ''), model, hour_start, COALESCE(project_hash, '')
                 "#,
             )?;
             let mut update_bucket_stmt = tx.prepare_cached(
                 r#"
                 UPDATE usage_bucket_30m
                 SET
-                    input_tokens = input_tokens - ?5,
-                    cache_read_tokens = cache_read_tokens - ?6,
-                    cache_creation_tokens = cache_creation_tokens - ?7,
-                    output_tokens = output_tokens - ?8,
-                    reasoning_output_tokens = reasoning_output_tokens - ?9,
-                    total_tokens = total_tokens - ?10,
-                    cost_with_cache_usd = cost_with_cache_usd - ?11,
-                    cost_without_cache_usd = cost_without_cache_usd - ?12,
-                    event_count = event_count - ?13,
-                    updated_at = ?14
-                WHERE source = ?1 AND model = ?2 AND hour_start = ?3 AND project_hash = ?4
+                    input_tokens = input_tokens - ?6,
+                    cache_read_tokens = cache_read_tokens - ?7,
+                    cache_creation_tokens = cache_creation_tokens - ?8,
+                    output_tokens = output_tokens - ?9,
+                    reasoning_output_tokens = reasoning_output_tokens - ?10,
+                    total_tokens = total_tokens - ?11,
+                    cost_with_cache_usd = cost_with_cache_usd - ?12,
+                    cost_without_cache_usd = cost_without_cache_usd - ?13,
+                    event_count = event_count - ?14,
+                    updated_at = ?15
+                WHERE source = ?1
+                  AND provider_label = ?2
+                  AND model = ?3
+                  AND hour_start = ?4
+                  AND project_hash = ?5
                 "#,
             )?;
             let mut delete_zero_stmt = tx.prepare_cached(
                 r#"
                 DELETE FROM usage_bucket_30m
-                WHERE source = ?1 AND model = ?2 AND hour_start = ?3 AND project_hash = ?4
+                WHERE source = ?1
+                  AND provider_label = ?2
+                  AND model = ?3
+                  AND hour_start = ?4
+                  AND project_hash = ?5
                   AND input_tokens <= 0
                   AND cache_read_tokens <= 0
                   AND cache_creation_tokens <= 0
@@ -212,29 +230,31 @@ impl SyncRunWriter {
                             row.get::<_, String>(0)?,
                             row.get::<_, String>(1)?,
                             row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
                             UsageTokens {
-                                input_tokens: row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
+                                input_tokens: row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
                                 cache_read_tokens: row
-                                    .get::<_, Option<i64>>(4)?
-                                    .unwrap_or_default(),
-                                cache_creation_tokens: row
                                     .get::<_, Option<i64>>(5)?
                                     .unwrap_or_default(),
-                                output_tokens: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
-                                reasoning_output_tokens: row
-                                    .get::<_, Option<i64>>(7)?
+                                cache_creation_tokens: row
+                                    .get::<_, Option<i64>>(6)?
                                     .unwrap_or_default(),
-                                total_tokens: row.get::<_, Option<i64>>(8)?.unwrap_or_default(),
+                                output_tokens: row.get::<_, Option<i64>>(7)?.unwrap_or_default(),
+                                reasoning_output_tokens: row
+                                    .get::<_, Option<i64>>(8)?
+                                    .unwrap_or_default(),
+                                total_tokens: row.get::<_, Option<i64>>(9)?.unwrap_or_default(),
                             },
-                            row.get::<_, Option<f64>>(9)?.unwrap_or_default(),
                             row.get::<_, Option<f64>>(10)?.unwrap_or_default(),
-                            row.get::<_, Option<i64>>(11)?.unwrap_or_default(),
+                            row.get::<_, Option<f64>>(11)?.unwrap_or_default(),
+                            row.get::<_, Option<i64>>(12)?.unwrap_or_default(),
                         ))
                     },
                 )?;
                 let aggregates = rows.collect::<rusqlite::Result<Vec<_>>>()?;
 
                 for (
+                    provider_label,
                     model,
                     hour_start,
                     project_hash,
@@ -246,6 +266,7 @@ impl SyncRunWriter {
                 {
                     update_bucket_stmt.execute(rusqlite::params![
                         source.as_str(),
+                        &provider_label,
                         &model,
                         &hour_start,
                         &project_hash,
@@ -262,12 +283,13 @@ impl SyncRunWriter {
                     ])?;
                     let deleted_empty_bucket = delete_zero_stmt.execute(rusqlite::params![
                         source.as_str(),
+                        &provider_label,
                         &model,
                         &hour_start,
                         &project_hash,
                     ])?;
                     if deleted_empty_bucket == 0 {
-                        touched_buckets.push((model, hour_start, project_hash));
+                        touched_buckets.push((provider_label, model, hour_start, project_hash));
                     }
                 }
 
@@ -311,13 +333,13 @@ impl SyncRunWriter {
             let mut event_stmt = tx.prepare_cached(
                 r#"
                 INSERT OR IGNORE INTO usage_event(
-                    event_key, source, model, event_at, hour_start,
+                    event_key, source, provider_label, model, event_at, hour_start,
                     input_tokens, cache_read_tokens, cache_creation_tokens, output_tokens, reasoning_output_tokens, total_tokens,
                     cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source, pricing_rate,
                     project_hash, project_label, project_ref, path_hash,
                     session_id, session_label, source_path_hash,
                     created_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)
                 "#,
             )?;
             let mut projects = HashMap::new();
@@ -340,6 +362,7 @@ impl SyncRunWriter {
                 let changed = event_stmt.execute(rusqlite::params![
                     event.event_key,
                     event.source.as_str(),
+                    event.provider_label,
                     event.model,
                     event.event_at,
                     event.hour_start,
@@ -499,7 +522,7 @@ impl SyncRunWriter {
 
     fn commit_shard_inner(
         &mut self,
-        shard: SyncShard,
+        mut shard: SyncShard,
         failpoint: Option<ShardCommitFailpoint>,
     ) -> Result<ShardCommitStats> {
         /*
@@ -526,6 +549,11 @@ impl SyncRunWriter {
         // 7.1 计时入口与累加器
         let started = Instant::now();
         let mut stats = ShardCommitStats::default();
+        if let Some(index) = self.provider_index.as_ref() {
+            for event in &mut shard.events {
+                event.provider_label = index.label_for(event.source, &event.event_at);
+            }
+        }
         let pricing_catalog = &self.pricing_catalog;
         let raw_archive_enabled = self.raw_archive_enabled;
         let run_started_at = self.run_started_at.clone();
@@ -755,6 +783,7 @@ fn roll_up_bucket(
         .unwrap_or_default();
     let key = BucketKey {
         source: event.source.as_str().to_string(),
+        provider_label: event.provider_label.clone(),
         model: event.model.clone(),
         hour_start: event.hour_start.clone(),
         project_hash,
@@ -825,12 +854,13 @@ fn flush_buckets_tx(
         return Ok(());
     }
 
-    // Use a static SQL string with an extra parameter (?20) for the PRICING_MIXED
+    // Use a static SQL string with an extra parameter (?21) for the PRICING_MIXED
     // sentinel value, avoiding format! interpolation into SQL text.
     let mut stmt = tx.prepare_cached(
         r#"
         INSERT INTO usage_bucket_30m(
             source,
+            provider_label,
             model,
             hour_start,
             project_hash,
@@ -849,8 +879,8 @@ fn flush_buckets_tx(
             pricing_rate,
             event_count,
             updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
-        ON CONFLICT(source, model, hour_start, project_hash) DO UPDATE SET
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
+        ON CONFLICT(source, provider_label, model, hour_start, project_hash) DO UPDATE SET
             project_label = excluded.project_label,
             project_ref = excluded.project_ref,
             input_tokens = usage_bucket_30m.input_tokens + excluded.input_tokens,
@@ -863,15 +893,15 @@ fn flush_buckets_tx(
             cost_without_cache_usd = usage_bucket_30m.cost_without_cache_usd + excluded.cost_without_cache_usd,
             pricing_status = CASE
                 WHEN usage_bucket_30m.pricing_status = excluded.pricing_status THEN usage_bucket_30m.pricing_status
-                ELSE ?20
+                ELSE ?21
             END,
             pricing_source = CASE
                 WHEN usage_bucket_30m.pricing_source IS excluded.pricing_source THEN usage_bucket_30m.pricing_source
-                ELSE ?20
+                ELSE ?21
             END,
             pricing_rate = CASE
                 WHEN usage_bucket_30m.pricing_rate IS excluded.pricing_rate THEN usage_bucket_30m.pricing_rate
-                ELSE ?20
+                ELSE ?21
             END,
             event_count = usage_bucket_30m.event_count + excluded.event_count,
             updated_at = excluded.updated_at
@@ -881,6 +911,7 @@ fn flush_buckets_tx(
     for (key, rollup) in buckets {
         stmt.execute(rusqlite::params![
             key.source,
+            key.provider_label,
             key.model,
             key.hour_start,
             key.project_hash,
@@ -908,7 +939,7 @@ fn flush_buckets_tx(
 fn refresh_bucket_pricing_after_reset_tx(
     tx: &rusqlite::Transaction<'_>,
     source: &str,
-    buckets: &[(String, String, String)],
+    buckets: &[(String, String, String, String)],
     updated_at: &str,
 ) -> Result<()> {
     if buckets.is_empty() {
@@ -924,28 +955,41 @@ fn refresh_bucket_pricing_after_reset_tx(
             pricing_source,
             pricing_rate
         FROM usage_event
-        WHERE source = ?1 AND model = ?2 AND hour_start = ?3 AND COALESCE(project_hash, '') = ?4
+        WHERE source = ?1
+          AND COALESCE(provider_label, '') = ?2
+          AND model = ?3
+          AND hour_start = ?4
+          AND COALESCE(project_hash, '') = ?5
         "#,
     )?;
     let mut update_stmt = tx.prepare_cached(
         r#"
         UPDATE usage_bucket_30m
-        SET pricing_status = ?5,
-            pricing_source = ?6,
-            pricing_rate = ?7,
-            updated_at = ?8
-        WHERE source = ?1 AND model = ?2 AND hour_start = ?3 AND project_hash = ?4
+        SET pricing_status = ?6,
+            pricing_source = ?7,
+            pricing_rate = ?8,
+            updated_at = ?9
+        WHERE source = ?1
+          AND provider_label = ?2
+          AND model = ?3
+          AND hour_start = ?4
+          AND project_hash = ?5
         "#,
     )?;
 
     let mut unique = HashSet::new();
-    for (model, hour_start, project_hash) in buckets {
-        if !unique.insert((model.clone(), hour_start.clone(), project_hash.clone())) {
+    for (provider_label, model, hour_start, project_hash) in buckets {
+        if !unique.insert((
+            provider_label.clone(),
+            model.clone(),
+            hour_start.clone(),
+            project_hash.clone(),
+        )) {
             continue;
         }
 
         let rows = select_stmt.query_map(
-            rusqlite::params![source, model, hour_start, project_hash],
+            rusqlite::params![source, provider_label, model, hour_start, project_hash],
             |row| {
                 Ok(CostBreakdown {
                     cost_with_cache_usd: row.get::<_, Option<f64>>(0)?.unwrap_or_default(),
@@ -971,6 +1015,7 @@ fn refresh_bucket_pricing_after_reset_tx(
 
         update_stmt.execute(rusqlite::params![
             source,
+            provider_label,
             model,
             hour_start,
             project_hash,
@@ -1004,6 +1049,7 @@ mod tests {
         UsageEvent {
             event_key: format!("codex:{path_hash}:{suffix}"),
             source: SourceKind::Codex,
+            provider_label: String::new(),
             model: "gpt-5".to_string(),
             event_at: "2026-05-01T10:00:00Z".to_string(),
             hour_start: "2026-05-01T10:00:00Z".to_string(),
@@ -1494,6 +1540,97 @@ mod tests {
     }
 
     #[test]
+    fn commit_shard_splits_buckets_by_provider_label() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = build_paths(temp.path());
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+
+        let map_path = temp.path().join("provider_activation.jsonl");
+        std::fs::write(
+            &map_path,
+            r#"
+{"platform":"codex","provider":"anyrouter","activated_at":"2026-05-01T10:00:00Z","event":"activate"}
+{"platform":"codex","provider":"methink","activated_at":"2026-05-01T10:15:00Z","event":"activate"}
+"#,
+        )?;
+        let provider_index = ProviderIndex::load(&map_path)?;
+        let project = ProjectInfo {
+            project_hash: "provider-project".to_string(),
+            project_label: "Provider Project".to_string(),
+            project_ref: None,
+            repo_root_hash: "provider-root".to_string(),
+            path_hash: "provider-path".to_string(),
+        };
+        let mut first = build_event("provider-a", "provider-path", 10);
+        first.event_at = "2026-05-01T10:05:00Z".to_string();
+        first.hour_start = "2026-05-01T10:00:00Z".to_string();
+        first.project = Some(project.clone());
+        let mut second = build_event("provider-b", "provider-path", 20);
+        second.event_at = "2026-05-01T10:20:00Z".to_string();
+        second.hour_start = "2026-05-01T10:00:00Z".to_string();
+        second.project = Some(project);
+
+        let mut writer = store.begin_sync_run_with_provider_index(Some(provider_index))?;
+        let stats = writer.commit_shard(SyncShard {
+            source: SourceKind::Codex,
+            reset_path_hashes: Vec::new(),
+            events: vec![first, second],
+            cursors: Vec::new(),
+            seen_file_paths: Vec::new(),
+            raw_records: Vec::new(),
+            turns: Vec::new(),
+            tool_calls: Vec::new(),
+        })?;
+        assert_eq!(stats.events_inserted, 2);
+
+        let conn = store.open_connection()?;
+        let labels = {
+            let mut stmt = conn.prepare(
+                r#"
+                SELECT provider_label
+                FROM usage_event
+                ORDER BY event_key
+                "#,
+            )?;
+            stmt.query_map([], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        assert_eq!(labels, vec!["anyrouter".to_string(), "methink".to_string()]);
+
+        let buckets = {
+            let mut stmt = conn.prepare(
+                r#"
+                SELECT provider_label, total_tokens, event_count
+                FROM usage_bucket_30m
+                WHERE source='codex'
+                  AND model='gpt-5'
+                  AND hour_start='2026-05-01T10:00:00Z'
+                  AND project_hash='provider-project'
+                ORDER BY provider_label
+                "#,
+            )?;
+            stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        assert_eq!(
+            buckets,
+            vec![
+                ("anyrouter".to_string(), 20, 1),
+                ("methink".to_string(), 40, 1),
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn commit_shard_uses_active_local_pricing_snapshot() -> anyhow::Result<()> {
         let temp = TempDir::new()?;
         let paths = build_paths(temp.path());
@@ -1572,6 +1709,7 @@ mod tests {
             events: vec![UsageEvent {
                 event_key: "claude:pathCache:1".to_string(),
                 source: SourceKind::Claude,
+                provider_label: String::new(),
                 model: "claude-sonnet-4-5".to_string(),
                 event_at: "2026-05-01T10:00:00Z".to_string(),
                 hour_start: "2026-05-01T10:00:00Z".to_string(),

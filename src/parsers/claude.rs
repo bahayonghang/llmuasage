@@ -371,6 +371,7 @@ fn parse_project_file(
         let event = UsageEvent {
             event_key: format!("claude:{path_hash}:{file_fingerprint}:{offset}"),
             source: SourceKind::Claude,
+            provider_label: String::new(),
             model: normalize_model(
                 value
                     .get("message")

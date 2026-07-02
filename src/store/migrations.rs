@@ -64,6 +64,7 @@ pub const MIGRATIONS: &[(u32, &str, MigrationFn)] = &[
         "cutover_gemini_source_to_antigravity",
         m_013_cutover_gemini_source_to_antigravity,
     ),
+    (14, "add_provider_label", m_014_add_provider_label),
 ];
 
 /// Returns the newest schema version known to this binary.
@@ -580,6 +581,66 @@ fn m_013_cutover_gemini_source_to_antigravity(tx: &Transaction<'_>) -> Result<()
         DELETE FROM meta WHERE key = 'source.gemini.enabled';
         "#,
     )?;
+    Ok(())
+}
+
+fn m_014_add_provider_label(tx: &Transaction<'_>) -> Result<()> {
+    if table_exists(tx, "usage_event")? {
+        ensure_column(
+            tx,
+            "usage_event",
+            "provider_label",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+    }
+
+    if !table_exists(tx, "usage_bucket_30m")? {
+        return Ok(());
+    }
+
+    tx.execute_batch(&format!(
+        r#"
+        CREATE TABLE usage_bucket_30m__v14 (
+            source TEXT NOT NULL,
+            provider_label TEXT NOT NULL DEFAULT '',
+            model TEXT NOT NULL,
+            hour_start TEXT NOT NULL,
+            project_hash TEXT NOT NULL DEFAULT '',
+            project_label TEXT,
+            project_ref TEXT,
+            input_tokens INTEGER NOT NULL,
+            cache_read_tokens INTEGER NOT NULL,
+            output_tokens INTEGER NOT NULL,
+            reasoning_output_tokens INTEGER NOT NULL,
+            total_tokens INTEGER NOT NULL,
+            updated_at TEXT NOT NULL,
+            cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+            cost_with_cache_usd REAL NOT NULL DEFAULT 0.0,
+            cost_without_cache_usd REAL NOT NULL DEFAULT 0.0,
+            pricing_status TEXT NOT NULL DEFAULT '{PRICING_UNPRICED}',
+            pricing_source TEXT,
+            pricing_rate TEXT,
+            event_count INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (source, provider_label, model, hour_start, project_hash)
+        );
+        INSERT INTO usage_bucket_30m__v14 (
+            source, provider_label, model, hour_start, project_hash, project_label, project_ref,
+            input_tokens, cache_read_tokens, output_tokens, reasoning_output_tokens, total_tokens,
+            updated_at, cache_creation_tokens, cost_with_cache_usd, cost_without_cache_usd,
+            pricing_status, pricing_source, pricing_rate, event_count
+        )
+        SELECT
+            source, '', model, hour_start, project_hash, project_label, project_ref,
+            input_tokens, cache_read_tokens, output_tokens, reasoning_output_tokens, total_tokens,
+            updated_at, cache_creation_tokens, cost_with_cache_usd, cost_without_cache_usd,
+            pricing_status, pricing_source, pricing_rate, event_count
+        FROM usage_bucket_30m;
+        DROP TABLE usage_bucket_30m;
+        ALTER TABLE usage_bucket_30m__v14 RENAME TO usage_bucket_30m;
+        CREATE INDEX IF NOT EXISTS idx_usage_bucket_30m_hour_start
+            ON usage_bucket_30m(hour_start);
+        "#
+    ))?;
     Ok(())
 }
 
@@ -1301,6 +1362,128 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(event_key, "gemini:legacy:1");
+        Ok(())
+    }
+
+    #[test]
+    fn migration_v14_adds_provider_label_and_rekeys_buckets() -> anyhow::Result<()> {
+        let mut conn = Connection::open_in_memory()?;
+        run_migrations_for_test(
+            &mut conn,
+            &[
+                (1, "baseline", m_001_baseline),
+                (2, "add_cache_split", m_002_add_cache_split),
+                (3, "add_cost_breakdown", m_003_add_cost_breakdown),
+                (4, "add_event_count_proj", m_004_add_event_count_proj),
+                (5, "add_source_file", m_005_add_source_file),
+                (6, "add_recent_history", m_006_add_recent_history),
+                (7, "add_raw_archive", m_007_add_raw_archive),
+                (8, "add_worker_lock_meta", m_008_add_worker_lock_meta),
+                (9, "add_antigravity_source", m_009_add_antigravity_source),
+                (10, "add_pricing_meta", m_010_add_pricing_meta),
+                (11, "add_behavior_facts", m_011_add_behavior_facts),
+                (
+                    12,
+                    "repair_source_sync_status_history_columns",
+                    m_012_repair_source_sync_status_history_columns,
+                ),
+                (
+                    13,
+                    "cutover_gemini_source_to_antigravity",
+                    m_013_cutover_gemini_source_to_antigravity,
+                ),
+            ],
+        )?;
+        conn.execute_batch(
+            r#"
+            INSERT INTO usage_event(
+                event_key, source, model, event_at, hour_start,
+                input_tokens, cache_read_tokens, cache_creation_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                project_hash, created_at
+            ) VALUES (
+                'codex:v14:1', 'codex', 'gpt-5',
+                '2026-07-01T00:01:00Z', '2026-07-01T00:00:00Z',
+                10, 1, 2, 20, 0, 33, 'project-a', '2026-07-01T00:01:00Z'
+            );
+            INSERT INTO usage_bucket_30m(
+                source, model, hour_start, project_hash, project_label, project_ref,
+                input_tokens, cache_read_tokens, cache_creation_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                cost_with_cache_usd, cost_without_cache_usd,
+                pricing_status, pricing_source, pricing_rate,
+                event_count, updated_at
+            ) VALUES (
+                'codex', 'gpt-5', '2026-07-01T00:00:00Z', 'project-a',
+                'Project A', 'repo-a',
+                10, 1, 2, 20, 0, 33,
+                0.25, 0.50, 'priced', 'static', '{"input":1}',
+                1, '2026-07-01T00:02:00Z'
+            );
+            "#,
+        )?;
+
+        run_migrations_for_test(
+            &mut conn,
+            &[(14, "add_provider_label", m_014_add_provider_label)],
+        )?;
+
+        assert_eq!(read_schema_version(&conn)?, 14);
+        let event_columns = pragma_columns(&conn, "usage_event")?;
+        assert!(event_columns.contains(&"provider_label".to_string()));
+        let bucket_columns = pragma_columns(&conn, "usage_bucket_30m")?;
+        assert!(bucket_columns.contains(&"provider_label".to_string()));
+
+        let event_provider: String = conn.query_row(
+            "SELECT provider_label FROM usage_event WHERE event_key='codex:v14:1'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(event_provider, "");
+        let bucket_row: (String, i64, String) = conn.query_row(
+            r#"
+            SELECT provider_label, total_tokens, pricing_rate
+            FROM usage_bucket_30m
+            WHERE source='codex'
+              AND provider_label=''
+              AND model='gpt-5'
+              AND hour_start='2026-07-01T00:00:00Z'
+              AND project_hash='project-a'
+            "#,
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        assert_eq!(
+            bucket_row,
+            ("".to_string(), 33, r#"{"input":1}"#.to_string())
+        );
+
+        let mut pk_stmt = conn.prepare("PRAGMA table_info(usage_bucket_30m)")?;
+        let pk_rows = pk_stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(1)?, row.get::<_, i64>(5)?))
+        })?;
+        let pk_columns = pk_rows
+            .collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .filter(|(_, pk)| *pk > 0)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            pk_columns,
+            vec![
+                ("source".to_string(), 1),
+                ("provider_label".to_string(), 2),
+                ("model".to_string(), 3),
+                ("hour_start".to_string(), 4),
+                ("project_hash".to_string(), 5),
+            ]
+        );
+
+        let index_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_usage_bucket_30m_hour_start'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(index_count, 1);
         Ok(())
     }
 }

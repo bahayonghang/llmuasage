@@ -431,6 +431,7 @@ fn parse_rollout_file(
         let event = UsageEvent {
             event_key: format!("codex:{path_hash}:{file_fingerprint}:{offset}"),
             source: SourceKind::Codex,
+            provider_label: String::new(),
             model: normalize_model(model.as_deref()),
             event_at: timestamp,
             hour_start,

@@ -73,6 +73,9 @@ pub enum Commands {
         /// still scans existing cursors, but this enables RecentReady signalling.
         #[arg(long)]
         recent_days: Option<u32>,
+        /// CCR provider activation JSONL used to attribute relay provider labels.
+        #[arg(long, value_name = "PATH")]
+        provider_map: Option<PathBuf>,
         /// Emit sync lifecycle events as NDJSON on stdout.
         #[arg(long)]
         json_events: bool,
@@ -231,6 +234,7 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
             allow_lossy_rebuild,
             source,
             recent_days,
+            provider_map,
             json_events,
         }) => {
             sync::run_with_options(
@@ -240,6 +244,7 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
                     source,
                     recent_days,
                     parallelism: None,
+                    provider_map,
                     json_events,
                     allow_lossy_rebuild,
                 },
