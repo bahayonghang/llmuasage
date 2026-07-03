@@ -504,6 +504,8 @@ mod tests {
         assert!(catalog.find("codex", "o3-mini").is_some());
         assert!(catalog.find("claude", "claude-opus-4-1").is_some());
         assert!(catalog.find("claude", "claude-sonnet-4-5").is_some());
+        assert!(catalog.find("claude", "claude-fable-5").is_some());
+        assert!(catalog.find("claude", "claude-mythos-5").is_some());
         assert!(catalog.find("opencode", "gpt-5").is_some());
         assert!(catalog.find("codex", "gpt-5-codex").is_some());
         assert!(catalog.find("opencode", "claude.sonnet.4.5").is_some());
@@ -512,11 +514,24 @@ mod tests {
                 .find("opencode", "anthropic/claude-sonnet-4-5")
                 .is_some()
         );
+        assert!(
+            catalog
+                .find("opencode", "anthropic.claude-fable-5")
+                .is_some()
+        );
+        assert!(
+            catalog
+                .find("opencode", "anthropic/claude-mythos-5")
+                .is_some()
+        );
         assert!(catalog.find("opencode", "gemini-3-pro-high").is_some());
         assert!(catalog.find("codex", "made-up-model").is_none());
         assert!(catalog.find("codex", "not-gpt-5").is_none());
         assert!(catalog.find("codex", "gpt-50").is_none());
         assert!(catalog.find("opencode", "gpt2").is_none());
+        assert!(catalog.find("claude", "not-fable-5").is_none());
+        assert!(catalog.find("claude", "not-mythos-5").is_none());
+        assert!(catalog.find("claude", "claude-mythos-preview").is_none());
     }
 
     #[test]
@@ -560,6 +575,19 @@ mod tests {
             .find("opencode", "gemini-3-pro-high")
             .expect("Gemini high alias should match preview pricing");
         assert_eq!(gemini.input_per_mtok, 2.0);
+
+        let fable = catalog
+            .find("opencode", "anthropic.claude-fable-5")
+            .expect("dot-normalized Anthropic Fable IDs should match OpenCode pricing");
+        assert_eq!(fable.input_per_mtok, 10.0);
+        assert_eq!(fable.cached_per_mtok, 1.0);
+        assert_eq!(fable.cache_creation_per_mtok(), 12.5);
+        assert_eq!(fable.output_per_mtok, 50.0);
+
+        let mythos = catalog
+            .find("opencode", "anthropic/claude-mythos-5")
+            .expect("provider-prefixed Mythos IDs should match OpenCode pricing");
+        assert_eq!(mythos.input_per_mtok, 10.0);
     }
 
     /// Litellm snapshots loaded from disk inherit the snapshot status and
@@ -745,8 +773,24 @@ mod tests {
             catalog.context_window("opencode", "gemini-3-pro-preview"),
             Some(1_000_000)
         );
+        assert_eq!(
+            catalog.context_window("claude", "claude-fable-5"),
+            Some(1_000_000)
+        );
+        assert_eq!(
+            catalog.context_window("claude", "claude-mythos-5"),
+            Some(1_000_000)
+        );
+        assert_eq!(
+            catalog.context_window("opencode", "anthropic.claude-fable-5"),
+            Some(1_000_000)
+        );
         // Unknown model degrades to None rather than panicking.
         assert_eq!(catalog.context_window("codex", "made-up-model"), None);
+        assert_eq!(
+            catalog.context_window("claude", "claude-mythos-preview"),
+            None
+        );
     }
 
     #[test]

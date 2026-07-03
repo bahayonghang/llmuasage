@@ -433,6 +433,46 @@ fn hook_run_syncs_only_triggered_source() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn sync_prices_claude_fable_and_mythos_usage() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_claude_fable_mythos()?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+
+        commands::sync::run(&app).await?;
+
+        let store = Store::new(&app.paths)?;
+        let dashboard = Dashboard::open(&store)?;
+        let models = dashboard.model_breakdown(&Default::default())?;
+        for model in ["claude-fable-5", "claude-mythos-5"] {
+            let row = models
+                .iter()
+                .find(|item| item.model == model)
+                .unwrap_or_else(|| panic!("{model} should be present in model breakdown"));
+            assert_eq!(row.pricing_status, "static", "{model}");
+            assert_eq!(row.pricing_source.as_deref(), Some("static-v1"), "{model}");
+            assert!(
+                (row.cost_with_cache_usd - 33.95).abs() < 1e-9,
+                "{model} cost should use Fable/Mythos static-v1 rates"
+            );
+        }
+        assert!(
+            models
+                .iter()
+                .filter(|item| matches!(item.model.as_str(), "claude-fable-5" | "claude-mythos-5"))
+                .all(|item| item.pricing_status != "unpriced")
+        );
+
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
 struct Fixture {
     root: TempDir,
     home: PathBuf,
@@ -546,6 +586,22 @@ impl Fixture {
             claude_file,
             "{\"timestamp\":\"2026-04-22T02:00:00Z\",\"message\":{\"model\":\"claude-sonnet-4\",\"usage\":{\"input_tokens\":60,\"cache_creation_input_tokens\":10,\"cache_read_input_tokens\":5,\"output_tokens\":20,\"total_tokens\":90}}}\n",
         )?;
+        Ok(())
+    }
+
+    fn seed_claude_fable_mythos(&self) -> Result<()> {
+        let claude_file = self
+            .home
+            .join(".claude")
+            .join("projects")
+            .join("demo")
+            .join("session.jsonl");
+        let rows = [
+            "{\"timestamp\":\"2026-07-03T02:00:00Z\",\"message\":{\"model\":\"claude-fable-5\",\"usage\":{\"input_tokens\":1000000,\"cache_creation_input_tokens\":300000,\"cache_read_input_tokens\":200000,\"output_tokens\":400000,\"total_tokens\":1900000}}}",
+            "{\"timestamp\":\"2026-07-03T02:30:00Z\",\"message\":{\"model\":\"claude-mythos-5\",\"usage\":{\"input_tokens\":1000000,\"cache_creation_input_tokens\":300000,\"cache_read_input_tokens\":200000,\"output_tokens\":400000,\"total_tokens\":1900000}}}",
+        ]
+        .join("\n");
+        fs::write(claude_file, format!("{rows}\n"))?;
         Ok(())
     }
 

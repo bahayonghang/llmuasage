@@ -2946,6 +2946,51 @@ mod tests {
     }
 
     #[test]
+    fn context_pressure_knows_claude_fable_and_mythos_windows() -> Result<()> {
+        use crate::testing::SeedEvent;
+
+        let fixture = Fixture::new()?;
+        fixture.seed_event(SeedEvent {
+            event_key: "claude:ctx:fable",
+            source: "claude",
+            model: "claude-fable-5",
+            input_tokens: 450_000,
+            cache_read_tokens: 50_000,
+            total_tokens: 500_000,
+            ..SeedEvent::default()
+        })?;
+        fixture.seed_event(SeedEvent {
+            event_key: "claude:ctx:mythos",
+            source: "claude",
+            model: "claude-mythos-5",
+            input_tokens: 250_000,
+            total_tokens: 250_000,
+            ..SeedEvent::default()
+        })?;
+        fixture.seed_event(SeedEvent {
+            event_key: "claude:ctx:unknown",
+            source: "claude",
+            model: "claude-mythos-preview",
+            input_tokens: 1_000_000,
+            total_tokens: 1_000_000,
+            ..SeedEvent::default()
+        })?;
+
+        let dashboard = Dashboard::open(fixture.store())?;
+        let pressure = dashboard.context_pressure(&Default::default())?;
+
+        assert!((pressure.peak_percent - 0.5).abs() < 1e-9);
+        assert!((pressure.avg_percent - 0.375).abs() < 1e-9);
+        assert_eq!(pressure.priced_events, 2);
+        assert_eq!(pressure.unpriced_events, 1);
+        assert_eq!(
+            pressure.peak_model.as_deref(),
+            Some("claude:claude-fable-5")
+        );
+        Ok(())
+    }
+
+    #[test]
     fn context_pressure_empty_is_zero() -> Result<()> {
         let fixture = Fixture::new()?;
         let dashboard = Dashboard::open(fixture.store())?;
