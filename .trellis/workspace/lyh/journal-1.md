@@ -316,3 +316,36 @@ Added codex-tracer docs in English/Chinese, documented the embedded schema.sql c
 ### Next Steps
 
 - None - task complete
+
+
+## Session 10: Claude Fable/Mythos 模型统计覆盖
+
+**Date**: 2026-07-03
+**Task**: Claude Fable/Mythos 模型统计覆盖
+**Branch**: `dev`
+
+### Summary
+
+为 Claude Fable 5 和 Claude Mythos 5 添加 static-v1 定价、OpenCode/Anthropic 匹配、1M context window、成本与 context pressure 回归测试，并记录 pricing catalog 维护规格。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `311e9bc` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
