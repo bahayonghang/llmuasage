@@ -3,6 +3,7 @@ import {
   formatCompactCurrency,
   formatNumber,
   formatPercent,
+  formatTokenAmount,
   formatUsd,
   statusTone,
 } from './format.js';
@@ -218,7 +219,7 @@ function buildInsights({ overview, modelRows, projectRows, costRows, sourceRows,
       tone: 'neutral',
       label: '用量主因',
       title: '当前窗口主要模型来源',
-      evidence: `${topModel.model || '--'} 使用 ${formatNumber(topModel.total_tokens)} tokens。`,
+      evidence: `${topModel.model || '--'} 使用 ${formatTokenAmount(topModel.total_tokens)} tokens。`,
       action: '无可用成本时，先用 token 排名定位主要消耗。',
     });
   }
@@ -228,7 +229,7 @@ function buildInsights({ overview, modelRows, projectRows, costRows, sourceRows,
       tone: 'neutral',
       label: '项目聚焦',
       title: '当前窗口主项目',
-      evidence: `${topProject.project_label || topProject.project_hash || '--'} 使用 ${formatNumber(topProject.total_tokens)} tokens。`,
+      evidence: `${topProject.project_label || topProject.project_hash || '--'} 使用 ${formatTokenAmount(topProject.total_tokens)} tokens。`,
       action: '若要降低用量，先从该项目的会话模式和模型选择入手。',
     });
   }
@@ -316,7 +317,7 @@ export function buildContext({ overview, trends, models, sources, projects, cost
     const output_tokens = Number(row.output_tokens || 0) + Number(row.reasoning_output_tokens || 0);
     return {
       model: row.model,
-      total_tokens: formatNumber(row.total_tokens),
+      total_tokens: formatTokenAmount(row.total_tokens),
       input_share: formatPercent(row.input_tokens, row.total_tokens),
       output_share: formatPercent(output_tokens, row.total_tokens),
       cached_share: formatPercent(row.cache_read_tokens, row.total_tokens),
@@ -326,7 +327,7 @@ export function buildContext({ overview, trends, models, sources, projects, cost
   const source_table_rows = sourceRows.slice(0, PANEL_LIMITS.sourceTable).map((row) => ({
     source: row.source,
     last_event_at: row.last_event_at || '尚未记录',
-    total_tokens: formatNumber(row.total_tokens),
+    total_tokens: formatTokenAmount(row.total_tokens),
   }));
 
   const cost_table_rows = costRows.slice(0, PANEL_LIMITS.costTable).map((row) => ({
@@ -456,7 +457,7 @@ export function buildKpis(context) {
       unit: '',
       foot: [
         `原始值 · ${totals.last_24h_tokens_raw}`,
-        `平均每段 · ${formatCompact(context.trend.average)} / ${context.trend.active} 段`,
+        `平均每段 · ${formatTokenAmount(context.trend.average)} / ${context.trend.active} 段`,
       ],
     },
     {
@@ -494,17 +495,17 @@ export function buildTrendStats(context) {
   return [
     {
       label: '时间窗口总量',
-      value: formatCompact(trend.total),
+      value: formatTokenAmount(trend.total),
       foot: `原始值 ${formatNumber(trend.total)}`,
     },
     {
       label: '最高单段用量',
-      value: formatCompact(trend.peak?.total_tokens || 0),
+      value: formatTokenAmount(trend.peak?.total_tokens || 0),
       foot: `最高时段 ${trend.peak?.label || '--'}`,
     },
     {
       label: '平均每段用量',
-      value: formatCompact(trend.average),
+      value: formatTokenAmount(trend.average),
       foot: `${trend.active} 个有记录时段`,
     },
   ];

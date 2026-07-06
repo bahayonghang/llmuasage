@@ -1,4 +1,4 @@
-import { escapeHtml, formatUsd, formatCompact, ratio, statusTone } from '../data.js';
+import { escapeHtml, formatNumber, formatUsd, formatTokenAmount, ratio, statusTone } from '../data.js';
 import { buildCostStats } from '../data/derive.js';
 
 const logger = window.console;
@@ -54,7 +54,7 @@ export function renderCosts(context, state = {}) {
         <tr>
           <td class="name-cell">${escapeHtml(row.model || '--')}</td>
           <td>${escapeHtml(row.source || '--')}</td>
-          <td class="r">${formatCompact(total_tokens)}</td>
+          <td class="r" title="${escapeHtml(`${formatNumber(total_tokens)} Token`)}">${escapeHtml(formatTokenAmount(total_tokens))}</td>
           <td class="r">${formatUsd(cost)}</td>
         </tr>
       `;

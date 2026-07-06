@@ -1,5 +1,5 @@
 import { getShellCopy } from '../copy.js';
-import { escapeHtml, formatCompact, formatNumber, formatUsd, ratio } from '../data.js';
+import { escapeHtml, formatNumber, formatTokenAmount, formatUsd, ratio } from '../data.js';
 
 const logger = window.console;
 
@@ -47,7 +47,7 @@ function formatMetric(metric, value) {
     return formatUsd(value);
   }
   if (metric === 'total_tokens') {
-    return formatCompact(value);
+    return formatTokenAmount(value);
   }
   return formatNumber(value);
 }

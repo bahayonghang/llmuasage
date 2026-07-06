@@ -1540,6 +1540,42 @@ mod tests {
     }
 
     #[test]
+    fn dashboard_assets_use_compact_token_formatter() {
+        let asset = |path: &str| {
+            asset_manifest()
+                .iter()
+                .find(|asset| asset.path == path)
+                .unwrap_or_else(|| panic!("{path} asset"))
+                .body
+        };
+
+        let format_js = asset("data/format.js");
+        assert!(format_js.contains("const COMPACT_UNITS"));
+        assert!(format_js.contains("suffix: 'K'"));
+        assert!(format_js.contains("suffix: 'M'"));
+        assert!(format_js.contains("suffix: 'B'"));
+        assert!(format_js.contains("export function formatTokenAmount(value)"));
+        assert!(format_js.contains("Number(scaled.toFixed(maximumFractionDigits)) >= 1000"));
+
+        let data_js = asset("data.js");
+        assert!(data_js.contains("formatTokenAmount,"));
+
+        let models_js = asset("render/models.js");
+        assert!(models_js.contains("formatTokenAmount(total_tokens)"));
+        assert!(
+            models_js.contains(r#"title="${escapeHtml(`${formatNumber(total_tokens)} Token`)}""#)
+        );
+
+        let sources_js = asset("render/sources.js");
+        assert!(sources_js.contains("const compactTokens = formatTokenAmount(total_tokens);"));
+        assert!(sources_js.contains("const exactTokens = `${formatNumber(total_tokens)} Token`;"));
+
+        let trends_js = asset("render/trends.js");
+        assert!(trends_js.contains("const valueLabel = formatTokenAmount(value);"));
+        assert!(trends_js.contains("formatTokenAmount(row.total_tokens || 0)"));
+    }
+
+    #[test]
     fn render_assets_use_updated_terms() {
         let selected_bodies = asset_manifest()
             .iter()

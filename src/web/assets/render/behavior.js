@@ -1,5 +1,5 @@
 import { getShellCopy } from '../copy.js';
-import { escapeHtml, formatCompact, formatNumber, formatUsd, ratio } from '../data.js';
+import { escapeHtml, formatCompact, formatNumber, formatTokenAmount, formatUsd, ratio } from '../data.js';
 
 const logger = window.console;
 
@@ -118,7 +118,7 @@ function renderOptimize(optimize) {
   const findings = Array.isArray(optimize?.findings) ? optimize.findings : [];
   const grade = optimize?.grade || '--';
   const score = Number(optimize?.score ?? 0);
-  const savingsTokens = formatCompact(optimize?.estimated_savings_tokens || 0);
+  const savingsTokens = formatTokenAmount(optimize?.estimated_savings_tokens || 0);
   const savingsUsd = formatUsd(optimize?.estimated_savings_usd || 0);
 
   const summary = document.getElementById('optimize-summary');

@@ -1,4 +1,4 @@
-import { escapeHtml, formatNumber, formatPercent, ratio } from '../data.js';
+import { escapeHtml, formatNumber, formatPercent, formatTokenAmount, ratio } from '../data.js';
 
 const logger = window.console;
 
@@ -34,13 +34,14 @@ export function renderModels(context, state = {}) {
       const total_tokens = Number(row.total_tokens || 0);
       const widthPct = ratio(total_tokens, max);
       const label = row.model || '--';
-      const value = formatNumber(total_tokens);
+      const value = formatTokenAmount(total_tokens);
+      const exactValue = `${formatNumber(total_tokens)} Token`;
 
       return `
         <div class="bar-row">
           <div class="name">${escapeHtml(label)}</div>
           <div class="bar-track"><div class="bar-fill" style="width: ${widthPct}%"></div></div>
-          <div class="num">${escapeHtml(value)}</div>
+          <div class="num" title="${escapeHtml(exactValue)}">${escapeHtml(value)}</div>
         </div>
       `;
     })
@@ -67,7 +68,7 @@ export function renderModels(context, state = {}) {
       return `
         <tr>
           <td class="name-cell">${escapeHtml(row.model || '--')}</td>
-          <td class="r">${formatNumber(total_tokens)}</td>
+          <td class="r" title="${escapeHtml(`${formatNumber(total_tokens)} Token`)}">${escapeHtml(formatTokenAmount(total_tokens))}</td>
           <td class="r"><span class="${inputClass}">${inputPct}</span></td>
           <td class="r"><span class="${outputClass}">${outputPct}</span></td>
           <td class="r"><span class="${cachedClass}">${cachedPct}</span></td>

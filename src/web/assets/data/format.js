@@ -11,11 +11,47 @@ export function formatNumber(value) {
   return Intl.NumberFormat('en-US').format(Number(value || 0));
 }
 
+const COMPACT_UNITS = [
+  { value: 1_000_000_000_000, suffix: 'T' },
+  { value: 1_000_000_000, suffix: 'B' },
+  { value: 1_000_000, suffix: 'M' },
+  { value: 1_000, suffix: 'K' },
+];
+
+function formatCompactNumber(value) {
+  const amount = Number(value || 0);
+  if (!Number.isFinite(amount)) {
+    return '0';
+  }
+
+  const sign = amount < 0 ? '-' : '';
+  const abs = Math.abs(amount);
+  let unitIndex = COMPACT_UNITS.findIndex((candidate) => abs >= candidate.value);
+  if (unitIndex < 0) {
+    return `${sign}${Intl.NumberFormat('en-US').format(abs)}`;
+  }
+
+  let unit = COMPACT_UNITS[unitIndex];
+  let scaled = abs / unit.value;
+  const maximumFractionDigits = 1;
+  if (Number(scaled.toFixed(maximumFractionDigits)) >= 1000 && unitIndex > 0) {
+    unitIndex -= 1;
+    unit = COMPACT_UNITS[unitIndex];
+    scaled = abs / unit.value;
+  }
+
+  const formatted = Intl.NumberFormat('en-US', {
+    maximumFractionDigits,
+  }).format(scaled);
+  return `${sign}${formatted}${unit.suffix}`;
+}
+
 export function formatCompact(value) {
-  return Intl.NumberFormat('en-US', {
-    notation: 'compact',
-    maximumFractionDigits: 1,
-  }).format(Number(value || 0));
+  return formatCompactNumber(value);
+}
+
+export function formatTokenAmount(value) {
+  return formatCompactNumber(value);
 }
 
 export function formatCompactCurrency(value) {

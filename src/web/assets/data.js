@@ -14,6 +14,7 @@ export {
   escapeHtml,
   formatNumber,
   formatCompact,
+  formatTokenAmount,
   formatCompactCurrency,
   formatUsd,
   formatMaybe,

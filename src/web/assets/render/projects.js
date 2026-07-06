@@ -1,4 +1,4 @@
-import { escapeHtml, formatNumber, formatCompact, ratio } from '../data.js';
+import { escapeHtml, formatNumber, formatTokenAmount, ratio } from '../data.js';
 
 const logger = window.console;
 
@@ -37,13 +37,14 @@ export function renderProjects(context, state = {}) {
       const widthPct = ratio(total_tokens, max);
       const projectName = row.project_label || row.project_name || '--';
       const project_ref = row.project_ref || row.project_hash || row.project_url || '--';
+      const exactTokens = `${formatNumber(total_tokens)} Token`;
 
       return `
         <div class="project-row">
           <div class="project-name">${escapeHtml(projectName)}</div>
           <div class="project-url">${escapeHtml(project_ref)}</div>
           <div class="project-bar-wrap"><div class="project-bar-track"><div class="project-bar-fill" style="width: ${widthPct}%"></div></div></div>
-          <div class="project-value">${formatCompact(total_tokens)}</div>
+          <div class="project-value" title="${escapeHtml(exactTokens)}">${escapeHtml(formatTokenAmount(total_tokens))}</div>
         </div>
       `;
     })

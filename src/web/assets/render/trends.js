@@ -1,4 +1,4 @@
-import { escapeHtml, formatNumber, formatCompact } from '../data.js';
+import { escapeHtml, formatNumber, formatTokenAmount } from '../data.js';
 import { buildTrendStats } from '../data/derive.js';
 
 const logger = window.console;
@@ -62,7 +62,7 @@ export function renderTrends(context) {
       const x = i * colW + (colW - barW) / 2;
       const y = baseline - h;
       const isMax = value === max;
-      const valueLabel = formatCompact(value);
+      const valueLabel = formatTokenAmount(value);
       const timeLabel = compactTrendLabel(row.label);
 
       bars += `
@@ -89,7 +89,7 @@ export function renderTrends(context) {
       (row) => `
       <tr>
         <td>${escapeHtml(row.label || '--')}</td>
-        <td class="r">${formatNumber(row.total_tokens || 0)}</td>
+        <td class="r" title="${escapeHtml(`${formatNumber(row.total_tokens || 0)} Token`)}">${escapeHtml(formatTokenAmount(row.total_tokens || 0))}</td>
       </tr>
     `,
     )
@@ -120,7 +120,7 @@ export function renderTrends(context) {
       return `
         <tr>
           <td>${escapeHtml(row.source || '--')}</td>
-          <td class="r">${formatNumber(total_tokens)}</td>
+          <td class="r" title="${escapeHtml(`${formatNumber(total_tokens)} Token`)}">${escapeHtml(formatTokenAmount(total_tokens))}</td>
           <td class="r">${sharePct}%</td>
         </tr>
       `;
@@ -138,7 +138,7 @@ export function renderTrends(context) {
     </table>
     <div class="trend-observation">
       <div class="trend-observation-label">观察</div>
-      <div class="trend-observation-body">当前窗口峰值出现在 <span class="mono trend-observation-peak">${escapeHtml(context.trend.peak?.label || '--')}</span>，总用量约 <span class="mono trend-observation-peak">${escapeHtml(formatCompact(context.trend.peak?.total_tokens || 0))}</span> Token；当前主来源为 <span class="mono trend-observation-peak">${escapeHtml(context.leaders.source?.source || '--')}</span>。</div>
+      <div class="trend-observation-body">当前窗口峰值出现在 <span class="mono trend-observation-peak">${escapeHtml(context.trend.peak?.label || '--')}</span>，总用量约 <span class="mono trend-observation-peak">${escapeHtml(formatTokenAmount(context.trend.peak?.total_tokens || 0))}</span> Token；当前主来源为 <span class="mono trend-observation-peak">${escapeHtml(context.leaders.source?.source || '--')}</span>。</div>
     </div>
   `;
 
