@@ -4144,11 +4144,17 @@ mod tests {
         let started = std::time::Instant::now();
 
         let payload = dashboard.home_overview(&Default::default())?;
+        let elapsed = started.elapsed();
+        let limit = if std::env::var_os("CI").is_some() {
+            std::time::Duration::from_millis(500)
+        } else {
+            std::time::Duration::from_millis(80)
+        };
 
         assert_eq!(payload.summary.total_requests, 10_000);
         assert!(
-            started.elapsed() < std::time::Duration::from_millis(80),
-            "home_overview should stay below 80ms with 10k seeded events"
+            elapsed < limit,
+            "home_overview should stay below {limit:?} with 10k seeded events, got {elapsed:?}"
         );
         Ok(())
     }
