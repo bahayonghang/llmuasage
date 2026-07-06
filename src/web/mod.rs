@@ -2082,6 +2082,7 @@ mod tests {
             .find(|asset| asset.path == "data/derive.js")
             .expect("derive.js asset")
             .body;
+        let derive_js = derive_js.replace("\r\n", "\n");
         assert!(derive_js.contains("const chronologicalRows = normalizeTrendRows(trends);"));
         assert!(derive_js.contains("const recentRowsDesc = [...chronologicalRows].reverse();"));
         assert!(
