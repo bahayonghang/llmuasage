@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.9.0 - 2026-07-06
+
+### Added
+
+- Add provider-label attribution for sync events and 30-minute buckets, including `--provider-map` support for activation windows.
+- Add Codex Tracer ingestion, a local dashboard, and documentation for inspecting fine-grained Codex call activity.
+- Add local source-status, structured runtime logs, Cost Explorer slices, sync command center surfaces, and richer TUI token/stat panels.
+- Add Claude Fable 5 and Claude Mythos 5 static pricing and context-window coverage.
+- Add GitHub Actions CI for release version references, Rust checks, tests, docs, and reproducible docs installs.
+
+### Changed
+
+- Cut over ambiguous Gemini source handling to Google Antigravity source identifiers and hooks.
+- Refresh browser dashboard layout, compact numeric rendering, quick ranges, accessibility behavior, and docs screenshots.
+- Introduce Trellis project workflow metadata and repo-specific coding/spec guidance.
+- Bump crate metadata and lockfile to `0.9.0`.
+
+### Fixed
+
+- Restore the `source-status` command surface and harden OpenCode path discovery in tests.
+- Stabilize source-file archive/rebuild behavior, task cancellation consistency, and bucket-based daily/monthly reports.
+- Fix public version references and rustdoc warnings required by the release checklist.
+
 ## 0.5.3 - 2026-05-10
 
 ### Fixed
