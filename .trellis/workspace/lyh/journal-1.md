@@ -349,3 +349,36 @@ Added codex-tracer docs in English/Chinese, documented the embedded schema.sql c
 ### Next Steps
 
 - None - task complete
+
+
+## Session 11: Optimize serve number formatting
+
+**Date**: 2026-07-06
+**Task**: Optimize serve number formatting
+**Branch**: `dev`
+
+### Summary
+
+Created and completed Trellis task 07-06-serve-number-format. Added shared compact token formatting for the serve dashboard, updated model/source/project/trend/cost/explorer renderers to show K/M/B/T labels with exact-value tooltips, and verified with JS syntax checks, cargo fmt, clippy, focused asset test, full cargo test, git diff --check, and a live serve asset/API smoke.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3e2845a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

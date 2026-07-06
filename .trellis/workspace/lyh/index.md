@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 10
-- **Last Active**: 2026-07-03
+- **Total Sessions**: 11
+- **Last Active**: 2026-07-06
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~351 | Active |
+| `journal-1.md` | ~384 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 11 | 2026-07-06 | Optimize serve number formatting | `3e2845a` | `dev` |
 | 10 | 2026-07-03 | Claude Fable/Mythos 模型统计覆盖 | `311e9bc` | `dev` |
 | 9 | 2026-07-02 | provider_label 用量归因维度 | `af58f0a`, `b7d06be`, `14bd284`, `6d4d0d2` | `dev` |
 | 8 | 2026-07-01 | Token 统计口径增强与 TUI 观感升级 (A+B) | `3d3e202` | `dev` |
