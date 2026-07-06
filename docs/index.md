@@ -48,7 +48,7 @@ features:
 
 ## Current product surface
 
-- Version `0.7.1`.
+- Version `0.9.0`.
 - Sources: Codex, Claude Code, OpenCode, Google Antigravity (`antigravity` source id).
 - Report commands: `daily`, `monthly`, `session`, `blocks`, `statusline`.
 - Local UI commands: `dash`, `serve`, `export html`.

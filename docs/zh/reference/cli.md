@@ -1,6 +1,6 @@
 # CLI 参考
 
-本页按版本 `0.7.1` 的 `cargo run -- --help`、`cargo run -- serve --help`、`cargo run -- export html --help` 对齐。顶层 help 使用紧凑表格；子命令 help 继续使用 clap 输出。
+本页按版本 `0.9.0` 的 `cargo run -- --help`、`cargo run -- serve --help`、`cargo run -- export html --help` 对齐。顶层 help 使用紧凑表格；子命令 help 继续使用 clap 输出。
 
 ## 顶层 help
 

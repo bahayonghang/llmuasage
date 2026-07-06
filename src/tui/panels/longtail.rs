@@ -27,7 +27,7 @@ const TAIL_SHARE: f64 = 0.02;
 
 /// Returns a [`Collapsed`] plan when `values` (metric per row) has a foldable
 /// tail: more than `KEEP_MIN + 1` rows and at least two trailing rows each at or
-/// below [`TAIL_SHARE`] of `total`. Otherwise returns `None` (render all rows).
+/// below the tail-share threshold of `total`. Otherwise returns `None` (render all rows).
 ///
 /// `values` is assumed ranked descending, matching the breakdown SQL ordering;
 /// only the contiguous small tail is folded.
