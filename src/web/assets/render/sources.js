@@ -1,4 +1,4 @@
-import { escapeHtml, formatNumber, formatCompact, ratio } from '../data.js';
+import { escapeHtml, formatNumber, formatTokenAmount, ratio } from '../data.js';
 
 const logger = window.console;
 
@@ -20,6 +20,14 @@ export function renderSources(context) {
   // 1.1 填充来源数标签
   document.getElementById('sources-count').textContent = `${sourceRows.length} 个来源`;
 
+  if (!sourceRows.length) {
+    document.getElementById('sources-rows').innerHTML = `
+      <div class="empty-state compact">暂无来源数据。</div>
+    `;
+    logger.info('完成来源分布区渲染');
+    return;
+  }
+
   // 1.2 填充来源行
   const rowsHtml = sourceRows
     .slice(0, 4)
@@ -28,6 +36,8 @@ export function renderSources(context) {
       const widthPct = ratio(total_tokens, max);
       const sharePct = ((total_tokens / totals.total_tokens) * 100).toFixed(1);
       const last_event_at = row.last_event_at ? row.last_event_at.slice(11, 19) : '--';
+      const compactTokens = formatTokenAmount(total_tokens);
+      const exactTokens = `${formatNumber(total_tokens)} Token`;
 
       return `
         <div class="source-row">
@@ -37,10 +47,10 @@ export function renderSources(context) {
           </div>
           <div>
             <div class="src-bar-track"><div class="src-bar-fill" style="width: ${widthPct}%"></div></div>
-            <div class="src-meta">${formatNumber(total_tokens)} Token</div>
+            <div class="src-meta" title="${escapeHtml(exactTokens)}">${escapeHtml(compactTokens)} Token</div>
           </div>
           <div>
-            <div class="src-value">${formatCompact(total_tokens)}</div>
+            <div class="src-value" title="${escapeHtml(exactTokens)}">${escapeHtml(compactTokens)}</div>
             <div class="src-pct">${sharePct}%</div>
           </div>
         </div>

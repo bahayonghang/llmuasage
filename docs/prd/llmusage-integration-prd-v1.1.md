@@ -264,7 +264,7 @@ testing = []   # 暴露 src/testing/Fixture（D16）
 
 可选 hook（推荐安装）：`~/.gemini/settings.json::hooks.SessionEnd`，调用 `~/.llmusage/bin/llmusage-hook.cmd|sh`，与 Claude/Codex 一致复用 `hook_target.rs`（D14）。
 
-注册：`SourceKind::Gemini`（`as_str() == "gemini"`），`sources::registered_parsers / registered_integrations` 各加一行。
+注册：`SourceKind::Antigravity`（`as_str() == "antigravity"`），`registry::registered_parsers / registered_integrations` 各加一行。
 
 #### F1.2 cache 拆分（D8）
 
@@ -455,7 +455,7 @@ pub async fn run_with_progress(
 
 ```text
 llmusage sync                                     # 全源 + 全量
-llmusage sync --source codex|claude|opencode|gemini
+llmusage sync --source codex|claude|opencode|antigravity
 llmusage sync --recent-days 30
 llmusage sync --rebuild --source codex            # D20 仅清 codex 一源
 llmusage sync --json-events                       # NDJSON
@@ -719,7 +719,7 @@ M3 完成        → 0.5.0        正式
 3.  ccr-ui src/types/usage.ts 字段不变；Vue 零改动通过冒烟
 4.  llmusage --json-events sync --recent-days 30 子进程模式可用
 5.  llmusage 单测 / 集测覆盖：
-      - 四源解析（codex / claude / opencode / gemini）
+      - 四源解析（codex / claude / opencode / antigravity）
       - cache 拆分 + 双价 + recompute_costs 重算
       - heatmap / logs 分页 / cursor 编解码
       - source_file 三态机 + mark_source_file_deleted 三入口

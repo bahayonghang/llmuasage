@@ -8,6 +8,7 @@ use ratatui::{
 
 use super::super::app::ScrollState;
 use crate::query::SourceBreakdown;
+use crate::tui::panels::longtail;
 use crate::tui::theme;
 
 pub fn render(
@@ -49,7 +50,13 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[SourceBreakdown], scroll
     .style(theme::header_style())
     .bottom_margin(1);
 
-    let rows: Vec<Row> = items
+    // Fold the sub-2% long tail into one summary row on large source lists.
+    let total_tokens: i64 = items.iter().map(|item| item.total_tokens.max(0)).sum();
+    let values: Vec<i64> = items.iter().map(|item| item.total_tokens).collect();
+    let collapsed = longtail::collapse_tail(&values, total_tokens);
+    let shown = collapsed.map(|c| &items[..c.keep]).unwrap_or(items);
+
+    let mut rows: Vec<Row> = shown
         .iter()
         .skip(scroll.offset)
         .enumerate()
@@ -69,6 +76,18 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[SourceBreakdown], scroll
         })
         .collect();
 
+    if let Some(collapsed) = collapsed {
+        rows.push(
+            Row::new(vec![
+                Cell::from(longtail::summary_label(&collapsed)),
+                Cell::from(format_number(collapsed.hidden_value)),
+                Cell::from(String::new()),
+                Cell::from(String::new()),
+            ])
+            .style(theme::muted_style()),
+        );
+    }
+
     let table = Table::new(
         rows,
         [
@@ -80,7 +99,7 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[SourceBreakdown], scroll
     )
     .header(header)
     .block(styled_block("来源"))
-    .row_highlight_style(Style::default().fg(theme::ACCENT));
+    .row_highlight_style(Style::default().fg(theme::accent()));
 
     frame.render_widget(table, area);
 }

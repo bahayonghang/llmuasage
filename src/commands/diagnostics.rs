@@ -39,6 +39,7 @@ pub async fn run(
     let probes = integrations::probe_all(app)?;
     let recent_runs = store.run_log().recent_runs(20)?;
     let sync_status = store.sync_status().load_source_sync_statuses()?;
+    let logs = crate::logging::runtime_status(&app.paths)?;
     let diagnostics = json!({
         "env": {
             "os": std::env::consts::OS,
@@ -48,6 +49,8 @@ pub async fn run(
             "root_dir": app.paths.root_dir,
             "db_path": app.paths.db_path,
             "bin_dir": app.paths.bin_dir,
+            "logs_dir": app.paths.logs_dir,
+            "log_file_path": app.paths.log_file_path,
             "hook_cmd_path": app.paths.hook_cmd_path,
             "hook_sh_path": app.paths.hook_sh_path,
         },
@@ -61,6 +64,7 @@ pub async fn run(
         "sources": sources,
         "sync_status": sync_status,
         "archive": archive,
+        "logs": logs,
         "health_checks": {
             "recent_failures": health.recent_failures,
             "integration_records": health.integrations,
@@ -118,7 +122,7 @@ fn resolve_unique_source(store: &Store, file_path: &str) -> Result<SourceKind> {
     let candidates = rows.collect::<rusqlite::Result<Vec<_>>>()?;
     match candidates.as_slice() {
         [] => bail!(
-            "找不到 file_path={file_path} 对应的源；请显式传 --source codex|claude|opencode|gemini"
+            "找不到 file_path={file_path} 对应的源；请显式传 --source codex|claude|opencode|antigravity"
         ),
         [single] => SourceKind::parse_id(single)
             .ok_or_else(|| anyhow::anyhow!("source_file 表里 source 列出现未知值：{single}")),

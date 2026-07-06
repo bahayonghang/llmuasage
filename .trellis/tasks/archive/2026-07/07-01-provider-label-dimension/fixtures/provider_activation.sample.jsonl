@@ -1,0 +1,3 @@
+{"platform":"claude","profile":"relay-a","provider":"anyrouter","provider_type":"official_relay","base_url_host":"anyrouter.example","account":"synthetic-account","activated_at":"2026-07-01T12:03:44+00:00","event":"activate"}
+{"platform":"codex","profile":"relay-b","provider":"methink","provider_type":"official_relay","base_url_host":"methink.example","account":"synthetic-account","activated_at":"2026-07-01T12:30:00+00:00","event":"activate"}
+{"platform":"codex","profile":null,"provider":null,"provider_type":null,"base_url_host":null,"account":null,"activated_at":"2026-07-01T13:20:00+00:00","event":"clear"}

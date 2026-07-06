@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{Duration, SecondsFormat, Utc};
 use rusqlite::{Connection, OptionalExtension, params_from_iter};
@@ -10,20 +10,28 @@ use crate::{
     util::now_utc,
 };
 
+mod explorer;
 pub mod filter;
 mod heatmap;
 mod home_overview;
+pub mod inventory;
 pub(crate) mod logs;
 pub mod pricing;
 pub mod pricing_catalog;
 pub mod reports;
 
+pub use explorer::{
+    ExplorerDimension, ExplorerFilters, ExplorerGranularity, ExplorerMetric, ExplorerPayload,
+    ExplorerQuery, ExplorerRow, ExplorerSeriesPoint, ExplorerSupport, ExplorerTokenType,
+    ExplorerTotals,
+};
 pub use filter::{QueryFilter, ReportTimezone};
 pub use heatmap::HeatmapPoint;
 pub use home_overview::{
     HomeOverviewBootstrap, HomeOverviewPayload, HomeOverviewPlatformStats, HomeOverviewSeriesItem,
     HomeOverviewSummary,
 };
+pub use inventory::{InstalledItem, InventoryKind, InventoryRoots, InventorySource};
 pub use logs::{LogRecord, LogsPage, LogsQuery};
 pub use pricing::{CostBreakdown, PRICING_MIXED, PRICING_UNPRICED, PricingStatus};
 pub use pricing_catalog::PricingCatalog;
@@ -96,6 +104,25 @@ pub struct TrendPoint {
     pub label: String,
     /// Total tokens in the bucket.
     pub total_tokens: i64,
+}
+
+/// Context-window utilization summary produced by [`Dashboard::context_pressure`].
+///
+/// Percentages are prompt-side occupancy (`input + cache_read + cache_creation`)
+/// over the model's known maximum context window. Events whose model has no
+/// known window are excluded from the ratios and counted in `unpriced_events`.
+#[derive(Debug, Clone, Serialize)]
+pub struct ContextPressurePayload {
+    /// Highest single-event context occupancy ratio in [0, 1], if any priced.
+    pub peak_percent: f64,
+    /// Mean per-event context occupancy ratio in [0, 1] across priced events.
+    pub avg_percent: f64,
+    /// `source:model` label behind `peak_percent`, when known.
+    pub peak_model: Option<String>,
+    /// Events counted toward the ratios (model window known).
+    pub priced_events: i64,
+    /// Events skipped because the model window is unknown.
+    pub unpriced_events: i64,
 }
 
 /// One daily trend row produced by [`Dashboard::trends_daily`].
@@ -250,7 +277,7 @@ pub struct ActivityPayload {
     pub breakdown: Vec<ActivityBreakdown>,
 }
 
-/// Tool/action aggregate powered by `usage_tool_call`.
+/// Tool/action aggregate powered by `usage_tool_call` plus attributed event cost.
 #[derive(Debug, Clone, Serialize)]
 pub struct ToolBreakdown {
     /// Coarse tool/action family.
@@ -265,7 +292,7 @@ pub struct ToolBreakdown {
     pub turn_count: i64,
     /// Distinct sessions touched by this tool.
     pub session_count: i64,
-    /// Estimated cost attributed through parent events when available.
+    /// Estimated cost attributed through parent events after shared-event split.
     pub estimated_cost_usd: f64,
     /// Share of all calls in the current filter.
     pub call_share: f64,
@@ -282,6 +309,25 @@ pub struct ToolsPayload {
     pub support: BehaviorSupport,
     /// Tool aggregates ordered by calls/cost/name.
     pub breakdown: Vec<ToolBreakdown>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+struct AttributedToolRow {
+    tool_kind: String,
+    tool_name: String,
+    mcp_server: Option<String>,
+    calls: i64,
+    turn_count: i64,
+    session_count: i64,
+    estimated_cost_usd: f64,
+    input_tokens: f64,
+    cache_read_tokens: f64,
+    cache_creation_tokens: f64,
+    output_tokens: f64,
+    reasoning_output_tokens: f64,
+    first_seen_at: Option<String>,
+    last_seen_at: Option<String>,
 }
 
 /// One read-only optimization finding derived from normalized local facts.
@@ -318,6 +364,27 @@ pub struct OptimizePayload {
     pub estimated_savings_usd: f64,
     /// Findings ordered by severity and estimated savings.
     pub findings: Vec<OptimizeFinding>,
+}
+
+/// Read-only zero-call ("zombie") inventory report: locally installed skills and
+/// MCP servers that have no recorded call in `usage_tool_call`.
+#[derive(Debug, Clone, Serialize)]
+pub struct ZombieReport {
+    /// Total installed items scanned (skills + MCP across detected sources).
+    pub installed_total: usize,
+    /// Installed-but-never-called items, sorted by source/kind/name.
+    pub zombies: Vec<ZombieItem>,
+}
+
+/// One installed-but-never-called skill or MCP server.
+#[derive(Debug, Clone, Serialize)]
+pub struct ZombieItem {
+    /// Owning CLI (`claude` / `codex` / `opencode`).
+    pub source: String,
+    /// `skill` or `mcp`.
+    pub kind: String,
+    /// Skill name or MCP server name.
+    pub name: String,
 }
 
 /// Candidate model row for model comparison.
@@ -466,7 +533,7 @@ pub struct HealthPayload {
 ///   file. `None` until full-history sweeps are tracked.
 #[derive(Debug, Clone, Serialize)]
 pub struct SourceDiagnostics {
-    /// Source identifier (`codex` / `claude` / `opencode` / `gemini`).
+    /// Source identifier (`codex` / `claude` / `opencode` / `antigravity`).
     pub source: String,
     /// Number of `source_file` rows currently in `live` state.
     pub live_files: u64,
@@ -507,11 +574,94 @@ pub struct DiagnosticsPayload {
     pub recent_failures: Vec<RunRecord>,
 }
 
+/// Top dashboard sync command-center payload. It answers ordinary sync safety
+/// separately from lossy rebuild risk and exposes only structured facts.
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncCommandCenterPayload {
+    pub mode: String,
+    pub tone: String,
+    pub headline_key: String,
+    pub reason_key: String,
+    pub generated_at: String,
+    pub current_job: Option<SyncCurrentJobPayload>,
+    pub last_run: Option<SyncLastRunPayload>,
+    pub safety: SyncSafetyPayload,
+    pub metrics: SyncMetricsPayload,
+    pub sources: Vec<SyncSourcePayload>,
+    pub actions: Vec<SyncActionPayload>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncCurrentJobPayload {
+    pub job_id: String,
+    pub status: String,
+    pub last_event: Option<String>,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub error_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncLastRunPayload {
+    pub status: String,
+    pub command: String,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub error_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncSafetyPayload {
+    pub ordinary_sync_safe: bool,
+    pub worker_lock: String,
+    pub worker_lock_holder: Option<String>,
+    pub lossy_rebuild_risk: bool,
+    pub risk_sources: Vec<String>,
+    pub recent_failures: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncMetricsPayload {
+    pub events_seen: i64,
+    pub inserted_delta: i64,
+    pub stored_events: i64,
+    pub sources_ready: i64,
+    pub sources_total: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncSourcePayload {
+    pub source: String,
+    pub status: String,
+    pub tone: String,
+    pub files_processed: i64,
+    pub changed_files: i64,
+    pub skipped_files: i64,
+    pub events_seen: i64,
+    pub events_inserted: i64,
+    pub stored_events: i64,
+    pub updated_at: Option<String>,
+    pub share: f64,
+    pub error_key: Option<String>,
+    pub lossy_rebuild_risk: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncActionPayload {
+    pub id: String,
+    pub label_key: String,
+    pub primary: bool,
+    pub disabled: bool,
+    pub reason_key: Option<String>,
+}
+
 /// Full snapshot embedded into exported HTML bundles.
 #[derive(Debug, Clone, Serialize)]
 pub struct DashboardSnapshot {
     /// Headline overview metrics.
     pub overview: OverviewPayload,
+    /// Structured top-of-page sync safety and latest-run summary.
+    pub sync_command_center: SyncCommandCenterPayload,
     /// Last 24 hours trend series.
     pub day_trends: Vec<TrendPoint>,
     /// Last 7 days trend series.
@@ -540,6 +690,9 @@ pub struct DashboardSnapshot {
     /// Default model comparison payload. If fewer than two models are present
     /// it carries candidates plus an explicit warning.
     pub compare: ModelComparePayload,
+    /// Default Cost Explorer slice captured for live dashboard bootstrap and
+    /// static HTML exports.
+    pub explorer: ExplorerPayload,
     /// Integration/cursor/run health payload.
     pub health: HealthPayload,
     /// Archive/source-file diagnostics plus recent failed run records.
@@ -552,6 +705,8 @@ pub struct DashboardSnapshot {
 pub struct DashboardCoreSnapshot {
     /// Top-level totals and recent status.
     pub overview: OverviewPayload,
+    /// Structured top-of-page sync safety and latest-run summary.
+    pub sync_command_center: SyncCommandCenterPayload,
     /// 24h-style trend rows.
     pub day_trends: Vec<TrendPoint>,
     /// 7d-style trend rows.
@@ -809,6 +964,99 @@ impl Dashboard {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// Summarizes context-window utilization across the filtered event set.
+    ///
+    /// Grouped by `(source, model)` to avoid per-event scans: each group's peak
+    /// prompt tokens and summed prompt tokens are divided by the model's known
+    /// context window (from the static catalog). Groups whose model window is
+    /// unknown are excluded from the ratios and reported as `unpriced_events`.
+    pub fn context_pressure(&self, filter: &QueryFilter) -> Result<ContextPressurePayload> {
+        let event_filter = filter.event_filter(None);
+        let sql = format!(
+            r#"
+            SELECT
+                source,
+                model,
+                MAX(input_tokens + cache_read_tokens + cache_creation_tokens) AS peak_prompt,
+                SUM(input_tokens + cache_read_tokens + cache_creation_tokens) AS sum_prompt,
+                COUNT(*) AS event_count
+            FROM usage_event
+            {}
+            GROUP BY source, model
+            "#,
+            event_filter.where_sql()
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params_from_iter(event_filter.params().iter()), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<i64>>(2)?.unwrap_or_default(),
+                    row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
+                    row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        let catalog = PricingCatalog::static_v1();
+        let mut peak_percent = 0.0_f64;
+        let mut peak_model: Option<String> = None;
+        let mut ratio_sum = 0.0_f64;
+        let mut priced_events = 0_i64;
+        let mut unpriced_events = 0_i64;
+        for (source, model, peak_prompt, sum_prompt, event_count) in rows {
+            match catalog.context_window(&source, &model) {
+                Some(window) => {
+                    let window = window as f64;
+                    let group_peak = peak_prompt.max(0) as f64 / window;
+                    if group_peak > peak_percent {
+                        peak_percent = group_peak;
+                        peak_model = Some(format!("{source}:{model}"));
+                    }
+                    ratio_sum += sum_prompt.max(0) as f64 / window;
+                    priced_events += event_count;
+                }
+                None => unpriced_events += event_count,
+            }
+        }
+        let avg_percent = if priced_events > 0 {
+            ratio_sum / priced_events as f64
+        } else {
+            0.0
+        };
+        Ok(ContextPressurePayload {
+            peak_percent,
+            avg_percent,
+            peak_model,
+            priced_events,
+            unpriced_events,
+        })
+    }
+
+    /// Loads recent 5-hour rolling blocks (burn rate / projection) for the
+    /// interactive dashboard, reusing the CLI `blocks` report engine with
+    /// dashboard-friendly defaults (recent blocks, local time, 5h windows).
+    pub fn blocks_report(&self) -> anyhow::Result<Vec<reports::BlockReportRow>> {
+        let filter = reports::ReportFilter {
+            since: None,
+            until: None,
+            order: reports::SortOrder::Desc,
+            timezone: reports::ReportTimezone::Local,
+            locale: "en-US".to_string(),
+            source: None,
+            project: None,
+            breakdown: false,
+        };
+        let options = reports::BlockReportOptions {
+            active_only: false,
+            recent_only: true,
+            token_limit: None,
+            session_length_hours: 5.0,
+        };
+        Ok(reports::load_blocks_report(&self.store, &filter, &options)?.blocks)
+    }
+
     /// Loads total token usage grouped by source plus each source's freshest event time.
     pub fn source_breakdown(&self, filter: &QueryFilter) -> Result<Vec<SourceBreakdown>> {
         let bucket_filter = filter.bucket_filter(None);
@@ -999,61 +1247,169 @@ impl Dashboard {
         })
     }
 
-    /// Loads tool/action aggregates from normalized `usage_tool_call` facts.
+    /// Loads attributed tool/action aggregates from normalized behavior facts.
+    ///
+    /// Shared-event cost is split across sibling tool calls, and cost-bearing
+    /// turns without any tool calls are surfaced as a `(non-tool)` bucket.
     pub fn tool_breakdown(&self, filter: &QueryFilter) -> Result<ToolsPayload> {
+        let support = behavior_support(&self.conn, "usage_event", filter.event_filter(None))?;
+        if !support.supported {
+            return Ok(ToolsPayload {
+                support,
+                breakdown: Vec::new(),
+            });
+        }
+
+        let rows = self.tool_attribution_rows(filter)?;
+        let total_calls: i64 = rows.iter().map(|row| row.calls).sum();
+        let breakdown = rows
+            .into_iter()
+            .map(|row| ToolBreakdown {
+                tool_kind: row.tool_kind,
+                tool_name: row.tool_name,
+                mcp_server: row.mcp_server,
+                calls: row.calls,
+                turn_count: row.turn_count,
+                session_count: row.session_count,
+                estimated_cost_usd: row.estimated_cost_usd,
+                call_share: ratio(row.calls, total_calls),
+                first_seen_at: row.first_seen_at,
+                last_seen_at: row.last_seen_at,
+            })
+            .collect();
+        Ok(ToolsPayload { support, breakdown })
+    }
+
+    fn tool_attribution_rows(&self, filter: &QueryFilter) -> Result<Vec<AttributedToolRow>> {
+        let event_filter = filter.event_filter(Some("e"));
         let tool_filter = filter.tool_filter(Some("tc"));
-        let support = behavior_support(&self.conn, "usage_tool_call", filter.tool_filter(None))?;
-        let total_calls = scalar_i64(
-            &self.conn,
-            &format!(
-                "SELECT COUNT(*) FROM usage_tool_call tc{}",
-                tool_filter.where_sql()
-            ),
-            params_from_iter(tool_filter.params().iter()),
-        )?;
         let sql = format!(
             r#"
+            WITH filtered_events AS (
+                SELECT
+                    e.event_key,
+                    e.event_at,
+                    e.session_id,
+                    COALESCE(e.cost_with_cache_usd, 0.0) AS cost_with_cache_usd,
+                    COALESCE(e.input_tokens, 0) AS input_tokens,
+                    COALESCE(e.cache_read_tokens, 0) AS cache_read_tokens,
+                    COALESCE(e.cache_creation_tokens, 0) AS cache_creation_tokens,
+                    COALESCE(e.output_tokens, 0) AS output_tokens,
+                    COALESCE(e.reasoning_output_tokens, 0) AS reasoning_output_tokens
+                FROM usage_event e
+                {event_where}
+            ),
+            filtered_tools AS (
+                SELECT
+                    tc.tool_call_key,
+                    tc.event_key,
+                    tc.turn_key,
+                    tc.session_id,
+                    tc.occurred_at,
+                    tc.tool_kind,
+                    tc.tool_name,
+                    tc.mcp_server
+                FROM usage_tool_call tc
+                {tool_where}
+            ),
+            event_tool_counts AS (
+                SELECT
+                    tc.event_key,
+                    COUNT(*) AS tool_count
+                FROM filtered_tools tc
+                WHERE tc.event_key IS NOT NULL
+                GROUP BY tc.event_key
+            ),
+            attributed_rows AS (
+                SELECT
+                    tc.tool_kind AS tool_kind,
+                    tc.tool_name AS tool_name,
+                    tc.mcp_server AS mcp_server,
+                    COALESCE(tc.turn_key, 'turn:' || tc.event_key) AS turn_key,
+                    COALESCE(tc.session_id, e.session_id) AS session_id,
+                    tc.occurred_at AS occurred_at,
+                    1 AS call_count,
+                    COALESCE(e.cost_with_cache_usd, 0.0) / ec.tool_count AS estimated_cost_usd,
+                    COALESCE(e.input_tokens, 0) * (1.0 / ec.tool_count) AS input_tokens,
+                    COALESCE(e.cache_read_tokens, 0) * (1.0 / ec.tool_count) AS cache_read_tokens,
+                    COALESCE(e.cache_creation_tokens, 0) * (1.0 / ec.tool_count) AS cache_creation_tokens,
+                    COALESCE(e.output_tokens, 0) * (1.0 / ec.tool_count) AS output_tokens,
+                    COALESCE(e.reasoning_output_tokens, 0) * (1.0 / ec.tool_count) AS reasoning_output_tokens
+                FROM filtered_tools tc
+                JOIN usage_event e ON e.event_key = tc.event_key
+                JOIN event_tool_counts ec ON ec.event_key = tc.event_key
+
+                UNION ALL
+
+                SELECT
+                    '(non-tool)' AS tool_kind,
+                    '(non-tool)' AS tool_name,
+                    NULL AS mcp_server,
+                    'turn:' || e.event_key AS turn_key,
+                    e.session_id AS session_id,
+                    e.event_at AS occurred_at,
+                    0 AS call_count,
+                    COALESCE(e.cost_with_cache_usd, 0.0) AS estimated_cost_usd,
+                    COALESCE(e.input_tokens, 0) AS input_tokens,
+                    COALESCE(e.cache_read_tokens, 0) AS cache_read_tokens,
+                    COALESCE(e.cache_creation_tokens, 0) AS cache_creation_tokens,
+                    COALESCE(e.output_tokens, 0) AS output_tokens,
+                    COALESCE(e.reasoning_output_tokens, 0) AS reasoning_output_tokens
+                FROM filtered_events e
+                LEFT JOIN filtered_tools tc ON tc.event_key = e.event_key
+                WHERE tc.tool_call_key IS NULL
+            )
             SELECT
-                tc.tool_kind,
-                tc.tool_name,
-                tc.mcp_server,
-                COUNT(*) AS calls,
-                COUNT(DISTINCT tc.turn_key) AS turn_count,
-                COUNT(DISTINCT tc.session_id) AS session_count,
-                COALESCE(SUM(e.cost_with_cache_usd), 0.0) AS estimated_cost_usd,
-                MIN(tc.occurred_at) AS first_seen_at,
-                MAX(tc.occurred_at) AS last_seen_at
-            FROM usage_tool_call tc
-            LEFT JOIN usage_event e ON e.event_key = tc.event_key
-            {}
-            GROUP BY tc.tool_kind, tc.tool_name, tc.mcp_server
-            ORDER BY calls DESC, estimated_cost_usd DESC, tc.tool_kind ASC, tc.tool_name ASC
+                tool_kind,
+                tool_name,
+                mcp_server,
+                COALESCE(SUM(call_count), 0) AS calls,
+                COUNT(DISTINCT turn_key) AS turn_count,
+                COUNT(DISTINCT session_id) AS session_count,
+                COALESCE(SUM(estimated_cost_usd), 0.0) AS estimated_cost_usd,
+                COALESCE(SUM(input_tokens), 0.0) AS input_tokens,
+                COALESCE(SUM(cache_read_tokens), 0.0) AS cache_read_tokens,
+                COALESCE(SUM(cache_creation_tokens), 0.0) AS cache_creation_tokens,
+                COALESCE(SUM(output_tokens), 0.0) AS output_tokens,
+                COALESCE(SUM(reasoning_output_tokens), 0.0) AS reasoning_output_tokens,
+                MIN(occurred_at) AS first_seen_at,
+                MAX(occurred_at) AS last_seen_at
+            FROM attributed_rows
+            GROUP BY tool_kind, tool_name, mcp_server
+            ORDER BY calls DESC, estimated_cost_usd DESC, tool_kind ASC, tool_name ASC
             LIMIT 50
             "#,
-            tool_filter.where_sql()
+            event_where = event_filter.where_sql(),
+            tool_where = tool_filter.where_sql()
         );
         let mut stmt = self.conn.prepare(&sql)?;
-        let rows = stmt.query_map(params_from_iter(tool_filter.params().iter()), |row| {
-            let calls = row.get::<_, Option<i64>>(3)?.unwrap_or_default();
-            let turn_count = row.get::<_, Option<i64>>(4)?.unwrap_or_default();
-            let session_count = row.get::<_, Option<i64>>(5)?.unwrap_or_default();
-            Ok(ToolBreakdown {
-                tool_kind: row.get(0)?,
-                tool_name: row.get(1)?,
-                mcp_server: row.get(2)?,
-                calls,
-                turn_count: turn_count.min(calls),
-                session_count: session_count.min(calls),
-                estimated_cost_usd: row.get::<_, Option<f64>>(6)?.unwrap_or_default(),
-                call_share: ratio(calls, total_calls),
-                first_seen_at: row.get(7)?,
-                last_seen_at: row.get(8)?,
-            })
-        })?;
-        Ok(ToolsPayload {
-            support,
-            breakdown: rows.collect::<rusqlite::Result<Vec<_>>>()?,
-        })
+        let rows = stmt.query_map(
+            params_from_iter(
+                event_filter
+                    .params()
+                    .iter()
+                    .chain(tool_filter.params().iter()),
+            ),
+            |row| {
+                Ok(AttributedToolRow {
+                    tool_kind: row.get(0)?,
+                    tool_name: row.get(1)?,
+                    mcp_server: row.get(2)?,
+                    calls: row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
+                    turn_count: row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
+                    session_count: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
+                    estimated_cost_usd: row.get::<_, Option<f64>>(6)?.unwrap_or_default(),
+                    input_tokens: row.get::<_, Option<f64>>(7)?.unwrap_or_default(),
+                    cache_read_tokens: row.get::<_, Option<f64>>(8)?.unwrap_or_default(),
+                    cache_creation_tokens: row.get::<_, Option<f64>>(9)?.unwrap_or_default(),
+                    output_tokens: row.get::<_, Option<f64>>(10)?.unwrap_or_default(),
+                    reasoning_output_tokens: row.get::<_, Option<f64>>(11)?.unwrap_or_default(),
+                    first_seen_at: row.get(12)?,
+                    last_seen_at: row.get(13)?,
+                })
+            },
+        )?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     /// Loads read-only behavior optimization findings.
@@ -1124,6 +1480,57 @@ impl Dashboard {
             estimated_savings_usd,
             findings,
         })
+    }
+
+    /// Diffs locally-installed skills / MCP servers against the actually-called
+    /// set in `usage_tool_call`, returning never-called ("zombie") candidates.
+    ///
+    /// Read-only: this only reports candidates; llmusage never deletes or modifies
+    /// anything. Matching is by `(source, name)` — skills resolve to concrete names
+    /// only for Claude and OpenCode (Codex skills are not scanned), MCP matches by
+    /// `(source, server)` across all three CLIs.
+    pub fn zombie_report(&self, roots: &inventory::InventoryRoots) -> Result<ZombieReport> {
+        let installed = roots.scan();
+        let used_skills = self.used_tool_pairs("skill", "tool_name")?;
+        let used_mcp = self.used_tool_pairs("mcp", "mcp_server")?;
+
+        let mut zombies = Vec::new();
+        for item in &installed {
+            let used = match item.kind {
+                inventory::InventoryKind::Skill => &used_skills,
+                inventory::InventoryKind::Mcp => &used_mcp,
+            };
+            let key = (item.source.as_str().to_string(), item.name.clone());
+            if !used.contains(&key) {
+                zombies.push(ZombieItem {
+                    source: item.source.as_str().to_string(),
+                    kind: item.kind.as_str().to_string(),
+                    name: item.name.clone(),
+                });
+            }
+        }
+        Ok(ZombieReport {
+            installed_total: installed.len(),
+            zombies,
+        })
+    }
+
+    /// Distinct `(source, value)` pairs actually observed for a `tool_kind`.
+    /// `column` is a fixed identifier (`tool_name` / `mcp_server`), never user input.
+    fn used_tool_pairs(&self, tool_kind: &str, column: &str) -> Result<BTreeSet<(String, String)>> {
+        let sql = format!(
+            "SELECT DISTINCT source, {column} FROM usage_tool_call \
+             WHERE tool_kind = ?1 AND {column} IS NOT NULL AND {column} != ''"
+        );
+        let mut statement = self.conn.prepare(&sql)?;
+        let rows = statement.query_map([tool_kind], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut set = BTreeSet::new();
+        for row in rows {
+            set.insert(row?);
+        }
+        Ok(set)
     }
 
     fn detect_low_read_edit_ratio(&self, filter: &QueryFilter) -> Result<Option<OptimizeFinding>> {
@@ -1661,6 +2068,11 @@ impl Dashboard {
         heatmap::load(self, filter, days)
     }
 
+    /// Loads the flexible Cost Explorer-style aggregate for the requested slice.
+    pub fn explorer(&self, query: &ExplorerQuery) -> Result<ExplorerPayload> {
+        explorer::load(self, query)
+    }
+
     /// Loads cursor-paginated usage log rows (F4.3 / D26).
     pub fn logs(&self, query: &LogsQuery) -> Result<LogsPage> {
         logs::load(self, query)
@@ -1703,6 +2115,160 @@ impl Dashboard {
         })
     }
 
+    /// Builds the top-of-dashboard sync command center payload.
+    pub fn sync_command_center(&self, filter: &QueryFilter) -> Result<SyncCommandCenterPayload> {
+        let diagnostics = self.diagnostics()?;
+        let statuses = load_sync_statuses_with_conn(&self.conn, filter)?;
+        let recent_runs = self.store.run_log().recent_runs_with_conn(&self.conn, 10)?;
+        let current_lock = Store::current_worker_lock_with_conn(&self.conn)?;
+        let recent_failures = recent_runs
+            .iter()
+            .filter(|run| matches!(run.command.as_str(), "sync" | "sync --rebuild" | "hook-run"))
+            .filter(|run| RunRecord::counts_as_failure(run))
+            .count();
+        let selected_source = filter.source.map(|source| source.as_str().to_string());
+        let risk_sources = diagnostics
+            .by_source
+            .iter()
+            .filter(|source| {
+                selected_source
+                    .as_deref()
+                    .is_none_or(|selected| source.source == selected)
+            })
+            .filter(|source| source.lossy_rebuild_risk)
+            .map(|source| source.source.clone())
+            .collect::<Vec<_>>();
+        let risk_set = risk_sources.iter().cloned().collect::<BTreeSet<_>>();
+        let inserted_total = statuses.iter().map(|row| row.events_inserted).sum::<i64>();
+        let seen_total = statuses.iter().map(|row| row.events_seen).sum::<i64>();
+        let stored_total = statuses.iter().map(|row| row.stored_events).sum::<i64>();
+        let ready_total = statuses
+            .iter()
+            .filter(|row| row.last_error.is_none() && row.stored_events > 0)
+            .count() as i64;
+        let sources_total = statuses.len() as i64;
+        let max_stored = statuses
+            .iter()
+            .map(|row| row.stored_events)
+            .max()
+            .unwrap_or_default()
+            .max(1);
+        let last_run = recent_runs
+            .iter()
+            .find(|run| matches!(run.command.as_str(), "sync" | "sync --rebuild" | "hook-run"))
+            .map(|run| SyncLastRunPayload {
+                status: run.status.clone(),
+                command: run.command.clone(),
+                started_at: run.started_at.clone(),
+                finished_at: run.finished_at.clone(),
+                error_key: RunRecord::counts_as_failure(run)
+                    .then(|| "syncCenter.reason.lastRunFailed".to_string()),
+            });
+        let worker_lock = if current_lock.is_some() {
+            "busy"
+        } else {
+            "available"
+        }
+        .to_string();
+        let worker_lock_holder = current_lock.as_ref().map(|lock| lock.holder_identity());
+        let lossy_rebuild_risk = !risk_sources.is_empty();
+        let tone = if worker_lock == "busy" || recent_failures > 0 || lossy_rebuild_risk {
+            "warn"
+        } else {
+            "good"
+        };
+        let headline_key = if worker_lock == "busy" {
+            "syncCenter.headline.busy"
+        } else if recent_failures > 0 {
+            "syncCenter.headline.failed"
+        } else if lossy_rebuild_risk {
+            "syncCenter.headline.rebuildRisk"
+        } else {
+            "syncCenter.headline.ready"
+        };
+        let reason_key = if lossy_rebuild_risk {
+            "syncCenter.reason.rebuildRisk"
+        } else if statuses.is_empty() {
+            "syncCenter.reason.empty"
+        } else {
+            "syncCenter.reason.ready"
+        };
+
+        Ok(SyncCommandCenterPayload {
+            mode: "live".to_string(),
+            tone: tone.to_string(),
+            headline_key: headline_key.to_string(),
+            reason_key: reason_key.to_string(),
+            generated_at: now_utc(),
+            current_job: None,
+            last_run,
+            safety: SyncSafetyPayload {
+                ordinary_sync_safe: worker_lock != "busy",
+                worker_lock: worker_lock.clone(),
+                worker_lock_holder,
+                lossy_rebuild_risk,
+                risk_sources,
+                recent_failures,
+            },
+            metrics: SyncMetricsPayload {
+                events_seen: seen_total,
+                inserted_delta: inserted_total,
+                stored_events: stored_total,
+                sources_ready: ready_total,
+                sources_total,
+            },
+            sources: statuses
+                .into_iter()
+                .map(|row| {
+                    let source_risk = risk_set.contains(&row.source);
+                    let status = if row.last_error.is_some() {
+                        "error"
+                    } else if source_risk {
+                        "rebuild_risk"
+                    } else if row.stored_events > 0 || row.events_seen > 0 {
+                        "ok"
+                    } else {
+                        "idle"
+                    };
+                    let tone = match status {
+                        "error" | "rebuild_risk" => "warn",
+                        "ok" => "good",
+                        _ => "neutral",
+                    };
+                    SyncSourcePayload {
+                        source: row.source,
+                        status: status.to_string(),
+                        tone: tone.to_string(),
+                        files_processed: row.files_processed,
+                        changed_files: row.changed_files,
+                        skipped_files: (row.files_processed - row.changed_files).max(0),
+                        events_seen: row.events_seen,
+                        events_inserted: row.events_inserted,
+                        stored_events: row.stored_events,
+                        updated_at: Some(row.updated_at),
+                        share: (row.stored_events as f64 / max_stored as f64).clamp(0.0, 1.0),
+                        error_key: row
+                            .last_error
+                            .is_some()
+                            .then(|| "syncCenter.reason.sourceError".to_string()),
+                        lossy_rebuild_risk: source_risk,
+                    }
+                })
+                .collect(),
+            actions: vec![SyncActionPayload {
+                id: "sync".to_string(),
+                label_key: "syncCenter.action.sync".to_string(),
+                primary: true,
+                disabled: worker_lock == "busy",
+                reason_key: if worker_lock == "busy" {
+                    Some("syncCenter.action.busy".to_string())
+                } else {
+                    None
+                },
+            }],
+        })
+    }
+
     /// Builds the full dashboard snapshot used by static HTML export.
     ///
     /// The snapshot still embeds the legacy four-window trends (`day`/`week`/
@@ -1713,6 +2279,7 @@ impl Dashboard {
         let core = self.core_snapshot(filter)?;
         Ok(DashboardSnapshot {
             overview: core.overview,
+            sync_command_center: core.sync_command_center,
             day_trends: core.day_trends,
             week_trends: core.week_trends,
             month_trends: core.month_trends,
@@ -1725,6 +2292,10 @@ impl Dashboard {
             tools: self.tool_breakdown(filter)?,
             optimize: self.optimize(filter)?,
             compare: self.model_compare(filter, None, None)?,
+            explorer: self.explorer(&ExplorerQuery {
+                filter: filter.clone(),
+                ..Default::default()
+            })?,
             health: core.health,
             diagnostics: core.diagnostics,
         })
@@ -1737,6 +2308,7 @@ impl Dashboard {
     pub fn core_snapshot(&self, filter: &QueryFilter) -> Result<DashboardCoreSnapshot> {
         Ok(DashboardCoreSnapshot {
             overview: self.overview(filter)?,
+            sync_command_center: self.sync_command_center(filter)?,
             day_trends: self.trends("day", filter)?,
             week_trends: self.trends("week", filter)?,
             month_trends: self.trends("month", filter)?,
@@ -2024,11 +2596,82 @@ fn map_token_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<TokenSummary> 
     })
 }
 
+#[derive(Debug)]
+struct SyncStatusRow {
+    source: String,
+    files_processed: i64,
+    changed_files: i64,
+    events_seen: i64,
+    events_inserted: i64,
+    stored_events: i64,
+    updated_at: String,
+    last_error: Option<String>,
+}
+
+fn load_sync_statuses_with_conn(
+    conn: &Connection,
+    filter: &QueryFilter,
+) -> Result<Vec<SyncStatusRow>> {
+    let source = filter.source.map(|source| source.as_str().to_string());
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT source, files_processed, changed_files, events_seen, events_inserted,
+               stored_events, updated_at
+        FROM source_sync_status
+        WHERE (?1 IS NULL OR source = ?1)
+        ORDER BY stored_events DESC, source ASC
+        "#,
+    )?;
+    let rows = stmt.query_map([source], |row| {
+        Ok(SyncStatusRow {
+            source: row.get(0)?,
+            files_processed: row.get(1)?,
+            changed_files: row.get(2)?,
+            events_seen: row.get(3)?,
+            events_inserted: row.get(4)?,
+            stored_events: row.get(5)?,
+            updated_at: row.get(6)?,
+            last_error: None,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 /// Loads `SourceDiagnostics` rows by joining the per-source state counts in
 /// `source_file` with the recent/history completion timestamps in
 /// `source_sync_status`. Rows show up for any source that appears in either
 /// table, sorted by source identifier.
 fn load_source_diagnostics(conn: &Connection) -> Result<Vec<SourceDiagnostics>> {
+    // Pre-load all source_file paths to avoid N+1 queries in the main loop
+    let mut file_paths_by_source: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    {
+        let mut stmt = conn.prepare("SELECT source, file_path FROM source_file")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (source, path) = row?;
+            file_paths_by_source.entry(source).or_default().push(path);
+        }
+    }
+
+    // Pre-load event counts per source
+    let mut event_counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    {
+        let mut stmt = conn.prepare("SELECT source, COUNT(*) FROM usage_event GROUP BY source")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?.max(0) as u64,
+            ))
+        })?;
+        for row in rows {
+            let (source, count) = row?;
+            event_counts.insert(source, count);
+        }
+    }
+
     let mut stmt = conn.prepare(
         r#"
         WITH file_states AS (
@@ -2060,9 +2703,17 @@ fn load_source_diagnostics(conn: &Connection) -> Result<Vec<SourceDiagnostics>> 
     )?;
     let rows = stmt.query_map([], |row| {
         let source = row.get::<_, String>(0)?;
-        let missing_file_count = missing_source_file_count(conn, &source)?;
+        let missing_file_count = file_paths_by_source
+            .get(&source)
+            .map(|paths| {
+                paths
+                    .iter()
+                    .filter(|path| !std::path::Path::new(path).exists())
+                    .count() as u64
+            })
+            .unwrap_or(0);
         let total_events = if missing_file_count > 0 {
-            source_event_count(conn, &source)?
+            *event_counts.get(&source).unwrap_or(&0)
         } else {
             0
         };
@@ -2083,35 +2734,6 @@ fn load_source_diagnostics(conn: &Connection) -> Result<Vec<SourceDiagnostics>> 
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
-}
-
-fn source_event_count(conn: &Connection, source: &str) -> rusqlite::Result<u64> {
-    Ok(conn
-        .query_row(
-            "SELECT COUNT(*) FROM usage_event WHERE source = ?1",
-            [source],
-            |row| row.get::<_, i64>(0),
-        )?
-        .max(0) as u64)
-}
-
-fn missing_source_file_count(conn: &Connection, source: &str) -> rusqlite::Result<u64> {
-    let mut stmt = conn.prepare(
-        r#"
-        SELECT file_path
-        FROM source_file
-        WHERE source = ?1
-        "#,
-    )?;
-    let rows = stmt.query_map([source], |row| row.get::<_, String>(0))?;
-    let mut count = 0u64;
-    for row in rows {
-        let path = row?;
-        if !std::path::Path::new(&path).exists() {
-            count += 1;
-        }
-    }
-    Ok(count)
 }
 
 fn scalar_i64<P>(conn: &Connection, sql: &str, params: P) -> Result<i64>
@@ -2282,6 +2904,105 @@ mod tests {
     }
 
     #[test]
+    fn context_pressure_ratios_and_unpriced_split() -> Result<()> {
+        use crate::testing::SeedEvent;
+
+        let fixture = Fixture::new()?;
+        // Priced model (codex gpt-5, window 400_000): peak prompt 200_000 -> 50%.
+        fixture.seed_event(SeedEvent {
+            event_key: "codex:ctx:1",
+            model: "gpt-5",
+            input_tokens: 150_000,
+            cache_read_tokens: 50_000,
+            total_tokens: 200_000,
+            ..SeedEvent::default()
+        })?;
+        fixture.seed_event(SeedEvent {
+            event_key: "codex:ctx:2",
+            model: "gpt-5",
+            input_tokens: 40_000,
+            total_tokens: 40_000,
+            ..SeedEvent::default()
+        })?;
+        // Unknown-window model is excluded from ratios but counted as unpriced.
+        fixture.seed_event(SeedEvent {
+            event_key: "codex:ctx:3",
+            model: "mystery-model",
+            input_tokens: 999_999,
+            total_tokens: 999_999,
+            ..SeedEvent::default()
+        })?;
+
+        let dashboard = Dashboard::open(fixture.store())?;
+        let pressure = dashboard.context_pressure(&Default::default())?;
+
+        assert!((pressure.peak_percent - 0.5).abs() < 1e-9);
+        // avg = (200_000 + 40_000) / 400_000 / 2 priced events = 0.30
+        assert!((pressure.avg_percent - 0.30).abs() < 1e-9);
+        assert_eq!(pressure.priced_events, 2);
+        assert_eq!(pressure.unpriced_events, 1);
+        assert_eq!(pressure.peak_model.as_deref(), Some("codex:gpt-5"));
+        Ok(())
+    }
+
+    #[test]
+    fn context_pressure_knows_claude_fable_and_mythos_windows() -> Result<()> {
+        use crate::testing::SeedEvent;
+
+        let fixture = Fixture::new()?;
+        fixture.seed_event(SeedEvent {
+            event_key: "claude:ctx:fable",
+            source: "claude",
+            model: "claude-fable-5",
+            input_tokens: 450_000,
+            cache_read_tokens: 50_000,
+            total_tokens: 500_000,
+            ..SeedEvent::default()
+        })?;
+        fixture.seed_event(SeedEvent {
+            event_key: "claude:ctx:mythos",
+            source: "claude",
+            model: "claude-mythos-5",
+            input_tokens: 250_000,
+            total_tokens: 250_000,
+            ..SeedEvent::default()
+        })?;
+        fixture.seed_event(SeedEvent {
+            event_key: "claude:ctx:unknown",
+            source: "claude",
+            model: "claude-mythos-preview",
+            input_tokens: 1_000_000,
+            total_tokens: 1_000_000,
+            ..SeedEvent::default()
+        })?;
+
+        let dashboard = Dashboard::open(fixture.store())?;
+        let pressure = dashboard.context_pressure(&Default::default())?;
+
+        assert!((pressure.peak_percent - 0.5).abs() < 1e-9);
+        assert!((pressure.avg_percent - 0.375).abs() < 1e-9);
+        assert_eq!(pressure.priced_events, 2);
+        assert_eq!(pressure.unpriced_events, 1);
+        assert_eq!(
+            pressure.peak_model.as_deref(),
+            Some("claude:claude-fable-5")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn context_pressure_empty_is_zero() -> Result<()> {
+        let fixture = Fixture::new()?;
+        let dashboard = Dashboard::open(fixture.store())?;
+        let pressure = dashboard.context_pressure(&Default::default())?;
+        assert_eq!(pressure.priced_events, 0);
+        assert_eq!(pressure.unpriced_events, 0);
+        assert_eq!(pressure.peak_percent, 0.0);
+        assert_eq!(pressure.avg_percent, 0.0);
+        Ok(())
+    }
+
+    #[test]
     fn overview_filter_by_date_range_clamps_correctly() -> Result<()> {
         let fixture = Fixture::new()?;
         fixture.seed_dashboard(72)?;
@@ -2292,7 +3013,6 @@ mod tests {
             until: Some(NaiveDate::from_ymd_opt(2026, 4, 2).unwrap()),
             ..Default::default()
         })?;
-
         assert_eq!(one_day.bucket_count, 24);
         assert!(one_day.total.total_tokens > 0);
         assert!(
@@ -2400,22 +3120,38 @@ mod tests {
     #[test]
     fn behavior_queries_return_activity_and_tool_breakdowns() -> Result<()> {
         let fixture = Fixture::new()?;
+        let conn = fixture.store().open_connection()?;
+
         fixture.seed_event(crate::testing::SeedEvent {
-            event_key: "codex:behavior:1",
+            event_key: "codex:behavior:multi-tool",
             event_at: "2026-05-01T00:00:00Z",
             hour_start: Some("2026-05-01T00:00:00Z"),
-            input_tokens: 100,
-            output_tokens: 50,
-            total_tokens: 150,
-            cost_with_cache_usd: 0.42,
-            cost_without_cache_usd: 0.42,
+            input_tokens: 120,
+            output_tokens: 60,
+            total_tokens: 180,
+            cost_with_cache_usd: 1.00,
+            cost_without_cache_usd: 1.00,
             pricing_status: "static",
             pricing_source: Some("static-v1"),
             session_id: Some("session-behavior"),
             source_path_hash: Some("path-behavior"),
             ..Default::default()
         })?;
-        let conn = fixture.store().open_connection()?;
+        fixture.seed_event(crate::testing::SeedEvent {
+            event_key: "codex:behavior:non-tool",
+            event_at: "2026-05-02T01:00:00Z",
+            hour_start: Some("2026-05-02T01:00:00Z"),
+            input_tokens: 80,
+            output_tokens: 20,
+            total_tokens: 100,
+            cost_with_cache_usd: 0.25,
+            cost_without_cache_usd: 0.25,
+            pricing_status: "static",
+            pricing_source: Some("static-v1"),
+            session_id: Some("session-behavior"),
+            source_path_hash: Some("path-behavior"),
+            ..Default::default()
+        })?;
         conn.execute(
             r#"
             INSERT INTO usage_turn(
@@ -2424,9 +3160,23 @@ mod tests {
                 one_shot, call_count, input_tokens, cache_read_tokens,
                 cache_creation_tokens, output_tokens, reasoning_output_tokens,
                 total_tokens, created_at
-            ) VALUES ('turn:codex:behavior:1', 'codex', 'session-behavior',
+            ) VALUES ('turn:codex:behavior:multi-tool', 'codex', 'session-behavior',
                 'path-behavior', 'project-test', 'gpt-5', '2026-05-01T00:00:00Z',
                 'coding', 1, 0, 1, 1, 100, 0, 0, 50, 0, 150, '2026-05-01T00:00:00Z')
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_turn(
+                turn_key, source, session_id, source_path_hash, project_hash,
+                primary_model, started_at, category, has_edits, retries,
+                one_shot, call_count, input_tokens, cache_read_tokens,
+                cache_creation_tokens, output_tokens, reasoning_output_tokens,
+                total_tokens, created_at
+            ) VALUES ('turn:codex:behavior:non-tool', 'codex', 'session-behavior',
+                'path-behavior', 'project-test', 'gpt-5', '2026-05-02T01:00:00Z',
+                'coding', 0, 0, 0, 1, 80, 0, 0, 20, 0, 100, '2026-05-02T01:00:00Z')
             "#,
             [],
         )?;
@@ -2436,10 +3186,25 @@ mod tests {
                 tool_call_key, turn_key, event_key, source, session_id,
                 source_path_hash, project_hash, model, occurred_at, tool_name,
                 tool_kind, mcp_server, mcp_tool, input_fingerprint, safe_preview, created_at
-            ) VALUES ('tool:codex:behavior:1', 'turn:codex:behavior:1',
-                'codex:behavior:1', 'codex', 'session-behavior', 'path-behavior',
-                'project-test', 'gpt-5', '2026-05-01T00:00:00Z', 'Edit', 'edit',
+            ) VALUES ('tool:codex:behavior:multi-tool:edit',
+                'turn:codex:behavior:multi-tool', 'codex:behavior:multi-tool', 'codex',
+                'session-behavior', 'path-behavior', 'project-test', 'gpt-5',
+                '2026-05-01T00:00:00Z', 'Edit', 'edit',
                 NULL, NULL, 'fp-edit', 'Edit src/lib.rs', '2026-05-01T00:00:00Z')
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_tool_call(
+                tool_call_key, turn_key, event_key, source, session_id,
+                source_path_hash, project_hash, model, occurred_at, tool_name,
+                tool_kind, mcp_server, mcp_tool, input_fingerprint, safe_preview, created_at
+            ) VALUES ('tool:codex:behavior:multi-tool:read',
+                'turn:codex:behavior:multi-tool', 'codex:behavior:multi-tool', 'codex',
+                'session-behavior', 'path-behavior', 'project-test', 'gpt-5',
+                '2026-05-01T00:00:00Z', 'Read', 'read',
+                NULL, NULL, 'fp-read', 'Read src/lib.rs', '2026-05-01T00:00:00Z')
             "#,
             [],
         )?;
@@ -2454,9 +3219,9 @@ mod tests {
         assert!(activity.support.supported);
         assert_eq!(activity.breakdown.len(), 1);
         assert_eq!(activity.breakdown[0].category, "coding");
-        assert_eq!(activity.breakdown[0].turns, 1);
+        assert_eq!(activity.breakdown[0].turns, 2);
         assert_eq!(activity.breakdown[0].one_shot_rate, 1.0);
-        assert_eq!(activity.breakdown[0].estimated_cost_usd, 0.42);
+        assert_eq!(activity.breakdown[0].estimated_cost_usd, 1.25);
 
         let tools = dashboard.tool_breakdown(&QueryFilter {
             source: Some(SourceKind::Codex),
@@ -2464,12 +3229,88 @@ mod tests {
             ..Default::default()
         })?;
         assert!(tools.support.supported);
-        assert_eq!(tools.breakdown.len(), 1);
-        assert_eq!(tools.breakdown[0].tool_kind, "edit");
-        assert_eq!(tools.breakdown[0].tool_name, "Edit");
-        assert_eq!(tools.breakdown[0].calls, 1);
-        assert_eq!(tools.breakdown[0].call_share, 1.0);
-        assert_eq!(tools.breakdown[0].estimated_cost_usd, 0.42);
+        assert_eq!(tools.breakdown.len(), 3);
+        let total_cost: f64 = tools
+            .breakdown
+            .iter()
+            .map(|row| row.estimated_cost_usd)
+            .sum();
+        assert!((total_cost - 1.25).abs() < f64::EPSILON);
+
+        let edit = tools
+            .breakdown
+            .iter()
+            .find(|row| row.tool_name == "Edit")
+            .expect("edit row");
+        assert_eq!(edit.tool_kind, "edit");
+        assert_eq!(edit.calls, 1);
+        assert_eq!(edit.turn_count, 1);
+        assert_eq!(edit.session_count, 1);
+        assert_eq!(edit.call_share, 0.5);
+        assert_eq!(edit.estimated_cost_usd, 0.5);
+
+        let read = tools
+            .breakdown
+            .iter()
+            .find(|row| row.tool_name == "Read")
+            .expect("read row");
+        assert_eq!(read.tool_kind, "read");
+        assert_eq!(read.calls, 1);
+        assert_eq!(read.turn_count, 1);
+        assert_eq!(read.session_count, 1);
+        assert_eq!(read.call_share, 0.5);
+        assert_eq!(read.estimated_cost_usd, 0.5);
+
+        let non_tool = tools
+            .breakdown
+            .iter()
+            .find(|row| row.tool_name == "(non-tool)")
+            .expect("non-tool row");
+        assert_eq!(non_tool.tool_kind, "(non-tool)");
+        assert_eq!(non_tool.calls, 0);
+        assert_eq!(non_tool.turn_count, 1);
+        assert_eq!(non_tool.session_count, 1);
+        assert_eq!(non_tool.call_share, 0.0);
+        assert_eq!(non_tool.estimated_cost_usd, 0.25);
+
+        let day_one = dashboard.tool_breakdown(&QueryFilter {
+            source: Some(SourceKind::Codex),
+            model: Some("gpt-5".to_string()),
+            since: Some(NaiveDate::from_ymd_opt(2026, 5, 1).unwrap()),
+            until: Some(NaiveDate::from_ymd_opt(2026, 5, 1).unwrap()),
+            timezone: ReportTimezone::Utc,
+            ..Default::default()
+        })?;
+        assert_eq!(day_one.breakdown.len(), 2);
+        let day_one_cost: f64 = day_one
+            .breakdown
+            .iter()
+            .map(|row| row.estimated_cost_usd)
+            .sum();
+        assert!((day_one_cost - 1.0).abs() < f64::EPSILON);
+        assert!(
+            day_one
+                .breakdown
+                .iter()
+                .all(|row| row.tool_name != "(non-tool)")
+        );
+
+        let day_two = dashboard.tool_breakdown(&QueryFilter {
+            source: Some(SourceKind::Codex),
+            model: Some("gpt-5".to_string()),
+            since: Some(NaiveDate::from_ymd_opt(2026, 5, 2).unwrap()),
+            until: Some(NaiveDate::from_ymd_opt(2026, 5, 2).unwrap()),
+            timezone: ReportTimezone::Utc,
+            ..Default::default()
+        })?;
+        assert_eq!(day_two.breakdown.len(), 1);
+        let day_two_cost: f64 = day_two
+            .breakdown
+            .iter()
+            .map(|row| row.estimated_cost_usd)
+            .sum();
+        assert!((day_two_cost - 0.25).abs() < f64::EPSILON);
+        assert_eq!(day_two.breakdown[0].tool_name, "(non-tool)");
         Ok(())
     }
 
@@ -2547,6 +3388,76 @@ mod tests {
         assert!(!tools.support.supported);
         assert_eq!(tools.support.level, "no_data");
         assert!(tools.breakdown.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn zombie_report_diffs_installed_against_used() -> Result<()> {
+        use super::InventoryRoots;
+
+        let fixture = Fixture::new()?;
+        let conn = fixture.store().open_connection()?;
+        let seed = |source: &str, kind: &str, name: &str, server: Option<&str>| -> Result<()> {
+            conn.execute(
+                r#"INSERT INTO usage_tool_call(
+                    tool_call_key, source, occurred_at, tool_name, tool_kind, mcp_server, created_at
+                ) VALUES (?1, ?2, '2026-05-01T00:00:00Z', ?3, ?4, ?5, '2026-05-01T00:00:00Z')"#,
+                rusqlite::params![
+                    format!("tc:{source}:{kind}:{name}"),
+                    source,
+                    name,
+                    kind,
+                    server
+                ],
+            )?;
+            Ok(())
+        };
+        // Used set: claude skill alpha, claude mcp context7, opencode skill gamma.
+        seed("claude", "skill", "alpha", None)?;
+        seed("claude", "mcp", "context7/search", Some("context7"))?;
+        seed("opencode", "skill", "gamma", None)?;
+
+        // Installed roots in a temp tree (superset of the used set).
+        let temp = tempfile::tempdir()?;
+        let root = temp.path();
+        let write = |rel: &str, body: &str| {
+            let path = root.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        };
+        write("claude/skills/alpha/SKILL.md", "x");
+        write("claude/skills/beta/SKILL.md", "x");
+        write(
+            "claude.json",
+            r#"{"mcpServers":{"context7":{},"playwright":{}}}"#,
+        );
+        write("opencode/skills/gamma/SKILL.md", "x");
+        write("opencode/skills/delta/SKILL.md", "x");
+        write("opencode/opencode.json", r#"{"mcp":{}}"#);
+        let roots = InventoryRoots {
+            claude_skills: root.join("claude/skills"),
+            claude_mcp_config: root.join("claude.json"),
+            codex_skills: root.join("codex/skills"),
+            codex_mcp_config: root.join("codex/config.toml"),
+            opencode_skills: root.join("opencode/skills"),
+            opencode_mcp_config: root.join("opencode/opencode.json"),
+        };
+
+        let report = Dashboard::open(fixture.store())?.zombie_report(&roots)?;
+        let zombies: std::collections::BTreeSet<(String, String, String)> = report
+            .zombies
+            .iter()
+            .map(|item| (item.source.clone(), item.kind.clone(), item.name.clone()))
+            .collect();
+
+        // Installed but never called → zombie candidates.
+        assert!(zombies.contains(&("claude".into(), "skill".into(), "beta".into())));
+        assert!(zombies.contains(&("claude".into(), "mcp".into(), "playwright".into())));
+        assert!(zombies.contains(&("opencode".into(), "skill".into(), "delta".into())));
+        // Actually-used items are never flagged.
+        assert!(!zombies.iter().any(|item| item.2 == "alpha"));
+        assert!(!zombies.iter().any(|item| item.2 == "context7"));
+        assert!(!zombies.iter().any(|item| item.2 == "gamma"));
         Ok(())
     }
 
@@ -3199,13 +4110,13 @@ mod tests {
         fixture.seed_dashboard(12)?;
         let payload = Dashboard::open(fixture.store())?.home_overview(&Default::default())?;
 
-        for source in ["claude", "codex", "gemini", "opencode"] {
+        for source in ["claude", "codex", "antigravity", "opencode"] {
             assert!(payload.by_platform.contains_key(source));
         }
         assert!(payload.by_platform["codex"].requests > 0);
         assert!(payload.by_platform["claude"].requests > 0);
         assert!(payload.by_platform["opencode"].requests > 0);
-        assert_eq!(payload.by_platform["gemini"].requests, 0);
+        assert_eq!(payload.by_platform["antigravity"].requests, 0);
         assert!(!payload.series.is_empty());
         Ok(())
     }
@@ -3233,11 +4144,17 @@ mod tests {
         let started = std::time::Instant::now();
 
         let payload = dashboard.home_overview(&Default::default())?;
+        let elapsed = started.elapsed();
+        let limit = if std::env::var_os("CI").is_some() {
+            std::time::Duration::from_millis(500)
+        } else {
+            std::time::Duration::from_millis(80)
+        };
 
         assert_eq!(payload.summary.total_requests, 10_000);
         assert!(
-            started.elapsed() < std::time::Duration::from_millis(80),
-            "home_overview should stay below 80ms with 10k seeded events"
+            elapsed < limit,
+            "home_overview should stay below {limit:?} with 10k seeded events, got {elapsed:?}"
         );
         Ok(())
     }

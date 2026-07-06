@@ -91,10 +91,23 @@ pub(crate) fn extract_claude_tools(value: &Value) -> Vec<BehaviorToolEvidence> {
         .filter(|item| item.get("type").and_then(Value::as_str) == Some("tool_use"))
         .filter_map(|item| {
             let tool_name = item.get("name").and_then(Value::as_str)?.trim();
-            (!tool_name.is_empty()).then(|| {
-                let input = item.get("input");
-                tool_evidence(tool_name, input, None)
-            })
+            if tool_name.is_empty() {
+                return None;
+            }
+            let input = item.get("input");
+            // The `Skill` tool carries the concrete skill in input.skill; resolve it
+            // so behavior/zero-call analysis sees the real name, not literal "Skill".
+            if tool_name.eq_ignore_ascii_case("skill") {
+                let skill_name = input
+                    .and_then(|input| input.get("skill"))
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or(tool_name);
+                Some(skill_evidence(skill_name, input))
+            } else {
+                Some(tool_evidence(tool_name, input, None))
+            }
         })
         .enumerate()
         .map(|(index, mut tool)| {
@@ -156,6 +169,111 @@ fn collect_codex_function_calls(value: &Value, out: &mut Vec<BehaviorToolEvidenc
             }
         }
         _ => {}
+    }
+}
+
+/// Builds tool evidence from one OpenCode `part` row whose `type == "tool"`.
+///
+/// OpenCode names tools differently from Claude/Codex: built-ins are bare words
+/// (`read`, `bash`, `glob`), skills surface as `tool == "skill"` with the name in
+/// `state.input.name`, and MCP tools use a single-underscore `<server>_<tool>`
+/// shape (no `mcp__` prefix). Returns `None` for non-tool or unnamed parts.
+pub(crate) fn opencode_tool_evidence(part: &Value) -> Option<BehaviorToolEvidence> {
+    if part.get("type").and_then(Value::as_str) != Some("tool") {
+        return None;
+    }
+    let tool = part
+        .get("tool")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let input = part.get("state").and_then(|state| state.get("input"));
+
+    let (display_name, tool_kind, mcp_server, mcp_tool) = if tool.eq_ignore_ascii_case("skill") {
+        // Skill name lives in state.input.name; fall back to the literal tool.
+        let skill_name = input
+            .and_then(|input| input.get("name"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(tool);
+        (skill_name.to_string(), ToolKind::Skill, None, None)
+    } else if is_opencode_builtin(tool) {
+        // Built-ins map cleanly through the shared classifier (read->Read,
+        // bash->Bash, glob/grep->Search, todowrite->Planning, task->Agent, ...).
+        (
+            tool.to_string(),
+            classify_tool(tool, None, None),
+            None,
+            None,
+        )
+    } else if let Some((server, mcp_tool)) = split_opencode_mcp(tool) {
+        // Heuristic: a non-builtin name containing `_` is an MCP `<server>_<tool>`.
+        // Known-server longest-prefix matching (needs opencode.json) is left to the
+        // inventory work; first-underscore split can mis-split a server whose own
+        // name contains `_` (documented known limitation).
+        (
+            tool.to_string(),
+            ToolKind::Mcp,
+            Some(server),
+            Some(mcp_tool),
+        )
+    } else {
+        (tool.to_string(), ToolKind::Core, None, None)
+    };
+
+    Some(BehaviorToolEvidence {
+        sequence: 0,
+        tool_name: normalize_tool_name(&display_name),
+        tool_kind,
+        mcp_server,
+        mcp_tool,
+        input_fingerprint: input.map(input_fingerprint),
+        safe_preview: safe_tool_preview(tool, input),
+    })
+}
+
+/// OpenCode built-in tool names (bare words, no server prefix).
+fn is_opencode_builtin(tool: &str) -> bool {
+    const BUILTINS: &[&str] = &[
+        "read",
+        "write",
+        "edit",
+        "multiedit",
+        "bash",
+        "glob",
+        "grep",
+        "list",
+        "webfetch",
+        "patch",
+        "task",
+        "question",
+        "todowrite",
+        "todoread",
+        "invalid",
+    ];
+    BUILTINS.contains(&tool.to_ascii_lowercase().as_str())
+}
+
+/// Splits an OpenCode MCP tool name `<server>_<tool>` at the first underscore.
+fn split_opencode_mcp(tool: &str) -> Option<(String, String)> {
+    let (server, rest) = tool.split_once('_')?;
+    let server = normalize_tool_name(server);
+    let mcp_tool = normalize_tool_name(rest);
+    (!server.is_empty() && !mcp_tool.is_empty()).then_some((server, mcp_tool))
+}
+
+/// Builds evidence for a skill call with the concrete skill name and a forced
+/// `Skill` kind. Used by Claude (`input.skill`) and OpenCode (`state.input.name`).
+fn skill_evidence(skill_name: &str, input: Option<&Value>) -> BehaviorToolEvidence {
+    BehaviorToolEvidence {
+        sequence: 0,
+        tool_name: normalize_tool_name(skill_name),
+        tool_kind: ToolKind::Skill,
+        mcp_server: None,
+        mcp_tool: None,
+        input_fingerprint: input.map(input_fingerprint),
+        safe_preview: safe_tool_preview("skill", input),
     }
 }
 
@@ -335,13 +453,16 @@ fn truncate_preview(value: &str) -> String {
 mod tests {
     use serde_json::json;
 
-    use super::{extract_claude_tools, extract_codex_tools, turn_from_tools};
+    use super::{
+        extract_claude_tools, extract_codex_tools, opencode_tool_evidence, turn_from_tools,
+    };
     use crate::models::{ActivityCategory, SourceKind, ToolKind, UsageEvent, UsageTokens};
 
     fn event() -> UsageEvent {
         UsageEvent {
             event_key: "codex:path:offset".to_string(),
             source: SourceKind::Codex,
+            provider_label: String::new(),
             model: "gpt-5".to_string(),
             event_at: "2026-05-01T00:00:00Z".to_string(),
             hour_start: "2026-05-01T00:00:00Z".to_string(),
@@ -387,6 +508,19 @@ mod tests {
     }
 
     #[test]
+    fn claude_skill_resolves_concrete_name_from_input() {
+        let tools = extract_claude_tools(&json!({
+            "message": { "content": [
+                {"type":"tool_use","name":"Skill","input":{"skill":"smart-search","args":"x"}}
+            ]}
+        }));
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].tool_kind, ToolKind::Skill);
+        // Concrete skill name resolved from input.skill, not literal "Skill".
+        assert_eq!(tools[0].tool_name, "smart-search");
+    }
+
+    #[test]
     fn codex_tool_extraction_recognizes_response_item_function_call() {
         let value = json!({
             "type": "response_item",
@@ -429,5 +563,41 @@ mod tests {
         assert_eq!(turn.category, ActivityCategory::Coding);
         assert!(turn.has_edits);
         assert!(turn.one_shot);
+    }
+
+    #[test]
+    fn opencode_tool_evidence_classifies_builtin_skill_and_mcp() {
+        let read = opencode_tool_evidence(&json!({
+            "type": "tool",
+            "tool": "read",
+            "state": { "status": "completed", "input": { "file_path": "src/lib.rs" } }
+        }))
+        .expect("read evidence");
+        assert_eq!(read.tool_name, "read");
+        assert_eq!(read.tool_kind, ToolKind::Read);
+        assert!(read.safe_preview.as_deref().unwrap().contains("src/lib.rs"));
+
+        let skill = opencode_tool_evidence(&json!({
+            "type": "tool",
+            "tool": "skill",
+            "state": { "input": { "name": "smart-search" } }
+        }))
+        .expect("skill evidence");
+        assert_eq!(skill.tool_kind, ToolKind::Skill);
+        assert_eq!(skill.tool_name, "smart-search");
+
+        let mcp = opencode_tool_evidence(&json!({
+            "type": "tool",
+            "tool": "context7_query-docs",
+            "state": { "status": "completed" }
+        }))
+        .expect("mcp evidence");
+        assert_eq!(mcp.tool_kind, ToolKind::Mcp);
+        assert_eq!(mcp.mcp_server.as_deref(), Some("context7"));
+        assert_eq!(mcp.mcp_tool.as_deref(), Some("query-docs"));
+
+        // Non-tool parts and unnamed tools are ignored.
+        assert!(opencode_tool_evidence(&json!({ "type": "text", "text": "hi" })).is_none());
+        assert!(opencode_tool_evidence(&json!({ "type": "tool", "tool": "" })).is_none());
     }
 }

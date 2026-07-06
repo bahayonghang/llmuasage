@@ -33,3 +33,7 @@ If the concept you need isn't in the glossary yet, that's a signal — either yo
 If your output contradicts an existing ADR, surface it explicitly rather than silently overriding:
 
 > _Contradicts ADR-0007 (event-sourced orders) — but worth reopening because…_
+
+## Passive reader work
+
+Before adding a passive parser or expanding a source from hook/plugin-only to passive/hybrid behavior, read [`passive-parser-onboarding.md`](./passive-parser-onboarding.md) and update [`passive-source-candidates.md`](./passive-source-candidates.md). If real samples or token semantics are missing, stop at descriptor/candidate documentation and do not write parser code.

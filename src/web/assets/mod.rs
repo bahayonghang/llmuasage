@@ -90,14 +90,14 @@ const ASSET_MANIFEST: &[WebAsset] = &[
         body: include_str!("data/derive.js"),
     },
     WebAsset {
-        path: "render.js",
-        content_type: "application/javascript; charset=utf-8",
-        body: include_str!("render.js"),
-    },
-    WebAsset {
         path: "render/hero.js",
         content_type: "application/javascript; charset=utf-8",
         body: include_str!("render/hero.js"),
+    },
+    WebAsset {
+        path: "render/sync-command-center.js",
+        content_type: "application/javascript; charset=utf-8",
+        body: include_str!("render/sync-command-center.js"),
     },
     WebAsset {
         path: "render/trends.js",
@@ -125,6 +125,11 @@ const ASSET_MANIFEST: &[WebAsset] = &[
         body: include_str!("render/behavior.js"),
     },
     WebAsset {
+        path: "render/explorer.js",
+        content_type: "application/javascript; charset=utf-8",
+        body: include_str!("render/explorer.js"),
+    },
+    WebAsset {
         path: "render/costs.js",
         content_type: "application/javascript; charset=utf-8",
         body: include_str!("render/costs.js"),
@@ -133,21 +138,6 @@ const ASSET_MANIFEST: &[WebAsset] = &[
         path: "render/insights.js",
         content_type: "application/javascript; charset=utf-8",
         body: include_str!("render/insights.js"),
-    },
-    WebAsset {
-        path: "render/charts.js",
-        content_type: "application/javascript; charset=utf-8",
-        body: include_str!("render/charts.js"),
-    },
-    WebAsset {
-        path: "render/tables.js",
-        content_type: "application/javascript; charset=utf-8",
-        body: include_str!("render/tables.js"),
-    },
-    WebAsset {
-        path: "render/health.js",
-        content_type: "application/javascript; charset=utf-8",
-        body: include_str!("render/health.js"),
     },
     WebAsset {
         path: "favicon.svg",

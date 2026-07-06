@@ -12,6 +12,22 @@ pub enum Action {
     ScrollUp,
     NextWindow,
     PrevWindow,
+    Refresh,
+    ToggleAutoRefresh,
+    StartSync,
+    OpenSourcePicker,
+    OpenHelp,
+    CycleTheme,
+    None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DialogAction {
+    Close,
+    MoveDown,
+    MoveUp,
+    Select,
+    ClearSource,
     None,
 }
 
@@ -24,10 +40,27 @@ pub fn handle_key_event(key: KeyEvent, _active_panel: Panel) -> Action {
         KeyCode::Char('k') | KeyCode::Up => Action::ScrollUp,
         KeyCode::Char('l') | KeyCode::Right => Action::NextWindow,
         KeyCode::Char('h') | KeyCode::Left => Action::PrevWindow,
+        KeyCode::Char('r') => Action::Refresh,
+        KeyCode::Char('R') => Action::ToggleAutoRefresh,
+        KeyCode::Char('x') => Action::StartSync,
+        KeyCode::Char('s') => Action::OpenSourcePicker,
+        KeyCode::Char('?') => Action::OpenHelp,
+        KeyCode::Char('t') => Action::CycleTheme,
         KeyCode::Char(c) => Panel::from_digit_char(c)
             .map(Action::SwitchPanel)
             .unwrap_or(Action::None),
         _ => Action::None,
+    }
+}
+
+pub fn handle_dialog_key_event(key: KeyEvent) -> DialogAction {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') => DialogAction::Close,
+        KeyCode::Char('j') | KeyCode::Down => DialogAction::MoveDown,
+        KeyCode::Char('k') | KeyCode::Up => DialogAction::MoveUp,
+        KeyCode::Enter | KeyCode::Char(' ') => DialogAction::Select,
+        KeyCode::Char('a') => DialogAction::ClearSource,
+        _ => DialogAction::None,
     }
 }
 
@@ -56,13 +89,38 @@ mod tests {
 
     #[test]
     fn digits_outside_panel_count_do_not_switch_panels() {
-        assert_eq!(
-            handle_key_event(char_key('9'), Panel::Overview),
-            Action::None
-        );
+        // With COUNT == 9, only '0' is outside the 1..=9 panel range.
         assert_eq!(
             handle_key_event(char_key('0'), Panel::Overview),
             Action::None
+        );
+    }
+
+    #[test]
+    fn source_picker_shortcut_opens_dialog() {
+        assert_eq!(
+            handle_key_event(char_key('s'), Panel::Overview),
+            Action::OpenSourcePicker
+        );
+        assert_eq!(
+            handle_key_event(char_key('x'), Panel::Overview),
+            Action::StartSync
+        );
+        assert_eq!(
+            handle_key_event(char_key('?'), Panel::Overview),
+            Action::OpenHelp
+        );
+    }
+
+    #[test]
+    fn dialog_keys_map_to_source_picker_actions() {
+        assert_eq!(
+            handle_dialog_key_event(char_key('j')),
+            DialogAction::MoveDown
+        );
+        assert_eq!(
+            handle_dialog_key_event(char_key('a')),
+            DialogAction::ClearSource
         );
     }
 }

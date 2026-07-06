@@ -1,14 +1,16 @@
 use std::{
+    sync::mpsc,
     thread,
     time::{Duration, Instant},
 };
 
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use rusqlite::{OptionalExtension, Transaction, TransactionBehavior, params};
-use tracing::info;
+use tracing::{info, warn};
 
 use super::{
-    HolderKind, Store, WORKER_LOCK_LEASE_MINUTES, WORKER_LOCK_NAME, WorkerLock, WorkerLockMeta,
+    HolderKind, Store, WORKER_LOCK_LEASE_MINUTES, WORKER_LOCK_NAME, WorkerLock,
+    WorkerLockHeartbeat, WorkerLockMeta,
 };
 use crate::{
     error::{LlmusageError, Result},
@@ -21,9 +23,56 @@ impl WorkerLock {
             .refresh_worker_lock(&self.lock_name, &self.owner_id)
     }
 
+    /// Starts a background heartbeat that refreshes this lock until the
+    /// returned guard is dropped.
+    pub fn start_heartbeat(&self, interval: Duration) -> WorkerLockHeartbeat {
+        let interval = if interval.is_zero() {
+            Duration::from_millis(1)
+        } else {
+            interval
+        };
+        let store = self.store.clone();
+        let lock_name = self.lock_name.clone();
+        let owner_id = self.owner_id.clone();
+        let (stop_tx, stop_rx) = mpsc::channel();
+        let handle = thread::spawn(move || {
+            loop {
+                match stop_rx.recv_timeout(interval) {
+                    Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        if let Err(err) = store.refresh_worker_lock(&lock_name, &owner_id) {
+                            warn!(error = %err, "SQLite worker 锁 heartbeat 续租失败");
+                        }
+                    }
+                }
+            }
+        });
+        WorkerLockHeartbeat {
+            stop_tx: Some(stop_tx),
+            handle: Some(handle),
+        }
+    }
+
+    /// Starts the default heartbeat cadence for production sync runs.
+    pub fn start_default_heartbeat(&self) -> WorkerLockHeartbeat {
+        let lease_seconds = WORKER_LOCK_LEASE_MINUTES.max(1) as u64 * 60;
+        self.start_heartbeat(Duration::from_secs((lease_seconds / 3).max(1)))
+    }
+
     /// Metadata captured when this guard acquired the lock.
     pub fn meta(&self) -> &WorkerLockMeta {
         &self.meta
+    }
+}
+
+impl Drop for WorkerLockHeartbeat {
+    fn drop(&mut self) {
+        if let Some(stop_tx) = self.stop_tx.take() {
+            let _ = stop_tx.send(());
+        }
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
     }
 }
 
@@ -72,9 +121,28 @@ impl Store {
         }
     }
 
+    /// Attempts to acquire the global worker lock once without sleeping.
+    ///
+    /// JobRegistry uses this to build a cancellation-aware async wait loop
+    /// without spawning unbounded blocking waiters.
+    pub(crate) fn try_acquire_worker_lock_once(
+        &self,
+        kind: HolderKind,
+    ) -> Result<Option<WorkerLock>> {
+        self.try_acquire_worker_lock(kind)
+    }
+
     /// Returns the current non-expired worker lock holder, if any.
     pub fn current_worker_lock(&self) -> Result<Option<WorkerLockMeta>> {
         let conn = self.open_connection()?;
+        Self::current_worker_lock_with_conn(&conn)
+    }
+
+    /// Returns the current non-expired worker lock holder using an existing
+    /// connection.
+    pub(crate) fn current_worker_lock_with_conn(
+        conn: &rusqlite::Connection,
+    ) -> Result<Option<WorkerLockMeta>> {
         let meta = conn
             .query_row(
                 r#"

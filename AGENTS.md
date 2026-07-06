@@ -1,45 +1,48 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-`src/main.rs` is the CLI entrypoint and `src/lib.rs` wires shared modules. Keep subcommand logic in `src/commands/`, storage and query code in `src/store/` and `src/query/`, parser and tool-specific adapters in `src/parsers/` and `src/integrations/`, and terminal or browser UIs in `src/tui/` and `src/web/`. Static dashboard assets live under `src/web/assets/`. Integration tests sit in `tests/*.rs`. Bilingual docs live in `docs/` and `docs/zh/`. Treat `ref/vibeusage/` as upstream reference code, not the primary edit target.
+`src/main.rs` is the CLI entrypoint and `src/lib.rs` wires shared modules. Keep subcommands in `src/commands/`, parsers in `src/parsers/`, tool adapters in `src/integrations/`, SQLite/storage code in `src/store/`, and reporting/query logic in `src/query/`. Terminal and browser UIs live in `src/tui/` and `src/web/`; static dashboard assets are under `src/web/assets/`. Integration tests are in `tests/*.rs`. VitePress docs live in `docs/` with Chinese pages in `docs/zh/`. Treat `ref/` as upstream/reference code.
 
 ## Build, Test, and Development Commands
-- `cargo run -- <command>`: run the CLI locally, for example `cargo run -- serve` or `cargo run -- sync`.
+- `cargo run -- <command>`: run the CLI locally, e.g. `cargo run -- sync` or `cargo run -- serve`.
 - `just serve`: start the local web dashboard.
 - `just docs`: run the VitePress docs dev server.
 - `just build`: build the release binary and production docs.
-- `just ci`: repo gate; runs `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test -- --test-threads=1`, and `npm --prefix docs run docs:build`.
-- `just install`: install the CLI from the current checkout.
+- `just ci`: full gate: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test -- --test-threads=1`, and `npm --prefix docs run docs:build`.
+- `just install`: install the CLI from this checkout.
 
 ## Coding Style & Naming Conventions
-Use Rust 2024 defaults and keep code `cargo fmt` clean. Follow standard Rust naming: `snake_case` for modules, files, and functions; `PascalCase` for types; `SCREAMING_SNAKE_CASE` for constants. Keep each command in a matching module such as `src/commands/sync.rs`. For docs, prefer short kebab-case file names like `getting-started.md`.
+Use Rust 2024 and keep code `cargo fmt` clean. Follow standard Rust naming: `snake_case` for files, modules, and functions; `PascalCase` for types; `SCREAMING_SNAKE_CASE` for constants. Keep command modules aligned with command names, such as `src/commands/sync.rs`. Use short kebab-case names for docs pages, e.g. `getting-started.md`.
 
 ## Testing Guidelines
-Add or update integration tests in `tests/` for command, parser, and storage changes. Prefer focused names such as `sync_regression.rs` or `local_flow.rs`. Use `tempfile` for isolated filesystem and SQLite fixtures. Run `cargo test -- --test-threads=1` locally to match CI behavior.
+Add focused integration tests in `tests/` for command, parser, store, and report behavior. Prefer names that describe the surface, such as `sync_regression.rs` or `local_flow.rs`. Use `tempfile` for isolated homes, fixtures, and SQLite state. Run `cargo test -- --test-threads=1` to match CI ordering; run targeted tests before `just ci`.
 
 ## Commit & Pull Request Guidelines
-Recent history uses Conventional Commits with scope and emoji, often in Chinese, for example `refactor(web): ♻️ ...` or `docs(readme): 📝 ...`. Keep commits narrow and grouped by feature or surface. PRs should include: a short summary, affected commands or docs paths, validation output from `just ci` or targeted commands, and screenshots when `src/web/` or docs UI changes. When command behavior changes, update both `README.md`/`README.zh-CN.md` and the matching docs pages.
+Recent history uses Conventional Commits with scopes, emoji, and often Chinese text, e.g. `feat(看板): [AI] ✨ ...` or `docs(文档): [AI] 📝 ...`. Keep commits narrow and grouped by feature or surface. PRs should include a summary, affected commands/docs paths, linked issues when available, validation output, and screenshots for dashboard or docs UI changes. When CLI behavior changes, update `README.md`, `README.zh-CN.md`, and matching docs pages.
 
 ## Security & Generated Files
-Do not commit local usage data, SQLite files, or user config copied from `~/.llmusage/`. Do not hand-edit generated directories: `target/`, `docs/node_modules/`, `docs/.vitepress/cache/`, or `docs/.vitepress/dist/`.
+Do not commit local usage data, SQLite databases, or copied user config from `~/.llmusage/`. Be careful with rebuild/reset paths and document destructive behavior. Do not hand-edit generated or dependency directories: `target/`, `docs/node_modules/`, `docs/.vitepress/cache/`, or `docs/.vitepress/dist/`.
 
-## Agent skills
+## Agent-Specific Notes
+Before non-trivial domain changes, read `docs/agents/domain.md` and relevant ADRs in `docs/adr/`. For passive parser/source work, follow `docs/agents/passive-parser-onboarding.md` and update `docs/agents/passive-source-candidates.md` when appropriate.
+<!-- TRELLIS:START -->
+# Trellis Instructions
 
-### Issue tracker
+These instructions are for AI assistants working in this project.
 
-GitHub Issues at github.com/bahayonghang/llmuasage via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+This project is managed by Trellis. The working knowledge you need lives under `.trellis/`:
 
-### Triage labels
+- `.trellis/workflow.md` — development phases, when to create tasks, skill routing
+- `.trellis/spec/` — package- and layer-scoped coding guidelines (read before writing code in a given layer)
+- `.trellis/workspace/` — per-developer journals and session traces
+- `.trellis/tasks/` — active and archived tasks (PRDs, research, jsonl context)
 
-Canonical defaults — `needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`. See `docs/agents/triage-labels.md`.
+If a Trellis command is available on your platform (e.g. `/trellis:finish-work`, `/trellis:continue`), prefer it over manual steps. Not every platform exposes every command.
 
-### Domain docs
+If you're using Codex or another agent-capable tool, additional project-scoped helpers may live in:
+- `.agents/skills/` — reusable Trellis skills
+- `.codex/agents/` — optional custom subagents
 
-Single-context. Read these before working on any non-trivial change:
+Managed by Trellis. Edits outside this block are preserved; edits inside may be overwritten by a future `trellis update`.
 
-- [`CONTEXT.md`](CONTEXT.md) — terminology and source-anchor map for the 11 domain concepts (Source, SourceParser, Integration, HookTarget, Cursor, Bucket, SyncShard, SyncRunWriter, Store, Registry, RunLog).
-- [`docs/adr/0001-source-registry-and-parser-trait.md`](docs/adr/0001-source-registry-and-parser-trait.md) — why `SourceParser` trait + `sources::registered_*` registry, with deletion-test arguments.
-- [`docs/adr/0002-sync-shard-as-commit-protocol.md`](docs/adr/0002-sync-shard-as-commit-protocol.md) — why `SyncShard` + `commit_shard` fixes the implicit reset → events → cursor protocol.
-- [`docs/adr/0003-store-facade-vs-substores.md`](docs/adr/0003-store-facade-vs-substores.md) — why `Store` is a façade with 5 borrowed views (`CursorStore` / `IntegrationStateStore` / `RunLog` / `SyncStatusStore` / `TriggerStore`).
-
-Process notes for agents: see `docs/agents/domain.md`.
+<!-- TRELLIS:END -->

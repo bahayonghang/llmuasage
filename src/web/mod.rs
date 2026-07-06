@@ -1,10 +1,16 @@
-use std::{collections::HashMap, future::Future, net::SocketAddr, time::Duration};
+use std::{
+    collections::HashMap,
+    future::Future,
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use anyhow::Result;
 use axum::{
     Json, Router,
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode, header},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
@@ -12,14 +18,16 @@ use chrono::{FixedOffset, NaiveDate};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::net::TcpListener;
+use tokio::sync::Semaphore;
 use tracing::{error, info};
 
 use crate::{
     error::{LlmusageError, Result as LlmusageResult},
     models::SourceKind,
     query::{
-        ActivityPayload, BehaviorSupport, Dashboard, LogsQuery, ModelComparePayload,
-        OptimizePayload, QueryFilter, ToolsPayload,
+        ActivityPayload, BehaviorSupport, Dashboard, ExplorerDimension, ExplorerFilters,
+        ExplorerGranularity, ExplorerMetric, ExplorerQuery, ExplorerTokenType, LogsQuery,
+        ModelComparePayload, OptimizePayload, QueryFilter, ToolsPayload,
     },
     store::Store,
     sync::{JobRegistry, SyncOptions},
@@ -27,6 +35,7 @@ use crate::{
 
 const WEB_API_TIMEOUT: Duration = Duration::from_secs(5);
 const WEB_BEHAVIOR_API_TIMEOUT: Duration = Duration::from_secs(1);
+const WEB_DASHBOARD_QUERY_PERMITS: usize = 4;
 
 mod assets;
 mod brand;
@@ -36,6 +45,22 @@ mod shell;
 pub struct WebState {
     pub store: Store,
     pub jobs: JobRegistry,
+    #[doc(hidden)]
+    pub dashboard_query_semaphore: Arc<Semaphore>,
+}
+
+impl WebState {
+    pub fn new(store: Store) -> Self {
+        Self::with_jobs_and_query_limit(store, JobRegistry::default(), WEB_DASHBOARD_QUERY_PERMITS)
+    }
+
+    fn with_jobs_and_query_limit(store: Store, jobs: JobRegistry, permits: usize) -> Self {
+        Self {
+            store,
+            jobs,
+            dashboard_query_semaphore: Arc::new(Semaphore::new(permits.max(1))),
+        }
+    }
 }
 
 pub async fn serve(store: Store, preferred_port: Option<u16>) -> Result<SocketAddr> {
@@ -51,10 +76,7 @@ pub async fn serve(store: Store, preferred_port: Option<u16>) -> Result<SocketAd
     info!("开始组装本地 Web UI 路由");
 
     // 1.1 创建状态并收敛根页面、资源和 API 路由
-    let state = WebState {
-        store,
-        jobs: JobRegistry::default(),
-    };
+    let state = WebState::new(store);
     let app = Router::new()
         .route("/", get(index_live))
         .route("/assets/{*path}", get(asset_file))
@@ -68,6 +90,7 @@ pub async fn serve(store: Store, preferred_port: Option<u16>) -> Result<SocketAd
         .route("/api/costs", get(api_costs))
         .route("/api/activity", get(api_activity))
         .route("/api/tools", get(api_tools))
+        .route("/api/explorer", get(api_explorer))
         .route("/api/optimize", get(api_optimize))
         .route("/api/compare/models", get(api_compare_models))
         .route("/api/compare", get(api_compare))
@@ -147,9 +170,10 @@ async fn api_dashboard(
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
     let filter = dashboard_filter_from_params(&params);
+    let scope = dashboard_scope_from_params(&params);
     api_json_async(
         "/api/dashboard",
-        load_dashboard_snapshot_resilient(state, filter),
+        load_dashboard_snapshot_resilient(state, filter, scope),
     )
     .await
 }
@@ -266,6 +290,34 @@ async fn api_tools(
     api_json_async(
         "/api/tools",
         load_behavior_api(state, move |d| d.tool_breakdown(&filter), degraded_tools),
+    )
+    .await
+}
+
+async fn api_explorer(
+    State(state): State<WebState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let query = match explorer_query_from_params(&params) {
+        Ok(query) => query,
+        Err(detail) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": {
+                        "code": "invalid_query",
+                        "message": "Explorer 查询参数无效",
+                        "detail": detail,
+                        "endpoint": "/api/explorer",
+                    }
+                })),
+            )
+                .into_response();
+        }
+    };
+    api_json_async(
+        "/api/explorer",
+        load_via_dashboard(state, move |dashboard| dashboard.explorer(&query)),
     )
     .await
 }
@@ -414,8 +466,12 @@ struct ForgetRequest {
 
 async fn api_diagnostics_forget(
     State(state): State<WebState>,
+    headers: HeaderMap,
     Json(payload): Json<ForgetRequest>,
 ) -> Response {
+    if let Some(response) = reject_non_local_write(&headers) {
+        return response;
+    }
     let Some(source_str) = payload.source.as_deref() else {
         return (
             StatusCode::BAD_REQUEST,
@@ -470,9 +526,28 @@ async fn api_diagnostics_forget(
 
 async fn api_jobs_start(
     State(state): State<WebState>,
+    headers: HeaderMap,
     Json(options): Json<SyncOptions>,
 ) -> Response {
-    let (job_id, _rx) = state.jobs.start(&state.store, options);
+    if let Some(response) = reject_non_local_write(&headers) {
+        return response;
+    }
+    let (job_id, _rx) = match state.jobs.try_start(&state.store, options) {
+        Ok(started) => started,
+        Err(rejected) => {
+            return (
+                StatusCode::CONFLICT,
+                Json(json!({
+                    "error": {
+                        "code": "sync_job_active",
+                        "message": "已有同步任务正在运行或取消中",
+                        "active_job_id": rejected.active_job_id,
+                    }
+                })),
+            )
+                .into_response();
+        }
+    };
     let Some(snapshot) = state.jobs.snapshot(&job_id) else {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -508,7 +583,14 @@ async fn api_jobs_get(State(state): State<WebState>, Path(id): Path<String>) -> 
     }
 }
 
-async fn api_jobs_cancel(State(state): State<WebState>, Path(id): Path<String>) -> Response {
+async fn api_jobs_cancel(
+    State(state): State<WebState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) = reject_non_local_write(&headers) {
+        return response;
+    }
     if !state.jobs.cancel(&id) {
         return (
             StatusCode::NOT_FOUND,
@@ -528,6 +610,93 @@ async fn api_jobs_cancel(State(state): State<WebState>, Path(id): Path<String>) 
     .into_response()
 }
 
+fn reject_non_local_write(headers: &HeaderMap) -> Option<Response> {
+    let Some(host) = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .map(normalize_authority)
+    else {
+        return Some(write_guard_error(
+            "invalid_host",
+            "本地写入 API 需要有效 Host header",
+            None,
+        ));
+    };
+    if !is_loopback_authority(&host) {
+        return Some(write_guard_error(
+            "invalid_host",
+            "本地写入 API 只接受 localhost/loopback Host",
+            Some(host),
+        ));
+    }
+
+    if let Some(origin) = headers
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
+    {
+        let Some(origin_authority) = origin_authority(origin) else {
+            return Some(write_guard_error(
+                "invalid_origin",
+                "本地写入 API 不接受无法解析的 Origin",
+                Some(origin.to_string()),
+            ));
+        };
+        if origin_authority != host {
+            return Some(write_guard_error(
+                "origin_mismatch",
+                "本地写入 API 只接受同源 Origin",
+                Some(origin.to_string()),
+            ));
+        }
+    }
+
+    None
+}
+
+fn write_guard_error(code: &str, message: &str, detail: Option<String>) -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(json!({
+            "error": {
+                "code": code,
+                "message": message,
+                "detail": detail,
+            }
+        })),
+    )
+        .into_response()
+}
+
+fn origin_authority(origin: &str) -> Option<String> {
+    let origin = origin.trim();
+    let rest = origin
+        .strip_prefix("http://")
+        .or_else(|| origin.strip_prefix("https://"))?;
+    let authority = rest
+        .split('/')
+        .next()
+        .map(normalize_authority)
+        .filter(|value| !value.is_empty())?;
+    Some(authority)
+}
+
+fn normalize_authority(raw: &str) -> String {
+    raw.trim().trim_end_matches('.').to_ascii_lowercase()
+}
+
+fn is_loopback_authority(authority: &str) -> bool {
+    let host = authority_host(authority);
+    host == "localhost" || host.parse::<IpAddr>().is_ok_and(|addr| addr.is_loopback())
+}
+
+fn authority_host(authority: &str) -> &str {
+    let authority = authority.rsplit('@').next().unwrap_or(authority);
+    if let Some(rest) = authority.strip_prefix('[') {
+        return rest.split(']').next().unwrap_or_default();
+    }
+    authority.split(':').next().unwrap_or_default()
+}
+
 async fn load_via_dashboard<T, F>(state: WebState, f: F) -> LlmusageResult<T>
 where
     T: Send + 'static,
@@ -545,9 +714,32 @@ where
     T: Send + 'static,
     F: FnOnce(&Dashboard) -> LlmusageResult<T> + Send + 'static,
 {
-    with_timeout(
+    let started = Instant::now();
+    let permit = match tokio::time::timeout(
         timeout,
+        state.dashboard_query_semaphore.clone().acquire_owned(),
+    )
+    .await
+    {
+        Ok(Ok(permit)) => permit,
+        Ok(Err(_)) => {
+            return Err(LlmusageError::ConfigInvalid {
+                detail: "dashboard query semaphore is closed".to_string(),
+            });
+        }
+        Err(_) => return Err(dashboard_timeout_error(timeout)),
+    };
+    let Some(remaining) = timeout.checked_sub(started.elapsed()) else {
+        return Err(dashboard_timeout_error(timeout));
+    };
+    if remaining.is_zero() {
+        return Err(dashboard_timeout_error(timeout));
+    }
+
+    with_timeout(
+        remaining,
         tokio::task::spawn_blocking(move || {
+            let _permit = permit;
             let dashboard = Dashboard::open(&state.store)?;
             f(&dashboard)
         }),
@@ -579,23 +771,38 @@ where
             detail: format!("blocking dashboard task failed: {err}"),
         })?,
         Err(_) => Err(LlmusageError::ConfigInvalid {
-            detail: format!(
-                "dashboard query exceeded {} ms timeout",
-                duration.as_millis()
-            ),
+            detail: dashboard_timeout_message(duration),
         }),
     }
+}
+
+fn dashboard_timeout_error(duration: Duration) -> LlmusageError {
+    LlmusageError::ConfigInvalid {
+        detail: dashboard_timeout_message(duration),
+    }
+}
+
+fn dashboard_timeout_message(duration: Duration) -> String {
+    format!(
+        "dashboard query exceeded {} ms timeout",
+        duration.as_millis()
+    )
 }
 
 async fn load_dashboard_snapshot_resilient(
     state: WebState,
     filter: QueryFilter,
+    scope: DashboardScope,
 ) -> LlmusageResult<serde_json::Value> {
     let core = load_via_dashboard(state.clone(), {
         let filter = filter.clone();
         move |dashboard| dashboard.core_snapshot(&filter)
     })
     .await?;
+
+    if scope == DashboardScope::Core {
+        return Ok(dashboard_core_json(core));
+    }
 
     let activity_filter = filter.clone();
     let activity = load_behavior_api(
@@ -615,19 +822,54 @@ async fn load_dashboard_snapshot_resilient(
         move |dashboard| dashboard.optimize(&optimize_filter),
         degraded_optimize,
     );
+    let explorer_filter = filter.clone();
+    let explorer = load_via_dashboard(state.clone(), move |dashboard| {
+        dashboard.explorer(&ExplorerQuery {
+            filter: explorer_filter,
+            ..Default::default()
+        })
+    });
     let compare = load_behavior_api(
         state,
         move |dashboard| dashboard.model_compare(&filter, None, None),
         degraded_compare,
     );
-    let (activity, tools, optimize, compare) = tokio::join!(activity, tools, optimize, compare);
+    let (activity, tools, optimize, explorer, compare) =
+        tokio::join!(activity, tools, optimize, explorer, compare);
     let activity = activity?;
     let tools = tools?;
     let optimize = optimize?;
+    let explorer = explorer?;
     let compare = compare?;
 
-    Ok(json!({
+    let mut payload = dashboard_core_json(core);
+    if let Some(object) = payload.as_object_mut() {
+        object.insert("activity".to_string(), json!(activity));
+        object.insert("tools".to_string(), json!(tools));
+        object.insert("optimize".to_string(), json!(optimize));
+        object.insert("explorer".to_string(), json!(explorer));
+        object.insert("compare".to_string(), json!(compare));
+    }
+    Ok(payload)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DashboardScope {
+    Full,
+    Core,
+}
+
+fn dashboard_scope_from_params(params: &HashMap<String, String>) -> DashboardScope {
+    match params.get("scope").map(String::as_str) {
+        Some("core") => DashboardScope::Core,
+        _ => DashboardScope::Full,
+    }
+}
+
+fn dashboard_core_json(core: crate::query::DashboardCoreSnapshot) -> serde_json::Value {
+    json!({
         "overview": core.overview,
+        "sync_command_center": core.sync_command_center,
         "day_trends": core.day_trends,
         "week_trends": core.week_trends,
         "month_trends": core.month_trends,
@@ -636,13 +878,9 @@ async fn load_dashboard_snapshot_resilient(
         "sources": core.sources,
         "projects": core.projects,
         "costs": core.costs,
-        "activity": activity,
-        "tools": tools,
-        "optimize": optimize,
-        "compare": compare,
         "health": core.health,
         "diagnostics": core.diagnostics,
-    }))
+    })
 }
 
 fn degraded_support(reason: String) -> BehaviorSupport {
@@ -695,7 +933,11 @@ fn dashboard_filter_from_params(params: &HashMap<String, String>) -> QueryFilter
     let mut filter = dashboard_filter_from_params_without_window(params);
 
     if filter.since.is_none() && filter.until.is_none() {
-        apply_window_filter(params.get("window").map(String::as_str), &mut filter);
+        let range = params
+            .get("range")
+            .or_else(|| params.get("window"))
+            .map(String::as_str);
+        apply_window_filter(range, &mut filter);
     }
 
     filter
@@ -713,6 +955,58 @@ fn dashboard_filter_from_params_without_window(params: &HashMap<String, String>)
             .or_else(|| query_string(params, "project")),
         timezone: query_timezone(params.get("timezone").or_else(|| params.get("tz"))),
     }
+}
+
+fn explorer_query_from_params(
+    params: &HashMap<String, String>,
+) -> std::result::Result<ExplorerQuery, String> {
+    let filter = dashboard_filter_from_params(params);
+    let granularity = match params.get("granularity").map(String::as_str) {
+        Some(raw) => ExplorerGranularity::parse(raw)
+            .ok_or_else(|| format!("unsupported granularity: {raw}"))?,
+        None => ExplorerGranularity::Day,
+    };
+    let metric = match params.get("metric").map(String::as_str) {
+        Some(raw) => {
+            ExplorerMetric::parse(raw).ok_or_else(|| format!("unsupported metric: {raw}"))?
+        }
+        None => ExplorerMetric::AttributedCostUsd,
+    };
+    let group_by = match params.get("group_by").map(String::as_str) {
+        Some(raw) => {
+            ExplorerDimension::parse(raw).ok_or_else(|| format!("unsupported group_by: {raw}"))?
+        }
+        None => ExplorerDimension::Source,
+    };
+    let token_type = match params.get("token_type").map(String::as_str) {
+        Some(raw) => Some(
+            ExplorerTokenType::parse(raw)
+                .ok_or_else(|| format!("unsupported token_type: {raw}"))?,
+        ),
+        None => None,
+    };
+    let limit = params
+        .get("limit")
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .unwrap_or(8);
+
+    Ok(ExplorerQuery {
+        filter,
+        granularity,
+        metric,
+        group_by,
+        filters: ExplorerFilters {
+            session_id: query_string(params, "session_id")
+                .or_else(|| query_string(params, "session")),
+            tool_name: query_string(params, "tool_name").or_else(|| query_string(params, "tool")),
+            tool_kind: query_string(params, "tool_kind"),
+            is_tool: params.get("is_tool").map(|raw| parse_bool_query(Some(raw))),
+            token_type,
+        },
+        limit,
+        include_other: !params.contains_key("include_other")
+            || parse_bool_query(params.get("include_other")),
+    })
 }
 
 fn query_string(params: &HashMap<String, String>, key: &str) -> Option<String> {
@@ -787,7 +1081,7 @@ fn apply_window_filter(window: Option<&str>, filter: &mut QueryFilter) {
             filter.since = Some(today);
             filter.until = Some(today);
         }
-        "day" | "24h" => {
+        "day" | "24h" | "1d" => {
             filter.since = today.pred_opt();
             filter.until = Some(today);
         }
@@ -848,6 +1142,10 @@ mod tests {
         fs,
         io::{Read, Write},
         net::SocketAddr,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
         time::{Duration, Instant},
     };
 
@@ -857,7 +1155,10 @@ mod tests {
 
     use crate::{AppPaths, LlmusageError, store::Store, sync::SyncOptions};
 
-    use super::{api_json, asset_manifest, live_index_html, serve, snapshot_index_html};
+    use super::{
+        WebState, api_json, asset_manifest, live_index_html, load_via_dashboard_with_timeout,
+        serve, snapshot_index_html,
+    };
 
     fn make_store() -> anyhow::Result<(TempDir, Store)> {
         let temp = TempDir::new()?;
@@ -873,8 +1174,22 @@ mod tests {
         path: &str,
         body: Option<String>,
     ) -> anyhow::Result<(StatusCode, serde_json::Value)> {
+        route_json_with_headers(addr, method, path, body, &[]).await
+    }
+
+    async fn route_json_with_headers(
+        addr: SocketAddr,
+        method: &str,
+        path: &str,
+        body: Option<String>,
+        headers: &[(&str, &str)],
+    ) -> anyhow::Result<(StatusCode, serde_json::Value)> {
         let method = method.to_string();
         let path = path.to_string();
+        let headers = headers
+            .iter()
+            .map(|(name, value)| format!("{name}: {value}\r\n"))
+            .collect::<String>();
         let raw = tokio::task::spawn_blocking(move || {
             let mut stream = std::net::TcpStream::connect(addr)?;
             stream.set_read_timeout(Some(Duration::from_secs(10)))?;
@@ -883,6 +1198,7 @@ mod tests {
             let request = format!(
                 "{method} {path} HTTP/1.1\r\n\
                  Host: {addr}\r\n\
+                 {headers}\
                  Content-Type: application/json\r\n\
                  Accept: application/json\r\n\
                  Content-Length: {}\r\n\
@@ -907,7 +1223,8 @@ mod tests {
             .and_then(|raw| raw.parse::<u16>().ok())
             .ok_or_else(|| anyhow::anyhow!("invalid status line: {head:?}"))?;
         let body = decode_http_body(head, body)?;
-        let payload = serde_json::from_str(&body)?;
+        let payload = serde_json::from_str(&body)
+            .map_err(|err| anyhow::anyhow!("invalid JSON response body {body:?}: {err}"))?;
         Ok((StatusCode::from_u16(status_code)?, payload))
     }
 
@@ -979,7 +1296,7 @@ mod tests {
         let html = live_index_html();
         assert!(html.contains("data-mode=\"live\""));
         assert!(html.contains("data-app-version=\""));
-        assert!(html.contains("data-supported-sources=\"codex, claude, opencode, gemini\""));
+        assert!(html.contains("data-supported-sources=\"codex, claude, opencode, antigravity\""));
         assert!(html.contains("type=\"module\""));
         assert!(html.contains("assets/app.js"));
         assert!(html.contains("assets/base.css"));
@@ -1008,6 +1325,11 @@ mod tests {
         assert!(html.contains("id=\"filter-rail\""));
         assert!(html.contains("data-filter=\"source\""));
         assert!(html.contains("data-filter=\"model\""));
+        assert!(html.contains("data-range-preset=\"1d\""));
+        assert!(html.contains("data-range-preset=\"7d\""));
+        assert!(html.contains("data-range-preset=\"30d\""));
+        assert!(html.contains("data-date-input type=\"text\""));
+        assert!(!html.contains("type=\"date\""));
         assert!(html.contains("id=\"auto-refresh\""));
         assert!(html.contains("data-refresh-interval=\"30000\""));
         assert!(html.contains("data-refresh-interval=\"60000\""));
@@ -1039,6 +1361,148 @@ mod tests {
     }
 
     #[test]
+    fn dashboard_shell_and_assets_wire_sync_command_center() {
+        let html = live_index_html();
+        assert!(html.contains("id=\"sync-command-center\""));
+        assert!(html.contains("data-i18n=\"shell.syncCenter.eyebrow\""));
+
+        let app_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "app.js")
+            .expect("app.js asset")
+            .body;
+        assert!(app_js.contains(
+            "import { renderSyncCommandCenter } from './render/sync-command-center.js';"
+        ));
+        assert!(app_js.contains("renderSyncCommandCenter(context, dashboardState)"));
+        assert!(app_js.contains("refreshSyncCommandCenter(state)"));
+
+        let renderer = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "render/sync-command-center.js")
+            .expect("sync command center renderer asset")
+            .body;
+        assert!(renderer.contains("export function renderSyncCommandCenter"));
+        assert!(renderer.contains("activeJobSnapshot?.last_event"));
+        assert!(renderer.contains("document.getElementById('btn-sync')?.click()"));
+        assert!(renderer.contains("sync-command-center-segmented-bar"));
+        assert!(renderer.contains("sync-command-center-details"));
+        assert!(renderer.contains("sync-command-center-detail-grid"));
+        assert!(renderer.contains("copy.detailsHint"));
+        assert!(renderer.contains("sourceSegmentedBar(center)"));
+        assert!(renderer.contains("sync-command-center-secondary"));
+        assert!(renderer.contains("sync-command-center-status"));
+        assert!(renderer.contains("last_run"));
+        assert!(renderer.contains("current_job"));
+        assert!(renderer.contains("activeJobSnapshot?.status !== 'running'"));
+        assert!(renderer.contains("return { kind, source, summary, stats }"));
+        assert!(renderer.contains("copy.sourceShareAria"));
+        assert!(renderer.contains("statusLabels"));
+        for forbidden in [
+            "snapshot.error",
+            "current.error",
+            "last_run.error",
+            "source.last_error",
+        ] {
+            assert!(
+                !renderer.contains(forbidden),
+                "sync command center renderer must not expose raw error marker: {forbidden}"
+            );
+        }
+        assert!(renderer.contains("error_key"));
+
+        let copy_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "copy.js")
+            .expect("copy.js asset")
+            .body;
+        assert!(copy_js.contains("syncCenter.headline.ready"));
+        assert!(copy_js.contains("insertedDelta"));
+        assert!(copy_js.contains("rebuild_risk"));
+        assert!(copy_js.contains("available"));
+        assert!(copy_js.contains("sourceShareAria"));
+        assert!(copy_js.contains("detailsHint"));
+        assert!(copy_js.contains("statusLabels"));
+        assert!(copy_js.contains("syncCenter.reason.sourceError"));
+    }
+
+    #[test]
+    fn sync_command_center_does_not_parse_human_summary_strings() {
+        let app_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "app.js")
+            .expect("app.js asset")
+            .body;
+        let renderer = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "render/sync-command-center.js")
+            .expect("sync command center renderer asset")
+            .body;
+        let combined = format!("{app_js}\n{renderer}");
+
+        for forbidden in [
+            "summary.match",
+            "summary.split",
+            "split('inserted_delta')",
+            "split(\"inserted_delta\")",
+            "inserted_delta=",
+            "stored_events=",
+        ] {
+            assert!(
+                !combined.contains(forbidden),
+                "forbidden summary parsing marker: {forbidden}"
+            );
+        }
+        assert!(renderer.contains("total_inserted"));
+        assert!(renderer.contains("stored_events"));
+        assert!(!renderer.contains("snapshot.summary"));
+        assert!(!renderer.contains("last_run.summary"));
+        for forbidden in [
+            "snapshot.error",
+            "current.error",
+            "last_run.error",
+            "source.last_error",
+        ] {
+            assert!(
+                !renderer.contains(forbidden),
+                "forbidden raw error marker: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn dashboard_assets_style_sync_command_center_responsively() {
+        let components_css = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "components.css")
+            .expect("components.css asset")
+            .body;
+        let layout_css = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "layout.css")
+            .expect("layout.css asset")
+            .body;
+        let components_css_lf = components_css.replace("\r\n", "\n");
+
+        assert!(components_css.contains(".sync-command-center"));
+        assert!(components_css.contains(".sync-command-center-details summary"));
+        assert!(components_css.contains(".sync-command-center-detail-grid"));
+        assert!(components_css.contains(".sync-command-center-segments"));
+        assert!(components_css.contains(".sync-command-center-source[data-tone='warn']"));
+        assert!(components_css.contains(".sync-command-center-action .btn"));
+        assert!(components_css.contains(".sync-command-center-metric .mini-label"));
+        assert!(
+            components_css_lf
+                .contains(".explorer-controls,\n  .explorer-summary,\n  .explorer-results-grid")
+        );
+        assert!(components_css.contains("--sync-tone: var(--danger);"));
+        assert!(components_css.contains("color-mix(in oklab, var(--danger) 20%, transparent)"));
+        assert!(layout_css.contains(".sync-command-center-detail-grid"));
+        assert!(layout_css.contains("@media (max-width: 720px)"));
+        assert!(!components_css.contains("border-left-color: var(--sync-tone"));
+    }
+
+    #[test]
     fn asset_manifest_contains_required_files() {
         let paths = asset_manifest()
             .iter()
@@ -1060,37 +1524,62 @@ mod tests {
                 "data/fetch.js",
                 "data/format.js",
                 "data/derive.js",
-                "render.js",
                 "render/hero.js",
+                "render/sync-command-center.js",
                 "render/trends.js",
                 "render/models.js",
                 "render/sources.js",
                 "render/projects.js",
                 "render/behavior.js",
+                "render/explorer.js",
                 "render/costs.js",
                 "render/insights.js",
-                "render/charts.js",
-                "render/tables.js",
-                "render/health.js",
                 "favicon.svg",
             ]
         );
     }
 
     #[test]
+    fn dashboard_assets_use_compact_token_formatter() {
+        let asset = |path: &str| {
+            asset_manifest()
+                .iter()
+                .find(|asset| asset.path == path)
+                .unwrap_or_else(|| panic!("{path} asset"))
+                .body
+        };
+
+        let format_js = asset("data/format.js");
+        assert!(format_js.contains("const COMPACT_UNITS"));
+        assert!(format_js.contains("suffix: 'K'"));
+        assert!(format_js.contains("suffix: 'M'"));
+        assert!(format_js.contains("suffix: 'B'"));
+        assert!(format_js.contains("export function formatTokenAmount(value)"));
+        assert!(format_js.contains("Number(scaled.toFixed(maximumFractionDigits)) >= 1000"));
+
+        let data_js = asset("data.js");
+        assert!(data_js.contains("formatTokenAmount,"));
+
+        let models_js = asset("render/models.js");
+        assert!(models_js.contains("formatTokenAmount(total_tokens)"));
+        assert!(
+            models_js.contains(r#"title="${escapeHtml(`${formatNumber(total_tokens)} Token`)}""#)
+        );
+
+        let sources_js = asset("render/sources.js");
+        assert!(sources_js.contains("const compactTokens = formatTokenAmount(total_tokens);"));
+        assert!(sources_js.contains("const exactTokens = `${formatNumber(total_tokens)} Token`;"));
+
+        let trends_js = asset("render/trends.js");
+        assert!(trends_js.contains("const valueLabel = formatTokenAmount(value);"));
+        assert!(trends_js.contains("formatTokenAmount(row.total_tokens || 0)"));
+    }
+
+    #[test]
     fn render_assets_use_updated_terms() {
         let selected_bodies = asset_manifest()
             .iter()
-            .filter(|asset| {
-                matches!(
-                    asset.path,
-                    "copy.js"
-                        | "render/hero.js"
-                        | "render/charts.js"
-                        | "render/tables.js"
-                        | "render/health.js"
-                )
-            })
+            .filter(|asset| matches!(asset.path, "copy.js" | "render/hero.js"))
             .map(|asset| asset.body)
             .collect::<Vec<_>>()
             .join("\n");
@@ -1186,6 +1675,30 @@ mod tests {
     }
 
     #[test]
+    fn dashboard_data_layers_pass_through_sync_command_center() {
+        let fetch_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "data/fetch.js")
+            .expect("fetch.js asset")
+            .body;
+        let derive_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "data/derive.js")
+            .expect("derive.js asset")
+            .body;
+
+        assert!(fetch_js.contains("sync_command_center: snapshot?.sync_command_center"));
+        assert!(fetch_js.contains("sync_command_center: null"));
+        assert!(derive_js.contains("sync_command_center"));
+        assert!(derive_js.contains("function normalizeSyncCommandCenter"));
+        assert!(
+            derive_js
+                .contains("syncCommandCenter: normalizeSyncCommandCenter(sync_command_center)")
+        );
+        assert!(!derive_js.contains("last_error"));
+    }
+
+    #[test]
     fn app_entry_loads_dashboard_sections_instead_of_missing_window_global() {
         let app_js = asset_manifest()
             .iter()
@@ -1195,6 +1708,9 @@ mod tests {
         assert!(app_js.contains("loadDashboardSnapshot(state)"));
         assert!(app_js.contains("syncUrlFromState(state)"));
         assert!(app_js.contains("state.filters = currentFilterInputs()"));
+        assert!(app_js.contains("setupRangePresetControls(state)"));
+        assert!(app_js.contains("setupDateInputs(state)"));
+        assert!(app_js.contains("date-picker-popover"));
         assert!(!app_js.contains("window.LLMUSAGE_DATA"));
     }
 
@@ -1206,10 +1722,60 @@ mod tests {
             .expect("fetch.js asset")
             .body;
         assert!(fetch_js.contains("export async function loadDashboardSnapshot"));
-        assert!(fetch_js.contains("loadJson(`/api/dashboard${buildFilterQuery(state)}`)"));
+        assert!(
+            fetch_js
+                .contains("loadLiveJson(`/api/dashboard${buildDashboardQuery(state, options)}`")
+        );
         assert!(fetch_js.contains("export async function loadSection"));
+        assert!(fetch_js.contains("state?.rangePreset"));
+        assert!(fetch_js.contains("params.set('range', state.rangePreset)"));
         assert!(fetch_js.contains("回退到旧分段 API"));
         assert!(fetch_js.contains("snapshot.json"));
+    }
+
+    #[test]
+    fn dashboard_assets_coalesce_cache_and_fast_refresh_ranges() {
+        let app_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "app.js")
+            .expect("app.js asset")
+            .body;
+        let fetch_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "data/fetch.js")
+            .expect("fetch.js asset")
+            .body;
+        let derive_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "data/derive.js")
+            .expect("derive.js asset")
+            .body;
+        let behavior_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "render/behavior.js")
+            .expect("render/behavior.js asset")
+            .body;
+        let explorer_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "render/explorer.js")
+            .expect("render/explorer.js asset")
+            .body;
+
+        assert!(fetch_js.contains("const LIVE_CACHE_TTL_MS = 10000"));
+        assert!(fetch_js.contains("const liveInflight = new Map()"));
+        assert!(fetch_js.contains("function normalizedRequestKey"));
+        assert!(fetch_js.contains("export function clearLiveRequestCache"));
+        assert!(fetch_js.contains("liveCacheEpoch += 1"));
+        assert!(fetch_js.contains("export async function loadDashboardCoreSnapshot"));
+        assert!(fetch_js.contains("scope: 'core'"));
+        assert!(app_js.contains("async function reloadDashboardFastRange"));
+        assert!(app_js.contains("loadDashboardCoreSnapshot(state)"));
+        assert!(app_js.contains("sameStableFilters(previousFilters"));
+        assert!(app_js.contains("clearLiveRequestCache()"));
+        assert!(app_js.contains("!hasUsableExplorer(snapshot) || !isDefaultExplorerState(state)"));
+        assert!(derive_js.contains("secondary_refreshing: Boolean(_meta?.secondary_refreshing)"));
+        assert!(behavior_js.contains("shell.refresh.secondaryStale"));
+        assert!(explorer_js.contains("shell.refresh.secondaryStale"));
     }
 
     #[test]
@@ -1235,11 +1801,20 @@ mod tests {
             "data-i18n=\"shell.nav.item.usage\"",
             "data-i18n=\"shell.nav.item.trend\"",
             "data-i18n=\"shell.nav.item.behavior\"",
+            "data-i18n=\"shell.nav.item.explorer\"",
             "data-i18n=\"shell.nav.item.cost\"",
             "data-i18n=\"shell.behavior.optimize.title\"",
             "data-i18n=\"shell.behavior.compare.title\"",
+            "data-i18n=\"shell.explorer.title\"",
+            "data-i18n=\"shell.explorer.metric\"",
+            "data-i18n=\"shell.explorer.groupBy\"",
+            "data-i18n=\"shell.explorer.apply\"",
             "data-i18n=\"shell.btn.export\"",
             "data-i18n=\"shell.btn.sync\"",
+            "data-i18n=\"shell.filters.range\"",
+            "data-i18n=\"shell.filters.range.1d\"",
+            "data-i18n=\"shell.filters.range.7d\"",
+            "data-i18n=\"shell.filters.range.30d\"",
             "data-i18n=\"shell.filters.apply\"",
             "data-i18n=\"shell.filters.reset\"",
             "data-i18n=\"shell.endpoint.lastSync\"",
@@ -1321,6 +1896,8 @@ mod tests {
         assert!(app_js.contains("setupLocaleToggle"));
         assert!(app_js.contains("setupSyncJob(state)"));
         assert!(app_js.contains("setupAutoRefresh(state)"));
+        assert!(app_js.contains("setupExplorerControls(state)"));
+        assert!(app_js.contains("renderExplorer(context, dashboardState)"));
         assert!(app_js.contains("renderInsights(context)"));
         assert!(app_js.contains("initTheme()"));
         assert!(app_js.contains("applyDomI18n(document)"));
@@ -1361,6 +1938,7 @@ mod tests {
         assert!(app_js.contains("/api/jobs/${encodeURIComponent(state.activeJobId)}/cancel"));
         assert!(app_js.contains("pollJobUntilTerminal(state, state.activeJobId)"));
         assert!(app_js.contains("await reloadDashboard(state)"));
+        assert!(app_js.contains("clearLiveRequestCache()"));
         assert!(app_js.contains("shell.sync.snapshotDisabled"));
     }
 
@@ -1378,6 +1956,7 @@ mod tests {
         for marker in [
             "setupNavigation()",
             "setupFilterControls(state)",
+            "setupExplorerControls(state)",
             "setupPanelToggles(state)",
             "setupSyncJob(state)",
             "setupThemeToggle()",
@@ -1400,8 +1979,65 @@ mod tests {
         assert!(fetch_js.contains("loadOptionalSection(state, 'activity'"));
         assert!(fetch_js.contains("loadOptionalSection(state, 'tools'"));
         assert!(fetch_js.contains("loadOptionalSection(state, 'optimize'"));
+        assert!(fetch_js.contains("loadOptionalExplorer(state)"));
         assert!(fetch_js.contains("loadOptionalSection(state, 'compare'"));
         assert!(fetch_js.contains("level: 'degraded'"));
+    }
+
+    #[test]
+    fn dashboard_assets_wire_explorer_workbench_without_frontend_pivoting() {
+        let app_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "app.js")
+            .expect("app.js asset")
+            .body;
+        let fetch_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "data/fetch.js")
+            .expect("fetch.js asset")
+            .body;
+        let derive_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "data/derive.js")
+            .expect("derive.js asset")
+            .body;
+        let explorer_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "render/explorer.js")
+            .expect("render/explorer.js asset")
+            .body;
+        let copy_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "copy.js")
+            .expect("copy.js asset")
+            .body;
+        let components_css = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "components.css")
+            .expect("components.css asset")
+            .body;
+
+        assert!(app_js.contains("DEFAULT_EXPLORER"));
+        assert!(app_js.contains("currentExplorerInputs()"));
+        assert!(app_js.contains("await loadExplorer(state)"));
+        assert!(app_js.contains("shell.explorer.snapshotDisabled"));
+        assert!(fetch_js.contains("export function buildExplorerQuery"));
+        assert!(fetch_js.contains("export async function loadExplorer"));
+        assert!(fetch_js.contains("snapshot?.explorer"));
+        assert!(fetch_js.contains("loadLiveJson(`/api/explorer${buildExplorerQuery(state)}`)"));
+        assert!(fetch_js.contains("return await loadExplorer(state);"));
+        assert!(!fetch_js.contains("loadOptionalSection(state, 'explorer'"));
+        assert!(derive_js.contains("const explorerPayload = normalizeExplorer(explorer);"));
+        assert!(derive_js.contains("explorer: explorerPayload"));
+        assert!(explorer_js.contains("renderExplorer"));
+        assert!(explorer_js.contains("context?.panels?.explorer"));
+        assert!(
+            !explorer_js.contains("fetch("),
+            "Explorer renderer must render backend payloads, not fetch or pivot raw data"
+        );
+        assert!(copy_js.contains("shell.explorer.includeNonTool"));
+        assert!(components_css.contains(".explorer-controls"));
+        assert!(components_css.contains(".explorer-results-grid"));
     }
 
     #[test]
@@ -1446,6 +2082,7 @@ mod tests {
             .find(|asset| asset.path == "data/derive.js")
             .expect("derive.js asset")
             .body;
+        let derive_js = derive_js.replace("\r\n", "\n");
         assert!(derive_js.contains("const chronologicalRows = normalizeTrendRows(trends);"));
         assert!(derive_js.contains("const recentRowsDesc = [...chronologicalRows].reverse();"));
         assert!(
@@ -1491,7 +2128,7 @@ mod tests {
         assert!(charts_css.contains(".trend-bar.is-peak"));
         assert!(charts_css.contains(".trend-peak-label"));
         assert!(charts_css.contains(".trend-empty-title"));
-        assert!(charts_css.contains("min-width: 560px"));
+        assert!(charts_css.contains("min-width: 0"));
     }
 
     #[test]
@@ -1515,6 +2152,65 @@ mod tests {
                 .unwrap()
                 .contains("llmusage init")
         );
+    }
+
+    #[tokio::test]
+    async fn dashboard_queries_hold_semaphore_around_blocking_work() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let state = WebState::with_jobs_and_query_limit(store, Default::default(), 1);
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_active = Arc::new(AtomicUsize::new(0));
+
+        let query = |state: WebState| {
+            let active = Arc::clone(&active);
+            let max_active = Arc::clone(&max_active);
+            load_via_dashboard_with_timeout(state, Duration::from_secs(2), move |_dashboard| {
+                let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+                let mut observed = max_active.load(Ordering::SeqCst);
+                while current > observed {
+                    match max_active.compare_exchange(
+                        observed,
+                        current,
+                        Ordering::SeqCst,
+                        Ordering::SeqCst,
+                    ) {
+                        Ok(_) => break,
+                        Err(actual) => observed = actual,
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(100));
+                active.fetch_sub(1, Ordering::SeqCst);
+                Ok::<(), LlmusageError>(())
+            })
+        };
+
+        let (first, second) = tokio::join!(query(state.clone()), query(state));
+        first?;
+        second?;
+        assert_eq!(
+            max_active.load(Ordering::SeqCst),
+            1,
+            "dashboard blocking queries should be serialized by the test semaphore"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn write_apis_reject_cross_origin_posts() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let addr = serve(store, Some(0)).await?;
+
+        let (status, payload) = route_json_with_headers(
+            addr,
+            "POST",
+            "/api/jobs",
+            Some(serde_json::to_string(&SyncOptions::default())?),
+            &[("Origin", "http://evil.example")],
+        )
+        .await?;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(payload["error"]["code"], "origin_mismatch");
+        Ok(())
     }
 
     #[tokio::test]
@@ -1765,12 +2461,31 @@ mod tests {
                 session_id, session_label, source_path_hash, created_at,
                 cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source, pricing_rate
             )
-            VALUES ('codex:behavior:web', 'codex', 'gpt-5',
+            VALUES ('codex:behavior:web:multi-tool', 'codex', 'gpt-5',
                     '2026-05-01T00:00:00Z', '2026-05-01T00:00:00Z',
                     100, 0, 0, 50, 0, 150,
                     'project-a', 'Project A', NULL, 'path-a',
                     'session-a', NULL, 'path-a', '2026-05-01T00:00:00Z',
-                    0.5, 0.5, 'static', 'static-v1', NULL)
+                    1.0, 1.0, 'static', 'static-v1', NULL)
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_event(
+                event_key, source, model, event_at, hour_start,
+                input_tokens, cache_creation_tokens, cache_read_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                project_hash, project_label, project_ref, path_hash,
+                session_id, session_label, source_path_hash, created_at,
+                cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source, pricing_rate
+            )
+            VALUES ('codex:behavior:web:non-tool', 'codex', 'gpt-5',
+                    '2026-05-02T01:00:00Z', '2026-05-02T01:00:00Z',
+                    80, 0, 0, 20, 0, 100,
+                    'project-a', 'Project A', NULL, 'path-a',
+                    'session-a', NULL, 'path-a', '2026-05-02T01:00:00Z',
+                    0.25, 0.25, 'static', 'static-v1', NULL)
             "#,
             [],
         )?;
@@ -1784,8 +2499,8 @@ mod tests {
                 event_count, updated_at
             )
             VALUES ('codex', 'gpt-5', '2026-05-01T00:00:00Z', 'project-a', 'Project A', NULL,
-                    100, 0, 0, 50, 0, 150, 0.5, 0.5, 'static', 'static-v1',
-                    1, '2026-05-01T00:00:00Z')
+                    180, 0, 0, 70, 0, 250, 1.25, 1.25, 'static', 'static-v1',
+                    2, '2026-05-01T00:00:00Z')
             "#,
             [],
         )?;
@@ -1797,9 +2512,23 @@ mod tests {
                 one_shot, call_count, input_tokens, cache_read_tokens,
                 cache_creation_tokens, output_tokens, reasoning_output_tokens,
                 total_tokens, created_at
-            ) VALUES ('turn:codex:behavior:web', 'codex', 'session-a', 'path-a',
+            ) VALUES ('turn:codex:behavior:web:multi-tool', 'codex', 'session-a', 'path-a',
                 'project-a', 'gpt-5', '2026-05-01T00:00:00Z', 'coding',
                 1, 0, 1, 1, 100, 0, 0, 50, 0, 150, '2026-05-01T00:00:00Z')
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_turn(
+                turn_key, source, session_id, source_path_hash, project_hash,
+                primary_model, started_at, category, has_edits, retries,
+                one_shot, call_count, input_tokens, cache_read_tokens,
+                cache_creation_tokens, output_tokens, reasoning_output_tokens,
+                total_tokens, created_at
+            ) VALUES ('turn:codex:behavior:web:non-tool', 'codex', 'session-a', 'path-a',
+                'project-a', 'gpt-5', '2026-05-01T01:00:00Z', 'coding',
+                0, 0, 0, 1, 80, 0, 0, 20, 0, 100, '2026-05-01T01:00:00Z')
             "#,
             [],
         )?;
@@ -1809,10 +2538,23 @@ mod tests {
                 tool_call_key, turn_key, event_key, source, session_id,
                 source_path_hash, project_hash, model, occurred_at, tool_name,
                 tool_kind, mcp_server, mcp_tool, input_fingerprint, safe_preview, created_at
-            ) VALUES ('tool:codex:behavior:web', 'turn:codex:behavior:web',
-                'codex:behavior:web', 'codex', 'session-a', 'path-a',
+            ) VALUES ('tool:codex:behavior:web:edit', 'turn:codex:behavior:web:multi-tool',
+                'codex:behavior:web:multi-tool', 'codex', 'session-a', 'path-a',
                 'project-a', 'gpt-5', '2026-05-01T00:00:00Z', 'Edit', 'edit',
                 NULL, NULL, 'fp-edit', 'Edit src/web/mod.rs', '2026-05-01T00:00:00Z')
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_tool_call(
+                tool_call_key, turn_key, event_key, source, session_id,
+                source_path_hash, project_hash, model, occurred_at, tool_name,
+                tool_kind, mcp_server, mcp_tool, input_fingerprint, safe_preview, created_at
+            ) VALUES ('tool:codex:behavior:web:read', 'turn:codex:behavior:web:multi-tool',
+                'codex:behavior:web:multi-tool', 'codex', 'session-a', 'path-a',
+                'project-a', 'gpt-5', '2026-05-01T00:00:00Z', 'Read', 'read',
+                NULL, NULL, 'fp-read', 'Read src/web/mod.rs', '2026-05-01T00:00:00Z')
             "#,
             [],
         )?;
@@ -1832,14 +2574,175 @@ mod tests {
             route_json(addr, "GET", &format!("/api/tools?{filter}"), None).await?;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(tools["support"]["supported"], true);
-        assert_eq!(tools["breakdown"][0]["tool_kind"], "edit");
-        assert_eq!(tools["breakdown"][0]["call_share"], 1.0);
+        let tool_rows = tools["breakdown"].as_array().expect("tool rows");
+        assert_eq!(tool_rows.len(), 3);
+        let total_cost: f64 = tool_rows
+            .iter()
+            .map(|row| row["estimated_cost_usd"].as_f64().unwrap_or_default())
+            .sum();
+        assert!((total_cost - 1.25).abs() < f64::EPSILON);
+        let edit = tool_rows
+            .iter()
+            .find(|row| row["tool_name"] == "Edit")
+            .expect("edit row");
+        assert_eq!(edit["tool_kind"], "edit");
+        assert_eq!(edit["call_share"], 0.5);
+        assert_eq!(edit["estimated_cost_usd"], 0.5);
+        let non_tool = tool_rows
+            .iter()
+            .find(|row| row["tool_name"] == "(non-tool)")
+            .expect("non-tool row");
+        assert_eq!(non_tool["tool_kind"], "(non-tool)");
+        assert_eq!(non_tool["calls"], 0);
+        assert_eq!(non_tool["turn_count"], 1);
+        assert_eq!(non_tool["estimated_cost_usd"], 0.25);
 
         let (status, dashboard) =
             route_json(addr, "GET", &format!("/api/dashboard?{filter}"), None).await?;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(dashboard["activity"]["breakdown"][0]["category"], "coding");
-        assert_eq!(dashboard["tools"]["breakdown"][0]["tool_name"], "Edit");
+        assert_eq!(
+            dashboard["activity"]["breakdown"][0]["estimated_cost_usd"],
+            1.25
+        );
+        assert_eq!(dashboard["tools"]["breakdown"].as_array().unwrap().len(), 3);
+
+        let day_two_filter = "source=codex&model=gpt-5&since=2026-05-02&until=2026-05-02";
+        let (status, tools_day_two) =
+            route_json(addr, "GET", &format!("/api/tools?{day_two_filter}"), None).await?;
+        assert_eq!(status, StatusCode::OK);
+        let day_two_rows = tools_day_two["breakdown"].as_array().expect("day two rows");
+        assert_eq!(day_two_rows.len(), 1);
+        assert_eq!(day_two_rows[0]["tool_name"], "(non-tool)");
+        assert_eq!(day_two_rows[0]["estimated_cost_usd"], 0.25);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn explorer_api_returns_grouped_rows_and_series() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let conn = store.open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_event(
+                event_key, source, model, event_at, hour_start,
+                input_tokens, cache_creation_tokens, cache_read_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                project_hash, project_label, project_ref, path_hash,
+                session_id, session_label, source_path_hash, created_at,
+                cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source, pricing_rate
+            )
+            VALUES ('codex:explorer:web:a', 'codex', 'gpt-5',
+                    '2026-05-01T00:00:00Z', '2026-05-01T00:00:00Z',
+                    120, 0, 0, 60, 0, 180,
+                    'project-a', 'Project A', NULL, 'path-a',
+                    'session-a', 'Session A', 'path-a', '2026-05-01T00:00:00Z',
+                    1.0, 1.0, 'static', 'static-v1', NULL)
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_event(
+                event_key, source, model, event_at, hour_start,
+                input_tokens, cache_creation_tokens, cache_read_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                project_hash, project_label, project_ref, path_hash,
+                session_id, session_label, source_path_hash, created_at,
+                cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source, pricing_rate
+            )
+            VALUES ('codex:explorer:web:b', 'codex', 'gpt-5',
+                    '2026-05-02T00:00:00Z', '2026-05-02T00:00:00Z',
+                    90, 0, 0, 30, 0, 120,
+                    'project-a', 'Project A', NULL, 'path-b',
+                    'session-b', 'Session B', 'path-b', '2026-05-02T00:00:00Z',
+                    0.6, 0.6, 'static', 'static-v1', NULL)
+            "#,
+            [],
+        )?;
+        for (tool_call_key, event_key, session_id, occurred_at, tool_name, tool_kind) in [
+            (
+                "tool:explorer:web:read:a",
+                "codex:explorer:web:a",
+                "session-a",
+                "2026-05-01T00:00:00Z",
+                "Read",
+                "read",
+            ),
+            (
+                "tool:explorer:web:edit:a",
+                "codex:explorer:web:a",
+                "session-a",
+                "2026-05-01T00:00:00Z",
+                "Edit",
+                "edit",
+            ),
+            (
+                "tool:explorer:web:read:b",
+                "codex:explorer:web:b",
+                "session-b",
+                "2026-05-02T00:00:00Z",
+                "Read",
+                "read",
+            ),
+        ] {
+            conn.execute(
+                r#"
+                INSERT INTO usage_tool_call(
+                    tool_call_key, turn_key, event_key, source, session_id,
+                    source_path_hash, project_hash, model, occurred_at, tool_name,
+                    tool_kind, mcp_server, mcp_tool, input_fingerprint, safe_preview, created_at
+                ) VALUES (?1, ?2, ?3, 'codex', ?4, ?4, 'project-a', 'gpt-5',
+                    ?5, ?6, ?7, NULL, NULL, ?1, ?6, ?5)
+                "#,
+                rusqlite::params![
+                    tool_call_key,
+                    format!("turn:{event_key}"),
+                    event_key,
+                    session_id,
+                    occurred_at,
+                    tool_name,
+                    tool_kind
+                ],
+            )?;
+        }
+        drop(conn);
+
+        let addr = serve(store, Some(0)).await?;
+        let (status, payload) = route_json(
+            addr,
+            "GET",
+            "/api/explorer?source=codex&metric=attributed_cost_usd&group_by=session&granularity=day&tool_name=Read&timezone=UTC",
+            None,
+        )
+        .await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(payload["support"]["level"], "normalized");
+        assert_eq!(payload["metric"], "attributed_cost_usd");
+        assert_eq!(payload["group_by"], "session");
+        assert_eq!(payload["totals"]["value"], 1.1);
+        let rows = payload["rows"].as_array().expect("rows");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["key"], "session-b");
+        assert_eq!(rows[0]["value"], 0.6);
+        assert_eq!(rows[1]["key"], "session-a");
+        assert_eq!(rows[1]["value"], 0.5);
+        assert_eq!(payload["series"].as_array().expect("series").len(), 2);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn explorer_api_rejects_invalid_metric_values() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let addr = serve(store, Some(0)).await?;
+        let (status, payload) = route_json(addr, "GET", "/api/explorer?metric=bogus", None).await?;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(payload["error"]["code"], "invalid_query");
+        assert!(
+            payload["error"]["detail"]
+                .as_str()
+                .is_some_and(|detail| detail.contains("unsupported metric"))
+        );
         Ok(())
     }
 
@@ -1943,16 +2846,16 @@ mod tests {
             conn.execute(
                 r#"
                 INSERT INTO usage_bucket_30m(
-                    source, model, hour_start, project_hash, project_label, project_ref,
+                    source, provider_label, model, hour_start, project_hash, project_label, project_ref,
                     input_tokens, cache_read_tokens, cache_creation_tokens,
                     output_tokens, reasoning_output_tokens, total_tokens,
                     cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source,
                     event_count, updated_at
                 )
-                VALUES ('codex', ?1, '2026-05-01T00:00:00Z', 'project-a', 'Project A', NULL,
+                VALUES ('codex', '', ?1, '2026-05-01T00:00:00Z', 'project-a', 'Project A', NULL,
                         100, 10, 0, 50, 0, 160, 0.2, 0.2, 'static', 'static-v1',
                         1, '2026-05-01T00:00:00Z')
-                ON CONFLICT(source, model, hour_start, project_hash) DO UPDATE SET
+                ON CONFLICT(source, provider_label, model, hour_start, project_hash) DO UPDATE SET
                     input_tokens = input_tokens + excluded.input_tokens,
                     cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens,
                     output_tokens = output_tokens + excluded.output_tokens,
@@ -2106,6 +3009,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn api_dashboard_core_scope_omits_secondary_sections() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let conn = store.open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_bucket_30m(
+                source, model, hour_start, project_hash, project_label, project_ref,
+                input_tokens, cache_read_tokens, cache_creation_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source,
+                event_count, updated_at
+            )
+            VALUES ('codex', 'gpt-5', '2026-05-01T00:00:00Z', 'project-a', 'Project A', NULL,
+                    10, 0, 0, 0, 0, 10, 0.1, 0.1, 'static', 'static-v1',
+                    1, '2026-05-01T00:00:00Z')
+            "#,
+            [],
+        )?;
+        drop(conn);
+
+        let addr = serve(store, Some(0)).await?;
+        let (status, payload) = route_json(
+            addr,
+            "GET",
+            "/api/dashboard?scope=core&source=codex&timezone=UTC",
+            None,
+        )
+        .await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(payload["overview"]["total"]["total_tokens"], 10);
+        assert!(payload["models"].as_array().expect("models").len() == 1);
+        assert!(payload["health"].is_object());
+        assert!(payload["activity"].is_null());
+        assert!(payload["tools"].is_null());
+        assert!(payload["optimize"].is_null());
+        assert!(payload["explorer"].is_null());
+        assert!(payload["compare"].is_null());
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn api_dashboard_applies_window_to_snapshot_sections() -> anyhow::Result<()> {
         let (_temp, store) = make_store()?;
         let conn = store.open_connection()?;
@@ -2147,6 +3091,18 @@ mod tests {
         assert_eq!(payload["models"].as_array().expect("models").len(), 1);
         assert_eq!(payload["models"][0]["model"], "fresh-model");
         assert_eq!(payload["costs"][0]["model"], "fresh-model");
+
+        let (status, payload) = route_json(
+            addr,
+            "GET",
+            "/api/dashboard?window=all&range=1d&source=codex&timezone=UTC",
+            None,
+        )
+        .await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(payload["overview"]["total"]["total_tokens"], 40);
+        assert_eq!(payload["models"].as_array().expect("models").len(), 1);
+        assert_eq!(payload["models"][0]["model"], "fresh-model");
         Ok(())
     }
 
@@ -2198,6 +3154,177 @@ mod tests {
             payload["diagnostics"]["by_source"][0]["lossy_rebuild_risk"],
             true
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn api_dashboard_embeds_sync_command_center_contract() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let conn = store.open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO source_sync_status(
+                source, files_processed, changed_files, bytes_scanned,
+                events_seen, events_replayed, events_inserted, stored_events,
+                parse_ms, write_ms, lock_wait_ms, updated_at
+            ) VALUES
+                ('codex', 2, 1, 2048, 7, 0, 5, 42, 10, 4, 0, '2026-05-29T00:01:00Z'),
+                ('claude', 1, 0, 1024, 0, 0, 0, 11, 3, 1, 0, '2026-05-29T00:02:00Z')
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO source_file(source, file_path, state, last_seen_at, last_state_change_at)
+            VALUES ('codex', ?1, 'missing', NULL, '2026-05-29T00:00:00Z')
+            "#,
+            [r"D:\missing\codex.jsonl"],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_event(
+                event_key, source, model, event_at, hour_start,
+                input_tokens, cache_creation_tokens, cache_read_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                project_hash, project_label, project_ref, path_hash,
+                session_id, session_label, source_path_hash, created_at,
+                cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source, pricing_rate
+            ) VALUES ('codex:event:sync-center', 'codex', 'gpt-5',
+                '2026-05-29T00:00:00Z', '2026-05-29T00:00:00Z',
+                10, 0, 0, 0, 0, 10,
+                'project-a', 'Project A', NULL, 'path-a',
+                NULL, NULL, NULL, '2026-05-29T00:00:00Z',
+                0.1, 0.1, 'static', 'static-v1', NULL)
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO run_log(command, status, summary, error, started_at, finished_at, duration_ms)
+            VALUES ('sync', 'success', 'human summary that must not be parsed', NULL,
+                    '2026-05-29T00:00:00Z', '2026-05-29T00:03:00Z', 180000)
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO run_log(command, status, summary, error, started_at, finished_at, duration_ms)
+            VALUES ('sync', 'failed', 'failed human summary that must not be parsed', ?1,
+                    '2026-05-29T00:04:00Z', '2026-05-29T00:05:00Z', 60000)
+            "#,
+            [r"failed while reading D:\Users\alice\.llmusage\secret.jsonl: raw token abc123"],
+        )?;
+        drop(conn);
+
+        let addr = serve(store, Some(0)).await?;
+        let (status, payload) = route_json(
+            addr,
+            "GET",
+            "/api/dashboard?source=codex&timezone=UTC",
+            None,
+        )
+        .await?;
+        assert_eq!(status, StatusCode::OK);
+
+        let center = &payload["sync_command_center"];
+        assert_eq!(center["mode"], "live");
+        assert_eq!(center["tone"], "warn");
+        assert_eq!(center["safety"]["ordinary_sync_safe"], true);
+        assert_eq!(center["safety"]["lossy_rebuild_risk"], true);
+        assert_eq!(center["safety"]["risk_sources"][0], "codex");
+        assert_eq!(center["last_run"]["status"], "failed");
+        assert_eq!(center["last_run"]["finished_at"], "2026-05-29T00:05:00Z");
+        assert_eq!(
+            center["last_run"]["error_key"],
+            "syncCenter.reason.lastRunFailed"
+        );
+        assert!(center["last_run"].get("error").is_none());
+        assert!(center["last_run"].get("summary").is_none());
+        let last_run_text = serde_json::to_string(&center["last_run"])?;
+        assert!(!last_run_text.contains("D:\\Users\\alice"));
+        assert!(!last_run_text.contains("secret.jsonl"));
+        assert!(!last_run_text.contains("abc123"));
+        assert_eq!(center["metrics"]["inserted_delta"], 5);
+        assert_eq!(center["metrics"]["stored_events"], 42);
+        assert_eq!(center["sources"][0]["source"], "codex");
+        assert_eq!(center["sources"][0]["events_inserted"], 5);
+        assert!(center["sources"][0]["share"].as_f64().unwrap() > 0.0);
+        assert!(center["sources"][0].get("last_error").is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn api_dashboard_sync_command_center_filters_rebuild_risk_by_source() -> anyhow::Result<()>
+    {
+        let (_temp, store) = make_store()?;
+        let conn = store.open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO source_sync_status(
+                source, files_processed, changed_files, bytes_scanned,
+                events_seen, events_replayed, events_inserted, stored_events,
+                parse_ms, write_ms, lock_wait_ms, updated_at
+            ) VALUES
+                ('codex', 1, 1, 2048, 3, 0, 3, 30, 10, 4, 0, '2026-05-29T00:01:00Z'),
+                ('claude', 1, 0, 1024, 1, 0, 1, 10, 3, 1, 0, '2026-05-29T00:02:00Z')
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO source_file(source, file_path, state, last_seen_at, last_state_change_at)
+            VALUES ('claude', ?1, 'missing', NULL, '2026-05-29T00:00:00Z')
+            "#,
+            [r"D:\missing\claude.jsonl"],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_event(
+                event_key, source, model, event_at, hour_start,
+                input_tokens, cache_creation_tokens, cache_read_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                project_hash, project_label, project_ref, path_hash,
+                session_id, session_label, source_path_hash, created_at,
+                cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source, pricing_rate
+            ) VALUES
+                ('codex:event:sync-center-filter', 'codex', 'gpt-5',
+                    '2026-05-29T00:00:00Z', '2026-05-29T00:00:00Z',
+                    10, 0, 0, 0, 0, 10,
+                    'project-a', 'Project A', NULL, 'path-a',
+                    NULL, NULL, NULL, '2026-05-29T00:00:00Z',
+                    0.1, 0.1, 'static', 'static-v1', NULL),
+                ('claude:event:sync-center-filter-risk', 'claude', 'claude-sonnet',
+                    '2026-05-29T00:00:00Z', '2026-05-29T00:00:00Z',
+                    20, 0, 0, 0, 0, 20,
+                    'project-b', 'Project B', NULL, 'path-b',
+                    NULL, NULL, NULL, '2026-05-29T00:00:00Z',
+                    0.2, 0.2, 'static', 'static-v1', NULL)
+            "#,
+            [],
+        )?;
+        drop(conn);
+
+        let addr = serve(store, Some(0)).await?;
+        let (status, payload) = route_json(
+            addr,
+            "GET",
+            "/api/dashboard?source=codex&timezone=UTC",
+            None,
+        )
+        .await?;
+        assert_eq!(status, StatusCode::OK);
+
+        let center = &payload["sync_command_center"];
+        assert_eq!(center["safety"]["lossy_rebuild_risk"], false);
+        assert!(
+            center["safety"]["risk_sources"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        let sources = center["sources"].as_array().unwrap();
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0]["source"], "codex");
         Ok(())
     }
 

@@ -3,6 +3,7 @@ import {
   formatCompactCurrency,
   formatNumber,
   formatPercent,
+  formatTokenAmount,
   formatUsd,
   statusTone,
 } from './format.js';
@@ -24,6 +25,83 @@ export const PANEL_LIMITS = Object.freeze({
 
 function normalizeRows(rows) {
   return Array.isArray(rows) ? rows : [];
+}
+
+function emptyExplorerPayload() {
+  return {
+    support: { supported: false, level: 'no_data', strategy: 'none' },
+    warning: null,
+    granularity: 'day',
+    metric: 'attributed_cost_usd',
+    group_by: 'source',
+    limit: 8,
+    include_other: true,
+    totals: { value: 0 },
+    rows: [],
+    series: [],
+  };
+}
+
+function normalizeExplorer(explorer) {
+  const payload = explorer || emptyExplorerPayload();
+  const rows = sortDesc(payload.rows, (row) => row?.value);
+  const series = normalizeRows(payload.series).map((point) => ({
+    bucket: point?.bucket || '--',
+    key: point?.key || '',
+    label: point?.label || point?.key || '--',
+    value: Number(point?.value || 0),
+    is_other: Boolean(point?.is_other),
+  }));
+  return {
+    ...emptyExplorerPayload(),
+    ...payload,
+    support: payload.support || emptyExplorerPayload().support,
+    totals: payload.totals || { value: 0 },
+    rows,
+    series,
+  };
+}
+
+function normalizeSyncCommandCenter(payload) {
+  const metrics = payload?.metrics || {};
+  const safety = payload?.safety || {};
+  return {
+    mode: payload?.mode || 'live',
+    tone: payload?.tone || 'neutral',
+    headline_key: payload?.headline_key || 'syncCenter.headline.empty',
+    reason_key: payload?.reason_key || 'syncCenter.reason.empty',
+    generated_at: payload?.generated_at || '',
+    current_job: payload?.current_job || null,
+    last_run: payload?.last_run || null,
+    safety: {
+      ordinary_sync_safe: safety?.ordinary_sync_safe !== false,
+      worker_lock: safety?.worker_lock || 'unknown',
+      worker_lock_holder: safety?.worker_lock_holder || null,
+      lossy_rebuild_risk: Boolean(safety?.lossy_rebuild_risk),
+      risk_sources: normalizeRows(safety?.risk_sources),
+      recent_failures: Number(safety?.recent_failures || 0),
+    },
+    metrics: {
+      events_seen: Number(metrics?.events_seen || 0),
+      inserted_delta: Number(metrics?.inserted_delta || 0),
+      stored_events: Number(metrics?.stored_events || 0),
+      sources_ready: Number(metrics?.sources_ready || 0),
+      sources_total: Number(metrics?.sources_total || 0),
+    },
+    sources: normalizeRows(payload?.sources).map((row) => ({
+      source: row?.source || '--',
+      status: row?.status || 'idle',
+      tone: row?.tone || 'neutral',
+      events_seen: Number(row?.events_seen || 0),
+      events_inserted: Number(row?.events_inserted || 0),
+        stored_events: Number(row?.stored_events || 0),
+        updated_at: row?.updated_at || '',
+        share: Math.max(0, Math.min(1, Number(row?.share || 0))),
+        error_key: row?.error_key || null,
+        lossy_rebuild_risk: Boolean(row?.lossy_rebuild_risk),
+      })),
+    actions: normalizeRows(payload?.actions),
+  };
 }
 
 function positiveRows(rows, select) {
@@ -141,7 +219,7 @@ function buildInsights({ overview, modelRows, projectRows, costRows, sourceRows,
       tone: 'neutral',
       label: '用量主因',
       title: '当前窗口主要模型来源',
-      evidence: `${topModel.model || '--'} 使用 ${formatNumber(topModel.total_tokens)} tokens。`,
+      evidence: `${topModel.model || '--'} 使用 ${formatTokenAmount(topModel.total_tokens)} tokens。`,
       action: '无可用成本时，先用 token 排名定位主要消耗。',
     });
   }
@@ -151,7 +229,7 @@ function buildInsights({ overview, modelRows, projectRows, costRows, sourceRows,
       tone: 'neutral',
       label: '项目聚焦',
       title: '当前窗口主项目',
-      evidence: `${topProject.project_label || topProject.project_hash || '--'} 使用 ${formatNumber(topProject.total_tokens)} tokens。`,
+      evidence: `${topProject.project_label || topProject.project_hash || '--'} 使用 ${formatTokenAmount(topProject.total_tokens)} tokens。`,
       action: '若要降低用量，先从该项目的会话模式和模型选择入手。',
     });
   }
@@ -176,7 +254,7 @@ function sortDesc(rows, select) {
  * 2) 固定 Top N、图表序列和对比表行
  * 3) 为各面板补齐总量、峰值、占比和紧凑显示值
  */
-export function buildContext({ overview, trends, models, sources, projects, costs, activity, tools, optimize, compare, health, diagnostics }) {
+export function buildContext({ overview, trends, models, sources, projects, costs, activity, tools, optimize, compare, explorer, health, diagnostics, sync_command_center, _meta }) {
   logger.info('开始构建页面上下文');
 
   // 1.1 规范化并排序趋势、排行和健康数据
@@ -200,6 +278,7 @@ export function buildContext({ overview, trends, models, sources, projects, cost
   const diagnosticFailureRows = normalizeRows(diagnostics?.recent_failures);
   const failureRows = normalizeRows(health?.recent_failures);
   const combinedFailureRows = failureRows.length ? failureRows : diagnosticFailureRows;
+  const explorerPayload = normalizeExplorer(explorer);
 
   // 1.2 计算账本摘要、趋势聚合和健康聚合
   const trendTotal = chronologicalRows.reduce(
@@ -238,7 +317,7 @@ export function buildContext({ overview, trends, models, sources, projects, cost
     const output_tokens = Number(row.output_tokens || 0) + Number(row.reasoning_output_tokens || 0);
     return {
       model: row.model,
-      total_tokens: formatNumber(row.total_tokens),
+      total_tokens: formatTokenAmount(row.total_tokens),
       input_share: formatPercent(row.input_tokens, row.total_tokens),
       output_share: formatPercent(output_tokens, row.total_tokens),
       cached_share: formatPercent(row.cache_read_tokens, row.total_tokens),
@@ -248,7 +327,7 @@ export function buildContext({ overview, trends, models, sources, projects, cost
   const source_table_rows = sourceRows.slice(0, PANEL_LIMITS.sourceTable).map((row) => ({
     source: row.source,
     last_event_at: row.last_event_at || '尚未记录',
-    total_tokens: formatNumber(row.total_tokens),
+    total_tokens: formatTokenAmount(row.total_tokens),
   }));
 
   const cost_table_rows = costRows.slice(0, PANEL_LIMITS.costTable).map((row) => ({
@@ -266,6 +345,7 @@ export function buildContext({ overview, trends, models, sources, projects, cost
       active_sources: overview?.source_count ?? sourceRows.length,
       failure_count: combinedFailureRows.length,
     },
+    syncCommandCenter: normalizeSyncCommandCenter(sync_command_center),
     leaders: {
       model: modelRows[0] ?? null,
       source: sourceRows[0] ?? null,
@@ -295,8 +375,10 @@ export function buildContext({ overview, trends, models, sources, projects, cost
       tools: toolRows,
       optimize: optimize || { support: { supported: false, level: 'no_data' }, findings: [] },
       compare: compare || { support: { supported: false, level: 'no_data' }, candidates: [] },
+      explorer: explorerPayload,
       activity_support: activity?.support || { supported: false, level: 'no_data' },
       tools_support: tools?.support || { supported: false, level: 'no_data' },
+      secondary_refreshing: Boolean(_meta?.secondary_refreshing),
     },
     health: {
       integrations: integrationRows,
@@ -375,7 +457,7 @@ export function buildKpis(context) {
       unit: '',
       foot: [
         `原始值 · ${totals.last_24h_tokens_raw}`,
-        `平均每段 · ${formatCompact(context.trend.average)} / ${context.trend.active} 段`,
+        `平均每段 · ${formatTokenAmount(context.trend.average)} / ${context.trend.active} 段`,
       ],
     },
     {
@@ -413,17 +495,17 @@ export function buildTrendStats(context) {
   return [
     {
       label: '时间窗口总量',
-      value: formatCompact(trend.total),
+      value: formatTokenAmount(trend.total),
       foot: `原始值 ${formatNumber(trend.total)}`,
     },
     {
       label: '最高单段用量',
-      value: formatCompact(trend.peak?.total_tokens || 0),
+      value: formatTokenAmount(trend.peak?.total_tokens || 0),
       foot: `最高时段 ${trend.peak?.label || '--'}`,
     },
     {
       label: '平均每段用量',
-      value: formatCompact(trend.average),
+      value: formatTokenAmount(trend.average),
       foot: `${trend.active} 个有记录时段`,
     },
   ];

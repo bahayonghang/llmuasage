@@ -1,0 +1,576 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>llmusage Sync Command Center Design Spec</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f3ea;
+      --surface: #fffaf0;
+      --text: #211f1a;
+      --muted: #655f52;
+      --line: #ded4c3;
+      --accent: #c8553d;
+      --accent-2: #0f9f72;
+      --accent-contrast: #ffffff;
+      --dark: #1a1714;
+      --dark-line: #34302a;
+      --dark-text: #f7efe5;
+      --shadow: 0 24px 70px rgba(44, 35, 20, 0.12);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #17130f;
+        --surface: #211b16;
+        --text: #f4eadb;
+        --muted: #c8bca9;
+        --line: #3d3329;
+        --accent: #ff856c;
+        --accent-2: #34d399;
+        --accent-contrast: #25120d;
+        --shadow: none;
+      }
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at top left, color-mix(in srgb, var(--accent) 16%, transparent), transparent 32rem), var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+    }
+    a { color: var(--accent); }
+    .page {
+      display: grid;
+      grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
+      gap: 2rem;
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+    .toc {
+      position: sticky;
+      top: 1rem;
+      align-self: start;
+      padding: 1.25rem;
+      border: 1px solid var(--line);
+      border-radius: 1.25rem;
+      background: color-mix(in srgb, var(--surface) 92%, transparent);
+      box-shadow: var(--shadow);
+    }
+    .toc strong {
+      display: block;
+      margin-bottom: 0.75rem;
+      font-size: 0.8rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .toc ul {
+      display: grid;
+      gap: 0.4rem;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .toc a {
+      display: block;
+      padding: 0.35rem 0.5rem;
+      border-radius: 0.65rem;
+      color: var(--text);
+      text-decoration: none;
+    }
+    .toc a:hover, .toc a:focus-visible {
+      background: color-mix(in srgb, var(--accent) 14%, transparent);
+      outline: none;
+    }
+    main {
+      min-width: 0;
+      padding: 2.5rem;
+      border: 1px solid var(--line);
+      border-radius: 1.6rem;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    header {
+      padding-bottom: 1.5rem;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 2rem;
+    }
+    h1 {
+      margin: 0 0 0.75rem;
+      font-size: clamp(2rem, 5vw, 4rem);
+      line-height: 1.05;
+      letter-spacing: -0.04em;
+    }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+    .meta li {
+      padding: 0.2rem 0.65rem;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+    }
+    section {
+      padding: 1.5rem 0;
+      border-top: 1px solid var(--line);
+    }
+    section:first-of-type { border-top: 0; }
+    h2 {
+      margin: 0 0 0.75rem;
+      font-size: clamp(1.35rem, 3vw, 2rem);
+      line-height: 1.2;
+    }
+    h3 { margin-top: 1.25rem; }
+    p, ul, ol, dl { margin-top: 0; }
+    .callout {
+      padding: 1rem 1.15rem;
+      border-left: 0.35rem solid var(--accent);
+      border-radius: 0.9rem;
+      background: color-mix(in srgb, var(--accent) 10%, transparent);
+    }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.35rem 0.7rem;
+      border-radius: 999px;
+      background: var(--accent);
+      color: var(--accent-contrast);
+      font-weight: 700;
+      font-size: 0.9rem;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+      font-size: 0.95rem;
+    }
+    th, td {
+      padding: 0.7rem;
+      border: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+    code {
+      padding: 0.12rem 0.3rem;
+      border-radius: 0.35rem;
+      background: color-mix(in srgb, var(--text) 9%, transparent);
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+    }
+    pre {
+      overflow-x: auto;
+      padding: 1rem;
+      border: 1px solid var(--line);
+      border-radius: 0.9rem;
+      background: color-mix(in srgb, var(--text) 7%, transparent);
+    }
+    pre code { padding: 0; background: transparent; }
+    .mock {
+      margin: 1.25rem 0;
+      border: 1px solid var(--dark-line);
+      border-radius: 1.4rem;
+      background: var(--dark);
+      color: var(--dark-text);
+      overflow: hidden;
+    }
+    .mock-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.8rem 1rem;
+      border-bottom: 1px solid var(--dark-line);
+      color: #b8aea3;
+      font-size: 0.85rem;
+    }
+    .mock-body { padding: 1.2rem; }
+    .sync-answer {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1rem;
+      margin-bottom: 1.2rem;
+    }
+    .sync-answer h3 {
+      margin: 0;
+      font-size: clamp(1.4rem, 4vw, 2.5rem);
+      line-height: 1.1;
+    }
+    .sync-answer p { margin: 0.35rem 0 0; color: #cbbfb1; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      border-radius: 999px;
+      padding: 0.35rem 0.6rem;
+      border: 1px solid #4a4037;
+      background: #26211d;
+      white-space: nowrap;
+      font-size: 0.85rem;
+    }
+    .dot {
+      width: 0.55rem;
+      height: 0.55rem;
+      border-radius: 999px;
+      background: var(--accent-2);
+      box-shadow: 0 0 0 0.25rem color-mix(in srgb, var(--accent-2) 18%, transparent);
+    }
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0.75rem;
+    }
+    .metric, .source-card {
+      padding: 0.9rem;
+      border: 1px solid #3b352f;
+      border-radius: 1rem;
+      background: #231f1b;
+    }
+    .metric span, .source-card span { color: #b8aea3; font-size: 0.82rem; }
+    .metric strong {
+      display: block;
+      margin-top: 0.15rem;
+      font-size: clamp(1.45rem, 4vw, 2.1rem);
+      line-height: 1.05;
+      letter-spacing: -0.04em;
+    }
+    .segbar {
+      display: flex;
+      height: 0.55rem;
+      margin: 1.1rem 0;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #312b25;
+    }
+    .segbar i:nth-child(1) { width: 46%; background: #34d399; }
+    .segbar i:nth-child(2) { width: 27%; background: #60a5fa; }
+    .segbar i:nth-child(3) { width: 19%; background: #a78bfa; }
+    .segbar i:nth-child(4) { width: 8%; background: #fbbf24; }
+    .source-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0.75rem;
+    }
+    .source-card strong { display: block; }
+    .source-card code { color: #f7efe5; }
+    .review-box {
+      border: 1px solid var(--line);
+      border-radius: 1rem;
+      padding: 1rem;
+      background: color-mix(in srgb, var(--accent-2) 8%, transparent);
+    }
+    @media (max-width: 860px) {
+      .page { display: block; padding: 1rem; }
+      .toc { position: static; margin-bottom: 1rem; }
+      .toc ul { grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); }
+      main { padding: 1.25rem; }
+      .metric-grid, .source-grid { grid-template-columns: 1fr 1fr; }
+      .sync-answer { flex-direction: column; }
+    }
+    @media (max-width: 560px) {
+      .metric-grid, .source-grid { grid-template-columns: 1fr; }
+    }
+    @media print {
+      :root {
+        --bg: #ffffff;
+        --surface: #ffffff;
+        --text: #000000;
+        --muted: #333333;
+        --line: #cccccc;
+        --accent: #000000;
+        --accent-contrast: #ffffff;
+      }
+      body { background: #ffffff; }
+      .page { display: block; max-width: none; padding: 0; }
+      .toc { display: none; }
+      main { padding: 0; border: 0; box-shadow: none; }
+      a { color: inherit; }
+      section { break-inside: avoid; }
+      .mock { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <nav class="toc" aria-label="Spec sections">
+      <strong>Contents</strong>
+      <ul>
+        <li><a href="#summary">Summary</a></li>
+        <li><a href="#goals">Goals</a></li>
+        <li><a href="#non-goals">Non-goals</a></li>
+        <li><a href="#context">Context</a></li>
+        <li><a href="#recommended-approach">Recommended Approach</a></li>
+        <li><a href="#alternatives">Alternatives</a></li>
+        <li><a href="#design-details">Design Details</a></li>
+        <li><a href="#risks">Risks</a></li>
+        <li><a href="#test-acceptance-criteria">Test/Acceptance Criteria</a></li>
+        <li><a href="#review-status">Review Status</a></li>
+      </ul>
+    </nav>
+
+    <main id="main">
+      <header>
+        <h1>llmusage Sync Command Center</h1>
+        <ul class="meta">
+          <li><span class="status">Design confirmed</span></li>
+          <li>2026-05-29</li>
+          <li>Repository: D:\Documents\Code\CLI\llmusage</li>
+          <li>Scope: dashboard sync top area</li>
+        </ul>
+      </header>
+
+      <section id="summary">
+        <h2>Summary</h2>
+        <p>
+          Add a TokenTracker-inspired Sync Command Center at the top of the llmusage dashboard. The module should first answer whether it is safe to run sync, then summarize the most recent sync result. The approved baseline is a small structured sync view-model returned by the backend and rendered by the frontend, rather than a purely visual CSS pass or a large real-time analytics rebuild.
+        </p>
+        <div class="callout">
+          The design intentionally copies TokenTracker's strong top-level hierarchy, large metrics, segmented bars, and compact source cards, while optimizing the product meaning for llmusage: local safety, rebuild risk, worker lock state, source-level sync outcome, and clear distinction between known numbers and unavailable deltas.
+        </div>
+      </section>
+
+      <section id="goals">
+        <h2>Goals</h2>
+        <ul>
+          <li>Make the page top answer: can I safely sync now, and what should I watch before doing it?</li>
+          <li>Show the most recent sync outcome with structured values: status, source count, seen events, inserted delta events, stored events, timing, and source errors.</li>
+          <li>Keep the existing dashboard job lifecycle: start job, poll job snapshot, cancel running job, then reload the dashboard when complete.</li>
+          <li>Expose rebuild risk separately from ordinary sync so users understand that ordinary sync preserves imported history while rebuild may be lossy.</li>
+          <li>Preserve the existing Rust data path, SQLite store, SyncShard commit protocol, and dashboard API timeout boundaries.</li>
+          <li>Stay bilingual-ready by routing visible labels through the existing copy/i18n surfaces.</li>
+        </ul>
+      </section>
+
+      <section id="non-goals">
+        <h2>Non-goals</h2>
+        <ul>
+          <li>No implementation of a new parser or provider source in this design.</li>
+          <li>No TokenTracker queue file model; llmusage continues using SQLite and SyncShard.</li>
+          <li>No cloud upload, public leaderboard, account identity, social sharing, or remote telemetry.</li>
+          <li>No claim of per-run token or cost delta unless the backend records reliable before-and-after evidence. Until then, the honest delta is newly inserted events.</li>
+          <li>No destructive rebuild action as the primary call to action. Rebuild stays secondary and risk-gated.</li>
+          <li>No broad dashboard redesign beyond the top sync command area and its direct dependencies.</li>
+        </ul>
+      </section>
+
+      <section id="context">
+        <h2>Context</h2>
+        <p>
+          The reference material came from the local <code>ref\TokenTracker\docs\screenshots</code> assets. The raw URL <code>https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screens</code> was checked and returned 404, so the design relies on the checked-out local reference screenshots instead. The relevant screenshots show a strong top surface: huge token totals, source segmentation, compact metric cards, activity heatmaps, and a menu-bar style status panel.
+        </p>
+        <p>
+          The current llmusage dashboard already has the necessary primitives: <code>src/web/shell.rs</code> defines the dashboard shell and sync button, <code>src/web/assets/app.js</code> starts and polls sync jobs, <code>src/sync/job_registry.rs</code> stores pollable job snapshots, <code>src/parsers/mod.rs</code> defines sync events and per-source stats, and <code>src/web/assets/data/derive.js</code> normalizes health and diagnostics into page context. The new design should compose these facts instead of inventing a second sync system.
+        </p>
+        <p>
+          Repository ADRs reinforce the boundary. ADR 0002 keeps SyncShard as the commit protocol, and ADR 0007 requires explicit error surfaces. This spec follows both: the command center is a presentation and small API contract improvement, not a rewrite of writer semantics.
+        </p>
+      </section>
+
+      <section id="recommended-approach">
+        <h2>Recommended Approach</h2>
+        <p>
+          Use a small backend-owned <code>sync_command_center</code> view-model and render it as a dedicated top module. This is the approved second approach from the design discussion: more truthful and testable than a frontend-only composition, but much smaller than a full TokenTracker-style real-time report system.
+        </p>
+        <div class="mock" aria-label="Mock Sync Command Center">
+          <div class="mock-top">
+            <strong>llmusage / sync command center</strong>
+            <span class="pill"><span class="dot"></span>Local SQLite</span>
+          </div>
+          <div class="mock-body">
+            <div class="sync-answer">
+              <div>
+                <h3>Sync ready</h3>
+                <p>普通 sync 安全；1 个 source 有缺失文件，仅影响 rebuild。</p>
+              </div>
+              <span class="pill"><span class="dot"></span>Run sync</span>
+            </div>
+            <div class="metric-grid">
+              <div class="metric"><span>Total imported tokens</span><strong>4.35B</strong></div>
+              <div class="metric"><span>Last inserted delta</span><strong>128</strong></div>
+              <div class="metric"><span>Stored events</span><strong>18.4K</strong></div>
+              <div class="metric"><span>Sources ready</span><strong>3 / 4</strong></div>
+            </div>
+            <div class="segbar"><i></i><i></i><i></i><i></i></div>
+            <div class="source-grid">
+              <div class="source-card"><strong>codex</strong><span>ok · inserted 74</span></div>
+              <div class="source-card"><strong>claude</strong><span>ok · inserted 41</span></div>
+              <div class="source-card"><strong>opencode</strong><span>no data</span></div>
+              <div class="source-card"><strong>gemini</strong><span>warning · missing files</span></div>
+            </div>
+          </div>
+        </div>
+        <p>
+          The visual direction is dark, compact, and metric-forward, matching TokenTracker's dashboard impact. The product hierarchy is different: safety and local sync truth come before decorative activity summaries.
+        </p>
+      </section>
+
+      <section id="alternatives">
+        <h2>Alternatives</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Alternative</th>
+              <th>Why not the baseline</th>
+              <th>When it becomes useful</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Frontend-only reuse of existing data</td>
+              <td>Lowest risk, but it would either parse summary strings or infer per-run facts from dashboard aggregates. That weakens trust in the top answer.</td>
+              <td>Useful as a temporary prototype if backend API work must be deferred.</td>
+            </tr>
+            <tr>
+              <td>Full TokenTracker-style real-time report</td>
+              <td>Strong visual impact, but it requires durable before-and-after metrics, richer progress events, and more UI states. It is too broad for this top-area optimization.</td>
+              <td>Useful after sync run logging records token and cost deltas as first-class facts.</td>
+            </tr>
+            <tr>
+              <td>Merge into the existing hero/status card only</td>
+              <td>Good consistency, but it keeps sync as secondary content. The user selected a dedicated command-center direction.</td>
+              <td>Useful if later visual review shows the page top is too tall.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="design-details">
+        <h2>Design Details</h2>
+        <h3>Backend view-model</h3>
+        <p>
+          The backend should return a stable structure in <code>/api/dashboard</code>, or through a sibling endpoint if maintaining strict separation is preferred. The field name should be explicit, such as <code>sync_command_center</code>. The model should be built from existing overview, health, diagnostics, source rows, and recent job/run facts.
+        </p>
+        <pre><code>{
+  "sync_command_center": {
+    "tone": "good",
+    "headline": "Sync ready",
+    "reason": "Regular sync is safe; rebuild has one source risk.",
+    "mode": "live",
+    "current_job": {
+      "job_id": "job-42",
+      "status": "running",
+      "last_event": "source_finished",
+      "started_at": "2026-05-29T00:00:00Z",
+      "finished_at": null,
+      "error": null
+    },
+    "last_run": {
+      "status": "completed",
+      "finished_at": "2026-05-29T00:01:12Z",
+      "sources": 4,
+      "total_seen": 230,
+      "total_inserted": 128,
+      "stored_events": 18400
+    },
+    "safety": {
+      "ordinary_sync_safe": true,
+      "worker_lock": "available",
+      "lossy_rebuild_risk": true,
+      "risk_sources": ["gemini"]
+    },
+    "sources": [
+      {
+        "source": "codex",
+        "status": "ok",
+        "share": 0.46,
+        "inserted_delta": 74,
+        "stored_events": 9200,
+        "last_error": null
+      }
+    ]
+  }
+}</code></pre>
+        <p>
+          The exact Rust type can be smaller than this example in the first implementation. The important contract is that the frontend receives structured values and never scrapes the human summary string.
+        </p>
+
+        <h3>Frontend rendering</h3>
+        <ul>
+          <li>Add a renderer such as <code>renderSyncCommandCenter(context, dashboardState)</code>.</li>
+          <li>Place the host near the top of <code>shell.rs</code>, before filters and KPI cards, so it reads as the first operational answer.</li>
+          <li>Use existing theme variables and copy/i18n patterns. Keep the dark card compatible with both light and dark page themes.</li>
+          <li>Render five states: empty or idle, ready, running, failed, and rebuild risk.</li>
+          <li>Keep snapshot mode truthful: show captured status and disable live sync actions.</li>
+        </ul>
+
+        <h3>Action behavior</h3>
+        <ul>
+          <li><strong>Run sync</strong> keeps using <code>POST /api/jobs</code> with current source and range options.</li>
+          <li><strong>Cancel sync</strong> keeps using the current cancel endpoint when the active job is running.</li>
+          <li><strong>Rebuild</strong> is not the primary action. If exposed later, it needs explicit warning text when <code>lossy_rebuild_risk</code> is true.</li>
+          <li>Auto-refresh should pause or avoid duplicate reloads while a job is running, matching existing behavior.</li>
+        </ul>
+      </section>
+
+      <section id="risks">
+        <h2>Risks</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Risk</th>
+              <th>Mitigation</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>The UI implies token or cost delta that the backend cannot prove.</td>
+              <td>Use inserted event delta as the first version. Add token/cost delta only after run logging records before-and-after totals.</td>
+            </tr>
+            <tr>
+              <td>The top card becomes too tall and pushes current dashboard content down.</td>
+              <td>Use a compact two-row layout at desktop sizes and collapse source cards behind a concise list on narrow screens.</td>
+            </tr>
+            <tr>
+              <td>Job state is in memory while dashboard totals are persisted, so after reload the active job may disappear.</td>
+              <td>Show durable last-run data from persisted run logs or overview, and treat current job as optional live state.</td>
+            </tr>
+            <tr>
+              <td>Rebuild risk messaging scares users away from ordinary sync.</td>
+              <td>Text must separate ordinary sync safety from rebuild risk: ordinary sync preserves imported history; rebuild can be lossy when sources are missing.</td>
+            </tr>
+            <tr>
+              <td>Frontend duplicates insight logic that already exists in derive.js.</td>
+              <td>Keep safety classification in the backend view-model or one small derive helper with asset tests preventing summary-string parsing.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="test-acceptance-criteria">
+        <h2>Test/Acceptance Criteria</h2>
+        <ul>
+          <li>Backend test proves <code>/api/dashboard</code> exposes <code>sync_command_center</code> with stable fields for ready, failed, running, and rebuild-risk fixtures.</li>
+          <li>Job registry or web route test proves completed, failed, and cancelled snapshots still serialize with stable status and structured last-event data.</li>
+          <li>Frontend asset test proves the renderer is wired from the shell/app entry and does not parse <code>snapshot.summary</code> text.</li>
+          <li>Browser visual check covers empty DB, normal data, running job, failed job, and lossy rebuild risk at desktop width and a narrow responsive width.</li>
+          <li>No horizontal overflow appears in the command center source-card row.</li>
+          <li>Snapshot mode shows captured information and disables live sync/cancel actions.</li>
+          <li>Minimum verification for implementation: targeted web/API tests plus <code>cargo test -- --test-threads=1</code>. If docs screenshots or docs navigation change, also run the docs build.</li>
+        </ul>
+      </section>
+
+      <section id="review-status">
+        <h2>Review Status</h2>
+        <div class="review-box">
+          <p><strong>Design discussion result:</strong> approved to continue with the small structured Sync Command Center contract, combining approach B with the priority order C: safety answer first, latest sync summary second.</p>
+          <p><strong>Spec status:</strong> written for user review. Implementation should not start until this spec is accepted or revised.</p>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

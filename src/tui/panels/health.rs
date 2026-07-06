@@ -76,7 +76,7 @@ fn render_payload(frame: &mut Frame, area: Rect, payload: &HealthPayload) {
                 Line::from(vec![
                     Span::styled(
                         format!("  {} ", c.source),
-                        Style::default().fg(theme::ACCENT),
+                        Style::default().fg(theme::accent()),
                     ),
                     Span::raw(format!("/ {} — ", c.cursor_key)),
                     Span::styled(ts, theme::muted_style()),
@@ -130,11 +130,11 @@ fn styled_block(title: &str) -> Block<'_> {
 fn section_block(title: &str) -> Block<'_> {
     Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::BORDER_NORMAL))
+        .border_style(Style::default().fg(theme::border_normal()))
         .title(Span::styled(
             format!(" {} ", title),
             Style::default()
-                .fg(theme::ACCENT)
+                .fg(theme::accent())
                 .add_modifier(Modifier::BOLD),
         ))
 }

@@ -1,6 +1,6 @@
-# Getting Started
+# Getting started
 
-`llmusage` is a Rust CLI that keeps the entire analytics path local.
+Use this guide when you want a local database, a first report, and a browser dashboard without learning every command first.
 
 ## Requirements
 
@@ -9,91 +9,98 @@
 - npm 10+
 - `just`
 
-## Install dependencies
+## 1. Install from this checkout
 
 ```powershell
 just install
 ```
 
-This does two things:
+This installs docs dependencies under `docs/` and installs the CLI with `cargo install --path . --locked --force`.
 
-- installs the VitePress docs dependencies under `docs/`
-- installs the CLI from the current checkout with `cargo install --path . --locked --force`
-
-## Run the local flow
+## 2. Initialize local runtime and hooks
 
 ```powershell
 llmusage init
+```
+
+`init` creates the runtime root, bootstraps SQLite, writes hook wrappers, and installs supported integrations for Codex, Claude Code, OpenCode, and Google Antigravity when their local config files are present.
+
+Default paths:
+
+| Item | Path |
+| --- | --- |
+| Runtime root | `~/.llmusage/` |
+| Database | `~/.llmusage/llmusage.db` |
+| Hook wrappers | `~/.llmusage/bin/llmusage-hook.cmd`, `~/.llmusage/bin/llmusage-hook.sh` |
+| Static exports | `~/.llmusage/exports/` |
+
+Override the runtime root with `--home <PATH>` or `LLMUSAGE_HOME`.
+
+## 3. Import local usage
+
+```powershell
 llmusage sync
+```
+
+`sync` parses local sources incrementally and writes normalized usage rows, 30-minute buckets, source-file diagnostics, and behavior facts.
+
+Use a source filter when you only want one source:
+
+```powershell
+llmusage sync --source codex
+```
+
+## 4. Read the default report
+
+```powershell
 llmusage
+```
+
+With no subcommand, `llmusage` is the `daily` report. It shows the last 7 calendar days in the selected timezone, including today. `--timezone local` uses the machine's current fixed local offset; pass a fixed offset such as `--timezone +08:00` for reproducible historical grouping.
+
+Use JSON for automation:
+
+```powershell
+llmusage daily --json --source antigravity
+```
+
+## 5. Open local dashboards
+
+Terminal dashboard:
+
+```powershell
 llmusage dash
+```
+
+Browser dashboard:
+
+```powershell
 llmusage serve
 ```
 
-### What each step does
+`serve` binds to `127.0.0.1`, prints the local URL, and tries to open the default browser.
 
-- `init` prepares `~/.llmusage/`, creates `llmusage.db`, generates hook wrappers, and installs Codex / Claude / OpenCode / Gemini integrations.
-- `sync` parses local sources incrementally and upserts usage data into SQLite. It shows human progress on stderr; use `--json-events` when a script needs NDJSON lifecycle/progress events.
-- `llmusage` without a subcommand prints the last 7 calendar days from the local DB, including today, in one aggregate ccusage-style daily table. The default table shows `Input`, `Output`, `Cache Create`, `Cache Read`, `Total Tokens`, and `Cost (USD)` with full comma-grouped token counts on wide terminals; `NO_COLOR=1` disables ANSI styling. `llmusage daily --json` keeps the stable aggregate snake_case JSON shape and includes `cache_creation_tokens`. Use `llmusage daily --all` for full history, `--source` / `--breakdown` for source/model detail, or `llmusage monthly`, `llmusage session`, and `llmusage blocks` for other report views.
-- `dash` opens the terminal TUI. Use digit keys or Tab/Shift+Tab to switch panels; `8:行为` shows a read-only Activity / Tools / Optimize / Compare behavior summary with explicit no-data, degraded, insufficient-models, and low-sample states.
-- `serve` starts the browser dashboard on `127.0.0.1` and opens it in your default browser. The first screen uses one filtered dashboard snapshot for KPI, trend, ranking, behavior, health, and diagnostics panels; live mode can export the current view as JSON, run a sync job with cancel/progress state, or opt into 30s/60s auto-refresh. Behavior analytics reads normalized `usage_turn` / `usage_tool_call` facts extracted during sync, not raw browser-side transcripts; Activity/Tools/Optimize/Compare degrade explicitly when a source lacks tool-level evidence. Optimize is read-only and never performs cleanup actions.
-
-Report commands are read-only and never upload data. They also do not auto-sync; run `llmusage sync` again when source data changes. Use `--source codex|claude|opencode|gemini` to restrict reports or sync. If you need to repopulate new session/source-file metadata after upgrading, run `llmusage sync --rebuild` while the original source files are still present. If a Codex/Claude/Gemini file was already cleaned up, normal `llmusage sync` keeps the imported history and diagnostics will show missing source files; `--rebuild` is refused unless you add `--allow-lossy-rebuild` to explicitly clear unrebuildable history. If you maintain a local pricing snapshot, run `llmusage doctor --refresh-pricing <file>`; llmusage stores it under `~/.llmusage/pricing/<catalog-version>.json`, recomputes event/bucket costs, and keeps later sync writes on that local catalog.
-
-## Verify the repo
+Codex-only browser dashboard:
 
 ```powershell
-just ci
+llmusage codex-tracer
 ```
 
-`ci` runs format, clippy, tests, and a VitePress production build.
+Use this when you want Codex-specific call and thread details in a dedicated `codex-tracer.db`.
 
-## Library API preview
+## 6. Export an offline report
 
-```rust
-use llmusage::{
-    paths::AppPaths,
-    query::{Dashboard, QueryFilter},
-    store::Store,
-    Result,
-};
-
-fn open_store(root: std::path::PathBuf) -> Result<Store> {
-    let paths = AppPaths::with_root(root)?;
-    let store = Store::new(&paths)?;
-    store.bootstrap()?;
-    Ok(store)
-}
-
-fn load_ccr_ui(store: &Store) -> Result<()> {
-    let filter = QueryFilter::default();
-    let dashboard = Dashboard::open(store)?;
-    let _snapshot = dashboard.snapshot(&filter)?;
-    let _overview = dashboard.overview(&filter)?;
-    let _daily = dashboard.trends_daily(&filter)?;
-    let _home = dashboard.home_overview(&filter)?;
-    let _heatmap = dashboard.heatmap(&filter, 365)?;
-    let _activity = dashboard.activity_breakdown(&filter)?;
-    let _tools = dashboard.tool_breakdown(&filter)?;
-    let _optimize = dashboard.optimize(&filter)?;
-    let _compare = dashboard.model_compare(&filter, None, None)?;
-    let _logs = dashboard.logs(&Default::default())?;
-    Ok(())
-}
+```powershell
+llmusage export html --out .\llmusage-report
 ```
 
-Runtime root resolution is `--home <PATH>` > `LLMUSAGE_HOME` > `~/.llmusage`.
-The 0.5.x ccr-ui surface includes `Dashboard::overview`, `trends_daily`, `home_overview`, `heatmap`, `logs`, activity/tool/optimize/compare payloads, archive diagnostics from the `source_file` state machine, persisted cost/pricing/cache fields, and in-process import jobs through `JobRegistry`. Runtime root resolution is shared by CLI and library entry points: `--home <PATH>` > `LLMUSAGE_HOME` > `~/.llmusage`.
+The export writes a static dashboard snapshot with `index.html`, `snapshot.json`, and `assets/*`.
 
-Downstream adapters can enable fixture helpers for integration tests:
+## Next steps
 
-```toml
-[dev-dependencies]
-llmusage = { path = "../llmusage", features = ["testing"] }
-```
-
-```rust
-let fixture = llmusage::testing::Fixture::new()?;
-fixture.seed_dashboard(12)?;
-let overview = llmusage::Dashboard::open(fixture.store())?.overview(&Default::default())?;
-```
+- [First sync](./first-sync) for safe rebuild behavior and NDJSON progress.
+- [First report](./first-report) for report filters and table semantics.
+- [Codex Tracer](./codex-tracer) for the dedicated Codex dashboard and rebuild behavior.
+- [Dashboard](../dashboard/) for `llmusage serve` filters, behavior panels, and degraded states.
+- [Safety](../safety/) for local data paths and destructive boundaries.
+- [CLI reference](../reference/cli) for exact flags.

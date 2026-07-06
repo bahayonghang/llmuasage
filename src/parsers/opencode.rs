@@ -8,8 +8,13 @@ use tracing::info;
 
 use crate::{
     integrations,
-    models::{ActivityCategory, SessionInfo, SourceKind, UsageEvent, UsageTokens, UsageTurn},
-    parsers::{ProgressSink, SourceParser, SourceSyncStats, SyncEvent},
+    models::{
+        ActivityCategory, SessionInfo, SourceKind, UsageEvent, UsageTokens, UsageToolCall,
+        UsageTurn,
+    },
+    parsers::{
+        ProgressSink, SourceParser, SourceSyncStats, SyncEvent, behavior::opencode_tool_evidence,
+    },
     project::ProjectResolver,
     store::{Store, SyncRunWriter, SyncShard},
     util::{bucket_start_from_rfc3339, file_identity, normalize_model, now_utc},
@@ -206,6 +211,25 @@ async fn sync_opencode(
         );
     }
 
+    // 扫描 part 表的工具调用：独立于 message 分页（part 自带 time_created，
+    // 通过 data 内的 messageID/sessionID 关联）；part 表缺失时优雅降级为空。
+    if !cancel.is_cancelled() {
+        let tool_calls = scan_opencode_tool_parts(&connection)?;
+        if !tool_calls.is_empty() {
+            let commit = writer.commit_shard(SyncShard {
+                source: SourceKind::Opencode,
+                reset_path_hashes: Vec::new(),
+                events: Vec::new(),
+                cursors: Vec::new(),
+                seen_file_paths: Vec::new(),
+                raw_records: Vec::new(),
+                turns: Vec::new(),
+                tool_calls,
+            })?;
+            write_ms += commit.write_ms;
+        }
+    }
+
     cursor.last_time_created = latest_time;
     cursor.last_processed_ids = latest_ids;
     cursor.sqlite_status = "ok".to_string();
@@ -213,7 +237,8 @@ async fn sync_opencode(
     store.cursors().save_opencode_cursor(&cursor)?;
 
     stats.files_processed = 1;
-    stats.changed_files = usize::from(normalized_events_seen > 0);
+    stats.changed_files = usize::from(seen_rows > 0);
+    stats.skipped_files = usize::from(seen_rows == 0);
     stats.bytes_scanned = scanned_bytes;
     stats.events_seen = normalized_events_seen;
     stats.events_inserted = inserted;
@@ -342,6 +367,7 @@ fn row_to_event(row: &OpencodeRow, resolver: &mut ProjectResolver) -> Result<Opt
     Ok(Some(UsageEvent {
         event_key: format!("opencode:{}", row.id),
         source: SourceKind::Opencode,
+        provider_label: String::new(),
         model: normalize_model(
             value
                 .get("modelID")
@@ -443,6 +469,89 @@ fn serialize_opencode_row(row: &OpencodeRow) -> String {
     }
     serde_json::to_string(&Value::Object(payload))
         .unwrap_or_else(|_| serde_json::json!({"id": row.id}).to_string())
+}
+
+/// Scans the OpenCode `part` table for `type == "tool"` rows and normalizes them
+/// into [`UsageToolCall`] facts.
+///
+/// Full-scan + idempotent (`INSERT OR IGNORE` on `tool_call_key`) by design: the
+/// `LIKE` filter keeps this to tool rows only, and completeness matters more than
+/// re-scan cost for this secondary behavior data. The `part` table is absent on
+/// older OpenCode releases, so a prepare failure degrades to an empty result
+/// instead of failing the whole sync.
+fn scan_opencode_tool_parts(connection: &Connection) -> Result<Vec<UsageToolCall>> {
+    let mut statement = match connection.prepare(
+        r#"SELECT time_created, data FROM part
+           WHERE data LIKE '%"type":"tool"%'
+           ORDER BY time_created ASC"#,
+    ) {
+        Ok(statement) => statement,
+        Err(_) => return Ok(Vec::new()),
+    };
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, Option<i64>>(0)?.unwrap_or_default(),
+            row.get::<_, String>(1)?,
+        ))
+    })?;
+
+    let mut tool_calls = Vec::new();
+    for (index, row) in rows.enumerate() {
+        let (time_created, data) = row?;
+        let Ok(value) = serde_json::from_str::<Value>(&data) else {
+            continue;
+        };
+        if let Some(call) = part_to_tool_call(&value, time_created, index) {
+            tool_calls.push(call);
+        }
+    }
+    Ok(tool_calls)
+}
+
+/// Normalizes one OpenCode `part` row (already JSON-parsed) into a tool-call fact.
+///
+/// Association is best-effort from fields inside `part.data`: `messageID` links to
+/// the message event (`opencode:<id>`), `sessionID` to the session, and the part
+/// `id` (or `messageID:index`) seeds the idempotency key. Project/model are not
+/// carried on parts, so they stay `None`.
+fn part_to_tool_call(part: &Value, time_created: i64, index: usize) -> Option<UsageToolCall> {
+    let evidence = opencode_tool_evidence(part)?;
+
+    let string_field = |key: &str| {
+        part.get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    let part_id = string_field("id");
+    let message_id = string_field("messageID");
+    let session_id = string_field("sessionID");
+
+    let key_seed = part_id
+        .clone()
+        .or_else(|| message_id.as_ref().map(|id| format!("{id}:{index}")))
+        .unwrap_or_else(|| format!("{time_created}:{index}"));
+
+    let occurred_at = chrono::DateTime::from_timestamp_millis(time_created)?.to_rfc3339();
+
+    Some(UsageToolCall {
+        tool_call_key: format!("tool:opencode:{key_seed}"),
+        turn_key: message_id.as_ref().map(|id| format!("turn:opencode:{id}")),
+        event_key: message_id.as_ref().map(|id| format!("opencode:{id}")),
+        source: SourceKind::Opencode,
+        session_id,
+        source_path_hash: None,
+        project_hash: None,
+        model: None,
+        occurred_at,
+        tool_name: evidence.tool_name,
+        tool_kind: evidence.tool_kind,
+        mcp_server: evidence.mcp_server,
+        mcp_tool: evidence.mcp_tool,
+        input_fingerprint: evidence.input_fingerprint,
+        safe_preview: evidence.safe_preview,
+    })
 }
 
 #[cfg(test)]

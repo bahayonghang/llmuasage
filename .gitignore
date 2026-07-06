@@ -1,11 +1,11 @@
 ref/
 .omc/
+.omx/
 .agents/
 .claude/
 .codex/
 .opencode/
 .cursor/
-.trellis/
 .kiro/
 
 
@@ -22,3 +22,10 @@ ref/
 task_plan.md
 findings.md
 progress.md
+
+.understand-anything/
+
+.planning/
+.plannings/
+.codegraph/
+.reasonix/

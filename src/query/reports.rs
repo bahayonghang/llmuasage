@@ -110,6 +110,11 @@ pub struct SessionReportRow {
     pub source: Option<String>,
     pub first_activity_at: String,
     pub last_activity_at: String,
+    /// Wall-clock span (first→last activity) in minutes.
+    pub span_minutes: i64,
+    /// Gap-capped active minutes: adjacent-event gaps over 30 minutes are
+    /// treated as "away" and excluded, approximating hands-on time.
+    pub active_minutes: i64,
     #[serde(flatten)]
     pub totals: TokenTotals,
     pub models_used: Vec<String>,
@@ -194,6 +199,26 @@ struct EventRow {
     source_path_hash: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct BucketRow {
+    source: String,
+    model: String,
+    local_date: NaiveDate,
+    input_tokens: i64,
+    cache_creation_tokens: i64,
+    cache_read_tokens: i64,
+    output_tokens: i64,
+    reasoning_output_tokens: i64,
+    cost_with_cache_usd: f64,
+    pricing_status: String,
+}
+
+#[derive(Debug, Clone)]
+struct ProjectBucketRow {
+    bucket: BucketRow,
+    project: Option<ProjectSummary>,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct TokenComponents {
     input_tokens: i64,
@@ -221,6 +246,18 @@ impl From<&EventRow> for TokenComponents {
             cache_read_tokens: event.cache_read_tokens,
             output_tokens: event.output_tokens,
             reasoning_output_tokens: event.reasoning_output_tokens,
+        }
+    }
+}
+
+impl From<&BucketRow> for TokenComponents {
+    fn from(bucket: &BucketRow) -> Self {
+        Self {
+            input_tokens: bucket.input_tokens,
+            cache_creation_tokens: bucket.cache_creation_tokens,
+            cache_read_tokens: bucket.cache_read_tokens,
+            output_tokens: bucket.output_tokens,
+            reasoning_output_tokens: bucket.reasoning_output_tokens,
         }
     }
 }
@@ -257,6 +294,19 @@ impl Aggregate {
             .entry((event.source.clone(), event.model.clone()))
             .or_default();
         add_tokens(entry, tokens, event.cost_with_cache_usd);
+    }
+
+    fn add_bucket(&mut self, bucket: &BucketRow) {
+        let tokens = TokenComponents::from(bucket);
+        add_tokens(&mut self.totals, tokens, bucket.cost_with_cache_usd);
+        self.models.insert(bucket.model.clone());
+        self.pricing_statuses.insert(bucket.pricing_status.clone());
+        self.sources.insert(bucket.source.clone());
+        let entry = self
+            .breakdowns
+            .entry((bucket.source.clone(), bucket.model.clone()))
+            .or_default();
+        add_tokens(entry, tokens, bucket.cost_with_cache_usd);
     }
 
     fn model_names(&self) -> Vec<String> {
@@ -310,16 +360,48 @@ fn add_tokens(totals: &mut TokenTotals, tokens: TokenComponents, cost: f64) {
 }
 
 pub fn load_daily_report(store: &Store, filter: &ReportFilter) -> Result<DailyReport> {
-    let events = load_filtered_events(store, filter)?;
+    if filter.project.is_some() {
+        return load_daily_report_from_events(store, filter);
+    }
+    let buckets = load_filtered_buckets(store, filter)?;
     let mut groups: BTreeMap<String, Aggregate> = BTreeMap::new();
     let mut totals = TokenTotals::default();
-    for event in &events {
+    for bucket in &buckets {
+        groups
+            .entry(bucket.local_date.format("%Y-%m-%d").to_string())
+            .or_default()
+            .add_bucket(bucket);
+        add_totals_from_bucket(&mut totals, bucket);
+    }
+
+    let mut daily = groups
+        .into_iter()
+        .map(|(date, aggregate)| DailyReportRow {
+            date,
+            source: filter.source.map(|value| value.as_str().to_string()),
+            project: None,
+            totals: aggregate.totals.clone(),
+            models_used: aggregate.model_names(),
+            model_breakdowns: aggregate.model_breakdowns(filter.breakdown),
+            conversation_count: aggregate.conversation_count(),
+            notes: aggregate.notes(),
+        })
+        .collect::<Vec<_>>();
+    sort_by_key(&mut daily, filter.order, |row| row.date.clone());
+    Ok(DailyReport { daily, totals })
+}
+
+fn load_daily_report_from_events(store: &Store, filter: &ReportFilter) -> Result<DailyReport> {
+    let mut groups: BTreeMap<String, Aggregate> = BTreeMap::new();
+    let mut totals = TokenTotals::default();
+    visit_filtered_events(store, filter, |event| {
         groups
             .entry(event.local_date.format("%Y-%m-%d").to_string())
             .or_default()
-            .add_event(event);
-        add_totals_from_event(&mut totals, event);
-    }
+            .add_event(&event);
+        add_totals_from_event(&mut totals, &event);
+        Ok(())
+    })?;
 
     let mut daily = groups
         .into_iter()
@@ -342,28 +424,71 @@ pub fn load_daily_reports_by_source(
     store: &Store,
     filter: &ReportFilter,
 ) -> Result<Vec<(SourceKind, DailyReport)>> {
-    let events = load_filtered_events(store, filter)?;
+    if filter.project.is_some() {
+        return load_daily_reports_by_source_from_events(store, filter);
+    }
+    let buckets = load_filtered_buckets(store, filter)?;
     let mut source_groups: BTreeMap<SourceKind, BTreeMap<String, Aggregate>> = BTreeMap::new();
     let mut source_totals: BTreeMap<SourceKind, TokenTotals> = BTreeMap::new();
 
-    for event in &events {
-        let Some(source) = SourceKind::parse_id(&event.source) else {
+    for bucket in &buckets {
+        let Some(source) = SourceKind::parse_id(&bucket.source) else {
             continue;
+        };
+        source_groups
+            .entry(source)
+            .or_default()
+            .entry(bucket.local_date.format("%Y-%m-%d").to_string())
+            .or_default()
+            .add_bucket(bucket);
+        add_totals_from_bucket(source_totals.entry(source).or_default(), bucket);
+    }
+
+    Ok(build_daily_reports_by_source(
+        filter,
+        source_groups,
+        source_totals,
+    ))
+}
+
+fn load_daily_reports_by_source_from_events(
+    store: &Store,
+    filter: &ReportFilter,
+) -> Result<Vec<(SourceKind, DailyReport)>> {
+    let mut source_groups: BTreeMap<SourceKind, BTreeMap<String, Aggregate>> = BTreeMap::new();
+    let mut source_totals: BTreeMap<SourceKind, TokenTotals> = BTreeMap::new();
+
+    visit_filtered_events(store, filter, |event| {
+        let Some(source) = SourceKind::parse_id(&event.source) else {
+            return Ok(());
         };
         source_groups
             .entry(source)
             .or_default()
             .entry(event.local_date.format("%Y-%m-%d").to_string())
             .or_default()
-            .add_event(event);
-        add_totals_from_event(source_totals.entry(source).or_default(), event);
-    }
+            .add_event(&event);
+        add_totals_from_event(source_totals.entry(source).or_default(), &event);
+        Ok(())
+    })?;
 
+    Ok(build_daily_reports_by_source(
+        filter,
+        source_groups,
+        source_totals,
+    ))
+}
+
+fn build_daily_reports_by_source(
+    filter: &ReportFilter,
+    mut source_groups: BTreeMap<SourceKind, BTreeMap<String, Aggregate>>,
+    mut source_totals: BTreeMap<SourceKind, TokenTotals>,
+) -> Vec<(SourceKind, DailyReport)> {
     let source_order = [
         SourceKind::Codex,
         SourceKind::Claude,
         SourceKind::Opencode,
-        SourceKind::Gemini,
+        SourceKind::Antigravity,
     ];
     let mut reports = Vec::new();
     for source in source_order {
@@ -393,23 +518,54 @@ pub fn load_daily_reports_by_source(
         ));
     }
 
-    Ok(reports)
+    reports
 }
 
 pub fn load_daily_project_report(
     store: &Store,
     filter: &ReportFilter,
 ) -> Result<DailyProjectReport> {
-    let events = load_filtered_events(store, filter)?;
+    if filter.project.is_some() {
+        return load_daily_project_report_from_events(store, filter);
+    }
+    let buckets = load_filtered_project_buckets(store, filter)?;
     let mut groups: BTreeMap<(String, ProjectSummary), Aggregate> = BTreeMap::new();
     let mut totals = TokenTotals::default();
-    for event in &events {
-        let project = event.project.clone().unwrap_or_else(unknown_project);
-        let date = event.local_date.format("%Y-%m-%d").to_string();
-        groups.entry((date, project)).or_default().add_event(event);
-        add_totals_from_event(&mut totals, event);
+    for bucket in &buckets {
+        let project = bucket.project.clone().unwrap_or_else(unknown_project);
+        let date = bucket.bucket.local_date.format("%Y-%m-%d").to_string();
+        groups
+            .entry((date, project))
+            .or_default()
+            .add_bucket(&bucket.bucket);
+        add_totals_from_bucket(&mut totals, &bucket.bucket);
     }
 
+    Ok(build_daily_project_report(filter, groups, totals))
+}
+
+fn load_daily_project_report_from_events(
+    store: &Store,
+    filter: &ReportFilter,
+) -> Result<DailyProjectReport> {
+    let mut groups: BTreeMap<(String, ProjectSummary), Aggregate> = BTreeMap::new();
+    let mut totals = TokenTotals::default();
+    visit_filtered_events(store, filter, |event| {
+        let project = event.project.clone().unwrap_or_else(unknown_project);
+        let date = event.local_date.format("%Y-%m-%d").to_string();
+        groups.entry((date, project)).or_default().add_event(&event);
+        add_totals_from_event(&mut totals, &event);
+        Ok(())
+    })?;
+
+    Ok(build_daily_project_report(filter, groups, totals))
+}
+
+fn build_daily_project_report(
+    filter: &ReportFilter,
+    groups: BTreeMap<(String, ProjectSummary), Aggregate>,
+    totals: TokenTotals,
+) -> DailyProjectReport {
     let mut projects: BTreeMap<String, Vec<DailyReportRow>> = BTreeMap::new();
     for ((date, project), aggregate) in groups {
         let label = project_display_key(&project);
@@ -428,20 +584,49 @@ pub fn load_daily_project_report(
         sort_by_key(rows, filter.order, |row| row.date.clone());
     }
 
-    Ok(DailyProjectReport { projects, totals })
+    DailyProjectReport { projects, totals }
 }
 
 pub fn load_monthly_report(store: &Store, filter: &ReportFilter) -> Result<MonthlyReport> {
-    let events = load_filtered_events(store, filter)?;
+    if filter.project.is_some() {
+        return load_monthly_report_from_events(store, filter);
+    }
+    let buckets = load_filtered_buckets(store, filter)?;
     let mut groups: BTreeMap<String, Aggregate> = BTreeMap::new();
     let mut totals = TokenTotals::default();
-    for event in &events {
+    for bucket in &buckets {
+        groups
+            .entry(bucket.local_date.format("%Y-%m").to_string())
+            .or_default()
+            .add_bucket(bucket);
+        add_totals_from_bucket(&mut totals, bucket);
+    }
+
+    let mut monthly = groups
+        .into_iter()
+        .map(|(month, aggregate)| MonthlyReportRow {
+            month,
+            source: filter.source.map(|value| value.as_str().to_string()),
+            totals: aggregate.totals.clone(),
+            models_used: aggregate.model_names(),
+            model_breakdowns: aggregate.model_breakdowns(filter.breakdown),
+        })
+        .collect::<Vec<_>>();
+    sort_by_key(&mut monthly, filter.order, |row| row.month.clone());
+    Ok(MonthlyReport { monthly, totals })
+}
+
+fn load_monthly_report_from_events(store: &Store, filter: &ReportFilter) -> Result<MonthlyReport> {
+    let mut groups: BTreeMap<String, Aggregate> = BTreeMap::new();
+    let mut totals = TokenTotals::default();
+    visit_filtered_events(store, filter, |event| {
         groups
             .entry(event.local_date.format("%Y-%m").to_string())
             .or_default()
-            .add_event(event);
-        add_totals_from_event(&mut totals, event);
-    }
+            .add_event(&event);
+        add_totals_from_event(&mut totals, &event);
+        Ok(())
+    })?;
 
     let mut monthly = groups
         .into_iter()
@@ -462,20 +647,24 @@ pub fn load_session_report(
     filter: &ReportFilter,
     session_id_filter: Option<&str>,
 ) -> Result<SessionListReport> {
-    let events = load_filtered_events(store, filter)?;
     let wanted = session_id_filter.map(|value| value.to_ascii_lowercase());
     let mut groups: BTreeMap<String, SessionGroup> = BTreeMap::new();
+    let mut session_times: BTreeMap<String, Vec<DateTime<FixedOffset>>> = BTreeMap::new();
     let mut totals = TokenTotals::default();
 
-    for event in &events {
-        let session_id = event_session_id(event);
+    visit_filtered_events(store, filter, |event| {
+        let session_id = event_session_id(&event);
         if let Some(wanted) = &wanted {
             let normalized = session_id.to_ascii_lowercase();
             if normalized != *wanted && !normalized.contains(wanted) {
-                continue;
+                return Ok(());
             }
         }
         let display_at = event.local_at.to_rfc3339();
+        session_times
+            .entry(session_id.clone())
+            .or_default()
+            .push(event.local_at);
         let entry = groups.entry(session_id).or_insert_with(|| {
             (
                 Aggregate::default(),
@@ -486,7 +675,7 @@ pub fn load_session_report(
                 display_at.clone(),
             )
         });
-        entry.0.add_event(event);
+        entry.0.add_event(&event);
         if entry.1.is_none() {
             entry.1 = event.project.clone();
         }
@@ -502,13 +691,18 @@ pub fn load_session_report(
         if display_at > entry.5 {
             entry.5 = display_at;
         }
-        add_totals_from_event(&mut totals, event);
-    }
+        add_totals_from_event(&mut totals, &event);
+        Ok(())
+    })?;
 
     let mut sessions = groups
         .into_iter()
         .map(
             |(session_id, (aggregate, project, session_label, source, first, last))| {
+                let (span_minutes, active_minutes) = session_times
+                    .get_mut(&session_id)
+                    .map(|times| session_time_span(times))
+                    .unwrap_or((0, 0));
                 SessionReportRow {
                     session_id,
                     session_label,
@@ -516,6 +710,8 @@ pub fn load_session_report(
                     source,
                     first_activity_at: first,
                     last_activity_at: last,
+                    span_minutes,
+                    active_minutes,
                     totals: aggregate.totals.clone(),
                     models_used: aggregate.model_names(),
                     model_breakdowns: aggregate.model_breakdowns(filter.breakdown),
@@ -527,6 +723,29 @@ pub fn load_session_report(
         row.last_activity_at.clone()
     });
     Ok(SessionListReport { sessions, totals })
+}
+
+const ACTIVE_GAP_CAP_MINUTES: i64 = 30;
+
+/// Returns `(span_minutes, active_minutes)` for a session's event times.
+///
+/// Span is last−first. Active sums adjacent-event gaps that do not exceed
+/// [`ACTIVE_GAP_CAP_MINUTES`], dropping idle stretches so the result
+/// approximates hands-on time rather than wall-clock presence.
+fn session_time_span(times: &mut [DateTime<FixedOffset>]) -> (i64, i64) {
+    if times.len() < 2 {
+        return (0, 0);
+    }
+    times.sort_unstable();
+    let span = (*times.last().unwrap() - times[0]).num_minutes().max(0);
+    let mut active = 0i64;
+    for pair in times.windows(2) {
+        let gap = (pair[1] - pair[0]).num_minutes();
+        if gap > 0 && gap <= ACTIVE_GAP_CAP_MINUTES {
+            active += gap;
+        }
+    }
+    (span, active)
 }
 
 pub fn load_single_session_report(
@@ -545,14 +764,12 @@ pub fn load_blocks_report(
     filter: &ReportFilter,
     options: &BlockReportOptions,
 ) -> Result<BlocksReport> {
-    let mut events = load_filtered_events(store, filter)?;
-    events.sort_by_key(|event| event.event_utc);
     let session_length =
         Duration::milliseconds((options.session_length_hours * 3_600_000.0) as i64);
     let now = Utc::now();
     let mut aggregates: Vec<(DateTime<Utc>, DateTime<Utc>, Aggregate)> = Vec::new();
 
-    for event in &events {
+    visit_filtered_events(store, filter, |event| {
         if aggregates.is_empty() {
             let start = floor_to_hour(event.event_utc);
             aggregates.push((start, start + session_length, Aggregate::default()));
@@ -564,8 +781,9 @@ pub fn load_blocks_report(
             aggregates.push((start, start + session_length, Aggregate::default()));
         }
         let last_index = aggregates.len() - 1;
-        aggregates[last_index].2.add_event(event);
-    }
+        aggregates[last_index].2.add_event(&event);
+        Ok(())
+    })?;
 
     let max_tokens = aggregates
         .iter()
@@ -668,6 +886,14 @@ fn add_totals_from_event(totals: &mut TokenTotals, event: &EventRow) {
     );
 }
 
+fn add_totals_from_bucket(totals: &mut TokenTotals, bucket: &BucketRow) {
+    add_tokens(
+        totals,
+        TokenComponents::from(bucket),
+        bucket.cost_with_cache_usd,
+    );
+}
+
 fn sort_by_key<T, F>(rows: &mut [T], order: SortOrder, key: F)
 where
     F: Fn(&T) -> String,
@@ -678,18 +904,208 @@ where
     }
 }
 
-fn load_filtered_events(store: &Store, filter: &ReportFilter) -> Result<Vec<EventRow>> {
+fn load_filtered_buckets(store: &Store, filter: &ReportFilter) -> Result<Vec<BucketRow>> {
     let conn = store.open_connection()?;
-    let rows = load_events_filtered(&conn, filter)?;
-    Ok(rows
-        .into_iter()
-        .filter(|event| filter_event_post_sql(event, filter))
-        .collect())
+    load_buckets_filtered(&conn, filter)
 }
 
-/// Loads events with date/source filters pushed down to SQL for performance.
+fn load_filtered_project_buckets(
+    store: &Store,
+    filter: &ReportFilter,
+) -> Result<Vec<ProjectBucketRow>> {
+    let conn = store.open_connection()?;
+    load_project_buckets_filtered(&conn, filter)
+}
+
+fn load_buckets_filtered(conn: &Connection, filter: &ReportFilter) -> Result<Vec<BucketRow>> {
+    let mut clauses = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+    push_bucket_filter(filter, &mut clauses, &mut params);
+
+    let where_clause = if clauses.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", clauses.join(" AND "))
+    };
+    let local_date_expr = bucket_local_date_expr("hour_start", &filter.timezone);
+    let sql = format!(
+        r#"
+        SELECT
+            source,
+            model,
+            {local_date_expr} AS local_date,
+            SUM(input_tokens),
+            SUM(cache_creation_tokens),
+            SUM(cache_read_tokens),
+            SUM(output_tokens),
+            SUM(reasoning_output_tokens),
+            SUM(cost_with_cache_usd),
+            COALESCE(pricing_status, 'unpriced') AS pricing_status
+        FROM usage_bucket_30m
+        {where_clause}
+        GROUP BY source, model, local_date, COALESCE(pricing_status, 'unpriced')
+        ORDER BY local_date ASC, source ASC, model ASC, pricing_status ASC
+        "#
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let param_refs = params
+        .iter()
+        .map(|value| value.as_ref())
+        .collect::<Vec<&dyn rusqlite::ToSql>>();
+    let rows = stmt.query_map(param_refs.as_slice(), |row| {
+        Ok(BucketRow {
+            source: row.get(0)?,
+            model: row.get(1)?,
+            local_date: parse_sql_local_date(row.get(2)?, 2)?,
+            input_tokens: row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
+            cache_creation_tokens: row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
+            cache_read_tokens: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
+            output_tokens: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
+            reasoning_output_tokens: row.get::<_, Option<i64>>(7)?.unwrap_or_default(),
+            cost_with_cache_usd: row.get::<_, Option<f64>>(8)?.unwrap_or_default(),
+            pricing_status: row
+                .get::<_, Option<String>>(9)?
+                .unwrap_or_else(|| crate::query::pricing::PRICING_UNPRICED.to_string()),
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn load_project_buckets_filtered(
+    conn: &Connection,
+    filter: &ReportFilter,
+) -> Result<Vec<ProjectBucketRow>> {
+    let mut clauses = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+    push_bucket_filter(filter, &mut clauses, &mut params);
+
+    let where_clause = if clauses.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", clauses.join(" AND "))
+    };
+    let local_date_expr = bucket_local_date_expr("hour_start", &filter.timezone);
+    let sql = format!(
+        r#"
+        SELECT
+            source,
+            model,
+            {local_date_expr} AS local_date,
+            project_hash,
+            project_label,
+            project_ref,
+            SUM(input_tokens),
+            SUM(cache_creation_tokens),
+            SUM(cache_read_tokens),
+            SUM(output_tokens),
+            SUM(reasoning_output_tokens),
+            SUM(cost_with_cache_usd),
+            COALESCE(pricing_status, 'unpriced') AS pricing_status
+        FROM usage_bucket_30m
+        {where_clause}
+        GROUP BY
+            source,
+            model,
+            local_date,
+            COALESCE(project_hash, ''),
+            project_label,
+            project_ref,
+            COALESCE(pricing_status, 'unpriced')
+        ORDER BY local_date ASC, project_hash ASC, source ASC, model ASC, pricing_status ASC
+        "#
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let param_refs = params
+        .iter()
+        .map(|value| value.as_ref())
+        .collect::<Vec<&dyn rusqlite::ToSql>>();
+    let rows = stmt.query_map(param_refs.as_slice(), |row| {
+        Ok(ProjectBucketRow {
+            bucket: BucketRow {
+                source: row.get(0)?,
+                model: row.get(1)?,
+                local_date: parse_sql_local_date(row.get(2)?, 2)?,
+                input_tokens: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
+                cache_creation_tokens: row.get::<_, Option<i64>>(7)?.unwrap_or_default(),
+                cache_read_tokens: row.get::<_, Option<i64>>(8)?.unwrap_or_default(),
+                output_tokens: row.get::<_, Option<i64>>(9)?.unwrap_or_default(),
+                reasoning_output_tokens: row.get::<_, Option<i64>>(10)?.unwrap_or_default(),
+                cost_with_cache_usd: row.get::<_, Option<f64>>(11)?.unwrap_or_default(),
+                pricing_status: row
+                    .get::<_, Option<String>>(12)?
+                    .unwrap_or_else(|| crate::query::pricing::PRICING_UNPRICED.to_string()),
+            },
+            project: normalize_project(row.get(3)?, row.get(4)?, row.get(5)?),
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn push_bucket_filter(
+    filter: &ReportFilter,
+    clauses: &mut Vec<String>,
+    params: &mut Vec<Box<dyn rusqlite::ToSql>>,
+) {
+    if let Some(source) = filter.source {
+        clauses.push("source = ?".to_string());
+        params.push(Box::new(source.as_str().to_string()));
+    }
+    if let Some(since) = filter.since {
+        let utc_start = local_date_to_utc_start(since, &filter.timezone);
+        clauses.push("hour_start >= ?".to_string());
+        params.push(Box::new(utc_start));
+    }
+    if let Some(until) = filter.until
+        && let Some(exclusive) = until.succ_opt()
+    {
+        let utc_end = local_date_to_utc_start(exclusive, &filter.timezone);
+        clauses.push("hour_start < ?".to_string());
+        params.push(Box::new(utc_end));
+    }
+}
+
+fn bucket_local_date_expr(column: &str, timezone: &ReportTimezone) -> String {
+    let seconds = fixed_offset_for(timezone).local_minus_utc();
+    if seconds == 0 {
+        format!("date({column})")
+    } else if seconds > 0 {
+        format!("date({column}, '+{seconds} seconds')")
+    } else {
+        format!("date({column}, '{seconds} seconds')")
+    }
+}
+
+fn parse_sql_local_date(value: String, column: usize) -> rusqlite::Result<NaiveDate> {
+    NaiveDate::parse_from_str(&value, "%Y-%m-%d").map_err(|err| {
+        rusqlite::Error::FromSqlConversionFailure(
+            column,
+            rusqlite::types::Type::Text,
+            Box::new(err),
+        )
+    })
+}
+
+fn visit_filtered_events<F>(store: &Store, filter: &ReportFilter, mut visitor: F) -> Result<()>
+where
+    F: FnMut(EventRow) -> Result<()>,
+{
+    let conn = store.open_connection()?;
+    visit_events_filtered(&conn, filter, |event| {
+        if filter_event_post_sql(&event, filter) {
+            visitor(event)?;
+        }
+        Ok(())
+    })
+}
+
+/// Visits events with date/source filters pushed down to SQL for performance.
 /// Project filtering remains in Rust because it requires fuzzy matching.
-fn load_events_filtered(conn: &Connection, filter: &ReportFilter) -> Result<Vec<EventRow>> {
+fn visit_events_filtered<F>(conn: &Connection, filter: &ReportFilter, mut visitor: F) -> Result<()>
+where
+    F: FnMut(EventRow) -> Result<()>,
+{
     let mut clauses = Vec::new();
     let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
@@ -746,7 +1162,8 @@ fn load_events_filtered(conn: &Connection, filter: &ReportFilter) -> Result<Vec<
 
     let mut stmt = conn.prepare(&sql)?;
     let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-    let rows = stmt.query_map(param_refs.as_slice(), |row| {
+    let mut rows = stmt.query(param_refs.as_slice())?;
+    while let Some(row) = rows.next()? {
         let event_at: String = row.get(3)?;
         let event_utc = DateTime::parse_from_rfc3339(&event_at)
             .map(|value| value.with_timezone(&Utc))
@@ -757,7 +1174,7 @@ fn load_events_filtered(conn: &Connection, filter: &ReportFilter) -> Result<Vec<
                     Box::new(err),
                 )
             })?;
-        Ok(RawEventRow {
+        let raw = RawEventRow {
             event_key: row.get(0)?,
             source: row.get(1)?,
             model: row.get(2)?,
@@ -777,30 +1194,31 @@ fn load_events_filtered(conn: &Connection, filter: &ReportFilter) -> Result<Vec<
             session_id: row.get(14)?,
             session_label: row.get(15)?,
             source_path_hash: row.get(16)?,
-        })
-    })?;
-    let raw = rows.collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(raw
-        .into_iter()
-        .map(|event| event.with_timezone(&filter.timezone))
-        .collect())
+        };
+        visitor(raw.with_timezone(&filter.timezone))?;
+    }
+    Ok(())
 }
 
 /// Converts a local NaiveDate midnight to a UTC RFC 3339 string for SQL filtering.
 fn local_date_to_utc_start(date: NaiveDate, timezone: &ReportTimezone) -> String {
-    use chrono::{Offset, SecondsFormat, TimeZone, offset::LocalResult};
+    use chrono::{SecondsFormat, TimeZone, offset::LocalResult};
     let local_start = date.and_hms_opt(0, 0, 0).expect("midnight is always valid");
-    let offset = match timezone {
-        ReportTimezone::Utc => Utc.fix(),
-        ReportTimezone::Local => Local::now().offset().fix(),
-        ReportTimezone::Fixed(offset) => *offset,
-    };
+    let offset = fixed_offset_for(timezone);
     let utc = match offset.from_local_datetime(&local_start) {
         LocalResult::Single(value) => value.with_timezone(&Utc),
         LocalResult::Ambiguous(earliest, _) => earliest.with_timezone(&Utc),
         LocalResult::None => offset.from_utc_datetime(&local_start).with_timezone(&Utc),
     };
     utc.to_rfc3339_opts(SecondsFormat::Secs, true)
+}
+
+fn fixed_offset_for(timezone: &ReportTimezone) -> FixedOffset {
+    match timezone {
+        ReportTimezone::Utc => Utc.fix(),
+        ReportTimezone::Local => Local::now().offset().fix(),
+        ReportTimezone::Fixed(offset) => *offset,
+    }
 }
 
 /// Post-SQL filter for conditions not pushed to the database (project fuzzy match).
@@ -952,11 +1370,7 @@ fn display_time(value: DateTime<Utc>, timezone: &ReportTimezone) -> String {
 }
 
 fn apply_timezone(value: DateTime<Utc>, timezone: &ReportTimezone) -> DateTime<FixedOffset> {
-    match timezone {
-        ReportTimezone::Utc => value.with_timezone(&Utc.fix()),
-        ReportTimezone::Local => value.with_timezone(&Local).fixed_offset(),
-        ReportTimezone::Fixed(offset) => value.with_timezone(offset),
-    }
+    value.with_timezone(&fixed_offset_for(timezone))
 }
 
 #[cfg(test)]
@@ -967,6 +1381,44 @@ mod tests {
 
     use super::*;
     use crate::{paths::AppPaths, store::Store};
+
+    fn at(rfc3339: &str) -> DateTime<FixedOffset> {
+        DateTime::parse_from_rfc3339(rfc3339).unwrap()
+    }
+
+    #[test]
+    fn session_time_span_caps_idle_gaps() {
+        // 0m, +10m, +50m (40m gap dropped), +55m (5m kept).
+        let mut times = vec![
+            at("2026-05-01T10:00:00Z"),
+            at("2026-05-01T10:10:00Z"),
+            at("2026-05-01T10:50:00Z"),
+            at("2026-05-01T10:55:00Z"),
+        ];
+        let (span, active) = session_time_span(&mut times);
+        assert_eq!(span, 55);
+        // 10 (<=30) + 40 (dropped) + 5 (<=30) = 15 active.
+        assert_eq!(active, 15);
+    }
+
+    #[test]
+    fn session_time_span_handles_single_and_empty() {
+        assert_eq!(session_time_span(&mut []), (0, 0));
+        assert_eq!(session_time_span(&mut [at("2026-05-01T10:00:00Z")]), (0, 0));
+    }
+
+    #[test]
+    fn session_time_span_sorts_unordered_input() {
+        let mut times = vec![
+            at("2026-05-01T10:20:00Z"),
+            at("2026-05-01T10:00:00Z"),
+            at("2026-05-01T10:05:00Z"),
+        ];
+        let (span, active) = session_time_span(&mut times);
+        assert_eq!(span, 20);
+        // 5m + 15m, both <= 30 → 20 active.
+        assert_eq!(active, 20);
+    }
 
     #[test]
     fn daily_report_filters_and_groups_by_local_date() -> Result<()> {
@@ -999,6 +1451,180 @@ mod tests {
         assert_eq!(report.daily[0].totals.total_tokens, 10);
         assert_eq!(report.daily[0].model_breakdowns.len(), 1);
         Ok(())
+    }
+
+    #[test]
+    fn daily_monthly_reports_read_bucket_rows_without_events() -> Result<()> {
+        let fixture = ReportFixture::new()?;
+        fixture.insert_bucket(SeedBucket {
+            source: "codex",
+            model: "gpt-5",
+            hour_start: "2026-05-04T16:30:00Z",
+            project_hash: "project-a",
+            project_label: "Project A",
+            project_ref: Some("example/project-a"),
+            input_tokens: 5,
+            cache_creation_tokens: 2,
+            cache_read_tokens: 1,
+            output_tokens: 3,
+            reasoning_output_tokens: 4,
+            total_tokens: 999,
+            cost_with_cache_usd: 1.25,
+            pricing_status: "static",
+        })?;
+        let conn = fixture.store.open_connection()?;
+        let event_count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM usage_event", [], |row| row.get(0))?;
+        assert_eq!(event_count, 0, "test must prove bucket read model");
+        drop(conn);
+
+        let filter = ReportFilter {
+            since: Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap()),
+            until: Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap()),
+            order: SortOrder::Asc,
+            timezone: ReportTimezone::Fixed(FixedOffset::east_opt(8 * 3600).unwrap()),
+            locale: "en-US".to_string(),
+            source: None,
+            project: None,
+            breakdown: true,
+        };
+        let daily = load_daily_report(&fixture.store, &filter)?;
+        assert_eq!(daily.daily.len(), 1);
+        assert_eq!(daily.daily[0].date, "2026-05-05");
+        assert_eq!(daily.daily[0].totals.total_tokens, 15);
+        assert_eq!(daily.daily[0].model_breakdowns.len(), 1);
+        assert_eq!(daily.totals.estimated_cost_usd, 1.25);
+
+        let monthly = load_monthly_report(&fixture.store, &filter)?;
+        assert_eq!(monthly.monthly.len(), 1);
+        assert_eq!(monthly.monthly[0].month, "2026-05");
+        assert_eq!(monthly.totals.total_tokens, 15);
+
+        let by_source = load_daily_reports_by_source(&fixture.store, &filter)?;
+        assert_eq!(by_source.len(), 1);
+        assert_eq!(by_source[0].0, SourceKind::Codex);
+        assert_eq!(by_source[0].1.totals.total_tokens, 15);
+
+        let projects = load_daily_project_report(&fixture.store, &filter)?;
+        let project_rows = projects
+            .projects
+            .get("example/project-a")
+            .expect("bucket project row should be grouped by project_ref");
+        assert_eq!(project_rows.len(), 1);
+        assert_eq!(project_rows[0].totals.total_tokens, 15);
+        Ok(())
+    }
+
+    #[test]
+    fn daily_monthly_reports_ignore_large_event_backlog_without_project_filter() -> Result<()> {
+        let fixture = ReportFixture::new()?;
+        fixture.insert_event_backlog("2026-05-04T16:30:00Z", 100_000)?;
+        fixture.insert_bucket(SeedBucket {
+            source: "codex",
+            model: "gpt-5",
+            hour_start: "2026-05-04T16:30:00Z",
+            project_hash: "project-a",
+            project_label: "Project A",
+            project_ref: Some("example/project-a"),
+            input_tokens: 5,
+            cache_creation_tokens: 2,
+            cache_read_tokens: 1,
+            output_tokens: 3,
+            reasoning_output_tokens: 4,
+            total_tokens: 15,
+            cost_with_cache_usd: 1.25,
+            pricing_status: "static",
+        })?;
+
+        let filter = ReportFilter {
+            since: Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap()),
+            until: Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap()),
+            order: SortOrder::Asc,
+            timezone: ReportTimezone::Fixed(FixedOffset::east_opt(8 * 3600).unwrap()),
+            locale: "en-US".to_string(),
+            source: None,
+            project: None,
+            breakdown: false,
+        };
+
+        let daily = load_daily_report(&fixture.store, &filter)?;
+        assert_eq!(daily.totals.total_tokens, 15);
+        let monthly = load_monthly_report(&fixture.store, &filter)?;
+        assert_eq!(monthly.totals.total_tokens, 15);
+
+        let project_filter = ReportFilter {
+            project: Some("Backlog".to_string()),
+            ..filter
+        };
+        let project_daily = load_daily_report(&fixture.store, &project_filter)?;
+        assert_eq!(
+            project_daily.totals.total_tokens, 100_000,
+            "project fuzzy filters must retain event-detail semantics"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn daily_report_fixed_offset_filter_includes_exact_local_day_from_buckets() -> Result<()> {
+        let fixture = ReportFixture::new()?;
+        for (hour_start, project_hash) in [
+            ("2026-03-07T15:30:00Z", "outside-before"),
+            ("2026-03-07T16:00:00Z", "inside-start"),
+            ("2026-03-08T15:30:00Z", "inside-end"),
+            ("2026-03-08T16:00:00Z", "outside-after"),
+        ] {
+            fixture.insert_bucket(SeedBucket {
+                source: "codex",
+                model: "gpt-5",
+                hour_start,
+                project_hash,
+                project_label: project_hash,
+                project_ref: None,
+                input_tokens: 5,
+                cache_creation_tokens: 0,
+                cache_read_tokens: 0,
+                output_tokens: 0,
+                reasoning_output_tokens: 0,
+                total_tokens: 5,
+                cost_with_cache_usd: 0.0,
+                pricing_status: "static",
+            })?;
+        }
+
+        let report = load_daily_report(
+            &fixture.store,
+            &ReportFilter {
+                since: Some(NaiveDate::from_ymd_opt(2026, 3, 8).unwrap()),
+                until: Some(NaiveDate::from_ymd_opt(2026, 3, 8).unwrap()),
+                order: SortOrder::Asc,
+                timezone: ReportTimezone::Fixed(FixedOffset::east_opt(8 * 3600).unwrap()),
+                locale: "en-US".to_string(),
+                source: None,
+                project: None,
+                breakdown: false,
+            },
+        )?;
+
+        assert_eq!(report.daily.len(), 1);
+        assert_eq!(report.daily[0].date, "2026-03-08");
+        assert_eq!(report.daily[0].totals.total_tokens, 10);
+        Ok(())
+    }
+
+    #[test]
+    fn local_report_timezone_uses_current_fixed_offset_snapshot() {
+        let current_offset = Local::now().offset().fix();
+        let historical = DateTime::parse_from_rfc3339("2026-11-01T08:30:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        let local = apply_timezone(historical, &ReportTimezone::Local);
+
+        assert_eq!(
+            *local.offset(),
+            current_offset,
+            "`local` report rendering must use the same current fixed offset as SQL grouping"
+        );
     }
 
     #[test]
@@ -1042,17 +1668,7 @@ mod tests {
         fn new() -> Result<Self> {
             let temp = TempDir::new()?;
             let root_dir = temp.path().join(".llmusage");
-            let bin_dir = root_dir.join("bin");
-            let paths = AppPaths {
-                db_path: root_dir.join("llmusage.db"),
-                hook_cmd_path: bin_dir.join("llmusage-hook.cmd"),
-                hook_sh_path: bin_dir.join("llmusage-hook.sh"),
-                lock_path: root_dir.join("worker.lock"),
-                backups_dir: root_dir.join("backups"),
-                exports_dir: root_dir.join("exports"),
-                root_dir,
-                bin_dir,
-            };
+            let paths = AppPaths::with_root(root_dir)?;
             let store = Store::new(&paths)?;
             store.bootstrap()?;
             Ok(Self { _temp: temp, store })
@@ -1083,6 +1699,92 @@ mod tests {
             )?;
             Ok(())
         }
+
+        fn insert_event_backlog(&self, event_at: &str, count: i64) -> Result<()> {
+            let conn = self.store.open_connection()?;
+            conn.execute(
+                r#"
+                WITH digits(d) AS (
+                    VALUES (0), (1), (2), (3), (4), (5), (6), (7), (8), (9)
+                ),
+                seq(n) AS (
+                    SELECT d0.d
+                         + d1.d * 10
+                         + d2.d * 100
+                         + d3.d * 1000
+                         + d4.d * 10000
+                         + 1
+                    FROM digits d0
+                    CROSS JOIN digits d1
+                    CROSS JOIN digits d2
+                    CROSS JOIN digits d3
+                    CROSS JOIN digits d4
+                )
+                INSERT INTO usage_event(
+                    event_key, source, model, event_at, hour_start,
+                    input_tokens, cache_read_tokens, output_tokens, reasoning_output_tokens, total_tokens,
+                    pricing_status,
+                    project_hash, project_label, project_ref, path_hash, session_id, session_label, source_path_hash, created_at
+                )
+                SELECT
+                    'codex:backlog:' || n,
+                    'codex',
+                    'gpt-5',
+                    ?1,
+                    ?1,
+                    1,
+                    0,
+                    0,
+                    0,
+                    1,
+                    'unpriced',
+                    'project-backlog',
+                    'Backlog',
+                    NULL,
+                    'backlog-path',
+                    'backlog-session',
+                    NULL,
+                    'backlog-source',
+                    ?1
+                FROM seq
+                WHERE n <= ?2
+                "#,
+                params![event_at, count],
+            )?;
+            Ok(())
+        }
+
+        fn insert_bucket(&self, bucket: SeedBucket<'_>) -> Result<()> {
+            let conn = self.store.open_connection()?;
+            conn.execute(
+                r#"
+                INSERT INTO usage_bucket_30m(
+                    source, model, hour_start, project_hash, project_label, project_ref,
+                    input_tokens, cache_read_tokens, cache_creation_tokens,
+                    output_tokens, reasoning_output_tokens, total_tokens,
+                    cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source,
+                    event_count, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13, ?14, NULL, 1, ?3)
+                "#,
+                params![
+                    bucket.source,
+                    bucket.model,
+                    bucket.hour_start,
+                    bucket.project_hash,
+                    bucket.project_label,
+                    bucket.project_ref,
+                    bucket.input_tokens,
+                    bucket.cache_read_tokens,
+                    bucket.cache_creation_tokens,
+                    bucket.output_tokens,
+                    bucket.reasoning_output_tokens,
+                    bucket.total_tokens,
+                    bucket.cost_with_cache_usd,
+                    bucket.pricing_status,
+                ],
+            )?;
+            Ok(())
+        }
     }
 
     struct SeedEvent<'a> {
@@ -1094,5 +1796,22 @@ mod tests {
         project_hash: &'a str,
         project_label: &'a str,
         session_id: &'a str,
+    }
+
+    struct SeedBucket<'a> {
+        source: &'a str,
+        model: &'a str,
+        hour_start: &'a str,
+        project_hash: &'a str,
+        project_label: &'a str,
+        project_ref: Option<&'a str>,
+        input_tokens: i64,
+        cache_creation_tokens: i64,
+        cache_read_tokens: i64,
+        output_tokens: i64,
+        reasoning_output_tokens: i64,
+        total_tokens: i64,
+        cost_with_cache_usd: f64,
+        pricing_status: &'a str,
     }
 }

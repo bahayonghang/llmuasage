@@ -1,5 +1,6 @@
 use std::{
     io::{IsTerminal, Write},
+    path::PathBuf,
     time::{Duration, Instant},
 };
 
@@ -13,8 +14,8 @@ use crate::{
     app::AppContext,
     models::SourceKind,
     parsers::{SourceSyncStats, SyncEvent, SyncSummaryEvent, driver},
-    sources,
-    store::{HolderKind, MigrationProgressEvent, SourceFileInventory, SourceSyncStatus, Store},
+    registry,
+    store::{HolderKind, MigrationProgressEvent, SourceSyncStatus, Store},
 };
 
 #[derive(Debug, Clone)]
@@ -31,6 +32,7 @@ pub struct SyncRunOptions {
     pub source: Option<SourceKind>,
     pub recent_days: Option<u32>,
     pub parallelism: Option<usize>,
+    pub provider_map: Option<PathBuf>,
     pub json_events: bool,
     pub allow_lossy_rebuild: bool,
 }
@@ -85,6 +87,7 @@ async fn run_with_human_events(
     progress.render(&SyncEvent::LockWaiting { timeout_ms: 30_000 });
     let lock_started = Instant::now();
     let lock = store.acquire_worker_lock_with(Duration::from_secs(30), HolderKind::Cli)?;
+    let heartbeat = lock.start_default_heartbeat();
     let lock_wait_ms = lock_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
     progress.render(&SyncEvent::LockAcquired {
         wait_ms: lock_wait_ms,
@@ -130,6 +133,7 @@ async fn run_with_human_events(
     drop(tx);
     let _ = reporter.await;
     let summary = summary_result?;
+    drop(heartbeat);
     drop(lock);
     print_summary(&summary, options);
 
@@ -180,6 +184,7 @@ async fn run_with_json_events(
             .await?;
         let lock_started = Instant::now();
         let lock = store.acquire_worker_lock_with(Duration::from_secs(30), HolderKind::Cli)?;
+        let heartbeat = lock.start_default_heartbeat();
         let lock_wait_ms = lock_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
         tx.send(SyncEvent::LockAcquired {
             wait_ms: lock_wait_ms,
@@ -208,6 +213,7 @@ async fn run_with_json_events(
             },
         )
         .await?;
+        drop(heartbeat);
         drop(lock);
         Ok::<SyncSummary, anyhow::Error>(summary)
     }
@@ -244,10 +250,11 @@ fn print_summary(summary: &SyncSummary, options: &SyncRunOptions) {
     }
     for item in &summary.sources {
         println!(
-            "- {}: files={} changed={} seen={} inserted_delta={} stored_events={}",
+            "- {}: files={} changed={} skipped={} seen={} committed={} stored_events={}",
             item.source,
             item.files_processed,
             item.changed_files,
+            item.skipped_files,
             item.events_seen,
             item.events_inserted,
             item.stored_events
@@ -261,6 +268,44 @@ fn print_summary(summary: &SyncSummary, options: &SyncRunOptions) {
 
 pub async fn run_once(_app: &AppContext, store: &Store, lock_wait_ms: u64) -> Result<SyncSummary> {
     run_once_with_options(_app, store, lock_wait_ms, &SyncRunOptions::default(), None).await
+}
+
+pub async fn run_store_once_with_options(
+    store: &Store,
+    options: &SyncRunOptions,
+) -> Result<SyncSummary> {
+    store.bootstrap()?;
+    let lock_started = Instant::now();
+    let lock = store.acquire_worker_lock_with(Duration::from_secs(30), HolderKind::Cli)?;
+    let heartbeat = lock.start_default_heartbeat();
+    let lock_wait_ms = lock_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+    store
+        .run_log()
+        .recover_running_runs(&["sync", "hook-run"])?;
+    let command_name = if options.rebuild {
+        "sync --rebuild"
+    } else {
+        "sync"
+    };
+    let cancel = CancellationToken::new();
+    let summary = super::run_tracked(
+        store,
+        command_name,
+        async { run_once_locked(store, lock_wait_ms, options, None, &cancel).await },
+        |item| {
+            Some(format!(
+                "sources={} seen={} inserted_delta={} stored_events={}",
+                item.sources.len(),
+                item.total_seen,
+                item.total_inserted,
+                item.stored_events
+            ))
+        },
+    )
+    .await?;
+    drop(heartbeat);
+    drop(lock);
+    Ok(summary)
 }
 
 pub async fn run_once_with_options(
@@ -289,6 +334,16 @@ pub async fn run_once_with_cancel(
     sender: Option<&mut mpsc::Sender<SyncEvent>>,
     cancel: &CancellationToken,
 ) -> Result<SyncSummary> {
+    run_once_locked(store, lock_wait_ms, options, sender, cancel).await
+}
+
+async fn run_once_locked(
+    store: &Store,
+    lock_wait_ms: u64,
+    options: &SyncRunOptions,
+    sender: Option<&mut mpsc::Sender<SyncEvent>>,
+    cancel: &CancellationToken,
+) -> Result<SyncSummary> {
     /*
      * ========================================================================
      * 步骤2：执行三阶段同步流水线
@@ -310,8 +365,11 @@ pub async fn run_once_with_cancel(
         .map(|value| value.get().min(4))
         .unwrap_or(1);
     let parallelism = options.parallelism.unwrap_or(default_parallelism).max(1);
-    let mut writer = store.begin_sync_run()?;
-    let parsers = sources::registered_parsers()
+    let provider_index = crate::domain::provider_map::ProviderIndex::resolve_for_sync(
+        options.provider_map.as_deref(),
+    )?;
+    let mut writer = store.begin_sync_run_with_provider_index(provider_index)?;
+    let parsers = registry::registered_parsers()
         .into_iter()
         .filter(|parser| {
             options
@@ -319,7 +377,20 @@ pub async fn run_once_with_cancel(
                 .is_none_or(|source| parser.source() == source)
         })
         .collect::<Vec<_>>();
-    let source_file_inventories = collect_source_file_inventories(&parsers);
+    let parserless_sources = match options.source {
+        Some(source)
+            if registry::source_descriptor(source)
+                .is_some_and(|descriptor| !descriptor.capabilities.parser) =>
+        {
+            vec![source]
+        }
+        Some(_) => Vec::new(),
+        None => registry::registered_source_descriptors()
+            .iter()
+            .filter(|descriptor| !descriptor.capabilities.parser)
+            .map(|descriptor| descriptor.kind)
+            .collect(),
+    };
     let sources = driver::drive_with_events(driver::DriveContext {
         parsers: &parsers,
         store,
@@ -327,7 +398,6 @@ pub async fn run_once_with_cancel(
         parallelism,
         lock_wait_ms,
         recent_days: options.recent_days,
-        source_file_inventories,
         sender,
         cancel,
     })
@@ -357,6 +427,29 @@ pub async fn run_once_with_cancel(
         });
         source_stats.push(source);
     }
+    for source in parserless_sources {
+        let stored_events = stored_events_for_source(store, source)?;
+        sync_statuses.push(SourceSyncStatus {
+            source: source.as_str().to_string(),
+            files_processed: 0,
+            changed_files: 0,
+            bytes_scanned: 0,
+            events_seen: 0,
+            events_replayed: 0,
+            events_inserted: 0,
+            stored_events: stored_events as i64,
+            parse_ms: 0,
+            write_ms: 0,
+            lock_wait_ms: lock_wait_ms as i64,
+            updated_at: crate::util::now_utc(),
+        });
+        source_stats.push(SourceSyncStats {
+            source,
+            stored_events,
+            lock_wait_ms,
+            ..SourceSyncStats::default()
+        });
+    }
     writer.finish_sync_run()?;
     store
         .sync_status()
@@ -371,71 +464,6 @@ pub async fn run_once_with_cancel(
         total_inserted,
         stored_events,
     })
-}
-
-fn collect_source_file_inventories(
-    parsers: &[Box<dyn crate::parsers::SourceParser>],
-) -> Vec<SourceFileInventory> {
-    parsers
-        .iter()
-        .filter_map(|parser| {
-            let source = parser.source();
-            enumerate_source_files(source)
-                .map(|file_paths| SourceFileInventory { source, file_paths })
-        })
-        .collect()
-}
-
-fn enumerate_source_files(source: SourceKind) -> Option<Vec<String>> {
-    let home_dir = crate::util::resolve_home_dir();
-    let paths = match source {
-        SourceKind::Codex => {
-            let codex_home = std::env::var("CODEX_HOME")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|_| home_dir.join(".codex"));
-            list_matching_files(codex_home.join("sessions"), |name, _path| {
-                name.starts_with("rollout-") && name.ends_with(".jsonl")
-            })
-        }
-        SourceKind::Claude => {
-            list_matching_files(home_dir.join(".claude").join("projects"), |name, _path| {
-                name.ends_with(".jsonl")
-            })
-        }
-        SourceKind::Gemini => {
-            list_matching_files(home_dir.join(".gemini").join("tmp"), |name, path| {
-                name.starts_with("session-")
-                    && name.ends_with(".json")
-                    && path
-                        .parent()
-                        .and_then(|parent| parent.file_name())
-                        .and_then(|value| value.to_str())
-                        == Some("chats")
-            })
-        }
-        SourceKind::Opencode => return None,
-    };
-    Some(paths)
-}
-
-fn list_matching_files(
-    root: std::path::PathBuf,
-    predicate: impl Fn(&str, &std::path::Path) -> bool,
-) -> Vec<String> {
-    let mut files = walkdir::WalkDir::new(root)
-        .into_iter()
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| entry.file_type().is_file())
-        .map(|entry| entry.into_path())
-        .filter(|path| {
-            path.file_name()
-                .and_then(|value| value.to_str())
-                .is_some_and(|name| predicate(name, path))
-        })
-        .map(|path| path.to_string_lossy().to_string())
-        .collect::<Vec<_>>();
-    files.sort();
-    files
 }
 
 fn stored_event_count(store: &Store, source: Option<SourceKind>) -> Result<usize> {
@@ -503,7 +531,7 @@ Restore the source files or pass --allow-lossy-rebuild to explicitly accept clea
 fn rebuild_guard_sources(source: Option<SourceKind>) -> Vec<SourceKind> {
     source.map_or_else(
         || {
-            sources::registered_parsers()
+            registry::registered_parsers()
                 .into_iter()
                 .map(|parser| parser.source())
                 .collect()
@@ -591,9 +619,10 @@ fn human_progress_line(event: &SyncEvent) -> Option<String> {
             source_label(*source)
         )),
         SyncEvent::SourceFinished { source, stats } => Some(format!(
-            "{}: 完成，文件 {} 个，导入 {} 条",
+            "{}: 完成，文件 {} 个，跳过 {} 个，提交 {} 条",
             source_label(*source),
             stats.files_processed,
+            stats.skipped_files,
             stats.events_inserted
         )),
         SyncEvent::Failed { error } => Some(format!("同步失败：{error}")),
@@ -609,6 +638,6 @@ fn source_label(source: SourceKind) -> &'static str {
         SourceKind::Codex => "Codex",
         SourceKind::Claude => "Claude",
         SourceKind::Opencode => "OpenCode",
-        SourceKind::Gemini => "Gemini",
+        SourceKind::Antigravity => "Antigravity",
     }
 }

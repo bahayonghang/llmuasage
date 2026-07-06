@@ -1,4 +1,4 @@
-import { escapeHtml, formatNumber, formatPercent, ratio } from '../data.js';
+import { escapeHtml, formatNumber, formatPercent, formatTokenAmount, ratio } from '../data.js';
 
 const logger = window.console;
 
@@ -19,19 +19,29 @@ export function renderModels(context, state = {}) {
   const visibleRows = expanded ? modelRows : modelRows.slice(0, 8);
   const max = Number(modelRows[0]?.total_tokens || 1);
 
+  if (!visibleRows.length) {
+    document.getElementById('models-bars').innerHTML = `
+      <div class="empty-state compact">暂无模型用量数据。</div>
+    `;
+    document.getElementById('models-table').innerHTML = '';
+    logger.info('完成模型分布区渲染');
+    return;
+  }
+
   // 1.1 填充模型用量条形图
   const barHtml = visibleRows
     .map((row) => {
       const total_tokens = Number(row.total_tokens || 0);
       const widthPct = ratio(total_tokens, max);
       const label = row.model || '--';
-      const value = formatNumber(total_tokens);
+      const value = formatTokenAmount(total_tokens);
+      const exactValue = `${formatNumber(total_tokens)} Token`;
 
       return `
         <div class="bar-row">
           <div class="name">${escapeHtml(label)}</div>
           <div class="bar-track"><div class="bar-fill" style="width: ${widthPct}%"></div></div>
-          <div class="num">${escapeHtml(value)}</div>
+          <div class="num" title="${escapeHtml(exactValue)}">${escapeHtml(value)}</div>
         </div>
       `;
     })
@@ -58,7 +68,7 @@ export function renderModels(context, state = {}) {
       return `
         <tr>
           <td class="name-cell">${escapeHtml(row.model || '--')}</td>
-          <td class="r">${formatNumber(total_tokens)}</td>
+          <td class="r" title="${escapeHtml(`${formatNumber(total_tokens)} Token`)}">${escapeHtml(formatTokenAmount(total_tokens))}</td>
           <td class="r"><span class="${inputClass}">${inputPct}</span></td>
           <td class="r"><span class="${outputClass}">${outputPct}</span></td>
           <td class="r"><span class="${cachedClass}">${cachedPct}</span></td>

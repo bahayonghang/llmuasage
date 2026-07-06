@@ -2,21 +2,26 @@ use std::{future::Future, path::PathBuf};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use tracing::{error, info};
 
 use crate::{app::AppContext, models::SourceKind};
 
 pub mod blocks;
+pub mod codex_tracer;
 pub mod daily;
 pub mod dash;
 pub mod diagnostics;
 pub mod doctor;
 pub mod export;
+pub mod help;
 pub mod hook_run;
 pub mod init;
+pub mod logs;
 pub mod monthly;
 pub mod report_args;
 pub mod serve;
 pub mod session;
+pub mod source_status;
 pub mod status;
 pub mod statusline;
 pub mod sync;
@@ -68,11 +73,17 @@ pub enum Commands {
         /// still scans existing cursors, but this enables RecentReady signalling.
         #[arg(long)]
         recent_days: Option<u32>,
+        /// CCR provider activation JSONL used to attribute relay provider labels.
+        #[arg(long, value_name = "PATH")]
+        provider_map: Option<PathBuf>,
         /// Emit sync lifecycle events as NDJSON on stdout.
         #[arg(long)]
         json_events: bool,
     },
     Status,
+    /// Show parser-backed source and monitor-only platform status.
+    #[command(name = "source-status")]
+    SourceStatus,
     Diagnostics {
         /// Write the diagnostics JSON dump to a file instead of stdout.
         #[arg(long)]
@@ -96,6 +107,21 @@ pub enum Commands {
         #[arg(long, value_name = "PATH")]
         refresh_pricing: Option<PathBuf>,
     },
+    /// Query local structured runtime logs and recent run records.
+    Logs {
+        /// Number of recent log entries and run_log records to return.
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+        /// Minimum tracing level to include.
+        #[arg(long, value_parser = ["error", "warn", "info", "debug", "trace"])]
+        level: Option<String>,
+        /// Restrict to one tracked command label, such as `sync`.
+        #[arg(long)]
+        command: Option<String>,
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
     Serve {
         #[arg(long)]
         port: Option<u16>,
@@ -112,6 +138,19 @@ pub enum Commands {
     Uninstall {
         #[arg(long)]
         purge: bool,
+    },
+    /// Codex-specific usage tracker with detailed token accounting and thread tracking.
+    #[command(name = "codex-tracer")]
+    CodexTracer {
+        /// Port to listen on (default: 8765)
+        #[arg(long, default_value_t = 8765)]
+        port: u16,
+        /// Don't automatically open browser
+        #[arg(long)]
+        no_open: bool,
+        /// Rebuild database from JSONL files
+        #[arg(long)]
+        rebuild: bool,
     },
     #[command(name = "hook-run", hide = true)]
     HookRun {
@@ -143,12 +182,20 @@ where
     S: FnOnce(&T) -> Option<String>,
 {
     let run_id = store.run_log().record_run_start(command)?;
+    info!(command, run_id, "run started");
     match body.await {
         Ok(value) => {
             let summary = success_summary(&value);
             store
                 .run_log()
                 .finish_run(run_id, "success", summary.as_deref(), None)?;
+            info!(
+                command,
+                run_id,
+                status = "success",
+                summary = summary.as_deref().unwrap_or(""),
+                "run finished"
+            );
             Ok(value)
         }
         Err(err) => {
@@ -161,6 +208,13 @@ where
                     "记录 {command} 失败 run_log 时也失败: {finish_err}"
                 )));
             }
+            error!(
+                command,
+                run_id,
+                status = "failed",
+                error = %err,
+                "run failed"
+            );
             Err(err)
         }
     }
@@ -180,6 +234,7 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
             allow_lossy_rebuild,
             source,
             recent_days,
+            provider_map,
             json_events,
         }) => {
             sync::run_with_options(
@@ -189,6 +244,7 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
                     source,
                     recent_days,
                     parallelism: None,
+                    provider_map,
                     json_events,
                     allow_lossy_rebuild,
                 },
@@ -196,6 +252,7 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
             .await
         }
         Some(Commands::Status) => status::run(&app).await,
+        Some(Commands::SourceStatus) => source_status::run(&app).await,
         Some(Commands::Diagnostics {
             out,
             forget_file,
@@ -205,6 +262,12 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
             json,
             refresh_pricing,
         }) => doctor::run(&app, json, refresh_pricing).await,
+        Some(Commands::Logs {
+            limit,
+            level,
+            command,
+            json,
+        }) => logs::run(&app, limit, level, command, json).await,
         Some(Commands::Serve { port }) => serve::run(&app, port).await,
         Some(Commands::Dash) => dash::run(&app, false).await,
         Some(Commands::Tui) => dash::run(&app, true).await,
@@ -212,10 +275,54 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
             ExportCommand::Html { out } => export::run_html(&app, out).await,
         },
         Some(Commands::Uninstall { purge }) => uninstall::run(&app, purge).await,
+        Some(Commands::CodexTracer {
+            port,
+            no_open,
+            rebuild,
+        }) => codex_tracer::run(&app, port, !no_open, rebuild).await,
         Some(Commands::HookRun {
             source,
             trigger,
             auto,
         }) => hook_run::run(&app, source, &trigger, auto).await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::{CommandFactory, Parser};
+
+    use super::{Cli, Commands};
+
+    #[test]
+    fn source_filter_accepts_antigravity_and_rejects_gemini() {
+        let cli = Cli::try_parse_from(["llmusage", "sync", "--source", "antigravity"])
+            .expect("antigravity should be accepted");
+        match cli.command {
+            Some(Commands::Sync { source, .. }) => {
+                assert_eq!(source.map(|value| value.as_str()), Some("antigravity"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let err = Cli::try_parse_from(["llmusage", "sync", "--source", "gemini"])
+            .expect_err("gemini source id should be rejected");
+        assert!(err.to_string().contains("antigravity"));
+    }
+
+    #[test]
+    fn source_status_parses_from_args() {
+        let cli =
+            Cli::try_parse_from(["llmusage", "source-status"]).expect("source-status should parse");
+        assert!(matches!(cli.command, Some(Commands::SourceStatus)));
+    }
+
+    #[test]
+    fn source_status_visible_in_help_text() {
+        let help = Cli::command().render_help().to_string();
+        assert!(
+            help.contains("source-status"),
+            "expected `source-status` in help output, got: {help}"
+        );
     }
 }

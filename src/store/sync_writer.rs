@@ -4,6 +4,7 @@ use std::{
 };
 
 use crate::error::Result;
+use rusqlite::{Transaction, TransactionBehavior};
 use tracing::info;
 
 use super::{
@@ -11,6 +12,7 @@ use super::{
     SyncShard,
 };
 use crate::{
+    domain::provider_map::ProviderIndex,
     error::LlmusageError,
     models::{ProjectInfo, SourceKind, UsageEvent, UsageTokens, UsageToolCall, UsageTurn},
     query::{
@@ -27,8 +29,39 @@ use crate::{
 /// each parser would have to reintroduce its own chunking constant.
 const EVENT_WRITE_BATCH_SIZE: usize = 1000;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShardCommitFailpoint {
+    Reset,
+    Events,
+    Cursor,
+    SourceFile,
+    Raw,
+    BehaviorReset,
+    Turns,
+    ToolCalls,
+}
+
+fn fail_shard_commit_at(
+    active: Option<ShardCommitFailpoint>,
+    target: ShardCommitFailpoint,
+) -> Result<()> {
+    if active == Some(target) {
+        return Err(LlmusageError::ConfigInvalid {
+            detail: format!("test failpoint during shard commit: {target:?}"),
+        });
+    }
+    Ok(())
+}
+
 impl Store {
     pub fn begin_sync_run(&self) -> Result<SyncRunWriter> {
+        self.begin_sync_run_with_provider_index(None)
+    }
+
+    pub fn begin_sync_run_with_provider_index(
+        &self,
+        provider_index: Option<ProviderIndex>,
+    ) -> Result<SyncRunWriter> {
         /*
          * ========================================================================
          * 步骤3：建立单写入端
@@ -48,6 +81,7 @@ impl Store {
             run_started_at: crate::util::now_utc_millis(),
             raw_archive_enabled,
             pricing_catalog,
+            provider_index,
         })
     }
 }
@@ -94,8 +128,8 @@ impl Store {
 }
 
 impl SyncRunWriter {
-    fn reset_file_events_batch(
-        &mut self,
+    fn reset_file_events_batch_tx(
+        tx: &Transaction<'_>,
         source: SourceKind,
         path_hashes: &[String],
     ) -> Result<()> {
@@ -114,13 +148,13 @@ impl SyncRunWriter {
          */
         info!(source = %source, count = path_hashes.len(), "开始清理重放旧事件");
 
-        // 4.1 在同一事务里扣减 bucket 并删除旧 event
+        // 4.1 在 shard 事务里扣减 bucket 并删除旧 event
         let mut unique = HashSet::new();
-        let tx = self.conn.transaction()?;
         {
             let mut aggregate_stmt = tx.prepare_cached(
                 r#"
                 SELECT
+                    COALESCE(provider_label, ''),
                     model,
                     hour_start,
                     COALESCE(project_hash, ''),
@@ -135,30 +169,38 @@ impl SyncRunWriter {
                     COUNT(*)
                 FROM usage_event
                 WHERE source = ?1 AND source_path_hash = ?2
-                GROUP BY model, hour_start, COALESCE(project_hash, '')
+                GROUP BY COALESCE(provider_label, ''), model, hour_start, COALESCE(project_hash, '')
                 "#,
             )?;
             let mut update_bucket_stmt = tx.prepare_cached(
                 r#"
                 UPDATE usage_bucket_30m
                 SET
-                    input_tokens = input_tokens - ?5,
-                    cache_read_tokens = cache_read_tokens - ?6,
-                    cache_creation_tokens = cache_creation_tokens - ?7,
-                    output_tokens = output_tokens - ?8,
-                    reasoning_output_tokens = reasoning_output_tokens - ?9,
-                    total_tokens = total_tokens - ?10,
-                    cost_with_cache_usd = cost_with_cache_usd - ?11,
-                    cost_without_cache_usd = cost_without_cache_usd - ?12,
-                    event_count = event_count - ?13,
-                    updated_at = ?14
-                WHERE source = ?1 AND model = ?2 AND hour_start = ?3 AND project_hash = ?4
+                    input_tokens = input_tokens - ?6,
+                    cache_read_tokens = cache_read_tokens - ?7,
+                    cache_creation_tokens = cache_creation_tokens - ?8,
+                    output_tokens = output_tokens - ?9,
+                    reasoning_output_tokens = reasoning_output_tokens - ?10,
+                    total_tokens = total_tokens - ?11,
+                    cost_with_cache_usd = cost_with_cache_usd - ?12,
+                    cost_without_cache_usd = cost_without_cache_usd - ?13,
+                    event_count = event_count - ?14,
+                    updated_at = ?15
+                WHERE source = ?1
+                  AND provider_label = ?2
+                  AND model = ?3
+                  AND hour_start = ?4
+                  AND project_hash = ?5
                 "#,
             )?;
             let mut delete_zero_stmt = tx.prepare_cached(
                 r#"
                 DELETE FROM usage_bucket_30m
-                WHERE source = ?1 AND model = ?2 AND hour_start = ?3 AND project_hash = ?4
+                WHERE source = ?1
+                  AND provider_label = ?2
+                  AND model = ?3
+                  AND hour_start = ?4
+                  AND project_hash = ?5
                   AND input_tokens <= 0
                   AND cache_read_tokens <= 0
                   AND cache_creation_tokens <= 0
@@ -188,29 +230,31 @@ impl SyncRunWriter {
                             row.get::<_, String>(0)?,
                             row.get::<_, String>(1)?,
                             row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
                             UsageTokens {
-                                input_tokens: row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
+                                input_tokens: row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
                                 cache_read_tokens: row
-                                    .get::<_, Option<i64>>(4)?
-                                    .unwrap_or_default(),
-                                cache_creation_tokens: row
                                     .get::<_, Option<i64>>(5)?
                                     .unwrap_or_default(),
-                                output_tokens: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
-                                reasoning_output_tokens: row
-                                    .get::<_, Option<i64>>(7)?
+                                cache_creation_tokens: row
+                                    .get::<_, Option<i64>>(6)?
                                     .unwrap_or_default(),
-                                total_tokens: row.get::<_, Option<i64>>(8)?.unwrap_or_default(),
+                                output_tokens: row.get::<_, Option<i64>>(7)?.unwrap_or_default(),
+                                reasoning_output_tokens: row
+                                    .get::<_, Option<i64>>(8)?
+                                    .unwrap_or_default(),
+                                total_tokens: row.get::<_, Option<i64>>(9)?.unwrap_or_default(),
                             },
-                            row.get::<_, Option<f64>>(9)?.unwrap_or_default(),
                             row.get::<_, Option<f64>>(10)?.unwrap_or_default(),
-                            row.get::<_, Option<i64>>(11)?.unwrap_or_default(),
+                            row.get::<_, Option<f64>>(11)?.unwrap_or_default(),
+                            row.get::<_, Option<i64>>(12)?.unwrap_or_default(),
                         ))
                     },
                 )?;
                 let aggregates = rows.collect::<rusqlite::Result<Vec<_>>>()?;
 
                 for (
+                    provider_label,
                     model,
                     hour_start,
                     project_hash,
@@ -222,6 +266,7 @@ impl SyncRunWriter {
                 {
                     update_bucket_stmt.execute(rusqlite::params![
                         source.as_str(),
+                        &provider_label,
                         &model,
                         &hour_start,
                         &project_hash,
@@ -238,12 +283,13 @@ impl SyncRunWriter {
                     ])?;
                     let deleted_empty_bucket = delete_zero_stmt.execute(rusqlite::params![
                         source.as_str(),
+                        &provider_label,
                         &model,
                         &hour_start,
                         &project_hash,
                     ])?;
                     if deleted_empty_bucket == 0 {
-                        touched_buckets.push((model, hour_start, project_hash));
+                        touched_buckets.push((provider_label, model, hour_start, project_hash));
                     }
                 }
 
@@ -251,19 +297,21 @@ impl SyncRunWriter {
             }
 
             refresh_bucket_pricing_after_reset_tx(
-                &tx,
+                tx,
                 source.as_str(),
                 &touched_buckets,
                 &updated_at,
             )?;
         }
-        tx.commit()?;
-
         info!(source = %source, "完成重放旧事件清理");
         Ok(())
     }
 
-    fn write_event_batch(&mut self, events: &[UsageEvent]) -> Result<usize> {
+    fn write_event_batch_tx(
+        tx: &Transaction<'_>,
+        pricing_catalog: &PricingCatalog,
+        events: &[UsageEvent],
+    ) -> Result<usize> {
         if events.is_empty() {
             return Ok(0);
         }
@@ -279,20 +327,19 @@ impl SyncRunWriter {
          */
         info!(batch = events.len(), "开始批量写入 usage_event");
 
-        // 5.1 在单事务中插入 event，并为新 event 做内存聚合
-        let tx = self.conn.transaction()?;
+        // 5.1 在 shard 事务中插入 event，并为新 event 做内存聚合
         let now = now_utc();
         let inserted = {
             let mut event_stmt = tx.prepare_cached(
                 r#"
                 INSERT OR IGNORE INTO usage_event(
-                    event_key, source, model, event_at, hour_start,
+                    event_key, source, provider_label, model, event_at, hour_start,
                     input_tokens, cache_read_tokens, cache_creation_tokens, output_tokens, reasoning_output_tokens, total_tokens,
                     cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source, pricing_rate,
                     project_hash, project_label, project_ref, path_hash,
                     session_id, session_label, source_path_hash,
                     created_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)
                 "#,
             )?;
             let mut projects = HashMap::new();
@@ -301,7 +348,7 @@ impl SyncRunWriter {
 
             for event in events {
                 let cost = pricing::compute_cost_with(
-                    &self.pricing_catalog,
+                    pricing_catalog,
                     event.source.as_str(),
                     &event.model,
                     pricing::CostTokens {
@@ -315,6 +362,7 @@ impl SyncRunWriter {
                 let changed = event_stmt.execute(rusqlite::params![
                     event.event_key,
                     event.source.as_str(),
+                    event.provider_label,
                     event.model,
                     event.event_at,
                     event.hour_start,
@@ -369,17 +417,19 @@ impl SyncRunWriter {
             drop(event_stmt);
 
             // 5.2 将项目维表和 30 分钟桶一次性刷入
-            flush_projects_tx(&tx, &projects)?;
-            flush_buckets_tx(&tx, &buckets)?;
+            flush_projects_tx(tx, &projects)?;
+            flush_buckets_tx(tx, &buckets)?;
             inserted
         };
-        tx.commit()?;
-
         info!(batch = events.len(), inserted, "完成批量写入 usage_event");
         Ok(inserted)
     }
 
-    fn write_cursor_batch(&mut self, source: SourceKind, cursors: &[FileCursor]) -> Result<()> {
+    fn write_cursor_batch_tx(
+        tx: &Transaction<'_>,
+        source: SourceKind,
+        cursors: &[FileCursor],
+    ) -> Result<()> {
         if cursors.is_empty() {
             return Ok(());
         }
@@ -395,8 +445,7 @@ impl SyncRunWriter {
          */
         info!(source = %source, count = cursors.len(), "开始批量刷新 cursor");
 
-        // 6.1 用单事务 upsert 本轮发生变化的 cursor
-        let tx = self.conn.transaction()?;
+        // 6.1 用 shard 事务 upsert 本轮发生变化的 cursor
         {
             let mut stmt = tx.prepare_cached(
                 r#"
@@ -449,8 +498,6 @@ impl SyncRunWriter {
                 ])?;
             }
         }
-        tx.commit()?;
-
         info!(source = %source, "完成批量刷新 cursor");
         Ok(())
     }
@@ -461,6 +508,23 @@ impl SyncRunWriter {
     }
 
     pub fn commit_shard(&mut self, shard: SyncShard) -> Result<ShardCommitStats> {
+        self.commit_shard_inner(shard, None)
+    }
+
+    #[cfg(test)]
+    fn commit_shard_with_failpoint(
+        &mut self,
+        shard: SyncShard,
+        failpoint: ShardCommitFailpoint,
+    ) -> Result<ShardCommitStats> {
+        self.commit_shard_inner(shard, Some(failpoint))
+    }
+
+    fn commit_shard_inner(
+        &mut self,
+        mut shard: SyncShard,
+        failpoint: Option<ShardCommitFailpoint>,
+    ) -> Result<ShardCommitStats> {
         /*
          * ========================================================================
          * 步骤7：原子化提交单个 shard
@@ -485,40 +549,65 @@ impl SyncRunWriter {
         // 7.1 计时入口与累加器
         let started = Instant::now();
         let mut stats = ShardCommitStats::default();
+        if let Some(index) = self.provider_index.as_ref() {
+            for event in &mut shard.events {
+                event.provider_label = index.label_for(event.source, &event.event_at);
+            }
+        }
+        let pricing_catalog = &self.pricing_catalog;
+        let raw_archive_enabled = self.raw_archive_enabled;
+        let run_started_at = self.run_started_at.clone();
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
 
         // 7.2 先清旧 event，再批写 event，最后落 cursor —— 顺序由协议保证
         if !shard.reset_path_hashes.is_empty() {
-            self.reset_file_events_batch(shard.source, &shard.reset_path_hashes)?;
+            Self::reset_file_events_batch_tx(&tx, shard.source, &shard.reset_path_hashes)?;
         }
+        fail_shard_commit_at(failpoint, ShardCommitFailpoint::Reset)?;
         for batch in shard.events.chunks(EVENT_WRITE_BATCH_SIZE) {
-            stats.events_inserted += self.write_event_batch(batch)?;
+            stats.events_inserted += Self::write_event_batch_tx(&tx, pricing_catalog, batch)?;
         }
+        fail_shard_commit_at(failpoint, ShardCommitFailpoint::Events)?;
         if !shard.cursors.is_empty() {
-            self.write_cursor_batch(shard.source, &shard.cursors)?;
+            Self::write_cursor_batch_tx(&tx, shard.source, &shard.cursors)?;
         }
+        fail_shard_commit_at(failpoint, ShardCommitFailpoint::Cursor)?;
         // 7.3 把本轮看到的候选文件登记为 source_file.state='live'
         //     （D15 / ADR 0006）。OpenCode 等无 file 身份的源传空 vec。
         if !shard.seen_file_paths.is_empty() {
-            self.write_source_file_seen(shard.source, &shard.seen_file_paths)?;
+            Self::write_source_file_seen_tx(
+                &tx,
+                shard.source,
+                &shard.seen_file_paths,
+                &run_started_at,
+            )?;
         }
+        fail_shard_commit_at(failpoint, ShardCommitFailpoint::SourceFile)?;
         // 7.4 raw archive opt-in（D11 / F1.5）：开关关时丢弃 raw_records，
         //     避免 parser 端必须同步判定开关；开关开时与 event 共享 commit
         //     周期落库（INSERT OR IGNORE 保证 event_key 重复时幂等）。
-        if self.raw_archive_enabled && !shard.raw_records.is_empty() {
-            self.write_raw_records_batch(&shard.raw_records)?;
+        if raw_archive_enabled && !shard.raw_records.is_empty() {
+            Self::write_raw_records_batch_tx(&tx, &shard.raw_records)?;
         }
+        fail_shard_commit_at(failpoint, ShardCommitFailpoint::Raw)?;
         // 7.5 行为事实是 usage_event/bucket 之外的独立 normalized 表。
         //     reset 同源文件时先清掉旧 path_hash 关联事实，随后 INSERT OR IGNORE
         //     新事实；未支持行为提取的 parser 可继续传空 vec。
         if !shard.reset_path_hashes.is_empty() {
-            self.reset_behavior_facts_batch(shard.source, &shard.reset_path_hashes)?;
+            Self::reset_behavior_facts_batch_tx(&tx, shard.source, &shard.reset_path_hashes)?;
         }
+        fail_shard_commit_at(failpoint, ShardCommitFailpoint::BehaviorReset)?;
         if !shard.turns.is_empty() {
-            stats.turns_inserted += self.write_turn_batch(&shard.turns)?;
+            stats.turns_inserted += Self::write_turn_batch_tx(&tx, &shard.turns)?;
         }
+        fail_shard_commit_at(failpoint, ShardCommitFailpoint::Turns)?;
         if !shard.tool_calls.is_empty() {
-            stats.tool_calls_inserted += self.write_tool_call_batch(&shard.tool_calls)?;
+            stats.tool_calls_inserted += Self::write_tool_call_batch_tx(&tx, &shard.tool_calls)?;
         }
+        fail_shard_commit_at(failpoint, ShardCommitFailpoint::ToolCalls)?;
+        tx.commit()?;
 
         stats.files_seen = shard.seen_file_paths.len();
         stats.write_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
@@ -533,8 +622,8 @@ impl SyncRunWriter {
         Ok(stats)
     }
 
-    fn reset_behavior_facts_batch(
-        &mut self,
+    fn reset_behavior_facts_batch_tx(
+        tx: &Transaction<'_>,
         source: SourceKind,
         path_hashes: &[String],
     ) -> Result<()> {
@@ -542,7 +631,6 @@ impl SyncRunWriter {
             return Ok(());
         }
         let mut unique = HashSet::new();
-        let tx = self.conn.transaction()?;
         {
             let mut delete_tool_stmt = tx.prepare_cached(
                 "DELETE FROM usage_tool_call WHERE source = ?1 AND source_path_hash = ?2",
@@ -558,12 +646,10 @@ impl SyncRunWriter {
                 delete_turn_stmt.execute(rusqlite::params![source.as_str(), path_hash])?;
             }
         }
-        tx.commit()?;
         Ok(())
     }
 
-    fn write_turn_batch(&mut self, turns: &[UsageTurn]) -> Result<usize> {
-        let tx = self.conn.transaction()?;
+    fn write_turn_batch_tx(tx: &Transaction<'_>, turns: &[UsageTurn]) -> Result<usize> {
         let inserted = {
             let mut stmt = tx.prepare_cached(
                 r#"
@@ -604,12 +690,13 @@ impl SyncRunWriter {
             }
             inserted
         };
-        tx.commit()?;
         Ok(inserted)
     }
 
-    fn write_tool_call_batch(&mut self, tool_calls: &[UsageToolCall]) -> Result<usize> {
-        let tx = self.conn.transaction()?;
+    fn write_tool_call_batch_tx(
+        tx: &Transaction<'_>,
+        tool_calls: &[UsageToolCall],
+    ) -> Result<usize> {
         let inserted = {
             let mut stmt = tx.prepare_cached(
                 r#"
@@ -646,12 +733,13 @@ impl SyncRunWriter {
             }
             inserted
         };
-        tx.commit()?;
         Ok(inserted)
     }
 
-    fn write_raw_records_batch(&mut self, records: &[super::RawRecord]) -> Result<()> {
-        let tx = self.conn.transaction()?;
+    fn write_raw_records_batch_tx(
+        tx: &Transaction<'_>,
+        records: &[super::RawRecord],
+    ) -> Result<()> {
         {
             let mut stmt = tx.prepare_cached(
                 r#"
@@ -665,19 +753,16 @@ impl SyncRunWriter {
                 stmt.execute(rusqlite::params![record.event_key, record.raw_json, now])?;
             }
         }
-        tx.commit()?;
         Ok(())
     }
 
-    fn write_source_file_seen(&mut self, source: SourceKind, file_paths: &[String]) -> Result<()> {
-        let tx = self.conn.transaction()?;
-        super::source_file::upsert_live_in_tx(
-            &tx,
-            source.as_str(),
-            file_paths,
-            &self.run_started_at,
-        )?;
-        tx.commit()?;
+    fn write_source_file_seen_tx(
+        tx: &Transaction<'_>,
+        source: SourceKind,
+        file_paths: &[String],
+        run_started_at: &str,
+    ) -> Result<()> {
+        super::source_file::upsert_live_in_tx(tx, source.as_str(), file_paths, run_started_at)?;
         Ok(())
     }
 }
@@ -698,6 +783,7 @@ fn roll_up_bucket(
         .unwrap_or_default();
     let key = BucketKey {
         source: event.source.as_str().to_string(),
+        provider_label: event.provider_label.clone(),
         model: event.model.clone(),
         hour_start: event.hour_start.clone(),
         project_hash,
@@ -768,12 +854,13 @@ fn flush_buckets_tx(
         return Ok(());
     }
 
-    // Use a static SQL string with an extra parameter (?20) for the PRICING_MIXED
+    // Use a static SQL string with an extra parameter (?21) for the PRICING_MIXED
     // sentinel value, avoiding format! interpolation into SQL text.
     let mut stmt = tx.prepare_cached(
         r#"
         INSERT INTO usage_bucket_30m(
             source,
+            provider_label,
             model,
             hour_start,
             project_hash,
@@ -792,8 +879,8 @@ fn flush_buckets_tx(
             pricing_rate,
             event_count,
             updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
-        ON CONFLICT(source, model, hour_start, project_hash) DO UPDATE SET
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
+        ON CONFLICT(source, provider_label, model, hour_start, project_hash) DO UPDATE SET
             project_label = excluded.project_label,
             project_ref = excluded.project_ref,
             input_tokens = usage_bucket_30m.input_tokens + excluded.input_tokens,
@@ -806,15 +893,15 @@ fn flush_buckets_tx(
             cost_without_cache_usd = usage_bucket_30m.cost_without_cache_usd + excluded.cost_without_cache_usd,
             pricing_status = CASE
                 WHEN usage_bucket_30m.pricing_status = excluded.pricing_status THEN usage_bucket_30m.pricing_status
-                ELSE ?20
+                ELSE ?21
             END,
             pricing_source = CASE
                 WHEN usage_bucket_30m.pricing_source IS excluded.pricing_source THEN usage_bucket_30m.pricing_source
-                ELSE ?20
+                ELSE ?21
             END,
             pricing_rate = CASE
                 WHEN usage_bucket_30m.pricing_rate IS excluded.pricing_rate THEN usage_bucket_30m.pricing_rate
-                ELSE ?20
+                ELSE ?21
             END,
             event_count = usage_bucket_30m.event_count + excluded.event_count,
             updated_at = excluded.updated_at
@@ -824,6 +911,7 @@ fn flush_buckets_tx(
     for (key, rollup) in buckets {
         stmt.execute(rusqlite::params![
             key.source,
+            key.provider_label,
             key.model,
             key.hour_start,
             key.project_hash,
@@ -851,7 +939,7 @@ fn flush_buckets_tx(
 fn refresh_bucket_pricing_after_reset_tx(
     tx: &rusqlite::Transaction<'_>,
     source: &str,
-    buckets: &[(String, String, String)],
+    buckets: &[(String, String, String, String)],
     updated_at: &str,
 ) -> Result<()> {
     if buckets.is_empty() {
@@ -867,28 +955,41 @@ fn refresh_bucket_pricing_after_reset_tx(
             pricing_source,
             pricing_rate
         FROM usage_event
-        WHERE source = ?1 AND model = ?2 AND hour_start = ?3 AND COALESCE(project_hash, '') = ?4
+        WHERE source = ?1
+          AND COALESCE(provider_label, '') = ?2
+          AND model = ?3
+          AND hour_start = ?4
+          AND COALESCE(project_hash, '') = ?5
         "#,
     )?;
     let mut update_stmt = tx.prepare_cached(
         r#"
         UPDATE usage_bucket_30m
-        SET pricing_status = ?5,
-            pricing_source = ?6,
-            pricing_rate = ?7,
-            updated_at = ?8
-        WHERE source = ?1 AND model = ?2 AND hour_start = ?3 AND project_hash = ?4
+        SET pricing_status = ?6,
+            pricing_source = ?7,
+            pricing_rate = ?8,
+            updated_at = ?9
+        WHERE source = ?1
+          AND provider_label = ?2
+          AND model = ?3
+          AND hour_start = ?4
+          AND project_hash = ?5
         "#,
     )?;
 
     let mut unique = HashSet::new();
-    for (model, hour_start, project_hash) in buckets {
-        if !unique.insert((model.clone(), hour_start.clone(), project_hash.clone())) {
+    for (provider_label, model, hour_start, project_hash) in buckets {
+        if !unique.insert((
+            provider_label.clone(),
+            model.clone(),
+            hour_start.clone(),
+            project_hash.clone(),
+        )) {
             continue;
         }
 
         let rows = select_stmt.query_map(
-            rusqlite::params![source, model, hour_start, project_hash],
+            rusqlite::params![source, provider_label, model, hour_start, project_hash],
             |row| {
                 Ok(CostBreakdown {
                     cost_with_cache_usd: row.get::<_, Option<f64>>(0)?.unwrap_or_default(),
@@ -914,6 +1015,7 @@ fn refresh_bucket_pricing_after_reset_tx(
 
         update_stmt.execute(rusqlite::params![
             source,
+            provider_label,
             model,
             hour_start,
             project_hash,
@@ -935,28 +1037,19 @@ mod tests {
             UsageToolCall, UsageTurn,
         },
         paths::AppPaths,
-        store::FileCursor,
+        store::{BootstrapOptions, FileCursor},
     };
     use tempfile::TempDir;
 
     fn build_paths(root: &std::path::Path) -> AppPaths {
-        let root_dir = root.to_path_buf();
-        AppPaths {
-            db_path: root_dir.join("llmusage.db"),
-            hook_cmd_path: root_dir.join("hook.cmd"),
-            hook_sh_path: root_dir.join("hook.sh"),
-            lock_path: root_dir.join("worker.lock"),
-            bin_dir: root_dir.join("bin"),
-            backups_dir: root_dir.join("backups"),
-            exports_dir: root_dir.join("exports"),
-            root_dir,
-        }
+        AppPaths::with_root(root.to_path_buf()).expect("test paths")
     }
 
     fn build_event(suffix: &str, path_hash: &str, total: i64) -> UsageEvent {
         UsageEvent {
             event_key: format!("codex:{path_hash}:{suffix}"),
             source: SourceKind::Codex,
+            provider_label: String::new(),
             model: "gpt-5".to_string(),
             event_at: "2026-05-01T10:00:00Z".to_string(),
             hour_start: "2026-05-01T10:00:00Z".to_string(),
@@ -1019,6 +1112,157 @@ mod tests {
             input_fingerprint: Some(format!("fp:{tool_name}")),
             safe_preview: Some(format!("{tool_name} preview")),
         }
+    }
+
+    fn build_behavior_turn(event: &UsageEvent, category: ActivityCategory) -> UsageTurn {
+        UsageTurn {
+            category,
+            ..UsageTurn::from_event(event, category)
+        }
+    }
+
+    fn build_full_replacement_shard(path_hash: &str) -> SyncShard {
+        let replacement = build_event("replacement", path_hash, 20);
+        SyncShard {
+            source: SourceKind::Codex,
+            reset_path_hashes: vec![path_hash.to_string()],
+            events: vec![replacement.clone()],
+            cursors: vec![build_cursor(path_hash)],
+            seen_file_paths: vec![format!("/tmp/{path_hash}.jsonl")],
+            raw_records: vec![super::super::RawRecord {
+                event_key: replacement.event_key.clone(),
+                raw_json: r#"{"replacement":true}"#.to_string(),
+            }],
+            turns: vec![UsageTurn {
+                has_edits: true,
+                ..build_behavior_turn(&replacement, ActivityCategory::Coding)
+            }],
+            tool_calls: vec![UsageToolCall {
+                tool_kind: ToolKind::Edit,
+                ..build_tool_call(&replacement, "Edit")
+            }],
+        }
+    }
+
+    fn assert_seed_only_after_failed_shard(store: &Store, path_hash: &str) -> anyhow::Result<()> {
+        let conn = store.open_connection()?;
+        let seed_events: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_event WHERE event_key = ?1",
+            [format!("codex:{path_hash}:seed")],
+            |row| row.get(0),
+        )?;
+        let replacement_events: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_event WHERE event_key = ?1",
+            [format!("codex:{path_hash}:replacement")],
+            |row| row.get(0),
+        )?;
+        let (bucket_count, bucket_total): (i64, i64) = conn.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(total_tokens), 0) FROM usage_bucket_30m WHERE source = 'codex'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let cursor_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM source_cursor WHERE source = 'codex'",
+            [],
+            |row| row.get(0),
+        )?;
+        let source_file_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM source_file WHERE source = 'codex'",
+            [],
+            |row| row.get(0),
+        )?;
+        let replacement_raw_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_event_raw WHERE event_key = ?1",
+            [format!("codex:{path_hash}:replacement")],
+            |row| row.get(0),
+        )?;
+        let turn_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_turn WHERE source_path_hash = ?1",
+            [path_hash],
+            |row| row.get(0),
+        )?;
+        let edit_turn_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_turn WHERE source_path_hash = ?1 AND category = 'coding'",
+            [path_hash],
+            |row| row.get(0),
+        )?;
+        let tool_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_tool_call WHERE source_path_hash = ?1",
+            [path_hash],
+            |row| row.get(0),
+        )?;
+        let edit_tool_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_tool_call WHERE source_path_hash = ?1 AND tool_kind = 'edit'",
+            [path_hash],
+            |row| row.get(0),
+        )?;
+
+        assert_eq!(seed_events, 1, "seed event must remain after rollback");
+        assert_eq!(
+            replacement_events, 0,
+            "replacement event must not survive failed shard"
+        );
+        assert_eq!(bucket_count, 1, "seed bucket must remain");
+        assert_eq!(bucket_total, 20, "bucket should still reflect seed only");
+        assert_eq!(cursor_count, 0, "cursor write must roll back");
+        assert_eq!(source_file_count, 0, "source_file write must roll back");
+        assert_eq!(replacement_raw_count, 0, "raw write must roll back");
+        assert_eq!(turn_count, 1, "seed turn must remain after rollback");
+        assert_eq!(edit_turn_count, 0, "replacement turn must roll back");
+        assert_eq!(tool_count, 1, "seed tool call must remain after rollback");
+        assert_eq!(edit_tool_count, 0, "replacement tool call must roll back");
+        Ok(())
+    }
+
+    #[test]
+    fn commit_shard_rolls_back_every_stage_on_failure() -> anyhow::Result<()> {
+        let failpoints = [
+            ShardCommitFailpoint::Reset,
+            ShardCommitFailpoint::Events,
+            ShardCommitFailpoint::Cursor,
+            ShardCommitFailpoint::SourceFile,
+            ShardCommitFailpoint::Raw,
+            ShardCommitFailpoint::BehaviorReset,
+            ShardCommitFailpoint::Turns,
+            ShardCommitFailpoint::ToolCalls,
+        ];
+
+        for failpoint in failpoints {
+            let temp = TempDir::new()?;
+            let paths = build_paths(temp.path());
+            let store = Store::new(&paths)?;
+            store.bootstrap_with(BootstrapOptions::default().with_raw_archive(true))?;
+            let path_hash = "pathAtomic";
+            let seed = build_event("seed", path_hash, 10);
+            let mut writer = store.begin_sync_run()?;
+            writer.commit_shard(SyncShard {
+                source: SourceKind::Codex,
+                reset_path_hashes: Vec::new(),
+                events: vec![seed.clone()],
+                cursors: Vec::new(),
+                seen_file_paths: Vec::new(),
+                raw_records: vec![super::super::RawRecord {
+                    event_key: seed.event_key.clone(),
+                    raw_json: r#"{"seed":true}"#.to_string(),
+                }],
+                turns: vec![build_behavior_turn(&seed, ActivityCategory::Exploration)],
+                tool_calls: vec![build_tool_call(&seed, "Read")],
+            })?;
+
+            let err = writer
+                .commit_shard_with_failpoint(build_full_replacement_shard(path_hash), failpoint)
+                .expect_err("test failpoint should abort shard");
+            assert!(
+                err.to_string().contains("test failpoint"),
+                "unexpected error for {failpoint:?}: {err}"
+            );
+            drop(writer);
+
+            assert_seed_only_after_failed_shard(&store, path_hash)
+                .map_err(|err| err.context(format!("failpoint {failpoint:?}")))?;
+        }
+
+        Ok(())
     }
 
     /// Validates the reset → events → cursor protocol is upheld in a single shard:
@@ -1296,6 +1540,97 @@ mod tests {
     }
 
     #[test]
+    fn commit_shard_splits_buckets_by_provider_label() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = build_paths(temp.path());
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+
+        let map_path = temp.path().join("provider_activation.jsonl");
+        std::fs::write(
+            &map_path,
+            r#"
+{"platform":"codex","provider":"anyrouter","activated_at":"2026-05-01T10:00:00Z","event":"activate"}
+{"platform":"codex","provider":"methink","activated_at":"2026-05-01T10:15:00Z","event":"activate"}
+"#,
+        )?;
+        let provider_index = ProviderIndex::load(&map_path)?;
+        let project = ProjectInfo {
+            project_hash: "provider-project".to_string(),
+            project_label: "Provider Project".to_string(),
+            project_ref: None,
+            repo_root_hash: "provider-root".to_string(),
+            path_hash: "provider-path".to_string(),
+        };
+        let mut first = build_event("provider-a", "provider-path", 10);
+        first.event_at = "2026-05-01T10:05:00Z".to_string();
+        first.hour_start = "2026-05-01T10:00:00Z".to_string();
+        first.project = Some(project.clone());
+        let mut second = build_event("provider-b", "provider-path", 20);
+        second.event_at = "2026-05-01T10:20:00Z".to_string();
+        second.hour_start = "2026-05-01T10:00:00Z".to_string();
+        second.project = Some(project);
+
+        let mut writer = store.begin_sync_run_with_provider_index(Some(provider_index))?;
+        let stats = writer.commit_shard(SyncShard {
+            source: SourceKind::Codex,
+            reset_path_hashes: Vec::new(),
+            events: vec![first, second],
+            cursors: Vec::new(),
+            seen_file_paths: Vec::new(),
+            raw_records: Vec::new(),
+            turns: Vec::new(),
+            tool_calls: Vec::new(),
+        })?;
+        assert_eq!(stats.events_inserted, 2);
+
+        let conn = store.open_connection()?;
+        let labels = {
+            let mut stmt = conn.prepare(
+                r#"
+                SELECT provider_label
+                FROM usage_event
+                ORDER BY event_key
+                "#,
+            )?;
+            stmt.query_map([], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        assert_eq!(labels, vec!["anyrouter".to_string(), "methink".to_string()]);
+
+        let buckets = {
+            let mut stmt = conn.prepare(
+                r#"
+                SELECT provider_label, total_tokens, event_count
+                FROM usage_bucket_30m
+                WHERE source='codex'
+                  AND model='gpt-5'
+                  AND hour_start='2026-05-01T10:00:00Z'
+                  AND project_hash='provider-project'
+                ORDER BY provider_label
+                "#,
+            )?;
+            stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        assert_eq!(
+            buckets,
+            vec![
+                ("anyrouter".to_string(), 20, 1),
+                ("methink".to_string(), 40, 1),
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn commit_shard_uses_active_local_pricing_snapshot() -> anyhow::Result<()> {
         let temp = TempDir::new()?;
         let paths = build_paths(temp.path());
@@ -1374,6 +1709,7 @@ mod tests {
             events: vec![UsageEvent {
                 event_key: "claude:pathCache:1".to_string(),
                 source: SourceKind::Claude,
+                provider_label: String::new(),
                 model: "claude-sonnet-4-5".to_string(),
                 event_at: "2026-05-01T10:00:00Z".to_string(),
                 hour_start: "2026-05-01T10:00:00Z".to_string(),

@@ -8,11 +8,11 @@ use serde::Serialize;
 use serde_json::json;
 use tracing::info;
 
-use crate::{app::AppContext, models::SourceKind, sources, store::Store, util::now_utc};
+use crate::{app::AppContext, models::SourceKind, registry, store::Store, util::now_utc};
 
+pub mod antigravity;
 pub mod claude;
 pub mod codex;
-pub mod gemini;
 pub mod hook_target;
 pub mod integration;
 pub mod opencode;
@@ -36,7 +36,7 @@ pub struct IntegrationAction {
 }
 
 pub fn probe_all(app: &AppContext) -> Result<Vec<IntegrationProbe>> {
-    sources::registered_integrations()
+    registry::registered_integrations()
         .iter()
         .map(|integ| integ.probe(app))
         .collect()
@@ -49,7 +49,7 @@ pub fn install_all(app: &AppContext, store: &Store) -> Result<Vec<IntegrationAct
      * ========================================================================
      * 目标：
      * 1) 先生成 Windows / Unix 两类 hook 包装器
-     * 2) 再按 sources::registered_integrations 顺序遍历安装
+     * 2) 再按 registry::registered_integrations 顺序遍历安装
      * 3) 每个集成的安装结果都写入 integration_install
      */
     info!("开始生成本地 hook 包装器并安装集成");
@@ -59,7 +59,7 @@ pub fn install_all(app: &AppContext, store: &Store) -> Result<Vec<IntegrationAct
 
     // 1.2 遍历注册表安装每个集成
     let mut actions = Vec::new();
-    for integ in sources::registered_integrations() {
+    for integ in registry::registered_integrations() {
         let source = integ.source();
         let action = collect_install_result(store, source, integ.install(app, store))?;
         actions.push(action);
@@ -70,7 +70,7 @@ pub fn install_all(app: &AppContext, store: &Store) -> Result<Vec<IntegrationAct
 }
 
 pub fn uninstall_all(app: &AppContext, store: &Store) -> Result<Vec<IntegrationAction>> {
-    sources::registered_integrations()
+    registry::registered_integrations()
         .iter()
         .map(|integ| integ.uninstall(app, store))
         .collect()

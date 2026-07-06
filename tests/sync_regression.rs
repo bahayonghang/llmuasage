@@ -126,11 +126,90 @@ fn hot_sync_keeps_unchanged_source_files_live_and_reports_stored_events() -> Res
         assert_eq!(second.total_inserted, 0);
         assert_eq!(second.stored_events, 2);
         assert_eq!(second.sources[0].changed_files, 0);
+        assert_eq!(second.sources[0].skipped_files, 2);
         assert_eq!(second.sources[0].stored_events, 2);
 
         let counts = store.source_files().counts(SourceKind::Codex)?;
         assert_eq!(counts.live, 2);
         assert_eq!(counts.missing, 0, "unchanged-but-present files stay live");
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn default_ccr_provider_map_labels_sync_and_rebuild() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_codex(
+        "rollout-provider-default.jsonl",
+        120,
+        "2026-04-22T01:12:00Z",
+    )?;
+    fixture.write_provider_map(
+        r#"{"platform":"codex","provider":"anyrouter","activated_at":"2026-04-22T01:00:00Z","event":"activate"}"#,
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+
+        let first = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Codex),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(first.total_inserted, 1);
+        assert_provider_label(&app.paths.db_path, "anyrouter")?;
+
+        fixture.write_provider_map(
+            r#"{"platform":"codex","provider":"methink","activated_at":"2026-04-22T01:00:00Z","event":"activate"}"#,
+        )?;
+        let rebuilt = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                rebuild: true,
+                source: Some(SourceKind::Codex),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(rebuilt.total_inserted, 1);
+        assert_provider_label(&app.paths.db_path, "methink")?;
+
+        let explicit_map = fixture.home.join("explicit-provider-map.jsonl");
+        fs::write(
+            &explicit_map,
+            r#"{"platform":"codex","provider":"glm","activated_at":"2026-04-22T01:00:00Z","event":"activate"}"#,
+        )?;
+        let rebuilt_explicit = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                rebuild: true,
+                source: Some(SourceKind::Codex),
+                provider_map: Some(explicit_map),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(rebuilt_explicit.total_inserted, 1);
+        assert_provider_label(&app.paths.db_path, "glm")?;
+
         Ok::<_, anyhow::Error>(())
     })?;
 
@@ -390,6 +469,49 @@ fn legacy_nonblocking_worker_lock_records_hook_kind() -> Result<()> {
     #[allow(deprecated)]
     let second = store.acquire_worker_lock()?;
     assert!(second.is_none());
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn worker_lock_heartbeat_refreshes_existing_lease() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let app = AppContext::discover()?;
+    let store = Store::new(&app.paths)?;
+    store.bootstrap()?;
+
+    let lock = store.acquire_worker_lock_with(Duration::from_millis(1), HolderKind::Cli)?;
+    let stale_updated_at = "2000-01-01T00:00:00Z";
+    let stale_lease_expires_at = "2000-01-01T00:00:00Z";
+    let conn = Connection::open(&app.paths.db_path)?;
+    conn.execute(
+        "UPDATE worker_lock SET updated_at = ?1, lease_expires_at = ?2",
+        (stale_updated_at, stale_lease_expires_at),
+    )?;
+    drop(conn);
+
+    let heartbeat = lock.start_heartbeat(Duration::from_millis(10));
+    let mut refreshed = None;
+    for _ in 0..50 {
+        thread::sleep(Duration::from_millis(20));
+        let conn = Connection::open(&app.paths.db_path)?;
+        let row = conn.query_row(
+            "SELECT updated_at, lease_expires_at FROM worker_lock",
+            [],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )?;
+        if row.0 != stale_updated_at && row.1 != stale_lease_expires_at {
+            refreshed = Some(row);
+            break;
+        }
+    }
+    drop(heartbeat);
+    drop(lock);
+    assert!(
+        refreshed.is_some(),
+        "heartbeat should refresh updated_at and lease_expires_at before the lease can expire"
+    );
 
     fixture.restore_env();
     Ok(())
@@ -663,6 +785,67 @@ fn opencode_high_water_handles_same_timestamp_ids() -> Result<()> {
 }
 
 #[test]
+fn opencode_part_tool_calls_land_in_usage_tool_call() -> Result<()> {
+    /*
+     * ========================================================================
+     * 步骤6：验证 OpenCode part 表工具调用进入 usage_tool_call
+     * ========================================================================
+     * 目标：
+     * 1) message + 两条 tool part（builtin read + MCP）sync 后落 usage_tool_call
+     * 2) MCP 工具按 `<server>_<tool>` 归类，mcp_server 正确
+     * 3) 重复 sync 幂等（part 全量重扫但 tool_call_key 去重）
+     */
+    let fixture = Fixture::new()?;
+    fixture.seed_opencode("msg-1", 1776823200000, 64)?;
+    fixture.seed_opencode_tool_part(
+        "prt-1",
+        "msg-1",
+        "session-1",
+        1776823200050,
+        serde_json::json!({
+            "id": "prt-1",
+            "messageID": "msg-1",
+            "sessionID": "session-1",
+            "type": "tool",
+            "tool": "read",
+            "state": { "status": "completed", "input": { "file_path": "src/lib.rs" } }
+        }),
+    )?;
+    fixture.seed_opencode_tool_part(
+        "prt-2",
+        "msg-1",
+        "session-1",
+        1776823200060,
+        serde_json::json!({
+            "id": "prt-2",
+            "messageID": "msg-1",
+            "sessionID": "session-1",
+            "type": "tool",
+            "tool": "context7_query-docs",
+            "state": { "status": "completed" }
+        }),
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        commands::sync::run(&app).await?;
+        assert_eq!(usage_tool_call_count(&app.paths.db_path)?, 2);
+        assert_eq!(
+            opencode_mcp_servers(&app.paths.db_path)?,
+            vec!["context7".to_string()]
+        );
+
+        commands::sync::run(&app).await?;
+        assert_eq!(usage_tool_call_count(&app.paths.db_path)?, 2);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
 fn opencode_replaced_db_resets_high_water() -> Result<()> {
     let fixture = Fixture::new()?;
     fixture.seed_opencode("msg-1", 1776823200000, 64)?;
@@ -733,12 +916,93 @@ fn opencode_missing_db_reports_absent_without_failing_sync() -> Result<()> {
 }
 
 #[test]
+fn opencode_channel_db_without_opencode_home_is_imported() -> Result<()> {
+    let fixture = Fixture::new()?;
+    unsafe {
+        std::env::remove_var("OPENCODE_HOME");
+    }
+    let channel_db = fixture
+        .home
+        .join(".local")
+        .join("share")
+        .join("opencode")
+        .join("opencode-stable.db");
+    fixture.seed_opencode_at(&channel_db, "msg-stable", 1776823200000, 64)?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+
+        let summary = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Opencode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+        assert_eq!(summary.total_inserted, 1);
+        assert_eq!(usage_event_count(&app.paths.db_path)?, 1);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn opencode_explicit_db_env_is_imported() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let explicit_db = fixture
+        .home
+        .join("custom-opencode")
+        .join("opencode-nightly.db");
+    fixture.seed_opencode_at(&explicit_db, "msg-nightly", 1776823200000, 64)?;
+    unsafe {
+        std::env::set_var("OPENCODE_DB", &explicit_db);
+    }
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+
+        let summary = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Opencode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+        assert_eq!(summary.total_inserted, 1);
+        assert_eq!(usage_event_count(&app.paths.db_path)?, 1);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
 fn source_sync_stats_absent_wire_contract_is_backward_compatible() -> Result<()> {
     let default_value = serde_json::to_value(SourceSyncStats {
         source: SourceKind::Opencode,
         ..SourceSyncStats::default()
     })?;
     assert_eq!(default_value["absent"], false);
+    assert_eq!(default_value["skipped_files"], 0);
 
     let absent_value = serde_json::to_value(SourceSyncStats {
         source: SourceKind::Opencode,
@@ -763,6 +1027,7 @@ fn source_sync_stats_absent_wire_contract_is_backward_compatible() -> Result<()>
     });
     let legacy_stats: SourceSyncStats = serde_json::from_value(legacy_json)?;
     assert!(!legacy_stats.absent);
+    assert_eq!(legacy_stats.skipped_files, 0);
     assert_eq!(legacy_stats.source, SourceKind::Opencode);
     assert_eq!(
         legacy_stats.last_error.as_deref(),
@@ -801,7 +1066,7 @@ fn hook_run_failure_marks_run_failed_and_finishes_worker() -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let app = AppContext::discover()?;
-        let err = commands::hook_run::run(&app, SourceKind::Codex, "manual-test", false)
+        let err = commands::hook_run::run(&app, SourceKind::Opencode, "manual-test", false)
             .await
             .expect_err("hook-run should fail");
         assert!(!err.to_string().trim().is_empty());
@@ -809,7 +1074,7 @@ fn hook_run_failure_marks_run_failed_and_finishes_worker() -> Result<()> {
         let run = latest_run_record(&app.paths.db_path, "hook-run")?;
         assert_failed_run(&run);
 
-        let (started_at, finished_at) = trigger_worker_times(&app.paths.db_path, "codex")?;
+        let (started_at, finished_at) = trigger_worker_times(&app.paths.db_path, "opencode")?;
         assert!(started_at.is_some());
         assert!(finished_at.is_some());
         Ok::<_, anyhow::Error>(())
@@ -937,6 +1202,40 @@ fn usage_event_count(db_path: &Path) -> Result<i64> {
     Ok(count)
 }
 
+fn assert_provider_label(db_path: &Path, expected: &str) -> Result<()> {
+    let conn = Connection::open(db_path)?;
+    let event_labels = {
+        let mut stmt = conn.prepare("SELECT provider_label FROM usage_event ORDER BY event_key")?;
+        stmt.query_map([], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    assert_eq!(event_labels, vec![expected.to_string()]);
+
+    let bucket_labels = {
+        let mut stmt =
+            conn.prepare("SELECT provider_label FROM usage_bucket_30m ORDER BY provider_label")?;
+        stmt.query_map([], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    assert_eq!(bucket_labels, vec![expected.to_string()]);
+    Ok(())
+}
+
+fn usage_tool_call_count(db_path: &Path) -> Result<i64> {
+    let conn = Connection::open(db_path)?;
+    let count = conn.query_row("SELECT COUNT(*) FROM usage_tool_call", [], |row| row.get(0))?;
+    Ok(count)
+}
+
+fn opencode_mcp_servers(db_path: &Path) -> Result<Vec<String>> {
+    let conn = Connection::open(db_path)?;
+    let mut stmt = conn.prepare(
+        "SELECT mcp_server FROM usage_tool_call WHERE tool_kind = 'mcp' AND mcp_server IS NOT NULL ORDER BY mcp_server",
+    )?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 fn table_columns(conn: &Connection, table: &str) -> Result<Vec<String>> {
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
     let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
@@ -1003,6 +1302,7 @@ struct Fixture {
     _root: TempDir,
     home: PathBuf,
     codex_home: PathBuf,
+    ccr_root: PathBuf,
     opencode_home: PathBuf,
     saved: Vec<(String, Option<String>)>,
 }
@@ -1012,19 +1312,29 @@ impl Fixture {
         let root = TempDir::new()?;
         let home = root.path().join("home");
         let codex_home = home.join(".codex");
+        let ccr_root = home.join(".ccr");
         let opencode_home = root.path().join("opencode-home");
         fs::create_dir_all(&home)?;
         fs::create_dir_all(&codex_home)?;
+        fs::create_dir_all(&ccr_root)?;
         fs::create_dir_all(&opencode_home)?;
 
         let mut saved = Vec::new();
-        for key in ["HOME", "USERPROFILE", "CODEX_HOME", "OPENCODE_HOME"] {
+        for key in [
+            "HOME",
+            "USERPROFILE",
+            "CODEX_HOME",
+            "CCR_ROOT",
+            "OPENCODE_HOME",
+            "OPENCODE_DB",
+        ] {
             saved.push((key.to_string(), std::env::var(key).ok()));
         }
         unsafe {
             std::env::set_var("HOME", &home);
             std::env::set_var("USERPROFILE", &home);
             std::env::set_var("CODEX_HOME", &codex_home);
+            std::env::set_var("CCR_ROOT", &ccr_root);
             std::env::set_var("OPENCODE_HOME", &opencode_home);
         }
 
@@ -1035,6 +1345,7 @@ impl Fixture {
             _root: root,
             home,
             codex_home,
+            ccr_root,
             opencode_home,
             saved,
         })
@@ -1075,6 +1386,18 @@ impl Fixture {
         .join("\n");
         fs::write(sessions_dir.join(name), payload)?;
         Ok(())
+    }
+
+    fn write_provider_map(&self, contents: &str) -> Result<PathBuf> {
+        let path = self
+            .ccr_root
+            .join("analytics")
+            .join("provider_activation.jsonl");
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&path, contents)?;
+        Ok(path)
     }
 
     fn append_codex(&self, name: &str, total_tokens: i64, timestamp: &str) -> Result<()> {
@@ -1161,7 +1484,20 @@ impl Fixture {
 
     fn seed_opencode(&self, message_id: &str, time_created: i64, total_tokens: i64) -> Result<()> {
         let db_path = self.opencode_home.join("opencode.db");
-        let conn = Connection::open(&db_path)?;
+        self.seed_opencode_at(&db_path, message_id, time_created, total_tokens)
+    }
+
+    fn seed_opencode_at(
+        &self,
+        db_path: &Path,
+        message_id: &str,
+        time_created: i64,
+        total_tokens: i64,
+    ) -> Result<()> {
+        if let Some(parent) = db_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let conn = Connection::open(db_path)?;
         conn.execute_batch(
             r#"
             CREATE TABLE IF NOT EXISTS project(id TEXT PRIMARY KEY, worktree TEXT);
@@ -1218,6 +1554,26 @@ impl Fixture {
             fs::remove_file(&db_path)?;
         }
         self.seed_opencode(message_id, time_created, total_tokens)
+    }
+
+    fn seed_opencode_tool_part(
+        &self,
+        part_id: &str,
+        message_id: &str,
+        session_id: &str,
+        time_created: i64,
+        data: serde_json::Value,
+    ) -> Result<()> {
+        let db_path = self.opencode_home.join("opencode.db");
+        let conn = Connection::open(&db_path)?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS part(id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, time_created INTEGER, data TEXT);",
+        )?;
+        conn.execute(
+            "INSERT OR REPLACE INTO part(id, message_id, session_id, time_created, data) VALUES (?1, ?2, ?3, ?4, ?5)",
+            (&part_id, &message_id, &session_id, &time_created, &data.to_string()),
+        )?;
+        Ok(())
     }
 }
 

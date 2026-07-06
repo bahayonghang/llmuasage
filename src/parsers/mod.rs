@@ -7,13 +7,12 @@ pub mod claude;
 pub mod codex;
 pub mod driver;
 pub mod file_state;
-pub mod gemini;
 pub mod opencode;
+pub(crate) mod source_files;
 pub mod source_parser;
 
 pub use claude::ClaudeParser;
 pub use codex::CodexParser;
-pub use gemini::GeminiParser;
 pub use opencode::OpencodeParser;
 pub use source_parser::{ProgressSink, SourceParser};
 
@@ -111,6 +110,9 @@ pub struct SourceSyncStats {
     pub files_processed: usize,
     /// Number of files/DBs that required re-parse or incremental scan.
     pub changed_files: usize,
+    /// Number of files/DBs skipped because cursor/fingerprint evidence showed no new work.
+    #[serde(default)]
+    pub skipped_files: usize,
     /// Bytes scanned while parsing the source.
     pub bytes_scanned: u64,
     /// Number of normalized events observed before dedupe.
@@ -141,6 +143,7 @@ impl Default for SourceSyncStats {
             source: SourceKind::Codex,
             files_processed: 0,
             changed_files: 0,
+            skipped_files: 0,
             bytes_scanned: 0,
             events_seen: 0,
             events_replayed: 0,

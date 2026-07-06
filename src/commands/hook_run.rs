@@ -1,14 +1,17 @@
+use std::process::{Command, Stdio};
+
 use anyhow::Result;
-use tracing::info;
+use tracing::{debug, info, warn};
 
 use crate::{
     app::AppContext,
+    integrations::codex,
     models::SourceKind,
     store::{HolderKind, Store},
     util::now_utc,
 };
 
-use super::sync::run_once;
+use super::sync::{SyncRunOptions, run_once_with_options};
 
 pub async fn run(app: &AppContext, source: SourceKind, trigger: &str, _auto: bool) -> Result<()> {
     /*
@@ -30,10 +33,11 @@ pub async fn run(app: &AppContext, source: SourceKind, trigger: &str, _auto: boo
         .triggers()
         .upsert_trigger_state(source, trigger, &signaled_at)?;
     #[allow(deprecated)]
-    let Some(_lock) = store.acquire_worker_lock()? else {
+    let Some(lock) = store.acquire_worker_lock()? else {
         return Ok(());
     };
-    debug_assert_eq!(_lock.meta().holder_kind, HolderKind::Hook.as_str());
+    debug_assert_eq!(lock.meta().holder_kind, HolderKind::Hook.as_str());
+    let heartbeat = lock.start_default_heartbeat();
     store
         .run_log()
         .recover_running_runs(&["sync", "hook-run"])?;
@@ -50,7 +54,17 @@ pub async fn run(app: &AppContext, source: SourceKind, trigger: &str, _auto: boo
                 store
                     .triggers()
                     .mark_trigger_worker_started(source, &started_at)?;
-                let attempt = run_once(app, &store, 0).await;
+                let attempt = run_once_with_options(
+                    app,
+                    &store,
+                    0,
+                    &SyncRunOptions {
+                        source: Some(source),
+                        ..SyncRunOptions::default()
+                    },
+                    None,
+                )
+                .await;
                 let finished_at = now_utc();
                 store
                     .triggers()
@@ -69,7 +83,45 @@ pub async fn run(app: &AppContext, source: SourceKind, trigger: &str, _auto: boo
         |inserted| Some(format!("hook source={source} inserted={inserted}")),
     )
     .await?;
+    drop(heartbeat);
+    drop(lock);
 
     info!(source = %source, inserted = total_inserted, "完成 hook-run 信号处理");
+    chain_original_notify_if_needed(app, source)?;
+    Ok(())
+}
+
+fn chain_original_notify_if_needed(app: &AppContext, source: SourceKind) -> Result<()> {
+    if source != SourceKind::Codex {
+        return Ok(());
+    }
+
+    let Some(original) = codex::original_notify(app)? else {
+        return Ok(());
+    };
+    let current = crate::integrations::HookTarget::current(app).notify_args(source, "notify");
+    if !codex::should_chain_original_notify(&current, &original) {
+        debug!("跳过 Codex original notify chaining");
+        return Ok(());
+    }
+
+    let Some((program, args)) = original.split_first() else {
+        return Ok(());
+    };
+    let mut command = Command::new(program);
+    command
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    match command.spawn() {
+        Ok(_) => {
+            debug!("已启动 Codex original notify chaining");
+        }
+        Err(err) => {
+            warn!(error = %err, "Codex original notify chaining 启动失败");
+        }
+    };
     Ok(())
 }

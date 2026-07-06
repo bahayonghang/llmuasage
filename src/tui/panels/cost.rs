@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 use crate::query::CostLine;
+use crate::tui::panels::longtail;
 use crate::tui::theme;
 
 use super::super::app::ScrollState;
@@ -52,7 +53,17 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[CostLine], scroll: &Scro
     .style(theme::header_style())
     .bottom_margin(1);
 
-    let rows: Vec<Row> = items
+    // Fold the sub-2% cost tail (metric in micro-dollars) into a summary row.
+    let micros = |cost: f64| (cost.max(0.0) * 1_000_000.0) as i64;
+    let values: Vec<i64> = items
+        .iter()
+        .map(|item| micros(item.estimated_cost_usd))
+        .collect();
+    let total_cost: i64 = values.iter().sum();
+    let collapsed = longtail::collapse_tail(&values, total_cost);
+    let shown = collapsed.map(|c| &items[..c.keep]).unwrap_or(items);
+
+    let mut rows: Vec<Row> = shown
         .iter()
         .skip(scroll.offset)
         .enumerate()
@@ -72,6 +83,22 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[CostLine], scroll: &Scro
         })
         .collect();
 
+    if let Some(collapsed) = collapsed {
+        rows.push(
+            Row::new(vec![
+                Cell::from(longtail::summary_label(&collapsed)),
+                Cell::from(String::new()),
+                Cell::from(String::new()),
+                Cell::from(String::new()),
+                Cell::from(format!(
+                    "${:.2}",
+                    collapsed.hidden_value as f64 / 1_000_000.0
+                )),
+            ])
+            .style(theme::muted_style()),
+        );
+    }
+
     let table = Table::new(
         rows,
         [
@@ -84,7 +111,7 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[CostLine], scroll: &Scro
     )
     .header(header)
     .block(styled_block("成本"))
-    .row_highlight_style(Style::default().fg(theme::ACCENT));
+    .row_highlight_style(Style::default().fg(theme::accent()));
 
     frame.render_widget(table, area);
 }

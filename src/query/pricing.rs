@@ -172,6 +172,32 @@ mod tests {
     }
 
     #[test]
+    fn pricing_static_v1_hits_claude_fable_and_mythos_5() {
+        for model in ["claude-fable-5", "claude-mythos-5"] {
+            let cost = compute_cost(
+                "claude",
+                model,
+                tokens(1_000_000, 200_000, 300_000, 400_000, 0),
+            );
+
+            assert_eq!(cost.pricing_status, PricingStatus::Static, "{model}");
+            assert_eq!(cost.pricing_source.as_deref(), Some("static-v1"));
+            assert!((cost.cost_with_cache_usd - 33.95).abs() < 1e-9, "{model}");
+            assert!((cost.cost_without_cache_usd - 35.0).abs() < 1e-9, "{model}");
+            let pricing_rate = cost
+                .pricing_rate
+                .as_deref()
+                .expect("matched Fable/Mythos rows should carry pricing_rate");
+            assert!(pricing_rate.contains("\"input_per_mtok\":10.0"), "{model}");
+            assert!(
+                pricing_rate.contains("\"cache_creation_per_mtok\":12.5"),
+                "{model}"
+            );
+            assert!(pricing_rate.contains("\"output_per_mtok\":50.0"), "{model}");
+        }
+    }
+
+    #[test]
     fn pricing_rate_preserves_low_precision_rates() {
         let catalog = PricingCatalog {
             version: "precision-test".to_string(),
@@ -185,6 +211,7 @@ mod tests {
                 output_per_mtok: 0.005,
                 reasoning_per_mtok: None,
                 reasoning_policy: Default::default(),
+                context_window: None,
             }],
         };
         let cost = compute_cost_with(
@@ -216,6 +243,7 @@ mod tests {
                 output_per_mtok: 15.0,
                 reasoning_per_mtok: Some(99.0),
                 reasoning_policy: ReasoningPolicy::IncludedInOutput,
+                context_window: None,
             }],
         };
 
@@ -244,6 +272,7 @@ mod tests {
                 output_per_mtok: 2.0,
                 reasoning_per_mtok: Some(4.0),
                 reasoning_policy: ReasoningPolicy::Separate,
+                context_window: None,
             }],
         };
 

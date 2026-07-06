@@ -1,151 +1,113 @@
 # llmusage
 
-[简体中文](./README.zh-CN.md)
+[简体中文](./README.zh-CN.md) · [Docs](https://bahayonghang.github.io/llmuasage/)
 
-Local-first Rust CLI for AI coding usage analytics.
+Local-first usage analytics for AI coding CLIs. `llmusage` reads local Codex, Claude Code, OpenCode, and Google Antigravity artifacts into a local SQLite database, then renders reports, a terminal dashboard, a browser dashboard, and offline HTML exports without upload or login.
 
-The goal is simple: use hooks and a local SQLite database to track multiple AI coding CLIs without upload, login, or any cloud API.
-
-Thanks to [vibeusage](https://github.com/victorGPT/vibeusage) for the original idea. `llmusage` is a Rust rewrite and improvement built on that foundation, with a stricter local-first path.
-
-Current 0.5.1 coverage:
-
-- Codex `config.toml notify`
-- Claude `Stop` / `SessionEnd` hooks
-- OpenCode `session.updated` plugin event
-- Gemini `SessionEnd` hooks and `~/.gemini/tmp/*/chats/session-*.json` parsing
-
-Core sources of truth:
-
-- Config directory: `~/.llmusage/`
-- Database: `~/.llmusage/llmusage.db`
-- Hook wrappers: `~/.llmusage/bin/llmusage-hook.cmd`, `~/.llmusage/bin/llmusage-hook.sh`
-
-Commands:
-
-Report-first commands (read local SQLite only; run `llmusage sync` first if data looks stale):
-
-- `llmusage` / `llmusage daily`
-- `llmusage monthly`
-- `llmusage session`
-- `llmusage blocks`
-- `llmusage statusline`
-
-`llmusage` / `llmusage daily` defaults to the last 7 calendar days in the selected timezone, including today. Human output now uses one aggregate ccusage-style table with `Date / Models / Input / Output / Cache Create / Cache Read / Total Tokens / Cost (USD)`, grouped comma-separated token counts, and multi-line model lists; `NO_COLOR=1` disables ANSI styling. JSON output stays aggregate snake_case and includes `cache_creation_tokens`. Use `--all` for full daily history, `--since YYYYMMDD` / `--until YYYYMMDD` for an explicit range, `--source` to filter one local source, or `--breakdown` to include per-source/model details.
-
-Common report options include `--since YYYYMMDD`, `--until YYYYMMDD`, `--json`, `--breakdown`, `--order asc|desc`, `--timezone UTC|local|+08:00`, `--locale en-US|zh-CN|ja-JP`, `--compact`, and `--source codex|claude|opencode|gemini`.
-
-Operational commands:
-
-- `llmusage init`
-- `llmusage sync` (`--rebuild` reparses local sources and rebuilds usage rows/buckets; it is refused by default if imported file-backed history has missing source files; pass `--allow-lossy-rebuild` only to explicitly clear unrebuildable history; progress is printed to stderr, while `--json-events` prints NDJSON lifecycle/progress events to stdout)
-- `llmusage status`
-- `llmusage diagnostics` (`--forget-file <PATH>` can mark a source file as intentionally ignored)
-- `llmusage doctor` (`--refresh-pricing <file>` imports a local pricing snapshot and recomputes costs)
-- `llmusage dash`
-- `llmusage serve`
-- `llmusage tui` (deprecated alias for `dash`)
-- `llmusage export html`
-- `llmusage uninstall`
-
-Web dashboard:
-
-Below is the local browser dashboard served by `llmusage serve`. The first screen keeps the active time/source/model filter, KPI strip, activity trend, project/model/source/cost rankings, behavior analytics, sync/export actions, and diagnostic signals in one local-only view.
-
-The behavior section is powered by normalized facts extracted during `sync`:
-
-- Activity and Tools aggregate local turn/tool facts without storing full prompts, assistant messages, or file contents.
-- Optimize is a read-only recommendation panel for patterns such as low Read/Edit ratio, repeated reads, generated/dependency reads, and session outliers; it never deletes, archives, rewrites, or auto-cleans anything.
-- Compare picks or accepts two models and shows directional cost, cache, one-shot, retry, category, and working-style metrics with explicit low-sample warnings.
-- Source support is intentionally explicit: Claude and Codex can emit richer tool facts; Gemini and OpenCode currently degrade to conservative turn facts when source logs do not expose tool-level evidence.
+> Current crate version: `0.9.0`.
 
 ![llmusage web dashboard overview](./docs/public/screenshots/web-dashboard-overview.png)
 
-Terminal dashboard:
+<small>Dashboard screenshot uses a sanitized local fixture served by `llmusage serve`; it is not real user data.</small>
 
-- `llmusage dash` opens the terminal TUI. Its top navigation now includes `8:行为`, a read-only behavior summary that reuses the same Activity / Tools / Optimize / Compare dashboard queries and shows no-data, degraded, insufficient-models, and low-sample states instead of pretending missing facts are zeroes.
+## Install
 
-Development:
+From this checkout:
 
 ```powershell
-cargo check
-cargo test
-cargo run -- init
-cargo run -- sync
-cargo run -- --json
-cargo run -- dash
-cargo run -- serve
+just install
 ```
 
-Notes:
+Or run directly while developing:
 
-- `serve` only binds to `127.0.0.1` and opens the dashboard in your default browser
-- `serve` supports one-shot snapshot loading, URL-restored filters, optional 30s/60s auto-refresh, and in-process sync jobs with progress/cancel state
-- `export html` generates an offline static report with the same dashboard shell; snapshot mode disables live-only sync/refresh actions
-- report commands are read-only SQLite views and do not auto-sync
-- behavior analytics is local-only and read-only at query time; it uses normalized `usage_turn` / `usage_tool_call` rows produced during sync instead of parsing raw transcripts in the browser
-- normal `sync` keeps imported usage history when a source file is missing; diagnostics may report `source_file.missing`, but usage rows are not deleted
-- `status` and `diagnostics` are read-only unless `diagnostics --forget-file` is used
-- `doctor` is read-only unless `--refresh-pricing <file>` is used; pricing refresh only reads a local JSON file, stores it under `~/.llmusage/pricing/<catalog-version>.json`, and writes local SQLite metadata/costs
-
-## 0.5.1 highlights
-
-- ccr-ui-facing read APIs: `Dashboard::overview`, `trends_daily`, `home_overview`, `heatmap`, `logs`, archive diagnostics, and source-file forget support.
-- Persisted cost fields are now the query/report source of truth: normal sync writes event/bucket cost metadata, `doctor --refresh-pricing <file>` recomputes both events and buckets from a local snapshot, and reports/dashboard payloads expose total cost, cache efficiency, daily cost, model dual-cost/pricing metadata, project cost, and log cost/id/recorded-at fields.
-- In-process import jobs through `JobRegistry` with progress snapshots and cancellation.
-- Full schema migrations from v0/v1 through v11, including cache split, cost metadata, source-file state, raw archive, worker lock metadata, Gemini registration, `pricing_catalog_version`, and normalized behavior facts.
-- Stable snake_case JSON across CLI reports, HTTP API, and static exports.
-- Public `LlmusageError` and `testing::Fixture` surfaces for downstream adapters.
-
-## Library API (0.5.1)
-
-The 0.5.x line exposes a SemVer-stable library surface for desktop adapters such as ccr-ui:
-
-```rust
-use llmusage::{
-    paths::AppPaths,
-    query::{Dashboard, QueryFilter},
-    store::Store,
-    Result,
-};
-
-fn open_store(root: std::path::PathBuf) -> Result<Store> {
-    let paths = AppPaths::with_root(root)?;
-    let store = Store::new(&paths)?;
-    store.bootstrap()?;
-    Ok(store)
-}
-
-fn load_ccr_ui(store: &Store) -> Result<()> {
-    let filter = QueryFilter::default();
-    let dashboard = Dashboard::open(store)?;
-    let _snapshot = dashboard.snapshot(&filter)?;
-    let _overview = dashboard.overview(&filter)?;
-    let _daily = dashboard.trends_daily(&filter)?;
-    let _home = dashboard.home_overview(&filter)?;
-    let _heatmap = dashboard.heatmap(&filter, 365)?;
-    let _activity = dashboard.activity_breakdown(&filter)?;
-    let _tools = dashboard.tool_breakdown(&filter)?;
-    let _optimize = dashboard.optimize(&filter)?;
-    let _compare = dashboard.model_compare(&filter, None, None)?;
-    let _logs = dashboard.logs(&Default::default())?;
-    Ok(())
-}
+```powershell
+cargo run -- --help
 ```
 
-Path resolution order is `--home <PATH>` first, then `LLMUSAGE_HOME`, then `~/.llmusage`.
-The ccr-ui surface now includes filtered dashboard/home/daily-trend/heatmap/log queries, archive diagnostics from the `source_file` state machine, persisted cost/pricing/cache fields, behavior activity/tool/optimize/compare payloads, and `JobRegistry::start/get/cancel` for in-process import jobs. Use `Store::acquire_worker_lock_with` when embedding sync so CLI, library, and hook workers share one local lock.
+Top-level help is table-oriented for quick scanning. Use `llmusage help --zh` for Chinese help, and `llmusage help <COMMAND>` or `llmusage <COMMAND> --help` for command-specific clap help.
 
-For downstream integration tests, depend on the local crate with the testing
-feature and use the isolated fixture helpers:
+The runtime lives under `~/.llmusage/` by default. Override it with `--home <PATH>` or `LLMUSAGE_HOME`.
+Structured runtime logs are local-only NDJSON at `~/.llmusage/logs/llmusage.ndjson`. Control file logging with `LLMUSAGE_LOG=off|error|warn|info|debug|trace` (default: `warn`); `RUST_LOG` continues to control console stderr logging.
 
-```toml
-[dev-dependencies]
-llmusage = { path = "../llmusage", features = ["testing"] }
+## Fast path
+
+```powershell
+llmusage init
+llmusage sync
+llmusage
+llmusage serve
 ```
 
-```rust
-let fixture = llmusage::testing::Fixture::new()?;
-fixture.seed_dashboard(12)?;
-let overview = llmusage::Dashboard::open(fixture.store())?.overview(&Default::default())?;
+What this does:
+
+1. `init` creates `~/.llmusage/`, bootstraps `llmusage.db`, writes hook wrappers, and installs supported local integrations.
+2. `sync` parses local sources incrementally and writes usage rows, 30-minute buckets, source-file diagnostics, and behavior facts.
+3. `llmusage` shows the default daily report for the last 7 calendar days.
+4. `serve` starts the local dashboard on `127.0.0.1`.
+
+## Supported local sources
+
+| Source | Local artifacts |
+| --- | --- |
+| Codex | OpenAI Codex rollout/session JSONL and `config.toml notify` |
+| Claude | Claude Code project JSONL plus `Stop` / `SessionEnd` hooks |
+| OpenCode | OpenCode local SQLite usage database plus `session.updated` plugin event |
+| Antigravity | Antigravity CLI `Stop` hook in `~/.gemini/config/hooks.json` (`--source antigravity`); no transcript parser is registered until a verified token-bearing schema exists |
+
+`source-status` and `dash` also show monitor-only platform candidates such as Gemini CLI, Cursor, Copilot, Zed, Kiro, Goose, Grok, Kimi/Qwen, Roo/Kilo/Cline, Codebuff, Crush, Warp/Oz, Amp, Hermes, and Trae. Monitor-only means llmusage can probe candidate local roots and explain why parsing is blocked; it does not write zero usage rows or untrusted token rows.
+
+## Common commands
+
+```powershell
+llmusage daily --source codex --since 20260501 --until 20260518
+llmusage monthly --breakdown
+llmusage session --project my-repo
+llmusage blocks --active
+llmusage source-status
+llmusage help --zh
+llmusage dash
+llmusage codex-tracer
+llmusage logs --limit 50 --level warn
+llmusage export html --out .\llmusage-report
+```
+
+Report commands are read-only SQLite queries; run `llmusage sync` when the database is stale.
+
+`llmusage dash` uses a tokscale-style terminal dashboard. Keyboard controls: `tab`/`shift-tab` or `1`-`8` switch views, `s` opens the source picker, `r` refreshes dashboard data, `R` toggles auto-refresh, `x` runs sync for the current source filter, `?` opens help/settings, and `q` exits.
+
+The browser dashboard includes behavior panels and a local Cost Explorer workbench for time × metric × group-by slicing, including tool/non-tool cost attribution and offline snapshot export.
+
+## Codex tracer
+
+```powershell
+llmusage codex-tracer
+llmusage codex-tracer --port 9876
+llmusage codex-tracer --no-open
+llmusage codex-tracer --rebuild
+```
+
+`codex-tracer` is a Codex-only local dashboard. It reads rollout JSONL from `$CODEX_HOME/rollout/` or `~/.codex/rollout/`, builds a separate `~/.llmusage/codex-tracer.db`, and serves a dedicated browser UI with detailed token accounting and thread tracking.
+
+## Safety defaults
+
+- No account login, device token, upload queue, or remote usage API call.
+- Normal `llmusage sync` keeps imported usage when original source files are missing.
+- `llmusage sync --rebuild` refuses lossy rebuilds unless you also pass `--allow-lossy-rebuild`.
+- `llmusage diagnostics --forget-file <PATH> --source <SOURCE>` is the explicit write path for intentionally ignored source files.
+- `llmusage logs` queries local runtime logs and recent command audit rows without changing report stdout or `sync --json-events` stdout contracts.
+- `llmusage doctor --refresh-pricing <file>` reads a local pricing snapshot; URLs are refused.
+
+## Documentation
+
+- [Guide](./docs/guide/getting-started.md)
+- [Codex tracer guide](./docs/guide/codex-tracer.md)
+- [Dashboard](./docs/dashboard/index.md)
+- [CLI reference](./docs/reference/cli.md)
+- [Safety](./docs/safety/index.md)
+- [Architecture](./docs/architecture/index.md)
+
+Development gate:
+
+```powershell
+just ci
 ```

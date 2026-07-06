@@ -8,14 +8,20 @@
 use proptest::prelude::*;
 use ratatui::{Terminal, backend::TestBackend, layout::Rect};
 
+use llmusage::domain::platform_monitor::{ParserSupportStatus, PlatformProbe, PlatformProbeStatus};
 use llmusage::query::{
     ActivityBreakdown, ActivityPayload, BehaviorSupport, CategoryCompareRow, CompareMetric,
-    CompareModelCandidate, CostLine, CursorHealth, HealthPayload, ModelBreakdown,
-    ModelComparePayload, ModelCompareStats, OptimizeFinding, OptimizePayload, OverviewPayload,
-    ProjectBreakdown, SourceBreakdown, TokenSummary, ToolBreakdown, ToolsPayload, TrendPoint,
+    CompareModelCandidate, ContextPressurePayload, CostLine, CursorHealth, DailyTrendPoint,
+    HealthPayload, HeatmapPoint, ModelBreakdown, ModelComparePayload, ModelCompareStats,
+    OptimizeFinding, OptimizePayload, OverviewPayload, ProjectBreakdown, SourceBreakdown,
+    SyncActionPayload, SyncCommandCenterPayload, SyncMetricsPayload, SyncSafetyPayload,
+    SyncSourcePayload, TokenSummary, ToolBreakdown, ToolsPayload, TrendPoint, ZombieItem,
+    ZombieReport,
 };
 use llmusage::store::{IntegrationState, RunRecord};
-use llmusage::tui::app::{BehaviorPanelPayload, Panel, ScrollState, TimeWindow};
+use llmusage::tui::app::{
+    ActiveDialog, AppState, BehaviorPanelPayload, Panel, ScrollState, StatsPanelPayload, TimeWindow,
+};
 
 /// Format a number with thousands separators (matching panel rendering).
 fn format_number(n: i64) -> String {
@@ -272,6 +278,326 @@ fn render_trends_text(
     buffer_text(&terminal)
 }
 
+fn render_daily_text(points: Vec<DailyTrendPoint>, width: u16, height: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    let area = Rect::new(0, 0, width, height);
+    let scroll = ScrollState {
+        offset: 0,
+        total: points.len(),
+        visible: height.saturating_sub(4) as usize,
+    };
+    let data: Option<Result<Vec<DailyTrendPoint>, String>> = Some(Ok(points));
+
+    terminal
+        .draw(|frame| {
+            llmusage::tui::panels::daily::render(frame, area, &data, &scroll);
+        })
+        .unwrap();
+
+    buffer_text(&terminal)
+}
+
+fn render_hourly_text(points: Vec<TrendPoint>, width: u16, height: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    let area = Rect::new(0, 0, width, height);
+    let scroll = ScrollState {
+        offset: 0,
+        total: points.len(),
+        visible: height.saturating_sub(4) as usize,
+    };
+    let data: Option<Result<Vec<TrendPoint>, String>> = Some(Ok(points));
+
+    terminal
+        .draw(|frame| {
+            llmusage::tui::panels::hourly::render(frame, area, &data, &scroll);
+        })
+        .unwrap();
+
+    buffer_text(&terminal)
+}
+
+fn sample_sync_payload() -> SyncCommandCenterPayload {
+    SyncCommandCenterPayload {
+        mode: "live".to_string(),
+        tone: "good".to_string(),
+        headline_key: "syncCenter.headline.ready".to_string(),
+        reason_key: "syncCenter.reason.ready".to_string(),
+        generated_at: "2026-06-12T00:00:00Z".to_string(),
+        current_job: None,
+        last_run: None,
+        safety: SyncSafetyPayload {
+            ordinary_sync_safe: true,
+            worker_lock: "available".to_string(),
+            worker_lock_holder: None,
+            lossy_rebuild_risk: false,
+            risk_sources: Vec::new(),
+            recent_failures: 0,
+        },
+        metrics: SyncMetricsPayload {
+            events_seen: 1_500,
+            inserted_delta: 25,
+            stored_events: 12_000,
+            sources_ready: 2,
+            sources_total: 3,
+        },
+        sources: vec![
+            SyncSourcePayload {
+                source: "codex".to_string(),
+                status: "ok".to_string(),
+                tone: "good".to_string(),
+                files_processed: 12,
+                changed_files: 2,
+                skipped_files: 10,
+                events_seen: 1_000,
+                events_inserted: 20,
+                stored_events: 8_000,
+                updated_at: Some("2026-06-12T00:00:00Z".to_string()),
+                share: 1.0,
+                error_key: None,
+                lossy_rebuild_risk: false,
+            },
+            SyncSourcePayload {
+                source: "opencode".to_string(),
+                status: "idle".to_string(),
+                tone: "neutral".to_string(),
+                files_processed: 4,
+                changed_files: 0,
+                skipped_files: 4,
+                events_seen: 500,
+                events_inserted: 5,
+                stored_events: 4_000,
+                updated_at: Some("2026-06-11T00:00:00Z".to_string()),
+                share: 0.5,
+                error_key: None,
+                lossy_rebuild_risk: false,
+            },
+        ],
+        actions: vec![SyncActionPayload {
+            id: "sync".to_string(),
+            label_key: "syncCenter.action.sync".to_string(),
+            primary: true,
+            disabled: false,
+            reason_key: None,
+        }],
+    }
+}
+
+fn sample_platform_probes() -> Vec<PlatformProbe> {
+    vec![
+        PlatformProbe {
+            platform_id: "codex",
+            display_name: "Codex",
+            source_kind: Some(llmusage::SourceKind::Codex),
+            status: PlatformProbeStatus::Detected,
+            parser_status: ParserSupportStatus::Registered,
+            quality: Some("precise"),
+            privacy: "local_artifacts",
+            roots_checked: 1,
+            roots_detected: 1,
+            artifact_patterns: &["*.jsonl"],
+            detail: "candidate roots detected".to_string(),
+            next_action: "parsed by the registered Codex source parser",
+        },
+        PlatformProbe {
+            platform_id: "gemini",
+            display_name: "Gemini CLI",
+            source_kind: None,
+            status: PlatformProbeStatus::Detected,
+            parser_status: ParserSupportStatus::BlockedNoSamples,
+            quality: None,
+            privacy: "local_artifacts",
+            roots_checked: 1,
+            roots_detected: 1,
+            artifact_patterns: &["*.jsonl"],
+            detail: "candidate roots detected".to_string(),
+            next_action: "monitor-only; requires sanitized Gemini CLI samples",
+        },
+    ]
+}
+
+fn render_usage_text(
+    payload: SyncCommandCenterPayload,
+    probes: Vec<PlatformProbe>,
+    width: u16,
+    height: u16,
+) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    let area = Rect::new(0, 0, width, height);
+    let scroll = ScrollState {
+        offset: 0,
+        total: payload.sources.len() + probes.len(),
+        visible: height.saturating_sub(8) as usize,
+    };
+    let data: Option<Result<SyncCommandCenterPayload, String>> = Some(Ok(payload));
+
+    terminal
+        .draw(|frame| {
+            llmusage::tui::panels::usage::render(frame, area, &data, &probes, &scroll);
+        })
+        .unwrap();
+
+    buffer_text(&terminal)
+}
+
+fn render_overview_text(payload: OverviewPayload, width: u16, height: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    let area = Rect::new(0, 0, width, height);
+    let data: Option<Result<OverviewPayload, String>> = Some(Ok(payload));
+
+    terminal
+        .draw(|frame| {
+            llmusage::tui::panels::overview::render(frame, area, &data);
+        })
+        .unwrap();
+
+    buffer_text(&terminal)
+}
+
+fn sample_overview_payload() -> OverviewPayload {
+    OverviewPayload {
+        generated_at: "2026-06-12T00:00:00Z".to_string(),
+        total: TokenSummary {
+            input_tokens: 10_000,
+            cache_creation_tokens: 500,
+            cache_read_tokens: 2_500,
+            output_tokens: 8_000,
+            reasoning_output_tokens: 1_000,
+            total_tokens: 22_000,
+        },
+        last_24h: TokenSummary::default(),
+        source_count: 2,
+        bucket_count: 10,
+        total_events: 12,
+        last_24h_events: 2,
+        total_cost_usd: 3.5,
+        cache_efficiency: 0.25,
+        last_sync_at: Some("2026-06-12T00:00:00Z".to_string()),
+        last_export_at: None,
+    }
+}
+
+#[test]
+fn overview_panel_renders_summary_sections_and_24h_pulse() {
+    let mut payload = sample_overview_payload();
+    payload.last_24h = TokenSummary {
+        input_tokens: 1_000,
+        cache_creation_tokens: 500,
+        cache_read_tokens: 1_000,
+        output_tokens: 2_000,
+        reasoning_output_tokens: 1_000,
+        total_tokens: 5_500,
+    };
+    payload.last_24h_events = 2;
+
+    let text = render_overview_text(payload, 120, 30);
+
+    for expected in [
+        "Token Mix",
+        "Recent Activity",
+        "Freshness",
+        "24h Pulse",
+        "Input",
+        "Cache read",
+        "Avg/event",
+        "Generated",
+        "All-time share",
+        "5,500",
+        "2,750",
+        "25.0%",
+    ] {
+        assert!(
+            text.contains(expected),
+            "overview panel should contain '{expected}', got: {text}"
+        );
+    }
+}
+
+fn sample_stats_payload() -> StatsPanelPayload {
+    StatsPanelPayload {
+        overview: sample_overview_payload(),
+        heatmap: vec![
+            HeatmapPoint {
+                date: "2026-06-09".to_string(),
+                event_count: 0,
+                total_tokens: 0,
+            },
+            HeatmapPoint {
+                date: "2026-06-10".to_string(),
+                event_count: 1,
+                total_tokens: 4_000,
+            },
+            HeatmapPoint {
+                date: "2026-06-11".to_string(),
+                event_count: 3,
+                total_tokens: 8_000,
+            },
+            HeatmapPoint {
+                date: "2026-06-12".to_string(),
+                event_count: 2,
+                total_tokens: 6_000,
+            },
+        ],
+        sources: vec![
+            SourceBreakdown {
+                source: "codex".to_string(),
+                total_tokens: 16_000,
+                last_event_at: Some("2026-06-12T00:00:00Z".to_string()),
+                event_count: 8,
+            },
+            SourceBreakdown {
+                source: "opencode".to_string(),
+                total_tokens: 6_000,
+                last_event_at: None,
+                event_count: 4,
+            },
+        ],
+        health: HealthPayload {
+            integrations: vec![IntegrationState {
+                source: "codex".to_string(),
+                install_type: "init".to_string(),
+                status: "ok".to_string(),
+                config_path: None,
+                backup_path: None,
+                details_json: None,
+                updated_at: "2026-06-12T00:00:00Z".to_string(),
+            }],
+            cursors: vec![CursorHealth {
+                source: "codex".to_string(),
+                cursor_key: "session".to_string(),
+                updated_at: Some("2026-06-12T00:00:00Z".to_string()),
+                sqlite_status: None,
+            }],
+            recent_failures: Vec::new(),
+        },
+        context_pressure: ContextPressurePayload {
+            peak_percent: 0.42,
+            avg_percent: 0.18,
+            peak_model: Some("codex:gpt-5".to_string()),
+            priced_events: 12,
+            unpriced_events: 0,
+        },
+    }
+}
+
+fn render_stats_text(payload: StatsPanelPayload, width: u16, height: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    let area = Rect::new(0, 0, width, height);
+    let scroll = ScrollState {
+        offset: 0,
+        total: payload.sources.len(),
+        visible: height.saturating_sub(10) as usize,
+    };
+    let data: Option<Result<StatsPanelPayload, String>> = Some(Ok(payload));
+
+    terminal
+        .draw(|frame| {
+            llmusage::tui::panels::stats::render(frame, area, &data, &scroll);
+        })
+        .unwrap();
+
+    buffer_text(&terminal)
+}
+
 fn support(supported: bool, level: &str, reason: Option<&str>) -> BehaviorSupport {
     BehaviorSupport {
         supported,
@@ -321,18 +647,32 @@ fn sample_behavior_payload() -> BehaviorPanelPayload {
         },
         tools: ToolsPayload {
             support: support(true, "normalized", None),
-            breakdown: vec![ToolBreakdown {
-                tool_kind: "read".to_string(),
-                tool_name: "Read".to_string(),
-                mcp_server: Some("filesystem".to_string()),
-                calls: 7,
-                turn_count: 4,
-                session_count: 2,
-                estimated_cost_usd: 0.42,
-                call_share: 0.35,
-                first_seen_at: Some("2026-05-17T00:00:00Z".to_string()),
-                last_seen_at: Some("2026-05-17T01:00:00Z".to_string()),
-            }],
+            breakdown: vec![
+                ToolBreakdown {
+                    tool_kind: "read".to_string(),
+                    tool_name: "Read".to_string(),
+                    mcp_server: Some("filesystem".to_string()),
+                    calls: 7,
+                    turn_count: 4,
+                    session_count: 2,
+                    estimated_cost_usd: 0.42,
+                    call_share: 0.35,
+                    first_seen_at: Some("2026-05-17T00:00:00Z".to_string()),
+                    last_seen_at: Some("2026-05-17T01:00:00Z".to_string()),
+                },
+                ToolBreakdown {
+                    tool_kind: "(non-tool)".to_string(),
+                    tool_name: "(non-tool)".to_string(),
+                    mcp_server: None,
+                    calls: 0,
+                    turn_count: 3,
+                    session_count: 1,
+                    estimated_cost_usd: 0.17,
+                    call_share: 0.0,
+                    first_seen_at: Some("2026-05-17T00:30:00Z".to_string()),
+                    last_seen_at: Some("2026-05-17T01:30:00Z".to_string()),
+                },
+            ],
         },
         optimize: OptimizePayload {
             support: support(true, "normalized", None),
@@ -348,6 +688,14 @@ fn sample_behavior_payload() -> BehaviorPanelPayload {
                 recommendation: "Cache context before re-reading".to_string(),
                 estimated_savings_tokens: 8_000,
                 estimated_savings_usd: 0.8,
+            }],
+        },
+        zombie: ZombieReport {
+            installed_total: 3,
+            zombies: vec![ZombieItem {
+                source: "claude".to_string(),
+                kind: "skill".to_string(),
+                name: "smart-search".to_string(),
             }],
         },
         compare: ModelComparePayload {
@@ -421,14 +769,247 @@ fn render_nav_text(active_panel: Panel, width: u16, height: u16) -> String {
     buffer_text(&terminal)
 }
 
+fn render_shell_text(mut state: AppState, width: u16, height: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    state.handle_resize(width, height);
+
+    terminal
+        .draw(|frame| {
+            llmusage::tui::draw::draw(frame, &state);
+        })
+        .unwrap();
+
+    buffer_text(&terminal)
+}
+
 // ─── Property Tests ───────────────────────────────────────────────────────────
 
 #[test]
-fn nav_bar_renders_behavior_panel_shortcut() {
+fn nav_bar_renders_agents_panel_shortcut() {
     let text = render_nav_text(Panel::Behavior, 120, 3);
     assert!(
-        text.contains("8:行为"),
-        "nav bar should expose behavior panel as 8:行为, got: {text}"
+        text.contains("8 Agents"),
+        "nav bar should expose behavior panel as 8 Agents, got: {text}"
+    );
+}
+
+#[test]
+fn dashboard_shell_renders_tokscale_style_header_and_footer() {
+    let text = render_shell_text(AppState::new(), 120, 30);
+
+    for expected in [
+        "llmusage",
+        "Overview",
+        "Usage",
+        "Daily",
+        "Hourly",
+        "[s:source]",
+        "[r:refresh]",
+        "[x:sync]",
+        "[?]",
+    ] {
+        assert!(
+            text.contains(expected),
+            "dashboard shell should contain '{expected}', got: {text}"
+        );
+    }
+}
+
+#[test]
+fn dashboard_shell_uses_short_labels_on_narrow_widths() {
+    let text = render_shell_text(AppState::new(), 50, 18);
+
+    for expected in ["llmusage", "Ovw", "Use", "Day", "Hr", "tab/1-8"] {
+        assert!(
+            text.contains(expected),
+            "narrow dashboard shell should contain '{expected}', got: {text}"
+        );
+    }
+}
+
+#[test]
+fn source_picker_overlay_lists_monitor_only_platforms() {
+    let mut state = AppState::new();
+    state.active_dialog = Some(ActiveDialog::SourcePicker);
+
+    let text = render_shell_text(state, 120, 30);
+
+    for expected in ["Sources", "Gemini CLI", "blocked_no_samples"] {
+        assert!(
+            text.contains(expected),
+            "source picker should contain '{expected}', got: {text}"
+        );
+    }
+}
+
+#[test]
+fn daily_panel_renders_tokscale_style_token_channels() {
+    let text = render_daily_text(
+        vec![
+            DailyTrendPoint {
+                date: "2026-05-28".to_string(),
+                input_tokens: 1_000,
+                cache_read_tokens: 2_000,
+                cache_creation_tokens: 500,
+                output_tokens: 3_000,
+                total_tokens: 6_500,
+                event_count: 7,
+                cost_with_cache_usd: 1.25,
+            },
+            DailyTrendPoint {
+                date: "2026-05-29".to_string(),
+                input_tokens: 2_000,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                output_tokens: 4_000,
+                total_tokens: 6_000,
+                event_count: 3,
+                cost_with_cache_usd: 2.5,
+            },
+        ],
+        120,
+        16,
+    );
+
+    for expected in [
+        "Daily Usage",
+        "2026-05-29",
+        "Input",
+        "Output",
+        "Cache R",
+        "Cache W",
+        "detail",
+        "$2.50",
+    ] {
+        assert!(
+            text.contains(expected),
+            "daily panel should contain '{expected}', got: {text}"
+        );
+    }
+}
+
+#[test]
+fn daily_panel_uses_compact_columns_on_narrow_widths() {
+    let text = render_daily_text(
+        vec![DailyTrendPoint {
+            date: "2026-05-29".to_string(),
+            input_tokens: 1,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            output_tokens: 2,
+            total_tokens: 3,
+            event_count: 1,
+            cost_with_cache_usd: 0.01,
+        }],
+        50,
+        10,
+    );
+
+    assert!(text.contains("Daily Usage"), "panel title missing: {text}");
+    assert!(text.contains("05-29"), "compact date missing: {text}");
+    assert!(
+        !text.contains("2026-05-29"),
+        "narrow daily panel should not keep full date: {text}"
+    );
+}
+
+#[test]
+fn hourly_panel_renders_profile_bars_and_compact_hour_labels() {
+    let text = render_hourly_text(
+        vec![
+            TrendPoint {
+                label: "2026-05-29T13:00:00Z".to_string(),
+                total_tokens: 1_000,
+            },
+            TrendPoint {
+                label: "2026-05-29T14:00:00Z".to_string(),
+                total_tokens: 2_000,
+            },
+        ],
+        120,
+        12,
+    );
+
+    for expected in ["Hourly Usage", "05-29 14:00", "Profile", "#"] {
+        assert!(
+            text.contains(expected),
+            "hourly panel should contain '{expected}', got: {text}"
+        );
+    }
+}
+
+#[test]
+fn usage_panel_renders_sync_status_and_platform_monitor_summary() {
+    let text = render_usage_text(sample_sync_payload(), sample_platform_probes(), 120, 18);
+
+    for expected in [
+        "Usage / Sync",
+        "Ready to sync",
+        "Source Sync",
+        "Skipped",
+        "codex",
+        "8,000",
+        "Platform Monitor",
+        "Gemini CLI",
+        "blocked-no-samples",
+    ] {
+        assert!(
+            text.contains(expected),
+            "usage panel should contain '{expected}', got: {text}"
+        );
+    }
+}
+
+#[test]
+fn usage_panel_uses_compact_columns_on_narrow_widths() {
+    let text = render_usage_text(sample_sync_payload(), sample_platform_probes(), 52, 12);
+
+    for expected in ["Usage / Sync", "Stored", "codex", "8,000"] {
+        assert!(
+            text.contains(expected),
+            "narrow usage panel should contain '{expected}', got: {text}"
+        );
+    }
+    assert!(
+        !text.contains("Inserted"),
+        "narrow usage panel should hide wide-only columns: {text}"
+    );
+}
+
+#[test]
+fn stats_panel_renders_contribution_and_source_mix() {
+    let text = render_stats_text(sample_stats_payload(), 120, 20);
+
+    for expected in [
+        "Stats",
+        "Contribution",
+        "Source Mix",
+        "current streak",
+        "3.50",
+        "codex",
+        "16.0k",
+        "Health Signals",
+    ] {
+        assert!(
+            text.contains(expected),
+            "stats panel should contain '{expected}', got: {text}"
+        );
+    }
+}
+
+#[test]
+fn stats_panel_uses_compact_source_columns_on_narrow_widths() {
+    let text = render_stats_text(sample_stats_payload(), 50, 12);
+
+    for expected in ["Stats", "Source Mix", "codex", "16.0k"] {
+        assert!(
+            text.contains(expected),
+            "narrow stats panel should contain '{expected}', got: {text}"
+        );
+    }
+    assert!(
+        !text.contains("Last Event"),
+        "narrow stats panel should hide wide-only columns: {text}"
     );
 }
 
@@ -540,6 +1121,7 @@ fn behavior_panel_renders_all_behavior_sections_and_sample_rows() {
         "Compare",
         "coding",
         "Read",
+        "(non-tool)",
         "gpt-5",
         "sonnet",
         "Repeated reads",

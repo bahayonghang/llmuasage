@@ -241,6 +241,13 @@ pub struct WorkerLock {
     meta: WorkerLockMeta,
 }
 
+/// RAII guard that keeps a held [`WorkerLock`] lease fresh until dropped.
+#[must_use]
+pub struct WorkerLockHeartbeat {
+    stop_tx: Option<std::sync::mpsc::Sender<()>>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
 /// Main SQLite-backed store façade used across commands, parsers, and queries.
 #[derive(Debug, Clone)]
 pub struct Store {
@@ -314,7 +321,8 @@ impl Store {
             let page: Vec<PricingRecomputeRow> = {
                 let mut stmt = tx.prepare(
                     r#"
-                    SELECT event_key, source, model, hour_start, COALESCE(project_hash, ''),
+                    SELECT event_key, source, COALESCE(provider_label, ''), model, hour_start,
+                           COALESCE(project_hash, ''),
                            COALESCE(input_tokens, 0),
                            COALESCE(cache_read_tokens, 0),
                            COALESCE(cache_creation_tokens, 0),
@@ -330,14 +338,15 @@ impl Store {
                     Ok(PricingRecomputeRow {
                         event_key: row.get(0)?,
                         source: row.get(1)?,
-                        model: row.get(2)?,
-                        hour_start: row.get(3)?,
-                        project_hash: row.get(4)?,
-                        input_tokens: row.get(5)?,
-                        cache_read_tokens: row.get(6)?,
-                        cache_creation_tokens: row.get(7)?,
-                        output_tokens: row.get(8)?,
-                        reasoning_output_tokens: row.get(9)?,
+                        provider_label: row.get(2)?,
+                        model: row.get(3)?,
+                        hour_start: row.get(4)?,
+                        project_hash: row.get(5)?,
+                        input_tokens: row.get(6)?,
+                        cache_read_tokens: row.get(7)?,
+                        cache_creation_tokens: row.get(8)?,
+                        output_tokens: row.get(9)?,
+                        reasoning_output_tokens: row.get(10)?,
                     })
                 })?;
                 mapped.collect::<rusqlite::Result<Vec<_>>>()?
@@ -384,6 +393,7 @@ impl Store {
                     buckets
                         .entry(BucketKey {
                             source: row.source.clone(),
+                            provider_label: row.provider_label.clone(),
                             model: row.model.clone(),
                             hour_start: row.hour_start.clone(),
                             project_hash: row.project_hash.clone(),
@@ -404,12 +414,16 @@ impl Store {
             let mut update_bucket_stmt = tx.prepare(
                 r#"
                 UPDATE usage_bucket_30m
-                SET cost_with_cache_usd = ?5,
-                    cost_without_cache_usd = ?6,
-                    pricing_status = ?7,
-                    pricing_source = ?8,
-                    pricing_rate = ?9
-                WHERE source = ?1 AND model = ?2 AND hour_start = ?3 AND project_hash = ?4
+                SET cost_with_cache_usd = ?6,
+                    cost_without_cache_usd = ?7,
+                    pricing_status = ?8,
+                    pricing_source = ?9,
+                    pricing_rate = ?10
+                WHERE source = ?1
+                  AND provider_label = ?2
+                  AND model = ?3
+                  AND hour_start = ?4
+                  AND project_hash = ?5
                 "#,
             )?;
             let mut delete_empty_bucket_stmt = tx.prepare(
@@ -419,6 +433,7 @@ impl Store {
                     SELECT 1
                     FROM usage_event e
                     WHERE e.source = usage_bucket_30m.source
+                      AND COALESCE(e.provider_label, '') = usage_bucket_30m.provider_label
                       AND e.model = usage_bucket_30m.model
                       AND e.hour_start = usage_bucket_30m.hour_start
                       AND COALESCE(e.project_hash, '') = usage_bucket_30m.project_hash
@@ -429,6 +444,7 @@ impl Store {
             for (key, pricing) in buckets {
                 update_bucket_stmt.execute(params![
                     key.source,
+                    key.provider_label,
                     key.model,
                     key.hour_start,
                     key.project_hash,
@@ -461,6 +477,7 @@ pub struct SyncRunWriter {
     run_started_at: String,
     raw_archive_enabled: bool,
     pricing_catalog: crate::query::PricingCatalog,
+    provider_index: Option<crate::domain::provider_map::ProviderIndex>,
 }
 
 impl SyncRunWriter {
@@ -604,6 +621,7 @@ pub struct ShardCommitStats {
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 struct BucketKey {
     source: String,
+    provider_label: String,
     model: String,
     hour_start: String,
     project_hash: String,
@@ -613,6 +631,7 @@ struct BucketKey {
 struct PricingRecomputeRow {
     event_key: String,
     source: String,
+    provider_label: String,
     model: String,
     hour_start: String,
     project_hash: String,

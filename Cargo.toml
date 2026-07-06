@@ -1,6 +1,6 @@
 [package]
 name = "llmusage"
-version = "0.6.3"
+version = "0.9.0"
 edition = "2024"
 description = "Local-first AI CLI usage analytics with Rust, SQLite, hooks, and zero upload."
 repository = "https://github.com/bahayonghang/llmuasage"
@@ -17,6 +17,11 @@ path = "src/lib.rs"
 name = "llmusage"
 path = "src/main.rs"
 
+[[example]]
+name = "docs_dashboard_serve"
+path = "examples/docs_dashboard_serve.rs"
+required-features = ["testing"]
+
 [features]
 default = []
 testing = ["dep:tempfile"]
@@ -24,16 +29,16 @@ testing = ["dep:tempfile"]
 [dependencies]
 anyhow = "1.0"
 axum = { version = "0.8", features = ["http1", "json", "tokio"] }
-chrono = { version = "0.4", features = ["clock", "serde"] }
+chrono = { version = "0.4.45", features = ["clock", "serde"] }
 clap = { version = "4.5", features = ["derive"] }
 crossterm = "0.29"
-dashmap = "6.1"
+dashmap = "6.2.1"
 dirs = "6.0"
 fs4 = "1.1.0"
-ratatui = "0.30.0"
-rusqlite = { version = "0.39.0", features = ["bundled", "chrono"] }
+ratatui = "0.30.1"
+rusqlite = { version = "0.40.1", features = ["bundled", "chrono"] }
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde_json = "1.0.150"
 base64 = "0.22"
 thiserror = "2.0"
 sha2 = "0.11.0"
@@ -44,9 +49,12 @@ tokio = { version = "1.52.3", features = [
     "signal",
 ] }
 tokio-util = "0.7"
-toml_edit = "0.25.11"
+toml_edit = "0.25.12"
+tower-http = { version = "0.7.0", features = ["fs"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+unicode-width = "0.2.2"
 walkdir = "2.5"
 tempfile = { version = "3.23", optional = true }
 

@@ -1,99 +1,106 @@
 # 快速开始
 
-`llmusage` 是一个本地优先的 Rust CLI。
+如果你只想建立本地数据库、看到第一份报表并打开浏览器 Dashboard，从这里开始即可。
 
 ## 环境要求
 
-- Rust stable
+- Rust stable toolchain
 - Node.js 20+
 - npm 10+
 - `just`
 
-## 安装依赖
+## 1. 从当前 checkout 安装
 
 ```powershell
 just install
 ```
 
-这条命令会：
+该任务会安装 `docs/` 下的 VitePress 依赖，并通过 `cargo install --path . --locked --force` 安装 CLI。
 
-- 安装 `docs/` 下的 VitePress 依赖
-- 用 `cargo install --path . --locked --force` 安装当前仓库里的 CLI
-
-## 跑通本地链路
+## 2. 初始化本地运行时与 hooks
 
 ```powershell
 llmusage init
+```
+
+`init` 会创建运行时目录、初始化 SQLite、写入 hook 包装器，并在本地配置存在时安装 Codex、Claude Code、OpenCode、Google Antigravity 集成。
+
+默认路径：
+
+| 项目 | 路径 |
+| --- | --- |
+| 运行时根目录 | `~/.llmusage/` |
+| 数据库 | `~/.llmusage/llmusage.db` |
+| hook 包装器 | `~/.llmusage/bin/llmusage-hook.cmd`、`~/.llmusage/bin/llmusage-hook.sh` |
+| 静态导出 | `~/.llmusage/exports/` |
+
+可用 `--home <PATH>` 或 `LLMUSAGE_HOME` 覆盖运行时根目录。
+
+## 3. 导入本地用量
+
+```powershell
 llmusage sync
+```
+
+`sync` 会增量解析本地真源，写入标准化 usage 行、30 分钟 bucket、source-file 诊断和行为事实。
+
+只同步单个来源：
+
+```powershell
+llmusage sync --source codex
+```
+
+## 4. 查看默认报表
+
+```powershell
 llmusage
+```
+
+没有子命令时，`llmusage` 等价于 `daily`，显示所选时区下最近 7 个自然日（包含今天）。`--timezone local` 使用本机当前固定本地偏移；如果需要跨机器可复现的历史分组，请显式传入 `--timezone +08:00` 这类固定偏移。
+
+自动化场景使用 JSON：
+
+```powershell
+llmusage daily --json --source antigravity
+```
+
+## 5. 打开本地 Dashboard
+
+终端 Dashboard：
+
+```powershell
 llmusage dash
+```
+
+浏览器 Dashboard：
+
+```powershell
 llmusage serve
 ```
 
-### 每一步做什么
+`serve` 只监听 `127.0.0.1`，会打印本地 URL，并尝试打开默认浏览器。
 
-- `init` 建立 `~/.llmusage/`、创建 `llmusage.db`、生成 hook 包装器并安装 Codex / Claude / OpenCode / Gemini 集成。
-- `sync` 增量解析本地真源并写入 SQLite。人读进度默认写入 stderr；脚本需要生命周期/进度事件时可用 `--json-events` 输出 NDJSON。
-- 不带子命令的 `llmusage` 会从本地 DB 输出过去 7 个自然日（包含今天）的 daily 报表，并默认聚合为一张 ccusage 风格表。默认列展示 `Input`、`Output`、`Cache Create`、`Cache Read`、`Total Tokens` 和 `Cost (USD)`；宽屏下 token 使用完整逗号分隔数字，`NO_COLOR=1` 会禁用 ANSI 样式。`llmusage daily --json` 保持稳定的聚合 snake_case JSON 结构，并包含 `cache_creation_tokens`。也可以使用 `llmusage daily --all` 查看完整历史，或用 `--source` / `--breakdown` 查看来源和模型明细，`llmusage monthly`、`llmusage session`、`llmusage blocks` 提供其他报表。
-- `dash` 打开终端 TUI。可用数字键或 Tab/Shift+Tab 切换面板；`8:行为` 展示只读的 Activity / Tools / Optimize / Compare 行为摘要，并明确显示 no-data、degraded、insufficient-models、low-sample 状态。
-- `serve` 在 `127.0.0.1` 上启动本地分析页，并默认用系统浏览器打开它。首屏用同一个筛选后的 Dashboard 快照驱动 KPI、趋势、排行、行为分析、health 和 diagnostics 面板；live 模式可以把当前视图导出为 JSON、启动带取消/进度状态的 sync job，或开启 30s/60s 自动刷新。行为分析读取 sync 阶段提取的 normalized `usage_turn` / `usage_tool_call`，不会在浏览器端解析 raw transcript；Activity/Tools/Optimize/Compare 在来源缺少工具级证据时会显式降级。Optimize 只读展示建议，不会执行清理动作。
-
-报表命令都是只读操作，不上传数据，也不会自动 sync；源数据变化后请重新运行 `llmusage sync`。可用 `--source codex|claude|opencode|gemini` 限定报表或同步来源。升级后如果需要重新填充 session/source-file metadata，请只在原始源文件仍存在时运行 `llmusage sync --rebuild`。如果 Codex/Claude/Gemini 文件已经被清理，普通 `llmusage sync` 会保留已导入历史并在 diagnostics 中显示缺失源文件；`--rebuild` 默认拒绝，除非加 `--allow-lossy-rebuild` 明确清掉不可重建历史。如果维护本地价格快照，可运行 `llmusage doctor --refresh-pricing <file>`；llmusage 会把快照保存到 `~/.llmusage/pricing/<catalog-version>.json`，重算 event/bucket 成本，并让后续 sync 继续使用该本地 catalog。
-
-## 回归检查
+Codex 专属浏览器 Dashboard：
 
 ```powershell
-just ci
+llmusage codex-tracer
 ```
 
-`ci` 会运行格式检查、clippy、测试和 VitePress 生产构建。
+当你需要独立的 `codex-tracer.db` 以及 Codex 专属调用/线程细节时，使用这个命令。
 
-## 库 API 预览
+## 6. 导出离线报告
 
-```rust
-use llmusage::{
-    paths::AppPaths,
-    query::{Dashboard, QueryFilter},
-    store::Store,
-    Result,
-};
-
-fn open_store(root: std::path::PathBuf) -> Result<Store> {
-    let paths = AppPaths::with_root(root)?;
-    let store = Store::new(&paths)?;
-    store.bootstrap()?;
-    Ok(store)
-}
-
-fn load_ccr_ui(store: &Store) -> Result<()> {
-    let filter = QueryFilter::default();
-    let dashboard = Dashboard::open(store)?;
-    let _snapshot = dashboard.snapshot(&filter)?;
-    let _overview = dashboard.overview(&filter)?;
-    let _daily = dashboard.trends_daily(&filter)?;
-    let _home = dashboard.home_overview(&filter)?;
-    let _heatmap = dashboard.heatmap(&filter, 365)?;
-    let _activity = dashboard.activity_breakdown(&filter)?;
-    let _tools = dashboard.tool_breakdown(&filter)?;
-    let _optimize = dashboard.optimize(&filter)?;
-    let _compare = dashboard.model_compare(&filter, None, None)?;
-    let _logs = dashboard.logs(&Default::default())?;
-    Ok(())
-}
+```powershell
+llmusage export html --out .\llmusage-report
 ```
 
-运行根目录解析顺序是 `--home <PATH>` > `LLMUSAGE_HOME` > `~/.llmusage`。
-0.5.x 的 ccr-ui 表面包含 `Dashboard::overview`、`trends_daily`、`home_overview`、`heatmap`、`logs`、activity/tool/optimize/compare payload、来自 `source_file` 状态机的归档诊断、持久化 cost/pricing/cache 字段，以及通过 `JobRegistry` 暴露的进程内导入任务。CLI 与 library 入口共用运行根目录解析顺序：`--home <PATH>` > `LLMUSAGE_HOME` > `~/.llmusage`。
+导出目录包含 `index.html`、`snapshot.json` 和 `assets/*`。
 
-下游适配层可在集成测试中启用测试夹具：
+## 下一步
 
-```toml
-[dev-dependencies]
-llmusage = { path = "../llmusage", features = ["testing"] }
-```
-
-```rust
-let fixture = llmusage::testing::Fixture::new()?;
-fixture.seed_dashboard(12)?;
-let overview = llmusage::Dashboard::open(fixture.store())?.overview(&Default::default())?;
-```
+- [第一次同步](./first-sync)：了解安全重建与 NDJSON 进度。
+- [第一次报表](./first-report)：了解报表筛选与表格语义。
+- [Codex Tracer](./codex-tracer)：了解专用 Codex Dashboard 与重建行为。
+- [Dashboard](../dashboard/)：了解 `llmusage serve`、行为面板和降级状态。
+- [安全说明](../safety/)：了解本地数据路径与破坏性边界。
+- [CLI 参考](../reference/cli)：查精确参数。

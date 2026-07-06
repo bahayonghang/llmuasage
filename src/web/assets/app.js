@@ -1,6 +1,15 @@
 import { UI_COPY, getLocale, getShellCopy, onLocaleChange, setLocale } from './copy.js';
-import { buildContext, buildFilterQuery, loadDashboardSnapshot } from './data.js';
+import {
+  buildContext,
+  buildExplorerQuery,
+  buildFilterQuery,
+  clearLiveRequestCache,
+  loadDashboardCoreSnapshot,
+  loadDashboardSnapshot,
+  loadExplorer,
+} from './data.js';
 import { renderHero } from './render/hero.js';
+import { renderSyncCommandCenter } from './render/sync-command-center.js';
 import { renderTrends } from './render/trends.js';
 import { renderModels } from './render/models.js';
 import { renderSources } from './render/sources.js';
@@ -8,6 +17,7 @@ import { renderProjects } from './render/projects.js';
 import { renderCosts } from './render/costs.js';
 import { renderInsights } from './render/insights.js';
 import { renderBehavior } from './render/behavior.js';
+import { renderExplorer } from './render/explorer.js';
 import { applyDomI18n, bindI18nDomSync } from './i18n.js';
 import { initTheme, toggleTheme } from './theme.js';
 import { setRenderer, setRuntimeState } from './runtime.js';
@@ -15,8 +25,26 @@ import { setRenderer, setRuntimeState } from './runtime.js';
 const logger = window.console;
 const DEFAULT_TREND_WINDOW = 'day';
 const VALID_TREND_WINDOWS = new Set(['day', 'week', 'month', 'all']);
+const DEFAULT_RANGE_PRESET = '1d';
+const CUSTOM_RANGE_PRESET = 'custom';
+const VALID_RANGE_PRESETS = new Set(['1d', '7d', '30d', 'all', CUSTOM_RANGE_PRESET]);
+const RANGE_TO_TREND_WINDOW = Object.freeze({ '1d': 'day', '7d': 'week', '30d': 'month', all: 'all' });
+const TREND_WINDOW_TO_RANGE = Object.freeze({ day: '1d', week: '7d', month: '30d', all: 'all' });
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const AUTO_REFRESH_STORAGE_KEY = 'llmusage:autoRefreshMs';
 const VALID_AUTO_REFRESH_MS = new Set([0, 30000, 60000]);
+const DEFAULT_EXPLORER = Object.freeze({
+  granularity: 'day',
+  metric: 'attributed_cost_usd',
+  groupBy: 'source',
+  sessionId: '',
+  toolName: '',
+  toolKind: '',
+  tokenType: '',
+  limit: 8,
+  includeOther: true,
+  includeNonTool: true,
+});
 let dashboardState = null;
 
 /*
@@ -41,10 +69,14 @@ async function main() {
   const state = {
     mode: document.body?.dataset?.mode === 'snapshot' ? 'snapshot' : 'live',
     trendWindow: initialTrendWindowFromUrl(),
+    rangePreset: initialRangePresetFromUrl(),
     filters: readFiltersFromUrl(),
+    explorer: initialExplorerStateFromUrl(),
     autoRefreshMs: readAutoRefreshPreference(),
     autoRefreshTimer: null,
     reloadPromise: null,
+    reloadGeneration: 0,
+    secondaryRefreshing: false,
     rawData: null,
     expanded: {
       models: false,
@@ -59,6 +91,7 @@ async function main() {
   syncFilterControls(state);
   setupNavigation();
   setupFilterControls(state);
+  setupExplorerControls(state);
   setupPanelToggles(state);
   setupExport(state);
   setupSyncJob(state);
@@ -90,24 +123,94 @@ async function main() {
 
 async function loadDashboardData(state) {
   logger.info('开始加载 dashboard 数据');
-  const snapshot = await loadDashboardSnapshot(state);
+  let snapshot = await loadDashboardSnapshot(state);
+  if (state.mode !== 'snapshot' && (!hasUsableExplorer(snapshot) || !isDefaultExplorerState(state))) {
+    snapshot = { ...snapshot };
+    try {
+      snapshot.explorer = await loadExplorer(state);
+    } catch (error) {
+      logger.warn('/api/explorer degraded', error);
+      snapshot.explorer = degradedExplorerPayload(error);
+    }
+  }
   logger.info('完成 dashboard 数据加载');
   return snapshot;
+}
+
+function hasUsableExplorer(snapshot) {
+  return Boolean(snapshot?.explorer?.support || snapshot?.explorer?.rows || snapshot?.explorer?.series);
+}
+
+function isDefaultExplorerState(state) {
+  const explorer = { ...DEFAULT_EXPLORER, ...(state?.explorer || {}) };
+  return (
+    explorer.granularity === DEFAULT_EXPLORER.granularity
+    && explorer.metric === DEFAULT_EXPLORER.metric
+    && explorer.groupBy === DEFAULT_EXPLORER.groupBy
+    && !explorer.sessionId
+    && !explorer.toolName
+    && !explorer.toolKind
+    && !explorer.tokenType
+    && clampExplorerLimit(explorer.limit) === DEFAULT_EXPLORER.limit
+    && explorer.includeOther !== false
+    && explorer.includeNonTool !== false
+  );
+}
+
+function stableFilterKey(filters = {}) {
+  const params = new URLSearchParams();
+  for (const key of ['source', 'model', 'project_hash', 'timezone']) {
+    if (filters[key]) {
+      params.set(key, filters[key]);
+    }
+  }
+  return params.toString();
+}
+
+function sameStableFilters(left, right) {
+  return stableFilterKey(left) === stableFilterKey(right);
+}
+
+function mergeCoreSnapshot(previous, core, options = {}) {
+  return {
+    ...(previous || {}),
+    overview: core?.overview,
+    trends: core?.trends,
+    models: core?.models,
+    sources: core?.sources,
+    projects: core?.projects,
+    costs: core?.costs,
+    health: core?.health,
+    diagnostics: core?.diagnostics,
+    sync_command_center: core?.sync_command_center,
+    _meta: {
+      ...((previous && previous._meta) || {}),
+      secondary_refreshing: Boolean(options.secondaryRefreshing),
+    },
+  };
 }
 
 function renderDashboard(rawData) {
   const context = buildContext(rawData);
 
+  renderSyncCommandCenter(context, dashboardState);
   renderHero(context);
   renderTrends(context);
   renderModels(context, dashboardState);
   renderSources(context);
   renderProjects(context, dashboardState);
   renderBehavior(context);
+  renderExplorer(context, dashboardState);
   renderCosts(context, dashboardState);
   renderInsights(context);
   syncPanelToggleControls(context, dashboardState);
   syncFilterControls(dashboardState, context);
+}
+
+function refreshSyncCommandCenter(state = dashboardState) {
+  if (!state?.rawData) return;
+  const context = buildContext(state.rawData);
+  renderSyncCommandCenter(context, state);
 }
 
 function appVersion() {
@@ -128,8 +231,51 @@ function readFiltersFromUrl() {
 
 function initialTrendWindowFromUrl() {
   const params = new URLSearchParams(window.location.search || '');
-  const requestedWindow = params.get('window') || DEFAULT_TREND_WINDOW;
-  return VALID_TREND_WINDOWS.has(requestedWindow) ? requestedWindow : DEFAULT_TREND_WINDOW;
+  const requestedWindow = params.get('window');
+  if (VALID_TREND_WINDOWS.has(requestedWindow)) {
+    return requestedWindow;
+  }
+  return RANGE_TO_TREND_WINDOW[params.get('range')] || DEFAULT_TREND_WINDOW;
+}
+
+function initialRangePresetFromUrl() {
+  const params = new URLSearchParams(window.location.search || '');
+  if (params.get('since') || params.get('until')) {
+    return CUSTOM_RANGE_PRESET;
+  }
+
+  const requestedRange = params.get('range');
+  if (VALID_RANGE_PRESETS.has(requestedRange) && requestedRange !== CUSTOM_RANGE_PRESET) {
+    return requestedRange;
+  }
+
+  return TREND_WINDOW_TO_RANGE[params.get('window')] || DEFAULT_RANGE_PRESET;
+}
+
+function initialExplorerStateFromUrl() {
+  const params = new URLSearchParams(window.location.search || '');
+  const next = { ...DEFAULT_EXPLORER };
+  if (params.get('granularity')) next.granularity = params.get('granularity');
+  if (params.get('metric')) next.metric = params.get('metric');
+  if (params.get('group_by')) next.groupBy = params.get('group_by');
+  if (params.get('session_id') || params.get('session')) {
+    next.sessionId = params.get('session_id') || params.get('session');
+  }
+  if (params.get('tool_name') || params.get('tool')) {
+    next.toolName = params.get('tool_name') || params.get('tool');
+  }
+  if (params.get('tool_kind')) next.toolKind = params.get('tool_kind');
+  if (params.get('token_type')) next.tokenType = params.get('token_type');
+  if (params.get('limit')) {
+    next.limit = clampExplorerLimit(params.get('limit'));
+  }
+  if (params.has('include_other')) {
+    next.includeOther = parseQueryBool(params.get('include_other'));
+  }
+  if (params.has('is_tool')) {
+    next.includeNonTool = !parseQueryBool(params.get('is_tool'));
+  }
+  return next;
 }
 
 function readAutoRefreshPreference() {
@@ -139,6 +285,26 @@ function readAutoRefreshPreference() {
   } catch (_) {
     return 0;
   }
+}
+
+function degradedExplorerPayload(error) {
+  return {
+    support: {
+      supported: false,
+      level: 'degraded',
+      reason: error?.message || 'Explorer query failed; fixed dashboard panels are still available.',
+      strategy: 'unknown',
+    },
+    warning: error?.message || 'Explorer query failed.',
+    granularity: 'day',
+    metric: 'attributed_cost_usd',
+    group_by: 'source',
+    limit: 8,
+    include_other: true,
+    totals: { value: 0 },
+    rows: [],
+    series: [],
+  };
 }
 
 function persistAutoRefreshPreference(value) {
@@ -166,7 +332,7 @@ function renderBootstrapError(error) {
     <div class="status-panel-head">
       <div>
         <div class="status-eyebrow">${escapeHtml(UI_COPY.hero.statusEyebrow)}</div>
-        <div style="font-size: 18px; font-weight: 600; margin-top: 2px;">${escapeHtml(errorCopy.title)}</div>
+        <div class="status-panel-title">${escapeHtml(errorCopy.title)}</div>
       </div>
       <span class="status-pill" data-tone="warn"><span class="pulse"></span>${escapeHtml(errorCopy.pill)}</span>
     </div>
@@ -178,7 +344,7 @@ function renderBootstrapError(error) {
     </div>
   `;
   const errorBlock = `
-    <div style="padding: 18px; border: 1px dashed rgba(200,85,61,0.35); border-radius: 14px; color: #f5a890; font-size: 13px;">
+    <div class="bootstrap-error">
       ${escapeHtml(message)}
     </div>
   `;
@@ -233,7 +399,7 @@ function escapeHtml(value) {
  * 2) 当区域进入视口时，高亮对应侧边栏链接
  */
 function setupNavigation() {
-  const sections = ['overview', 'trends', 'models', 'sources', 'projects', 'behavior', 'cost', 'status'];
+  const sections = ['overview', 'trends', 'models', 'sources', 'projects', 'behavior', 'explorer', 'cost', 'status'];
   const navLinks = document.querySelectorAll('aside nav a');
 
   function setActive(id) {
@@ -266,7 +432,8 @@ function setupNavigation() {
   document.querySelectorAll('a[data-target="projects"]').forEach((a) => {
     a.addEventListener('click', (e) => {
       e.preventDefault();
-      document.getElementById('projects')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      document.getElementById('projects')?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
       setActive('projects');
     });
   });
@@ -296,8 +463,11 @@ function syncFilterControls(state, context = null) {
   populateSourceFilter();
 
   document.querySelectorAll('[data-window]').forEach((button) => {
-    button.classList.toggle('active', button.dataset.window === state.trendWindow);
+    const active = button.dataset.window === state.trendWindow;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
   });
+  syncRangePresetControls(state);
 
   const filters = state.filters || {};
   const snapshotMode = state.mode === 'snapshot';
@@ -328,14 +498,16 @@ function syncFilterControls(state, context = null) {
     }
   }
 
-  document.querySelectorAll('#filter-rail [data-filter], #filters-apply, #filters-reset').forEach((el) => {
-    el.disabled = snapshotMode;
-    if (snapshotMode) {
-      el.setAttribute('title', getShellCopy('shell.filters.snapshotDisabled'));
-    } else {
-      el.removeAttribute('title');
-    }
-  });
+  document
+    .querySelectorAll('#filter-rail [data-filter], #filter-rail [data-range-preset], #filters-apply, #filters-reset')
+    .forEach((el) => {
+      el.disabled = snapshotMode;
+      if (snapshotMode) {
+        el.setAttribute('title', getShellCopy('shell.filters.snapshotDisabled'));
+      } else {
+        el.removeAttribute('title');
+      }
+    });
 }
 
 function currentFilterInputs() {
@@ -344,15 +516,299 @@ function currentFilterInputs() {
   if (source && source !== 'all') filters.source = source;
   for (const key of ['model', 'since', 'until']) {
     const value = document.querySelector(`[data-filter="${key}"]`)?.value?.trim();
-    if (value) filters[key] = value;
+    if (!value) continue;
+    if (key === 'since' || key === 'until') {
+      const normalized = normalizeIsoDateValue(value);
+      if (normalized) filters[key] = normalized;
+    } else {
+      filters[key] = value;
+    }
   }
   return filters;
+}
+
+function parseQueryBool(value) {
+  return !['0', 'false', 'no', 'off'].includes(String(value || '').trim().toLowerCase());
+}
+
+function clampExplorerLimit(value) {
+  const parsed = Number.parseInt(String(value || ''), 10);
+  if (!Number.isFinite(parsed)) return DEFAULT_EXPLORER.limit;
+  return Math.max(1, Math.min(50, parsed));
+}
+
+function normalizeRangePreset(value) {
+  return VALID_RANGE_PRESETS.has(value) ? value : DEFAULT_RANGE_PRESET;
+}
+
+function syncRangePresetControls(state) {
+  const activePreset = normalizeRangePreset(state?.rangePreset);
+  document.querySelectorAll('[data-range-preset]').forEach((button) => {
+    const active = activePreset !== CUSTOM_RANGE_PRESET && button.dataset.rangePreset === activePreset;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+}
+
+function setCustomRangeFromInputs(state) {
+  const hasDate = Boolean(
+    document.querySelector('[data-filter="since"]')?.value?.trim() ||
+      document.querySelector('[data-filter="until"]')?.value?.trim(),
+  );
+  state.rangePreset = hasDate ? CUSTOM_RANGE_PRESET : DEFAULT_RANGE_PRESET;
+  syncRangePresetControls(state);
+}
+
+function normalizeIsoDateValue(value) {
+  const parsed = parseIsoDate(value);
+  return parsed ? formatIsoDate(parsed) : null;
+}
+
+function parseIsoDate(value) {
+  const raw = String(value || '').trim();
+  if (!ISO_DATE_PATTERN.test(raw)) return null;
+  const [year, month, day] = raw.split('-').map((part) => Number(part));
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    return null;
+  }
+  return date;
+}
+
+function formatIsoDate(date) {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function utcMonthStart(date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
+}
+
+function addUtcMonths(date, delta) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + delta, 1));
+}
+
+function localTodayAsUtcDate() {
+  const now = new Date();
+  return new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+}
+
+function sameUtcDate(a, b) {
+  return Boolean(
+    a &&
+      b &&
+      a.getUTCFullYear() === b.getUTCFullYear() &&
+      a.getUTCMonth() === b.getUTCMonth() &&
+      a.getUTCDate() === b.getUTCDate(),
+  );
+}
+
+function datePickerLocale() {
+  return getLocale() === 'zh' ? 'zh-CN' : 'en-US';
+}
+
+function datePickerMonthTitle(date) {
+  return new Intl.DateTimeFormat(datePickerLocale(), {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(date);
+}
+
+function datePickerWeekdays() {
+  const value = getShellCopy('shell.date.weekdays');
+  return value.split('|').filter(Boolean);
+}
+
+const datePickerState = {
+  popover: null,
+  input: null,
+  state: null,
+  month: null,
+};
+
+function ensureDatePickerPopover() {
+  if (datePickerState.popover) return datePickerState.popover;
+  const popover = document.createElement('div');
+  popover.className = 'date-picker-popover';
+  popover.setAttribute('role', 'dialog');
+  popover.setAttribute('aria-modal', 'false');
+  popover.addEventListener('click', handleDatePickerClick);
+  document.body.appendChild(popover);
+  datePickerState.popover = popover;
+  return popover;
+}
+
+function openDatePicker(input, state) {
+  if (input.disabled) return;
+  const selected = parseIsoDate(input.value) || localTodayAsUtcDate();
+  datePickerState.input = input;
+  datePickerState.state = state;
+  datePickerState.month = utcMonthStart(selected);
+  ensureDatePickerPopover();
+  renderDatePicker();
+}
+
+function closeDatePicker() {
+  datePickerState.popover?.remove();
+  datePickerState.popover = null;
+  datePickerState.input = null;
+  datePickerState.state = null;
+  datePickerState.month = null;
+}
+
+function positionDatePicker() {
+  const { popover, input } = datePickerState;
+  if (!popover || !input) return;
+  const rect = input.getBoundingClientRect();
+  const width = popover.offsetWidth || 260;
+  const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+  const top = Math.min(rect.bottom + 6, window.innerHeight - popover.offsetHeight - 8);
+  popover.style.left = `${left}px`;
+  popover.style.top = `${Math.max(8, top)}px`;
+}
+
+function renderDatePicker() {
+  const { popover, input } = datePickerState;
+  if (!popover || !input) return;
+
+  const selected = parseIsoDate(input.value);
+  const today = localTodayAsUtcDate();
+  const month = datePickerState.month || utcMonthStart(selected || today);
+  const firstDay = month.getUTCDay();
+  const gridStart = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth(), 1 - firstDay));
+  const weekdays = datePickerWeekdays();
+
+  let cells = weekdays
+    .map((day) => `<div class="date-picker-weekday">${escapeHtml(day)}</div>`)
+    .join('');
+
+  for (let index = 0; index < 42; index += 1) {
+    const day = new Date(Date.UTC(gridStart.getUTCFullYear(), gridStart.getUTCMonth(), gridStart.getUTCDate() + index));
+    const iso = formatIsoDate(day);
+    const classes = ['date-picker-day'];
+    if (day.getUTCMonth() !== month.getUTCMonth()) classes.push('is-outside');
+    if (sameUtcDate(day, today)) classes.push('is-today');
+    if (sameUtcDate(day, selected)) classes.push('is-selected');
+    cells += `<button type="button" class="${classes.join(' ')}" data-date-value="${iso}">${day.getUTCDate()}</button>`;
+  }
+
+  popover.innerHTML = `
+    <div class="date-picker-head">
+      <button class="date-picker-nav" type="button" data-date-nav="-1" aria-label="${escapeHtml(getShellCopy('shell.date.prevMonth'))}">‹</button>
+      <div class="date-picker-title">${escapeHtml(datePickerMonthTitle(month))}</div>
+      <button class="date-picker-nav" type="button" data-date-nav="1" aria-label="${escapeHtml(getShellCopy('shell.date.nextMonth'))}">›</button>
+    </div>
+    <div class="date-picker-grid">${cells}</div>
+    <div class="date-picker-actions">
+      <button type="button" data-date-action="clear">${escapeHtml(getShellCopy('shell.date.clear'))}</button>
+      <button type="button" data-date-action="today">${escapeHtml(getShellCopy('shell.date.today'))}</button>
+    </div>
+  `;
+  positionDatePicker();
+}
+
+function handleDatePickerClick(event) {
+  const nav = event.target.closest('[data-date-nav]');
+  if (nav) {
+    datePickerState.month = addUtcMonths(datePickerState.month || localTodayAsUtcDate(), Number(nav.dataset.dateNav || 0));
+    renderDatePicker();
+    return;
+  }
+
+  const action = event.target.closest('[data-date-action]')?.dataset?.dateAction;
+  if (action === 'clear') {
+    datePickerState.input.value = '';
+    datePickerState.input.dispatchEvent(new Event('input', { bubbles: true }));
+    closeDatePicker();
+    return;
+  }
+  if (action === 'today') {
+    datePickerState.input.value = formatIsoDate(localTodayAsUtcDate());
+    datePickerState.input.dispatchEvent(new Event('input', { bubbles: true }));
+    closeDatePicker();
+    return;
+  }
+
+  const day = event.target.closest('[data-date-value]');
+  if (day) {
+    datePickerState.input.value = day.dataset.dateValue;
+    datePickerState.input.dispatchEvent(new Event('input', { bubbles: true }));
+    closeDatePicker();
+  }
+}
+
+function setupDateInputs(state) {
+  document.querySelectorAll('[data-date-input]').forEach((input) => {
+    input.addEventListener('focus', () => openDatePicker(input, state));
+    input.addEventListener('click', () => openDatePicker(input, state));
+    input.addEventListener('input', () => setCustomRangeFromInputs(state));
+    input.addEventListener('change', () => {
+      const normalized = normalizeIsoDateValue(input.value);
+      if (normalized) input.value = normalized;
+      setCustomRangeFromInputs(state);
+    });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') closeDatePicker();
+    });
+  });
+
+  document.addEventListener('click', (event) => {
+    if (!datePickerState.popover) return;
+    if (event.target.closest('.date-picker-popover') || event.target.closest('[data-date-input]')) return;
+    closeDatePicker();
+  });
+  window.addEventListener('resize', positionDatePicker);
+  window.addEventListener('scroll', positionDatePicker, true);
+  onLocaleChange(renderDatePicker);
+}
+
+function setupRangePresetControls(state) {
+  syncRangePresetControls(state);
+  const group = document.getElementById('range-presets');
+  if (!group || state.mode === 'snapshot') return;
+
+  group.addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-range-preset]');
+    if (!button || button.disabled) return;
+    const preset = button.dataset.rangePreset;
+    if (!VALID_RANGE_PRESETS.has(preset) || preset === CUSTOM_RANGE_PRESET) return;
+
+    try {
+      const previousFilters = { ...(state.filters || {}) };
+      const filters = currentFilterInputs();
+      delete filters.since;
+      delete filters.until;
+      state.filters = filters;
+      state.rangePreset = preset;
+      state.trendWindow = RANGE_TO_TREND_WINDOW[preset] || state.trendWindow;
+      closeDatePicker();
+      if (sameStableFilters(previousFilters, filters)) {
+        await reloadDashboardFastRange(state);
+      } else {
+        clearLiveRequestCache();
+        await reloadDashboard(state);
+      }
+      syncFilterControls(state);
+    } catch (error) {
+      logger.error('快捷时间范围切换失败', error);
+      renderBootstrapError(error);
+    }
+  });
 }
 
 function syncUrlFromState(state) {
   if (state.mode === 'snapshot') return;
   const query = buildFilterQuery(state);
-  const next = `${window.location.pathname}${query}${window.location.hash || ''}`;
+  const params = new URLSearchParams(query.slice(1));
+  const explorerParams = new URLSearchParams(buildExplorerQuery(state).slice(1));
+  for (const [key, value] of explorerParams.entries()) {
+    params.set(key, value);
+  }
+  const mergedQuery = params.toString();
+  const next = `${window.location.pathname}${mergedQuery ? `?${mergedQuery}` : ''}${window.location.hash || ''}`;
   window.history.replaceState(null, '', next);
 }
 
@@ -361,8 +817,20 @@ async function reloadDashboard(state) {
     return state.reloadPromise;
   }
 
+  const generation = ++state.reloadGeneration;
+  state.secondaryRefreshing = false;
   state.reloadPromise = (async () => {
-    state.rawData = await loadDashboardData(state);
+    const snapshot = await loadDashboardData(state);
+    if (generation !== state.reloadGeneration) {
+      return state.rawData;
+    }
+    state.rawData = {
+      ...snapshot,
+      _meta: {
+        ...((snapshot && snapshot._meta) || {}),
+        secondary_refreshing: false,
+      },
+    };
     syncUrlFromState(state);
     renderDashboard(state.rawData);
     updateSyncButton(state);
@@ -374,6 +842,66 @@ async function reloadDashboard(state) {
   } finally {
     state.reloadPromise = null;
   }
+}
+
+async function reloadDashboardFastRange(state) {
+  if (state.mode === 'snapshot') {
+    return reloadDashboard(state);
+  }
+
+  const generation = ++state.reloadGeneration;
+  const previous = state.rawData;
+  state.secondaryRefreshing = Boolean(previous);
+
+  const core = await loadDashboardCoreSnapshot(state);
+  if (generation !== state.reloadGeneration) {
+    return state.rawData;
+  }
+
+  state.rawData = mergeCoreSnapshot(previous, core, { secondaryRefreshing: state.secondaryRefreshing });
+  syncUrlFromState(state);
+  renderDashboard(state.rawData);
+  updateSyncButton(state);
+
+  const refreshSecondary = async () => {
+    try {
+      const full = await loadDashboardData(state);
+      if (generation !== state.reloadGeneration) {
+        return;
+      }
+      state.secondaryRefreshing = false;
+      state.rawData = {
+        ...full,
+        _meta: {
+          ...((full && full._meta) || {}),
+          secondary_refreshing: false,
+        },
+      };
+      renderDashboard(state.rawData);
+      updateSyncButton(state);
+    } catch (error) {
+      if (generation !== state.reloadGeneration) {
+        return;
+      }
+      state.secondaryRefreshing = false;
+      if (state.rawData) {
+        state.rawData = {
+          ...state.rawData,
+          _meta: {
+            ...((state.rawData && state.rawData._meta) || {}),
+            secondary_refreshing: false,
+          },
+        };
+        renderDashboard(state.rawData);
+      }
+      logger.error('次级面板刷新失败', error);
+      const endpointSync = document.getElementById('endpoint-sync');
+      if (endpointSync) endpointSync.textContent = error?.message || getShellCopy('shell.refresh.failed');
+    }
+  };
+
+  void refreshSecondary();
+  return state.rawData;
 }
 
 async function refreshDashboardInPlace(state) {
@@ -449,6 +977,8 @@ function setupAutoRefresh(state) {
 function setupFilterControls(state) {
   populateSourceFilter();
   setupTrendSegments(state);
+  setupRangePresetControls(state);
+  setupDateInputs(state);
 
   const apply = document.getElementById('filters-apply');
   const reset = document.getElementById('filters-reset');
@@ -461,6 +991,14 @@ function setupFilterControls(state) {
   apply?.addEventListener('click', async () => {
     try {
       state.filters = currentFilterInputs();
+      if (state.filters.since || state.filters.until) {
+        state.rangePreset = CUSTOM_RANGE_PRESET;
+      } else if (state.rangePreset === CUSTOM_RANGE_PRESET) {
+        state.rangePreset = DEFAULT_RANGE_PRESET;
+        state.trendWindow = DEFAULT_TREND_WINDOW;
+      }
+      closeDatePicker();
+      clearLiveRequestCache();
       await reloadDashboard(state);
     } catch (error) {
       logger.error('筛选加载失败', error);
@@ -471,7 +1009,10 @@ function setupFilterControls(state) {
   reset?.addEventListener('click', async () => {
     try {
       state.filters = {};
+      state.rangePreset = DEFAULT_RANGE_PRESET;
       state.trendWindow = DEFAULT_TREND_WINDOW;
+      closeDatePicker();
+      clearLiveRequestCache();
       await reloadDashboard(state);
       syncFilterControls(state);
     } catch (error) {
@@ -482,6 +1023,107 @@ function setupFilterControls(state) {
 
   rail?.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
+      event.preventDefault();
+      apply?.click();
+    }
+  });
+}
+
+function syncExplorerControls(state) {
+  if (!state) return;
+  const explorer = { ...DEFAULT_EXPLORER, ...(state.explorer || {}) };
+  const snapshotMode = state.mode === 'snapshot';
+  const values = {
+    metric: explorer.metric,
+    groupBy: explorer.groupBy,
+    granularity: explorer.granularity,
+    limit: clampExplorerLimit(explorer.limit),
+    sessionId: explorer.sessionId || '',
+    toolName: explorer.toolName || '',
+    toolKind: explorer.toolKind || '',
+    tokenType: explorer.tokenType || '',
+    includeOther: explorer.includeOther !== false,
+    includeNonTool: explorer.includeNonTool !== false,
+  };
+
+  for (const [key, value] of Object.entries(values)) {
+    const control = document.querySelector(`[data-explorer-control="${key}"]`);
+    if (!control) continue;
+    if (control.type === 'checkbox') {
+      control.checked = Boolean(value);
+    } else if (document.activeElement !== control) {
+      control.value = String(value);
+    }
+  }
+
+  document
+    .querySelectorAll('#explorer-controls [data-explorer-control], #explorer-apply, #explorer-reset')
+    .forEach((el) => {
+      el.disabled = snapshotMode;
+      if (snapshotMode) {
+        el.setAttribute('title', getShellCopy('shell.explorer.snapshotDisabled'));
+      } else {
+        el.removeAttribute('title');
+      }
+    });
+}
+
+function currentExplorerInputs() {
+  const valueFor = (key) => document.querySelector(`[data-explorer-control="${key}"]`)?.value?.trim() || '';
+  return {
+    granularity: valueFor('granularity') || DEFAULT_EXPLORER.granularity,
+    metric: valueFor('metric') || DEFAULT_EXPLORER.metric,
+    groupBy: valueFor('groupBy') || DEFAULT_EXPLORER.groupBy,
+    sessionId: valueFor('sessionId'),
+    toolName: valueFor('toolName'),
+    toolKind: valueFor('toolKind'),
+    tokenType: valueFor('tokenType'),
+    limit: clampExplorerLimit(valueFor('limit')),
+    includeOther: document.querySelector('[data-explorer-control="includeOther"]')?.checked !== false,
+    includeNonTool: document.querySelector('[data-explorer-control="includeNonTool"]')?.checked !== false,
+  };
+}
+
+async function reloadExplorer(state) {
+  if (state.mode === 'snapshot') return state.rawData?.explorer;
+  try {
+    const explorer = await loadExplorer(state);
+    state.rawData = { ...(state.rawData || {}), explorer };
+    syncUrlFromState(state);
+    renderDashboard(state.rawData);
+    return explorer;
+  } catch (error) {
+    logger.error('Explorer 加载失败', error);
+    const explorer = degradedExplorerPayload(error);
+    state.rawData = { ...(state.rawData || {}), explorer };
+    renderDashboard(state.rawData);
+    return explorer;
+  }
+}
+
+function setupExplorerControls(state) {
+  syncExplorerControls(state);
+  const controls = document.getElementById('explorer-controls');
+  const apply = document.getElementById('explorer-apply');
+  const reset = document.getElementById('explorer-reset');
+
+  if (!controls || state.mode === 'snapshot') {
+    return;
+  }
+
+  apply?.addEventListener('click', async () => {
+    state.explorer = currentExplorerInputs();
+    await reloadExplorer(state);
+  });
+
+  reset?.addEventListener('click', async () => {
+    state.explorer = { ...DEFAULT_EXPLORER };
+    syncExplorerControls(state);
+    await reloadExplorer(state);
+  });
+
+  controls.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.target.closest('button')) {
       event.preventDefault();
       apply?.click();
     }
@@ -575,8 +1217,20 @@ function setupTrendSegments(state) {
     }
 
     try {
+      const previousFilters = { ...(state.filters || {}) };
       state.trendWindow = nextWindow;
-      await reloadDashboard(state);
+      state.rangePreset = TREND_WINDOW_TO_RANGE[nextWindow] || DEFAULT_RANGE_PRESET;
+      state.filters = currentFilterInputs();
+      delete state.filters.since;
+      delete state.filters.until;
+      closeDatePicker();
+      if (sameStableFilters(previousFilters, state.filters)) {
+        await reloadDashboardFastRange(state);
+      } else {
+        clearLiveRequestCache();
+        await reloadDashboard(state);
+      }
+      syncFilterControls(state);
     } catch (error) {
       logger.error('趋势窗口切换失败', error);
       renderBootstrapError(error);
@@ -611,6 +1265,7 @@ function setupExport(state) {
       mode: state.mode,
       source: window.location.host,
       trend_window: state.trendWindow,
+      range_preset: state.rangePreset,
       filter: state.filters || {},
       app: { name: 'llmusage', version: appVersion() },
       data: state.rawData,
@@ -647,6 +1302,10 @@ function syncOptionsFromState(state) {
     options.source = state.filters.source;
   }
   const recentDays = {
+    '1d': 1,
+    '7d': 7,
+    '30d': 30,
+  }[state.rangePreset] || {
     day: 1,
     week: 7,
     month: 30,
@@ -693,6 +1352,9 @@ function jobStatusLabel(snapshot) {
   if (status === 'running') {
     return getShellCopy('shell.sync.running');
   }
+  if (status === 'cancelling') {
+    return getShellCopy('shell.sync.cancelling');
+  }
   if (status === 'completed') {
     return getShellCopy('shell.sync.completed');
   }
@@ -710,7 +1372,7 @@ function updateSyncButton(state, snapshot = state.activeJobSnapshot) {
   if (!btn) return;
 
   const snapshotMode = state.mode === 'snapshot';
-  const running = snapshot?.status === 'running';
+  const running = ['running', 'cancelling'].includes(snapshot?.status);
   btn.disabled = snapshotMode;
   btn.dataset.jobStatus = snapshot?.status || 'idle';
   btn.title = snapshotMode ? getShellCopy('shell.sync.snapshotDisabled') : snapshot?.summary || '';
@@ -736,6 +1398,7 @@ async function pollJobUntilTerminal(state, jobId) {
     snapshot = await getJson(`/api/jobs/${encodeURIComponent(jobId)}`);
     state.activeJobSnapshot = snapshot;
     updateSyncButton(state, snapshot);
+    refreshSyncCommandCenter(state);
   }
   return snapshot;
 }
@@ -754,6 +1417,7 @@ function setupSyncJob(state) {
         const payload = await postJson(`/api/jobs/${encodeURIComponent(state.activeJobId)}/cancel`, {});
         state.activeJobSnapshot = payload.snapshot;
         updateSyncButton(state, state.activeJobSnapshot);
+        refreshSyncCommandCenter(state);
         return;
       }
 
@@ -762,10 +1426,13 @@ function setupSyncJob(state) {
       state.activeJobId = payload.job_id;
       state.activeJobSnapshot = payload.snapshot;
       updateSyncButton(state, state.activeJobSnapshot);
+      refreshSyncCommandCenter(state);
 
       const terminal = await pollJobUntilTerminal(state, state.activeJobId);
       updateSyncButton(state, terminal);
+      refreshSyncCommandCenter(state);
       if (terminal?.status === 'completed') {
+        clearLiveRequestCache();
         await reloadDashboard(state);
       }
     } catch (error) {
@@ -773,11 +1440,12 @@ function setupSyncJob(state) {
       const endpointSync = document.getElementById('endpoint-sync');
       if (endpointSync) endpointSync.textContent = error?.message || getShellCopy('shell.sync.failed');
     } finally {
-      if (state.activeJobSnapshot?.status !== 'failed') {
+      if (!['failed', 'cancelled'].includes(state.activeJobSnapshot?.status)) {
         state.activeJobId = null;
         state.activeJobSnapshot = null;
       }
       updateSyncButton(state);
+      refreshSyncCommandCenter(state);
     }
   });
 }

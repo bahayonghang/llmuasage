@@ -1,150 +1,113 @@
 # llmusage
 
-[English](./README.md)
+[English](./README.md) · [文档](https://bahayonghang.github.io/llmuasage/zh/)
 
-本地优先的 Rust CLI。
+本地优先的 AI CLI 用量分析工具。`llmusage` 会把本机 Codex、Claude Code、OpenCode、Google Antigravity 的本地记录解析进本地 SQLite，然后提供命令行报表、终端 Dashboard、浏览器 Dashboard 和离线 HTML 导出；不上传、不登录、不调用云端用量 API。
 
-目标很直接：用 hook 和本地 SQLite 复现多 CLI 用量采集，不上传、不登录、不连云端 API。
+> 当前 crate 版本：`0.9.0`。
 
-感谢 [vibeusage](https://github.com/victorGPT/vibeusage) 提供思路。`llmusage` 在它的基础上用 Rust 做了重构和改进，并把本地优先这条边界收得更紧。
+![llmusage 本地 Web Dashboard 概览](./docs/public/screenshots/web-dashboard-overview.png)
 
-当前 0.5.1 覆盖：
+<small>截图来自 `llmusage serve` 启动的脱敏本地 fixture，不是真实用户数据。</small>
 
-- Codex `config.toml notify`
-- Claude `Stop` / `SessionEnd` hooks
-- OpenCode `session.updated` plugin event
-- Gemini `SessionEnd` hooks 与 `~/.gemini/tmp/*/chats/session-*.json` 解析
+## 安装
 
-核心真源：
-
-- 配置目录：`~/.llmusage/`
-- 数据库：`~/.llmusage/llmusage.db`
-- hook 包装器：`~/.llmusage/bin/llmusage-hook.cmd`、`~/.llmusage/bin/llmusage-hook.sh`
-
-命令：
-
-报表优先命令（只读本地 SQLite；如果数据看起来过旧，先运行 `llmusage sync`）：
-
-- `llmusage` / `llmusage daily`
-- `llmusage monthly`
-- `llmusage session`
-- `llmusage blocks`
-- `llmusage statusline`
-
-`llmusage` / `llmusage daily` 默认按所选时区显示过去 7 个自然日（包含今天）；human 输出改为一张聚合的 ccusage 风格表，列为 `Date / Models / Input / Output / Cache Create / Cache Read / Total Tokens / Cost (USD)`，token 使用完整逗号分隔数字，模型以多行列表展示；`NO_COLOR=1` 会禁用 ANSI 样式。JSON 输出保持聚合 snake_case，并包含 `cache_creation_tokens`。需要完整 daily 历史时使用 `--all`，需要指定范围时使用 `--since YYYYMMDD` / `--until YYYYMMDD`，可用 `--source` 过滤单个本地来源，或用 `--breakdown` 输出按来源/模型拆分的明细。
-
-常用报表参数包括 `--since YYYYMMDD`、`--until YYYYMMDD`、`--json`、`--breakdown`、`--order asc|desc`、`--timezone UTC|local|+08:00`、`--locale en-US|zh-CN|ja-JP`、`--compact`、`--source codex|claude|opencode|gemini`。
-
-运维命令：
-
-- `llmusage init`
-- `llmusage sync`（`--rebuild` 会重新解析本地真源并重建用量行/bucket；如果已导入的文件型历史存在缺失源文件，默认会拒绝执行；只有显式传 `--allow-lossy-rebuild` 才会清掉不可重建历史；默认进度写入 stderr，`--json-events` 会在 stdout 输出 NDJSON 生命周期/进度事件）
-- `llmusage status`
-- `llmusage diagnostics`（`--forget-file <PATH>` 可把源文件标记为用户主动忽略）
-- `llmusage doctor`（`--refresh-pricing <file>` 导入本地价格快照并重算成本）
-- `llmusage dash`
-- `llmusage serve`
-- `llmusage tui`（`dash` 的已废弃别名）
-- `llmusage export html`
-- `llmusage uninstall`
-
-Web 分析页：
-
-下面这张图就是 `llmusage serve` 启动后的本地浏览器分析页。首屏会把当前时间/来源/模型筛选、KPI、活动趋势、项目/模型/来源/成本排行、行为分析、同步/导出动作和诊断线索放在同一个本地只读视图里。
-
-行为分析区由 `sync` 阶段提取的 normalized facts 驱动：
-
-- Activity 和 Tools 聚合本地 turn/tool facts，不保存完整 prompt、assistant 消息或文件内容。
-- Optimize 是只读建议面板，用于提示低 Read/Edit 比、重复读取、生成物/依赖目录读取、session outlier 等模式；不会自动删除、归档、重写或清理任何内容。
-- Compare 会自动选择或接受两个模型，展示成本、cache、one-shot、retry、category 和工作风格指标，并明确提示低样本。
-- 来源支持会显式降级：Claude/Codex 可产出更丰富的工具事实；Gemini/OpenCode 在源日志不提供工具级证据时只保守地产出 turn facts。
-
-![llmusage 本地 web 分析页概览](./docs/public/screenshots/web-dashboard-overview.png)
-
-终端分析页：
-
-- `llmusage dash` 会打开终端 TUI。顶部导航现在包含 `8:行为`，用同一套 Activity / Tools / Optimize / Compare dashboard 查询展示只读行为摘要，并明确显示 no-data、degraded、insufficient-models、low-sample 状态，不把缺失事实伪装成 0。
-
-开发：
+在当前 checkout 中安装：
 
 ```powershell
-cargo check
-cargo test
-cargo run -- init
-cargo run -- sync
-cargo run -- --json
-cargo run -- dash
-cargo run -- serve
+just install
 ```
 
-说明：
+开发时也可以直接运行：
 
-- `serve` 只监听 `127.0.0.1`，并会默认用系统浏览器打开分析页
-- `serve` 支持单快照加载、URL 恢复筛选、可选 30s/60s 自动刷新，以及带进度/取消状态的进程内同步任务
-- `export html` 生成同一套 Dashboard shell 的离线静态报告；离线快照会禁用实时 sync/refresh 控件
-- 报表命令都是只读 SQLite 视图，不会自动 sync
-- 行为分析在查询时仍是本地只读；它读取 sync 预提取的 `usage_turn` / `usage_tool_call`，不会在浏览器端解析 raw transcript
-- 普通 `sync` 遇到源文件缺失时会保留已导入 usage history；diagnostics 里出现 `source_file.missing` 不代表 usage 行已被删除
-- `status` 和普通 `diagnostics` 是只读命令；`diagnostics --forget-file` 会写入本地忽略状态
-- 普通 `doctor` 是只读命令；`doctor --refresh-pricing <file>` 只读取本地 JSON，把快照保存到 `~/.llmusage/pricing/<catalog-version>.json`，并写入本地 SQLite 价格元信息/成本
-
-## 0.5.1 重点
-
-- 面向 ccr-ui 的只读 API：`Dashboard::overview`、`trends_daily`、`home_overview`、`heatmap`、`logs`、归档诊断与源文件 forget。
-- 持久化成本列成为报表/查询真源：常规 sync 写入 event/bucket 成本元信息，`doctor --refresh-pricing <file>` 用本地快照同步重算 event 与 bucket，报表和 dashboard payload 暴露总成本、cache efficiency、每日成本、模型双价/pricing 元信息、项目成本以及日志 cost/id/recorded_at 字段。
-- `JobRegistry` 提供进程内导入任务、进度快照与取消。
-- v0/v1 到 v11 的完整 schema migration，覆盖 cache split、成本元信息、source_file 状态机、raw archive、worker lock 元信息、Gemini 注册、`pricing_catalog_version` 与 normalized behavior facts。
-- CLI 报表、HTTP API、静态导出的 JSON 字段统一 snake_case。
-- 为下游适配层提供公共 `LlmusageError` 和 `testing::Fixture`。
-
-## 库 API（0.5.1）
-
-0.5.x 为 ccr-ui 这类桌面适配层提供 SemVer-stable 的库表面：
-
-```rust
-use llmusage::{
-    paths::AppPaths,
-    query::{Dashboard, QueryFilter},
-    store::Store,
-    Result,
-};
-
-fn open_store(root: std::path::PathBuf) -> Result<Store> {
-    let paths = AppPaths::with_root(root)?;
-    let store = Store::new(&paths)?;
-    store.bootstrap()?;
-    Ok(store)
-}
-
-fn load_ccr_ui(store: &Store) -> Result<()> {
-    let filter = QueryFilter::default();
-    let dashboard = Dashboard::open(store)?;
-    let _snapshot = dashboard.snapshot(&filter)?;
-    let _overview = dashboard.overview(&filter)?;
-    let _daily = dashboard.trends_daily(&filter)?;
-    let _home = dashboard.home_overview(&filter)?;
-    let _heatmap = dashboard.heatmap(&filter, 365)?;
-    let _activity = dashboard.activity_breakdown(&filter)?;
-    let _tools = dashboard.tool_breakdown(&filter)?;
-    let _optimize = dashboard.optimize(&filter)?;
-    let _compare = dashboard.model_compare(&filter, None, None)?;
-    let _logs = dashboard.logs(&Default::default())?;
-    Ok(())
-}
+```powershell
+cargo run -- --help
 ```
 
-路径解析顺序是 `--home <PATH>` 优先，其次 `LLMUSAGE_HOME`，最后 `~/.llmusage`。
-ccr-ui 表面包含带 `QueryFilter` 的 dashboard/home/daily-trend/heatmap/log 查询、来自 `source_file` 状态机的归档诊断、持久化 cost/pricing/cache 字段、行为 activity/tool/optimize/compare payload，以及 `JobRegistry::start/get/cancel` 进程内导入任务。
+顶层 help 现在使用表格形式，方便快速浏览。中文顶层 help 可用 `llmusage help --zh`；子命令旧版 clap help 仍可用 `llmusage help <COMMAND>` 或 `llmusage <COMMAND> --help`。
 
-下游适配层（如 ccr-ui）写集成测试时，可在 dev-dependencies 中启用测试夹具：
+默认运行时目录是 `~/.llmusage/`。可用 `--home <PATH>` 或 `LLMUSAGE_HOME` 覆盖。
+结构化运行日志只写本地 NDJSON：`~/.llmusage/logs/llmusage.ndjson`。文件日志可用 `LLMUSAGE_LOG=off|error|warn|info|debug|trace` 控制（默认 `warn`）；`RUST_LOG` 继续只控制控制台 stderr 日志。
 
-```toml
-[dev-dependencies]
-llmusage = { path = "../llmusage", features = ["testing"] }
+## 最短路径
+
+```powershell
+llmusage init
+llmusage sync
+llmusage
+llmusage serve
 ```
 
-```rust
-let fixture = llmusage::testing::Fixture::new()?;
-fixture.seed_dashboard(12)?;
-let overview = llmusage::Dashboard::open(fixture.store())?.overview(&Default::default())?;
+含义：
+
+1. `init` 创建 `~/.llmusage/`、初始化 `llmusage.db`、写入 hook 包装器，并安装支持的本地集成。
+2. `sync` 增量解析本地真源，写入 usage 行、30 分钟 bucket、source-file 诊断和行为事实。
+3. `llmusage` 显示默认 daily 报表：所选时区下最近 7 个自然日。
+4. `serve` 在 `127.0.0.1` 启动本地浏览器 Dashboard。
+
+## 支持的本地来源
+
+| 来源 | 本地记录 |
+| --- | --- |
+| Codex | OpenAI Codex rollout/session JSONL 与 `config.toml notify` |
+| Claude | Claude Code project JSONL 与 `Stop` / `SessionEnd` hooks |
+| OpenCode | OpenCode 本地 SQLite 用量库与 `session.updated` plugin event |
+| Antigravity | Antigravity CLI `Stop` hook（`~/.gemini/config/hooks.json`，`--source antigravity`）；没有经过验证的 token schema 前不注册 transcript parser |
+
+`source-status` 和 `dash` 还会显示 Gemini CLI、Cursor、Copilot、Zed、Kiro、Goose、Grok、Kimi/Qwen、Roo/Kilo/Cline、Codebuff、Crush、Warp/Oz、Amp、Hermes、Trae 等仅监控平台。仅监控表示 llmusage 可以探测候选本地路径并说明为什么阻塞解析；不会写入 0 用量行，也不会写入未验证 token 行。
+
+## 常用命令
+
+```powershell
+llmusage daily --source codex --since 20260501 --until 20260518
+llmusage monthly --breakdown
+llmusage session --project my-repo
+llmusage blocks --active
+llmusage source-status
+llmusage help --zh
+llmusage dash
+llmusage codex-tracer
+llmusage logs --limit 50 --level warn
+llmusage export html --out .\llmusage-report
+```
+
+报表命令只是只读 SQLite 查询；如果数据库过旧，先运行 `llmusage sync`。
+
+`llmusage dash` 使用 tokscale 风格的终端 Dashboard。快捷键：`tab`/`shift-tab` 或 `1`-`8` 切换视图，`s` 打开来源选择器，`r` 刷新 Dashboard 数据，`R` 切换自动刷新，`x` 按当前来源筛选运行 sync，`?` 打开帮助/设置，`q` 退出。
+
+浏览器 Dashboard 包含行为面板和本地 Cost Explorer workbench，可按时间 × 指标 × 分组做切片分析，并支持工具/非工具成本归因与离线快照导出。
+
+## Codex Tracer
+
+```powershell
+llmusage codex-tracer
+llmusage codex-tracer --port 9876
+llmusage codex-tracer --no-open
+llmusage codex-tracer --rebuild
+```
+
+`codex-tracer` 是一个只面向 Codex 的本地 Dashboard。它会从 `$CODEX_HOME/rollout/` 或 `~/.codex/rollout/` 读取 rollout JSONL，构建独立的 `~/.llmusage/codex-tracer.db`，然后启动带细粒度 token 会计和线程追踪的专用浏览器界面。
+
+## 安全默认值
+
+- 不需要账号登录、device token、上传队列或远端用量 API。
+- 普通 `llmusage sync` 遇到原始源文件缺失时会保留已导入 usage。
+- `llmusage sync --rebuild` 默认拒绝有损重建，除非同时传入 `--allow-lossy-rebuild`。
+- `llmusage diagnostics --forget-file <PATH> --source <SOURCE>` 是显式忽略源文件的写入入口。
+- `llmusage logs` 查询本地运行日志和最近命令审计记录，不改变报表 stdout 或 `sync --json-events` stdout 合同。
+- `llmusage doctor --refresh-pricing <file>` 只读取本地价格快照；URL 会被拒绝。
+
+## 文档
+
+- [指南](./docs/zh/guide/getting-started.md)
+- [Codex Tracer 指南](./docs/zh/guide/codex-tracer.md)
+- [Dashboard](./docs/zh/dashboard/index.md)
+- [CLI 参考](./docs/zh/reference/cli.md)
+- [安全说明](./docs/zh/safety/index.md)
+- [架构说明](./docs/zh/architecture/index.md)
+
+开发门禁：
+
+```powershell
+just ci
 ```

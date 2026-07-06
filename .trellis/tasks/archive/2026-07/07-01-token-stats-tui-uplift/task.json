@@ -1,0 +1,29 @@
+{
+  "id": "token-stats-tui-uplift",
+  "name": "token-stats-tui-uplift",
+  "title": "Token 统计与 TUI 观感优化",
+  "description": "对标 ref/token-tracker，增强 llmusage 的 token 统计口径(A)与 TUI 展示观感(B)",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-07-01",
+  "completedAt": "2026-07-01",
+  "branch": null,
+  "base_branch": "dev",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-01-stats-metrics",
+    "07-01-tui-uplift"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

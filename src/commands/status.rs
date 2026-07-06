@@ -1,7 +1,9 @@
 use anyhow::Result;
 use tracing::info;
 
-use crate::{app::AppContext, integrations, query::Dashboard, store::Store};
+use crate::{
+    app::AppContext, commands::source_status, integrations, query::Dashboard, store::Store,
+};
 
 pub async fn run(app: &AppContext) -> Result<()> {
     /*
@@ -23,6 +25,8 @@ pub async fn run(app: &AppContext) -> Result<()> {
     let sources = dashboard.source_breakdown(&Default::default())?;
     let health = dashboard.health()?;
     let probes = integrations::probe_all(app)?;
+    let capability_statuses = source_status::build_source_capability_statuses(&probes, &sources);
+    let platform_statuses = source_status::build_platform_monitor_statuses();
     let lock = store.current_worker_lock()?;
 
     // 1.2 打印人读摘要
@@ -45,6 +49,7 @@ pub async fn run(app: &AppContext) -> Result<()> {
             source.last_event_at.as_deref().unwrap_or("never")
         );
     }
+    source_status::print_human_statuses(&capability_statuses, &platform_statuses);
     for probe in probes {
         println!(
             "- Integration {}: {} ({})",

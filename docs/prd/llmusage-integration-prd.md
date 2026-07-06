@@ -70,7 +70,7 @@ ccr-ui 侧只剩两件事：**调 query 层组装响应** + **包装 sync 任务
 | `UsageArchiveDiagnostics.live_sources / missing_sources / deleted_sources / archived_sessions / recent_completed_at / history_completed_at` | `source_cursor` + `run_log` 部分对应 | 引入 source 文件状态机（live / missing / deleted_by_user）和"recent vs history"两阶段游标 | F6 |
 | Codex 重导（reset + recent N 天） | `sync --rebuild` 全量重导，无 per-source；recent_days 不存在 | 加 `--rebuild --source codex` + `--recent-days N` | F3 |
 | 实时导入进度（job-progress / recent-ready / finished / failed） | 无；CLI 一次性 | 任务化 + 进度通道 | F3 |
-| Gemini 平台 | 不支持 | 新增 `SourceKind::Gemini` + parser + integration | F1 |
+| Gemini 平台 | 不支持 | 新增 `SourceKind::Antigravity` + parser + integration | F1 |
 
 ---
 
@@ -78,24 +78,27 @@ ccr-ui 侧只剩两件事：**调 query 层组装响应** + **包装 sync 任务
 
 ### F1 数据模型扩展
 
+
+
+> 2026-05-28 update note: ADR 0009 supersedes the old Gemini compatibility plan. The public source id is now `antigravity`; the legacy Gemini transcript parser and `--source gemini` filter are removed. Antigravity remains hook/integration-only through `~/.gemini/config/hooks.json::Stop` until a stable usage-bearing artifact is verified.
 #### F1.1 新增 Gemini 源
 
-**主数据源：session transcript JSON**
+**历史方案（已由 ADR 0009 supersede）：session transcript JSON**
 - 路径：`~/.gemini/tmp/<projectHash>/chats/session-*.json`（与 ccr-db `usage_import_service.rs` 现行实现对齐，已经在生产环境跑过）。
 - 字段抽取：每条 assistant 消息读 `tokens.{input,output,cached}` 或 `usageMetadata` / `usage_metadata`（兼容老版本）。`output_tokens` 含 thought tokens；如需拆 `reasoning_output_tokens`，按 Gemini API 的 `thoughtsTokenCount` 单独抽取。
 - 项目识别：用 `~/.gemini/projects.json` 把 `projectHash` 反查回原始 cwd，再交给 `project::resolve_project_info` 走和 Claude/Codex 同样的归一化流水线。
 - 文件状态：用与 Claude 一致的 `FileCursor`（fingerprint + size + mtime + tail signature + offset）。
 
-**可选 hook（推荐安装但不强依赖）**
+**历史方案（已由 ADR 0009 supersede）：Gemini CLI SessionEnd hook**
 - Gemini CLI v1 hooks 已支持 `SessionStart / SessionEnd / Notification / PreCompress`，配置写在 `~/.gemini/settings.json::hooks.SessionEnd`，约定 stdin/stdout JSON、exit 0/2/其他三档。
-- `integrations::gemini::install` 行为（与 Claude integration 同结构）：
-  1. 备份 `~/.gemini/settings.json` 到 `~/.llmusage/backups/`。
-  2. 合并写入：
+- 旧 `integrations::gemini::install` 计划已由 `integrations::antigravity::install` 取代：
+  1. 历史方案备份 `~/.gemini/settings.json` 到 `~/.llmusage/backups/`。
+  2. 历史方案合并写入：
      ```json
      {
        "hooks": {
          "SessionEnd": [
-           { "command": "<HookTarget::shell_command(gemini, SessionEnd)>" }
+           { "command": "<legacy HookTarget::shell_command(gemini, SessionEnd)>" }
          ]
        }
      }
@@ -107,8 +110,8 @@ ccr-ui 侧只剩两件事：**调 query 层组装响应** + **包装 sync 任务
 - Gemini CLI 还能开 `telemetry.target=local` 写 `.gemini/telemetry.log`（含 `gemini_cli.token.usage` counter），但这条路径需要用户主动 opt-in 且 schema 与 OTLP 强绑定，留作未来增强。v1 不引入。
 
 **其他配置**
-- `models.rs::SourceKind::Gemini`（`as_str() == "gemini"`）。
-- `sources::registered_parsers / registered_integrations` 注册新源。
+- `domain::models::SourceKind::Antigravity`（`as_str() == "antigravity"`）。
+- `registry::registered_parsers / registered_integrations` 注册新源。
 - `pricing.rs` 加 Gemini 档位（`gemini-2.5-pro / gemini-2.5-flash / gemini-2.0-flash` 等）。
 - `usage_bucket_30m` schema 无需改动，靠 `source` 列区分。
 
@@ -239,7 +242,7 @@ pub async fn run_with_progress(
 - `llmusage sync --json-events` 把 `SyncEvent` 以 NDJSON 形式写到 stdout，方便不能直接链接 lib 的下游（如未来分发独立 CLI 时）。
 
 #### F3.4 子命令补全
-- `llmusage sync --source codex` / `--source claude` / `--source gemini` / `--source opencode`。
+- `llmusage sync --source codex` / `--source claude` / `--source antigravity` / `--source opencode`。
 - `llmusage sync --recent-days 30`。
 - `llmusage sync --rebuild --source codex`（用于 ccr-ui 的"修复 Codex"按钮）。
 - `--rebuild --source <X>` 仅 reset 该源的 cursor / event / bucket / source_file，其他源不动。需要把 `Store::reset_usage_data()` 拆出 `Store::reset_for_source(SourceKind)`，原方法保留为 `for_source(All)` 的语义糖。

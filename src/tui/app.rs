@@ -1,7 +1,13 @@
+use crate::query::reports::BlockReportRow;
 use crate::query::{
-    ActivityPayload, CostLine, HealthPayload, ModelBreakdown, ModelComparePayload, OptimizePayload,
-    OverviewPayload, ProjectBreakdown, QueryFilter, SourceBreakdown, ToolsPayload, TrendPoint,
+    ActivityPayload, ContextPressurePayload, CostLine, DailyTrendPoint, HealthPayload,
+    HeatmapPoint, ModelBreakdown, ModelComparePayload, OptimizePayload, OverviewPayload,
+    ProjectBreakdown, QueryFilter, SourceBreakdown, SyncCommandCenterPayload, ToolsPayload,
+    TrendPoint, ZombieReport,
 };
+use crate::{domain::platform_monitor::PlatformProbe, models::SourceKind};
+
+use std::time::{Duration, Instant};
 
 /// The eight dashboard panels in fixed display order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,10 +21,25 @@ pub enum Panel {
     Cost = 5,
     Health = 6,
     Behavior = 7,
+    Blocks = 8,
 }
 
 impl Panel {
-    pub const COUNT: usize = 8;
+    pub const COUNT: usize = 9;
+
+    pub fn all() -> &'static [Self] {
+        &[
+            Self::Overview,
+            Self::Trends,
+            Self::Models,
+            Self::Sources,
+            Self::Projects,
+            Self::Cost,
+            Self::Health,
+            Self::Behavior,
+            Self::Blocks,
+        ]
+    }
 
     pub fn from_index(i: usize) -> Option<Self> {
         match i {
@@ -30,6 +51,7 @@ impl Panel {
             5 => Some(Self::Cost),
             6 => Some(Self::Health),
             7 => Some(Self::Behavior),
+            8 => Some(Self::Blocks),
             _ => None,
         }
     }
@@ -50,6 +72,34 @@ impl Panel {
     pub fn prev(self) -> Self {
         Self::from_index((self as usize + Self::COUNT - 1) % Self::COUNT).unwrap()
     }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Overview => "Overview",
+            Self::Trends => "Usage",
+            Self::Models => "Models",
+            Self::Sources => "Daily",
+            Self::Projects => "Hourly",
+            Self::Cost => "Cost",
+            Self::Health => "Stats",
+            Self::Behavior => "Agents",
+            Self::Blocks => "Blocks",
+        }
+    }
+
+    pub fn short_label(self) -> &'static str {
+        match self {
+            Self::Overview => "Ovw",
+            Self::Trends => "Use",
+            Self::Models => "Mod",
+            Self::Sources => "Day",
+            Self::Projects => "Hr",
+            Self::Cost => "Cost",
+            Self::Health => "Sta",
+            Self::Behavior => "Agt",
+            Self::Blocks => "Blk",
+        }
+    }
 }
 
 /// Combined behavior analytics payload for the terminal dashboard.
@@ -58,7 +108,18 @@ pub struct BehaviorPanelPayload {
     pub activity: ActivityPayload,
     pub tools: ToolsPayload,
     pub optimize: OptimizePayload,
+    pub zombie: ZombieReport,
     pub compare: ModelComparePayload,
+}
+
+/// Combined read-only facts for the tokscale-style stats panel.
+#[derive(Debug, Clone)]
+pub struct StatsPanelPayload {
+    pub overview: OverviewPayload,
+    pub heatmap: Vec<HeatmapPoint>,
+    pub sources: Vec<SourceBreakdown>,
+    pub health: HealthPayload,
+    pub context_pressure: ContextPressurePayload,
 }
 
 /// Time window for the trends panel.
@@ -122,13 +183,44 @@ pub struct ScrollState {
 
 impl ScrollState {
     pub fn scroll_down(&mut self) {
-        if self.offset < self.total.saturating_sub(self.visible) {
+        if self.offset < self.total.saturating_sub(self.visible.max(1)) {
             self.offset += 1;
         }
     }
 
     pub fn scroll_up(&mut self) {
         self.offset = self.offset.saturating_sub(1);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActiveDialog {
+    SourcePicker,
+    Help,
+}
+
+#[derive(Debug, Clone)]
+pub struct SourcePickerState {
+    pub selected: usize,
+}
+
+impl SourcePickerState {
+    fn clamp(&mut self, len: usize) {
+        if len == 0 {
+            self.selected = 0;
+        } else if self.selected >= len {
+            self.selected = len - 1;
+        }
+    }
+
+    fn move_by(&mut self, delta: isize, len: usize) {
+        if len == 0 {
+            self.selected = 0;
+            return;
+        }
+        let len = len as isize;
+        let next = (self.selected as isize + delta).rem_euclid(len);
+        self.selected = next as usize;
     }
 }
 
@@ -140,13 +232,29 @@ pub struct AppState {
     pub filter: QueryFilter,
     // Cached data (loaded on panel switch)
     pub overview: Option<Result<OverviewPayload, String>>,
+    pub sync_center: Option<Result<SyncCommandCenterPayload, String>>,
     pub trends: Option<Result<Vec<TrendPoint>, String>>,
     pub models: Option<Result<Vec<ModelBreakdown>, String>>,
+    pub daily: Option<Result<Vec<DailyTrendPoint>, String>>,
+    pub hourly: Option<Result<Vec<TrendPoint>, String>>,
     pub sources: Option<Result<Vec<SourceBreakdown>, String>>,
     pub projects: Option<Result<Vec<ProjectBreakdown>, String>>,
     pub costs: Option<Result<Vec<CostLine>, String>>,
     pub health: Option<Result<HealthPayload, String>>,
+    pub stats: Option<Result<StatsPanelPayload, String>>,
     pub behavior: Option<Result<BehaviorPanelPayload, String>>,
+    pub blocks: Option<Result<Vec<BlockReportRow>, String>>,
+    pub platform_probes: Vec<PlatformProbe>,
+    pub active_dialog: Option<ActiveDialog>,
+    pub source_picker: SourcePickerState,
+    pub status_message: Option<String>,
+    pub auto_refresh: bool,
+    pub auto_refresh_interval: Duration,
+    pub last_refresh: Instant,
+    pub spinner_frame: usize,
+    pub terminal_width: u16,
+    pub terminal_height: u16,
+    pub needs_refresh: bool,
 }
 
 impl Default for AppState {
@@ -167,14 +275,146 @@ impl AppState {
             }),
             filter: QueryFilter::default(),
             overview: None,
+            sync_center: None,
             trends: None,
             models: None,
+            daily: None,
+            hourly: None,
             sources: None,
             projects: None,
             costs: None,
             health: None,
+            stats: None,
             behavior: None,
+            blocks: None,
+            platform_probes: crate::domain::platform_monitor::probe_registered_platforms(),
+            active_dialog: None,
+            source_picker: SourcePickerState { selected: 0 },
+            status_message: None,
+            auto_refresh: false,
+            auto_refresh_interval: Duration::from_secs(30),
+            last_refresh: Instant::now(),
+            spinner_frame: 0,
+            terminal_width: 80,
+            terminal_height: 24,
+            needs_refresh: false,
         }
+    }
+
+    pub fn is_narrow(&self) -> bool {
+        self.terminal_width < 80
+    }
+
+    pub fn is_very_narrow(&self) -> bool {
+        self.terminal_width < 60
+    }
+
+    pub fn source_filter_label(&self) -> &'static str {
+        self.filter.source.map(SourceKind::as_str).unwrap_or("all")
+    }
+
+    pub fn open_source_picker(&mut self) {
+        self.source_picker.clamp(self.platform_probes.len());
+        self.active_dialog = Some(ActiveDialog::SourcePicker);
+    }
+
+    pub fn open_help(&mut self) {
+        self.active_dialog = Some(ActiveDialog::Help);
+    }
+
+    pub fn close_dialog(&mut self) {
+        self.active_dialog = None;
+    }
+
+    pub fn source_picker_next(&mut self) {
+        self.source_picker.move_by(1, self.platform_probes.len());
+    }
+
+    pub fn source_picker_prev(&mut self) {
+        self.source_picker.move_by(-1, self.platform_probes.len());
+    }
+
+    pub fn select_source_picker_row(&mut self) {
+        let Some(probe) = self.platform_probes.get(self.source_picker.selected) else {
+            return;
+        };
+
+        match probe.source_kind {
+            Some(source) => {
+                if self.filter.source == Some(source) {
+                    self.filter.source = None;
+                    self.set_status("Source filter cleared");
+                } else {
+                    self.filter.source = Some(source);
+                    self.set_status(&format!("Source filter: {}", source.as_str()));
+                }
+                self.invalidate_cached_data();
+                self.active_dialog = None;
+            }
+            None => {
+                self.set_status(&format!(
+                    "{} is monitor-only: {}",
+                    probe.display_name, probe.next_action
+                ));
+            }
+        }
+    }
+
+    pub fn clear_source_filter(&mut self) {
+        self.filter.source = None;
+        self.invalidate_cached_data();
+        self.active_dialog = None;
+        self.set_status("Source filter cleared");
+    }
+
+    pub fn invalidate_cached_data(&mut self) {
+        self.overview = None;
+        self.sync_center = None;
+        self.trends = None;
+        self.models = None;
+        self.daily = None;
+        self.hourly = None;
+        self.sources = None;
+        self.projects = None;
+        self.costs = None;
+        self.health = None;
+        self.stats = None;
+        self.behavior = None;
+        self.blocks = None;
+        for scroll in &mut self.scroll {
+            scroll.offset = 0;
+        }
+        self.needs_refresh = true;
+    }
+
+    pub fn mark_refreshed(&mut self) {
+        self.last_refresh = Instant::now();
+        self.needs_refresh = false;
+    }
+
+    pub fn toggle_auto_refresh(&mut self) {
+        self.auto_refresh = !self.auto_refresh;
+        if self.auto_refresh {
+            self.set_status("Auto refresh enabled");
+        } else {
+            self.set_status("Auto refresh disabled");
+        }
+    }
+
+    pub fn on_tick(&mut self) {
+        self.spinner_frame = (self.spinner_frame + 1) % 20;
+        if self.auto_refresh && self.last_refresh.elapsed() >= self.auto_refresh_interval {
+            self.needs_refresh = true;
+        }
+    }
+
+    pub fn handle_resize(&mut self, width: u16, height: u16) {
+        self.terminal_width = width;
+        self.terminal_height = height;
+    }
+
+    pub fn set_status(&mut self, message: &str) {
+        self.status_message = Some(message.to_string());
     }
 }
 

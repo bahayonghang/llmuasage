@@ -82,7 +82,6 @@ fn local_flow_installs_syncs_exports_and_uninstalls() -> Result<()> {
                 .join("derive.js")
                 .is_file()
         );
-        assert!(html_out.join("assets").join("render.js").is_file());
         assert!(
             html_out
                 .join("assets")
@@ -94,21 +93,7 @@ fn local_flow_installs_syncs_exports_and_uninstalls() -> Result<()> {
             html_out
                 .join("assets")
                 .join("render")
-                .join("charts.js")
-                .is_file()
-        );
-        assert!(
-            html_out
-                .join("assets")
-                .join("render")
-                .join("tables.js")
-                .is_file()
-        );
-        assert!(
-            html_out
-                .join("assets")
-                .join("render")
-                .join("health.js")
+                .join("explorer.js")
                 .is_file()
         );
         let exported_index = fs::read_to_string(html_out.join("index.html"))?;
@@ -122,6 +107,10 @@ fn local_flow_installs_syncs_exports_and_uninstalls() -> Result<()> {
         assert!(exported_index.contains("<title>llmusage · 本地用量概览</title>"));
         assert!(exported_index.contains(">本地用量概览</strong>"));
         assert!(exported_index.contains("用量趋势"));
+        assert!(exported_index.contains("Cost Explorer"));
+        let snapshot_json = fs::read_to_string(html_out.join("snapshot.json"))?;
+        let snapshot: serde_json::Value = serde_json::from_str(&snapshot_json)?;
+        assert!(snapshot["explorer"].is_object());
         assert!(!exported_index.contains("llmusage 本地账本"));
         assert!(web::live_index_html().contains("data-mode=\"live\""));
         assert!(web::snapshot_index_html().contains("data-mode=\"snapshot\""));
@@ -293,7 +282,189 @@ fn init_writes_quoted_windows_string_commands_for_spaced_paths() -> Result<()> {
                 .join("plugin")
                 .join("llmusage-tracker.js"),
         )?;
-        assert!(plugin_body.contains("cmd /c \"\""));
+        let expected_opencode = integrations::HookTarget::current(&app)
+            .shell_command(SourceKind::Opencode, "session.updated");
+        assert!(plugin_body.contains(&expected_opencode));
+        if cfg!(windows) {
+            assert!(plugin_body.contains("cmd /c \"\""));
+        }
+
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn antigravity_install_cleans_legacy_gemini_hooks() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fs::create_dir_all(fixture.home.join(".gemini").join("config"))?;
+    let user_antigravity_command = "echo user-antigravity";
+    let legacy_antigravity_command = "llmusage-hook --source gemini --trigger Stop --auto";
+    fs::write(
+        fixture
+            .home
+            .join(".gemini")
+            .join("config")
+            .join("hooks.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "Stop": [
+                { "type": "command", "command": user_antigravity_command },
+                { "type": "command", "command": legacy_antigravity_command }
+            ]
+        }))?,
+    )?;
+    let user_legacy_settings_command = "echo user-legacy-gemini";
+    let legacy_settings_command = "llmusage-hook --source gemini --trigger SessionEnd --auto";
+    fs::write(
+        fixture.home.join(".gemini").join("settings.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "hooks": {
+                "SessionEnd": [
+                    { "hooks": [{ "type": "command", "command": user_legacy_settings_command }] },
+                    { "hooks": [{ "type": "command", "command": legacy_settings_command }] }
+                ]
+            }
+        }))?,
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        commands::init::run(&app).await?;
+
+        let expected_stop =
+            integrations::HookTarget::current(&app).shell_command(SourceKind::Antigravity, "Stop");
+        let hooks: serde_json::Value = serde_json::from_slice(&fs::read(
+            fixture
+                .home
+                .join(".gemini")
+                .join("config")
+                .join("hooks.json"),
+        )?)?;
+        let stop_commands = hooks
+            .get("Stop")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|hook| hook.get("command").and_then(serde_json::Value::as_str))
+            .collect::<Vec<_>>();
+        assert!(
+            stop_commands
+                .iter()
+                .any(|command| *command == expected_stop)
+        );
+        assert!(expected_stop.contains("--source antigravity"));
+        assert!(!expected_stop.contains("--source gemini"));
+        assert!(stop_commands.contains(&user_antigravity_command));
+        assert!(!stop_commands.contains(&legacy_antigravity_command));
+
+        let legacy_settings: serde_json::Value = serde_json::from_slice(&fs::read(
+            fixture.home.join(".gemini").join("settings.json"),
+        )?)?;
+        let session_end_commands = legacy_settings
+            .get("hooks")
+            .and_then(|hooks| hooks.get("SessionEnd"))
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| entry.get("hooks").and_then(serde_json::Value::as_array))
+            .flatten()
+            .filter_map(|hook| hook.get("command").and_then(serde_json::Value::as_str))
+            .collect::<Vec<_>>();
+        assert!(session_end_commands.contains(&user_legacy_settings_command));
+        assert!(!session_end_commands.contains(&legacy_settings_command));
+
+        commands::uninstall::run(&app, false).await?;
+        let restored_hooks: serde_json::Value = serde_json::from_slice(&fs::read(
+            fixture
+                .home
+                .join(".gemini")
+                .join("config")
+                .join("hooks.json"),
+        )?)?;
+        let remaining = restored_hooks
+            .get("Stop")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len)
+            .unwrap_or_default();
+        assert_eq!(remaining, 1);
+        let restored_commands = restored_hooks
+            .get("Stop")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|hook| hook.get("command").and_then(serde_json::Value::as_str))
+            .collect::<Vec<_>>();
+        assert_eq!(restored_commands, vec![user_antigravity_command]);
+
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn hook_run_syncs_only_triggered_source() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_codex()?;
+    fixture.seed_claude()?;
+    fixture.seed_opencode()?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+
+        commands::hook_run::run(&app, SourceKind::Claude, "Stop", true).await?;
+
+        let store = Store::new(&app.paths)?;
+        let dashboard = Dashboard::open(&store)?;
+        let sources = dashboard.source_breakdown(&Default::default())?;
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].source, "claude");
+        assert!(sources[0].total_tokens > 0);
+
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn sync_prices_claude_fable_and_mythos_usage() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_claude_fable_mythos()?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+
+        commands::sync::run(&app).await?;
+
+        let store = Store::new(&app.paths)?;
+        let dashboard = Dashboard::open(&store)?;
+        let models = dashboard.model_breakdown(&Default::default())?;
+        for model in ["claude-fable-5", "claude-mythos-5"] {
+            let row = models
+                .iter()
+                .find(|item| item.model == model)
+                .unwrap_or_else(|| panic!("{model} should be present in model breakdown"));
+            assert_eq!(row.pricing_status, "static", "{model}");
+            assert_eq!(row.pricing_source.as_deref(), Some("static-v1"), "{model}");
+            assert!(
+                (row.cost_with_cache_usd - 33.95).abs() < 1e-9,
+                "{model} cost should use Fable/Mythos static-v1 rates"
+            );
+        }
+        assert!(
+            models
+                .iter()
+                .filter(|item| matches!(item.model.as_str(), "claude-fable-5" | "claude-mythos-5"))
+                .all(|item| item.pricing_status != "unpriced")
+        );
 
         Ok::<_, anyhow::Error>(())
     })?;
@@ -415,6 +586,22 @@ impl Fixture {
             claude_file,
             "{\"timestamp\":\"2026-04-22T02:00:00Z\",\"message\":{\"model\":\"claude-sonnet-4\",\"usage\":{\"input_tokens\":60,\"cache_creation_input_tokens\":10,\"cache_read_input_tokens\":5,\"output_tokens\":20,\"total_tokens\":90}}}\n",
         )?;
+        Ok(())
+    }
+
+    fn seed_claude_fable_mythos(&self) -> Result<()> {
+        let claude_file = self
+            .home
+            .join(".claude")
+            .join("projects")
+            .join("demo")
+            .join("session.jsonl");
+        let rows = [
+            "{\"timestamp\":\"2026-07-03T02:00:00Z\",\"message\":{\"model\":\"claude-fable-5\",\"usage\":{\"input_tokens\":1000000,\"cache_creation_input_tokens\":300000,\"cache_read_input_tokens\":200000,\"output_tokens\":400000,\"total_tokens\":1900000}}}",
+            "{\"timestamp\":\"2026-07-03T02:30:00Z\",\"message\":{\"model\":\"claude-mythos-5\",\"usage\":{\"input_tokens\":1000000,\"cache_creation_input_tokens\":300000,\"cache_read_input_tokens\":200000,\"output_tokens\":400000,\"total_tokens\":1900000}}}",
+        ]
+        .join("\n");
+        fs::write(claude_file, format!("{rows}\n"))?;
         Ok(())
     }
 

@@ -4,12 +4,17 @@ export {
   loadSection,
   loadTrendWindow,
   loadDashboardSnapshot,
+  loadDashboardCoreSnapshot,
   buildFilterQuery,
+  buildExplorerQuery,
+  loadExplorer,
+  clearLiveRequestCache,
 } from './data/fetch.js';
 export {
   escapeHtml,
   formatNumber,
   formatCompact,
+  formatTokenAmount,
   formatCompactCurrency,
   formatUsd,
   formatMaybe,

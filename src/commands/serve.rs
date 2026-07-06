@@ -19,11 +19,13 @@ pub async fn run(app: &AppContext, port: Option<u16>) -> Result<()> {
 
     let store = Store::new(&app.paths)?;
     store.bootstrap()?;
-    let run_id = store.run_log().record_run_start("serve")?;
-    let addr = web::serve(store.clone(), port).await?;
-    store
-        .run_log()
-        .finish_run(run_id, "success", Some(&format!("listen={addr}")), None)?;
+    let addr = super::run_tracked(
+        &store,
+        "serve",
+        async { web::serve(store.clone(), port).await },
+        |addr| Some(format!("listen={addr}")),
+    )
+    .await?;
 
     /*
      * ========================================================================

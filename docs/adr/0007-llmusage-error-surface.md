@@ -2,7 +2,7 @@
 
 - 状态：拟稿（0.5.0 sprint M0- 骨架 / M3 收尾）
 - 落地阶段：M0- 骨架 / M3 收尾
-- 相关代码：`src/error.rs`、所有 pub fn 签名替换
+- 相关代码：`src/api/error.rs`、所有 pub fn 签名替换
 - 相关术语：LlmusageError
 - 关联 PRD：v1.1 §F0.3（D17）
 

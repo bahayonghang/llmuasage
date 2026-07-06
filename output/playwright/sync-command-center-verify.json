@@ -1,0 +1,29 @@
+{
+  "desktop": {
+    "hostExists": true,
+    "hostBeforeHero": true,
+    "hostText": "SYNC\n正在读取同步状态…",
+    "actionText": null,
+    "noHorizontalOverflow": false,
+    "scrollWidth": 1399,
+    "innerWidth": 1348,
+    "sourceCards": 0,
+    "segmentedBars": 0
+  },
+  "mobile720": null,
+  "screenshots": [
+    "output/playwright/sync-command-center-desktop.png",
+    "output/playwright/sync-command-center-720.png"
+  ],
+  "http": {
+    "htmlHasHost": true,
+    "htmlHostBeforeHero": true,
+    "apiHasCenter": true,
+    "ordinarySyncSafe": true,
+    "noCostDeltaClaim": true,
+    "noTokenDeltaClaim": true,
+    "actionId": "sync",
+    "hasLastRun": true,
+    "sourceCount": 0
+  }
+}

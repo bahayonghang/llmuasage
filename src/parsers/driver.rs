@@ -4,7 +4,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use super::{SourceParser, SourceSyncStats, SyncEvent};
-use crate::store::{SourceFileInventory, Store, SyncRunWriter};
+use crate::store::{Store, SyncRunWriter};
 
 /// Drives a fixed list of [`SourceParser`] implementations against the shared
 /// writer in registration order.
@@ -35,7 +35,6 @@ pub async fn drive(
         parallelism,
         lock_wait_ms,
         recent_days: None,
-        source_file_inventories: Vec::new(),
         sender: None,
         cancel: &CancellationToken::new(),
     })
@@ -51,7 +50,6 @@ pub struct DriveContext<'a, 'b> {
     pub parallelism: usize,
     pub lock_wait_ms: u64,
     pub recent_days: Option<u32>,
-    pub source_file_inventories: Vec<SourceFileInventory>,
     pub sender: Option<&'b mut mpsc::Sender<SyncEvent>>,
     pub cancel: &'a CancellationToken,
 }
@@ -96,27 +94,21 @@ pub async fn drive_with_events(mut ctx: DriveContext<'_, '_>) -> Result<Vec<Sour
         stats.lock_wait_ms = ctx.lock_wait_ms;
         let source = parser.source();
 
-        // 1.2 先登记本轮枚举到的全部候选文件，再把没扫到、
-        //     上次还是 live 的文件改成 missing。commit_shard 只看到
-        //     changed/reparsed 文件；这里的 inventory 才是 missing sweep
-        //     的候选全集。
-        if let Some(inventory) = ctx
-            .source_file_inventories
-            .iter()
-            .find(|inventory| inventory.source == source)
-        {
-            ctx.store.source_files().mark_inventory_seen(
-                source,
-                &inventory.file_paths,
-                &run_started_at,
-            )?;
-        }
-        let swept = ctx
-            .store
-            .source_files()
-            .sweep_missing(source, &run_started_at)?;
-        if swept > 0 {
-            info!(source = %source, swept, "标记 missing 文件完成");
+        // 1.2 Parser-owned source inventory marks every candidate file seen in
+        //     this run before parsing changed files. Driver only performs the
+        //     stale-live sweep. If enumeration reported a non-fatal error,
+        //     skip the sweep to avoid converting unreadable subtrees into
+        //     false `missing` history.
+        if stats.last_error.is_some() {
+            info!(source = %source, "source inventory incomplete; skipping missing sweep");
+        } else {
+            let swept = ctx
+                .store
+                .source_files()
+                .sweep_missing(source, &run_started_at)?;
+            if swept > 0 {
+                info!(source = %source, swept, "标记 missing 文件完成");
+            }
         }
 
         if ctx.recent_days.is_some() {

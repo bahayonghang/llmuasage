@@ -1,4 +1,5 @@
-import { escapeHtml, formatCompact, formatNumber, formatUsd, ratio } from '../data.js';
+import { getShellCopy } from '../copy.js';
+import { escapeHtml, formatCompact, formatNumber, formatTokenAmount, formatUsd, ratio } from '../data.js';
 
 const logger = window.console;
 
@@ -9,13 +10,19 @@ function supportLabel(support) {
   return support?.level || 'no_data';
 }
 
-function emptyState(support, fallback) {
+function emptyState(support, fallback, compact = false) {
   const reason = support?.reason || fallback;
   return `
-    <div class="empty-state">
+    <div class="empty-state${compact ? ' compact' : ''}">
       ${escapeHtml(reason)}
     </div>
   `;
+}
+
+function refreshNotice(refreshing) {
+  return refreshing
+    ? `<div class="empty-state stale-refresh-notice">${escapeHtml(getShellCopy('shell.refresh.secondaryStale'))}</div>`
+    : '';
 }
 
 function renderBars(rows, valueKey, labelFn, valueFn) {
@@ -41,7 +48,7 @@ function renderBars(rows, valueKey, labelFn, valueFn) {
 
 function renderActivityTable(rows, support) {
   if (!rows.length) {
-    return emptyState(support, '暂无 activity 数据。');
+    return emptyState(support, '暂无 activity 数据。', true);
   }
   const rowsHtml = rows
     .slice(0, 8)
@@ -73,7 +80,7 @@ function renderActivityTable(rows, support) {
 
 function renderToolsTable(rows, support) {
   if (!rows.length) {
-    return emptyState(support, '暂无 tool 数据。');
+    return emptyState(support, '暂无 tool 数据。', true);
   }
   const rowsHtml = rows
     .slice(0, 8)
@@ -111,7 +118,7 @@ function renderOptimize(optimize) {
   const findings = Array.isArray(optimize?.findings) ? optimize.findings : [];
   const grade = optimize?.grade || '--';
   const score = Number(optimize?.score ?? 0);
-  const savingsTokens = formatCompact(optimize?.estimated_savings_tokens || 0);
+  const savingsTokens = formatTokenAmount(optimize?.estimated_savings_tokens || 0);
   const savingsUsd = formatUsd(optimize?.estimated_savings_usd || 0);
 
   const summary = document.getElementById('optimize-summary');
@@ -141,6 +148,7 @@ function renderOptimize(optimize) {
     host.innerHTML = emptyState(
       support,
       '暂无 optimize finding；建议仅基于 normalized facts 生成，不会自动执行清理。',
+      true,
     );
     return;
   }
@@ -183,6 +191,7 @@ function renderCompare(compare) {
     host.innerHTML = emptyState(
       support,
       '至少需要两个模型才会显示 compare；低样本会以 warning 形式显式降级。',
+      true,
     );
     return;
   }
@@ -194,7 +203,7 @@ function renderCompare(compare) {
     </tr>
   `).join('');
   host.innerHTML = `
-    ${warning ? `<div class="empty-state">${escapeHtml(warning)}</div>` : ''}
+    ${warning ? `<div class="empty-state compact">${escapeHtml(warning)}</div>` : ''}
     <table class="panel-table">
       <thead>
         <tr>
@@ -227,9 +236,10 @@ export function renderBehavior(context) {
   const toolsSupport = panels.tools_support;
   const optimize = panels.optimize;
   const compare = panels.compare;
+  const refreshing = Boolean(panels.secondary_refreshing);
 
-  document.getElementById('activity-support').textContent = supportLabel(activitySupport);
-  document.getElementById('tools-support').textContent = supportLabel(toolsSupport);
+  document.getElementById('activity-support').textContent = refreshing ? 'refreshing' : supportLabel(activitySupport);
+  document.getElementById('tools-support').textContent = refreshing ? 'refreshing' : supportLabel(toolsSupport);
 
   document.getElementById('activity-bars').innerHTML = renderBars(
     activityRows,
@@ -240,7 +250,7 @@ export function renderBehavior(context) {
   document.getElementById('activity-table').innerHTML = renderActivityTable(
     activityRows,
     activitySupport,
-  );
+  ) + refreshNotice(refreshing);
 
   document.getElementById('tools-bars').innerHTML = renderBars(
     toolRows,
@@ -248,9 +258,15 @@ export function renderBehavior(context) {
     (row) => row.mcp_server ? `${row.mcp_server} / ${row.tool_name}` : row.tool_name || '--',
     (row) => `${formatCompact(row.calls)} calls`,
   );
-  document.getElementById('tools-table').innerHTML = renderToolsTable(toolRows, toolsSupport);
+  document.getElementById('tools-table').innerHTML = renderToolsTable(toolRows, toolsSupport) + refreshNotice(refreshing);
   renderOptimize(optimize);
   renderCompare(compare);
+  if (refreshing) {
+    const optimizeHost = document.getElementById('optimize-findings');
+    if (optimizeHost) optimizeHost.insertAdjacentHTML('afterbegin', refreshNotice(true));
+    const compareHost = document.getElementById('compare-panel');
+    if (compareHost) compareHost.insertAdjacentHTML('afterbegin', refreshNotice(true));
+  }
 
   logger.info('完成行为分析区渲染');
 }
