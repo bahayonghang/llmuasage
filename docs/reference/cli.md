@@ -161,7 +161,63 @@ llmusage doctor --json
 llmusage doctor --refresh-pricing .\litellm-prices.json
 ```
 
-Runs health checks. `--refresh-pricing <PATH>` copies a local LiteLLM pricing snapshot into `~/.llmusage/pricing/` and recomputes per-event costs. URLs are refused.
+Runs health checks. `--refresh-pricing <PATH>` validates a complete internal-v1, catalog-v2, or native LiteLLM base snapshot, stores a content-addressed copy under `~/.llmusage/pricing/`, clears any active overlay, and recomputes per-event costs. URLs are refused. This option replaces the complete base; it is not an incremental overlay.
+
+### `llmusage catalog`
+
+```powershell
+llmusage catalog apply .\pricing-overlay.json
+llmusage catalog status
+llmusage catalog status --json
+llmusage catalog reset
+```
+
+`catalog apply` validates and activates a local v2 overlay. The overlay is always merged with its recorded base, so applying a second overlay does not stack it on the previous effective catalog. Models with an existing `id` are replaced as complete definitions; `remove_models` fails when an id is unknown. Activation stores content-addressed base/overlay/effective files and recomputes persisted event and bucket costs before switching catalog metadata.
+
+`catalog status` distinguishes the base, optional overlay, and effective catalog. JSON output includes each layer's declared version, runtime identity, schema version, file, model count, expanded source-rule count, and `rebase_available`.
+
+`catalog reset` removes the overlay and restores its recorded base. A snapshot base remains pinned; an embedded base returns to the current embedded catalog. With no overlay, reset is idempotent.
+
+Minimal overlay:
+
+```json
+{
+  "schema_version": 2,
+  "kind": "overlay",
+  "version": "team-pricing-2026-07",
+  "models": [
+    {
+      "id": "team-model",
+      "sources": ["codex", "opencode"],
+      "matches": [
+        { "value": "team-model", "mode": "exact" }
+      ],
+      "rates": {
+        "default": {
+          "input_per_mtok": 1.0,
+          "cached_per_mtok": 0.1,
+          "cache_creation_per_mtok": 1.25,
+          "output_per_mtok": 6.0
+        },
+        "tiers": [
+          {
+            "name": "long_context",
+            "prompt_tokens_above": 272000,
+            "input_per_mtok": 2.0,
+            "cached_per_mtok": 0.2,
+            "cache_creation_per_mtok": 2.5,
+            "output_per_mtok": 9.0
+          }
+        ]
+      },
+      "context_window": 1050000
+    }
+  ],
+  "remove_models": []
+}
+```
+
+`exact` matches only the normalized complete model id. `family` also accepts dash/dot-normalized family suffixes. Exact matches win over family matches, then the longest matcher wins. `version` is an audit label and never controls a file path. Tier thresholds are selected per `usage_event` from input + cache-read + cache-creation tokens; bucket totals never trigger a tier again.
 
 ### `llmusage logs`
 

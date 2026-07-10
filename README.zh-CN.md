@@ -68,6 +68,7 @@ llmusage help --zh
 llmusage dash
 llmusage codex-tracer
 llmusage logs --limit 50 --level warn
+llmusage catalog status
 llmusage export html --out .\llmusage-report
 ```
 
@@ -76,6 +77,20 @@ llmusage export html --out .\llmusage-report
 `llmusage dash` 使用 tokscale 风格的终端 Dashboard。快捷键：`tab`/`shift-tab` 或 `1`-`8` 切换视图，`s` 打开来源选择器，`r` 刷新 Dashboard 数据，`R` 切换自动刷新，`x` 按当前来源筛选运行 sync，`?` 打开帮助/设置，`q` 退出。
 
 浏览器 Dashboard 包含行为面板和本地 Cost Explorer workbench，可按时间 × 指标 × 分组做切片分析，并支持工具/非工具成本归因与离线快照导出。
+
+## 模型价格目录
+
+模型价格和上下文窗口来自内置 `static-v2` 目录。该目录已为 Codex 和 OpenCode 加入 `gpt-5.6-luna`、`gpt-5.6-terra`、`gpt-5.6-sol`，其中 `gpt-5.6` 是 Sol 的精确别名；单请求提示 token 超过 272,000 时使用长上下文费率。
+
+可以只写增量覆盖，不需要复制整份内置目录：
+
+```powershell
+llmusage catalog apply .\pricing-overlay.json
+llmusage catalog status --json
+llmusage catalog reset
+```
+
+覆盖层按稳定模型 id 新增、完整替换或删除模型定义。apply/reset 会重算已落库 event 成本和 30 分钟 bucket 定价。`doctor --refresh-pricing <PATH>` 继续作为完整 base snapshot 的兼容入口，不是增量覆盖。所有目录输入都必须是本地文件，llmusage 不会联网拉取价格。
 
 ## Codex Tracer
 
@@ -95,7 +110,7 @@ llmusage codex-tracer --rebuild
 - `llmusage sync --rebuild` 默认拒绝有损重建，除非同时传入 `--allow-lossy-rebuild`。
 - `llmusage diagnostics --forget-file <PATH> --source <SOURCE>` 是显式忽略源文件的写入入口。
 - `llmusage logs` 查询本地运行日志和最近命令审计记录，不改变报表 stdout 或 `sync --json-events` stdout 合同。
-- `llmusage doctor --refresh-pricing <file>` 只读取本地价格快照；URL 会被拒绝。
+- `llmusage catalog apply <file>` 与 `doctor --refresh-pricing <file>` 只读取本地目录文件；URL 会被拒绝。
 
 ## 文档
 

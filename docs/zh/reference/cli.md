@@ -161,7 +161,63 @@ llmusage doctor --json
 llmusage doctor --refresh-pricing .\litellm-prices.json
 ```
 
-执行健康检查。`--refresh-pricing <PATH>` 会把本地 LiteLLM 价格快照复制到 `~/.llmusage/pricing/` 并重算 event 成本；URL 会被拒绝。
+执行健康检查。`--refresh-pricing <PATH>` 会校验完整的内部 v1、catalog v2 或原生 LiteLLM base snapshot，在 `~/.llmusage/pricing/` 下保存内容寻址副本，清除当前 overlay，并重算 event 成本；URL 会被拒绝。该参数替换完整 base，不是增量覆盖。
+
+### `llmusage catalog`
+
+```powershell
+llmusage catalog apply .\pricing-overlay.json
+llmusage catalog status
+llmusage catalog status --json
+llmusage catalog reset
+```
+
+`catalog apply` 校验并激活本地 v2 overlay。overlay 始终与记录的 base 合并，因此第二次 apply 不会叠加在上一个 effective catalog 上。已有 `id` 的模型会被完整替换；`remove_models` 引用未知 id 时会失败。激活会保存内容寻址的 base/overlay/effective 文件，先重算已落库 event 和 bucket 成本，再切换 catalog metadata。
+
+`catalog status` 区分 base、可选 overlay 和 effective catalog。JSON 输出包含每层声明版本、运行时身份、schema 版本、文件、模型数、展开后的来源规则数和 `rebase_available`。
+
+`catalog reset` 移除 overlay 并恢复它记录的 base。snapshot base 会继续固定；embedded base 会回到当前二进制内置目录。没有 overlay 时 reset 幂等成功。
+
+最小 overlay：
+
+```json
+{
+  "schema_version": 2,
+  "kind": "overlay",
+  "version": "team-pricing-2026-07",
+  "models": [
+    {
+      "id": "team-model",
+      "sources": ["codex", "opencode"],
+      "matches": [
+        { "value": "team-model", "mode": "exact" }
+      ],
+      "rates": {
+        "default": {
+          "input_per_mtok": 1.0,
+          "cached_per_mtok": 0.1,
+          "cache_creation_per_mtok": 1.25,
+          "output_per_mtok": 6.0
+        },
+        "tiers": [
+          {
+            "name": "long_context",
+            "prompt_tokens_above": 272000,
+            "input_per_mtok": 2.0,
+            "cached_per_mtok": 0.2,
+            "cache_creation_per_mtok": 2.5,
+            "output_per_mtok": 9.0
+          }
+        ]
+      },
+      "context_window": 1050000
+    }
+  ],
+  "remove_models": []
+}
+```
+
+`exact` 只匹配规范化后的完整模型 id；`family` 还接受 dash/dot 规范化后的家族后缀。exact 优先于 family，同模式下最长 matcher 优先。`version` 只用于审计，不控制文件路径。tier 阈值按单条 `usage_event` 的 input + cache-read + cache-creation token 选择；bucket 总量不会再次触发 tier。
 
 ### `llmusage logs`
 
