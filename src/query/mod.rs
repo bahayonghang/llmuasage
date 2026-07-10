@@ -999,7 +999,7 @@ impl Dashboard {
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
 
-        let catalog = PricingCatalog::static_v1();
+        let catalog = self.store.active_pricing_catalog()?;
         let mut peak_percent = 0.0_f64;
         let mut peak_model: Option<String> = None;
         let mut ratio_sum = 0.0_f64;
@@ -3056,7 +3056,7 @@ mod tests {
         assert!(model.cost_without_cache_usd >= model.cost_with_cache_usd);
         assert!(model.cache_savings_usd >= 0.0);
         assert_eq!(model.pricing_status, "static");
-        assert_eq!(model.pricing_source.as_deref(), Some("static-v1"));
+        assert_eq!(model.pricing_source.as_deref(), Some("static-v2"));
         assert!(model.pricing_rate.is_some());
 
         let project = dashboard
@@ -3779,7 +3779,7 @@ mod tests {
     }
 
     /// Validates D6/F1.3: `Store::recompute_costs` rewrites the per-event
-    /// cost columns using the static-v1 catalog, so a `usage_event` seeded
+    /// cost columns using the embedded catalog, so a `usage_event` seeded
     /// with zero cost now carries non-zero `cost_with_cache_usd` and a
     /// `pricing_status = 'static'` row tag.
     #[test]
@@ -3817,7 +3817,7 @@ mod tests {
         assert!(cost_with > 0.0);
         assert!(cost_without > cost_with);
         assert_eq!(status, "static");
-        assert_eq!(source, "static-v1");
+        assert_eq!(source, "static-v2");
         let (bucket_cost_with, bucket_status, bucket_source): (f64, String, String) = conn
             .query_row(
                 r#"
@@ -3830,7 +3830,7 @@ mod tests {
             )?;
         assert!((bucket_cost_with - cost_with).abs() < 1e-9);
         assert_eq!(bucket_status, "static");
-        assert_eq!(bucket_source, "static-v1");
+        assert_eq!(bucket_source, "static-v2");
         Ok(())
     }
 

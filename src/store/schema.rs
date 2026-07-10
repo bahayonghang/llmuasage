@@ -61,6 +61,8 @@ impl Store {
         if let Some(enabled) = options.enable_raw_archive {
             write_meta_flag(&conn, META_RAW_ARCHIVE_KEY, enabled)?;
         }
+        drop(conn);
+        self.upgrade_embedded_pricing_if_needed()?;
 
         info!(
             version = migrations::latest_schema_version(),

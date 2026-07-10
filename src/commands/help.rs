@@ -334,6 +334,10 @@ const ENGLISH_COMMANDS: &[(&str, &str)] = &[
         "Run health checks and optionally refresh pricing from a local file.",
     ),
     (
+        "catalog",
+        "Apply, inspect, or reset the local pricing catalog overlay.",
+    ),
+    (
         "logs",
         "Query local structured runtime logs and recent run records.",
     ),
@@ -413,6 +417,7 @@ const ENGLISH_EXAMPLES: &[(&str, &str)] = &[
     ),
     ("Active burn-rate block", "llmusage blocks --active"),
     ("Browser dashboard", "llmusage serve"),
+    ("Inspect pricing catalog", "llmusage catalog status --json"),
     (
         "Offline export",
         "llmusage export html --out ./llmusage-report",
@@ -442,6 +447,7 @@ const CHINESE_COMMANDS: &[(&str, &str)] = &[
     ("source-status", "输出解析器支持的来源与仅监控平台状态。"),
     ("diagnostics", "输出诊断 JSON，或显式忽略某个来源文件。"),
     ("doctor", "运行健康检查，也可从本地文件刷新价格。"),
+    ("catalog", "应用、查看或重置本地价格目录覆盖。"),
     ("logs", "查询本地结构化运行日志与最近命令记录。"),
     ("dash", "打开交互式终端 Dashboard。"),
     ("serve", "在 127.0.0.1 启动本地浏览器 Dashboard。"),
@@ -501,6 +507,7 @@ const CHINESE_EXAMPLES: &[(&str, &str)] = &[
     ("JSON 月报拆分", "llmusage monthly --json --breakdown"),
     ("当前 burn-rate 窗口", "llmusage blocks --active"),
     ("浏览器 Dashboard", "llmusage serve"),
+    ("查看价格目录", "llmusage catalog status --json"),
     ("离线导出", "llmusage export html --out ./llmusage-report"),
     ("英文顶层 help", "llmusage help"),
     ("子命令 help", "llmusage help daily"),
@@ -540,6 +547,7 @@ mod tests {
         assert!(help.contains("┌"));
         assert!(help.contains("│ Command"));
         assert!(help.contains("source-status"));
+        assert!(help.contains("catalog"));
         assert!(help.contains("Report options:"));
         assert!(help.contains("llmusage help --zh"));
         assert!(!help.contains("| --- |"));
@@ -551,6 +559,7 @@ mod tests {
         let zh = top_level_help_with_width(HelpLanguage::Chinese, 70);
         assert!(zh.contains("│ 命令"));
         assert!(zh.contains("source-status"));
+        assert!(zh.contains("catalog"));
         assert!(zh.contains("报表参数"));
         assert!(zh.contains("示例"));
         assert!(!zh.contains("| --- |"));

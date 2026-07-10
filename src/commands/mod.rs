@@ -7,6 +7,7 @@ use tracing::{error, info};
 use crate::{app::AppContext, models::SourceKind};
 
 pub mod blocks;
+pub mod catalog;
 pub mod codex_tracer;
 pub mod daily;
 pub mod dash;
@@ -107,6 +108,11 @@ pub enum Commands {
         #[arg(long, value_name = "PATH")]
         refresh_pricing: Option<PathBuf>,
     },
+    /// Manage the local pricing catalog overlay.
+    Catalog {
+        #[command(subcommand)]
+        command: CatalogCommand,
+    },
     /// Query local structured runtime logs and recent run records.
     Logs {
         /// Number of recent log entries and run_log records to return.
@@ -169,6 +175,23 @@ pub enum ExportCommand {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CatalogCommand {
+    /// Validate and activate a local v2 overlay file.
+    Apply {
+        #[arg(value_name = "PATH")]
+        path: PathBuf,
+    },
+    /// Show the base, overlay, and effective catalog layers.
+    Status {
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove the overlay and restore its recorded base catalog.
+    Reset,
 }
 
 async fn run_tracked<T, Fut, S>(
@@ -262,6 +285,11 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
             json,
             refresh_pricing,
         }) => doctor::run(&app, json, refresh_pricing).await,
+        Some(Commands::Catalog { command }) => match command {
+            CatalogCommand::Apply { path } => catalog::apply(&app, &path).await,
+            CatalogCommand::Status { json } => catalog::status(&app, json).await,
+            CatalogCommand::Reset => catalog::reset(&app).await,
+        },
         Some(Commands::Logs {
             limit,
             level,
@@ -324,5 +352,35 @@ mod tests {
             help.contains("source-status"),
             "expected `source-status` in help output, got: {help}"
         );
+    }
+
+    #[test]
+    fn catalog_subcommands_parse() {
+        let apply = Cli::try_parse_from(["llmusage", "catalog", "apply", "overlay.json"])
+            .expect("catalog apply should parse");
+        assert!(matches!(
+            apply.command,
+            Some(Commands::Catalog {
+                command: super::CatalogCommand::Apply { .. }
+            })
+        ));
+
+        let status = Cli::try_parse_from(["llmusage", "catalog", "status", "--json"])
+            .expect("catalog status should parse");
+        assert!(matches!(
+            status.command,
+            Some(Commands::Catalog {
+                command: super::CatalogCommand::Status { json: true }
+            })
+        ));
+
+        let reset = Cli::try_parse_from(["llmusage", "catalog", "reset"])
+            .expect("catalog reset should parse");
+        assert!(matches!(
+            reset.command,
+            Some(Commands::Catalog {
+                command: super::CatalogCommand::Reset
+            })
+        ));
     }
 }

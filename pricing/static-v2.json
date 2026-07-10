@@ -1,0 +1,255 @@
+{
+  "schema_version": 2,
+  "kind": "base",
+  "version": "static-v2",
+  "models": [
+    {
+      "id": "gpt-5-mini",
+      "sources": ["codex"],
+      "matches": [
+        { "value": "gpt-5-mini", "mode": "family" }
+      ],
+      "rates": {
+        "default": {
+          "input_per_mtok": 0.25,
+          "cached_per_mtok": 0.025,
+          "output_per_mtok": 2.0
+        }
+      },
+      "context_window": 400000
+    },
+    {
+      "id": "gpt-5-legacy-codex",
+      "sources": ["codex"],
+      "matches": [
+        { "value": "gpt-5", "mode": "family" },
+        { "value": "o3", "mode": "family" },
+        { "value": "o4", "mode": "family" },
+        { "value": "gpt-5-codex", "mode": "exact" }
+      ],
+      "rates": {
+        "default": {
+          "input_per_mtok": 1.25,
+          "cached_per_mtok": 0.125,
+          "output_per_mtok": 10.0
+        }
+      },
+      "context_window": 400000
+    },
+    {
+      "id": "claude-opus",
+      "sources": ["claude"],
+      "matches": [
+        { "value": "claude-opus", "mode": "family" },
+        { "value": "opus", "mode": "family" }
+      ],
+      "rates": {
+        "default": {
+          "input_per_mtok": 15.0,
+          "cached_per_mtok": 1.5,
+          "output_per_mtok": 75.0
+        }
+      },
+      "context_window": 200000
+    },
+    {
+      "id": "claude-sonnet",
+      "sources": ["claude"],
+      "matches": [
+        { "value": "claude-sonnet", "mode": "family" },
+        { "value": "sonnet", "mode": "family" },
+        { "value": "claude-3-7", "mode": "family" }
+      ],
+      "rates": {
+        "default": {
+          "input_per_mtok": 3.0,
+          "cached_per_mtok": 0.3,
+          "output_per_mtok": 15.0
+        }
+      },
+      "context_window": 200000
+    },
+    {
+      "id": "claude-haiku",
+      "sources": ["claude"],
+      "matches": [
+        { "value": "claude-haiku", "mode": "family" },
+        { "value": "haiku", "mode": "family" }
+      ],
+      "rates": {
+        "default": {
+          "input_per_mtok": 0.8,
+          "cached_per_mtok": 0.08,
+          "output_per_mtok": 4.0
+        }
+      },
+      "context_window": 200000
+    },
+    {
+      "id": "claude-fable-5",
+      "sources": ["claude", "opencode"],
+      "matches": [
+        { "value": "claude-fable-5", "mode": "family" },
+        { "value": "fable-5", "mode": "family" },
+        { "value": "anthropic-claude-fable-5", "mode": "family" }
+      ],
+      "rates": {
+        "default": {
+          "input_per_mtok": 10.0,
+          "cached_per_mtok": 1.0,
+          "cache_creation_per_mtok": 12.5,
+          "output_per_mtok": 50.0
+        }
+      },
+      "context_window": 1000000
+    },
+    {
+      "id": "claude-mythos-5",
+      "sources": ["claude", "opencode"],
+      "matches": [
+        { "value": "claude-mythos-5", "mode": "family" },
+        { "value": "mythos-5", "mode": "family" },
+        { "value": "anthropic-claude-mythos-5", "mode": "family" }
+      ],
+      "rates": {
+        "default": {
+          "input_per_mtok": 10.0,
+          "cached_per_mtok": 1.0,
+          "cache_creation_per_mtok": 12.5,
+          "output_per_mtok": 50.0
+        }
+      },
+      "context_window": 1000000
+    },
+    {
+      "id": "gpt-5-legacy-opencode",
+      "sources": ["opencode"],
+      "matches": [
+        { "value": "gpt", "mode": "family" },
+        { "value": "gpt-5", "mode": "family" },
+        { "value": "gpt-5-codex", "mode": "exact" },
+        { "value": "o3", "mode": "family" },
+        { "value": "o4", "mode": "family" }
+      ],
+      "rates": {
+        "default": {
+          "input_per_mtok": 1.25,
+          "cached_per_mtok": 0.125,
+          "output_per_mtok": 10.0
+        }
+      },
+      "context_window": 400000
+    },
+    {
+      "id": "claude-sonnet-opencode",
+      "sources": ["opencode"],
+      "matches": [
+        { "value": "claude-sonnet", "mode": "family" },
+        { "value": "sonnet", "mode": "family" }
+      ],
+      "rates": {
+        "default": {
+          "input_per_mtok": 3.0,
+          "cached_per_mtok": 0.3,
+          "output_per_mtok": 15.0
+        }
+      },
+      "context_window": 200000
+    },
+    {
+      "id": "gemini-3-pro-preview",
+      "sources": ["opencode"],
+      "matches": [
+        { "value": "gemini-3-pro-preview", "mode": "family" },
+        { "value": "gemini-3-pro-high", "mode": "exact" }
+      ],
+      "rates": {
+        "default": {
+          "input_per_mtok": 2.0,
+          "cached_per_mtok": 0.2,
+          "output_per_mtok": 12.0
+        }
+      },
+      "context_window": 1000000
+    },
+    {
+      "id": "gpt-5.6-luna",
+      "sources": ["codex", "opencode"],
+      "matches": [
+        { "value": "gpt-5.6-luna", "mode": "exact" }
+      ],
+      "rates": {
+        "default": {
+          "input_per_mtok": 1.0,
+          "cached_per_mtok": 0.1,
+          "cache_creation_per_mtok": 1.25,
+          "output_per_mtok": 6.0
+        },
+        "tiers": [
+          {
+            "name": "long_context",
+            "prompt_tokens_above": 272000,
+            "input_per_mtok": 2.0,
+            "cached_per_mtok": 0.2,
+            "cache_creation_per_mtok": 2.5,
+            "output_per_mtok": 9.0
+          }
+        ]
+      },
+      "context_window": 1050000
+    },
+    {
+      "id": "gpt-5.6-terra",
+      "sources": ["codex", "opencode"],
+      "matches": [
+        { "value": "gpt-5.6-terra", "mode": "exact" }
+      ],
+      "rates": {
+        "default": {
+          "input_per_mtok": 2.5,
+          "cached_per_mtok": 0.25,
+          "cache_creation_per_mtok": 3.125,
+          "output_per_mtok": 15.0
+        },
+        "tiers": [
+          {
+            "name": "long_context",
+            "prompt_tokens_above": 272000,
+            "input_per_mtok": 5.0,
+            "cached_per_mtok": 0.5,
+            "cache_creation_per_mtok": 6.25,
+            "output_per_mtok": 22.5
+          }
+        ]
+      },
+      "context_window": 1050000
+    },
+    {
+      "id": "gpt-5.6-sol",
+      "sources": ["codex", "opencode"],
+      "matches": [
+        { "value": "gpt-5.6-sol", "mode": "exact" },
+        { "value": "gpt-5.6", "mode": "exact" }
+      ],
+      "rates": {
+        "default": {
+          "input_per_mtok": 5.0,
+          "cached_per_mtok": 0.5,
+          "cache_creation_per_mtok": 6.25,
+          "output_per_mtok": 30.0
+        },
+        "tiers": [
+          {
+            "name": "long_context",
+            "prompt_tokens_above": 272000,
+            "input_per_mtok": 10.0,
+            "cached_per_mtok": 1.0,
+            "cache_creation_per_mtok": 12.5,
+            "output_per_mtok": 45.0
+          }
+        ]
+      },
+      "context_window": 1050000
+    }
+  ]
+}
