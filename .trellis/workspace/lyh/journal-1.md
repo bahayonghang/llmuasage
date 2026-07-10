@@ -382,3 +382,37 @@ Created and completed Trellis task 07-06-serve-number-format. Added shared compa
 ### Next Steps
 
 - None - task complete
+
+
+## Session 12: 完成可配置模型目录与 GPT-5.6 支持
+
+**Date**: 2026-07-10
+**Task**: 完成可配置模型目录与 GPT-5.6 支持
+**Branch**: `dev`
+
+### Summary
+
+实现内置基础目录与用户覆盖层的双层配置，新增 catalog 管理命令、持久化激活与失败恢复；补充 GPT-5.6 Luna、Terra、Sol 的定价、上下文和来源匹配，并同步中英文文档、契约与回归测试。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b1aa754` | (see git log) |
+| `f3db2c0` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
