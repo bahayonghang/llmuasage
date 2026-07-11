@@ -2041,6 +2041,64 @@ mod tests {
     }
 
     #[test]
+    fn dashboard_assets_bound_explorer_time_series_height() {
+        let html = live_index_html();
+        let explorer_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "render/explorer.js")
+            .expect("render/explorer.js asset")
+            .body;
+        let copy_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "copy.js")
+            .expect("copy.js asset")
+            .body;
+        let components_css = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "components.css")
+            .expect("components.css asset")
+            .body;
+        let layout_css = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "layout.css")
+            .expect("layout.css asset")
+            .body;
+        let charts_css = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "charts.css")
+            .expect("charts.css asset")
+            .body;
+
+        assert!(html.contains("id=\"explorer-series-chart\""));
+        assert!(html.contains("id=\"explorer-series-details\""));
+        assert!(!html.contains("id=\"explorer-series\""));
+        assert!(explorer_js.contains("const MAX_CHART_SERIES = 5"));
+        assert!(explorer_js.contains("const SERIES_TABLE_LIMIT = 80"));
+        assert!(explorer_js.contains(".slice(0, MAX_CHART_SERIES)"));
+        assert!(explorer_js.contains("series.slice(-SERIES_TABLE_LIMIT)"));
+        assert!(explorer_js.contains("function miniChartGeometry(values)"));
+        assert!(explorer_js.contains("function renderSeriesDetails(series, explorer, open)"));
+        assert!(explorer_js.contains("detailsHost.querySelector('details')?.open"));
+        assert_eq!(
+            copy_js
+                .matches("'shell.explorer.seriesIndependentScale'")
+                .count(),
+            2
+        );
+        assert!(copy_js.contains("'shell.explorer.seriesTruncated'"));
+        assert_eq!(
+            copy_js.matches("'shell.explorer.seriesScopeAll'").count(),
+            2
+        );
+        assert!(components_css.contains(".explorer-series-chart-card"));
+        assert!(components_css.contains("max-height: min(420px, 50vh)"));
+        assert!(components_css.contains("position: sticky"));
+        assert!(layout_css.contains("scroll-margin-top: 80px"));
+        assert!(charts_css.contains(".explorer-series-line"));
+        assert!(charts_css.contains(".explorer-series-peak-dot"));
+    }
+
+    #[test]
     fn dashboard_assets_surface_diagnostics_insights_without_fake_claims() {
         let fetch_js = asset_manifest()
             .iter()
