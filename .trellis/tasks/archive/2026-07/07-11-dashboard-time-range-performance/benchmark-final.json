@@ -1,0 +1,183 @@
+{
+  "generated_at": "2026-07-11T11:18:40.592Z",
+  "url": "http://127.0.0.1:37423",
+  "budgets": {
+    "click_feedback_p95_ms": 100,
+    "interactive_api_p95_ms": 400,
+    "interactive_bytes": 131072
+  },
+  "http": {
+    "1d": {
+      "median_ms": 136.34,
+      "p95_ms": 142.16,
+      "median_bytes": 15714,
+      "max_bytes": 15714,
+      "samples": [
+        {
+          "duration_ms": 142.16,
+          "bytes": 15714
+        },
+        {
+          "duration_ms": 127.87,
+          "bytes": 15714
+        },
+        {
+          "duration_ms": 125.37,
+          "bytes": 15714
+        },
+        {
+          "duration_ms": 136.34,
+          "bytes": 15714
+        },
+        {
+          "duration_ms": 137.36,
+          "bytes": 15714
+        }
+      ]
+    },
+    "7d": {
+      "median_ms": 145.98,
+      "p95_ms": 156.4,
+      "median_bytes": 19316,
+      "max_bytes": 19316,
+      "samples": [
+        {
+          "duration_ms": 156.4,
+          "bytes": 19316
+        },
+        {
+          "duration_ms": 150.26,
+          "bytes": 19316
+        },
+        {
+          "duration_ms": 143.81,
+          "bytes": 19316
+        },
+        {
+          "duration_ms": 143.82,
+          "bytes": 19316
+        },
+        {
+          "duration_ms": 145.98,
+          "bytes": 19316
+        }
+      ]
+    },
+    "30d": {
+      "median_ms": 141.8,
+      "p95_ms": 160.57,
+      "median_bytes": 25941,
+      "max_bytes": 25941,
+      "samples": [
+        {
+          "duration_ms": 141.8,
+          "bytes": 25941
+        },
+        {
+          "duration_ms": 160.57,
+          "bytes": 25941
+        },
+        {
+          "duration_ms": 134.14,
+          "bytes": 25941
+        },
+        {
+          "duration_ms": 157.63,
+          "bytes": 25941
+        },
+        {
+          "duration_ms": 134.14,
+          "bytes": 25941
+        }
+      ]
+    },
+    "all": {
+      "median_ms": 202.44,
+      "p95_ms": 238.98,
+      "median_bytes": 66450,
+      "max_bytes": 66450,
+      "samples": [
+        {
+          "duration_ms": 202.44,
+          "bytes": 66450
+        },
+        {
+          "duration_ms": 203.95,
+          "bytes": 66450
+        },
+        {
+          "duration_ms": 238.98,
+          "bytes": 66450
+        },
+        {
+          "duration_ms": 186.18,
+          "bytes": 66450
+        },
+        {
+          "duration_ms": 201.09,
+          "bytes": 66450
+        }
+      ]
+    }
+  },
+  "browser": {
+    "chrome": "C:/Program Files/Google/Chrome/Application/chrome.exe",
+    "clicks": [
+      {
+        "preset": "1d",
+        "feedback_ms": 1,
+        "interactive_response_ms": 266.5,
+        "critical_render_ms": 282,
+        "secondary_complete_ms": 338.9,
+        "request_count": 1,
+        "payload_bytes": 15714
+      },
+      {
+        "preset": "7d",
+        "feedback_ms": 2.3,
+        "interactive_response_ms": 310.7,
+        "critical_render_ms": 316.8,
+        "secondary_complete_ms": 1029.4,
+        "request_count": 1,
+        "payload_bytes": 19316
+      },
+      {
+        "preset": "30d",
+        "feedback_ms": 3.7,
+        "interactive_response_ms": 179.5,
+        "critical_render_ms": 186.5,
+        "secondary_complete_ms": 2232.3,
+        "request_count": 6,
+        "payload_bytes": 32915
+      },
+      {
+        "preset": "all",
+        "feedback_ms": 2.2,
+        "interactive_response_ms": 233.2,
+        "critical_render_ms": 239.2,
+        "secondary_complete_ms": 2327.2,
+        "request_count": 6,
+        "payload_bytes": 99227
+      }
+    ],
+    "long_tasks": [
+      {
+        "start_ms": 99.5,
+        "duration_ms": 95
+      },
+      {
+        "start_ms": 495.40000000596046,
+        "duration_ms": 56
+      }
+    ],
+    "rapid_switch": {
+      "latest_feedback_ms": 0.6,
+      "latest_response_ms": 202.9,
+      "complete_ms": 218.7,
+      "active_preset": "all",
+      "request_count": 4,
+      "interactive_requests": 4,
+      "payload_bytes": 66450
+    }
+  }
+}
