@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 12
-- **Last Active**: 2026-07-10
+- **Total Sessions**: 13
+- **Last Active**: 2026-07-11
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~418 | Active |
+| `journal-1.md` | ~451 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 13 | 2026-07-11 | 优化 Explorer 时间序列展示 | `8e75049` | `dev` |
 | 12 | 2026-07-10 | 完成可配置模型目录与 GPT-5.6 支持 | `b1aa754`, `f3db2c0` | `dev` |
 | 11 | 2026-07-06 | Optimize serve number formatting | `3e2845a` | `dev` |
 | 10 | 2026-07-03 | Claude Fable/Mythos 模型统计覆盖 | `311e9bc` | `dev` |

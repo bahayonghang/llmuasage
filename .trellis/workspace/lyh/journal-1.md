@@ -416,3 +416,36 @@ Created and completed Trellis task 07-06-serve-number-format. Added shared compa
 ### Next Steps
 
 - None - task complete
+
+
+## Session 13: 优化 Explorer 时间序列展示
+
+**Date**: 2026-07-11
+**Task**: 优化 Explorer 时间序列展示
+**Branch**: `dev`
+
+### Summary
+
+将 Cost Explorer 超长时间序列表重构为最多 5 个独立刻度趋势小图，并提供默认折叠、限高滚动的最近 80 条明细；完成中英文、明暗主题、桌面移动端 Chrome 验收及 just ci。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8e75049` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
