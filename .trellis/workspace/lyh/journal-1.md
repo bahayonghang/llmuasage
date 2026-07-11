@@ -449,3 +449,37 @@ Created and completed Trellis task 07-06-serve-number-format. Added shared compa
 ### Next Steps
 
 - None - task complete
+
+
+## Session 14: 优化看板时间范围切换性能
+
+**Date**: 2026-07-11
+**Task**: 优化看板时间范围切换性能
+**Branch**: `dev`
+
+### Summary
+
+新增精简交互投影、真实取消和聚合查询路由；代表库四档 API p95 均低于 400 ms，并完成 0.9.1 版本同步。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `257ecd5` | (see git log) |
+| `c0873b0` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
