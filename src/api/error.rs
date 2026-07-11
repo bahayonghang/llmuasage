@@ -63,6 +63,12 @@ pub enum LlmusageError {
         /// Human-readable explanation of what was rejected and how to fix it.
         detail: String,
     },
+    /// Work was intentionally stopped because its caller timed out or went away.
+    #[error("cancelled: {operation}")]
+    Cancelled {
+        /// Stable operation label for diagnostics and structured logs.
+        operation: &'static str,
+    },
     /// Pricing data is unavailable for `(source, model)` while a caller has
     /// asked for a strict cost calculation. Soft callers (dashboard fallback)
     /// continue to use [`crate::query::PricingStatus::Unpriced`]; this variant
@@ -151,6 +157,14 @@ mod tests {
             detail: "missing required `--source` flag".to_string(),
         };
         assert!(err.to_string().contains("missing required"));
+    }
+
+    #[test]
+    fn cancelled_variant_identifies_operation() {
+        let err = LlmusageError::Cancelled {
+            operation: "dashboard query",
+        };
+        assert_eq!(err.to_string(), "cancelled: dashboard query");
     }
 
     #[test]

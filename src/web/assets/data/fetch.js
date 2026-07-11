@@ -1,5 +1,6 @@
 const logger = window.console;
 const LIVE_CACHE_TTL_MS = 10000;
+const LIVE_CACHE_MAX_ENTRIES = 32;
 const liveCache = new Map();
 const liveInflight = new Map();
 let liveCacheEpoch = 0;
@@ -13,11 +14,11 @@ let liveCacheEpoch = 0;
  * 2) 兼容 live API 与 snapshot.json 双来源
  * 3) 把请求入口收敛给 app.js 调度
  */
-export async function loadJson(path) {
+export async function loadJson(path, options = {}) {
   logger.info('开始请求页面 JSON 数据');
 
   // 1.1 发起请求并校验 HTTP 状态
-  const response = await fetch(path);
+  const response = await fetch(path, { signal: options.signal });
   if (!response.ok) {
     let detail = '';
     try {
@@ -44,6 +45,9 @@ export async function loadJson(path) {
 export function clearLiveRequestCache() {
   liveCacheEpoch += 1;
   liveCache.clear();
+  for (const entry of liveInflight.values()) {
+    entry.controller.abort();
+  }
   liveInflight.clear();
 }
 
@@ -61,28 +65,41 @@ async function loadLiveJson(path, options = {}) {
   if (cacheable) {
     const cached = liveCache.get(key);
     if (cached && Date.now() - cached.receivedAt < LIVE_CACHE_TTL_MS) {
+      liveCache.delete(key);
+      liveCache.set(key, cached);
       return cached.payload;
     }
   }
 
   if (liveInflight.has(key)) {
-    return liveInflight.get(key);
+    return liveInflight.get(key).promise;
   }
 
   const epoch = liveCacheEpoch;
-  const request = loadJson(path)
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (options.signal?.aborted) {
+    controller.abort();
+  } else {
+    options.signal?.addEventListener('abort', abort, { once: true });
+  }
+  const request = loadJson(path, { signal: controller.signal })
     .then((payload) => {
       if (cacheable && epoch === liveCacheEpoch) {
         liveCache.set(key, { payload, receivedAt: Date.now() });
+        while (liveCache.size > LIVE_CACHE_MAX_ENTRIES) {
+          liveCache.delete(liveCache.keys().next().value);
+        }
       }
       return payload;
     })
     .finally(() => {
-      if (liveInflight.get(key) === request) {
+      options.signal?.removeEventListener('abort', abort);
+      if (liveInflight.get(key)?.promise === request) {
         liveInflight.delete(key);
       }
     });
-  liveInflight.set(key, request);
+  liveInflight.set(key, { promise: request, controller });
   return request;
 }
 
@@ -146,7 +163,7 @@ export function buildExplorerQuery(state) {
 }
 
 function snapshotTrendRows(snapshot, windowName) {
-  return snapshot?.[`${windowName}_trends`] || [];
+  return snapshot?.trends || snapshot?.[`${windowName}_trends`] || [];
 }
 
 function buildDashboardQuery(state, options = {}) {
@@ -183,6 +200,7 @@ export async function loadDashboardSnapshot(state, options = {}) {
   try {
     snapshot = await loadLiveJson(`/api/dashboard${buildDashboardQuery(state, options)}`, options);
   } catch (error) {
+    if (error?.name === 'AbortError') throw error;
     logger.warn('/api/dashboard 不可用，回退到旧分段 API', error);
     const [overview, trends, models, sources, projects, costs, activity, tools, optimize, explorer, compare, health, diagnostics] = await Promise.all([
       loadSection(state, 'overview', '/api/overview'),
@@ -223,46 +241,62 @@ export async function loadDashboardCoreSnapshot(state, options = {}) {
   return loadDashboardSnapshot(state, { ...options, scope: 'core' });
 }
 
-export async function loadSection(state, section, path) {
+export async function loadDashboardInteractiveSnapshot(state, options = {}) {
+  return loadDashboardSnapshot(state, { ...options, scope: 'interactive' });
+}
+
+export async function loadSection(state, section, path, options = {}) {
   if (state.mode === 'snapshot') {
     const snapshot = await ensureSnapshot(state);
     return snapshot?.[section];
   }
-  return loadLiveJson(`${path}${buildFilterQuery(state)}`);
+  return loadLiveJson(`${path}${buildFilterQuery(state)}`, options);
 }
 
-async function loadOptionalSection(state, section, path, fallback) {
+async function loadOptionalSection(state, section, path, fallback, options = {}) {
   try {
-    return await loadSection(state, section, path);
+    return await loadSection(state, section, path, options);
   } catch (error) {
+    if (error?.name === 'AbortError') throw error;
     logger.warn(`${path} degraded`, error);
     return fallbackFor(error, fallback);
   }
 }
 
-async function loadOptionalExplorer(state) {
+async function loadOptionalExplorer(state, options = {}) {
   try {
-    return await loadExplorer(state);
+    return await loadExplorer(state, options);
   } catch (error) {
+    if (error?.name === 'AbortError') throw error;
     logger.warn('/api/explorer degraded', error);
     return fallbackFor(error, emptyExplorer);
   }
 }
 
-export async function loadTrendWindow(state, windowName) {
+export async function loadTrendWindow(state, windowName, options = {}) {
   if (state.mode === 'snapshot') {
     const snapshot = await ensureSnapshot(state);
     return snapshot?.[`${windowName}_trends`];
   }
-  return loadLiveJson(`/api/trends${buildFilterQuery({ ...state, trendWindow: windowName })}`);
+  return loadLiveJson(`/api/trends${buildFilterQuery({ ...state, trendWindow: windowName })}`, options);
 }
 
-export async function loadExplorer(state) {
+export async function loadExplorer(state, options = {}) {
   if (state.mode === 'snapshot') {
     const snapshot = await ensureSnapshot(state);
     return snapshot?.explorer;
   }
-  return loadLiveJson(`/api/explorer${buildExplorerQuery(state)}`);
+  return loadLiveJson(`/api/explorer${buildExplorerQuery(state)}`, options);
+}
+
+export function loadDashboardSecondarySections(state, options = {}) {
+  return {
+    activity: () => loadOptionalSection(state, 'activity', '/api/activity', emptyActivity, options),
+    tools: () => loadOptionalSection(state, 'tools', '/api/tools', emptyTools, options),
+    optimize: () => loadOptionalSection(state, 'optimize', '/api/optimize', emptyOptimize, options),
+    explorer: () => loadOptionalExplorer(state, options),
+    compare: () => loadOptionalSection(state, 'compare', '/api/compare', emptyCompare, options),
+  };
 }
 
 function degradedSupport(error) {

@@ -4,7 +4,8 @@ import {
   buildExplorerQuery,
   buildFilterQuery,
   clearLiveRequestCache,
-  loadDashboardCoreSnapshot,
+  loadDashboardInteractiveSnapshot,
+  loadDashboardSecondarySections,
   loadDashboardSnapshot,
   loadExplorer,
 } from './data.js';
@@ -33,6 +34,7 @@ const TREND_WINDOW_TO_RANGE = Object.freeze({ day: '1d', week: '7d', month: '30d
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const AUTO_REFRESH_STORAGE_KEY = 'llmusage:autoRefreshMs';
 const VALID_AUTO_REFRESH_MS = new Set([0, 30000, 60000]);
+const SECONDARY_LOAD_CONCURRENCY = 2;
 const DEFAULT_EXPLORER = Object.freeze({
   granularity: 'day',
   metric: 'attributed_cost_usd',
@@ -76,6 +78,7 @@ async function main() {
     autoRefreshTimer: null,
     reloadPromise: null,
     reloadGeneration: 0,
+    rangeReloadController: null,
     secondaryRefreshing: false,
     rawData: null,
     expanded: {
@@ -191,6 +194,13 @@ function mergeCoreSnapshot(previous, core, options = {}) {
 }
 
 function renderDashboard(rawData) {
+  renderPrimaryDashboard(rawData);
+  const context = buildContext(rawData);
+  renderBehavior(context);
+  renderExplorer(context, dashboardState);
+}
+
+function renderPrimaryDashboard(rawData) {
   const context = buildContext(rawData);
 
   renderSyncCommandCenter(context, dashboardState);
@@ -199,12 +209,37 @@ function renderDashboard(rawData) {
   renderModels(context, dashboardState);
   renderSources(context);
   renderProjects(context, dashboardState);
-  renderBehavior(context);
-  renderExplorer(context, dashboardState);
   renderCosts(context, dashboardState);
   renderInsights(context);
   syncPanelToggleControls(context, dashboardState);
   syncFilterControls(dashboardState, context);
+}
+
+function renderSecondarySection(section, rawData) {
+  const context = buildContext(rawData);
+  if (section === 'explorer') {
+    renderExplorer(context, dashboardState);
+  } else {
+    renderBehavior(context);
+  }
+}
+
+function isAbortError(error) {
+  return error?.name === 'AbortError';
+}
+
+async function runSecondaryLoaders(loaders, onResult) {
+  const entries = Object.entries(loaders);
+  let nextIndex = 0;
+  const worker = async () => {
+    while (nextIndex < entries.length) {
+      const [section, load] = entries[nextIndex++];
+      const payload = await load();
+      onResult(section, payload);
+    }
+  };
+  const workerCount = Math.min(SECONDARY_LOAD_CONCURRENCY, entries.length);
+  return Promise.allSettled(Array.from({ length: workerCount }, () => worker()));
 }
 
 function refreshSyncCommandCenter(state = dashboardState) {
@@ -784,6 +819,7 @@ function setupRangePresetControls(state) {
       state.filters = filters;
       state.rangePreset = preset;
       state.trendWindow = RANGE_TO_TREND_WINDOW[preset] || state.trendWindow;
+      syncRangePresetControls(state);
       closeDatePicker();
       if (sameStableFilters(previousFilters, filters)) {
         await reloadDashboardFastRange(state);
@@ -793,6 +829,7 @@ function setupRangePresetControls(state) {
       }
       syncFilterControls(state);
     } catch (error) {
+      if (isAbortError(error)) return;
       logger.error('快捷时间范围切换失败', error);
       renderBootstrapError(error);
     }
@@ -813,6 +850,8 @@ function syncUrlFromState(state) {
 }
 
 async function reloadDashboard(state) {
+  state.rangeReloadController?.abort();
+  state.rangeReloadController = null;
   if (state.reloadPromise) {
     return state.reloadPromise;
   }
@@ -850,54 +889,52 @@ async function reloadDashboardFastRange(state) {
   }
 
   const generation = ++state.reloadGeneration;
+  state.rangeReloadController?.abort();
+  const controller = new AbortController();
+  state.rangeReloadController = controller;
   const previous = state.rawData;
   state.secondaryRefreshing = Boolean(previous);
 
-  const core = await loadDashboardCoreSnapshot(state);
+  if (previous) {
+    state.rawData = {
+      ...previous,
+      _meta: {
+        ...((previous && previous._meta) || {}),
+        secondary_refreshing: true,
+      },
+    };
+    renderBehavior(buildContext(state.rawData));
+    renderExplorer(buildContext(state.rawData), state);
+  }
+
+  const core = await loadDashboardInteractiveSnapshot(state, { signal: controller.signal });
   if (generation !== state.reloadGeneration) {
     return state.rawData;
   }
 
   state.rawData = mergeCoreSnapshot(previous, core, { secondaryRefreshing: state.secondaryRefreshing });
   syncUrlFromState(state);
-  renderDashboard(state.rawData);
+  renderPrimaryDashboard(state.rawData);
   updateSyncButton(state);
 
   const refreshSecondary = async () => {
-    try {
-      const full = await loadDashboardData(state);
-      if (generation !== state.reloadGeneration) {
-        return;
-      }
-      state.secondaryRefreshing = false;
-      state.rawData = {
-        ...full,
-        _meta: {
-          ...((full && full._meta) || {}),
-          secondary_refreshing: false,
-        },
-      };
-      renderDashboard(state.rawData);
-      updateSyncButton(state);
-    } catch (error) {
-      if (generation !== state.reloadGeneration) {
-        return;
-      }
-      state.secondaryRefreshing = false;
-      if (state.rawData) {
-        state.rawData = {
-          ...state.rawData,
-          _meta: {
-            ...((state.rawData && state.rawData._meta) || {}),
-            secondary_refreshing: false,
-          },
-        };
-        renderDashboard(state.rawData);
-      }
-      logger.error('次级面板刷新失败', error);
-      const endpointSync = document.getElementById('endpoint-sync');
-      if (endpointSync) endpointSync.textContent = error?.message || getShellCopy('shell.refresh.failed');
-    }
+    const loaders = loadDashboardSecondarySections(state, { signal: controller.signal });
+    await runSecondaryLoaders(loaders, (section, payload) => {
+      if (generation !== state.reloadGeneration || controller.signal.aborted) return;
+      state.rawData = { ...state.rawData, [section]: payload };
+      renderSecondarySection(section, state.rawData);
+    });
+    if (generation !== state.reloadGeneration || controller.signal.aborted) return;
+    state.secondaryRefreshing = false;
+    state.rawData = {
+      ...state.rawData,
+      _meta: {
+        ...((state.rawData && state.rawData._meta) || {}),
+        secondary_refreshing: false,
+      },
+    };
+    renderBehavior(buildContext(state.rawData));
+    renderExplorer(buildContext(state.rawData), state);
   };
 
   void refreshSecondary();
@@ -1220,6 +1257,7 @@ function setupTrendSegments(state) {
       const previousFilters = { ...(state.filters || {}) };
       state.trendWindow = nextWindow;
       state.rangePreset = TREND_WINDOW_TO_RANGE[nextWindow] || DEFAULT_RANGE_PRESET;
+      syncRangePresetControls(state);
       state.filters = currentFilterInputs();
       delete state.filters.since;
       delete state.filters.until;
@@ -1232,6 +1270,7 @@ function setupTrendSegments(state) {
       }
       syncFilterControls(state);
     } catch (error) {
+      if (isAbortError(error)) return;
       logger.error('趋势窗口切换失败', error);
       renderBootstrapError(error);
     }

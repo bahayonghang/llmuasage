@@ -383,6 +383,7 @@ export function buildContext({ overview, trends, models, sources, projects, cost
     health: {
       integrations: integrationRows,
       cursors: cursorRows,
+      cursor_count: Number(health?.cursor_count ?? cursorRows.length),
       failures: combinedFailureRows,
       ready_integrations,
       total_integrations: integrationRows.length,

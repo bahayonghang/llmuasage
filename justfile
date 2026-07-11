@@ -20,4 +20,6 @@ ci:
     cargo fmt --check
     cargo clippy --all-targets --all-features -- -D warnings
     cargo test -- --test-threads=1
+    node --check scripts/benchmark-dashboard-range.mjs
+    node --test scripts/tests/dashboard-fetch.test.mjs
     npm --prefix docs run docs:build

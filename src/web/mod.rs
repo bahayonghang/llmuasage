@@ -2,7 +2,10 @@ use std::{
     collections::HashMap,
     future::Future,
     net::{IpAddr, SocketAddr},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -15,11 +18,12 @@ use axum::{
     routing::{get, post},
 };
 use chrono::{FixedOffset, NaiveDate};
+use rusqlite::InterruptHandle;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::net::TcpListener;
-use tokio::sync::Semaphore;
-use tracing::{error, info};
+use tokio::sync::{Semaphore, oneshot};
+use tracing::{debug, error, info};
 
 use crate::{
     error::{LlmusageError, Result as LlmusageResult},
@@ -171,9 +175,10 @@ async fn api_dashboard(
 ) -> Response {
     let filter = dashboard_filter_from_params(&params);
     let scope = dashboard_scope_from_params(&params);
+    let window = dashboard_window_from_params(&params).to_string();
     api_json_async(
         "/api/dashboard",
-        load_dashboard_snapshot_resilient(state, filter, scope),
+        load_dashboard_snapshot_resilient(state, filter, scope, window),
     )
     .await
 }
@@ -185,7 +190,7 @@ async fn api_overview(
     let filter = dashboard_filter_from_params(&params);
     api_json_async(
         "/api/overview",
-        load_via_dashboard(state, move |d| d.overview(&filter)),
+        load_via_dashboard(state, "overview", move |d| d.overview(&filter)),
     )
     .await
 }
@@ -201,7 +206,7 @@ async fn api_trends(
     let filter = dashboard_filter_from_params_without_window(&params);
     api_json_async(
         "/api/trends",
-        load_via_dashboard(state, move |d| d.trends(&window, &filter)),
+        load_via_dashboard(state, "trends", move |d| d.trends(&window, &filter)),
     )
     .await
 }
@@ -213,7 +218,7 @@ async fn api_trends_daily(
     let filter = dashboard_filter_from_params(&params);
     api_json_async(
         "/api/trends_daily",
-        load_via_dashboard(state, move |d| d.trends_daily(&filter)),
+        load_via_dashboard(state, "trends-daily", move |d| d.trends_daily(&filter)),
     )
     .await
 }
@@ -225,7 +230,7 @@ async fn api_models(
     let filter = dashboard_filter_from_params(&params);
     api_json_async(
         "/api/models",
-        load_via_dashboard(state, move |d| d.model_breakdown(&filter)),
+        load_via_dashboard(state, "models", move |d| d.model_breakdown(&filter)),
     )
     .await
 }
@@ -237,7 +242,7 @@ async fn api_sources(
     let filter = dashboard_filter_from_params(&params);
     api_json_async(
         "/api/sources",
-        load_via_dashboard(state, move |d| d.source_breakdown(&filter)),
+        load_via_dashboard(state, "sources", move |d| d.source_breakdown(&filter)),
     )
     .await
 }
@@ -249,7 +254,7 @@ async fn api_projects(
     let filter = dashboard_filter_from_params(&params);
     api_json_async(
         "/api/projects",
-        load_via_dashboard(state, move |d| d.project_breakdown(&filter)),
+        load_via_dashboard(state, "projects", move |d| d.project_breakdown(&filter)),
     )
     .await
 }
@@ -261,7 +266,7 @@ async fn api_costs(
     let filter = dashboard_filter_from_params(&params);
     api_json_async(
         "/api/costs",
-        load_via_dashboard(state, move |d| d.cost_breakdown(&filter)),
+        load_via_dashboard(state, "costs", move |d| d.cost_breakdown(&filter)),
     )
     .await
 }
@@ -275,6 +280,7 @@ async fn api_activity(
         "/api/activity",
         load_behavior_api(
             state,
+            "activity",
             move |d| d.activity_breakdown(&filter),
             degraded_activity,
         ),
@@ -289,7 +295,12 @@ async fn api_tools(
     let filter = dashboard_filter_from_params(&params);
     api_json_async(
         "/api/tools",
-        load_behavior_api(state, move |d| d.tool_breakdown(&filter), degraded_tools),
+        load_behavior_api(
+            state,
+            "tools",
+            move |d| d.tool_breakdown(&filter),
+            degraded_tools,
+        ),
     )
     .await
 }
@@ -317,7 +328,9 @@ async fn api_explorer(
     };
     api_json_async(
         "/api/explorer",
-        load_via_dashboard(state, move |dashboard| dashboard.explorer(&query)),
+        load_via_dashboard(state, "explorer", move |dashboard| {
+            dashboard.explorer(&query)
+        }),
     )
     .await
 }
@@ -329,7 +342,12 @@ async fn api_optimize(
     let filter = dashboard_filter_from_params(&params);
     api_json_async(
         "/api/optimize",
-        load_behavior_api(state, move |d| d.optimize(&filter), degraded_optimize),
+        load_behavior_api(
+            state,
+            "optimize",
+            move |d| d.optimize(&filter),
+            degraded_optimize,
+        ),
     )
     .await
 }
@@ -341,7 +359,7 @@ async fn api_compare_models(
     let filter = dashboard_filter_from_params(&params);
     api_json_async(
         "/api/compare/models",
-        load_via_dashboard(state, move |d| d.compare_models(&filter)),
+        load_via_dashboard(state, "compare-models", move |d| d.compare_models(&filter)),
     )
     .await
 }
@@ -355,6 +373,7 @@ async fn api_compare(
         "/api/compare",
         load_behavior_api(
             state,
+            "compare",
             move |d| {
                 d.model_compare(
                     &filter,
@@ -375,7 +394,7 @@ async fn api_home_overview(
     let filter = dashboard_filter_from_params(&params);
     api_json_async(
         "/api/home_overview",
-        load_via_dashboard(state, move |d| d.home_overview(&filter)),
+        load_via_dashboard(state, "home-overview", move |d| d.home_overview(&filter)),
     )
     .await
 }
@@ -391,7 +410,7 @@ async fn api_heatmap(
     let filter = dashboard_filter_from_params(&params);
     api_json_async(
         "/api/heatmap",
-        load_via_dashboard(state, move |d| d.heatmap(&filter, days)),
+        load_via_dashboard(state, "heatmap", move |d| d.heatmap(&filter, days)),
     )
     .await
 }
@@ -438,19 +457,23 @@ async fn api_logs(
 
     api_json_async(
         "/api/logs",
-        load_via_dashboard(state, move |d| d.logs(&query)),
+        load_via_dashboard(state, "logs", move |d| d.logs(&query)),
     )
     .await
 }
 
 async fn api_health(State(state): State<WebState>) -> Response {
-    api_json_async("/api/health", load_via_dashboard(state, |d| d.health())).await
+    api_json_async(
+        "/api/health",
+        load_via_dashboard(state, "health", |d| d.health()),
+    )
+    .await
 }
 
 async fn api_diagnostics(State(state): State<WebState>) -> Response {
     api_json_async(
         "/api/diagnostics",
-        load_via_dashboard(state, |d| d.diagnostics()),
+        load_via_dashboard(state, "diagnostics", |d| d.diagnostics()),
     )
     .await
 }
@@ -697,16 +720,57 @@ fn authority_host(authority: &str) -> &str {
     authority.split(':').next().unwrap_or_default()
 }
 
-async fn load_via_dashboard<T, F>(state: WebState, f: F) -> LlmusageResult<T>
+struct DashboardQueryGuard {
+    cancelled: Arc<AtomicBool>,
+    interrupt: Option<InterruptHandle>,
+    armed: bool,
+}
+
+impl DashboardQueryGuard {
+    fn new(cancelled: Arc<AtomicBool>) -> Self {
+        Self {
+            cancelled,
+            interrupt: None,
+            armed: true,
+        }
+    }
+
+    fn attach(&mut self, interrupt: InterruptHandle) {
+        self.interrupt = Some(interrupt);
+    }
+
+    fn interrupt(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+        if let Some(interrupt) = &self.interrupt {
+            interrupt.interrupt();
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+        self.interrupt = None;
+    }
+}
+
+impl Drop for DashboardQueryGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            self.interrupt();
+        }
+    }
+}
+
+async fn load_via_dashboard<T, F>(state: WebState, section: &'static str, f: F) -> LlmusageResult<T>
 where
     T: Send + 'static,
     F: FnOnce(&Dashboard) -> LlmusageResult<T> + Send + 'static,
 {
-    load_via_dashboard_with_timeout(state, WEB_API_TIMEOUT, f).await
+    load_via_dashboard_with_timeout(state, section, WEB_API_TIMEOUT, f).await
 }
 
 async fn load_via_dashboard_with_timeout<T, F>(
     state: WebState,
+    section: &'static str,
     timeout: Duration,
     f: F,
 ) -> LlmusageResult<T>
@@ -727,8 +791,18 @@ where
                 detail: "dashboard query semaphore is closed".to_string(),
             });
         }
-        Err(_) => return Err(dashboard_timeout_error(timeout)),
+        Err(_) => {
+            debug!(
+                section,
+                semaphore_wait_ms = started.elapsed().as_millis(),
+                query_ms = 0_u128,
+                cancelled = true,
+                "Dashboard query timed out waiting for a permit"
+            );
+            return Err(dashboard_timeout_error(timeout));
+        }
     };
+    let semaphore_wait = started.elapsed();
     let Some(remaining) = timeout.checked_sub(started.elapsed()) else {
         return Err(dashboard_timeout_error(timeout));
     };
@@ -736,49 +810,113 @@ where
         return Err(dashboard_timeout_error(timeout));
     }
 
-    with_timeout(
-        remaining,
-        tokio::task::spawn_blocking(move || {
-            let _permit = permit;
-            let dashboard = Dashboard::open(&state.store)?;
-            f(&dashboard)
-        }),
-    )
-    .await
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let blocking_cancelled = Arc::clone(&cancelled);
+    let (interrupt_tx, interrupt_rx) = oneshot::channel();
+    let query_started = Instant::now();
+    let mut task = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        let dashboard = Dashboard::open(&state.store)?;
+        let interrupt = dashboard.interrupt_handle();
+        if blocking_cancelled.load(Ordering::SeqCst) {
+            interrupt.interrupt();
+            return Err(dashboard_cancelled_error());
+        }
+        if interrupt_tx.send(interrupt).is_err() {
+            return Err(dashboard_cancelled_error());
+        }
+        if blocking_cancelled.load(Ordering::SeqCst) {
+            return Err(dashboard_cancelled_error());
+        }
+        f(&dashboard)
+    });
+    let mut guard = DashboardQueryGuard::new(cancelled);
+    let interrupt = match tokio::time::timeout(remaining, interrupt_rx).await {
+        Ok(Ok(interrupt)) => interrupt,
+        Ok(Err(_)) => {
+            guard.disarm();
+            return dashboard_join_result(task.await);
+        }
+        Err(_) => {
+            guard.interrupt();
+            let _ = task.await;
+            guard.disarm();
+            debug!(
+                section,
+                semaphore_wait_ms = semaphore_wait.as_millis(),
+                query_ms = query_started.elapsed().as_millis(),
+                cancelled = true,
+                "Dashboard query timed out before SQLite became interruptible"
+            );
+            return Err(dashboard_timeout_error(timeout));
+        }
+    };
+    guard.attach(interrupt);
+
+    let Some(query_remaining) = timeout.checked_sub(started.elapsed()) else {
+        guard.interrupt();
+        let _ = task.await;
+        guard.disarm();
+        return Err(dashboard_timeout_error(timeout));
+    };
+    let result = match tokio::time::timeout(query_remaining, &mut task).await {
+        Ok(joined) => {
+            guard.disarm();
+            dashboard_join_result(joined)
+        }
+        Err(_) => {
+            guard.interrupt();
+            let _ = task.await;
+            guard.disarm();
+            Err(dashboard_timeout_error(timeout))
+        }
+    };
+    debug!(
+        section,
+        semaphore_wait_ms = semaphore_wait.as_millis(),
+        query_ms = query_started.elapsed().as_millis(),
+        cancelled = result
+            .as_ref()
+            .is_err_and(|error| matches!(error, LlmusageError::Cancelled { .. })),
+        "Dashboard query completed"
+    );
+    result
 }
 
-async fn load_behavior_api<T, F, D>(state: WebState, f: F, degraded: D) -> LlmusageResult<T>
+fn dashboard_join_result<T>(
+    joined: std::result::Result<LlmusageResult<T>, tokio::task::JoinError>,
+) -> LlmusageResult<T> {
+    joined.map_err(|err| LlmusageError::ConfigInvalid {
+        detail: format!("blocking dashboard task failed: {err}"),
+    })?
+}
+
+async fn load_behavior_api<T, F, D>(
+    state: WebState,
+    section: &'static str,
+    f: F,
+    degraded: D,
+) -> LlmusageResult<T>
 where
     T: Send + 'static,
     F: FnOnce(&Dashboard) -> LlmusageResult<T> + Send + 'static,
     D: FnOnce(String) -> T,
 {
-    match load_via_dashboard_with_timeout(state, WEB_BEHAVIOR_API_TIMEOUT, f).await {
+    match load_via_dashboard_with_timeout(state, section, WEB_BEHAVIOR_API_TIMEOUT, f).await {
         Ok(value) => Ok(value),
         Err(err) => Ok(degraded(err.to_string())),
-    }
-}
-
-async fn with_timeout<T>(
-    duration: Duration,
-    task: tokio::task::JoinHandle<LlmusageResult<T>>,
-) -> LlmusageResult<T>
-where
-    T: Send + 'static,
-{
-    match tokio::time::timeout(duration, task).await {
-        Ok(joined) => joined.map_err(|err| LlmusageError::ConfigInvalid {
-            detail: format!("blocking dashboard task failed: {err}"),
-        })?,
-        Err(_) => Err(LlmusageError::ConfigInvalid {
-            detail: dashboard_timeout_message(duration),
-        }),
     }
 }
 
 fn dashboard_timeout_error(duration: Duration) -> LlmusageError {
     LlmusageError::ConfigInvalid {
         detail: dashboard_timeout_message(duration),
+    }
+}
+
+fn dashboard_cancelled_error() -> LlmusageError {
+    LlmusageError::Cancelled {
+        operation: "dashboard query",
     }
 }
 
@@ -793,8 +931,17 @@ async fn load_dashboard_snapshot_resilient(
     state: WebState,
     filter: QueryFilter,
     scope: DashboardScope,
+    window: String,
 ) -> LlmusageResult<serde_json::Value> {
-    let core = load_via_dashboard(state.clone(), {
+    if scope == DashboardScope::Interactive {
+        let interactive = load_via_dashboard(state, "dashboard:interactive", move |dashboard| {
+            dashboard.interactive_snapshot(&filter, &window)
+        })
+        .await?;
+        return Ok(json!(interactive));
+    }
+
+    let core = load_via_dashboard(state.clone(), "dashboard:core", {
         let filter = filter.clone();
         move |dashboard| dashboard.core_snapshot(&filter)
     })
@@ -807,23 +954,26 @@ async fn load_dashboard_snapshot_resilient(
     let activity_filter = filter.clone();
     let activity = load_behavior_api(
         state.clone(),
+        "dashboard:activity",
         move |dashboard| dashboard.activity_breakdown(&activity_filter),
         degraded_activity,
     );
     let tools_filter = filter.clone();
     let tools = load_behavior_api(
         state.clone(),
+        "dashboard:tools",
         move |dashboard| dashboard.tool_breakdown(&tools_filter),
         degraded_tools,
     );
     let optimize_filter = filter.clone();
     let optimize = load_behavior_api(
         state.clone(),
+        "dashboard:optimize",
         move |dashboard| dashboard.optimize(&optimize_filter),
         degraded_optimize,
     );
     let explorer_filter = filter.clone();
-    let explorer = load_via_dashboard(state.clone(), move |dashboard| {
+    let explorer = load_via_dashboard(state.clone(), "dashboard:explorer", move |dashboard| {
         dashboard.explorer(&ExplorerQuery {
             filter: explorer_filter,
             ..Default::default()
@@ -831,6 +981,7 @@ async fn load_dashboard_snapshot_resilient(
     });
     let compare = load_behavior_api(
         state,
+        "dashboard:compare",
         move |dashboard| dashboard.model_compare(&filter, None, None),
         degraded_compare,
     );
@@ -857,12 +1008,27 @@ async fn load_dashboard_snapshot_resilient(
 enum DashboardScope {
     Full,
     Core,
+    Interactive,
 }
 
 fn dashboard_scope_from_params(params: &HashMap<String, String>) -> DashboardScope {
     match params.get("scope").map(String::as_str) {
         Some("core") => DashboardScope::Core,
+        Some("interactive") => DashboardScope::Interactive,
         _ => DashboardScope::Full,
+    }
+}
+
+fn dashboard_window_from_params(params: &HashMap<String, String>) -> &'static str {
+    match params
+        .get("window")
+        .or_else(|| params.get("range"))
+        .map(String::as_str)
+    {
+        Some("week" | "7d") => "week",
+        Some("month" | "30d") => "month",
+        Some("all") => "all",
+        _ => "day",
     }
 }
 
@@ -1111,7 +1277,29 @@ where
     T: Serialize,
 {
     match result {
-        Ok(value) => Json(json!(value)).into_response(),
+        Ok(value) => {
+            let started = Instant::now();
+            match serde_json::to_vec(&value) {
+                Ok(body) => {
+                    debug!(
+                        endpoint,
+                        serialization_ms = started.elapsed().as_millis(),
+                        payload_bytes = body.len(),
+                        "Web API response serialized"
+                    );
+                    (
+                        StatusCode::OK,
+                        [(header::CONTENT_TYPE, "application/json")],
+                        body,
+                    )
+                        .into_response()
+                }
+                Err(err) => {
+                    error!(endpoint, error = %err, "Web API response serialization failed");
+                    StatusCode::INTERNAL_SERVER_ERROR.into_response()
+                }
+            }
+        }
         Err(err) => {
             error!(endpoint, error = %err, "Web API handler failed");
             (
@@ -1762,14 +1950,29 @@ mod tests {
             .body;
 
         assert!(fetch_js.contains("const LIVE_CACHE_TTL_MS = 10000"));
+        assert!(fetch_js.contains("const LIVE_CACHE_MAX_ENTRIES = 32"));
         assert!(fetch_js.contains("const liveInflight = new Map()"));
         assert!(fetch_js.contains("function normalizedRequestKey"));
         assert!(fetch_js.contains("export function clearLiveRequestCache"));
         assert!(fetch_js.contains("liveCacheEpoch += 1"));
-        assert!(fetch_js.contains("export async function loadDashboardCoreSnapshot"));
-        assert!(fetch_js.contains("scope: 'core'"));
+        assert!(fetch_js.contains("export async function loadDashboardInteractiveSnapshot"));
+        assert!(fetch_js.contains("scope: 'interactive'"));
+        assert!(fetch_js.contains("entry.controller.abort()"));
+        let data_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "data.js")
+            .expect("data.js asset")
+            .body;
+        assert!(data_js.contains("loadDashboardInteractiveSnapshot"));
+        assert!(data_js.contains("loadDashboardSecondarySections"));
         assert!(app_js.contains("async function reloadDashboardFastRange"));
-        assert!(app_js.contains("loadDashboardCoreSnapshot(state)"));
+        assert!(
+            app_js
+                .contains("loadDashboardInteractiveSnapshot(state, { signal: controller.signal })")
+        );
+        assert!(app_js.contains("const SECONDARY_LOAD_CONCURRENCY = 2"));
+        assert!(app_js.contains("runSecondaryLoaders(loaders"));
+        assert!(app_js.contains("renderPrimaryDashboard(state.rawData)"));
         assert!(app_js.contains("sameStableFilters(previousFilters"));
         assert!(app_js.contains("clearLiveRequestCache()"));
         assert!(app_js.contains("!hasUsableExplorer(snapshot) || !isDefaultExplorerState(state)"));
@@ -2024,8 +2227,10 @@ mod tests {
         assert!(fetch_js.contains("export function buildExplorerQuery"));
         assert!(fetch_js.contains("export async function loadExplorer"));
         assert!(fetch_js.contains("snapshot?.explorer"));
-        assert!(fetch_js.contains("loadLiveJson(`/api/explorer${buildExplorerQuery(state)}`)"));
-        assert!(fetch_js.contains("return await loadExplorer(state);"));
+        assert!(
+            fetch_js.contains("loadLiveJson(`/api/explorer${buildExplorerQuery(state)}`, options)")
+        );
+        assert!(fetch_js.contains("return await loadExplorer(state, options);"));
         assert!(!fetch_js.contains("loadOptionalSection(state, 'explorer'"));
         assert!(derive_js.contains("const explorerPayload = normalizeExplorer(explorer);"));
         assert!(derive_js.contains("explorer: explorerPayload"));
@@ -2222,24 +2427,29 @@ mod tests {
         let query = |state: WebState| {
             let active = Arc::clone(&active);
             let max_active = Arc::clone(&max_active);
-            load_via_dashboard_with_timeout(state, Duration::from_secs(2), move |_dashboard| {
-                let current = active.fetch_add(1, Ordering::SeqCst) + 1;
-                let mut observed = max_active.load(Ordering::SeqCst);
-                while current > observed {
-                    match max_active.compare_exchange(
-                        observed,
-                        current,
-                        Ordering::SeqCst,
-                        Ordering::SeqCst,
-                    ) {
-                        Ok(_) => break,
-                        Err(actual) => observed = actual,
+            load_via_dashboard_with_timeout(
+                state,
+                "test-semaphore",
+                Duration::from_secs(2),
+                move |_dashboard| {
+                    let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+                    let mut observed = max_active.load(Ordering::SeqCst);
+                    while current > observed {
+                        match max_active.compare_exchange(
+                            observed,
+                            current,
+                            Ordering::SeqCst,
+                            Ordering::SeqCst,
+                        ) {
+                            Ok(_) => break,
+                            Err(actual) => observed = actual,
+                        }
                     }
-                }
-                std::thread::sleep(Duration::from_millis(100));
-                active.fetch_sub(1, Ordering::SeqCst);
-                Ok::<(), LlmusageError>(())
-            })
+                    std::thread::sleep(Duration::from_millis(100));
+                    active.fetch_sub(1, Ordering::SeqCst);
+                    Ok::<(), LlmusageError>(())
+                },
+            )
         };
 
         let (first, second) = tokio::join!(query(state.clone()), query(state));
@@ -2250,6 +2460,35 @@ mod tests {
             1,
             "dashboard blocking queries should be serialized by the test semaphore"
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn dashboard_timeout_interrupts_sqlite_and_releases_permit() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let state = WebState::with_jobs_and_query_limit(store, Default::default(), 1);
+        let started = Instant::now();
+        let error = load_via_dashboard_with_timeout(
+            state.clone(),
+            "test-cancel",
+            Duration::from_millis(20),
+            |dashboard| dashboard.test_slow_query(),
+        )
+        .await
+        .expect_err("the recursive SQLite query should exceed the test timeout");
+        assert!(error.to_string().contains("dashboard query exceeded"));
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "SQLite interruption should stop the blocking query promptly"
+        );
+
+        load_via_dashboard_with_timeout(
+            state,
+            "test-after-cancel",
+            Duration::from_secs(1),
+            |dashboard| dashboard.overview(&Default::default()).map(|_| ()),
+        )
+        .await?;
         Ok(())
     }
 
@@ -3108,6 +3347,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn api_dashboard_interactive_scope_is_lean_and_selected_window_only() -> anyhow::Result<()>
+    {
+        let (_temp, store) = make_store()?;
+        let conn = store.open_connection()?;
+        let now = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+        conn.execute(
+            r#"
+            INSERT INTO usage_bucket_30m(
+                source, model, hour_start, project_hash, project_label, project_ref,
+                input_tokens, cache_read_tokens, cache_creation_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source,
+                event_count, updated_at
+            )
+            VALUES ('codex', 'gpt-5', ?1, 'project-a', 'Project A', NULL,
+                    10, 0, 0, 0, 0, 10, 0.1, 0.1, 'static', 'static-v1',
+                    1, ?1)
+            "#,
+            [&now],
+        )?;
+        let mut insert_cursor = conn.prepare(
+            "INSERT INTO source_cursor(source, cursor_key, updated_at) VALUES ('codex', ?1, ?2)",
+        )?;
+        for index in 0..500 {
+            insert_cursor.execute(rusqlite::params![format!("cursor-{index}"), &now])?;
+        }
+        drop(insert_cursor);
+        drop(conn);
+
+        let addr = serve(store, Some(0)).await?;
+        let (status, payload) = route_json(
+            addr,
+            "GET",
+            "/api/dashboard?scope=interactive&range=7d&window=week&source=codex&timezone=UTC",
+            None,
+        )
+        .await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(payload["overview"]["total"]["total_tokens"], 10);
+        assert_eq!(payload["health"]["cursor_count"], 500);
+        assert!(payload["health"]["cursors"].is_null());
+        assert!(payload["trends"].as_array().is_some());
+        assert!(payload["day_trends"].is_null());
+        assert!(payload["week_trends"].is_null());
+        assert!(payload["activity"].is_null());
+        assert!(payload["explorer"].is_null());
+        assert!(
+            serde_json::to_vec(&payload)?.len() <= 128 * 1024,
+            "interactive payload must stay within the accepted 128 KiB boundary"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn api_dashboard_applies_window_to_snapshot_sections() -> anyhow::Result<()> {
         let (_temp, store) = make_store()?;
         let conn = store.open_connection()?;
@@ -3194,6 +3487,20 @@ mod tests {
             "#,
             [],
         )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_bucket_30m(
+                source, model, hour_start,
+                input_tokens, cache_creation_tokens, cache_read_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                event_count, updated_at
+            ) VALUES (
+                'codex', 'gpt-5', '2026-05-01T00:00:00Z',
+                10, 0, 0, 0, 0, 10, 1, '2026-05-01T00:00:00Z'
+            )
+            "#,
+            [],
+        )?;
         drop(conn);
 
         let addr = serve(store, Some(0)).await?;
@@ -3253,6 +3560,20 @@ mod tests {
                 'project-a', 'Project A', NULL, 'path-a',
                 NULL, NULL, NULL, '2026-05-29T00:00:00Z',
                 0.1, 0.1, 'static', 'static-v1', NULL)
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_bucket_30m(
+                source, model, hour_start,
+                input_tokens, cache_creation_tokens, cache_read_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                event_count, updated_at
+            ) VALUES (
+                'codex', 'gpt-5', '2026-05-29T00:00:00Z',
+                10, 0, 0, 0, 0, 10, 1, '2026-05-29T00:00:00Z'
+            )
             "#,
             [],
         )?;

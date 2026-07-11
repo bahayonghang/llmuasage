@@ -5,6 +5,8 @@ export {
   loadTrendWindow,
   loadDashboardSnapshot,
   loadDashboardCoreSnapshot,
+  loadDashboardInteractiveSnapshot,
+  loadDashboardSecondarySections,
   buildFilterQuery,
   buildExplorerQuery,
   loadExplorer,

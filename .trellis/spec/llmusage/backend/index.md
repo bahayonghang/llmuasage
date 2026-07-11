@@ -23,6 +23,7 @@ output, and dashboard/TUI consumers.
 | [Source Sync Contracts](./source-sync-contracts.md)   | Parser/source monitor boundaries and sync stats payload contracts               | Documented |
 | [Pricing Catalog Contracts](./pricing-catalog-contracts.md) | Static pricing rows, model matchers, cost status, and context-window contracts | Documented |
 | [Codex Tracer Contracts](./codex-tracer-contracts.md) | Codex-specific usage tracker with detailed token accounting and thread tracking | Documented |
+| [Dashboard Performance Contracts](./dashboard-performance-contracts.md) | Interactive payload, query routing, cancellation, and range-refresh budgets | Documented |
 
 ## Quality Check
 
