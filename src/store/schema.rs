@@ -3,7 +3,7 @@ use std::fs;
 use rusqlite::OptionalExtension;
 use tracing::info;
 
-use super::{BootstrapOptions, Store, migrations};
+use super::{BootstrapOptions, BootstrapProgressEvent, BootstrapProgressSink, Store, migrations};
 use crate::error::Result;
 
 const META_RAW_ARCHIVE_KEY: &str = "raw_archive_enabled";
@@ -21,6 +21,22 @@ impl Store {
         &self,
         sink: Option<migrations::MigrationEventSink<'_>>,
     ) -> Result<()> {
+        if let Some(migration_sink) = sink {
+            let mut adapter = |event| {
+                if let BootstrapProgressEvent::Migration(event) = event {
+                    migration_sink(event);
+                }
+            };
+            self.bootstrap_with_events(BootstrapOptions::default(), Some(&mut adapter))
+        } else {
+            self.bootstrap_with_events(BootstrapOptions::default(), None)
+        }
+    }
+
+    pub(crate) fn bootstrap_with_progress(
+        &self,
+        sink: Option<BootstrapProgressSink<'_>>,
+    ) -> Result<()> {
         self.bootstrap_with_events(BootstrapOptions::default(), sink)
     }
 
@@ -35,7 +51,7 @@ impl Store {
     fn bootstrap_with_events(
         &self,
         options: BootstrapOptions,
-        migration_sink: Option<migrations::MigrationEventSink<'_>>,
+        mut progress_sink: Option<BootstrapProgressSink<'_>>,
     ) -> Result<()> {
         /*
          * ========================================================================
@@ -59,13 +75,18 @@ impl Store {
         if migrations::read_schema_version(&conn)? == 0 && self.paths.db_path.is_file() {
             self.backup_pre_0_5_0_db()?;
         }
-        migrations::run_migrations_with_events(&mut conn, migration_sink)?;
+        if let Some(sink) = progress_sink.as_deref_mut() {
+            let mut migration_sink = |event| sink(BootstrapProgressEvent::Migration(event));
+            migrations::run_migrations_with_events(&mut conn, Some(&mut migration_sink))?;
+        } else {
+            migrations::run_migrations_with_events(&mut conn, None)?;
+        }
 
         if let Some(enabled) = options.enable_raw_archive {
             write_meta_flag(&conn, META_RAW_ARCHIVE_KEY, enabled)?;
         }
         drop(conn);
-        self.upgrade_embedded_pricing_if_needed()?;
+        self.upgrade_embedded_pricing_if_needed(progress_sink)?;
 
         info!(
             version = migrations::latest_schema_version(),

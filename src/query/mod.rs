@@ -4244,18 +4244,25 @@ mod tests {
     #[test]
     fn recompute_costs_deletes_orphan_buckets() -> Result<()> {
         let fixture = Fixture::new()?;
-        fixture.seed_event(crate::testing::SeedEvent {
-            event_key: "codex:live-bucket",
-            source: "codex",
-            model: "gpt-5",
-            event_at: "2026-05-01T00:00:00Z",
-            hour_start: Some("2026-05-01T00:00:00Z"),
-            input_tokens: 1_000,
-            output_tokens: 500,
-            total_tokens: 1_500,
-            created_at: Some("2026-05-01T00:00:00Z"),
-            ..Default::default()
-        })?;
+        const LIVE_BUCKETS: usize = 128;
+        for index in 0..LIVE_BUCKETS {
+            let event_key = format!("codex:live-bucket-{index:03}");
+            let day = index / 24 + 1;
+            let hour = index % 24;
+            let event_at = format!("2026-05-{day:02}T{hour:02}:00:00Z");
+            fixture.seed_event(crate::testing::SeedEvent {
+                event_key: &event_key,
+                source: "codex",
+                model: "gpt-5",
+                event_at: &event_at,
+                hour_start: Some(&event_at),
+                input_tokens: 1_000,
+                output_tokens: 500,
+                total_tokens: 1_500,
+                created_at: Some(&event_at),
+                ..Default::default()
+            })?;
+        }
         let conn = fixture.store().open_connection()?;
         conn.execute(
             r#"
@@ -4265,10 +4272,10 @@ mod tests {
                 output_tokens, reasoning_output_tokens, total_tokens,
                 cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source, pricing_rate,
                 event_count, updated_at
-            ) VALUES ('codex', 'gpt-5', '2026-05-02T00:00:00Z', '', NULL, NULL,
+            ) VALUES ('codex', 'gpt-5', '2026-06-01T00:00:00Z', '', NULL, NULL,
                 0, 0, 0, 0, 0, 0,
                 42.0, 42.0, 'static', 'static-v1', '{}',
-                0, '2026-05-02T00:00:00Z')
+                0, '2026-06-01T00:00:00Z')
             "#,
             [],
         )?;
@@ -4278,21 +4285,30 @@ mod tests {
             [],
             |row| row.get(0),
         )?;
-        assert_eq!(before, 2);
+        assert_eq!(before, LIVE_BUCKETS as i64 + 1);
 
         let updated = fixture.store().recompute_costs()?;
-        assert_eq!(updated, 1);
+        assert_eq!(updated, LIVE_BUCKETS);
 
         let after: i64 = conn.query_row(
             "SELECT COUNT(*) FROM usage_bucket_30m WHERE source = 'codex'",
             [],
             |row| row.get(0),
         )?;
-        assert_eq!(after, 1, "orphan bucket should be deleted, not zeroed");
+        assert_eq!(
+            after, LIVE_BUCKETS as i64,
+            "orphan bucket should be deleted without affecting live buckets"
+        );
+        let event_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_event WHERE source = 'codex'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(event_count, LIVE_BUCKETS as i64);
         let orphan_count: i64 = conn.query_row(
             r#"
             SELECT COUNT(*) FROM usage_bucket_30m
-            WHERE source = 'codex' AND model = 'gpt-5' AND hour_start = '2026-05-02T00:00:00Z'
+            WHERE source = 'codex' AND model = 'gpt-5' AND hour_start = '2026-06-01T00:00:00Z'
             "#,
             [],
             |row| row.get(0),

@@ -35,6 +35,20 @@
 - Monitor-only platforms must surface as diagnostics/status entries with token
   quality labels, not as parser-backed usage, until sanitized fixtures and token
   semantics exist.
+- Sync bootstrap progress is an observational pre-lock stream. Existing
+  migration events keep their names and meaning; embedded pricing upgrades add
+  `pricing_upgrade_started`, `pricing_upgrade_progress`,
+  `pricing_bucket_reconcile_started`, and `pricing_upgrade_finished` before
+  `lock_waiting`.
+- Pricing started/progress events carry source/target catalog versions and
+  processed/total event counts. Reconcile/finished events carry bucket counts;
+  finished also carries deleted orphan count and elapsed milliseconds.
+- Human stderr and `sync --json-events` consume one bootstrap-to-sync mapping.
+  Human output may replace a TTY line but must end lines at reconcile/finished
+  boundaries. JSON mode keeps stdout NDJSON-only and treats pricing variants as
+  additive. No-op or pinned catalog bootstrap emits no pricing variants.
+- Bootstrap callback delivery must not persist progress or alter migration,
+  pricing activation, lock acquisition, failure, or cancellation semantics.
 
 ### 4. Validation & Error Matrix
 
@@ -65,6 +79,8 @@
   terminal panels.
 - Registry/monitor tests proving monitored platforms do not accidentally become
   parser-backed sources.
+- Human and subprocess tests covering pricing phase text, ordered additive
+  NDJSON variants, stdout purity, and structured log phase fields.
 
 ### 7. Wrong vs Correct
 
