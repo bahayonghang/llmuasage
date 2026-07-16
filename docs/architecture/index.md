@@ -10,7 +10,7 @@ The runtime state lives under `~/.llmusage/` unless overridden by `--home <PATH>
 - `bin/llmusage-hook.cmd` and `bin/llmusage-hook.sh` are local wrappers called by external tools.
 - `exports/` stores static HTML reports.
 - `backups/` stores integration config backups used by uninstall.
-- `pricing/` stores local pricing snapshots imported by `doctor --refresh-pricing`.
+- `pricing/` stores content-addressed base, overlay, and effective pricing catalogs activated by `catalog` or `doctor --refresh-pricing`.
 
 ## Source registry
 
@@ -49,6 +49,22 @@ Report commands, TUI, web dashboard, and HTML export all read local SQLite throu
 
 Custom Cost Explorer queries use `Dashboard::explorer(&ExplorerQuery)` and the `/api/explorer` endpoint. Explorer is additive to the fixed dashboard snapshot: it supports time granularity, metric, group-by, Top N/Other, and session/tool/token filters, but it still returns backend-aggregated rows and series rather than asking the browser to pivot raw events. Query execution chooses an event, turn, or tool-attribution strategy based on the selected metric and dimension, and every payload carries support metadata such as `normalized`, `no_data`, `degraded`, or `unsupported`.
 
+## Pricing catalog flow
+
+The embedded `pricing/static-v2.json` file is the default base. It owns stable model ids, source expansion, exact/family matchers, default and threshold rates, and context windows. Parser-owned model strings remain unchanged in SQLite.
+
+The optional user layer is a v2 `overlay` activated explicitly with `catalog apply`. Merge is deterministic: validate the base, apply strict `remove_models`, replace or append complete definitions by stable id, then validate the effective catalog. There is no field-level deep merge. Exact matchers win over family matchers, then longer matchers win.
+
+Catalog files under `~/.llmusage/pricing/` use SHA-256 names:
+
+- `base-<sha256>.json` for a pinned base copy,
+- `overlays/overlay-<sha256>.json` for the user overlay,
+- `effective-<sha256>.json` for the normalized merged catalog.
+
+SQLite meta records the active, base, and overlay identities/files. A selected file that is missing, modified, or invalid fails closed instead of falling back to embedded data. Applying a catalog writes and validates files first, recomputes each `usage_event`, reconciles 30-minute bucket pricing, and switches all catalog metadata in the final transaction. `doctor --refresh-pricing` uses the same activation service for a complete base snapshot.
+
+Threshold rates are selected per event from input + cache-read + cache-creation tokens. Buckets and reports only sum persisted event costs. Context-pressure queries load the active catalog, so configured models use their configured context windows.
+
 ## Behavior facts
 
 The 0.6.x line adds normalized behavior tables:
@@ -76,7 +92,7 @@ Schema migrations are explicit and versioned. The current line includes:
 - raw archive opt-in,
 - worker lock metadata,
 - Antigravity source registration,
-- `pricing_catalog_version`,
+- active/base/overlay pricing catalog metadata,
 - behavior fact tables,
 - v13 `gemini` → `antigravity` source-id cutover,
 - compatibility repair for historical `source_sync_status.stored_events` drift.
@@ -89,5 +105,5 @@ Schema migrations are explicit and versioned. The current line includes:
 - No account login.
 - No upload queue.
 - No remote usage API call.
-- Pricing refresh reads a user-provided local JSON file.
+- Pricing catalog activation reads user-provided local JSON files and never fetches remote pricing.
 - Browser dashboard binds to `127.0.0.1`.

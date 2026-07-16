@@ -479,18 +479,19 @@ fn html_shell(mode: &str) -> String {
         <div id="explorer-summary" class="explorer-summary"></div>
         <div id="explorer-warning"></div>
         <div class="explorer-results-grid">
-          <div>
+          <div class="explorer-ranking">
             <div class="panel-title" data-i18n="shell.explorer.rowsTitle">维度排行</div>
             <div class="panel-sub" data-i18n="shell.explorer.rowsSub">按当前指标排序，Top N 之外可合并为 Other。</div>
             <div class="panel-bars" id="explorer-bars"></div>
             <div id="explorer-rows"></div>
           </div>
-          <div>
+          <div class="explorer-trends">
             <div class="panel-title" data-i18n="shell.explorer.seriesTitle">时间序列</div>
-            <div class="panel-sub" data-i18n="shell.explorer.seriesSub">按所选粒度返回，可用于 snapshot/export 离线查看。</div>
-            <div id="explorer-series"></div>
+            <div class="panel-sub" data-i18n="shell.explorer.seriesSub">前 5 个维度使用独立刻度展示，完整区间可用于离线查看。</div>
+            <div id="explorer-series-chart"></div>
           </div>
         </div>
+        <div id="explorer-series-details"></div>
       </div>
     </section>
 

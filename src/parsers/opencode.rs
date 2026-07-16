@@ -395,25 +395,37 @@ fn normalize_opencode_tokens(value: Option<&Value>) -> UsageTokens {
     let input_tokens = value
         .get("input")
         .and_then(Value::as_i64)
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .max(0);
     let cache_creation_tokens = value
         .get("cache")
         .and_then(|cache| cache.get("write"))
         .and_then(Value::as_i64)
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .max(0);
     let cache_read_tokens = value
         .get("cache")
         .and_then(|cache| cache.get("read"))
         .and_then(Value::as_i64)
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .max(0);
     let output_tokens = value
         .get("output")
         .and_then(Value::as_i64)
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .max(0);
     let reasoning_output_tokens = value
         .get("reasoning")
         .and_then(Value::as_i64)
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .max(0);
+    let known_total = input_tokens + cache_creation_tokens + cache_read_tokens + output_tokens;
+    let total_tokens = value
+        .get("total")
+        .and_then(Value::as_i64)
+        .filter(|total| *total >= 0)
+        .unwrap_or_default()
+        .max(known_total);
 
     UsageTokens {
         input_tokens,
@@ -421,11 +433,7 @@ fn normalize_opencode_tokens(value: Option<&Value>) -> UsageTokens {
         cache_creation_tokens,
         output_tokens,
         reasoning_output_tokens,
-        total_tokens: input_tokens
-            + cache_creation_tokens
-            + cache_read_tokens
-            + output_tokens
-            + reasoning_output_tokens,
+        total_tokens,
     }
 }
 
@@ -576,6 +584,35 @@ mod tests {
         assert_eq!(tokens.cache_read_tokens, 20);
         assert_eq!(tokens.output_tokens, 30);
         assert_eq!(tokens.reasoning_output_tokens, 7);
-        assert_eq!(tokens.total_tokens, 197);
+        assert_eq!(tokens.total_tokens, 190);
+    }
+
+    #[test]
+    fn opencode_prefers_authoritative_total_when_larger_than_known_components() {
+        let tokens = normalize_opencode_tokens(Some(&json!({
+            "input": 100,
+            "output": 30,
+            "reasoning": 7,
+            "total": 250,
+            "cache": {
+                "write": 40,
+                "read": 20
+            }
+        })));
+
+        assert_eq!(tokens.total_tokens, 250);
+    }
+
+    #[test]
+    fn opencode_clamps_negative_channels() {
+        let tokens = normalize_opencode_tokens(Some(&json!({
+            "input": -10,
+            "output": -3,
+            "reasoning": -1,
+            "total": -14,
+            "cache": {"read": -2, "write": -4}
+        })));
+
+        assert_eq!(tokens, crate::models::UsageTokens::default());
     }
 }

@@ -20,7 +20,7 @@
 | `~/.llmusage/backups/` | 卸载时使用的集成配置备份 |
 | `~/.llmusage/exports/` | 静态 HTML 导出 |
 | `~/.llmusage/logs/llmusage.ndjson` | 本地结构化运行诊断和命令追踪 |
-| `~/.llmusage/pricing/` | `doctor --refresh-pricing` 导入的本地价格快照 |
+| `~/.llmusage/pricing/` | 内容寻址的本地 base、overlay 和 effective 价格目录 |
 
 运行时根目录优先级：`--home <PATH>` > `LLMUSAGE_HOME` > `~/.llmusage`。
 
@@ -74,13 +74,18 @@ llmusage diagnostics --forget-file <PATH> --source codex
 
 这会把该行标记为 `deleted_by_user`，并移除 cursor 行。
 
-## 价格刷新只读本地文件
+## 价格目录变更只读本地文件
 
 ```powershell
+llmusage catalog apply .\pricing-overlay.json
+llmusage catalog status --json
+llmusage catalog reset
 llmusage doctor --refresh-pricing .\litellm-prices.json
 ```
 
-该命令会把本地 JSON 快照复制到 `~/.llmusage/pricing/`，重算本地成本列，并记录 `pricing_catalog_version`。URL 会被拒绝。
+`catalog apply` 激活增量 v2 overlay；`doctor --refresh-pricing` 激活完整 base snapshot 并清除已有 overlay。两者只接受已存在的本地文件，拒绝 URL，也不会联网拉取。
+
+激活会在 `~/.llmusage/pricing/` 下写入 SHA-256 内容寻址文件，重算本地 event 和 bucket 成本，随后切换 SQLite catalog metadata。已选择文件缺失、被修改或无效时会显式报错，不会静默回退内置价格。`catalog reset` 移除 overlay，并用它记录的 base 重算。未被引用的 digest 文件可以作为本地审计材料保留；`uninstall --purge` 会随整个运行时根目录一起删除。
 
 ## 浏览器 Dashboard 边界
 

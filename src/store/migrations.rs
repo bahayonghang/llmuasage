@@ -539,7 +539,7 @@ fn m_010_add_pricing_meta(tx: &Transaction<'_>) -> Result<()> {
         VALUES ('pricing_catalog_version', ?1)
         ON CONFLICT(key) DO NOTHING
         "#,
-        [crate::query::pricing_catalog::PricingCatalog::static_v1()
+        [crate::query::pricing_catalog::PricingCatalog::embedded()
             .version
             .as_str()],
     )?;
@@ -1087,7 +1087,7 @@ mod tests {
         )?;
         assert_eq!(
             value,
-            crate::query::pricing_catalog::PricingCatalog::static_v1().version
+            crate::query::pricing_catalog::PricingCatalog::embedded().version
         );
         Ok(())
     }

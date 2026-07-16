@@ -314,7 +314,7 @@ export function buildContext({ overview, trends, models, sources, projects, cost
 
   // 1.3 派生图表与表格数据，避免 render 层重复计算
   const model_table_rows = modelRows.slice(0, PANEL_LIMITS.modelTable).map((row) => {
-    const output_tokens = Number(row.output_tokens || 0) + Number(row.reasoning_output_tokens || 0);
+    const output_tokens = Number(row.output_tokens || 0);
     return {
       model: row.model,
       total_tokens: formatTokenAmount(row.total_tokens),
@@ -383,6 +383,7 @@ export function buildContext({ overview, trends, models, sources, projects, cost
     health: {
       integrations: integrationRows,
       cursors: cursorRows,
+      cursor_count: Number(health?.cursor_count ?? cursorRows.length),
       failures: combinedFailureRows,
       ready_integrations,
       total_integrations: integrationRows.length,

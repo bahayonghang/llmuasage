@@ -1,96 +1,121 @@
 # llmusage Pricing Catalog Contracts
 
-## Scenario: Static Model Pricing And Context Windows
+## Scenario: Versioned Model Pricing And Context Windows
 
 ### 1. Scope / Trigger
 
-- Trigger: changes to `pricing/static-v1.json`, `PricingCatalog`, cost
-  calculation, model breakdown pricing fields, or context-pressure windows.
-- Static pricing is cross-layer: parser model strings flow into SQLite events,
-  `PricingCatalog::find`, persisted cost fields, dashboard/TUI model breakdowns,
-  and context pressure.
-- Parser-owned model names must remain raw model identifiers. Catalog changes
-  add recognition; they do not rename stored events into another model bucket.
+- Trigger: changes to `pricing/static-v2.json`, `PricingCatalog`, catalog activation,
+  cost calculation, model pricing fields, or context-pressure windows.
+- Pricing is cross-layer: parser model strings flow into SQLite events, catalog
+  lookup, persisted costs, 30-minute buckets, reports, dashboards, and context
+  pressure.
+- Parser-owned model names remain raw identifiers. Catalog recognition must not
+  rename stored events or merge model buckets.
 
-### 2. Signatures
+### 2. Catalog V2 Signatures
 
-- Static catalog asset: `pricing/static-v1.json`.
-- Lookup API: `PricingCatalog::static_v1().find(source, model) ->
-  Option<&PricingRow>`.
-- Context API: `PricingCatalog::context_window(source, model) -> Option<i64>`.
-- Cost API: `compute_cost(source, model, UsageTokens) -> CostEstimate`.
-- Relevant persisted fields: `cost_with_cache_usd`,
-  `cost_without_cache_usd`, `pricing_status`, `pricing_source`,
-  `pricing_rate`.
+- Embedded base: `pricing/static-v2.json`.
+- Top level: `schema_version = 2`, `kind = base|overlay`, human `version`,
+  `models`, and overlay-only `remove_models`.
+- Model: stable `id`, one or more `sources`, explicit `matches`, `rates.default`,
+  optional `rates.tiers`, and optional positive `context_window`.
+- Matcher modes: `exact` or `family`. Exact wins over family; within one mode,
+  the longest normalized matcher wins.
+- Runtime APIs: `PricingCatalog::embedded()`, `load_snapshot`, `find`,
+  `context_window`, and Store catalog apply/status/reset services.
+- `PricingCatalog::static_v1()` is only a deprecated source-compatibility wrapper
+  around the current embedded catalog.
 
-### 3. Contracts
+### 3. Model And Matcher Contracts
 
-- A model is priced only when the catalog has a row for that source and the
-  matcher is intentionally scoped to the model family/version.
-- `pricing_status = "static"` and `pricing_source = "static-v1"` identify
-  embedded catalog hits; misses stay `pricing_status = "unpriced"`.
-- `context_pressure` only uses rows with a known context window. Unknown models
-  must increase the unpriced/unknown-window count rather than guessing a
-  denominator.
-- Provider-prefixed OpenCode/Anthropic model IDs should be covered with
-  explicit matchers when normalization cannot strip the prefix safely.
-- `UsageTokens.cache_creation_tokens` is one aggregate field. If official
-  pricing distinguishes cache write durations, the static row may only use one
-  documented approximation until a schema-level split exists.
+- A model definition is keyed by stable `id`; `sources` expands it into
+  source-specific runtime rules without duplicating rates.
+- `exact` matches only the complete normalized model id. `family` also accepts a
+  dash-delimited normalized suffix. Normalization lowercases, strips provider
+  prefixes, and maps dot/underscore/colon separators to dash.
+- Empty/duplicate model ids, sources, matchers, and ambiguous compiled matchers
+  are rejected before activation.
+- Aliases belong in catalog data. Do not add production Rust alias branches for
+  ordinary model additions.
+- Unknown models remain `unpriced` and have no context denominator. Do not infer
+  a rate or context window from a broad provider default.
 
-### 4. Validation & Error Matrix
+### 4. Rate And Tier Contracts
 
-- Missing static row -> cost is zero, `pricing_status = "unpriced"`, and no
-  context denominator is available.
-- Over-broad matcher -> unrelated models can be repriced; add negative tests
-  such as `not-<model>` and preview/non-version aliases.
-- New model context window omitted -> costs may be priced while context
-  pressure still treats the model as unknown.
-- Exact cache-write duration unavailable in stored tokens -> document the
-  chosen single-rate approximation in task notes or code comments.
+- Every rate channel must be finite and non-negative. Cache creation defaults to
+  uncached input only when the source document omits it.
+- Tier names are unique and `prompt_tokens_above` thresholds are positive and
+  strictly increasing.
+- Tier selection is per `usage_event`:
 
-### 5. Good/Base/Bad Cases
+  ```text
+  prompt_tokens = input + cache_read + cache_creation
+  selected = highest tier where prompt_tokens > prompt_tokens_above
+  ```
 
-- Good: `claude-fable-5` and `claude-mythos-5` keep their stored model names
-  and both resolve to explicit Claude static rows with a 1,000,000-token window.
-- Base: existing Opus/Sonnet/Haiku/GPT/Gemini rows keep passing non-overlap
-  tests after adding a model row.
-- Bad: using a broad matcher like `mythos` when the task only covers
-  `claude-mythos-5`, causing `claude-mythos-preview` to match accidentally.
+- Buckets and reports sum persisted event costs. They must never reapply a tier
+  threshold to aggregate tokens.
+- `pricing_rate` records the stable model id, selected tier, prompt-token count,
+  threshold, actual channel rates, and reasoning policy.
 
-### 6. Tests Required
+### 5. Overlay And Activation Contracts
 
-- Static catalog tests for positive source/model hits and negative non-overlap
-  cases.
-- Cost tests asserting `PricingStatus::Static`, source `static-v1`,
-  non-zero cost, and expected rates in `pricing_rate`.
-- Context-pressure tests asserting known windows are used and unknown models
-  remain counted as unpriced/unknown.
-- Parser/sync/report fixture when a new source model should appear in user
-  reporting without becoming `unpriced`.
+- Overlay merge order is: validate base, strictly remove ids, completely replace
+  or append definitions by id, then validate the full effective catalog.
+- Replacement is whole-model. Never deep-merge rate or matcher fields.
+- A second apply uses the recorded base, not the previous effective catalog.
+- Persist canonical files as `base-<sha256>.json`,
+  `overlays/overlay-<sha256>.json`, and `effective-<sha256>.json`. The declared
+  `version` is an audit label and never participates in path construction.
+- Write and validate files first, recompute events page-by-page, reconcile bucket
+  pricing, then switch active/base/overlay meta in the final transaction.
+- `Store::recompute_costs()` recalculates with the selected catalog without
+  clearing its base/overlay metadata. Repricing must not change layer ownership.
+- `Store::recompute_costs_with(custom)` persists non-embedded catalog content
+  under a digest filename before switching metadata, including when the caller
+  labels the catalog `PricingStatus::Static`.
+- Once meta selects a user file, missing content, digest mismatch, parse failure,
+  or metadata/document mismatch fails closed. Do not fall back to embedded data.
+- `catalog reset` restores a pinned snapshot base. An embedded base returns to
+  the current embedded catalog. Reset without an overlay is idempotent.
+- `doctor --refresh-pricing` activates a complete internal-v1, v2, or native
+  LiteLLM base snapshot and clears any overlay; it is not an overlay path.
+- Old `pricing/<version>.json` snapshots remain readable when only legacy
+  `pricing_catalog_version` meta exists.
 
-### 7. Wrong vs Correct
+### 6. Embedded Upgrade Contract
 
-#### Wrong
+- Bootstrap upgrades an unpinned old `static-*` catalog to the current embedded
+  catalog and recomputes costs.
+- Complete snapshots remain pinned.
+- Overlays based on an old embedded catalog remain pinned; status reports
+  `rebase_available` until the user applies again or resets.
 
-```json
-{
-  "source": "claude",
-  "matchers": ["mythos"],
-  "input_per_mtok": 10.0
-}
-```
+### 7. GPT-5.6 Contract
 
-#### Correct
+- `gpt-5.6-luna`, `gpt-5.6-terra`, and `gpt-5.6-sol` are exact entries for
+  `codex` and `opencode`, each with context window `1_050_000`.
+- Exact alias `gpt-5.6` resolves to Sol. It must not claim
+  `not-gpt-5.6-*` or preview suffixes.
+- Default input/cache-write/cache-read/output MTok rates:
+  - Luna: `1.0 / 1.25 / 0.1 / 6.0`
+  - Terra: `2.5 / 3.125 / 0.25 / 15.0`
+  - Sol: `5.0 / 6.25 / 0.5 / 30.0`
+- Above 272,000 prompt tokens, all input channels use 2x default and output uses
+  1.5x default. Exactly 272,000 remains on the default tier.
 
-```json
-{
-  "source": "claude",
-  "matchers": ["claude-mythos-5", "mythos-5"],
-  "input_per_mtok": 10.0,
-  "cached_per_mtok": 1.0,
-  "cache_creation_per_mtok": 12.5,
-  "output_per_mtok": 50.0,
-  "context_window": 1000000
-}
-```
+### 8. Tests Required
+
+- Embedded load, positive source/model/alias matches, and negative non-overlap.
+- Invalid schema, identifiers, matcher duplication, rates, thresholds, and
+  strict unknown removal.
+- Internal-v1 and native LiteLLM compatibility.
+- Short/272K/long exact costs, cache creation, audit JSON, and mixed-tier bucket.
+- Overlay add/replace/remove, repeated apply, process restart, reset, digest
+  corruption, old-path compatibility, embedded upgrade, and snapshot pinning.
+- Active-catalog recompute preserves overlay metadata; direct custom-catalog
+  recompute survives restart; a failure after the first 5,000-event page can be
+  retried to consistent event and bucket costs without an early metadata switch.
+- Context pressure for embedded and configured models; unknown windows remain
+  counted separately.
+- Final gates: fmt, strict Clippy, serial full tests, docs build, and diff check.

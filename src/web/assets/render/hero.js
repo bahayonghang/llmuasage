@@ -83,7 +83,7 @@ export function renderHero(context) {
       </div>
       <div class="status-cell">
         <div class="status-cell-label">${escapeHtml(heroCopy.cell.cursors)}</div>
-        <div class="status-cell-value">${formatNumber(health.cursors?.length || 0)}</div>
+        <div class="status-cell-value">${formatNumber(health.cursor_count ?? health.cursors?.length ?? 0)}</div>
       </div>
       <div class="status-cell">
         <div class="status-cell-label">${escapeHtml(heroCopy.cell.failures)}</div>

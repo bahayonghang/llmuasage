@@ -382,3 +382,138 @@ Created and completed Trellis task 07-06-serve-number-format. Added shared compa
 ### Next Steps
 
 - None - task complete
+
+
+## Session 12: 完成可配置模型目录与 GPT-5.6 支持
+
+**Date**: 2026-07-10
+**Task**: 完成可配置模型目录与 GPT-5.6 支持
+**Branch**: `dev`
+
+### Summary
+
+实现内置基础目录与用户覆盖层的双层配置，新增 catalog 管理命令、持久化激活与失败恢复；补充 GPT-5.6 Luna、Terra、Sol 的定价、上下文和来源匹配，并同步中英文文档、契约与回归测试。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b1aa754` | (see git log) |
+| `f3db2c0` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 13: 优化 Explorer 时间序列展示
+
+**Date**: 2026-07-11
+**Task**: 优化 Explorer 时间序列展示
+**Branch**: `dev`
+
+### Summary
+
+将 Cost Explorer 超长时间序列表重构为最多 5 个独立刻度趋势小图，并提供默认折叠、限高滚动的最近 80 条明细；完成中英文、明暗主题、桌面移动端 Chrome 验收及 just ci。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8e75049` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 14: 优化看板时间范围切换性能
+
+**Date**: 2026-07-11
+**Task**: 优化看板时间范围切换性能
+**Branch**: `dev`
+
+### Summary
+
+新增精简交互投影、真实取消和聚合查询路由；代表库四档 API p95 均低于 400 ms，并完成 0.9.1 版本同步。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `257ecd5` | (see git log) |
+| `c0873b0` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 15: Align token accounting with ccusage
+
+**Date**: 2026-07-16
+**Task**: Align token accounting with ccusage
+**Branch**: `dev`
+
+### Summary
+
+Aligned Claude, Codex, and OpenCode token normalization with ccusage; made persisted totals authoritative across queries and UI; added guarded per-source accounting-version rebuilds, parity tests, documentation, and durable contracts.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0848fe8` | (see git log) |
+| `3702195` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

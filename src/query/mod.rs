@@ -520,6 +520,17 @@ pub struct HealthPayload {
     pub recent_failures: Vec<RunRecord>,
 }
 
+/// Compact health projection used by latency-sensitive live dashboard reads.
+#[derive(Debug, Clone, Serialize)]
+pub struct HealthSummaryPayload {
+    /// Latest install/probe states for known integrations.
+    pub integrations: Vec<IntegrationState>,
+    /// Number of persisted cursors without serializing every cursor key.
+    pub cursor_count: i64,
+    /// Recent non-success command runs.
+    pub recent_failures: Vec<RunRecord>,
+}
+
 /// Per-source archive state diagnostics, derived from the `source_file`
 /// state machine (D15 / ADR 0006).
 ///
@@ -729,6 +740,20 @@ pub struct DashboardCoreSnapshot {
     pub diagnostics: DiagnosticsPayload,
 }
 
+/// Lean live-dashboard projection for one selected time range.
+#[derive(Debug, Clone, Serialize)]
+pub struct DashboardInteractiveSnapshot {
+    pub overview: OverviewPayload,
+    pub sync_command_center: SyncCommandCenterPayload,
+    pub trends: Vec<TrendPoint>,
+    pub models: Vec<ModelBreakdown>,
+    pub sources: Vec<SourceBreakdown>,
+    pub projects: Vec<ProjectBreakdown>,
+    pub costs: Vec<CostLine>,
+    pub health: HealthSummaryPayload,
+    pub diagnostics: DiagnosticsPayload,
+}
+
 /// Read-side façade backed by a single SQLite connection. All eight dashboard
 /// queries share the same connection so a snapshot only opens the DB once.
 pub struct Dashboard {
@@ -745,6 +770,19 @@ impl Dashboard {
             store: store.clone(),
             conn,
         })
+    }
+
+    pub(crate) fn interrupt_handle(&self) -> rusqlite::InterruptHandle {
+        self.conn.get_interrupt_handle()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_slow_query(&self) -> Result<i64> {
+        Ok(self.conn.query_row(
+            "WITH RECURSIVE counter(value) AS (VALUES(1) UNION ALL SELECT value + 1 FROM counter WHERE value < 100000000) SELECT SUM(value) FROM counter",
+            [],
+            |row| row.get(0),
+        )?)
     }
 
     /// Loads top-level lifetime/24h overview metrics plus recent sync/export timestamps.
@@ -829,11 +867,7 @@ impl Dashboard {
         let sql = format!(
             r#"
             SELECT {label_expr} AS label,
-                   COALESCE(SUM(input_tokens), 0) +
-                       COALESCE(SUM(cache_creation_tokens), 0) +
-                       COALESCE(SUM(cache_read_tokens), 0) +
-                       COALESCE(SUM(output_tokens), 0) +
-                       COALESCE(SUM(reasoning_output_tokens), 0) AS total_tokens
+                   COALESCE(SUM(total_tokens), 0) AS total_tokens
             FROM usage_bucket_30m
             {}
             GROUP BY label
@@ -852,8 +886,7 @@ impl Dashboard {
     }
 
     /// Loads a per-day trend series with full token breakdown and event count
-    /// (D9/F4.2). Output tokens already include reasoning tokens at the
-    /// API boundary; callers must not add them a second time.
+    /// (D9/F4.2). Reasoning remains a separate diagnostic channel.
     ///
     /// Days are grouped by the local calendar date in
     /// [`QueryFilter::timezone`]; UTC days are reconstructed from the
@@ -868,12 +901,8 @@ impl Dashboard {
                 COALESCE(SUM(input_tokens), 0),
                 COALESCE(SUM(cache_read_tokens), 0),
                 COALESCE(SUM(cache_creation_tokens), 0),
-                COALESCE(SUM(output_tokens), 0) + COALESCE(SUM(reasoning_output_tokens), 0),
-                COALESCE(SUM(input_tokens), 0) +
-                    COALESCE(SUM(cache_creation_tokens), 0) +
-                    COALESCE(SUM(cache_read_tokens), 0) +
-                    COALESCE(SUM(output_tokens), 0) +
-                    COALESCE(SUM(reasoning_output_tokens), 0),
+                COALESCE(SUM(output_tokens), 0),
+                COALESCE(SUM(total_tokens), 0),
                 COALESCE(SUM(event_count), 0),
                 COALESCE(SUM(cost_with_cache_usd), 0.0)
             FROM usage_bucket_30m
@@ -911,8 +940,7 @@ impl Dashboard {
                 SUM(cache_read_tokens),
                 SUM(output_tokens),
                 SUM(reasoning_output_tokens),
-                SUM(input_tokens) + SUM(cache_creation_tokens) + SUM(cache_read_tokens) +
-                    SUM(output_tokens) + SUM(reasoning_output_tokens),
+                SUM(total_tokens),
                 SUM(event_count),
                 SUM(cost_with_cache_usd),
                 SUM(cost_without_cache_usd),
@@ -932,8 +960,7 @@ impl Dashboard {
             {}
             GROUP BY model
             ORDER BY
-                SUM(input_tokens) + SUM(cache_creation_tokens) + SUM(cache_read_tokens) +
-                    SUM(output_tokens) + SUM(reasoning_output_tokens) DESC,
+                SUM(total_tokens) DESC,
                 model ASC
             "#,
             sql_filter.where_sql()
@@ -999,7 +1026,7 @@ impl Dashboard {
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
 
-        let catalog = PricingCatalog::static_v1();
+        let catalog = self.store.active_pricing_catalog()?;
         let mut peak_percent = 0.0_f64;
         let mut peak_model: Option<String> = None;
         let mut ratio_sum = 0.0_f64;
@@ -1060,47 +1087,46 @@ impl Dashboard {
     /// Loads total token usage grouped by source plus each source's freshest event time.
     pub fn source_breakdown(&self, filter: &QueryFilter) -> Result<Vec<SourceBreakdown>> {
         let bucket_filter = filter.bucket_filter(None);
-        let event_filter = filter.event_filter(None);
-        let mut query_params = bucket_filter.clone().into_params();
-        query_params.extend(event_filter.clone().into_params());
         let sql = format!(
             r#"
             SELECT
-                totals.source,
-                totals.total_tokens,
-                last_event.last_event_at,
-                totals.event_count
-            FROM (
-                SELECT source,
-                       SUM(input_tokens) + SUM(cache_creation_tokens) + SUM(cache_read_tokens) +
-                           SUM(output_tokens) + SUM(reasoning_output_tokens) AS total_tokens,
-                       SUM(event_count) AS event_count
-                FROM usage_bucket_30m
-                {}
-                GROUP BY source
-            ) totals
-            LEFT JOIN (
-                SELECT source, MAX(event_at) AS last_event_at
-                FROM usage_event
-                {}
-                GROUP BY source
-            ) last_event
-                ON last_event.source = totals.source
-            ORDER BY totals.total_tokens DESC, totals.source ASC
+                source,
+                SUM(total_tokens) AS total_tokens,
+                SUM(event_count) AS event_count
+            FROM usage_bucket_30m
+            {}
+            GROUP BY source
+            ORDER BY total_tokens DESC, source ASC
             "#,
-            bucket_filter.where_sql(),
-            event_filter.where_sql()
+            bucket_filter.where_sql()
         );
         let mut stmt = self.conn.prepare(&sql)?;
-        let rows = stmt.query_map(params_from_iter(query_params.iter()), |row| {
+        let rows = stmt.query_map(params_from_iter(bucket_filter.params().iter()), |row| {
             Ok(SourceBreakdown {
                 source: row.get(0)?,
                 total_tokens: row.get::<_, Option<i64>>(1)?.unwrap_or_default(),
-                last_event_at: row.get(2)?,
-                event_count: row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
+                last_event_at: None,
+                event_count: row.get::<_, Option<i64>>(2)?.unwrap_or_default(),
             })
         })?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        let mut sources = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(stmt);
+
+        for source in &mut sources {
+            let mut event_filter = filter.event_filter(None);
+            event_filter.push("source = ?", source.source.clone());
+            let last_event_sql = format!(
+                "SELECT MAX(event_at) FROM usage_event {}",
+                event_filter.where_sql()
+            );
+            source.last_event_at = self.conn.query_row(
+                &last_event_sql,
+                params_from_iter(event_filter.params().iter()),
+                |row| row.get(0),
+            )?;
+        }
+
+        Ok(sources)
     }
 
     /// Loads ranked project totals derived from aggregated buckets.
@@ -1113,16 +1139,14 @@ impl Dashboard {
                 project_hash,
                 MAX(project_label),
                 MAX(project_ref),
-                SUM(input_tokens) + SUM(cache_creation_tokens) + SUM(cache_read_tokens) +
-                    SUM(output_tokens) + SUM(reasoning_output_tokens),
+                SUM(total_tokens),
                 SUM(event_count),
                 SUM(cost_with_cache_usd)
             FROM usage_bucket_30m
             {}
             GROUP BY project_hash
             ORDER BY
-                SUM(input_tokens) + SUM(cache_creation_tokens) + SUM(cache_read_tokens) +
-                    SUM(output_tokens) + SUM(reasoning_output_tokens) DESC,
+                SUM(total_tokens) DESC,
                 MAX(project_label) ASC
             "#,
             sql_filter.where_sql()
@@ -1160,16 +1184,14 @@ impl Dashboard {
                 SUM(cache_read_tokens),
                 SUM(output_tokens),
                 SUM(reasoning_output_tokens),
-                SUM(input_tokens) + SUM(cache_creation_tokens) + SUM(cache_read_tokens) +
-                    SUM(output_tokens) + SUM(reasoning_output_tokens),
+                SUM(total_tokens),
                 SUM(cost_with_cache_usd),
                 SUM(event_count)
             FROM usage_bucket_30m
             {}
             GROUP BY source, model
             ORDER BY
-                SUM(input_tokens) + SUM(cache_creation_tokens) + SUM(cache_read_tokens) +
-                    SUM(output_tokens) + SUM(reasoning_output_tokens) DESC,
+                SUM(total_tokens) DESC,
                 source ASC,
                 model ASC
             "#,
@@ -2115,9 +2137,40 @@ impl Dashboard {
         })
     }
 
+    /// Loads the health fields used by the live web shell without returning
+    /// thousands of cursor keys that the shell only counts.
+    pub fn health_summary(&self) -> Result<HealthSummaryPayload> {
+        let integrations = self
+            .store
+            .integration_state()
+            .load_integration_states_with_conn(&self.conn)?;
+        let recent_failures = self
+            .store
+            .run_log()
+            .recent_runs_with_conn(&self.conn, 10)?
+            .into_iter()
+            .filter(crate::store::RunRecord::counts_as_failure)
+            .collect();
+        let cursor_count = scalar_i64(&self.conn, "SELECT COUNT(*) FROM source_cursor", [])?;
+
+        Ok(HealthSummaryPayload {
+            integrations,
+            cursor_count,
+            recent_failures,
+        })
+    }
+
     /// Builds the top-of-dashboard sync command center payload.
     pub fn sync_command_center(&self, filter: &QueryFilter) -> Result<SyncCommandCenterPayload> {
         let diagnostics = self.diagnostics()?;
+        self.sync_command_center_with_diagnostics(filter, &diagnostics)
+    }
+
+    fn sync_command_center_with_diagnostics(
+        &self,
+        filter: &QueryFilter,
+        diagnostics: &DiagnosticsPayload,
+    ) -> Result<SyncCommandCenterPayload> {
         let statuses = load_sync_statuses_with_conn(&self.conn, filter)?;
         let recent_runs = self.store.run_log().recent_runs_with_conn(&self.conn, 10)?;
         let current_lock = Store::current_worker_lock_with_conn(&self.conn)?;
@@ -2306,9 +2359,10 @@ impl Dashboard {
     /// Web handlers use this to return the first screen even when
     /// Activity/Tools/Optimize/Compare time out or fail.
     pub fn core_snapshot(&self, filter: &QueryFilter) -> Result<DashboardCoreSnapshot> {
+        let diagnostics = self.diagnostics()?;
         Ok(DashboardCoreSnapshot {
             overview: self.overview(filter)?,
-            sync_command_center: self.sync_command_center(filter)?,
+            sync_command_center: self.sync_command_center_with_diagnostics(filter, &diagnostics)?,
             day_trends: self.trends("day", filter)?,
             week_trends: self.trends("week", filter)?,
             month_trends: self.trends("month", filter)?,
@@ -2318,7 +2372,28 @@ impl Dashboard {
             projects: self.project_breakdown(filter)?,
             costs: self.cost_breakdown(filter)?,
             health: self.health()?,
-            diagnostics: self.diagnostics()?,
+            diagnostics,
+        })
+    }
+
+    /// Builds the range-dependent live projection without legacy trend windows
+    /// or full cursor detail.
+    pub fn interactive_snapshot(
+        &self,
+        filter: &QueryFilter,
+        window: &str,
+    ) -> Result<DashboardInteractiveSnapshot> {
+        let diagnostics = self.diagnostics()?;
+        Ok(DashboardInteractiveSnapshot {
+            overview: self.overview(filter)?,
+            sync_command_center: self.sync_command_center_with_diagnostics(filter, &diagnostics)?,
+            trends: self.trends(window, filter)?,
+            models: self.model_breakdown(filter)?,
+            sources: self.source_breakdown(filter)?,
+            projects: self.project_breakdown(filter)?,
+            costs: self.cost_breakdown(filter)?,
+            health: self.health_summary()?,
+            diagnostics,
         })
     }
 }
@@ -2535,11 +2610,7 @@ fn query_token_summary(
             COALESCE(SUM(cache_read_tokens), 0),
             COALESCE(SUM(output_tokens), 0),
             COALESCE(SUM(reasoning_output_tokens), 0),
-            COALESCE(SUM(input_tokens), 0) +
-                COALESCE(SUM(cache_creation_tokens), 0) +
-                COALESCE(SUM(cache_read_tokens), 0) +
-                COALESCE(SUM(output_tokens), 0) +
-                COALESCE(SUM(reasoning_output_tokens), 0)
+            COALESCE(SUM(total_tokens), 0)
         FROM usage_bucket_30m
         {}
         "#,
@@ -2656,10 +2727,13 @@ fn load_source_diagnostics(conn: &Connection) -> Result<Vec<SourceDiagnostics>> 
         }
     }
 
-    // Pre-load event counts per source
+    // `event_count` is maintained transactionally with usage_event writes, so
+    // diagnostics can avoid scanning the full fact table on every dashboard load.
     let mut event_counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
     {
-        let mut stmt = conn.prepare("SELECT source, COUNT(*) FROM usage_event GROUP BY source")?;
+        let mut stmt = conn.prepare(
+            "SELECT source, COALESCE(SUM(event_count), 0) FROM usage_bucket_30m GROUP BY source",
+        )?;
         let rows = stmt.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -2814,9 +2888,46 @@ mod tests {
     use chrono::NaiveDate;
 
     use super::{Dashboard, QueryFilter, ReportTimezone};
-    use crate::{models::SourceKind, store::Store, testing::Fixture};
+    use crate::{
+        models::SourceKind,
+        store::Store,
+        testing::{Fixture, SeedEvent},
+    };
 
     const EPSILON: f64 = 1e-9;
+
+    #[test]
+    fn diagnostics_counts_protected_events_from_aggregate_projection() -> Result<()> {
+        let fixture = Fixture::new()?;
+        for (event_key, tokens) in [("codex:diagnostics:1", 10), ("codex:diagnostics:2", 20)] {
+            fixture.seed_event(SeedEvent {
+                event_key,
+                input_tokens: tokens,
+                total_tokens: tokens,
+                ..Default::default()
+            })?;
+        }
+        let conn = fixture.store().open_connection()?;
+        conn.execute(
+            "INSERT INTO source_file(source, file_path, state, last_state_change_at) VALUES ('codex', ?1, 'live', '2026-07-11T00:00:00Z')",
+            [fixture.paths().root_dir.join("missing-session.jsonl").display().to_string()],
+        )?;
+        // The aggregate projection remains populated while the fact rows are
+        // removed, making this a direct regression for the diagnostics route.
+        conn.execute("DELETE FROM usage_event", [])?;
+        drop(conn);
+
+        let diagnostics = Dashboard::open(fixture.store())?.diagnostics()?;
+        let codex = diagnostics
+            .by_source
+            .iter()
+            .find(|row| row.source == "codex")
+            .expect("codex diagnostics");
+        assert_eq!(codex.missing_file_count, 1);
+        assert_eq!(codex.protected_event_count, 2);
+        assert!(codex.lossy_rebuild_risk);
+        Ok(())
+    }
 
     #[test]
     fn dashboard_snapshot_uses_single_connection_and_matches_individual_methods() -> Result<()> {
@@ -2899,6 +3010,92 @@ mod tests {
                 })?
                 .len(),
             1
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn source_breakdown_preserves_filtered_latest_event_time() -> Result<()> {
+        let fixture = Fixture::new()?;
+        for event in [
+            SeedEvent {
+                event_key: "codex:source-breakdown:early",
+                event_at: "2026-05-01T01:00:00Z",
+                input_tokens: 10,
+                total_tokens: 10,
+                project_hash: "project-a",
+                ..Default::default()
+            },
+            SeedEvent {
+                event_key: "codex:source-breakdown:latest-matching",
+                event_at: "2026-05-02T23:00:00Z",
+                input_tokens: 20,
+                total_tokens: 20,
+                project_hash: "project-a",
+                ..Default::default()
+            },
+            SeedEvent {
+                event_key: "codex:source-breakdown:other-model",
+                model: "gpt-other",
+                event_at: "2026-05-03T00:00:00Z",
+                input_tokens: 30,
+                total_tokens: 30,
+                project_hash: "project-a",
+                ..Default::default()
+            },
+            SeedEvent {
+                event_key: "codex:source-breakdown:other-project",
+                event_at: "2026-05-04T00:00:00Z",
+                input_tokens: 40,
+                total_tokens: 40,
+                project_hash: "project-b",
+                ..Default::default()
+            },
+            SeedEvent {
+                event_key: "claude:source-breakdown:latest",
+                source: "claude",
+                model: "claude-sonnet-4-5",
+                event_at: "2026-05-05T00:00:00Z",
+                input_tokens: 50,
+                total_tokens: 50,
+                project_hash: "project-a",
+                ..Default::default()
+            },
+        ] {
+            fixture.seed_event(event)?;
+        }
+
+        let dashboard = Dashboard::open(fixture.store())?;
+        let filtered = dashboard.source_breakdown(&QueryFilter {
+            source: Some(SourceKind::Codex),
+            model: Some("gpt-5".to_string()),
+            since: Some(NaiveDate::from_ymd_opt(2026, 5, 1).unwrap()),
+            until: Some(NaiveDate::from_ymd_opt(2026, 5, 2).unwrap()),
+            project_hash: Some("project-a".to_string()),
+            timezone: ReportTimezone::Utc,
+        })?;
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].source, "codex");
+        assert_eq!(filtered[0].total_tokens, 30);
+        assert_eq!(filtered[0].event_count, 2);
+        assert_eq!(
+            filtered[0].last_event_at.as_deref(),
+            Some("2026-05-02T23:00:00Z")
+        );
+
+        let all = dashboard.source_breakdown(&QueryFilter::default())?;
+        assert_eq!(
+            all.iter()
+                .find(|row| row.source == "codex")
+                .and_then(|row| row.last_event_at.as_deref()),
+            Some("2026-05-04T00:00:00Z")
+        );
+        assert_eq!(
+            all.iter()
+                .find(|row| row.source == "claude")
+                .and_then(|row| row.last_event_at.as_deref()),
+            Some("2026-05-05T00:00:00Z")
         );
         Ok(())
     }
@@ -3056,7 +3253,7 @@ mod tests {
         assert!(model.cost_without_cache_usd >= model.cost_with_cache_usd);
         assert!(model.cache_savings_usd >= 0.0);
         assert_eq!(model.pricing_status, "static");
-        assert_eq!(model.pricing_source.as_deref(), Some("static-v1"));
+        assert_eq!(model.pricing_source.as_deref(), Some("static-v2"));
         assert!(model.pricing_rate.is_some());
 
         let project = dashboard
@@ -3764,7 +3961,7 @@ mod tests {
         assert_eq!(row.input_tokens, 100);
         assert_eq!(row.cache_read_tokens, 10);
         assert_eq!(row.cache_creation_tokens, 5);
-        assert_eq!(row.output_tokens, 57); // output(50) + reasoning(7)
+        assert_eq!(row.output_tokens, 50);
         assert_eq!(row.total_tokens, 172);
         assert_eq!(row.event_count, 2);
 
@@ -3779,7 +3976,7 @@ mod tests {
     }
 
     /// Validates D6/F1.3: `Store::recompute_costs` rewrites the per-event
-    /// cost columns using the static-v1 catalog, so a `usage_event` seeded
+    /// cost columns using the embedded catalog, so a `usage_event` seeded
     /// with zero cost now carries non-zero `cost_with_cache_usd` and a
     /// `pricing_status = 'static'` row tag.
     #[test]
@@ -3817,7 +4014,7 @@ mod tests {
         assert!(cost_with > 0.0);
         assert!(cost_without > cost_with);
         assert_eq!(status, "static");
-        assert_eq!(source, "static-v1");
+        assert_eq!(source, "static-v2");
         let (bucket_cost_with, bucket_status, bucket_source): (f64, String, String) = conn
             .query_row(
                 r#"
@@ -3830,7 +4027,7 @@ mod tests {
             )?;
         assert!((bucket_cost_with - cost_with).abs() < 1e-9);
         assert_eq!(bucket_status, "static");
-        assert_eq!(bucket_source, "static-v1");
+        assert_eq!(bucket_source, "static-v2");
         Ok(())
     }
 

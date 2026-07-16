@@ -218,6 +218,7 @@ pub struct ExplorerPayload {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExplorerStrategy {
+    Bucket,
     Event,
     Turn,
     Attribution,
@@ -226,6 +227,7 @@ enum ExplorerStrategy {
 impl ExplorerStrategy {
     fn as_str(self) -> &'static str {
         match self {
+            Self::Bucket => "bucket",
             Self::Event => "event",
             Self::Turn => "turn",
             Self::Attribution => "attribution",
@@ -286,6 +288,7 @@ pub(super) fn load(dashboard: &Dashboard, query: &ExplorerQuery) -> Result<Explo
     }
 
     let all_rows = match strategy {
+        ExplorerStrategy::Bucket => load_bucket_rows(&dashboard.conn, &query)?,
         ExplorerStrategy::Event => load_event_rows(&dashboard.conn, &query)?,
         ExplorerStrategy::Turn => load_turn_rows(&dashboard.conn, &query, &scope)?,
         ExplorerStrategy::Attribution => load_attribution_rows(&dashboard.conn, &query, &scope)?,
@@ -296,6 +299,7 @@ pub(super) fn load(dashboard: &Dashboard, query: &ExplorerQuery) -> Result<Explo
         Vec::new()
     } else {
         let all_series = match strategy {
+            ExplorerStrategy::Bucket => load_bucket_series(&dashboard.conn, &query)?,
             ExplorerStrategy::Event => load_event_series(&dashboard.conn, &query)?,
             ExplorerStrategy::Turn => load_turn_series(&dashboard.conn, &query, &scope)?,
             ExplorerStrategy::Attribution => {
@@ -354,9 +358,25 @@ fn choose_strategy(query: &ExplorerQuery) -> ExplorerStrategy {
         ExplorerStrategy::Attribution
     } else if query.metric == ExplorerMetric::Turns {
         ExplorerStrategy::Turn
+    } else if bucket_compatible(query) {
+        ExplorerStrategy::Bucket
     } else {
         ExplorerStrategy::Event
     }
+}
+
+fn bucket_compatible(query: &ExplorerQuery) -> bool {
+    matches!(
+        query.group_by,
+        ExplorerDimension::Source | ExplorerDimension::Model | ExplorerDimension::Project
+    ) && matches!(
+        query.metric,
+        ExplorerMetric::AttributedCostUsd | ExplorerMetric::Calls | ExplorerMetric::TotalTokens
+    ) && query.filters.session_id.is_none()
+        && query.filters.tool_name.is_none()
+        && query.filters.tool_kind.is_none()
+        && query.filters.is_tool.is_none()
+        && query.filters.token_type.is_none()
 }
 
 fn capability_scope(
@@ -365,6 +385,28 @@ fn capability_scope(
     strategy: ExplorerStrategy,
 ) -> Result<CapabilityScope> {
     match strategy {
+        ExplorerStrategy::Bucket => {
+            let count = filtered_bucket_count(conn, query)?;
+            let support = if count > 0 {
+                ExplorerSupport {
+                    supported: true,
+                    level: "normalized".to_string(),
+                    reason: None,
+                    strategy: strategy.as_str().to_string(),
+                }
+            } else {
+                ExplorerSupport {
+                    supported: false,
+                    level: "no_data".to_string(),
+                    reason: Some("No usage events match this filter.".to_string()),
+                    strategy: strategy.as_str().to_string(),
+                }
+            };
+            Ok(CapabilityScope {
+                support,
+                allowed_sources: None,
+            })
+        }
         ExplorerStrategy::Event => {
             let count = filtered_event_count(conn, query)?;
             let support = if count > 0 {
@@ -392,6 +434,19 @@ fn capability_scope(
             behavior_scope(conn, query, strategy, "usage_tool_call", "tool attribution")
         }
     }
+}
+
+fn filtered_bucket_count(conn: &Connection, query: &ExplorerQuery) -> Result<i64> {
+    let filter = query.filter.bucket_filter(Some("b"));
+    let sql = format!(
+        "SELECT COALESCE(SUM(b.event_count), 0) FROM usage_bucket_30m b{}",
+        filter.where_sql()
+    );
+    Ok(
+        conn.query_row(&sql, params_from_iter(filter.params().iter()), |row| {
+            row.get(0)
+        })?,
+    )
 }
 
 fn behavior_scope(
@@ -520,6 +575,59 @@ fn load_event_rows(conn: &Connection, query: &ExplorerQuery) -> Result<Vec<Group
         where_sql = filter.where_sql()
     );
     query_group_values(conn, &sql, &filter)
+}
+
+fn load_bucket_rows(conn: &Connection, query: &ExplorerQuery) -> Result<Vec<GroupValue>> {
+    let spec = bucket_group_spec(query.group_by);
+    let filter = query.filter.bucket_filter(Some("b"));
+    let value_expr = bucket_metric_expr(query.metric);
+    let sql = format!(
+        r#"
+        SELECT
+            {key_expr} AS group_key,
+            {label_expr} AS group_label,
+            {value_expr} AS metric_value
+        FROM usage_bucket_30m b
+        {where_sql}
+        GROUP BY group_key, group_label
+        ORDER BY metric_value DESC, group_label ASC
+        "#,
+        key_expr = spec.key_expr,
+        label_expr = spec.label_expr,
+        value_expr = value_expr,
+        where_sql = filter.where_sql()
+    );
+    query_group_values(conn, &sql, &filter)
+}
+
+fn load_bucket_series(conn: &Connection, query: &ExplorerQuery) -> Result<Vec<SeriesValue>> {
+    let spec = bucket_group_spec(query.group_by);
+    let bucket = bucket_expr(
+        query.granularity,
+        "b.hour_start",
+        &query.filter.local_time_modifier(),
+    );
+    let filter = query.filter.bucket_filter(Some("b"));
+    let value_expr = bucket_metric_expr(query.metric);
+    let sql = format!(
+        r#"
+        SELECT
+            {bucket} AS bucket_key,
+            {key_expr} AS group_key,
+            {label_expr} AS group_label,
+            {value_expr} AS metric_value
+        FROM usage_bucket_30m b
+        {where_sql}
+        GROUP BY bucket_key, group_key, group_label
+        ORDER BY bucket_key ASC, metric_value DESC, group_label ASC
+        "#,
+        bucket = bucket,
+        key_expr = spec.key_expr,
+        label_expr = spec.label_expr,
+        value_expr = value_expr,
+        where_sql = filter.where_sql()
+    );
+    query_series_values(conn, &sql, &filter)
 }
 
 fn load_event_series(conn: &Connection, query: &ExplorerQuery) -> Result<Vec<SeriesValue>> {
@@ -907,11 +1015,7 @@ fn attribution_outer_sql(
                 COALESCE(e.cache_creation_tokens, 0) AS cache_creation_tokens,
                 COALESCE(e.output_tokens, 0) AS output_tokens,
                 COALESCE(e.reasoning_output_tokens, 0) AS reasoning_output_tokens,
-                COALESCE(e.input_tokens, 0) +
-                    COALESCE(e.cache_read_tokens, 0) +
-                    COALESCE(e.cache_creation_tokens, 0) +
-                    COALESCE(e.output_tokens, 0) +
-                    COALESCE(e.reasoning_output_tokens, 0) AS total_tokens
+                COALESCE(e.total_tokens, 0) AS total_tokens
             FROM usage_event e
             {event_where}
         ),
@@ -1060,6 +1164,24 @@ fn event_group_spec(group_by: ExplorerDimension) -> GroupSpec {
     }
 }
 
+fn bucket_group_spec(group_by: ExplorerDimension) -> GroupSpec {
+    match group_by {
+        ExplorerDimension::Source => GroupSpec {
+            key_expr: "b.source".to_string(),
+            label_expr: "b.source".to_string(),
+        },
+        ExplorerDimension::Model => GroupSpec {
+            key_expr: "b.model".to_string(),
+            label_expr: "b.model".to_string(),
+        },
+        ExplorerDimension::Project => GroupSpec {
+            key_expr: "COALESCE(NULLIF(b.project_hash, ''), 'unknown-project')".to_string(),
+            label_expr: "COALESCE(NULLIF(b.project_ref, ''), NULLIF(b.project_label, ''), NULLIF(b.project_hash, ''), 'unknown-project')".to_string(),
+        },
+        _ => unreachable!("bucket strategy only supports source/model/project"),
+    }
+}
+
 fn turn_group_spec(group_by: ExplorerDimension) -> GroupSpec {
     match group_by {
         ExplorerDimension::Source => GroupSpec {
@@ -1130,9 +1252,22 @@ fn event_metric_expr(metric: ExplorerMetric, token_type: Option<ExplorerTokenTyp
                 "CAST(COALESCE(SUM({}), 0) AS REAL)",
                 token_type.event_expr("e")
             ),
-            None => "CAST(COALESCE(SUM(COALESCE(e.input_tokens, 0) + COALESCE(e.cache_creation_tokens, 0) + COALESCE(e.cache_read_tokens, 0) + COALESCE(e.output_tokens, 0) + COALESCE(e.reasoning_output_tokens, 0)), 0) AS REAL)".to_string(),
+            None => "CAST(COALESCE(SUM(COALESCE(e.total_tokens, 0)), 0) AS REAL)".to_string(),
         },
         ExplorerMetric::Turns => unreachable!("turn metric routes through turn strategy"),
+    }
+}
+
+fn bucket_metric_expr(metric: ExplorerMetric) -> &'static str {
+    match metric {
+        ExplorerMetric::AttributedCostUsd => {
+            "COALESCE(SUM(COALESCE(b.cost_with_cache_usd, 0.0)), 0.0)"
+        }
+        ExplorerMetric::Calls => "CAST(COALESCE(SUM(b.event_count), 0) AS REAL)",
+        ExplorerMetric::TotalTokens => "CAST(COALESCE(SUM(b.total_tokens), 0) AS REAL)",
+        ExplorerMetric::Turns | ExplorerMetric::Sessions => {
+            unreachable!("unsupported metrics must not use the bucket strategy")
+        }
     }
 }
 
@@ -1414,12 +1549,13 @@ fn share(value: f64, total: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use chrono::NaiveDate;
+    use chrono::{FixedOffset, NaiveDate};
     use rusqlite::Connection;
 
     use super::{
         Dashboard, ExplorerDimension, ExplorerFilters, ExplorerGranularity, ExplorerMetric,
-        ExplorerQuery,
+        ExplorerQuery, ExplorerStrategy, ExplorerTokenType, choose_strategy, load_bucket_rows,
+        load_bucket_series, load_event_rows, load_event_series,
     };
     use crate::{
         error::Result,
@@ -1500,6 +1636,136 @@ mod tests {
             ],
         )?;
         Ok(())
+    }
+
+    #[test]
+    fn explorer_bucket_strategy_matches_event_results_for_supported_shapes() -> Result<()> {
+        let fixture = Fixture::new()?;
+        for event in [
+            SeedEvent {
+                event_key: "codex:bucket:before-boundary",
+                source: "codex",
+                model: "gpt-5",
+                event_at: "2026-05-01T15:59:00Z",
+                hour_start: Some("2026-05-01T15:59:00Z"),
+                input_tokens: 100,
+                total_tokens: 100,
+                cost_with_cache_usd: 1.0,
+                cost_without_cache_usd: 1.0,
+                pricing_status: "static",
+                pricing_source: Some("static-v1"),
+                project_hash: "project-a",
+                project_label: "Project A",
+                ..Default::default()
+            },
+            SeedEvent {
+                event_key: "codex:bucket:inside-a",
+                source: "codex",
+                model: "gpt-5",
+                event_at: "2026-05-01T16:00:00Z",
+                hour_start: Some("2026-05-01T16:00:00Z"),
+                input_tokens: 200,
+                total_tokens: 200,
+                cost_with_cache_usd: 2.0,
+                cost_without_cache_usd: 2.0,
+                pricing_status: "static",
+                pricing_source: Some("static-v1"),
+                project_hash: "project-a",
+                project_label: "Project A",
+                ..Default::default()
+            },
+            SeedEvent {
+                event_key: "claude:bucket:inside-b",
+                source: "claude",
+                model: "sonnet",
+                event_at: "2026-05-02T02:00:00Z",
+                hour_start: Some("2026-05-02T02:00:00Z"),
+                input_tokens: 300,
+                total_tokens: 300,
+                cost_with_cache_usd: 3.0,
+                cost_without_cache_usd: 3.0,
+                pricing_status: "static",
+                pricing_source: Some("static-v1"),
+                project_hash: "project-b",
+                project_label: "Project B",
+                ..Default::default()
+            },
+        ] {
+            fixture.seed_event(event)?;
+        }
+
+        let dashboard = Dashboard::open(fixture.store())?;
+        for metric in [
+            ExplorerMetric::AttributedCostUsd,
+            ExplorerMetric::Calls,
+            ExplorerMetric::TotalTokens,
+        ] {
+            for group_by in [
+                ExplorerDimension::Source,
+                ExplorerDimension::Model,
+                ExplorerDimension::Project,
+            ] {
+                let query = ExplorerQuery {
+                    filter: QueryFilter {
+                        since: Some(NaiveDate::from_ymd_opt(2026, 5, 2).unwrap()),
+                        until: Some(NaiveDate::from_ymd_opt(2026, 5, 2).unwrap()),
+                        timezone: ReportTimezone::Fixed(FixedOffset::east_opt(8 * 3600).unwrap()),
+                        ..Default::default()
+                    },
+                    granularity: ExplorerGranularity::Day,
+                    metric,
+                    group_by,
+                    filters: ExplorerFilters::default(),
+                    limit: 8,
+                    include_other: true,
+                };
+
+                assert_eq!(choose_strategy(&query), ExplorerStrategy::Bucket);
+                let bucket_rows = load_bucket_rows(&dashboard.conn, &query)?;
+                let event_rows = load_event_rows(&dashboard.conn, &query)?;
+                assert_eq!(bucket_rows.len(), event_rows.len());
+                for (bucket, event) in bucket_rows.iter().zip(&event_rows) {
+                    assert_eq!((&bucket.key, &bucket.label), (&event.key, &event.label));
+                    assert!((bucket.value - event.value).abs() < f64::EPSILON);
+                }
+
+                let bucket_series = load_bucket_series(&dashboard.conn, &query)?;
+                let event_series = load_event_series(&dashboard.conn, &query)?;
+                assert_eq!(bucket_series.len(), event_series.len());
+                for (bucket, event) in bucket_series.iter().zip(&event_series) {
+                    assert_eq!(
+                        (&bucket.bucket, &bucket.key, &bucket.label),
+                        (&event.bucket, &event.key, &event.label)
+                    );
+                    assert!((bucket.value - event.value).abs() < f64::EPSILON);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn explorer_bucket_strategy_rejects_fact_only_semantics() {
+        for query in [
+            ExplorerQuery {
+                group_by: ExplorerDimension::Session,
+                ..Default::default()
+            },
+            ExplorerQuery {
+                metric: ExplorerMetric::Sessions,
+                ..Default::default()
+            },
+            ExplorerQuery {
+                filters: ExplorerFilters {
+                    token_type: Some(ExplorerTokenType::Input),
+                    ..Default::default()
+                },
+                metric: ExplorerMetric::TotalTokens,
+                ..Default::default()
+            },
+        ] {
+            assert_eq!(choose_strategy(&query), ExplorerStrategy::Event);
+        }
     }
 
     #[test]

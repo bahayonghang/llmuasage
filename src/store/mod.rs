@@ -12,6 +12,7 @@ mod cursor;
 mod integration;
 mod lock;
 mod migrations;
+mod pricing_catalog;
 mod run_log;
 mod schema;
 mod source_file;
@@ -24,7 +25,11 @@ pub use integration::IntegrationStateStore;
 pub use migrations::{
     MigrationProgress, MigrationProgressEvent, latest_schema_version, read_schema_version,
 };
+pub use pricing_catalog::{
+    CatalogApplyResult, CatalogLayerStatus, CatalogResetResult, PricingCatalogStatus,
+};
 pub use run_log::RunLog;
+pub use schema::TOKEN_ACCOUNTING_VERSION;
 pub use source_file::{LossyRebuildRisk, SourceFileStateCounts, SourceFileStore};
 pub use sync_status::SyncStatusStore;
 pub use trigger::TriggerStore;
@@ -169,6 +174,15 @@ pub struct SourceSyncStatus {
     /// Total imported events currently stored for this source after the run.
     #[serde(default)]
     pub stored_events: i64,
+    /// Parser-owned token accounting contract recorded for this source.
+    #[serde(default)]
+    pub token_accounting_version: Option<u32>,
+    /// True when stored rows require an explicit guarded source rebuild.
+    #[serde(default)]
+    pub legacy_token_accounting: bool,
+    /// Actionable warning for read-only legacy results.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_accounting_warning: Option<String>,
     /// Parser wall-clock time in milliseconds.
     pub parse_ms: i64,
     /// SQLite write wall-clock time in milliseconds.
@@ -283,15 +297,15 @@ impl Store {
 
     /// Recomputes and persists per-event cost columns from the active pricing
     /// catalog (D6/F1.3). Returns the number of `usage_event` rows updated.
-    /// Single transaction so a partial run never leaves the table half-priced.
+    /// Preserves the current catalog activation metadata while recalculating.
     pub fn recompute_costs(&self) -> crate::error::Result<usize> {
         let catalog = self.active_pricing_catalog()?;
-        self.recompute_costs_with(&catalog)
+        let activation = pricing_catalog::PricingMetaChange::preserve();
+        self.recompute_costs_with_meta(&catalog, &activation)
     }
 
-    /// Recomputes costs against a caller-supplied catalog. doctor uses
-    /// this to drive a recompute through a litellm snapshot loaded from
-    /// `~/.llmusage/pricing/`.
+    /// Recomputes costs against a caller-supplied catalog, persisting custom
+    /// catalog data before the final activation metadata switch.
     ///
     /// Uses paged processing to avoid loading the entire `usage_event` table
     /// into memory. Each page of events is updated within a savepoint so a
@@ -301,6 +315,15 @@ impl Store {
     pub fn recompute_costs_with(
         &self,
         catalog: &crate::query::pricing_catalog::PricingCatalog,
+    ) -> crate::error::Result<usize> {
+        let activation = pricing_catalog::PricingMetaChange::for_catalog(self, catalog)?;
+        self.recompute_costs_with_meta(catalog, &activation)
+    }
+
+    fn recompute_costs_with_meta(
+        &self,
+        catalog: &crate::query::pricing_catalog::PricingCatalog,
+        activation: &pricing_catalog::PricingMetaChange,
     ) -> crate::error::Result<usize> {
         use std::collections::HashMap;
 
@@ -457,15 +480,19 @@ impl Store {
             }
             delete_empty_bucket_stmt.execute([])?;
         }
-        let catalog_version = catalog.version.as_str();
-        tx.execute(
-            r#"
-            INSERT INTO meta(key, value)
-            VALUES ('pricing_catalog_version', ?1)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value
-            "#,
-            [catalog_version],
-        )?;
+        for key in &activation.deletes {
+            tx.execute("DELETE FROM meta WHERE key = ?1", [key])?;
+        }
+        for (key, value) in &activation.upserts {
+            tx.execute(
+                r#"
+                INSERT INTO meta(key, value)
+                VALUES (?1, ?2)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                "#,
+                params![key, value],
+            )?;
+        }
         tx.commit()?;
         Ok(updated)
     }

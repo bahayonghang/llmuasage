@@ -66,6 +66,28 @@
   font-size: 12px;
 }
 
+.explorer-series-baseline {
+  stroke: var(--line);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.explorer-series-line {
+  fill: none;
+  stroke: var(--data-accent);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.explorer-series-peak-dot {
+  fill: var(--surface);
+  stroke: var(--data-accent-deep);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
 @media (max-width: 720px) {
   .trends-chart-svg {
     min-width: 0;

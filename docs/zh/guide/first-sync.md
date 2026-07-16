@@ -50,6 +50,18 @@ llmusage sync --rebuild
 
 `--rebuild` 会先清空可重建 usage 行、bucket、project 和 cursor，再重新解析本地真源。如果已导入的文件型历史依赖现在缺失的源文件，默认拒绝执行。
 
+Token 统计口径按 parser 来源单独记录版本。含旧口径行的数据库仍可读取，但普通
+sync 会拒绝混写新旧结果。请逐个显式重建受影响来源：
+
+```powershell
+llmusage sync --rebuild --source codex
+llmusage sync --rebuild --source claude
+llmusage sync --rebuild --source opencode
+```
+
+只有重建完整成功后才会推进来源 marker。来源仍需重建时，`source-status` 和
+diagnostics 会返回 `legacy_token_accounting`、`token_accounting_version` 和可执行的警告信息。
+
 只有明确接受清掉不可重建历史时才使用：
 
 ```powershell
@@ -72,3 +84,7 @@ llmusage diagnostics --out .\llmusage-diagnostics.json
 - `run_log` 与 `source_sync_status`：运行状态。
 
 Token 质量标签来自来源 descriptor，不是运行时猜测：`precise` 来源保留 input、output、cache read、cache creation/write、reasoning 和 total 通道；`total_only` 不声称子通道精确；`estimated` 明确表示近似；仅监控或阻塞来源会显示为 unavailable/parserless，而不是被导入。
+
+对 precise 来源，`input_tokens` 表示非缓存输入，缓存通道单独展示，parser 写入的
+`total_tokens` 是报表和 Dashboard 的唯一总量依据。Reasoning 是诊断子通道；当上游
+output 或 total 已包含它时，不会再次相加。

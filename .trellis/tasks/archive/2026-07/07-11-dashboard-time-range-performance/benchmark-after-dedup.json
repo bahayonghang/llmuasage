@@ -1,0 +1,150 @@
+{
+  "generated_at": "2026-07-11T10:24:19.481Z",
+  "url": "http://127.0.0.1:37423",
+  "budgets": {
+    "click_feedback_p95_ms": 100,
+    "interactive_api_p95_ms": 400,
+    "interactive_bytes": 131072
+  },
+  "http": {
+    "1d": {
+      "median_ms": 295.01,
+      "p95_ms": 323,
+      "median_bytes": 15828,
+      "max_bytes": 15828,
+      "samples": [
+        {
+          "duration_ms": 295.01,
+          "bytes": 15828
+        },
+        {
+          "duration_ms": 294.51,
+          "bytes": 15828
+        },
+        {
+          "duration_ms": 323,
+          "bytes": 15828
+        }
+      ]
+    },
+    "7d": {
+      "median_ms": 346.31,
+      "p95_ms": 346.87,
+      "median_bytes": 19318,
+      "max_bytes": 19318,
+      "samples": [
+        {
+          "duration_ms": 346.31,
+          "bytes": 19318
+        },
+        {
+          "duration_ms": 331.75,
+          "bytes": 19318
+        },
+        {
+          "duration_ms": 346.87,
+          "bytes": 19318
+        }
+      ]
+    },
+    "30d": {
+      "median_ms": 355.97,
+      "p95_ms": 366.94,
+      "median_bytes": 25943,
+      "max_bytes": 25943,
+      "samples": [
+        {
+          "duration_ms": 366.94,
+          "bytes": 25943
+        },
+        {
+          "duration_ms": 355.97,
+          "bytes": 25943
+        },
+        {
+          "duration_ms": 333.48,
+          "bytes": 25943
+        }
+      ]
+    },
+    "all": {
+      "median_ms": 412.09,
+      "p95_ms": 414.61,
+      "median_bytes": 66452,
+      "max_bytes": 66452,
+      "samples": [
+        {
+          "duration_ms": 414.61,
+          "bytes": 66452
+        },
+        {
+          "duration_ms": 363.55,
+          "bytes": 66452
+        },
+        {
+          "duration_ms": 412.09,
+          "bytes": 66452
+        }
+      ]
+    }
+  },
+  "browser": {
+    "chrome": "C:/Program Files/Google/Chrome/Application/chrome.exe",
+    "clicks": [
+      {
+        "preset": "1d",
+        "feedback_ms": 0.8,
+        "interactive_response_ms": 405.9,
+        "critical_render_ms": 419.9,
+        "secondary_complete_ms": 472.8,
+        "request_count": 1,
+        "payload_bytes": 15828
+      },
+      {
+        "preset": "7d",
+        "feedback_ms": 2.2,
+        "interactive_response_ms": 519.6,
+        "critical_render_ms": 525.6,
+        "secondary_complete_ms": 1064,
+        "request_count": 1,
+        "payload_bytes": 19318
+      },
+      {
+        "preset": "30d",
+        "feedback_ms": 2.5,
+        "interactive_response_ms": 353.1,
+        "critical_render_ms": 358.5,
+        "secondary_complete_ms": 2429,
+        "request_count": 6,
+        "payload_bytes": 32917
+      },
+      {
+        "preset": "all",
+        "feedback_ms": 3,
+        "interactive_response_ms": 433.7,
+        "critical_render_ms": 439.1,
+        "secondary_complete_ms": 2531,
+        "request_count": 6,
+        "payload_bytes": 99229
+      }
+    ],
+    "rapid_switch": {
+      "latest_feedback_ms": 189.6,
+      "complete_ms": 189.6,
+      "active_preset": "all",
+      "request_count": 4,
+      "interactive_requests": 0,
+      "payload_bytes": 0
+    },
+    "long_tasks": [
+      {
+        "start_ms": 90.79999999701977,
+        "duration_ms": 87
+      },
+      {
+        "start_ms": 637.5,
+        "duration_ms": 52
+      }
+    ]
+  }
+}

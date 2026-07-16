@@ -1,0 +1,33 @@
+{
+  "id": "explorer-time-series-layout",
+  "name": "explorer-time-series-layout",
+  "title": "优化 Cost Explorer 时间序列展示",
+  "description": "用最多 5 行独立尺度趋势小图和默认折叠明细压缩 Cost Explorer 时间序列区域。",
+  "status": "completed",
+  "dev_type": "frontend",
+  "scope": "src/web",
+  "package": null,
+  "priority": "P2",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-07-11",
+  "completedAt": "2026-07-11",
+  "branch": null,
+  "base_branch": "dev",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "src/web/shell.rs",
+    "src/web/assets/render/explorer.js",
+    "src/web/assets/components.css",
+    "src/web/assets/charts.css",
+    "src/web/assets/copy.js",
+    "src/web/mod.rs"
+  ],
+  "notes": "",
+  "meta": {}
+}

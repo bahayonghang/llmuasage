@@ -20,7 +20,7 @@ Common files and directories:
 | `~/.llmusage/backups/` | Integration config backups used by uninstall |
 | `~/.llmusage/exports/` | Static HTML exports |
 | `~/.llmusage/logs/llmusage.ndjson` | Local structured runtime diagnostics and command tracing |
-| `~/.llmusage/pricing/` | Local pricing snapshots imported with `doctor --refresh-pricing` |
+| `~/.llmusage/pricing/` | Content-addressed local base, overlay, and effective pricing catalogs |
 
 Runtime root precedence: `--home <PATH>` > `LLMUSAGE_HOME` > `~/.llmusage`.
 
@@ -74,13 +74,18 @@ llmusage diagnostics --forget-file <PATH> --source codex
 
 This marks the row as `deleted_by_user` and removes its cursor row.
 
-## Pricing refresh is local-file only
+## Pricing catalog changes are local-file only
 
 ```powershell
+llmusage catalog apply .\pricing-overlay.json
+llmusage catalog status --json
+llmusage catalog reset
 llmusage doctor --refresh-pricing .\litellm-prices.json
 ```
 
-This copies the local JSON snapshot under `~/.llmusage/pricing/`, recomputes local cost columns, and records `pricing_catalog_version`. URLs are refused.
+`catalog apply` activates an incremental v2 overlay. `doctor --refresh-pricing` activates a complete base snapshot and clears any overlay. Both commands accept only existing local files; URLs and remote fetching are refused.
+
+Activation writes SHA-256-addressed files under `~/.llmusage/pricing/`, recomputes local event and bucket costs, and then switches SQLite catalog metadata. A missing, modified, or invalid selected file is an explicit error; llmusage does not silently fall back to embedded prices. `catalog reset` removes an overlay and recomputes costs with its recorded base. Unreferenced digest files may remain as local audit artifacts and are removed by `uninstall --purge` with the rest of the runtime root.
 
 ## Browser dashboard boundary
 

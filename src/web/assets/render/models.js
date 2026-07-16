@@ -54,7 +54,7 @@ export function renderModels(context, state = {}) {
     .map((row) => {
       const total_tokens = Number(row.total_tokens || 0);
       const input_tokens = Number(row.input_tokens || 0);
-      const output_tokens = Number(row.output_tokens || 0) + Number(row.reasoning_output_tokens || 0);
+      const output_tokens = Number(row.output_tokens || 0);
       const cached_tokens = Number(row.cache_read_tokens || 0);
 
       const inputPct = formatPercent(input_tokens, total_tokens);

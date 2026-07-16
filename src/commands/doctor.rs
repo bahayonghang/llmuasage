@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::Serialize;
 use tracing::info;
 
-use crate::{app::AppContext, integrations, query::PricingCatalog, store::Store};
+use crate::{app::AppContext, integrations, store::Store};
 
 #[derive(Debug, Clone, Serialize)]
 struct DoctorCheck {
@@ -20,46 +20,24 @@ pub async fn run(app: &AppContext, json: bool, refresh_pricing: Option<PathBuf>)
     diagnostics(app, json).await
 }
 
-/// Validates a local litellm pricing snapshot, copies it to
-/// `~/.llmusage/pricing/<catalog-version>.json`, and recomputes the
-/// per-event cost columns. URLs are refused; PRD §1.2 explicitly excludes
-/// remote price fetching from 0.5.x.
+/// Validates and activates a complete local pricing snapshot, then recomputes
+/// per-event costs. URLs are refused and the persisted file is content-addressed.
 async fn refresh_pricing_catalog(app: &AppContext, source_path: &Path) -> Result<()> {
     info!(path = %source_path.display(), "刷新定价快照");
-
-    if let Some(raw) = source_path.to_str()
-        && (raw.starts_with("http://") || raw.starts_with("https://"))
-    {
-        anyhow::bail!("llmusage 0.5.x 不支持从 URL 拉取定价快照；请下载 JSON 后传本地路径");
-    }
-    if !source_path.is_file() {
-        anyhow::bail!("定价快照路径不存在或不是文件: {}", source_path.display());
-    }
-
-    // 用 catalog loader 校验 schema 同时拿到 catalog 实例，下一步直接驱动 recompute。
-    let catalog = PricingCatalog::load_snapshot(source_path)?;
-
-    let pricing_dir = app.paths.root_dir.join("pricing");
-    std::fs::create_dir_all(&pricing_dir)
-        .with_context(|| format!("创建定价目录失败: {}", pricing_dir.display()))?;
-    let target = pricing_dir.join(format!("{}.json", catalog.version));
-    std::fs::copy(source_path, &target)
-        .with_context(|| format!("写入定价快照失败: {}", target.display()))?;
-
     let store = Store::new(&app.paths)?;
     store.bootstrap()?;
-    let updated = store.recompute_costs_with(&catalog)?;
+    let result = store.activate_pricing_snapshot(source_path)?;
     info!(
-        updated,
-        catalog = catalog.version,
-        snapshot = %target.display(),
+        updated = result.updated_events,
+        catalog = result.effective.identity,
+        snapshot = result.effective.file.as_deref().unwrap_or("embedded"),
         "定价快照已落盘并重算"
     );
     println!(
-        "已写入 {} 并按 catalog `{}` 重算 {} 条事件的成本列",
-        target.display(),
-        catalog.version,
-        updated
+        "已激活 catalog `{}`（{}）并重算 {} 条事件的成本列",
+        result.effective.version,
+        result.effective.file.as_deref().unwrap_or("embedded"),
+        result.updated_events
     );
     Ok(())
 }

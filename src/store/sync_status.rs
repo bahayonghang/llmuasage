@@ -46,13 +46,36 @@ impl<'a> SyncStatusStore<'a> {
                 events_replayed: row.get(5)?,
                 events_inserted: row.get(6)?,
                 stored_events: row.get(7)?,
+                token_accounting_version: None,
+                legacy_token_accounting: false,
+                token_accounting_warning: None,
                 parse_ms: row.get(8)?,
                 write_ms: row.get(9)?,
                 lock_wait_ms: row.get(10)?,
                 updated_at: row.get(11)?,
             })
         })?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        let mut statuses = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(stmt);
+        for status in &mut statuses {
+            let Some(source) = crate::models::SourceKind::parse_id(&status.source) else {
+                continue;
+            };
+            if !crate::registry::source_descriptor(source)
+                .is_some_and(|descriptor| descriptor.capabilities.parser)
+            {
+                continue;
+            }
+            status.token_accounting_version = self.store.token_accounting_version(source)?;
+            status.legacy_token_accounting = self.store.has_legacy_token_accounting(source)?;
+            if status.legacy_token_accounting {
+                status.token_accounting_warning = Some(format!(
+                    "legacy token accounting; run `llmusage sync --rebuild --source {}`",
+                    source.as_str()
+                ));
+            }
+        }
+        Ok(statuses)
     }
 
     pub fn save_source_sync_statuses(&self, statuses: &[SourceSyncStatus]) -> Result<()> {

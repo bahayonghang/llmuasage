@@ -9,7 +9,7 @@ use chrono::{Duration, Utc};
 use rusqlite::{Connection, params};
 use tempfile::TempDir;
 
-use llmusage::{paths::AppPaths, store::Store};
+use llmusage::{paths::AppPaths, query::Dashboard, store::Store};
 
 #[test]
 fn report_commands_emit_stable_json_from_sqlite() -> Result<()> {
@@ -75,7 +75,7 @@ fn report_commands_emit_stable_json_from_sqlite() -> Result<()> {
         daily["daily"][0]["cache_creation_tokens"].as_i64(),
         Some(30)
     );
-    assert_eq!(daily["totals"]["total_tokens"].as_i64(), Some(415));
+    assert_eq!(daily["totals"]["total_tokens"].as_i64(), Some(385));
     assert!(daily["daily"][0].get("conversation_count").is_none());
     assert!(daily["daily"][0].get("conversationCount").is_none());
 
@@ -99,7 +99,7 @@ fn report_commands_emit_stable_json_from_sqlite() -> Result<()> {
         monthly["totals"]["cache_creation_tokens"].as_i64(),
         Some(30)
     );
-    assert_eq!(monthly["totals"]["total_tokens"].as_i64(), Some(415));
+    assert_eq!(monthly["totals"]["total_tokens"].as_i64(), Some(385));
 
     let session = fixture.json(&[
         "session",
@@ -117,7 +117,7 @@ fn report_commands_emit_stable_json_from_sqlite() -> Result<()> {
         session["session"]["cache_creation_tokens"].as_i64(),
         Some(30)
     );
-    assert_eq!(session["session"]["total_tokens"].as_i64(), Some(165));
+    assert_eq!(session["session"]["total_tokens"].as_i64(), Some(135));
 
     let blocks = fixture.json(&[
         "blocks",
@@ -615,12 +615,17 @@ fn doctor_refresh_pricing_writes_catalog_version_meta() -> Result<()> {
         store.meta_value("pricing_catalog_version")?.as_deref(),
         Some("litellm-snapshot-2026-05")
     );
+    let catalog_file = store
+        .meta_value("pricing_catalog_file")?
+        .expect("snapshot file metadata");
+    assert!(catalog_file.starts_with("base-"));
+    assert!(catalog_file.ends_with(".json"));
     assert!(
         fixture
             .paths
             .root_dir
             .join("pricing")
-            .join("litellm-snapshot-2026-05.json")
+            .join(catalog_file)
             .is_file()
     );
 
@@ -722,6 +727,103 @@ fn doctor_refresh_pricing_accepts_native_litellm_snapshot() -> Result<()> {
     assert_eq!(source, "native-litellm");
     assert!((event_cost - 31.5).abs() < 1e-6);
     assert!((bucket_cost - event_cost).abs() < 1e-9);
+    Ok(())
+}
+
+#[test]
+fn catalog_cli_applies_reports_and_resets_overlay_across_processes() -> Result<()> {
+    let fixture = ReportCliFixture::new()?;
+    fixture.seed_event(SeedEvent {
+        event_key: "codex:catalog-overlay:1",
+        source: "codex",
+        model: "private-cli-model",
+        event_at: "2026-05-01T00:00:00Z",
+        input_tokens: 1_000_000,
+        cache_read_tokens: 0,
+        output_tokens: 0,
+        reasoning_output_tokens: 0,
+        total_tokens: 1_000_000,
+        project_hash: "project-catalog",
+        project_label: "Project Catalog",
+        session_id: Some("catalog-overlay-session"),
+        source_path_hash: Some("catalog-overlay-source"),
+        ..SeedEvent::default()
+    })?;
+    let overlay = fixture.home.join("pricing-overlay.json");
+    fs::write(
+        &overlay,
+        r#"{
+  "schema_version": 2,
+  "kind": "overlay",
+  "version": "team-catalog-1",
+  "models": [
+    {
+      "id": "private-cli-model",
+      "sources": ["codex"],
+      "matches": [{ "value": "private-cli-model", "mode": "exact" }],
+      "rates": {
+        "default": {
+          "input_per_mtok": 3.0,
+          "cached_per_mtok": 0.3,
+          "output_per_mtok": 18.0
+        }
+      },
+      "context_window": 2000000
+    }
+  ]
+}"#,
+    )?;
+
+    let applied = fixture.output(&["catalog", "apply", overlay.to_str().unwrap()])?;
+    assert!(applied.status.success(), "{applied:?}");
+    let status = fixture.json(&["catalog", "status", "--json"])?;
+    assert_eq!(status["base"]["identity"].as_str(), Some("static-v2"));
+    assert_eq!(
+        status["overlay"]["version"].as_str(),
+        Some("team-catalog-1")
+    );
+    assert!(
+        status["effective"]["identity"]
+            .as_str()
+            .is_some_and(|identity| identity.starts_with("effective-"))
+    );
+    assert_eq!(status["rebase_available"].as_bool(), Some(false));
+
+    let conn = Connection::open(&fixture.paths.db_path)?;
+    let (priced, source): (f64, String) = conn.query_row(
+        "SELECT cost_with_cache_usd, pricing_source FROM usage_event WHERE event_key = 'codex:catalog-overlay:1'",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    assert!((priced - 3.0).abs() < 1e-9);
+    assert!(source.starts_with("effective-"));
+    drop(conn);
+
+    let store = Store::new(&fixture.paths)?;
+    let pressure = Dashboard::open(&store)?.context_pressure(&Default::default())?;
+    assert!((pressure.peak_percent - 0.5).abs() < 1e-9);
+    assert_eq!(
+        pressure.peak_model.as_deref(),
+        Some("codex:private-cli-model")
+    );
+
+    let reset = fixture.output(&["catalog", "reset"])?;
+    assert!(reset.status.success(), "{reset:?}");
+    let reset_status = fixture.json(&["catalog", "status", "--json"])?;
+    assert!(reset_status["overlay"].is_null());
+    assert_eq!(
+        reset_status["effective"]["identity"].as_str(),
+        Some("static-v2")
+    );
+
+    let conn = Connection::open(&fixture.paths.db_path)?;
+    let (cost, pricing_status): (f64, String) = conn.query_row(
+        "SELECT cost_with_cache_usd, pricing_status FROM usage_event WHERE event_key = 'codex:catalog-overlay:1'",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    assert_eq!(cost, 0.0);
+    assert_eq!(pricing_status, "unpriced");
     Ok(())
 }
 

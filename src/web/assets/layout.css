@@ -502,9 +502,17 @@ section.block {
   .trends-bottom {
     grid-template-columns: 1fr;
   }
+
+  .explorer-results-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 720px) {
+  section.block {
+    scroll-margin-top: 80px;
+  }
+
   .app {
     grid-template-columns: minmax(0, 1fr);
   }

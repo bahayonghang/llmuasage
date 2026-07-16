@@ -109,11 +109,7 @@ fn load_summary(conn: &Connection, filter: &QueryFilter) -> Result<HomeOverviewS
         SELECT
             COUNT(DISTINCT source || ':' || COALESCE(NULLIF(session_id, ''), NULLIF(source_path_hash, ''), event_key)),
             COUNT(*),
-            COALESCE(SUM(input_tokens), 0) +
-                COALESCE(SUM(cache_creation_tokens), 0) +
-                COALESCE(SUM(cache_read_tokens), 0) +
-                COALESCE(SUM(output_tokens), 0) +
-                COALESCE(SUM(reasoning_output_tokens), 0),
+            COALESCE(SUM(total_tokens), 0),
             COALESCE(SUM(cost_with_cache_usd), 0.0),
             COALESCE(SUM(input_tokens), 0),
             COALESCE(SUM(cache_creation_tokens), 0),
@@ -160,11 +156,7 @@ fn load_by_platform(
             source,
             COUNT(DISTINCT source || ':' || COALESCE(NULLIF(session_id, ''), NULLIF(source_path_hash, ''), event_key)),
             COUNT(*),
-            COALESCE(SUM(input_tokens), 0) +
-                COALESCE(SUM(cache_creation_tokens), 0) +
-                COALESCE(SUM(cache_read_tokens), 0) +
-                COALESCE(SUM(output_tokens), 0) +
-                COALESCE(SUM(reasoning_output_tokens), 0)
+            COALESCE(SUM(total_tokens), 0)
         FROM usage_event
         {}
         GROUP BY source
@@ -202,11 +194,7 @@ fn load_series(conn: &Connection, filter: &QueryFilter) -> Result<Vec<HomeOvervi
             source,
             COUNT(DISTINCT source || ':' || COALESCE(NULLIF(session_id, ''), NULLIF(source_path_hash, ''), event_key)),
             COUNT(*),
-            COALESCE(SUM(input_tokens), 0) +
-                COALESCE(SUM(cache_creation_tokens), 0) +
-                COALESCE(SUM(cache_read_tokens), 0) +
-                COALESCE(SUM(output_tokens), 0) +
-                COALESCE(SUM(reasoning_output_tokens), 0)
+            COALESCE(SUM(total_tokens), 0)
         FROM usage_event
         {}
         GROUP BY local_date, source

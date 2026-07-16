@@ -86,47 +86,6 @@ impl Store {
     }
 }
 
-impl Store {
-    /// Loads the catalog currently selected by `meta('pricing_catalog_version')`.
-    ///
-    /// Missing metadata keeps the embedded static catalog. Once metadata points
-    /// at a local snapshot, load failures are returned to the caller instead of
-    /// silently falling back to `static-v1`; otherwise new sync/recompute work
-    /// would be priced against a catalog the user did not select.
-    pub fn active_pricing_catalog(&self) -> Result<PricingCatalog> {
-        let Some(version) = self.meta_value("pricing_catalog_version")? else {
-            return Ok(PricingCatalog::static_v1().clone());
-        };
-        if version == PricingCatalog::static_v1().version {
-            return Ok(PricingCatalog::static_v1().clone());
-        }
-
-        let snapshot_path = self
-            .paths
-            .root_dir
-            .join("pricing")
-            .join(format!("{version}.json"));
-        let catalog = PricingCatalog::load_snapshot(&snapshot_path).map_err(|source| {
-            LlmusageError::ConfigInvalid {
-                detail: format!(
-                    "failed to load active pricing catalog `{version}` from {}: {source}",
-                    snapshot_path.display()
-                ),
-            }
-        })?;
-        if catalog.version != version {
-            return Err(LlmusageError::ConfigInvalid {
-                detail: format!(
-                    "pricing catalog metadata points to `{version}` but snapshot {} declares `{}`",
-                    snapshot_path.display(),
-                    catalog.version
-                ),
-            });
-        }
-        Ok(catalog)
-    }
-}
-
 impl SyncRunWriter {
     fn reset_file_events_batch_tx(
         tx: &Transaction<'_>,
@@ -1472,7 +1431,7 @@ mod tests {
         )?;
         assert!(event_cost > 0.0);
         assert_eq!(event_status, "static");
-        assert_eq!(event_source, "static-v1");
+        assert_eq!(event_source, "static-v2");
 
         let bucket_count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM usage_bucket_30m WHERE source = 'codex'",
@@ -1523,7 +1482,7 @@ mod tests {
             "bucket cost should match persisted event cost after reset"
         );
         assert_eq!(bucket_status, "static");
-        assert_eq!(bucket_source, "static-v1");
+        assert_eq!(bucket_source, "static-v2");
         assert_eq!(event_count, 1);
 
         let unpriced_bucket_count: i64 = conn.query_row(
@@ -1750,7 +1709,7 @@ mod tests {
         assert!((event_cost - 72.6).abs() < 1e-9);
         assert!((without_cache - 78.0).abs() < 1e-9);
         assert_eq!(status, "static");
-        assert_eq!(source, "static-v1");
+        assert_eq!(source, "static-v2");
 
         let (bucket_cost, cache_creation, cache_read, bucket_status): (f64, i64, i64, String) =
             conn.query_row(

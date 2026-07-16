@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 11
-- **Last Active**: 2026-07-06
+- **Total Sessions**: 15
+- **Last Active**: 2026-07-16
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~384 | Active |
+| `journal-1.md` | ~519 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,10 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 15 | 2026-07-16 | Align token accounting with ccusage | `0848fe8`, `3702195` | `dev` |
+| 14 | 2026-07-11 | 优化看板时间范围切换性能 | `257ecd5`, `c0873b0` | `dev` |
+| 13 | 2026-07-11 | 优化 Explorer 时间序列展示 | `8e75049` | `dev` |
+| 12 | 2026-07-10 | 完成可配置模型目录与 GPT-5.6 支持 | `b1aa754`, `f3db2c0` | `dev` |
 | 11 | 2026-07-06 | Optimize serve number formatting | `3e2845a` | `dev` |
 | 10 | 2026-07-03 | Claude Fable/Mythos 模型统计覆盖 | `311e9bc` | `dev` |
 | 9 | 2026-07-02 | provider_label 用量归因维度 | `af58f0a`, `b7d06be`, `14bd284`, `6d4d0d2` | `dev` |

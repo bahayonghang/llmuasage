@@ -4,7 +4,7 @@
 
 Local-first usage analytics for AI coding CLIs. `llmusage` reads local Codex, Claude Code, OpenCode, and Google Antigravity artifacts into a local SQLite database, then renders reports, a terminal dashboard, a browser dashboard, and offline HTML exports without upload or login.
 
-> Current crate version: `0.9.0`.
+> Current crate version: `0.9.2`.
 
 ![llmusage web dashboard overview](./docs/public/screenshots/web-dashboard-overview.png)
 
@@ -68,6 +68,7 @@ llmusage help --zh
 llmusage dash
 llmusage codex-tracer
 llmusage logs --limit 50 --level warn
+llmusage catalog status
 llmusage export html --out .\llmusage-report
 ```
 
@@ -76,6 +77,20 @@ Report commands are read-only SQLite queries; run `llmusage sync` when the datab
 `llmusage dash` uses a tokscale-style terminal dashboard. Keyboard controls: `tab`/`shift-tab` or `1`-`8` switch views, `s` opens the source picker, `r` refreshes dashboard data, `R` toggles auto-refresh, `x` runs sync for the current source filter, `?` opens help/settings, and `q` exits.
 
 The browser dashboard includes behavior panels and a local Cost Explorer workbench for time × metric × group-by slicing, including tool/non-tool cost attribution and offline snapshot export.
+
+## Pricing catalog
+
+Model pricing and context windows come from the embedded `static-v2` catalog. It includes `gpt-5.6-luna`, `gpt-5.6-terra`, and `gpt-5.6-sol` for Codex and OpenCode, including the exact `gpt-5.6` alias for Sol and request-scoped long-context pricing above 272,000 prompt tokens.
+
+Apply a local incremental overlay without copying the embedded catalog:
+
+```powershell
+llmusage catalog apply .\pricing-overlay.json
+llmusage catalog status --json
+llmusage catalog reset
+```
+
+An overlay adds, replaces, or removes complete model definitions by stable model id. Applying or resetting a catalog recomputes persisted event costs and 30-minute bucket pricing. `doctor --refresh-pricing <PATH>` remains the compatibility entrypoint for a complete base snapshot, not an overlay. All catalog inputs are local files; llmusage does not fetch pricing from the network.
 
 ## Codex tracer
 
@@ -93,9 +108,10 @@ llmusage codex-tracer --rebuild
 - No account login, device token, upload queue, or remote usage API call.
 - Normal `llmusage sync` keeps imported usage when original source files are missing.
 - `llmusage sync --rebuild` refuses lossy rebuilds unless you also pass `--allow-lossy-rebuild`.
+- Legacy token-accounting rows stay readable but block new writes until each parser source is rebuilt with `llmusage sync --rebuild --source <source>`.
 - `llmusage diagnostics --forget-file <PATH> --source <SOURCE>` is the explicit write path for intentionally ignored source files.
 - `llmusage logs` queries local runtime logs and recent command audit rows without changing report stdout or `sync --json-events` stdout contracts.
-- `llmusage doctor --refresh-pricing <file>` reads a local pricing snapshot; URLs are refused.
+- `llmusage catalog apply <file>` and `doctor --refresh-pricing <file>` read local catalog files; URLs are refused.
 
 ## Documentation
 
