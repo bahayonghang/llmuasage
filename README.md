@@ -45,6 +45,8 @@ What this does:
 3. `llmusage` shows the default daily report for the last 7 calendar days.
 4. `serve` starts the local dashboard on `127.0.0.1`.
 
+On the first sync after an embedded pricing catalog upgrade, `sync` reprices historical events before scanning sources. Stderr reports the catalog versions, processed/total events, bucket reconciliation, and completion. `sync --json-events` exposes the same pricing lifecycle as NDJSON-only stdout.
+
 ## Supported local sources
 
 | Source | Local artifacts |
@@ -91,6 +93,8 @@ llmusage catalog reset
 ```
 
 An overlay adds, replaces, or removes complete model definitions by stable model id. Applying or resetting a catalog recomputes persisted event costs and 30-minute bucket pricing. `doctor --refresh-pricing <PATH>` remains the compatibility entrypoint for a complete base snapshot, not an overlay. All catalog inputs are local files; llmusage does not fetch pricing from the network.
+
+Pricing recompute start/reconcile/finish diagnostics are available in the local file log at `LLMUSAGE_LOG=info`; page-level records require `debug`. Human sync progress is shown independently of the file-log level, and a recompute still running after 30 seconds emits one `warn` record at the default level.
 
 ## Codex tracer
 

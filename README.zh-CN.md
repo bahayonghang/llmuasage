@@ -45,6 +45,8 @@ llmusage serve
 3. `llmusage` 显示默认 daily 报表：所选时区下最近 7 个自然日。
 4. `serve` 在 `127.0.0.1` 启动本地浏览器 Dashboard。
 
+内置定价目录升级后的第一次 sync 会在扫描来源前重算历史事件价格。stderr 会显示目录版本、已处理/总事件数、汇总桶对账和完成状态；`sync --json-events` 会在纯 NDJSON stdout 中提供同一套定价生命周期。
+
 ## 支持的本地来源
 
 | 来源 | 本地记录 |
@@ -91,6 +93,8 @@ llmusage catalog reset
 ```
 
 覆盖层按稳定模型 id 新增、完整替换或删除模型定义。apply/reset 会重算已落库 event 成本和 30 分钟 bucket 定价。`doctor --refresh-pricing <PATH>` 继续作为完整 base snapshot 的兼容入口，不是增量覆盖。所有目录输入都必须是本地文件，llmusage 不会联网拉取价格。
+
+将 `LLMUSAGE_LOG` 设为 `info` 可在本地文件日志中记录定价重算的开始、对账和完成；页级记录需要 `debug`。终端人读进度不依赖文件日志级别；重算超过 30 秒后会按默认 `warn` 级别记录一次仍在推进的告警。
 
 ## Codex Tracer
 

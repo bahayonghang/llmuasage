@@ -10,6 +10,8 @@ llmusage sync
 
 人读进度写入 stderr，最终摘要保留在 stdout。
 
+如果内置定价目录自上次运行后发生变化，bootstrap 会在扫描来源前重算历史事件价格。进度会显示新旧目录版本、已处理/总事件数、汇总桶对账和最终耗时。对未固定的内置目录，这是一轮一次性升级；目录已是最新或已固定时会跳过。
+
 摘要会按来源显示 `files`、`changed`、`skipped`、`seen`、`committed` 和 `stored_events`。对文件型来源，`skipped` 表示已保存的 cursor、文件大小、mtime、头部 fingerprint、尾部签名和 offset 证明文件未变化。对 OpenCode，`skipped` 表示 SQLite 高水位 cursor 没找到更新行。`committed` 是 SQLite 去重后本次新增写入数；`stored_events` 是数据库中的持久总量。
 
 ## 只导入一个来源
@@ -32,7 +34,9 @@ llmusage sync --source antigravity
 llmusage sync --json-events
 ```
 
-该模式会在 stdout 输出 NDJSON 生命周期/进度事件，适合 wrapper 或 UI adapter 使用。
+该模式会在 stdout 输出 NDJSON 生命周期/进度事件。定价升级会依次增加 `pricing_upgrade_started`、节流后的 `pricing_upgrade_progress`、`pricing_bucket_reconcile_started` 和 `pricing_upgrade_finished`，适合 wrapper 或 UI adapter 使用。
+
+人读进度不依赖结构化日志。文件诊断可用 `LLMUSAGE_LOG=info` 记录定价阶段边界，或用 `debug` 记录页进度；默认 `warn` 级别会在重算超过 30 秒后记录一次存活告警。
 
 ## recent-ready 信号
 
