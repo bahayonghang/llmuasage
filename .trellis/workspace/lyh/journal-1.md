@@ -551,3 +551,36 @@ Aligned Claude, Codex, and OpenCode token normalization with ccusage; made persi
 ### Next Steps
 
 - None - task complete
+
+
+## Session 17: Serve 安全迁移旧版 token 统计
+
+**Date**: 2026-07-17
+**Task**: Serve 安全迁移旧版 token 统计
+**Branch**: `dev`
+
+### Summary
+
+实现 serve 启动前按来源安全重建 legacy token accounting，保留有损来源与 parserless 历史，并修正 full rebuild 的逐源边界；补齐回归测试、双语文档和 Trellis 规范。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `31ca870` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
