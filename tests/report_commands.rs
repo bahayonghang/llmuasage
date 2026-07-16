@@ -75,7 +75,7 @@ fn report_commands_emit_stable_json_from_sqlite() -> Result<()> {
         daily["daily"][0]["cache_creation_tokens"].as_i64(),
         Some(30)
     );
-    assert_eq!(daily["totals"]["total_tokens"].as_i64(), Some(415));
+    assert_eq!(daily["totals"]["total_tokens"].as_i64(), Some(385));
     assert!(daily["daily"][0].get("conversation_count").is_none());
     assert!(daily["daily"][0].get("conversationCount").is_none());
 
@@ -99,7 +99,7 @@ fn report_commands_emit_stable_json_from_sqlite() -> Result<()> {
         monthly["totals"]["cache_creation_tokens"].as_i64(),
         Some(30)
     );
-    assert_eq!(monthly["totals"]["total_tokens"].as_i64(), Some(415));
+    assert_eq!(monthly["totals"]["total_tokens"].as_i64(), Some(385));
 
     let session = fixture.json(&[
         "session",
@@ -117,7 +117,7 @@ fn report_commands_emit_stable_json_from_sqlite() -> Result<()> {
         session["session"]["cache_creation_tokens"].as_i64(),
         Some(30)
     );
-    assert_eq!(session["session"]["total_tokens"].as_i64(), Some(165));
+    assert_eq!(session["session"]["total_tokens"].as_i64(), Some(135));
 
     let blocks = fixture.json(&[
         "blocks",

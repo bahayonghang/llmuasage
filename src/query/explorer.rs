@@ -1015,11 +1015,7 @@ fn attribution_outer_sql(
                 COALESCE(e.cache_creation_tokens, 0) AS cache_creation_tokens,
                 COALESCE(e.output_tokens, 0) AS output_tokens,
                 COALESCE(e.reasoning_output_tokens, 0) AS reasoning_output_tokens,
-                COALESCE(e.input_tokens, 0) +
-                    COALESCE(e.cache_read_tokens, 0) +
-                    COALESCE(e.cache_creation_tokens, 0) +
-                    COALESCE(e.output_tokens, 0) +
-                    COALESCE(e.reasoning_output_tokens, 0) AS total_tokens
+                COALESCE(e.total_tokens, 0) AS total_tokens
             FROM usage_event e
             {event_where}
         ),
@@ -1256,7 +1252,7 @@ fn event_metric_expr(metric: ExplorerMetric, token_type: Option<ExplorerTokenTyp
                 "CAST(COALESCE(SUM({}), 0) AS REAL)",
                 token_type.event_expr("e")
             ),
-            None => "CAST(COALESCE(SUM(COALESCE(e.input_tokens, 0) + COALESCE(e.cache_creation_tokens, 0) + COALESCE(e.cache_read_tokens, 0) + COALESCE(e.output_tokens, 0) + COALESCE(e.reasoning_output_tokens, 0)), 0) AS REAL)".to_string(),
+            None => "CAST(COALESCE(SUM(COALESCE(e.total_tokens, 0)), 0) AS REAL)".to_string(),
         },
         ExplorerMetric::Turns => unreachable!("turn metric routes through turn strategy"),
     }

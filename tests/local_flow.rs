@@ -516,10 +516,10 @@ fn sync_prices_gpt_5_6_per_request_for_codex_and_opencode() -> Result<()> {
         assert_eq!(rows[0].0, "codex");
         assert_eq!(rows[0].1, "gpt-5.6-luna");
         assert!(rows[0].4.contains("\"tier\":\"default\""));
-        assert!((rows[0].5 - 0.8).abs() < 1e-9);
+        assert!((rows[0].5 - 0.7).abs() < 1e-9);
         assert_eq!(rows[1].1, "gpt-5.6-luna");
-        assert!(rows[1].4.contains("\"tier\":\"long_context\""));
-        assert!((rows[1].5 - 1.3000025).abs() < 1e-9);
+        assert!(rows[1].4.contains("\"tier\":\"default\""));
+        assert!((rows[1].5 - 0.70000125).abs() < 1e-9);
         assert_eq!(rows[2].0, "opencode");
         assert_eq!(rows[2].1, "gpt-5.6-sol");
         assert!(rows[2].4.contains("\"tier\":\"long_context\""));
@@ -537,7 +537,7 @@ fn sync_prices_gpt_5_6_per_request_for_codex_and_opencode() -> Result<()> {
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
-        assert!((bucket_cost - 2.1000025).abs() < 1e-9);
+        assert!((bucket_cost - 1.40000125).abs() < 1e-9);
         assert_eq!(bucket_rate, "mixed");
         drop(conn);
 

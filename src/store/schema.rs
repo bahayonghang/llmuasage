@@ -8,6 +8,9 @@ use crate::error::Result;
 
 const META_RAW_ARCHIVE_KEY: &str = "raw_archive_enabled";
 
+/// Current parser-owned token normalization contract.
+pub const TOKEN_ACCOUNTING_VERSION: u32 = 2;
+
 impl Store {
     pub fn bootstrap(&self) -> Result<()> {
         self.bootstrap_with(BootstrapOptions::default())
@@ -99,6 +102,48 @@ impl Store {
         write_meta_value(&conn, key, value)
     }
 
+    /// Returns the token-accounting contract recorded for one parser source.
+    pub fn token_accounting_version(
+        &self,
+        source: crate::models::SourceKind,
+    ) -> Result<Option<u32>> {
+        Ok(self
+            .meta_value(&token_accounting_key(source))?
+            .and_then(|value| value.parse().ok()))
+    }
+
+    /// True when persisted rows predate the current token-accounting contract.
+    pub fn has_legacy_token_accounting(&self, source: crate::models::SourceKind) -> Result<bool> {
+        if self.token_accounting_version(source)? == Some(TOKEN_ACCOUNTING_VERSION) {
+            return Ok(false);
+        }
+        let conn = self.open_connection()?;
+        let rows: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_event WHERE source = ?1",
+            [source.as_str()],
+            |row| row.get(0),
+        )?;
+        Ok(rows > 0)
+    }
+
+    /// Marks a source only after its parser/store sync completes successfully.
+    pub fn mark_current_token_accounting(&self, source: crate::models::SourceKind) -> Result<()> {
+        self.set_meta_value(
+            &token_accounting_key(source),
+            &TOKEN_ACCOUNTING_VERSION.to_string(),
+        )
+    }
+
+    /// Clears the marker before a guarded rebuild starts.
+    pub fn clear_token_accounting_version(&self, source: crate::models::SourceKind) -> Result<()> {
+        let conn = self.open_connection()?;
+        conn.execute(
+            "DELETE FROM meta WHERE key = ?1",
+            [token_accounting_key(source)],
+        )?;
+        Ok(())
+    }
+
     /// Deletes rebuildable usage state for exactly one source (D20 / F3.3).
     ///
     /// `project_dim` is intentionally preserved because projects can be shared
@@ -171,6 +216,10 @@ impl Store {
         }
         Ok(())
     }
+}
+
+fn token_accounting_key(source: crate::models::SourceKind) -> String {
+    format!("token_accounting_version.{}", source.as_str())
 }
 
 fn read_meta_flag(conn: &rusqlite::Connection, key: &str) -> Result<bool> {

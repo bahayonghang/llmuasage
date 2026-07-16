@@ -27,6 +27,9 @@ pub struct SourceCapabilityStatus {
     pub quality: &'static str,
     pub total_tokens: i64,
     pub last_event_at: Option<String>,
+    pub token_accounting_version: Option<u32>,
+    pub legacy_token_accounting: bool,
+    pub token_accounting_warning: Option<String>,
     pub detail: String,
 }
 
@@ -52,7 +55,8 @@ pub async fn run(app: &AppContext) -> Result<()> {
     let dashboard = Dashboard::open(&store)?;
     let sources = dashboard.source_breakdown(&Default::default())?;
     let probes = integrations::probe_all(app)?;
-    let capability_statuses = build_source_capability_statuses(&probes, &sources);
+    let mut capability_statuses = build_source_capability_statuses(&probes, &sources);
+    apply_token_accounting_statuses(&store, &mut capability_statuses)?;
     let platform_statuses = build_platform_monitor_statuses();
 
     println!("Source status:");
@@ -92,13 +96,35 @@ pub fn build_platform_monitor_statuses() -> Vec<PlatformMonitorStatus> {
         .collect()
 }
 
+pub fn apply_token_accounting_statuses(
+    store: &Store,
+    statuses: &mut [SourceCapabilityStatus],
+) -> Result<()> {
+    for status in statuses {
+        if !registry::source_descriptor(status.source)
+            .is_some_and(|descriptor| descriptor.capabilities.parser)
+        {
+            continue;
+        }
+        status.token_accounting_version = store.token_accounting_version(status.source)?;
+        status.legacy_token_accounting = store.has_legacy_token_accounting(status.source)?;
+        if status.legacy_token_accounting {
+            status.token_accounting_warning = Some(format!(
+                "legacy token accounting; run `llmusage sync --rebuild --source {}`",
+                status.source.as_str()
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub fn print_human_statuses(
     capability_statuses: &[SourceCapabilityStatus],
     platform_statuses: &[PlatformMonitorStatus],
 ) {
     for status in capability_statuses {
         println!(
-            "- Source status {}: activation={} status={} configured={} quality={} total={} last={} ({})",
+            "- Source status {}: activation={} status={} configured={} quality={} total={} last={} accounting={} ({})",
             status.source,
             status.activation,
             status.status,
@@ -106,8 +132,18 @@ pub fn print_human_statuses(
             status.quality,
             status.total_tokens,
             status.last_event_at.as_deref().unwrap_or("never"),
+            if status.legacy_token_accounting {
+                "legacy"
+            } else if status.token_accounting_version.is_some() {
+                "current"
+            } else {
+                "unversioned"
+            },
             status.display_name
         );
+        if let Some(warning) = &status.token_accounting_warning {
+            println!("  warning: {warning}");
+        }
     }
     for platform in platform_statuses {
         println!(
@@ -185,6 +221,9 @@ fn source_status_from_parts(
         quality,
         total_tokens,
         last_event_at,
+        token_accounting_version: None,
+        legacy_token_accounting: false,
+        token_accounting_warning: None,
         detail,
     }
 }

@@ -29,6 +29,7 @@ pub use pricing_catalog::{
     CatalogApplyResult, CatalogLayerStatus, CatalogResetResult, PricingCatalogStatus,
 };
 pub use run_log::RunLog;
+pub use schema::TOKEN_ACCOUNTING_VERSION;
 pub use source_file::{LossyRebuildRisk, SourceFileStateCounts, SourceFileStore};
 pub use sync_status::SyncStatusStore;
 pub use trigger::TriggerStore;
@@ -173,6 +174,15 @@ pub struct SourceSyncStatus {
     /// Total imported events currently stored for this source after the run.
     #[serde(default)]
     pub stored_events: i64,
+    /// Parser-owned token accounting contract recorded for this source.
+    #[serde(default)]
+    pub token_accounting_version: Option<u32>,
+    /// True when stored rows require an explicit guarded source rebuild.
+    #[serde(default)]
+    pub legacy_token_accounting: bool,
+    /// Actionable warning for read-only legacy results.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_accounting_warning: Option<String>,
     /// Parser wall-clock time in milliseconds.
     pub parse_ms: i64,
     /// SQLite write wall-clock time in milliseconds.

@@ -1,8 +1,9 @@
 use std::{
+    collections::HashMap,
     fs::File,
     future::Future,
     io::{BufRead, BufReader, Seek, SeekFrom},
-    path::{Path, PathBuf},
+    path::Path,
     pin::Pin,
     time::Instant,
 };
@@ -31,6 +32,7 @@ use crate::{
 #[derive(Debug, Clone)]
 struct ClaudeShardPlan {
     files: Vec<CandidateFile>,
+    reset_path_hashes: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -49,9 +51,18 @@ struct ClaudeShardOutput {
 #[derive(Debug)]
 struct ClaudeParseResult {
     end_offset: u64,
-    events: Vec<UsageEvent>,
+    events: Vec<ClaudeEventCandidate>,
     turns: Vec<UsageTurn>,
     tool_calls: Vec<UsageToolCall>,
+}
+
+#[derive(Debug)]
+struct ClaudeEventCandidate {
+    event: UsageEvent,
+    message_id: Option<String>,
+    request_id: Option<String>,
+    is_sidechain: bool,
+    message_only_key: bool,
 }
 
 /// Claude project log parser. Owns the per-file scan + per-shard commit
@@ -114,22 +125,13 @@ async fn sync_claude(
     );
     let cursor_map = store.cursors().load_file_cursors(SourceKind::Claude)?;
 
-    let mut shards = std::collections::HashMap::<PathBuf, Vec<CandidateFile>>::new();
     let mut changed_files = 0usize;
-    for file_path in files {
-        let key = file_path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."));
+    for file_path in &files {
         let existing = file_path
             .to_str()
             .and_then(|raw| cursor_map.get(raw).cloned());
-        if should_rescan_file(&file_path, existing.as_ref())? {
+        if should_rescan_file(file_path, existing.as_ref())? {
             changed_files += 1;
-            shards.entry(key).or_default().push(CandidateFile {
-                path: file_path,
-                existing,
-            });
         }
     }
 
@@ -140,11 +142,21 @@ async fn sync_claude(
     let mut inserted = 0usize;
     let mut write_ms = 0u64;
     let mut files_scanned = 0usize;
-    let mut plans = shards
-        .into_values()
-        .map(|files| ClaudeShardPlan { files })
-        .collect::<Vec<_>>();
-    plans.sort_by_key(|plan| plan.files.first().map(|file| file.path.clone()));
+    let plans = if changed_files == 0 {
+        Vec::new()
+    } else {
+        vec![ClaudeShardPlan {
+            files: files
+                .iter()
+                .cloned()
+                .map(|path| CandidateFile {
+                    path,
+                    existing: None,
+                })
+                .collect(),
+            reset_path_hashes: cursor_map.keys().map(|path| hash_string(path)).collect(),
+        }]
+    };
 
     let width = parallelism.max(1);
     for batch in plans.chunks(width) {
@@ -227,18 +239,20 @@ fn emit_progress(sink: &mut Option<ProgressSink<'_>>, event: SyncEvent) {
 
 fn parse_claude_shard(plan: ClaudeShardPlan) -> Result<ClaudeShardOutput> {
     let mut resolver = ProjectResolver::default();
+    let replaying = !plan.reset_path_hashes.is_empty();
     let mut output = ClaudeShardOutput {
         events: Vec::new(),
         turns: Vec::new(),
         tool_calls: Vec::new(),
         cursors: Vec::new(),
-        reset_path_hashes: Vec::new(),
+        reset_path_hashes: plan.reset_path_hashes,
         events_seen: 0,
         events_replayed: 0,
         bytes_scanned: 0,
         seen_file_paths: Vec::new(),
     };
 
+    let mut candidates = Vec::new();
     for candidate in plan.files {
         let existing = candidate.existing.clone();
         let decision = decide_file_replay(candidate)?;
@@ -261,11 +275,10 @@ fn parse_claude_shard(plan: ClaudeShardPlan) -> Result<ClaudeShardOutput> {
             .file_size
             .saturating_sub(decision.start_offset);
         output.events_seen += parsed.events.len();
-        if decision.replay_mode == FileReplayMode::Reparse && existing.is_some() {
+        if replaying || (decision.replay_mode == FileReplayMode::Reparse && existing.is_some()) {
             output.events_replayed += parsed.events.len();
-            output.reset_path_hashes.push(path_hash);
         }
-        output.events.extend(parsed.events);
+        candidates.extend(parsed.events);
         output.turns.extend(parsed.turns);
         output.tool_calls.extend(parsed.tool_calls);
         output.cursors.push(finalize_cursor(
@@ -276,6 +289,8 @@ fn parse_claude_shard(plan: ClaudeShardPlan) -> Result<ClaudeShardOutput> {
             None,
         ));
     }
+
+    output.events = dedupe_claude_events(candidates);
 
     Ok(output)
 }
@@ -368,8 +383,35 @@ fn parse_project_file(
             .unwrap_or(fallback_session_id.as_str())
             .to_string();
 
+        let message_id = value
+            .get("message")
+            .and_then(|message| message.get("id"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let request_id = value
+            .get("requestId")
+            .or_else(|| value.get("request_id"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let is_sidechain = value
+            .get("isSidechain")
+            .or_else(|| value.get("is_sidechain"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let event_key = claude_event_key(
+            message_id.as_deref(),
+            request_id.as_deref(),
+            path_hash,
+            file_fingerprint,
+            offset,
+            false,
+        );
         let event = UsageEvent {
-            event_key: format!("claude:{path_hash}:{file_fingerprint}:{offset}"),
+            event_key,
             source: SourceKind::Claude,
             provider_label: String::new(),
             model: normalize_model(
@@ -392,7 +434,13 @@ fn parse_project_file(
         let tools = extract_claude_tools(&value);
         turns.push(turn_from_tools(&event, &tools));
         tool_calls.extend(tool_calls_from_evidence(&event, tools));
-        events.push(event);
+        events.push(ClaudeEventCandidate {
+            event,
+            message_id,
+            request_id,
+            is_sidechain,
+            message_only_key: false,
+        });
     }
 
     Ok(ClaudeParseResult {
@@ -403,34 +451,162 @@ fn parse_project_file(
     })
 }
 
+fn dedupe_claude_events(candidates: Vec<ClaudeEventCandidate>) -> Vec<UsageEvent> {
+    let mut deduped: Vec<ClaudeEventCandidate> = Vec::new();
+    let mut exact_indexes = HashMap::<(String, Option<String>), usize>::new();
+    let mut message_indexes = HashMap::<String, Vec<usize>>::new();
+
+    for candidate in candidates {
+        let Some(message_id) = candidate.message_id.as_ref() else {
+            deduped.push(candidate);
+            continue;
+        };
+        let exact_key = (message_id.clone(), candidate.request_id.clone());
+        let existing_index = exact_indexes.get(&exact_key).copied().or_else(|| {
+            message_indexes.get(message_id).and_then(|indexes| {
+                indexes
+                    .iter()
+                    .copied()
+                    .find(|index| candidate.is_sidechain || deduped[*index].is_sidechain)
+            })
+        });
+
+        if let Some(index) = existing_index {
+            let cross_request = deduped[index].request_id != candidate.request_id;
+            merge_claude_candidate(&mut deduped[index], candidate);
+            deduped[index].message_only_key |= cross_request;
+            exact_indexes.insert(exact_key, index);
+            continue;
+        }
+
+        let index = deduped.len();
+        exact_indexes.insert(exact_key, index);
+        message_indexes
+            .entry(message_id.clone())
+            .or_default()
+            .push(index);
+        deduped.push(candidate);
+    }
+
+    deduped
+        .into_iter()
+        .map(|mut candidate| {
+            if candidate.message_id.is_some() {
+                candidate.event.event_key = claude_event_key(
+                    candidate.message_id.as_deref(),
+                    candidate.request_id.as_deref(),
+                    "",
+                    "",
+                    0,
+                    candidate.message_only_key,
+                );
+            }
+            candidate.event
+        })
+        .collect()
+}
+
+fn merge_claude_candidate(existing: &mut ClaudeEventCandidate, candidate: ClaudeEventCandidate) {
+    let prefer_candidate = (existing.is_sidechain && !candidate.is_sidechain)
+        || (existing.is_sidechain == candidate.is_sidechain
+            && candidate.event.tokens.total_tokens > existing.event.tokens.total_tokens);
+    let merged = UsageTokens {
+        input_tokens: existing
+            .event
+            .tokens
+            .input_tokens
+            .max(candidate.event.tokens.input_tokens),
+        cache_read_tokens: existing
+            .event
+            .tokens
+            .cache_read_tokens
+            .max(candidate.event.tokens.cache_read_tokens),
+        cache_creation_tokens: existing
+            .event
+            .tokens
+            .cache_creation_tokens
+            .max(candidate.event.tokens.cache_creation_tokens),
+        output_tokens: existing
+            .event
+            .tokens
+            .output_tokens
+            .max(candidate.event.tokens.output_tokens),
+        reasoning_output_tokens: existing
+            .event
+            .tokens
+            .reasoning_output_tokens
+            .max(candidate.event.tokens.reasoning_output_tokens),
+        total_tokens: existing
+            .event
+            .tokens
+            .total_tokens
+            .max(candidate.event.tokens.total_tokens),
+    };
+    if prefer_candidate {
+        let message_only_key = existing.message_only_key;
+        *existing = candidate;
+        existing.message_only_key = message_only_key;
+    }
+    existing.event.tokens = UsageTokens {
+        total_tokens: merged.total_tokens.max(
+            merged.input_tokens
+                + merged.cache_creation_tokens
+                + merged.cache_read_tokens
+                + merged.output_tokens,
+        ),
+        ..merged
+    };
+}
+
+fn claude_event_key(
+    message_id: Option<&str>,
+    request_id: Option<&str>,
+    path_hash: &str,
+    file_fingerprint: &str,
+    offset: u64,
+    message_only: bool,
+) -> String {
+    let Some(message_id) = message_id else {
+        return format!("claude:{path_hash}:{file_fingerprint}:{offset}");
+    };
+    let identity = if message_only {
+        message_id.to_string()
+    } else {
+        format!("{message_id}\0{}", request_id.unwrap_or_default())
+    };
+    format!("claude:logical:{}", hash_string(&identity))
+}
+
 fn normalize_claude_usage(value: &Value) -> UsageTokens {
     let input_tokens = value
         .get("input_tokens")
         .and_then(Value::as_i64)
-        .unwrap_or_default();
-    let cache_creation_tokens = read_i64(value, "cache_creation_input_tokens")
-        + read_i64(value, "cache_creation_input_tokens_5m")
-        + read_i64(value, "cache_creation_input_tokens_1h");
+        .unwrap_or_default()
+        .max(0);
+    let cache_creation_tokens = read_i64(value, "cache_creation_input_tokens").max(0)
+        + read_i64(value, "cache_creation_input_tokens_5m").max(0)
+        + read_i64(value, "cache_creation_input_tokens_1h").max(0);
     let cache_read_tokens = value
         .get("cache_read_input_tokens")
         .and_then(Value::as_i64)
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .max(0);
     let output_tokens = value
         .get("output_tokens")
         .and_then(Value::as_i64)
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .max(0);
     let reasoning_output_tokens = value
         .get("reasoning_output_tokens")
         .or_else(|| value.get("thinking_output_tokens"))
         .and_then(Value::as_i64)
-        .unwrap_or_default();
-    let total_tokens = value.get("total_tokens").and_then(Value::as_i64).unwrap_or(
-        input_tokens
-            + cache_creation_tokens
-            + cache_read_tokens
-            + output_tokens
-            + reasoning_output_tokens,
-    );
+        .unwrap_or_default()
+        .max(0);
+    let total_tokens = value
+        .get("total_tokens")
+        .and_then(Value::as_i64)
+        .filter(|tokens| *tokens >= 0)
+        .unwrap_or(input_tokens + cache_creation_tokens + cache_read_tokens + output_tokens);
 
     UsageTokens {
         input_tokens,
@@ -502,7 +678,7 @@ mod tests {
         let tokens = normalize_claude_usage(&usage);
 
         assert_eq!(tokens.reasoning_output_tokens, 7);
-        assert_eq!(tokens.total_tokens, 28);
+        assert_eq!(tokens.total_tokens, 21);
     }
 
     #[test]
@@ -516,7 +692,7 @@ mod tests {
         let tokens = normalize_claude_usage(&usage);
 
         assert_eq!(tokens.reasoning_output_tokens, 3);
-        assert_eq!(tokens.total_tokens, 18);
+        assert_eq!(tokens.total_tokens, 15);
     }
 
     #[test]
@@ -534,6 +710,20 @@ mod tests {
         assert_eq!(tokens.cache_creation_tokens, 10);
         assert_eq!(tokens.cache_read_tokens, 2);
         assert_eq!(tokens.total_tokens, 27);
+    }
+
+    #[test]
+    fn claude_parser_clamps_negative_channels() {
+        let tokens = normalize_claude_usage(&json!({
+            "input_tokens": -10,
+            "cache_creation_input_tokens": -4,
+            "cache_read_input_tokens": -2,
+            "output_tokens": -3,
+            "reasoning_output_tokens": -1,
+            "total_tokens": -20
+        }));
+
+        assert_eq!(tokens, crate::models::UsageTokens::default());
     }
 
     #[test]

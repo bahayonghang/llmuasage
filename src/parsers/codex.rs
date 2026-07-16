@@ -264,7 +264,6 @@ fn parse_codex_shard(plan: CodexShardPlan) -> Result<CodexShardOutput> {
         let parsed = parse_rollout_file(
             &decision.snapshot.path,
             &path_hash,
-            &decision.snapshot.file_fingerprint,
             decision.start_offset,
             last_total,
             last_model,
@@ -297,7 +296,6 @@ fn parse_codex_shard(plan: CodexShardPlan) -> Result<CodexShardOutput> {
 fn parse_rollout_file(
     file_path: &Path,
     path_hash: &str,
-    file_fingerprint: &str,
     start_offset: u64,
     last_total: Option<UsageTokens>,
     last_model: Option<String>,
@@ -428,11 +426,20 @@ fn parse_rollout_file(
             totals = Some(next_total);
         }
 
+        let normalized_model = normalize_model(model.as_deref());
+        let logical_identity = format!(
+            "{timestamp}\0{normalized_model}\0{}\0{}\0{}\0{}\0{}",
+            delta.input_tokens,
+            delta.cache_read_tokens,
+            delta.output_tokens,
+            delta.reasoning_output_tokens,
+            delta.total_tokens,
+        );
         let event = UsageEvent {
-            event_key: format!("codex:{path_hash}:{file_fingerprint}:{offset}"),
+            event_key: format!("codex:logical:{}", hash_string(&logical_identity)),
             source: SourceKind::Codex,
             provider_label: String::new(),
-            model: normalize_model(model.as_deref()),
+            model: normalized_model,
             event_at: timestamp,
             hour_start,
             tokens: delta,
@@ -509,25 +516,31 @@ fn parse_usage_tokens(value: &Value) -> Option<UsageTokens> {
     value.as_object()?;
     let raw_input_tokens = read_i64(value, "input_tokens")
         .or_else(|| read_i64(value, "prompt_tokens"))
-        .unwrap_or_default();
-    let explicit_cache_read_tokens = read_i64(value, "cache_read_tokens")
-        .or_else(|| read_i64(value, "cached_input_tokens"))
-        .or_else(|| read_i64(value, "cache_read_input_tokens"));
-    let nested_cache_read_tokens =
-        read_nested_i64(value, &["prompt_tokens_details", "cached_tokens"])
-            .or_else(|| read_nested_i64(value, &["input_tokens_details", "cached_tokens"]))
-            .or_else(|| {
-                read_nested_i64(value, &["usage", "prompt_tokens_details", "cached_tokens"])
-            })
-            .or_else(|| {
-                read_nested_i64(value, &["usage", "input_tokens_details", "cached_tokens"])
-            });
-    let cache_read_tokens = explicit_cache_read_tokens
-        .or(nested_cache_read_tokens)
-        .unwrap_or_default();
-    let input_tokens = if explicit_cache_read_tokens.is_some() {
+        .unwrap_or_default()
+        .max(0);
+    let separate_cache_read_tokens = read_i64(value, "cache_read_tokens")
+        .or_else(|| read_i64(value, "cache_read_input_tokens"))
+        .map(|tokens| tokens.max(0));
+    let inclusive_cache_read_tokens = read_i64(value, "cached_input_tokens")
+        .or_else(|| {
+            read_nested_i64(value, &["prompt_tokens_details", "cached_tokens"])
+                .or_else(|| read_nested_i64(value, &["input_tokens_details", "cached_tokens"]))
+                .or_else(|| {
+                    read_nested_i64(value, &["usage", "prompt_tokens_details", "cached_tokens"])
+                })
+                .or_else(|| {
+                    read_nested_i64(value, &["usage", "input_tokens_details", "cached_tokens"])
+                })
+        })
+        .map(|tokens| tokens.max(0));
+    let cache_read_tokens = separate_cache_read_tokens.unwrap_or_else(|| {
+        inclusive_cache_read_tokens
+            .unwrap_or_default()
+            .clamp(0, raw_input_tokens.max(0))
+    });
+    let input_tokens = if separate_cache_read_tokens.is_some() {
         raw_input_tokens
-    } else if nested_cache_read_tokens.is_some() {
+    } else if inclusive_cache_read_tokens.is_some() {
         (raw_input_tokens - cache_read_tokens).max(0)
     } else {
         raw_input_tokens
@@ -548,10 +561,12 @@ fn parse_usage_tokens(value: &Value) -> Option<UsageTokens> {
                 &["usage", "prompt_tokens_details", "cache_creation_tokens"],
             )
         })
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .max(0);
     let output_tokens = read_i64(value, "output_tokens")
         .or_else(|| read_i64(value, "completion_tokens"))
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .max(0);
     let reasoning_output_tokens = read_i64(value, "reasoning_output_tokens")
         .or_else(|| read_i64(value, "reasoning_tokens"))
         .or_else(|| read_nested_i64(value, &["completion_tokens_details", "reasoning_tokens"]))
@@ -568,14 +583,11 @@ fn parse_usage_tokens(value: &Value) -> Option<UsageTokens> {
                 &["usage", "output_tokens_details", "reasoning_tokens"],
             )
         })
-        .unwrap_or_default();
-    let total_tokens = read_i64(value, "total_tokens").unwrap_or(
-        input_tokens
-            + cache_creation_tokens
-            + cache_read_tokens
-            + output_tokens
-            + reasoning_output_tokens,
-    );
+        .unwrap_or_default()
+        .max(0);
+    let total_tokens = read_i64(value, "total_tokens")
+        .filter(|tokens| *tokens >= 0)
+        .unwrap_or(input_tokens + cache_creation_tokens + cache_read_tokens + output_tokens);
     Some(UsageTokens {
         input_tokens,
         cache_read_tokens,
@@ -619,7 +631,7 @@ mod tests {
 
         let tokens = parse_usage_tokens(&usage).expect("usage tokens");
 
-        assert_eq!(tokens.input_tokens, 100);
+        assert_eq!(tokens.input_tokens, 58);
         assert_eq!(tokens.cache_read_tokens, 42);
         assert_eq!(tokens.output_tokens, 8);
         assert_eq!(tokens.reasoning_output_tokens, 3);
@@ -710,7 +722,7 @@ mod tests {
         assert_eq!(tokens.input_tokens, 100);
         assert_eq!(tokens.output_tokens, 30);
         assert_eq!(tokens.reasoning_output_tokens, 9);
-        assert_eq!(tokens.total_tokens, 139);
+        assert_eq!(tokens.total_tokens, 130);
     }
 
     #[test]
@@ -731,10 +743,10 @@ mod tests {
         let tokens = parse_usage_tokens(&usage).expect("usage tokens");
 
         assert_eq!(tokens.input_tokens, 0);
-        assert_eq!(tokens.cache_read_tokens, 42);
+        assert_eq!(tokens.cache_read_tokens, 30);
         assert_eq!(tokens.output_tokens, 8);
         assert_eq!(tokens.reasoning_output_tokens, 2);
-        assert_eq!(tokens.total_tokens, 52);
+        assert_eq!(tokens.total_tokens, 38);
     }
 
     #[test]
@@ -748,12 +760,12 @@ mod tests {
         });
         let tokens = parse_usage_tokens(&usage).expect("usage tokens");
 
-        assert_eq!(tokens.input_tokens, 100);
+        assert_eq!(tokens.input_tokens, 58);
         assert_eq!(tokens.cache_creation_tokens, 12);
         assert_eq!(tokens.cache_read_tokens, 42);
         assert_eq!(tokens.output_tokens, 8);
         assert_eq!(tokens.reasoning_output_tokens, 2);
-        assert_eq!(tokens.total_tokens, 164);
+        assert_eq!(tokens.total_tokens, 120);
     }
 
     #[test]
@@ -776,12 +788,26 @@ mod tests {
 
         let delta = pick_delta(None, Some(&total), Some(&previous));
 
-        assert_eq!(delta.input_tokens, 50);
+        assert_eq!(delta.input_tokens, 0);
         assert_eq!(delta.cache_creation_tokens, 0);
         assert_eq!(delta.cache_read_tokens, 25);
         assert_eq!(delta.output_tokens, 15);
         assert_eq!(delta.reasoning_output_tokens, 3);
         assert_eq!(delta.total_tokens, 93);
+    }
+
+    #[test]
+    fn codex_parser_clamps_negative_channels() {
+        let tokens = parse_usage_tokens(&json!({
+            "input_tokens": -10,
+            "cached_input_tokens": -4,
+            "output_tokens": -3,
+            "reasoning_output_tokens": -2,
+            "total_tokens": -19
+        }))
+        .expect("usage tokens");
+
+        assert_eq!(tokens, UsageTokens::default());
     }
 
     #[test]
@@ -830,15 +856,7 @@ mod tests {
         )?;
 
         let mut resolver = crate::project::ProjectResolver::default();
-        let parsed = parse_rollout_file(
-            &path,
-            "path-hash",
-            "fingerprint",
-            0,
-            None,
-            None,
-            &mut resolver,
-        )?;
+        let parsed = parse_rollout_file(&path, "path-hash", 0, None, None, &mut resolver)?;
 
         assert_eq!(parsed.events.len(), 1);
         assert_eq!(parsed.turns.len(), 1);

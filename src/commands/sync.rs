@@ -356,6 +356,7 @@ async fn run_once_locked(
      */
     info!("开始执行 sync 三阶段流水线");
 
+    assert_token_accounting_write_allowed(store, options)?;
     if options.rebuild {
         reset_for_rebuild(store, options)?;
     }
@@ -420,6 +421,9 @@ async fn run_once_locked(
             events_replayed: source.events_replayed as i64,
             events_inserted: source.events_inserted as i64,
             stored_events: source.stored_events as i64,
+            token_accounting_version: Some(crate::store::TOKEN_ACCOUNTING_VERSION),
+            legacy_token_accounting: false,
+            token_accounting_warning: None,
             parse_ms: source.parse_ms as i64,
             write_ms: source.write_ms as i64,
             lock_wait_ms: source.lock_wait_ms as i64,
@@ -438,6 +442,9 @@ async fn run_once_locked(
             events_replayed: 0,
             events_inserted: 0,
             stored_events: stored_events as i64,
+            token_accounting_version: store.token_accounting_version(source)?,
+            legacy_token_accounting: store.has_legacy_token_accounting(source)?,
+            token_accounting_warning: None,
             parse_ms: 0,
             write_ms: 0,
             lock_wait_ms: lock_wait_ms as i64,
@@ -451,6 +458,13 @@ async fn run_once_locked(
         });
     }
     writer.finish_sync_run()?;
+    for source in &source_stats {
+        if registry::source_descriptor(source.source)
+            .is_some_and(|descriptor| descriptor.capabilities.parser)
+        {
+            store.mark_current_token_accounting(source.source)?;
+        }
+    }
     store
         .sync_status()
         .save_source_sync_statuses(&sync_statuses)?;
@@ -488,10 +502,42 @@ fn reset_for_rebuild(store: &Store, options: &SyncRunOptions) -> Result<()> {
     assert_lossless_rebuild(store, options)?;
     if let Some(source) = options.source {
         store.reset_for_source(source)?;
+        store.clear_token_accounting_version(source)?;
     } else {
         store.reset_usage_data()?;
+        for source in rebuild_guard_sources(None) {
+            store.clear_token_accounting_version(source)?;
+        }
     }
     Ok(())
+}
+
+fn assert_token_accounting_write_allowed(store: &Store, options: &SyncRunOptions) -> Result<()> {
+    if options.rebuild {
+        return Ok(());
+    }
+    let mut legacy = Vec::new();
+    for source in rebuild_guard_sources(options.source) {
+        if !registry::source_descriptor(source)
+            .is_some_and(|descriptor| descriptor.capabilities.parser)
+        {
+            continue;
+        }
+        if store.has_legacy_token_accounting(source)? {
+            legacy.push(source);
+        }
+    }
+    if legacy.is_empty() {
+        return Ok(());
+    }
+    let sources = legacy
+        .iter()
+        .map(|source| source.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    bail!(
+        "Refusing to mix legacy and current token accounting for source(s): {sources}. Existing reports remain readable but may use the legacy accounting contract. Run `llmusage sync --rebuild --source <source>` for each listed source. The existing lossy-rebuild guard remains active; --allow-lossy-rebuild is never enabled automatically."
+    )
 }
 
 fn assert_lossless_rebuild(store: &Store, options: &SyncRunOptions) -> Result<()> {

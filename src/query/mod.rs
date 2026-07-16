@@ -867,11 +867,7 @@ impl Dashboard {
         let sql = format!(
             r#"
             SELECT {label_expr} AS label,
-                   COALESCE(SUM(input_tokens), 0) +
-                       COALESCE(SUM(cache_creation_tokens), 0) +
-                       COALESCE(SUM(cache_read_tokens), 0) +
-                       COALESCE(SUM(output_tokens), 0) +
-                       COALESCE(SUM(reasoning_output_tokens), 0) AS total_tokens
+                   COALESCE(SUM(total_tokens), 0) AS total_tokens
             FROM usage_bucket_30m
             {}
             GROUP BY label
@@ -890,8 +886,7 @@ impl Dashboard {
     }
 
     /// Loads a per-day trend series with full token breakdown and event count
-    /// (D9/F4.2). Output tokens already include reasoning tokens at the
-    /// API boundary; callers must not add them a second time.
+    /// (D9/F4.2). Reasoning remains a separate diagnostic channel.
     ///
     /// Days are grouped by the local calendar date in
     /// [`QueryFilter::timezone`]; UTC days are reconstructed from the
@@ -906,12 +901,8 @@ impl Dashboard {
                 COALESCE(SUM(input_tokens), 0),
                 COALESCE(SUM(cache_read_tokens), 0),
                 COALESCE(SUM(cache_creation_tokens), 0),
-                COALESCE(SUM(output_tokens), 0) + COALESCE(SUM(reasoning_output_tokens), 0),
-                COALESCE(SUM(input_tokens), 0) +
-                    COALESCE(SUM(cache_creation_tokens), 0) +
-                    COALESCE(SUM(cache_read_tokens), 0) +
-                    COALESCE(SUM(output_tokens), 0) +
-                    COALESCE(SUM(reasoning_output_tokens), 0),
+                COALESCE(SUM(output_tokens), 0),
+                COALESCE(SUM(total_tokens), 0),
                 COALESCE(SUM(event_count), 0),
                 COALESCE(SUM(cost_with_cache_usd), 0.0)
             FROM usage_bucket_30m
@@ -949,8 +940,7 @@ impl Dashboard {
                 SUM(cache_read_tokens),
                 SUM(output_tokens),
                 SUM(reasoning_output_tokens),
-                SUM(input_tokens) + SUM(cache_creation_tokens) + SUM(cache_read_tokens) +
-                    SUM(output_tokens) + SUM(reasoning_output_tokens),
+                SUM(total_tokens),
                 SUM(event_count),
                 SUM(cost_with_cache_usd),
                 SUM(cost_without_cache_usd),
@@ -970,8 +960,7 @@ impl Dashboard {
             {}
             GROUP BY model
             ORDER BY
-                SUM(input_tokens) + SUM(cache_creation_tokens) + SUM(cache_read_tokens) +
-                    SUM(output_tokens) + SUM(reasoning_output_tokens) DESC,
+                SUM(total_tokens) DESC,
                 model ASC
             "#,
             sql_filter.where_sql()
@@ -1102,8 +1091,7 @@ impl Dashboard {
             r#"
             SELECT
                 source,
-                SUM(input_tokens) + SUM(cache_creation_tokens) + SUM(cache_read_tokens) +
-                    SUM(output_tokens) + SUM(reasoning_output_tokens) AS total_tokens,
+                SUM(total_tokens) AS total_tokens,
                 SUM(event_count) AS event_count
             FROM usage_bucket_30m
             {}
@@ -1151,16 +1139,14 @@ impl Dashboard {
                 project_hash,
                 MAX(project_label),
                 MAX(project_ref),
-                SUM(input_tokens) + SUM(cache_creation_tokens) + SUM(cache_read_tokens) +
-                    SUM(output_tokens) + SUM(reasoning_output_tokens),
+                SUM(total_tokens),
                 SUM(event_count),
                 SUM(cost_with_cache_usd)
             FROM usage_bucket_30m
             {}
             GROUP BY project_hash
             ORDER BY
-                SUM(input_tokens) + SUM(cache_creation_tokens) + SUM(cache_read_tokens) +
-                    SUM(output_tokens) + SUM(reasoning_output_tokens) DESC,
+                SUM(total_tokens) DESC,
                 MAX(project_label) ASC
             "#,
             sql_filter.where_sql()
@@ -1198,16 +1184,14 @@ impl Dashboard {
                 SUM(cache_read_tokens),
                 SUM(output_tokens),
                 SUM(reasoning_output_tokens),
-                SUM(input_tokens) + SUM(cache_creation_tokens) + SUM(cache_read_tokens) +
-                    SUM(output_tokens) + SUM(reasoning_output_tokens),
+                SUM(total_tokens),
                 SUM(cost_with_cache_usd),
                 SUM(event_count)
             FROM usage_bucket_30m
             {}
             GROUP BY source, model
             ORDER BY
-                SUM(input_tokens) + SUM(cache_creation_tokens) + SUM(cache_read_tokens) +
-                    SUM(output_tokens) + SUM(reasoning_output_tokens) DESC,
+                SUM(total_tokens) DESC,
                 source ASC,
                 model ASC
             "#,
@@ -2626,11 +2610,7 @@ fn query_token_summary(
             COALESCE(SUM(cache_read_tokens), 0),
             COALESCE(SUM(output_tokens), 0),
             COALESCE(SUM(reasoning_output_tokens), 0),
-            COALESCE(SUM(input_tokens), 0) +
-                COALESCE(SUM(cache_creation_tokens), 0) +
-                COALESCE(SUM(cache_read_tokens), 0) +
-                COALESCE(SUM(output_tokens), 0) +
-                COALESCE(SUM(reasoning_output_tokens), 0)
+            COALESCE(SUM(total_tokens), 0)
         FROM usage_bucket_30m
         {}
         "#,
@@ -3981,7 +3961,7 @@ mod tests {
         assert_eq!(row.input_tokens, 100);
         assert_eq!(row.cache_read_tokens, 10);
         assert_eq!(row.cache_creation_tokens, 5);
-        assert_eq!(row.output_tokens, 57); // output(50) + reasoning(7)
+        assert_eq!(row.output_tokens, 50);
         assert_eq!(row.total_tokens, 172);
         assert_eq!(row.event_count, 2);
 

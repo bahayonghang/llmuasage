@@ -191,6 +191,7 @@ struct EventRow {
     cache_read_tokens: i64,
     output_tokens: i64,
     reasoning_output_tokens: i64,
+    total_tokens: i64,
     cost_with_cache_usd: f64,
     pricing_status: String,
     project: Option<ProjectSummary>,
@@ -209,6 +210,7 @@ struct BucketRow {
     cache_read_tokens: i64,
     output_tokens: i64,
     reasoning_output_tokens: i64,
+    total_tokens: i64,
     cost_with_cache_usd: f64,
     pricing_status: String,
 }
@@ -226,15 +228,12 @@ struct TokenComponents {
     cache_read_tokens: i64,
     output_tokens: i64,
     reasoning_output_tokens: i64,
+    total_tokens: i64,
 }
 
 impl TokenComponents {
     fn total_tokens(self) -> i64 {
-        self.input_tokens
-            + self.cache_creation_tokens
-            + self.cache_read_tokens
-            + self.output_tokens
-            + self.reasoning_output_tokens
+        self.total_tokens
     }
 }
 
@@ -246,6 +245,7 @@ impl From<&EventRow> for TokenComponents {
             cache_read_tokens: event.cache_read_tokens,
             output_tokens: event.output_tokens,
             reasoning_output_tokens: event.reasoning_output_tokens,
+            total_tokens: event.total_tokens,
         }
     }
 }
@@ -258,6 +258,7 @@ impl From<&BucketRow> for TokenComponents {
             cache_read_tokens: bucket.cache_read_tokens,
             output_tokens: bucket.output_tokens,
             reasoning_output_tokens: bucket.reasoning_output_tokens,
+            total_tokens: bucket.total_tokens,
         }
     }
 }
@@ -940,6 +941,7 @@ fn load_buckets_filtered(conn: &Connection, filter: &ReportFilter) -> Result<Vec
             SUM(cache_read_tokens),
             SUM(output_tokens),
             SUM(reasoning_output_tokens),
+            SUM(total_tokens),
             SUM(cost_with_cache_usd),
             COALESCE(pricing_status, 'unpriced') AS pricing_status
         FROM usage_bucket_30m
@@ -963,9 +965,10 @@ fn load_buckets_filtered(conn: &Connection, filter: &ReportFilter) -> Result<Vec
             cache_read_tokens: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
             output_tokens: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
             reasoning_output_tokens: row.get::<_, Option<i64>>(7)?.unwrap_or_default(),
-            cost_with_cache_usd: row.get::<_, Option<f64>>(8)?.unwrap_or_default(),
+            total_tokens: row.get::<_, Option<i64>>(8)?.unwrap_or_default(),
+            cost_with_cache_usd: row.get::<_, Option<f64>>(9)?.unwrap_or_default(),
             pricing_status: row
-                .get::<_, Option<String>>(9)?
+                .get::<_, Option<String>>(10)?
                 .unwrap_or_else(|| crate::query::pricing::PRICING_UNPRICED.to_string()),
         })
     })?;
@@ -1001,6 +1004,7 @@ fn load_project_buckets_filtered(
             SUM(cache_read_tokens),
             SUM(output_tokens),
             SUM(reasoning_output_tokens),
+            SUM(total_tokens),
             SUM(cost_with_cache_usd),
             COALESCE(pricing_status, 'unpriced') AS pricing_status
         FROM usage_bucket_30m
@@ -1032,9 +1036,10 @@ fn load_project_buckets_filtered(
                 cache_read_tokens: row.get::<_, Option<i64>>(8)?.unwrap_or_default(),
                 output_tokens: row.get::<_, Option<i64>>(9)?.unwrap_or_default(),
                 reasoning_output_tokens: row.get::<_, Option<i64>>(10)?.unwrap_or_default(),
-                cost_with_cache_usd: row.get::<_, Option<f64>>(11)?.unwrap_or_default(),
+                total_tokens: row.get::<_, Option<i64>>(11)?.unwrap_or_default(),
+                cost_with_cache_usd: row.get::<_, Option<f64>>(12)?.unwrap_or_default(),
                 pricing_status: row
-                    .get::<_, Option<String>>(12)?
+                    .get::<_, Option<String>>(13)?
                     .unwrap_or_else(|| crate::query::pricing::PRICING_UNPRICED.to_string()),
             },
             project: normalize_project(row.get(3)?, row.get(4)?, row.get(5)?),
@@ -1146,6 +1151,7 @@ where
             cache_read_tokens,
             output_tokens,
             reasoning_output_tokens,
+            total_tokens,
             cost_with_cache_usd,
             pricing_status,
             project_hash,
@@ -1184,16 +1190,17 @@ where
             cache_read_tokens: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
             output_tokens: row.get::<_, Option<i64>>(7)?.unwrap_or_default(),
             reasoning_output_tokens: row.get::<_, Option<i64>>(8)?.unwrap_or_default(),
-            cost_with_cache_usd: row.get::<_, Option<f64>>(9)?.unwrap_or_default(),
+            total_tokens: row.get::<_, Option<i64>>(9)?.unwrap_or_default(),
+            cost_with_cache_usd: row.get::<_, Option<f64>>(10)?.unwrap_or_default(),
             pricing_status: row
-                .get::<_, Option<String>>(10)?
+                .get::<_, Option<String>>(11)?
                 .unwrap_or_else(|| crate::query::pricing::PRICING_UNPRICED.to_string()),
-            project_hash: row.get(11)?,
-            project_label: row.get(12)?,
-            project_ref: row.get(13)?,
-            session_id: row.get(14)?,
-            session_label: row.get(15)?,
-            source_path_hash: row.get(16)?,
+            project_hash: row.get(12)?,
+            project_label: row.get(13)?,
+            project_ref: row.get(14)?,
+            session_id: row.get(15)?,
+            session_label: row.get(16)?,
+            source_path_hash: row.get(17)?,
         };
         visitor(raw.with_timezone(&filter.timezone))?;
     }
@@ -1243,6 +1250,7 @@ struct RawEventRow {
     cache_read_tokens: i64,
     output_tokens: i64,
     reasoning_output_tokens: i64,
+    total_tokens: i64,
     cost_with_cache_usd: f64,
     pricing_status: String,
     project_hash: Option<String>,
@@ -1268,6 +1276,7 @@ impl RawEventRow {
             cache_read_tokens: self.cache_read_tokens,
             output_tokens: self.output_tokens,
             reasoning_output_tokens: self.reasoning_output_tokens,
+            total_tokens: self.total_tokens,
             cost_with_cache_usd: self.cost_with_cache_usd,
             pricing_status: self.pricing_status,
             project: normalize_project(self.project_hash, self.project_label, self.project_ref),
@@ -1491,19 +1500,19 @@ mod tests {
         let daily = load_daily_report(&fixture.store, &filter)?;
         assert_eq!(daily.daily.len(), 1);
         assert_eq!(daily.daily[0].date, "2026-05-05");
-        assert_eq!(daily.daily[0].totals.total_tokens, 15);
+        assert_eq!(daily.daily[0].totals.total_tokens, 999);
         assert_eq!(daily.daily[0].model_breakdowns.len(), 1);
         assert_eq!(daily.totals.estimated_cost_usd, 1.25);
 
         let monthly = load_monthly_report(&fixture.store, &filter)?;
         assert_eq!(monthly.monthly.len(), 1);
         assert_eq!(monthly.monthly[0].month, "2026-05");
-        assert_eq!(monthly.totals.total_tokens, 15);
+        assert_eq!(monthly.totals.total_tokens, 999);
 
         let by_source = load_daily_reports_by_source(&fixture.store, &filter)?;
         assert_eq!(by_source.len(), 1);
         assert_eq!(by_source[0].0, SourceKind::Codex);
-        assert_eq!(by_source[0].1.totals.total_tokens, 15);
+        assert_eq!(by_source[0].1.totals.total_tokens, 999);
 
         let projects = load_daily_project_report(&fixture.store, &filter)?;
         let project_rows = projects
@@ -1511,7 +1520,7 @@ mod tests {
             .get("example/project-a")
             .expect("bucket project row should be grouped by project_ref");
         assert_eq!(project_rows.len(), 1);
-        assert_eq!(project_rows[0].totals.total_tokens, 15);
+        assert_eq!(project_rows[0].totals.total_tokens, 999);
         Ok(())
     }
 

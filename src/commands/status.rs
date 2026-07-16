@@ -25,7 +25,9 @@ pub async fn run(app: &AppContext) -> Result<()> {
     let sources = dashboard.source_breakdown(&Default::default())?;
     let health = dashboard.health()?;
     let probes = integrations::probe_all(app)?;
-    let capability_statuses = source_status::build_source_capability_statuses(&probes, &sources);
+    let mut capability_statuses =
+        source_status::build_source_capability_statuses(&probes, &sources);
+    source_status::apply_token_accounting_statuses(&store, &mut capability_statuses)?;
     let platform_statuses = source_status::build_platform_monitor_statuses();
     let lock = store.current_worker_lock()?;
 
