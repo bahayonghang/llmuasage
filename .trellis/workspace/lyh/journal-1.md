@@ -517,3 +517,37 @@ Aligned Claude, Codex, and OpenCode token normalization with ccusage; made persi
 ### Next Steps
 
 - None - task complete
+
+
+## Session 16: 优化同步数据库初始化性能与进度可见性
+
+**Date**: 2026-07-16
+**Task**: 优化同步数据库初始化性能与进度可见性
+**Branch**: `dev`
+
+### Summary
+
+将定价桶对账改为线性主键集合比较，新增人类输出、NDJSON 生命周期事件和结构化日志，并以 53.9 万事件快照验证性能与一致性；同步更新中英文文档。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `731c91f77d3ab9b263b18037c0064a60db46cecc` | (see git log) |
+| `89bc7de1d07cfcafea3cdbfc38935bc2ec74ace3` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

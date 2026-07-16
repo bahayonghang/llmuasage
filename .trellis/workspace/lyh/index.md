@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 15
+- **Total Sessions**: 16
 - **Last Active**: 2026-07-16
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~519 | Active |
+| `journal-1.md` | ~553 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 16 | 2026-07-16 | 优化同步数据库初始化性能与进度可见性 | `731c91f77d3ab9b263b18037c0064a60db46cecc`, `89bc7de1d07cfcafea3cdbfc38935bc2ec74ace3` | `dev` |
 | 15 | 2026-07-16 | Align token accounting with ccusage | `0848fe8`, `3702195` | `dev` |
 | 14 | 2026-07-11 | 优化看板时间范围切换性能 | `257ecd5`, `c0873b0` | `dev` |
 | 13 | 2026-07-11 | 优化 Explorer 时间序列展示 | `8e75049` | `dev` |
