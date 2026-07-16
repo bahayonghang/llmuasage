@@ -1,0 +1,5 @@
+{"file":".trellis/spec/llmusage/backend/index.md","reason":"Defines the backend full-quality gate expected before completion."}
+{"file":".trellis/spec/llmusage/backend/pricing-catalog-contracts.md","reason":"Check final transaction atomicity, retry consistency, pricing correctness, and embedded upgrade behavior."}
+{"file":".trellis/spec/llmusage/backend/source-sync-contracts.md","reason":"Check event compatibility, NDJSON purity, lifecycle ordering, and unchanged sync summary semantics."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Audit every event producer/consumer boundary and avoid duplicated payload interpretation."}
+{"file":".trellis/tasks/07-16-sync-database-init-hang/research/performance-and-progress-options.md","reason":"Validate the implementation against the measured hotspot and selected no-migration design."}
