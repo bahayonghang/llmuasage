@@ -483,3 +483,37 @@ Created and completed Trellis task 07-06-serve-number-format. Added shared compa
 ### Next Steps
 
 - None - task complete
+
+
+## Session 15: Align token accounting with ccusage
+
+**Date**: 2026-07-16
+**Task**: Align token accounting with ccusage
+**Branch**: `dev`
+
+### Summary
+
+Aligned Claude, Codex, and OpenCode token normalization with ccusage; made persisted totals authoritative across queries and UI; added guarded per-source accounting-version rebuilds, parity tests, documentation, and durable contracts.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0848fe8` | (see git log) |
+| `3702195` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
