@@ -223,7 +223,7 @@ async fn run_with_json_events(
 fn print_summary(summary: &SyncSummary, options: &SyncRunOptions) {
     println!("Sync finished:");
     if options.rebuild {
-        println!("- rebuild: reset usage rows, buckets, projects, and cursors before sync");
+        println!("- rebuild: reset parser-backed usage state source by source before sync");
     }
     for item in &summary.sources {
         println!(
@@ -333,9 +333,22 @@ async fn run_once_locked(
      */
     info!("开始执行 sync 三阶段流水线");
 
-    assert_token_accounting_write_allowed(store, options)?;
+    let parsers = registry::registered_parsers()
+        .into_iter()
+        .filter(|parser| {
+            options
+                .source
+                .is_none_or(|source| parser.source() == source)
+        })
+        .collect::<Vec<_>>();
+    let parser_sources = parsers
+        .iter()
+        .map(|parser| parser.source())
+        .collect::<Vec<_>>();
+
+    assert_token_accounting_write_allowed(store, options, &parser_sources)?;
     if options.rebuild {
-        reset_for_rebuild(store, options)?;
+        reset_for_rebuild(store, options, &parser_sources)?;
     }
 
     // 2.1 计算并发度并按 source 顺序解析 + 即时写入
@@ -347,14 +360,6 @@ async fn run_once_locked(
         options.provider_map.as_deref(),
     )?;
     let mut writer = store.begin_sync_run_with_provider_index(provider_index)?;
-    let parsers = registry::registered_parsers()
-        .into_iter()
-        .filter(|parser| {
-            options
-                .source
-                .is_none_or(|source| parser.source() == source)
-        })
-        .collect::<Vec<_>>();
     let parserless_sources = match options.source {
         Some(source)
             if registry::source_descriptor(source)
@@ -475,35 +480,34 @@ fn stored_events_for_source(store: &Store, source: SourceKind) -> Result<usize> 
     stored_event_count(store, Some(source))
 }
 
-fn reset_for_rebuild(store: &Store, options: &SyncRunOptions) -> Result<()> {
-    assert_lossless_rebuild(store, options)?;
+fn reset_for_rebuild(
+    store: &Store,
+    options: &SyncRunOptions,
+    parser_sources: &[SourceKind],
+) -> Result<()> {
+    let rebuild_sources = rebuild_sources(options.source, parser_sources);
+    assert_lossless_rebuild(store, options, &rebuild_sources)?;
     if let Some(source) = options.source {
         store.reset_for_source(source)?;
         store.clear_token_accounting_version(source)?;
     } else {
-        store.reset_usage_data()?;
-        for source in rebuild_guard_sources(None) {
+        for source in rebuild_sources {
+            store.reset_for_source(source)?;
             store.clear_token_accounting_version(source)?;
         }
     }
     Ok(())
 }
 
-fn assert_token_accounting_write_allowed(store: &Store, options: &SyncRunOptions) -> Result<()> {
+fn assert_token_accounting_write_allowed(
+    store: &Store,
+    options: &SyncRunOptions,
+    parser_sources: &[SourceKind],
+) -> Result<()> {
     if options.rebuild {
         return Ok(());
     }
-    let mut legacy = Vec::new();
-    for source in rebuild_guard_sources(options.source) {
-        if !registry::source_descriptor(source)
-            .is_some_and(|descriptor| descriptor.capabilities.parser)
-        {
-            continue;
-        }
-        if store.has_legacy_token_accounting(source)? {
-            legacy.push(source);
-        }
-    }
+    let legacy = legacy_token_accounting_sources_for(store, parser_sources)?;
     if legacy.is_empty() {
         return Ok(());
     }
@@ -517,18 +521,22 @@ fn assert_token_accounting_write_allowed(store: &Store, options: &SyncRunOptions
     )
 }
 
-fn assert_lossless_rebuild(store: &Store, options: &SyncRunOptions) -> Result<()> {
+fn assert_lossless_rebuild(
+    store: &Store,
+    options: &SyncRunOptions,
+    rebuild_sources: &[SourceKind],
+) -> Result<()> {
     if options.allow_lossy_rebuild {
         return Ok(());
     }
 
-    let risks = rebuild_guard_sources(options.source)
-        .into_iter()
-        .filter_map(|source| {
-            let risk = store.source_files().lossy_rebuild_risk(source).ok()?;
-            risk.has_risk().then_some(risk)
-        })
-        .collect::<Vec<_>>();
+    let mut risks = Vec::new();
+    for source in rebuild_sources {
+        let risk = store.source_files().lossy_rebuild_risk(*source)?;
+        if risk.has_risk() {
+            risks.push(risk);
+        }
+    }
     if risks.is_empty() {
         return Ok(());
     }
@@ -551,16 +559,32 @@ Restore the source files or pass --allow-lossy-rebuild to explicitly accept clea
     );
 }
 
-fn rebuild_guard_sources(source: Option<SourceKind>) -> Vec<SourceKind> {
-    source.map_or_else(
-        || {
-            registry::registered_parsers()
-                .into_iter()
-                .map(|parser| parser.source())
-                .collect()
-        },
-        |source| vec![source],
-    )
+pub(crate) fn legacy_token_accounting_sources(store: &Store) -> Result<Vec<SourceKind>> {
+    let parser_sources = registry::registered_parsers()
+        .into_iter()
+        .map(|parser| parser.source())
+        .collect::<Vec<_>>();
+    legacy_token_accounting_sources_for(store, &parser_sources)
+}
+
+fn legacy_token_accounting_sources_for(
+    store: &Store,
+    parser_sources: &[SourceKind],
+) -> Result<Vec<SourceKind>> {
+    let mut legacy_sources = Vec::new();
+    for source in parser_sources {
+        if store.has_legacy_token_accounting(*source)? {
+            legacy_sources.push(*source);
+        }
+    }
+    Ok(legacy_sources)
+}
+
+fn rebuild_sources(
+    selected_source: Option<SourceKind>,
+    parser_sources: &[SourceKind],
+) -> Vec<SourceKind> {
+    selected_source.map_or_else(|| parser_sources.to_vec(), |source| vec![source])
 }
 
 struct HumanProgress {

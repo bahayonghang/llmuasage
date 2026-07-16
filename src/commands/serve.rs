@@ -1,9 +1,24 @@
 use std::process::{Command, Stdio};
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use tracing::{info, warn};
 
-use crate::{app::AppContext, store::Store, web};
+use crate::{app::AppContext, models::SourceKind, store::Store, web};
+
+use super::sync;
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct TokenAccountingRepairReport {
+    pub rebuilt_sources: Vec<SourceKind>,
+    pub blocked_sources: Vec<BlockedTokenAccountingSource>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BlockedTokenAccountingSource {
+    pub source: SourceKind,
+    pub missing_file_count: u64,
+    pub protected_event_count: u64,
+}
 
 pub async fn run(app: &AppContext, port: Option<u16>) -> Result<()> {
     /*
@@ -19,6 +34,7 @@ pub async fn run(app: &AppContext, port: Option<u16>) -> Result<()> {
 
     let store = Store::new(&app.paths)?;
     store.bootstrap()?;
+    repair_legacy_token_accounting(app, &store).await?;
     let addr = super::run_tracked(
         &store,
         "serve",
@@ -48,6 +64,68 @@ pub async fn run(app: &AppContext, port: Option<u16>) -> Result<()> {
     tokio::signal::ctrl_c().await?;
     info!("收到 Ctrl+C，准备停止本地 Web UI 服务");
     Ok(())
+}
+
+pub async fn repair_legacy_token_accounting(
+    app: &AppContext,
+    store: &Store,
+) -> Result<TokenAccountingRepairReport> {
+    let legacy_sources = sync::legacy_token_accounting_sources(store)?;
+    let mut report = TokenAccountingRepairReport::default();
+
+    for source in legacy_sources {
+        let risk = store.source_files().lossy_rebuild_risk(source)?;
+        if risk.has_risk() {
+            warn!(
+                source = %source,
+                missing_files = risk.missing_file_count,
+                protected_events = risk.protected_event_count,
+                "serve 检测到 legacy token accounting，但自动重建会丢失历史，已跳过该来源"
+            );
+            eprintln!(
+                "Skipped automatic token-accounting rebuild for {source}: missing_files={} protected_events={}. Restore the source files, then run `llmusage sync --rebuild --source {source}`. Historical reports remain available; --allow-lossy-rebuild was not enabled.",
+                risk.missing_file_count, risk.protected_event_count
+            );
+            report.blocked_sources.push(BlockedTokenAccountingSource {
+                source,
+                missing_file_count: risk.missing_file_count,
+                protected_event_count: risk.protected_event_count,
+            });
+            continue;
+        }
+
+        info!(source = %source, "serve 开始自动重建 legacy token accounting 来源");
+        eprintln!("Rebuilding legacy token accounting for {source} before starting dashboard...");
+        sync::run_with_options(
+            app,
+            sync::SyncRunOptions {
+                rebuild: true,
+                source: Some(source),
+                allow_lossy_rebuild: false,
+                ..Default::default()
+            },
+        )
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to rebuild legacy token accounting for {source}; dashboard startup was stopped. Run `llmusage sync --rebuild --source {source}` after resolving the reported parser or SQLite error."
+            )
+        })?;
+        report.rebuilt_sources.push(source);
+        info!(source = %source, "serve 完成 legacy token accounting 自动重建");
+    }
+
+    if !report.rebuilt_sources.is_empty() {
+        let sources = report
+            .rebuilt_sources
+            .iter()
+            .map(|source| source.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        eprintln!("Token-accounting rebuild completed for: {sources}");
+    }
+
+    Ok(report)
 }
 
 fn open_dashboard_in_browser(url: &str) -> Result<()> {

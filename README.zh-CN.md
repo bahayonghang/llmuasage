@@ -43,7 +43,7 @@ llmusage serve
 1. `init` 创建 `~/.llmusage/`、初始化 `llmusage.db`、写入 hook 包装器，并安装支持的本地集成。
 2. `sync` 增量解析本地真源，写入 usage 行、30 分钟 bucket、source-file 诊断和行为事实。
 3. `llmusage` 显示默认 daily 报表：所选时区下最近 7 个自然日。
-4. `serve` 在 `127.0.0.1` 启动本地浏览器 Dashboard。
+4. `serve` 会按需安全重建旧版 parser token 统计口径，然后在 `127.0.0.1` 启动本地浏览器 Dashboard。
 
 内置定价目录升级后的第一次 sync 会在扫描来源前重算历史事件价格。stderr 会显示目录版本、已处理/总事件数、汇总桶对账和完成状态；`sync --json-events` 会在纯 NDJSON stdout 中提供同一套定价生命周期。
 
@@ -112,7 +112,9 @@ llmusage codex-tracer --rebuild
 - 不需要账号登录、device token、上传队列或远端用量 API。
 - 普通 `llmusage sync` 遇到原始源文件缺失时会保留已导入 usage。
 - `llmusage sync --rebuild` 默认拒绝有损重建，除非同时传入 `--allow-lossy-rebuild`。
-- 旧 token 统计口径的数据仍可读取，但会拒绝混写；需对每个 parser 来源执行 `llmusage sync --rebuild --source <source>`。
+- 无 source 的 `llmusage sync --rebuild` 只重置 parser-backed 来源；parserless Antigravity 的历史和诊断状态会保留。
+- `llmusage serve` 会在绑定端口前自动重建可安全迁移的旧版 parser 来源。源文件缺失的来源只会告警并跳过，旧历史仍可读取且继续拒绝混写。
+- 自动修复永远不会启用 `--allow-lossy-rebuild`；请先恢复缺失源文件，再显式执行 `llmusage sync --rebuild --source <source>`。
 - `llmusage diagnostics --forget-file <PATH> --source <SOURCE>` 是显式忽略源文件的写入入口。
 - `llmusage logs` 查询本地运行日志和最近命令审计记录，不改变报表 stdout 或 `sync --json-events` stdout 合同。
 - `llmusage catalog apply <file>` 与 `doctor --refresh-pricing <file>` 只读取本地目录文件；URL 会被拒绝。

@@ -202,12 +202,13 @@ impl Store {
     pub fn reset_usage_data(&self) -> Result<()> {
         /*
          * ========================================================================
-         * 步骤2：清空可重建的用量真源
+         * 步骤2：低层全局清空用量数据
          * ========================================================================
          * 目标：
-         * 1) 支持 `sync --rebuild` 重新解析本地源以补齐新 schema 字段
-         * 2) 只删除可从本地 Codex/Claude/OpenCode 真源重建的数据
-         * 3) 保留 run_log / integration_install / trigger_state 等运维记录
+         * 1) 为明确需要全局 reset 的内部调用方保留兼容 API
+         * 2) 清空所有来源，包括没有 parser capability 的来源
+         * 3) command-level `sync --rebuild` 不得调用；它必须按 parser registry 逐源 reset
+         * 4) 保留 run_log / integration_install / trigger_state 等运维记录
          */
         info!("开始清空可重建用量数据");
 

@@ -48,7 +48,7 @@ llmusage sync
 llmusage sync --rebuild
 ```
 
-`--rebuild` 会在重新解析前删除可重建 usage 行、bucket、project 行和 cursor。如果已导入文件型历史依赖现在缺失的源文件，llmusage 默认拒绝重建。
+`--rebuild` 会按来源重置 parser-backed 用量状态，再重新解析本地来源。无 source 的 full rebuild 以 parser registry 作为删除边界，因此 parserless Antigravity 的 event、bucket、行为事实、cursor 和 source-file 诊断都会保留。如果 parser 来源的已导入文件型历史依赖现在缺失的源文件，llmusage 会在任何 reset 发生前拒绝重建。
 
 显式覆盖参数是：
 
@@ -57,6 +57,15 @@ llmusage sync --rebuild --allow-lossy-rebuild
 ```
 
 只有当你接受清掉不可重建历史时才使用。
+
+## Dashboard 启动迁移
+
+`llmusage serve` 会在绑定本地端口前检查 parser-backed 来源是否使用旧版 token 统计
+口径。只有追踪的输入文件仍然可用时，才会自动逐源重建。存在有损重建风险的来源会告警并
+跳过：历史仍可读取，普通写入继续被 guard 拒绝，Dashboard 也会继续启动。来源通过安全
+预检后若发生意外错误，则会终止启动。
+
+启动自动迁移永远不会启用 `--allow-lossy-rebuild`，parserless 来源也不是迁移目标。
 
 ## 诊断缺失源文件
 

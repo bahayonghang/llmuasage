@@ -43,7 +43,7 @@ What this does:
 1. `init` creates `~/.llmusage/`, bootstraps `llmusage.db`, writes hook wrappers, and installs supported local integrations.
 2. `sync` parses local sources incrementally and writes usage rows, 30-minute buckets, source-file diagnostics, and behavior facts.
 3. `llmusage` shows the default daily report for the last 7 calendar days.
-4. `serve` starts the local dashboard on `127.0.0.1`.
+4. `serve` safely rebuilds legacy parser-backed token accounting when needed, then starts the local dashboard on `127.0.0.1`.
 
 On the first sync after an embedded pricing catalog upgrade, `sync` reprices historical events before scanning sources. Stderr reports the catalog versions, processed/total events, bucket reconciliation, and completion. `sync --json-events` exposes the same pricing lifecycle as NDJSON-only stdout.
 
@@ -112,7 +112,9 @@ llmusage codex-tracer --rebuild
 - No account login, device token, upload queue, or remote usage API call.
 - Normal `llmusage sync` keeps imported usage when original source files are missing.
 - `llmusage sync --rebuild` refuses lossy rebuilds unless you also pass `--allow-lossy-rebuild`.
-- Legacy token-accounting rows stay readable but block new writes until each parser source is rebuilt with `llmusage sync --rebuild --source <source>`.
+- A full `llmusage sync --rebuild` resets only parser-backed sources; parserless Antigravity history and diagnostics are preserved.
+- `llmusage serve` automatically rebuilds safe legacy parser sources before binding a port. Sources with missing files are skipped with a warning, keep their readable history, and remain write-protected.
+- Automatic repair never enables `--allow-lossy-rebuild`; use `llmusage sync --rebuild --source <source>` explicitly after restoring missing source files.
 - `llmusage diagnostics --forget-file <PATH> --source <SOURCE>` is the explicit write path for intentionally ignored source files.
 - `llmusage logs` queries local runtime logs and recent command audit rows without changing report stdout or `sync --json-events` stdout contracts.
 - `llmusage catalog apply <file>` and `doctor --refresh-pricing <file>` read local catalog files; URLs are refused.

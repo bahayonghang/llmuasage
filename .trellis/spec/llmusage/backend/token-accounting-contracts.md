@@ -14,6 +14,10 @@ is the compatibility baseline when reference implementations disagree.
   `usage_bucket_30m.total_tokens` -> query/UI `total_tokens`.
 - Version metadata: `meta('token_accounting_version.<source>') = '2'`.
 - Legacy repair: `llmusage sync --rebuild --source <source>`.
+- Serve startup repair:
+  `commands::serve::repair_legacy_token_accounting(&AppContext, &Store) -> Result<TokenAccountingRepairReport>`.
+- Repair reports list `rebuilt_sources` and `blocked_sources`; each blocked row
+  includes `source`, `missing_file_count`, and `protected_event_count`.
 
 ## 3. Contracts
 
@@ -34,6 +38,19 @@ is the compatibility baseline when reference implementations disagree.
 - OpenCode uses `max(valid tokens.total, input + cache write + cache read + output)`.
 - Pricing receives normalized channels. Prompt-tier selection remains
   `input + cache_read + cache_creation`.
+- `llmusage serve` detects legacy parser sources after store bootstrap and
+  before binding a port. It rebuilds safe sources one at a time in parser
+  registry order with `allow_lossy_rebuild=false`.
+- A known lossy legacy source is reported as blocked without deleting history;
+  the dashboard may start, but normal writes remain guarded for that source.
+- Parser, SQLite, commit, or risk-query errors for an otherwise automatic
+  repair propagate and stop dashboard startup.
+- A no-source full rebuild derives its preflight, reset, marker-clear, and
+  parser fan-out boundaries from the same parser collection. It calls
+  `Store::reset_for_source` for each parser source and preserves parserless
+  events, buckets, behavior facts, cursors, and source-file state.
+- `Store::reset_usage_data` is a low-level global reset surface. Command-level
+  full rebuild must not call it because it has no parser capability boundary.
 
 ## 4. Validation & Error Matrix
 
@@ -45,6 +62,10 @@ is the compatibility baseline when reference implementations disagree.
 | Rebuild has missing source files | Existing lossy-rebuild guard refuses it |
 | Rebuild parser/store commit fails | Leave marker absent; do not claim parity |
 | Parserless source | Do not invent a marker or token normalization |
+| Serve finds safe legacy parser source | Rebuild before binding the dashboard port |
+| Serve finds lossy legacy parser source | Warn, preserve history and marker state, continue startup |
+| Serve repair risk query or safe rebuild fails | Return the error and do not bind the port |
+| Full rebuild includes parserless history | Preserve it; reset only parser registry sources |
 
 Never enable `--allow-lossy-rebuild` automatically.
 
@@ -57,6 +78,11 @@ Never enable `--allow-lossy-rebuild` automatically.
   components.
 - Bad: a report computes `input + cache + output + reasoning` instead of
   summing persisted `total_tokens`.
+- Good: serve repairs Codex, Claude, and OpenCode in registry order while an
+  unrelated parserless Antigravity archive remains untouched.
+- Base: an already-current or empty parser source makes serve repair a no-op.
+- Bad: a full rebuild calls `reset_usage_data`, deleting parserless history
+  that no registered parser can reconstruct.
 
 ## 6. Tests Required
 
@@ -66,6 +92,11 @@ Never enable `--allow-lossy-rebuild` automatically.
   advancement, legacy refusal, warning payload, and guarded rebuild.
 - `tests/sync_regression.rs` keeps hot sync, append, replacement, and rebuild
   behavior idempotent.
+- Serve repair tests assert safe marker advancement, normal-sync unblocking,
+  registry order, lossy blocked counts, preserved history, and propagated
+  parser failure.
+- Full rebuild tests seed parserless event, bucket, behavior, cursor, and
+  source-file rows, then assert every row survives the rebuild.
 - Run `cargo test -- --test-threads=1` and `just ci` for cross-layer changes.
 
 ## 7. Wrong vs Correct
@@ -85,3 +116,22 @@ SUM(total_tokens)
 
 The corrected query preserves source semantics and prevents visible diagnostic
 subchannels from being charged or displayed twice.
+
+For full rebuild deletion boundaries:
+
+### Wrong
+
+```rust
+store.reset_usage_data()?;
+```
+
+### Correct
+
+```rust
+for source in parser_sources {
+    store.reset_for_source(source)?;
+}
+```
+
+The correct form cannot delete a parserless source that the subsequent parser
+fan-out is unable to reconstruct.

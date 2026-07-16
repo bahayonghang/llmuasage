@@ -52,7 +52,7 @@ llmusage sync --recent-days 1
 llmusage sync --rebuild
 ```
 
-`--rebuild` clears rebuildable usage rows, buckets, projects, and cursors before reparsing local sources. It is refused by default when file-backed imported history depends on source files that are now missing.
+`--rebuild` resets parser-backed usage state source by source before reparsing local sources. Parserless Antigravity events, buckets, behavior facts, cursors, and source-file diagnostics are preserved. The rebuild is refused by default when file-backed imported history for a parser source depends on files that are now missing.
 
 Token accounting is versioned per parser source. Databases containing rows
 from the older accounting contract remain readable, but normal sync refuses to
@@ -67,6 +67,13 @@ llmusage sync --rebuild --source opencode
 The source marker advances only after the rebuild succeeds. `source-status` and
 diagnostics expose `legacy_token_accounting`, `token_accounting_version`, and
 an actionable warning while a source still needs rebuilding.
+
+`llmusage serve` performs this repair automatically for safe legacy parser
+sources before it binds the dashboard port. A source with lossy rebuild risk is
+skipped with a warning: its historical reports remain readable, its normal
+writes stay guarded, and the dashboard still starts. Parser, SQLite, or commit
+failures for a source that passed the safety check stop dashboard startup.
+Automatic repair never enables `--allow-lossy-rebuild`.
 
 Only pass the lossy flag when you intentionally accept clearing unrebuildable history:
 

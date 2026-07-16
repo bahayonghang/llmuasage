@@ -52,7 +52,7 @@ llmusage sync --recent-days 1
 llmusage sync --rebuild
 ```
 
-`--rebuild` 会先清空可重建 usage 行、bucket、project 和 cursor，再重新解析本地真源。如果已导入的文件型历史依赖现在缺失的源文件，默认拒绝执行。
+`--rebuild` 会按来源重置 parser-backed 用量状态，再重新解析本地真源。parserless Antigravity 的 event、bucket、行为事实、cursor 和 source-file 诊断都会保留。如果 parser 来源的已导入文件型历史依赖现在缺失的源文件，默认拒绝执行。
 
 Token 统计口径按 parser 来源单独记录版本。含旧口径行的数据库仍可读取，但普通
 sync 会拒绝混写新旧结果。请逐个显式重建受影响来源：
@@ -65,6 +65,11 @@ llmusage sync --rebuild --source opencode
 
 只有重建完整成功后才会推进来源 marker。来源仍需重建时，`source-status` 和
 diagnostics 会返回 `legacy_token_accounting`、`token_accounting_version` 和可执行的警告信息。
+
+`llmusage serve` 会在绑定 Dashboard 端口前自动修复可安全迁移的旧版 parser 来源。
+存在有损重建风险的来源会告警并跳过：历史报表仍可读取，普通写入继续被 guard 拒绝，
+Dashboard 仍会启动。已通过安全预检的来源若发生 parser、SQLite 或提交错误，Dashboard
+会停止启动。自动修复永远不会启用 `--allow-lossy-rebuild`。
 
 只有明确接受清掉不可重建历史时才使用：
 

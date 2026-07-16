@@ -48,7 +48,7 @@ Normal sync imports new/changed local source artifacts. If a file-backed source 
 llmusage sync --rebuild
 ```
 
-`--rebuild` deletes rebuildable usage rows, buckets, project rows, and cursors before reparsing local sources. If imported file-backed history depends on source files that are now missing, llmusage refuses the rebuild by default.
+`--rebuild` resets parser-backed usage state source by source before reparsing local sources. A full rebuild uses the parser registry as its deletion boundary, so parserless Antigravity events, buckets, behavior facts, cursors, and source-file diagnostics are preserved. If imported file-backed history for a parser source depends on files that are now missing, llmusage refuses the rebuild before any reset.
 
 The explicit override is:
 
@@ -57,6 +57,18 @@ llmusage sync --rebuild --allow-lossy-rebuild
 ```
 
 Use it only when you accept clearing unrebuildable imported history.
+
+## Dashboard startup migration
+
+`llmusage serve` checks for legacy parser-backed token accounting before it
+binds a local port. It automatically rebuilds only sources whose tracked input
+files are still available. A source with lossy rebuild risk is skipped with a
+warning; its history remains readable, normal writes remain guarded, and the
+dashboard continues to start. Unexpected failures after a source passes the
+safety check stop startup.
+
+This startup path never enables `--allow-lossy-rebuild`. Parserless sources are
+not migration targets.
 
 ## Diagnose missing source files
 
