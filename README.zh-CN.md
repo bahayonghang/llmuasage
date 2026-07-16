@@ -108,6 +108,7 @@ llmusage codex-tracer --rebuild
 - 不需要账号登录、device token、上传队列或远端用量 API。
 - 普通 `llmusage sync` 遇到原始源文件缺失时会保留已导入 usage。
 - `llmusage sync --rebuild` 默认拒绝有损重建，除非同时传入 `--allow-lossy-rebuild`。
+- 旧 token 统计口径的数据仍可读取，但会拒绝混写；需对每个 parser 来源执行 `llmusage sync --rebuild --source <source>`。
 - `llmusage diagnostics --forget-file <PATH> --source <SOURCE>` 是显式忽略源文件的写入入口。
 - `llmusage logs` 查询本地运行日志和最近命令审计记录，不改变报表 stdout 或 `sync --json-events` stdout 合同。
 - `llmusage catalog apply <file>` 与 `doctor --refresh-pricing <file>` 只读取本地目录文件；URL 会被拒绝。

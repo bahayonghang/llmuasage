@@ -50,6 +50,20 @@ llmusage sync --rebuild
 
 `--rebuild` clears rebuildable usage rows, buckets, projects, and cursors before reparsing local sources. It is refused by default when file-backed imported history depends on source files that are now missing.
 
+Token accounting is versioned per parser source. Databases containing rows
+from the older accounting contract remain readable, but normal sync refuses to
+mix old and corrected rows. Rebuild each affected source explicitly:
+
+```powershell
+llmusage sync --rebuild --source codex
+llmusage sync --rebuild --source claude
+llmusage sync --rebuild --source opencode
+```
+
+The source marker advances only after the rebuild succeeds. `source-status` and
+diagnostics expose `legacy_token_accounting`, `token_accounting_version`, and
+an actionable warning while a source still needs rebuilding.
+
 Only pass the lossy flag when you intentionally accept clearing unrebuildable history:
 
 ```powershell
@@ -72,3 +86,8 @@ llmusage diagnostics --out .\llmusage-diagnostics.json
 - `run_log` and `source_sync_status`: operational status.
 
 Token quality labels are source descriptors, not runtime guesses: `precise` sources preserve input, output, cache read, cache creation/write, reasoning, and total channels; `total_only` sources do not claim subchannel precision; `estimated` sources are explicitly approximate; monitor-only or blocked sources are shown as unavailable/parserless instead of being imported.
+
+For precise sources, `input_tokens` is non-cached input, cache channels are
+reported separately, and parser-owned `total_tokens` is authoritative across
+reports and dashboards. Reasoning remains a diagnostic subchannel and is not
+added again when upstream output or total already includes it.

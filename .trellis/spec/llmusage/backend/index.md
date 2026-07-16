@@ -12,6 +12,9 @@ output, and dashboard/TUI consumers.
 - Read [Pricing Catalog Contracts](./pricing-catalog-contracts.md) before
   changing embedded pricing rows, model matcher behavior, cost computation, or
   context-window coverage.
+- Read [Token Accounting Contracts](./token-accounting-contracts.md) before
+  changing parser token fields, deduplication, totals, costs, or legacy rebuild
+  behavior.
 - Also read `docs/agents/domain.md` and
   `docs/agents/passive-parser-onboarding.md` before promoting a monitored
   platform into a parser-backed source.
@@ -24,6 +27,7 @@ output, and dashboard/TUI consumers.
 | [Pricing Catalog Contracts](./pricing-catalog-contracts.md) | Static pricing rows, model matchers, cost status, and context-window contracts | Documented |
 | [Codex Tracer Contracts](./codex-tracer-contracts.md) | Codex-specific usage tracker with detailed token accounting and thread tracking | Documented |
 | [Dashboard Performance Contracts](./dashboard-performance-contracts.md) | Interactive payload, query routing, cancellation, and range-refresh budgets | Documented |
+| [Token Accounting Contracts](./token-accounting-contracts.md) | Parser normalization, logical dedupe, authoritative totals, and guarded legacy rebuild | Documented |
 
 ## Quality Check
 

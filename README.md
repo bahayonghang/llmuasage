@@ -108,6 +108,7 @@ llmusage codex-tracer --rebuild
 - No account login, device token, upload queue, or remote usage API call.
 - Normal `llmusage sync` keeps imported usage when original source files are missing.
 - `llmusage sync --rebuild` refuses lossy rebuilds unless you also pass `--allow-lossy-rebuild`.
+- Legacy token-accounting rows stay readable but block new writes until each parser source is rebuilt with `llmusage sync --rebuild --source <source>`.
 - `llmusage diagnostics --forget-file <PATH> --source <SOURCE>` is the explicit write path for intentionally ignored source files.
 - `llmusage logs` queries local runtime logs and recent command audit rows without changing report stdout or `sync --json-events` stdout contracts.
 - `llmusage catalog apply <file>` and `doctor --refresh-pricing <file>` read local catalog files; URLs are refused.
