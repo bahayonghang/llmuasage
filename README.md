@@ -12,15 +12,14 @@ Local-first usage analytics for AI coding CLIs. `llmusage` reads local Codex, Cl
 
 ## Install
 
-From this checkout:
+```powershell
+cargo install llmusage --git https://github.com/bahayonghang/llmuasage.git
+```
+
+For development, use `just install` from this checkout, or `cargo run` to run directly:
 
 ```powershell
 just install
-```
-
-Or run directly while developing:
-
-```powershell
 cargo run -- --help
 ```
 

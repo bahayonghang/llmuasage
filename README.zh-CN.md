@@ -12,15 +12,14 @@
 
 ## 安装
 
-在当前 checkout 中安装：
+```powershell
+cargo install llmusage --git https://github.com/bahayonghang/llmuasage.git
+```
+
+开发时可在当前 checkout 中用 `just install` 安装，或用 `cargo run` 直接运行：
 
 ```powershell
 just install
-```
-
-开发时也可以直接运行：
-
-```powershell
 cargo run -- --help
 ```
 
