@@ -3,7 +3,7 @@ use std::fs;
 use rusqlite::OptionalExtension;
 use tracing::info;
 
-use super::{BootstrapOptions, Store, migrations};
+use super::{BootstrapOptions, BootstrapProgressEvent, BootstrapProgressSink, Store, migrations};
 use crate::error::Result;
 
 const META_RAW_ARCHIVE_KEY: &str = "raw_archive_enabled";
@@ -21,6 +21,22 @@ impl Store {
         &self,
         sink: Option<migrations::MigrationEventSink<'_>>,
     ) -> Result<()> {
+        if let Some(migration_sink) = sink {
+            let mut adapter = |event| {
+                if let BootstrapProgressEvent::Migration(event) = event {
+                    migration_sink(event);
+                }
+            };
+            self.bootstrap_with_events(BootstrapOptions::default(), Some(&mut adapter))
+        } else {
+            self.bootstrap_with_events(BootstrapOptions::default(), None)
+        }
+    }
+
+    pub(crate) fn bootstrap_with_progress(
+        &self,
+        sink: Option<BootstrapProgressSink<'_>>,
+    ) -> Result<()> {
         self.bootstrap_with_events(BootstrapOptions::default(), sink)
     }
 
@@ -35,7 +51,7 @@ impl Store {
     fn bootstrap_with_events(
         &self,
         options: BootstrapOptions,
-        migration_sink: Option<migrations::MigrationEventSink<'_>>,
+        mut progress_sink: Option<BootstrapProgressSink<'_>>,
     ) -> Result<()> {
         /*
          * ========================================================================
@@ -59,13 +75,18 @@ impl Store {
         if migrations::read_schema_version(&conn)? == 0 && self.paths.db_path.is_file() {
             self.backup_pre_0_5_0_db()?;
         }
-        migrations::run_migrations_with_events(&mut conn, migration_sink)?;
+        if let Some(sink) = progress_sink.as_deref_mut() {
+            let mut migration_sink = |event| sink(BootstrapProgressEvent::Migration(event));
+            migrations::run_migrations_with_events(&mut conn, Some(&mut migration_sink))?;
+        } else {
+            migrations::run_migrations_with_events(&mut conn, None)?;
+        }
 
         if let Some(enabled) = options.enable_raw_archive {
             write_meta_flag(&conn, META_RAW_ARCHIVE_KEY, enabled)?;
         }
         drop(conn);
-        self.upgrade_embedded_pricing_if_needed()?;
+        self.upgrade_embedded_pricing_if_needed(progress_sink)?;
 
         info!(
             version = migrations::latest_schema_version(),
@@ -181,12 +202,13 @@ impl Store {
     pub fn reset_usage_data(&self) -> Result<()> {
         /*
          * ========================================================================
-         * 步骤2：清空可重建的用量真源
+         * 步骤2：低层全局清空用量数据
          * ========================================================================
          * 目标：
-         * 1) 支持 `sync --rebuild` 重新解析本地源以补齐新 schema 字段
-         * 2) 只删除可从本地 Codex/Claude/OpenCode 真源重建的数据
-         * 3) 保留 run_log / integration_install / trigger_state 等运维记录
+         * 1) 为明确需要全局 reset 的内部调用方保留兼容 API
+         * 2) 清空所有来源，包括没有 parser capability 的来源
+         * 3) command-level `sync --rebuild` 不得调用；它必须按 parser registry 逐源 reset
+         * 4) 保留 run_log / integration_install / trigger_state 等运维记录
          */
         info!("开始清空可重建用量数据");
 

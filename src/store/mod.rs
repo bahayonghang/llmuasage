@@ -1,5 +1,11 @@
-use rusqlite::Connection;
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
+
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
+use tracing::{debug, error, info, warn};
 
 use crate::{
     models::{SourceKind, UsageEvent, UsageTokens, UsageToolCall, UsageTurn},
@@ -86,6 +92,9 @@ pub struct OpencodeCursor {
     pub last_time_created: i64,
     /// Message ids already consumed at the high-water timestamp.
     pub last_processed_ids: Vec<String>,
+    /// Highest OpenCode `part.rowid` fully scanned for behavior facts.
+    #[serde(default)]
+    pub last_part_rowid: i64,
     /// Last observed SQLite status such as `ok` or `missing-db`.
     pub sqlite_status: String,
     /// Last cursor refresh time in RFC 3339 format.
@@ -301,7 +310,9 @@ impl Store {
     pub fn recompute_costs(&self) -> crate::error::Result<usize> {
         let catalog = self.active_pricing_catalog()?;
         let activation = pricing_catalog::PricingMetaChange::preserve();
-        self.recompute_costs_with_meta(&catalog, &activation)
+        Ok(self
+            .recompute_costs_with_meta_and_progress(&catalog, &activation, None)?
+            .updated_events)
     }
 
     /// Recomputes costs against a caller-supplied catalog, persisting custom
@@ -317,7 +328,9 @@ impl Store {
         catalog: &crate::query::pricing_catalog::PricingCatalog,
     ) -> crate::error::Result<usize> {
         let activation = pricing_catalog::PricingMetaChange::for_catalog(self, catalog)?;
-        self.recompute_costs_with_meta(catalog, &activation)
+        Ok(self
+            .recompute_costs_with_meta_and_progress(catalog, &activation, None)?
+            .updated_events)
     }
 
     fn recompute_costs_with_meta(
@@ -325,13 +338,38 @@ impl Store {
         catalog: &crate::query::pricing_catalog::PricingCatalog,
         activation: &pricing_catalog::PricingMetaChange,
     ) -> crate::error::Result<usize> {
-        use std::collections::HashMap;
+        Ok(self
+            .recompute_costs_with_meta_and_progress(catalog, activation, None)?
+            .updated_events)
+    }
 
-        use rusqlite::params;
-
+    fn recompute_costs_with_meta_and_progress(
+        &self,
+        catalog: &crate::query::pricing_catalog::PricingCatalog,
+        activation: &pricing_catalog::PricingMetaChange,
+        progress_sink: Option<BootstrapProgressSink<'_>>,
+    ) -> crate::error::Result<PricingRecomputeSummary> {
         const PAGE_SIZE: usize = 5000;
 
         let mut conn = self.open_connection()?;
+        let from_version = conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'pricing_catalog_version'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .unwrap_or_else(|| "unknown".to_string());
+        let total_events = conn.query_row("SELECT COUNT(*) FROM usage_event", [], |row| {
+            row.get::<_, i64>(0)
+        })? as usize;
+        let mut progress = PricingRecomputeProgress::new(
+            progress_sink,
+            from_version,
+            catalog.version.clone(),
+            total_events,
+        );
+        progress.started();
 
         // Pass 1: page through usage_event rows and update cost columns.
         // We use event_key as a cursor for keyset pagination (it's the PK).
@@ -339,11 +377,12 @@ impl Store {
         let mut last_event_key = String::new();
         let mut buckets: HashMap<BucketKey, PricingRollup> = HashMap::new();
 
-        loop {
-            let tx = conn.transaction()?;
-            let page: Vec<PricingRecomputeRow> = {
-                let mut stmt = tx.prepare(
-                    r#"
+        let event_result: crate::error::Result<()> = (|| {
+            loop {
+                let tx = conn.transaction()?;
+                let page: Vec<PricingRecomputeRow> = {
+                    let mut stmt = tx.prepare(
+                        r#"
                     SELECT event_key, source, COALESCE(provider_label, ''), model, hour_start,
                            COALESCE(project_hash, ''),
                            COALESCE(input_tokens, 0),
@@ -356,33 +395,34 @@ impl Store {
                     ORDER BY event_key ASC
                     LIMIT ?2
                     "#,
-                )?;
-                let mapped = stmt.query_map(params![&last_event_key, PAGE_SIZE as i64], |row| {
-                    Ok(PricingRecomputeRow {
-                        event_key: row.get(0)?,
-                        source: row.get(1)?,
-                        provider_label: row.get(2)?,
-                        model: row.get(3)?,
-                        hour_start: row.get(4)?,
-                        project_hash: row.get(5)?,
-                        input_tokens: row.get(6)?,
-                        cache_read_tokens: row.get(7)?,
-                        cache_creation_tokens: row.get(8)?,
-                        output_tokens: row.get(9)?,
-                        reasoning_output_tokens: row.get(10)?,
-                    })
-                })?;
-                mapped.collect::<rusqlite::Result<Vec<_>>>()?
-            };
+                    )?;
+                    let mapped =
+                        stmt.query_map(params![&last_event_key, PAGE_SIZE as i64], |row| {
+                            Ok(PricingRecomputeRow {
+                                event_key: row.get(0)?,
+                                source: row.get(1)?,
+                                provider_label: row.get(2)?,
+                                model: row.get(3)?,
+                                hour_start: row.get(4)?,
+                                project_hash: row.get(5)?,
+                                input_tokens: row.get(6)?,
+                                cache_read_tokens: row.get(7)?,
+                                cache_creation_tokens: row.get(8)?,
+                                output_tokens: row.get(9)?,
+                                reasoning_output_tokens: row.get(10)?,
+                            })
+                        })?;
+                    mapped.collect::<rusqlite::Result<Vec<_>>>()?
+                };
 
-            if page.is_empty() {
-                tx.commit()?;
-                break;
-            }
+                if page.is_empty() {
+                    tx.commit()?;
+                    break;
+                }
 
-            {
-                let mut update_stmt = tx.prepare(
-                    r#"
+                {
+                    let mut update_stmt = tx.prepare(
+                        r#"
                     UPDATE usage_event
                     SET cost_with_cache_usd = ?2,
                         cost_without_cache_usd = ?3,
@@ -391,111 +431,169 @@ impl Store {
                         pricing_rate = ?6
                     WHERE event_key = ?1
                     "#,
-                )?;
-                for row in &page {
-                    let breakdown = crate::query::pricing::compute_cost_with(
-                        catalog,
-                        &row.source,
-                        &row.model,
-                        crate::query::pricing::CostTokens {
-                            input: row.input_tokens,
-                            cache_read: row.cache_read_tokens,
-                            cache_creation: row.cache_creation_tokens,
-                            output: row.output_tokens,
-                            reasoning_output: row.reasoning_output_tokens,
-                        },
-                    );
-                    update_stmt.execute(params![
-                        row.event_key,
-                        breakdown.cost_with_cache_usd,
-                        breakdown.cost_without_cache_usd,
-                        breakdown.pricing_status.as_str(),
-                        breakdown.pricing_source,
-                        breakdown.pricing_rate,
-                    ])?;
-                    buckets
-                        .entry(BucketKey {
-                            source: row.source.clone(),
-                            provider_label: row.provider_label.clone(),
-                            model: row.model.clone(),
-                            hour_start: row.hour_start.clone(),
-                            project_hash: row.project_hash.clone(),
-                        })
-                        .or_default()
-                        .add(&breakdown);
-                    updated += 1;
+                    )?;
+                    for row in &page {
+                        let breakdown = crate::query::pricing::compute_cost_with(
+                            catalog,
+                            &row.source,
+                            &row.model,
+                            crate::query::pricing::CostTokens {
+                                input: row.input_tokens,
+                                cache_read: row.cache_read_tokens,
+                                cache_creation: row.cache_creation_tokens,
+                                output: row.output_tokens,
+                                reasoning_output: row.reasoning_output_tokens,
+                            },
+                        );
+                        update_stmt.execute(params![
+                            row.event_key,
+                            breakdown.cost_with_cache_usd,
+                            breakdown.cost_without_cache_usd,
+                            breakdown.pricing_status.as_str(),
+                            breakdown.pricing_source,
+                            breakdown.pricing_rate,
+                        ])?;
+                        buckets
+                            .entry(BucketKey {
+                                source: row.source.clone(),
+                                provider_label: row.provider_label.clone(),
+                                model: row.model.clone(),
+                                hour_start: row.hour_start.clone(),
+                                project_hash: row.project_hash.clone(),
+                            })
+                            .or_default()
+                            .add(&breakdown);
+                        updated += 1;
+                    }
                 }
-            }
 
-            last_event_key = page.last().unwrap().event_key.clone();
-            tx.commit()?;
+                last_event_key = page.last().unwrap().event_key.clone();
+                tx.commit()?;
+                progress.page_committed(updated);
+            }
+            Ok(())
+        })();
+        if let Err(err) = event_result {
+            progress.failed("events", updated, buckets.len(), &err);
+            return Err(err);
         }
 
         // Pass 2: reconcile bucket pricing and write catalog version atomically.
-        let tx = conn.transaction()?;
-        {
-            let mut update_bucket_stmt = tx.prepare(
-                r#"
-                UPDATE usage_bucket_30m
-                SET cost_with_cache_usd = ?6,
-                    cost_without_cache_usd = ?7,
-                    pricing_status = ?8,
-                    pricing_source = ?9,
-                    pricing_rate = ?10
-                WHERE source = ?1
-                  AND provider_label = ?2
-                  AND model = ?3
-                  AND hour_start = ?4
-                  AND project_hash = ?5
-                "#,
-            )?;
-            let mut delete_empty_bucket_stmt = tx.prepare(
-                r#"
-                DELETE FROM usage_bucket_30m
-                WHERE NOT EXISTS (
-                    SELECT 1
-                    FROM usage_event e
-                    WHERE e.source = usage_bucket_30m.source
-                      AND COALESCE(e.provider_label, '') = usage_bucket_30m.provider_label
-                      AND e.model = usage_bucket_30m.model
-                      AND e.hour_start = usage_bucket_30m.hour_start
-                      AND COALESCE(e.project_hash, '') = usage_bucket_30m.project_hash
-                )
-                "#,
-            )?;
-
-            for (key, pricing) in buckets {
-                update_bucket_stmt.execute(params![
-                    key.source,
-                    key.provider_label,
-                    key.model,
-                    key.hour_start,
-                    key.project_hash,
-                    pricing.cost_with_cache_usd(),
-                    pricing.cost_without_cache_usd(),
-                    pricing.pricing_status(),
-                    pricing.pricing_source(),
-                    pricing.pricing_rate(),
-                ])?;
+        let bucket_count = buckets.len();
+        progress.bucket_reconcile_started(bucket_count);
+        let reconcile_result: crate::error::Result<usize> = (|| {
+            let tx = conn.transaction()?;
+            let deleted_orphan_buckets = reconcile_pricing_buckets(&tx, &buckets)?;
+            for key in &activation.deletes {
+                tx.execute("DELETE FROM meta WHERE key = ?1", [key])?;
             }
-            delete_empty_bucket_stmt.execute([])?;
-        }
-        for key in &activation.deletes {
-            tx.execute("DELETE FROM meta WHERE key = ?1", [key])?;
-        }
-        for (key, value) in &activation.upserts {
-            tx.execute(
-                r#"
-                INSERT INTO meta(key, value)
-                VALUES (?1, ?2)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value
-                "#,
-                params![key, value],
-            )?;
-        }
-        tx.commit()?;
-        Ok(updated)
+            for (key, value) in &activation.upserts {
+                tx.execute(
+                    r#"
+                    INSERT INTO meta(key, value)
+                    VALUES (?1, ?2)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                    "#,
+                    params![key, value],
+                )?;
+            }
+            tx.commit()?;
+            Ok(deleted_orphan_buckets)
+        })();
+        let deleted_orphan_buckets = match reconcile_result {
+            Ok(deleted) => deleted,
+            Err(err) => {
+                progress.failed("bucket_reconcile", updated, bucket_count, &err);
+                return Err(err);
+            }
+        };
+        let summary = PricingRecomputeSummary {
+            updated_events: updated,
+            bucket_count,
+            deleted_orphan_buckets,
+            elapsed_ms: progress.elapsed_ms(),
+        };
+        progress.finished(&summary);
+        Ok(summary)
     }
+}
+
+fn reconcile_pricing_buckets(
+    tx: &Transaction<'_>,
+    buckets: &HashMap<BucketKey, PricingRollup>,
+) -> crate::error::Result<usize> {
+    let persisted_keys = {
+        let mut stmt = tx.prepare(
+            r#"
+            SELECT source, provider_label, model, hour_start, project_hash
+            FROM usage_bucket_30m
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(BucketKey {
+                source: row.get(0)?,
+                provider_label: row.get(1)?,
+                model: row.get(2)?,
+                hour_start: row.get(3)?,
+                project_hash: row.get(4)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+
+    let mut update_bucket = tx.prepare(
+        r#"
+        UPDATE usage_bucket_30m
+        SET cost_with_cache_usd = ?6,
+            cost_without_cache_usd = ?7,
+            pricing_status = ?8,
+            pricing_source = ?9,
+            pricing_rate = ?10
+        WHERE source = ?1
+          AND provider_label = ?2
+          AND model = ?3
+          AND hour_start = ?4
+          AND project_hash = ?5
+        "#,
+    )?;
+    for (key, pricing) in buckets {
+        update_bucket.execute(params![
+            &key.source,
+            &key.provider_label,
+            &key.model,
+            &key.hour_start,
+            &key.project_hash,
+            pricing.cost_with_cache_usd(),
+            pricing.cost_without_cache_usd(),
+            pricing.pricing_status(),
+            pricing.pricing_source(),
+            pricing.pricing_rate(),
+        ])?;
+    }
+
+    let mut delete_bucket = tx.prepare(
+        r#"
+        DELETE FROM usage_bucket_30m
+        WHERE source = ?1
+          AND provider_label = ?2
+          AND model = ?3
+          AND hour_start = ?4
+          AND project_hash = ?5
+        "#,
+    )?;
+    let mut deleted = 0usize;
+    for key in persisted_keys {
+        if !buckets.contains_key(&key) {
+            deleted += delete_bucket.execute(params![
+                &key.source,
+                &key.provider_label,
+                &key.model,
+                &key.hour_start,
+                &key.project_hash,
+            ])?;
+        }
+    }
+    Ok(deleted)
 }
 
 /// Single-connection writer used by sync to batch event/cursor updates transactionally.
@@ -630,6 +728,237 @@ impl BootstrapOptions {
     }
 }
 
+/// Internal progress envelope for schema migration and embedded pricing work.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BootstrapProgressEvent {
+    Migration(MigrationProgressEvent),
+    PricingUpgradeStarted {
+        from_version: String,
+        to_version: String,
+        total_events: usize,
+    },
+    PricingUpgradeProgress {
+        from_version: String,
+        to_version: String,
+        processed_events: usize,
+        total_events: usize,
+        elapsed_ms: u64,
+    },
+    PricingBucketReconcileStarted {
+        to_version: String,
+        bucket_count: usize,
+    },
+    PricingUpgradeFinished {
+        from_version: String,
+        to_version: String,
+        updated_events: usize,
+        bucket_count: usize,
+        deleted_orphan_buckets: usize,
+        elapsed_ms: u64,
+    },
+}
+
+pub(crate) type BootstrapProgressSink<'a> = &'a mut dyn FnMut(BootstrapProgressEvent);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PricingRecomputeSummary {
+    updated_events: usize,
+    bucket_count: usize,
+    deleted_orphan_buckets: usize,
+    elapsed_ms: u64,
+}
+
+struct PricingRecomputeProgress<'a> {
+    sink: Option<BootstrapProgressSink<'a>>,
+    from_version: String,
+    to_version: String,
+    total_events: usize,
+    started_at: Instant,
+    last_emitted_at: Instant,
+    last_emitted_events: usize,
+    slow_warning_emitted: bool,
+}
+
+impl<'a> PricingRecomputeProgress<'a> {
+    const PROGRESS_INTERVAL: Duration = Duration::from_secs(1);
+    const PROGRESS_EVENT_INTERVAL: usize = 25_000;
+    const SLOW_WARNING_AFTER: Duration = Duration::from_secs(30);
+
+    fn new(
+        sink: Option<BootstrapProgressSink<'a>>,
+        from_version: String,
+        to_version: String,
+        total_events: usize,
+    ) -> Self {
+        let now = Instant::now();
+        Self {
+            sink,
+            from_version,
+            to_version,
+            total_events,
+            started_at: now,
+            last_emitted_at: now,
+            last_emitted_events: 0,
+            slow_warning_emitted: false,
+        }
+    }
+
+    fn started(&mut self) {
+        info!(
+            operation = "pricing_recompute",
+            phase = "started",
+            from_version = %self.from_version,
+            to_version = %self.to_version,
+            total_events = self.total_events,
+            "开始重算定价目录"
+        );
+        self.emit(BootstrapProgressEvent::PricingUpgradeStarted {
+            from_version: self.from_version.clone(),
+            to_version: self.to_version.clone(),
+            total_events: self.total_events,
+        });
+    }
+
+    fn page_committed(&mut self, processed_events: usize) {
+        let now = Instant::now();
+        let elapsed = now.duration_since(self.started_at);
+        if self.take_slow_warning(elapsed) {
+            warn!(
+                operation = "pricing_recompute",
+                phase = "events",
+                from_version = %self.from_version,
+                to_version = %self.to_version,
+                processed_events,
+                total_events = self.total_events,
+                elapsed_ms = elapsed.as_millis().min(u64::MAX as u128) as u64,
+                "定价重算仍在进行"
+            );
+        }
+        if now.duration_since(self.last_emitted_at) < Self::PROGRESS_INTERVAL
+            && processed_events.saturating_sub(self.last_emitted_events)
+                < Self::PROGRESS_EVENT_INTERVAL
+            && processed_events != self.total_events
+        {
+            return;
+        }
+
+        let elapsed_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
+        debug!(
+            operation = "pricing_recompute",
+            phase = "events",
+            from_version = %self.from_version,
+            to_version = %self.to_version,
+            processed_events,
+            total_events = self.total_events,
+            elapsed_ms,
+            "定价重算页已提交"
+        );
+        self.emit(BootstrapProgressEvent::PricingUpgradeProgress {
+            from_version: self.from_version.clone(),
+            to_version: self.to_version.clone(),
+            processed_events,
+            total_events: self.total_events,
+            elapsed_ms,
+        });
+        self.last_emitted_at = now;
+        self.last_emitted_events = processed_events;
+    }
+
+    fn bucket_reconcile_started(&mut self, bucket_count: usize) {
+        info!(
+            operation = "pricing_recompute",
+            phase = "bucket_reconcile",
+            from_version = %self.from_version,
+            to_version = %self.to_version,
+            processed_events = self.total_events,
+            total_events = self.total_events,
+            bucket_count,
+            elapsed_ms = self.elapsed_ms(),
+            "开始对账定价汇总桶"
+        );
+        self.emit(BootstrapProgressEvent::PricingBucketReconcileStarted {
+            to_version: self.to_version.clone(),
+            bucket_count,
+        });
+    }
+
+    fn finished(&mut self, summary: &PricingRecomputeSummary) {
+        let elapsed = self.started_at.elapsed();
+        if self.take_slow_warning(elapsed) {
+            warn!(
+                operation = "pricing_recompute",
+                phase = "bucket_reconcile",
+                from_version = %self.from_version,
+                to_version = %self.to_version,
+                processed_events = summary.updated_events,
+                total_events = self.total_events,
+                bucket_count = summary.bucket_count,
+                elapsed_ms = summary.elapsed_ms,
+                "定价汇总桶对账耗时超过预期"
+            );
+        }
+        info!(
+            operation = "pricing_recompute",
+            phase = "finished",
+            from_version = %self.from_version,
+            to_version = %self.to_version,
+            processed_events = summary.updated_events,
+            total_events = self.total_events,
+            bucket_count = summary.bucket_count,
+            deleted_orphan_buckets = summary.deleted_orphan_buckets,
+            elapsed_ms = summary.elapsed_ms,
+            "完成定价目录重算"
+        );
+        self.emit(BootstrapProgressEvent::PricingUpgradeFinished {
+            from_version: self.from_version.clone(),
+            to_version: self.to_version.clone(),
+            updated_events: summary.updated_events,
+            bucket_count: summary.bucket_count,
+            deleted_orphan_buckets: summary.deleted_orphan_buckets,
+            elapsed_ms: summary.elapsed_ms,
+        });
+    }
+
+    fn failed(
+        &self,
+        phase: &'static str,
+        processed_events: usize,
+        bucket_count: usize,
+        err: &crate::error::LlmusageError,
+    ) {
+        error!(
+            operation = "pricing_recompute",
+            phase,
+            from_version = %self.from_version,
+            to_version = %self.to_version,
+            processed_events,
+            total_events = self.total_events,
+            bucket_count,
+            elapsed_ms = self.elapsed_ms(),
+            error = %err,
+            "定价目录重算失败"
+        );
+    }
+
+    fn elapsed_ms(&self) -> u64 {
+        self.started_at.elapsed().as_millis().min(u64::MAX as u128) as u64
+    }
+
+    fn take_slow_warning(&mut self, elapsed: Duration) -> bool {
+        if self.slow_warning_emitted || elapsed < Self::SLOW_WARNING_AFTER {
+            return false;
+        }
+        self.slow_warning_emitted = true;
+        true
+    }
+
+    fn emit(&mut self, event: BootstrapProgressEvent) {
+        if let Some(sink) = self.sink.as_deref_mut() {
+            sink(event);
+        }
+    }
+}
+
 /// Outcome of [`SyncRunWriter::commit_shard`] reported back to the caller.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ShardCommitStats {
@@ -753,5 +1082,55 @@ impl MetadataRollup {
         } else {
             self.value.clone()
         }
+    }
+}
+
+#[cfg(test)]
+mod pricing_reconcile_tests {
+    use tempfile::TempDir;
+
+    use super::*;
+
+    #[test]
+    fn pricing_bucket_reconcile_does_not_require_usage_event() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = AppPaths::with_root(temp.path().to_path_buf())?;
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+        let mut conn = store.open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_bucket_30m(
+                source, provider_label, model, hour_start, project_hash,
+                input_tokens, cache_read_tokens, cache_creation_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                event_count, updated_at
+            ) VALUES ('codex', '', 'orphan', '2026-07-16T00:00:00Z', '',
+                      0, 0, 0, 0, 0, 0, 0, '2026-07-16T00:00:00Z')
+            "#,
+            [],
+        )?;
+        conn.execute_batch("DROP TABLE usage_event;")?;
+
+        let tx = conn.transaction()?;
+        let deleted = reconcile_pricing_buckets(&tx, &HashMap::new())?;
+        tx.commit()?;
+
+        assert_eq!(deleted, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn pricing_slow_warning_threshold_is_one_shot() {
+        let mut progress = PricingRecomputeProgress::new(
+            None,
+            "static-v1".to_string(),
+            "static-v2".to_string(),
+            100,
+        );
+
+        assert!(!progress.take_slow_warning(Duration::from_secs(29)));
+        assert!(progress.take_slow_warning(Duration::from_secs(30)));
+        assert!(!progress.take_slow_warning(Duration::from_secs(31)));
     }
 }

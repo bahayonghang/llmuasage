@@ -121,7 +121,11 @@ llmusage sync --rebuild
 llmusage sync --rebuild --allow-lossy-rebuild
 ```
 
-导入本地来源。`--json-events` 在 stdout 写 NDJSON 生命周期事件。`--allow-lossy-rebuild` 必须配合 `--rebuild`。
+导入本地来源。扫描来源前，bootstrap 可能升级未固定的内置定价目录并重算历史事件价格。人读 stderr 会显示目录版本、已处理/总事件数、汇总桶对账和完成耗时，不再一直停留在一条笼统的数据库初始化提示。
+
+`--json-events` 在 stdout 写 NDJSON 生命周期事件；发生内置升级时会额外输出 `pricing_upgrade_started`、`pricing_upgrade_progress`、`pricing_bucket_reconcile_started`、`pricing_upgrade_finished`。目录已是最新或固定了 snapshot/overlay 时不会输出这些定价事件。`--allow-lossy-rebuild` 必须配合 `--rebuild`。
+
+设置 `LLMUSAGE_LOG=info` 可记录结构化的定价开始/对账/完成文件日志，`debug` 还会记录节流后的页进度。默认 `warn` 级别会在重算持续超过 30 秒时记录一次存活告警；终端进度不受文件日志级别影响。
 
 人读摘要会按来源显示 `files`、`changed`、`skipped`、`seen`、`committed` 和 `stored_events`。`skipped` 对文件型来源来自现有 cursor/fingerprint 证据，对 OpenCode 这种 DB 来源来自 SQLite 高水位 cursor。`committed` 是 SQLite 去重后本次新增写入数。
 

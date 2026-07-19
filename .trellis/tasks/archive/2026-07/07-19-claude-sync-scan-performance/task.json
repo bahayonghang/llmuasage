@@ -1,0 +1,28 @@
+{
+  "id": "claude-sync-scan-performance",
+  "name": "claude-sync-scan-performance",
+  "title": "优化多来源同步扫描性能",
+  "description": "深入分析并优化 llmusage sync 的 Claude、Codex 与 OpenCode 扫描、增量判定、解析和写入性能，同时修复各热路径上经测量确认的其他主要瓶颈。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-07-19",
+  "completedAt": "2026-07-19",
+  "branch": null,
+  "base_branch": "dev",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-19-home-overview-query-performance"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

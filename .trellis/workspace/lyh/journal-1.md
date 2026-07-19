@@ -517,3 +517,104 @@ Aligned Claude, Codex, and OpenCode token normalization with ccusage; made persi
 ### Next Steps
 
 - None - task complete
+
+
+## Session 16: 优化同步数据库初始化性能与进度可见性
+
+**Date**: 2026-07-16
+**Task**: 优化同步数据库初始化性能与进度可见性
+**Branch**: `dev`
+
+### Summary
+
+将定价桶对账改为线性主键集合比较，新增人类输出、NDJSON 生命周期事件和结构化日志，并以 53.9 万事件快照验证性能与一致性；同步更新中英文文档。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `731c91f77d3ab9b263b18037c0064a60db46cecc` | (see git log) |
+| `89bc7de1d07cfcafea3cdbfc38935bc2ec74ace3` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 17: Serve 安全迁移旧版 token 统计
+
+**Date**: 2026-07-17
+**Task**: Serve 安全迁移旧版 token 统计
+**Branch**: `dev`
+
+### Summary
+
+实现 serve 启动前按来源安全重建 legacy token accounting，保留有损来源与 parserless 历史，并修正 full rebuild 的逐源边界；补齐回归测试、双语文档和 Trellis 规范。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `31ca870` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 18: 完成首页概览与多来源同步性能优化
+
+**Date**: 2026-07-19
+**Task**: 完成首页概览与多来源同步性能优化
+**Branch**: `dev`
+
+### Summary
+
+完成 home_overview 共享 row stream 与 diagnostics 缺失源优化，恢复 80ms 门；完成 Claude/Codex/OpenCode 增量扫描与写入性能修复。debug/release 80ms 各连续三次通过，严格 Clippy、未设置 CI=1 的完整串行测试、docs build 和 git diff check 全绿；保留用户原有配置与 README WIP。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `66d596f` | (see git log) |
+| `05add10` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

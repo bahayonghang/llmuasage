@@ -15,7 +15,7 @@ use crate::{
     models::SourceKind,
     parsers::{SourceSyncStats, SyncEvent, SyncSummaryEvent, driver},
     registry,
-    store::{HolderKind, MigrationProgressEvent, SourceSyncStatus, Store},
+    store::{BootstrapProgressEvent, HolderKind, SourceSyncStatus, Store},
 };
 
 #[derive(Debug, Clone)]
@@ -69,21 +69,10 @@ async fn run_with_human_events(
 ) -> Result<()> {
     let mut progress = HumanProgress::new();
     progress.render(&SyncEvent::BootstrapStarted);
-    let mut migration_sink = |event: MigrationProgressEvent| {
-        progress.render(&match event {
-            MigrationProgressEvent::Started(item) => SyncEvent::MigrationStarted {
-                version: item.version,
-                name: item.name.to_string(),
-                latest_version: crate::store::latest_schema_version(),
-            },
-            MigrationProgressEvent::Finished(item) => SyncEvent::MigrationFinished {
-                version: item.version,
-                name: item.name.to_string(),
-                elapsed_ms: item.elapsed_ms.unwrap_or_default(),
-            },
-        });
+    let mut bootstrap_sink = |event: BootstrapProgressEvent| {
+        progress.render(&SyncEvent::from(event));
     };
-    store.bootstrap_with_migration_events(Some(&mut migration_sink))?;
+    store.bootstrap_with_progress(Some(&mut bootstrap_sink))?;
     progress.render(&SyncEvent::LockWaiting { timeout_ms: 30_000 });
     let lock_started = Instant::now();
     let lock = store.acquire_worker_lock_with(Duration::from_secs(30), HolderKind::Cli)?;
@@ -162,23 +151,11 @@ async fn run_with_json_events(
 
     let result = async {
         {
-            let migration_tx = tx.clone();
-            let mut migration_sink = move |event: MigrationProgressEvent| {
-                let sync_event = match event {
-                    MigrationProgressEvent::Started(item) => SyncEvent::MigrationStarted {
-                        version: item.version,
-                        name: item.name.to_string(),
-                        latest_version: crate::store::latest_schema_version(),
-                    },
-                    MigrationProgressEvent::Finished(item) => SyncEvent::MigrationFinished {
-                        version: item.version,
-                        name: item.name.to_string(),
-                        elapsed_ms: item.elapsed_ms.unwrap_or_default(),
-                    },
-                };
-                let _ = migration_tx.try_send(sync_event);
+            let bootstrap_tx = tx.clone();
+            let mut bootstrap_sink = move |event: BootstrapProgressEvent| {
+                let _ = bootstrap_tx.try_send(SyncEvent::from(event));
             };
-            store.bootstrap_with_migration_events(Some(&mut migration_sink))?;
+            store.bootstrap_with_progress(Some(&mut bootstrap_sink))?;
         }
         tx.send(SyncEvent::LockWaiting { timeout_ms: 30_000 })
             .await?;
@@ -246,7 +223,7 @@ async fn run_with_json_events(
 fn print_summary(summary: &SyncSummary, options: &SyncRunOptions) {
     println!("Sync finished:");
     if options.rebuild {
-        println!("- rebuild: reset usage rows, buckets, projects, and cursors before sync");
+        println!("- rebuild: reset parser-backed usage state source by source before sync");
     }
     for item in &summary.sources {
         println!(
@@ -356,9 +333,22 @@ async fn run_once_locked(
      */
     info!("开始执行 sync 三阶段流水线");
 
-    assert_token_accounting_write_allowed(store, options)?;
+    let parsers = registry::registered_parsers()
+        .into_iter()
+        .filter(|parser| {
+            options
+                .source
+                .is_none_or(|source| parser.source() == source)
+        })
+        .collect::<Vec<_>>();
+    let parser_sources = parsers
+        .iter()
+        .map(|parser| parser.source())
+        .collect::<Vec<_>>();
+
+    assert_token_accounting_write_allowed(store, options, &parser_sources)?;
     if options.rebuild {
-        reset_for_rebuild(store, options)?;
+        reset_for_rebuild(store, options, &parser_sources)?;
     }
 
     // 2.1 计算并发度并按 source 顺序解析 + 即时写入
@@ -370,14 +360,6 @@ async fn run_once_locked(
         options.provider_map.as_deref(),
     )?;
     let mut writer = store.begin_sync_run_with_provider_index(provider_index)?;
-    let parsers = registry::registered_parsers()
-        .into_iter()
-        .filter(|parser| {
-            options
-                .source
-                .is_none_or(|source| parser.source() == source)
-        })
-        .collect::<Vec<_>>();
     let parserless_sources = match options.source {
         Some(source)
             if registry::source_descriptor(source)
@@ -498,35 +480,34 @@ fn stored_events_for_source(store: &Store, source: SourceKind) -> Result<usize> 
     stored_event_count(store, Some(source))
 }
 
-fn reset_for_rebuild(store: &Store, options: &SyncRunOptions) -> Result<()> {
-    assert_lossless_rebuild(store, options)?;
+fn reset_for_rebuild(
+    store: &Store,
+    options: &SyncRunOptions,
+    parser_sources: &[SourceKind],
+) -> Result<()> {
+    let rebuild_sources = rebuild_sources(options.source, parser_sources);
+    assert_lossless_rebuild(store, options, &rebuild_sources)?;
     if let Some(source) = options.source {
         store.reset_for_source(source)?;
         store.clear_token_accounting_version(source)?;
     } else {
-        store.reset_usage_data()?;
-        for source in rebuild_guard_sources(None) {
+        for source in rebuild_sources {
+            store.reset_for_source(source)?;
             store.clear_token_accounting_version(source)?;
         }
     }
     Ok(())
 }
 
-fn assert_token_accounting_write_allowed(store: &Store, options: &SyncRunOptions) -> Result<()> {
+fn assert_token_accounting_write_allowed(
+    store: &Store,
+    options: &SyncRunOptions,
+    parser_sources: &[SourceKind],
+) -> Result<()> {
     if options.rebuild {
         return Ok(());
     }
-    let mut legacy = Vec::new();
-    for source in rebuild_guard_sources(options.source) {
-        if !registry::source_descriptor(source)
-            .is_some_and(|descriptor| descriptor.capabilities.parser)
-        {
-            continue;
-        }
-        if store.has_legacy_token_accounting(source)? {
-            legacy.push(source);
-        }
-    }
+    let legacy = legacy_token_accounting_sources_for(store, parser_sources)?;
     if legacy.is_empty() {
         return Ok(());
     }
@@ -540,18 +521,22 @@ fn assert_token_accounting_write_allowed(store: &Store, options: &SyncRunOptions
     )
 }
 
-fn assert_lossless_rebuild(store: &Store, options: &SyncRunOptions) -> Result<()> {
+fn assert_lossless_rebuild(
+    store: &Store,
+    options: &SyncRunOptions,
+    rebuild_sources: &[SourceKind],
+) -> Result<()> {
     if options.allow_lossy_rebuild {
         return Ok(());
     }
 
-    let risks = rebuild_guard_sources(options.source)
-        .into_iter()
-        .filter_map(|source| {
-            let risk = store.source_files().lossy_rebuild_risk(source).ok()?;
-            risk.has_risk().then_some(risk)
-        })
-        .collect::<Vec<_>>();
+    let mut risks = Vec::new();
+    for source in rebuild_sources {
+        let risk = store.source_files().lossy_rebuild_risk(*source)?;
+        if risk.has_risk() {
+            risks.push(risk);
+        }
+    }
     if risks.is_empty() {
         return Ok(());
     }
@@ -574,16 +559,32 @@ Restore the source files or pass --allow-lossy-rebuild to explicitly accept clea
     );
 }
 
-fn rebuild_guard_sources(source: Option<SourceKind>) -> Vec<SourceKind> {
-    source.map_or_else(
-        || {
-            registry::registered_parsers()
-                .into_iter()
-                .map(|parser| parser.source())
-                .collect()
-        },
-        |source| vec![source],
-    )
+pub(crate) fn legacy_token_accounting_sources(store: &Store) -> Result<Vec<SourceKind>> {
+    let parser_sources = registry::registered_parsers()
+        .into_iter()
+        .map(|parser| parser.source())
+        .collect::<Vec<_>>();
+    legacy_token_accounting_sources_for(store, &parser_sources)
+}
+
+fn legacy_token_accounting_sources_for(
+    store: &Store,
+    parser_sources: &[SourceKind],
+) -> Result<Vec<SourceKind>> {
+    let mut legacy_sources = Vec::new();
+    for source in parser_sources {
+        if store.has_legacy_token_accounting(*source)? {
+            legacy_sources.push(*source);
+        }
+    }
+    Ok(legacy_sources)
+}
+
+fn rebuild_sources(
+    selected_source: Option<SourceKind>,
+    parser_sources: &[SourceKind],
+) -> Vec<SourceKind> {
+    selected_source.map_or_else(|| parser_sources.to_vec(), |source| vec![source])
 }
 
 struct HumanProgress {
@@ -616,6 +617,8 @@ impl HumanProgress {
                 event,
                 SyncEvent::SourceFinished { .. }
                     | SyncEvent::MigrationFinished { .. }
+                    | SyncEvent::PricingBucketReconcileStarted { .. }
+                    | SyncEvent::PricingUpgradeFinished { .. }
                     | SyncEvent::LockAcquired { .. }
             ) {
                 let _ = writeln!(self.stderr);
@@ -629,7 +632,7 @@ impl HumanProgress {
 
 fn human_progress_line(event: &SyncEvent) -> Option<String> {
     match event {
-        SyncEvent::BootstrapStarted => Some("初始化数据库...".to_string()),
+        SyncEvent::BootstrapStarted => Some("检查数据库 schema 与定价目录...".to_string()),
         SyncEvent::MigrationStarted {
             version,
             name,
@@ -643,6 +646,45 @@ fn human_progress_line(event: &SyncEvent) -> Option<String> {
             elapsed_ms,
         } => Some(format!(
             "数据库 schema v{version} {name} 完成（{elapsed_ms}ms）"
+        )),
+        SyncEvent::PricingUpgradeStarted {
+            from_version,
+            to_version,
+            total_events,
+        } => Some(format!(
+            "升级定价目录 {from_version} → {to_version}：共 {total_events} 条事件..."
+        )),
+        SyncEvent::PricingUpgradeProgress {
+            from_version,
+            to_version,
+            processed_events,
+            total_events,
+            elapsed_ms,
+        } => {
+            let percentage = if *total_events == 0 {
+                100.0
+            } else {
+                *processed_events as f64 * 100.0 / *total_events as f64
+            };
+            Some(format!(
+                "升级定价目录 {from_version} → {to_version}：已处理 {processed_events}/{total_events} 条（{percentage:.1}%），已用 {elapsed_ms}ms"
+            ))
+        }
+        SyncEvent::PricingBucketReconcileStarted {
+            to_version,
+            bucket_count,
+        } => Some(format!(
+            "事件定价完成，正在对账 {bucket_count} 个 {to_version} 汇总桶..."
+        )),
+        SyncEvent::PricingUpgradeFinished {
+            to_version,
+            updated_events,
+            bucket_count,
+            deleted_orphan_buckets,
+            elapsed_ms,
+            ..
+        } => Some(format!(
+            "定价目录 {to_version} 升级完成：{updated_events} 条事件，{bucket_count} 个桶，清理 {deleted_orphan_buckets} 个孤立桶（{elapsed_ms}ms）"
         )),
         SyncEvent::LockWaiting { .. } => Some("等待 SQLite sync worker 锁...".to_string()),
         SyncEvent::LockAcquired { wait_ms } => {
@@ -685,5 +727,67 @@ fn source_label(source: SourceKind) -> &'static str {
         SourceKind::Claude => "Claude",
         SourceKind::Opencode => "OpenCode",
         SourceKind::Antigravity => "Antigravity",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn human_progress_describes_pricing_upgrade_phases() {
+        assert_eq!(
+            human_progress_line(&SyncEvent::BootstrapStarted).as_deref(),
+            Some("检查数据库 schema 与定价目录...")
+        );
+        assert_eq!(
+            human_progress_line(&SyncEvent::PricingUpgradeProgress {
+                from_version: "static-v1".to_string(),
+                to_version: "static-v2".to_string(),
+                processed_events: 25_000,
+                total_events: 50_000,
+                elapsed_ms: 1_234,
+            })
+            .as_deref(),
+            Some("升级定价目录 static-v1 → static-v2：已处理 25000/50000 条（50.0%），已用 1234ms")
+        );
+        assert_eq!(
+            human_progress_line(&SyncEvent::PricingBucketReconcileStarted {
+                to_version: "static-v2".to_string(),
+                bucket_count: 7_153,
+            })
+            .as_deref(),
+            Some("事件定价完成，正在对账 7153 个 static-v2 汇总桶...")
+        );
+        assert_eq!(
+            human_progress_line(&SyncEvent::PricingUpgradeFinished {
+                from_version: "static-v1".to_string(),
+                to_version: "static-v2".to_string(),
+                updated_events: 539_146,
+                bucket_count: 7_153,
+                deleted_orphan_buckets: 2,
+                elapsed_ms: 46_000,
+            })
+            .as_deref(),
+            Some(
+                "定价目录 static-v2 升级完成：539146 条事件，7153 个桶，清理 2 个孤立桶（46000ms）"
+            )
+        );
+    }
+
+    #[test]
+    fn pricing_sync_event_serializes_as_additive_snake_case_ndjson() -> anyhow::Result<()> {
+        let value = serde_json::to_value(SyncEvent::PricingUpgradeProgress {
+            from_version: "static-v1".to_string(),
+            to_version: "static-v2".to_string(),
+            processed_events: 25_000,
+            total_events: 50_000,
+            elapsed_ms: 1_234,
+        })?;
+
+        assert_eq!(value["event"], "pricing_upgrade_progress");
+        assert_eq!(value["processed_events"], 25_000);
+        assert_eq!(value["total_events"], 50_000);
+        Ok(())
     }
 }

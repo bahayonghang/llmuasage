@@ -8,6 +8,11 @@ llmusage serve
 
 默认从 `37421` 开始探测本地端口，只绑定 `127.0.0.1`，打印 URL，并尝试打开默认浏览器。
 
+绑定端口前，`serve` 会检查 parser-backed 来源是否仍使用旧版 token 统计口径，并按
+registry 顺序逐源安全重建。存在源文件缺失风险的来源会保持原状并输出告警，因此旧历史
+仍可读取，Dashboard 也会继续启动；意外的 parser、SQLite 或提交错误则会终止启动。
+自动路径永远不会启用 `--allow-lossy-rebuild`，也不会重建 parserless Antigravity。
+
 需要固定 URL 时指定端口：
 
 ```powershell

@@ -1,0 +1,32 @@
+{
+  "id": "sync-database-init-hang",
+  "name": "sync-database-init-hang",
+  "title": "Optimize sync database bootstrap performance and progress",
+  "description": "Replace pathological pricing bucket reconciliation and expose visible progress plus structured logs during bootstrap catalog upgrades.",
+  "status": "completed",
+  "dev_type": "backend",
+  "scope": "Store pricing recompute, sync bootstrap events/logging, regression tests, and bilingual CLI contracts",
+  "package": null,
+  "priority": "P2",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-07-16",
+  "completedAt": "2026-07-16",
+  "branch": null,
+  "base_branch": "dev",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "src/store/mod.rs",
+    "src/store/schema.rs",
+    "src/store/pricing_catalog.rs",
+    "src/parsers/mod.rs",
+    "src/commands/sync.rs"
+  ],
+  "notes": "",
+  "meta": {}
+}

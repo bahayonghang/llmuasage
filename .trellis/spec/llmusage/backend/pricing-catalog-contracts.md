@@ -90,6 +90,22 @@
 - Complete snapshots remain pinned.
 - Overlays based on an old embedded catalog remain pinned; status reports
   `rebase_available` until the user applies again or resets.
+- Event repricing remains paged and each committed page may emit observational
+  progress. Bucket updates, orphan deletion, and activation metadata remain one
+  final transaction; failure before that commit must not emit completion or
+  advance the active catalog.
+- Final bucket reconciliation must reuse the recomputed in-memory bucket-key
+  map. It reads persisted bucket primary keys once, updates matching keys, and
+  deletes only persisted keys absent from the map. Reconciliation must not read
+  `usage_event`, add a permanent index, or introduce a schema migration.
+- Bootstrap pricing progress is ordered as started, throttled committed-page
+  progress, bucket-reconcile started, and finished. Emit progress at most once
+  per second or every 25,000 events, plus the final page. Current and pinned
+  catalogs emit no pricing lifecycle.
+- Structured pricing logs use stable operation/phase/version/count/elapsed
+  fields without paths, event keys, prompts, or catalog contents. Phase
+  boundaries are `info`, page progress is `debug`, continued work past 30
+  seconds emits exactly one `warn`, and failures are `error`.
 
 ### 7. GPT-5.6 Contract
 
@@ -116,6 +132,10 @@
 - Active-catalog recompute preserves overlay metadata; direct custom-catalog
   recompute survives restart; a failure after the first 5,000-event page can be
   retried to consistent event and bucket costs without an early metadata switch.
+- Many-bucket reconciliation includes at least one orphan and structurally
+  proves the final reconciliation has no `usage_event` dependency.
+- Embedded-upgrade progress tests cover ordering, monotonic counts, successful
+  activation, no-op silence, failed-run completion suppression, and retry.
 - Context pressure for embedded and configured models; unknown windows remain
   counted separately.
 - Final gates: fmt, strict Clippy, serial full tests, docs build, and diff check.

@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{models::SourceKind, store::MigrationProgress};
+use crate::{
+    models::SourceKind,
+    store::{BootstrapProgressEvent, MigrationProgress, MigrationProgressEvent},
+};
 
 pub(crate) mod behavior;
 pub mod claude;
@@ -34,6 +37,34 @@ pub enum SyncEvent {
     MigrationFinished {
         version: u32,
         name: String,
+        elapsed_ms: u64,
+    },
+    /// An embedded pricing catalog upgrade is about to reprice stored events.
+    PricingUpgradeStarted {
+        from_version: String,
+        to_version: String,
+        total_events: usize,
+    },
+    /// A committed pricing page made durable progress.
+    PricingUpgradeProgress {
+        from_version: String,
+        to_version: String,
+        processed_events: usize,
+        total_events: usize,
+        elapsed_ms: u64,
+    },
+    /// Event repricing finished and bucket pricing reconciliation is starting.
+    PricingBucketReconcileStarted {
+        to_version: String,
+        bucket_count: usize,
+    },
+    /// Embedded pricing activation and bucket reconciliation committed.
+    PricingUpgradeFinished {
+        from_version: String,
+        to_version: String,
+        updated_events: usize,
+        bucket_count: usize,
+        deleted_orphan_buckets: usize,
         elapsed_ms: u64,
     },
     /// Caller is waiting for the global SQLite sync worker lock.
@@ -81,6 +112,71 @@ impl From<MigrationProgress> for SyncEvent {
                 version: value.version,
                 name: value.name.to_string(),
                 latest_version: crate::store::latest_schema_version(),
+            },
+        }
+    }
+}
+
+impl From<BootstrapProgressEvent> for SyncEvent {
+    fn from(value: BootstrapProgressEvent) -> Self {
+        match value {
+            BootstrapProgressEvent::Migration(MigrationProgressEvent::Started(item)) => {
+                SyncEvent::MigrationStarted {
+                    version: item.version,
+                    name: item.name.to_string(),
+                    latest_version: crate::store::latest_schema_version(),
+                }
+            }
+            BootstrapProgressEvent::Migration(MigrationProgressEvent::Finished(item)) => {
+                SyncEvent::MigrationFinished {
+                    version: item.version,
+                    name: item.name.to_string(),
+                    elapsed_ms: item.elapsed_ms.unwrap_or_default(),
+                }
+            }
+            BootstrapProgressEvent::PricingUpgradeStarted {
+                from_version,
+                to_version,
+                total_events,
+            } => SyncEvent::PricingUpgradeStarted {
+                from_version,
+                to_version,
+                total_events,
+            },
+            BootstrapProgressEvent::PricingUpgradeProgress {
+                from_version,
+                to_version,
+                processed_events,
+                total_events,
+                elapsed_ms,
+            } => SyncEvent::PricingUpgradeProgress {
+                from_version,
+                to_version,
+                processed_events,
+                total_events,
+                elapsed_ms,
+            },
+            BootstrapProgressEvent::PricingBucketReconcileStarted {
+                to_version,
+                bucket_count,
+            } => SyncEvent::PricingBucketReconcileStarted {
+                to_version,
+                bucket_count,
+            },
+            BootstrapProgressEvent::PricingUpgradeFinished {
+                from_version,
+                to_version,
+                updated_events,
+                bucket_count,
+                deleted_orphan_buckets,
+                elapsed_ms,
+            } => SyncEvent::PricingUpgradeFinished {
+                from_version,
+                to_version,
+                updated_events,
+                bucket_count,
+                deleted_orphan_buckets,
+                elapsed_ms,
             },
         }
     }

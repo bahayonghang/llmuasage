@@ -8,6 +8,8 @@ use crate::util::resolve_home_dir;
 /// Result of enumerating a file-backed source's candidate files.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SourceFileListing {
+    /// Root directory used for enumeration and source-specific grouping.
+    pub root: PathBuf,
     /// Existing candidate files that matched the source-specific predicate.
     pub paths: Vec<PathBuf>,
     /// Non-fatal filesystem enumeration errors seen while walking the source.
@@ -58,11 +60,14 @@ fn list_matching_files(
     root: PathBuf,
     predicate: impl Fn(&str, &Path) -> bool,
 ) -> SourceFileListing {
+    let mut listing = SourceFileListing {
+        root: root.clone(),
+        ..SourceFileListing::default()
+    };
     if !root.exists() {
-        return SourceFileListing::default();
+        return listing;
     }
 
-    let mut listing = SourceFileListing::default();
     for entry in WalkDir::new(root).into_iter() {
         let entry = match entry {
             Ok(entry) => entry,

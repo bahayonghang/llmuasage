@@ -121,7 +121,11 @@ llmusage sync --rebuild
 llmusage sync --rebuild --allow-lossy-rebuild
 ```
 
-Imports local sources. `--json-events` writes NDJSON lifecycle events to stdout. `--allow-lossy-rebuild` requires `--rebuild`.
+Imports local sources. Before source scanning, bootstrap may upgrade an unpinned embedded pricing catalog and reprice historical events. Human stderr reports catalog versions, processed/total events, bucket reconciliation, and elapsed completion time instead of leaving one generic database-initialization line active.
+
+`--json-events` writes NDJSON lifecycle events to stdout, including additive `pricing_upgrade_started`, `pricing_upgrade_progress`, `pricing_bucket_reconcile_started`, and `pricing_upgrade_finished` events when an embedded upgrade runs. A current catalog or pinned snapshot/overlay emits none of these pricing events. `--allow-lossy-rebuild` requires `--rebuild`.
+
+Set `LLMUSAGE_LOG=info` for structured pricing start/reconcile/finish file records, or `debug` for throttled page progress. The default `warn` file level records one liveness warning if repricing continues beyond 30 seconds; terminal progress remains visible at every file-log level.
 
 Human summaries include per-source `files`, `changed`, `skipped`, `seen`, `committed`, and `stored_events`. `skipped` is derived from existing cursor/fingerprint evidence for file-backed sources and from the OpenCode SQLite high-water cursor for DB-backed sync. `committed` is the newly inserted event delta after SQLite dedupe.
 

@@ -71,7 +71,8 @@ impl<'a> CursorStore<'a> {
         let row = conn
             .query_row(
                 r#"
-                SELECT inode, last_time_created, last_processed_ids_json, sqlite_status, updated_at
+                SELECT inode, last_time_created, last_processed_ids_json,
+                       last_part_rowid, sqlite_status, updated_at
                 FROM source_cursor
                 WHERE source = 'opencode' AND cursor_key = 'main'
                 "#,
@@ -85,10 +86,11 @@ impl<'a> CursorStore<'a> {
                             .as_deref()
                             .and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok())
                             .unwrap_or_default(),
+                        last_part_rowid: row.get::<_, Option<i64>>(3)?.unwrap_or_default().max(0),
                         sqlite_status: row
-                            .get::<_, Option<String>>(3)?
+                            .get::<_, Option<String>>(4)?
                             .unwrap_or_else(|| "never_checked".to_string()),
-                        updated_at: row.get::<_, Option<String>>(4)?.unwrap_or_else(now_utc),
+                        updated_at: row.get::<_, Option<String>>(5)?.unwrap_or_else(now_utc),
                     })
                 },
             )
@@ -102,12 +104,14 @@ impl<'a> CursorStore<'a> {
         conn.execute(
             r#"
             INSERT INTO source_cursor(
-                source, cursor_key, inode, last_time_created, last_processed_ids_json, sqlite_status, updated_at
-            ) VALUES ('opencode', 'main', ?1, ?2, ?3, ?4, ?5)
+                source, cursor_key, inode, last_time_created, last_processed_ids_json,
+                last_part_rowid, sqlite_status, updated_at
+            ) VALUES ('opencode', 'main', ?1, ?2, ?3, ?4, ?5, ?6)
             ON CONFLICT(source, cursor_key) DO UPDATE SET
                 inode = excluded.inode,
                 last_time_created = excluded.last_time_created,
                 last_processed_ids_json = excluded.last_processed_ids_json,
+                last_part_rowid = excluded.last_part_rowid,
                 sqlite_status = excluded.sqlite_status,
                 updated_at = excluded.updated_at
             "#,
@@ -120,6 +124,7 @@ impl<'a> CursorStore<'a> {
                         source,
                     }
                 })?,
+                cursor.last_part_rowid,
                 cursor.sqlite_status,
                 cursor.updated_at,
             ],

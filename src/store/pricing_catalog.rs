@@ -7,7 +7,7 @@ use std::{
 use rusqlite::OptionalExtension;
 use serde::Serialize;
 
-use super::Store;
+use super::{BootstrapProgressSink, Store};
 use crate::{
     error::{LlmusageError, Result},
     query::{PricingCatalog, PricingStatus},
@@ -395,7 +395,10 @@ impl Store {
         })
     }
 
-    pub(super) fn upgrade_embedded_pricing_if_needed(&self) -> Result<()> {
+    pub(super) fn upgrade_embedded_pricing_if_needed(
+        &self,
+        progress_sink: Option<BootstrapProgressSink<'_>>,
+    ) -> Result<()> {
         let meta = self.pricing_meta()?;
         if meta.has_overlay() || meta.active_file.is_some() {
             return Ok(());
@@ -406,7 +409,7 @@ impl Store {
         if active.starts_with("static-") && active != PricingCatalog::embedded().version {
             let catalog = PricingCatalog::embedded().clone();
             let activation = PricingMetaChange::active(&catalog.version, None);
-            self.recompute_costs_with_meta(&catalog, &activation)?;
+            self.recompute_costs_with_meta_and_progress(&catalog, &activation, progress_sink)?;
         }
         Ok(())
     }
@@ -629,7 +632,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::paths::AppPaths;
+    use crate::{paths::AppPaths, store::BootstrapProgressEvent};
 
     fn test_store(temp: &TempDir) -> anyhow::Result<Store> {
         let paths = AppPaths::with_root(temp.path().to_path_buf())?;
@@ -840,10 +843,24 @@ mod tests {
         )?;
         drop(conn);
 
+        let activation = PricingMetaChange::for_catalog(&store, &catalog)?;
+        let mut progress_events = Vec::new();
+        let mut progress_sink = |event| progress_events.push(event);
         let error = store
-            .recompute_costs_with(&catalog)
+            .recompute_costs_with_meta_and_progress(&catalog, &activation, Some(&mut progress_sink))
             .expect_err("the injected second-page failure must abort recomputation");
         assert!(error.to_string().contains("injected second-page failure"));
+        assert!(matches!(
+            progress_events.first(),
+            Some(BootstrapProgressEvent::PricingUpgradeStarted { .. })
+        ));
+        assert!(
+            !progress_events.iter().any(|event| matches!(
+                event,
+                BootstrapProgressEvent::PricingUpgradeFinished { .. }
+            )),
+            "a failed final activation must not emit a finished event"
+        );
         let conn = store.open_connection()?;
         let priced_after_failure: i64 = conn.query_row(
             "SELECT COUNT(*) FROM usage_event WHERE pricing_source = 'private-pricing-1'",
@@ -962,6 +979,95 @@ mod tests {
             store.meta_value(META_ACTIVE_VERSION)?.as_deref(),
             Some("static-v2")
         );
+        Ok(())
+    }
+
+    #[test]
+    fn pricing_progress_reports_ordered_upgrade_lifecycle_and_noop_is_silent() -> anyhow::Result<()>
+    {
+        let temp = TempDir::new()?;
+        let store = test_store(&temp)?;
+        let conn = store.open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_event(
+                event_key, source, model, event_at, hour_start,
+                input_tokens, cache_read_tokens, cache_creation_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens, created_at
+            ) VALUES ('pricing-progress', 'codex', 'gpt-5', ?1, ?1,
+                      100, 0, 0, 10, 0, 110, ?1)
+            "#,
+            ["2026-07-16T00:00:00Z"],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_bucket_30m(
+                source, provider_label, model, hour_start, project_hash,
+                input_tokens, cache_read_tokens, cache_creation_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                event_count, updated_at
+            ) VALUES ('codex', '', 'gpt-5', ?1, '', 100, 0, 0, 10, 0, 110, 1, ?1)
+            "#,
+            ["2026-07-16T00:00:00Z"],
+        )?;
+        drop(conn);
+        store.set_meta_value(META_ACTIVE_VERSION, "static-v1")?;
+
+        let mut events = Vec::new();
+        let mut sink = |event| events.push(event);
+        store.bootstrap_with_progress(Some(&mut sink))?;
+
+        assert!(matches!(
+            events.as_slice(),
+            [
+                BootstrapProgressEvent::PricingUpgradeStarted {
+                    from_version,
+                    to_version,
+                    total_events: 1,
+                },
+                BootstrapProgressEvent::PricingUpgradeProgress {
+                    from_version: progress_from,
+                    to_version: progress_to,
+                    processed_events: 1,
+                    total_events: 1,
+                    ..
+                },
+                BootstrapProgressEvent::PricingBucketReconcileStarted {
+                    to_version: reconcile_to,
+                    bucket_count: 1,
+                },
+                BootstrapProgressEvent::PricingUpgradeFinished {
+                    from_version: finished_from,
+                    to_version: finished_to,
+                    updated_events: 1,
+                    bucket_count: 1,
+                    deleted_orphan_buckets: 0,
+                    ..
+                }
+            ] if from_version == "static-v1"
+                && to_version == "static-v2"
+                && progress_from == from_version
+                && progress_to == to_version
+                && reconcile_to == to_version
+                && finished_from == from_version
+                && finished_to == to_version
+        ));
+        assert_eq!(
+            store.meta_value(META_ACTIVE_VERSION)?.as_deref(),
+            Some("static-v2")
+        );
+
+        let mut noop_events = Vec::new();
+        let mut noop_sink = |event| noop_events.push(event);
+        store.bootstrap_with_progress(Some(&mut noop_sink))?;
+        assert!(noop_events.is_empty());
+
+        store.set_meta_value(META_ACTIVE_VERSION, "static-v1")?;
+        store.set_meta_value(META_ACTIVE_FILE, "pinned-snapshot.json")?;
+        let mut pinned_events = Vec::new();
+        let mut pinned_sink = |event| pinned_events.push(event);
+        store.bootstrap_with_progress(Some(&mut pinned_sink))?;
+        assert!(pinned_events.is_empty());
         Ok(())
     }
 }

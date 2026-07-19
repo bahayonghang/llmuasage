@@ -20,6 +20,9 @@
 - Store status rows persist existing source status columns. Do not add a schema
   migration for derived skipped counts unless a consumer needs historical
   skipped totals independent of the latest source sync status.
+- Schema v15 adds `source_cursor.last_part_rowid` and
+  `(source, source_path_hash)` indexes on `usage_turn` and `usage_tool_call`.
+  OpenCode owns the part cursor; file-backed sources continue using `FileCursor`.
 - Monitor descriptors live outside parser promotion and report detection status,
   candidate roots, and parser availability.
 
@@ -30,11 +33,45 @@
 - `files_processed` counts source artifacts considered by the parser for that
   run, not rows committed to `usage_event`.
 - `changed_files` counts artifacts that produced new or refreshed parser work.
+- Claude logical dedupe is scoped to the first directory below
+  `~/.claude/projects`. If any file in a project changes, replay every current
+  JSONL in that project, but do not replay other projects or reset missing
+  historical paths. Projects parse independently; outputs from one bounded
+  parallel batch may share one atomic `SyncShard` commit.
+- Codex remains file-cursor incremental: unchanged files are metadata-only and
+  append work reads only bytes after the stored offset.
+- OpenCode database replacement detection uses persisted message anchors
+  `(last_time_created, last_processed_ids)`. Preserve all cursors when every
+  anchor exists; if any anchor disappeared, reset message and part cursors.
+  File size, mtime, head signatures, and Windows creation time are not database
+  generation identities.
+- OpenCode tool parts use a persisted `last_part_rowid`. Read pages only inside
+  `(last_part_rowid, MAX(rowid)]`, advance after the closed range completes,
+  and leave the cursor unchanged on cancellation/failure. A missing `part`
+  table degrades to no tool rows.
+- Writer reset paths must be set-oriented where cardinality amplifies work:
+  behavior deletes use a temporary path-key table, and reset bucket pricing is
+  recomputed with one source-range event scan joined to a temporary bucket-key
+  table. Never issue one source-range event scan per touched bucket.
 - `stored_events` is the committed event count after store dedupe and reset
   behavior; it can be lower than parser-emitted raw events.
 - Monitor-only platforms must surface as diagnostics/status entries with token
   quality labels, not as parser-backed usage, until sanitized fixtures and token
   semantics exist.
+- Sync bootstrap progress is an observational pre-lock stream. Existing
+  migration events keep their names and meaning; embedded pricing upgrades add
+  `pricing_upgrade_started`, `pricing_upgrade_progress`,
+  `pricing_bucket_reconcile_started`, and `pricing_upgrade_finished` before
+  `lock_waiting`.
+- Pricing started/progress events carry source/target catalog versions and
+  processed/total event counts. Reconcile/finished events carry bucket counts;
+  finished also carries deleted orphan count and elapsed milliseconds.
+- Human stderr and `sync --json-events` consume one bootstrap-to-sync mapping.
+  Human output may replace a TTY line but must end lines at reconcile/finished
+  boundaries. JSON mode keeps stdout NDJSON-only and treats pricing variants as
+  additive. No-op or pinned catalog bootstrap emits no pricing variants.
+- Bootstrap callback delivery must not persist progress or alter migration,
+  pricing activation, lock acquisition, failure, or cancellation semantics.
 
 ### 4. Validation & Error Matrix
 
@@ -45,14 +82,23 @@
   imported usage remains available.
 - Source rewrite or fingerprint change -> artifact leaves skipped state and the
   focused regression must show refreshed parser/store visibility.
+- OpenCode growth with all message anchors present -> keep message and part
+  high-waters; database replacement with a missing anchor -> reset both.
+- OpenCode `part` table absent -> message sync succeeds and part cursor does not
+  advance.
 - Existing JSON without `skipped_files` -> serde default must load as `0`.
 
 ### 5. Good/Base/Bad Cases
 
 - Good: a new monitor descriptor lists candidate roots and parser availability
   while leaving `SourceKind` unchanged.
+- Good: one changed Claude file replays only its project, then a bounded group
+  of parsed projects shares one writer transaction.
 - Base: Codex/Claude/OpenCode parser stats include processed, changed, skipped,
   emitted, and stored counts in CLI JSON/human output and TUI payloads.
+- Bad: treating a growing OpenCode DB as replaced because its mtime/length
+  changed, or refreshing pricing with one `usage_event WHERE source = ?` scan
+  per bucket.
 - Bad: adding a Gemini/Cursor/etc. parser ID only because a root directory was
   detected, without token fixtures and cursor/fingerprint tests.
 
@@ -65,6 +111,16 @@
   terminal panels.
 - Registry/monitor tests proving monitored platforms do not accidentally become
   parser-backed sources.
+- Claude multi-project tests proving unchanged projects remain skipped while
+  cross-file streaming/sidechain dedupe inside the changed project is stable.
+- Codex append tests asserting only the changed file and appended byte range are
+  scanned.
+- OpenCode growth/replacement and part high-water tests covering hot zero-row,
+  one-row append, closed upper bounds, and idempotent replacement replay.
+- Migration/query-plan tests proving behavior reset indexes exist; writer tests
+  proving shard-local behavior dedupe and shared-bucket pricing recovery.
+- Human and subprocess tests covering pricing phase text, ordered additive
+  NDJSON variants, stdout purity, and structured log phase fields.
 
 ### 7. Wrong vs Correct
 
@@ -84,5 +140,14 @@ PlatformMonitorDescriptor {
     parser_available: false,
     token_quality: TokenQuality::Unsupported,
     candidate_roots,
+}
+```
+
+```rust
+// Validate the persisted parser anchor; content metadata is not a DB generation.
+if !opencode_cursor_anchor_exists(&connection, &cursor)? {
+    cursor.last_time_created = 0;
+    cursor.last_processed_ids.clear();
+    cursor.last_part_rowid = 0;
 }
 ```

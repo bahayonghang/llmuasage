@@ -8,6 +8,13 @@ llmusage serve
 
 By default it probes local ports starting at `37421`, binds only to `127.0.0.1`, prints the URL, and tries to open the default browser.
 
+Before binding a port, `serve` checks parser-backed sources for legacy token
+accounting. Safe sources are rebuilt one at a time in registry order. Sources
+with missing-file rebuild risk are left unchanged and reported as warnings, so
+their historical reports remain available and the dashboard can still start.
+Unexpected parser, SQLite, or commit failures stop startup. This automatic path
+never enables `--allow-lossy-rebuild` and never rebuilds parserless Antigravity.
+
 Use a fixed port when you need a stable URL:
 
 ```powershell

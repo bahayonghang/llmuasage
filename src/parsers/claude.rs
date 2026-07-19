@@ -1,9 +1,9 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::File,
     future::Future,
     io::{BufRead, BufReader, Seek, SeekFrom},
-    path::Path,
+    path::{Path, PathBuf},
     pin::Pin,
     time::Instant,
 };
@@ -114,6 +114,7 @@ async fn sync_claude(
         writer.run_started_at(),
     )?;
     let inventory_error = listing.error_summary();
+    let inventory_root = listing.root;
     let files = listing.paths;
     let total_files = files.len();
     emit_progress(
@@ -125,14 +126,21 @@ async fn sync_claude(
     );
     let cursor_map = store.cursors().load_file_cursors(SourceKind::Claude)?;
 
-    let mut changed_files = 0usize;
-    for file_path in &files {
+    let mut projects =
+        HashMap::<PathBuf, Vec<(PathBuf, Option<crate::store::FileCursor>, bool)>>::new();
+    let mut trigger_files = 0usize;
+    for file_path in files {
         let existing = file_path
             .to_str()
             .and_then(|raw| cursor_map.get(raw).cloned());
-        if should_rescan_file(file_path, existing.as_ref())? {
-            changed_files += 1;
+        let changed = should_rescan_file(&file_path, existing.as_ref())?;
+        if changed {
+            trigger_files += 1;
         }
+        projects
+            .entry(claude_project_key(&inventory_root, &file_path))
+            .or_default()
+            .push((file_path, existing, changed));
     }
 
     // 1.2 控制并发度并行解析分片
@@ -142,21 +150,31 @@ async fn sync_claude(
     let mut inserted = 0usize;
     let mut write_ms = 0u64;
     let mut files_scanned = 0usize;
-    let plans = if changed_files == 0 {
-        Vec::new()
-    } else {
-        vec![ClaudeShardPlan {
-            files: files
+    let mut plans = projects
+        .into_values()
+        .filter(|files| files.iter().any(|(_, _, changed)| *changed))
+        .map(|files| {
+            let reset_path_hashes = files
                 .iter()
-                .cloned()
-                .map(|path| CandidateFile {
-                    path,
-                    existing: None,
+                .filter_map(|(path, existing, _)| {
+                    existing
+                        .as_ref()
+                        .map(|_| hash_string(&path.to_string_lossy()))
                 })
-                .collect(),
-            reset_path_hashes: cursor_map.keys().map(|path| hash_string(path)).collect(),
-        }]
-    };
+                .collect();
+            ClaudeShardPlan {
+                files: files
+                    .into_iter()
+                    .map(|(path, _, _)| CandidateFile {
+                        path,
+                        existing: None,
+                    })
+                    .collect(),
+                reset_path_hashes,
+            }
+        })
+        .collect::<Vec<_>>();
+    plans.sort_by_key(|plan| plan.files.first().map(|file| file.path.clone()));
 
     let width = parallelism.max(1);
     for batch in plans.chunks(width) {
@@ -169,46 +187,51 @@ async fn sync_claude(
             tasks.push(task::spawn_blocking(move || parse_claude_shard(plan)));
         }
 
+        let mut combined = SyncShard::new(SourceKind::Claude);
+        let mut batch_cancelled = false;
         for task in tasks {
             if cancel.is_cancelled() {
+                batch_cancelled = true;
                 break;
             }
             let shard = task.await??;
             events_seen += shard.events_seen;
             events_replayed += shard.events_replayed;
             bytes_scanned += shard.bytes_scanned;
-
-            // 1.3 把 reset / event / cursor 协议交给单写入端原子提交
-            let commit = writer.commit_shard(SyncShard {
-                source: SourceKind::Claude,
-                reset_path_hashes: shard.reset_path_hashes,
-                events: shard.events,
-                cursors: shard.cursors,
-                seen_file_paths: shard.seen_file_paths,
-                raw_records: Vec::new(),
-                turns: shard.turns,
-                tool_calls: shard.tool_calls,
-            })?;
-            files_scanned += commit.files_seen;
-            inserted += commit.events_inserted;
-            write_ms += commit.write_ms;
-            emit_progress(
-                &mut progress,
-                SyncEvent::Progress {
-                    source: SourceKind::Claude,
-                    files_scanned: files_scanned as u64,
-                    records_imported: inserted as u64,
-                    current_file: None,
-                },
-            );
+            combined.reset_path_hashes.extend(shard.reset_path_hashes);
+            combined.events.extend(shard.events);
+            combined.cursors.extend(shard.cursors);
+            combined.seen_file_paths.extend(shard.seen_file_paths);
+            combined.turns.extend(shard.turns);
+            combined.tool_calls.extend(shard.tool_calls);
         }
+        if batch_cancelled {
+            break;
+        }
+
+        // 1.3 同一有界解析批次合并为一个事务，避免每项目重复 fsync/checkpoint。
+        // 项目级 logical dedupe 已在 parse_claude_shard 内完成；writer 继续负责
+        // 跨项目最终幂等与 reset → event → cursor 的原子提交顺序。
+        let commit = writer.commit_shard(combined)?;
+        files_scanned += commit.files_seen;
+        inserted += commit.events_inserted;
+        write_ms += commit.write_ms;
+        emit_progress(
+            &mut progress,
+            SyncEvent::Progress {
+                source: SourceKind::Claude,
+                files_scanned: files_scanned as u64,
+                records_imported: inserted as u64,
+                current_file: None,
+            },
+        );
     }
 
     let mut stats = SourceSyncStats {
         source: SourceKind::Claude,
         files_processed: total_files,
-        changed_files,
-        skipped_files: total_files.saturating_sub(changed_files),
+        changed_files: files_scanned,
+        skipped_files: total_files.saturating_sub(files_scanned),
         bytes_scanned,
         events_seen,
         events_replayed,
@@ -222,6 +245,7 @@ async fn sync_claude(
 
     info!(
         files_processed = stats.files_processed,
+        trigger_files,
         changed_files = stats.changed_files,
         skipped_files = stats.skipped_files,
         events_seen = stats.events_seen,
@@ -229,6 +253,16 @@ async fn sync_claude(
         "完成 Claude 项目真源解析"
     );
     Ok(stats)
+}
+
+fn claude_project_key(root: &Path, file_path: &Path) -> PathBuf {
+    file_path
+        .strip_prefix(root)
+        .ok()
+        .and_then(|relative| relative.components().next())
+        .map(|component| root.join(component.as_os_str()))
+        .or_else(|| file_path.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 fn emit_progress(sink: &mut Option<ProgressSink<'_>>, event: SyncEvent) {
@@ -239,7 +273,11 @@ fn emit_progress(sink: &mut Option<ProgressSink<'_>>, event: SyncEvent) {
 
 fn parse_claude_shard(plan: ClaudeShardPlan) -> Result<ClaudeShardOutput> {
     let mut resolver = ProjectResolver::default();
-    let replaying = !plan.reset_path_hashes.is_empty();
+    let replay_path_hashes = plan
+        .reset_path_hashes
+        .iter()
+        .cloned()
+        .collect::<HashSet<_>>();
     let mut output = ClaudeShardOutput {
         events: Vec::new(),
         turns: Vec::new(),
@@ -275,7 +313,9 @@ fn parse_claude_shard(plan: ClaudeShardPlan) -> Result<ClaudeShardOutput> {
             .file_size
             .saturating_sub(decision.start_offset);
         output.events_seen += parsed.events.len();
-        if replaying || (decision.replay_mode == FileReplayMode::Reparse && existing.is_some()) {
+        if replay_path_hashes.contains(&path_hash)
+            || (decision.replay_mode == FileReplayMode::Reparse && existing.is_some())
+        {
             output.events_replayed += parsed.events.len();
         }
         candidates.extend(parsed.events);

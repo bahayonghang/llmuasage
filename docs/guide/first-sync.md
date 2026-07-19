@@ -10,6 +10,8 @@ llmusage sync
 
 Human progress is written to stderr. The final summary stays on stdout.
 
+If the embedded pricing catalog changed since the previous run, bootstrap reprices historical events before source scanning. Progress shows the old/new catalog versions, processed and total event counts, bucket reconciliation, and final elapsed time. This is a one-time upgrade for an unpinned embedded catalog; a current or pinned catalog skips the phase.
+
 The summary includes `files`, `changed`, `skipped`, `seen`, `committed`, and `stored_events` per source. For file-backed sources, `skipped` means the stored cursor, size, mtime, head fingerprint, tail signature, and offset show the artifact is unchanged. For OpenCode, `skipped` means the SQLite high-water cursor found no newer rows. `committed` is the newly inserted event delta after SQLite dedupe; `stored_events` is the durable total currently in the database.
 
 ## Import one source
@@ -32,7 +34,9 @@ Other platforms can appear in `llmusage source-status` or the `dash` source pick
 llmusage sync --json-events
 ```
 
-This mode prints lifecycle and progress events as NDJSON on stdout. Use it for wrappers or UI adapters that need machine-readable progress.
+This mode prints lifecycle and progress events as NDJSON on stdout. Pricing upgrades add `pricing_upgrade_started`, throttled `pricing_upgrade_progress`, `pricing_bucket_reconcile_started`, and `pricing_upgrade_finished` in that order. Use it for wrappers or UI adapters that need machine-readable progress.
+
+Human progress does not depend on structured logging. For file diagnostics, use `LLMUSAGE_LOG=info` for pricing phase boundaries or `debug` for page progress; the default `warn` level records one liveness warning after 30 seconds.
 
 ## Recent-ready signal
 
@@ -48,7 +52,7 @@ llmusage sync --recent-days 1
 llmusage sync --rebuild
 ```
 
-`--rebuild` clears rebuildable usage rows, buckets, projects, and cursors before reparsing local sources. It is refused by default when file-backed imported history depends on source files that are now missing.
+`--rebuild` resets parser-backed usage state source by source before reparsing local sources. Parserless Antigravity events, buckets, behavior facts, cursors, and source-file diagnostics are preserved. The rebuild is refused by default when file-backed imported history for a parser source depends on files that are now missing.
 
 Token accounting is versioned per parser source. Databases containing rows
 from the older accounting contract remain readable, but normal sync refuses to
@@ -63,6 +67,13 @@ llmusage sync --rebuild --source opencode
 The source marker advances only after the rebuild succeeds. `source-status` and
 diagnostics expose `legacy_token_accounting`, `token_accounting_version`, and
 an actionable warning while a source still needs rebuilding.
+
+`llmusage serve` performs this repair automatically for safe legacy parser
+sources before it binds the dashboard port. A source with lossy rebuild risk is
+skipped with a warning: its historical reports remain readable, its normal
+writes stay guarded, and the dashboard still starts. Parser, SQLite, or commit
+failures for a source that passed the safety check stop dashboard startup.
+Automatic repair never enables `--allow-lossy-rebuild`.
 
 Only pass the lossy flag when you intentionally accept clearing unrebuildable history:
 
