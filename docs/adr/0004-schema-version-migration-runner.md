@@ -153,3 +153,13 @@ v12 是真实兼容修复 migration：重新以幂等方式确保 `recent_comple
   - cost_with_cache_usd 被 backfill（不是 0）
 - 0.6.x 行为事实表单测：`migration_v11_creates_behavior_fact_tables`，断言 `usage_turn` / `usage_tool_call` 存在且 `schema_version == 11`。
 - v12 兼容修复单测：`migration_v12_repairs_source_sync_status_columns_on_drifted_v11_db`，断言漂移 v11 库升级后 `stored_events` 存在、既有行默认值为 0，且 `schema_version == 12`。
+
+## 2026-07-19 更新：v15 来源增量游标与行为 reset 索引
+
+v15 `optimize_source_sync_cursors_and_behavior_resets` 是真实 schema migration：
+
+- `source_cursor.last_part_rowid INTEGER NOT NULL DEFAULT 0` 持久化 OpenCode `part.rowid` 高水位；旧库升级后执行一次幂等工具事实 backfill。
+- `idx_usage_turn_source_path_hash(source, source_path_hash)` 与 `idx_usage_tool_call_source_path_hash(source, source_path_hash)` 支撑 `SyncShard` 按来源文件 reset 行为事实。
+- migration 不修改 OpenCode 自有数据库，也不回填伪造的 rowid；列默认值和两个 `CREATE INDEX IF NOT EXISTS` 保持 fresh/upgrade 幂等。与 v13/v14 一致，极端漂移库缺少目标表时该项 no-op，不在后续 migration 中凭空重建旧 schema。
+
+验证：`migration_v15_adds_opencode_part_cursor_and_behavior_reset_indexes` 同时断言 schema version、列默认值、索引存在性以及 reset 查询计划使用对应复合索引。

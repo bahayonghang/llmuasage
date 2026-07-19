@@ -29,6 +29,26 @@ use crate::{
 /// each parser would have to reintroduce its own chunking constant.
 const EVENT_WRITE_BATCH_SIZE: usize = 1000;
 
+const RESET_BUCKET_PRICING_SELECT_SQL: &str = r#"
+    SELECT
+        b.provider_label,
+        b.model,
+        b.hour_start,
+        b.project_hash,
+        e.cost_with_cache_usd,
+        e.cost_without_cache_usd,
+        e.pricing_status,
+        e.pricing_source,
+        e.pricing_rate
+    FROM usage_event AS e INDEXED BY idx_usage_event_source_path_hash
+    JOIN temp.llmusage_reset_bucket AS b
+      ON b.provider_label = COALESCE(e.provider_label, '')
+     AND b.model = e.model
+     AND b.hour_start = e.hour_start
+     AND b.project_hash = COALESCE(e.project_hash, '')
+    WHERE e.source = ?1
+"#;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ShardCommitFailpoint {
     Reset,
@@ -493,6 +513,7 @@ impl SyncRunWriter {
          * 2) 让 parser 不再关心写入顺序与 batch 大小
          * 3) 统一返回 inserted 数与本次提交耗时
          */
+        dedupe_behavior_facts(&mut shard);
         info!(
             source = %shard.source,
             resets = shard.reset_path_hashes.len(),
@@ -589,22 +610,39 @@ impl SyncRunWriter {
         if path_hashes.is_empty() {
             return Ok(());
         }
-        let mut unique = HashSet::new();
+
+        tx.execute_batch(
+            r#"
+            CREATE TEMP TABLE IF NOT EXISTS llmusage_reset_path(
+                path_hash TEXT PRIMARY KEY
+            ) WITHOUT ROWID;
+            DELETE FROM temp.llmusage_reset_path;
+            "#,
+        )?;
         {
-            let mut delete_tool_stmt = tx.prepare_cached(
-                "DELETE FROM usage_tool_call WHERE source = ?1 AND source_path_hash = ?2",
-            )?;
-            let mut delete_turn_stmt = tx.prepare_cached(
-                "DELETE FROM usage_turn WHERE source = ?1 AND source_path_hash = ?2",
+            let mut insert_stmt = tx.prepare_cached(
+                "INSERT OR IGNORE INTO temp.llmusage_reset_path(path_hash) VALUES (?1)",
             )?;
             for path_hash in path_hashes {
-                if !unique.insert(path_hash.clone()) {
-                    continue;
-                }
-                delete_tool_stmt.execute(rusqlite::params![source.as_str(), path_hash])?;
-                delete_turn_stmt.execute(rusqlite::params![source.as_str(), path_hash])?;
+                insert_stmt.execute([path_hash])?;
             }
         }
+        tx.execute(
+            r#"
+            DELETE FROM usage_tool_call
+            WHERE source = ?1
+              AND source_path_hash IN (SELECT path_hash FROM temp.llmusage_reset_path)
+            "#,
+            [source.as_str()],
+        )?;
+        tx.execute(
+            r#"
+            DELETE FROM usage_turn
+            WHERE source = ?1
+              AND source_path_hash IN (SELECT path_hash FROM temp.llmusage_reset_path)
+            "#,
+            [source.as_str()],
+        )?;
         Ok(())
     }
 
@@ -724,6 +762,17 @@ impl SyncRunWriter {
         super::source_file::upsert_live_in_tx(tx, source.as_str(), file_paths, run_started_at)?;
         Ok(())
     }
+}
+
+fn dedupe_behavior_facts(shard: &mut SyncShard) {
+    let mut turn_keys = HashSet::new();
+    shard
+        .turns
+        .retain(|turn| turn_keys.insert(turn.turn_key.clone()));
+    let mut tool_keys = HashSet::new();
+    shard
+        .tool_calls
+        .retain(|call| tool_keys.insert(call.tool_call_key.clone()));
 }
 
 fn bool_to_i64(value: bool) -> i64 {
@@ -905,22 +954,73 @@ fn refresh_bucket_pricing_after_reset_tx(
         return Ok(());
     }
 
-    let mut select_stmt = tx.prepare_cached(
+    tx.execute_batch(
         r#"
-        SELECT
-            cost_with_cache_usd,
-            cost_without_cache_usd,
-            pricing_status,
-            pricing_source,
-            pricing_rate
-        FROM usage_event
-        WHERE source = ?1
-          AND COALESCE(provider_label, '') = ?2
-          AND model = ?3
-          AND hour_start = ?4
-          AND COALESCE(project_hash, '') = ?5
+        CREATE TEMP TABLE IF NOT EXISTS llmusage_reset_bucket(
+            provider_label TEXT NOT NULL,
+            model TEXT NOT NULL,
+            hour_start TEXT NOT NULL,
+            project_hash TEXT NOT NULL,
+            PRIMARY KEY(provider_label, model, hour_start, project_hash)
+        ) WITHOUT ROWID;
+        DELETE FROM temp.llmusage_reset_bucket;
         "#,
     )?;
+    {
+        let mut insert_stmt = tx.prepare_cached(
+            r#"
+            INSERT OR IGNORE INTO temp.llmusage_reset_bucket(
+                provider_label, model, hour_start, project_hash
+            ) VALUES (?1, ?2, ?3, ?4)
+            "#,
+        )?;
+        for (provider_label, model, hour_start, project_hash) in buckets {
+            insert_stmt.execute(rusqlite::params![
+                provider_label,
+                model,
+                hour_start,
+                project_hash
+            ])?;
+        }
+    }
+
+    let mut pricing_by_bucket = HashMap::new();
+    {
+        let mut select_stmt = tx.prepare_cached(RESET_BUCKET_PRICING_SELECT_SQL)?;
+        let rows = select_stmt.query_map([source], |row| {
+            Ok((
+                (
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ),
+                CostBreakdown {
+                    cost_with_cache_usd: row.get::<_, Option<f64>>(4)?.unwrap_or_default(),
+                    cost_without_cache_usd: row.get::<_, Option<f64>>(5)?.unwrap_or_default(),
+                    pricing_status: match row
+                        .get::<_, Option<String>>(6)?
+                        .unwrap_or_else(|| PRICING_UNPRICED.to_string())
+                        .as_str()
+                    {
+                        "static" => pricing::PricingStatus::Static,
+                        "snapshot" => pricing::PricingStatus::Snapshot,
+                        _ => pricing::PricingStatus::Unpriced,
+                    },
+                    pricing_source: row.get(7)?,
+                    pricing_rate: row.get(8)?,
+                },
+            ))
+        })?;
+        for row in rows {
+            let (key, cost) = row?;
+            pricing_by_bucket
+                .entry(key)
+                .or_insert_with(PricingRollup::default)
+                .add(&cost);
+        }
+    }
+
     let mut update_stmt = tx.prepare_cached(
         r#"
         UPDATE usage_bucket_30m
@@ -936,48 +1036,13 @@ fn refresh_bucket_pricing_after_reset_tx(
         "#,
     )?;
 
-    let mut unique = HashSet::new();
-    for (provider_label, model, hour_start, project_hash) in buckets {
-        if !unique.insert((
-            provider_label.clone(),
-            model.clone(),
-            hour_start.clone(),
-            project_hash.clone(),
-        )) {
-            continue;
-        }
-
-        let rows = select_stmt.query_map(
-            rusqlite::params![source, provider_label, model, hour_start, project_hash],
-            |row| {
-                Ok(CostBreakdown {
-                    cost_with_cache_usd: row.get::<_, Option<f64>>(0)?.unwrap_or_default(),
-                    cost_without_cache_usd: row.get::<_, Option<f64>>(1)?.unwrap_or_default(),
-                    pricing_status: match row
-                        .get::<_, Option<String>>(2)?
-                        .unwrap_or_else(|| PRICING_UNPRICED.to_string())
-                        .as_str()
-                    {
-                        "static" => pricing::PricingStatus::Static,
-                        "snapshot" => pricing::PricingStatus::Snapshot,
-                        _ => pricing::PricingStatus::Unpriced,
-                    },
-                    pricing_source: row.get(3)?,
-                    pricing_rate: row.get(4)?,
-                })
-            },
-        )?;
-        let mut pricing = PricingRollup::default();
-        for row in rows {
-            pricing.add(&row?);
-        }
-
+    for ((provider_label, model, hour_start, project_hash), pricing) in pricing_by_bucket {
         update_stmt.execute(rusqlite::params![
             source,
-            provider_label,
-            model,
-            hour_start,
-            project_hash,
+            &provider_label,
+            &model,
+            &hour_start,
+            &project_hash,
             pricing.pricing_status(),
             pricing.pricing_source(),
             pricing.pricing_rate(),
@@ -1392,6 +1457,28 @@ mod tests {
     }
 
     #[test]
+    fn shard_behavior_facts_are_deduped_before_sql() {
+        let event = build_event("dedupe", "pathDedupe", 10);
+        let turn = UsageTurn::from_event(&event, ActivityCategory::General);
+        let tool = build_tool_call(&event, "Read");
+        let mut shard = SyncShard {
+            source: SourceKind::Codex,
+            reset_path_hashes: Vec::new(),
+            events: Vec::new(),
+            cursors: Vec::new(),
+            seen_file_paths: Vec::new(),
+            raw_records: Vec::new(),
+            turns: vec![turn.clone(), turn],
+            tool_calls: vec![tool.clone(), tool],
+        };
+
+        dedupe_behavior_facts(&mut shard);
+
+        assert_eq!(shard.turns.len(), 1);
+        assert_eq!(shard.tool_calls.len(), 1);
+    }
+
+    #[test]
     fn commit_shard_persists_costs_and_recomputes_bucket_pricing_after_reset() -> anyhow::Result<()>
     {
         let temp = TempDir::new()?;
@@ -1493,6 +1580,103 @@ mod tests {
         assert_eq!(
             unpriced_bucket_count, 0,
             "reset removes emptied buckets instead of leaving stale mixed pricing"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn reset_refreshes_shared_bucket_pricing_without_per_bucket_event_scans() -> anyhow::Result<()>
+    {
+        let temp = TempDir::new()?;
+        let paths = build_paths(temp.path());
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+
+        let mut short = build_event("short", "pathShort", 10);
+        short.model = "gpt-5.6-sol".to_string();
+        let mut long = build_event("long", "pathLong", 300_000);
+        long.model = "gpt-5.6-sol".to_string();
+
+        let mut writer = store.begin_sync_run()?;
+        writer.commit_shard(SyncShard {
+            source: SourceKind::Codex,
+            reset_path_hashes: Vec::new(),
+            events: vec![short, long],
+            cursors: Vec::new(),
+            seen_file_paths: Vec::new(),
+            raw_records: Vec::new(),
+            turns: Vec::new(),
+            tool_calls: Vec::new(),
+        })?;
+
+        let conn = store.open_connection()?;
+        let initial_rate: String = conn.query_row(
+            "SELECT pricing_rate FROM usage_bucket_30m WHERE source = 'codex'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(initial_rate, PRICING_MIXED);
+        drop(conn);
+
+        writer.commit_shard(SyncShard {
+            source: SourceKind::Codex,
+            reset_path_hashes: vec!["pathLong".to_string()],
+            events: Vec::new(),
+            cursors: Vec::new(),
+            seen_file_paths: Vec::new(),
+            raw_records: Vec::new(),
+            turns: Vec::new(),
+            tool_calls: Vec::new(),
+        })?;
+        drop(writer);
+
+        let conn = store.open_connection()?;
+        let event_rate: String = conn.query_row(
+            "SELECT pricing_rate FROM usage_event WHERE source_path_hash = 'pathShort'",
+            [],
+            |row| row.get(0),
+        )?;
+        let bucket_rate: String = conn.query_row(
+            "SELECT pricing_rate FROM usage_bucket_30m WHERE source = 'codex'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_ne!(event_rate, PRICING_MIXED);
+        assert_eq!(bucket_rate, event_rate);
+
+        conn.execute_batch(
+            r#"
+            CREATE TEMP TABLE llmusage_reset_bucket(
+                provider_label TEXT NOT NULL,
+                model TEXT NOT NULL,
+                hour_start TEXT NOT NULL,
+                project_hash TEXT NOT NULL,
+                PRIMARY KEY(provider_label, model, hour_start, project_hash)
+            ) WITHOUT ROWID;
+            "#,
+        )?;
+        let explain_sql = format!("EXPLAIN QUERY PLAN {RESET_BUCKET_PRICING_SELECT_SQL}");
+        let mut stmt = conn.prepare(&explain_sql)?;
+        let plan = stmt
+            .query_map([SourceKind::Codex.as_str()], |row| row.get::<_, String>(3))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        assert_eq!(
+            plan.iter()
+                .filter(|detail| detail.contains("usage_event") || detail.contains(" e "))
+                .count(),
+            1,
+            "pricing refresh must scan the source event range once: {plan:?}"
+        );
+        assert!(
+            plan.iter()
+                .any(|detail| detail.contains("idx_usage_event_source_path_hash (source=?)")),
+            "pricing refresh must constrain the single event scan by source: {plan:?}"
+        );
+        assert!(
+            plan.iter()
+                .any(|detail| detail.contains("PRIMARY KEY") && detail.contains("b")),
+            "pricing refresh must probe touched buckets by temp-table primary key: {plan:?}"
         );
 
         Ok(())

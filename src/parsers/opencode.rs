@@ -17,10 +17,11 @@ use crate::{
     },
     project::ProjectResolver,
     store::{Store, SyncRunWriter, SyncShard},
-    util::{bucket_start_from_rfc3339, file_identity, normalize_model, now_utc},
+    util::{bucket_start_from_rfc3339, normalize_model, now_utc},
 };
 
 const OPENCODE_PAGE_SIZE: i64 = 1000;
+const OPENCODE_PART_PAGE_SIZE: i64 = 1000;
 
 #[derive(Debug)]
 struct OpencodeRow {
@@ -29,6 +30,13 @@ struct OpencodeRow {
     time_created: i64,
     role: Option<String>,
     project_worktree: Option<String>,
+    data: String,
+}
+
+#[derive(Debug)]
+struct OpencodeToolPartRow {
+    rowid: i64,
+    time_created: i64,
     data: String,
 }
 
@@ -96,20 +104,20 @@ async fn sync_opencode(
         return Ok(stats);
     }
 
-    // 1.2 按时间和主键分页读取 message 表
-    let db_identity = file_identity(&db_path)?;
-    if cursor.inode != 0 && cursor.inode != db_identity {
+    // 1.2 用已处理消息作为数据库代际锚点。文件长度/mtime 会随 SQLite
+    // 正常增长变化，不能用于区分原库增长与替换库。
+    let connection = Connection::open(&db_path)?;
+    if !opencode_cursor_anchor_exists(&connection, &cursor)? {
         info!(
-            previous_inode = cursor.inode,
-            current_inode = db_identity,
-            "检测到 OpenCode DB 身份变化，重置高水位"
+            last_time_created = cursor.last_time_created,
+            anchor_ids = cursor.last_processed_ids.len(),
+            "检测到 OpenCode DB cursor 锚点缺失，重置高水位"
         );
         cursor.last_time_created = 0;
         cursor.last_processed_ids.clear();
+        cursor.last_part_rowid = 0;
     }
-    cursor.inode = db_identity;
 
-    let connection = Connection::open(&db_path)?;
     let mut resolver = ProjectResolver::default();
     let raw_archive_enabled = store.raw_archive_enabled()?;
     let mut latest_time = cursor.last_time_created;
@@ -119,6 +127,8 @@ async fn sync_opencode(
     let mut scanned_bytes = 0u64;
     let mut inserted = 0usize;
     let mut write_ms = 0u64;
+    let initial_part_rowid = cursor.last_part_rowid;
+    let mut part_rows_seen = 0usize;
     let mut page_last_time = cursor.last_time_created;
     let mut page_last_id = cursor
         .last_processed_ids
@@ -211,22 +221,55 @@ async fn sync_opencode(
         );
     }
 
-    // 扫描 part 表的工具调用：独立于 message 分页（part 自带 time_created，
-    // 通过 data 内的 messageID/sessionID 关联）；part 表缺失时优雅降级为空。
-    if !cancel.is_cancelled() {
-        let tool_calls = scan_opencode_tool_parts(&connection)?;
-        if !tool_calls.is_empty() {
-            let commit = writer.commit_shard(SyncShard {
-                source: SourceKind::Opencode,
-                reset_path_hashes: Vec::new(),
-                events: Vec::new(),
-                cursors: Vec::new(),
-                seen_file_paths: Vec::new(),
-                raw_records: Vec::new(),
-                turns: Vec::new(),
-                tool_calls,
-            })?;
-            write_ms += commit.write_ms;
+    // part 工具事实使用独立 rowid 高水位。封闭上界避免本轮持续追赶活跃 DB，
+    // 页级 commit 保持内存有界；part 表缺失时优雅降级为空。
+    if !cancel.is_cancelled()
+        && let Some(upper_rowid) = opencode_part_upper_rowid(&connection)?
+    {
+        let mut page_rowid = cursor.last_part_rowid;
+        while page_rowid < upper_rowid && !cancel.is_cancelled() {
+            let rows = load_opencode_tool_part_page(&connection, page_rowid, upper_rowid)?;
+            if rows.is_empty() {
+                break;
+            }
+
+            let mut tool_calls = Vec::new();
+            for row in rows {
+                page_rowid = row.rowid;
+                part_rows_seen += 1;
+                scanned_bytes += row.data.len() as u64;
+                let Ok(value) = serde_json::from_str::<Value>(&row.data) else {
+                    continue;
+                };
+                if let Some(call) = part_to_tool_call(&value, row.time_created, row.rowid) {
+                    tool_calls.push(call);
+                }
+            }
+            if !tool_calls.is_empty() {
+                let commit = writer.commit_shard(SyncShard {
+                    source: SourceKind::Opencode,
+                    reset_path_hashes: Vec::new(),
+                    events: Vec::new(),
+                    cursors: Vec::new(),
+                    seen_file_paths: Vec::new(),
+                    raw_records: Vec::new(),
+                    turns: Vec::new(),
+                    tool_calls,
+                })?;
+                write_ms += commit.write_ms;
+            }
+            emit_progress(
+                &mut progress,
+                SyncEvent::Progress {
+                    source: SourceKind::Opencode,
+                    files_scanned: (seen_rows + part_rows_seen) as u64,
+                    records_imported: inserted as u64,
+                    current_file: Some(db_path.display().to_string()),
+                },
+            );
+        }
+        if !cancel.is_cancelled() {
+            cursor.last_part_rowid = upper_rowid;
         }
     }
 
@@ -237,8 +280,10 @@ async fn sync_opencode(
     store.cursors().save_opencode_cursor(&cursor)?;
 
     stats.files_processed = 1;
-    stats.changed_files = usize::from(seen_rows > 0);
-    stats.skipped_files = usize::from(seen_rows == 0);
+    let part_cursor_advanced = cursor.last_part_rowid > initial_part_rowid;
+    let changed = seen_rows > 0 || part_cursor_advanced;
+    stats.changed_files = usize::from(changed);
+    stats.skipped_files = usize::from(!changed);
     stats.bytes_scanned = scanned_bytes;
     stats.events_seen = normalized_events_seen;
     stats.events_inserted = inserted;
@@ -248,6 +293,7 @@ async fn sync_opencode(
 
     info!(
         rows_seen = seen_rows,
+        part_rows_seen,
         events_seen = stats.events_seen,
         bytes_scanned = stats.bytes_scanned,
         "完成 OpenCode SQLite 真源解析"
@@ -298,6 +344,27 @@ fn load_opencode_page(
         },
     )?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn opencode_cursor_anchor_exists(
+    connection: &Connection,
+    cursor: &crate::store::OpencodeCursor,
+) -> Result<bool> {
+    if cursor.last_time_created == 0 || cursor.last_processed_ids.is_empty() {
+        return Ok(true);
+    }
+
+    let mut statement = connection
+        .prepare("SELECT EXISTS(SELECT 1 FROM message WHERE time_created = ?1 AND id = ?2)")?;
+    for id in &cursor.last_processed_ids {
+        let exists = statement.query_row(params![cursor.last_time_created, id], |row| {
+            row.get::<_, bool>(0)
+        })?;
+        if !exists {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 fn row_to_event(row: &OpencodeRow, resolver: &mut ProjectResolver) -> Result<Option<UsageEvent>> {
@@ -479,41 +546,40 @@ fn serialize_opencode_row(row: &OpencodeRow) -> String {
         .unwrap_or_else(|_| serde_json::json!({"id": row.id}).to_string())
 }
 
-/// Scans the OpenCode `part` table for `type == "tool"` rows and normalizes them
-/// into [`UsageToolCall`] facts.
-///
-/// Full-scan + idempotent (`INSERT OR IGNORE` on `tool_call_key`) by design: the
-/// `LIKE` filter keeps this to tool rows only, and completeness matters more than
-/// re-scan cost for this secondary behavior data. The `part` table is absent on
-/// older OpenCode releases, so a prepare failure degrades to an empty result
-/// instead of failing the whole sync.
-fn scan_opencode_tool_parts(connection: &Connection) -> Result<Vec<UsageToolCall>> {
-    let mut statement = match connection.prepare(
-        r#"SELECT time_created, data FROM part
-           WHERE data LIKE '%"type":"tool"%'
-           ORDER BY time_created ASC"#,
-    ) {
+fn opencode_part_upper_rowid(connection: &Connection) -> Result<Option<i64>> {
+    let mut statement = match connection.prepare("SELECT COALESCE(MAX(rowid), 0) FROM part") {
         Ok(statement) => statement,
-        Err(_) => return Ok(Vec::new()),
+        Err(_) => return Ok(None),
     };
-    let rows = statement.query_map([], |row| {
-        Ok((
-            row.get::<_, Option<i64>>(0)?.unwrap_or_default(),
-            row.get::<_, String>(1)?,
-        ))
-    })?;
+    Ok(Some(statement.query_row([], |row| row.get(0))?))
+}
 
-    let mut tool_calls = Vec::new();
-    for (index, row) in rows.enumerate() {
-        let (time_created, data) = row?;
-        let Ok(value) = serde_json::from_str::<Value>(&data) else {
-            continue;
-        };
-        if let Some(call) = part_to_tool_call(&value, time_created, index) {
-            tool_calls.push(call);
-        }
-    }
-    Ok(tool_calls)
+fn load_opencode_tool_part_page(
+    connection: &Connection,
+    last_rowid: i64,
+    upper_rowid: i64,
+) -> Result<Vec<OpencodeToolPartRow>> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT rowid, time_created, data
+        FROM part
+        WHERE rowid > ?1 AND rowid <= ?2
+          AND data LIKE '%"type":"tool"%'
+        ORDER BY rowid ASC
+        LIMIT ?3
+        "#,
+    )?;
+    let rows = statement.query_map(
+        params![last_rowid, upper_rowid, OPENCODE_PART_PAGE_SIZE],
+        |row| {
+            Ok(OpencodeToolPartRow {
+                rowid: row.get(0)?,
+                time_created: row.get::<_, Option<i64>>(1)?.unwrap_or_default(),
+                data: row.get(2)?,
+            })
+        },
+    )?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 /// Normalizes one OpenCode `part` row (already JSON-parsed) into a tool-call fact.
@@ -522,7 +588,7 @@ fn scan_opencode_tool_parts(connection: &Connection) -> Result<Vec<UsageToolCall
 /// the message event (`opencode:<id>`), `sessionID` to the session, and the part
 /// `id` (or `messageID:index`) seeds the idempotency key. Project/model are not
 /// carried on parts, so they stay `None`.
-fn part_to_tool_call(part: &Value, time_created: i64, index: usize) -> Option<UsageToolCall> {
+fn part_to_tool_call(part: &Value, time_created: i64, rowid: i64) -> Option<UsageToolCall> {
     let evidence = opencode_tool_evidence(part)?;
 
     let string_field = |key: &str| {
@@ -538,8 +604,8 @@ fn part_to_tool_call(part: &Value, time_created: i64, index: usize) -> Option<Us
 
     let key_seed = part_id
         .clone()
-        .or_else(|| message_id.as_ref().map(|id| format!("{id}:{index}")))
-        .unwrap_or_else(|| format!("{time_created}:{index}"));
+        .or_else(|| message_id.as_ref().map(|id| format!("{id}:{rowid}")))
+        .unwrap_or_else(|| format!("{time_created}:{rowid}"));
 
     let occurred_at = chrono::DateTime::from_timestamp_millis(time_created)?.to_rfc3339();
 

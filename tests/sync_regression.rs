@@ -140,6 +140,149 @@ fn hot_sync_keeps_unchanged_source_files_live_and_reports_stored_events() -> Res
 }
 
 #[test]
+fn codex_append_scans_only_changed_file() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_codex("rollout-a.jsonl", 120, "2026-04-22T01:12:00Z")?;
+    fixture.seed_codex("rollout-b.jsonl", 80, "2026-04-22T02:12:00Z")?;
+    let changed_path = fixture
+        .codex_home
+        .join("sessions/2026/04/22/rollout-a.jsonl");
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Codex),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+        let before = fs::metadata(&changed_path)?.len();
+        fixture.append_codex("rollout-a.jsonl", 33, "2026-04-22T03:12:00Z")?;
+        let appended_bytes = fs::metadata(&changed_path)?.len() - before;
+        let summary = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Codex),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+        let stats = &summary.sources[0];
+        assert_eq!(stats.files_processed, 2);
+        assert_eq!(stats.changed_files, 1);
+        assert_eq!(stats.skipped_files, 1);
+        assert_eq!(stats.bytes_scanned, appended_bytes);
+        assert_eq!(stats.events_seen, 1);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn claude_changed_project_does_not_replay_other_projects() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let project_a_main = fixture.seed_claude_lines(
+        "project-a",
+        "session.jsonl",
+        &[claude_logical_usage_line(
+            "msg-shared",
+            "req-main",
+            false,
+            80,
+            "2026-04-22T01:00:00Z",
+        )],
+    )?;
+    let project_a_sidechain = fixture.seed_claude_lines(
+        "project-a",
+        "sidechain.jsonl",
+        &[claude_logical_usage_line(
+            "msg-shared",
+            "req-side",
+            true,
+            100,
+            "2026-04-22T01:01:00Z",
+        )],
+    )?;
+    fixture.seed_claude_lines(
+        "project-b",
+        "session.jsonl",
+        &[claude_logical_usage_line(
+            "msg-other",
+            "req-other",
+            false,
+            60,
+            "2026-04-22T02:00:00Z",
+        )],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let first = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Claude),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(first.sources[0].events_seen, 3);
+        assert_eq!(usage_event_count(&app.paths.db_path)?, 2);
+
+        fixture.append_claude_line(
+            "project-a",
+            "session.jsonl",
+            &claude_logical_usage_line("msg-new", "req-new", false, 40, "2026-04-22T03:00:00Z"),
+        )?;
+        let changed_project_bytes =
+            fs::metadata(&project_a_main)?.len() + fs::metadata(&project_a_sidechain)?.len();
+        let second = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Claude),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+        let stats = &second.sources[0];
+        assert_eq!(stats.files_processed, 3);
+        assert_eq!(stats.changed_files, 2);
+        assert_eq!(stats.skipped_files, 1);
+        assert_eq!(stats.bytes_scanned, changed_project_bytes);
+        assert_eq!(stats.events_seen, 3);
+        assert_eq!(usage_event_count(&app.paths.db_path)?, 3);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
 fn default_ccr_provider_map_labels_sync_and_rebuild() -> Result<()> {
     let fixture = Fixture::new()?;
     fixture.seed_codex(
@@ -768,14 +911,51 @@ fn opencode_high_water_handles_same_timestamp_ids() -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let app = AppContext::discover()?;
-        commands::sync::run(&app).await?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let first = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Opencode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(first.sources[0].events_seen, 1);
         assert_eq!(usage_event_count(&app.paths.db_path)?, 1);
 
         fixture.seed_opencode("msg-2", 1776823200000, 48)?;
-        commands::sync::run(&app).await?;
+        let second = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Opencode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(second.sources[0].events_seen, 1);
         assert_eq!(usage_event_count(&app.paths.db_path)?, 2);
 
-        commands::sync::run(&app).await?;
+        let third = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Opencode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(third.sources[0].events_seen, 0);
+        assert_eq!(third.sources[0].changed_files, 0);
+        assert_eq!(third.sources[0].skipped_files, 1);
         assert_eq!(usage_event_count(&app.paths.db_path)?, 2);
         Ok::<_, anyhow::Error>(())
     })?;
@@ -785,7 +965,7 @@ fn opencode_high_water_handles_same_timestamp_ids() -> Result<()> {
 }
 
 #[test]
-fn opencode_part_tool_calls_land_in_usage_tool_call() -> Result<()> {
+fn opencode_part_scan_uses_persisted_high_water() -> Result<()> {
     /*
      * ========================================================================
      * 步骤6：验证 OpenCode part 表工具调用进入 usage_tool_call
@@ -829,15 +1009,73 @@ fn opencode_part_tool_calls_land_in_usage_tool_call() -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let app = AppContext::discover()?;
-        commands::sync::run(&app).await?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let first = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Opencode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(first.sources[0].changed_files, 1);
         assert_eq!(usage_tool_call_count(&app.paths.db_path)?, 2);
         assert_eq!(
             opencode_mcp_servers(&app.paths.db_path)?,
             vec!["context7".to_string()]
         );
+        let first_part_rowid = store.cursors().load_opencode_cursor()?.last_part_rowid;
+        assert!(first_part_rowid > 0);
 
-        commands::sync::run(&app).await?;
+        let hot = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Opencode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(hot.sources[0].changed_files, 0);
+        assert_eq!(hot.sources[0].skipped_files, 1);
+        assert_eq!(hot.sources[0].bytes_scanned, 0);
         assert_eq!(usage_tool_call_count(&app.paths.db_path)?, 2);
+
+        fixture.seed_opencode_tool_part(
+            "prt-3",
+            "msg-1",
+            "session-1",
+            1776823200070,
+            serde_json::json!({
+                "id": "prt-3",
+                "messageID": "msg-1",
+                "sessionID": "session-1",
+                "type": "tool",
+                "tool": "edit",
+                "state": { "status": "completed", "input": { "file_path": "src/main.rs" } }
+            }),
+        )?;
+        let appended = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Opencode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(appended.sources[0].changed_files, 1);
+        assert!(appended.sources[0].bytes_scanned > 0);
+        assert_eq!(usage_tool_call_count(&app.paths.db_path)?, 3);
+        assert!(store.cursors().load_opencode_cursor()?.last_part_rowid > first_part_rowid);
         Ok::<_, anyhow::Error>(())
     })?;
 
@@ -857,14 +1095,13 @@ fn opencode_replaced_db_resets_high_water() -> Result<()> {
 
         let store = Store::new(&app.paths)?;
         let first_cursor = store.cursors().load_opencode_cursor()?;
-        assert_ne!(first_cursor.inode, 0);
+        assert_eq!(first_cursor.last_time_created, 1776823200000);
         assert_eq!(usage_event_count(&app.paths.db_path)?, 1);
 
         fixture.replace_opencode_db("msg-replaced", 1776823100000, 48)?;
         commands::sync::run(&app).await?;
 
         let second_cursor = store.cursors().load_opencode_cursor()?;
-        assert_ne!(second_cursor.inode, first_cursor.inode);
         assert_eq!(second_cursor.last_time_created, 1776823100000);
         assert_eq!(usage_event_count(&app.paths.db_path)?, 2);
         Ok::<_, anyhow::Error>(())
@@ -1454,16 +1691,35 @@ impl Fixture {
     }
 
     fn seed_claude(&self, name: &str, total_tokens: i64, timestamp: &str) -> Result<()> {
+        self.seed_claude_lines("demo", name, &[claude_usage_line(timestamp, total_tokens)])?;
+        Ok(())
+    }
+
+    fn seed_claude_lines(&self, project: &str, name: &str, lines: &[String]) -> Result<PathBuf> {
         let claude_file = self
             .home
             .join(".claude")
             .join("projects")
-            .join("demo")
+            .join(project)
             .join(name);
-        fs::write(
-            claude_file,
-            format!("{}\n", claude_usage_line(timestamp, total_tokens)),
-        )?;
+        if let Some(parent) = claude_file.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&claude_file, format!("{}\n", lines.join("\n")))?;
+        Ok(claude_file)
+    }
+
+    fn append_claude_line(&self, project: &str, name: &str, line: &str) -> Result<()> {
+        let claude_file = self
+            .home
+            .join(".claude")
+            .join("projects")
+            .join(project)
+            .join(name);
+        fs::OpenOptions::new()
+            .append(true)
+            .open(claude_file)?
+            .write_all(format!("{line}\n").as_bytes())?;
         Ok(())
     }
 
@@ -1616,6 +1872,33 @@ fn claude_usage_line(timestamp: &str, total_tokens: i64) -> String {
     serde_json::json!({
         "timestamp": timestamp,
         "message": {
+            "model": "claude-sonnet-4",
+            "usage": {
+                "input_tokens": total_tokens,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": total_tokens,
+            }
+        }
+    })
+    .to_string()
+}
+
+fn claude_logical_usage_line(
+    message_id: &str,
+    request_id: &str,
+    is_sidechain: bool,
+    total_tokens: i64,
+    timestamp: &str,
+) -> String {
+    serde_json::json!({
+        "timestamp": timestamp,
+        "sessionId": "session-claude",
+        "requestId": request_id,
+        "isSidechain": is_sidechain,
+        "message": {
+            "id": message_id,
             "model": "claude-sonnet-4",
             "usage": {
                 "input_tokens": total_tokens,

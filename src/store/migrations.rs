@@ -65,6 +65,11 @@ pub const MIGRATIONS: &[(u32, &str, MigrationFn)] = &[
         m_013_cutover_gemini_source_to_antigravity,
     ),
     (14, "add_provider_label", m_014_add_provider_label),
+    (
+        15,
+        "optimize_source_sync_cursors_and_behavior_resets",
+        m_015_optimize_source_sync_cursors_and_behavior_resets,
+    ),
 ];
 
 /// Returns the newest schema version known to this binary.
@@ -714,6 +719,34 @@ fn m_012_repair_source_sync_status_history_columns(tx: &Transaction<'_>) -> Resu
         "stored_events",
         "INTEGER NOT NULL DEFAULT 0",
     )?;
+    Ok(())
+}
+
+fn m_015_optimize_source_sync_cursors_and_behavior_resets(tx: &Transaction<'_>) -> Result<()> {
+    if table_exists(tx, "source_cursor")? {
+        ensure_column(
+            tx,
+            "source_cursor",
+            "last_part_rowid",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+    }
+    if table_exists(tx, "usage_turn")? {
+        tx.execute_batch(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_usage_turn_source_path_hash
+                ON usage_turn(source, source_path_hash);
+            "#,
+        )?;
+    }
+    if table_exists(tx, "usage_tool_call")? {
+        tx.execute_batch(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_usage_tool_call_source_path_hash
+                ON usage_tool_call(source, source_path_hash);
+            "#,
+        )?;
+    }
     Ok(())
 }
 
@@ -1484,6 +1517,51 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(index_count, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn migration_v15_adds_part_cursor_and_behavior_reset_indexes() -> anyhow::Result<()> {
+        let mut conn = Connection::open_in_memory()?;
+        run_migrations_for_test(
+            &mut conn,
+            &[
+                (1, "baseline", m_001_baseline),
+                (11, "add_behavior_facts", m_011_add_behavior_facts),
+                (
+                    15,
+                    "optimize_source_sync_cursors_and_behavior_resets",
+                    m_015_optimize_source_sync_cursors_and_behavior_resets,
+                ),
+            ],
+        )?;
+
+        let cursor_columns = pragma_columns(&conn, "source_cursor")?;
+        assert!(cursor_columns.contains(&"last_part_rowid".to_string()));
+        for (table, index) in [
+            ("usage_turn", "idx_usage_turn_source_path_hash"),
+            ("usage_tool_call", "idx_usage_tool_call_source_path_hash"),
+        ] {
+            let count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?1",
+                [index],
+                |row| row.get(0),
+            )?;
+            assert_eq!(count, 1, "{index} should exist");
+
+            let mut statement = conn.prepare(&format!(
+                "EXPLAIN QUERY PLAN DELETE FROM {table} WHERE source=?1 AND source_path_hash=?2"
+            ))?;
+            let details = statement
+                .query_map(["claude", "path-hash"], |row| row.get::<_, String>(3))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+                .join("\n");
+            assert!(
+                details.contains(index),
+                "plan should use {index}: {details}"
+            );
+        }
+        assert_eq!(read_schema_version(&conn)?, 15);
         Ok(())
     }
 }

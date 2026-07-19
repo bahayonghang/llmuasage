@@ -92,6 +92,9 @@ pub struct OpencodeCursor {
     pub last_time_created: i64,
     /// Message ids already consumed at the high-water timestamp.
     pub last_processed_ids: Vec<String>,
+    /// Highest OpenCode `part.rowid` fully scanned for behavior facts.
+    #[serde(default)]
+    pub last_part_rowid: i64,
     /// Last observed SQLite status such as `ok` or `missing-db`.
     pub sqlite_status: String,
     /// Last cursor refresh time in RFC 3339 format.
