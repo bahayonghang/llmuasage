@@ -584,3 +584,37 @@ Aligned Claude, Codex, and OpenCode token normalization with ccusage; made persi
 ### Next Steps
 
 - None - task complete
+
+
+## Session 18: 完成首页概览与多来源同步性能优化
+
+**Date**: 2026-07-19
+**Task**: 完成首页概览与多来源同步性能优化
+**Branch**: `dev`
+
+### Summary
+
+完成 home_overview 共享 row stream 与 diagnostics 缺失源优化，恢复 80ms 门；完成 Claude/Codex/OpenCode 增量扫描与写入性能修复。debug/release 80ms 各连续三次通过，严格 Clippy、未设置 CI=1 的完整串行测试、docs build 和 git diff check 全绿；保留用户原有配置与 README WIP。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `66d596f` | (see git log) |
+| `05add10` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
