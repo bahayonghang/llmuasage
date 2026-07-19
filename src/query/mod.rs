@@ -2727,14 +2727,33 @@ fn load_source_diagnostics(conn: &Connection) -> Result<Vec<SourceDiagnostics>> 
         }
     }
 
+    let missing_file_counts: std::collections::HashMap<String, u64> = file_paths_by_source
+        .iter()
+        .filter_map(|(source, paths)| {
+            let missing = paths
+                .iter()
+                .filter(|path| !std::path::Path::new(path).exists())
+                .count() as u64;
+            (missing > 0).then_some((source.clone(), missing))
+        })
+        .collect();
+
     // `event_count` is maintained transactionally with usage_event writes, so
     // diagnostics can avoid scanning the full fact table on every dashboard load.
+    // It is only needed for sources with missing files; querying all buckets when
+    // every source file is live makes the common dashboard path needlessly scan
+    // the entire aggregate projection.
     let mut event_counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
-    {
-        let mut stmt = conn.prepare(
-            "SELECT source, COALESCE(SUM(event_count), 0) FROM usage_bucket_30m GROUP BY source",
-        )?;
-        let rows = stmt.query_map([], |row| {
+    if !missing_file_counts.is_empty() {
+        let placeholders = std::iter::repeat_n("?", missing_file_counts.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT source, COALESCE(SUM(event_count), 0) FROM usage_bucket_30m WHERE source IN ({placeholders}) GROUP BY source"
+        );
+        let sources = missing_file_counts.keys().collect::<Vec<_>>();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(sources), |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, i64>(1)?.max(0) as u64,
@@ -2777,15 +2796,7 @@ fn load_source_diagnostics(conn: &Connection) -> Result<Vec<SourceDiagnostics>> 
     )?;
     let rows = stmt.query_map([], |row| {
         let source = row.get::<_, String>(0)?;
-        let missing_file_count = file_paths_by_source
-            .get(&source)
-            .map(|paths| {
-                paths
-                    .iter()
-                    .filter(|path| !std::path::Path::new(path).exists())
-                    .count() as u64
-            })
-            .unwrap_or(0);
+        let missing_file_count = missing_file_counts.get(&source).copied().unwrap_or(0);
         let total_events = if missing_file_count > 0 {
             *event_counts.get(&source).unwrap_or(&0)
         } else {
@@ -2885,9 +2896,9 @@ pub(crate) fn session_outlier_query_plan_for_test(
 mod tests {
     use anyhow::Result;
 
-    use chrono::NaiveDate;
+    use chrono::{FixedOffset, NaiveDate};
 
-    use super::{Dashboard, QueryFilter, ReportTimezone};
+    use super::{Dashboard, QueryFilter, ReportTimezone, home_overview};
     use crate::{
         models::SourceKind,
         store::Store,
@@ -4350,13 +4361,121 @@ mod tests {
     }
 
     #[test]
+    fn home_overview_preserves_exact_session_day_and_filter_semantics() -> Result<()> {
+        let fixture = Fixture::new()?;
+        fixture.seed_event(SeedEvent {
+            event_key: "codex:cross-day:1",
+            source: "codex",
+            model: "gpt-5",
+            event_at: "2026-04-01T23:30:00Z",
+            hour_start: Some("2026-04-01T23:00:00Z"),
+            session_id: Some("session-shared"),
+            project_hash: "project-a",
+            input_tokens: 10,
+            total_tokens: 10,
+            ..Default::default()
+        })?;
+        fixture.seed_event(SeedEvent {
+            event_key: "codex:cross-day:2",
+            source: "codex",
+            model: "gpt-5",
+            event_at: "2026-04-02T00:30:00Z",
+            hour_start: Some("2026-04-02T00:00:00Z"),
+            session_id: Some("session-shared"),
+            project_hash: "project-a",
+            input_tokens: 20,
+            total_tokens: 20,
+            ..Default::default()
+        })?;
+        fixture.seed_event(SeedEvent {
+            event_key: "claude:fallback:1",
+            source: "claude",
+            model: "claude-sonnet-4",
+            event_at: "2026-04-02T01:00:00Z",
+            hour_start: Some("2026-04-02T01:00:00Z"),
+            source_path_hash: Some("claude-path"),
+            project_hash: "project-b",
+            input_tokens: 30,
+            total_tokens: 30,
+            ..Default::default()
+        })?;
+        fixture.seed_event(SeedEvent {
+            event_key: "opencode:fallback:1",
+            source: "opencode",
+            model: "gpt-5",
+            event_at: "2026-04-02T16:00:00Z",
+            hour_start: Some("2026-04-02T16:00:00Z"),
+            source_path_hash: Some("opencode-path"),
+            project_hash: "project-c",
+            input_tokens: 40,
+            total_tokens: 40,
+            ..Default::default()
+        })?;
+        fixture.store().open_connection()?.execute(
+            "INSERT INTO run_log(command, status, started_at, finished_at) VALUES ('sync', 'success', '2026-04-03T00:00:00Z', '2026-04-03T00:01:00Z')",
+            [],
+        )?;
+
+        let dashboard = Dashboard::open(fixture.store())?;
+        let utc_plus_eight = FixedOffset::east_opt(8 * 60 * 60).expect("valid offset");
+        let all_filter = QueryFilter {
+            timezone: ReportTimezone::Fixed(utc_plus_eight),
+            ..Default::default()
+        };
+        let payload = dashboard.home_overview(&all_filter)?;
+        let (profiled_payload, _) = home_overview::load_profile(&dashboard, &all_filter)?;
+        assert_eq!(
+            serde_json::to_value(&payload)?,
+            serde_json::to_value(&profiled_payload)?
+        );
+        assert_eq!(payload.summary.total_sessions, 3);
+        assert_eq!(payload.summary.total_requests, 4);
+        assert_eq!(payload.summary.total_tokens, 100);
+        assert_eq!(payload.summary.active_days, 2);
+        assert_eq!(payload.by_platform["codex"].sessions, 1);
+        assert_eq!(payload.by_platform["codex"].requests, 2);
+        assert_eq!(payload.by_platform["claude"].sessions, 1);
+        assert_eq!(payload.by_platform["opencode"].sessions, 1);
+        assert_eq!(payload.series.len(), 2);
+        assert_eq!(payload.series[0].date, "2026-04-02");
+        assert_eq!(payload.series[0].codex.sessions, 1);
+        assert_eq!(payload.series[0].codex.requests, 2);
+        assert_eq!(payload.series[0].claude.sessions, 1);
+        assert_eq!(payload.series[1].date, "2026-04-03");
+        assert_eq!(payload.series[1].opencode.sessions, 1);
+        assert!(payload.bootstrap.usage_import_attempted);
+        assert!(payload.bootstrap.is_warm);
+        assert_eq!(payload.last_updated, "2026-04-03T00:01:00Z");
+
+        let filtered = dashboard.home_overview(&QueryFilter {
+            source: Some(SourceKind::Codex),
+            model: Some("gpt-5".to_string()),
+            project_hash: Some("project-a".to_string()),
+            since: Some(NaiveDate::from_ymd_opt(2026, 4, 2).expect("valid date")),
+            until: Some(NaiveDate::from_ymd_opt(2026, 4, 2).expect("valid date")),
+            timezone: ReportTimezone::Fixed(utc_plus_eight),
+        })?;
+        assert_eq!(filtered.summary.total_sessions, 1);
+        assert_eq!(filtered.summary.total_requests, 2);
+        assert_eq!(filtered.summary.total_tokens, 30);
+        assert_eq!(filtered.summary.active_days, 1);
+        assert_eq!(filtered.by_platform["codex"].requests, 2);
+        assert_eq!(filtered.by_platform["claude"].requests, 0);
+        assert_eq!(filtered.series.len(), 1);
+        assert_eq!(filtered.series[0].date, "2026-04-02");
+        assert_eq!(filtered.series[0].codex.sessions, 1);
+        Ok(())
+    }
+
+    #[test]
     fn home_overview_under_80ms_with_seeded_10k_events() -> Result<()> {
         let fixture = Fixture::new()?;
         fixture.seed_dashboard(10_000)?;
         let dashboard = Dashboard::open(fixture.store())?;
         let started = std::time::Instant::now();
 
-        let payload = dashboard.home_overview(&Default::default())?;
+        let (payload, timing) = home_overview::load_profile(&dashboard, &Default::default())?;
+        eprintln!("home_overview profile: {timing:?}");
         let elapsed = started.elapsed();
         let limit = if std::env::var_os("CI").is_some() {
             std::time::Duration::from_millis(500)
@@ -4369,6 +4488,33 @@ mod tests {
             elapsed < limit,
             "home_overview should stay below {limit:?} with 10k seeded events, got {elapsed:?}"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn home_overview_profiles_configured_read_only_backup() -> Result<()> {
+        let Some(db_path) = std::env::var_os("LLMUSAGE_HOME_OVERVIEW_BACKUP_DB") else {
+            return Ok(());
+        };
+        let db_path = std::path::PathBuf::from(db_path);
+        let conn = rusqlite::Connection::open_with_flags(
+            &db_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )?;
+        let event_count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM usage_event", [], |row| row.get(0))?;
+        let bucket_count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM usage_bucket_30m", [], |row| {
+                row.get(0)
+            })?;
+        drop(conn);
+
+        for run in 0..5 {
+            let (_, timing) = home_overview::load_profile_read_only(&db_path, &Default::default())?;
+            eprintln!(
+                "home_overview real backup run={run} events={event_count} buckets={bucket_count} timing={timing:?}"
+            );
+        }
         Ok(())
     }
 }

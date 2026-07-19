@@ -123,6 +123,40 @@ FROM usage_event
 WHERE source = ?;
 ```
 
+## Scenario: Cold home overview query
+
+`Dashboard::home_overview` is a cold read contract, not a cacheable or
+pre-warmed projection. The local seeded 10k-event test retains its strict
+80 ms budget in both debug and release builds; CI-only tolerance must not be
+used as completion evidence.
+
+The query must preserve the exact event semantics for `QueryFilter` source,
+model, project, date bounds, and fixed/local timezone conversion. Session
+identity is `source` plus the first non-empty value of `session_id`,
+`source_path_hash`, or `event_key`. A session may appear on multiple local
+calendar days: it counts once in the summary and once per day/source in the
+series. The stable by-platform map always contains `claude`, `codex`,
+`antigravity`, and `opencode`, while unknown sources remain compatible in the
+map and are omitted from the fixed series fields.
+
+The summary, by-platform, and daily series sections share one filtered
+`usage_event` row stream. Rust-side aggregation may build the three exact
+projections, but a change must not reintroduce three independent fact-table
+scans or distinct/group temporary B-trees. Test-only profiling records total,
+event-read, summary, by-platform, series, run-state, and diagnostics elapsed
+time plus `EXPLAIN QUERY PLAN` details and opcode count. Production payloads do
+not expose these fields.
+
+Archive diagnostics may aggregate `usage_bucket_30m` only for sources with
+missing source files; when all files are live, the bucket scan is skipped.
+This is a query-path optimization with no schema or migration change, and it
+must retain protected-event counts and archive payload fields exactly.
+
+Validation requires the focused 80 ms test to pass three consecutive times in
+debug and release, exact cross-day/session/filter coverage, and a read-only or
+online-backup profile for representative databases. No process cache, warm-up
+query, delayed work, platform exception, or threshold relaxation is allowed.
+
 The first query uses the aggregate projection. The second runs once per
 returned source, preserves exact fact semantics, and can use
 `idx_usage_event_source_event_at`.
