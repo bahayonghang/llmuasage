@@ -72,6 +72,23 @@
   additive. No-op or pinned catalog bootstrap emits no pricing variants.
 - Bootstrap callback delivery must not persist progress or alter migration,
   pricing activation, lock acquisition, failure, or cancellation semantics.
+- Human progress rendering lives in `src/commands/sync_progress.rs` behind one
+  event entry and one copy source (`human_progress_line`). TTY stderr renders
+  indicatif bars (OpenCode is a spinner because its `files_scanned` counts
+  rows, not files; Codex/Claude use determinate bars whose position counts
+  replayed files only); non-TTY or any non-empty `LLMUSAGE_PROGRESS` falls
+  back to plain lines and must never emit ANSI escapes. Progress stays on
+  stderr, the `Sync finished` summary table stays on stdout, and renderer
+  teardown is owned by a command-level RAII guard so early `?` returns,
+  failures, and Ctrl-C cancellation all leave a clean terminal. CLI Ctrl-C
+  cancels through `run_once_with_cancel`'s token; a ctrl-c task that clones
+  the event sender must be aborted and awaited before the reporter channel is
+  relied on to close.
+- The human `Sync finished` block is an aligned table (files/changed/skipped/
+  seen/committed/stored plus human-readable bytes and parse/write durations)
+  rendered by the pure `format_summary_lines`; coloring is stdout-TTY-only and
+  applied after width computation. `SyncEvent`/`SourceSyncStats` wire shapes
+  are unaffected by display changes.
 
 ### 4. Validation & Error Matrix
 
