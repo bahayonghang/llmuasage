@@ -24,7 +24,8 @@
     "07-20-tui-time-window-bounding",
     "07-20-tui-render-efficiency",
     "07-20-tui-style-unify",
-    "07-20-tui-interaction-features"
+    "07-20-tui-interaction-features",
+    "07-21-tui-render-thread-benchmark"
   ],
   "parent": null,
   "relatedFiles": [],

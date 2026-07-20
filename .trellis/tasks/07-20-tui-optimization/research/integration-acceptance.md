@@ -1,6 +1,6 @@
 # TUI 综合优化集成验收矩阵
 
-日期：2026-07-20。
+日期：2026-07-21。
 
 | Criterion | Status | Evidence |
 | --- | --- | --- |
@@ -9,11 +9,12 @@
 | X3 time-window bounds | pass | Time-window child tests and release 30d query/scan equivalence evidence. |
 | X4 theme/no-color coverage | pass | Theme source guards, all-theme shells, no-color buffers, and serial suite. |
 | X5 token/cost semantics | pass | Async/time-window payload equivalence tests and full serial suite; default window remains `All`. |
-| X6 repository quality gate | pass | `just ci` exited 0, including fmt, strict clippy, Rust tests, Node checks, and docs build. |
-| X7(a) render-thread blocking median | missing evidence | No three-sample before/after render-thread blocking measurement exists in `perf-baseline.md`. |
+| X6 repository quality gate | pass | Final `just ci` exited 0 on 2026-07-21, including fmt, strict clippy, 366 library tests (3 local performance tests ignored), integration/doc tests, Node checks, and docs build. |
+| X7(a) render-thread blocking median | pass | Release warm-up + three-sample medians on the representative database: Stats 0.203 ms vs 169.3 ms before, Behavior 0.250 ms vs 3777.5 ms before, Blocks 0.212 ms vs 403.2 ms before. Background query wait was excluded. |
 | X7(b) async payload wall time | pass | Release three-sample medians: Stats 35.8% and Behavior 52.3% improvement. |
 | X7(c) idle draw count | pass | Deterministic redraw evidence: 40 idle ticks -> 0 requests; active ticks remain dirty. |
 
-The parent remains open/planning because X7(a) is a factual acceptance gap. The
-missing measurement is not converted into a pass by the isolated smoke or by
-query wall-time data.
+All X1-X7 criteria have direct evidence. X7(a) measures request dispatch,
+loading-frame draw, matching-result application, and populated-frame draw as
+separate continuous render-thread sections; background query wait and the quit
+smoke are not included in the metric.

@@ -343,43 +343,47 @@ fn request_panel_data(
 fn apply_panel_results(loader: &mut PanelDataLoader, state: &mut AppState) -> bool {
     let mut dirty = false;
     while let Some(result) = loader.try_recv() {
-        if !panel_result_matches(state, &result) {
-            continue;
-        }
-        let panel = result.panel;
-        let refreshing = result.refreshing;
-        match result.payload {
-            PanelPayload::Overview(payload) => state.overview = Some(payload),
-            PanelPayload::SyncCenter(payload) => state.sync_center = Some(payload),
-            PanelPayload::Models(payload) => {
-                state.model_collapse = payload
-                    .as_ref()
-                    .ok()
-                    .and_then(|items| panels::models::collapse_plan(items));
-                state.models = Some(payload);
-            }
-            PanelPayload::Daily(payload) => state.daily = Some(payload),
-            PanelPayload::Hourly(payload) => state.hourly = Some(payload),
-            PanelPayload::Costs(payload) => {
-                state.cost_collapse = payload
-                    .as_ref()
-                    .ok()
-                    .and_then(|items| panels::cost::collapse_plan(items));
-                state.costs = Some(payload);
-            }
-            PanelPayload::Stats(payload) => state.stats = Some(payload),
-            PanelPayload::Behavior(payload) => state.behavior = Some(*payload),
-            PanelPayload::Blocks(payload) => state.blocks = Some(payload),
-        }
-        state.panel_loading[panel as usize] = false;
-        update_scroll_total(state, panel);
-        state.mark_refreshed();
-        dirty = true;
-        if refreshing {
-            state.set_status("Refreshed local dashboard cache");
-        }
+        dirty |= apply_panel_result(state, result);
     }
     dirty
+}
+
+fn apply_panel_result(state: &mut AppState, result: PanelResult) -> bool {
+    if !panel_result_matches(state, &result) {
+        return false;
+    }
+    let panel = result.panel;
+    let refreshing = result.refreshing;
+    match result.payload {
+        PanelPayload::Overview(payload) => state.overview = Some(payload),
+        PanelPayload::SyncCenter(payload) => state.sync_center = Some(payload),
+        PanelPayload::Models(payload) => {
+            state.model_collapse = payload
+                .as_ref()
+                .ok()
+                .and_then(|items| panels::models::collapse_plan(items));
+            state.models = Some(payload);
+        }
+        PanelPayload::Daily(payload) => state.daily = Some(payload),
+        PanelPayload::Hourly(payload) => state.hourly = Some(payload),
+        PanelPayload::Costs(payload) => {
+            state.cost_collapse = payload
+                .as_ref()
+                .ok()
+                .and_then(|items| panels::cost::collapse_plan(items));
+            state.costs = Some(payload);
+        }
+        PanelPayload::Stats(payload) => state.stats = Some(payload),
+        PanelPayload::Behavior(payload) => state.behavior = Some(*payload),
+        PanelPayload::Blocks(payload) => state.blocks = Some(payload),
+    }
+    state.panel_loading[panel as usize] = false;
+    update_scroll_total(state, panel);
+    state.mark_refreshed();
+    if refreshing {
+        state.set_status("Refreshed local dashboard cache");
+    }
+    true
 }
 
 fn panel_result_matches(state: &AppState, result: &PanelResult) -> bool {
@@ -525,6 +529,7 @@ fn ok_len<T>(result: &Result<Vec<T>, String>) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::paths::AppPaths;
     use crate::tui::app::TimeWindow;
     use crossterm::event::{KeyModifiers, MouseEvent};
     use ratatui::{
@@ -532,6 +537,7 @@ mod tests {
         backend::TestBackend,
         style::{Color, Modifier},
     };
+    use std::time::Instant;
 
     fn buffer_text(terminal: &Terminal<TestBackend>) -> String {
         terminal
@@ -698,6 +704,166 @@ mod tests {
             );
         }
         Ok(())
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct RenderThreadSample {
+        dispatch_ms: f64,
+        loading_draw_ms: f64,
+        result_apply_ms: f64,
+        populated_draw_ms: f64,
+    }
+
+    impl RenderThreadSample {
+        fn max_ms(self) -> f64 {
+            self.dispatch_ms
+                .max(self.loading_draw_ms)
+                .max(self.result_apply_ms)
+                .max(self.populated_draw_ms)
+        }
+    }
+
+    #[ignore = "reads the local usage database for release-mode performance evidence"]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn measure_local_render_thread_first_visit() -> Result<()> {
+        let paths = AppPaths::discover()?;
+        let database_bytes = std::fs::metadata(&paths.db_path)?.len();
+        let store = Store::new(&paths)?;
+        let mut loader = PanelDataLoader::new(&store)?;
+
+        eprintln!("database_bytes={database_bytes} window=30d samples=3");
+        for (panel, baseline_sync_ms) in [
+            (Panel::Health, 169.3),
+            (Panel::Behavior, 3777.5),
+            (Panel::Blocks, 403.2),
+        ] {
+            let _ = measure_render_thread_visit(&mut loader, panel).await?;
+
+            let mut maxima = Vec::with_capacity(3);
+            for sample_number in 1..=3 {
+                let sample = measure_render_thread_visit(&mut loader, panel).await?;
+                let max_ms = sample.max_ms();
+                maxima.push(max_ms);
+                eprintln!(
+                    "panel={} sample={} dispatch_ms={:.3} loading_draw_ms={:.3} result_apply_ms={:.3} populated_draw_ms={:.3} max_render_thread_ms={:.3}",
+                    benchmark_panel_label(panel),
+                    sample_number,
+                    sample.dispatch_ms,
+                    sample.loading_draw_ms,
+                    sample.result_apply_ms,
+                    sample.populated_draw_ms,
+                    max_ms,
+                );
+            }
+
+            let median_ms = median(&mut maxima);
+            eprintln!(
+                "panel={} baseline_sync_ms={baseline_sync_ms:.1} max_render_thread_samples_ms={maxima:?} median_max_render_thread_ms={median_ms:.3} improvement_pct={:.1}",
+                benchmark_panel_label(panel),
+                (baseline_sync_ms - median_ms) * 100.0 / baseline_sync_ms,
+            );
+        }
+        Ok(())
+    }
+
+    async fn measure_render_thread_visit(
+        loader: &mut PanelDataLoader,
+        panel: Panel,
+    ) -> Result<RenderThreadSample> {
+        let mut terminal = Terminal::new(TestBackend::new(120, 30))?;
+        let mut state = AppState::new();
+        state.active_panel = panel;
+        state.time_window = TimeWindow::Month30d;
+
+        let started = Instant::now();
+        request_panel_data(loader, &mut state, panel, false);
+        let dispatch_ms = elapsed_ms(started);
+
+        let started = Instant::now();
+        terminal.draw(|frame| draw::draw(frame, &state))?;
+        let loading_draw_ms = elapsed_ms(started);
+        anyhow::ensure!(
+            buffer_text(&terminal).contains("Loading"),
+            "{} did not render its loading frame",
+            benchmark_panel_label(panel)
+        );
+
+        let result = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(result) = loader.try_recv() {
+                    break result;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .map_err(|_| anyhow::anyhow!("timed out waiting for {}", benchmark_panel_label(panel)))?;
+        assert_panel_result_ok(panel, &result)?;
+
+        let started = Instant::now();
+        let accepted = apply_panel_result(&mut state, result);
+        let result_apply_ms = elapsed_ms(started);
+        anyhow::ensure!(
+            accepted,
+            "{} result was rejected",
+            benchmark_panel_label(panel)
+        );
+
+        let started = Instant::now();
+        terminal.draw(|frame| draw::draw(frame, &state))?;
+        let populated_draw_ms = elapsed_ms(started);
+        anyhow::ensure!(
+            !state.panel_loading[panel as usize] && panel_has_data(&state, panel),
+            "{} did not reach populated state",
+            benchmark_panel_label(panel)
+        );
+        anyhow::ensure!(
+            !buffer_text(&terminal).contains("Loading"),
+            "{} still rendered its loading frame",
+            benchmark_panel_label(panel)
+        );
+
+        Ok(RenderThreadSample {
+            dispatch_ms,
+            loading_draw_ms,
+            result_apply_ms,
+            populated_draw_ms,
+        })
+    }
+
+    fn assert_panel_result_ok(panel: Panel, result: &PanelResult) -> Result<()> {
+        let error = match &result.payload {
+            PanelPayload::Stats(Err(error)) | PanelPayload::Blocks(Err(error)) => {
+                Some(error.as_str())
+            }
+            PanelPayload::Behavior(payload) => {
+                payload.as_ref().as_ref().err().map(|error| error.as_str())
+            }
+            _ => None,
+        };
+        anyhow::ensure!(result.panel == panel, "received unexpected panel result");
+        if let Some(error) = error {
+            anyhow::bail!("{} query failed: {error}", benchmark_panel_label(panel));
+        }
+        Ok(())
+    }
+
+    fn benchmark_panel_label(panel: Panel) -> &'static str {
+        match panel {
+            Panel::Health => "Stats",
+            Panel::Behavior => "Behavior",
+            Panel::Blocks => "Blocks",
+            _ => panel.label(),
+        }
+    }
+
+    fn elapsed_ms(started: Instant) -> f64 {
+        started.elapsed().as_secs_f64() * 1_000.0
+    }
+
+    fn median(values: &mut [f64]) -> f64 {
+        values.sort_by(f64::total_cmp);
+        values[values.len() / 2]
     }
 
     #[test]

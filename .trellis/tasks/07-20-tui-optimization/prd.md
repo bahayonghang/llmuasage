@@ -38,6 +38,7 @@
 | `07-20-tui-style-unify` | P2 | 主题槽位全覆盖 + 文案统一 + 共享格式化 + 无色/受限色降级 | 4（须在 5 之前，先定 golden 基线） |
 | `07-20-tui-render-efficiency` | P2 | 按需重绘 + 主题快照 + 行窗口化/世代 memo | 5（依赖 2 的数据世代与 4 的基线；与 4 串行——同触 theme.rs 与全部面板） |
 | `07-20-tui-interaction-features` | P3 | 行选中/排序/滚轮/加载 spinner/死面板处置 | 6（依赖 2、4、5——复用窗口化状态与 selection 槽位） |
+| `07-21-tui-render-thread-benchmark` | P2 | 首访渲染线程连续同步区段基准 | 7（六项实现完成后的父任务 X7(a) 证据） |
 
 执行顺序为强建议（style 与 render 因共同修改 theme.rs/全部面板/golden 基线必须串行）；父子结构不是依赖系统，顺序约束同时写入各子任务 prd，子任务各自独立验收。六个子任务均按复杂任务对待：`task.py start` 前必须补齐 design.md 与 implement.md（workflow 启动门槛）。
 
@@ -49,7 +50,7 @@
 - [x] X4：切换主题后所有面板颜色一致跟随（无硬编码残留）；`NO_COLOR` 下可读。
 - [x] X5：数据语义回归：默认启动态与 All 窗口下，TUI 展示的 token/成本数字与优化前逐面板一致（同一数据库快照）；非 All 窗口下与「全量查询 + 窗口过滤」等值；文案类有意变更以 style 任务的变更清单为准。不违反 token-accounting-contracts.md 与 source-sync-contracts.md。（前提：time-window 任务 R2 的默认窗口决策须保证启动态等价 All，否则回改本条。）
 - [x] X6：`just ci` 全绿（fmt / clippy -D warnings / cargo test -- --test-threads=1 / node 检查 / docs build）。
-- [ ] X7：性能证据（统一测量协议：代表性数据库快照 + release 构建 + 3 次取中位数，对齐 07-20-sync-full-profiling 协议）：(a) 首访 Stats/Behavior/Blocks 期间渲染线程最长连续阻塞时长前后对比；(b) Stats/Behavior 载荷 wall-time 达到 async 任务 A3 阈值；(c) 空闲无动画 10s 内 draw 调用计数达到 render 任务 A1 标准。基线与结果记录入父任务 research/perf-baseline.md。当前 (b)/(c) 已有 release/确定性证据；(a) 仍缺少三次 render-thread blocking 测量，不能将 X7 整体标记为通过。
+- [x] X7：性能证据（统一测量协议：代表性数据库快照 + release 构建 + 3 次取中位数，对齐 07-20-sync-full-profiling 协议）：(a) 首访 Stats/Behavior/Blocks 期间渲染线程最长连续阻塞时长前后对比；(b) Stats/Behavior 载荷 wall-time 达到 async 任务 A3 阈值；(c) 空闲无动画 10s 内 draw 调用计数达到 render 任务 A1 标准。基线与结果记录入父任务 research/perf-baseline.md。X7(a) 的优化后最长同步区段中位数为 Stats 0.203 ms、Behavior 0.250 ms、Blocks 0.212 ms；(b)/(c) 的 release/确定性证据亦通过。
 
 ## Out Of Scope
 
