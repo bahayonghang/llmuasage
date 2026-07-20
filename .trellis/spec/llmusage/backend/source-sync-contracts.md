@@ -84,6 +84,12 @@
   cancels through `run_once_with_cancel`'s token; a ctrl-c task that clones
   the event sender must be aborted and awaited before the reporter channel is
   relied on to close.
+- The interactive TUI is a synchronous renderer running inside the process
+  Tokio runtime. It must submit sync work through the in-process `JobRegistry`;
+  it must never create a nested runtime or call `block_on` from the render
+  thread. A second sync action requests cancellation instead of spawning a
+  second job. TUI exit cancels an active job and waits only for a documented,
+  bounded interval before restoring the terminal.
 - The human `Sync finished` block is an aligned table (files/changed/skipped/
   seen/committed/stored plus human-readable bytes and parse/write durations)
   rendered by the pure `format_summary_lines`; coloring is stdout-TTY-only and
@@ -138,6 +144,8 @@
   proving shard-local behavior dedupe and shared-bucket pricing recovery.
 - Human and subprocess tests covering pricing phase text, ordered additive
   NDJSON variants, stdout purity, and structured log phase fields.
+- A multi-thread `#[tokio::test]` covering the TUI sync action, duplicate-start
+  cancellation, progress text projection, and bounded shutdown behavior.
 
 ### 7. Wrong vs Correct
 

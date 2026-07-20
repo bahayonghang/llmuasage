@@ -1,4 +1,4 @@
-use std::io;
+use std::{io, time::Duration};
 
 use anyhow::Result;
 use crossterm::{
@@ -10,7 +10,6 @@ use crossterm::{
 use ratatui::{Terminal, backend::CrosstermBackend};
 
 use crate::{
-    commands::sync::{self, SyncRunOptions},
     query::{Dashboard, InventoryRoots},
     store::Store,
 };
@@ -25,11 +24,13 @@ pub mod nav_bar;
 pub mod panels;
 pub mod report_table;
 pub mod source_picker;
+mod sync_control;
 pub mod theme;
 
 use app::{AppState, BehaviorPanelPayload, Panel, StatsPanelPayload};
 use event::{EventHandler, TuiEvent};
 use input::{Action, DialogAction, handle_dialog_key_event, handle_key_event};
+use sync_control::{SyncController, SyncUpdate};
 
 /// Main entry point for the interactive terminal dashboard.
 pub fn run_dashboard(store: &Store) -> Result<()> {
@@ -84,6 +85,7 @@ pub fn run_terminal(store: &Store) -> Result<()> {
 fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Store) -> Result<()> {
     let dashboard = Dashboard::open(store)?;
     let mut state = AppState::new();
+    let mut sync = SyncController::new()?;
     let size = terminal.size()?;
     state.handle_resize(size.width, size.height);
     let mut events = EventHandler::new(std::time::Duration::from_millis(250));
@@ -99,6 +101,7 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
         let ev = events.recv()?;
         let action = match ev {
             TuiEvent::Tick => {
+                apply_sync_updates(&mut sync, &dashboard, &mut state);
                 state.on_tick();
                 if state.needs_refresh {
                     refresh_panel_data(&dashboard, &mut state);
@@ -126,7 +129,10 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
         };
 
         match action {
-            Action::Quit => break,
+            Action::Quit => {
+                sync.shutdown(Duration::from_millis(500));
+                break;
+            }
             Action::SwitchPanel(p) => {
                 state.active_panel = p;
                 load_panel_data(&dashboard, &mut state, p);
@@ -162,7 +168,10 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
             }
             Action::Refresh => refresh_panel_data(&dashboard, &mut state),
             Action::ToggleAutoRefresh => state.toggle_auto_refresh(),
-            Action::StartSync => run_sync_action(store, &dashboard, &mut state),
+            Action::StartSync => {
+                let message = sync.start_or_cancel(store, state.filter.source);
+                state.set_status(&message);
+            }
             Action::OpenSourcePicker => state.open_source_picker(),
             Action::OpenHelp => state.open_help(),
             Action::CycleTheme => {
@@ -176,33 +185,21 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
     Ok(())
 }
 
-fn run_sync_action(store: &Store, dashboard: &Dashboard, state: &mut AppState) {
-    state.set_status("Sync running...");
-    let runtime = match tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(runtime) => runtime,
-        Err(err) => {
-            state.set_status(&format!("Sync runtime error: {err}"));
-            return;
+fn apply_sync_updates(sync: &mut SyncController, dashboard: &Dashboard, state: &mut AppState) {
+    for update in sync.drain_updates() {
+        match update {
+            SyncUpdate::Progress(message) => state.set_status(&message),
+            SyncUpdate::Completed { inserted, stored } => {
+                state.invalidate_cached_data();
+                load_panel_data(dashboard, state, state.active_panel);
+                state.mark_refreshed();
+                state.set_status(&format!(
+                    "Sync complete: {inserted} inserted, {stored} stored"
+                ));
+            }
+            SyncUpdate::Failed(error) => state.set_status(&format!("Sync failed: {error}")),
+            SyncUpdate::Cancelled => state.set_status("Sync cancelled"),
         }
-    };
-    let options = SyncRunOptions {
-        source: state.filter.source,
-        ..SyncRunOptions::default()
-    };
-    match runtime.block_on(sync::run_store_once_with_options(store, &options)) {
-        Ok(summary) => {
-            state.invalidate_cached_data();
-            load_panel_data(dashboard, state, state.active_panel);
-            state.mark_refreshed();
-            state.set_status(&format!(
-                "Sync complete: {} inserted, {} stored",
-                summary.total_inserted, summary.stored_events
-            ));
-        }
-        Err(err) => state.set_status(&format!("Sync failed: {err}")),
     }
 }
 
