@@ -45,6 +45,11 @@ pub fn render(frame: &mut Frame, viewport: Rect, state: &AppState) {
                 state.source_filter_label(),
                 Style::default().fg(theme::accent()),
             ),
+            Span::styled(" • Window ", theme::muted_style()),
+            Span::styled(
+                state.time_window.label(),
+                Style::default().fg(theme::accent()),
+            ),
         ])),
         rows[0],
     );
@@ -55,7 +60,8 @@ pub fn render(frame: &mut Frame, viewport: Rect, state: &AppState) {
 
     let lines = vec![
         Line::from("tab / shift-tab: switch tabs    1-9: jump to tab"),
-        Line::from("j/k or arrows: scroll            h/l: change time window"),
+        Line::from("j/k or arrows: scroll            h/l: Today/7d/30d/All"),
+        Line::from("window: Models/Daily/Hourly/Cost/Stats/Behavior"),
         Line::from("s: source picker                 a: all sources in picker"),
         Line::from("r: refresh dashboard cache       R: toggle auto refresh"),
         Line::from("x: run sync for current source   t: cycle theme"),

@@ -5,6 +5,7 @@ use rusqlite::{Connection, OptionalExtension, params_from_iter};
 use serde::Serialize;
 
 use crate::{
+    domain::source_descriptor::registered_source_descriptors,
     error::Result,
     store::{IntegrationState, RunRecord, Store},
     util::now_utc,
@@ -860,7 +861,7 @@ impl Dashboard {
         }
         let modifier = filter.local_time_modifier();
         let label_expr = match window {
-            "day" => "hour_start".to_string(),
+            "day" | "hourly" => "hour_start".to_string(),
             "week" | "month" => format!("date(hour_start, '{modifier}')"),
             _ => format!("strftime('%Y-%m', hour_start, '{modifier}')"),
         };
@@ -998,7 +999,7 @@ impl Dashboard {
     /// context window (from the static catalog). Groups whose model window is
     /// unknown are excluded from the ratios and reported as `unpriced_events`.
     pub fn context_pressure(&self, filter: &QueryFilter) -> Result<ContextPressurePayload> {
-        let event_filter = filter.event_filter(None);
+        let event_filter = context_pressure_event_filter(filter);
         let sql = format!(
             r#"
             SELECT
@@ -2398,6 +2399,25 @@ impl Dashboard {
     }
 }
 
+fn context_pressure_event_filter(filter: &QueryFilter) -> filter::SqlFilter {
+    let mut event_filter = filter.event_filter(None);
+    if filter.source.is_none() && (filter.since.is_some() || filter.until.is_some()) {
+        let sources = registered_source_descriptors();
+        event_filter.push_raw(format!(
+            "source IN ({})",
+            std::iter::repeat_n("?", sources.len())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+        for descriptor in sources {
+            event_filter.push_value(rusqlite::types::Value::Text(
+                descriptor.stable_id.to_string(),
+            ));
+        }
+    }
+    event_filter
+}
+
 fn behavior_support(
     conn: &Connection,
     table: &str,
@@ -2898,7 +2918,9 @@ mod tests {
 
     use chrono::{FixedOffset, NaiveDate};
 
-    use super::{Dashboard, QueryFilter, ReportTimezone, home_overview};
+    use super::{
+        Dashboard, QueryFilter, ReportTimezone, context_pressure_event_filter, home_overview,
+    };
     use crate::{
         models::SourceKind,
         store::Store,
@@ -3150,6 +3172,95 @@ mod tests {
         assert_eq!(pressure.priced_events, 2);
         assert_eq!(pressure.unpriced_events, 1);
         assert_eq!(pressure.peak_model.as_deref(), Some("codex:gpt-5"));
+        Ok(())
+    }
+
+    #[test]
+    fn bounded_context_pressure_uses_source_time_ranges_without_changing_totals() -> Result<()> {
+        let fixture = Fixture::new()?;
+        for event in [
+            SeedEvent {
+                event_key: "codex:bounded:1",
+                source: "codex",
+                model: "gpt-5",
+                event_at: "2026-05-08T01:00:00Z",
+                input_tokens: 200_000,
+                total_tokens: 200_000,
+                ..Default::default()
+            },
+            SeedEvent {
+                event_key: "claude:bounded:1",
+                source: "claude",
+                model: "claude-fable-5",
+                event_at: "2026-05-08T02:00:00Z",
+                input_tokens: 500_000,
+                total_tokens: 500_000,
+                ..Default::default()
+            },
+            SeedEvent {
+                event_key: "codex:outside",
+                source: "codex",
+                model: "gpt-5",
+                event_at: "2026-05-07T23:59:59Z",
+                input_tokens: 400_000,
+                total_tokens: 400_000,
+                ..Default::default()
+            },
+        ] {
+            fixture.seed_event(event)?;
+        }
+        let filter = QueryFilter {
+            since: Some(NaiveDate::from_ymd_opt(2026, 5, 8).unwrap()),
+            until: Some(NaiveDate::from_ymd_opt(2026, 5, 8).unwrap()),
+            timezone: ReportTimezone::Utc,
+            ..Default::default()
+        };
+        let dashboard = Dashboard::open(fixture.store())?;
+        let combined = dashboard.context_pressure(&filter)?;
+        let codex = dashboard.context_pressure(&QueryFilter {
+            source: Some(SourceKind::Codex),
+            ..filter.clone()
+        })?;
+        let claude = dashboard.context_pressure(&QueryFilter {
+            source: Some(SourceKind::Claude),
+            ..filter.clone()
+        })?;
+
+        assert_eq!(
+            combined.priced_events,
+            codex.priced_events + claude.priced_events
+        );
+        assert_eq!(
+            combined.unpriced_events,
+            codex.unpriced_events + claude.unpriced_events
+        );
+        let expected_avg = (codex.avg_percent * codex.priced_events as f64
+            + claude.avg_percent * claude.priced_events as f64)
+            / combined.priced_events as f64;
+        assert!((combined.avg_percent - expected_avg).abs() < EPSILON);
+        assert_eq!(
+            combined.peak_percent,
+            codex.peak_percent.max(claude.peak_percent)
+        );
+
+        let event_filter = context_pressure_event_filter(&filter);
+        let sql = format!(
+            "EXPLAIN QUERY PLAN SELECT source, model, MAX(input_tokens + cache_read_tokens + cache_creation_tokens), SUM(input_tokens + cache_read_tokens + cache_creation_tokens), COUNT(*) FROM usage_event {} GROUP BY source, model",
+            event_filter.where_sql()
+        );
+        let conn = fixture.store().open_connection()?;
+        let mut stmt = conn.prepare(&sql)?;
+        let plan = stmt
+            .query_map(
+                rusqlite::params_from_iter(event_filter.params().iter()),
+                |row| row.get::<_, String>(3),
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        assert!(
+            plan.iter()
+                .any(|detail| detail.contains("idx_usage_event_source_event_at")),
+            "{plan:?}"
+        );
         Ok(())
     }
 

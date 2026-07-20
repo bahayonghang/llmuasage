@@ -155,16 +155,19 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
             }
             Action::NextWindow => {
                 state.time_window = state.time_window.next();
-                // Invalidate trends cache so it reloads with new window
-                state.trends = None;
                 let panel = state.active_panel;
-                request_panel_data(&mut loader, &mut state, panel, true);
+                invalidate_windowed_panel_data(&mut state);
+                if panel_uses_time_window(panel) {
+                    request_panel_data(&mut loader, &mut state, panel, false);
+                }
             }
             Action::PrevWindow => {
                 state.time_window = state.time_window.prev();
-                state.trends = None;
                 let panel = state.active_panel;
-                request_panel_data(&mut loader, &mut state, panel, true);
+                invalidate_windowed_panel_data(&mut state);
+                if panel_uses_time_window(panel) {
+                    request_panel_data(&mut loader, &mut state, panel, false);
+                }
             }
             Action::Refresh => refresh_panel_data(&mut loader, &mut state),
             Action::ToggleAutoRefresh => state.toggle_auto_refresh(),
@@ -295,7 +298,7 @@ fn apply_panel_results(loader: &mut PanelDataLoader, state: &mut AppState) {
 fn panel_result_matches(state: &AppState, result: &PanelResult) -> bool {
     result.generation == state.data_generation
         && result.panel == state.active_panel
-        && result.time_window == state.time_window
+        && (!panel_uses_time_window(result.panel) || result.time_window == state.time_window)
         && filters_match(&result.filter, &state.filter)
 }
 
@@ -319,6 +322,38 @@ fn panel_has_data(state: &AppState, panel: Panel) -> bool {
         Panel::Health => state.stats.is_some(),
         Panel::Behavior => state.behavior.is_some(),
         Panel::Blocks => state.blocks.is_some(),
+    }
+}
+
+fn panel_uses_time_window(panel: Panel) -> bool {
+    matches!(
+        panel,
+        Panel::Models
+            | Panel::Sources
+            | Panel::Projects
+            | Panel::Cost
+            | Panel::Health
+            | Panel::Behavior
+    )
+}
+
+fn invalidate_windowed_panel_data(state: &mut AppState) {
+    state.models = None;
+    state.daily = None;
+    state.hourly = None;
+    state.costs = None;
+    state.stats = None;
+    state.behavior = None;
+    for panel in [
+        Panel::Models,
+        Panel::Sources,
+        Panel::Projects,
+        Panel::Cost,
+        Panel::Health,
+        Panel::Behavior,
+    ] {
+        state.scroll[panel as usize].offset = 0;
+        state.panel_loading[panel as usize] = false;
     }
 }
 
@@ -387,6 +422,7 @@ fn ok_len<T>(result: &Result<Vec<T>, String>) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::app::TimeWindow;
     use ratatui::{Terminal, backend::TestBackend};
 
     fn buffer_text(terminal: &Terminal<TestBackend>) -> String {
@@ -425,6 +461,50 @@ mod tests {
             payload: PanelPayload::Models(Err("wrong filter".to_string())),
         };
         assert!(!panel_result_matches(&state, &wrong_filter));
+    }
+
+    #[test]
+    fn window_mismatch_is_rejected_only_for_managed_panels() {
+        let mut state = AppState::new();
+        state.data_generation = 4;
+        state.time_window = TimeWindow::All;
+
+        state.active_panel = Panel::Models;
+        let managed = PanelResult {
+            panel: Panel::Models,
+            filter: state.filter.clone(),
+            time_window: TimeWindow::Week7d,
+            generation: 4,
+            refreshing: false,
+            payload: PanelPayload::Models(Err("unused".to_string())),
+        };
+        assert!(!panel_result_matches(&state, &managed));
+
+        for (panel, payload) in [
+            (
+                Panel::Overview,
+                PanelPayload::Overview(Err("unused".to_string())),
+            ),
+            (
+                Panel::Trends,
+                PanelPayload::SyncCenter(Err("unused".to_string())),
+            ),
+            (
+                Panel::Blocks,
+                PanelPayload::Blocks(Err("unused".to_string())),
+            ),
+        ] {
+            state.active_panel = panel;
+            let lifetime = PanelResult {
+                panel,
+                filter: state.filter.clone(),
+                time_window: TimeWindow::Week7d,
+                generation: 4,
+                refreshing: false,
+                payload,
+            };
+            assert!(panel_result_matches(&state, &lifetime), "{panel:?}");
+        }
     }
 
     #[test]

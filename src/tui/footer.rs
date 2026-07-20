@@ -76,18 +76,25 @@ fn render_controls(frame: &mut Frame, area: Rect, state: &AppState) {
 }
 
 fn render_status(frame: &mut Frame, area: Rect, state: &AppState) {
-    let mut spans = Vec::new();
-    spans.push(Span::styled(
-        "source ",
-        Style::default()
-            .fg(theme::accent())
-            .add_modifier(Modifier::BOLD),
-    ));
-    spans.push(Span::styled(
-        state.source_filter_label(),
-        Style::default().fg(theme::accent()),
-    ));
-    spans.push(Span::styled(" • ", theme::muted_style()));
+    let mut spans = vec![
+        Span::styled(
+            "source ",
+            Style::default()
+                .fg(theme::accent())
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            state.source_filter_label(),
+            Style::default().fg(theme::accent()),
+        ),
+        Span::styled(" • ", theme::muted_style()),
+        Span::styled("window ", theme::muted_style()),
+        Span::styled(
+            state.time_window.label(),
+            Style::default().fg(theme::accent()),
+        ),
+        Span::styled(" • ", theme::muted_style()),
+    ];
 
     if let Some(message) = &state.status_message {
         spans.push(Span::styled(

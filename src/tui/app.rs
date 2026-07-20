@@ -7,6 +7,7 @@ use crate::query::{
 };
 use crate::{domain::platform_monitor::PlatformProbe, models::SourceKind};
 
+use chrono::{Duration as ChronoDuration, NaiveDate, Utc};
 use std::time::{Duration, Instant};
 
 /// The eight dashboard panels in fixed display order.
@@ -165,11 +166,39 @@ impl TimeWindow {
     /// Human-readable label for the UI.
     pub fn label(&self) -> &'static str {
         match self {
-            Self::Day24h => "24h",
+            Self::Day24h => "Today",
             Self::Week7d => "7d",
             Self::Month30d => "30d",
-            Self::All => "全部",
+            Self::All => "All",
         }
+    }
+
+    pub fn query_filter(self, base: &QueryFilter) -> QueryFilter {
+        let today = base.timezone.date_at(Utc::now());
+        self.query_filter_on(base, today)
+    }
+
+    fn query_filter_on(self, base: &QueryFilter, today: NaiveDate) -> QueryFilter {
+        let mut filter = base.clone();
+        match self {
+            Self::Day24h => {
+                filter.since = Some(today);
+                filter.until = Some(today);
+            }
+            Self::Week7d => {
+                filter.since = Some(today - ChronoDuration::days(6));
+                filter.until = Some(today);
+            }
+            Self::Month30d => {
+                filter.since = Some(today - ChronoDuration::days(29));
+                filter.until = Some(today);
+            }
+            Self::All => {
+                filter.since = None;
+                filter.until = None;
+            }
+        }
+        filter
     }
 }
 
@@ -269,7 +298,7 @@ impl AppState {
     pub fn new() -> Self {
         Self {
             active_panel: Panel::Overview,
-            time_window: TimeWindow::Week7d,
+            time_window: TimeWindow::All,
             scroll: std::array::from_fn(|_| ScrollState {
                 offset: 0,
                 total: 0,
@@ -426,6 +455,7 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::FixedOffset;
     use proptest::prelude::*;
 
     /// Generate a valid panel index.
@@ -457,6 +487,52 @@ mod tests {
             Just(NavAction::Tab),
             Just(NavAction::ShiftTab),
         ]
+    }
+
+    #[test]
+    fn time_windows_map_to_inclusive_local_calendar_dates() {
+        let today = NaiveDate::from_ymd_opt(2026, 7, 20).unwrap();
+        let base = QueryFilter {
+            source: Some(SourceKind::Codex),
+            model: Some("gpt-5.6-sol".to_string()),
+            since: Some(NaiveDate::from_ymd_opt(2020, 1, 1).unwrap()),
+            until: Some(NaiveDate::from_ymd_opt(2020, 1, 2).unwrap()),
+            project_hash: Some("project".to_string()),
+            timezone: crate::query::ReportTimezone::Fixed(
+                FixedOffset::east_opt(8 * 3_600).unwrap(),
+            ),
+        };
+
+        let today_filter = TimeWindow::Day24h.query_filter_on(&base, today);
+        assert_eq!(today_filter.since, Some(today));
+        assert_eq!(today_filter.until, Some(today));
+
+        let week_filter = TimeWindow::Week7d.query_filter_on(&base, today);
+        assert_eq!(
+            week_filter.since,
+            Some(NaiveDate::from_ymd_opt(2026, 7, 14).unwrap())
+        );
+        assert_eq!(week_filter.until, Some(today));
+
+        let month_filter = TimeWindow::Month30d.query_filter_on(&base, today);
+        assert_eq!(
+            month_filter.since,
+            Some(NaiveDate::from_ymd_opt(2026, 6, 21).unwrap())
+        );
+        assert_eq!(month_filter.until, Some(today));
+
+        let all_filter = TimeWindow::All.query_filter_on(&base, today);
+        assert_eq!(all_filter.since, None);
+        assert_eq!(all_filter.until, None);
+        assert_eq!(all_filter.source, base.source);
+        assert_eq!(all_filter.model, base.model);
+        assert_eq!(all_filter.project_hash, base.project_hash);
+        assert_eq!(all_filter.timezone, base.timezone);
+    }
+
+    #[test]
+    fn app_state_defaults_to_all_time() {
+        assert_eq!(AppState::new().time_window, TimeWindow::All);
     }
 
     // Feature: terminal-dashboard, Property 1: Panel navigation produces correct index
