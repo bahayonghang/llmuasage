@@ -28,11 +28,11 @@
 
 ## Acceptance Criteria
 
-- [ ] A1：首次进入 Behavior/Stats/Blocks：立即出现 loading 帧（TestBackend 证据），期间按键可切面板；数据就绪后正确填充。
-- [ ] A2：快速连续切换面板/筛选：无过期结果覆盖（R7a 测试）；无查询悬挂残留（进程可干净退出）。
-- [ ] A3：统一测量协议（代表性数据库快照 + release 构建 + 3 次取中位数，对齐父任务 X7 协议）下，Stats/Behavior 载荷 wall-time 较串行基线下降 ≥30%，且数字与串行一致；基线与结果记录到任务 research/。
-- [ ] A4：R7 全部测试 + `cargo test -- --test-threads=1`、fmt、严格 clippy 全绿；X5 数据语义回归通过。
-- [ ] A5：dashboard-performance-contracts.md 若因复用抽取而涉及 web 代码，web 行为零变化（现有契约测试全绿）。
+- [x] A1：首次进入 Behavior/Stats/Blocks：立即出现 loading 帧（TestBackend 证据），期间按键可切面板；数据就绪后正确填充。
+- [x] A2：快速连续切换面板/筛选：无过期结果覆盖（R7a 测试）；无查询悬挂残留（进程可干净退出）。
+- [x] A3：统一测量协议（代表性数据库快照 + release 构建 + 3 次取中位数，对齐父任务 X7 协议）下，Stats/Behavior 载荷 wall-time 较串行基线下降 ≥30%，且数字与串行一致；基线与结果记录到任务 research/。
+- [x] A4：R7 全部测试 + `cargo test -- --test-threads=1`、fmt、严格 clippy 全绿；X5 数据语义回归通过。
+- [x] A5：dashboard-performance-contracts.md 若因复用抽取而涉及 web 代码，web 行为零变化（现有契约测试全绿）。
 
 ## Out Of Scope
 
