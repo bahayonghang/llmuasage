@@ -54,7 +54,9 @@ pub fn render(frame: &mut Frame, viewport: Rect, state: &AppState) {
 
     let lines = vec![
         Line::from("tab / shift-tab: switch tabs    1-9: jump to tab"),
-        Line::from("j/k or arrows: scroll            h/l: Today/7d/30d/All"),
+        Line::from("j/k or arrows: select row        PgUp/PgDn: page"),
+        Line::from("Home/End: first/last row          o/O: sort key/direction"),
+        Line::from("mouse wheel: select row           h/l: Today/7d/30d/All"),
         Line::from("window: Models/Daily/Hourly/Cost/Stats/Behavior"),
         Line::from("s: source picker                 a: all sources in picker"),
         Line::from("r: refresh dashboard cache       R: toggle auto refresh"),

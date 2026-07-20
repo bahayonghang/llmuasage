@@ -14,6 +14,9 @@
 ```text
 RedrawState::{initial, request, take}()
 AppState::on_tick(animation_active: bool) -> bool
+ScrollState::{scroll_up, scroll_down, page_up, page_down,
+              select_first, select_last, set_total, visible_range}()
+SortState::{header, apply}(...)
 EventHandler::recv() -> Result<TuiEvent>
 theme::with_render_snapshot(|| render_frame())
 models|cost::render_with_plan(..., collapse: Option<Collapsed>)
@@ -40,6 +43,17 @@ models|cost::render_with_plan(..., collapse: Option<Collapsed>)
   it whenever the payload is invalidated.
 - Windowing and memoization are internal only: the same payload, scroll offset,
   terminal size, and theme must produce the same `TestBackend` cells.
+- Models, Daily, Hourly, Cost, Blocks, and the Stats source table use one
+  `ScrollState` for selection and windowing. Single-row movement wraps; paging
+  and Home/End clamp; every rendered selected row uses `theme::selection_style()`.
+- Models, Daily, Cost, and Blocks keep independent `SortState` values. `o`
+  cycles the panel's supported columns, `O` reverses direction, stable in-memory
+  sorting preserves ties and the row collection, and the active header shows an
+  arrow. An unsorted Models/Cost view uses its collapsed row count; a sorted view
+  uses the raw payload length and disables long-tail collapse.
+- Mouse wheel events map to the same row movement actions as the keyboard.
+  Footer spinner frames are fixed-width ASCII and render only while a panel load
+  or sync is active.
 
 ### 4. Validation & Error Matrix
 
@@ -53,6 +67,11 @@ models|cost::render_with_plan(..., collapse: Option<Collapsed>)
 | Models/Cost generation changes | Recompute collapse plan once on acceptance |
 | scroll offset changes | Reuse collapse plan and format visible rows only |
 | payload/filter/window invalidated | Clear payload and its derived plan |
+| row movement at first/last item | Wrap for single-row movement; never leave bounds |
+| page movement past either edge | Clamp at first/last item and keep it visible |
+| sort direction changes | Reorder the loaded references only; do not query or mutate payload |
+| Models/Cost sort becomes active | Use raw length and suppress the ranked-order collapse plan |
+| no panel load or sync active | Render no spinner and keep idle ticks clean |
 
 ### 5. Good/Base/Bad Cases
 
@@ -60,12 +79,16 @@ models|cost::render_with_plan(..., collapse: Option<Collapsed>)
   seconds while auto-refresh timing remains active.
 - Good: a 40-row Models table in a 7-row viewport formats seven rows and renders
   the same buffer as the equivalent visible prefix.
+- Good: sorting Daily by tokens updates the arrow and detail strip to follow the
+  selected row while leaving the loaded `Vec<DailyTrendPoint>` unchanged.
 - Base: loading/sync progress continues to animate at the existing 250 ms tick.
 - Bad: drawing at the top of every loop iteration, which restores permanent 4
   fps work even when no state changed.
 - Bad: draining ticks by discarding the first queued key event.
 - Bad: appending a collapsed summary row after every visible slice even when its
   absolute row is outside the viewport.
+- Bad: using `row_highlight_style` without `TableState`, or maintaining a second
+  panel-local offset that can diverge from `ScrollState`.
 
 ### 6. Tests Required
 
@@ -77,6 +100,13 @@ models|cost::render_with_plan(..., collapse: Option<Collapsed>)
 - Assert Models and Cost full-dataset buffers equal their visible-prefix buffers;
   keep Blocks rendering tests and source scans proving every scroll iterator has
   a visible `take` bound.
+- Property-test selection bounds, wrap, paging, and selected-row visibility.
+  Assert stable ascending/descending sorting preserves ties and the collection,
+  and render-test an arrow plus selection-dependent detail. Assert wheel mapping
+  and spinner active/idle frames through `TestBackend`.
+- Source-scan every selectable live table for `visible_range` and
+  `selection_style`; removed TUI-only panel modules must not remain exported or
+  referenced. Query APIs used by web/snapshots remain outside this cleanup.
 - Run `cargo fmt --all -- --check`, strict clippy, and serial full tests.
 
 ### 7. Wrong vs Correct
@@ -103,3 +133,17 @@ loop {
 
 The correct form makes state transitions own redraw requests while pure ticks
 remain scheduling notifications rather than frames.
+
+For selectable tables, styling must be applied to the manually windowed row:
+
+```rust
+// Wrong: no TableState is passed, so this never highlights a row.
+Table::new(rows, widths).row_highlight_style(theme::selection_style())
+
+// Correct: absolute indexes stay aligned with ScrollState and sorted references.
+if absolute == scroll.selected {
+    row.style(theme::selection_style())
+} else {
+    row
+}
+```

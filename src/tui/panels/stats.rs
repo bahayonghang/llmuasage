@@ -352,12 +352,17 @@ fn render_sources(
         .max()
         .unwrap_or(0);
     let visible_height = super::visible_table_rows(area);
-    let rows = sources
-        .iter()
-        .skip(scroll.offset)
-        .take(visible_height)
-        .enumerate()
-        .map(|(index, source)| source_row(source, max_tokens, index, very_narrow, narrow));
+    let range = scroll.visible_range(sources.len(), visible_height);
+    let rows = range.clone().enumerate().map(|(visible_index, absolute)| {
+        source_row(
+            &sources[absolute],
+            max_tokens,
+            visible_index,
+            absolute == scroll.selected,
+            very_narrow,
+            narrow,
+        )
+    });
 
     let header = Row::new(source_header(very_narrow, narrow))
         .style(theme::header_style())
@@ -413,6 +418,7 @@ fn source_row(
     source: &SourceBreakdown,
     max_tokens: i64,
     index: usize,
+    selected: bool,
     very_narrow: bool,
     narrow: bool,
 ) -> Row<'static> {
@@ -443,7 +449,9 @@ fn source_row(
         ])
     };
 
-    if index % 2 == 1 {
+    if selected {
+        row = row.style(theme::selection_style());
+    } else if index % 2 == 1 {
         row = row.style(theme::row_alt_style());
     }
     row

@@ -121,8 +121,8 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
             TuiEvent::Tick => {
                 let mut tick_dirty = apply_panel_results(&mut loader, &mut state);
                 tick_dirty |= apply_sync_updates(&mut sync, &mut loader, &mut state);
-                let animation_active =
-                    state.panel_loading.iter().any(|loading| *loading) || sync.is_active();
+                state.sync_active = sync.is_active();
+                let animation_active = state.background_active();
                 tick_dirty |= state.on_tick(animation_active);
                 if state.needs_refresh {
                     refresh_panel_data(&mut loader, &mut state);
@@ -138,13 +138,7 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
                 redraw.request();
                 continue;
             }
-            TuiEvent::Mouse(mouse) => {
-                if let Some(panel) = panel_from_mouse(&state, &mouse) {
-                    Action::SwitchPanel(panel)
-                } else {
-                    Action::None
-                }
-            }
+            TuiEvent::Mouse(mouse) => action_from_mouse(&state, &mouse),
             TuiEvent::Key(key) => {
                 if state.active_dialog.is_some() {
                     handle_dialog_action(handle_dialog_key_event(key), &mut state);
@@ -181,6 +175,48 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
             Action::ScrollUp => {
                 state.scroll[state.active_panel as usize].scroll_up();
             }
+            Action::PageDown => {
+                state.scroll[state.active_panel as usize].page_down();
+            }
+            Action::PageUp => {
+                state.scroll[state.active_panel as usize].page_up();
+            }
+            Action::SelectFirst => {
+                state.scroll[state.active_panel as usize].select_first();
+            }
+            Action::SelectLast => {
+                state.scroll[state.active_panel as usize].select_last();
+            }
+            Action::CycleSort => {
+                if let Some((key, descending)) = state.cycle_sort() {
+                    let panel = state.active_panel;
+                    update_scroll_total(&mut state, panel);
+                    state.set_status(&format!(
+                        "Sort: {} {}",
+                        key.label(),
+                        if descending {
+                            "descending"
+                        } else {
+                            "ascending"
+                        }
+                    ));
+                }
+            }
+            Action::ReverseSort => {
+                if let Some((key, descending)) = state.reverse_sort() {
+                    let panel = state.active_panel;
+                    update_scroll_total(&mut state, panel);
+                    state.set_status(&format!(
+                        "Sort: {} {}",
+                        key.label(),
+                        if descending {
+                            "descending"
+                        } else {
+                            "ascending"
+                        }
+                    ));
+                }
+            }
             Action::NextWindow => {
                 state.time_window = state.time_window.next();
                 let panel = state.active_panel;
@@ -201,6 +237,7 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
             Action::ToggleAutoRefresh => state.toggle_auto_refresh(),
             Action::StartSync => {
                 let message = sync.start_or_cancel(store, state.filter.source);
+                state.sync_active = sync.is_active();
                 state.set_status(&message);
             }
             Action::OpenSourcePicker => state.open_source_picker(),
@@ -267,16 +304,19 @@ fn handle_dialog_action(action: DialogAction, state: &mut AppState) {
     }
 }
 
-fn panel_from_mouse(state: &AppState, mouse: &crossterm::event::MouseEvent) -> Option<Panel> {
-    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-        return None;
+fn action_from_mouse(state: &AppState, mouse: &crossterm::event::MouseEvent) -> Action {
+    match mouse.kind {
+        MouseEventKind::ScrollDown => Action::ScrollDown,
+        MouseEventKind::ScrollUp => Action::ScrollUp,
+        MouseEventKind::Down(MouseButton::Left) => nav_bar::panel_at_position(
+            ratatui::layout::Rect::new(0, 0, state.terminal_width, 3),
+            mouse.column,
+            mouse.row,
+        )
+        .map(Action::SwitchPanel)
+        .unwrap_or(Action::None),
+        _ => Action::None,
     }
-
-    nav_bar::panel_at_position(
-        ratatui::layout::Rect::new(0, 0, state.terminal_width, 3),
-        mouse.column,
-        mouse.row,
-    )
 }
 
 fn request_panel_data(
@@ -402,6 +442,7 @@ fn invalidate_windowed_panel_data(state: &mut AppState) {
         Panel::Behavior,
     ] {
         state.scroll[panel as usize].offset = 0;
+        state.scroll[panel as usize].selected = 0;
         state.panel_loading[panel as usize] = false;
     }
 }
@@ -446,10 +487,22 @@ fn update_scroll_total(state: &mut AppState, panel: Panel) {
             .as_ref()
             .and_then(|result| result.as_ref().ok())
             .map(|payload| payload.sources.len() + state.platform_probes.len()),
-        Panel::Models => state.models.as_ref().and_then(ok_len),
+        Panel::Models => state.models.as_ref().and_then(ok_len).map(|raw| {
+            if state.sort[Panel::Models as usize].key.is_some() {
+                raw
+            } else {
+                state.model_collapse.map_or(raw, |plan| plan.keep + 1)
+            }
+        }),
         Panel::Sources => state.daily.as_ref().and_then(ok_len),
         Panel::Projects => state.hourly.as_ref().and_then(ok_len),
-        Panel::Cost => state.costs.as_ref().and_then(ok_len),
+        Panel::Cost => state.costs.as_ref().and_then(ok_len).map(|raw| {
+            if state.sort[Panel::Cost as usize].key.is_some() {
+                raw
+            } else {
+                state.cost_collapse.map_or(raw, |plan| plan.keep + 1)
+            }
+        }),
         Panel::Blocks => state.blocks.as_ref().and_then(ok_len),
         Panel::Health => state
             .stats
@@ -460,9 +513,8 @@ fn update_scroll_total(state: &mut AppState, panel: Panel) {
     };
     if let Some(total) = total {
         let scroll = &mut state.scroll[panel as usize];
-        scroll.total = total;
         scroll.visible = scroll.visible.max(1);
-        scroll.offset = scroll.offset.min(total.saturating_sub(scroll.visible));
+        scroll.set_total(total);
     }
 }
 
@@ -474,6 +526,7 @@ fn ok_len<T>(result: &Result<Vec<T>, String>) -> Option<usize> {
 mod tests {
     use super::*;
     use crate::tui::app::TimeWindow;
+    use crossterm::event::{KeyModifiers, MouseEvent};
     use ratatui::{
         Terminal,
         backend::TestBackend,
@@ -505,26 +558,51 @@ mod tests {
     }
 
     #[test]
+    fn mouse_wheel_maps_to_selection_actions() {
+        let state = AppState::new();
+        let mouse = |kind| MouseEvent {
+            kind,
+            column: 10,
+            row: 10,
+            modifiers: KeyModifiers::NONE,
+        };
+        assert_eq!(
+            action_from_mouse(&state, &mouse(MouseEventKind::ScrollDown)),
+            Action::ScrollDown
+        );
+        assert_eq!(
+            action_from_mouse(&state, &mouse(MouseEventKind::ScrollUp)),
+            Action::ScrollUp
+        );
+    }
+
+    #[test]
     fn every_scrolled_table_bounds_row_construction_to_the_viewport() {
-        let sources = [
+        let selected_tables = [
             ("blocks", include_str!("panels/blocks.rs")),
             ("cost", include_str!("panels/cost.rs")),
             ("daily", include_str!("panels/daily.rs")),
             ("hourly", include_str!("panels/hourly.rs")),
             ("models", include_str!("panels/models.rs")),
-            ("projects", include_str!("panels/projects.rs")),
-            ("sources", include_str!("panels/sources.rs")),
             ("stats", include_str!("panels/stats.rs")),
-            ("usage", include_str!("panels/usage.rs")),
         ];
+        for (name, source) in selected_tables {
+            assert!(
+                source.contains("visible_range("),
+                "{name} must construct only the selected visible window"
+            );
+            assert!(
+                source.contains("selection_style()"),
+                "{name} must visibly style the selected row"
+            );
+        }
 
-        for (name, source) in sources {
-            for tail in source.split(".skip(scroll.offset)").skip(1) {
-                assert!(
-                    tail.trim_start().starts_with(".take("),
-                    "{name} must bound each scrolled iterator before formatting rows"
-                );
-            }
+        let usage = include_str!("panels/usage.rs");
+        for tail in usage.split(".skip(scroll.offset)").skip(1) {
+            assert!(
+                tail.trim_start().starts_with(".take("),
+                "usage must bound each scrolled iterator before formatting rows"
+            );
         }
     }
 

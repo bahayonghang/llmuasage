@@ -59,47 +59,46 @@ fn render_table(frame: &mut Frame, area: Rect, points: &[TrendPoint], scroll: &S
         .unwrap_or(0);
     let visible_height = super::visible_table_rows(area);
 
-    let rows = points
-        .iter()
-        .rev()
-        .skip(scroll.offset)
-        .take(visible_height)
-        .enumerate()
-        .map(|(index, point)| {
-            let share = if total_tokens > 0 {
-                point.total_tokens.max(0) as f64 / total_tokens as f64 * 100.0
-            } else {
-                0.0
-            };
-            let cells = if very_narrow {
-                vec![
-                    Cell::from(format_hour_label(&point.label, true)),
-                    Cell::from(format_tokens(point.total_tokens)),
-                ]
-            } else if narrow {
-                vec![
-                    Cell::from(format_hour_label(&point.label, true)),
-                    Cell::from(format_tokens(point.total_tokens)),
-                    Cell::from(format!("{share:.0}%")),
-                ]
-            } else {
-                vec![
-                    Cell::from(format_hour_label(&point.label, false)).style(theme::bold_style()),
-                    Cell::from(format_tokens(point.total_tokens)),
-                    Cell::from(format!("{share:.1}%")),
-                    Cell::from(render_bar(point.total_tokens, peak_tokens, 24))
-                        .style(theme::fg_style(theme::positive_fg())),
-                ]
-            };
+    let ordered: Vec<&TrendPoint> = points.iter().rev().collect();
+    let range = scroll.visible_range(ordered.len(), visible_height);
+    let rows = range.clone().enumerate().map(|(visible_index, absolute)| {
+        let point = ordered[absolute];
+        let share = if total_tokens > 0 {
+            point.total_tokens.max(0) as f64 / total_tokens as f64 * 100.0
+        } else {
+            0.0
+        };
+        let cells = if very_narrow {
+            vec![
+                Cell::from(format_hour_label(&point.label, true)),
+                Cell::from(format_tokens(point.total_tokens)),
+            ]
+        } else if narrow {
+            vec![
+                Cell::from(format_hour_label(&point.label, true)),
+                Cell::from(format_tokens(point.total_tokens)),
+                Cell::from(format!("{share:.0}%")),
+            ]
+        } else {
+            vec![
+                Cell::from(format_hour_label(&point.label, false)).style(theme::bold_style()),
+                Cell::from(format_tokens(point.total_tokens)),
+                Cell::from(format!("{share:.1}%")),
+                Cell::from(render_bar(point.total_tokens, peak_tokens, 24))
+                    .style(theme::fg_style(theme::positive_fg())),
+            ]
+        };
 
-            let mut row = Row::new(cells);
-            if point.total_tokens == peak_tokens && peak_tokens > 0 {
-                row = row.style(theme::bold_fg_style(theme::warning_fg()));
-            } else if index % 2 == 1 {
-                row = row.style(theme::row_alt_style());
-            }
-            row
-        });
+        let mut row = Row::new(cells);
+        if absolute == scroll.selected {
+            row = row.style(theme::selection_style());
+        } else if point.total_tokens == peak_tokens && peak_tokens > 0 {
+            row = row.style(theme::bold_fg_style(theme::warning_fg()));
+        } else if visible_index % 2 == 1 {
+            row = row.style(theme::row_alt_style());
+        }
+        row
+    });
 
     let header = Row::new(header_cells(very_narrow, narrow))
         .style(theme::header_style())

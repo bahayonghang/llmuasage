@@ -38,12 +38,14 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                 &state.models,
                 &state.scroll[Panel::Models as usize],
                 state.model_collapse,
+                state.sort[Panel::Models as usize],
             ),
-            Panel::Sources => panels::daily::render(
+            Panel::Sources => panels::daily::render_sorted(
                 frame,
                 content_area,
                 &state.daily,
                 &state.scroll[Panel::Sources as usize],
+                state.sort[Panel::Sources as usize],
             ),
             Panel::Projects => panels::hourly::render(
                 frame,
@@ -57,6 +59,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                 &state.costs,
                 &state.scroll[Panel::Cost as usize],
                 state.cost_collapse,
+                state.sort[Panel::Cost as usize],
             ),
             Panel::Health => panels::stats::render(
                 frame,
@@ -65,11 +68,12 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                 &state.scroll[Panel::Health as usize],
             ),
             Panel::Behavior => panels::behavior::render(frame, content_area, &state.behavior),
-            Panel::Blocks => panels::blocks::render(
+            Panel::Blocks => panels::blocks::render_sorted(
                 frame,
                 content_area,
                 &state.blocks,
                 &state.scroll[Panel::Blocks as usize],
+                state.sort[Panel::Blocks as usize],
             ),
         }
 

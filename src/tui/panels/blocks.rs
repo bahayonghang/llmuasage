@@ -14,13 +14,23 @@ use ratatui::{
 use crate::query::reports::BlockReportRow;
 use crate::tui::{format::grouped as format_number, theme};
 
-use super::super::app::ScrollState;
+use super::super::app::{ScrollState, SortState, TableSortKey, stable_sort_refs};
 
 pub fn render(
     frame: &mut Frame,
     area: Rect,
     data: &Option<Result<Vec<BlockReportRow>, String>>,
     scroll: &ScrollState,
+) {
+    render_sorted(frame, area, data, scroll, SortState::default());
+}
+
+pub(crate) fn render_sorted(
+    frame: &mut Frame,
+    area: Rect,
+    data: &Option<Result<Vec<BlockReportRow>, String>>,
+    scroll: &ScrollState,
+    sort: SortState,
 ) {
     match data {
         None => placeholder(frame, area, "Loading...", theme::muted_style()),
@@ -33,7 +43,7 @@ pub fn render(
         Some(Ok(items)) if items.is_empty() => {
             placeholder(frame, area, "No block data found.", theme::muted_style())
         }
-        Some(Ok(items)) => render_table(frame, area, items, scroll),
+        Some(Ok(items)) => render_table(frame, area, items, scroll, sort),
     }
 }
 
@@ -44,26 +54,40 @@ fn placeholder(frame: &mut Frame, area: Rect, text: &str, style: Style) {
     frame.render_widget(widget, area);
 }
 
-fn render_table(frame: &mut Frame, area: Rect, items: &[BlockReportRow], scroll: &ScrollState) {
+fn render_table(
+    frame: &mut Frame,
+    area: Rect,
+    items: &[BlockReportRow],
+    scroll: &ScrollState,
+    sort: SortState,
+) {
     let header = Row::new(vec![
-        Cell::from("Window"),
+        Cell::from(sort.header("Window", TableSortKey::Date)),
         Cell::from("Status"),
-        Cell::from("Total Tokens"),
+        Cell::from(sort.header("Total Tokens", TableSortKey::Tokens)),
         Cell::from("Burn/h"),
         Cell::from("Projected"),
         Cell::from("Limit"),
-        Cell::from("Cost (USD)"),
+        Cell::from(sort.header("Cost (USD)", TableSortKey::Cost)),
     ])
     .style(theme::header_style())
     .bottom_margin(1);
 
     let visible_height = super::visible_table_rows(area);
-    let rows: Vec<Row> = items
-        .iter()
-        .skip(scroll.offset)
-        .take(visible_height)
+    let ordered = stable_sort_refs(items.iter().collect(), sort, |left, right, key| match key {
+        TableSortKey::Date => left.start_at.cmp(&right.start_at),
+        TableSortKey::Tokens => left.totals.total_tokens.cmp(&right.totals.total_tokens),
+        TableSortKey::Cost => left
+            .totals
+            .estimated_cost_usd
+            .total_cmp(&right.totals.estimated_cost_usd),
+    });
+    let range = scroll.visible_range(ordered.len(), visible_height);
+    let rows: Vec<Row> = range
+        .clone()
         .enumerate()
-        .map(|(i, item)| {
+        .map(|(visible_index, absolute)| {
+            let item = ordered[absolute];
             let window = format!(
                 "{} → {}",
                 short_time(&item.start_at),
@@ -83,10 +107,12 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[BlockReportRow], scroll:
                 Cell::from(limit),
                 Cell::from(format!("${:.2}", item.totals.estimated_cost_usd)),
             ]);
-            if item.is_active {
+            if absolute == scroll.selected {
+                row.style(theme::selection_style())
+            } else if item.is_active {
                 // The live window is highlighted; its burn rate/projection matter most.
                 row.style(theme::bold_fg_style(theme::accent()))
-            } else if i % 2 == 1 {
+            } else if visible_index % 2 == 1 {
                 row.style(theme::row_alt_style())
             } else {
                 row
@@ -107,8 +133,7 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[BlockReportRow], scroll:
         ],
     )
     .header(header)
-    .block(styled_block("Blocks (5h burn rate)"))
-    .row_highlight_style(theme::selection_style());
+    .block(styled_block("Blocks (5h burn rate)"));
 
     frame.render_widget(table, area);
 }
@@ -164,6 +189,7 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(120, 20)).unwrap();
         let scroll = ScrollState {
             offset: 0,
+            selected: 0,
             total: 0,
             visible: 15,
         };

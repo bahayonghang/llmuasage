@@ -2,8 +2,7 @@ use crate::query::reports::BlockReportRow;
 use crate::query::{
     ActivityPayload, ContextPressurePayload, CostLine, DailyTrendPoint, HealthPayload,
     HeatmapPoint, ModelBreakdown, ModelComparePayload, OptimizePayload, OverviewPayload,
-    ProjectBreakdown, QueryFilter, SourceBreakdown, SyncCommandCenterPayload, ToolsPayload,
-    TrendPoint, ZombieReport,
+    QueryFilter, SourceBreakdown, SyncCommandCenterPayload, ToolsPayload, TrendPoint, ZombieReport,
 };
 use crate::{domain::platform_monitor::PlatformProbe, models::SourceKind};
 
@@ -12,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use super::panels::longtail::Collapsed;
 
-/// The eight dashboard panels in fixed display order.
+/// The nine dashboard panels in fixed display order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Panel {
@@ -208,20 +207,127 @@ impl TimeWindow {
 #[derive(Debug, Clone)]
 pub struct ScrollState {
     pub offset: usize,
+    pub selected: usize,
     pub total: usize,
     pub visible: usize,
 }
 
 impl ScrollState {
     pub fn scroll_down(&mut self) {
-        if self.offset < self.total.saturating_sub(self.visible.max(1)) {
-            self.offset += 1;
-        }
+        self.move_by(1);
     }
 
     pub fn scroll_up(&mut self) {
-        self.offset = self.offset.saturating_sub(1);
+        self.move_by(-1);
     }
+
+    pub fn page_down(&mut self) {
+        self.selected = self
+            .selected
+            .saturating_add(self.visible.max(1))
+            .min(self.total.saturating_sub(1));
+        self.ensure_selected_visible();
+    }
+
+    pub fn page_up(&mut self) {
+        self.selected = self.selected.saturating_sub(self.visible.max(1));
+        self.ensure_selected_visible();
+    }
+
+    pub fn select_first(&mut self) {
+        self.selected = 0;
+        self.ensure_selected_visible();
+    }
+
+    pub fn select_last(&mut self) {
+        self.selected = self.total.saturating_sub(1);
+        self.ensure_selected_visible();
+    }
+
+    pub fn set_total(&mut self, total: usize) {
+        self.total = total;
+        self.selected = self.selected.min(total.saturating_sub(1));
+        self.ensure_selected_visible();
+    }
+
+    pub fn visible_range(&self, total: usize, visible: usize) -> std::ops::Range<usize> {
+        let visible = visible.max(1);
+        let selected = self.selected.min(total.saturating_sub(1));
+        let max_offset = total.saturating_sub(visible);
+        let mut offset = self.offset.min(max_offset);
+        if selected < offset {
+            offset = selected;
+        } else if selected >= offset.saturating_add(visible) {
+            offset = selected.saturating_add(1).saturating_sub(visible);
+        }
+        offset..offset.saturating_add(visible).min(total)
+    }
+
+    fn move_by(&mut self, delta: isize) {
+        if self.total == 0 {
+            self.selected = 0;
+            self.offset = 0;
+            return;
+        }
+        self.selected = (self.selected as isize + delta).rem_euclid(self.total as isize) as usize;
+        self.ensure_selected_visible();
+    }
+
+    fn ensure_selected_visible(&mut self) {
+        let range = self.visible_range(self.total, self.visible);
+        self.offset = range.start;
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TableSortKey {
+    Date,
+    Tokens,
+    Cost,
+}
+
+impl TableSortKey {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Date => "date",
+            Self::Tokens => "tokens",
+            Self::Cost => "cost",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SortState {
+    pub key: Option<TableSortKey>,
+    pub descending: bool,
+}
+
+impl SortState {
+    pub fn header(self, label: &str, key: TableSortKey) -> String {
+        if self.key != Some(key) {
+            return label.to_string();
+        }
+        format!("{label} {}", if self.descending { '▼' } else { '▲' })
+    }
+
+    pub fn apply(self, order: std::cmp::Ordering) -> std::cmp::Ordering {
+        if self.descending {
+            order.reverse()
+        } else {
+            order
+        }
+    }
+}
+
+pub(crate) fn stable_sort_refs<T>(
+    mut items: Vec<&T>,
+    sort: SortState,
+    compare: impl Fn(&T, &T, TableSortKey) -> std::cmp::Ordering,
+) -> Vec<&T> {
+    if let Some(key) = sort.key {
+        items.sort_by(|left, right| sort.apply(compare(left, right, key)));
+    }
+    items
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -260,18 +366,15 @@ pub struct AppState {
     pub active_panel: Panel,
     pub time_window: TimeWindow,
     pub scroll: [ScrollState; Panel::COUNT],
+    pub sort: [SortState; Panel::COUNT],
     pub filter: QueryFilter,
     // Cached data (loaded on panel switch)
     pub overview: Option<Result<OverviewPayload, String>>,
     pub sync_center: Option<Result<SyncCommandCenterPayload, String>>,
-    pub trends: Option<Result<Vec<TrendPoint>, String>>,
     pub models: Option<Result<Vec<ModelBreakdown>, String>>,
     pub daily: Option<Result<Vec<DailyTrendPoint>, String>>,
     pub hourly: Option<Result<Vec<TrendPoint>, String>>,
-    pub sources: Option<Result<Vec<SourceBreakdown>, String>>,
-    pub projects: Option<Result<Vec<ProjectBreakdown>, String>>,
     pub costs: Option<Result<Vec<CostLine>, String>>,
-    pub health: Option<Result<HealthPayload, String>>,
     pub stats: Option<Result<StatsPanelPayload, String>>,
     pub behavior: Option<Result<BehaviorPanelPayload, String>>,
     pub blocks: Option<Result<Vec<BlockReportRow>, String>>,
@@ -288,6 +391,7 @@ pub struct AppState {
     pub needs_refresh: bool,
     pub data_generation: u64,
     pub panel_loading: [bool; Panel::COUNT],
+    pub sync_active: bool,
     pub model_collapse: Option<Collapsed>,
     pub cost_collapse: Option<Collapsed>,
 }
@@ -305,20 +409,18 @@ impl AppState {
             time_window: TimeWindow::All,
             scroll: std::array::from_fn(|_| ScrollState {
                 offset: 0,
+                selected: 0,
                 total: 0,
                 visible: 0,
             }),
+            sort: [SortState::default(); Panel::COUNT],
             filter: QueryFilter::default(),
             overview: None,
             sync_center: None,
-            trends: None,
             models: None,
             daily: None,
             hourly: None,
-            sources: None,
-            projects: None,
             costs: None,
-            health: None,
             stats: None,
             behavior: None,
             blocks: None,
@@ -335,6 +437,7 @@ impl AppState {
             needs_refresh: false,
             data_generation: 0,
             panel_loading: [false; Panel::COUNT],
+            sync_active: false,
             model_collapse: None,
             cost_collapse: None,
         }
@@ -409,19 +512,16 @@ impl AppState {
     pub fn invalidate_cached_data(&mut self) {
         self.overview = None;
         self.sync_center = None;
-        self.trends = None;
         self.models = None;
         self.daily = None;
         self.hourly = None;
-        self.sources = None;
-        self.projects = None;
         self.costs = None;
-        self.health = None;
         self.stats = None;
         self.behavior = None;
         self.blocks = None;
         for scroll in &mut self.scroll {
             scroll.offset = 0;
+            scroll.selected = 0;
         }
         self.panel_loading = [false; Panel::COUNT];
         self.model_collapse = None;
@@ -454,13 +554,76 @@ impl AppState {
         animation_active || self.needs_refresh != was_refresh_needed
     }
 
+    pub fn background_active(&self) -> bool {
+        self.sync_active || self.panel_loading.iter().any(|loading| *loading)
+    }
+
+    pub fn cycle_sort(&mut self) -> Option<(TableSortKey, bool)> {
+        let keys = sort_keys(self.active_panel);
+        let first = *keys.first()?;
+        let result = {
+            let state = &mut self.sort[self.active_panel as usize];
+            state.key = Some(
+                match state
+                    .key
+                    .and_then(|key| keys.iter().position(|item| *item == key))
+                {
+                    Some(index) => keys[(index + 1) % keys.len()],
+                    None => first,
+                },
+            );
+            state.descending = true;
+            (state.key.expect("sort key set"), state.descending)
+        };
+        self.reset_active_selection();
+        Some(result)
+    }
+
+    pub fn reverse_sort(&mut self) -> Option<(TableSortKey, bool)> {
+        let first = *sort_keys(self.active_panel).first()?;
+        let result = {
+            let state = &mut self.sort[self.active_panel as usize];
+            match state.key {
+                Some(_) => state.descending = !state.descending,
+                None => {
+                    state.key = Some(first);
+                    state.descending = false;
+                }
+            }
+            (state.key.expect("sort key set"), state.descending)
+        };
+        self.reset_active_selection();
+        Some(result)
+    }
+
+    fn reset_active_selection(&mut self) {
+        let scroll = &mut self.scroll[self.active_panel as usize];
+        scroll.selected = 0;
+        scroll.offset = 0;
+    }
+
     pub fn handle_resize(&mut self, width: u16, height: u16) {
         self.terminal_width = width;
         self.terminal_height = height;
+        let visible = height.saturating_sub(11).max(1) as usize;
+        for scroll in &mut self.scroll {
+            scroll.visible = visible;
+            scroll.ensure_selected_visible();
+        }
     }
 
     pub fn set_status(&mut self, message: &str) {
         self.status_message = Some(message.to_string());
+    }
+}
+
+fn sort_keys(panel: Panel) -> &'static [TableSortKey] {
+    match panel {
+        Panel::Models => &[TableSortKey::Tokens, TableSortKey::Cost],
+        Panel::Sources => &[TableSortKey::Date, TableSortKey::Tokens, TableSortKey::Cost],
+        Panel::Cost => &[TableSortKey::Cost, TableSortKey::Tokens],
+        Panel::Blocks => &[TableSortKey::Date, TableSortKey::Tokens, TableSortKey::Cost],
+        _ => &[],
     }
 }
 
@@ -611,30 +774,112 @@ mod tests {
         }
     }
 
-    // Feature: terminal-dashboard, Property 4: Scroll offset stays within valid bounds
-    // Validates: Requirements 5.3, 7.3, 8.3
+    // Feature: terminal-dashboard, Property 4: selection and its viewport stay bounded.
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(100))]
 
         #[test]
-        fn scroll_offset_stays_within_bounds(
+        fn selection_and_window_stay_within_bounds(
             total in 0usize..1000,
             visible in 0usize..1000,
-            ops in proptest::collection::vec(prop::bool::ANY, 0..200),
+            ops in proptest::collection::vec(0u8..6, 0..200),
         ) {
-            let mut state = ScrollState { offset: 0, total, visible };
-            let max_offset = total.saturating_sub(visible);
+            let mut state = ScrollState {
+                offset: 0,
+                selected: 0,
+                total,
+                visible,
+            };
+            let max_offset = total.saturating_sub(visible.max(1));
 
-            for go_down in ops {
-                if go_down {
-                    state.scroll_down();
-                } else {
-                    state.scroll_up();
+            for action in ops {
+                match action {
+                    0 => state.scroll_down(),
+                    1 => state.scroll_up(),
+                    2 => state.page_down(),
+                    3 => state.page_up(),
+                    4 => state.select_first(),
+                    _ => state.select_last(),
                 }
                 prop_assert!(state.offset <= max_offset,
                     "offset {} exceeded max {} (total={}, visible={})",
                     state.offset, max_offset, total, visible);
+                if total == 0 {
+                    prop_assert_eq!(state.selected, 0);
+                } else {
+                    prop_assert!(state.selected < total);
+                    let range = state.visible_range(total, visible);
+                    prop_assert!(range.contains(&state.selected));
+                }
             }
         }
+    }
+
+    #[test]
+    fn row_movement_wraps_while_paging_clamps() {
+        let mut state = ScrollState {
+            offset: 0,
+            selected: 0,
+            total: 5,
+            visible: 2,
+        };
+        state.scroll_up();
+        assert_eq!(state.selected, 4);
+        state.scroll_down();
+        assert_eq!(state.selected, 0);
+        state.page_down();
+        state.page_down();
+        state.page_down();
+        assert_eq!(state.selected, 4);
+        state.page_up();
+        assert_eq!(state.selected, 2);
+    }
+
+    #[test]
+    fn stable_sort_preserves_ties_and_collection() {
+        let items = [("first", 2), ("second", 1), ("third", 2)];
+        let ascending = stable_sort_refs(
+            items.iter().collect(),
+            SortState {
+                key: Some(TableSortKey::Tokens),
+                descending: false,
+            },
+            |left, right, _| left.1.cmp(&right.1),
+        );
+        assert_eq!(
+            ascending.iter().map(|item| item.0).collect::<Vec<_>>(),
+            ["second", "first", "third"]
+        );
+
+        let descending = stable_sort_refs(
+            items.iter().collect(),
+            SortState {
+                key: Some(TableSortKey::Tokens),
+                descending: true,
+            },
+            |left, right, _| left.1.cmp(&right.1),
+        );
+        assert_eq!(
+            descending.iter().map(|item| item.0).collect::<Vec<_>>(),
+            ["first", "third", "second"]
+        );
+        let mut ids = descending.iter().map(|item| item.0).collect::<Vec<_>>();
+        ids.sort_unstable();
+        assert_eq!(ids, ["first", "second", "third"]);
+    }
+
+    #[test]
+    fn sort_state_is_remembered_per_panel() {
+        let mut state = AppState::new();
+        state.active_panel = Panel::Models;
+        assert_eq!(state.cycle_sort(), Some((TableSortKey::Tokens, true)));
+        state.active_panel = Panel::Cost;
+        assert_eq!(state.cycle_sort(), Some((TableSortKey::Cost, true)));
+        state.active_panel = Panel::Models;
+        assert_eq!(state.reverse_sort(), Some((TableSortKey::Tokens, false)));
+        assert_eq!(
+            state.sort[Panel::Cost as usize].key,
+            Some(TableSortKey::Cost)
+        );
     }
 }

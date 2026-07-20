@@ -8,7 +8,7 @@ use ratatui::{
 use crate::query::ModelBreakdown;
 use crate::tui::{format::grouped as format_number, panels::longtail, theme};
 
-use super::super::app::ScrollState;
+use super::super::app::{ScrollState, SortState, TableSortKey, stable_sort_refs};
 
 /// Render the models panel as a table with scroll support.
 pub fn render(
@@ -21,7 +21,7 @@ pub fn render(
         .as_ref()
         .and_then(|result| result.as_ref().ok())
         .and_then(|items| collapse_plan(items));
-    render_with_plan(frame, area, data, scroll, collapsed);
+    render_with_plan(frame, area, data, scroll, collapsed, SortState::default());
 }
 
 pub(crate) fn render_with_plan(
@@ -30,6 +30,7 @@ pub(crate) fn render_with_plan(
     data: &Option<Result<Vec<ModelBreakdown>, String>>,
     scroll: &ScrollState,
     collapsed: Option<longtail::Collapsed>,
+    sort: SortState,
 ) {
     match data {
         None => {
@@ -50,7 +51,7 @@ pub(crate) fn render_with_plan(
                 .block(styled_block("Models"));
             frame.render_widget(widget, area);
         }
-        Some(Ok(items)) => render_table(frame, area, items, scroll, collapsed),
+        Some(Ok(items)) => render_table(frame, area, items, scroll, collapsed, sort),
     }
 }
 
@@ -66,58 +67,74 @@ fn render_table(
     items: &[ModelBreakdown],
     scroll: &ScrollState,
     collapsed: Option<longtail::Collapsed>,
+    sort: SortState,
 ) {
     let header = Row::new(vec![
         Cell::from("Model"),
-        Cell::from("Total Tokens"),
+        Cell::from(sort.header("Total Tokens", TableSortKey::Tokens)),
         Cell::from("Events"),
-        Cell::from("Cost (USD)"),
+        Cell::from(sort.header("Cost (USD)", TableSortKey::Cost)),
     ])
     .style(theme::header_style())
     .bottom_margin(1);
 
     // Fold the sub-2% long tail into one summary row on large breakdowns.
-    let shown = collapsed.map(|c| &items[..c.keep]).unwrap_or(items);
+    let collapsed = collapsed.filter(|_| sort.key.is_none());
+    let mut ordered =
+        stable_sort_refs(items.iter().collect(), sort, |left, right, key| match key {
+            TableSortKey::Tokens => left.total_tokens.cmp(&right.total_tokens),
+            TableSortKey::Cost => left
+                .cost_with_cache_usd
+                .total_cmp(&right.cost_with_cache_usd),
+            TableSortKey::Date => std::cmp::Ordering::Equal,
+        });
+    if sort.key.is_none()
+        && let Some(collapsed) = collapsed
+    {
+        ordered.truncate(collapsed.keep);
+    }
     let visible_height = super::visible_table_rows(area);
-
-    let mut rows: Vec<Row> = shown
-        .iter()
-        .skip(scroll.offset)
-        .take(visible_height)
+    let total_rows = ordered.len() + usize::from(collapsed.is_some());
+    let range = scroll.visible_range(total_rows, visible_height);
+    let rows: Vec<Row> = range
+        .clone()
         .enumerate()
-        .map(|(i, item)| {
-            let absolute = scroll.offset + i;
-            let row = Row::new(vec![
-                Cell::from(item.model.clone()),
-                Cell::from(format_number(item.total_tokens)),
-                Cell::from(format_number(item.event_count)),
-                Cell::from(format!("{:.4}", item.cost_with_cache_usd)),
-            ]);
-            if absolute == 0 {
-                // Rank #1 stands out in the accent color, bold.
+        .map(|(visible_index, absolute)| {
+            let (row, summary) = if let Some(item) = ordered.get(absolute) {
+                (
+                    Row::new(vec![
+                        Cell::from(item.model.clone()),
+                        Cell::from(format_number(item.total_tokens)),
+                        Cell::from(format_number(item.event_count)),
+                        Cell::from(format!("{:.4}", item.cost_with_cache_usd)),
+                    ]),
+                    false,
+                )
+            } else {
+                let collapsed = collapsed.expect("summary row requires a collapse plan");
+                (
+                    Row::new(vec![
+                        Cell::from(longtail::summary_label(&collapsed)),
+                        Cell::from(format_number(collapsed.hidden_value)),
+                        Cell::from(String::new()),
+                        Cell::from(String::new()),
+                    ]),
+                    true,
+                )
+            };
+            if absolute == scroll.selected {
+                row.style(theme::selection_style())
+            } else if summary {
+                row.style(theme::muted_style())
+            } else if absolute == 0 {
                 row.style(theme::bold_fg_style(theme::accent()))
-            } else if i % 2 == 1 {
+            } else if visible_index % 2 == 1 {
                 row.style(theme::row_alt_style())
             } else {
                 row
             }
         })
         .collect();
-
-    if let Some(collapsed) = collapsed.filter(|collapsed| {
-        collapsed.keep >= scroll.offset
-            && collapsed.keep < scroll.offset.saturating_add(visible_height)
-    }) {
-        rows.push(
-            Row::new(vec![
-                Cell::from(longtail::summary_label(&collapsed)),
-                Cell::from(format_number(collapsed.hidden_value)),
-                Cell::from(String::new()),
-                Cell::from(String::new()),
-            ])
-            .style(theme::muted_style()),
-        );
-    }
 
     let table = Table::new(
         rows,
@@ -129,8 +146,7 @@ fn render_table(
         ],
     )
     .header(header)
-    .block(styled_block("Models"))
-    .row_highlight_style(theme::selection_style());
+    .block(styled_block("Models"));
 
     frame.render_widget(table, area);
 }

@@ -27,11 +27,11 @@
 
 ## Acceptance Criteria
 
-- [ ] A1：表格面板可见选中行高亮，↑/↓/PgUp/PgDn/Home/End/滚轮行为正确且不越界（proptest 证据）。
-- [ ] A2：排序键生效、方向可切、表头有指示、每面板记忆；数字与排序前集合一致（仅顺序变化）。
-- [ ] A3：后台活动期间 spinner 可见且动画流畅；无后台活动时不渲染。
-- [ ] A4：死代码处置完成（决策记录 + 代码落地），无未接线模块/字段残留或已全部接线。
-- [ ] A5：help/footer 提示与实际键位一致；`cargo test -- --test-threads=1`、fmt、严格 clippy 全绿。
+- [x] A1：表格面板可见选中行高亮，↑/↓/PgUp/PgDn/Home/End/滚轮行为正确且不越界（proptest 证据）。
+- [x] A2：排序键生效、方向可切、表头有指示、每面板记忆；数字与排序前集合一致（仅顺序变化）。
+- [x] A3：后台活动期间 spinner 可见且动画流畅；无后台活动时不渲染。
+- [x] A4：死代码处置完成（决策记录 + 代码落地），无未接线模块/字段残留或已全部接线。
+- [x] A5：help/footer 提示与实际键位一致；`cargo test -- --test-threads=1`、fmt、严格 clippy 全绿。
 
 ## Out Of Scope
 
