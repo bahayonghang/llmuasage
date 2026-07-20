@@ -618,3 +618,37 @@ Aligned Claude, Codex, and OpenCode token normalization with ccusage; made persi
 ### Next Steps
 
 - None - task complete
+
+
+## Session 19: sync 进度条系统、摘要表格与全链路 profiling
+
+**Date**: 2026-07-20
+**Task**: sync 进度条系统、摘要表格与全链路 profiling
+**Branch**: `dev`
+
+### Summary
+
+indicatif 进度条（OpenCode spinner / Codex/Claude 重放文件确定条）+ RAII 终端清理 + Ctrl-C 取消 + LLMUSAGE_PROGRESS=off；对齐摘要表格（bytes/parse/write 列，TTY 着色）；profiling 证明渲染开销 0.009%、通道零丢弃，冷跑 Codex write 25.3s 另立 P3 backlog（07-20-sync-cold-import-write-throughput）。全量 424 测试绿、fmt/clippy 净。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a16f55c` | (see git log) |
+| `36e19a1` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

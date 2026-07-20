@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 18
-- **Last Active**: 2026-07-19
+- **Total Sessions**: 19
+- **Last Active**: 2026-07-20
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~620 | Active |
+| `journal-1.md` | ~654 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 19 | 2026-07-20 | sync 进度条系统、摘要表格与全链路 profiling | `a16f55c`, `36e19a1` | `dev` |
 | 18 | 2026-07-19 | 完成首页概览与多来源同步性能优化 | `66d596f`, `05add10` | `dev` |
 | 17 | 2026-07-17 | Serve 安全迁移旧版 token 统计 | `31ca870` | `dev` |
 | 16 | 2026-07-16 | 优化同步数据库初始化性能与进度可见性 | `731c91f77d3ab9b263b18037c0064a60db46cecc`, `89bc7de1d07cfcafea3cdbfc38935bc2ec74ace3` | `dev` |
