@@ -43,13 +43,13 @@
 
 ## 跨子任务验收（父任务收口时检查）
 
-- [ ] X1：`llmusage dash` 中按 `x` 触发全量 sync：不 panic、UI 持续响应按键与重绘、有进度指示、可取消或至少可退出。
-- [ ] X2：首次进入 Behavior/Stats/Blocks 面板：先渲染 loading 态帧，数据就绪后填充；期间切换面板不产生过期结果覆盖（世代语义，对齐 dashboard-performance-contracts.md 的 range-click 语义）。
-- [ ] X3：`h`/`l` 切换时间窗对趋势/聚合面板有可见效果，且各面板查询带时间边界（除明确定义为 lifetime 的口径外）。
-- [ ] X4：切换主题后所有面板颜色一致跟随（无硬编码残留）；`NO_COLOR` 下可读。
-- [ ] X5：数据语义回归：默认启动态与 All 窗口下，TUI 展示的 token/成本数字与优化前逐面板一致（同一数据库快照）；非 All 窗口下与「全量查询 + 窗口过滤」等值；文案类有意变更以 style 任务的变更清单为准。不违反 token-accounting-contracts.md 与 source-sync-contracts.md。（前提：time-window 任务 R2 的默认窗口决策须保证启动态等价 All，否则回改本条。）
-- [ ] X6：`just ci` 全绿（fmt / clippy -D warnings / cargo test -- --test-threads=1 / node 检查 / docs build）。
-- [ ] X7：性能证据（统一测量协议：代表性数据库快照 + release 构建 + 3 次取中位数，对齐 07-20-sync-full-profiling 协议）：(a) 首访 Stats/Behavior/Blocks 期间渲染线程最长连续阻塞时长前后对比；(b) Stats/Behavior 载荷 wall-time 达到 async 任务 A3 阈值；(c) 空闲无动画 10s 内 draw 调用计数达到 render 任务 A1 标准。基线与结果记录入父任务 research/perf-baseline.md。
+- [x] X1：`llmusage dash` 中按 `x` 触发全量 sync：不 panic、UI 持续响应按键与重绘、有进度指示、可取消或至少可退出。
+- [x] X2：首次进入 Behavior/Stats/Blocks 面板：先渲染 loading 态帧，数据就绪后填充；期间切换面板不产生过期结果覆盖（世代语义，对齐 dashboard-performance-contracts.md 的 range-click 语义）。
+- [x] X3：`h`/`l` 切换时间窗对趋势/聚合面板有可见效果，且各面板查询带时间边界（除明确定义为 lifetime 的口径外）。
+- [x] X4：切换主题后所有面板颜色一致跟随（无硬编码残留）；`NO_COLOR` 下可读。
+- [x] X5：数据语义回归：默认启动态与 All 窗口下，TUI 展示的 token/成本数字与优化前逐面板一致（同一数据库快照）；非 All 窗口下与「全量查询 + 窗口过滤」等值；文案类有意变更以 style 任务的变更清单为准。不违反 token-accounting-contracts.md 与 source-sync-contracts.md。（前提：time-window 任务 R2 的默认窗口决策须保证启动态等价 All，否则回改本条。）
+- [x] X6：`just ci` 全绿（fmt / clippy -D warnings / cargo test -- --test-threads=1 / node 检查 / docs build）。
+- [ ] X7：性能证据（统一测量协议：代表性数据库快照 + release 构建 + 3 次取中位数，对齐 07-20-sync-full-profiling 协议）：(a) 首访 Stats/Behavior/Blocks 期间渲染线程最长连续阻塞时长前后对比；(b) Stats/Behavior 载荷 wall-time 达到 async 任务 A3 阈值；(c) 空闲无动画 10s 内 draw 调用计数达到 render 任务 A1 标准。基线与结果记录入父任务 research/perf-baseline.md。当前 (b)/(c) 已有 release/确定性证据；(a) 仍缺少三次 render-thread blocking 测量，不能将 X7 整体标记为通过。
 
 ## Out Of Scope
 
