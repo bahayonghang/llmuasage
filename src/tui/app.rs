@@ -255,6 +255,8 @@ pub struct AppState {
     pub terminal_width: u16,
     pub terminal_height: u16,
     pub needs_refresh: bool,
+    pub data_generation: u64,
+    pub panel_loading: [bool; Panel::COUNT],
 }
 
 impl Default for AppState {
@@ -298,6 +300,8 @@ impl AppState {
             terminal_width: 80,
             terminal_height: 24,
             needs_refresh: false,
+            data_generation: 0,
+            panel_loading: [false; Panel::COUNT],
         }
     }
 
@@ -384,6 +388,7 @@ impl AppState {
         for scroll in &mut self.scroll {
             scroll.offset = 0;
         }
+        self.panel_loading = [false; Panel::COUNT];
         self.needs_refresh = true;
     }
 

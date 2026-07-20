@@ -20,6 +20,8 @@ GET /api/dashboard?scope=interactive&range=<1d|7d|30d|all>&window=<day|week|mont
 Dashboard::interactive_snapshot(&QueryFilter, window: &str)
     -> Result<DashboardInteractiveSnapshot>
 load_via_dashboard(state, section, query) -> Future<Result<T>>
+TUI PanelRequest(panel, filter, time_window, generation, refreshing)
+    -> bounded PanelResult channel
 ```
 
 `QueryFilter` fields shared by bucket and fact queries are `source`, `model`,
@@ -45,6 +47,15 @@ load_via_dashboard(state, section, query) -> Future<Result<T>>
   query permits for the blocking task lifetime, publishes an SQLite
   `InterruptHandle`, and interrupts plus awaits abandoned work before releasing
   the permit.
+- TUI panel reads follow the same cancellation boundary from its synchronous
+  event loop: every request opens a fresh `Dashboard` inside `spawn_blocking`,
+  holds one of five TUI-local permits, publishes an interrupt handle through a
+  shared slot, and sends one typed result through a bounded channel. The UI
+  thread never opens a dashboard connection or waits for a query.
+- TUI result acceptance requires panel, generation, time window, and every
+  stable `QueryFilter` field to match current state. A cold request keeps the
+  payload empty so the loading frame is reachable; a forced refresh retains
+  the current payload and marks it stale until the matching result arrives.
 - Explorer uses `usage_bucket_30m` only for source/model/project groupings with
   attributed cost, calls, or total-token metrics and no session/tool/is-tool/
   token-type filters. Other shapes keep event, turn, or attribution strategies.
@@ -64,6 +75,8 @@ load_via_dashboard(state, section, query) -> Future<Result<T>>
 | `scope=interactive` | Return the lean selected-window contract |
 | Unknown `range`/`window` | Normalize to `day` |
 | Browser abort or newer generation | Do not publish the obsolete result |
+| TUI switch/filter/window supersedes a request | Interrupt it and discard any late result that fails the full request match |
+| TUI refresh with cached payload | Keep rendering cached data and expose refreshing status |
 | Query timeout before/after handle publication | Interrupt when possible, await the blocking task, return the structured timeout error |
 | SQLite reports `OperationInterrupted` | Map to `LlmusageError::Cancelled`, not configuration failure |
 | Semaphore closes | Return structured `ConfigInvalid` detail |
@@ -78,6 +91,11 @@ load_via_dashboard(state, section, query) -> Future<Result<T>>
   windows and secondary sections for compatibility.
 - Bad: a rapid `1d -> 7d -> 30d -> all` sequence lets a slower `1d` response
   overwrite the selected `all` state or leaves its SQLite statement running.
+- Good: switching from Stats to Blocks immediately paints the Blocks loading
+  state; a late Stats result is discarded after its SQLite statement is
+  interrupted.
+- Bad: a TUI key handler calls a `Dashboard` query before returning to draw,
+  making the existing loading branch unreachable.
 - Bad: an Explorer request with `session_id` reads buckets and silently drops
   session semantics.
 
@@ -87,6 +105,9 @@ load_via_dashboard(state, section, query) -> Future<Result<T>>
   array, and unchanged full/core behavior.
 - Rust cancellation tests force a slow SQLite statement, assert interruption,
   and prove the semaphore permit is released.
+- TUI tests force a slow SQLite statement, assert bounded cancellation, reject
+  stale generation/filter results, render cold loading states through
+  `TestBackend`, and compare parallel Stats/Behavior payloads to serial reads.
 - Explorer equivalence tests compare bucket and event totals, rows, Other,
   series, filters, and timezone boundaries for supported shapes; routing tests
   assert fact-only shapes do not use buckets.
