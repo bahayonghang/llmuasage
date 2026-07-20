@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 20
-- **Last Active**: 2026-07-20
+- **Total Sessions**: 21
+- **Last Active**: 2026-07-21
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~685 | Active |
+| `journal-1.md` | ~718 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 21 | 2026-07-21 | 补齐 TUI 首访渲染线程证据并归档 | `75b9f5a` | `dev` |
 | 20 | 2026-07-20 | 归档 sync 冷跑全量导入写入吞吐 backlog | - | `dev` |
 | 19 | 2026-07-20 | sync 进度条系统、摘要表格与全链路 profiling | `a16f55c`, `36e19a1` | `dev` |
 | 18 | 2026-07-19 | 完成首页概览与多来源同步性能优化 | `66d596f`, `05add10` | `dev` |

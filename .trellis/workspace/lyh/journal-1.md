@@ -683,3 +683,36 @@ indicatif 进度条（OpenCode spinner / Codex/Claude 重放文件确定条）+ 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 21: 补齐 TUI 首访渲染线程证据并归档
+
+**Date**: 2026-07-21
+**Task**: 补齐 TUI 首访渲染线程证据并归档
+**Branch**: `dev`
+
+### Summary
+
+新增 release 忽略基准测量 Stats、Behavior、Blocks 首访渲染线程四个同步区段，记录三次中位数并将父任务 X7(a) 更新为通过；just ci 全绿，随后归档 benchmark 子任务与 TUI 优化父任务。保留用户未跟踪 TODO.md 未暂存。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `75b9f5a` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
