@@ -56,6 +56,7 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[DailyTrendPoint], scroll
     let narrow = inner.width < 92;
     let [table_area, detail_area] =
         Layout::vertical([Constraint::Min(1), Constraint::Length(2)]).areas(inner);
+    // The outer panel border is already removed; only header + margin consume rows.
     let visible_height = table_area.height.saturating_sub(2).max(1) as usize;
     let rows = newest_first(items)
         .skip(scroll.offset)

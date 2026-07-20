@@ -17,6 +17,20 @@ pub fn render(
     data: &Option<Result<Vec<ModelBreakdown>, String>>,
     scroll: &ScrollState,
 ) {
+    let collapsed = data
+        .as_ref()
+        .and_then(|result| result.as_ref().ok())
+        .and_then(|items| collapse_plan(items));
+    render_with_plan(frame, area, data, scroll, collapsed);
+}
+
+pub(crate) fn render_with_plan(
+    frame: &mut Frame,
+    area: Rect,
+    data: &Option<Result<Vec<ModelBreakdown>, String>>,
+    scroll: &ScrollState,
+    collapsed: Option<longtail::Collapsed>,
+) {
     match data {
         None => {
             let widget = Paragraph::new("Loading...")
@@ -36,11 +50,23 @@ pub fn render(
                 .block(styled_block("Models"));
             frame.render_widget(widget, area);
         }
-        Some(Ok(items)) => render_table(frame, area, items, scroll),
+        Some(Ok(items)) => render_table(frame, area, items, scroll, collapsed),
     }
 }
 
-fn render_table(frame: &mut Frame, area: Rect, items: &[ModelBreakdown], scroll: &ScrollState) {
+pub(crate) fn collapse_plan(items: &[ModelBreakdown]) -> Option<longtail::Collapsed> {
+    let total_tokens: i64 = items.iter().map(|item| item.total_tokens.max(0)).sum();
+    let values: Vec<i64> = items.iter().map(|item| item.total_tokens).collect();
+    longtail::collapse_tail(&values, total_tokens)
+}
+
+fn render_table(
+    frame: &mut Frame,
+    area: Rect,
+    items: &[ModelBreakdown],
+    scroll: &ScrollState,
+    collapsed: Option<longtail::Collapsed>,
+) {
     let header = Row::new(vec![
         Cell::from("Model"),
         Cell::from("Total Tokens"),
@@ -51,14 +77,13 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[ModelBreakdown], scroll:
     .bottom_margin(1);
 
     // Fold the sub-2% long tail into one summary row on large breakdowns.
-    let total_tokens: i64 = items.iter().map(|item| item.total_tokens.max(0)).sum();
-    let values: Vec<i64> = items.iter().map(|item| item.total_tokens).collect();
-    let collapsed = longtail::collapse_tail(&values, total_tokens);
     let shown = collapsed.map(|c| &items[..c.keep]).unwrap_or(items);
+    let visible_height = super::visible_table_rows(area);
 
     let mut rows: Vec<Row> = shown
         .iter()
         .skip(scroll.offset)
+        .take(visible_height)
         .enumerate()
         .map(|(i, item)| {
             let absolute = scroll.offset + i;
@@ -79,7 +104,10 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[ModelBreakdown], scroll:
         })
         .collect();
 
-    if let Some(collapsed) = collapsed {
+    if let Some(collapsed) = collapsed.filter(|collapsed| {
+        collapsed.keep >= scroll.offset
+            && collapsed.keep < scroll.offset.saturating_add(visible_height)
+    }) {
         rows.push(
             Row::new(vec![
                 Cell::from(longtail::summary_label(&collapsed)),

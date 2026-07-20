@@ -6,7 +6,7 @@
 //! through the accessor fns (`accent()`, `muted_fg()`, ...) or the style
 //! constructors, both of which resolve against the process-wide active theme.
 
-use std::sync::RwLock;
+use std::{cell::Cell, sync::RwLock};
 
 use ratatui::{
     style::{Color, Modifier, Style},
@@ -339,13 +339,44 @@ fn active_lock() -> &'static RwLock<ThemeState> {
     &ACTIVE
 }
 
+thread_local! {
+    static RENDER_SNAPSHOT: Cell<Option<ThemeState>> = const { Cell::new(None) };
+}
+
+struct RenderSnapshotGuard(Option<ThemeState>);
+
+impl Drop for RenderSnapshotGuard {
+    fn drop(&mut self) {
+        RENDER_SNAPSHOT.with(|slot| slot.set(self.0));
+    }
+}
+
+/// Runs a render using one theme read snapshot instead of taking the global
+/// lock for every semantic color accessor.
+pub fn with_render_snapshot<R>(render: impl FnOnce() -> R) -> R {
+    let snapshot = *active_lock().read().expect("theme lock poisoned");
+    let previous = RENDER_SNAPSHOT.with(|slot| {
+        let previous = slot.get();
+        slot.set(Some(snapshot));
+        previous
+    });
+    let _guard = RenderSnapshotGuard(previous);
+    render()
+}
+
 /// Returns a snapshot of the current theme.
 pub fn active_theme() -> Theme {
-    active_lock().read().expect("theme lock poisoned").theme
+    RENDER_SNAPSHOT
+        .with(|slot| slot.get())
+        .map(|state| state.theme)
+        .unwrap_or_else(|| active_lock().read().expect("theme lock poisoned").theme)
 }
 
 pub fn color_mode() -> TerminalColorMode {
-    active_lock().read().expect("theme lock poisoned").mode
+    RENDER_SNAPSHOT
+        .with(|slot| slot.get())
+        .map(|state| state.mode)
+        .unwrap_or_else(|| active_lock().read().expect("theme lock poisoned").mode)
 }
 
 /// Replaces the active theme; subsequent renders use the new palette.
@@ -860,5 +891,19 @@ mod tests {
                 .bg(Color::Cyan)
                 .add_modifier(Modifier::BOLD)
         );
+    }
+
+    #[test]
+    fn render_snapshot_is_stable_until_the_frame_finishes() {
+        set_color_mode(TerminalColorMode::TrueColor);
+        set_theme(Theme::default_dark());
+        let before = active_theme();
+        with_render_snapshot(|| {
+            assert_eq!(active_theme().name, before.name);
+            set_theme(Theme::catppuccin_mocha());
+            assert_eq!(active_theme().accent, before.accent);
+        });
+        assert_eq!(active_theme().name, "mocha");
+        set_theme(Theme::default_dark());
     }
 }

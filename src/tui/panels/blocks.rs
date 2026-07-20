@@ -57,9 +57,11 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[BlockReportRow], scroll:
     .style(theme::header_style())
     .bottom_margin(1);
 
+    let visible_height = super::visible_table_rows(area);
     let rows: Vec<Row> = items
         .iter()
         .skip(scroll.offset)
+        .take(visible_height)
         .enumerate()
         .map(|(i, item)| {
             let window = format!(

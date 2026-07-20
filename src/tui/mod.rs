@@ -32,6 +32,25 @@ use event::{EventHandler, TuiEvent};
 use input::{Action, DialogAction, handle_dialog_key_event, handle_key_event};
 use sync_control::{SyncController, SyncUpdate};
 
+#[derive(Debug)]
+struct RedrawState {
+    dirty: bool,
+}
+
+impl RedrawState {
+    fn initial() -> Self {
+        Self { dirty: true }
+    }
+
+    fn request(&mut self) {
+        self.dirty = true;
+    }
+
+    fn take(&mut self) -> bool {
+        std::mem::take(&mut self.dirty)
+    }
+}
+
 /// Main entry point for the interactive terminal dashboard.
 pub fn run_dashboard(store: &Store) -> Result<()> {
     // 0. Resolve theme and terminal color capability before entering raw mode.
@@ -90,24 +109,33 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
 
     // Load overview data initially (default panel)
     request_panel_data(&mut loader, &mut state, Panel::Overview, false);
+    let mut redraw = RedrawState::initial();
 
     loop {
-        // Draw frame
-        terminal.draw(|frame| draw::draw(frame, &state))?;
+        if redraw.take() {
+            terminal.draw(|frame| draw::draw(frame, &state))?;
+        }
 
         let ev = events.recv()?;
         let action = match ev {
             TuiEvent::Tick => {
-                apply_panel_results(&mut loader, &mut state);
-                apply_sync_updates(&mut sync, &mut loader, &mut state);
-                state.on_tick();
+                let mut tick_dirty = apply_panel_results(&mut loader, &mut state);
+                tick_dirty |= apply_sync_updates(&mut sync, &mut loader, &mut state);
+                let animation_active =
+                    state.panel_loading.iter().any(|loading| *loading) || sync.is_active();
+                tick_dirty |= state.on_tick(animation_active);
                 if state.needs_refresh {
                     refresh_panel_data(&mut loader, &mut state);
+                    tick_dirty = true;
+                }
+                if tick_dirty {
+                    redraw.request();
                 }
                 continue;
             }
             TuiEvent::Resize(width, height) => {
                 state.handle_resize(width, height);
+                redraw.request();
                 continue;
             }
             TuiEvent::Mouse(mouse) => {
@@ -120,6 +148,7 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
             TuiEvent::Key(key) => {
                 if state.active_dialog.is_some() {
                     handle_dialog_action(handle_dialog_key_event(key), &mut state);
+                    redraw.request();
                     continue;
                 }
                 handle_key_event(key, state.active_panel)
@@ -182,6 +211,7 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
             }
             Action::None => {}
         }
+        redraw.request();
     }
 
     Ok(())
@@ -191,8 +221,10 @@ fn apply_sync_updates(
     sync: &mut SyncController,
     loader: &mut PanelDataLoader,
     state: &mut AppState,
-) {
+) -> bool {
+    let mut dirty = false;
     for update in sync.drain_updates() {
+        dirty = true;
         match update {
             SyncUpdate::Progress(message) => state.set_status(&message),
             SyncUpdate::Completed { inserted, stored } => {
@@ -206,6 +238,7 @@ fn apply_sync_updates(
             SyncUpdate::Cancelled => state.set_status("Sync cancelled"),
         }
     }
+    dirty
 }
 
 fn refresh_panel_data(loader: &mut PanelDataLoader, state: &mut AppState) {
@@ -267,7 +300,8 @@ fn request_panel_data(
     });
 }
 
-fn apply_panel_results(loader: &mut PanelDataLoader, state: &mut AppState) {
+fn apply_panel_results(loader: &mut PanelDataLoader, state: &mut AppState) -> bool {
+    let mut dirty = false;
     while let Some(result) = loader.try_recv() {
         if !panel_result_matches(state, &result) {
             continue;
@@ -277,10 +311,22 @@ fn apply_panel_results(loader: &mut PanelDataLoader, state: &mut AppState) {
         match result.payload {
             PanelPayload::Overview(payload) => state.overview = Some(payload),
             PanelPayload::SyncCenter(payload) => state.sync_center = Some(payload),
-            PanelPayload::Models(payload) => state.models = Some(payload),
+            PanelPayload::Models(payload) => {
+                state.model_collapse = payload
+                    .as_ref()
+                    .ok()
+                    .and_then(|items| panels::models::collapse_plan(items));
+                state.models = Some(payload);
+            }
             PanelPayload::Daily(payload) => state.daily = Some(payload),
             PanelPayload::Hourly(payload) => state.hourly = Some(payload),
-            PanelPayload::Costs(payload) => state.costs = Some(payload),
+            PanelPayload::Costs(payload) => {
+                state.cost_collapse = payload
+                    .as_ref()
+                    .ok()
+                    .and_then(|items| panels::cost::collapse_plan(items));
+                state.costs = Some(payload);
+            }
             PanelPayload::Stats(payload) => state.stats = Some(payload),
             PanelPayload::Behavior(payload) => state.behavior = Some(*payload),
             PanelPayload::Blocks(payload) => state.blocks = Some(payload),
@@ -288,10 +334,12 @@ fn apply_panel_results(loader: &mut PanelDataLoader, state: &mut AppState) {
         state.panel_loading[panel as usize] = false;
         update_scroll_total(state, panel);
         state.mark_refreshed();
+        dirty = true;
         if refreshing {
             state.set_status("Refreshed local dashboard cache");
         }
     }
+    dirty
 }
 
 fn panel_result_matches(state: &AppState, result: &PanelResult) -> bool {
@@ -338,9 +386,11 @@ fn panel_uses_time_window(panel: Panel) -> bool {
 
 fn invalidate_windowed_panel_data(state: &mut AppState) {
     state.models = None;
+    state.model_collapse = None;
     state.daily = None;
     state.hourly = None;
     state.costs = None;
+    state.cost_collapse = None;
     state.stats = None;
     state.behavior = None;
     for panel in [
@@ -366,6 +416,7 @@ fn invalidate_inactive_panel_data(state: &mut AppState) {
     }
     if active != Panel::Models {
         state.models = None;
+        state.model_collapse = None;
     }
     if active != Panel::Sources {
         state.daily = None;
@@ -375,6 +426,7 @@ fn invalidate_inactive_panel_data(state: &mut AppState) {
     }
     if active != Panel::Cost {
         state.costs = None;
+        state.cost_collapse = None;
     }
     if active != Panel::Health {
         state.stats = None;
@@ -436,6 +488,44 @@ mod tests {
             .iter()
             .map(|cell| cell.symbol())
             .collect()
+    }
+
+    #[test]
+    fn idle_ticks_produce_zero_draws_after_the_initial_frame() {
+        let mut redraw = RedrawState::initial();
+        assert!(redraw.take(), "initial frame must render");
+
+        let idle_draws = (0..40).filter(|_| redraw.take()).count();
+        assert_eq!(idle_draws, 0, "ten seconds of 250ms ticks stay idle");
+
+        for _ in 0..4 {
+            redraw.request();
+            assert!(redraw.take(), "active animation ticks request frames");
+        }
+    }
+
+    #[test]
+    fn every_scrolled_table_bounds_row_construction_to_the_viewport() {
+        let sources = [
+            ("blocks", include_str!("panels/blocks.rs")),
+            ("cost", include_str!("panels/cost.rs")),
+            ("daily", include_str!("panels/daily.rs")),
+            ("hourly", include_str!("panels/hourly.rs")),
+            ("models", include_str!("panels/models.rs")),
+            ("projects", include_str!("panels/projects.rs")),
+            ("sources", include_str!("panels/sources.rs")),
+            ("stats", include_str!("panels/stats.rs")),
+            ("usage", include_str!("panels/usage.rs")),
+        ];
+
+        for (name, source) in sources {
+            for tail in source.split(".skip(scroll.offset)").skip(1) {
+                assert!(
+                    tail.trim_start().starts_with(".take("),
+                    "{name} must bound each scrolled iterator before formatting rows"
+                );
+            }
+        }
     }
 
     #[test]

@@ -57,7 +57,7 @@ fn render_table(frame: &mut Frame, area: Rect, points: &[TrendPoint], scroll: &S
         .map(|point| point.total_tokens.max(0))
         .max()
         .unwrap_or(0);
-    let visible_height = inner.height.saturating_sub(2).max(1) as usize;
+    let visible_height = super::visible_table_rows(area);
 
     let rows = points
         .iter()

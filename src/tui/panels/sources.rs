@@ -53,10 +53,12 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[SourceBreakdown], scroll
     let values: Vec<i64> = items.iter().map(|item| item.total_tokens).collect();
     let collapsed = longtail::collapse_tail(&values, total_tokens);
     let shown = collapsed.map(|c| &items[..c.keep]).unwrap_or(items);
+    let visible_height = super::visible_table_rows(area);
 
     let mut rows: Vec<Row> = shown
         .iter()
         .skip(scroll.offset)
+        .take(visible_height)
         .enumerate()
         .map(|(i, item)| {
             let last_event = item.last_event_at.as_deref().unwrap_or("-");
@@ -74,7 +76,10 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[SourceBreakdown], scroll
         })
         .collect();
 
-    if let Some(collapsed) = collapsed {
+    if let Some(collapsed) = collapsed.filter(|collapsed| {
+        collapsed.keep >= scroll.offset
+            && collapsed.keep < scroll.offset.saturating_add(visible_height)
+    }) {
         rows.push(
             Row::new(vec![
                 Cell::from(longtail::summary_label(&collapsed)),

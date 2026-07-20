@@ -1250,6 +1250,77 @@ proptest! {
     }
 }
 
+#[test]
+fn models_visible_window_matches_full_dataset_buffer() {
+    let items: Vec<ModelBreakdown> = (0..40)
+        .map(|index| ModelBreakdown {
+            model: format!("model-{index:02}"),
+            input_tokens: 0,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+            output_tokens: 0,
+            reasoning_output_tokens: 0,
+            total_tokens: 10_000,
+            event_count: 100,
+            cost_with_cache_usd: 1.25,
+            cost_without_cache_usd: 0.0,
+            cache_savings_usd: 0.0,
+            pricing_status: "static".to_string(),
+            pricing_source: None,
+            pricing_rate: None,
+        })
+        .collect();
+    let visible = 7usize;
+    let scroll = ScrollState {
+        offset: 0,
+        total: items.len(),
+        visible,
+    };
+    let area = Rect::new(0, 0, 120, (visible + 4) as u16);
+
+    let render = |rows: Vec<ModelBreakdown>| {
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        let data = Some(Ok(rows));
+        terminal
+            .draw(|frame| llmusage::tui::panels::models::render(frame, area, &data, &scroll))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    };
+
+    assert_eq!(render(items.clone()), render(items[..visible].to_vec()));
+}
+
+#[test]
+fn cost_visible_window_matches_full_dataset_buffer() {
+    let items: Vec<CostLine> = (0..40)
+        .map(|index| CostLine {
+            source: "codex".to_string(),
+            model: format!("model-{index:02}"),
+            total_tokens: 10_000,
+            estimated_cost_usd: 1.25,
+            event_count: 100,
+        })
+        .collect();
+    let visible = 7usize;
+    let scroll = ScrollState {
+        offset: 0,
+        total: items.len(),
+        visible,
+    };
+    let area = Rect::new(0, 0, 120, (visible + 4) as u16);
+
+    let render = |rows: Vec<CostLine>| {
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        let data = Some(Ok(rows));
+        terminal
+            .draw(|frame| llmusage::tui::panels::cost::render(frame, area, &data, &scroll))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    };
+
+    assert_eq!(render(items.clone()), render(items[..visible].to_vec()));
+}
+
 // Feature: terminal-dashboard, Property 4.5: Trends panel renders safely for
 // random series and includes the dashboard shell / empty placeholder.
 proptest! {

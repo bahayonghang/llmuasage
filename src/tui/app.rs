@@ -10,6 +10,8 @@ use crate::{domain::platform_monitor::PlatformProbe, models::SourceKind};
 use chrono::{Duration as ChronoDuration, NaiveDate, Utc};
 use std::time::{Duration, Instant};
 
+use super::panels::longtail::Collapsed;
+
 /// The eight dashboard panels in fixed display order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -286,6 +288,8 @@ pub struct AppState {
     pub needs_refresh: bool,
     pub data_generation: u64,
     pub panel_loading: [bool; Panel::COUNT],
+    pub model_collapse: Option<Collapsed>,
+    pub cost_collapse: Option<Collapsed>,
 }
 
 impl Default for AppState {
@@ -331,6 +335,8 @@ impl AppState {
             needs_refresh: false,
             data_generation: 0,
             panel_loading: [false; Panel::COUNT],
+            model_collapse: None,
+            cost_collapse: None,
         }
     }
 
@@ -418,6 +424,8 @@ impl AppState {
             scroll.offset = 0;
         }
         self.panel_loading = [false; Panel::COUNT];
+        self.model_collapse = None;
+        self.cost_collapse = None;
         self.needs_refresh = true;
     }
 
@@ -435,11 +443,15 @@ impl AppState {
         }
     }
 
-    pub fn on_tick(&mut self) {
-        self.spinner_frame = (self.spinner_frame + 1) % 20;
+    pub fn on_tick(&mut self, animation_active: bool) -> bool {
+        if animation_active {
+            self.spinner_frame = (self.spinner_frame + 1) % 20;
+        }
+        let was_refresh_needed = self.needs_refresh;
         if self.auto_refresh && self.last_refresh.elapsed() >= self.auto_refresh_interval {
             self.needs_refresh = true;
         }
+        animation_active || self.needs_refresh != was_refresh_needed
     }
 
     pub fn handle_resize(&mut self, width: u16, height: u16) {
@@ -533,6 +545,13 @@ mod tests {
     #[test]
     fn app_state_defaults_to_all_time() {
         assert_eq!(AppState::new().time_window, TimeWindow::All);
+    }
+
+    #[test]
+    fn idle_ticks_do_not_request_redraw_but_active_animation_does() {
+        let mut state = AppState::new();
+        assert!(!state.on_tick(false));
+        assert!(state.on_tick(true));
     }
 
     // Feature: terminal-dashboard, Property 1: Panel navigation produces correct index

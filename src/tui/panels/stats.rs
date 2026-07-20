@@ -351,7 +351,7 @@ fn render_sources(
         .map(|source| source.total_tokens.max(0))
         .max()
         .unwrap_or(0);
-    let visible_height = area.height.saturating_sub(3).max(1) as usize;
+    let visible_height = super::visible_table_rows(area);
     let rows = sources
         .iter()
         .skip(scroll.offset)

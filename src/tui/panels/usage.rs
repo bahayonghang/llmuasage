@@ -185,7 +185,7 @@ fn render_sources(
 
     let very_narrow = area.width < 58;
     let narrow = area.width < 88;
-    let visible_height = area.height.saturating_sub(3).max(1) as usize;
+    let visible_height = super::visible_table_rows(area);
     let rows = payload
         .sources
         .iter()

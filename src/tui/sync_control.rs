@@ -61,6 +61,10 @@ impl SyncController {
         }
     }
 
+    pub(super) fn is_active(&self) -> bool {
+        self.active_job_id.is_some()
+    }
+
     pub(super) fn drain_updates(&mut self) -> Vec<SyncUpdate> {
         let mut updates = Vec::new();
         let mut disconnected = false;

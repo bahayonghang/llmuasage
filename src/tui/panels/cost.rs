@@ -18,6 +18,20 @@ pub fn render(
     data: &Option<Result<Vec<CostLine>, String>>,
     scroll: &ScrollState,
 ) {
+    let collapsed = data
+        .as_ref()
+        .and_then(|result| result.as_ref().ok())
+        .and_then(|items| collapse_plan(items));
+    render_with_plan(frame, area, data, scroll, collapsed);
+}
+
+pub(crate) fn render_with_plan(
+    frame: &mut Frame,
+    area: Rect,
+    data: &Option<Result<Vec<CostLine>, String>>,
+    scroll: &ScrollState,
+    collapsed: Option<longtail::Collapsed>,
+) {
     match data {
         None => {
             let widget = Paragraph::new("Loading...")
@@ -37,11 +51,26 @@ pub fn render(
                 .block(styled_block("Cost"));
             frame.render_widget(widget, area);
         }
-        Some(Ok(items)) => render_table(frame, area, items, scroll),
+        Some(Ok(items)) => render_table(frame, area, items, scroll, collapsed),
     }
 }
 
-fn render_table(frame: &mut Frame, area: Rect, items: &[CostLine], scroll: &ScrollState) {
+pub(crate) fn collapse_plan(items: &[CostLine]) -> Option<longtail::Collapsed> {
+    let values: Vec<i64> = items
+        .iter()
+        .map(|item| (item.estimated_cost_usd.max(0.0) * 1_000_000.0) as i64)
+        .collect();
+    let total_cost: i64 = values.iter().sum();
+    longtail::collapse_tail(&values, total_cost)
+}
+
+fn render_table(
+    frame: &mut Frame,
+    area: Rect,
+    items: &[CostLine],
+    scroll: &ScrollState,
+    collapsed: Option<longtail::Collapsed>,
+) {
     let header = Row::new(vec![
         Cell::from("Source"),
         Cell::from("Model"),
@@ -53,18 +82,13 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[CostLine], scroll: &Scro
     .bottom_margin(1);
 
     // Fold the sub-2% cost tail (metric in micro-dollars) into a summary row.
-    let micros = |cost: f64| (cost.max(0.0) * 1_000_000.0) as i64;
-    let values: Vec<i64> = items
-        .iter()
-        .map(|item| micros(item.estimated_cost_usd))
-        .collect();
-    let total_cost: i64 = values.iter().sum();
-    let collapsed = longtail::collapse_tail(&values, total_cost);
     let shown = collapsed.map(|c| &items[..c.keep]).unwrap_or(items);
+    let visible_height = super::visible_table_rows(area);
 
     let mut rows: Vec<Row> = shown
         .iter()
         .skip(scroll.offset)
+        .take(visible_height)
         .enumerate()
         .map(|(i, item)| {
             let row = Row::new(vec![
@@ -82,7 +106,10 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[CostLine], scroll: &Scro
         })
         .collect();
 
-    if let Some(collapsed) = collapsed {
+    if let Some(collapsed) = collapsed.filter(|collapsed| {
+        collapsed.keep >= scroll.offset
+            && collapsed.keep < scroll.offset.saturating_add(visible_height)
+    }) {
         rows.push(
             Row::new(vec![
                 Cell::from(longtail::summary_label(&collapsed)),
