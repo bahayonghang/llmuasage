@@ -652,3 +652,34 @@ indicatif 进度条（OpenCode spinner / Codex/Claude 重放文件确定条）+ 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 20: 归档 sync 冷跑全量导入写入吞吐 backlog
+
+**Date**: 2026-07-20
+**Task**: 归档 sync 冷跑全量导入写入吞吐 backlog
+**Branch**: `dev`
+
+### Summary
+
+按用户要求归档未进入实施的 07-20-sync-cold-import-write-throughput 规划任务；未关联工作提交，保留其他 TUI 规划与 TODO.md 的未跟踪改动。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
