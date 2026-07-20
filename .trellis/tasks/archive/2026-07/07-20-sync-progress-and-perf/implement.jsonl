@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "sync 摘要、SyncEvent/bootstrap 事件契约与人类/JSON 输出分工的权威边界；进度条与统计表格改造不得越界"}
+{"file": ".trellis/tasks/archive/2026-07/07-19-claude-sync-scan-performance/prd.md", "reason": "上一轮扫描性能基线与测量方法（字节/行数/查询计划断言），本轮全链路 profiling 的对照起点"}

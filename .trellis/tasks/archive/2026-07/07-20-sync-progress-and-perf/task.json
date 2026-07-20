@@ -1,0 +1,31 @@
+{
+  "id": "sync-progress-and-perf",
+  "name": "sync-progress-and-perf",
+  "title": "sync 扫描进度条与展示性能优化",
+  "description": "为 llmusage sync 扫描过程设计进度条系统；深入分析同步/扫描性能问题；优化最终统计展示效果。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-07-20",
+  "completedAt": "2026-07-20",
+  "branch": null,
+  "base_branch": "dev",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-20-sync-progress-lifecycle",
+    "07-20-sync-summary-display",
+    "07-20-sync-full-profiling",
+    "07-20-sync-cold-import-write-throughput"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
