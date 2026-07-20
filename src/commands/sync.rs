@@ -1,6 +1,7 @@
 use std::{
-    io::{IsTerminal, Write},
+    io::IsTerminal,
     path::PathBuf,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -12,6 +13,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     app::AppContext,
+    commands::{sync_progress, sync_summary},
     models::SourceKind,
     parsers::{SourceSyncStats, SyncEvent, SyncSummaryEvent, driver},
     registry,
@@ -67,28 +69,56 @@ async fn run_with_human_events(
     store: &Store,
     options: &SyncRunOptions,
 ) -> Result<()> {
-    let mut progress = HumanProgress::new();
-    progress.render(&SyncEvent::BootstrapStarted);
-    let mut bootstrap_sink = |event: BootstrapProgressEvent| {
-        progress.render(&SyncEvent::from(event));
+    // 渲染器与 guard 的生命周期属于命令函数本身：bootstrap/锁阶段的 `?`
+    // 提前返回同样经 Drop 完成终端清理，不依赖 reporter task 是否已 spawn。
+    let renderer = Arc::new(Mutex::new(sync_progress::stderr_renderer()));
+    let _guard = sync_progress::TerminalGuard::new(Arc::clone(&renderer));
+    let render_stats = Arc::new(Mutex::new(sync_progress::RenderStats::default()));
+    let bootstrap_started = Instant::now();
+    sync_progress::render_shared_timed(&renderer, &render_stats, &SyncEvent::BootstrapStarted);
+    let bootstrap_renderer = Arc::clone(&renderer);
+    let bootstrap_stats = Arc::clone(&render_stats);
+    let mut bootstrap_sink = move |event: BootstrapProgressEvent| {
+        sync_progress::render_shared_timed(
+            &bootstrap_renderer,
+            &bootstrap_stats,
+            &SyncEvent::from(event),
+        );
     };
     store.bootstrap_with_progress(Some(&mut bootstrap_sink))?;
-    progress.render(&SyncEvent::LockWaiting { timeout_ms: 30_000 });
+    tracing::debug!(
+        bootstrap_ms = bootstrap_started.elapsed().as_millis() as u64,
+        "bootstrap finished"
+    );
+    sync_progress::render_shared(&renderer, &SyncEvent::LockWaiting { timeout_ms: 30_000 });
     let lock_started = Instant::now();
     let lock = store.acquire_worker_lock_with(Duration::from_secs(30), HolderKind::Cli)?;
     let heartbeat = lock.start_default_heartbeat();
     let lock_wait_ms = lock_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
-    progress.render(&SyncEvent::LockAcquired {
-        wait_ms: lock_wait_ms,
-    });
+    sync_progress::render_shared(
+        &renderer,
+        &SyncEvent::LockAcquired {
+            wait_ms: lock_wait_ms,
+        },
+    );
     store
         .run_log()
         .recover_running_runs(&["sync", "hook-run"])?;
     let (mut tx, mut rx) = mpsc::channel(128);
+    let cancel = CancellationToken::new();
+    let ctrl_c_tx = tx.clone();
+    let ctrl_c_cancel = cancel.clone();
+    let ctrl_c_task = tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            ctrl_c_cancel.cancel();
+            let _ = ctrl_c_tx.send(SyncEvent::Cancelled).await;
+        }
+    });
+    let reporter_renderer = Arc::clone(&renderer);
+    let reporter_stats = Arc::clone(&render_stats);
     let reporter = tokio::spawn(async move {
-        let mut progress = progress;
         while let Some(event) = rx.recv().await {
-            progress.render(&event);
+            sync_progress::render_shared_timed(&reporter_renderer, &reporter_stats, &event);
         }
     });
 
@@ -100,7 +130,9 @@ async fn run_with_human_events(
     let summary_result = super::run_tracked(
         store,
         command_name,
-        async { run_once_with_options(app, store, lock_wait_ms, options, Some(&mut tx)).await },
+        async {
+            run_once_with_cancel(app, store, lock_wait_ms, options, Some(&mut tx), &cancel).await
+        },
         |item| {
             Some(format!(
                 "sources={} seen={} inserted_delta={} stored_events={}",
@@ -119,8 +151,19 @@ async fn run_with_human_events(
             })
             .await;
     }
+    // 先停掉 Ctrl-C 监听并等其资源释放：它持有的 tx 克隆随任务结束而 drop，
+    // 否则 channel 永不关闭、reporter 永不退出（死锁）。
+    ctrl_c_task.abort();
+    let _ = ctrl_c_task.await;
     drop(tx);
     let _ = reporter.await;
+    if let Ok(stats) = render_stats.lock() {
+        tracing::debug!(
+            render_calls = stats.calls,
+            render_ms = stats.nanos / 1_000_000,
+            "progress render cost"
+        );
+    }
     let summary = summary_result?;
     drop(heartbeat);
     drop(lock);
@@ -136,6 +179,15 @@ async fn run_with_json_events(
     options: &SyncRunOptions,
 ) -> Result<()> {
     let (mut tx, mut rx) = mpsc::channel(128);
+    // JSON 路径只接取消 token，不挂渲染器；driver 在多 parser 的取消边界自行
+    // 发 Cancelled，单 parser（--source）取消时 NDJSON 以 finished 收尾。
+    let cancel = CancellationToken::new();
+    let ctrl_c_cancel = cancel.clone();
+    let ctrl_c_task = tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            ctrl_c_cancel.cancel();
+        }
+    });
     tx.send(SyncEvent::Started {
         job_id: "cli".to_string(),
         files_total: 0,
@@ -178,7 +230,10 @@ async fn run_with_json_events(
         let summary = super::run_tracked(
             store,
             command_name,
-            async { run_once_with_options(app, store, lock_wait_ms, options, Some(&mut tx)).await },
+            async {
+                run_once_with_cancel(app, store, lock_wait_ms, options, Some(&mut tx), &cancel)
+                    .await
+            },
             |item| {
                 Some(format!(
                     "sources={} seen={} inserted_delta={} stored_events={}",
@@ -217,30 +272,18 @@ async fn run_with_json_events(
     }
     drop(tx);
     collector.await??;
+    // JSON 路径的 ctrl-c 任务不持 channel 克隆，abort 顺序无害；await 仅为与
+    // human 路径对称、确保任务资源已释放。
+    ctrl_c_task.abort();
+    let _ = ctrl_c_task.await;
     result.map(|_| ())
 }
 
 fn print_summary(summary: &SyncSummary, options: &SyncRunOptions) {
-    println!("Sync finished:");
-    if options.rebuild {
-        println!("- rebuild: reset parser-backed usage state source by source before sync");
+    let color = std::io::stdout().is_terminal();
+    for line in sync_summary::format_summary_lines(summary, options.rebuild, color) {
+        println!("{line}");
     }
-    for item in &summary.sources {
-        println!(
-            "- {}: files={} changed={} skipped={} seen={} committed={} stored_events={}",
-            item.source,
-            item.files_processed,
-            item.changed_files,
-            item.skipped_files,
-            item.events_seen,
-            item.events_inserted,
-            item.stored_events
-        );
-    }
-    println!(
-        "- totals: seen={} inserted_delta={} stored_events={}",
-        summary.total_seen, summary.total_inserted, summary.stored_events
-    );
 }
 
 pub async fn run_once(_app: &AppContext, store: &Store, lock_wait_ms: u64) -> Result<SyncSummary> {
@@ -332,6 +375,7 @@ async fn run_once_locked(
      * 4) 最后刷新每源诊断状态
      */
     info!("开始执行 sync 三阶段流水线");
+    let pipeline_started = Instant::now();
 
     let parsers = registry::registered_parsers()
         .into_iter()
@@ -374,6 +418,7 @@ async fn run_once_locked(
             .map(|descriptor| descriptor.kind)
             .collect(),
     };
+    let driver_started = Instant::now();
     let sources = driver::drive_with_events(driver::DriveContext {
         parsers: &parsers,
         store,
@@ -385,15 +430,22 @@ async fn run_once_locked(
         cancel,
     })
     .await?;
+    tracing::debug!(
+        driver_ms = driver_started.elapsed().as_millis() as u64,
+        "driver finished"
+    );
     let mut total_seen = 0usize;
     let mut total_inserted = 0usize;
     let mut sync_statuses = Vec::new();
     let mut source_stats = Vec::with_capacity(sources.len());
 
+    let stored_query_started = Instant::now();
+    let mut stored_queries = 0u64;
     for mut source in sources {
         total_seen += source.events_seen;
         total_inserted += source.events_inserted;
         source.stored_events = stored_events_for_source(store, source.source)?;
+        stored_queries += 1;
         sync_statuses.push(SourceSyncStatus {
             source: source.source.as_str().to_string(),
             files_processed: source.files_processed as i64,
@@ -415,6 +467,7 @@ async fn run_once_locked(
     }
     for source in parserless_sources {
         let stored_events = stored_events_for_source(store, source)?;
+        stored_queries += 1;
         sync_statuses.push(SourceSyncStatus {
             source: source.as_str().to_string(),
             files_processed: 0,
@@ -440,6 +493,11 @@ async fn run_once_locked(
         });
     }
     writer.finish_sync_run()?;
+    tracing::debug!(
+        stored_query_ms = stored_query_started.elapsed().as_millis() as u64,
+        stored_queries,
+        "stored_events queries finished"
+    );
     for source in &source_stats {
         if registry::source_descriptor(source.source)
             .is_some_and(|descriptor| descriptor.capabilities.parser)
@@ -453,6 +511,10 @@ async fn run_once_locked(
 
     let stored_events = stored_event_count(store, options.source)?;
     let stats = source_stats;
+    tracing::debug!(
+        pipeline_ms = pipeline_started.elapsed().as_millis() as u64,
+        "sync pipeline finished"
+    );
     info!("完成 sync 三阶段流水线");
     Ok(SyncSummary {
         sources: stats,
@@ -585,209 +647,4 @@ fn rebuild_sources(
     parser_sources: &[SourceKind],
 ) -> Vec<SourceKind> {
     selected_source.map_or_else(|| parser_sources.to_vec(), |source| vec![source])
-}
-
-struct HumanProgress {
-    stderr: std::io::Stderr,
-    tty: bool,
-    last_line_len: usize,
-}
-
-impl HumanProgress {
-    fn new() -> Self {
-        let stderr = std::io::stderr();
-        let tty = stderr.is_terminal();
-        Self {
-            stderr,
-            tty,
-            last_line_len: 0,
-        }
-    }
-
-    fn render(&mut self, event: &SyncEvent) {
-        let Some(line) = human_progress_line(event) else {
-            return;
-        };
-        if self.tty {
-            let padding = self.last_line_len.saturating_sub(line.chars().count());
-            let _ = write!(self.stderr, "\r{line}{}", " ".repeat(padding));
-            let _ = self.stderr.flush();
-            self.last_line_len = line.chars().count();
-            if matches!(
-                event,
-                SyncEvent::SourceFinished { .. }
-                    | SyncEvent::MigrationFinished { .. }
-                    | SyncEvent::PricingBucketReconcileStarted { .. }
-                    | SyncEvent::PricingUpgradeFinished { .. }
-                    | SyncEvent::LockAcquired { .. }
-            ) {
-                let _ = writeln!(self.stderr);
-                self.last_line_len = 0;
-            }
-        } else {
-            let _ = writeln!(self.stderr, "{line}");
-        }
-    }
-}
-
-fn human_progress_line(event: &SyncEvent) -> Option<String> {
-    match event {
-        SyncEvent::BootstrapStarted => Some("检查数据库 schema 与定价目录...".to_string()),
-        SyncEvent::MigrationStarted {
-            version,
-            name,
-            latest_version,
-        } => Some(format!(
-            "升级数据库 schema v0 → v{latest_version}，正在执行 v{version} {name}..."
-        )),
-        SyncEvent::MigrationFinished {
-            version,
-            name,
-            elapsed_ms,
-        } => Some(format!(
-            "数据库 schema v{version} {name} 完成（{elapsed_ms}ms）"
-        )),
-        SyncEvent::PricingUpgradeStarted {
-            from_version,
-            to_version,
-            total_events,
-        } => Some(format!(
-            "升级定价目录 {from_version} → {to_version}：共 {total_events} 条事件..."
-        )),
-        SyncEvent::PricingUpgradeProgress {
-            from_version,
-            to_version,
-            processed_events,
-            total_events,
-            elapsed_ms,
-        } => {
-            let percentage = if *total_events == 0 {
-                100.0
-            } else {
-                *processed_events as f64 * 100.0 / *total_events as f64
-            };
-            Some(format!(
-                "升级定价目录 {from_version} → {to_version}：已处理 {processed_events}/{total_events} 条（{percentage:.1}%），已用 {elapsed_ms}ms"
-            ))
-        }
-        SyncEvent::PricingBucketReconcileStarted {
-            to_version,
-            bucket_count,
-        } => Some(format!(
-            "事件定价完成，正在对账 {bucket_count} 个 {to_version} 汇总桶..."
-        )),
-        SyncEvent::PricingUpgradeFinished {
-            to_version,
-            updated_events,
-            bucket_count,
-            deleted_orphan_buckets,
-            elapsed_ms,
-            ..
-        } => Some(format!(
-            "定价目录 {to_version} 升级完成：{updated_events} 条事件，{bucket_count} 个桶，清理 {deleted_orphan_buckets} 个孤立桶（{elapsed_ms}ms）"
-        )),
-        SyncEvent::LockWaiting { .. } => Some("等待 SQLite sync worker 锁...".to_string()),
-        SyncEvent::LockAcquired { wait_ms } => {
-            Some(format!("已获取 SQLite sync worker 锁（等待 {wait_ms}ms）"))
-        }
-        SyncEvent::SourceStarted {
-            source,
-            files_total,
-        } => Some(format!(
-            "{}: 扫描 {files_total} 个文件...",
-            source_label(*source)
-        )),
-        SyncEvent::Progress {
-            source,
-            files_scanned,
-            records_imported,
-            ..
-        } => Some(format!(
-            "{}: 已处理 {files_scanned}，导入 {records_imported} 条",
-            source_label(*source)
-        )),
-        SyncEvent::SourceFinished { source, stats } => Some(format!(
-            "{}: 完成，文件 {} 个，跳过 {} 个，提交 {} 条",
-            source_label(*source),
-            stats.files_processed,
-            stats.skipped_files,
-            stats.events_inserted
-        )),
-        SyncEvent::Failed { error } => Some(format!("同步失败：{error}")),
-        SyncEvent::Cancelled => Some("同步已取消".to_string()),
-        SyncEvent::Started { .. } | SyncEvent::Finished { .. } | SyncEvent::RecentReady { .. } => {
-            None
-        }
-    }
-}
-
-fn source_label(source: SourceKind) -> &'static str {
-    match source {
-        SourceKind::Codex => "Codex",
-        SourceKind::Claude => "Claude",
-        SourceKind::Opencode => "OpenCode",
-        SourceKind::Antigravity => "Antigravity",
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn human_progress_describes_pricing_upgrade_phases() {
-        assert_eq!(
-            human_progress_line(&SyncEvent::BootstrapStarted).as_deref(),
-            Some("检查数据库 schema 与定价目录...")
-        );
-        assert_eq!(
-            human_progress_line(&SyncEvent::PricingUpgradeProgress {
-                from_version: "static-v1".to_string(),
-                to_version: "static-v2".to_string(),
-                processed_events: 25_000,
-                total_events: 50_000,
-                elapsed_ms: 1_234,
-            })
-            .as_deref(),
-            Some("升级定价目录 static-v1 → static-v2：已处理 25000/50000 条（50.0%），已用 1234ms")
-        );
-        assert_eq!(
-            human_progress_line(&SyncEvent::PricingBucketReconcileStarted {
-                to_version: "static-v2".to_string(),
-                bucket_count: 7_153,
-            })
-            .as_deref(),
-            Some("事件定价完成，正在对账 7153 个 static-v2 汇总桶...")
-        );
-        assert_eq!(
-            human_progress_line(&SyncEvent::PricingUpgradeFinished {
-                from_version: "static-v1".to_string(),
-                to_version: "static-v2".to_string(),
-                updated_events: 539_146,
-                bucket_count: 7_153,
-                deleted_orphan_buckets: 2,
-                elapsed_ms: 46_000,
-            })
-            .as_deref(),
-            Some(
-                "定价目录 static-v2 升级完成：539146 条事件，7153 个桶，清理 2 个孤立桶（46000ms）"
-            )
-        );
-    }
-
-    #[test]
-    fn pricing_sync_event_serializes_as_additive_snake_case_ndjson() -> anyhow::Result<()> {
-        let value = serde_json::to_value(SyncEvent::PricingUpgradeProgress {
-            from_version: "static-v1".to_string(),
-            to_version: "static-v2".to_string(),
-            processed_events: 25_000,
-            total_events: 50_000,
-            elapsed_ms: 1_234,
-        })?;
-
-        assert_eq!(value["event"], "pricing_upgrade_progress");
-        assert_eq!(value["processed_events"], 25_000);
-        assert_eq!(value["total_events"], 50_000);
-        Ok(())
-    }
 }

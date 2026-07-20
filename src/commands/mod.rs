@@ -26,6 +26,8 @@ pub mod source_status;
 pub mod status;
 pub mod statusline;
 pub mod sync;
+pub mod sync_progress;
+pub mod sync_summary;
 pub mod tui;
 pub mod uninstall;
 

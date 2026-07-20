@@ -930,6 +930,47 @@ fn json_events_subprocess_emits_ndjson_per_event() -> Result<()> {
     Ok(())
 }
 
+/// Validates the human progress surface: piped (non-TTY) `llmusage sync`
+/// writes no ANSI escape sequences to stderr, both with the default renderer
+/// selection and with `LLMUSAGE_PROGRESS=off` forcing the line renderer.
+#[test]
+fn human_sync_subprocess_stderr_contains_no_ansi_escapes() -> Result<()> {
+    for progress_env in [None, Some("off")] {
+        let temp = TempDir::new()?;
+        let home = temp.path().join("home");
+        let root = temp.path().join(".llmusage");
+        fs::create_dir_all(&home)?;
+
+        let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_llmusage"));
+        command
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .arg("--home")
+            .arg(&root)
+            .args(["sync", "--source", "codex"])
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .env("CODEX_HOME", home.join(".codex"))
+            .env("OPENCODE_HOME", home.join("opencode"))
+            .env("LLMUSAGE_LOG", "info")
+            .env("RUST_LOG", "off");
+        if let Some(value) = progress_env {
+            command.env("LLMUSAGE_PROGRESS", value);
+        }
+        let output = command.output()?;
+        assert!(output.status.success(), "{output:?}");
+        assert!(
+            !output.stderr.contains(&0x1B),
+            "sync human stderr must not contain ANSI escapes (LLMUSAGE_PROGRESS={progress_env:?}): {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            !output.stdout.contains(&0x1B),
+            "sync summary stdout must not contain ANSI escapes (LLMUSAGE_PROGRESS={progress_env:?})"
+        );
+    }
+    Ok(())
+}
+
 struct OpencodeFixture {
     _root: TempDir,
     paths: AppPaths,
