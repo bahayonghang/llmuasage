@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/07-20-tui-optimization/research/llmusage-tui-analysis.md", "reason": "跨子任务验收 X1-X7 的证据基线"}
+{"file": ".trellis/spec/llmusage/backend/dashboard-performance-contracts.md", "reason": "契约红线：交互载荷/取消/预算"}

@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/07-20-tui-optimization/research/llmusage-tui-analysis.md", "reason": "证据：§1 重绘策略、§4 每帧分配、§5 P2 主题锁/Tick 积压"}
+{"file": ".trellis/tasks/07-20-tui-optimization/research/tokscale-patterns.md", "reason": "tokscale 模式 3/10/11：世代 memo/行窗口化/色表重建时机"}

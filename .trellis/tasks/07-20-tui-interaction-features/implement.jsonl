@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/07-20-tui-optimization/research/llmusage-tui-analysis.md", "reason": "证据：§3 功能清单、§5 死代码清单（面板/字段/spinner/高亮）"}
+{"file": ".trellis/tasks/07-20-tui-optimization/research/tokscale-patterns.md", "reason": "tokscale §4 交互基线与模式 9/10/14 参照"}

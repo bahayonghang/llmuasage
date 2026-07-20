@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/llmusage/backend/dashboard-performance-contracts.md", "reason": "验收对照：取消/中断/世代契约与 web 零回归"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "数据语义回归红线（token/成本口径）"}
