@@ -1,7 +1,7 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
@@ -45,9 +45,9 @@ fn render_payload(frame: &mut Frame, area: Rect, payload: &HealthPayload) {
             .iter()
             .map(|i| {
                 let status_color = if i.status == "ok" || i.status == "active" {
-                    Color::Green
+                    theme::positive_fg()
                 } else {
-                    Color::Yellow
+                    theme::warning_fg()
                 };
                 Line::from(vec![
                     Span::raw(format!("  {} ", i.source)),
@@ -91,7 +91,7 @@ fn render_payload(frame: &mut Frame, area: Rect, payload: &HealthPayload) {
     let fail_lines: Vec<Line> = if payload.recent_failures.is_empty() {
         vec![Line::styled(
             "无失败记录 ✓",
-            Style::default().fg(Color::Green),
+            Style::default().fg(theme::positive_fg()),
         )]
     } else {
         payload
@@ -102,13 +102,13 @@ fn render_payload(frame: &mut Frame, area: Rect, payload: &HealthPayload) {
                 Some(err) => Line::from(vec![
                     Span::styled(
                         format!("  {} ", r.command),
-                        Style::default().fg(Color::Yellow),
+                        Style::default().fg(theme::warning_fg()),
                     ),
-                    Span::styled(err.as_str(), Style::default().fg(Color::Red)),
+                    Span::styled(err.as_str(), Style::default().fg(theme::error_fg())),
                 ]),
                 None => Line::styled(
                     format!("  {}", r.command),
-                    Style::default().fg(Color::Yellow),
+                    Style::default().fg(theme::warning_fg()),
                 ),
             })
             .collect()

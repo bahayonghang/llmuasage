@@ -1,7 +1,7 @@
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
@@ -92,10 +92,7 @@ fn render_list(frame: &mut Frame, area: Rect, state: &AppState) {
         );
 
         let style = if selected_row {
-            Style::default()
-                .fg(Color::Black)
-                .bg(theme::accent())
-                .add_modifier(Modifier::BOLD)
+            theme::selection_style()
         } else if active {
             Style::default()
                 .fg(theme::positive_fg())

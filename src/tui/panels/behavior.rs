@@ -7,7 +7,14 @@ use ratatui::{
 };
 
 use crate::query::{BehaviorSupport, ModelComparePayload, OptimizePayload, ZombieReport};
-use crate::tui::{app::BehaviorPanelPayload, theme};
+use crate::tui::{
+    app::BehaviorPanelPayload,
+    format::{
+        cost as format_cost, grouped as format_number, metric_value as format_metric_value,
+        percent_ratio as format_percent,
+    },
+    theme,
+};
 
 /// Render the terminal behavior analytics summary.
 pub fn render(frame: &mut Frame, area: Rect, data: &Option<Result<BehaviorPanelPayload, String>>) {
@@ -134,7 +141,7 @@ fn render_optimize(
             Span::styled(
                 format!("Score {} ({}) ", payload.score, payload.grade),
                 Style::default()
-                    .fg(Color::Green)
+                    .fg(theme::positive_fg())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw(format!(
@@ -187,7 +194,7 @@ fn render_optimize(
             Span::styled(
                 format!("僵尸 {} ", zombie.zombies.len()),
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(theme::warning_fg())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw(format!(
@@ -207,7 +214,7 @@ fn render_compare(frame: &mut Frame, area: Rect, payload: &ModelComparePayload) 
             Span::styled(
                 "警告 ",
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(theme::warning_fg())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw(warning.clone()),
@@ -309,11 +316,11 @@ fn support_line(support: &BehaviorSupport) -> Line<'_> {
     let level = support_level_label(&support.level);
     let status_style = if support.supported {
         Style::default()
-            .fg(Color::Green)
+            .fg(theme::positive_fg())
             .add_modifier(Modifier::BOLD)
     } else {
         Style::default()
-            .fg(Color::Yellow)
+            .fg(theme::warning_fg())
             .add_modifier(Modifier::BOLD)
     };
     let mut spans = vec![
@@ -339,44 +346,8 @@ fn support_level_label(level: &str) -> String {
 
 fn severity_color(severity: &str) -> Color {
     match severity {
-        "high" => Color::Red,
-        "medium" => Color::Yellow,
-        _ => Color::Green,
-    }
-}
-
-fn format_cost(cost: f64) -> String {
-    format!("${cost:.2}")
-}
-
-fn format_percent(value: f64) -> String {
-    format!("{:.1}%", value * 100.0)
-}
-
-fn format_metric_value(value: f64) -> String {
-    if (0.0..=1.0).contains(&value) {
-        format_percent(value)
-    } else {
-        format!("{value:.2}")
-    }
-}
-
-fn format_number(n: i64) -> String {
-    if n == 0 {
-        return "0".to_string();
-    }
-    let s = n.abs().to_string();
-    let mut result = String::new();
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-    }
-    let formatted: String = result.chars().rev().collect();
-    if n < 0 {
-        format!("-{formatted}")
-    } else {
-        formatted
+        "high" => theme::error_fg(),
+        "medium" => theme::warning_fg(),
+        _ => theme::positive_fg(),
     }
 }

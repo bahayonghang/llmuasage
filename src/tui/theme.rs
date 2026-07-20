@@ -25,9 +25,18 @@ pub struct Theme {
     pub border_active: Color,
     pub border_normal: Color,
     pub error_fg: Color,
+    pub warning_fg: Color,
     pub positive_fg: Color,
     pub muted_fg: Color,
+    pub surface_fg: Color,
     pub row_alt_bg: Color,
+    pub selection_fg: Color,
+    pub selection_bg: Color,
+    pub metric_input: Color,
+    pub metric_output: Color,
+    pub metric_cache_read: Color,
+    pub metric_cache_write: Color,
+    pub metric_reasoning: Color,
     pub kpi_colors: [Color; 4],
     pub trend_bar_fg: Color,
     pub trend_peak_fg: Color,
@@ -52,9 +61,18 @@ impl Theme {
             border_active: Color::Cyan,
             border_normal: Color::DarkGray,
             error_fg: Color::Red,
+            warning_fg: Color::Yellow,
             positive_fg: Color::Green,
             muted_fg: Color::DarkGray,
+            surface_fg: Color::White,
             row_alt_bg: Color::Rgb(30, 30, 40),
+            selection_fg: Color::Black,
+            selection_bg: Color::Cyan,
+            metric_input: Color::Cyan,
+            metric_output: Color::Green,
+            metric_cache_read: Color::Blue,
+            metric_cache_write: Color::Magenta,
+            metric_reasoning: Color::Yellow,
             kpi_colors: [Color::Cyan, Color::Green, Color::Yellow, Color::Magenta],
             trend_bar_fg: Color::Blue,
             trend_peak_fg: Color::Yellow,
@@ -76,15 +94,24 @@ impl Theme {
     pub const fn catppuccin_mocha() -> Self {
         Self {
             name: "mocha",
-            accent: Color::Rgb(137, 180, 250),        // blue
-            accent_dim: Color::Rgb(88, 91, 112),      // surface2
-            header_fg: Color::Rgb(203, 166, 247),     // mauve
-            border_active: Color::Rgb(137, 180, 250), // blue
-            border_normal: Color::Rgb(69, 71, 90),    // surface1
-            error_fg: Color::Rgb(243, 139, 168),      // red
-            positive_fg: Color::Rgb(166, 227, 161),   // green
-            muted_fg: Color::Rgb(127, 132, 156),      // overlay1
-            row_alt_bg: Color::Rgb(41, 44, 60),       // surface0-ish
+            accent: Color::Rgb(137, 180, 250),             // blue
+            accent_dim: Color::Rgb(88, 91, 112),           // surface2
+            header_fg: Color::Rgb(203, 166, 247),          // mauve
+            border_active: Color::Rgb(137, 180, 250),      // blue
+            border_normal: Color::Rgb(69, 71, 90),         // surface1
+            error_fg: Color::Rgb(243, 139, 168),           // red
+            warning_fg: Color::Rgb(249, 226, 175),         // yellow
+            positive_fg: Color::Rgb(166, 227, 161),        // green
+            muted_fg: Color::Rgb(127, 132, 156),           // overlay1
+            surface_fg: Color::Rgb(205, 214, 244),         // text
+            row_alt_bg: Color::Rgb(41, 44, 60),            // surface0-ish
+            selection_fg: Color::Rgb(30, 30, 46),          // crust
+            selection_bg: Color::Rgb(137, 180, 250),       // blue
+            metric_input: Color::Rgb(137, 180, 250),       // blue
+            metric_output: Color::Rgb(166, 227, 161),      // green
+            metric_cache_read: Color::Rgb(137, 180, 250),  // blue
+            metric_cache_write: Color::Rgb(203, 166, 247), // mauve
+            metric_reasoning: Color::Rgb(249, 226, 175),   // yellow
             kpi_colors: [
                 Color::Rgb(137, 180, 250), // blue
                 Color::Rgb(166, 227, 161), // green
@@ -194,6 +221,11 @@ pub fn error_fg() -> Color {
     active_theme().error_fg
 }
 
+/// Color for warning and degraded values.
+pub fn warning_fg() -> Color {
+    active_theme().warning_fg
+}
+
 /// Color for success/positive values.
 pub fn positive_fg() -> Color {
     active_theme().positive_fg
@@ -204,6 +236,11 @@ pub fn muted_fg() -> Color {
     active_theme().muted_fg
 }
 
+/// Primary foreground for unselected terminal surfaces.
+pub fn surface_fg() -> Color {
+    active_theme().surface_fg
+}
+
 /// Alternating row background (subtle).
 pub fn row_alt_bg() -> Color {
     active_theme().row_alt_bg
@@ -212,6 +249,26 @@ pub fn row_alt_bg() -> Color {
 /// KPI card colors (one per card).
 pub fn kpi_colors() -> [Color; 4] {
     active_theme().kpi_colors
+}
+
+pub fn metric_input() -> Color {
+    active_theme().metric_input
+}
+
+pub fn metric_output() -> Color {
+    active_theme().metric_output
+}
+
+pub fn metric_cache_read() -> Color {
+    active_theme().metric_cache_read
+}
+
+pub fn metric_cache_write() -> Color {
+    active_theme().metric_cache_write
+}
+
+pub fn metric_reasoning() -> Color {
+    active_theme().metric_reasoning
 }
 
 /// Primary bar color for the trends cockpit.
@@ -269,14 +326,23 @@ pub fn row_alt_style() -> Style {
 /// Style for the active nav tab.
 pub fn nav_active_style() -> Style {
     Style::default()
-        .fg(Color::Black)
-        .bg(accent())
+        .fg(active_theme().selection_fg)
+        .bg(active_theme().selection_bg)
         .add_modifier(Modifier::BOLD)
 }
 
 /// Style for inactive nav tabs.
 pub fn nav_inactive_style() -> Style {
-    Style::default().fg(Color::White)
+    Style::default().fg(surface_fg())
+}
+
+/// Style for selected rows and picker entries.
+pub fn selection_style() -> Style {
+    let theme = active_theme();
+    Style::default()
+        .fg(theme.selection_fg)
+        .bg(theme.selection_bg)
+        .add_modifier(Modifier::BOLD)
 }
 
 /// Style for block borders (active panel).
@@ -345,6 +411,13 @@ mod tests {
         assert_eq!(theme.accent, Color::Cyan);
         assert_eq!(theme.muted_fg, Color::DarkGray);
         assert_eq!(theme.row_alt_bg, Color::Rgb(30, 30, 40));
+        assert_eq!(theme.selection_fg, Color::Black);
+        assert_eq!(theme.selection_bg, Color::Cyan);
+        assert_eq!(theme.metric_input, Color::Cyan);
+        assert_eq!(theme.metric_output, Color::Green);
+        assert_eq!(theme.metric_cache_read, Color::Blue);
+        assert_eq!(theme.metric_cache_write, Color::Magenta);
+        assert_eq!(theme.metric_reasoning, Color::Yellow);
         assert_eq!(
             theme.kpi_colors,
             [Color::Cyan, Color::Green, Color::Yellow, Color::Magenta]
@@ -371,5 +444,32 @@ mod tests {
         assert_eq!(bar_color(10.0), Color::Green);
         assert_eq!(bar_color(60.0), Color::Yellow);
         assert_eq!(bar_color(95.0), Color::Red);
+    }
+
+    #[test]
+    fn tui_panels_do_not_bypass_semantic_theme_slots() {
+        let sources = [
+            ("behavior", include_str!("panels/behavior.rs")),
+            ("blocks", include_str!("panels/blocks.rs")),
+            ("cost", include_str!("panels/cost.rs")),
+            ("daily", include_str!("panels/daily.rs")),
+            ("health", include_str!("panels/health.rs")),
+            ("hourly", include_str!("panels/hourly.rs")),
+            ("models", include_str!("panels/models.rs")),
+            ("overview", include_str!("panels/overview.rs")),
+            ("projects", include_str!("panels/projects.rs")),
+            ("sources", include_str!("panels/sources.rs")),
+            ("stats", include_str!("panels/stats.rs")),
+            ("trends", include_str!("panels/trends.rs")),
+            ("usage", include_str!("panels/usage.rs")),
+            ("source_picker", include_str!("source_picker.rs")),
+        ];
+
+        for (name, source) in sources {
+            assert!(
+                !source.contains("Color::"),
+                "{name} must use semantic theme slots instead of Color::*"
+            );
+        }
     }
 }

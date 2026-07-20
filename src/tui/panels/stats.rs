@@ -9,7 +9,11 @@ use ratatui::{
 
 use crate::{
     query::{HeatmapPoint, SourceBreakdown},
-    tui::{app::StatsPanelPayload, theme},
+    tui::{
+        app::StatsPanelPayload,
+        format::{grouped as format_number, tokens as format_tokens},
+        theme,
+    },
 };
 
 use super::super::app::ScrollState;
@@ -118,45 +122,48 @@ fn render_summary(frame: &mut Frame, area: Rect, payload: &StatsPanelPayload) {
             Span::styled("total tokens ", theme::muted_style()),
             Span::styled(
                 format_tokens(payload.overview.total.total_tokens),
-                metric_style(Color::Cyan),
+                metric_style(theme::metric_input()),
             ),
             Span::styled("  events ", theme::muted_style()),
             Span::styled(
                 format_number(payload.overview.total_events),
-                metric_style(Color::Green),
+                metric_style(theme::metric_output()),
             ),
             Span::styled("  cost ", theme::muted_style()),
             Span::styled(
                 format!("${:.2}", payload.overview.total_cost_usd),
-                metric_style(Color::Yellow),
+                metric_style(theme::metric_reasoning()),
             ),
         ]),
         Line::from(vec![
             Span::styled("active days ", theme::muted_style()),
-            Span::styled(active_days.to_string(), metric_style(Color::Green)),
+            Span::styled(active_days.to_string(), metric_style(theme::positive_fg())),
             Span::styled("  current streak ", theme::muted_style()),
             Span::styled(
                 format!("{current_streak}/{longest_streak}d"),
-                metric_style(Color::Magenta),
+                metric_style(theme::metric_cache_write()),
             ),
             Span::styled("  best day ", theme::muted_style()),
-            Span::styled(best_day_text, metric_style(Color::Cyan)),
+            Span::styled(best_day_text, metric_style(theme::metric_input())),
         ]),
         Line::from(vec![
             Span::styled("sources ", theme::muted_style()),
-            Span::styled(payload.sources.len().to_string(), metric_style(Color::Cyan)),
+            Span::styled(
+                payload.sources.len().to_string(),
+                metric_style(theme::metric_input()),
+            ),
             Span::styled("  cache read ", theme::muted_style()),
             Span::styled(
                 format!("{:.1}%", payload.overview.cache_efficiency * 100.0),
-                metric_style(Color::Green),
+                metric_style(theme::positive_fg()),
             ),
             Span::styled("  failures ", theme::muted_style()),
             Span::styled(
                 payload.health.recent_failures.len().to_string(),
                 if payload.health.recent_failures.is_empty() {
-                    metric_style(Color::Green)
+                    metric_style(theme::positive_fg())
                 } else {
-                    metric_style(Color::Yellow)
+                    metric_style(theme::warning_fg())
                 },
             ),
         ]),
@@ -332,7 +339,7 @@ fn render_sources(
     if sources.is_empty() {
         let empty = Paragraph::new("No source contribution data.")
             .style(theme::muted_style())
-            .block(theme::trend_card_block("Source Mix", Color::Cyan));
+            .block(theme::trend_card_block("Source Mix", theme::metric_input()));
         frame.render_widget(empty, area);
         return;
     }
@@ -357,7 +364,7 @@ fn render_sources(
         .bottom_margin(1);
     let table = Table::new(rows, source_widths(very_narrow, narrow))
         .header(header)
-        .block(theme::trend_card_block("Source Mix", Color::Cyan));
+        .block(theme::trend_card_block("Source Mix", theme::metric_input()));
     frame.render_widget(table, area);
 }
 
@@ -371,20 +378,20 @@ fn render_health_summary(frame: &mut Frame, area: Rect, payload: &StatsPanelPayl
             Span::styled("integrations ", theme::muted_style()),
             Span::styled(
                 payload.health.integrations.len().to_string(),
-                metric_style(Color::Cyan),
+                metric_style(theme::metric_input()),
             ),
             Span::styled("  cursors ", theme::muted_style()),
             Span::styled(
                 payload.health.cursors.len().to_string(),
-                metric_style(Color::Green),
+                metric_style(theme::positive_fg()),
             ),
             Span::styled("  recent failures ", theme::muted_style()),
             Span::styled(
                 payload.health.recent_failures.len().to_string(),
                 if payload.health.recent_failures.is_empty() {
-                    metric_style(Color::Green)
+                    metric_style(theme::positive_fg())
                 } else {
-                    metric_style(Color::Yellow)
+                    metric_style(theme::warning_fg())
                 },
             ),
         ]),
@@ -394,7 +401,10 @@ fn render_health_summary(frame: &mut Frame, area: Rect, payload: &StatsPanelPayl
         ),
     ];
     frame.render_widget(
-        Paragraph::new(lines).block(theme::trend_card_block("Health Signals", Color::Magenta)),
+        Paragraph::new(lines).block(theme::trend_card_block(
+            "Health Signals",
+            theme::metric_cache_write(),
+        )),
         area,
     );
 }
@@ -429,7 +439,7 @@ fn source_row(
                     .unwrap_or_else(|| "-".to_string()),
             ),
             Cell::from(render_bar(source.total_tokens, max_tokens, 20))
-                .style(Style::default().fg(Color::Green)),
+                .style(Style::default().fg(theme::positive_fg())),
         ])
     };
 
@@ -560,36 +570,6 @@ fn compact_date(date: &str) -> String {
 
 fn metric_style(color: Color) -> Style {
     Style::default().fg(color).add_modifier(Modifier::BOLD)
-}
-
-fn format_tokens(value: i64) -> String {
-    if value.abs() >= 1_000_000 {
-        format!("{:.1}M", value as f64 / 1_000_000.0)
-    } else if value.abs() >= 10_000 {
-        format!("{:.1}k", value as f64 / 1_000.0)
-    } else {
-        format_number(value)
-    }
-}
-
-fn format_number(value: i64) -> String {
-    if value == 0 {
-        return "0".to_string();
-    }
-    let s = value.abs().to_string();
-    let mut result = String::new();
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-    }
-    let formatted: String = result.chars().rev().collect();
-    if value < 0 {
-        format!("-{formatted}")
-    } else {
-        formatted
-    }
 }
 
 #[cfg(test)]

@@ -7,7 +7,10 @@ use ratatui::{
 };
 
 use crate::query::DailyTrendPoint;
-use crate::tui::theme;
+use crate::tui::{
+    format::{cost as format_cost, grouped as format_number, tokens as format_tokens},
+    theme,
+};
 
 use super::super::app::ScrollState;
 
@@ -63,7 +66,7 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[DailyTrendPoint], scroll
                 vec![
                     Cell::from(compact_date(&day.date)),
                     Cell::from(format_cost(day.cost_with_cache_usd))
-                        .style(Style::default().fg(Color::Green)),
+                        .style(Style::default().fg(theme::positive_fg())),
                 ]
             } else if narrow {
                 vec![
@@ -71,23 +74,25 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[DailyTrendPoint], scroll
                     Cell::from(format_number(day.event_count)),
                     Cell::from(format_tokens(day.total_tokens)),
                     Cell::from(format_cost(day.cost_with_cache_usd))
-                        .style(Style::default().fg(Color::Green)),
+                        .style(Style::default().fg(theme::positive_fg())),
                 ]
             } else {
                 vec![
                     Cell::from(day.date.clone())
                         .style(Style::default().add_modifier(Modifier::BOLD)),
                     Cell::from(format_number(day.event_count)),
-                    Cell::from(format_tokens(day.input_tokens)).style(metric_style(Color::Cyan)),
-                    Cell::from(format_tokens(day.output_tokens)).style(metric_style(Color::Green)),
+                    Cell::from(format_tokens(day.input_tokens))
+                        .style(metric_style(theme::metric_input())),
+                    Cell::from(format_tokens(day.output_tokens))
+                        .style(metric_style(theme::metric_output())),
                     Cell::from(format_tokens(day.cache_read_tokens))
-                        .style(metric_style(Color::Blue)),
+                        .style(metric_style(theme::metric_cache_read())),
                     Cell::from(format_tokens(day.cache_creation_tokens))
-                        .style(metric_style(Color::Magenta)),
-                    Cell::from(cache_hit_rate(day)).style(metric_style(Color::Yellow)),
+                        .style(metric_style(theme::metric_cache_write())),
+                    Cell::from(cache_hit_rate(day)).style(metric_style(theme::warning_fg())),
                     Cell::from(format_tokens(day.total_tokens)),
                     Cell::from(format_cost(day.cost_with_cache_usd))
-                        .style(Style::default().fg(Color::Green)),
+                        .style(Style::default().fg(theme::positive_fg())),
                 ]
             };
 
@@ -142,9 +147,15 @@ fn render_detail(
             theme::block_title_style(),
         ),
         Span::styled("  input ", theme::muted_style()),
-        Span::styled(format_tokens(day.input_tokens), metric_style(Color::Cyan)),
+        Span::styled(
+            format_tokens(day.input_tokens),
+            metric_style(theme::metric_input()),
+        ),
         Span::styled("  output ", theme::muted_style()),
-        Span::styled(format_tokens(day.output_tokens), metric_style(Color::Green)),
+        Span::styled(
+            format_tokens(day.output_tokens),
+            metric_style(theme::metric_output()),
+        ),
         Span::styled("  cache R/W ", theme::muted_style()),
         Span::styled(
             format!(
@@ -152,12 +163,12 @@ fn render_detail(
                 format_tokens(day.cache_read_tokens),
                 format_tokens(day.cache_creation_tokens)
             ),
-            metric_style(Color::Magenta),
+            metric_style(theme::metric_cache_write()),
         ),
         Span::styled("  cost ", theme::muted_style()),
         Span::styled(
             format_cost(day.cost_with_cache_usd),
-            metric_style(Color::Green),
+            metric_style(theme::positive_fg()),
         ),
     ]);
     frame.render_widget(Paragraph::new(line).style(theme::muted_style()), area);
@@ -226,38 +237,4 @@ fn cache_hit_rate(day: &DailyTrendPoint) -> String {
 
 fn metric_style(color: Color) -> Style {
     Style::default().fg(color)
-}
-
-fn format_cost(value: f64) -> String {
-    format!("${value:.2}")
-}
-
-fn format_tokens(value: i64) -> String {
-    if value.abs() >= 1_000_000 {
-        format!("{:.1}M", value as f64 / 1_000_000.0)
-    } else if value.abs() >= 10_000 {
-        format!("{:.1}k", value as f64 / 1_000.0)
-    } else {
-        format_number(value)
-    }
-}
-
-fn format_number(value: i64) -> String {
-    if value == 0 {
-        return "0".to_string();
-    }
-    let s = value.abs().to_string();
-    let mut result = String::new();
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-    }
-    let formatted: String = result.chars().rev().collect();
-    if value < 0 {
-        format!("-{formatted}")
-    } else {
-        formatted
-    }
 }

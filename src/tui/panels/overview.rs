@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::query::OverviewPayload;
-use crate::tui::theme;
+use crate::tui::{format::grouped as format_tokens, theme};
 
 /// Render the overview panel with KPI cards and metadata.
 pub fn render(frame: &mut Frame, area: Rect, data: &Option<Result<OverviewPayload, String>>) {
@@ -135,15 +135,15 @@ fn render_24h_pulse(frame: &mut Frame, area: Rect, payload: &OverviewPayload) {
         metric_line(
             "Tokens",
             format_tokens(payload.last_24h.total_tokens),
-            Color::Green,
+            theme::positive_fg(),
         ),
         metric_line(
             "Events",
             format_tokens(payload.last_24h_events),
-            Color::Cyan,
+            theme::metric_input(),
         ),
-        metric_line("Avg/event", avg, Color::Yellow),
-        metric_line("All-time share", share, Color::Magenta),
+        metric_line("Avg/event", avg, theme::metric_reasoning()),
+        metric_line("All-time share", share, theme::metric_cache_write()),
     ];
     lines.extend(token_mix_lines(&payload.last_24h));
 
@@ -166,60 +166,84 @@ fn render_summary_block(frame: &mut Frame, area: Rect, title: &str, lines: Vec<L
 
 fn token_mix_lines(summary: &crate::query::TokenSummary) -> Vec<Line<'static>> {
     vec![
-        metric_line("Input", format_tokens(summary.input_tokens), Color::Cyan),
-        metric_line("Output", format_tokens(summary.output_tokens), Color::Green),
+        metric_line(
+            "Input",
+            format_tokens(summary.input_tokens),
+            theme::metric_input(),
+        ),
+        metric_line(
+            "Output",
+            format_tokens(summary.output_tokens),
+            theme::metric_output(),
+        ),
         metric_line(
             "Cache read",
             format_tokens(summary.cache_read_tokens),
-            Color::Blue,
+            theme::metric_cache_read(),
         ),
         metric_line(
             "Cache write",
             format_tokens(summary.cache_creation_tokens),
-            Color::Magenta,
+            theme::metric_cache_write(),
         ),
         metric_line(
             "Reasoning",
             format_tokens(summary.reasoning_output_tokens),
-            Color::Yellow,
+            theme::metric_reasoning(),
         ),
     ]
 }
 
 fn activity_lines(payload: &OverviewPayload) -> Vec<Line<'static>> {
     vec![
-        metric_line("Events", format_tokens(payload.total_events), Color::Green),
+        metric_line(
+            "Events",
+            format_tokens(payload.total_events),
+            theme::positive_fg(),
+        ),
         metric_line(
             "24h events",
             format_tokens(payload.last_24h_events),
-            Color::Cyan,
+            theme::metric_input(),
         ),
         metric_line(
             "Avg/event",
             average_tokens(payload.total.total_tokens, payload.total_events),
-            Color::Yellow,
+            theme::metric_reasoning(),
         ),
-        metric_line("Sources", payload.source_count.to_string(), Color::Magenta),
-        metric_line("Buckets", payload.bucket_count.to_string(), Color::Blue),
+        metric_line(
+            "Sources",
+            payload.source_count.to_string(),
+            theme::metric_cache_write(),
+        ),
+        metric_line(
+            "Buckets",
+            payload.bucket_count.to_string(),
+            theme::metric_cache_read(),
+        ),
     ]
 }
 
 fn freshness_lines(payload: &OverviewPayload) -> Vec<Line<'static>> {
     vec![
-        metric_line("Last sync", last_sync_text(payload), Color::Green),
+        metric_line("Last sync", last_sync_text(payload), theme::positive_fg()),
         metric_line(
             "Last export",
             payload
                 .last_export_at
                 .clone()
                 .unwrap_or_else(|| "never".to_string()),
-            Color::Cyan,
+            theme::metric_input(),
         ),
-        metric_line("Generated", payload.generated_at.clone(), Color::Blue),
+        metric_line(
+            "Generated",
+            payload.generated_at.clone(),
+            theme::metric_cache_read(),
+        ),
         metric_line(
             "Cache hit",
             format!("{:.1}%", payload.cache_efficiency * 100.0),
-            Color::Magenta,
+            theme::metric_cache_write(),
         ),
     ]
 }
@@ -288,25 +312,4 @@ fn styled_block(title: &str) -> Block<'_> {
             format!(" {} ", title),
             theme::block_title_style(),
         ))
-}
-
-/// Format token counts with thousands separators for readability.
-fn format_tokens(n: i64) -> String {
-    if n == 0 {
-        return "0".to_string();
-    }
-    let s = n.abs().to_string();
-    let mut result = String::new();
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-    }
-    let formatted: String = result.chars().rev().collect();
-    if n < 0 {
-        format!("-{formatted}")
-    } else {
-        formatted
-    }
 }

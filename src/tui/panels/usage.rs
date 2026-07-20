@@ -9,7 +9,7 @@ use ratatui::{
 use crate::{
     domain::platform_monitor::{ParserSupportStatus, PlatformProbe, PlatformProbeStatus},
     query::{SyncCommandCenterPayload, SyncLastRunPayload, SyncSourcePayload},
-    tui::theme,
+    tui::{format::grouped as format_number, theme},
 };
 
 use super::super::app::ScrollState;
@@ -103,22 +103,22 @@ fn render_summary(
             Span::styled("events ", theme::muted_style()),
             Span::styled(
                 format_number(payload.metrics.events_seen),
-                metric_style(Color::Cyan),
+                metric_style(theme::metric_input()),
             ),
             Span::styled("  inserted ", theme::muted_style()),
             Span::styled(
                 format_number(payload.metrics.inserted_delta),
-                metric_style(Color::Green),
+                metric_style(theme::positive_fg()),
             ),
             Span::styled("  stored ", theme::muted_style()),
             Span::styled(
                 format_number(payload.metrics.stored_events),
-                metric_style(Color::Yellow),
+                metric_style(theme::warning_fg()),
             ),
             Span::styled("  sources ", theme::muted_style()),
             Span::styled(
                 format!("{}/{}", payload.metrics.sources_ready, source_total),
-                metric_style(Color::Magenta),
+                metric_style(theme::metric_cache_write()),
             ),
         ]),
         Line::from(vec![
@@ -126,27 +126,27 @@ fn render_summary(
             Span::styled(
                 payload.safety.worker_lock.as_str(),
                 if payload.safety.worker_lock == "available" {
-                    metric_style(Color::Green)
+                    metric_style(theme::positive_fg())
                 } else {
-                    metric_style(Color::Yellow)
+                    metric_style(theme::warning_fg())
                 },
             ),
             Span::styled("  rebuild-risk ", theme::muted_style()),
             Span::styled(
                 yes_no(payload.safety.lossy_rebuild_risk),
                 if payload.safety.lossy_rebuild_risk {
-                    metric_style(Color::Yellow)
+                    metric_style(theme::warning_fg())
                 } else {
-                    metric_style(Color::Green)
+                    metric_style(theme::positive_fg())
                 },
             ),
             Span::styled("  monitored ", theme::muted_style()),
             Span::styled(
                 format!("{detected}/{} detected", probes.len()),
-                metric_style(Color::Cyan),
+                metric_style(theme::metric_input()),
             ),
             Span::styled("  parserless ", theme::muted_style()),
-            Span::styled(monitor_only.to_string(), metric_style(Color::Yellow)),
+            Span::styled(monitor_only.to_string(), metric_style(theme::warning_fg())),
         ]),
     ];
 
@@ -175,7 +175,10 @@ fn render_sources(
     if payload.sources.is_empty() {
         let empty = Paragraph::new("No source sync status yet. Run sync or refresh after imports.")
             .style(theme::muted_style())
-            .block(theme::trend_card_block("Source Sync", Color::Cyan));
+            .block(theme::trend_card_block(
+                "Source Sync",
+                theme::metric_input(),
+            ));
         frame.render_widget(empty, area);
         return;
     }
@@ -196,7 +199,10 @@ fn render_sources(
         .bottom_margin(1);
     let table = Table::new(rows, source_widths(very_narrow, narrow))
         .header(header)
-        .block(theme::trend_card_block("Source Sync", Color::Cyan));
+        .block(theme::trend_card_block(
+            "Source Sync",
+            theme::metric_input(),
+        ));
     frame.render_widget(table, area);
 }
 
@@ -233,10 +239,13 @@ fn render_monitor(frame: &mut Frame, area: Rect, probes: &[PlatformProbe]) {
             Span::styled("platform probes ", theme::muted_style()),
             Span::styled(
                 format!("{detected}/{}", probes.len()),
-                metric_style(Color::Cyan),
+                metric_style(theme::metric_input()),
             ),
             Span::styled("  blocked-no-samples ", theme::muted_style()),
-            Span::styled(parserless_blocked.to_string(), metric_style(Color::Yellow)),
+            Span::styled(
+                parserless_blocked.to_string(),
+                metric_style(theme::warning_fg()),
+            ),
         ]),
         Line::styled(detected_line, theme::muted_style()),
         Line::styled(
@@ -244,8 +253,10 @@ fn render_monitor(frame: &mut Frame, area: Rect, probes: &[PlatformProbe]) {
             theme::muted_style(),
         ),
     ];
-    let widget =
-        Paragraph::new(lines).block(theme::trend_card_block("Platform Monitor", Color::Magenta));
+    let widget = Paragraph::new(lines).block(theme::trend_card_block(
+        "Platform Monitor",
+        theme::metric_cache_write(),
+    ));
     frame.render_widget(widget, area);
 }
 
@@ -282,7 +293,7 @@ fn source_row(
     };
 
     if source.lossy_rebuild_risk {
-        row = row.style(metric_style(Color::Yellow));
+        row = row.style(metric_style(theme::warning_fg()));
     } else if index % 2 == 1 {
         row = row.style(theme::row_alt_style());
     }
@@ -335,15 +346,18 @@ fn source_widths(very_narrow: bool, narrow: bool) -> Vec<Constraint> {
 
 fn last_run_spans(last_run: &SyncLastRunPayload) -> Vec<Span<'static>> {
     let status_style = if last_run.status == "success" {
-        metric_style(Color::Green)
+        metric_style(theme::positive_fg())
     } else {
-        metric_style(Color::Yellow)
+        metric_style(theme::warning_fg())
     };
     vec![
         Span::styled("last run ", theme::muted_style()),
         Span::styled(last_run.status.clone(), status_style),
         Span::styled("  ", theme::muted_style()),
-        Span::styled(last_run.command.clone(), metric_style(Color::Cyan)),
+        Span::styled(
+            last_run.command.clone(),
+            metric_style(theme::metric_input()),
+        ),
         Span::styled("  started ", theme::muted_style()),
         Span::styled(last_run.started_at.clone(), theme::muted_style()),
     ]
@@ -370,8 +384,8 @@ fn reason_text(key: &str) -> &'static str {
 
 fn tone_style(tone: &str) -> Style {
     match tone {
-        "good" => metric_style(Color::Green),
-        "warn" => metric_style(Color::Yellow),
+        "good" => metric_style(theme::positive_fg()),
+        "warn" => metric_style(theme::warning_fg()),
         "neutral" => theme::muted_style(),
         _ => Style::default(),
     }
@@ -383,24 +397,4 @@ fn metric_style(color: Color) -> Style {
 
 fn yes_no(value: bool) -> &'static str {
     if value { "yes" } else { "no" }
-}
-
-fn format_number(value: i64) -> String {
-    if value == 0 {
-        return "0".to_string();
-    }
-    let s = value.abs().to_string();
-    let mut result = String::new();
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-    }
-    let formatted: String = result.chars().rev().collect();
-    if value < 0 {
-        format!("-{formatted}")
-    } else {
-        formatted
-    }
 }

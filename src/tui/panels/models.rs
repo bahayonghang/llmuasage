@@ -7,8 +7,7 @@ use ratatui::{
 };
 
 use crate::query::ModelBreakdown;
-use crate::tui::panels::longtail;
-use crate::tui::theme;
+use crate::tui::{format::grouped as format_number, panels::longtail, theme};
 
 use super::super::app::ScrollState;
 
@@ -108,7 +107,7 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[ModelBreakdown], scroll:
     )
     .header(header)
     .block(styled_block("模型"))
-    .row_highlight_style(Style::default().fg(theme::accent()));
+    .row_highlight_style(theme::selection_style());
 
     frame.render_widget(table, area);
 }
@@ -121,24 +120,4 @@ fn styled_block(title: &str) -> Block<'_> {
             format!(" {} ", title),
             theme::block_title_style(),
         ))
-}
-
-fn format_number(n: i64) -> String {
-    if n == 0 {
-        return "0".to_string();
-    }
-    let s = n.abs().to_string();
-    let mut result = String::new();
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-    }
-    let formatted: String = result.chars().rev().collect();
-    if n < 0 {
-        format!("-{formatted}")
-    } else {
-        formatted
-    }
 }

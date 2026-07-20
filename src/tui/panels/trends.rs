@@ -9,7 +9,10 @@ use ratatui::{
 
 use super::super::app::TimeWindow;
 use crate::query::TrendPoint;
-use crate::tui::theme;
+use crate::tui::{
+    format::{axis_compact as format_compact, tokens as format_tokens},
+    theme,
+};
 
 /// All time window variants in display order.
 const ALL_WINDOWS: [TimeWindow; 4] = [
@@ -534,44 +537,4 @@ fn parse_hh_mm(label: &str) -> Option<String> {
 
 fn truncate_chars(value: &str, max_chars: usize) -> String {
     value.chars().take(max_chars).collect()
-}
-
-fn format_tokens(n: i64) -> String {
-    if n.abs() >= 1_000_000 {
-        format!("{:.1}M", n as f64 / 1_000_000.0)
-    } else if n.abs() >= 10_000 {
-        format!("{:.1}k", n as f64 / 1_000.0)
-    } else {
-        format_number(n)
-    }
-}
-
-fn format_compact(n: i64) -> String {
-    if n.abs() >= 1_000_000 {
-        format!("{:.0}M", n as f64 / 1_000_000.0)
-    } else if n.abs() >= 10_000 {
-        format!("{:.0}k", n as f64 / 1_000.0)
-    } else {
-        n.to_string()
-    }
-}
-
-fn format_number(n: i64) -> String {
-    if n == 0 {
-        return "0".to_string();
-    }
-    let s = n.abs().to_string();
-    let mut result = String::new();
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-    }
-    let formatted: String = result.chars().rev().collect();
-    if n < 0 {
-        format!("-{formatted}")
-    } else {
-        formatted
-    }
 }

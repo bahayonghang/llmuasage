@@ -16,6 +16,7 @@ mod data_loader;
 pub mod draw;
 pub mod event;
 pub mod footer;
+pub mod format;
 pub mod help_dialog;
 pub mod input;
 pub mod nav_bar;

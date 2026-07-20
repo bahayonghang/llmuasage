@@ -2,13 +2,13 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use ratatui::{
     Frame,
     layout::{Constraint, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::Span,
     widgets::{Cell, Paragraph, Row, Table},
 };
 
 use crate::query::TrendPoint;
-use crate::tui::theme;
+use crate::tui::{format::tokens as format_tokens, theme};
 
 use super::super::app::ScrollState;
 
@@ -90,7 +90,7 @@ fn render_table(frame: &mut Frame, area: Rect, points: &[TrendPoint], scroll: &S
                     Cell::from(format_tokens(point.total_tokens)),
                     Cell::from(format!("{share:.1}%")),
                     Cell::from(render_bar(point.total_tokens, peak_tokens, 24))
-                        .style(Style::default().fg(Color::Green)),
+                        .style(Style::default().fg(theme::positive_fg())),
                 ]
             };
 
@@ -98,7 +98,7 @@ fn render_table(frame: &mut Frame, area: Rect, points: &[TrendPoint], scroll: &S
             if point.total_tokens == peak_tokens && peak_tokens > 0 {
                 row = row.style(
                     Style::default()
-                        .fg(Color::Yellow)
+                        .fg(theme::warning_fg())
                         .add_modifier(Modifier::BOLD),
                 );
             } else if index % 2 == 1 {
@@ -188,34 +188,4 @@ fn render_bar(value: i64, max_value: i64, width: usize) -> String {
     }
     .min(width);
     format!("{}{}", "#".repeat(filled), "-".repeat(width - filled))
-}
-
-fn format_tokens(value: i64) -> String {
-    if value.abs() >= 1_000_000 {
-        format!("{:.1}M", value as f64 / 1_000_000.0)
-    } else if value.abs() >= 10_000 {
-        format!("{:.1}k", value as f64 / 1_000.0)
-    } else {
-        format_number(value)
-    }
-}
-
-fn format_number(value: i64) -> String {
-    if value == 0 {
-        return "0".to_string();
-    }
-    let s = value.abs().to_string();
-    let mut result = String::new();
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-    }
-    let formatted: String = result.chars().rev().collect();
-    if value < 0 {
-        format!("-{formatted}")
-    } else {
-        formatted
-    }
 }

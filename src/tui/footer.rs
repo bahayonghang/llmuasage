@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 
-use super::{app::AppState, theme};
+use super::{app::AppState, format::footer_compact, theme};
 
 pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
     let block = Block::default()
@@ -107,7 +107,7 @@ fn render_status(frame: &mut Frame, area: Rect, state: &AppState) {
         spans.push(Span::styled(
             format!(
                 "{} tokens • ${:.2}",
-                format_compact(overview.total.total_tokens),
+                footer_compact(overview.total.total_tokens),
                 overview.total_cost_usd
             ),
             theme::muted_style(),
@@ -117,15 +117,4 @@ fn render_status(frame: &mut Frame, area: Rect, state: &AppState) {
     }
 
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
-}
-
-fn format_compact(value: i64) -> String {
-    let abs = value.abs();
-    if abs >= 1_000_000 {
-        format!("{:.1}M", value as f64 / 1_000_000.0)
-    } else if abs >= 10_000 {
-        format!("{:.1}k", value as f64 / 1_000.0)
-    } else {
-        value.to_string()
-    }
 }
