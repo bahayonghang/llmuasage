@@ -1,7 +1,6 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
@@ -13,15 +12,15 @@ use crate::tui::theme;
 pub fn render(frame: &mut Frame, area: Rect, data: &Option<Result<HealthPayload, String>>) {
     match data {
         None => {
-            let widget = Paragraph::new("加载中...")
+            let widget = Paragraph::new("Loading...")
                 .style(theme::muted_style())
-                .block(styled_block("健康"));
+                .block(styled_block("Health"));
             frame.render_widget(widget, area);
         }
         Some(Err(e)) => {
-            let widget = Paragraph::new(format!("数据加载失败: {e}"))
+            let widget = Paragraph::new(format!("Data load failed: {e}"))
                 .style(theme::error_style())
-                .block(styled_block("健康"));
+                .block(styled_block("Health"));
             frame.render_widget(widget, area);
         }
         Some(Ok(payload)) => render_payload(frame, area, payload),
@@ -38,7 +37,7 @@ fn render_payload(frame: &mut Frame, area: Rect, payload: &HealthPayload) {
 
     // Integrations section
     let int_lines: Vec<Line> = if payload.integrations.is_empty() {
-        vec![Line::styled("无数据", theme::muted_style())]
+        vec![Line::styled("No data", theme::muted_style())]
     } else {
         payload
             .integrations
@@ -51,47 +50,39 @@ fn render_payload(frame: &mut Frame, area: Rect, payload: &HealthPayload) {
                 };
                 Line::from(vec![
                     Span::raw(format!("  {} ", i.source)),
-                    Span::styled(
-                        &i.status,
-                        Style::default()
-                            .fg(status_color)
-                            .add_modifier(Modifier::BOLD),
-                    ),
+                    Span::styled(&i.status, theme::bold_fg_style(status_color)),
                 ])
             })
             .collect()
     };
-    let int_widget = Paragraph::new(int_lines).block(section_block("集成状态"));
+    let int_widget = Paragraph::new(int_lines).block(section_block("Integration Status"));
     frame.render_widget(int_widget, int_area);
 
     // Cursors section
     let cur_lines: Vec<Line> = if payload.cursors.is_empty() {
-        vec![Line::styled("无数据", theme::muted_style())]
+        vec![Line::styled("No data", theme::muted_style())]
     } else {
         payload
             .cursors
             .iter()
             .map(|c| {
-                let ts = c.updated_at.as_deref().unwrap_or("未更新");
+                let ts = c.updated_at.as_deref().unwrap_or("Never updated");
                 Line::from(vec![
-                    Span::styled(
-                        format!("  {} ", c.source),
-                        Style::default().fg(theme::accent()),
-                    ),
+                    Span::styled(format!("  {} ", c.source), theme::fg_style(theme::accent())),
                     Span::raw(format!("/ {} — ", c.cursor_key)),
                     Span::styled(ts, theme::muted_style()),
                 ])
             })
             .collect()
     };
-    let cur_widget = Paragraph::new(cur_lines).block(section_block("游标"));
+    let cur_widget = Paragraph::new(cur_lines).block(section_block("Cursors"));
     frame.render_widget(cur_widget, cur_area);
 
     // Recent failures section (max 10)
     let fail_lines: Vec<Line> = if payload.recent_failures.is_empty() {
         vec![Line::styled(
-            "无失败记录 ✓",
-            Style::default().fg(theme::positive_fg()),
+            "No failure records",
+            theme::fg_style(theme::positive_fg()),
         )]
     } else {
         payload
@@ -102,18 +93,18 @@ fn render_payload(frame: &mut Frame, area: Rect, payload: &HealthPayload) {
                 Some(err) => Line::from(vec![
                     Span::styled(
                         format!("  {} ", r.command),
-                        Style::default().fg(theme::warning_fg()),
+                        theme::fg_style(theme::warning_fg()),
                     ),
-                    Span::styled(err.as_str(), Style::default().fg(theme::error_fg())),
+                    Span::styled(err.as_str(), theme::fg_style(theme::error_fg())),
                 ]),
                 None => Line::styled(
                     format!("  {}", r.command),
-                    Style::default().fg(theme::warning_fg()),
+                    theme::fg_style(theme::warning_fg()),
                 ),
             })
             .collect()
     };
-    let fail_widget = Paragraph::new(fail_lines).block(section_block("近期失败"));
+    let fail_widget = Paragraph::new(fail_lines).block(section_block("Recent Failures"));
     frame.render_widget(fail_widget, fail_area);
 }
 
@@ -130,11 +121,9 @@ fn styled_block(title: &str) -> Block<'_> {
 fn section_block(title: &str) -> Block<'_> {
     Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::border_normal()))
+        .border_style(theme::fg_style(theme::border_normal()))
         .title(Span::styled(
             format!(" {} ", title),
-            Style::default()
-                .fg(theme::accent())
-                .add_modifier(Modifier::BOLD),
+            theme::bold_fg_style(theme::accent()),
         ))
 }

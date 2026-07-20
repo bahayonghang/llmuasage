@@ -1,7 +1,7 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::Color,
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
@@ -13,15 +13,15 @@ use crate::tui::{format::grouped as format_tokens, theme};
 pub fn render(frame: &mut Frame, area: Rect, data: &Option<Result<OverviewPayload, String>>) {
     match data {
         None => {
-            let widget = Paragraph::new("加载中...")
+            let widget = Paragraph::new("Loading...")
                 .style(theme::muted_style())
-                .block(styled_block("概览"));
+                .block(styled_block("Overview"));
             frame.render_widget(widget, area);
         }
         Some(Err(e)) => {
-            let widget = Paragraph::new(format!("数据加载失败: {e}"))
+            let widget = Paragraph::new(format!("Data load failed: {e}"))
                 .style(theme::error_style())
-                .block(styled_block("概览"));
+                .block(styled_block("Overview"));
             frame.render_widget(widget, area);
         }
         Some(Ok(payload)) => render_payload(frame, area, payload),
@@ -29,7 +29,7 @@ pub fn render(frame: &mut Frame, area: Rect, data: &Option<Result<OverviewPayloa
 }
 
 fn render_payload(frame: &mut Frame, area: Rect, payload: &OverviewPayload) {
-    let block = styled_block("概览");
+    let block = styled_block("Overview");
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -72,7 +72,7 @@ fn render_kpi_row(frame: &mut Frame, area: Rect, payload: &OverviewPayload) {
     render_kpi_card(
         frame,
         kpi_cols[0],
-        "累计 Tokens",
+        "Total Tokens",
         &format_tokens(payload.total.total_tokens),
         theme::kpi_colors()[0],
     );
@@ -86,14 +86,14 @@ fn render_kpi_row(frame: &mut Frame, area: Rect, payload: &OverviewPayload) {
     render_kpi_card(
         frame,
         kpi_cols[2],
-        "累计成本",
+        "Total Cost",
         &format!("${:.2}", payload.total_cost_usd),
         theme::kpi_colors()[2],
     );
     render_kpi_card(
         frame,
         kpi_cols[3],
-        "缓存命中率",
+        "Cache Hit Rate",
         &format!("{:.1}%", payload.cache_efficiency * 100.0),
         theme::kpi_colors()[3],
     );
@@ -251,10 +251,7 @@ fn freshness_lines(payload: &OverviewPayload) -> Vec<Line<'static>> {
 fn metric_line(label: &'static str, value: String, color: Color) -> Line<'static> {
     Line::from(vec![
         Span::styled(format!("{label:<12}"), theme::muted_style()),
-        Span::styled(
-            value,
-            Style::default().fg(color).add_modifier(Modifier::BOLD),
-        ),
+        Span::styled(value, theme::bold_fg_style(color)),
     ])
 }
 
@@ -262,7 +259,7 @@ fn last_sync_text(payload: &OverviewPayload) -> String {
     payload
         .last_sync_at
         .clone()
-        .unwrap_or_else(|| "从未同步".to_string())
+        .unwrap_or_else(|| "Never synced".to_string())
 }
 
 fn average_tokens(tokens: i64, events: i64) -> String {
@@ -290,15 +287,15 @@ fn render_kpi_card(
 ) {
     let card = Paragraph::new(Line::from(vec![Span::styled(
         value,
-        Style::default().fg(color).add_modifier(Modifier::BOLD),
+        theme::bold_fg_style(color),
     )]))
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(color))
+            .border_style(theme::fg_style(color))
             .title(Span::styled(
                 format!(" {} ", title),
-                Style::default().fg(color).add_modifier(Modifier::BOLD),
+                theme::bold_fg_style(color),
             )),
     );
     frame.render_widget(card, area);

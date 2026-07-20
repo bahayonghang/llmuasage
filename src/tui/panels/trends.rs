@@ -2,7 +2,7 @@ use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::{Modifier, Style},
+    style::Style,
     text::{Line, Span},
     widgets::{Cell, Paragraph, Row, Table},
 };
@@ -31,15 +31,15 @@ pub fn render(
 ) {
     match data {
         None => {
-            let widget = Paragraph::new("加载中...")
+            let widget = Paragraph::new("Loading...")
                 .style(theme::muted_style())
-                .block(theme::panel_block("趋势"));
+                .block(theme::panel_block("Usage Trends"));
             frame.render_widget(widget, area);
         }
         Some(Err(e)) => {
-            let widget = Paragraph::new(format!("数据加载失败: {e}"))
+            let widget = Paragraph::new(format!("Data load failed: {e}"))
                 .style(theme::error_style())
-                .block(theme::panel_block("趋势"));
+                .block(theme::panel_block("Usage Trends"));
             frame.render_widget(widget, area);
         }
         Some(Ok(points)) => render_trends(frame, area, points, time_window),
@@ -47,7 +47,7 @@ pub fn render(
 }
 
 fn render_trends(frame: &mut Frame, area: Rect, points: &[TrendPoint], time_window: TimeWindow) {
-    let block = theme::panel_block("趋势");
+    let block = theme::panel_block("Usage Trends");
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -83,7 +83,7 @@ fn render_trends(frame: &mut Frame, area: Rect, points: &[TrendPoint], time_wind
     };
 
     if points.is_empty() {
-        let placeholder = Paragraph::new("暂无趋势数据").style(theme::muted_style());
+        let placeholder = Paragraph::new("No trend data found.").style(theme::muted_style());
         frame.render_widget(placeholder, body_area);
         return;
     }
@@ -105,7 +105,7 @@ fn render_trends(frame: &mut Frame, area: Rect, points: &[TrendPoint], time_wind
 }
 
 fn render_window_selector(frame: &mut Frame, area: Rect, active: TimeWindow) {
-    let mut spans: Vec<Span> = vec![Span::styled("窗口: ", theme::muted_style())];
+    let mut spans: Vec<Span> = vec![Span::styled("Window: ", theme::muted_style())];
 
     for (i, window) in ALL_WINDOWS.iter().enumerate() {
         if i > 0 {
@@ -120,7 +120,10 @@ fn render_window_selector(frame: &mut Frame, area: Rect, active: TimeWindow) {
         spans.push(Span::styled(label, style));
     }
 
-    spans.push(Span::styled("  h/l 或 ←/→ 切换", theme::trend_aux_style()));
+    spans.push(Span::styled(
+        "  h/l or left/right to switch",
+        theme::trend_aux_style(),
+    ));
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
@@ -153,7 +156,7 @@ fn render_summary(frame: &mut Frame, area: Rect, points: &[TrendPoint], time_win
     render_card(
         frame,
         total_area,
-        "总量",
+        "Total",
         &format_tokens(total),
         "tokens",
         theme::kpi_colors()[0],
@@ -161,7 +164,7 @@ fn render_summary(frame: &mut Frame, area: Rect, points: &[TrendPoint], time_win
     render_card(
         frame,
         peak_area,
-        "峰值",
+        "Peak",
         &format_tokens(peak_tokens),
         &peak_label,
         theme::trend_peak_fg(),
@@ -170,8 +173,8 @@ fn render_summary(frame: &mut Frame, area: Rect, points: &[TrendPoint], time_win
         frame,
         avg_area,
         match time_window {
-            TimeWindow::Day24h => "桶均",
-            _ => "日均",
+            TimeWindow::Day24h => "Avg / bucket",
+            _ => "Daily avg",
         },
         &format_tokens(average),
         "tokens",
@@ -181,12 +184,12 @@ fn render_summary(frame: &mut Frame, area: Rect, points: &[TrendPoint], time_win
         frame,
         active_area,
         match time_window {
-            TimeWindow::Day24h => "活跃桶",
-            TimeWindow::All => "活跃月",
-            _ => "活跃天",
+            TimeWindow::Day24h => "Active buckets",
+            TimeWindow::All => "Active months",
+            _ => "Active days",
         },
         &active_count.to_string(),
-        &format!("共 {}", points.len()),
+        &format!("{} total", points.len()),
         theme::kpi_colors()[1],
     );
 }
@@ -200,10 +203,7 @@ fn render_card(
     color: ratatui::style::Color,
 ) {
     let lines = vec![
-        Line::from(Span::styled(
-            value.to_string(),
-            Style::default().fg(color).add_modifier(Modifier::BOLD),
-        )),
+        Line::from(Span::styled(value.to_string(), theme::bold_fg_style(color))),
         Line::from(Span::styled(subtitle.to_string(), theme::trend_aux_style())),
     ];
     let card = Paragraph::new(lines).block(theme::trend_card_block(title, color));
@@ -211,7 +211,7 @@ fn render_card(
 }
 
 fn render_chart(frame: &mut Frame, area: Rect, points: &[TrendPoint], time_window: TimeWindow) {
-    let block = theme::panel_block("趋势图");
+    let block = theme::panel_block("Trend Chart");
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -220,7 +220,7 @@ fn render_chart(frame: &mut Frame, area: Rect, points: &[TrendPoint], time_windo
     }
     if points.is_empty() {
         frame.render_widget(
-            Paragraph::new("暂无趋势数据").style(theme::muted_style()),
+            Paragraph::new("No trend data found.").style(theme::muted_style()),
             inner,
         );
         return;
@@ -360,7 +360,7 @@ fn render_details(frame: &mut Frame, area: Rect, points: &[TrendPoint], time_win
         ])
     });
 
-    let header = Row::new(vec![Cell::from("最近"), Cell::from("Tokens")])
+    let header = Row::new(vec![Cell::from("Recent"), Cell::from("Tokens")])
         .style(theme::header_style())
         .bottom_margin(1);
     let table = Table::new(
@@ -368,7 +368,7 @@ fn render_details(frame: &mut Frame, area: Rect, points: &[TrendPoint], time_win
         [Constraint::Percentage(45), Constraint::Percentage(55)],
     )
     .header(header)
-    .block(theme::panel_block("最近明细"));
+    .block(theme::panel_block("Recent Details"));
     frame.render_widget(table, area);
 }
 

@@ -1,7 +1,6 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Rect},
-    style::Style,
     text::Span,
     widgets::{Block, Borders, Cell, Paragraph, Row, Table},
 };
@@ -20,21 +19,21 @@ pub fn render(
 ) {
     match data {
         None => {
-            let widget = Paragraph::new("加载中...")
+            let widget = Paragraph::new("Loading...")
                 .style(theme::muted_style())
-                .block(styled_block("模型"));
+                .block(styled_block("Models"));
             frame.render_widget(widget, area);
         }
         Some(Err(e)) => {
-            let widget = Paragraph::new(format!("数据加载失败: {e}"))
+            let widget = Paragraph::new(format!("Data load failed: {e}"))
                 .style(theme::error_style())
-                .block(styled_block("模型"));
+                .block(styled_block("Models"));
             frame.render_widget(widget, area);
         }
         Some(Ok(items)) if items.is_empty() => {
-            let widget = Paragraph::new("暂无模型数据")
+            let widget = Paragraph::new("No model data found.")
                 .style(theme::muted_style())
-                .block(styled_block("模型"));
+                .block(styled_block("Models"));
             frame.render_widget(widget, area);
         }
         Some(Ok(items)) => render_table(frame, area, items, scroll),
@@ -43,10 +42,10 @@ pub fn render(
 
 fn render_table(frame: &mut Frame, area: Rect, items: &[ModelBreakdown], scroll: &ScrollState) {
     let header = Row::new(vec![
-        Cell::from("模型"),
-        Cell::from("总 Tokens"),
-        Cell::from("事件数"),
-        Cell::from("成本 (USD)"),
+        Cell::from("Model"),
+        Cell::from("Total Tokens"),
+        Cell::from("Events"),
+        Cell::from("Cost (USD)"),
     ])
     .style(theme::header_style())
     .bottom_margin(1);
@@ -71,11 +70,7 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[ModelBreakdown], scroll:
             ]);
             if absolute == 0 {
                 // Rank #1 stands out in the accent color, bold.
-                row.style(
-                    Style::default()
-                        .fg(theme::accent())
-                        .add_modifier(ratatui::style::Modifier::BOLD),
-                )
+                row.style(theme::bold_fg_style(theme::accent()))
             } else if i % 2 == 1 {
                 row.style(theme::row_alt_style())
             } else {
@@ -106,7 +101,7 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[ModelBreakdown], scroll:
         ],
     )
     .header(header)
-    .block(styled_block("模型"))
+    .block(styled_block("Models"))
     .row_highlight_style(theme::selection_style());
 
     frame.render_widget(table, area);

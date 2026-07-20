@@ -14,6 +14,54 @@ use ratatui::{
     widgets::{Block, Borders},
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalColorMode {
+    TrueColor,
+    Ansi16,
+    NoColor,
+}
+
+impl TerminalColorMode {
+    pub fn from_env() -> Self {
+        Self::detect(
+            std::env::var_os("NO_COLOR").is_some(),
+            std::env::var("LLMUSAGE_NO_COLOR").ok().as_deref(),
+            std::env::var("TERM").ok().as_deref(),
+            std::env::var("COLORTERM").ok().as_deref(),
+        )
+    }
+
+    fn detect(
+        no_color: bool,
+        llmusage_no_color: Option<&str>,
+        term: Option<&str>,
+        colorterm: Option<&str>,
+    ) -> Self {
+        if no_color || llmusage_no_color.is_some_and(env_flag_enabled) {
+            return Self::NoColor;
+        }
+
+        let supports_truecolor = [term, colorterm].into_iter().flatten().any(|value| {
+            let value = value.to_ascii_lowercase();
+            value.contains("truecolor") || value.contains("24bit") || value.contains("direct")
+        });
+        if supports_truecolor || (term.is_none() && colorterm.is_none()) {
+            Self::TrueColor
+        } else {
+            Self::Ansi16
+        }
+    }
+}
+
+fn env_flag_enabled(value: &str) -> bool {
+    let value = value.trim();
+    !value.is_empty()
+        && !value.eq_ignore_ascii_case("0")
+        && !value.eq_ignore_ascii_case("false")
+        && !value.eq_ignore_ascii_case("no")
+        && !value.eq_ignore_ascii_case("off")
+}
+
 /// A named palette of semantic color slots. `Copy` so `active_theme()` can hand
 /// out cheap snapshots without locking for the duration of a render.
 #[derive(Debug, Clone, Copy)]
@@ -134,8 +182,132 @@ impl Theme {
         }
     }
 
+    pub const fn graphite() -> Self {
+        Self {
+            name: "graphite",
+            accent: Color::Rgb(232, 184, 87),
+            accent_dim: Color::Rgb(105, 110, 118),
+            header_fg: Color::Rgb(232, 184, 87),
+            border_active: Color::Rgb(232, 184, 87),
+            border_normal: Color::Rgb(82, 87, 94),
+            error_fg: Color::Rgb(238, 111, 111),
+            warning_fg: Color::Rgb(232, 184, 87),
+            positive_fg: Color::Rgb(112, 194, 159),
+            muted_fg: Color::Rgb(132, 138, 147),
+            surface_fg: Color::Rgb(225, 228, 232),
+            row_alt_bg: Color::Rgb(38, 41, 45),
+            selection_fg: Color::Rgb(28, 30, 33),
+            selection_bg: Color::Rgb(232, 184, 87),
+            metric_input: Color::Rgb(112, 194, 159),
+            metric_output: Color::Rgb(238, 111, 111),
+            metric_cache_read: Color::Rgb(105, 169, 231),
+            metric_cache_write: Color::Rgb(232, 184, 87),
+            metric_reasoning: Color::Rgb(193, 145, 214),
+            kpi_colors: [
+                Color::Rgb(232, 184, 87),
+                Color::Rgb(112, 194, 159),
+                Color::Rgb(105, 169, 231),
+                Color::Rgb(193, 145, 214),
+            ],
+            trend_bar_fg: Color::Rgb(105, 169, 231),
+            trend_peak_fg: Color::Rgb(232, 184, 87),
+            trend_aux_fg: Color::Rgb(105, 110, 118),
+            heat: [
+                Color::Rgb(52, 56, 61),
+                Color::Rgb(59, 91, 79),
+                Color::Rgb(73, 126, 103),
+                Color::Rgb(92, 162, 132),
+                Color::Rgb(112, 194, 159),
+            ],
+            bar_ok: Color::Rgb(112, 194, 159),
+            bar_warn: Color::Rgb(232, 184, 87),
+            bar_danger: Color::Rgb(238, 111, 111),
+        }
+    }
+
+    pub const fn lagoon() -> Self {
+        Self {
+            name: "lagoon",
+            accent: Color::Rgb(65, 195, 190),
+            accent_dim: Color::Rgb(73, 104, 117),
+            header_fg: Color::Rgb(105, 213, 208),
+            border_active: Color::Rgb(65, 195, 190),
+            border_normal: Color::Rgb(49, 78, 91),
+            error_fg: Color::Rgb(255, 116, 126),
+            warning_fg: Color::Rgb(244, 197, 96),
+            positive_fg: Color::Rgb(111, 207, 151),
+            muted_fg: Color::Rgb(119, 151, 161),
+            surface_fg: Color::Rgb(222, 238, 239),
+            row_alt_bg: Color::Rgb(20, 49, 61),
+            selection_fg: Color::Rgb(9, 36, 48),
+            selection_bg: Color::Rgb(65, 195, 190),
+            metric_input: Color::Rgb(111, 207, 151),
+            metric_output: Color::Rgb(255, 116, 126),
+            metric_cache_read: Color::Rgb(92, 164, 232),
+            metric_cache_write: Color::Rgb(244, 166, 96),
+            metric_reasoning: Color::Rgb(210, 145, 230),
+            kpi_colors: [
+                Color::Rgb(65, 195, 190),
+                Color::Rgb(111, 207, 151),
+                Color::Rgb(244, 197, 96),
+                Color::Rgb(255, 116, 126),
+            ],
+            trend_bar_fg: Color::Rgb(65, 195, 190),
+            trend_peak_fg: Color::Rgb(244, 197, 96),
+            trend_aux_fg: Color::Rgb(73, 104, 117),
+            heat: [
+                Color::Rgb(24, 57, 69),
+                Color::Rgb(31, 91, 91),
+                Color::Rgb(39, 126, 119),
+                Color::Rgb(51, 161, 151),
+                Color::Rgb(65, 195, 190),
+            ],
+            bar_ok: Color::Rgb(111, 207, 151),
+            bar_warn: Color::Rgb(244, 197, 96),
+            bar_danger: Color::Rgb(255, 116, 126),
+        }
+    }
+
+    fn adapted(self, mode: TerminalColorMode) -> Self {
+        let adapt = |color| adapt_color(color, mode);
+        Self {
+            name: self.name,
+            accent: adapt(self.accent),
+            accent_dim: adapt(self.accent_dim),
+            header_fg: adapt(self.header_fg),
+            border_active: adapt(self.border_active),
+            border_normal: adapt(self.border_normal),
+            error_fg: adapt(self.error_fg),
+            warning_fg: adapt(self.warning_fg),
+            positive_fg: adapt(self.positive_fg),
+            muted_fg: adapt(self.muted_fg),
+            surface_fg: adapt(self.surface_fg),
+            row_alt_bg: adapt(self.row_alt_bg),
+            selection_fg: adapt(self.selection_fg),
+            selection_bg: adapt(self.selection_bg),
+            metric_input: adapt(self.metric_input),
+            metric_output: adapt(self.metric_output),
+            metric_cache_read: adapt(self.metric_cache_read),
+            metric_cache_write: adapt(self.metric_cache_write),
+            metric_reasoning: adapt(self.metric_reasoning),
+            kpi_colors: self.kpi_colors.map(adapt),
+            trend_bar_fg: adapt(self.trend_bar_fg),
+            trend_peak_fg: adapt(self.trend_peak_fg),
+            trend_aux_fg: adapt(self.trend_aux_fg),
+            heat: self.heat.map(adapt),
+            bar_ok: adapt(self.bar_ok),
+            bar_warn: adapt(self.bar_warn),
+            bar_danger: adapt(self.bar_danger),
+        }
+    }
+
     /// All selectable themes in cycle order.
-    pub const ALL: [Theme; 2] = [Theme::default_dark(), Theme::catppuccin_mocha()];
+    pub const ALL: [Theme; 4] = [
+        Theme::default_dark(),
+        Theme::catppuccin_mocha(),
+        Theme::graphite(),
+        Theme::lagoon(),
+    ];
 
     /// Looks up a theme by its `name`, case-insensitively.
     pub fn by_name(name: &str) -> Option<Theme> {
@@ -153,19 +325,51 @@ impl Default for Theme {
 
 // ── Active theme (process-wide) ───────────────────────────────────────────────
 
-fn active_lock() -> &'static RwLock<Theme> {
-    static ACTIVE: RwLock<Theme> = RwLock::new(Theme::default_dark());
+#[derive(Clone, Copy)]
+struct ThemeState {
+    theme: Theme,
+    mode: TerminalColorMode,
+}
+
+fn active_lock() -> &'static RwLock<ThemeState> {
+    static ACTIVE: RwLock<ThemeState> = RwLock::new(ThemeState {
+        theme: Theme::default_dark(),
+        mode: TerminalColorMode::TrueColor,
+    });
     &ACTIVE
 }
 
 /// Returns a snapshot of the current theme.
 pub fn active_theme() -> Theme {
-    *active_lock().read().expect("theme lock poisoned")
+    active_lock().read().expect("theme lock poisoned").theme
+}
+
+pub fn color_mode() -> TerminalColorMode {
+    active_lock().read().expect("theme lock poisoned").mode
 }
 
 /// Replaces the active theme; subsequent renders use the new palette.
 pub fn set_theme(theme: Theme) {
-    *active_lock().write().expect("theme lock poisoned") = theme;
+    let mut state = active_lock().write().expect("theme lock poisoned");
+    state.theme = theme.adapted(state.mode);
+}
+
+pub fn set_color_mode(mode: TerminalColorMode) {
+    let mut state = active_lock().write().expect("theme lock poisoned");
+    let base = Theme::by_name(state.theme.name).unwrap_or_else(Theme::default_dark);
+    state.mode = mode;
+    state.theme = base.adapted(mode);
+}
+
+pub fn configure_from_env() {
+    let mode = TerminalColorMode::from_env();
+    let theme = std::env::var("LLMUSAGE_THEME")
+        .ok()
+        .and_then(|name| Theme::by_name(&name))
+        .unwrap_or_else(Theme::default_dark);
+    let mut state = active_lock().write().expect("theme lock poisoned");
+    state.mode = mode;
+    state.theme = theme.adapted(mode);
 }
 
 /// Switches to the named theme if it exists, returning the theme's name on
@@ -304,13 +508,35 @@ pub fn bar_color(percent: f64) -> Color {
     }
 }
 
+pub fn fg_style(color: Color) -> Style {
+    if color_mode() == TerminalColorMode::NoColor {
+        Style::default()
+    } else {
+        Style::default().fg(color)
+    }
+}
+
+pub fn bold_style() -> Style {
+    if color_mode() == TerminalColorMode::NoColor {
+        Style::default()
+    } else {
+        Style::default().add_modifier(Modifier::BOLD)
+    }
+}
+
+pub fn bold_fg_style(color: Color) -> Style {
+    if color_mode() == TerminalColorMode::NoColor {
+        Style::default()
+    } else {
+        Style::default().fg(color).add_modifier(Modifier::BOLD)
+    }
+}
+
 // ── Style constructors ───────────────────────────────────────────────────────
 
 /// Style for table header row.
 pub fn header_style() -> Style {
-    Style::default()
-        .fg(header_fg())
-        .add_modifier(Modifier::BOLD)
+    bold_fg_style(header_fg())
 }
 
 /// Style for normal data rows.
@@ -320,24 +546,28 @@ pub fn row_style() -> Style {
 
 /// Style for alternating (even-index) data rows.
 pub fn row_alt_style() -> Style {
-    Style::default().bg(row_alt_bg())
+    if color_mode() == TerminalColorMode::NoColor {
+        Style::default()
+    } else {
+        Style::default().bg(row_alt_bg())
+    }
 }
 
 /// Style for the active nav tab.
 pub fn nav_active_style() -> Style {
-    Style::default()
-        .fg(active_theme().selection_fg)
-        .bg(active_theme().selection_bg)
-        .add_modifier(Modifier::BOLD)
+    selection_style()
 }
 
 /// Style for inactive nav tabs.
 pub fn nav_inactive_style() -> Style {
-    Style::default().fg(surface_fg())
+    fg_style(surface_fg())
 }
 
 /// Style for selected rows and picker entries.
 pub fn selection_style() -> Style {
+    if color_mode() == TerminalColorMode::NoColor {
+        return Style::default();
+    }
     let theme = active_theme();
     Style::default()
         .fg(theme.selection_fg)
@@ -347,22 +577,22 @@ pub fn selection_style() -> Style {
 
 /// Style for block borders (active panel).
 pub fn block_border_style() -> Style {
-    Style::default().fg(border_active())
+    fg_style(border_active())
 }
 
 /// Style for block title text.
 pub fn block_title_style() -> Style {
-    Style::default().fg(accent()).add_modifier(Modifier::BOLD)
+    bold_fg_style(accent())
 }
 
 /// Style for error text.
 pub fn error_style() -> Style {
-    Style::default().fg(error_fg())
+    fg_style(error_fg())
 }
 
 /// Style for muted/placeholder text.
 pub fn muted_style() -> Style {
-    Style::default().fg(muted_fg())
+    fg_style(muted_fg())
 }
 
 /// Shared bordered block for dashboard panels.
@@ -377,28 +607,66 @@ pub fn panel_block(title: &str) -> Block<'_> {
 pub fn trend_card_block(title: &str, color: Color) -> Block<'_> {
     Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(color))
-        .title(Span::styled(
-            format!(" {title} "),
-            Style::default().fg(color).add_modifier(Modifier::BOLD),
-        ))
+        .border_style(fg_style(color))
+        .title(Span::styled(format!(" {title} "), bold_fg_style(color)))
 }
 
 /// Style for ordinary trend bars.
 pub fn trend_bar_style() -> Style {
-    Style::default().fg(trend_bar_fg())
+    fg_style(trend_bar_fg())
 }
 
 /// Style for the peak trend bar and peak value.
 pub fn trend_peak_style() -> Style {
-    Style::default()
-        .fg(trend_peak_fg())
-        .add_modifier(Modifier::BOLD)
+    bold_fg_style(trend_peak_fg())
 }
 
 /// Style for trend axes, labels, and secondary hints.
 pub fn trend_aux_style() -> Style {
-    Style::default().fg(trend_aux_fg())
+    fg_style(trend_aux_fg())
+}
+
+fn adapt_color(color: Color, mode: TerminalColorMode) -> Color {
+    match mode {
+        TerminalColorMode::TrueColor => color,
+        TerminalColorMode::NoColor => Color::Reset,
+        TerminalColorMode::Ansi16 => match color {
+            Color::Rgb(red, green, blue) => nearest_ansi16(red, green, blue),
+            other => other,
+        },
+    }
+}
+
+fn nearest_ansi16(red: u8, green: u8, blue: u8) -> Color {
+    const PALETTE: [(Color, (u8, u8, u8)); 16] = [
+        (Color::Black, (0, 0, 0)),
+        (Color::Red, (128, 0, 0)),
+        (Color::Green, (0, 128, 0)),
+        (Color::Yellow, (128, 128, 0)),
+        (Color::Blue, (0, 0, 128)),
+        (Color::Magenta, (128, 0, 128)),
+        (Color::Cyan, (0, 128, 128)),
+        (Color::Gray, (192, 192, 192)),
+        (Color::DarkGray, (128, 128, 128)),
+        (Color::LightRed, (255, 0, 0)),
+        (Color::LightGreen, (0, 255, 0)),
+        (Color::LightYellow, (255, 255, 0)),
+        (Color::LightBlue, (0, 0, 255)),
+        (Color::LightMagenta, (255, 0, 255)),
+        (Color::LightCyan, (0, 255, 255)),
+        (Color::White, (255, 255, 255)),
+    ];
+
+    PALETTE
+        .into_iter()
+        .min_by_key(|(_, (candidate_red, candidate_green, candidate_blue))| {
+            let red = i32::from(red) - i32::from(*candidate_red);
+            let green = i32::from(green) - i32::from(*candidate_green);
+            let blue = i32::from(blue) - i32::from(*candidate_blue);
+            red * red + green * green + blue * blue
+        })
+        .map(|(color, _)| color)
+        .unwrap_or(Color::White)
 }
 
 #[cfg(test)]
@@ -426,10 +694,13 @@ mod tests {
 
     #[test]
     fn cycle_theme_wraps_and_set_by_name_round_trips() {
+        set_color_mode(TerminalColorMode::TrueColor);
         set_theme(Theme::default_dark());
         assert_eq!(active_theme().name, "dark");
         assert_eq!(cycle_theme(), "mocha");
         assert_eq!(active_theme().accent, Color::Rgb(137, 180, 250));
+        assert_eq!(cycle_theme(), "graphite");
+        assert_eq!(cycle_theme(), "lagoon");
         assert_eq!(cycle_theme(), "dark");
         assert_eq!(set_theme_by_name("mocha"), Some("mocha"));
         assert_eq!(set_theme_by_name("nope"), None);
@@ -440,6 +711,7 @@ mod tests {
 
     #[test]
     fn bar_color_thresholds() {
+        set_color_mode(TerminalColorMode::TrueColor);
         set_theme(Theme::default_dark());
         assert_eq!(bar_color(10.0), Color::Green);
         assert_eq!(bar_color(60.0), Color::Yellow);
@@ -471,5 +743,122 @@ mod tests {
                 "{name} must use semantic theme slots instead of Color::*"
             );
         }
+    }
+
+    #[test]
+    fn interactive_tui_copy_stays_english() {
+        let sources = [
+            include_str!("mod.rs"),
+            include_str!("footer.rs"),
+            include_str!("help_dialog.rs"),
+            include_str!("nav_bar.rs"),
+            include_str!("source_picker.rs"),
+            include_str!("panels/behavior.rs"),
+            include_str!("panels/blocks.rs"),
+            include_str!("panels/cost.rs"),
+            include_str!("panels/daily.rs"),
+            include_str!("panels/health.rs"),
+            include_str!("panels/hourly.rs"),
+            include_str!("panels/models.rs"),
+            include_str!("panels/overview.rs"),
+            include_str!("panels/projects.rs"),
+            include_str!("panels/sources.rs"),
+            include_str!("panels/stats.rs"),
+            include_str!("panels/trends.rs"),
+            include_str!("panels/usage.rs"),
+            include_str!("../../tests/tui_panels_prop.rs"),
+        ];
+
+        assert!(sources.iter().all(|source| !source.chars().any(is_han)));
+    }
+
+    fn is_han(ch: char) -> bool {
+        matches!(
+            ch,
+            '\u{3400}'..='\u{4dbf}' | '\u{4e00}'..='\u{9fff}' | '\u{f900}'..='\u{faff}'
+        )
+    }
+
+    #[test]
+    fn detects_no_color_truecolor_and_limited_terminals() {
+        assert_eq!(
+            TerminalColorMode::detect(true, None, Some("xterm-256color"), None),
+            TerminalColorMode::NoColor
+        );
+        assert_eq!(
+            TerminalColorMode::detect(false, Some("true"), None, None),
+            TerminalColorMode::NoColor
+        );
+        assert_eq!(
+            TerminalColorMode::detect(false, Some("0"), None, None),
+            TerminalColorMode::TrueColor
+        );
+        assert_eq!(
+            TerminalColorMode::detect(false, None, Some("xterm-256color"), Some("truecolor")),
+            TerminalColorMode::TrueColor
+        );
+        assert_eq!(
+            TerminalColorMode::detect(false, None, Some("xterm-256color"), None),
+            TerminalColorMode::Ansi16
+        );
+    }
+
+    #[test]
+    fn new_themes_and_color_adaptation_cover_all_slots() {
+        assert_eq!(
+            Theme::ALL.map(|theme| theme.name),
+            ["dark", "mocha", "graphite", "lagoon"]
+        );
+
+        let ansi = Theme::lagoon().adapted(TerminalColorMode::Ansi16);
+        let ansi_colors = [
+            ansi.accent,
+            ansi.row_alt_bg,
+            ansi.metric_input,
+            ansi.metric_output,
+            ansi.metric_cache_read,
+            ansi.metric_cache_write,
+            ansi.metric_reasoning,
+            ansi.heat[4],
+        ];
+        assert!(
+            ansi_colors
+                .iter()
+                .all(|color| !matches!(color, Color::Rgb(..)))
+        );
+
+        let plain = Theme::graphite().adapted(TerminalColorMode::NoColor);
+        let plain_colors = [
+            plain.accent,
+            plain.surface_fg,
+            plain.selection_bg,
+            plain.metric_input,
+            plain.kpi_colors[3],
+            plain.heat[4],
+            plain.bar_danger,
+        ];
+        assert!(plain_colors.iter().all(|color| *color == Color::Reset));
+    }
+
+    #[test]
+    fn truecolor_style_helpers_preserve_stage_one_styles() {
+        set_color_mode(TerminalColorMode::TrueColor);
+        set_theme(Theme::default_dark());
+
+        assert_eq!(fg_style(Color::Cyan), Style::default().fg(Color::Cyan));
+        assert_eq!(bold_style(), Style::default().add_modifier(Modifier::BOLD));
+        assert_eq!(
+            bold_fg_style(Color::Green),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD)
+        );
+        assert_eq!(
+            selection_style(),
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
+        );
     }
 }

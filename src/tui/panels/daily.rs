@@ -1,7 +1,7 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::{Line, Span},
     widgets::{Cell, Paragraph, Row, Table},
 };
@@ -66,7 +66,7 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[DailyTrendPoint], scroll
                 vec![
                     Cell::from(compact_date(&day.date)),
                     Cell::from(format_cost(day.cost_with_cache_usd))
-                        .style(Style::default().fg(theme::positive_fg())),
+                        .style(theme::fg_style(theme::positive_fg())),
                 ]
             } else if narrow {
                 vec![
@@ -74,12 +74,11 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[DailyTrendPoint], scroll
                     Cell::from(format_number(day.event_count)),
                     Cell::from(format_tokens(day.total_tokens)),
                     Cell::from(format_cost(day.cost_with_cache_usd))
-                        .style(Style::default().fg(theme::positive_fg())),
+                        .style(theme::fg_style(theme::positive_fg())),
                 ]
             } else {
                 vec![
-                    Cell::from(day.date.clone())
-                        .style(Style::default().add_modifier(Modifier::BOLD)),
+                    Cell::from(day.date.clone()).style(theme::bold_style()),
                     Cell::from(format_number(day.event_count)),
                     Cell::from(format_tokens(day.input_tokens))
                         .style(metric_style(theme::metric_input())),
@@ -92,7 +91,7 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[DailyTrendPoint], scroll
                     Cell::from(cache_hit_rate(day)).style(metric_style(theme::warning_fg())),
                     Cell::from(format_tokens(day.total_tokens)),
                     Cell::from(format_cost(day.cost_with_cache_usd))
-                        .style(Style::default().fg(theme::positive_fg())),
+                        .style(theme::fg_style(theme::positive_fg())),
                 ]
             };
 
@@ -236,5 +235,5 @@ fn cache_hit_rate(day: &DailyTrendPoint) -> String {
 }
 
 fn metric_style(color: Color) -> Style {
-    Style::default().fg(color)
+    theme::fg_style(color)
 }

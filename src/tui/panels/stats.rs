@@ -2,7 +2,7 @@ use chrono::{Datelike, NaiveDate};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::{Line, Span},
     widgets::{Cell, Paragraph, Row, Table},
 };
@@ -246,7 +246,7 @@ fn render_contribution(frame: &mut Frame, area: Rect, heatmap: &[HeatmapPoint]) 
         let bucket = contribution_bucket(point.total_tokens, &thresholds);
         frame.buffer_mut()[(x, y)]
             .set_symbol("\u{25A0}")
-            .set_style(Style::default().fg(theme::heat(bucket)));
+            .set_style(theme::fg_style(theme::heat(bucket)));
     }
 
     // Caption: date range on the left, a low→high legend on the right.
@@ -282,7 +282,7 @@ fn render_heat_legend(frame: &mut Frame, inner: Rect, row_offset: u16, caption_l
     for level in 0..squares {
         frame.buffer_mut()[(x, y)]
             .set_symbol("\u{25A0}")
-            .set_style(Style::default().fg(theme::heat(level + 1)));
+            .set_style(theme::fg_style(theme::heat(level + 1)));
         x += 1;
     }
     frame
@@ -300,7 +300,7 @@ fn render_contribution_strip(frame: &mut Frame, inner: Rect, heatmap: &[HeatmapP
         let symbol = if bucket == 0 { "." } else { "\u{25A0}" };
         frame.buffer_mut()[(inner.x + idx as u16, inner.y)]
             .set_symbol(symbol)
-            .set_style(Style::default().fg(theme::heat(bucket)));
+            .set_style(theme::fg_style(theme::heat(bucket)));
     }
     if inner.height > 1 {
         let first = recent.first().map(|point| compact_date(&point.date));
@@ -429,7 +429,7 @@ fn source_row(
         ])
     } else {
         Row::new(vec![
-            Cell::from(source.source.clone()).style(Style::default().add_modifier(Modifier::BOLD)),
+            Cell::from(source.source.clone()).style(theme::bold_style()),
             Cell::from(format_tokens(source.total_tokens)),
             Cell::from(format_number(source.event_count)),
             Cell::from(
@@ -439,7 +439,7 @@ fn source_row(
                     .unwrap_or_else(|| "-".to_string()),
             ),
             Cell::from(render_bar(source.total_tokens, max_tokens, 20))
-                .style(Style::default().fg(theme::positive_fg())),
+                .style(theme::fg_style(theme::positive_fg())),
         ])
     };
 
@@ -569,7 +569,7 @@ fn compact_date(date: &str) -> String {
 }
 
 fn metric_style(color: Color) -> Style {
-    Style::default().fg(color).add_modifier(Modifier::BOLD)
+    theme::bold_fg_style(color)
 }
 
 #[cfg(test)]

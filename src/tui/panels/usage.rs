@@ -1,7 +1,7 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::{Line, Span},
     widgets::{Cell, Paragraph, Row, Table},
 };
@@ -281,7 +281,7 @@ fn source_row(
         ])
     } else {
         Row::new(vec![
-            Cell::from(source.source.clone()).style(Style::default().add_modifier(Modifier::BOLD)),
+            Cell::from(source.source.clone()).style(theme::bold_style()),
             Cell::from(source.status.clone()).style(tone_style(&source.tone)),
             Cell::from(format_number(source.events_seen)),
             Cell::from(format_number(source.events_inserted)),
@@ -392,7 +392,7 @@ fn tone_style(tone: &str) -> Style {
 }
 
 fn metric_style(color: Color) -> Style {
-    Style::default().fg(color).add_modifier(Modifier::BOLD)
+    theme::bold_fg_style(color)
 }
 
 fn yes_no(value: bool) -> &'static str {

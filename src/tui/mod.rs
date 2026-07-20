@@ -34,10 +34,8 @@ use sync_control::{SyncController, SyncUpdate};
 
 /// Main entry point for the interactive terminal dashboard.
 pub fn run_dashboard(store: &Store) -> Result<()> {
-    // 0. Honor an optional initial theme from the environment.
-    if let Ok(name) = std::env::var("LLMUSAGE_THEME") {
-        theme::set_theme_by_name(&name);
-    }
+    // 0. Resolve theme and terminal color capability before entering raw mode.
+    theme::configure_from_env();
 
     // 1. Install panic hook BEFORE enabling raw mode
     let default_hook = std::panic::take_hook();
@@ -424,7 +422,11 @@ fn ok_len<T>(result: &Result<Vec<T>, String>) -> Option<usize> {
 mod tests {
     use super::*;
     use crate::tui::app::TimeWindow;
-    use ratatui::{Terminal, backend::TestBackend};
+    use ratatui::{
+        Terminal,
+        backend::TestBackend,
+        style::{Color, Modifier},
+    };
 
     fn buffer_text(terminal: &Terminal<TestBackend>) -> String {
         terminal
@@ -511,9 +513,9 @@ mod tests {
     #[test]
     fn heavy_panels_render_loading_before_results_arrive() -> Result<()> {
         for (panel, expected) in [
-            (Panel::Behavior, "加 载 中"),
+            (Panel::Behavior, "Loading"),
             (Panel::Health, "Loading"),
-            (Panel::Blocks, "加 载 中"),
+            (Panel::Blocks, "Loading"),
         ] {
             let backend = TestBackend::new(120, 30);
             let mut terminal = Terminal::new(backend)?;
@@ -528,5 +530,86 @@ mod tests {
             );
         }
         Ok(())
+    }
+
+    #[test]
+    fn no_color_dashboard_buffers_have_no_styles() -> Result<()> {
+        theme::set_color_mode(theme::TerminalColorMode::NoColor);
+        theme::set_theme(theme::Theme::graphite());
+
+        for panel in Panel::all() {
+            let mut terminal = Terminal::new(TestBackend::new(120, 30))?;
+            let mut state = AppState::new();
+            state.active_panel = *panel;
+            terminal.draw(|frame| draw::draw(frame, &state))?;
+            assert_unstyled(&terminal, panel.label());
+        }
+
+        for dialog in [app::ActiveDialog::SourcePicker, app::ActiveDialog::Help] {
+            let mut terminal = Terminal::new(TestBackend::new(120, 30))?;
+            let mut state = AppState::new();
+            state.active_dialog = Some(dialog);
+            terminal.draw(|frame| draw::draw(frame, &state))?;
+            assert_unstyled(&terminal, "dialog");
+        }
+
+        theme::set_color_mode(theme::TerminalColorMode::TrueColor);
+        theme::set_theme(theme::Theme::default_dark());
+        Ok(())
+    }
+
+    #[test]
+    fn every_theme_reaches_all_panel_shells_and_dialogs() -> Result<()> {
+        theme::set_color_mode(theme::TerminalColorMode::TrueColor);
+
+        for selected_theme in theme::Theme::ALL {
+            theme::set_theme(selected_theme);
+            let accent = theme::active_theme().accent;
+            for panel in Panel::all() {
+                let mut terminal = Terminal::new(TestBackend::new(120, 30))?;
+                let mut state = AppState::new();
+                state.active_panel = *panel;
+                terminal.draw(|frame| draw::draw(frame, &state))?;
+                assert!(
+                    terminal
+                        .backend()
+                        .buffer()
+                        .content()
+                        .iter()
+                        .any(|cell| cell.fg == accent || cell.bg == accent),
+                    "{} must reach {}",
+                    selected_theme.name,
+                    panel.label()
+                );
+            }
+
+            for dialog in [app::ActiveDialog::SourcePicker, app::ActiveDialog::Help] {
+                let mut terminal = Terminal::new(TestBackend::new(120, 30))?;
+                let mut state = AppState::new();
+                state.active_dialog = Some(dialog);
+                terminal.draw(|frame| draw::draw(frame, &state))?;
+                assert!(
+                    terminal
+                        .backend()
+                        .buffer()
+                        .content()
+                        .iter()
+                        .any(|cell| cell.fg == accent || cell.bg == accent),
+                    "{} must reach dialog",
+                    selected_theme.name
+                );
+            }
+        }
+
+        theme::set_theme(theme::Theme::default_dark());
+        Ok(())
+    }
+
+    fn assert_unstyled(terminal: &Terminal<TestBackend>, label: &str) {
+        for cell in terminal.backend().buffer().content() {
+            assert_eq!(cell.fg, Color::Reset, "{label} foreground");
+            assert_eq!(cell.bg, Color::Reset, "{label} background");
+            assert_eq!(cell.modifier, Modifier::empty(), "{label} modifier");
+        }
     }
 }

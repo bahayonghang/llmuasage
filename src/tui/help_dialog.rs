@@ -1,7 +1,6 @@
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
-    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
 };
@@ -15,7 +14,7 @@ pub fn render(frame: &mut Frame, viewport: Rect, state: &AppState) {
     let block = Block::default()
         .title(" Help / Settings ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::accent()));
+        .border_style(theme::fg_style(theme::accent()));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -36,20 +35,15 @@ pub fn render(frame: &mut Frame, viewport: Rect, state: &AppState) {
             Span::styled("Theme ", theme::muted_style()),
             Span::styled(
                 theme::active_theme().name,
-                Style::default()
-                    .fg(theme::accent())
-                    .add_modifier(Modifier::BOLD),
+                theme::bold_fg_style(theme::accent()),
             ),
             Span::styled(" • Source ", theme::muted_style()),
             Span::styled(
                 state.source_filter_label(),
-                Style::default().fg(theme::accent()),
+                theme::fg_style(theme::accent()),
             ),
             Span::styled(" • Window ", theme::muted_style()),
-            Span::styled(
-                state.time_window.label(),
-                Style::default().fg(theme::accent()),
-            ),
+            Span::styled(state.time_window.label(), theme::fg_style(theme::accent())),
         ])),
         rows[0],
     );

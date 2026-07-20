@@ -2,7 +2,6 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use ratatui::{
     Frame,
     layout::{Constraint, Rect},
-    style::{Modifier, Style},
     text::Span,
     widgets::{Cell, Paragraph, Row, Table},
 };
@@ -85,22 +84,17 @@ fn render_table(frame: &mut Frame, area: Rect, points: &[TrendPoint], scroll: &S
                 ]
             } else {
                 vec![
-                    Cell::from(format_hour_label(&point.label, false))
-                        .style(Style::default().add_modifier(Modifier::BOLD)),
+                    Cell::from(format_hour_label(&point.label, false)).style(theme::bold_style()),
                     Cell::from(format_tokens(point.total_tokens)),
                     Cell::from(format!("{share:.1}%")),
                     Cell::from(render_bar(point.total_tokens, peak_tokens, 24))
-                        .style(Style::default().fg(theme::positive_fg())),
+                        .style(theme::fg_style(theme::positive_fg())),
                 ]
             };
 
             let mut row = Row::new(cells);
             if point.total_tokens == peak_tokens && peak_tokens > 0 {
-                row = row.style(
-                    Style::default()
-                        .fg(theme::warning_fg())
-                        .add_modifier(Modifier::BOLD),
-                );
+                row = row.style(theme::bold_fg_style(theme::warning_fg()));
             } else if index % 2 == 1 {
                 row = row.style(theme::row_alt_style());
             }

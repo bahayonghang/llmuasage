@@ -819,7 +819,7 @@ fn dashboard_shell_renders_tokscale_style_header_and_footer() {
 fn dashboard_shell_uses_short_labels_on_narrow_widths() {
     let text = render_shell_text(AppState::new(), 50, 18);
 
-    for expected in ["llmusage", "Ovw", "Use", "Day", "Hr", "tab/1-8"] {
+    for expected in ["llmusage", "Ovw", "Use", "Day", "Hr", "tab/1-9"] {
         assert!(
             text.contains(expected),
             "narrow dashboard shell should contain '{expected}', got: {text}"
@@ -1088,7 +1088,7 @@ fn trends_window_labels_use_window_specific_short_formats() {
 fn trends_empty_data_renders_placeholder() {
     let text = render_trends_text(Vec::new(), TimeWindow::Week7d, 80, 18);
     assert!(
-        text.contains("暂无趋势数据"),
+        text.contains("No trend data found."),
         "empty trend data should show placeholder: {text}"
     );
 }
@@ -1104,7 +1104,7 @@ fn trends_small_terminal_does_not_panic() {
 
     let text = render_trends_text(points, TimeWindow::Month30d, 30, 8);
     assert!(
-        text.contains("趋势"),
+        text.contains("Usage Trends"),
         "small terminal should render a shell"
     );
 }
@@ -1114,11 +1114,11 @@ fn behavior_panel_renders_all_behavior_sections_and_sample_rows() {
     let text = render_behavior_text(sample_behavior_payload(), 160, 40);
 
     for expected in [
-        "行为",
+        "Behavior",
         "Activity",
         "Tools",
         "Optimize",
-        "Compare",
+        "Model Comparison",
         "coding",
         "Read",
         "(non-tool)",
@@ -1189,7 +1189,7 @@ fn behavior_panel_renders_no_data_degraded_and_compare_warnings() {
         "no-data",
         "degraded",
         "insufficient-models",
-        "暂不计算 score",
+        "score and savings are not calculated",
         "At least two",
     ] {
         assert!(
@@ -1240,12 +1240,12 @@ proptest! {
         prop_assert!(text.contains(&bc_str),
             "Missing bucket_count '{}' in output", bc_str);
 
-        // last_sync_at or "从未同步"
+        // last_sync_at or "Never synced"
         match &payload.last_sync_at {
             Some(ts) => prop_assert!(text.contains(ts),
                 "Missing last_sync_at '{}' in output", ts),
-            None => prop_assert!(text.contains("从未同步"),
-                "Missing '从未同步' placeholder in output"),
+            None => prop_assert!(text.contains("Never synced"),
+                "Missing 'Never synced' placeholder in output"),
         }
     }
 }
@@ -1267,10 +1267,10 @@ proptest! {
     ) {
         let text = render_trends_text(points.clone(), window, 100, 26);
 
-        prop_assert!(text.contains("趋势"),
+        prop_assert!(text.contains("Usage Trends"),
             "Trends panel shell should render for any generated series");
         if points.is_empty() {
-            prop_assert!(text.contains("暂无趋势数据"),
+            prop_assert!(text.contains("No trend data found."),
                 "Empty trend series should render placeholder");
         }
     }

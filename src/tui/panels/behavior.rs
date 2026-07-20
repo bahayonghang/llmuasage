@@ -1,7 +1,7 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::Color,
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
 };
@@ -20,15 +20,15 @@ use crate::tui::{
 pub fn render(frame: &mut Frame, area: Rect, data: &Option<Result<BehaviorPanelPayload, String>>) {
     match data {
         None => {
-            let widget = Paragraph::new("加载中...")
+            let widget = Paragraph::new("Loading...")
                 .style(theme::muted_style())
-                .block(theme::panel_block("行为"));
+                .block(theme::panel_block("Behavior"));
             frame.render_widget(widget, area);
         }
         Some(Err(e)) => {
-            let widget = Paragraph::new(format!("数据加载失败: {e}"))
+            let widget = Paragraph::new(format!("Data load failed: {e}"))
                 .style(theme::error_style())
-                .block(theme::panel_block("行为"));
+                .block(theme::panel_block("Behavior"));
             frame.render_widget(widget, area);
         }
         Some(Ok(payload)) => render_payload(frame, area, payload),
@@ -55,16 +55,14 @@ fn render_activity(frame: &mut Frame, area: Rect, payload: &BehaviorPanelPayload
     if payload.activity.breakdown.is_empty() {
         lines.push(empty_reason_line(
             &payload.activity.support,
-            "无 Activity 行为事实。",
+            "No activity behavior facts.",
         ));
     } else {
         lines.extend(payload.activity.breakdown.iter().take(4).map(|row| {
             Line::from(vec![
                 Span::styled(
                     format!("{} ", row.category),
-                    Style::default()
-                        .fg(theme::accent())
-                        .add_modifier(Modifier::BOLD),
+                    theme::bold_fg_style(theme::accent()),
                 ),
                 Span::raw(format!(
                     "turns={} edits={} tokens={} cost={} one-shot={} retry={}",
@@ -78,7 +76,7 @@ fn render_activity(frame: &mut Frame, area: Rect, payload: &BehaviorPanelPayload
             ])
         }));
     }
-    render_section(frame, area, "行为 · Activity 分类", lines);
+    render_section(frame, area, "Behavior / Activity Categories", lines);
 }
 
 fn render_tools(frame: &mut Frame, area: Rect, payload: &BehaviorPanelPayload) {
@@ -86,7 +84,7 @@ fn render_tools(frame: &mut Frame, area: Rect, payload: &BehaviorPanelPayload) {
     if payload.tools.breakdown.is_empty() {
         lines.push(empty_reason_line(
             &payload.tools.support,
-            "无 Tools 行为事实。",
+            "No tool behavior facts.",
         ));
     } else {
         lines.extend(payload.tools.breakdown.iter().take(4).map(|row| {
@@ -98,9 +96,7 @@ fn render_tools(frame: &mut Frame, area: Rect, payload: &BehaviorPanelPayload) {
             Line::from(vec![
                 Span::styled(
                     format!("{}/{}{} ", row.tool_kind, row.tool_name, server),
-                    Style::default()
-                        .fg(theme::accent())
-                        .add_modifier(Modifier::BOLD),
+                    theme::bold_fg_style(theme::accent()),
                 ),
                 Span::raw(format!(
                     "calls={} turns={} sessions={} share={} cost={}",
@@ -113,7 +109,7 @@ fn render_tools(frame: &mut Frame, area: Rect, payload: &BehaviorPanelPayload) {
             ])
         }));
     }
-    render_section(frame, area, "行为 · Tools 工具", lines);
+    render_section(frame, area, "Behavior / Tools", lines);
 }
 
 fn render_optimize(
@@ -124,7 +120,7 @@ fn render_optimize(
 ) {
     let mut lines = vec![support_line(&payload.support)];
     lines.push(Line::styled(
-        "只读建议：llmusage 不会自动删除、归档、重写或清理任何内容。",
+        "Read-only advice: llmusage never deletes, archives, rewrites, or cleans content automatically.",
         theme::muted_style(),
     ));
 
@@ -133,16 +129,14 @@ fn render_optimize(
             lines.push(Line::styled(reason.clone(), theme::muted_style()));
         }
         lines.push(Line::styled(
-            "无行为事实，暂不计算 score 或 savings。",
+            "No behavior facts; score and savings are not calculated.",
             theme::muted_style(),
         ));
     } else {
         lines.push(Line::from(vec![
             Span::styled(
                 format!("Score {} ({}) ", payload.score, payload.grade),
-                Style::default()
-                    .fg(theme::positive_fg())
-                    .add_modifier(Modifier::BOLD),
+                theme::bold_fg_style(theme::positive_fg()),
             ),
             Span::raw(format!(
                 "estimated savings={} / {}",
@@ -153,7 +147,7 @@ fn render_optimize(
 
         if payload.findings.is_empty() {
             lines.push(Line::styled(
-                "未发现明显浪费模式；继续结合上下文人工判断。",
+                "No obvious waste patterns found; review the surrounding context manually.",
                 theme::muted_style(),
             ));
         } else {
@@ -161,12 +155,10 @@ fn render_optimize(
                 Line::from(vec![
                     Span::styled(
                         format!("[{}] {} ", finding.severity, finding.title),
-                        Style::default()
-                            .fg(severity_color(&finding.severity))
-                            .add_modifier(Modifier::BOLD),
+                        theme::bold_fg_style(severity_color(&finding.severity)),
                     ),
                     Span::raw(format!(
-                        "{}；建议：{}",
+                        "{}. Recommendation: {}",
                         finding.evidence, finding.recommendation
                     )),
                 ])
@@ -177,7 +169,7 @@ fn render_optimize(
     if zombie.zombies.is_empty() {
         lines.push(Line::styled(
             format!(
-                "僵尸技能/MCP：无（已扫描 {} 个已装项）",
+                "Zombie skills/MCPs: none ({} installed items scanned)",
                 zombie.installed_total
             ),
             theme::muted_style(),
@@ -192,31 +184,24 @@ fn render_optimize(
             .join(" · ");
         lines.push(Line::from(vec![
             Span::styled(
-                format!("僵尸 {} ", zombie.zombies.len()),
-                Style::default()
-                    .fg(theme::warning_fg())
-                    .add_modifier(Modifier::BOLD),
+                format!("Zombies {} ", zombie.zombies.len()),
+                theme::bold_fg_style(theme::warning_fg()),
             ),
             Span::raw(format!(
-                "装了从未调用（共 {} 已装）：{}（可清理候选；llmusage 不自动删除）",
+                "Installed but never called ({} installed): {} (cleanup candidates; llmusage never deletes automatically)",
                 zombie.installed_total, preview,
             )),
         ]));
     }
 
-    render_section(frame, area, "行为 · Optimize 只读建议", lines);
+    render_section(frame, area, "Behavior / Optimize (read-only)", lines);
 }
 
 fn render_compare(frame: &mut Frame, area: Rect, payload: &ModelComparePayload) {
     let mut lines = vec![support_line(&payload.support)];
     if let Some(warning) = &payload.warning {
         lines.push(Line::from(vec![
-            Span::styled(
-                "警告 ",
-                Style::default()
-                    .fg(theme::warning_fg())
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Span::styled("Warning ", theme::bold_fg_style(theme::warning_fg())),
             Span::raw(warning.clone()),
         ]));
     }
@@ -226,9 +211,7 @@ fn render_compare(frame: &mut Frame, area: Rect, payload: &ModelComparePayload) 
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("{} vs {} ", left.model, right.model),
-                    Style::default()
-                        .fg(theme::accent())
-                        .add_modifier(Modifier::BOLD),
+                    theme::bold_fg_style(theme::accent()),
                 ),
                 Span::raw(format!(
                     "calls {}:{} / {}:{} edits {}:{} / {}:{} cost {}:{} / {}:{}",
@@ -250,7 +233,7 @@ fn render_compare(frame: &mut Frame, area: Rect, payload: &ModelComparePayload) 
                 Line::from(vec![
                     Span::styled(
                         format!("{} ", metric.label),
-                        Style::default().fg(theme::accent()),
+                        theme::fg_style(theme::accent()),
                     ),
                     Span::raw(format!(
                         "{} → {}{}",
@@ -268,7 +251,7 @@ fn render_compare(frame: &mut Frame, area: Rect, payload: &ModelComparePayload) 
                 lines.push(Line::from(vec![
                     Span::styled(
                         format!("category:{} ", category.category),
-                        Style::default().fg(theme::accent()),
+                        theme::fg_style(theme::accent()),
                     ),
                     Span::raw(format!(
                         "one-shot {} vs {}",
@@ -281,16 +264,16 @@ fn render_compare(frame: &mut Frame, area: Rect, payload: &ModelComparePayload) 
         _ => {
             lines.push(empty_reason_line(
                 &payload.support,
-                "Compare 需要至少两个有本地用量的模型。",
+                "Compare requires at least two models with local usage.",
             ));
             lines.push(Line::styled(
-                format!("候选模型: {}", payload.candidates.len()),
+                format!("Candidate models: {}", payload.candidates.len()),
                 theme::muted_style(),
             ));
         }
     }
 
-    render_section(frame, area, "行为 · Compare 模型对比", lines);
+    render_section(frame, area, "Behavior / Model Comparison", lines);
 }
 
 fn render_section(frame: &mut Frame, area: Rect, title: &str, lines: Vec<Line<'_>>) {
@@ -303,28 +286,22 @@ fn render_section(frame: &mut Frame, area: Rect, title: &str, lines: Vec<Line<'_
 fn section_block(title: &str) -> Block<'_> {
     Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::border_normal()))
+        .border_style(theme::fg_style(theme::border_normal()))
         .title(Span::styled(
             format!(" {title} "),
-            Style::default()
-                .fg(theme::accent())
-                .add_modifier(Modifier::BOLD),
+            theme::bold_fg_style(theme::accent()),
         ))
 }
 
 fn support_line(support: &BehaviorSupport) -> Line<'_> {
     let level = support_level_label(&support.level);
     let status_style = if support.supported {
-        Style::default()
-            .fg(theme::positive_fg())
-            .add_modifier(Modifier::BOLD)
+        theme::bold_fg_style(theme::positive_fg())
     } else {
-        Style::default()
-            .fg(theme::warning_fg())
-            .add_modifier(Modifier::BOLD)
+        theme::bold_fg_style(theme::warning_fg())
     };
     let mut spans = vec![
-        Span::styled("状态 ", Style::default().fg(theme::accent())),
+        Span::styled("Status ", theme::fg_style(theme::accent())),
         Span::styled(level, status_style),
     ];
     if let Some(reason) = &support.reason {

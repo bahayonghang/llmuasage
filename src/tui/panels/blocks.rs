@@ -6,7 +6,7 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Rect},
-    style::{Modifier, Style},
+    style::Style,
     text::Span,
     widgets::{Block, Borders, Cell, Paragraph, Row, Table},
 };
@@ -23,15 +23,15 @@ pub fn render(
     scroll: &ScrollState,
 ) {
     match data {
-        None => placeholder(frame, area, "加载中...", theme::muted_style()),
+        None => placeholder(frame, area, "Loading...", theme::muted_style()),
         Some(Err(e)) => placeholder(
             frame,
             area,
-            &format!("数据加载失败: {e}"),
+            &format!("Data load failed: {e}"),
             theme::error_style(),
         ),
         Some(Ok(items)) if items.is_empty() => {
-            placeholder(frame, area, "暂无区块数据", theme::muted_style())
+            placeholder(frame, area, "No block data found.", theme::muted_style())
         }
         Some(Ok(items)) => render_table(frame, area, items, scroll),
     }
@@ -40,19 +40,19 @@ pub fn render(
 fn placeholder(frame: &mut Frame, area: Rect, text: &str, style: Style) {
     let widget = Paragraph::new(text.to_string())
         .style(style)
-        .block(styled_block("区块"));
+        .block(styled_block("Blocks"));
     frame.render_widget(widget, area);
 }
 
 fn render_table(frame: &mut Frame, area: Rect, items: &[BlockReportRow], scroll: &ScrollState) {
     let header = Row::new(vec![
-        Cell::from("窗口"),
-        Cell::from("状态"),
-        Cell::from("总 Tokens"),
+        Cell::from("Window"),
+        Cell::from("Status"),
+        Cell::from("Total Tokens"),
         Cell::from("Burn/h"),
-        Cell::from("预计"),
-        Cell::from("额度"),
-        Cell::from("成本 (USD)"),
+        Cell::from("Projected"),
+        Cell::from("Limit"),
+        Cell::from("Cost (USD)"),
     ])
     .style(theme::header_style())
     .bottom_margin(1);
@@ -83,11 +83,7 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[BlockReportRow], scroll:
             ]);
             if item.is_active {
                 // The live window is highlighted; its burn rate/projection matter most.
-                row.style(
-                    Style::default()
-                        .fg(theme::accent())
-                        .add_modifier(Modifier::BOLD),
-                )
+                row.style(theme::bold_fg_style(theme::accent()))
             } else if i % 2 == 1 {
                 row.style(theme::row_alt_style())
             } else {
@@ -109,7 +105,7 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[BlockReportRow], scroll:
         ],
     )
     .header(header)
-    .block(styled_block("区块 (5h burn rate)"))
+    .block(styled_block("Blocks (5h burn rate)"))
     .row_highlight_style(theme::selection_style());
 
     frame.render_widget(table, area);
