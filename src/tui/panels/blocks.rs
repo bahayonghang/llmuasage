@@ -12,7 +12,7 @@ use ratatui::{
 };
 
 use crate::query::reports::BlockReportRow;
-use crate::tui::{format::grouped as format_number, theme};
+use crate::tui::{format::stat_compact, theme};
 
 use super::super::app::{ScrollState, SortState, TableSortKey, stable_sort_refs};
 
@@ -101,9 +101,9 @@ fn render_table(
             let row = Row::new(vec![
                 Cell::from(window),
                 Cell::from(status),
-                Cell::from(format_number(item.totals.total_tokens)),
-                Cell::from(format_number(item.burn_rate_tokens_per_hour.round() as i64)),
-                Cell::from(format_number(item.projected_total_tokens)),
+                Cell::from(stat_compact(item.totals.total_tokens)),
+                Cell::from(stat_compact(item.burn_rate_tokens_per_hour.round() as i64)),
+                Cell::from(stat_compact(item.projected_total_tokens)),
                 Cell::from(limit),
                 Cell::from(format!("${:.2}", item.totals.estimated_cost_usd)),
             ]);
@@ -172,12 +172,12 @@ mod tests {
             end_at: "2026-06-20T15:00:00Z".to_string(),
             is_active: active,
             duration_minutes: 90,
-            burn_rate_tokens_per_hour: 12_000.0,
-            projected_total_tokens: 60_000,
+            burn_rate_tokens_per_hour: 288_694_891.0,
+            projected_total_tokens: 18_500_000_000,
             token_limit: Some(100_000),
             token_limit_percent: Some(60.0),
             totals: TokenTotals {
-                total_tokens: 45_000,
+                total_tokens: 18_214_785_227,
                 estimated_cost_usd: 1.23,
                 ..TokenTotals::default()
             },
@@ -206,7 +206,8 @@ mod tests {
         let text = render_text(&data);
         assert!(text.contains("Burn/h"));
         assert!(text.contains("active"));
-        assert!(text.contains("45,000"));
+        assert!(text.contains("18.2B"));
+        assert!(text.contains("288.7M"));
     }
 
     #[test]

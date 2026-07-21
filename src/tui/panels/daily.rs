@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::query::DailyTrendPoint;
 use crate::tui::{
-    format::{cost as format_cost, grouped as format_number, tokens as format_tokens},
+    format::{cost as format_cost, stat_compact},
     theme,
 };
 
@@ -97,25 +97,25 @@ fn render_table(
         } else if narrow {
             vec![
                 Cell::from(compact_date(&day.date)),
-                Cell::from(format_number(day.event_count)),
-                Cell::from(format_tokens(day.total_tokens)),
+                Cell::from(stat_compact(day.event_count)),
+                Cell::from(stat_compact(day.total_tokens)),
                 Cell::from(format_cost(day.cost_with_cache_usd))
                     .style(theme::fg_style(theme::positive_fg())),
             ]
         } else {
             vec![
                 Cell::from(day.date.clone()).style(theme::bold_style()),
-                Cell::from(format_number(day.event_count)),
-                Cell::from(format_tokens(day.input_tokens))
+                Cell::from(stat_compact(day.event_count)),
+                Cell::from(stat_compact(day.input_tokens))
                     .style(metric_style(theme::metric_input())),
-                Cell::from(format_tokens(day.output_tokens))
+                Cell::from(stat_compact(day.output_tokens))
                     .style(metric_style(theme::metric_output())),
-                Cell::from(format_tokens(day.cache_read_tokens))
+                Cell::from(stat_compact(day.cache_read_tokens))
                     .style(metric_style(theme::metric_cache_read())),
-                Cell::from(format_tokens(day.cache_creation_tokens))
+                Cell::from(stat_compact(day.cache_creation_tokens))
                     .style(metric_style(theme::metric_cache_write())),
                 Cell::from(cache_hit_rate(day)).style(metric_style(theme::warning_fg())),
-                Cell::from(format_tokens(day.total_tokens)),
+                Cell::from(stat_compact(day.total_tokens)),
                 Cell::from(format_cost(day.cost_with_cache_usd))
                     .style(theme::fg_style(theme::positive_fg())),
             ]
@@ -171,20 +171,20 @@ fn render_detail(
         ),
         Span::styled("  input ", theme::muted_style()),
         Span::styled(
-            format_tokens(day.input_tokens),
+            stat_compact(day.input_tokens),
             metric_style(theme::metric_input()),
         ),
         Span::styled("  output ", theme::muted_style()),
         Span::styled(
-            format_tokens(day.output_tokens),
+            stat_compact(day.output_tokens),
             metric_style(theme::metric_output()),
         ),
         Span::styled("  cache R/W ", theme::muted_style()),
         Span::styled(
             format!(
                 "{}/{}",
-                format_tokens(day.cache_read_tokens),
-                format_tokens(day.cache_creation_tokens)
+                stat_compact(day.cache_read_tokens),
+                stat_compact(day.cache_creation_tokens)
             ),
             metric_style(theme::metric_cache_write()),
         ),

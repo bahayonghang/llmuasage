@@ -21,27 +21,7 @@ use llmusage::store::IntegrationState;
 use llmusage::tui::app::{
     ActiveDialog, AppState, BehaviorPanelPayload, Panel, ScrollState, StatsPanelPayload,
 };
-
-/// Format a number with thousands separators (matching panel rendering).
-fn format_number(n: i64) -> String {
-    if n == 0 {
-        return "0".to_string();
-    }
-    let s = n.abs().to_string();
-    let mut result = String::new();
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-    }
-    let formatted: String = result.chars().rev().collect();
-    if n < 0 {
-        format!("-{formatted}")
-    } else {
-        formatted
-    }
-}
+use llmusage::tui::format::stat_compact;
 
 /// Extract all text content from a TestBackend buffer as a single string.
 /// Handles wide (CJK) characters correctly by skipping their continuation cells.
@@ -86,11 +66,11 @@ fn buffer_text(terminal: &Terminal<TestBackend>) -> String {
 
 fn arb_token_summary() -> impl Strategy<Value = TokenSummary> {
     (
-        0i64..100_000,
-        0i64..100_000,
-        0i64..100_000,
-        0i64..100_000,
-        0i64..100_000,
+        0i64..5_000_000_000,
+        0i64..5_000_000_000,
+        0i64..5_000_000_000,
+        0i64..5_000_000_000,
+        0i64..5_000_000_000,
     )
         .prop_map(
             |(input, cache_creation, cache, output, reasoning)| TokenSummary {
@@ -108,8 +88,8 @@ fn arb_overview_payload() -> impl Strategy<Value = OverviewPayload> {
     (
         arb_token_summary(),
         arb_token_summary(),
-        0i64..100,
-        0i64..1000,
+        0i64..2_000_000,
+        0i64..2_000_000,
         0.0f64..10000.0,
         0.0f64..1.0,
         proptest::option::of("[a-z]{5,10}"),
@@ -134,8 +114,13 @@ fn arb_overview_payload() -> impl Strategy<Value = OverviewPayload> {
 }
 
 fn arb_model_breakdown() -> impl Strategy<Value = ModelBreakdown> {
-    ("[a-z]{3,8}", 1i64..100_000, 1i64..1000, 0.0001f64..100.0).prop_map(
-        |(model, tokens, events, cost)| ModelBreakdown {
+    (
+        "[a-z]{3,8}",
+        1i64..20_000_000_000,
+        1i64..2_000_000,
+        0.0001f64..100.0,
+    )
+        .prop_map(|(model, tokens, events, cost)| ModelBreakdown {
             model,
             input_tokens: 0,
             cache_creation_tokens: 0,
@@ -150,17 +135,16 @@ fn arb_model_breakdown() -> impl Strategy<Value = ModelBreakdown> {
             pricing_status: "static".to_string(),
             pricing_source: None,
             pricing_rate: None,
-        },
-    )
+        })
 }
 
 fn arb_cost_line() -> impl Strategy<Value = CostLine> {
     (
         "[a-z]{3,8}",
         "[a-z]{3,8}",
-        1i64..100_000,
+        1i64..20_000_000_000,
         0.01f64..100.0,
-        1i64..1000,
+        1i64..2_000_000,
     )
         .prop_map(|(source, model, tokens, cost, events)| CostLine {
             source,
@@ -397,13 +381,61 @@ fn overview_panel_renders_summary_sections_and_24h_pulse() {
         "Avg/event",
         "Generated",
         "All-time share",
-        "5,500",
-        "2,750",
+        "5.5K",
+        "2.8K",
         "25.0%",
     ] {
         assert!(
             text.contains(expected),
             "overview panel should contain '{expected}', got: {text}"
+        );
+    }
+}
+
+#[test]
+fn overview_panel_compacts_screenshot_scale_statistics_in_wide_and_narrow_layouts() {
+    let mut payload = sample_overview_payload();
+    payload.total = TokenSummary {
+        input_tokens: 1_029_915_980,
+        cache_creation_tokens: 308_679_097,
+        cache_read_tokens: 16_727_462_769,
+        output_tokens: 102_129_668,
+        reasoning_output_tokens: 31_392_730,
+        total_tokens: 18_214_785_227,
+    };
+    payload.last_24h = TokenSummary {
+        input_tokens: 13_747_991,
+        cache_creation_tokens: 4_145_779,
+        cache_read_tokens: 269_193_939,
+        output_tokens: 1_317_422,
+        reasoning_output_tokens: 339_434,
+        total_tokens: 288_694_891,
+    };
+    payload.total_events = 137_075;
+    payload.last_24h_events = 2_155;
+    payload.bucket_count = 3_968;
+
+    for (width, height) in [(120, 30), (80, 30)] {
+        let text = render_overview_text(payload.clone(), width, height);
+        for expected in ["18.2B", "288.7M"] {
+            assert!(
+                text.contains(expected),
+                "{width}x{height} overview should contain '{expected}', got: {text}"
+            );
+        }
+        for exact in ["18,214,785,227", "288,694,891"] {
+            assert!(
+                !text.contains(exact),
+                "{width}x{height} overview should not contain '{exact}', got: {text}"
+            );
+        }
+    }
+
+    let wide = render_overview_text(payload, 120, 30);
+    for expected in ["1B", "16.7B", "137.1K", "2.2K", "4K"] {
+        assert!(
+            wide.contains(expected),
+            "wide overview should contain '{expected}', got: {wide}"
         );
     }
 }
@@ -436,7 +468,7 @@ fn sample_stats_payload() -> StatsPanelPayload {
         sources: vec![
             SourceBreakdown {
                 source: "codex".to_string(),
-                total_tokens: 16_000,
+                total_tokens: 16_214_785_227,
                 last_event_at: Some("2026-06-12T00:00:00Z".to_string()),
                 event_count: 8,
             },
@@ -745,11 +777,11 @@ fn daily_panel_renders_tokscale_style_token_channels() {
         vec![
             DailyTrendPoint {
                 date: "2026-05-28".to_string(),
-                input_tokens: 1_000,
-                cache_read_tokens: 2_000,
-                cache_creation_tokens: 500,
-                output_tokens: 3_000,
-                total_tokens: 6_500,
+                input_tokens: 1_000_000_000,
+                cache_read_tokens: 2_000_000_000,
+                cache_creation_tokens: 500_000_000,
+                output_tokens: 14_714_785_227,
+                total_tokens: 18_214_785_227,
                 event_count: 7,
                 cost_with_cache_usd: 1.25,
             },
@@ -776,6 +808,7 @@ fn daily_panel_renders_tokscale_style_token_channels() {
         "Cache R",
         "Cache W",
         "detail",
+        "18.2B",
         "$2.50",
     ] {
         assert!(
@@ -820,14 +853,14 @@ fn hourly_panel_renders_profile_bars_and_compact_hour_labels() {
             },
             TrendPoint {
                 label: "2026-05-29T14:00:00Z".to_string(),
-                total_tokens: 2_000,
+                total_tokens: 18_214_785_227,
             },
         ],
         120,
         12,
     );
 
-    for expected in ["Hourly Usage", "05-29 14:00", "Profile", "#"] {
+    for expected in ["Hourly Usage", "05-29 14:00", "18.2B", "Profile", "#"] {
         assert!(
             text.contains(expected),
             "hourly panel should contain '{expected}', got: {text}"
@@ -884,7 +917,7 @@ fn stats_panel_renders_contribution_and_source_mix() {
         "current streak",
         "3.50",
         "codex",
-        "16.0k",
+        "16.2B",
         "Health Signals",
     ] {
         assert!(
@@ -898,7 +931,7 @@ fn stats_panel_renders_contribution_and_source_mix() {
 fn stats_panel_uses_compact_source_columns_on_narrow_widths() {
     let text = render_stats_text(sample_stats_payload(), 50, 12);
 
-    for expected in ["Stats", "Source Mix", "codex", "16.0k"] {
+    for expected in ["Stats", "Source Mix", "codex", "16.2B"] {
         assert!(
             text.contains(expected),
             "narrow stats panel should contain '{expected}', got: {text}"
@@ -930,6 +963,21 @@ fn behavior_panel_renders_all_behavior_sections_and_sample_rows() {
         assert!(
             text.contains(expected),
             "expected behavior panel to contain '{expected}', got: {text}"
+        );
+    }
+}
+
+#[test]
+fn behavior_panel_compacts_large_analytics_counts() {
+    let mut payload = sample_behavior_payload();
+    payload.activity.breakdown[0].total_tokens = 18_214_785_227;
+    payload.tools.breakdown[0].calls = 137_075;
+
+    let text = render_behavior_text(payload, 160, 40);
+    for expected in ["tokens=18.2B", "calls=137.1K"] {
+        assert!(
+            text.contains(expected),
+            "behavior panel should contain '{expected}', got: {text}"
         );
     }
 }
@@ -1032,12 +1080,12 @@ proptest! {
             "Missing cache_efficiency '{}' in output", eff_str);
 
         // source_count
-        let sc_str = payload.source_count.to_string();
+        let sc_str = stat_compact(payload.source_count);
         prop_assert!(text.contains(&sc_str),
             "Missing source_count '{}' in output", sc_str);
 
         // bucket_count
-        let bc_str = payload.bucket_count.to_string();
+        let bc_str = stat_compact(payload.bucket_count);
         prop_assert!(text.contains(&bc_str),
             "Missing bucket_count '{}' in output", bc_str);
 
@@ -1147,10 +1195,10 @@ proptest! {
         for item in &items {
             prop_assert!(text.contains(&item.model),
                 "Missing model name '{}' in output", item.model);
-            let tokens_str = format_number(item.total_tokens);
+            let tokens_str = stat_compact(item.total_tokens);
             prop_assert!(text.contains(&tokens_str),
                 "Missing total_tokens '{}' in output", tokens_str);
-            let events_str = format_number(item.event_count);
+            let events_str = stat_compact(item.event_count);
             prop_assert!(text.contains(&events_str),
                 "Missing event_count '{}' in output", events_str);
             let cost_str = format!("{:.4}", item.cost_with_cache_usd);
@@ -1185,10 +1233,10 @@ proptest! {
                 "Missing source '{}' in output", item.source);
             prop_assert!(text.contains(&item.model),
                 "Missing model '{}' in output", item.model);
-            let events_str = format_number(item.event_count);
+            let events_str = stat_compact(item.event_count);
             prop_assert!(text.contains(&events_str),
                 "Missing event_count '{}' in output", events_str);
-            let tokens_str = format_number(item.total_tokens);
+            let tokens_str = stat_compact(item.total_tokens);
             prop_assert!(text.contains(&tokens_str),
                 "Missing total_tokens '{}' in output", tokens_str);
             let cost_str = format!("${:.2}", item.estimated_cost_usd);

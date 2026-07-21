@@ -9,11 +9,7 @@ use ratatui::{
 
 use crate::{
     query::{HeatmapPoint, SourceBreakdown},
-    tui::{
-        app::StatsPanelPayload,
-        format::{grouped as format_number, tokens as format_tokens},
-        theme,
-    },
+    tui::{app::StatsPanelPayload, format::stat_compact, theme},
 };
 
 use super::super::app::ScrollState;
@@ -112,7 +108,7 @@ fn render_summary(frame: &mut Frame, area: Rect, payload: &StatsPanelPayload) {
             format!(
                 "{} {}",
                 compact_date(&point.date),
-                format_tokens(point.total_tokens)
+                stat_compact(point.total_tokens)
             )
         })
         .unwrap_or_else(|| "none".to_string());
@@ -121,12 +117,12 @@ fn render_summary(frame: &mut Frame, area: Rect, payload: &StatsPanelPayload) {
         Line::from(vec![
             Span::styled("total tokens ", theme::muted_style()),
             Span::styled(
-                format_tokens(payload.overview.total.total_tokens),
+                stat_compact(payload.overview.total.total_tokens),
                 metric_style(theme::metric_input()),
             ),
             Span::styled("  events ", theme::muted_style()),
             Span::styled(
-                format_number(payload.overview.total_events),
+                stat_compact(payload.overview.total_events),
                 metric_style(theme::metric_output()),
             ),
             Span::styled("  cost ", theme::muted_style()),
@@ -425,19 +421,19 @@ fn source_row(
     let mut row = if very_narrow {
         Row::new(vec![
             Cell::from(source.source.clone()),
-            Cell::from(format_tokens(source.total_tokens)),
+            Cell::from(stat_compact(source.total_tokens)),
         ])
     } else if narrow {
         Row::new(vec![
             Cell::from(source.source.clone()),
-            Cell::from(format_tokens(source.total_tokens)),
-            Cell::from(format_number(source.event_count)),
+            Cell::from(stat_compact(source.total_tokens)),
+            Cell::from(stat_compact(source.event_count)),
         ])
     } else {
         Row::new(vec![
             Cell::from(source.source.clone()).style(theme::bold_style()),
-            Cell::from(format_tokens(source.total_tokens)),
-            Cell::from(format_number(source.event_count)),
+            Cell::from(stat_compact(source.total_tokens)),
+            Cell::from(stat_compact(source.event_count)),
             Cell::from(
                 source
                     .last_event_at

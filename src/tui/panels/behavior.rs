@@ -10,8 +10,8 @@ use crate::query::{BehaviorSupport, ModelComparePayload, OptimizePayload, Zombie
 use crate::tui::{
     app::BehaviorPanelPayload,
     format::{
-        cost as format_cost, grouped as format_number, metric_value as format_metric_value,
-        percent_ratio as format_percent,
+        cost as format_cost, metric_value as format_metric_value, percent_ratio as format_percent,
+        stat_compact,
     },
     theme,
 };
@@ -66,9 +66,9 @@ fn render_activity(frame: &mut Frame, area: Rect, payload: &BehaviorPanelPayload
                 ),
                 Span::raw(format!(
                     "turns={} edits={} tokens={} cost={} one-shot={} retry={}",
-                    format_number(row.turns),
-                    format_number(row.edit_turns),
-                    format_number(row.total_tokens),
+                    stat_compact(row.turns),
+                    stat_compact(row.edit_turns),
+                    stat_compact(row.total_tokens),
                     format_cost(row.estimated_cost_usd),
                     format_percent(row.one_shot_rate),
                     format_percent(row.retry_rate),
@@ -100,9 +100,9 @@ fn render_tools(frame: &mut Frame, area: Rect, payload: &BehaviorPanelPayload) {
                 ),
                 Span::raw(format!(
                     "calls={} turns={} sessions={} share={} cost={}",
-                    format_number(row.calls),
-                    format_number(row.turn_count),
-                    format_number(row.session_count),
+                    stat_compact(row.calls),
+                    stat_compact(row.turn_count),
+                    stat_compact(row.session_count),
                     format_percent(row.call_share),
                     format_cost(row.estimated_cost_usd),
                 )),
@@ -140,7 +140,7 @@ fn render_optimize(
             ),
             Span::raw(format!(
                 "estimated savings={} / {}",
-                format_number(payload.estimated_savings_tokens),
+                stat_compact(payload.estimated_savings_tokens),
                 format_cost(payload.estimated_savings_usd),
             )),
         ]));
@@ -216,13 +216,13 @@ fn render_compare(frame: &mut Frame, area: Rect, payload: &ModelComparePayload) 
                 Span::raw(format!(
                     "calls {}:{} / {}:{} edits {}:{} / {}:{} cost {}:{} / {}:{}",
                     left.model,
-                    format_number(left.calls),
+                    stat_compact(left.calls),
                     right.model,
-                    format_number(right.calls),
+                    stat_compact(right.calls),
                     left.model,
-                    format_number(left.edit_turns),
+                    stat_compact(left.edit_turns),
                     right.model,
-                    format_number(right.edit_turns),
+                    stat_compact(right.edit_turns),
                     left.model,
                     format_cost(left.estimated_cost_usd),
                     right.model,

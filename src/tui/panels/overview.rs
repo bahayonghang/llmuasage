@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::query::OverviewPayload;
-use crate::tui::{format::grouped as format_tokens, theme};
+use crate::tui::{format::stat_compact, theme};
 
 /// Render the overview panel with KPI cards and metadata.
 pub fn render(frame: &mut Frame, area: Rect, data: &Option<Result<OverviewPayload, String>>) {
@@ -73,14 +73,14 @@ fn render_kpi_row(frame: &mut Frame, area: Rect, payload: &OverviewPayload) {
         frame,
         kpi_cols[0],
         "Total Tokens",
-        &format_tokens(payload.total.total_tokens),
+        &stat_compact(payload.total.total_tokens),
         theme::kpi_colors()[0],
     );
     render_kpi_card(
         frame,
         kpi_cols[1],
         "24h Tokens",
-        &format_tokens(payload.last_24h.total_tokens),
+        &stat_compact(payload.last_24h.total_tokens),
         theme::kpi_colors()[1],
     );
     render_kpi_card(
@@ -134,12 +134,12 @@ fn render_24h_pulse(frame: &mut Frame, area: Rect, payload: &OverviewPayload) {
     let mut lines = vec![
         metric_line(
             "Tokens",
-            format_tokens(payload.last_24h.total_tokens),
+            stat_compact(payload.last_24h.total_tokens),
             theme::positive_fg(),
         ),
         metric_line(
             "Events",
-            format_tokens(payload.last_24h_events),
+            stat_compact(payload.last_24h_events),
             theme::metric_input(),
         ),
         metric_line("Avg/event", avg, theme::metric_reasoning()),
@@ -152,8 +152,16 @@ fn render_24h_pulse(frame: &mut Frame, area: Rect, payload: &OverviewPayload) {
 
 fn render_compact_metadata(frame: &mut Frame, area: Rect, payload: &OverviewPayload) {
     let meta_lines = vec![
-        metric_line("Sources", payload.source_count.to_string(), theme::accent()),
-        metric_line("Buckets", payload.bucket_count.to_string(), theme::accent()),
+        metric_line(
+            "Sources",
+            stat_compact(payload.source_count),
+            theme::accent(),
+        ),
+        metric_line(
+            "Buckets",
+            stat_compact(payload.bucket_count),
+            theme::accent(),
+        ),
         metric_line("Last sync", last_sync_text(payload), theme::accent()),
     ];
     frame.render_widget(Paragraph::new(meta_lines), area);
@@ -168,27 +176,27 @@ fn token_mix_lines(summary: &crate::query::TokenSummary) -> Vec<Line<'static>> {
     vec![
         metric_line(
             "Input",
-            format_tokens(summary.input_tokens),
+            stat_compact(summary.input_tokens),
             theme::metric_input(),
         ),
         metric_line(
             "Output",
-            format_tokens(summary.output_tokens),
+            stat_compact(summary.output_tokens),
             theme::metric_output(),
         ),
         metric_line(
             "Cache read",
-            format_tokens(summary.cache_read_tokens),
+            stat_compact(summary.cache_read_tokens),
             theme::metric_cache_read(),
         ),
         metric_line(
             "Cache write",
-            format_tokens(summary.cache_creation_tokens),
+            stat_compact(summary.cache_creation_tokens),
             theme::metric_cache_write(),
         ),
         metric_line(
             "Reasoning",
-            format_tokens(summary.reasoning_output_tokens),
+            stat_compact(summary.reasoning_output_tokens),
             theme::metric_reasoning(),
         ),
     ]
@@ -198,12 +206,12 @@ fn activity_lines(payload: &OverviewPayload) -> Vec<Line<'static>> {
     vec![
         metric_line(
             "Events",
-            format_tokens(payload.total_events),
+            stat_compact(payload.total_events),
             theme::positive_fg(),
         ),
         metric_line(
             "24h events",
-            format_tokens(payload.last_24h_events),
+            stat_compact(payload.last_24h_events),
             theme::metric_input(),
         ),
         metric_line(
@@ -213,12 +221,12 @@ fn activity_lines(payload: &OverviewPayload) -> Vec<Line<'static>> {
         ),
         metric_line(
             "Sources",
-            payload.source_count.to_string(),
+            stat_compact(payload.source_count),
             theme::metric_cache_write(),
         ),
         metric_line(
             "Buckets",
-            payload.bucket_count.to_string(),
+            stat_compact(payload.bucket_count),
             theme::metric_cache_read(),
         ),
     ]
@@ -266,7 +274,7 @@ fn average_tokens(tokens: i64, events: i64) -> String {
     if events <= 0 {
         "-".to_string()
     } else {
-        format_tokens(tokens / events)
+        stat_compact(tokens / events)
     }
 }
 

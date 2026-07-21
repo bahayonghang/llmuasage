@@ -6,7 +6,7 @@ use ratatui::{
 };
 
 use crate::query::ModelBreakdown;
-use crate::tui::{format::grouped as format_number, panels::longtail, theme};
+use crate::tui::{format::stat_compact, panels::longtail, theme};
 
 use super::super::app::{ScrollState, SortState, TableSortKey, stable_sort_refs};
 
@@ -104,8 +104,8 @@ fn render_table(
                 (
                     Row::new(vec![
                         Cell::from(item.model.clone()),
-                        Cell::from(format_number(item.total_tokens)),
-                        Cell::from(format_number(item.event_count)),
+                        Cell::from(stat_compact(item.total_tokens)),
+                        Cell::from(stat_compact(item.event_count)),
                         Cell::from(format!("{:.4}", item.cost_with_cache_usd)),
                     ]),
                     false,
@@ -115,7 +115,7 @@ fn render_table(
                 (
                     Row::new(vec![
                         Cell::from(longtail::summary_label(&collapsed)),
-                        Cell::from(format_number(collapsed.hidden_value)),
+                        Cell::from(stat_compact(collapsed.hidden_value)),
                         Cell::from(String::new()),
                         Cell::from(String::new()),
                     ]),
