@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Harden CI: unify the Rust and dashboard-JS gates, run tests with `--all-features`, add build caching and cancel-in-progress, and add a `cargo audit` security job.
+- Declare a minimum supported Rust version (`rust-version = "1.85"`) and enable GitHub branch protection on `main`.
+
 ## 1.0.0 - 2026-07-21
 
 ### Added
@@ -97,6 +104,7 @@
 - If session/source-file/archive metadata is missing after upgrade, run `llmusage sync --rebuild` to repopulate it from local sources.
 
 ### 0.5.0 JSON naming migration- Switched report command JSON (`daily`, `monthly`, `session`, `blocks`) from camelCase to snake_case to match HTTP API, static export snapshots, and SQLite field names.
+
 - 0.4.x → 0.5.0 field map for jq/scripts:
   - `totalTokens` → `total_tokens`
   - `inputTokens` → `input_tokens`
