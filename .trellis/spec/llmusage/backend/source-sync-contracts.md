@@ -75,10 +75,15 @@
 - Human progress rendering lives in `src/commands/sync_progress.rs` behind one
   event entry and one copy source (`human_progress_line`). TTY stderr renders
   indicatif bars (OpenCode is a spinner because its `files_scanned` counts
-  rows, not files; Codex/Claude use determinate bars whose position counts
-  replayed files only); non-TTY or any non-empty `LLMUSAGE_PROGRESS` falls
-  back to plain lines and must never emit ANSI escapes. Progress stays on
-  stderr, the `Sync finished` summary table stays on stdout, and renderer
+  rows, not files; Codex/Claude use determinate bars whose length and position
+  both count files planned for replay in the current run). File-backed parser
+  workers increment one relaxed atomic counter per completed file; the async
+  parser side samples at no more than 5 Hz, emits a boundary snapshot before
+  commit, and refreshes committed record counts after commit. A full TTY bar
+  shows the commit phase until `SourceFinished`; non-TTY or any non-empty
+  `LLMUSAGE_PROGRESS` falls back to plain lines and must never emit ANSI
+  escapes. Progress stays on stderr, the `Sync finished` summary table stays
+  on stdout, and renderer
   teardown is owned by a command-level RAII guard so early `?` returns,
   failures, and Ctrl-C cancellation all leave a clean terminal. CLI Ctrl-C
   cancels through `run_once_with_cancel`'s token; a ctrl-c task that clones

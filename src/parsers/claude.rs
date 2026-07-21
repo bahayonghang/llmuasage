@@ -19,6 +19,7 @@ use crate::{
     parsers::{
         ProgressSink, SourceParser, SourceSyncStats, SyncEvent,
         behavior::{extract_claude_tools, tool_calls_from_evidence, turn_from_tools},
+        file_progress::{FileProgress, FileProgressCounter},
         file_state::{
             CandidateFile, FileReplayMode, decide_file_replay, finalize_cursor, should_rescan_file,
         },
@@ -117,13 +118,6 @@ async fn sync_claude(
     let inventory_root = listing.root;
     let files = listing.paths;
     let total_files = files.len();
-    emit_progress(
-        &mut progress,
-        SyncEvent::SourceStarted {
-            source: SourceKind::Claude,
-            files_total: total_files as u64,
-        },
-    );
     let cursor_map = store.cursors().load_file_cursors(SourceKind::Claude)?;
 
     let mut projects =
@@ -175,6 +169,15 @@ async fn sync_claude(
         })
         .collect::<Vec<_>>();
     plans.sort_by_key(|plan| plan.files.first().map(|file| file.path.clone()));
+    let planned_files = plans.iter().map(|plan| plan.files.len()).sum::<usize>();
+    emit_progress(
+        &mut progress,
+        SyncEvent::SourceStarted {
+            source: SourceKind::Claude,
+            files_total: planned_files as u64,
+        },
+    );
+    let (mut file_progress, file_progress_counter) = FileProgress::new();
 
     let width = parallelism.max(1);
     for batch in plans.chunks(width) {
@@ -184,7 +187,10 @@ async fn sync_claude(
         let mut tasks = Vec::new();
         for plan in batch {
             let plan = plan.clone();
-            tasks.push(task::spawn_blocking(move || parse_claude_shard(plan)));
+            let counter = file_progress_counter.clone();
+            tasks.push(task::spawn_blocking(move || {
+                parse_claude_shard(plan, counter)
+            }));
         }
 
         let mut combined = SyncShard::new(SourceKind::Claude);
@@ -194,7 +200,19 @@ async fn sync_claude(
                 batch_cancelled = true;
                 break;
             }
-            let shard = task.await??;
+            let shard = file_progress
+                .wait_for(task, |files_scanned| {
+                    emit_progress(
+                        &mut progress,
+                        SyncEvent::Progress {
+                            source: SourceKind::Claude,
+                            files_scanned,
+                            records_imported: inserted as u64,
+                            current_file: None,
+                        },
+                    );
+                })
+                .await??;
             events_seen += shard.events_seen;
             events_replayed += shard.events_replayed;
             bytes_scanned += shard.bytes_scanned;
@@ -209,6 +227,17 @@ async fn sync_claude(
             break;
         }
 
+        let completed_files = file_progress.boundary_snapshot();
+        emit_progress(
+            &mut progress,
+            SyncEvent::Progress {
+                source: SourceKind::Claude,
+                files_scanned: completed_files,
+                records_imported: inserted as u64,
+                current_file: None,
+            },
+        );
+
         // 1.3 同一有界解析批次合并为一个事务，避免每项目重复 fsync/checkpoint。
         // 项目级 logical dedupe 已在 parse_claude_shard 内完成；writer 继续负责
         // 跨项目最终幂等与 reset → event → cursor 的原子提交顺序。
@@ -220,7 +249,7 @@ async fn sync_claude(
             &mut progress,
             SyncEvent::Progress {
                 source: SourceKind::Claude,
-                files_scanned: files_scanned as u64,
+                files_scanned: completed_files,
                 records_imported: inserted as u64,
                 current_file: None,
             },
@@ -271,7 +300,10 @@ fn emit_progress(sink: &mut Option<ProgressSink<'_>>, event: SyncEvent) {
     }
 }
 
-fn parse_claude_shard(plan: ClaudeShardPlan) -> Result<ClaudeShardOutput> {
+fn parse_claude_shard(
+    plan: ClaudeShardPlan,
+    progress: FileProgressCounter,
+) -> Result<ClaudeShardOutput> {
     let mut resolver = ProjectResolver::default();
     let replay_path_hashes = plan
         .reset_path_hashes
@@ -328,6 +360,7 @@ fn parse_claude_shard(plan: ClaudeShardPlan) -> Result<ClaudeShardOutput> {
             None,
             None,
         ));
+        progress.advance_file();
     }
 
     output.events = dedupe_claude_events(candidates);
