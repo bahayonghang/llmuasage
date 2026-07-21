@@ -716,3 +716,36 @@ indicatif 进度条（OpenCode spinner / Codex/Claude 重放文件确定条）+ 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 22: 完成 TUI 大数紧凑显示
+
+**Date**: 2026-07-21
+**Task**: 完成 TUI 大数紧凑显示
+**Branch**: `dev`
+
+### Summary
+
+新增大写 K/M/B/T 统计格式化并迁移交互式 TUI 分析面板，保留 Usage 同步计数与非交互输出的精确语义；补齐边界、渲染与属性测试并通过 just ci。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f995145` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
