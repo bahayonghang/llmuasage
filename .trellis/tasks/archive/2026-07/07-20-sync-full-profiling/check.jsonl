@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/llmusage/backend/index.md", "reason": "质量门禁清单：fmt、严格 clippy、串行全量测试的执行标准"}
+{"file": ".trellis/tasks/archive/2026-07/07-19-claude-sync-scan-performance/prd.md", "reason": "A8 验收样式参考：修复后测量必须相对基线有证据，不能宣称无据完成"}

@@ -154,6 +154,10 @@ impl QueryFilter {
 }
 
 impl ReportTimezone {
+    pub(crate) fn date_at(&self, now: DateTime<Utc>) -> NaiveDate {
+        now.with_timezone(&self.fixed_offset()).date_naive()
+    }
+
     fn fixed_offset(&self) -> FixedOffset {
         match self {
             Self::Utc => Utc.fix(),
@@ -220,6 +224,17 @@ mod tests {
             QueryFilter::default().timezone,
             ReportTimezone::Local
         ));
+    }
+
+    #[test]
+    fn fixed_timezone_selects_the_local_date_at_a_utc_day_boundary() {
+        let timezone = ReportTimezone::Fixed(FixedOffset::west_opt(8 * 3_600).unwrap());
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 3, 0, 0).unwrap();
+
+        assert_eq!(
+            timezone.date_at(now),
+            NaiveDate::from_ymd_opt(2026, 7, 19).unwrap()
+        );
     }
 
     #[test]

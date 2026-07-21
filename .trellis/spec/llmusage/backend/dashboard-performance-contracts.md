@@ -20,6 +20,10 @@ GET /api/dashboard?scope=interactive&range=<1d|7d|30d|all>&window=<day|week|mont
 Dashboard::interactive_snapshot(&QueryFilter, window: &str)
     -> Result<DashboardInteractiveSnapshot>
 load_via_dashboard(state, section, query) -> Future<Result<T>>
+TUI PanelRequest(panel, filter, time_window, generation, refreshing)
+    -> bounded PanelResult channel
+TimeWindow::query_filter(&QueryFilter)
+    -> QueryFilter with inclusive local-calendar since/until dates
 ```
 
 `QueryFilter` fields shared by bucket and fact queries are `source`, `model`,
@@ -45,6 +49,30 @@ load_via_dashboard(state, section, query) -> Future<Result<T>>
   query permits for the blocking task lifetime, publishes an SQLite
   `InterruptHandle`, and interrupts plus awaits abandoned work before releasing
   the permit.
+- TUI panel reads follow the same cancellation boundary from its synchronous
+  event loop: every request opens a fresh `Dashboard` inside `spawn_blocking`,
+  holds one of five TUI-local permits, publishes an interrupt handle through a
+  shared slot, and sends one typed result through a bounded channel. The UI
+  thread never opens a dashboard connection or waits for a query.
+- TUI result acceptance requires panel, generation, time window, and every
+  stable `QueryFilter` field to match current state. A cold request keeps the
+  payload empty so the loading frame is reachable; a forced refresh retains
+  the current payload and marks it stale until the matching result arrives.
+- TUI windows are `Today`, `7d`, `30d`, and `All`; bounded windows are inclusive
+  local calendar days in `QueryFilter.timezone`, and `All` is the startup
+  default. Windows govern Models, Daily, Hourly, Cost, Stats source mix/context
+  pressure, and Behavior activity/tools/optimize/compare. Overview, the 365-day
+  heatmap, sync center, zombie inventory, and Blocks keep their fixed semantics.
+- Bounded all-source context pressure executes one `(source, event_at)` indexed
+  range per registered source. The TUI may run those ranges concurrently, then
+  reconstruct `avg_percent` by weighting each source average by
+  `priced_events`; counts sum and `peak_percent` is the maximum source peak.
+- Recent Blocks preserves the historical anchor chain. It reverse-probes each
+  registered source through `idx_usage_event_source_event_at`, merges timestamps,
+  and starts the normal block engine at the first event after the latest
+  pre-cutoff adjacent gap at least as long as the block session. No qualifying
+  gap falls back to the full scan. Project filters and `token_limit=max` also
+  retain the full scan because their historical semantics cannot be truncated.
 - Explorer uses `usage_bucket_30m` only for source/model/project groupings with
   attributed cost, calls, or total-token metrics and no session/tool/is-tool/
   token-type filters. Other shapes keep event, turn, or attribution strategies.
@@ -64,6 +92,12 @@ load_via_dashboard(state, section, query) -> Future<Result<T>>
 | `scope=interactive` | Return the lean selected-window contract |
 | Unknown `range`/`window` | Normalize to `day` |
 | Browser abort or newer generation | Do not publish the obsolete result |
+| TUI switch/filter/window supersedes a request | Interrupt it and discard any late result that fails the full request match |
+| TUI refresh with cached payload | Keep rendering cached data and expose refreshing status |
+| TUI window changes on a governed panel | Invalidate governed payloads, increment generation, interrupt the old request, and reload with local-date bounds |
+| TUI window changes on a fixed/lifetime panel | Update the visible window label without changing that panel's payload semantics |
+| Recent Blocks finds no pre-cutoff gap | Fall back to the historical full scan and retain identical block rows |
+| Recent Blocks uses project filtering or `token_limit=max` | Keep the full scan so fuzzy-project and historical-maximum semantics remain exact |
 | Query timeout before/after handle publication | Interrupt when possible, await the blocking task, return the structured timeout error |
 | SQLite reports `OperationInterrupted` | Map to `LlmusageError::Cancelled`, not configuration failure |
 | Semaphore closes | Return structured `ConfigInvalid` detail |
@@ -78,6 +112,18 @@ load_via_dashboard(state, section, query) -> Future<Result<T>>
   windows and secondary sections for compatibility.
 - Bad: a rapid `1d -> 7d -> 30d -> all` sequence lets a slower `1d` response
   overwrite the selected `all` state or leaves its SQLite statement running.
+- Good: switching from Stats to Blocks immediately paints the Blocks loading
+  state; a late Stats result is discarded after its SQLite statement is
+  interrupted.
+- Good: switching `All -> 30d` reloads Models/Stats/Behavior with inclusive
+  local-date bounds while Overview totals and the 365-day heatmap remain stable.
+- Good: a recent Blocks scan re-anchors after a five-hour gap and returns the
+  same rows as the full engine while scanning only post-gap events.
+- Base: continuous history without a five-hour gap keeps the full Blocks scan.
+- Bad: starting Blocks at `now - 3d - 5h`; a block anchor can chain across that
+  timestamp and change every later block boundary.
+- Bad: a TUI key handler calls a `Dashboard` query before returning to draw,
+  making the existing loading branch unreachable.
 - Bad: an Explorer request with `session_id` reads buckets and silently drops
   session semantics.
 
@@ -87,6 +133,16 @@ load_via_dashboard(state, section, query) -> Future<Result<T>>
   array, and unchanged full/core behavior.
 - Rust cancellation tests force a slow SQLite statement, assert interruption,
   and prove the semaphore permit is released.
+- TUI tests force a slow SQLite statement, assert bounded cancellation, reject
+  stale generation/filter results, render cold loading states through
+  `TestBackend`, and compare parallel Stats/Behavior payloads to serial reads.
+- TUI window tests assert Today/7d/30d inclusive local dates, `All` default and
+  cleared bounds, governed-panel invalidation, and fixed-panel result matching.
+- Context-pressure tests compare bounded all-source output with weighted
+  per-source output and assert `idx_usage_event_source_event_at` in the plan.
+- Blocks tests compare bounded/full rows across a cutoff-crossing block and
+  cover gap re-anchor, active detection, and no-gap fallback. Representative
+  release evidence records three-sample medians plus probe/main scanned rows.
 - Explorer equivalence tests compare bucket and event totals, rows, Other,
   series, filters, and timezone boundaries for supported shapes; routing tests
   assert fact-only shapes do not use buckets.
@@ -121,6 +177,15 @@ GROUP BY source;
 SELECT MAX(event_at)
 FROM usage_event
 WHERE source = ?;
+```
+
+For recent Blocks, the correct cutoff is data-dependent:
+
+```text
+cutoff = now - 3 days
+anchor = first event after latest adjacent-event gap >= session_length
+scan = events where event_at >= anchor
+fallback = full history when anchor is absent
 ```
 
 ## Scenario: Cold home overview query

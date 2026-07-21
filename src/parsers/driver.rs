@@ -75,13 +75,20 @@ pub async fn drive_with_events(mut ctx: DriveContext<'_, '_>) -> Result<Vec<Sour
             emit(ctx.sender.as_deref_mut(), SyncEvent::Cancelled).await?;
             break;
         }
-        // 1.1 调用 parser 的 parse 协议并注入锁等待耗时
+        // 1.1 调用 parser 的 parse 协议并注入锁等待耗时。
+        //     进度事件经 try_send 非阻塞投递；通道满时丢弃并计数，
+        //     供 profiling 观察背压丢弃率（不改变丢弃策略本身）。
         let progress_sender = ctx.sender.as_deref().cloned();
+        let progress_dropped = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let sink_dropped = std::sync::Arc::clone(&progress_dropped);
         let mut progress_sink = move |event: SyncEvent| {
-            if let Some(sender) = &progress_sender {
-                let _ = sender.try_send(event);
+            if let Some(sender) = &progress_sender
+                && sender.try_send(event).is_err()
+            {
+                sink_dropped.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
         };
+        let parse_started = std::time::Instant::now();
         let mut stats = parser
             .parse(
                 ctx.store,
@@ -93,6 +100,12 @@ pub async fn drive_with_events(mut ctx: DriveContext<'_, '_>) -> Result<Vec<Sour
             .await?;
         stats.lock_wait_ms = ctx.lock_wait_ms;
         let source = parser.source();
+        tracing::debug!(
+            source = %source,
+            parse_wall_ms = parse_started.elapsed().as_millis() as u64,
+            progress_dropped = progress_dropped.load(std::sync::atomic::Ordering::Relaxed),
+            "source parse finished"
+        );
 
         // 1.2 Parser-owned source inventory marks every candidate file seen in
         //     this run before parsing changed files. Driver only performs the

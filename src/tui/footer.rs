@@ -1,17 +1,16 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
 
-use super::{app::AppState, theme};
+use super::{app::AppState, format::footer_compact, theme};
 
 pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::border_normal()));
+        .border_style(theme::fg_style(theme::border_normal()));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -33,29 +32,44 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
 fn render_controls(frame: &mut Frame, area: Rect, state: &AppState) {
     let spans = if state.is_very_narrow() {
         vec![
-            Span::styled("tab/1-8", theme::muted_style()),
+            Span::styled("tab/1-9", theme::muted_style()),
             Span::raw(" "),
-            Span::styled("s", Style::default().fg(theme::accent())),
+            Span::styled("j/k", theme::fg_style(theme::accent())),
             Span::raw(" "),
-            Span::styled("r", Style::default().fg(theme::trend_peak_fg())),
+            Span::styled("Pg", theme::fg_style(theme::accent())),
             Span::raw(" "),
-            Span::styled("R", Style::default().fg(theme::positive_fg())),
+            Span::styled("o/O", theme::fg_style(theme::accent())),
             Span::raw(" "),
-            Span::styled("x", Style::default().fg(theme::positive_fg())),
+            Span::styled("s", theme::fg_style(theme::accent())),
+            Span::raw(" "),
+            Span::styled("r", theme::fg_style(theme::trend_peak_fg())),
+            Span::raw(" "),
+            Span::styled("R", theme::fg_style(theme::positive_fg())),
+            Span::raw(" "),
+            Span::styled("x", theme::fg_style(theme::positive_fg())),
             Span::raw(" "),
             Span::styled("?", theme::muted_style()),
             Span::raw(" "),
             Span::styled("q", theme::muted_style()),
         ]
+    } else if state.is_narrow() {
+        vec![Span::styled(
+            "tab/1-9 view  j/k row  Pg page  o/O sort  s source  r refresh  x sync  ? q",
+            theme::muted_style(),
+        )]
     } else {
         vec![
-            Span::styled("tab/shift-tab or 1-8 view", theme::muted_style()),
+            Span::styled("tab/shift-tab or 1-9 view", theme::muted_style()),
             Span::styled(" • ", theme::muted_style()),
-            Span::styled("[s:source]", Style::default().fg(theme::accent())),
+            Span::styled("[j/k/Pg:select]", theme::fg_style(theme::accent())),
             Span::styled(" • ", theme::muted_style()),
-            Span::styled("[r:refresh]", Style::default().fg(theme::trend_peak_fg())),
+            Span::styled("[o/O:sort]", theme::fg_style(theme::accent())),
+            Span::styled(" • ", theme::muted_style()),
+            Span::styled("[s:source]", theme::fg_style(theme::accent())),
+            Span::styled(" • ", theme::muted_style()),
+            Span::styled("[r:refresh]", theme::fg_style(theme::trend_peak_fg())),
             Span::styled(" ", theme::muted_style()),
-            Span::styled("[x:sync]", Style::default().fg(theme::positive_fg())),
+            Span::styled("[x:sync]", theme::fg_style(theme::positive_fg())),
             Span::styled(" ", theme::muted_style()),
             Span::styled(
                 if state.auto_refresh {
@@ -63,7 +77,7 @@ fn render_controls(frame: &mut Frame, area: Rect, state: &AppState) {
                 } else {
                     "[R:auto off]"
                 },
-                Style::default().fg(if state.auto_refresh {
+                theme::fg_style(if state.auto_refresh {
                     theme::positive_fg()
                 } else {
                     theme::muted_fg()
@@ -77,30 +91,31 @@ fn render_controls(frame: &mut Frame, area: Rect, state: &AppState) {
 
 fn render_status(frame: &mut Frame, area: Rect, state: &AppState) {
     let mut spans = Vec::new();
-    spans.push(Span::styled(
-        "source ",
-        Style::default()
-            .fg(theme::accent())
-            .add_modifier(Modifier::BOLD),
-    ));
-    spans.push(Span::styled(
-        state.source_filter_label(),
-        Style::default().fg(theme::accent()),
-    ));
-    spans.push(Span::styled(" • ", theme::muted_style()));
+    if let Some(spinner) = activity_spinner(state) {
+        spans.push(Span::styled(spinner, theme::bold_fg_style(theme::accent())));
+    }
+    spans.extend([
+        Span::styled("source ", theme::bold_fg_style(theme::accent())),
+        Span::styled(
+            state.source_filter_label(),
+            theme::fg_style(theme::accent()),
+        ),
+        Span::styled(" • ", theme::muted_style()),
+        Span::styled("window ", theme::muted_style()),
+        Span::styled(state.time_window.label(), theme::fg_style(theme::accent())),
+        Span::styled(" • ", theme::muted_style()),
+    ]);
 
     if let Some(message) = &state.status_message {
         spans.push(Span::styled(
             message.clone(),
-            Style::default()
-                .fg(theme::positive_fg())
-                .add_modifier(Modifier::BOLD),
+            theme::bold_fg_style(theme::positive_fg()),
         ));
     } else if let Some(Ok(overview)) = &state.overview {
         spans.push(Span::styled(
             format!(
                 "{} tokens • ${:.2}",
-                format_compact(overview.total.total_tokens),
+                footer_compact(overview.total.total_tokens),
                 overview.total_cost_usd
             ),
             theme::muted_style(),
@@ -112,13 +127,47 @@ fn render_status(frame: &mut Frame, area: Rect, state: &AppState) {
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-fn format_compact(value: i64) -> String {
-    let abs = value.abs();
-    if abs >= 1_000_000 {
-        format!("{:.1}M", value as f64 / 1_000_000.0)
-    } else if abs >= 10_000 {
-        format!("{:.1}k", value as f64 / 1_000.0)
-    } else {
-        value.to_string()
+fn activity_spinner(state: &AppState) -> Option<String> {
+    const FRAMES: [char; 4] = ['|', '/', '-', '\\'];
+    state
+        .background_active()
+        .then(|| format!("[{}] ", FRAMES[state.spinner_frame % FRAMES.len()]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{Terminal, backend::TestBackend};
+
+    fn render_text(state: &AppState) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(120, 4)).unwrap();
+        terminal
+            .draw(|frame| render(frame, frame.area(), state))
+            .unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect()
+    }
+
+    #[test]
+    fn spinner_only_renders_during_background_activity() {
+        let idle = AppState::new();
+        assert_eq!(activity_spinner(&idle), None);
+        assert!(!render_text(&idle).contains("[|]"));
+
+        let mut loading = AppState::new();
+        loading.panel_loading[crate::tui::app::Panel::Models as usize] = true;
+        assert!(render_text(&loading).contains("[|]"));
+        loading.spinner_frame = 1;
+        assert!(render_text(&loading).contains("[/]"));
+
+        let mut syncing = AppState::new();
+        syncing.sync_active = true;
+        syncing.spinner_frame = 2;
+        assert!(render_text(&syncing).contains("[-]"));
     }
 }

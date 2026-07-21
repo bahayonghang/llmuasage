@@ -15,6 +15,10 @@ output, and dashboard/TUI consumers.
 - Read [Token Accounting Contracts](./token-accounting-contracts.md) before
   changing parser token fields, deduplication, totals, costs, or legacy rebuild
   behavior.
+- Read [TUI Presentation Contracts](./tui-presentation-contracts.md) before
+  changing interactive themes, copy, formatting, or terminal color behavior.
+- Read [TUI Runtime Contracts](./tui-runtime-contracts.md) before changing the
+  event loop, redraw policy, render snapshots, or scrollable table construction.
 - Also read `docs/agents/domain.md` and
   `docs/agents/passive-parser-onboarding.md` before promoting a monitored
   platform into a parser-backed source.
@@ -28,6 +32,8 @@ output, and dashboard/TUI consumers.
 | [Codex Tracer Contracts](./codex-tracer-contracts.md) | Codex-specific usage tracker with detailed token accounting and thread tracking | Documented |
 | [Dashboard Performance Contracts](./dashboard-performance-contracts.md) | Interactive payload, query routing, cancellation, and range-refresh budgets | Documented |
 | [Token Accounting Contracts](./token-accounting-contracts.md) | Parser normalization, logical dedupe, authoritative totals, and guarded legacy rebuild | Documented |
+| [TUI Presentation Contracts](./tui-presentation-contracts.md) | Interactive theme slots, English copy, shared formatters, and terminal color fallback | Documented |
+| [TUI Runtime Contracts](./tui-runtime-contracts.md) | Dirty redraws, tick coalescing, frame snapshots, and visible-row caches | Documented |
 
 ## Quality Check
 

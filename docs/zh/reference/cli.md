@@ -1,6 +1,6 @@
 # CLI 参考
 
-本页按版本 `0.9.2` 的 `cargo run -- --help`、`cargo run -- serve --help`、`cargo run -- export html --help` 对齐。顶层 help 使用紧凑表格；子命令 help 继续使用 clap 输出。
+本页按版本 `1.0.0` 的 `cargo run -- --help`、`cargo run -- serve --help`、`cargo run -- export html --help` 对齐。顶层 help 使用紧凑表格；子命令 help 继续使用 clap 输出。
 
 ## 顶层 help
 
@@ -243,7 +243,7 @@ llmusage dash
 
 交互式终端 Dashboard。旧的隐藏 `tui` 命令是已废弃别名。
 
-快捷键：`tab`/`shift-tab` 或 `1`-`8` 切换视图，`j`/`k` 或方向键滚动，`h`/`l` 在适用视图切换时间窗口，`s` 打开来源选择器，`r` 刷新 Dashboard 数据，`R` 切换自动刷新，`x` 通过现有 sync worker lock 按当前来源筛选运行 sync，`?` 打开帮助/设置，`q` 退出。
+快捷键：`tab`/`shift-tab` 或 `1`-`9` 切换视图；`j`/`k`、方向键、Page Up/Page Down、Home/End 或鼠标滚轮选择行；`o` 循环可排序列，`O` 反转排序方向；`h`/`l` 在适用视图切换时间窗口；`s` 打开来源选择器；`r` 刷新 Dashboard 数据；`R` 切换自动刷新；`x` 通过现有 sync worker lock 按当前来源筛选运行 sync；`?` 打开帮助/设置；`q` 退出。
 
 ### `llmusage serve`
 

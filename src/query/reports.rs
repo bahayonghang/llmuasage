@@ -1,12 +1,17 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque};
 
 use anyhow::Result;
-use chrono::{DateTime, Duration, FixedOffset, Local, NaiveDate, Offset, Timelike, Utc};
+use chrono::{
+    DateTime, Duration, FixedOffset, Local, NaiveDate, Offset, SecondsFormat, Timelike, Utc,
+};
 use rusqlite::Connection;
 use serde::Serialize;
+use tracing::debug;
 
 pub use super::ReportTimezone;
-use crate::{models::SourceKind, store::Store};
+use crate::{
+    domain::source_descriptor::registered_source_descriptors, models::SourceKind, store::Store,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortOrder {
@@ -169,6 +174,20 @@ pub struct SingleSessionReport {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct BlocksReport {
     pub blocks: Vec<BlockReportRow>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct BlocksScanStats {
+    anchor_probe_events: usize,
+    scanned_events: usize,
+    scan_start: Option<String>,
+    fell_back_to_full_scan: bool,
+}
+
+struct LoadedBlocksReport {
+    report: BlocksReport,
+    #[cfg(test)]
+    scan: BlocksScanStats,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -765,12 +784,41 @@ pub fn load_blocks_report(
     filter: &ReportFilter,
     options: &BlockReportOptions,
 ) -> Result<BlocksReport> {
+    Ok(load_blocks_report_at(store, filter, options, Utc::now(), true)?.report)
+}
+
+fn load_blocks_report_at(
+    store: &Store,
+    filter: &ReportFilter,
+    options: &BlockReportOptions,
+    now: DateTime<Utc>,
+    allow_bounding: bool,
+) -> Result<LoadedBlocksReport> {
     let session_length =
         Duration::milliseconds((options.session_length_hours * 3_600_000.0) as i64);
-    let now = Utc::now();
+    let recent_cutoff = now - Duration::days(3);
+    let mut scan = BlocksScanStats::default();
+    let bounding_eligible = allow_bounding
+        && options.recent_only
+        && filter.since.is_none()
+        && filter.project.is_none()
+        && !matches!(options.token_limit, Some(TokenLimit::Max));
+    if bounding_eligible {
+        let conn = store.open_connection()?;
+        let anchor = find_blocks_scan_start(
+            &conn,
+            filter,
+            recent_cutoff,
+            session_length,
+            &mut scan.anchor_probe_events,
+        )?;
+        scan.scan_start = anchor;
+        scan.fell_back_to_full_scan = scan.scan_start.is_none();
+    }
     let mut aggregates: Vec<(DateTime<Utc>, DateTime<Utc>, Aggregate)> = Vec::new();
 
-    visit_filtered_events(store, filter, |event| {
+    visit_filtered_events_from(store, filter, scan.scan_start.as_deref(), |event| {
+        scan.scanned_events += 1;
         if aggregates.is_empty() {
             let start = floor_to_hour(event.event_utc);
             aggregates.push((start, start + session_length, Aggregate::default()));
@@ -797,7 +845,6 @@ pub fn load_blocks_report(
         None => None,
     };
 
-    let recent_cutoff = now - Duration::days(3);
     let mut blocks = aggregates
         .into_iter()
         .filter_map(|(start, end, aggregate)| {
@@ -839,7 +886,155 @@ pub fn load_blocks_report(
         })
         .collect::<Vec<_>>();
     sort_by_key(&mut blocks, filter.order, |row| row.start_at.clone());
-    Ok(BlocksReport { blocks })
+    debug!(
+        operation = "blocks_report",
+        anchor_probe_events = scan.anchor_probe_events,
+        scanned_events = scan.scanned_events,
+        scan_start = scan.scan_start.as_deref(),
+        fell_back_to_full_scan = scan.fell_back_to_full_scan,
+        "loaded usage blocks"
+    );
+    Ok(LoadedBlocksReport {
+        report: BlocksReport { blocks },
+        #[cfg(test)]
+        scan,
+    })
+}
+
+const BLOCK_ANCHOR_PAGE_SIZE: usize = 256;
+
+struct ReverseEventCursor {
+    source: String,
+    cutoff: String,
+    until_exclusive: Option<String>,
+    before: Option<(String, String)>,
+    buffered: VecDeque<(DateTime<Utc>, String, String)>,
+    exhausted: bool,
+    fetched: usize,
+}
+
+impl ReverseEventCursor {
+    fn new(source: String, cutoff: String, until_exclusive: Option<String>) -> Self {
+        Self {
+            source,
+            cutoff,
+            until_exclusive,
+            before: None,
+            buffered: VecDeque::new(),
+            exhausted: false,
+            fetched: 0,
+        }
+    }
+
+    fn next(&mut self, conn: &Connection) -> Result<Option<(DateTime<Utc>, String, String)>> {
+        if self.buffered.is_empty() && !self.exhausted {
+            self.load_page(conn)?;
+        }
+        Ok(self.buffered.pop_front())
+    }
+
+    fn load_page(&mut self, conn: &Connection) -> Result<()> {
+        let mut clauses = vec!["source = ?".to_string(), "event_at <= ?".to_string()];
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> =
+            vec![Box::new(self.source.clone()), Box::new(self.cutoff.clone())];
+        if let Some(until_exclusive) = &self.until_exclusive {
+            clauses.push("event_at < ?".to_string());
+            params.push(Box::new(until_exclusive.clone()));
+        }
+        if let Some((event_at, event_key)) = &self.before {
+            clauses.push("(event_at < ? OR (event_at = ? AND event_key < ?))".to_string());
+            params.push(Box::new(event_at.clone()));
+            params.push(Box::new(event_at.clone()));
+            params.push(Box::new(event_key.clone()));
+        }
+        params.push(Box::new(BLOCK_ANCHOR_PAGE_SIZE as i64));
+        let sql = format!(
+            r#"
+            SELECT event_at, event_key
+            FROM usage_event INDEXED BY idx_usage_event_source_event_at
+            WHERE {}
+            ORDER BY event_at DESC, event_key DESC
+            LIMIT ?
+            "#,
+            clauses.join(" AND ")
+        );
+        let param_refs = params
+            .iter()
+            .map(|value| value.as_ref())
+            .collect::<Vec<&dyn rusqlite::ToSql>>();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(param_refs.as_slice(), |row| {
+            let raw_event_at: String = row.get(0)?;
+            let event_at = DateTime::parse_from_rfc3339(&raw_event_at)
+                .map(|value| value.with_timezone(&Utc))
+                .map_err(|err| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        0,
+                        rusqlite::types::Type::Text,
+                        Box::new(err),
+                    )
+                })?;
+            Ok((event_at, raw_event_at, row.get::<_, String>(1)?))
+        })?;
+        let page = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        self.fetched += page.len();
+        self.exhausted = page.len() < BLOCK_ANCHOR_PAGE_SIZE;
+        if let Some((_, raw_event_at, event_key)) = page.last() {
+            self.before = Some((raw_event_at.clone(), event_key.clone()));
+        }
+        self.buffered.extend(page);
+        Ok(())
+    }
+}
+
+fn find_blocks_scan_start(
+    conn: &Connection,
+    filter: &ReportFilter,
+    cutoff: DateTime<Utc>,
+    session_length: Duration,
+    probe_events: &mut usize,
+) -> Result<Option<String>> {
+    let cutoff = cutoff.to_rfc3339_opts(SecondsFormat::AutoSi, true);
+    let until_exclusive = filter
+        .until
+        .and_then(|date| date.succ_opt())
+        .map(|date| local_date_to_utc_start(date, &filter.timezone));
+    let sources = filter
+        .source
+        .map(|source| vec![source.as_str().to_string()])
+        .unwrap_or_else(|| {
+            registered_source_descriptors()
+                .iter()
+                .map(|descriptor| descriptor.stable_id.to_string())
+                .collect()
+        });
+    let mut cursors = sources
+        .into_iter()
+        .map(|source| ReverseEventCursor::new(source, cutoff.clone(), until_exclusive.clone()))
+        .collect::<Vec<_>>();
+    let mut events = BinaryHeap::new();
+    for (index, cursor) in cursors.iter_mut().enumerate() {
+        if let Some((event_at, raw_event_at, event_key)) = cursor.next(conn)? {
+            events.push((event_at, event_key, raw_event_at, index));
+        }
+    }
+
+    let mut newer: Option<(DateTime<Utc>, String)> = None;
+    let mut anchor = None;
+    while let Some((event_at, _event_key, raw_event_at, cursor_index)) = events.pop() {
+        if let Some((newer_at, newer_raw_at)) = &newer
+            && *newer_at - event_at >= session_length
+        {
+            anchor = Some(newer_raw_at.clone());
+            break;
+        }
+        newer = Some((event_at, raw_event_at));
+        if let Some((next_at, next_raw_at, next_key)) = cursors[cursor_index].next(conn)? {
+            events.push((next_at, next_key, next_raw_at, cursor_index));
+        }
+    }
+    *probe_events = cursors.iter().map(|cursor| cursor.fetched).sum();
+    Ok(anchor)
 }
 
 pub fn load_statusline_summary(
@@ -1092,12 +1287,24 @@ fn parse_sql_local_date(value: String, column: usize) -> rusqlite::Result<NaiveD
     })
 }
 
-fn visit_filtered_events<F>(store: &Store, filter: &ReportFilter, mut visitor: F) -> Result<()>
+fn visit_filtered_events<F>(store: &Store, filter: &ReportFilter, visitor: F) -> Result<()>
+where
+    F: FnMut(EventRow) -> Result<()>,
+{
+    visit_filtered_events_from(store, filter, None, visitor)
+}
+
+fn visit_filtered_events_from<F>(
+    store: &Store,
+    filter: &ReportFilter,
+    exact_since: Option<&str>,
+    mut visitor: F,
+) -> Result<()>
 where
     F: FnMut(EventRow) -> Result<()>,
 {
     let conn = store.open_connection()?;
-    visit_events_filtered(&conn, filter, |event| {
+    visit_events_filtered(&conn, filter, exact_since, |event| {
         if filter_event_post_sql(&event, filter) {
             visitor(event)?;
         }
@@ -1107,7 +1314,12 @@ where
 
 /// Visits events with date/source filters pushed down to SQL for performance.
 /// Project filtering remains in Rust because it requires fuzzy matching.
-fn visit_events_filtered<F>(conn: &Connection, filter: &ReportFilter, mut visitor: F) -> Result<()>
+fn visit_events_filtered<F>(
+    conn: &Connection,
+    filter: &ReportFilter,
+    exact_since: Option<&str>,
+    mut visitor: F,
+) -> Result<()>
 where
     F: FnMut(EventRow) -> Result<()>,
 {
@@ -1117,12 +1329,27 @@ where
     if let Some(source) = filter.source {
         clauses.push("source = ?".to_string());
         params.push(Box::new(source.as_str().to_string()));
+    } else if exact_since.is_some() {
+        let sources = registered_source_descriptors();
+        clauses.push(format!(
+            "source IN ({})",
+            std::iter::repeat_n("?", sources.len())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+        params.extend(sources.iter().map(|descriptor| {
+            Box::new(descriptor.stable_id.to_string()) as Box<dyn rusqlite::ToSql>
+        }));
     }
     if let Some(since) = filter.since {
         // Convert local date start to UTC for SQL comparison
         let utc_start = local_date_to_utc_start(since, &filter.timezone);
         clauses.push("event_at >= ?".to_string());
         params.push(Box::new(utc_start));
+    }
+    if let Some(exact_since) = exact_since {
+        clauses.push("event_at >= ?".to_string());
+        params.push(Box::new(exact_since.to_string()));
     }
     if let Some(until) = filter.until {
         // Convert local date end (exclusive next day) to UTC for SQL comparison
@@ -1384,6 +1611,8 @@ fn apply_timezone(value: DateTime<Utc>, timezone: &ReportTimezone) -> DateTime<F
 
 #[cfg(test)]
 mod tests {
+    use std::time::Instant;
+
     use anyhow::Result;
     use rusqlite::params;
     use tempfile::TempDir;
@@ -1427,6 +1656,236 @@ mod tests {
         assert_eq!(span, 20);
         // 5m + 15m, both <= 30 → 20 active.
         assert_eq!(active, 20);
+    }
+
+    fn blocks_filter() -> ReportFilter {
+        ReportFilter {
+            since: None,
+            until: None,
+            order: SortOrder::Asc,
+            timezone: ReportTimezone::Utc,
+            locale: "en-US".to_string(),
+            source: None,
+            project: None,
+            breakdown: false,
+        }
+    }
+
+    fn recent_blocks_options() -> BlockReportOptions {
+        BlockReportOptions {
+            active_only: false,
+            recent_only: true,
+            token_limit: None,
+            session_length_hours: 5.0,
+        }
+    }
+
+    fn insert_block_event(
+        fixture: &ReportFixture,
+        event_key: &str,
+        event_at: &str,
+        tokens: i64,
+    ) -> Result<()> {
+        fixture.insert_event(SeedEvent {
+            event_key,
+            source: "codex",
+            model: "gpt-5",
+            event_at,
+            total_tokens: tokens,
+            project_hash: "blocks",
+            project_label: "Blocks",
+            session_id: "blocks-session",
+        })
+    }
+
+    #[test]
+    fn bounded_blocks_match_full_scan_for_a_cross_cutoff_block() -> Result<()> {
+        let fixture = ReportFixture::new()?;
+        for (key, event_at) in [
+            ("old", "2026-05-01T00:00:00Z"),
+            ("anchor", "2026-05-07T08:10:00Z"),
+            ("before-cutoff", "2026-05-07T11:50:00Z"),
+            ("after-cutoff-same-block", "2026-05-07T12:20:00Z"),
+            ("recent-block", "2026-05-07T13:05:00Z"),
+        ] {
+            insert_block_event(&fixture, key, event_at, 10)?;
+        }
+        let now = DateTime::parse_from_rfc3339("2026-05-10T12:00:00Z")?.with_timezone(&Utc);
+        let filter = blocks_filter();
+        let options = recent_blocks_options();
+
+        let bounded = load_blocks_report_at(&fixture.store, &filter, &options, now, true)?;
+        let full = load_blocks_report_at(&fixture.store, &filter, &options, now, false)?;
+
+        assert_eq!(bounded.report.blocks, full.report.blocks);
+        assert_eq!(bounded.report.blocks.len(), 1);
+        assert!(
+            bounded.report.blocks[0]
+                .start_at
+                .starts_with("2026-05-07T13:00:00")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn bounded_blocks_reanchor_after_the_latest_qualifying_gap() -> Result<()> {
+        let fixture = ReportFixture::new()?;
+        for (key, event_at) in [
+            ("old-a", "2026-05-01T00:00:00Z"),
+            ("old-b", "2026-05-01T01:00:00Z"),
+            ("anchor", "2026-05-07T08:10:00Z"),
+            ("recent-a", "2026-05-07T13:05:00Z"),
+            ("recent-b", "2026-05-08T09:00:00Z"),
+        ] {
+            insert_block_event(&fixture, key, event_at, 10)?;
+        }
+        let now = DateTime::parse_from_rfc3339("2026-05-10T12:00:00Z")?.with_timezone(&Utc);
+
+        let report = load_blocks_report_at(
+            &fixture.store,
+            &blocks_filter(),
+            &recent_blocks_options(),
+            now,
+            true,
+        )?;
+
+        assert_eq!(
+            report.scan.scan_start.as_deref(),
+            Some("2026-05-07T08:10:00Z")
+        );
+        assert!(!report.scan.fell_back_to_full_scan);
+        assert_eq!(report.scan.scanned_events, 3);
+        Ok(())
+    }
+
+    #[test]
+    fn bounded_blocks_preserve_active_block_detection() -> Result<()> {
+        let fixture = ReportFixture::new()?;
+        for (key, event_at) in [
+            ("old", "2026-05-01T00:00:00Z"),
+            ("anchor", "2026-05-07T08:10:00Z"),
+            ("active", "2026-05-10T10:15:00Z"),
+        ] {
+            insert_block_event(&fixture, key, event_at, 10)?;
+        }
+        let now = DateTime::parse_from_rfc3339("2026-05-10T12:00:00Z")?.with_timezone(&Utc);
+
+        let report = load_blocks_report_at(
+            &fixture.store,
+            &blocks_filter(),
+            &recent_blocks_options(),
+            now,
+            true,
+        )?;
+
+        let active = report
+            .report
+            .blocks
+            .iter()
+            .find(|block| block.is_active)
+            .unwrap();
+        assert!(active.start_at.starts_with("2026-05-10T10:00:00"));
+        Ok(())
+    }
+
+    #[test]
+    fn bounded_blocks_fall_back_when_continuous_history_has_no_gap() -> Result<()> {
+        let fixture = ReportFixture::new()?;
+        let start = DateTime::parse_from_rfc3339("2026-05-01T00:00:00Z")?.with_timezone(&Utc);
+        let cutoff = DateTime::parse_from_rfc3339("2026-05-07T12:00:00Z")?.with_timezone(&Utc);
+        let mut event_at = start;
+        let mut inserted = 0usize;
+        while event_at <= cutoff {
+            let key = format!("event-{inserted}");
+            let timestamp = event_at.to_rfc3339_opts(SecondsFormat::Secs, true);
+            insert_block_event(&fixture, &key, &timestamp, 1)?;
+            inserted += 1;
+            event_at += Duration::hours(4);
+        }
+        let now = DateTime::parse_from_rfc3339("2026-05-10T12:00:00Z")?.with_timezone(&Utc);
+
+        let report = load_blocks_report_at(
+            &fixture.store,
+            &blocks_filter(),
+            &recent_blocks_options(),
+            now,
+            true,
+        )?;
+
+        assert!(report.scan.fell_back_to_full_scan);
+        assert_eq!(report.scan.scan_start, None);
+        assert_eq!(report.scan.scanned_events, inserted);
+        Ok(())
+    }
+
+    #[ignore = "reads the local usage database for release-mode performance evidence"]
+    #[test]
+    fn measure_local_blocks_bounding() -> Result<()> {
+        let paths = AppPaths::discover()?;
+        let database_bytes = std::fs::metadata(&paths.db_path)?.len();
+        let store = Store::new(&paths)?;
+        let filter = blocks_filter();
+        let options = recent_blocks_options();
+        let now = Utc::now();
+
+        let _ = load_blocks_report_at(&store, &filter, &options, now, true)?;
+        let mut full_ms = Vec::new();
+        let mut bounded_ms = Vec::new();
+        let mut last_bounded = None;
+        let mut full_scanned_events = 0;
+        for _ in 0..3 {
+            let started = Instant::now();
+            let full = load_blocks_report_at(&store, &filter, &options, now, false)?;
+            full_ms.push(started.elapsed().as_secs_f64() * 1_000.0);
+
+            let started = Instant::now();
+            let bounded = load_blocks_report_at(&store, &filter, &options, now, true)?;
+            bounded_ms.push(started.elapsed().as_secs_f64() * 1_000.0);
+            assert_eq!(bounded.report.blocks, full.report.blocks);
+            full_scanned_events = full.scan.scanned_events;
+            last_bounded = Some(bounded);
+        }
+        full_ms.sort_by(f64::total_cmp);
+        bounded_ms.sort_by(f64::total_cmp);
+        let full_median = full_ms[full_ms.len() / 2];
+        let bounded_median = bounded_ms[bounded_ms.len() / 2];
+        let bounded = last_bounded.unwrap();
+
+        let conn = store.open_connection()?;
+        let cutoff = (now - Duration::days(3)).to_rfc3339_opts(SecondsFormat::AutoSi, true);
+        let anchor_plan = query_plan(
+            &conn,
+            "SELECT event_at, event_key FROM usage_event INDEXED BY idx_usage_event_source_event_at WHERE source = ?1 AND event_at <= ?2 ORDER BY event_at DESC, event_key DESC LIMIT 256",
+            &["codex", &cutoff],
+        )?;
+        let scan_plan = bounded
+            .scan
+            .scan_start
+            .as_deref()
+            .map(|scan_start| {
+                query_plan(
+                    &conn,
+                    "SELECT event_at FROM usage_event WHERE source IN ('codex', 'claude', 'opencode', 'antigravity') AND event_at >= ?1 ORDER BY event_at ASC, event_key ASC",
+                    &[scan_start],
+                )
+            })
+            .transpose()?
+            .unwrap_or_default();
+        eprintln!(
+            "database_bytes={database_bytes} full_ms={full_ms:?} bounded_ms={bounded_ms:?} improvement_pct={:.1} full_scanned_events={full_scanned_events} anchor_probe_events={} bounded_scanned_events={} scan_start={:?} fallback={} anchor_plan={anchor_plan:?} scan_plan={scan_plan:?}",
+            (full_median - bounded_median) * 100.0 / full_median,
+            bounded.scan.anchor_probe_events,
+            bounded.scan.scanned_events,
+            bounded.scan.scan_start,
+            bounded.scan.fell_back_to_full_scan,
+        );
+        Ok(())
+    }
+
+    fn query_plan(conn: &Connection, sql: &str, params: &[&str]) -> Result<Vec<String>> {
+        let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| row.get(3))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     #[test]

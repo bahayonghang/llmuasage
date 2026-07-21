@@ -1,6 +1,6 @@
 # CLI reference
 
-This page is aligned with `cargo run -- --help`, `cargo run -- serve --help`, and `cargo run -- export html --help` for version `0.9.2`. Top-level help is rendered as a compact table; command-specific help still uses the clap output.
+This page is aligned with `cargo run -- --help`, `cargo run -- serve --help`, and `cargo run -- export html --help` for version `1.0.0`. Top-level help is rendered as a compact table; command-specific help still uses the clap output.
 
 ## Top-level help
 
@@ -243,7 +243,7 @@ llmusage dash
 
 Interactive terminal dashboard. The old hidden `tui` command is a deprecated alias.
 
-Controls: `tab`/`shift-tab` or `1`-`8` switch views, `j`/`k` or arrows scroll, `h`/`l` change the active time window where applicable, `s` opens the source picker, `r` refreshes dashboard data, `R` toggles auto-refresh, `x` runs sync through the existing sync worker lock for the current source filter, `?` opens help/settings, and `q` exits.
+Controls: `tab`/`shift-tab` or `1`-`9` switch views; `j`/`k`, arrows, Page Up/Page Down, Home/End, or the mouse wheel select rows; `o` cycles sortable columns and `O` reverses direction; `h`/`l` change the active time window where applicable; `s` opens the source picker; `r` refreshes dashboard data; `R` toggles auto-refresh; `x` runs sync through the existing sync worker lock for the current source filter; `?` opens help/settings; and `q` exits.
 
 ### `llmusage serve`
 

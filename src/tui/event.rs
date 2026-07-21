@@ -12,6 +12,7 @@ pub enum TuiEvent {
 
 pub struct EventHandler {
     rx: mpsc::Receiver<TuiEvent>,
+    pending: Option<TuiEvent>,
 }
 
 impl EventHandler {
@@ -51,11 +52,33 @@ impl EventHandler {
         });
 
         drop(tx);
-        Self { rx }
+        Self { rx, pending: None }
     }
 
     pub fn recv(&mut self) -> Result<TuiEvent> {
-        Ok(self.rx.recv()?)
+        let event = match self.pending.take() {
+            Some(event) => event,
+            None => self.rx.recv()?,
+        };
+
+        if !matches!(event, TuiEvent::Tick) {
+            return Ok(event);
+        }
+
+        // Ticks are notifications, not user input. Collapse a burst while
+        // preserving the first keyboard, mouse, or resize event that follows.
+        loop {
+            match self.rx.try_recv() {
+                Ok(TuiEvent::Tick) => {}
+                Ok(event) => {
+                    self.pending = Some(event);
+                    break;
+                }
+                Err(mpsc::TryRecvError::Empty | mpsc::TryRecvError::Disconnected) => break,
+            }
+        }
+
+        Ok(TuiEvent::Tick)
     }
 }
 
@@ -65,9 +88,11 @@ fn should_forward_key_event(key: &KeyEvent) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::mpsc;
+
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
-    use super::should_forward_key_event;
+    use super::{EventHandler, TuiEvent, should_forward_key_event};
 
     fn key(kind: KeyEventKind) -> KeyEvent {
         KeyEvent {
@@ -83,5 +108,20 @@ mod tests {
         assert!(should_forward_key_event(&key(KeyEventKind::Press)));
         assert!(should_forward_key_event(&key(KeyEventKind::Repeat)));
         assert!(!should_forward_key_event(&key(KeyEventKind::Release)));
+    }
+
+    #[test]
+    fn coalesces_ticks_without_dropping_following_input() {
+        let (tx, rx) = mpsc::channel();
+        tx.send(TuiEvent::Tick).unwrap();
+        tx.send(TuiEvent::Tick).unwrap();
+        tx.send(TuiEvent::Tick).unwrap();
+        tx.send(TuiEvent::Key(key(KeyEventKind::Press))).unwrap();
+        tx.send(TuiEvent::Tick).unwrap();
+
+        let mut handler = EventHandler { rx, pending: None };
+        assert!(matches!(handler.recv().unwrap(), TuiEvent::Tick));
+        assert!(matches!(handler.recv().unwrap(), TuiEvent::Key(_)));
+        assert!(matches!(handler.recv().unwrap(), TuiEvent::Tick));
     }
 }

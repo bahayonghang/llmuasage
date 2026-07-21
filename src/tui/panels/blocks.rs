@@ -6,15 +6,15 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Rect},
-    style::{Modifier, Style},
+    style::Style,
     text::Span,
     widgets::{Block, Borders, Cell, Paragraph, Row, Table},
 };
 
 use crate::query::reports::BlockReportRow;
-use crate::tui::theme;
+use crate::tui::{format::grouped as format_number, theme};
 
-use super::super::app::ScrollState;
+use super::super::app::{ScrollState, SortState, TableSortKey, stable_sort_refs};
 
 pub fn render(
     frame: &mut Frame,
@@ -22,46 +22,72 @@ pub fn render(
     data: &Option<Result<Vec<BlockReportRow>, String>>,
     scroll: &ScrollState,
 ) {
+    render_sorted(frame, area, data, scroll, SortState::default());
+}
+
+pub(crate) fn render_sorted(
+    frame: &mut Frame,
+    area: Rect,
+    data: &Option<Result<Vec<BlockReportRow>, String>>,
+    scroll: &ScrollState,
+    sort: SortState,
+) {
     match data {
-        None => placeholder(frame, area, "加载中...", theme::muted_style()),
+        None => placeholder(frame, area, "Loading...", theme::muted_style()),
         Some(Err(e)) => placeholder(
             frame,
             area,
-            &format!("数据加载失败: {e}"),
+            &format!("Data load failed: {e}"),
             theme::error_style(),
         ),
         Some(Ok(items)) if items.is_empty() => {
-            placeholder(frame, area, "暂无区块数据", theme::muted_style())
+            placeholder(frame, area, "No block data found.", theme::muted_style())
         }
-        Some(Ok(items)) => render_table(frame, area, items, scroll),
+        Some(Ok(items)) => render_table(frame, area, items, scroll, sort),
     }
 }
 
 fn placeholder(frame: &mut Frame, area: Rect, text: &str, style: Style) {
     let widget = Paragraph::new(text.to_string())
         .style(style)
-        .block(styled_block("区块"));
+        .block(styled_block("Blocks"));
     frame.render_widget(widget, area);
 }
 
-fn render_table(frame: &mut Frame, area: Rect, items: &[BlockReportRow], scroll: &ScrollState) {
+fn render_table(
+    frame: &mut Frame,
+    area: Rect,
+    items: &[BlockReportRow],
+    scroll: &ScrollState,
+    sort: SortState,
+) {
     let header = Row::new(vec![
-        Cell::from("窗口"),
-        Cell::from("状态"),
-        Cell::from("总 Tokens"),
+        Cell::from(sort.header("Window", TableSortKey::Date)),
+        Cell::from("Status"),
+        Cell::from(sort.header("Total Tokens", TableSortKey::Tokens)),
         Cell::from("Burn/h"),
-        Cell::from("预计"),
-        Cell::from("额度"),
-        Cell::from("成本 (USD)"),
+        Cell::from("Projected"),
+        Cell::from("Limit"),
+        Cell::from(sort.header("Cost (USD)", TableSortKey::Cost)),
     ])
     .style(theme::header_style())
     .bottom_margin(1);
 
-    let rows: Vec<Row> = items
-        .iter()
-        .skip(scroll.offset)
+    let visible_height = super::visible_table_rows(area);
+    let ordered = stable_sort_refs(items.iter().collect(), sort, |left, right, key| match key {
+        TableSortKey::Date => left.start_at.cmp(&right.start_at),
+        TableSortKey::Tokens => left.totals.total_tokens.cmp(&right.totals.total_tokens),
+        TableSortKey::Cost => left
+            .totals
+            .estimated_cost_usd
+            .total_cmp(&right.totals.estimated_cost_usd),
+    });
+    let range = scroll.visible_range(ordered.len(), visible_height);
+    let rows: Vec<Row> = range
+        .clone()
         .enumerate()
-        .map(|(i, item)| {
+        .map(|(visible_index, absolute)| {
+            let item = ordered[absolute];
             let window = format!(
                 "{} → {}",
                 short_time(&item.start_at),
@@ -81,14 +107,12 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[BlockReportRow], scroll:
                 Cell::from(limit),
                 Cell::from(format!("${:.2}", item.totals.estimated_cost_usd)),
             ]);
-            if item.is_active {
+            if absolute == scroll.selected {
+                row.style(theme::selection_style())
+            } else if item.is_active {
                 // The live window is highlighted; its burn rate/projection matter most.
-                row.style(
-                    Style::default()
-                        .fg(theme::accent())
-                        .add_modifier(Modifier::BOLD),
-                )
-            } else if i % 2 == 1 {
+                row.style(theme::bold_fg_style(theme::accent()))
+            } else if visible_index % 2 == 1 {
                 row.style(theme::row_alt_style())
             } else {
                 row
@@ -109,8 +133,7 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[BlockReportRow], scroll:
         ],
     )
     .header(header)
-    .block(styled_block("区块 (5h burn rate)"))
-    .row_highlight_style(Style::default().fg(theme::accent()));
+    .block(styled_block("Blocks (5h burn rate)"));
 
     frame.render_widget(table, area);
 }
@@ -134,26 +157,6 @@ fn styled_block(title: &str) -> Block<'_> {
             format!(" {} ", title),
             theme::block_title_style(),
         ))
-}
-
-fn format_number(n: i64) -> String {
-    if n == 0 {
-        return "0".to_string();
-    }
-    let s = n.abs().to_string();
-    let mut result = String::new();
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-    }
-    let formatted: String = result.chars().rev().collect();
-    if n < 0 {
-        format!("-{formatted}")
-    } else {
-        formatted
-    }
 }
 
 #[cfg(test)]
@@ -186,6 +189,7 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(120, 20)).unwrap();
         let scroll = ScrollState {
             offset: 0,
+            selected: 0,
             total: 0,
             visible: 15,
         };

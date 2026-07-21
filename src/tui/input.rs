@@ -10,6 +10,12 @@ pub enum Action {
     PrevPanel,
     ScrollDown,
     ScrollUp,
+    PageDown,
+    PageUp,
+    SelectFirst,
+    SelectLast,
+    CycleSort,
+    ReverseSort,
     NextWindow,
     PrevWindow,
     Refresh,
@@ -38,6 +44,12 @@ pub fn handle_key_event(key: KeyEvent, _active_panel: Panel) -> Action {
         KeyCode::BackTab => Action::PrevPanel,
         KeyCode::Char('j') | KeyCode::Down => Action::ScrollDown,
         KeyCode::Char('k') | KeyCode::Up => Action::ScrollUp,
+        KeyCode::PageDown => Action::PageDown,
+        KeyCode::PageUp => Action::PageUp,
+        KeyCode::Home => Action::SelectFirst,
+        KeyCode::End => Action::SelectLast,
+        KeyCode::Char('o') => Action::CycleSort,
+        KeyCode::Char('O') => Action::ReverseSort,
         KeyCode::Char('l') | KeyCode::Right => Action::NextWindow,
         KeyCode::Char('h') | KeyCode::Left => Action::PrevWindow,
         KeyCode::Char('r') => Action::Refresh,
@@ -109,6 +121,46 @@ mod tests {
         assert_eq!(
             handle_key_event(char_key('?'), Panel::Overview),
             Action::OpenHelp
+        );
+    }
+
+    #[test]
+    fn paging_and_sort_keys_map_to_actions() {
+        assert_eq!(
+            handle_key_event(
+                KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE),
+                Panel::Models
+            ),
+            Action::PageDown
+        );
+        assert_eq!(
+            handle_key_event(
+                KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE),
+                Panel::Models
+            ),
+            Action::PageUp
+        );
+        assert_eq!(
+            handle_key_event(
+                KeyEvent::new(KeyCode::Home, KeyModifiers::NONE),
+                Panel::Models
+            ),
+            Action::SelectFirst
+        );
+        assert_eq!(
+            handle_key_event(
+                KeyEvent::new(KeyCode::End, KeyModifiers::NONE),
+                Panel::Models
+            ),
+            Action::SelectLast
+        );
+        assert_eq!(
+            handle_key_event(char_key('o'), Panel::Models),
+            Action::CycleSort
+        );
+        assert_eq!(
+            handle_key_event(char_key('O'), Panel::Models),
+            Action::ReverseSort
         );
     }
 

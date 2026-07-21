@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/07-20-tui-optimization/research/llmusage-tui-analysis.md", "reason": "核心证据：§2 数据流/每面板查询构成、§5 P1、§6 web spawn_blocking 模式"}
+{"file": ".trellis/spec/llmusage/backend/dashboard-performance-contracts.md", "reason": "契约：spawn_blocking+许可+InterruptHandle、世代/取消语义、source totals 条款"}
+{"file": ".trellis/tasks/07-20-tui-optimization/research/tokscale-patterns.md", "reason": "tokscale §1/§6：loading 态/try_recv 排水/世代快照交换参照"}

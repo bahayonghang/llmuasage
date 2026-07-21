@@ -9,6 +9,10 @@ use crate::query::reports::{
     ReportNotes, SessionReportRow, TokenTotals,
 };
 
+pub use crate::tui::format::{
+    cost as format_cost, grouped as format_count, token_compact as format_token_compact,
+};
+
 const COMPACT_THRESHOLD: usize = 100;
 const MAX_MODELS_DISPLAYED: usize = 3;
 
@@ -251,42 +255,6 @@ pub fn format_totals(totals: &TokenTotals) -> String {
         format_count(totals.total_tokens),
         format_cost(totals.estimated_cost_usd)
     )
-}
-
-pub fn format_count(value: i64) -> String {
-    let raw = value.abs().to_string();
-    let mut out = String::new();
-    for (idx, ch) in raw.chars().rev().enumerate() {
-        if idx > 0 && idx % 3 == 0 {
-            out.push(',');
-        }
-        out.push(ch);
-    }
-    let formatted = out.chars().rev().collect::<String>();
-    if value < 0 {
-        format!("-{formatted}")
-    } else {
-        formatted
-    }
-}
-
-pub fn format_token_compact(value: i64) -> String {
-    let sign = if value < 0 { "-" } else { "" };
-    let abs = value.unsigned_abs() as f64;
-    let (scaled, suffix) = if abs >= 1_000_000_000.0 {
-        (abs / 1_000_000_000.0, "B")
-    } else if abs >= 1_000_000.0 {
-        (abs / 1_000_000.0, "M")
-    } else if abs >= 1_000.0 {
-        (abs / 1_000.0, "K")
-    } else {
-        return value.to_string();
-    };
-    format!("{sign}{scaled:.2}{suffix}")
-}
-
-pub fn format_cost(value: f64) -> String {
-    format!("${value:.2}")
 }
 
 /// Formats `active/span` durations for the session table, e.g. `1.2h/3.5h`.

@@ -76,9 +76,8 @@ pub enum SyncEvent {
         source: SourceKind,
         files_total: u64,
     },
-    /// Throttled source progress snapshot. The current M2 implementation emits
-    /// at most one per source at the parser boundary; parser-internal file
-    /// progress is wired later with cancellation granularity.
+    /// Throttled source progress snapshot, emitted per shard/page commit
+    /// batch; a single source run may emit many of these.
     Progress {
         source: SourceKind,
         files_scanned: u64,

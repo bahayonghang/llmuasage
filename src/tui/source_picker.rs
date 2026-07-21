@@ -1,7 +1,7 @@
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::Style,
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
@@ -15,7 +15,7 @@ pub fn render(frame: &mut Frame, viewport: Rect, state: &AppState) {
     let block = Block::default()
         .title(" Sources ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::accent()));
+        .border_style(theme::fg_style(theme::accent()));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -92,14 +92,9 @@ fn render_list(frame: &mut Frame, area: Rect, state: &AppState) {
         );
 
         let style = if selected_row {
-            Style::default()
-                .fg(Color::Black)
-                .bg(theme::accent())
-                .add_modifier(Modifier::BOLD)
+            theme::selection_style()
         } else if active {
-            Style::default()
-                .fg(theme::positive_fg())
-                .add_modifier(Modifier::BOLD)
+            theme::bold_fg_style(theme::positive_fg())
         } else if probe.source_kind.is_none() {
             theme::muted_style()
         } else {

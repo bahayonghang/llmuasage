@@ -1,21 +1,34 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::{Line, Span},
     widgets::{Cell, Paragraph, Row, Table},
 };
 
 use crate::query::DailyTrendPoint;
-use crate::tui::theme;
+use crate::tui::{
+    format::{cost as format_cost, grouped as format_number, tokens as format_tokens},
+    theme,
+};
 
-use super::super::app::ScrollState;
+use super::super::app::{ScrollState, SortState, TableSortKey, stable_sort_refs};
 
 pub fn render(
     frame: &mut Frame,
     area: Rect,
     data: &Option<Result<Vec<DailyTrendPoint>, String>>,
     scroll: &ScrollState,
+) {
+    render_sorted(frame, area, data, scroll, SortState::default());
+}
+
+pub(crate) fn render_sorted(
+    frame: &mut Frame,
+    area: Rect,
+    data: &Option<Result<Vec<DailyTrendPoint>, String>>,
+    scroll: &ScrollState,
+    sort: SortState,
 ) {
     match data {
         None => {
@@ -36,11 +49,17 @@ pub fn render(
                 .block(theme::panel_block("Daily Usage"));
             frame.render_widget(widget, area);
         }
-        Some(Ok(items)) => render_table(frame, area, items, scroll),
+        Some(Ok(items)) => render_table(frame, area, items, scroll, sort),
     }
 }
 
-fn render_table(frame: &mut Frame, area: Rect, items: &[DailyTrendPoint], scroll: &ScrollState) {
+fn render_table(
+    frame: &mut Frame,
+    area: Rect,
+    items: &[DailyTrendPoint],
+    scroll: &ScrollState,
+    sort: SortState,
+) {
     let block = theme::panel_block("Daily Usage");
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -53,53 +72,66 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[DailyTrendPoint], scroll
     let narrow = inner.width < 92;
     let [table_area, detail_area] =
         Layout::vertical([Constraint::Min(1), Constraint::Length(2)]).areas(inner);
+    // The outer panel border is already removed; only header + margin consume rows.
     let visible_height = table_area.height.saturating_sub(2).max(1) as usize;
-    let rows = newest_first(items)
-        .skip(scroll.offset)
-        .take(visible_height)
-        .enumerate()
-        .map(|(index, day)| {
-            let cells = if very_narrow {
-                vec![
-                    Cell::from(compact_date(&day.date)),
-                    Cell::from(format_cost(day.cost_with_cache_usd))
-                        .style(Style::default().fg(Color::Green)),
-                ]
-            } else if narrow {
-                vec![
-                    Cell::from(compact_date(&day.date)),
-                    Cell::from(format_number(day.event_count)),
-                    Cell::from(format_tokens(day.total_tokens)),
-                    Cell::from(format_cost(day.cost_with_cache_usd))
-                        .style(Style::default().fg(Color::Green)),
-                ]
-            } else {
-                vec![
-                    Cell::from(day.date.clone())
-                        .style(Style::default().add_modifier(Modifier::BOLD)),
-                    Cell::from(format_number(day.event_count)),
-                    Cell::from(format_tokens(day.input_tokens)).style(metric_style(Color::Cyan)),
-                    Cell::from(format_tokens(day.output_tokens)).style(metric_style(Color::Green)),
-                    Cell::from(format_tokens(day.cache_read_tokens))
-                        .style(metric_style(Color::Blue)),
-                    Cell::from(format_tokens(day.cache_creation_tokens))
-                        .style(metric_style(Color::Magenta)),
-                    Cell::from(cache_hit_rate(day)).style(metric_style(Color::Yellow)),
-                    Cell::from(format_tokens(day.total_tokens)),
-                    Cell::from(format_cost(day.cost_with_cache_usd))
-                        .style(Style::default().fg(Color::Green)),
-                ]
-            };
+    let ordered = stable_sort_refs(
+        items.iter().rev().collect(),
+        sort,
+        |left, right, key| match key {
+            TableSortKey::Date => left.date.cmp(&right.date),
+            TableSortKey::Tokens => left.total_tokens.cmp(&right.total_tokens),
+            TableSortKey::Cost => left
+                .cost_with_cache_usd
+                .total_cmp(&right.cost_with_cache_usd),
+        },
+    );
+    let range = scroll.visible_range(ordered.len(), visible_height);
+    let rows = range.clone().enumerate().map(|(visible_index, absolute)| {
+        let day = ordered[absolute];
+        let cells = if very_narrow {
+            vec![
+                Cell::from(compact_date(&day.date)),
+                Cell::from(format_cost(day.cost_with_cache_usd))
+                    .style(theme::fg_style(theme::positive_fg())),
+            ]
+        } else if narrow {
+            vec![
+                Cell::from(compact_date(&day.date)),
+                Cell::from(format_number(day.event_count)),
+                Cell::from(format_tokens(day.total_tokens)),
+                Cell::from(format_cost(day.cost_with_cache_usd))
+                    .style(theme::fg_style(theme::positive_fg())),
+            ]
+        } else {
+            vec![
+                Cell::from(day.date.clone()).style(theme::bold_style()),
+                Cell::from(format_number(day.event_count)),
+                Cell::from(format_tokens(day.input_tokens))
+                    .style(metric_style(theme::metric_input())),
+                Cell::from(format_tokens(day.output_tokens))
+                    .style(metric_style(theme::metric_output())),
+                Cell::from(format_tokens(day.cache_read_tokens))
+                    .style(metric_style(theme::metric_cache_read())),
+                Cell::from(format_tokens(day.cache_creation_tokens))
+                    .style(metric_style(theme::metric_cache_write())),
+                Cell::from(cache_hit_rate(day)).style(metric_style(theme::warning_fg())),
+                Cell::from(format_tokens(day.total_tokens)),
+                Cell::from(format_cost(day.cost_with_cache_usd))
+                    .style(theme::fg_style(theme::positive_fg())),
+            ]
+        };
 
-            let row = Row::new(cells);
-            if index % 2 == 1 {
-                row.style(theme::row_alt_style())
-            } else {
-                row
-            }
-        });
+        let row = Row::new(cells);
+        if absolute == scroll.selected {
+            row.style(theme::selection_style())
+        } else if visible_index % 2 == 1 {
+            row.style(theme::row_alt_style())
+        } else {
+            row
+        }
+    });
 
-    let header = Row::new(header_cells(very_narrow, narrow))
+    let header = Row::new(header_cells(very_narrow, narrow, sort))
         .style(theme::header_style())
         .bottom_margin(1);
     let table = Table::new(rows, widths(very_narrow, narrow)).header(header);
@@ -108,27 +140,23 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[DailyTrendPoint], scroll
     render_detail(
         frame,
         detail_area,
-        items,
-        scroll.offset,
+        &ordered,
+        scroll.selected,
         narrow || very_narrow,
     );
-}
-
-fn newest_first(items: &[DailyTrendPoint]) -> impl Iterator<Item = &DailyTrendPoint> {
-    items.iter().rev()
 }
 
 fn render_detail(
     frame: &mut Frame,
     area: Rect,
-    items: &[DailyTrendPoint],
-    offset: usize,
+    items: &[&DailyTrendPoint],
+    selected: usize,
     compact: bool,
 ) {
     if area.width == 0 || area.height == 0 {
         return;
     }
-    let Some(day) = newest_first(items).nth(offset.min(items.len().saturating_sub(1))) else {
+    let Some(day) = items.get(selected.min(items.len().saturating_sub(1))) else {
         return;
     };
     let line = Line::from(vec![
@@ -142,9 +170,15 @@ fn render_detail(
             theme::block_title_style(),
         ),
         Span::styled("  input ", theme::muted_style()),
-        Span::styled(format_tokens(day.input_tokens), metric_style(Color::Cyan)),
+        Span::styled(
+            format_tokens(day.input_tokens),
+            metric_style(theme::metric_input()),
+        ),
         Span::styled("  output ", theme::muted_style()),
-        Span::styled(format_tokens(day.output_tokens), metric_style(Color::Green)),
+        Span::styled(
+            format_tokens(day.output_tokens),
+            metric_style(theme::metric_output()),
+        ),
         Span::styled("  cache R/W ", theme::muted_style()),
         Span::styled(
             format!(
@@ -152,30 +186,46 @@ fn render_detail(
                 format_tokens(day.cache_read_tokens),
                 format_tokens(day.cache_creation_tokens)
             ),
-            metric_style(Color::Magenta),
+            metric_style(theme::metric_cache_write()),
         ),
         Span::styled("  cost ", theme::muted_style()),
         Span::styled(
             format_cost(day.cost_with_cache_usd),
-            metric_style(Color::Green),
+            metric_style(theme::positive_fg()),
         ),
     ]);
     frame.render_widget(Paragraph::new(line).style(theme::muted_style()), area);
 }
 
-fn header_cells(very_narrow: bool, narrow: bool) -> Vec<Cell<'static>> {
-    let labels: &[&str] = if very_narrow {
-        &["Date", "Cost"]
+fn header_cells(very_narrow: bool, narrow: bool, sort: SortState) -> Vec<Cell<'static>> {
+    let labels = if very_narrow {
+        vec![
+            sort.header("Date", TableSortKey::Date),
+            sort.header("Cost", TableSortKey::Cost),
+        ]
     } else if narrow {
-        &["Date", "Events", "Tokens", "Cost"]
+        vec![
+            sort.header("Date", TableSortKey::Date),
+            "Events".to_string(),
+            sort.header("Tokens", TableSortKey::Tokens),
+            sort.header("Cost", TableSortKey::Cost),
+        ]
     } else {
-        &[
-            "Date", "Events", "Input", "Output", "Cache R", "Cache W", "Cache%", "Total", "Cost",
+        vec![
+            sort.header("Date", TableSortKey::Date),
+            "Events".to_string(),
+            "Input".to_string(),
+            "Output".to_string(),
+            "Cache R".to_string(),
+            "Cache W".to_string(),
+            "Cache%".to_string(),
+            sort.header("Total", TableSortKey::Tokens),
+            sort.header("Cost", TableSortKey::Cost),
         ]
     };
     labels
-        .iter()
-        .map(|label| Cell::from(Span::styled(*label, theme::header_style())))
+        .into_iter()
+        .map(|label| Cell::from(Span::styled(label, theme::header_style())))
         .collect()
 }
 
@@ -225,39 +275,56 @@ fn cache_hit_rate(day: &DailyTrendPoint) -> String {
 }
 
 fn metric_style(color: Color) -> Style {
-    Style::default().fg(color)
+    theme::fg_style(color)
 }
 
-fn format_cost(value: f64) -> String {
-    format!("${value:.2}")
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{Terminal, backend::TestBackend};
 
-fn format_tokens(value: i64) -> String {
-    if value.abs() >= 1_000_000 {
-        format!("{:.1}M", value as f64 / 1_000_000.0)
-    } else if value.abs() >= 10_000 {
-        format!("{:.1}k", value as f64 / 1_000.0)
-    } else {
-        format_number(value)
-    }
-}
-
-fn format_number(value: i64) -> String {
-    if value == 0 {
-        return "0".to_string();
-    }
-    let s = value.abs().to_string();
-    let mut result = String::new();
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.push(',');
+    fn day(date: &str, tokens: i64, input: i64, cost: f64) -> DailyTrendPoint {
+        DailyTrendPoint {
+            date: date.to_string(),
+            input_tokens: input,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            output_tokens: tokens - input,
+            total_tokens: tokens,
+            event_count: 1,
+            cost_with_cache_usd: cost,
         }
-        result.push(c);
     }
-    let formatted: String = result.chars().rev().collect();
-    if value < 0 {
-        format!("-{formatted}")
-    } else {
-        formatted
+
+    #[test]
+    fn sorted_header_and_detail_follow_selected_row() {
+        let data = Some(Ok(vec![
+            day("2026-07-19", 100, 11, 0.10),
+            day("2026-07-20", 900, 77, 0.90),
+        ]));
+        let scroll = ScrollState {
+            offset: 0,
+            selected: 1,
+            total: 2,
+            visible: 6,
+        };
+        let sort = SortState {
+            key: Some(TableSortKey::Tokens),
+            descending: true,
+        };
+        let mut terminal = Terminal::new(TestBackend::new(80, 12)).unwrap();
+        terminal
+            .draw(|frame| render_sorted(frame, frame.area(), &data, &scroll, sort))
+            .unwrap();
+
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(text.contains("Tokens ▼"));
+        assert!(text.contains("detail 07-19  input 11"));
     }
 }

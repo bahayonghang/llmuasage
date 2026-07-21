@@ -1,7 +1,6 @@
 use ratatui::{
     Frame,
     layout::{Alignment, Rect},
-    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
@@ -16,10 +15,7 @@ pub fn render(frame: &mut Frame, area: Rect, active_panel: Panel) {
 
     for (i, panel) in Panel::all().iter().enumerate() {
         if i > 0 {
-            spans.push(Span::styled(
-                " │ ",
-                Style::default().fg(theme::border_normal()),
-            ));
+            spans.push(Span::styled(" │ ", theme::fg_style(theme::border_normal())));
         }
 
         let tab_label = if very_narrow {
@@ -39,18 +35,16 @@ pub fn render(frame: &mut Frame, area: Rect, active_panel: Panel) {
     let line = Line::from(spans);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::border_normal()))
+        .border_style(theme::fg_style(theme::border_normal()))
         .title(Span::styled(
             " llmusage ",
-            Style::default()
-                .fg(theme::accent())
-                .add_modifier(Modifier::BOLD),
+            theme::bold_fg_style(theme::accent()),
         ))
         .title_alignment(Alignment::Left)
         .title_top(
             Line::from(Span::styled(
                 " local usage ",
-                Style::default().fg(theme::muted_fg()),
+                theme::fg_style(theme::muted_fg()),
             ))
             .right_aligned(),
         );

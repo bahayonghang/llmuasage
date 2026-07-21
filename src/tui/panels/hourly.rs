@@ -2,13 +2,12 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use ratatui::{
     Frame,
     layout::{Constraint, Rect},
-    style::{Color, Modifier, Style},
     text::Span,
     widgets::{Cell, Paragraph, Row, Table},
 };
 
 use crate::query::TrendPoint;
-use crate::tui::theme;
+use crate::tui::{format::tokens as format_tokens, theme};
 
 use super::super::app::ScrollState;
 
@@ -58,54 +57,48 @@ fn render_table(frame: &mut Frame, area: Rect, points: &[TrendPoint], scroll: &S
         .map(|point| point.total_tokens.max(0))
         .max()
         .unwrap_or(0);
-    let visible_height = inner.height.saturating_sub(2).max(1) as usize;
+    let visible_height = super::visible_table_rows(area);
 
-    let rows = points
-        .iter()
-        .rev()
-        .skip(scroll.offset)
-        .take(visible_height)
-        .enumerate()
-        .map(|(index, point)| {
-            let share = if total_tokens > 0 {
-                point.total_tokens.max(0) as f64 / total_tokens as f64 * 100.0
-            } else {
-                0.0
-            };
-            let cells = if very_narrow {
-                vec![
-                    Cell::from(format_hour_label(&point.label, true)),
-                    Cell::from(format_tokens(point.total_tokens)),
-                ]
-            } else if narrow {
-                vec![
-                    Cell::from(format_hour_label(&point.label, true)),
-                    Cell::from(format_tokens(point.total_tokens)),
-                    Cell::from(format!("{share:.0}%")),
-                ]
-            } else {
-                vec![
-                    Cell::from(format_hour_label(&point.label, false))
-                        .style(Style::default().add_modifier(Modifier::BOLD)),
-                    Cell::from(format_tokens(point.total_tokens)),
-                    Cell::from(format!("{share:.1}%")),
-                    Cell::from(render_bar(point.total_tokens, peak_tokens, 24))
-                        .style(Style::default().fg(Color::Green)),
-                ]
-            };
+    let ordered: Vec<&TrendPoint> = points.iter().rev().collect();
+    let range = scroll.visible_range(ordered.len(), visible_height);
+    let rows = range.clone().enumerate().map(|(visible_index, absolute)| {
+        let point = ordered[absolute];
+        let share = if total_tokens > 0 {
+            point.total_tokens.max(0) as f64 / total_tokens as f64 * 100.0
+        } else {
+            0.0
+        };
+        let cells = if very_narrow {
+            vec![
+                Cell::from(format_hour_label(&point.label, true)),
+                Cell::from(format_tokens(point.total_tokens)),
+            ]
+        } else if narrow {
+            vec![
+                Cell::from(format_hour_label(&point.label, true)),
+                Cell::from(format_tokens(point.total_tokens)),
+                Cell::from(format!("{share:.0}%")),
+            ]
+        } else {
+            vec![
+                Cell::from(format_hour_label(&point.label, false)).style(theme::bold_style()),
+                Cell::from(format_tokens(point.total_tokens)),
+                Cell::from(format!("{share:.1}%")),
+                Cell::from(render_bar(point.total_tokens, peak_tokens, 24))
+                    .style(theme::fg_style(theme::positive_fg())),
+            ]
+        };
 
-            let mut row = Row::new(cells);
-            if point.total_tokens == peak_tokens && peak_tokens > 0 {
-                row = row.style(
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                );
-            } else if index % 2 == 1 {
-                row = row.style(theme::row_alt_style());
-            }
-            row
-        });
+        let mut row = Row::new(cells);
+        if absolute == scroll.selected {
+            row = row.style(theme::selection_style());
+        } else if point.total_tokens == peak_tokens && peak_tokens > 0 {
+            row = row.style(theme::bold_fg_style(theme::warning_fg()));
+        } else if visible_index % 2 == 1 {
+            row = row.style(theme::row_alt_style());
+        }
+        row
+    });
 
     let header = Row::new(header_cells(very_narrow, narrow))
         .style(theme::header_style())
@@ -188,34 +181,4 @@ fn render_bar(value: i64, max_value: i64, width: usize) -> String {
     }
     .min(width);
     format!("{}{}", "#".repeat(filled), "-".repeat(width - filled))
-}
-
-fn format_tokens(value: i64) -> String {
-    if value.abs() >= 1_000_000 {
-        format!("{:.1}M", value as f64 / 1_000_000.0)
-    } else if value.abs() >= 10_000 {
-        format!("{:.1}k", value as f64 / 1_000.0)
-    } else {
-        format_number(value)
-    }
-}
-
-fn format_number(value: i64) -> String {
-    if value == 0 {
-        return "0".to_string();
-    }
-    let s = value.abs().to_string();
-    let mut result = String::new();
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-    }
-    let formatted: String = result.chars().rev().collect();
-    if value < 0 {
-        format!("-{formatted}")
-    } else {
-        formatted
-    }
 }

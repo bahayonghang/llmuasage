@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.0.0 - 2026-07-21
+
+### Added
+
+- Add structured sync progress, completion summaries, and statistics tables for long-running imports.
+- Add asynchronous TUI panel loading, row selection, sorting, and visible background activity feedback.
+- Add expanded TUI themes and terminal compatibility behavior.
+
+### Changed
+
+- Move TUI-triggered sync work to a background task so rendering and input stay responsive.
+- Reduce idle redraws, visible-row construction, time-window scans, and Blocks query work.
+- Unify TUI theme slots and formatting across panels.
+
+### Fixed
+
+- Bound first-visit render-thread work with reproducible performance coverage.
+
 ## 0.9.0 - 2026-07-06
 
 ### Added

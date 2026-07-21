@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/07-20-tui-optimization/research/llmusage-tui-analysis.md", "reason": "P0 证据：§1 入口链、§5 嵌套 runtime、§6 JobRegistry 可复用基建"}
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "sync 摘要/状态载荷与取消边界契约红线"}
+{"file": ".trellis/tasks/07-20-tui-optimization/research/tokscale-patterns.md", "reason": "tokscale §1：后台线程+try_recv 排水+嵌套 runtime 防护参照"}

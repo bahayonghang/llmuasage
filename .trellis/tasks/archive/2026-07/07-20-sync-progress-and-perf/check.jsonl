@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "§4 验证矩阵与 §6 测试要求：skipped/changed 语义、NDJSON 加法兼容、stdout 纯净度均需回归确认"}
+{"file": ".trellis/spec/llmusage/backend/index.md", "reason": "质量门禁清单：fmt、严格 clippy、串行全量测试与 docs build 的执行标准"}

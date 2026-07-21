@@ -2,14 +2,18 @@ use chrono::{Datelike, NaiveDate};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::{Line, Span},
     widgets::{Cell, Paragraph, Row, Table},
 };
 
 use crate::{
     query::{HeatmapPoint, SourceBreakdown},
-    tui::{app::StatsPanelPayload, theme},
+    tui::{
+        app::StatsPanelPayload,
+        format::{grouped as format_number, tokens as format_tokens},
+        theme,
+    },
 };
 
 use super::super::app::ScrollState;
@@ -118,45 +122,48 @@ fn render_summary(frame: &mut Frame, area: Rect, payload: &StatsPanelPayload) {
             Span::styled("total tokens ", theme::muted_style()),
             Span::styled(
                 format_tokens(payload.overview.total.total_tokens),
-                metric_style(Color::Cyan),
+                metric_style(theme::metric_input()),
             ),
             Span::styled("  events ", theme::muted_style()),
             Span::styled(
                 format_number(payload.overview.total_events),
-                metric_style(Color::Green),
+                metric_style(theme::metric_output()),
             ),
             Span::styled("  cost ", theme::muted_style()),
             Span::styled(
                 format!("${:.2}", payload.overview.total_cost_usd),
-                metric_style(Color::Yellow),
+                metric_style(theme::metric_reasoning()),
             ),
         ]),
         Line::from(vec![
             Span::styled("active days ", theme::muted_style()),
-            Span::styled(active_days.to_string(), metric_style(Color::Green)),
+            Span::styled(active_days.to_string(), metric_style(theme::positive_fg())),
             Span::styled("  current streak ", theme::muted_style()),
             Span::styled(
                 format!("{current_streak}/{longest_streak}d"),
-                metric_style(Color::Magenta),
+                metric_style(theme::metric_cache_write()),
             ),
             Span::styled("  best day ", theme::muted_style()),
-            Span::styled(best_day_text, metric_style(Color::Cyan)),
+            Span::styled(best_day_text, metric_style(theme::metric_input())),
         ]),
         Line::from(vec![
             Span::styled("sources ", theme::muted_style()),
-            Span::styled(payload.sources.len().to_string(), metric_style(Color::Cyan)),
+            Span::styled(
+                payload.sources.len().to_string(),
+                metric_style(theme::metric_input()),
+            ),
             Span::styled("  cache read ", theme::muted_style()),
             Span::styled(
                 format!("{:.1}%", payload.overview.cache_efficiency * 100.0),
-                metric_style(Color::Green),
+                metric_style(theme::positive_fg()),
             ),
             Span::styled("  failures ", theme::muted_style()),
             Span::styled(
                 payload.health.recent_failures.len().to_string(),
                 if payload.health.recent_failures.is_empty() {
-                    metric_style(Color::Green)
+                    metric_style(theme::positive_fg())
                 } else {
-                    metric_style(Color::Yellow)
+                    metric_style(theme::warning_fg())
                 },
             ),
         ]),
@@ -239,7 +246,7 @@ fn render_contribution(frame: &mut Frame, area: Rect, heatmap: &[HeatmapPoint]) 
         let bucket = contribution_bucket(point.total_tokens, &thresholds);
         frame.buffer_mut()[(x, y)]
             .set_symbol("\u{25A0}")
-            .set_style(Style::default().fg(theme::heat(bucket)));
+            .set_style(theme::fg_style(theme::heat(bucket)));
     }
 
     // Caption: date range on the left, a low→high legend on the right.
@@ -275,7 +282,7 @@ fn render_heat_legend(frame: &mut Frame, inner: Rect, row_offset: u16, caption_l
     for level in 0..squares {
         frame.buffer_mut()[(x, y)]
             .set_symbol("\u{25A0}")
-            .set_style(Style::default().fg(theme::heat(level + 1)));
+            .set_style(theme::fg_style(theme::heat(level + 1)));
         x += 1;
     }
     frame
@@ -293,7 +300,7 @@ fn render_contribution_strip(frame: &mut Frame, inner: Rect, heatmap: &[HeatmapP
         let symbol = if bucket == 0 { "." } else { "\u{25A0}" };
         frame.buffer_mut()[(inner.x + idx as u16, inner.y)]
             .set_symbol(symbol)
-            .set_style(Style::default().fg(theme::heat(bucket)));
+            .set_style(theme::fg_style(theme::heat(bucket)));
     }
     if inner.height > 1 {
         let first = recent.first().map(|point| compact_date(&point.date));
@@ -332,7 +339,7 @@ fn render_sources(
     if sources.is_empty() {
         let empty = Paragraph::new("No source contribution data.")
             .style(theme::muted_style())
-            .block(theme::trend_card_block("Source Mix", Color::Cyan));
+            .block(theme::trend_card_block("Source Mix", theme::metric_input()));
         frame.render_widget(empty, area);
         return;
     }
@@ -344,20 +351,25 @@ fn render_sources(
         .map(|source| source.total_tokens.max(0))
         .max()
         .unwrap_or(0);
-    let visible_height = area.height.saturating_sub(3).max(1) as usize;
-    let rows = sources
-        .iter()
-        .skip(scroll.offset)
-        .take(visible_height)
-        .enumerate()
-        .map(|(index, source)| source_row(source, max_tokens, index, very_narrow, narrow));
+    let visible_height = super::visible_table_rows(area);
+    let range = scroll.visible_range(sources.len(), visible_height);
+    let rows = range.clone().enumerate().map(|(visible_index, absolute)| {
+        source_row(
+            &sources[absolute],
+            max_tokens,
+            visible_index,
+            absolute == scroll.selected,
+            very_narrow,
+            narrow,
+        )
+    });
 
     let header = Row::new(source_header(very_narrow, narrow))
         .style(theme::header_style())
         .bottom_margin(1);
     let table = Table::new(rows, source_widths(very_narrow, narrow))
         .header(header)
-        .block(theme::trend_card_block("Source Mix", Color::Cyan));
+        .block(theme::trend_card_block("Source Mix", theme::metric_input()));
     frame.render_widget(table, area);
 }
 
@@ -371,20 +383,20 @@ fn render_health_summary(frame: &mut Frame, area: Rect, payload: &StatsPanelPayl
             Span::styled("integrations ", theme::muted_style()),
             Span::styled(
                 payload.health.integrations.len().to_string(),
-                metric_style(Color::Cyan),
+                metric_style(theme::metric_input()),
             ),
             Span::styled("  cursors ", theme::muted_style()),
             Span::styled(
                 payload.health.cursors.len().to_string(),
-                metric_style(Color::Green),
+                metric_style(theme::positive_fg()),
             ),
             Span::styled("  recent failures ", theme::muted_style()),
             Span::styled(
                 payload.health.recent_failures.len().to_string(),
                 if payload.health.recent_failures.is_empty() {
-                    metric_style(Color::Green)
+                    metric_style(theme::positive_fg())
                 } else {
-                    metric_style(Color::Yellow)
+                    metric_style(theme::warning_fg())
                 },
             ),
         ]),
@@ -394,7 +406,10 @@ fn render_health_summary(frame: &mut Frame, area: Rect, payload: &StatsPanelPayl
         ),
     ];
     frame.render_widget(
-        Paragraph::new(lines).block(theme::trend_card_block("Health Signals", Color::Magenta)),
+        Paragraph::new(lines).block(theme::trend_card_block(
+            "Health Signals",
+            theme::metric_cache_write(),
+        )),
         area,
     );
 }
@@ -403,6 +418,7 @@ fn source_row(
     source: &SourceBreakdown,
     max_tokens: i64,
     index: usize,
+    selected: bool,
     very_narrow: bool,
     narrow: bool,
 ) -> Row<'static> {
@@ -419,7 +435,7 @@ fn source_row(
         ])
     } else {
         Row::new(vec![
-            Cell::from(source.source.clone()).style(Style::default().add_modifier(Modifier::BOLD)),
+            Cell::from(source.source.clone()).style(theme::bold_style()),
             Cell::from(format_tokens(source.total_tokens)),
             Cell::from(format_number(source.event_count)),
             Cell::from(
@@ -429,11 +445,13 @@ fn source_row(
                     .unwrap_or_else(|| "-".to_string()),
             ),
             Cell::from(render_bar(source.total_tokens, max_tokens, 20))
-                .style(Style::default().fg(Color::Green)),
+                .style(theme::fg_style(theme::positive_fg())),
         ])
     };
 
-    if index % 2 == 1 {
+    if selected {
+        row = row.style(theme::selection_style());
+    } else if index % 2 == 1 {
         row = row.style(theme::row_alt_style());
     }
     row
@@ -559,37 +577,7 @@ fn compact_date(date: &str) -> String {
 }
 
 fn metric_style(color: Color) -> Style {
-    Style::default().fg(color).add_modifier(Modifier::BOLD)
-}
-
-fn format_tokens(value: i64) -> String {
-    if value.abs() >= 1_000_000 {
-        format!("{:.1}M", value as f64 / 1_000_000.0)
-    } else if value.abs() >= 10_000 {
-        format!("{:.1}k", value as f64 / 1_000.0)
-    } else {
-        format_number(value)
-    }
-}
-
-fn format_number(value: i64) -> String {
-    if value == 0 {
-        return "0".to_string();
-    }
-    let s = value.abs().to_string();
-    let mut result = String::new();
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-    }
-    let formatted: String = result.chars().rev().collect();
-    if value < 0 {
-        format!("-{formatted}")
-    } else {
-        formatted
-    }
+    theme::bold_fg_style(color)
 }
 
 #[cfg(test)]

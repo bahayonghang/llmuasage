@@ -1,4 +1,4 @@
-use std::io;
+use std::{io, time::Duration};
 
 use anyhow::Result;
 use crossterm::{
@@ -9,34 +9,52 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 
-use crate::{
-    commands::sync::{self, SyncRunOptions},
-    query::{Dashboard, InventoryRoots},
-    store::Store,
-};
+use crate::{query::QueryFilter, store::Store};
 
 pub mod app;
+mod data_loader;
 pub mod draw;
 pub mod event;
 pub mod footer;
+pub mod format;
 pub mod help_dialog;
 pub mod input;
 pub mod nav_bar;
 pub mod panels;
 pub mod report_table;
 pub mod source_picker;
+mod sync_control;
 pub mod theme;
 
-use app::{AppState, BehaviorPanelPayload, Panel, StatsPanelPayload};
+use app::{AppState, Panel};
+use data_loader::{PanelDataLoader, PanelPayload, PanelRequest, PanelResult};
 use event::{EventHandler, TuiEvent};
 use input::{Action, DialogAction, handle_dialog_key_event, handle_key_event};
+use sync_control::{SyncController, SyncUpdate};
+
+#[derive(Debug)]
+struct RedrawState {
+    dirty: bool,
+}
+
+impl RedrawState {
+    fn initial() -> Self {
+        Self { dirty: true }
+    }
+
+    fn request(&mut self) {
+        self.dirty = true;
+    }
+
+    fn take(&mut self) -> bool {
+        std::mem::take(&mut self.dirty)
+    }
+}
 
 /// Main entry point for the interactive terminal dashboard.
 pub fn run_dashboard(store: &Store) -> Result<()> {
-    // 0. Honor an optional initial theme from the environment.
-    if let Ok(name) = std::env::var("LLMUSAGE_THEME") {
-        theme::set_theme_by_name(&name);
-    }
+    // 0. Resolve theme and terminal color capability before entering raw mode.
+    theme::configure_from_env();
 
     // 1. Install panic hook BEFORE enabling raw mode
     let default_hook = std::panic::take_hook();
@@ -82,43 +100,49 @@ pub fn run_terminal(store: &Store) -> Result<()> {
 }
 
 fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Store) -> Result<()> {
-    let dashboard = Dashboard::open(store)?;
     let mut state = AppState::new();
+    let mut sync = SyncController::new()?;
+    let mut loader = PanelDataLoader::new(store)?;
     let size = terminal.size()?;
     state.handle_resize(size.width, size.height);
     let mut events = EventHandler::new(std::time::Duration::from_millis(250));
 
     // Load overview data initially (default panel)
-    load_panel_data(&dashboard, &mut state, Panel::Overview);
-    state.mark_refreshed();
+    request_panel_data(&mut loader, &mut state, Panel::Overview, false);
+    let mut redraw = RedrawState::initial();
 
     loop {
-        // Draw frame
-        terminal.draw(|frame| draw::draw(frame, &state))?;
+        if redraw.take() {
+            terminal.draw(|frame| draw::draw(frame, &state))?;
+        }
 
         let ev = events.recv()?;
         let action = match ev {
             TuiEvent::Tick => {
-                state.on_tick();
+                let mut tick_dirty = apply_panel_results(&mut loader, &mut state);
+                tick_dirty |= apply_sync_updates(&mut sync, &mut loader, &mut state);
+                state.sync_active = sync.is_active();
+                let animation_active = state.background_active();
+                tick_dirty |= state.on_tick(animation_active);
                 if state.needs_refresh {
-                    refresh_panel_data(&dashboard, &mut state);
+                    refresh_panel_data(&mut loader, &mut state);
+                    tick_dirty = true;
+                }
+                if tick_dirty {
+                    redraw.request();
                 }
                 continue;
             }
             TuiEvent::Resize(width, height) => {
                 state.handle_resize(width, height);
+                redraw.request();
                 continue;
             }
-            TuiEvent::Mouse(mouse) => {
-                if let Some(panel) = panel_from_mouse(&state, &mouse) {
-                    Action::SwitchPanel(panel)
-                } else {
-                    Action::None
-                }
-            }
+            TuiEvent::Mouse(mouse) => action_from_mouse(&state, &mouse),
             TuiEvent::Key(key) => {
                 if state.active_dialog.is_some() {
                     handle_dialog_action(handle_dialog_key_event(key), &mut state);
+                    redraw.request();
                     continue;
                 }
                 handle_key_event(key, state.active_panel)
@@ -126,20 +150,24 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
         };
 
         match action {
-            Action::Quit => break,
+            Action::Quit => {
+                sync.shutdown(Duration::from_millis(500));
+                loader.cancel_active();
+                break;
+            }
             Action::SwitchPanel(p) => {
                 state.active_panel = p;
-                load_panel_data(&dashboard, &mut state, p);
+                request_panel_data(&mut loader, &mut state, p, false);
             }
             Action::NextPanel => {
                 let p = state.active_panel.next();
                 state.active_panel = p;
-                load_panel_data(&dashboard, &mut state, p);
+                request_panel_data(&mut loader, &mut state, p, false);
             }
             Action::PrevPanel => {
                 let p = state.active_panel.prev();
                 state.active_panel = p;
-                load_panel_data(&dashboard, &mut state, p);
+                request_panel_data(&mut loader, &mut state, p, false);
             }
             Action::ScrollDown => {
                 state.scroll[state.active_panel as usize].scroll_down();
@@ -147,22 +175,71 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
             Action::ScrollUp => {
                 state.scroll[state.active_panel as usize].scroll_up();
             }
+            Action::PageDown => {
+                state.scroll[state.active_panel as usize].page_down();
+            }
+            Action::PageUp => {
+                state.scroll[state.active_panel as usize].page_up();
+            }
+            Action::SelectFirst => {
+                state.scroll[state.active_panel as usize].select_first();
+            }
+            Action::SelectLast => {
+                state.scroll[state.active_panel as usize].select_last();
+            }
+            Action::CycleSort => {
+                if let Some((key, descending)) = state.cycle_sort() {
+                    let panel = state.active_panel;
+                    update_scroll_total(&mut state, panel);
+                    state.set_status(&format!(
+                        "Sort: {} {}",
+                        key.label(),
+                        if descending {
+                            "descending"
+                        } else {
+                            "ascending"
+                        }
+                    ));
+                }
+            }
+            Action::ReverseSort => {
+                if let Some((key, descending)) = state.reverse_sort() {
+                    let panel = state.active_panel;
+                    update_scroll_total(&mut state, panel);
+                    state.set_status(&format!(
+                        "Sort: {} {}",
+                        key.label(),
+                        if descending {
+                            "descending"
+                        } else {
+                            "ascending"
+                        }
+                    ));
+                }
+            }
             Action::NextWindow => {
                 state.time_window = state.time_window.next();
-                // Invalidate trends cache so it reloads with new window
-                state.trends = None;
                 let panel = state.active_panel;
-                load_panel_data(&dashboard, &mut state, panel);
+                invalidate_windowed_panel_data(&mut state);
+                if panel_uses_time_window(panel) {
+                    request_panel_data(&mut loader, &mut state, panel, false);
+                }
             }
             Action::PrevWindow => {
                 state.time_window = state.time_window.prev();
-                state.trends = None;
                 let panel = state.active_panel;
-                load_panel_data(&dashboard, &mut state, panel);
+                invalidate_windowed_panel_data(&mut state);
+                if panel_uses_time_window(panel) {
+                    request_panel_data(&mut loader, &mut state, panel, false);
+                }
             }
-            Action::Refresh => refresh_panel_data(&dashboard, &mut state),
+            Action::Refresh => refresh_panel_data(&mut loader, &mut state),
             Action::ToggleAutoRefresh => state.toggle_auto_refresh(),
-            Action::StartSync => run_sync_action(store, &dashboard, &mut state),
+            Action::StartSync => {
+                let message = sync.start_or_cancel(store, state.filter.source);
+                state.sync_active = sync.is_active();
+                state.set_status(&message);
+            }
             Action::OpenSourcePicker => state.open_source_picker(),
             Action::OpenHelp => state.open_help(),
             Action::CycleTheme => {
@@ -171,47 +248,42 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
             }
             Action::None => {}
         }
+        redraw.request();
     }
 
     Ok(())
 }
 
-fn run_sync_action(store: &Store, dashboard: &Dashboard, state: &mut AppState) {
-    state.set_status("Sync running...");
-    let runtime = match tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(runtime) => runtime,
-        Err(err) => {
-            state.set_status(&format!("Sync runtime error: {err}"));
-            return;
+fn apply_sync_updates(
+    sync: &mut SyncController,
+    loader: &mut PanelDataLoader,
+    state: &mut AppState,
+) -> bool {
+    let mut dirty = false;
+    for update in sync.drain_updates() {
+        dirty = true;
+        match update {
+            SyncUpdate::Progress(message) => state.set_status(&message),
+            SyncUpdate::Completed { inserted, stored } => {
+                invalidate_inactive_panel_data(state);
+                request_panel_data(loader, state, state.active_panel, true);
+                state.set_status(&format!(
+                    "Sync complete: {inserted} inserted, {stored} stored"
+                ));
+            }
+            SyncUpdate::Failed(error) => state.set_status(&format!("Sync failed: {error}")),
+            SyncUpdate::Cancelled => state.set_status("Sync cancelled"),
         }
-    };
-    let options = SyncRunOptions {
-        source: state.filter.source,
-        ..SyncRunOptions::default()
-    };
-    match runtime.block_on(sync::run_store_once_with_options(store, &options)) {
-        Ok(summary) => {
-            state.invalidate_cached_data();
-            load_panel_data(dashboard, state, state.active_panel);
-            state.mark_refreshed();
-            state.set_status(&format!(
-                "Sync complete: {} inserted, {} stored",
-                summary.total_inserted, summary.stored_events
-            ));
-        }
-        Err(err) => state.set_status(&format!("Sync failed: {err}")),
     }
+    dirty
 }
 
-fn refresh_panel_data(dashboard: &Dashboard, state: &mut AppState) {
-    state.invalidate_cached_data();
+fn refresh_panel_data(loader: &mut PanelDataLoader, state: &mut AppState) {
     let panel = state.active_panel;
-    load_panel_data(dashboard, state, panel);
-    state.mark_refreshed();
-    state.set_status("Refreshed local dashboard cache");
+    invalidate_inactive_panel_data(state);
+    state.needs_refresh = false;
+    request_panel_data(loader, state, panel, true);
+    state.set_status("Refreshing local dashboard cache");
 }
 
 fn handle_dialog_action(action: DialogAction, state: &mut AppState) {
@@ -232,93 +304,183 @@ fn handle_dialog_action(action: DialogAction, state: &mut AppState) {
     }
 }
 
-fn panel_from_mouse(state: &AppState, mouse: &crossterm::event::MouseEvent) -> Option<Panel> {
-    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-        return None;
+fn action_from_mouse(state: &AppState, mouse: &crossterm::event::MouseEvent) -> Action {
+    match mouse.kind {
+        MouseEventKind::ScrollDown => Action::ScrollDown,
+        MouseEventKind::ScrollUp => Action::ScrollUp,
+        MouseEventKind::Down(MouseButton::Left) => nav_bar::panel_at_position(
+            ratatui::layout::Rect::new(0, 0, state.terminal_width, 3),
+            mouse.column,
+            mouse.row,
+        )
+        .map(Action::SwitchPanel)
+        .unwrap_or(Action::None),
+        _ => Action::None,
     }
+}
 
-    nav_bar::panel_at_position(
-        ratatui::layout::Rect::new(0, 0, state.terminal_width, 3),
-        mouse.column,
-        mouse.row,
+fn request_panel_data(
+    loader: &mut PanelDataLoader,
+    state: &mut AppState,
+    panel: Panel,
+    force: bool,
+) {
+    if !force && panel_has_data(state, panel) {
+        return;
+    }
+    state.data_generation = state.data_generation.wrapping_add(1);
+    state.panel_loading = [false; Panel::COUNT];
+    state.panel_loading[panel as usize] = true;
+    loader.request(PanelRequest {
+        panel,
+        filter: state.filter.clone(),
+        time_window: state.time_window,
+        generation: state.data_generation,
+        refreshing: panel_has_data(state, panel),
+    });
+}
+
+fn apply_panel_results(loader: &mut PanelDataLoader, state: &mut AppState) -> bool {
+    let mut dirty = false;
+    while let Some(result) = loader.try_recv() {
+        dirty |= apply_panel_result(state, result);
+    }
+    dirty
+}
+
+fn apply_panel_result(state: &mut AppState, result: PanelResult) -> bool {
+    if !panel_result_matches(state, &result) {
+        return false;
+    }
+    let panel = result.panel;
+    let refreshing = result.refreshing;
+    match result.payload {
+        PanelPayload::Overview(payload) => state.overview = Some(payload),
+        PanelPayload::SyncCenter(payload) => state.sync_center = Some(payload),
+        PanelPayload::Models(payload) => {
+            state.model_collapse = payload
+                .as_ref()
+                .ok()
+                .and_then(|items| panels::models::collapse_plan(items));
+            state.models = Some(payload);
+        }
+        PanelPayload::Daily(payload) => state.daily = Some(payload),
+        PanelPayload::Hourly(payload) => state.hourly = Some(payload),
+        PanelPayload::Costs(payload) => {
+            state.cost_collapse = payload
+                .as_ref()
+                .ok()
+                .and_then(|items| panels::cost::collapse_plan(items));
+            state.costs = Some(payload);
+        }
+        PanelPayload::Stats(payload) => state.stats = Some(payload),
+        PanelPayload::Behavior(payload) => state.behavior = Some(*payload),
+        PanelPayload::Blocks(payload) => state.blocks = Some(payload),
+    }
+    state.panel_loading[panel as usize] = false;
+    update_scroll_total(state, panel);
+    state.mark_refreshed();
+    if refreshing {
+        state.set_status("Refreshed local dashboard cache");
+    }
+    true
+}
+
+fn panel_result_matches(state: &AppState, result: &PanelResult) -> bool {
+    result.generation == state.data_generation
+        && result.panel == state.active_panel
+        && (!panel_uses_time_window(result.panel) || result.time_window == state.time_window)
+        && filters_match(&result.filter, &state.filter)
+}
+
+fn filters_match(left: &QueryFilter, right: &QueryFilter) -> bool {
+    left.source == right.source
+        && left.model == right.model
+        && left.since == right.since
+        && left.until == right.until
+        && left.project_hash == right.project_hash
+        && left.timezone == right.timezone
+}
+
+fn panel_has_data(state: &AppState, panel: Panel) -> bool {
+    match panel {
+        Panel::Overview => state.overview.is_some(),
+        Panel::Trends => state.sync_center.is_some(),
+        Panel::Models => state.models.is_some(),
+        Panel::Sources => state.daily.is_some(),
+        Panel::Projects => state.hourly.is_some(),
+        Panel::Cost => state.costs.is_some(),
+        Panel::Health => state.stats.is_some(),
+        Panel::Behavior => state.behavior.is_some(),
+        Panel::Blocks => state.blocks.is_some(),
+    }
+}
+
+fn panel_uses_time_window(panel: Panel) -> bool {
+    matches!(
+        panel,
+        Panel::Models
+            | Panel::Sources
+            | Panel::Projects
+            | Panel::Cost
+            | Panel::Health
+            | Panel::Behavior
     )
 }
 
-/// Load data for a panel only when the cached value is `None`.
-fn load_panel_data(dashboard: &Dashboard, state: &mut AppState, panel: Panel) {
-    match panel {
-        Panel::Overview => {
-            if state.overview.is_none() {
-                state.overview = Some(dashboard.overview(&state.filter).map_err(|e| e.to_string()));
-            }
-        }
-        Panel::Trends => {
-            if state.sync_center.is_none() {
-                state.sync_center = Some(
-                    dashboard
-                        .sync_command_center(&state.filter)
-                        .map_err(|e| e.to_string()),
-                );
-                update_scroll_total(state, Panel::Trends);
-            }
-        }
-        Panel::Models => {
-            if state.models.is_none() {
-                state.models = Some(
-                    dashboard
-                        .model_breakdown(&state.filter)
-                        .map_err(|e| e.to_string()),
-                );
-                update_scroll_total(state, Panel::Models);
-            }
-        }
-        Panel::Sources => {
-            if state.daily.is_none() {
-                state.daily = Some(
-                    dashboard
-                        .trends_daily(&state.filter)
-                        .map_err(|e| e.to_string()),
-                );
-                update_scroll_total(state, Panel::Sources);
-            }
-        }
-        Panel::Projects => {
-            if state.hourly.is_none() {
-                state.hourly = Some(
-                    dashboard
-                        .trends("day", &state.filter)
-                        .map_err(|e| e.to_string()),
-                );
-                update_scroll_total(state, Panel::Projects);
-            }
-        }
-        Panel::Cost => {
-            if state.costs.is_none() {
-                state.costs = Some(
-                    dashboard
-                        .cost_breakdown(&state.filter)
-                        .map_err(|e| e.to_string()),
-                );
-                update_scroll_total(state, Panel::Cost);
-            }
-        }
-        Panel::Health => {
-            if state.stats.is_none() {
-                state.stats = Some(load_stats_panel_data(dashboard, state));
-                update_scroll_total(state, Panel::Health);
-            }
-        }
-        Panel::Behavior => {
-            if state.behavior.is_none() {
-                state.behavior = Some(load_behavior_panel_data(dashboard, state));
-            }
-        }
-        Panel::Blocks => {
-            if state.blocks.is_none() {
-                state.blocks = Some(dashboard.blocks_report().map_err(|e| e.to_string()));
-                update_scroll_total(state, Panel::Blocks);
-            }
-        }
+fn invalidate_windowed_panel_data(state: &mut AppState) {
+    state.models = None;
+    state.model_collapse = None;
+    state.daily = None;
+    state.hourly = None;
+    state.costs = None;
+    state.cost_collapse = None;
+    state.stats = None;
+    state.behavior = None;
+    for panel in [
+        Panel::Models,
+        Panel::Sources,
+        Panel::Projects,
+        Panel::Cost,
+        Panel::Health,
+        Panel::Behavior,
+    ] {
+        state.scroll[panel as usize].offset = 0;
+        state.scroll[panel as usize].selected = 0;
+        state.panel_loading[panel as usize] = false;
+    }
+}
+
+fn invalidate_inactive_panel_data(state: &mut AppState) {
+    let active = state.active_panel;
+    if active != Panel::Overview {
+        state.overview = None;
+    }
+    if active != Panel::Trends {
+        state.sync_center = None;
+    }
+    if active != Panel::Models {
+        state.models = None;
+        state.model_collapse = None;
+    }
+    if active != Panel::Sources {
+        state.daily = None;
+    }
+    if active != Panel::Projects {
+        state.hourly = None;
+    }
+    if active != Panel::Cost {
+        state.costs = None;
+        state.cost_collapse = None;
+    }
+    if active != Panel::Health {
+        state.stats = None;
+    }
+    if active != Panel::Behavior {
+        state.behavior = None;
+    }
+    if active != Panel::Blocks {
+        state.blocks = None;
     }
 }
 
@@ -329,10 +491,22 @@ fn update_scroll_total(state: &mut AppState, panel: Panel) {
             .as_ref()
             .and_then(|result| result.as_ref().ok())
             .map(|payload| payload.sources.len() + state.platform_probes.len()),
-        Panel::Models => state.models.as_ref().and_then(ok_len),
+        Panel::Models => state.models.as_ref().and_then(ok_len).map(|raw| {
+            if state.sort[Panel::Models as usize].key.is_some() {
+                raw
+            } else {
+                state.model_collapse.map_or(raw, |plan| plan.keep + 1)
+            }
+        }),
         Panel::Sources => state.daily.as_ref().and_then(ok_len),
         Panel::Projects => state.hourly.as_ref().and_then(ok_len),
-        Panel::Cost => state.costs.as_ref().and_then(ok_len),
+        Panel::Cost => state.costs.as_ref().and_then(ok_len).map(|raw| {
+            if state.sort[Panel::Cost as usize].key.is_some() {
+                raw
+            } else {
+                state.cost_collapse.map_or(raw, |plan| plan.keep + 1)
+            }
+        }),
         Panel::Blocks => state.blocks.as_ref().and_then(ok_len),
         Panel::Health => state
             .stats
@@ -343,9 +517,8 @@ fn update_scroll_total(state: &mut AppState, panel: Panel) {
     };
     if let Some(total) = total {
         let scroll = &mut state.scroll[panel as usize];
-        scroll.total = total;
         scroll.visible = scroll.visible.max(1);
-        scroll.offset = scroll.offset.min(total.saturating_sub(scroll.visible));
+        scroll.set_total(total);
     }
 }
 
@@ -353,46 +526,424 @@ fn ok_len<T>(result: &Result<Vec<T>, String>) -> Option<usize> {
     result.as_ref().ok().map(Vec::len)
 }
 
-fn load_behavior_panel_data(
-    dashboard: &Dashboard,
-    state: &AppState,
-) -> Result<BehaviorPanelPayload, String> {
-    Ok(BehaviorPanelPayload {
-        activity: dashboard
-            .activity_breakdown(&state.filter)
-            .map_err(|e| e.to_string())?,
-        tools: dashboard
-            .tool_breakdown(&state.filter)
-            .map_err(|e| e.to_string())?,
-        optimize: dashboard
-            .optimize(&state.filter)
-            .map_err(|e| e.to_string())?,
-        zombie: dashboard
-            .zombie_report(&InventoryRoots::discover())
-            .map_err(|e| e.to_string())?,
-        compare: dashboard
-            .model_compare(&state.filter, None, None)
-            .map_err(|e| e.to_string())?,
-    })
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::paths::AppPaths;
+    use crate::tui::app::TimeWindow;
+    use crossterm::event::{KeyModifiers, MouseEvent};
+    use ratatui::{
+        Terminal,
+        backend::TestBackend,
+        style::{Color, Modifier},
+    };
+    use std::time::Instant;
 
-fn load_stats_panel_data(
-    dashboard: &Dashboard,
-    state: &AppState,
-) -> Result<StatsPanelPayload, String> {
-    Ok(StatsPanelPayload {
-        overview: dashboard
-            .overview(&state.filter)
-            .map_err(|e| e.to_string())?,
-        heatmap: dashboard
-            .heatmap(&state.filter, 365)
-            .map_err(|e| e.to_string())?,
-        sources: dashboard
-            .source_breakdown(&state.filter)
-            .map_err(|e| e.to_string())?,
-        health: dashboard.health().map_err(|e| e.to_string())?,
-        context_pressure: dashboard
-            .context_pressure(&state.filter)
-            .map_err(|e| e.to_string())?,
-    })
+    fn buffer_text(terminal: &Terminal<TestBackend>) -> String {
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect()
+    }
+
+    #[test]
+    fn idle_ticks_produce_zero_draws_after_the_initial_frame() {
+        let mut redraw = RedrawState::initial();
+        assert!(redraw.take(), "initial frame must render");
+
+        let idle_draws = (0..40).filter(|_| redraw.take()).count();
+        assert_eq!(idle_draws, 0, "ten seconds of 250ms ticks stay idle");
+
+        for _ in 0..4 {
+            redraw.request();
+            assert!(redraw.take(), "active animation ticks request frames");
+        }
+    }
+
+    #[test]
+    fn mouse_wheel_maps_to_selection_actions() {
+        let state = AppState::new();
+        let mouse = |kind| MouseEvent {
+            kind,
+            column: 10,
+            row: 10,
+            modifiers: KeyModifiers::NONE,
+        };
+        assert_eq!(
+            action_from_mouse(&state, &mouse(MouseEventKind::ScrollDown)),
+            Action::ScrollDown
+        );
+        assert_eq!(
+            action_from_mouse(&state, &mouse(MouseEventKind::ScrollUp)),
+            Action::ScrollUp
+        );
+    }
+
+    #[test]
+    fn every_scrolled_table_bounds_row_construction_to_the_viewport() {
+        let selected_tables = [
+            ("blocks", include_str!("panels/blocks.rs")),
+            ("cost", include_str!("panels/cost.rs")),
+            ("daily", include_str!("panels/daily.rs")),
+            ("hourly", include_str!("panels/hourly.rs")),
+            ("models", include_str!("panels/models.rs")),
+            ("stats", include_str!("panels/stats.rs")),
+        ];
+        for (name, source) in selected_tables {
+            assert!(
+                source.contains("visible_range("),
+                "{name} must construct only the selected visible window"
+            );
+            assert!(
+                source.contains("selection_style()"),
+                "{name} must visibly style the selected row"
+            );
+        }
+
+        let usage = include_str!("panels/usage.rs");
+        for tail in usage.split(".skip(scroll.offset)").skip(1) {
+            assert!(
+                tail.trim_start().starts_with(".take("),
+                "usage must bound each scrolled iterator before formatting rows"
+            );
+        }
+    }
+
+    #[test]
+    fn stale_generation_and_filter_results_are_rejected() {
+        let mut state = AppState::new();
+        state.active_panel = Panel::Models;
+        state.data_generation = 2;
+        let stale = PanelResult {
+            panel: Panel::Models,
+            filter: state.filter.clone(),
+            time_window: state.time_window,
+            generation: 1,
+            refreshing: false,
+            payload: PanelPayload::Models(Err("stale".to_string())),
+        };
+        assert!(!panel_result_matches(&state, &stale));
+
+        let mut wrong_filter = state.filter.clone();
+        wrong_filter.source = Some(crate::models::SourceKind::Codex);
+        let wrong_filter = PanelResult {
+            panel: Panel::Models,
+            filter: wrong_filter,
+            time_window: state.time_window,
+            generation: 2,
+            refreshing: false,
+            payload: PanelPayload::Models(Err("wrong filter".to_string())),
+        };
+        assert!(!panel_result_matches(&state, &wrong_filter));
+    }
+
+    #[test]
+    fn window_mismatch_is_rejected_only_for_managed_panels() {
+        let mut state = AppState::new();
+        state.data_generation = 4;
+        state.time_window = TimeWindow::All;
+
+        state.active_panel = Panel::Models;
+        let managed = PanelResult {
+            panel: Panel::Models,
+            filter: state.filter.clone(),
+            time_window: TimeWindow::Week7d,
+            generation: 4,
+            refreshing: false,
+            payload: PanelPayload::Models(Err("unused".to_string())),
+        };
+        assert!(!panel_result_matches(&state, &managed));
+
+        for (panel, payload) in [
+            (
+                Panel::Overview,
+                PanelPayload::Overview(Err("unused".to_string())),
+            ),
+            (
+                Panel::Trends,
+                PanelPayload::SyncCenter(Err("unused".to_string())),
+            ),
+            (
+                Panel::Blocks,
+                PanelPayload::Blocks(Err("unused".to_string())),
+            ),
+        ] {
+            state.active_panel = panel;
+            let lifetime = PanelResult {
+                panel,
+                filter: state.filter.clone(),
+                time_window: TimeWindow::Week7d,
+                generation: 4,
+                refreshing: false,
+                payload,
+            };
+            assert!(panel_result_matches(&state, &lifetime), "{panel:?}");
+        }
+    }
+
+    #[test]
+    fn heavy_panels_render_loading_before_results_arrive() -> Result<()> {
+        for (panel, expected) in [
+            (Panel::Behavior, "Loading"),
+            (Panel::Health, "Loading"),
+            (Panel::Blocks, "Loading"),
+        ] {
+            let backend = TestBackend::new(120, 30);
+            let mut terminal = Terminal::new(backend)?;
+            let mut state = AppState::new();
+            state.active_panel = panel;
+            state.panel_loading[panel as usize] = true;
+            terminal.draw(|frame| draw::draw(frame, &state))?;
+            let text = buffer_text(&terminal);
+            assert!(
+                text.contains(expected),
+                "{panel:?} should render its loading placeholder: {text:?}"
+            );
+        }
+        Ok(())
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct RenderThreadSample {
+        dispatch_ms: f64,
+        loading_draw_ms: f64,
+        result_apply_ms: f64,
+        populated_draw_ms: f64,
+    }
+
+    impl RenderThreadSample {
+        fn max_ms(self) -> f64 {
+            self.dispatch_ms
+                .max(self.loading_draw_ms)
+                .max(self.result_apply_ms)
+                .max(self.populated_draw_ms)
+        }
+    }
+
+    #[ignore = "reads the local usage database for release-mode performance evidence"]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn measure_local_render_thread_first_visit() -> Result<()> {
+        let paths = AppPaths::discover()?;
+        let database_bytes = std::fs::metadata(&paths.db_path)?.len();
+        let store = Store::new(&paths)?;
+        let mut loader = PanelDataLoader::new(&store)?;
+
+        eprintln!("database_bytes={database_bytes} window=30d samples=3");
+        for (panel, baseline_sync_ms) in [
+            (Panel::Health, 169.3),
+            (Panel::Behavior, 3777.5),
+            (Panel::Blocks, 403.2),
+        ] {
+            let _ = measure_render_thread_visit(&mut loader, panel).await?;
+
+            let mut maxima = Vec::with_capacity(3);
+            for sample_number in 1..=3 {
+                let sample = measure_render_thread_visit(&mut loader, panel).await?;
+                let max_ms = sample.max_ms();
+                maxima.push(max_ms);
+                eprintln!(
+                    "panel={} sample={} dispatch_ms={:.3} loading_draw_ms={:.3} result_apply_ms={:.3} populated_draw_ms={:.3} max_render_thread_ms={:.3}",
+                    benchmark_panel_label(panel),
+                    sample_number,
+                    sample.dispatch_ms,
+                    sample.loading_draw_ms,
+                    sample.result_apply_ms,
+                    sample.populated_draw_ms,
+                    max_ms,
+                );
+            }
+
+            let median_ms = median(&mut maxima);
+            eprintln!(
+                "panel={} baseline_sync_ms={baseline_sync_ms:.1} max_render_thread_samples_ms={maxima:?} median_max_render_thread_ms={median_ms:.3} improvement_pct={:.1}",
+                benchmark_panel_label(panel),
+                (baseline_sync_ms - median_ms) * 100.0 / baseline_sync_ms,
+            );
+        }
+        Ok(())
+    }
+
+    async fn measure_render_thread_visit(
+        loader: &mut PanelDataLoader,
+        panel: Panel,
+    ) -> Result<RenderThreadSample> {
+        let mut terminal = Terminal::new(TestBackend::new(120, 30))?;
+        let mut state = AppState::new();
+        state.active_panel = panel;
+        state.time_window = TimeWindow::Month30d;
+
+        let started = Instant::now();
+        request_panel_data(loader, &mut state, panel, false);
+        let dispatch_ms = elapsed_ms(started);
+
+        let started = Instant::now();
+        terminal.draw(|frame| draw::draw(frame, &state))?;
+        let loading_draw_ms = elapsed_ms(started);
+        anyhow::ensure!(
+            buffer_text(&terminal).contains("Loading"),
+            "{} did not render its loading frame",
+            benchmark_panel_label(panel)
+        );
+
+        let result = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(result) = loader.try_recv() {
+                    break result;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .map_err(|_| anyhow::anyhow!("timed out waiting for {}", benchmark_panel_label(panel)))?;
+        assert_panel_result_ok(panel, &result)?;
+
+        let started = Instant::now();
+        let accepted = apply_panel_result(&mut state, result);
+        let result_apply_ms = elapsed_ms(started);
+        anyhow::ensure!(
+            accepted,
+            "{} result was rejected",
+            benchmark_panel_label(panel)
+        );
+
+        let started = Instant::now();
+        terminal.draw(|frame| draw::draw(frame, &state))?;
+        let populated_draw_ms = elapsed_ms(started);
+        anyhow::ensure!(
+            !state.panel_loading[panel as usize] && panel_has_data(&state, panel),
+            "{} did not reach populated state",
+            benchmark_panel_label(panel)
+        );
+        anyhow::ensure!(
+            !buffer_text(&terminal).contains("Loading"),
+            "{} still rendered its loading frame",
+            benchmark_panel_label(panel)
+        );
+
+        Ok(RenderThreadSample {
+            dispatch_ms,
+            loading_draw_ms,
+            result_apply_ms,
+            populated_draw_ms,
+        })
+    }
+
+    fn assert_panel_result_ok(panel: Panel, result: &PanelResult) -> Result<()> {
+        let error = match &result.payload {
+            PanelPayload::Stats(Err(error)) | PanelPayload::Blocks(Err(error)) => {
+                Some(error.as_str())
+            }
+            PanelPayload::Behavior(payload) => {
+                payload.as_ref().as_ref().err().map(|error| error.as_str())
+            }
+            _ => None,
+        };
+        anyhow::ensure!(result.panel == panel, "received unexpected panel result");
+        if let Some(error) = error {
+            anyhow::bail!("{} query failed: {error}", benchmark_panel_label(panel));
+        }
+        Ok(())
+    }
+
+    fn benchmark_panel_label(panel: Panel) -> &'static str {
+        match panel {
+            Panel::Health => "Stats",
+            Panel::Behavior => "Behavior",
+            Panel::Blocks => "Blocks",
+            _ => panel.label(),
+        }
+    }
+
+    fn elapsed_ms(started: Instant) -> f64 {
+        started.elapsed().as_secs_f64() * 1_000.0
+    }
+
+    fn median(values: &mut [f64]) -> f64 {
+        values.sort_by(f64::total_cmp);
+        values[values.len() / 2]
+    }
+
+    #[test]
+    fn no_color_dashboard_buffers_have_no_styles() -> Result<()> {
+        theme::set_color_mode(theme::TerminalColorMode::NoColor);
+        theme::set_theme(theme::Theme::graphite());
+
+        for panel in Panel::all() {
+            let mut terminal = Terminal::new(TestBackend::new(120, 30))?;
+            let mut state = AppState::new();
+            state.active_panel = *panel;
+            terminal.draw(|frame| draw::draw(frame, &state))?;
+            assert_unstyled(&terminal, panel.label());
+        }
+
+        for dialog in [app::ActiveDialog::SourcePicker, app::ActiveDialog::Help] {
+            let mut terminal = Terminal::new(TestBackend::new(120, 30))?;
+            let mut state = AppState::new();
+            state.active_dialog = Some(dialog);
+            terminal.draw(|frame| draw::draw(frame, &state))?;
+            assert_unstyled(&terminal, "dialog");
+        }
+
+        theme::set_color_mode(theme::TerminalColorMode::TrueColor);
+        theme::set_theme(theme::Theme::default_dark());
+        Ok(())
+    }
+
+    #[test]
+    fn every_theme_reaches_all_panel_shells_and_dialogs() -> Result<()> {
+        theme::set_color_mode(theme::TerminalColorMode::TrueColor);
+
+        for selected_theme in theme::Theme::ALL {
+            theme::set_theme(selected_theme);
+            let accent = theme::active_theme().accent;
+            for panel in Panel::all() {
+                let mut terminal = Terminal::new(TestBackend::new(120, 30))?;
+                let mut state = AppState::new();
+                state.active_panel = *panel;
+                terminal.draw(|frame| draw::draw(frame, &state))?;
+                assert!(
+                    terminal
+                        .backend()
+                        .buffer()
+                        .content()
+                        .iter()
+                        .any(|cell| cell.fg == accent || cell.bg == accent),
+                    "{} must reach {}",
+                    selected_theme.name,
+                    panel.label()
+                );
+            }
+
+            for dialog in [app::ActiveDialog::SourcePicker, app::ActiveDialog::Help] {
+                let mut terminal = Terminal::new(TestBackend::new(120, 30))?;
+                let mut state = AppState::new();
+                state.active_dialog = Some(dialog);
+                terminal.draw(|frame| draw::draw(frame, &state))?;
+                assert!(
+                    terminal
+                        .backend()
+                        .buffer()
+                        .content()
+                        .iter()
+                        .any(|cell| cell.fg == accent || cell.bg == accent),
+                    "{} must reach dialog",
+                    selected_theme.name
+                );
+            }
+        }
+
+        theme::set_theme(theme::Theme::default_dark());
+        Ok(())
+    }
+
+    fn assert_unstyled(terminal: &Terminal<TestBackend>, label: &str) {
+        for cell in terminal.backend().buffer().content() {
+            assert_eq!(cell.fg, Color::Reset, "{label} foreground");
+            assert_eq!(cell.bg, Color::Reset, "{label} background");
+            assert_eq!(cell.modifier, Modifier::empty(), "{label} modifier");
+        }
+    }
 }

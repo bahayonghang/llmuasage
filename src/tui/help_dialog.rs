@@ -1,7 +1,6 @@
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
-    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
 };
@@ -15,7 +14,7 @@ pub fn render(frame: &mut Frame, viewport: Rect, state: &AppState) {
     let block = Block::default()
         .title(" Help / Settings ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::accent()));
+        .border_style(theme::fg_style(theme::accent()));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -36,15 +35,15 @@ pub fn render(frame: &mut Frame, viewport: Rect, state: &AppState) {
             Span::styled("Theme ", theme::muted_style()),
             Span::styled(
                 theme::active_theme().name,
-                Style::default()
-                    .fg(theme::accent())
-                    .add_modifier(Modifier::BOLD),
+                theme::bold_fg_style(theme::accent()),
             ),
             Span::styled(" • Source ", theme::muted_style()),
             Span::styled(
                 state.source_filter_label(),
-                Style::default().fg(theme::accent()),
+                theme::fg_style(theme::accent()),
             ),
+            Span::styled(" • Window ", theme::muted_style()),
+            Span::styled(state.time_window.label(), theme::fg_style(theme::accent())),
         ])),
         rows[0],
     );
@@ -55,7 +54,10 @@ pub fn render(frame: &mut Frame, viewport: Rect, state: &AppState) {
 
     let lines = vec![
         Line::from("tab / shift-tab: switch tabs    1-9: jump to tab"),
-        Line::from("j/k or arrows: scroll            h/l: change time window"),
+        Line::from("j/k or arrows: select row        PgUp/PgDn: page"),
+        Line::from("Home/End: first/last row          o/O: sort key/direction"),
+        Line::from("mouse wheel: select row           h/l: Today/7d/30d/All"),
+        Line::from("window: Models/Daily/Hourly/Cost/Stats/Behavior"),
         Line::from("s: source picker                 a: all sources in picker"),
         Line::from("r: refresh dashboard cache       R: toggle auto refresh"),
         Line::from("x: run sync for current source   t: cycle theme"),

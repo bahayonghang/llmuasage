@@ -1,16 +1,15 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Rect},
-    style::Style,
     text::Span,
     widgets::{Block, Borders, Cell, Paragraph, Row, Table},
 };
 
 use crate::query::CostLine;
 use crate::tui::panels::longtail;
-use crate::tui::theme;
+use crate::tui::{format::grouped as format_number, theme};
 
-use super::super::app::ScrollState;
+use super::super::app::{ScrollState, SortState, TableSortKey, stable_sort_refs};
 
 /// Render the cost panel as a table with scroll support.
 pub fn render(
@@ -19,85 +18,129 @@ pub fn render(
     data: &Option<Result<Vec<CostLine>, String>>,
     scroll: &ScrollState,
 ) {
+    let collapsed = data
+        .as_ref()
+        .and_then(|result| result.as_ref().ok())
+        .and_then(|items| collapse_plan(items));
+    render_with_plan(frame, area, data, scroll, collapsed, SortState::default());
+}
+
+pub(crate) fn render_with_plan(
+    frame: &mut Frame,
+    area: Rect,
+    data: &Option<Result<Vec<CostLine>, String>>,
+    scroll: &ScrollState,
+    collapsed: Option<longtail::Collapsed>,
+    sort: SortState,
+) {
     match data {
         None => {
-            let widget = Paragraph::new("加载中...")
+            let widget = Paragraph::new("Loading...")
                 .style(theme::muted_style())
-                .block(styled_block("成本"));
+                .block(styled_block("Cost"));
             frame.render_widget(widget, area);
         }
         Some(Err(e)) => {
-            let widget = Paragraph::new(format!("数据加载失败: {e}"))
+            let widget = Paragraph::new(format!("Data load failed: {e}"))
                 .style(theme::error_style())
-                .block(styled_block("成本"));
+                .block(styled_block("Cost"));
             frame.render_widget(widget, area);
         }
         Some(Ok(items)) if items.is_empty() => {
-            let widget = Paragraph::new("暂无成本数据")
+            let widget = Paragraph::new("No cost data found.")
                 .style(theme::muted_style())
-                .block(styled_block("成本"));
+                .block(styled_block("Cost"));
             frame.render_widget(widget, area);
         }
-        Some(Ok(items)) => render_table(frame, area, items, scroll),
+        Some(Ok(items)) => render_table(frame, area, items, scroll, collapsed, sort),
     }
 }
 
-fn render_table(frame: &mut Frame, area: Rect, items: &[CostLine], scroll: &ScrollState) {
+pub(crate) fn collapse_plan(items: &[CostLine]) -> Option<longtail::Collapsed> {
+    let values: Vec<i64> = items
+        .iter()
+        .map(|item| (item.estimated_cost_usd.max(0.0) * 1_000_000.0) as i64)
+        .collect();
+    let total_cost: i64 = values.iter().sum();
+    longtail::collapse_tail(&values, total_cost)
+}
+
+fn render_table(
+    frame: &mut Frame,
+    area: Rect,
+    items: &[CostLine],
+    scroll: &ScrollState,
+    collapsed: Option<longtail::Collapsed>,
+    sort: SortState,
+) {
     let header = Row::new(vec![
-        Cell::from("来源"),
-        Cell::from("模型"),
-        Cell::from("事件数"),
-        Cell::from("总 Tokens"),
-        Cell::from("估算成本"),
+        Cell::from("Source"),
+        Cell::from("Model"),
+        Cell::from("Events"),
+        Cell::from(sort.header("Total Tokens", TableSortKey::Tokens)),
+        Cell::from(sort.header("Estimated Cost", TableSortKey::Cost)),
     ])
     .style(theme::header_style())
     .bottom_margin(1);
 
     // Fold the sub-2% cost tail (metric in micro-dollars) into a summary row.
-    let micros = |cost: f64| (cost.max(0.0) * 1_000_000.0) as i64;
-    let values: Vec<i64> = items
-        .iter()
-        .map(|item| micros(item.estimated_cost_usd))
-        .collect();
-    let total_cost: i64 = values.iter().sum();
-    let collapsed = longtail::collapse_tail(&values, total_cost);
-    let shown = collapsed.map(|c| &items[..c.keep]).unwrap_or(items);
-
-    let mut rows: Vec<Row> = shown
-        .iter()
-        .skip(scroll.offset)
+    let collapsed = collapsed.filter(|_| sort.key.is_none());
+    let mut ordered =
+        stable_sort_refs(items.iter().collect(), sort, |left, right, key| match key {
+            TableSortKey::Tokens => left.total_tokens.cmp(&right.total_tokens),
+            TableSortKey::Cost => left.estimated_cost_usd.total_cmp(&right.estimated_cost_usd),
+            TableSortKey::Date => std::cmp::Ordering::Equal,
+        });
+    if sort.key.is_none()
+        && let Some(collapsed) = collapsed
+    {
+        ordered.truncate(collapsed.keep);
+    }
+    let visible_height = super::visible_table_rows(area);
+    let total_rows = ordered.len() + usize::from(collapsed.is_some());
+    let range = scroll.visible_range(total_rows, visible_height);
+    let rows: Vec<Row> = range
+        .clone()
         .enumerate()
-        .map(|(i, item)| {
-            let row = Row::new(vec![
-                Cell::from(item.source.clone()),
-                Cell::from(item.model.clone()),
-                Cell::from(format_number(item.event_count)),
-                Cell::from(format_number(item.total_tokens)),
-                Cell::from(format!("${:.2}", item.estimated_cost_usd)),
-            ]);
-            if i % 2 == 1 {
+        .map(|(visible_index, absolute)| {
+            let (row, summary) = if let Some(item) = ordered.get(absolute) {
+                (
+                    Row::new(vec![
+                        Cell::from(item.source.clone()),
+                        Cell::from(item.model.clone()),
+                        Cell::from(format_number(item.event_count)),
+                        Cell::from(format_number(item.total_tokens)),
+                        Cell::from(format!("${:.2}", item.estimated_cost_usd)),
+                    ]),
+                    false,
+                )
+            } else {
+                let collapsed = collapsed.expect("summary row requires a collapse plan");
+                (
+                    Row::new(vec![
+                        Cell::from(longtail::summary_label(&collapsed)),
+                        Cell::from(String::new()),
+                        Cell::from(String::new()),
+                        Cell::from(String::new()),
+                        Cell::from(format!(
+                            "${:.2}",
+                            collapsed.hidden_value as f64 / 1_000_000.0
+                        )),
+                    ]),
+                    true,
+                )
+            };
+            if absolute == scroll.selected {
+                row.style(theme::selection_style())
+            } else if summary {
+                row.style(theme::muted_style())
+            } else if visible_index % 2 == 1 {
                 row.style(theme::row_alt_style())
             } else {
                 row
             }
         })
         .collect();
-
-    if let Some(collapsed) = collapsed {
-        rows.push(
-            Row::new(vec![
-                Cell::from(longtail::summary_label(&collapsed)),
-                Cell::from(String::new()),
-                Cell::from(String::new()),
-                Cell::from(String::new()),
-                Cell::from(format!(
-                    "${:.2}",
-                    collapsed.hidden_value as f64 / 1_000_000.0
-                )),
-            ])
-            .style(theme::muted_style()),
-        );
-    }
 
     let table = Table::new(
         rows,
@@ -110,8 +153,7 @@ fn render_table(frame: &mut Frame, area: Rect, items: &[CostLine], scroll: &Scro
         ],
     )
     .header(header)
-    .block(styled_block("成本"))
-    .row_highlight_style(Style::default().fg(theme::accent()));
+    .block(styled_block("Cost"));
 
     frame.render_widget(table, area);
 }
@@ -124,24 +166,4 @@ fn styled_block(title: &str) -> Block<'_> {
             format!(" {} ", title),
             theme::block_title_style(),
         ))
-}
-
-fn format_number(n: i64) -> String {
-    if n == 0 {
-        return "0".to_string();
-    }
-    let s = n.abs().to_string();
-    let mut result = String::new();
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-    }
-    let formatted: String = result.chars().rev().collect();
-    if n < 0 {
-        format!("-{formatted}")
-    } else {
-        formatted
-    }
 }

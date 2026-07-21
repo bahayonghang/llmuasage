@@ -13,14 +13,13 @@ use llmusage::query::{
     ActivityBreakdown, ActivityPayload, BehaviorSupport, CategoryCompareRow, CompareMetric,
     CompareModelCandidate, ContextPressurePayload, CostLine, CursorHealth, DailyTrendPoint,
     HealthPayload, HeatmapPoint, ModelBreakdown, ModelComparePayload, ModelCompareStats,
-    OptimizeFinding, OptimizePayload, OverviewPayload, ProjectBreakdown, SourceBreakdown,
-    SyncActionPayload, SyncCommandCenterPayload, SyncMetricsPayload, SyncSafetyPayload,
-    SyncSourcePayload, TokenSummary, ToolBreakdown, ToolsPayload, TrendPoint, ZombieItem,
-    ZombieReport,
+    OptimizeFinding, OptimizePayload, OverviewPayload, SourceBreakdown, SyncActionPayload,
+    SyncCommandCenterPayload, SyncMetricsPayload, SyncSafetyPayload, SyncSourcePayload,
+    TokenSummary, ToolBreakdown, ToolsPayload, TrendPoint, ZombieItem, ZombieReport,
 };
-use llmusage::store::{IntegrationState, RunRecord};
+use llmusage::store::IntegrationState;
 use llmusage::tui::app::{
-    ActiveDialog, AppState, BehaviorPanelPayload, Panel, ScrollState, StatsPanelPayload, TimeWindow,
+    ActiveDialog, AppState, BehaviorPanelPayload, Panel, ScrollState, StatsPanelPayload,
 };
 
 /// Format a number with thousands separators (matching panel rendering).
@@ -155,35 +154,6 @@ fn arb_model_breakdown() -> impl Strategy<Value = ModelBreakdown> {
     )
 }
 
-fn arb_source_breakdown() -> impl Strategy<Value = SourceBreakdown> {
-    (
-        "[a-z]{3,8}",
-        1i64..100_000,
-        1i64..1000,
-        proptest::option::of("[0-9]{4}-[0-9]{2}-[0-9]{2}"),
-    )
-        .prop_map(|(source, tokens, events, last_event)| SourceBreakdown {
-            source,
-            total_tokens: tokens,
-            event_count: events,
-            last_event_at: last_event,
-        })
-}
-
-fn arb_project_breakdown() -> impl Strategy<Value = ProjectBreakdown> {
-    ("[a-z]{3,10}", 1i64..100_000, 1i64..1000, 0.0001f64..100.0).prop_map(
-        |(label, tokens, events, cost)| ProjectBreakdown {
-            project_hash: "hash".to_string(),
-            project_label: label,
-            project_ref: None,
-            total_tokens: tokens,
-            event_count: events,
-            total_cost_usd: cost,
-            project_path: None,
-        },
-    )
-}
-
 fn arb_cost_line() -> impl Strategy<Value = CostLine> {
     (
         "[a-z]{3,8}",
@@ -201,88 +171,12 @@ fn arb_cost_line() -> impl Strategy<Value = CostLine> {
         })
 }
 
-fn arb_integration_state() -> impl Strategy<Value = IntegrationState> {
-    ("[a-z]{3,8}", "[a-z]{4,8}").prop_map(|(source, status)| IntegrationState {
-        source,
-        install_type: "init".to_string(),
-        status,
-        config_path: None,
-        backup_path: None,
-        details_json: None,
-        updated_at: "2025-01-01T00:00:00Z".to_string(),
-    })
-}
-
-fn arb_cursor_health() -> impl Strategy<Value = CursorHealth> {
-    ("[a-z]{3,8}", "[a-z]{3,10}").prop_map(|(source, key)| CursorHealth {
-        source,
-        cursor_key: key,
-        updated_at: Some("2025-01-01T00:00:00Z".to_string()),
-        sqlite_status: None,
-    })
-}
-
-fn arb_run_record() -> impl Strategy<Value = RunRecord> {
-    ("[a-z]{3,8}", proptest::option::of("[a-z ]{5,15}")).prop_map(|(cmd, error)| RunRecord {
-        id: 1,
-        command: cmd,
-        status: "failed".to_string(),
-        summary: None,
-        error,
-        started_at: "2025-01-01T00:00:00Z".to_string(),
-        finished_at: None,
-    })
-}
-
-fn arb_health_payload() -> impl Strategy<Value = HealthPayload> {
-    (
-        proptest::collection::vec(arb_integration_state(), 0..5),
-        proptest::collection::vec(arb_cursor_health(), 0..5),
-        proptest::collection::vec(arb_run_record(), 0..15),
-    )
-        .prop_map(|(integrations, cursors, recent_failures)| HealthPayload {
-            integrations,
-            cursors,
-            recent_failures,
-        })
-}
-
-fn arb_trend_points() -> impl Strategy<Value = Vec<TrendPoint>> {
-    proptest::collection::vec(
-        ("2026-05-(0[1-9]|1[0-9]|2[0-8])", 0i64..1_000_000).prop_map(|(label, tokens)| {
-            TrendPoint {
-                label,
-                total_tokens: tokens,
-            }
-        }),
-        0..35,
-    )
-}
-
-fn render_trends_text(
-    points: Vec<TrendPoint>,
-    window: TimeWindow,
-    width: u16,
-    height: u16,
-) -> String {
-    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-    let area = Rect::new(0, 0, width, height);
-    let data: Option<Result<Vec<TrendPoint>, String>> = Some(Ok(points));
-
-    terminal
-        .draw(|frame| {
-            llmusage::tui::panels::trends::render(frame, area, &data, window);
-        })
-        .unwrap();
-
-    buffer_text(&terminal)
-}
-
 fn render_daily_text(points: Vec<DailyTrendPoint>, width: u16, height: u16) -> String {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     let area = Rect::new(0, 0, width, height);
     let scroll = ScrollState {
         offset: 0,
+        selected: 0,
         total: points.len(),
         visible: height.saturating_sub(4) as usize,
     };
@@ -302,6 +196,7 @@ fn render_hourly_text(points: Vec<TrendPoint>, width: u16, height: u16) -> Strin
     let area = Rect::new(0, 0, width, height);
     let scroll = ScrollState {
         offset: 0,
+        selected: 0,
         total: points.len(),
         visible: height.saturating_sub(4) as usize,
     };
@@ -425,6 +320,7 @@ fn render_usage_text(
     let area = Rect::new(0, 0, width, height);
     let scroll = ScrollState {
         offset: 0,
+        selected: 0,
         total: payload.sources.len() + probes.len(),
         visible: height.saturating_sub(8) as usize,
     };
@@ -584,6 +480,7 @@ fn render_stats_text(payload: StatsPanelPayload, width: u16, height: u16) -> Str
     let area = Rect::new(0, 0, width, height);
     let scroll = ScrollState {
         offset: 0,
+        selected: 0,
         total: payload.sources.len(),
         visible: height.saturating_sub(10) as usize,
     };
@@ -819,7 +716,7 @@ fn dashboard_shell_renders_tokscale_style_header_and_footer() {
 fn dashboard_shell_uses_short_labels_on_narrow_widths() {
     let text = render_shell_text(AppState::new(), 50, 18);
 
-    for expected in ["llmusage", "Ovw", "Use", "Day", "Hr", "tab/1-8"] {
+    for expected in ["llmusage", "Ovw", "Use", "Day", "Hr", "tab/1-9"] {
         assert!(
             text.contains(expected),
             "narrow dashboard shell should contain '{expected}', got: {text}"
@@ -1014,111 +911,15 @@ fn stats_panel_uses_compact_source_columns_on_narrow_widths() {
 }
 
 #[test]
-fn trends_week_labels_are_short_dates_not_truncated_years() {
-    let points = (10..=16)
-        .map(|day| TrendPoint {
-            label: format!("2026-05-{day:02}"),
-            total_tokens: i64::from(day) * 1_000,
-        })
-        .collect();
-
-    let text = render_trends_text(points, TimeWindow::Week7d, 120, 28);
-
-    assert!(
-        text.contains("05-16"),
-        "expected short MM-DD label in trends output: {text}"
-    );
-    assert!(
-        !text.contains("2026-05-16"),
-        "full date labels should not leak into the TUI chart/table: {text}"
-    );
-    assert!(
-        !text.contains("202 202"),
-        "truncated repeated year labels should not appear: {text}"
-    );
-}
-
-#[test]
-fn trends_window_labels_use_window_specific_short_formats() {
-    let cases = [
-        (
-            TimeWindow::Day24h,
-            TrendPoint {
-                label: "2026-05-16T09:30:00Z".to_string(),
-                total_tokens: 12_000,
-            },
-            "09:30",
-        ),
-        (
-            TimeWindow::Week7d,
-            TrendPoint {
-                label: "2026-05-16".to_string(),
-                total_tokens: 12_000,
-            },
-            "05-16",
-        ),
-        (
-            TimeWindow::Month30d,
-            TrendPoint {
-                label: "2026-05-16".to_string(),
-                total_tokens: 12_000,
-            },
-            "05-16",
-        ),
-        (
-            TimeWindow::All,
-            TrendPoint {
-                label: "2026-05".to_string(),
-                total_tokens: 12_000,
-            },
-            "2026-05",
-        ),
-    ];
-
-    for (window, point, expected_label) in cases {
-        let text = render_trends_text(vec![point], window, 96, 24);
-        assert!(
-            text.contains(expected_label),
-            "expected {expected_label} for {window:?}, got: {text}"
-        );
-    }
-}
-
-#[test]
-fn trends_empty_data_renders_placeholder() {
-    let text = render_trends_text(Vec::new(), TimeWindow::Week7d, 80, 18);
-    assert!(
-        text.contains("暂无趋势数据"),
-        "empty trend data should show placeholder: {text}"
-    );
-}
-
-#[test]
-fn trends_small_terminal_does_not_panic() {
-    let points = (1..=30)
-        .map(|day| TrendPoint {
-            label: format!("2026-05-{day:02}"),
-            total_tokens: i64::from(day) * 100,
-        })
-        .collect();
-
-    let text = render_trends_text(points, TimeWindow::Month30d, 30, 8);
-    assert!(
-        text.contains("趋势"),
-        "small terminal should render a shell"
-    );
-}
-
-#[test]
 fn behavior_panel_renders_all_behavior_sections_and_sample_rows() {
     let text = render_behavior_text(sample_behavior_payload(), 160, 40);
 
     for expected in [
-        "行为",
+        "Behavior",
         "Activity",
         "Tools",
         "Optimize",
-        "Compare",
+        "Model Comparison",
         "coding",
         "Read",
         "(non-tool)",
@@ -1189,7 +990,7 @@ fn behavior_panel_renders_no_data_degraded_and_compare_warnings() {
         "no-data",
         "degraded",
         "insufficient-models",
-        "暂不计算 score",
+        "score and savings are not calculated",
         "At least two",
     ] {
         assert!(
@@ -1240,40 +1041,87 @@ proptest! {
         prop_assert!(text.contains(&bc_str),
             "Missing bucket_count '{}' in output", bc_str);
 
-        // last_sync_at or "从未同步"
+        // last_sync_at or "Never synced"
         match &payload.last_sync_at {
             Some(ts) => prop_assert!(text.contains(ts),
                 "Missing last_sync_at '{}' in output", ts),
-            None => prop_assert!(text.contains("从未同步"),
-                "Missing '从未同步' placeholder in output"),
+            None => prop_assert!(text.contains("Never synced"),
+                "Missing 'Never synced' placeholder in output"),
         }
     }
 }
 
-// Feature: terminal-dashboard, Property 4.5: Trends panel renders safely for
-// random series and includes the dashboard shell / empty placeholder.
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+#[test]
+fn models_visible_window_matches_full_dataset_buffer() {
+    let items: Vec<ModelBreakdown> = (0..40)
+        .map(|index| ModelBreakdown {
+            model: format!("model-{index:02}"),
+            input_tokens: 0,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+            output_tokens: 0,
+            reasoning_output_tokens: 0,
+            total_tokens: 10_000,
+            event_count: 100,
+            cost_with_cache_usd: 1.25,
+            cost_without_cache_usd: 0.0,
+            cache_savings_usd: 0.0,
+            pricing_status: "static".to_string(),
+            pricing_source: None,
+            pricing_rate: None,
+        })
+        .collect();
+    let visible = 7usize;
+    let scroll = ScrollState {
+        offset: 0,
+        selected: 0,
+        total: items.len(),
+        visible,
+    };
+    let area = Rect::new(0, 0, 120, (visible + 4) as u16);
 
-    #[test]
-    fn prop_trends_panel_renders_without_panic(
-        points in arb_trend_points(),
-        window in prop_oneof![
-            Just(TimeWindow::Day24h),
-            Just(TimeWindow::Week7d),
-            Just(TimeWindow::Month30d),
-            Just(TimeWindow::All),
-        ],
-    ) {
-        let text = render_trends_text(points.clone(), window, 100, 26);
+    let render = |rows: Vec<ModelBreakdown>| {
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        let data = Some(Ok(rows));
+        terminal
+            .draw(|frame| llmusage::tui::panels::models::render(frame, area, &data, &scroll))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    };
 
-        prop_assert!(text.contains("趋势"),
-            "Trends panel shell should render for any generated series");
-        if points.is_empty() {
-            prop_assert!(text.contains("暂无趋势数据"),
-                "Empty trend series should render placeholder");
-        }
-    }
+    assert_eq!(render(items.clone()), render(items[..visible].to_vec()));
+}
+
+#[test]
+fn cost_visible_window_matches_full_dataset_buffer() {
+    let items: Vec<CostLine> = (0..40)
+        .map(|index| CostLine {
+            source: "codex".to_string(),
+            model: format!("model-{index:02}"),
+            total_tokens: 10_000,
+            estimated_cost_usd: 1.25,
+            event_count: 100,
+        })
+        .collect();
+    let visible = 7usize;
+    let scroll = ScrollState {
+        offset: 0,
+        selected: 0,
+        total: items.len(),
+        visible,
+    };
+    let area = Rect::new(0, 0, 120, (visible + 4) as u16);
+
+    let render = |rows: Vec<CostLine>| {
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        let data = Some(Ok(rows));
+        terminal
+            .draw(|frame| llmusage::tui::panels::cost::render(frame, area, &data, &scroll))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    };
+
+    assert_eq!(render(items.clone()), render(items[..visible].to_vec()));
 }
 
 // Feature: terminal-dashboard, Property 5: Model table renders all required columns
@@ -1287,7 +1135,7 @@ proptest! {
     ) {
         let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
         let area = Rect::new(0, 0, 120, 30);
-        let scroll = ScrollState { offset: 0, total: items.len(), visible: 25 };
+        let scroll = ScrollState { offset: 0, selected: 0, total: items.len(), visible: 25 };
         let data: Option<Result<Vec<ModelBreakdown>, String>> = Some(Ok(items.clone()));
 
         terminal.draw(|frame| {
@@ -1312,81 +1160,6 @@ proptest! {
     }
 }
 
-// Feature: terminal-dashboard, Property 6: Source table renders all required columns
-// **Validates: Requirements 6.1**
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
-
-    #[test]
-    fn prop_source_table_renders_all_required_columns(
-        items in proptest::collection::vec(arb_source_breakdown(), 1..4)
-    ) {
-        let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
-        let area = Rect::new(0, 0, 120, 30);
-        let scroll = ScrollState { offset: 0, total: items.len(), visible: 25 };
-        let data: Option<Result<Vec<SourceBreakdown>, String>> = Some(Ok(items.clone()));
-
-        terminal.draw(|frame| {
-            llmusage::tui::panels::sources::render(frame, area, &data, &scroll);
-        }).unwrap();
-
-        let text = buffer_text(&terminal);
-
-        for item in &items {
-            prop_assert!(text.contains(&item.source),
-                "Missing source '{}' in output", item.source);
-            let tokens_str = format_number(item.total_tokens);
-            prop_assert!(text.contains(&tokens_str),
-                "Missing total_tokens '{}' in output", tokens_str);
-            let events_str = format_number(item.event_count);
-            prop_assert!(text.contains(&events_str),
-                "Missing event_count '{}' in output", events_str);
-            match &item.last_event_at {
-                Some(ts) => prop_assert!(text.contains(ts),
-                    "Missing last_event_at '{}' in output", ts),
-                None => prop_assert!(text.contains("-"),
-                    "Missing placeholder '-' for None last_event_at"),
-            }
-        }
-    }
-}
-
-// Feature: terminal-dashboard, Property 7: Project table renders all required columns
-// **Validates: Requirements 7.1**
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
-
-    #[test]
-    fn prop_project_table_renders_all_required_columns(
-        items in proptest::collection::vec(arb_project_breakdown(), 1..4)
-    ) {
-        let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
-        let area = Rect::new(0, 0, 120, 30);
-        let scroll = ScrollState { offset: 0, total: items.len(), visible: 25 };
-        let data: Option<Result<Vec<ProjectBreakdown>, String>> = Some(Ok(items.clone()));
-
-        terminal.draw(|frame| {
-            llmusage::tui::panels::projects::render(frame, area, &data, &scroll);
-        }).unwrap();
-
-        let text = buffer_text(&terminal);
-
-        for item in &items {
-            prop_assert!(text.contains(&item.project_label),
-                "Missing project_label '{}' in output", item.project_label);
-            let tokens_str = format_number(item.total_tokens);
-            prop_assert!(text.contains(&tokens_str),
-                "Missing total_tokens '{}' in output", tokens_str);
-            let events_str = format_number(item.event_count);
-            prop_assert!(text.contains(&events_str),
-                "Missing event_count '{}' in output", events_str);
-            let cost_str = format!("{:.4}", item.total_cost_usd);
-            prop_assert!(text.contains(&cost_str),
-                "Missing total_cost_usd '{}' in output", cost_str);
-        }
-    }
-}
-
 // Feature: terminal-dashboard, Property 8: Cost table renders all required columns
 // **Validates: Requirements 8.1**
 proptest! {
@@ -1398,7 +1171,7 @@ proptest! {
     ) {
         let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
         let area = Rect::new(0, 0, 120, 30);
-        let scroll = ScrollState { offset: 0, total: items.len(), visible: 25 };
+        let scroll = ScrollState { offset: 0, selected: 0, total: items.len(), visible: 25 };
         let data: Option<Result<Vec<CostLine>, String>> = Some(Ok(items.clone()));
 
         terminal.draw(|frame| {
@@ -1422,50 +1195,5 @@ proptest! {
             prop_assert!(text.contains(&cost_str),
                 "Missing estimated_cost_usd '{}' in output", cost_str);
         }
-    }
-}
-
-// Feature: terminal-dashboard, Property 9: Health panel renders all integration and cursor entries
-// **Validates: Requirements 9.1, 9.2, 9.3**
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
-
-    #[test]
-    fn prop_health_panel_renders_all_entries(payload in arb_health_payload()) {
-        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
-        let area = Rect::new(0, 0, 120, 40);
-        let data: Option<Result<HealthPayload, String>> = Some(Ok(payload.clone()));
-
-        terminal.draw(|frame| {
-            llmusage::tui::panels::health::render(frame, area, &data);
-        }).unwrap();
-
-        let text = buffer_text(&terminal);
-
-        // Every integration's source and status must appear
-        for integration in &payload.integrations {
-            prop_assert!(text.contains(&integration.source),
-                "Missing integration source '{}' in output", integration.source);
-            prop_assert!(text.contains(&integration.status),
-                "Missing integration status '{}' in output", integration.status);
-        }
-
-        // Every cursor's source and cursor_key must appear
-        for cursor in &payload.cursors {
-            prop_assert!(text.contains(&cursor.source),
-                "Missing cursor source '{}' in output", cursor.source);
-            prop_assert!(text.contains(&cursor.cursor_key),
-                "Missing cursor_key '{}' in output", cursor.cursor_key);
-        }
-
-        // At most 10 failure records rendered
-        let rendered_failures = payload.recent_failures.iter().take(10).collect::<Vec<_>>();
-        for record in &rendered_failures {
-            prop_assert!(text.contains(&record.command),
-                "Missing failure command '{}' in output", record.command);
-        }
-        // If more than 10, the 11th should NOT appear (unless its command
-        // happens to be a substring of another entry — skip this strict check
-        // to avoid false positives with random data)
     }
 }
