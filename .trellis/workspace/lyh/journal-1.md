@@ -749,3 +749,36 @@ indicatif 进度条（OpenCode spinner / Codex/Claude 重放文件确定条）+ 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 23: 完成 sync 真实重放进度
+
+**Date**: 2026-07-21
+**Task**: 完成 sync 真实重放进度
+**Branch**: `dev`
+
+### Summary
+
+Claude/Codex 以 planned replay 文件数显示 5Hz 解析进度，TTY 显示提交阶段；补齐回归测试、同步契约与 9 次 release 性能对照。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `eeff9ef` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
