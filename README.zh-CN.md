@@ -4,7 +4,7 @@
 
 本地优先的 AI CLI 用量分析工具。`llmusage` 会把本机 Codex、Claude Code、OpenCode、Google Antigravity 的本地记录解析进本地 SQLite，然后提供命令行报表、终端 Dashboard、浏览器 Dashboard 和离线 HTML 导出；不上传、不登录、不调用云端用量 API。
 
-> 当前 crate 版本：`0.9.2`。
+> 当前 crate 版本：`1.0.0`。
 
 ![llmusage 本地 Web Dashboard 概览](./docs/public/screenshots/web-dashboard-overview.png)
 
