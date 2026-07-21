@@ -78,7 +78,7 @@ Browser dashboard:
 llmusage serve
 ```
 
-`serve` binds to `127.0.0.1`, prints the local URL, and tries to open the default browser.
+`serve` binds to `127.0.0.1` by default, prints the local URL, and tries to open the default browser. For a remote server, use `serve --public --no-open --port 37421` only behind a firewall, SSH tunnel, or reverse proxy: the dashboard has no authentication or TLS.
 
 Codex-only browser dashboard:
 

@@ -42,7 +42,7 @@ llmusage serve
 1. `init` 创建 `~/.llmusage/`、初始化 `llmusage.db`、写入 hook 包装器，并安装支持的本地集成。
 2. `sync` 增量解析本地真源，写入 usage 行、30 分钟 bucket、source-file 诊断和行为事实。
 3. `llmusage` 显示默认 daily 报表：所选时区下最近 7 个自然日。
-4. `serve` 会按需安全重建旧版 parser token 统计口径，然后在 `127.0.0.1` 启动本地浏览器 Dashboard。
+4. `serve` 会按需安全重建旧版 parser token 统计口径，然后默认在 `127.0.0.1` 启动浏览器 Dashboard。只有明确需要远程访问时才使用 `serve --public`：它会暴露不带认证和 TLS 的 Dashboard 与 JSON API。
 
 内置定价目录升级后的第一次 sync 会在扫描来源前重算历史事件价格。stderr 会显示目录版本、已处理/总事件数、汇总桶对账和完成状态；`sync --json-events` 会在纯 NDJSON stdout 中提供同一套定价生命周期。
 

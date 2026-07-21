@@ -101,7 +101,7 @@ Activation writes SHA-256-addressed files under `~/.llmusage/pricing/`, recomput
 
 ## Browser dashboard boundary
 
-`llmusage serve` binds to `127.0.0.1` only. It exposes local HTTP endpoints for the dashboard while the process is running. It does not open a public listener.
+`llmusage serve` binds to `127.0.0.1` by default and exposes local HTTP endpoints only while the process is running. `llmusage serve --public` explicitly binds `0.0.0.0`, exposing the dashboard and JSON API without authentication or TLS. Do not expose that port directly to an untrusted network; restrict it with a firewall, SSH tunnel, or authenticated reverse proxy.
 
 ## Static export boundary
 

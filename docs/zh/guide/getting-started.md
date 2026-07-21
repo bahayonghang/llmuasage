@@ -78,7 +78,7 @@ llmusage dash
 llmusage serve
 ```
 
-`serve` 只监听 `127.0.0.1`，会打印本地 URL，并尝试打开默认浏览器。
+`serve` 默认监听 `127.0.0.1`，会打印本地 URL，并尝试打开默认浏览器。远程服务器可使用 `serve --public --no-open --port 37421`，但必须配合防火墙、SSH 隧道或反向代理：Dashboard 不提供认证和 TLS。
 
 Codex 专属浏览器 Dashboard：
 

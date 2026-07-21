@@ -40,7 +40,7 @@ features:
 
 ## Dashboard preview
 
-`llmusage serve` starts a local dashboard on `127.0.0.1`.
+`llmusage serve` starts a dashboard on `127.0.0.1` by default; `--public` explicitly enables remote listening.
 
 ![llmusage web dashboard overview](/screenshots/web-dashboard-overview.png)
 

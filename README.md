@@ -42,7 +42,7 @@ What this does:
 1. `init` creates `~/.llmusage/`, bootstraps `llmusage.db`, writes hook wrappers, and installs supported local integrations.
 2. `sync` parses local sources incrementally and writes usage rows, 30-minute buckets, source-file diagnostics, and behavior facts.
 3. `llmusage` shows the default daily report for the last 7 calendar days.
-4. `serve` safely rebuilds legacy parser-backed token accounting when needed, then starts the local dashboard on `127.0.0.1`.
+4. `serve` safely rebuilds legacy parser-backed token accounting when needed, then starts the dashboard on `127.0.0.1` by default. Use `serve --public` only when you intentionally need remote access: it exposes an unauthenticated, non-TLS dashboard and JSON API.
 
 On the first sync after an embedded pricing catalog upgrade, `sync` reprices historical events before scanning sources. Stderr reports the catalog versions, processed/total events, bucket reconciliation, and completion. `sync --json-events` exposes the same pricing lifecycle as NDJSON-only stdout.
 

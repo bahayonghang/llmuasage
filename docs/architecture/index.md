@@ -106,4 +106,4 @@ Schema migrations are explicit and versioned. The current line includes:
 - No upload queue.
 - No remote usage API call.
 - Pricing catalog activation reads user-provided local JSON files and never fetches remote pricing.
-- Browser dashboard binds to `127.0.0.1`.
+- Browser dashboard binds to `127.0.0.1` by default; `serve --public` explicitly changes the listener to `0.0.0.0` without adding authentication or TLS.
