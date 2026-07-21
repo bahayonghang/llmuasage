@@ -782,3 +782,36 @@ Claude/Codex 以 planned replay 文件数显示 5Hz 解析进度，TTY 显示提
 ### Next Steps
 
 - None - task complete
+
+
+## Session 24: 优化 serve 远程监听与 SSH 启动
+
+**Date**: 2026-07-21
+**Task**: 优化 serve 远程监听与 SSH 启动
+**Branch**: `dev`
+
+### Summary
+
+新增 --public 与 --no-open，SSH 跳过浏览器启动，补齐测试、文档与服务契约。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `13a8867` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
