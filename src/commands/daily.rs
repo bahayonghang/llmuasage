@@ -1,10 +1,9 @@
 use anyhow::{Result, bail};
-use chrono::Duration;
 use tracing::debug;
 
 use crate::{app::AppContext, query::reports, store::Store, tui::report_table};
 
-use super::report_args::DailyArgs;
+use super::{report_args::DailyArgs, unified_report};
 
 pub async fn run(app: &AppContext, args: DailyArgs) -> Result<()> {
     debug!("starting daily report output");
@@ -14,15 +13,41 @@ pub async fn run(app: &AppContext, args: DailyArgs) -> Result<()> {
     if args.all && (filter.since.is_some() || filter.until.is_some()) {
         bail!("--all cannot be combined with --since or --until");
     }
-    if !args.all && filter.since.is_none() && filter.until.is_none() {
-        let today = reports::today_for_timezone(&filter.timezone);
-        filter.since = Some(today - Duration::days(6));
-        filter.until = Some(today);
+    if args.instances && !args.unified.sections.is_empty() {
+        bail!("--sections cannot be combined with --instances");
+    }
+
+    if !args.instances && !args.unified.sections.is_empty() {
+        let reports = unified_report::load_sections(
+            &store,
+            &filter,
+            reports::PeriodKind::Daily,
+            &args.unified.sections,
+            args.all,
+        )?;
+        unified_report::print_sections(
+            &reports,
+            reports::PeriodKind::Daily,
+            args.common.json,
+            args.unified.by_agent,
+            args.common.compact,
+            args.common.no_cost,
+        )?;
+        debug!("finished daily report output");
+        return Ok(());
+    }
+
+    if !args.all {
+        unified_report::apply_daily_default(&mut filter);
     }
 
     if args.instances {
         let report = reports::load_daily_project_report(&store, &filter)?;
         if args.common.json {
+            let mut report = serde_json::to_value(&report)?;
+            if args.common.no_cost {
+                unified_report::strip_cost_json(&mut report);
+            }
             println!("{}", serde_json::to_string_pretty(&report)?);
         } else {
             let mut rows = report
@@ -46,24 +71,31 @@ pub async fn run(app: &AppContext, args: DailyArgs) -> Result<()> {
                     &rows,
                     Some(&report.totals),
                     args.common.compact,
-                    true
+                    true,
+                    args.common.no_cost
                 )
             );
         }
     } else {
         if args.common.json {
-            let report = reports::load_daily_report(&store, &filter)?;
-            println!("{}", serde_json::to_string_pretty(&report)?);
-        } else {
-            let report = reports::load_daily_report(&store, &filter)?;
-            let color_mode = report_table::ColorMode::from_env();
-            println!("LLM Usage Report - Daily");
+            let report = reports::load_unified_report(&store, &filter, reports::PeriodKind::Daily)?;
             println!(
                 "{}",
-                report_table::render_daily_summary_table(
-                    &report.daily,
-                    Some(&report.totals),
+                serde_json::to_string_pretty(&unified_report::report_json(
+                    &report,
+                    args.unified.by_agent,
+                    args.common.no_cost
+                )?)?
+            );
+        } else {
+            let report = reports::load_unified_report(&store, &filter, reports::PeriodKind::Daily)?;
+            let color_mode = report_table::ColorMode::from_env();
+            println!(
+                "{}",
+                report_table::render_unified_table(
+                    &report,
                     args.common.compact,
+                    args.common.no_cost,
                     color_mode
                 )
             );

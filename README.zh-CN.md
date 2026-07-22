@@ -61,6 +61,8 @@ llmusage serve
 
 ```powershell
 llmusage daily --source codex --since 20260501 --until 20260518
+llmusage weekly --sections daily,monthly --no-cost
+llmusage codex daily --since 2026-05-01 --until 2026-05-18
 llmusage monthly --breakdown
 llmusage session --project my-repo
 llmusage blocks --active
@@ -74,6 +76,14 @@ llmusage export html --out .\llmusage-report
 ```
 
 报表命令只是只读 SQLite 查询；如果数据库过旧，先运行 `llmusage sync`。
+
+## 报表
+
+`daily`、`weekly`、`monthly` 和 `session` 共用 coding-agent 报表形状。人读表格展示聚合 `All` 行和按来源拆分的 `Agent` 行；CLI JSON 使用 camelCase 字段，`--by-agent` 会把嵌套来源行加入 JSON。`weekly` 按每周周一的起始日期分组。
+
+报表日期筛选同时接受 `YYYYMMDD` 和 `YYYY-MM-DD`。`--sections daily,weekly,monthly,session` 可以在一次输出中组合多个周期段（当前命令周期始终排在最前）；`--no-cost` 会隐藏成本列与 JSON 成本字段，但不会改变 token 总量。
+
+单来源视图使用 `llmusage <source> <period>`，例如 `llmusage claude daily` 或 `llmusage codex monthly`。支持的 source host 是 `claude`、`codex`、`opencode` 和 `antigravity`，每个都支持 `daily`、`weekly`、`monthly`、`session`。它与 `<period> --source <source>` 的数据相同，但会从文本和 JSON 移除 Agent 对比层。`blocks` 有意继续作为顶层命令。这个均匀来源 surface 是 llmusage 的扩展，不表示每个来源都复刻 ccusage 的逐来源能力矩阵。
 
 `llmusage dash` 使用 tokscale 风格的终端 Dashboard。快捷键：`tab`/`shift-tab` 或 `1`-`9` 切换视图；`j`/`k`、方向键、Page Up/Page Down、Home/End 或鼠标滚轮选择行；`o` 循环可排序列，`O` 反转排序方向；`s` 打开来源选择器；`r` 刷新 Dashboard 数据；`R` 切换自动刷新；`x` 按当前来源筛选运行 sync；`?` 打开帮助/设置；`q` 退出。
 

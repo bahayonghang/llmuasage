@@ -22,15 +22,18 @@ Usage: llmusage [OPTIONS] [COMMAND]
 | Option | Meaning |
 | --- | --- |
 | `--home <PATH>` | Override `LLMUSAGE_HOME` and the default `~/.llmusage` runtime root |
-| `--since <YYYYMMDD>` | Inclusive start date for report commands |
-| `--until <YYYYMMDD>` | Inclusive end date for report commands |
+| `--since <YYYY-MM-DD\|YYYYMMDD>` | Inclusive start date for report commands |
+| `--until <YYYY-MM-DD\|YYYYMMDD>` | Inclusive end date for report commands |
 | `--json` | Emit stable JSON for supported report commands |
 | `--breakdown` | Include per-model breakdown rows or payloads where supported |
 | `--order asc\|desc` | Sort report rows by period/activity |
 | `--timezone UTC\|local\|+08:00` | Report timezone. `local` uses the machine's current fixed local offset; it is not an IANA/DST-aware timezone. |
 | `--locale <LOCALE>` | Lightweight locale selector for titles and number formatting |
 | `--compact` | Use a narrower table layout |
-| `--source codex\|claude\|opencode\|antigravity` | Restrict reports or sync to one source |
+| `--no-cost` | Hide cost columns and cost fields from report output |
+| `--source codex\|claude\|opencode\|antigravity` | Restrict a top-level report or sync command to one source |
+| `-A, --by-agent` | Add nested source rows to unified report JSON |
+| `--sections daily\|weekly\|monthly\|session` | Add report periods to one combined output |
 | `--all` | Show full daily history instead of the default last 7 days |
 | `--instances` | Group daily rows by project/instance |
 | `--project <PROJECT>` | Filter by project label, hash, or reference |
@@ -59,7 +62,17 @@ llmusage daily --source codex --since 20260501 --until 20260518
 llmusage daily --json --breakdown
 ```
 
-Default command. Shows daily token and estimated-cost usage.
+Default command. Shows daily token and estimated-cost usage. Daily, weekly, and monthly text output uses the unified `All` plus `Agent` rows; CLI JSON is camelCase and adds nested source rows when `--by-agent` is set.
+
+### `llmusage weekly`
+
+```powershell
+llmusage weekly
+llmusage weekly --since 2026-05-04 --until 2026-05-10
+llmusage weekly --by-agent --json
+```
+
+Groups usage by the Monday that starts each week.
 
 ### `llmusage monthly`
 
@@ -78,6 +91,19 @@ llmusage session --project my-repo
 ```
 
 Groups usage by source session. `--id <ID>` accepts an exact or partial session id.
+
+### `llmusage <source> <period>`
+
+```powershell
+llmusage claude daily
+llmusage codex monthly --json
+llmusage opencode weekly --no-cost
+llmusage antigravity session
+```
+
+`claude`, `codex`, `opencode`, and `antigravity` each host `daily`, `weekly`, `monthly`, and `session`. A focused command injects the matching source filter, has the same data as `<period> --source <source>`, and removes the `Agent`/`Detected` comparison layer. Its JSON has no `agent` or `agents` fields. A duplicate matching `--source` is accepted; a conflicting value is rejected. `blocks` is deliberately not available in this tree.
+
+This is a uniform llmusage extension, not a source-by-source reproduction of ccusage's capability matrix.
 
 ### `llmusage blocks`
 

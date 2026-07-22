@@ -6,7 +6,7 @@ use crossterm::style::{Color, Stylize, style};
 use crate::models::SourceKind;
 use crate::query::reports::{
     BlockReportRow, DailyReportRow, ModelCostBreakdown, MonthlyReportRow, ProjectSummary,
-    ReportNotes, SessionReportRow, TokenTotals,
+    ReportNotes, SessionReportRow, TokenTotals, UnifiedAgent, UnifiedReport, UnifiedRow,
 };
 
 pub use crate::tui::format::{
@@ -14,6 +14,7 @@ pub use crate::tui::format::{
 };
 
 const COMPACT_THRESHOLD: usize = 100;
+const UNIFIED_COMPACT_THRESHOLD: usize = 140;
 const MAX_MODELS_DISPLAYED: usize = 3;
 
 #[derive(Clone, Copy)]
@@ -32,6 +33,7 @@ pub fn render_daily_table(
     totals: Option<&TokenTotals>,
     compact: bool,
     show_project: bool,
+    no_cost: bool,
 ) -> String {
     let compact = compact_mode(compact);
     let mut table_rows = Vec::new();
@@ -43,18 +45,20 @@ pub fn render_daily_table(
             &row.totals,
             compact,
             show_project,
+            no_cost,
         ));
         append_breakdowns(
             &mut table_rows,
             &row.model_breakdowns,
             compact,
             show_project,
+            no_cost,
         );
     }
     if let Some(totals) = totals {
-        table_rows.push(period_total_row(totals, compact, show_project));
+        table_rows.push(period_total_row(totals, compact, show_project, no_cost));
     }
-    let columns = period_columns("Date", compact, show_project);
+    let columns = period_columns("Date", compact, show_project, no_cost);
     render_table(&columns, &table_rows)
 }
 
@@ -80,6 +84,89 @@ pub fn render_daily_summary_table(
             source: SourceKind::Codex,
             color_mode,
         }),
+    )
+}
+
+pub fn render_unified_table(
+    report: &UnifiedReport,
+    compact: bool,
+    no_cost: bool,
+    color_mode: ColorMode,
+) -> String {
+    let compact = compact || terminal_width() < UNIFIED_COMPACT_THRESHOLD;
+    let mut table_rows = Vec::new();
+    for row in &report.rows {
+        table_rows.push(unified_row(row, compact, false, no_cost));
+        if row.agent_breakdowns.is_empty() {
+            append_unified_breakdowns(&mut table_rows, &row.model_breakdowns, compact, no_cost);
+            continue;
+        }
+        for agent_row in &row.agent_breakdowns {
+            table_rows.push(unified_row(agent_row, compact, true, no_cost));
+            append_unified_breakdowns(
+                &mut table_rows,
+                &agent_row.model_breakdowns,
+                compact,
+                no_cost,
+            );
+        }
+    }
+    if !report.rows.is_empty() {
+        table_rows.push(unified_total_row(&report.totals(), compact, no_cost));
+    }
+
+    let detected = report.detected_labels();
+    let title = format!(
+        "Coding (Agent) CLI Usage Report - {}\nDetected: {}",
+        report.kind.title(),
+        if detected.is_empty() {
+            "None".to_string()
+        } else {
+            detected.join(", ")
+        }
+    );
+    let table = render_table(
+        &unified_columns(report.kind.first_column(), compact, no_cost),
+        &table_rows,
+    );
+    format!(
+        "{title}\n{}",
+        style_unified_source_labels(table, report, color_mode)
+    )
+}
+
+pub fn render_focused_table(
+    report: &UnifiedReport,
+    source: SourceKind,
+    compact: bool,
+    no_cost: bool,
+    color_mode: ColorMode,
+) -> String {
+    let compact = compact_mode(compact);
+    let mut table_rows = Vec::new();
+    for row in &report.rows {
+        table_rows.push(focused_row(row, compact, no_cost));
+        append_focused_breakdowns(&mut table_rows, &row.model_breakdowns, compact, no_cost);
+    }
+    if !report.rows.is_empty() {
+        table_rows.push(focused_total_row(&report.totals(), compact, no_cost));
+    }
+
+    let title = render_source_title(
+        source,
+        &format!(
+            "{} Usage Report - {}",
+            UnifiedAgent::Source(source).display_name(),
+            report.kind.title()
+        ),
+        color_mode,
+    );
+    format!(
+        "{title}\n{}",
+        render_table(
+            &focused_columns(report.kind.first_column(), compact, no_cost),
+            &table_rows,
+        )
     )
 }
 
@@ -125,13 +212,20 @@ pub fn render_monthly_table(
             &row.totals,
             compact,
             false,
+            false,
         ));
-        append_breakdowns(&mut table_rows, &row.model_breakdowns, compact, false);
+        append_breakdowns(
+            &mut table_rows,
+            &row.model_breakdowns,
+            compact,
+            false,
+            false,
+        );
     }
     if let Some(totals) = totals {
-        table_rows.push(period_total_row(totals, compact, false));
+        table_rows.push(period_total_row(totals, compact, false, false));
     }
-    let columns = period_columns("Month", compact, false);
+    let columns = period_columns("Month", compact, false, false);
     render_table(&columns, &table_rows)
 }
 
@@ -175,7 +269,7 @@ pub fn render_session_table(
                 format_active_span(row.active_minutes, row.span_minutes),
             ]);
         }
-        append_breakdowns(&mut table_rows, &row.model_breakdowns, compact, true);
+        append_breakdowns(&mut table_rows, &row.model_breakdowns, compact, true, false);
     }
     if let Some(totals) = totals {
         table_rows.push(session_total_row(totals, compact));
@@ -183,9 +277,9 @@ pub fn render_session_table(
     render_table(&columns, &table_rows)
 }
 
-pub fn render_blocks_table(rows: &[BlockReportRow], compact: bool) -> String {
+pub fn render_blocks_table(rows: &[BlockReportRow], compact: bool, no_cost: bool) -> String {
     let compact = compact_mode(compact);
-    let columns = if compact {
+    let mut columns = if compact {
         vec![
             column("Block", Align::Left),
             column("Models", Align::Left),
@@ -211,12 +305,15 @@ pub fn render_blocks_table(rows: &[BlockReportRow], compact: bool) -> String {
             column("Active", Align::Left),
         ]
     };
+    if no_cost {
+        columns.remove(columns.len() - 2);
+    }
     let table_rows = rows
         .iter()
         .map(|row| {
             let block = format!("{} -> {}", row.start_at, row.end_at);
             let active = if row.is_active { "yes" } else { "no" }.to_string();
-            if compact {
+            let mut cells = if compact {
                 vec![
                     block,
                     format_models(&row.models_used),
@@ -243,7 +340,11 @@ pub fn render_blocks_table(rows: &[BlockReportRow], compact: bool) -> String {
                     format_cost(row.totals.estimated_cost_usd),
                     active,
                 ]
+            };
+            if no_cost {
+                cells.remove(cells.len() - 2);
             }
+            cells
         })
         .collect::<Vec<_>>();
     render_table(&columns, &table_rows)
@@ -311,7 +412,12 @@ impl ColorMode {
     }
 }
 
-fn period_columns(first_header: &'static str, compact: bool, show_project: bool) -> Vec<Column> {
+fn period_columns(
+    first_header: &'static str,
+    compact: bool,
+    show_project: bool,
+    no_cost: bool,
+) -> Vec<Column> {
     let mut columns = vec![column(first_header, Align::Left)];
     if show_project {
         columns.push(column("Project", Align::Left));
@@ -324,7 +430,9 @@ fn period_columns(first_header: &'static str, compact: bool, show_project: bool)
         columns.push(column("Cache Read", Align::Right));
         columns.push(column("Total Tokens", Align::Right));
     }
-    columns.push(column("Cost (USD)", Align::Right));
+    if !no_cost {
+        columns.push(column("Cost (USD)", Align::Right));
+    }
     columns
 }
 
@@ -356,6 +464,43 @@ fn daily_summary_columns(compact: bool) -> Vec<Column> {
         columns.push(column("Total Tokens", Align::Right));
     }
     columns.push(column("Cost (USD)", Align::Right));
+    columns
+}
+
+fn unified_columns(first_column: &'static str, compact: bool, no_cost: bool) -> Vec<Column> {
+    let mut columns = vec![
+        column(first_column, Align::Left),
+        column("Agent", Align::Left),
+        column("Models", Align::Left),
+        column("Input", Align::Right),
+        column("Output", Align::Right),
+    ];
+    if !compact {
+        columns.push(column("Cache Create", Align::Right));
+        columns.push(column("Cache Read", Align::Right));
+        columns.push(column("Total Tokens", Align::Right));
+    }
+    if !no_cost {
+        columns.push(column("Cost (USD)", Align::Right));
+    }
+    columns
+}
+
+fn focused_columns(first_column: &'static str, compact: bool, no_cost: bool) -> Vec<Column> {
+    let mut columns = vec![
+        column(first_column, Align::Left),
+        column("Models", Align::Left),
+        column("Input", Align::Right),
+        column("Output", Align::Right),
+    ];
+    if !compact {
+        columns.push(column("Cache Create", Align::Right));
+        columns.push(column("Cache Read", Align::Right));
+        columns.push(column("Total Tokens", Align::Right));
+    }
+    if !no_cost {
+        columns.push(column("Cost (USD)", Align::Right));
+    }
     columns
 }
 
@@ -415,6 +560,7 @@ fn period_row(
     totals: &TokenTotals,
     compact: bool,
     show_project: bool,
+    no_cost: bool,
 ) -> Vec<String> {
     let mut row = vec![period.to_string()];
     if show_project {
@@ -428,7 +574,9 @@ fn period_row(
         row.push(format_count(totals.cache_read_tokens));
         row.push(format_count(totals.total_tokens));
     }
-    row.push(format_cost(totals.estimated_cost_usd));
+    if !no_cost {
+        row.push(format_cost(totals.estimated_cost_usd));
+    }
     row
 }
 
@@ -463,7 +611,106 @@ fn daily_summary_row(row: &DailyReportRow, compact: bool) -> Vec<String> {
     cells
 }
 
-fn period_total_row(totals: &TokenTotals, compact: bool, show_project: bool) -> Vec<String> {
+fn unified_row(
+    row: &UnifiedRow,
+    compact: bool,
+    is_agent_breakdown: bool,
+    no_cost: bool,
+) -> Vec<String> {
+    let period = if is_agent_breakdown {
+        String::new()
+    } else {
+        row.period.clone()
+    };
+    let agent = if is_agent_breakdown {
+        format!("- {}", row.agent.display_name())
+    } else {
+        row.agent.display_name()
+    };
+    let models = if row.agent_breakdowns.is_empty() {
+        format_models(&row.models_used)
+    } else {
+        String::new()
+    };
+    let mut cells = vec![
+        period,
+        agent,
+        models,
+        format_count(row.totals.input_tokens),
+        format_count(row.totals.output_tokens),
+    ];
+    if !compact {
+        cells.push(format_count(row.totals.cache_creation_tokens));
+        cells.push(format_count(row.totals.cache_read_tokens));
+        cells.push(format_count(row.totals.total_tokens));
+    }
+    if !no_cost {
+        cells.push(format_cost(row.totals.estimated_cost_usd));
+    }
+    cells
+}
+
+fn unified_total_row(totals: &TokenTotals, compact: bool, no_cost: bool) -> Vec<String> {
+    let mut cells = vec![
+        "Total".to_string(),
+        String::new(),
+        String::new(),
+        format_count(totals.input_tokens),
+        format_count(totals.output_tokens),
+    ];
+    if !compact {
+        cells.push(format_count(totals.cache_creation_tokens));
+        cells.push(format_count(totals.cache_read_tokens));
+        cells.push(format_count(totals.total_tokens));
+    }
+    if !no_cost {
+        cells.push(format_cost(totals.estimated_cost_usd));
+    }
+    cells
+}
+
+fn focused_row(row: &UnifiedRow, compact: bool, no_cost: bool) -> Vec<String> {
+    let mut cells = vec![
+        row.period.clone(),
+        format_models(&row.models_used),
+        format_count(row.totals.input_tokens),
+        format_count(row.totals.output_tokens),
+    ];
+    if !compact {
+        cells.push(format_count(row.totals.cache_creation_tokens));
+        cells.push(format_count(row.totals.cache_read_tokens));
+        cells.push(format_count(row.totals.total_tokens));
+    }
+    if !no_cost {
+        cells.push(format_cost(row.totals.estimated_cost_usd));
+    }
+    cells
+}
+
+fn focused_total_row(totals: &TokenTotals, compact: bool, no_cost: bool) -> Vec<String> {
+    let mut cells = vec![
+        "Total".to_string(),
+        String::new(),
+        format_count(totals.input_tokens),
+        format_count(totals.output_tokens),
+    ];
+    if !compact {
+        cells.push(format_count(totals.cache_creation_tokens));
+        cells.push(format_count(totals.cache_read_tokens));
+        cells.push(format_count(totals.total_tokens));
+    }
+    if !no_cost {
+        cells.push(format_cost(totals.estimated_cost_usd));
+    }
+    cells
+}
+
+fn period_total_row(
+    totals: &TokenTotals,
+    compact: bool,
+    show_project: bool,
+    no_cost: bool,
+) -> Vec<String> {
     let mut row = vec!["Total".to_string()];
     if show_project {
         row.push(String::new());
@@ -476,7 +723,9 @@ fn period_total_row(totals: &TokenTotals, compact: bool, show_project: bool) -> 
         row.push(format_count(totals.cache_read_tokens));
         row.push(format_count(totals.total_tokens));
     }
-    row.push(format_cost(totals.estimated_cost_usd));
+    if !no_cost {
+        row.push(format_cost(totals.estimated_cost_usd));
+    }
     row
 }
 
@@ -547,6 +796,7 @@ fn append_breakdowns(
     breakdowns: &[ModelCostBreakdown],
     compact: bool,
     show_project: bool,
+    no_cost: bool,
 ) {
     for item in breakdowns {
         let label = format!("\u{2514}\u{2500} {}:{}", item.source, item.model);
@@ -562,7 +812,60 @@ fn append_breakdowns(
             row.push(format_count(item.cache_read_tokens));
             row.push(format_count(item.total_tokens));
         }
-        row.push(format_cost(item.estimated_cost_usd));
+        if !no_cost {
+            row.push(format_cost(item.estimated_cost_usd));
+        }
+        rows.push(row);
+    }
+}
+
+fn append_unified_breakdowns(
+    rows: &mut Vec<Vec<String>>,
+    breakdowns: &[ModelCostBreakdown],
+    compact: bool,
+    no_cost: bool,
+) {
+    for item in breakdowns {
+        let mut row = vec![
+            String::new(),
+            String::new(),
+            format!("- {}", format_model_name(&item.model)),
+            format_count(item.input_tokens),
+            format_count(item.output_tokens),
+        ];
+        if !compact {
+            row.push(format_count(item.cache_creation_tokens));
+            row.push(format_count(item.cache_read_tokens));
+            row.push(format_count(item.total_tokens));
+        }
+        if !no_cost {
+            row.push(format_cost(item.estimated_cost_usd));
+        }
+        rows.push(row);
+    }
+}
+
+fn append_focused_breakdowns(
+    rows: &mut Vec<Vec<String>>,
+    breakdowns: &[ModelCostBreakdown],
+    compact: bool,
+    no_cost: bool,
+) {
+    for item in breakdowns {
+        let mut row = vec![
+            String::new(),
+            format!("- {}", format_model_name(&item.model)),
+            format_count(item.input_tokens),
+            format_count(item.output_tokens),
+        ];
+        if !compact {
+            row.push(format_count(item.cache_creation_tokens));
+            row.push(format_count(item.cache_read_tokens));
+            row.push(format_count(item.total_tokens));
+        }
+        if !no_cost {
+            row.push(format_cost(item.estimated_cost_usd));
+        }
         rows.push(row);
     }
 }
@@ -612,6 +915,22 @@ fn append_daily_summary_breakdowns(
 
 fn render_table(columns: &[Column], rows: &[Vec<String>]) -> String {
     render_table_styled(columns, rows, None)
+}
+
+fn style_unified_source_labels(
+    mut table: String,
+    report: &UnifiedReport,
+    color_mode: ColorMode,
+) -> String {
+    if !color_mode.enabled() {
+        return table;
+    }
+    for source in &report.detected {
+        let label = format!("- {}", UnifiedAgent::Source(*source).display_name());
+        let styled = style(&label).with(source_color(*source)).to_string();
+        table = table.replace(&label, &styled);
+    }
+    table
 }
 
 #[derive(Clone, Copy)]
@@ -999,10 +1318,11 @@ fn detected_terminal_width() -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::query::reports::PeriodKind;
 
     #[test]
     fn render_empty_table_is_actionable() {
-        assert!(render_daily_table(&[], None, false, false).contains("No usage data"));
+        assert!(render_daily_table(&[], None, false, false, false).contains("No usage data"));
     }
 
     #[test]
@@ -1097,6 +1417,77 @@ mod tests {
         assert!(!table.contains("Reasoning"));
         assert!(!table.contains("Notes"));
         assert!(!table.contains("978.05K"));
+    }
+
+    #[test]
+    fn unified_table_renders_all_agent_rows_and_detected_title() {
+        let codex = UnifiedRow {
+            period: "2026-05-05".to_string(),
+            agent: UnifiedAgent::Source(SourceKind::Codex),
+            totals: TokenTotals {
+                input_tokens: 10,
+                output_tokens: 2,
+                total_tokens: 12,
+                estimated_cost_usd: 0.10,
+                ..TokenTotals::default()
+            },
+            models_used: vec!["gpt-5".to_string()],
+            agent_breakdowns: Vec::new(),
+            model_breakdowns: vec![ModelCostBreakdown {
+                source: "codex".to_string(),
+                model: "gpt-5".to_string(),
+                input_tokens: 10,
+                output_tokens: 2,
+                total_tokens: 12,
+                estimated_cost_usd: 0.10,
+                ..ModelCostBreakdown::default()
+            }],
+        };
+        let claude = UnifiedRow {
+            period: "2026-05-05".to_string(),
+            agent: UnifiedAgent::Source(SourceKind::Claude),
+            totals: TokenTotals {
+                input_tokens: 20,
+                output_tokens: 3,
+                total_tokens: 23,
+                estimated_cost_usd: 0.20,
+                ..TokenTotals::default()
+            },
+            models_used: vec!["claude-sonnet-4".to_string()],
+            agent_breakdowns: Vec::new(),
+            model_breakdowns: Vec::new(),
+        };
+        let report = UnifiedReport {
+            kind: PeriodKind::Daily,
+            rows: vec![UnifiedRow {
+                period: "2026-05-05".to_string(),
+                agent: UnifiedAgent::All,
+                totals: TokenTotals {
+                    input_tokens: 30,
+                    output_tokens: 5,
+                    total_tokens: 35,
+                    estimated_cost_usd: 0.30,
+                    ..TokenTotals::default()
+                },
+                models_used: vec!["gpt-5".to_string(), "claude-sonnet-4".to_string()],
+                agent_breakdowns: vec![codex, claude],
+                model_breakdowns: Vec::new(),
+            }],
+            detected: vec![SourceKind::Codex, SourceKind::Claude],
+        };
+
+        let table = render_unified_table(&report, false, false, ColorMode::Never);
+
+        assert!(table.contains("Coding (Agent) CLI Usage Report - Daily"));
+        assert!(table.contains("Detected: Codex, Claude"));
+        assert!(table.contains("Agent"));
+        assert!(table.contains("All"));
+        assert!(table.contains("- Codex"));
+        assert!(table.contains("- Claude"));
+        assert!(table.contains("- gpt-5"));
+        assert_eq!(table.matches("2026-05-05").count(), 1);
+        assert!(table.contains("Total"));
+        assert!(table.contains("$0.30"));
     }
 
     #[test]

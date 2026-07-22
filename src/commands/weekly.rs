@@ -3,10 +3,10 @@ use tracing::debug;
 
 use crate::{app::AppContext, query::reports, store::Store, tui::report_table};
 
-use super::{report_args::MonthlyArgs, unified_report};
+use super::{report_args::WeeklyArgs, unified_report};
 
-pub async fn run(app: &AppContext, args: MonthlyArgs) -> Result<()> {
-    debug!("starting monthly report output");
+pub async fn run(app: &AppContext, args: WeeklyArgs) -> Result<()> {
+    debug!("starting weekly report output");
     let store = Store::new(&app.paths)?;
     store.bootstrap()?;
     let filter = args.common.to_filter(None)?;
@@ -14,22 +14,22 @@ pub async fn run(app: &AppContext, args: MonthlyArgs) -> Result<()> {
         let reports = unified_report::load_sections(
             &store,
             &filter,
-            reports::PeriodKind::Monthly,
+            reports::PeriodKind::Weekly,
             &args.unified.sections,
             false,
         )?;
         unified_report::print_sections(
             &reports,
-            reports::PeriodKind::Monthly,
+            reports::PeriodKind::Weekly,
             args.common.json,
             args.unified.by_agent,
             args.common.compact,
             args.common.no_cost,
         )?;
-        debug!("finished monthly report output");
+        debug!("finished weekly report output");
         return Ok(());
     }
-    let report = reports::load_unified_report(&store, &filter, reports::PeriodKind::Monthly)?;
+    let report = reports::load_unified_report(&store, &filter, reports::PeriodKind::Weekly)?;
 
     if args.common.json {
         println!(
@@ -52,6 +52,6 @@ pub async fn run(app: &AppContext, args: MonthlyArgs) -> Result<()> {
         );
     }
 
-    debug!("finished monthly report output");
+    debug!("finished weekly report output");
     Ok(())
 }

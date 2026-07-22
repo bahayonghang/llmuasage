@@ -13,12 +13,22 @@ pub enum ReportOrderArg {
 
 #[derive(Debug, Clone, Args, Default)]
 pub struct ReportCommonArgs {
-    /// Inclusive start date in YYYYMMDD format.
-    #[arg(short = 's', long, value_name = "YYYYMMDD", value_parser = parse_report_date)]
+    /// Inclusive start date in YYYY-MM-DD or YYYYMMDD format.
+    #[arg(
+        short = 's',
+        long,
+        value_name = "YYYY-MM-DD|YYYYMMDD",
+        value_parser = parse_report_date
+    )]
     pub since: Option<String>,
 
-    /// Inclusive end date in YYYYMMDD format.
-    #[arg(short = 'u', long, value_name = "YYYYMMDD", value_parser = parse_report_date)]
+    /// Inclusive end date in YYYY-MM-DD or YYYYMMDD format.
+    #[arg(
+        short = 'u',
+        long,
+        value_name = "YYYY-MM-DD|YYYYMMDD",
+        value_parser = parse_report_date
+    )]
     pub until: Option<String>,
 
     /// Emit stable JSON and suppress human-readable tables.
@@ -45,6 +55,10 @@ pub struct ReportCommonArgs {
     #[arg(long)]
     pub compact: bool,
 
+    /// Hide cost fields from report tables and CLI JSON output.
+    #[arg(long)]
+    pub no_cost: bool,
+
     /// Restrict reports to one local source.
     #[arg(long, value_enum)]
     pub source: Option<SourceKind>,
@@ -68,10 +82,43 @@ impl ReportCommonArgs {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ReportSectionArg {
+    Daily,
+    Weekly,
+    Monthly,
+    Session,
+}
+
+impl ReportSectionArg {
+    pub fn kind(self) -> reports::PeriodKind {
+        match self {
+            Self::Daily => reports::PeriodKind::Daily,
+            Self::Weekly => reports::PeriodKind::Weekly,
+            Self::Monthly => reports::PeriodKind::Monthly,
+            Self::Session => reports::PeriodKind::Session,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Args, Default)]
+pub struct UnifiedReportArgs {
+    /// Add per-source rows to the CLI JSON report.
+    #[arg(short = 'A', long)]
+    pub by_agent: bool,
+
+    /// Include additional report periods in one combined output.
+    #[arg(long, value_delimiter = ',', value_enum, value_name = "SECTION")]
+    pub sections: Vec<ReportSectionArg>,
+}
+
 #[derive(Debug, Clone, Args, Default)]
 pub struct DailyArgs {
     #[command(flatten)]
     pub common: ReportCommonArgs,
+
+    #[command(flatten)]
+    pub unified: UnifiedReportArgs,
 
     /// Show the full daily history instead of the default last 7 days.
     #[arg(long)]
@@ -90,12 +137,27 @@ pub struct DailyArgs {
 pub struct MonthlyArgs {
     #[command(flatten)]
     pub common: ReportCommonArgs,
+
+    #[command(flatten)]
+    pub unified: UnifiedReportArgs,
+}
+
+#[derive(Debug, Clone, Args, Default)]
+pub struct WeeklyArgs {
+    #[command(flatten)]
+    pub common: ReportCommonArgs,
+
+    #[command(flatten)]
+    pub unified: UnifiedReportArgs,
 }
 
 #[derive(Debug, Clone, Args, Default)]
 pub struct SessionArgs {
     #[command(flatten)]
     pub common: ReportCommonArgs,
+
+    #[command(flatten)]
+    pub unified: UnifiedReportArgs,
 
     /// Show one session by exact or partial session id.
     #[arg(short = 'i', long = "id")]
@@ -200,10 +262,22 @@ fn parse_report_date(value: &str) -> std::result::Result<String, String> {
 }
 
 fn parse_date_value(value: &str) -> Result<NaiveDate> {
-    if value.len() != 8 || !value.chars().all(|ch| ch.is_ascii_digit()) {
-        return Err(anyhow!("date must use YYYYMMDD format"));
-    }
-    Ok(NaiveDate::parse_from_str(value, "%Y%m%d")?)
+    let format = if value.len() == 8 && value.chars().all(|ch| ch.is_ascii_digit()) {
+        "%Y%m%d"
+    } else if value.len() == 10
+        && value.as_bytes().get(4) == Some(&b'-')
+        && value.as_bytes().get(7) == Some(&b'-')
+        && value
+            .chars()
+            .enumerate()
+            .all(|(index, ch)| matches!(index, 4 | 7) || ch.is_ascii_digit())
+    {
+        "%Y-%m-%d"
+    } else {
+        return Err(anyhow!("date must use YYYY-MM-DD or YYYYMMDD format"));
+    };
+    NaiveDate::parse_from_str(value, format)
+        .map_err(|_| anyhow!("date must use a valid YYYY-MM-DD or YYYYMMDD value"))
 }
 
 fn parse_timezone(value: &str) -> std::result::Result<String, String> {
@@ -275,4 +349,29 @@ fn parse_positive_u64(value: &str) -> std::result::Result<u64, String> {
         return Err("value must be greater than zero".to_string());
     }
     Ok(parsed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn report_dates_accept_compact_and_iso_forms() {
+        let compact = parse_date_value("20260425").unwrap();
+        let iso = parse_date_value("2026-04-25").unwrap();
+        assert_eq!(compact, iso);
+        assert_eq!(parse_report_date("20260425").unwrap(), "20260425");
+        assert_eq!(parse_report_date("2026-04-25").unwrap(), "2026-04-25");
+    }
+
+    #[test]
+    fn report_dates_reject_other_forms_with_actionable_error() {
+        for invalid in ["2026/04/25", "2026-4-5", "20261340", "abcd"] {
+            let error = parse_date_value(invalid).unwrap_err().to_string();
+            assert!(
+                error.contains("YYYY-MM-DD or YYYYMMDD"),
+                "{invalid}: {error}"
+            );
+        }
+    }
 }
