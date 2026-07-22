@@ -9,6 +9,7 @@ import {
   loadDashboardSnapshot,
   loadExplorer,
 } from './data.js';
+import { dashboardFingerprint, panelFingerprint, stableSerialize } from './data/fingerprint.js';
 import { renderHero } from './render/hero.js';
 import { renderSyncCommandCenter } from './render/sync-command-center.js';
 import { renderTrends } from './render/trends.js';
@@ -17,7 +18,12 @@ import { renderSources } from './render/sources.js';
 import { renderProjects } from './render/projects.js';
 import { renderCosts } from './render/costs.js';
 import { renderInsights } from './render/insights.js';
-import { renderBehavior } from './render/behavior.js';
+import {
+  renderActivity,
+  renderCompare,
+  renderOptimize,
+  renderTools,
+} from './render/behavior.js';
 import { renderExplorer } from './render/explorer.js';
 import { applyDomI18n, bindI18nDomSync } from './i18n.js';
 import { initTheme, toggleTheme } from './theme.js';
@@ -35,6 +41,8 @@ const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const AUTO_REFRESH_STORAGE_KEY = 'llmusage:autoRefreshMs';
 const VALID_AUTO_REFRESH_MS = new Set([0, 30000, 60000]);
 const SECONDARY_LOAD_CONCURRENCY = 2;
+const JOB_POLL_INTERVAL_MS = 900;
+const JOB_POLL_MAX_DURATION_MS = 30 * 60 * 1000;
 const DEFAULT_EXPLORER = Object.freeze({
   granularity: 'day',
   metric: 'attributed_cost_usd',
@@ -193,42 +201,125 @@ function mergeCoreSnapshot(previous, core, options = {}) {
   };
 }
 
+/*
+ * 面板级 dirty-check 注册表：每个渲染入口先比对"本面板数据指纹"，
+ * 未变则跳过 DOM 写入。指纹由 data/fingerprint.js 计算（稳定序列化 +
+ * 易变字段剔除，key 含 locale——locale 切换令指纹自然失效，无需特判）。
+ */
+const panelFingerprintCache = new Map();
+
+function renderPanel(panel, fingerprint, render) {
+  if (fingerprint && panelFingerprintCache.get(panel) === fingerprint) {
+    return false;
+  }
+  render();
+  if (fingerprint) {
+    panelFingerprintCache.set(panel, fingerprint);
+  }
+  return true;
+}
+
+function jobFingerprintPart(snapshot) {
+  if (!snapshot) return null;
+  return {
+    status: snapshot.status,
+    job_id: snapshot.job_id,
+    summary: snapshot.summary,
+    started_at: snapshot.started_at,
+    finished_at: snapshot.finished_at,
+    last_event: snapshot.last_event ?? null,
+  };
+}
+
 function renderDashboard(rawData) {
   renderPrimaryDashboard(rawData);
-  const context = buildContext(rawData);
-  renderBehavior(context);
-  renderExplorer(context, dashboardState);
+  renderBehaviorSections(rawData);
+  renderExplorerPanel(rawData);
 }
 
 function renderPrimaryDashboard(rawData) {
   const context = buildContext(rawData);
+  const locale = getLocale();
+  const expanded = dashboardState?.expanded || {};
 
-  renderSyncCommandCenter(context, dashboardState);
-  renderHero(context);
-  renderTrends(context);
-  renderModels(context, dashboardState);
-  renderSources(context);
-  renderProjects(context, dashboardState);
-  renderCosts(context, dashboardState);
-  renderInsights(context);
+  renderPanel(
+    'syncCommandCenter',
+    panelFingerprint('syncCommandCenter', rawData, { locale, extra: jobFingerprintPart(dashboardState?.activeJobSnapshot) }),
+    () => renderSyncCommandCenter(context, dashboardState),
+  );
+  renderPanel('hero', panelFingerprint('hero', rawData, { locale }), () => renderHero(context));
+  renderPanel('trends', panelFingerprint('trends', rawData, { locale }), () => renderTrends(context));
+  renderPanel(
+    'models',
+    panelFingerprint('models', rawData, { locale, extra: { expanded: Boolean(expanded.models) } }),
+    () => renderModels(context, dashboardState),
+  );
+  renderPanel('sources', panelFingerprint('sources', rawData, { locale }), () => renderSources(context));
+  renderPanel(
+    'projects',
+    panelFingerprint('projects', rawData, { locale, extra: { expanded: Boolean(expanded.projects) } }),
+    () => renderProjects(context, dashboardState),
+  );
+  renderPanel(
+    'costs',
+    panelFingerprint('costs', rawData, { locale, extra: { expanded: Boolean(expanded.costs) } }),
+    () => renderCosts(context, dashboardState),
+  );
+  renderPanel('insights', panelFingerprint('insights', rawData, { locale }), () => renderInsights(context));
   syncPanelToggleControls(context, dashboardState);
   syncFilterControls(dashboardState, context);
 }
 
-function renderSecondarySection(section, rawData) {
-  const context = buildContext(rawData);
-  if (section === 'explorer') {
-    renderExplorer(context, dashboardState);
-  } else {
-    renderBehavior(context);
+const SECONDARY_SECTION_RENDERERS = {
+  activity: renderActivity,
+  tools: renderTools,
+  optimize: renderOptimize,
+  compare: renderCompare,
+};
+
+function secondaryPanelOptions(rawData) {
+  return {
+    locale: getLocale(),
+    extra: { refreshing: Boolean(rawData?._meta?.secondary_refreshing) },
+  };
+}
+
+function renderBehaviorSections(rawData) {
+  const options = secondaryPanelOptions(rawData);
+  for (const [section, renderer] of Object.entries(SECONDARY_SECTION_RENDERERS)) {
+    // 先算指纹、脏才 buildContext：数据未变时整条链零派生、零 DOM 写入
+    renderPanel(section, panelFingerprint(section, rawData, options), () => renderer(buildContext(rawData)));
   }
+}
+
+function renderExplorerPanel(rawData) {
+  renderPanel(
+    'explorer',
+    panelFingerprint('explorer', rawData, secondaryPanelOptions(rawData)),
+    () => {
+      // 先算指纹、脏才 buildContext：数据未变时整条链零派生、零 DOM 写入
+      const context = buildContext(rawData);
+      renderExplorer(context, dashboardState);
+    },
+  );
+}
+
+// secondary 到达回调：按 section 路由，只更新自己的 section。
+function renderSecondarySection(section, rawData) {
+  if (section === 'explorer') {
+    renderExplorerPanel(rawData);
+    return;
+  }
+  const renderer = SECONDARY_SECTION_RENDERERS[section];
+  if (!renderer) return;
+  renderPanel(section, panelFingerprint(section, rawData, secondaryPanelOptions(rawData)), () => renderer(buildContext(rawData)));
 }
 
 function isAbortError(error) {
   return error?.name === 'AbortError';
 }
 
-async function runSecondaryLoaders(loaders, onResult) {
+function runSecondaryLoaders(loaders, onResult) {
   const entries = Object.entries(loaders);
   let nextIndex = 0;
   const worker = async () => {
@@ -245,7 +336,11 @@ async function runSecondaryLoaders(loaders, onResult) {
 function refreshSyncCommandCenter(state = dashboardState) {
   if (!state?.rawData) return;
   const context = buildContext(state.rawData);
-  renderSyncCommandCenter(context, state);
+  renderPanel(
+    'syncCommandCenter',
+    panelFingerprint('syncCommandCenter', state.rawData, { locale: getLocale(), extra: jobFingerprintPart(state.activeJobSnapshot) }),
+    () => renderSyncCommandCenter(context, state),
+  );
 }
 
 function appVersion() {
@@ -500,7 +595,10 @@ function syncFilterControls(state, context = null) {
   document.querySelectorAll('[data-window]').forEach((button) => {
     const active = button.dataset.window === state.trendWindow;
     button.classList.toggle('active', active);
-    button.setAttribute('aria-pressed', String(active));
+    const pressed = String(active);
+    if (button.getAttribute('aria-pressed') !== pressed) {
+      button.setAttribute('aria-pressed', pressed);
+    }
   });
   syncRangePresetControls(state);
 
@@ -526,10 +624,14 @@ function syncFilterControls(state, context = null) {
         list.id = 'filter-model-options';
         modelInput.after(list);
       }
-      list.innerHTML = [...models]
-        .slice(0, 50)
-        .map((model) => `<option value="${escapeHtml(model)}"></option>`)
-        .join('');
+      const modelOptions = [...models].slice(0, 50);
+      const modelOptionsKey = modelOptions.join(' ');
+      if (list.dataset.optionsKey !== modelOptionsKey) {
+        list.dataset.optionsKey = modelOptionsKey;
+        list.innerHTML = modelOptions
+          .map((model) => `<option value="${escapeHtml(model)}"></option>`)
+          .join('');
+      }
     }
   }
 
@@ -581,7 +683,10 @@ function syncRangePresetControls(state) {
   document.querySelectorAll('[data-range-preset]').forEach((button) => {
     const active = activePreset !== CUSTOM_RANGE_PRESET && button.dataset.rangePreset === activePreset;
     button.classList.toggle('active', active);
-    button.setAttribute('aria-pressed', String(active));
+    const pressed = String(active);
+    if (button.getAttribute('aria-pressed') !== pressed) {
+      button.setAttribute('aria-pressed', pressed);
+    }
   });
 }
 
@@ -883,19 +988,22 @@ async function reloadDashboard(state) {
   }
 }
 
-async function reloadDashboardFastRange(state) {
+async function reloadDashboardFastRange(state, options = {}) {
   if (state.mode === 'snapshot') {
     return reloadDashboard(state);
   }
 
+  // silent：自动刷新 / sync 完成后的后台重载——不切换 stale 提示、
+  // 主数据指纹未变时整条渲染链短路（面板零 DOM 写入）。
+  const silent = Boolean(options.silent);
   const generation = ++state.reloadGeneration;
   state.rangeReloadController?.abort();
   const controller = new AbortController();
   state.rangeReloadController = controller;
   const previous = state.rawData;
-  state.secondaryRefreshing = Boolean(previous);
+  state.secondaryRefreshing = Boolean(previous) && !silent;
 
-  if (previous) {
+  if (previous && !silent) {
     state.rawData = {
       ...previous,
       _meta: {
@@ -903,8 +1011,8 @@ async function reloadDashboardFastRange(state) {
         secondary_refreshing: true,
       },
     };
-    renderBehavior(buildContext(state.rawData));
-    renderExplorer(buildContext(state.rawData), state);
+    renderBehaviorSections(state.rawData);
+    renderExplorerPanel(state.rawData);
   }
 
   const core = await loadDashboardInteractiveSnapshot(state, { signal: controller.signal });
@@ -912,9 +1020,12 @@ async function reloadDashboardFastRange(state) {
     return state.rawData;
   }
 
+  const previousFingerprint = previous ? dashboardFingerprint(previous) : null;
   state.rawData = mergeCoreSnapshot(previous, core, { secondaryRefreshing: state.secondaryRefreshing });
   syncUrlFromState(state);
-  renderPrimaryDashboard(state.rawData);
+  if (dashboardFingerprint(state.rawData) !== previousFingerprint) {
+    renderPrimaryDashboard(state.rawData);
+  }
   updateSyncButton(state);
 
   const refreshSecondary = async () => {
@@ -933,18 +1044,24 @@ async function reloadDashboardFastRange(state) {
         secondary_refreshing: false,
       },
     };
-    renderBehavior(buildContext(state.rawData));
-    renderExplorer(buildContext(state.rawData), state);
+    renderBehaviorSections(state.rawData);
+    renderExplorerPanel(state.rawData);
   };
 
   void refreshSecondary();
   return state.rawData;
 }
 
+// 自动刷新 / sync 完成后的重载统一走 interactive 路径（fast-range 流程）。
+// interactive 契约接受 since/until；自定义日期筛选无需回退 full scope。
+async function reloadDashboardAfterDataChange(state, options = {}) {
+  return reloadDashboardFastRange(state, options);
+}
+
 async function refreshDashboardInPlace(state) {
   if (state.mode === 'snapshot') return;
   try {
-    await reloadDashboard(state);
+    await reloadDashboardAfterDataChange(state, { silent: true });
   } catch (error) {
     logger.error('自动刷新失败', error);
     const endpointSync = document.getElementById('endpoint-sync');
@@ -977,7 +1094,10 @@ function syncAutoRefreshControls(state) {
     const interval = Number(button.dataset.refreshInterval || 0);
     const active = interval === Number(state.autoRefreshMs || 0);
     button.classList.toggle('active', active);
-    button.setAttribute('aria-pressed', String(active));
+    const pressed = String(active);
+    if (button.getAttribute('aria-pressed') !== pressed) {
+      button.setAttribute('aria-pressed', pressed);
+    }
     button.disabled = state.mode === 'snapshot';
     if (state.mode === 'snapshot') {
       button.setAttribute('title', getShellCopy('shell.refresh.snapshotDisabled'));
@@ -1127,13 +1247,13 @@ async function reloadExplorer(state) {
     const explorer = await loadExplorer(state);
     state.rawData = { ...(state.rawData || {}), explorer };
     syncUrlFromState(state);
-    renderDashboard(state.rawData);
+    renderExplorerPanel(state.rawData);
     return explorer;
   } catch (error) {
     logger.error('Explorer 加载失败', error);
     const explorer = degradedExplorerPayload(error);
     state.rawData = { ...(state.rawData || {}), explorer };
-    renderDashboard(state.rawData);
+    renderExplorerPanel(state.rawData);
     return explorer;
   }
 }
@@ -1176,6 +1296,23 @@ function setupExplorerControls(state) {
  * 2) 不足以展开的面板隐藏按钮，避免假 affordance
  * 3) aria-expanded 与当前状态同步
  */
+// 面板展开/折叠只重渲对应面板，无关面板零 DOM 写入。
+function renderExpandedPanel(panel) {
+  const rawData = dashboardState?.rawData;
+  if (!rawData) return;
+  const context = buildContext(rawData);
+  const locale = getLocale();
+  const expanded = dashboardState?.expanded || {};
+  if (panel === 'models') {
+    renderPanel('models', panelFingerprint('models', rawData, { locale, extra: { expanded: Boolean(expanded.models) } }), () => renderModels(context, dashboardState));
+  } else if (panel === 'projects') {
+    renderPanel('projects', panelFingerprint('projects', rawData, { locale, extra: { expanded: Boolean(expanded.projects) } }), () => renderProjects(context, dashboardState));
+  } else if (panel === 'costs') {
+    renderPanel('costs', panelFingerprint('costs', rawData, { locale, extra: { expanded: Boolean(expanded.costs) } }), () => renderCosts(context, dashboardState));
+  }
+  syncPanelToggleControls(context, dashboardState);
+}
+
 function setupPanelToggles(state) {
   document.addEventListener('click', (event) => {
     const button = event.target.closest('[data-toggle-panel]');
@@ -1190,7 +1327,7 @@ function setupPanelToggles(state) {
     }
 
     state.expanded[panel] = !state.expanded[panel];
-    renderDashboard(state.rawData);
+    renderExpandedPanel(panel);
   });
 }
 
@@ -1224,9 +1361,15 @@ function syncPanelToggleControls(context, state = dashboardState) {
     button.hidden = !hasMore;
     button.disabled = !hasMore;
     const expanded = Boolean(state?.expanded?.[panel]);
-    button.setAttribute('aria-expanded', String(expanded));
+    const expandedValue = String(expanded);
+    if (button.getAttribute('aria-expanded') !== expandedValue) {
+      button.setAttribute('aria-expanded', expandedValue);
+    }
     if (hasMore) {
-      button.textContent = getShellCopy(expanded ? config.collapseKey : config.expandKey);
+      const label = getShellCopy(expanded ? config.collapseKey : config.expandKey);
+      if (button.textContent !== label) {
+        button.textContent = label;
+      }
     }
   });
 }
@@ -1406,6 +1549,9 @@ function jobStatusLabel(snapshot) {
   return status;
 }
 
+// 幂等写保护：自动刷新 tick / 轮询都会调这里，内容未变时不触碰 DOM。
+let lastSyncButtonHtml = null;
+
 function updateSyncButton(state, snapshot = state.activeJobSnapshot) {
   const btn = document.getElementById('btn-sync');
   if (!btn) return;
@@ -1413,16 +1559,26 @@ function updateSyncButton(state, snapshot = state.activeJobSnapshot) {
   const snapshotMode = state.mode === 'snapshot';
   const running = ['running', 'cancelling'].includes(snapshot?.status);
   btn.disabled = snapshotMode;
-  btn.dataset.jobStatus = snapshot?.status || 'idle';
+  const jobStatus = snapshot?.status || 'idle';
+  if (btn.dataset.jobStatus !== jobStatus) {
+    btn.dataset.jobStatus = jobStatus;
+  }
   btn.title = snapshotMode ? getShellCopy('shell.sync.snapshotDisabled') : snapshot?.summary || '';
-  btn.innerHTML = `
+  const buttonHtml = `
     <svg class="i" viewBox="0 0 24 24" style="width: 13px; height: 13px;"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15A9 9 0 1 1 18 6.36L23 10"/></svg>
     <span>${escapeHtml(running ? getShellCopy('shell.sync.cancel') : getShellCopy('shell.btn.sync'))}</span>
   `;
+  if (lastSyncButtonHtml !== buttonHtml) {
+    lastSyncButtonHtml = buttonHtml;
+    btn.innerHTML = buttonHtml;
+  }
 
   const endpointSync = document.getElementById('endpoint-sync');
   if (endpointSync && snapshot) {
-    endpointSync.textContent = `${jobStatusLabel(snapshot)} · ${snapshot.summary || snapshot.job_id}`;
+    const endpointText = `${jobStatusLabel(snapshot)} · ${snapshot.summary || snapshot.job_id}`;
+    if (endpointSync.textContent !== endpointText) {
+      endpointSync.textContent = endpointText;
+    }
   }
 }
 
@@ -1430,12 +1586,25 @@ function isTerminalJob(snapshot) {
   return ['completed', 'failed', 'cancelled'].includes(snapshot?.status);
 }
 
+// 轮询快照浅比对：只有这些字段变化才写 DOM（状态行、进度文本），
+// 未变化的 tick 完全跳过 updateSyncButton 与 sync-command-center 重渲。
+function jobPollFingerprint(snapshot) {
+  return stableSerialize(jobFingerprintPart(snapshot));
+}
+
 async function pollJobUntilTerminal(state, jobId) {
   let snapshot = state.activeJobSnapshot;
-  while (jobId && !isTerminalJob(snapshot)) {
-    await new Promise((resolve) => setTimeout(resolve, 900));
+  let lastRenderedFingerprint = jobPollFingerprint(snapshot);
+  const deadline = Date.now() + JOB_POLL_MAX_DURATION_MS;
+  while (jobId && !isTerminalJob(snapshot) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, JOB_POLL_INTERVAL_MS));
     snapshot = await getJson(`/api/jobs/${encodeURIComponent(jobId)}`);
     state.activeJobSnapshot = snapshot;
+    const fingerprint = jobPollFingerprint(snapshot);
+    if (fingerprint === lastRenderedFingerprint) {
+      continue;
+    }
+    lastRenderedFingerprint = fingerprint;
     updateSyncButton(state, snapshot);
     refreshSyncCommandCenter(state);
   }
@@ -1472,7 +1641,7 @@ function setupSyncJob(state) {
       refreshSyncCommandCenter(state);
       if (terminal?.status === 'completed') {
         clearLiveRequestCache();
-        await reloadDashboard(state);
+        await reloadDashboardAfterDataChange(state);
       }
     } catch (error) {
       logger.error('同步任务失败', error);

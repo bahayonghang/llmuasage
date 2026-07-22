@@ -58,7 +58,7 @@ main {
 
 .hero {
   display: grid;
-  grid-template-columns: 1fr 360px;
+  grid-template-columns: minmax(0, 640px) 360px;
   gap: 28px;
   align-items: start;
   margin-bottom: 18px;
@@ -80,7 +80,7 @@ main {
 .hero-desc {
   font-size: 14.5px;
   color: var(--muted);
-  max-width: 520px;
+  max-width: 600px;
   line-height: 1.55;
 }
 
@@ -140,7 +140,6 @@ main {
   text-transform: uppercase;
   letter-spacing: 0.1em;
   font-weight: 600;
-  font-family: var(--font-mono);
 }
 
 .filter-group input,
@@ -167,10 +166,6 @@ main {
   gap: 8px;
   align-items: center;
   justify-content: flex-end;
-}
-
-.filter-range-group {
-  min-width: 270px;
 }
 
 .range-presets {
@@ -279,7 +274,7 @@ main {
 .date-picker-weekday {
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 10.5px;
   font-weight: 600;
   text-align: center;
 }
@@ -291,7 +286,7 @@ main {
 }
 
 .date-picker-day.is-outside {
-  color: var(--muted-2);
+  color: var(--muted);
   opacity: 0.72;
 }
 
@@ -337,7 +332,6 @@ main {
   color: var(--accent);
   font-weight: 600;
   margin-bottom: 6px;
-  font-family: var(--font-mono);
 }
 
 .section-title {
@@ -447,6 +441,12 @@ section.block {
   margin-bottom: 56px;
 }
 
+@media (max-width: 1450px) {
+  .filter-rail {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 1100px) {
   .app {
     grid-template-columns: 220px minmax(0, 1fr);
@@ -459,6 +459,15 @@ section.block {
 
   .hero {
     grid-template-columns: 1fr;
+  }
+
+  .topbar {
+    flex-wrap: wrap;
+    row-gap: 12px;
+  }
+
+  .topbar-actions {
+    flex-wrap: wrap;
   }
 
   .grid-2 {
@@ -608,10 +617,6 @@ section.block {
   .hero-meta {
     gap: 8px 12px;
     margin-top: 12px;
-  }
-
-  .status-panel {
-    display: none;
   }
 
   .kpi-grid {

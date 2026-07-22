@@ -773,6 +773,23 @@ impl Dashboard {
         })
     }
 
+    /// Opens a Dashboard whose connection uses a shorter `busy_timeout`.
+    ///
+    /// Web/API handlers use this so a locked database surfaces as a fast
+    /// section error inside the existing timeout/degraded flow instead of
+    /// blocking for the writer-oriented 30s default. Sync writers and export
+    /// paths keep using [`Dashboard::open`].
+    pub fn open_with_busy_timeout(
+        store: &Store,
+        busy_timeout: std::time::Duration,
+    ) -> Result<Self> {
+        let conn = store.open_connection_with_busy_timeout(busy_timeout)?;
+        Ok(Self {
+            store: store.clone(),
+            conn,
+        })
+    }
+
     pub(crate) fn interrupt_handle(&self) -> rusqlite::InterruptHandle {
         self.conn.get_interrupt_handle()
     }
@@ -2361,9 +2378,23 @@ impl Dashboard {
     /// Activity/Tools/Optimize/Compare time out or fail.
     pub fn core_snapshot(&self, filter: &QueryFilter) -> Result<DashboardCoreSnapshot> {
         let diagnostics = self.diagnostics()?;
+        self.core_snapshot_with_diagnostics(filter, &diagnostics)
+    }
+
+    /// Builds the core sections reusing an already-computed diagnostics
+    /// payload.
+    ///
+    /// The web layer caches `Dashboard::diagnostics()` at the request
+    /// boundary and injects the cached value here; `Dashboard::diagnostics`
+    /// itself stays a cold read and `home_overview` is untouched.
+    pub fn core_snapshot_with_diagnostics(
+        &self,
+        filter: &QueryFilter,
+        diagnostics: &DiagnosticsPayload,
+    ) -> Result<DashboardCoreSnapshot> {
         Ok(DashboardCoreSnapshot {
             overview: self.overview(filter)?,
-            sync_command_center: self.sync_command_center_with_diagnostics(filter, &diagnostics)?,
+            sync_command_center: self.sync_command_center_with_diagnostics(filter, diagnostics)?,
             day_trends: self.trends("day", filter)?,
             week_trends: self.trends("week", filter)?,
             month_trends: self.trends("month", filter)?,
@@ -2373,7 +2404,7 @@ impl Dashboard {
             projects: self.project_breakdown(filter)?,
             costs: self.cost_breakdown(filter)?,
             health: self.health()?,
-            diagnostics,
+            diagnostics: diagnostics.clone(),
         })
     }
 
@@ -2385,16 +2416,27 @@ impl Dashboard {
         window: &str,
     ) -> Result<DashboardInteractiveSnapshot> {
         let diagnostics = self.diagnostics()?;
+        self.interactive_snapshot_with_diagnostics(filter, window, &diagnostics)
+    }
+
+    /// Builds the interactive projection reusing an already-computed
+    /// diagnostics payload. See [`Dashboard::core_snapshot_with_diagnostics`].
+    pub fn interactive_snapshot_with_diagnostics(
+        &self,
+        filter: &QueryFilter,
+        window: &str,
+        diagnostics: &DiagnosticsPayload,
+    ) -> Result<DashboardInteractiveSnapshot> {
         Ok(DashboardInteractiveSnapshot {
             overview: self.overview(filter)?,
-            sync_command_center: self.sync_command_center_with_diagnostics(filter, &diagnostics)?,
+            sync_command_center: self.sync_command_center_with_diagnostics(filter, diagnostics)?,
             trends: self.trends(window, filter)?,
             models: self.model_breakdown(filter)?,
             sources: self.source_breakdown(filter)?,
             projects: self.project_breakdown(filter)?,
             costs: self.cost_breakdown(filter)?,
             health: self.health_summary()?,
-            diagnostics,
+            diagnostics: diagnostics.clone(),
         })
     }
 }
@@ -2478,26 +2520,47 @@ fn compare_model_candidates(
     let mut candidates = Vec::new();
     for row in rows {
         let (model, calls, total_tokens, estimated_cost_usd) = row?;
-        let mut model_filter = filter.clone();
-        model_filter.model = Some(model.clone());
-        let turn_filter = model_filter.turn_filter(Some("t"));
-        let (turns, edit_turns): (i64, i64) = conn.query_row(
-            &format!(
-                "SELECT COUNT(*), COALESCE(SUM(t.has_edits), 0) FROM usage_turn t{}",
-                turn_filter.where_sql()
-            ),
-            params_from_iter(turn_filter.params().iter()),
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )?;
         candidates.push(CompareModelCandidate {
             model,
             calls,
-            turns,
-            edit_turns,
+            turns: 0,
+            edit_turns: 0,
             total_tokens,
             estimated_cost_usd,
-            low_sample: calls < 20 || edit_turns < 10,
+            low_sample: true,
         });
+    }
+
+    // One grouped turn query covers every candidate instead of one query per
+    // model. A candidate without matching turns keeps the (0, 0) defaults,
+    // which matches the legacy per-model `COUNT(*)` result for empty sets.
+    if !candidates.is_empty() {
+        let turn_filter = filter.turn_filter(Some("t"));
+        let turn_sql = format!(
+            "SELECT t.primary_model, COUNT(*), COALESCE(SUM(t.has_edits), 0) FROM usage_turn t{} GROUP BY t.primary_model",
+            turn_filter.where_sql()
+        );
+        let mut turn_stmt = conn.prepare(&turn_sql)?;
+        let turn_rows =
+            turn_stmt.query_map(params_from_iter(turn_filter.params().iter()), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })?;
+        let mut turn_stats: std::collections::HashMap<String, (i64, i64)> =
+            std::collections::HashMap::new();
+        for row in turn_rows {
+            let (model, turns, edit_turns) = row?;
+            turn_stats.insert(model, (turns, edit_turns));
+        }
+        for candidate in &mut candidates {
+            let (turns, edit_turns) = turn_stats.get(&candidate.model).copied().unwrap_or((0, 0));
+            candidate.turns = turns;
+            candidate.edit_turns = edit_turns;
+            candidate.low_sample = candidate.calls < 20 || candidate.edit_turns < 10;
+        }
     }
     Ok(candidates)
 }
@@ -2732,6 +2795,20 @@ fn load_sync_statuses_with_conn(
 /// `source_file` with the recent/history completion timestamps in
 /// `source_sync_status`. Rows show up for any source that appears in either
 /// table, sorted by source identifier.
+#[cfg(test)]
+static DIAGNOSTICS_STAT_CALLS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+#[cfg(test)]
+pub(crate) fn reset_diagnostics_stat_counter() {
+    DIAGNOSTICS_STAT_CALLS.store(0, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[cfg(test)]
+pub(crate) fn diagnostics_stat_calls() -> usize {
+    DIAGNOSTICS_STAT_CALLS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 fn load_source_diagnostics(conn: &Connection) -> Result<Vec<SourceDiagnostics>> {
     // Pre-load all source_file paths to avoid N+1 queries in the main loop
     let mut file_paths_by_source: std::collections::HashMap<String, Vec<String>> =
@@ -2752,7 +2829,11 @@ fn load_source_diagnostics(conn: &Connection) -> Result<Vec<SourceDiagnostics>> 
         .filter_map(|(source, paths)| {
             let missing = paths
                 .iter()
-                .filter(|path| !std::path::Path::new(path).exists())
+                .filter(|path| {
+                    #[cfg(test)]
+                    DIAGNOSTICS_STAT_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    !std::path::Path::new(path).exists()
+                })
                 .count() as u64;
             (missing > 0).then_some((source.clone(), missing))
         })
@@ -4002,6 +4083,197 @@ mod tests {
         Ok(())
     }
 
+    /// Legacy per-candidate N+1 oracle for the grouped turn query in
+    /// `compare_model_candidates`. Mirrors the pre-refactor implementation:
+    /// the unchanged bucket top-25 query plus one `usage_turn` aggregate per
+    /// candidate model.
+    fn legacy_compare_model_candidates(
+        conn: &rusqlite::Connection,
+        filter: &QueryFilter,
+    ) -> Result<Vec<super::CompareModelCandidate>> {
+        let bucket_filter = filter.bucket_filter(Some("b"));
+        let sql = format!(
+            r#"
+            SELECT
+                b.model,
+                COALESCE(SUM(b.event_count), 0) AS calls,
+                COALESCE(SUM(b.total_tokens), 0) AS total_tokens,
+                COALESCE(SUM(b.cost_with_cache_usd), 0.0) AS estimated_cost_usd
+            FROM usage_bucket_30m b
+            {}
+            GROUP BY b.model
+            ORDER BY estimated_cost_usd DESC, total_tokens DESC, calls DESC, b.model ASC
+            LIMIT 25
+            "#,
+            bucket_filter.where_sql()
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(
+            rusqlite::params_from_iter(bucket_filter.params().iter()),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<i64>>(1)?.unwrap_or_default(),
+                    row.get::<_, Option<i64>>(2)?.unwrap_or_default(),
+                    row.get::<_, Option<f64>>(3)?.unwrap_or_default(),
+                ))
+            },
+        )?;
+        let mut candidates = Vec::new();
+        for row in rows {
+            let (model, calls, total_tokens, estimated_cost_usd) = row?;
+            let mut model_filter = filter.clone();
+            model_filter.model = Some(model.clone());
+            let turn_filter = model_filter.turn_filter(Some("t"));
+            let (turns, edit_turns): (i64, i64) = conn.query_row(
+                &format!(
+                    "SELECT COUNT(*), COALESCE(SUM(t.has_edits), 0) FROM usage_turn t{}",
+                    turn_filter.where_sql()
+                ),
+                rusqlite::params_from_iter(turn_filter.params().iter()),
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            candidates.push(super::CompareModelCandidate {
+                model,
+                calls,
+                turns,
+                edit_turns,
+                total_tokens,
+                estimated_cost_usd,
+                low_sample: calls < 20 || edit_turns < 10,
+            });
+        }
+        Ok(candidates)
+    }
+
+    /// Equivalence oracle: the grouped turn query must produce byte-identical
+    /// candidate JSON to the legacy N+1 across empty, partial-turn, full and
+    /// filtered scenarios.
+    #[test]
+    fn compare_candidates_match_legacy_n_plus_one_output() -> Result<()> {
+        // Empty database: no candidates at all.
+        let empty = Fixture::new()?;
+        let empty_dashboard = Dashboard::open(empty.store())?;
+        let new_empty = empty_dashboard.compare_models(&QueryFilter::default())?;
+        let legacy_empty =
+            legacy_compare_model_candidates(&empty_dashboard.conn, &QueryFilter::default())?;
+        assert!(new_empty.is_empty() && legacy_empty.is_empty());
+
+        // 25+ models (LIMIT 25 binds), one of them with buckets but zero
+        // turns, plus per-model turn counts that differ.
+        let fixture = Fixture::new()?;
+        fixture.seed_stress_dashboard(0, 0, 30)?;
+        let conn = fixture.store().open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_bucket_30m(
+                source, model, hour_start, project_hash, project_label, project_ref,
+                input_tokens, cache_read_tokens, cache_creation_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens,
+                cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source,
+                event_count, updated_at
+            ) VALUES ('codex', 'no-turns-model', '2026-05-01T00:00:00Z', 'project-stress', 'Project Stress', NULL,
+                100, 0, 0, 50, 0, 150, 9.99, 9.99, 'static', 'static-v1',
+                6, '2026-05-05T00:00:00Z')
+            "#,
+            [],
+        )?;
+        drop(conn);
+
+        let dashboard = Dashboard::open(fixture.store())?;
+        let filters = [
+            QueryFilter::default(),
+            QueryFilter {
+                source: Some(SourceKind::Codex),
+                ..Default::default()
+            },
+            QueryFilter {
+                model: Some("stress-model-03".to_string()),
+                ..Default::default()
+            },
+            QueryFilter {
+                project_hash: Some("project-stress".to_string()),
+                ..Default::default()
+            },
+            QueryFilter {
+                project_hash: Some("project-absent".to_string()),
+                ..Default::default()
+            },
+            QueryFilter {
+                since: Some(NaiveDate::from_ymd_opt(2026, 5, 2).expect("valid date")),
+                until: Some(NaiveDate::from_ymd_opt(2026, 5, 3).expect("valid date")),
+                timezone: ReportTimezone::Utc,
+                ..Default::default()
+            },
+        ];
+        for filter in &filters {
+            let new_candidates = dashboard.compare_models(filter)?;
+            let legacy_candidates = legacy_compare_model_candidates(&dashboard.conn, filter)?;
+            assert_eq!(
+                serde_json::to_value(&new_candidates)?,
+                serde_json::to_value(&legacy_candidates)?,
+                "candidate JSON must match the legacy N+1 output for filter {filter:?}"
+            );
+        }
+        // The grouped result must contain the no-turns model with zeroed turn
+        // stats (top bucket cost puts it first), matching legacy semantics.
+        let candidates = dashboard.compare_models(&QueryFilter::default())?;
+        let no_turns = candidates
+            .iter()
+            .find(|candidate| candidate.model == "no-turns-model")
+            .expect("bucket-only model is a candidate");
+        assert_eq!((no_turns.turns, no_turns.edit_turns), (0, 0));
+        assert!(no_turns.low_sample);
+        // And the full /api/compare payload stays field-equivalent to a
+        // payload whose candidates come from the legacy oracle.
+        let full = dashboard.model_compare(&QueryFilter::default(), None, None)?;
+        let mut legacy_full = serde_json::to_value(&full)?;
+        legacy_full["candidates"] = serde_json::to_value(legacy_compare_model_candidates(
+            &dashboard.conn,
+            &QueryFilter::default(),
+        )?)?;
+        assert_eq!(serde_json::to_value(&full)?, legacy_full);
+        Ok(())
+    }
+
+    static COMPARE_TURN_STATEMENTS: std::sync::atomic::AtomicUsize =
+        std::sync::atomic::AtomicUsize::new(0);
+
+    fn count_compare_turn_statements(event: rusqlite::trace::TraceEvent<'_>) {
+        if let rusqlite::trace::TraceEvent::Stmt(_, sql) = event
+            && sql.contains("usage_turn")
+        {
+            COMPARE_TURN_STATEMENTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    /// The grouped turn query runs exactly once regardless of candidate count
+    /// (previously once per candidate, up to 25).
+    #[test]
+    fn compare_candidates_use_constant_turn_query_count() -> Result<()> {
+        for models in [2_usize, 25] {
+            let fixture = Fixture::new()?;
+            fixture.seed_stress_dashboard(0, 0, models)?;
+            let dashboard = Dashboard::open(fixture.store())?;
+            dashboard.conn.trace_v2(
+                rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT,
+                Some(count_compare_turn_statements),
+            );
+            COMPARE_TURN_STATEMENTS.store(0, std::sync::atomic::Ordering::Relaxed);
+            let candidates = dashboard.compare_models(&QueryFilter::default())?;
+            assert_eq!(candidates.len(), models);
+            assert_eq!(
+                COMPARE_TURN_STATEMENTS.load(std::sync::atomic::Ordering::Relaxed),
+                1,
+                "compare candidates must run exactly one usage_turn query with {models} models"
+            );
+            dashboard
+                .conn
+                .trace_v2(rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT, None);
+        }
+        Ok(())
+    }
+
     /// Validates F4.3: a 365-day heatmap zero-fills every day in the window
     /// even when only a single bucket landed in SQLite, and surfaces the
     /// observed event_count/total_tokens on the matching local date.
@@ -4625,6 +4897,148 @@ mod tests {
             eprintln!(
                 "home_overview real backup run={run} events={event_count} buckets={bucket_count} timing={timing:?}"
             );
+        }
+        Ok(())
+    }
+
+    /// Measurement-only baseline for the serve dashboard query path task.
+    /// Run explicitly: `cargo test --lib measure_stress_diagnostics_and_full_sections -- --ignored --nocapture --test-threads=1`
+    #[test]
+    #[ignore = "measurement test; run explicitly for baseline/after reports"]
+    fn measure_stress_diagnostics_and_full_sections() -> Result<()> {
+        let fixture = Fixture::new()?;
+        fixture.seed_stress_dashboard(4_000, 1_000, 25)?;
+        let conn = fixture.store().open_connection()?;
+        let source_file_rows: i64 =
+            conn.query_row("SELECT COUNT(*) FROM source_file", [], |row| row.get(0))?;
+        let turn_rows: i64 =
+            conn.query_row("SELECT COUNT(*) FROM usage_turn", [], |row| row.get(0))?;
+        let model_rows: i64 = conn.query_row(
+            "SELECT COUNT(DISTINCT model) FROM usage_bucket_30m",
+            [],
+            |row| row.get(0),
+        )?;
+        drop(conn);
+        eprintln!(
+            "stress scale: source_file={source_file_rows} usage_turn={turn_rows} models={model_rows}"
+        );
+
+        let dashboard = Dashboard::open(fixture.store())?;
+        let filter = QueryFilter::default();
+        for run in 0..3 {
+            super::reset_diagnostics_stat_counter();
+            let started = std::time::Instant::now();
+            let diagnostics = dashboard.diagnostics()?;
+            eprintln!(
+                "diagnostics run={run} elapsed={:?} stat_calls={} by_source={}",
+                started.elapsed(),
+                super::diagnostics_stat_calls(),
+                diagnostics.by_source.len()
+            );
+        }
+
+        #[allow(clippy::type_complexity)]
+        let timed: [(&str, &dyn Fn(&Dashboard) -> crate::error::Result<()>); 7] = [
+            ("core_snapshot", &|d| d.core_snapshot(&filter).map(|_| ())),
+            ("activity", &|d| d.activity_breakdown(&filter).map(|_| ())),
+            ("tools", &|d| d.tool_breakdown(&filter).map(|_| ())),
+            ("optimize", &|d| d.optimize(&filter).map(|_| ())),
+            ("compare", &|d| {
+                d.model_compare(&filter, None, None).map(|_| ())
+            }),
+            ("explorer", &|d| {
+                d.explorer(&super::ExplorerQuery {
+                    filter: filter.clone(),
+                    ..Default::default()
+                })
+                .map(|_| ())
+            }),
+            ("full_snapshot_export", &|d| d.snapshot(&filter).map(|_| ())),
+        ];
+        for (section, run_fn) in timed {
+            let started = std::time::Instant::now();
+            run_fn(&dashboard)?;
+            eprintln!("section {section} elapsed={:?}", started.elapsed());
+        }
+        Ok(())
+    }
+
+    /// Measurement against a read-only copy of a representative database.
+    /// Set `LLMUSAGE_MEASURE_HOME` to the copied runtime root (the directory
+    /// that contains `llmusage.db`) and run with `--ignored --nocapture`.
+    #[test]
+    #[ignore = "measurement test; requires LLMUSAGE_MEASURE_HOME copy"]
+    fn measure_real_copy_diagnostics_and_full_sections() -> Result<()> {
+        let Some(root) = std::env::var_os("LLMUSAGE_MEASURE_HOME") else {
+            eprintln!("LLMUSAGE_MEASURE_HOME not set; skipping real-copy measurement");
+            return Ok(());
+        };
+        let paths = crate::paths::AppPaths::with_root(std::path::PathBuf::from(root))?;
+        let db_path = paths.db_path.clone();
+        let conn = rusqlite::Connection::open_with_flags(
+            &db_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )?;
+        let scale: Vec<(&str, i64)> = [
+            "source_file",
+            "usage_event",
+            "usage_bucket_30m",
+            "usage_turn",
+        ]
+        .iter()
+        .map(|table| {
+            let count = conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })?;
+            Ok((*table, count))
+        })
+        .collect::<Result<Vec<_>>>()?;
+        let models: i64 = conn.query_row(
+            "SELECT COUNT(DISTINCT model) FROM usage_bucket_30m",
+            [],
+            |row| row.get(0),
+        )?;
+        eprintln!("real copy scale: {scale:?} models={models}");
+
+        for run in 0..5 {
+            super::reset_diagnostics_stat_counter();
+            let started = std::time::Instant::now();
+            let rows = super::load_source_diagnostics(&conn)?;
+            eprintln!(
+                "real diagnostics run={run} elapsed={:?} stat_calls={} by_source={}",
+                started.elapsed(),
+                super::diagnostics_stat_calls(),
+                rows.len()
+            );
+        }
+        drop(conn);
+
+        // Section breakdown through the normal Dashboard facade. This is a
+        // file copy, so opening it read-write here never touches the original.
+        let store = crate::store::Store::new(&paths)?;
+        let dashboard = Dashboard::open(&store)?;
+        let filter = QueryFilter::default();
+        #[allow(clippy::type_complexity)]
+        let timed: [(&str, &dyn Fn(&Dashboard) -> crate::error::Result<()>); 6] = [
+            ("core_snapshot", &|d| d.core_snapshot(&filter).map(|_| ())),
+            ("activity", &|d| d.activity_breakdown(&filter).map(|_| ())),
+            ("tools", &|d| d.tool_breakdown(&filter).map(|_| ())),
+            ("optimize", &|d| d.optimize(&filter).map(|_| ())),
+            ("compare", &|d| {
+                d.model_compare(&filter, None, None).map(|_| ())
+            }),
+            ("explorer", &|d| {
+                d.explorer(&super::ExplorerQuery {
+                    filter: filter.clone(),
+                    ..Default::default()
+                })
+                .map(|_| ())
+            }),
+        ];
+        for (section, run_fn) in timed {
+            let started = std::time::Instant::now();
+            run_fn(&dashboard)?;
+            eprintln!("real section {section} elapsed={:?}", started.elapsed());
         }
         Ok(())
     }

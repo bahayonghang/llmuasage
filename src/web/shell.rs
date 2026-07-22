@@ -42,9 +42,10 @@ fn html_shell(mode: &str) -> String {
   try {{
     var t = localStorage.getItem('llmusage:theme');
     var l = localStorage.getItem('llmusage:locale');
-    if (t === 'dark' || t === 'light') {{
-      document.documentElement.setAttribute('data-theme', t);
+    if (t !== 'dark' && t !== 'light') {{
+      t = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
     }}
+    document.documentElement.setAttribute('data-theme', t);
     if (l === 'zh' || l === 'en') {{
       document.documentElement.setAttribute('data-locale', l);
     }}
@@ -75,12 +76,10 @@ fn html_shell(mode: &str) -> String {
       <a href="#overview" class="active" data-target="overview">
         <span class="nav-icon"><svg aria-hidden="true" class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></span>
         <span data-i18n="shell.nav.item.usage">用量概览</span>
-        <span class="badge">4</span>
       </a>
       <a href="#trends" data-target="trends">
         <span class="nav-icon"><svg aria-hidden="true" class="i" viewBox="0 0 24 24"><polyline points="3,17 9,11 13,15 21,7"/><polyline points="14,7 21,7 21,14"/></svg></span>
         <span data-i18n="shell.nav.item.trend">用量趋势</span>
-        <span class="badge">24h</span>
       </a>
     </nav>
 
@@ -225,7 +224,7 @@ fn html_shell(mode: &str) -> String {
           <input id="filter-until" data-filter="until" data-date-input type="text" inputmode="numeric" autocomplete="off" placeholder="YYYY-MM-DD" data-i18n-attr="placeholder=shell.filters.datePlaceholder" />
         </div>
         <div class="filter-actions">
-          <button class="btn" id="filters-apply" type="button" data-i18n="shell.filters.apply">应用筛选</button>
+          <button class="btn btn-primary" id="filters-apply" type="button" data-i18n="shell.filters.apply">应用筛选</button>
           <button class="btn" id="filters-reset" type="button" data-i18n="shell.filters.reset">重置</button>
         </div>
       </div>
@@ -266,16 +265,16 @@ fn html_shell(mode: &str) -> String {
               <span><span class="legend-dot"></span><span data-i18n="shell.trends.legend.tokens">用量 (Token)</span></span>
             </div>
           </div>
-          <svg class="chart-svg trends-chart-svg" viewBox="0 0 720 220" preserveAspectRatio="none" id="trends-chart" role="img" aria-label="最近 10 个时段用量趋势">
+          <svg class="chart-svg trends-chart-svg" viewBox="0 0 720 220" id="trends-chart" role="img" aria-label="最近 10 个时段用量趋势">
             <g class="trend-grid-lines">
-              <line x1="0" y1="40" x2="720" y2="40"/>
-              <line x1="0" y1="80" x2="720" y2="80"/>
-              <line x1="0" y1="120" x2="720" y2="120"/>
-              <line x1="0" y1="160" x2="720" y2="160"/>
+              <line x1="0" y1="40" x2="100%" y2="40"/>
+              <line x1="0" y1="80" x2="100%" y2="80"/>
+              <line x1="0" y1="120" x2="100%" y2="120"/>
+              <line x1="0" y1="160" x2="100%" y2="160"/>
             </g>
             <g id="trends-bars" fill="#c8553d"></g>
-            <line class="trend-baseline" x1="0" y1="200" x2="720" y2="200"/>
-            <g id="trends-labels" fill="#8d867a" font-size="9.5"></g>
+            <line class="trend-baseline" x1="0" y1="200" x2="100%" y2="200"/>
+            <g id="trends-labels" fill="#8d867a" font-size="10.5"></g>
           </svg>
         </div>
 

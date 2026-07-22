@@ -75,6 +75,34 @@ struct JobState {
 pub struct JobRegistry {
     inner: Arc<DashMap<JobId, Arc<Mutex<JobState>>>>,
     admission: Arc<Mutex<()>>,
+    terminal_hooks: TerminalHooks,
+}
+
+/// Callback list fired once after a job reaches a terminal state.
+///
+/// The web layer registers cache-invalidation hooks here; hooks must be
+/// cheap and non-blocking because they run inside the job task.
+type TerminalHook = Arc<dyn Fn() + Send + Sync>;
+
+#[derive(Clone, Default)]
+struct TerminalHooks(Arc<Mutex<Vec<TerminalHook>>>);
+
+impl fmt::Debug for TerminalHooks {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let count = self.0.lock().map(|hooks| hooks.len()).unwrap_or(0);
+        f.debug_struct("TerminalHooks")
+            .field("count", &count)
+            .finish()
+    }
+}
+
+impl TerminalHooks {
+    fn fire(&self) {
+        let hooks = self.0.lock().map(|hooks| hooks.clone()).unwrap_or_default();
+        for hook in hooks {
+            hook();
+        }
+    }
 }
 
 /// Error returned when the in-process sync job admission policy rejects a start
@@ -145,6 +173,17 @@ impl JobRegistry {
         }
     }
 
+    /// Registers a callback fired once after any job reaches a terminal state
+    /// (Completed / Failed / Cancelled). Used by the web layer to invalidate
+    /// read-side caches that depend on freshly synced data.
+    pub fn register_terminal_hook(&self, hook: impl Fn() + Send + Sync + 'static) {
+        self.terminal_hooks
+            .0
+            .lock()
+            .expect("job registry terminal hooks mutex poisoned")
+            .push(Arc::new(hook));
+    }
+
     fn spawn_start(
         &self,
         store: &Store,
@@ -172,8 +211,18 @@ impl JobRegistry {
         let store = store.clone();
         let options = options.clone();
         let job_id_for_task = job_id.clone();
+        let terminal_hooks = self.terminal_hooks.clone();
         tokio::spawn(async move {
-            run_job(job_id_for_task, store, options, cancel, tx, state).await;
+            run_job(
+                job_id_for_task,
+                store,
+                options,
+                cancel,
+                tx,
+                state,
+                terminal_hooks,
+            )
+            .await;
         });
         (job_id, rx)
     }
@@ -282,6 +331,7 @@ async fn run_job(
     cancel: CancellationToken,
     outbound: mpsc::Sender<JobEvent>,
     state: Arc<Mutex<JobState>>,
+    terminal_hooks: TerminalHooks,
 ) {
     let sync_options = SyncRunOptions {
         rebuild: options.rebuild,
@@ -348,6 +398,7 @@ async fn run_job(
                 Some("cancellation requested".to_string()),
                 None,
             );
+            terminal_hooks.fire();
             drop(internal_tx);
             let _ = event_forwarder.await;
             return;
@@ -391,6 +442,7 @@ async fn run_job(
             finish_state(&state, JobStatus::Failed, None, Some(message));
         }
     }
+    terminal_hooks.fire();
     drop(internal_tx);
     let _ = event_forwarder.await;
 }

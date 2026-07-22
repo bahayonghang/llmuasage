@@ -3,8 +3,8 @@ use std::{
     future::Future,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
+        Arc, OnceLock,
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -23,15 +23,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::net::TcpListener;
 use tokio::sync::{Semaphore, oneshot};
+use tower_http::compression::CompressionLayer;
 use tracing::{debug, error, info};
 
 use crate::{
     error::{LlmusageError, Result as LlmusageResult},
     models::SourceKind,
     query::{
-        ActivityPayload, BehaviorSupport, Dashboard, ExplorerDimension, ExplorerFilters,
-        ExplorerGranularity, ExplorerMetric, ExplorerQuery, ExplorerTokenType, LogsQuery,
-        ModelComparePayload, OptimizePayload, QueryFilter, ToolsPayload,
+        ActivityPayload, BehaviorSupport, Dashboard, DiagnosticsPayload, ExplorerDimension,
+        ExplorerFilters, ExplorerGranularity, ExplorerMetric, ExplorerQuery, ExplorerTokenType,
+        LogsQuery, ModelComparePayload, OptimizePayload, QueryFilter, ToolsPayload,
     },
     store::Store,
     sync::{JobRegistry, SyncOptions},
@@ -40,10 +41,85 @@ use crate::{
 const WEB_API_TIMEOUT: Duration = Duration::from_secs(5);
 const WEB_BEHAVIOR_API_TIMEOUT: Duration = Duration::from_secs(1);
 const WEB_DASHBOARD_QUERY_PERMITS: usize = 4;
+/// Web/API read connections fail lock waits fast so section timeouts and
+/// degraded fallbacks trigger inside the request budget; sync writers keep
+/// the 30s default from `Store::open_connection`.
+const WEB_READ_BUSY_TIMEOUT: Duration = Duration::from_millis(1_500);
+/// Request-boundary cache TTL for `Dashboard::diagnostics()`.
+///
+/// Baseline (research/baseline.md): one cold diagnostics pass costs ~50ms on
+/// a representative 2.7k-file database (~120ms on a 5k-file stress fixture)
+/// and every dashboard load used to pay it. 30s keeps that cost amortized
+/// while bounding how long an externally deleted file can go unnoticed; sync
+/// job completion invalidates the entry immediately, which covers the main
+/// freshness path. The query layer itself keeps cold-read semantics.
+const DIAGNOSTICS_CACHE_TTL: Duration = Duration::from_secs(30);
 
 mod assets;
 mod brand;
 mod shell;
+
+/// Request-boundary cache for the `Dashboard::diagnostics()` payload.
+///
+/// Lives in `WebState` (the web request boundary) — never in the query
+/// layer, which keeps cold-read semantics for `home_overview` and direct
+/// `Dashboard::diagnostics()` callers. A single entry is shared by
+/// `/api/diagnostics` and every dashboard scope; the tokio mutex provides
+/// single-flight recomputation so a TTL expiry triggers exactly one cold
+/// pass even under concurrent requests.
+struct DiagnosticsCache {
+    ttl: Duration,
+    entry: std::sync::RwLock<Option<DiagnosticsCacheEntry>>,
+    compute: tokio::sync::Mutex<()>,
+    generation: AtomicU64,
+}
+
+struct DiagnosticsCacheEntry {
+    payload: DiagnosticsPayload,
+    computed_at: Instant,
+}
+
+impl DiagnosticsCache {
+    fn new(ttl: Duration) -> Self {
+        Self {
+            ttl,
+            entry: std::sync::RwLock::new(None),
+            compute: tokio::sync::Mutex::new(()),
+            generation: AtomicU64::new(0),
+        }
+    }
+
+    fn get_fresh(&self) -> Option<DiagnosticsPayload> {
+        let guard = self.entry.read().ok()?;
+        let entry = guard.as_ref()?;
+        (entry.computed_at.elapsed() < self.ttl).then(|| entry.payload.clone())
+    }
+
+    fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Acquire)
+    }
+
+    fn store_if_generation(&self, payload: DiagnosticsPayload, expected_generation: u64) -> bool {
+        if let Ok(mut guard) = self.entry.write() {
+            if self.generation.load(Ordering::Acquire) != expected_generation {
+                return false;
+            }
+            *guard = Some(DiagnosticsCacheEntry {
+                payload,
+                computed_at: Instant::now(),
+            });
+            return true;
+        }
+        false
+    }
+
+    fn invalidate(&self) {
+        if let Ok(mut guard) = self.entry.write() {
+            self.generation.fetch_add(1, Ordering::AcqRel);
+            *guard = None;
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct WebState {
@@ -51,6 +127,7 @@ pub struct WebState {
     pub jobs: JobRegistry,
     #[doc(hidden)]
     pub dashboard_query_semaphore: Arc<Semaphore>,
+    diagnostics_cache: Arc<DiagnosticsCache>,
 }
 
 impl WebState {
@@ -59,10 +136,29 @@ impl WebState {
     }
 
     fn with_jobs_and_query_limit(store: Store, jobs: JobRegistry, permits: usize) -> Self {
+        Self::with_diagnostics_cache_ttl(store, jobs, permits, DIAGNOSTICS_CACHE_TTL)
+    }
+
+    fn with_diagnostics_cache_ttl(
+        store: Store,
+        jobs: JobRegistry,
+        permits: usize,
+        diagnostics_cache_ttl: Duration,
+    ) -> Self {
+        let diagnostics_cache = Arc::new(DiagnosticsCache::new(diagnostics_cache_ttl));
+        jobs.register_terminal_hook({
+            let cache = Arc::downgrade(&diagnostics_cache);
+            move || {
+                if let Some(cache) = cache.upgrade() {
+                    cache.invalidate();
+                }
+            }
+        });
         Self {
             store,
             jobs,
             dashboard_query_semaphore: Arc::new(Semaphore::new(permits.max(1))),
+            diagnostics_cache,
         }
     }
 }
@@ -115,6 +211,8 @@ pub(crate) async fn serve_on(
         .route("/api/jobs/{id}", get(api_jobs_get))
         .route("/api/jobs/{id}/cancel", post(api_jobs_cancel))
         .route("/api/health", get(api_health))
+        // 对 CSS/JS/SVG 与 JSON API 做 gzip/br 压缩协商；未发 Accept-Encoding 的客户端不受影响。
+        .layer(CompressionLayer::new())
         .with_state(state);
 
     info!("完成本地 Web UI 路由组装");
@@ -165,14 +263,16 @@ pub(crate) fn asset_manifest() -> &'static [assets::WebAsset] {
     assets::asset_manifest()
 }
 
-async fn index_live() -> Html<String> {
-    Html(live_index_html())
+async fn index_live() -> Html<&'static str> {
+    // 根页面只依赖编译期版本号与 registry，进程内内容固定，生成一次后复用。
+    static INDEX_HTML: OnceLock<String> = OnceLock::new();
+    Html(INDEX_HTML.get_or_init(live_index_html))
 }
 
-async fn asset_file(Path(path): Path<String>) -> Response {
+async fn asset_file(Path(path): Path<String>, headers: HeaderMap) -> Response {
     let normalized = path.trim_start_matches('/');
     match assets::find_asset(normalized) {
-        Some(asset) => asset.as_response(),
+        Some(asset) => asset.as_response(&headers),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -479,11 +579,7 @@ async fn api_health(State(state): State<WebState>) -> Response {
 }
 
 async fn api_diagnostics(State(state): State<WebState>) -> Response {
-    api_json_async(
-        "/api/diagnostics",
-        load_via_dashboard(state, "diagnostics", |d| d.diagnostics()),
-    )
-    .await
+    api_json_async("/api/diagnostics", load_diagnostics_cached(&state)).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -532,12 +628,15 @@ async fn api_diagnostics_forget(
         .store
         .mark_source_file_deleted(source, &payload.file_path)
     {
-        Ok(()) => Json(json!({
-            "ok": true,
-            "source": source.as_str(),
-            "file_path": payload.file_path,
-        }))
-        .into_response(),
+        Ok(()) => {
+            state.diagnostics_cache.invalidate();
+            Json(json!({
+                "ok": true,
+                "source": source.as_str(),
+                "file_path": payload.file_path,
+            }))
+            .into_response()
+        }
         Err(err) => {
             error!(endpoint = "/api/diagnostics/forget", error = %err, "forget failed");
             (
@@ -776,6 +875,39 @@ where
     load_via_dashboard_with_timeout(state, section, WEB_API_TIMEOUT, f).await
 }
 
+/// Loads `Dashboard::diagnostics()` through the request-boundary cache.
+///
+/// TTL hits return a clone without touching the database; a miss/expiry runs
+/// one cold `Dashboard::diagnostics()` via the normal permit/spawn_blocking
+/// path while concurrent callers wait on the single-flight mutex and reuse
+/// the result. Sync job terminal states invalidate the entry through the
+/// `JobRegistry` hook registered in `WebState`.
+async fn load_diagnostics_cached(state: &WebState) -> LlmusageResult<DiagnosticsPayload> {
+    if let Some(payload) = state.diagnostics_cache.get_fresh() {
+        return Ok(payload);
+    }
+    let _compute = state.diagnostics_cache.compute.lock().await;
+    loop {
+        if let Some(payload) = state.diagnostics_cache.get_fresh() {
+            return Ok(payload);
+        }
+        let generation = state.diagnostics_cache.generation();
+        let payload = load_via_dashboard(state.clone(), "diagnostics", |dashboard| {
+            dashboard.diagnostics()
+        })
+        .await?;
+        if state
+            .diagnostics_cache
+            .store_if_generation(payload.clone(), generation)
+        {
+            return Ok(payload);
+        }
+        // A sync job reached a terminal state while the cold read was in
+        // flight. Recompute under the same single-flight lock instead of
+        // publishing or returning the pre-sync payload.
+    }
+}
+
 async fn load_via_dashboard_with_timeout<T, F>(
     state: WebState,
     section: &'static str,
@@ -824,7 +956,7 @@ where
     let query_started = Instant::now();
     let mut task = tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        let dashboard = Dashboard::open(&state.store)?;
+        let dashboard = Dashboard::open_with_busy_timeout(&state.store, WEB_READ_BUSY_TIMEOUT)?;
         let interrupt = dashboard.interrupt_handle();
         if blocking_cancelled.load(Ordering::SeqCst) {
             interrupt.interrupt();
@@ -942,16 +1074,18 @@ async fn load_dashboard_snapshot_resilient(
     window: String,
 ) -> LlmusageResult<serde_json::Value> {
     if scope == DashboardScope::Interactive {
+        let diagnostics = load_diagnostics_cached(&state).await?;
         let interactive = load_via_dashboard(state, "dashboard:interactive", move |dashboard| {
-            dashboard.interactive_snapshot(&filter, &window)
+            dashboard.interactive_snapshot_with_diagnostics(&filter, &window, &diagnostics)
         })
         .await?;
         return Ok(json!(interactive));
     }
 
+    let diagnostics = load_diagnostics_cached(&state).await?;
     let core = load_via_dashboard(state.clone(), "dashboard:core", {
         let filter = filter.clone();
-        move |dashboard| dashboard.core_snapshot(&filter)
+        move |dashboard| dashboard.core_snapshot_with_diagnostics(&filter, &diagnostics)
     })
     .await?;
 
@@ -1345,15 +1479,25 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use axum::{body::to_bytes, http::StatusCode};
+    use axum::{
+        body::to_bytes,
+        http::{HeaderMap, HeaderValue, StatusCode, header},
+    };
     use chrono::{Duration as ChronoDuration, SecondsFormat, Utc};
     use tempfile::TempDir;
 
-    use crate::{AppPaths, LlmusageError, store::Store, sync::SyncOptions};
+    use crate::{
+        AppPaths, LlmusageError,
+        query::{diagnostics_stat_calls, reset_diagnostics_stat_counter},
+        store::Store,
+        sync::{JobRegistry, JobStatus, SyncOptions},
+        testing::Fixture,
+    };
 
     use super::{
-        WebState, api_json, asset_manifest, live_index_html, load_via_dashboard_with_timeout,
-        serve, serve_on, snapshot_index_html,
+        DiagnosticsCache, WEB_READ_BUSY_TIMEOUT, WebState, api_json, asset_manifest,
+        live_index_html, load_diagnostics_cached, load_via_dashboard,
+        load_via_dashboard_with_timeout, serve, serve_on, snapshot_index_html,
     };
 
     fn make_store() -> anyhow::Result<(TempDir, Store)> {
@@ -1497,6 +1641,79 @@ mod tests {
             rest = &after_size[size + 2..];
         }
         Ok(decoded)
+    }
+
+    async fn route_bytes(
+        addr: SocketAddr,
+        path: &str,
+        headers: &[(&str, &str)],
+    ) -> anyhow::Result<(StatusCode, String, Vec<u8>)> {
+        let path = path.to_string();
+        let headers = headers
+            .iter()
+            .map(|(name, value)| format!("{name}: {value}\r\n"))
+            .collect::<String>();
+        let raw = tokio::task::spawn_blocking(move || {
+            let mut stream = std::net::TcpStream::connect(addr)?;
+            stream.set_read_timeout(Some(Duration::from_secs(10)))?;
+            stream.set_write_timeout(Some(Duration::from_secs(10)))?;
+            let request = format!(
+                "GET {path} HTTP/1.1\r\n\
+                 Host: {addr}\r\n\
+                 {headers}\
+                 Connection: close\r\n\r\n"
+            );
+            stream.write_all(request.as_bytes())?;
+            let mut raw = Vec::new();
+            stream.read_to_end(&mut raw)?;
+            Ok::<_, anyhow::Error>(raw)
+        })
+        .await??;
+
+        let split = raw
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .ok_or_else(|| anyhow::anyhow!("invalid HTTP response"))?;
+        let head = String::from_utf8(raw[..split].to_vec())?;
+        let status_code = head
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .and_then(|raw| raw.parse::<u16>().ok())
+            .ok_or_else(|| anyhow::anyhow!("invalid status line: {head:?}"))?;
+        let body = decode_http_body_bytes(&head, &raw[split + 4..])?;
+        Ok((StatusCode::from_u16(status_code)?, head, body))
+    }
+
+    fn decode_http_body_bytes(head: &str, body: &[u8]) -> anyhow::Result<Vec<u8>> {
+        if !head
+            .to_ascii_lowercase()
+            .contains("transfer-encoding: chunked")
+        {
+            return Ok(body.to_vec());
+        }
+        let mut rest = body;
+        let mut decoded = Vec::new();
+        while let Some(line_end) = rest.windows(2).position(|window| window == b"\r\n") {
+            let size = usize::from_str_radix(std::str::from_utf8(&rest[..line_end])?.trim(), 16)?;
+            rest = &rest[line_end + 2..];
+            if size == 0 {
+                break;
+            }
+            if rest.len() < size + 2 {
+                return Err(anyhow::anyhow!("truncated chunked response"));
+            }
+            decoded.extend_from_slice(&rest[..size]);
+            rest = &rest[size + 2..];
+        }
+        Ok(decoded)
+    }
+
+    fn response_header<'a>(head: &'a str, name: &str) -> Option<&'a str> {
+        head.lines().skip(1).find_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            key.trim().eq_ignore_ascii_case(name).then(|| value.trim())
+        })
     }
 
     #[test]
@@ -1732,6 +1949,7 @@ mod tests {
                 "data/fetch.js",
                 "data/format.js",
                 "data/derive.js",
+                "data/fingerprint.js",
                 "render/hero.js",
                 "render/sync-command-center.js",
                 "render/trends.js",
@@ -1855,6 +2073,18 @@ mod tests {
 
         assert!(selected_bodies.contains("cache_savings_usd"));
         assert!(selected_bodies.contains("supportedSources"));
+    }
+
+    #[test]
+    fn hero_health_disclosure_tracks_the_mobile_breakpoint() {
+        let hero_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "render/hero.js")
+            .expect("hero.js asset")
+            .body;
+        assert!(hero_js.contains("STATUS_PANEL_MOBILE_QUERY = '(max-width: 720px)'"));
+        assert!(hero_js.contains("details.open = !statusPanelMediaQuery.matches"));
+        assert!(hero_js.contains("addEventListener('change', syncStatusPanelDisclosure)"));
     }
 
     #[test]
@@ -2148,6 +2378,17 @@ mod tests {
         assert!(app_js.contains("shell.refresh.snapshotDisabled"));
         assert!(copy_js.contains("shell.refresh.label"));
         assert!(copy_js.contains("shell.refresh.failed"));
+
+        let data_change_reload = app_js
+            .split("async function reloadDashboardAfterDataChange")
+            .nth(1)
+            .and_then(|tail| tail.split("async function refreshDashboardInPlace").next())
+            .expect("reloadDashboardAfterDataChange function body");
+        assert!(data_change_reload.contains("return reloadDashboardFastRange(state, options)"));
+        assert!(
+            !data_change_reload.contains("return reloadDashboard(state)"),
+            "live auto-refresh and sync completion must not fall back to full scope"
+        );
     }
 
     #[test]
@@ -2509,6 +2750,289 @@ mod tests {
             |dashboard| dashboard.overview(&Default::default()).map(|_| ()),
         )
         .await?;
+        Ok(())
+    }
+
+    #[test]
+    fn web_read_connections_use_short_busy_timeout_while_store_default_stays_30s()
+    -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let default_conn = store.open_connection()?;
+        let default_ms: i64 =
+            default_conn.query_row("PRAGMA busy_timeout", [], |row| row.get(0))?;
+        assert_eq!(
+            default_ms, 30_000,
+            "sync writer / default connections keep the 30s busy timeout"
+        );
+        let web_conn = store.open_connection_with_busy_timeout(WEB_READ_BUSY_TIMEOUT)?;
+        let web_ms: i64 = web_conn.query_row("PRAGMA busy_timeout", [], |row| row.get(0))?;
+        assert_eq!(web_ms, 1_500, "web read connections fail lock waits fast");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn locked_database_surfaces_busy_error_within_request_budget() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        // Hold an exclusive lock so every other connection hits SQLITE_BUSY.
+        let blocker = store.open_connection()?;
+        blocker.execute_batch("PRAGMA locking_mode = EXCLUSIVE")?;
+        blocker.execute_batch("BEGIN EXCLUSIVE")?;
+        blocker.execute(
+            "INSERT INTO meta(key, value) VALUES ('lock-test', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [],
+        )?;
+
+        let state = WebState::with_jobs_and_query_limit(store.clone(), Default::default(), 4);
+        let started = Instant::now();
+        let result = load_via_dashboard(state, "overview", |dashboard| {
+            dashboard.overview(&Default::default()).map(|_| ())
+        })
+        .await;
+        let elapsed = started.elapsed();
+        blocker.execute_batch("ROLLBACK; PRAGMA locking_mode = NORMAL")?;
+
+        let error = result.expect_err("a fully locked database must fail the web read");
+        assert!(
+            error.to_string().contains("locked"),
+            "expected a lock-related error, got: {error}"
+        );
+        assert!(
+            elapsed >= Duration::from_millis(1_200) && elapsed < Duration::from_secs(4),
+            "web read should fail near the 1.5s busy timeout instead of the 5s request timeout, got {elapsed:?}"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn diagnostics_cache_hits_within_ttl_and_recomputes_after_expiry() -> anyhow::Result<()> {
+        let fixture = Fixture::new()?;
+        fixture.seed_stress_dashboard(200, 1, 2)?;
+        let state = WebState::with_diagnostics_cache_ttl(
+            fixture.store().clone(),
+            JobRegistry::default(),
+            4,
+            Duration::from_millis(60),
+        );
+
+        reset_diagnostics_stat_counter();
+        let first = load_diagnostics_cached(&state).await?;
+        assert_eq!(first.by_source.len(), 3);
+        assert_eq!(
+            diagnostics_stat_calls(),
+            201,
+            "cold load stats every source_file row once"
+        );
+
+        let second = load_diagnostics_cached(&state).await?;
+        assert_eq!(
+            diagnostics_stat_calls(),
+            201,
+            "TTL hit must serve a clone without any stat call"
+        );
+        assert_eq!(
+            serde_json::to_value(&first)?,
+            serde_json::to_value(&second)?
+        );
+
+        tokio::time::sleep(Duration::from_millis(90)).await;
+        load_diagnostics_cached(&state).await?;
+        assert_eq!(
+            diagnostics_stat_calls(),
+            402,
+            "expired entry must recompute exactly one cold pass"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn diagnostics_cache_invalidation_fences_in_flight_store() -> anyhow::Result<()> {
+        let fixture = Fixture::new()?;
+        fixture.seed_stress_dashboard(2, 0, 0)?;
+        let payload = crate::query::Dashboard::open(fixture.store())?.diagnostics()?;
+        let cache = DiagnosticsCache::new(Duration::from_secs(60));
+
+        let stale_generation = cache.generation();
+        cache.invalidate();
+        assert!(
+            !cache.store_if_generation(payload.clone(), stale_generation),
+            "a cold read started before invalidation must not repopulate the cache"
+        );
+        assert!(cache.get_fresh().is_none());
+
+        let current_generation = cache.generation();
+        assert!(cache.store_if_generation(payload, current_generation));
+        assert!(cache.get_fresh().is_some());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn diagnostics_cache_detects_external_file_deletion_after_ttl() -> anyhow::Result<()> {
+        let fixture = Fixture::new()?;
+        fixture.seed_stress_dashboard(2, 0, 0)?;
+        let state = WebState::with_diagnostics_cache_ttl(
+            fixture.store().clone(),
+            JobRegistry::default(),
+            4,
+            Duration::from_millis(60),
+        );
+
+        let first = load_diagnostics_cached(&state).await?;
+        assert!(
+            first
+                .by_source
+                .iter()
+                .all(|source| source.missing_file_count == 0)
+        );
+
+        std::fs::remove_file(fixture.paths().root_dir.join("stress-files/file-0.jsonl"))?;
+
+        let cached = load_diagnostics_cached(&state).await?;
+        assert!(
+            cached
+                .by_source
+                .iter()
+                .all(|source| source.missing_file_count == 0),
+            "inside the TTL window the cached payload is still served"
+        );
+
+        tokio::time::sleep(Duration::from_millis(90)).await;
+        let recomputed = load_diagnostics_cached(&state).await?;
+        let codex = recomputed
+            .by_source
+            .iter()
+            .find(|source| source.source == "codex")
+            .expect("codex diagnostics row");
+        assert_eq!(
+            codex.missing_file_count, 1,
+            "after TTL expiry the externally deleted file is judged missing"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn diagnostics_cache_invalidates_when_sync_job_finishes() -> anyhow::Result<()> {
+        let fixture = Fixture::new()?;
+        fixture.seed_stress_dashboard(50, 0, 1)?;
+        let jobs = JobRegistry::default();
+        let state = WebState::with_diagnostics_cache_ttl(
+            fixture.store().clone(),
+            jobs.clone(),
+            4,
+            // Long TTL: only the sync terminal hook may clear this entry.
+            Duration::from_secs(3_600),
+        );
+
+        reset_diagnostics_stat_counter();
+        load_diagnostics_cached(&state).await?;
+        load_diagnostics_cached(&state).await?;
+        assert_eq!(diagnostics_stat_calls(), 50, "second load is a TTL hit");
+
+        let (job_id, _rx) = state.jobs.start(
+            &state.store,
+            SyncOptions {
+                // Parser-less source: the job touches no real parser scan
+                // roots and reaches a terminal state immediately.
+                source: Some("antigravity".to_string()),
+                ..Default::default()
+            },
+        );
+        let wait_started = Instant::now();
+        loop {
+            let terminal = state
+                .jobs
+                .snapshot(&job_id)
+                .map(|snapshot| {
+                    matches!(
+                        snapshot.status,
+                        JobStatus::Completed | JobStatus::Failed | JobStatus::Cancelled
+                    )
+                })
+                .unwrap_or(false);
+            if terminal {
+                break;
+            }
+            anyhow::ensure!(
+                wait_started.elapsed() < Duration::from_secs(30),
+                "sync job did not reach a terminal state in time"
+            );
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        // The hook fires synchronously right after the terminal state is set;
+        // a short settle keeps this assertion race-free.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        load_diagnostics_cached(&state).await?;
+        assert_eq!(
+            diagnostics_stat_calls(),
+            100,
+            "sync job terminal state must invalidate the cached diagnostics"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn diagnostics_cache_single_flight_computes_once_under_concurrency() -> anyhow::Result<()>
+    {
+        let fixture = Fixture::new()?;
+        fixture.seed_stress_dashboard(2_000, 0, 1)?;
+        let state = WebState::with_diagnostics_cache_ttl(
+            fixture.store().clone(),
+            JobRegistry::default(),
+            4,
+            Duration::from_secs(60),
+        );
+
+        reset_diagnostics_stat_counter();
+        // `join!` polls every waiter to the single-flight mutex before the
+        // first cold pass can finish, so all eight share one computation.
+        let results = tokio::join!(
+            load_diagnostics_cached(&state),
+            load_diagnostics_cached(&state),
+            load_diagnostics_cached(&state),
+            load_diagnostics_cached(&state),
+            load_diagnostics_cached(&state),
+            load_diagnostics_cached(&state),
+            load_diagnostics_cached(&state),
+            load_diagnostics_cached(&state),
+        );
+        let payloads = [
+            results.0?, results.1?, results.2?, results.3?, results.4?, results.5?, results.6?,
+            results.7?,
+        ];
+        let first = serde_json::to_value(&payloads[0])?;
+        for payload in &payloads {
+            assert_eq!(&serde_json::to_value(payload)?, &first);
+        }
+        assert_eq!(
+            diagnostics_stat_calls(),
+            2_000,
+            "8 concurrent cold loads must share exactly one stat pass"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn diagnostics_cache_is_shared_between_diagnostics_api_and_dashboard()
+    -> anyhow::Result<()> {
+        let fixture = Fixture::new()?;
+        fixture.seed_stress_dashboard(500, 0, 2)?;
+        let addr = serve(fixture.store().clone(), Some(0)).await?;
+
+        reset_diagnostics_stat_counter();
+        let (core_status, _core) =
+            route_json(addr, "GET", "/api/dashboard?scope=core", None).await?;
+        assert_eq!(core_status, StatusCode::OK);
+        let stats_after_core = diagnostics_stat_calls();
+        assert_eq!(stats_after_core, 500, "core dashboard warms the cache");
+
+        let (status, payload) = route_json(addr, "GET", "/api/diagnostics", None).await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(payload["by_source"].as_array().unwrap().len(), 3);
+        assert_eq!(
+            diagnostics_stat_calls(),
+            stats_after_core,
+            "/api/diagnostics must reuse the dashboard-warmed cache"
+        );
         Ok(())
     }
 
@@ -3783,6 +4307,258 @@ mod tests {
         .await?;
         assert_eq!(status, StatusCode::NOT_FOUND);
         assert_eq!(missing_cancel["error"]["code"], "job_not_found");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn asset_response_sets_etag_and_revalidates() -> anyhow::Result<()> {
+        let asset = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "app.js")
+            .expect("app.js asset");
+
+        let response = asset.as_response(&HeaderMap::new());
+        assert_eq!(response.status(), StatusCode::OK);
+        let etag = response
+            .headers()
+            .get(header::ETAG)
+            .and_then(|value| value.to_str().ok())
+            .expect("ETag header")
+            .to_string();
+        assert!(etag.starts_with('"') && etag.ends_with('"'));
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CACHE_CONTROL)
+                .and_then(|value| value.to_str().ok()),
+            Some("no-cache")
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            Some(asset.content_type)
+        );
+        let body = to_bytes(response.into_body(), usize::MAX).await?;
+        assert_eq!(body.as_ref(), asset.body.as_bytes());
+
+        // ETag 在进程内稳定，且不同资源互不相同。
+        let second = asset.as_response(&HeaderMap::new());
+        assert_eq!(
+            second
+                .headers()
+                .get(header::ETAG)
+                .and_then(|value| value.to_str().ok()),
+            Some(etag.as_str())
+        );
+        let other = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "components.css")
+            .expect("components.css asset")
+            .as_response(&HeaderMap::new());
+        assert_ne!(
+            other
+                .headers()
+                .get(header::ETAG)
+                .and_then(|value| value.to_str().ok()),
+            Some(etag.as_str())
+        );
+
+        // If-None-Match 命中（精确 / 弱校验 / 列表）返回 304 空 body。
+        for candidate in [
+            etag.clone(),
+            format!("W/{etag}"),
+            format!("\"0000000000000000\", {etag}"),
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert(header::IF_NONE_MATCH, HeaderValue::from_str(&candidate)?);
+            let response = asset.as_response(&headers);
+            assert_eq!(response.status(), StatusCode::NOT_MODIFIED, "{candidate}");
+            assert_eq!(
+                response
+                    .headers()
+                    .get(header::ETAG)
+                    .and_then(|value| value.to_str().ok()),
+                Some(etag.as_str())
+            );
+            assert_eq!(
+                response
+                    .headers()
+                    .get(header::CACHE_CONTROL)
+                    .and_then(|value| value.to_str().ok()),
+                Some("no-cache")
+            );
+            let body = to_bytes(response.into_body(), usize::MAX).await?;
+            assert!(body.is_empty(), "{candidate}");
+        }
+
+        // 未命中时回退到 200 全量响应。
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::IF_NONE_MATCH,
+            HeaderValue::from_static("\"0000000000000000\""),
+        );
+        let response = asset.as_response(&headers);
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await?;
+        assert_eq!(body.as_ref(), asset.body.as_bytes());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn served_assets_support_etag_revalidation() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let addr = serve(store, Some(0)).await?;
+
+        let (status, head, body) = route_bytes(addr, "/assets/app.js", &[]).await?;
+        assert_eq!(status, StatusCode::OK);
+        let etag = response_header(&head, "etag")
+            .expect("ETag header")
+            .to_string();
+        assert_eq!(response_header(&head, "cache-control"), Some("no-cache"));
+        let expected = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "app.js")
+            .expect("app.js asset")
+            .body;
+        assert_eq!(body, expected.as_bytes());
+
+        let (status, head, body) =
+            route_bytes(addr, "/assets/app.js", &[("If-None-Match", &etag)]).await?;
+        assert_eq!(status, StatusCode::NOT_MODIFIED);
+        assert_eq!(response_header(&head, "etag"), Some(etag.as_str()));
+        assert!(body.is_empty());
+
+        let (status, _, body) = route_bytes(
+            addr,
+            "/assets/app.js",
+            &[("If-None-Match", "\"0000000000000000\"")],
+        )
+        .await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, expected.as_bytes());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn served_assets_and_api_negotiate_compression() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let addr = serve(store, Some(0)).await?;
+
+        let app_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "app.js")
+            .expect("app.js asset")
+            .body;
+
+        // 不带 Accept-Encoding：原文直出，无 Content-Encoding。
+        let (status, head, identity) = route_bytes(addr, "/assets/app.js", &[]).await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(response_header(&head, "content-encoding"), None);
+        assert_eq!(identity, app_js.as_bytes());
+
+        // gzip 协商：带 Content-Encoding，gzip magic，且体积更小。
+        let (status, head, gzipped) =
+            route_bytes(addr, "/assets/app.js", &[("Accept-Encoding", "gzip")]).await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(response_header(&head, "content-encoding"), Some("gzip"));
+        assert_eq!(&gzipped[..2], &[0x1f, 0x8b]);
+        assert!(gzipped.len() < identity.len());
+
+        // br 协商同理（brotli 无 magic，只校验协商与体积）。
+        let (status, head, brotli) =
+            route_bytes(addr, "/assets/app.js", &[("Accept-Encoding", "br")]).await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(response_header(&head, "content-encoding"), Some("br"));
+        assert!(brotli.len() < identity.len());
+
+        // 客户端显式拒绝 gzip 时保持 identity。
+        let (status, head, plain) =
+            route_bytes(addr, "/assets/app.js", &[("Accept-Encoding", "gzip;q=0")]).await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(response_header(&head, "content-encoding"), None);
+        assert_eq!(plain, app_js.as_bytes());
+
+        // JSON API 同样参与压缩协商，但不新增缓存头。
+        let (status, head, _) =
+            route_bytes(addr, "/api/dashboard", &[("Accept-Encoding", "gzip")]).await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(response_header(&head, "content-encoding"), Some("gzip"));
+        let (status, head, _) = route_bytes(addr, "/api/dashboard", &[]).await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(response_header(&head, "content-encoding"), None);
+        assert_eq!(response_header(&head, "cache-control"), None);
+        assert_eq!(response_header(&head, "etag"), None);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn served_index_body_is_stable_across_requests() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let addr = serve(store, Some(0)).await?;
+
+        let (first_status, first) = route_text(addr, "GET", "/").await?;
+        let (second_status, second) = route_text(addr, "GET", "/").await?;
+        assert_eq!(first_status, StatusCode::OK);
+        assert_eq!(second_status, StatusCode::OK);
+        assert_eq!(first, second);
+        assert!(first.contains("data-mode=\"live\""));
+        Ok(())
+    }
+
+    /// Times one full dashboard request with generous measurement timeouts.
+    async fn timed_full_request(addr: SocketAddr) -> anyhow::Result<(StatusCode, Duration)> {
+        let started = Instant::now();
+        let raw = tokio::task::spawn_blocking(move || {
+            let mut stream = std::net::TcpStream::connect(addr)?;
+            stream.set_read_timeout(Some(Duration::from_secs(60)))?;
+            stream.set_write_timeout(Some(Duration::from_secs(10)))?;
+            stream.write_all(
+                format!(
+                    "GET /api/dashboard?scope=full HTTP/1.1\r\n\
+                     Host: {addr}\r\n\
+                     Accept: application/json\r\n\
+                     Connection: close\r\n\r\n"
+                )
+                .as_bytes(),
+            )?;
+            let mut raw = String::new();
+            stream.read_to_string(&mut raw)?;
+            Ok::<_, anyhow::Error>(raw)
+        })
+        .await??;
+        let elapsed = started.elapsed();
+        let status_code = raw
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .and_then(|code| code.parse::<u16>().ok())
+            .ok_or_else(|| anyhow::anyhow!("invalid response: {raw:?}"))?;
+        Ok((StatusCode::from_u16(status_code)?, elapsed))
+    }
+
+    /// Measurement-only baseline for two concurrent full dashboard requests.
+    /// Run explicitly: `cargo test --lib measure_stress_double_full_concurrency -- --ignored --nocapture --test-threads=1`
+    #[tokio::test]
+    #[ignore = "measurement test; run explicitly for baseline/after reports"]
+    async fn measure_stress_double_full_concurrency() -> anyhow::Result<()> {
+        let fixture = crate::testing::Fixture::new()?;
+        fixture.seed_stress_dashboard(4_000, 1_000, 25)?;
+        let addr = serve(fixture.store().clone(), Some(0)).await?;
+
+        let (single_status, single_elapsed) = timed_full_request(addr).await?;
+        eprintln!("single full status={single_status} elapsed={single_elapsed:?}");
+        assert_eq!(single_status, StatusCode::OK);
+
+        let pair_started = Instant::now();
+        let (first, second) = tokio::join!(timed_full_request(addr), timed_full_request(addr));
+        let pair_wall = pair_started.elapsed();
+        let (first_status, first_elapsed) = first?;
+        let (second_status, second_elapsed) = second?;
+        eprintln!("concurrent full A status={first_status} elapsed={first_elapsed:?}");
+        eprintln!("concurrent full B status={second_status} elapsed={second_elapsed:?}");
+        eprintln!("concurrent pair wall={pair_wall:?}");
         Ok(())
     }
 

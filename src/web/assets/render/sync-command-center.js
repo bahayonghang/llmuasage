@@ -81,15 +81,19 @@ function displayKey(key, fallback) {
   return getShellCopy(key || '') || fallback || key || '--';
 }
 
+function formatMetricValue(value) {
+  return value == null ? '--' : formatNumber(value);
+}
+
 function metricCards(center, running) {
   const copy = UI_COPY.sections.syncCenter;
   const metrics = center?.metrics || {};
   const runningSummary = running?.summary || null;
   const runningStats = running?.stats || null;
   const values = {
-    eventsSeen: runningSummary?.total_seen ?? runningStats?.events_seen ?? metrics.events_seen,
-    insertedDelta: runningSummary?.total_inserted ?? runningStats?.events_inserted ?? metrics.inserted_delta,
-    storedEvents: runningSummary?.stored_events ?? runningStats?.stored_events ?? metrics.stored_events,
+    eventsSeen: formatMetricValue(runningSummary?.total_seen ?? runningStats?.events_seen ?? metrics.events_seen),
+    insertedDelta: formatMetricValue(runningSummary?.total_inserted ?? runningStats?.events_inserted ?? metrics.inserted_delta),
+    storedEvents: formatMetricValue(runningSummary?.stored_events ?? runningStats?.stored_events ?? metrics.stored_events),
     sourcesReady: metrics.sources_total ? `${formatNumber(metrics.sources_ready)} / ${formatNumber(metrics.sources_total)}` : '--',
   };
 
@@ -369,11 +373,14 @@ export function renderSyncCommandCenter(context, state) {
     </details>
   `;
 
-  host.querySelectorAll('[data-sync-command-center-action]').forEach((button) => {
-    button.addEventListener('click', () => {
+  // 容器级一次委托：host 的 innerHTML 重建不影响其上的监听器，避免逐节点重复绑定。
+  if (host.dataset.actionDelegateBound !== 'true') {
+    host.addEventListener('click', (event) => {
+      if (!event.target.closest('[data-sync-command-center-action]')) return;
       document.getElementById('btn-sync')?.click();
     });
-  });
+    host.dataset.actionDelegateBound = 'true';
+  }
 
   logger.info('完成同步命令中心渲染');
 }

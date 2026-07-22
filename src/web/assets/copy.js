@@ -39,18 +39,27 @@ const UI_COPY_ZH = Object.freeze({
       total: Object.freeze({
         label: '总用量',
         body: '累计 Token',
+        footRawLabel: '累计 Token',
+        footLeaderLabel: '用量最高模型',
       }),
       last24h: Object.freeze({
         label: '近 24 小时',
         body: '最近 24 小时总量',
+        footRawLabel: '原始值',
+        footAverageLabel: '平均每段',
+        bucketUnit: '段',
       }),
       sources: Object.freeze({
         label: '来源数',
         body: '已记录来源',
+        footPrimaryLabel: '主要来源',
+        footLastLabel: '最近记录',
       }),
       cost: Object.freeze({
         label: '估算成本',
         body: '累计成本',
+        footRawLabel: '累计成本',
+        footTopLabel: '最高',
       }),
     }),
     error: Object.freeze({
@@ -252,18 +261,27 @@ const UI_COPY_EN = Object.freeze({
       total: Object.freeze({
         label: 'Total',
         body: 'Cumulative tokens',
+        footRawLabel: 'Cumulative tokens',
+        footLeaderLabel: 'Top model',
       }),
       last24h: Object.freeze({
         label: 'Last 24h',
         body: 'Tokens in last 24 hours',
+        footRawLabel: 'Raw value',
+        footAverageLabel: 'Avg per bucket',
+        bucketUnit: 'buckets',
       }),
       sources: Object.freeze({
         label: 'Sources',
         body: 'Recorded sources',
+        footPrimaryLabel: 'Top source',
+        footLastLabel: 'Last seen',
       }),
       cost: Object.freeze({
         label: 'Est. cost',
         body: 'Cumulative cost',
+        footRawLabel: 'Cumulative cost',
+        footTopLabel: 'Top',
       }),
     }),
     error: Object.freeze({
@@ -862,9 +880,17 @@ const STATUS_LABEL_EN = Object.freeze({
  * 1) 默认按 localStorage 决定首屏语言
  * 2) setLocale 保存、切换 UI_COPY 引用、广播事件
  * 3) onLocaleChange 让 toggle 触发后所有渲染层都能 rerender
+ * 4) document.documentElement.lang 随 locale 同步（zh-CN / en）
  */
 let currentLocale = readStoredLocale();
 const localeListeners = new Set();
+
+function syncDocumentLang(locale) {
+  if (typeof document === 'undefined' || !document.documentElement) return;
+  document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en';
+}
+
+syncDocumentLang(currentLocale);
 
 function readStoredLocale() {
   try {
@@ -906,6 +932,7 @@ export function setLocale(locale) {
   // 4.2 更新内部状态并写存储
   currentLocale = next;
   UI_COPY = uiCopyFor(next);
+  syncDocumentLang(next);
   try {
     window.localStorage?.setItem(LOCALE_STORAGE_KEY, next);
   } catch (_err) {

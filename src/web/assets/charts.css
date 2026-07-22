@@ -10,11 +10,13 @@
 .trend-grid-lines {
   stroke: color-mix(in oklab, var(--dark-text) 8%, transparent);
   stroke-dasharray: 2 4;
+  vector-effect: non-scaling-stroke;
 }
 
 .trend-baseline {
   stroke: color-mix(in oklab, var(--dark-text) 28%, transparent);
   stroke-width: 1.2;
+  vector-effect: non-scaling-stroke;
 }
 
 .trend-bar-hit {
@@ -50,7 +52,7 @@
 .trend-axis-label {
   fill: var(--dark-muted);
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: 10.5px;
 }
 
 .trend-empty-title {

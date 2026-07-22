@@ -185,6 +185,97 @@ impl Fixture {
         Ok(())
     }
 
+    /// Seeds a stress-scale dashboard dataset used by performance measurement
+    /// and cache tests: `existing_files`/`missing_files` `source_file` rows
+    /// (the former backed by real files created under the fixture root so
+    /// `Path::exists` pays a real stat cost), plus `models` distinct models
+    /// with `usage_bucket_30m` and `usage_turn` rows for compare queries.
+    pub fn seed_stress_dashboard(
+        &self,
+        existing_files: usize,
+        missing_files: usize,
+        models: usize,
+    ) -> Result<()> {
+        let conn = self.store.open_connection()?;
+        let files_root = self.paths().root_dir.join("stress-files");
+        std::fs::create_dir_all(&files_root)?;
+        let now = "2026-05-05T00:00:00Z";
+        let sources = ["codex", "claude", "opencode"];
+
+        conn.execute_batch("BEGIN")?;
+        let seed_result = (|| -> Result<()> {
+            for idx in 0..existing_files {
+                let path = files_root.join(format!("file-{idx}.jsonl"));
+                std::fs::write(&path, b"{}\n")?;
+                conn.execute(
+                    "INSERT OR REPLACE INTO source_file(source, file_path, state, last_seen_at, last_state_change_at) VALUES (?1, ?2, 'live', ?3, ?3)",
+                    params![sources[idx % sources.len()], path.display().to_string(), now],
+                )?;
+            }
+            for idx in 0..missing_files {
+                let path = files_root.join(format!("missing-{idx}.jsonl"));
+                conn.execute(
+                    "INSERT OR REPLACE INTO source_file(source, file_path, state, last_seen_at, last_state_change_at) VALUES (?1, ?2, 'live', ?3, ?3)",
+                    params![sources[idx % sources.len()], path.display().to_string(), now],
+                )?;
+            }
+            for model_idx in 0..models {
+                let source = sources[model_idx % sources.len()];
+                let model = format!("stress-model-{model_idx:02}");
+                for bucket_idx in 0..4 {
+                    let hour_start = format!("2026-05-{:02}T00:00:00Z", 1 + bucket_idx);
+                    conn.execute(
+                        r#"
+                        INSERT INTO usage_bucket_30m(
+                            source, model, hour_start, project_hash, project_label, project_ref,
+                            input_tokens, cache_read_tokens, cache_creation_tokens,
+                            output_tokens, reasoning_output_tokens, total_tokens,
+                            cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source,
+                            event_count, updated_at
+                        ) VALUES (?1, ?2, ?3, 'project-stress', 'Project Stress', NULL,
+                            100, 0, 0, 50, 0, 150, 0.05, 0.05, 'static', 'static-v1',
+                            6, ?4)
+                        "#,
+                        params![source, model, hour_start, now],
+                    )?;
+                }
+                for turn_idx in 0..30 {
+                    conn.execute(
+                        r#"
+                        INSERT INTO usage_turn(
+                            turn_key, source, session_id, source_path_hash, project_hash,
+                            primary_model, started_at, category, has_edits, retries,
+                            one_shot, call_count, input_tokens, cache_read_tokens,
+                            cache_creation_tokens, output_tokens, reasoning_output_tokens,
+                            total_tokens, created_at
+                        ) VALUES (?1, ?2, 'session-stress', 'path-stress',
+                            'project-stress', ?3, '2026-05-01T00:00:00Z', 'coding',
+                            ?4, 0, 1, 1, 100, 0, 0, 50, 0, 150, ?5)
+                        "#,
+                        params![
+                            format!("turn:stress:{model_idx}:{turn_idx}"),
+                            source,
+                            model,
+                            (turn_idx % 2) as i64,
+                            now
+                        ],
+                    )?;
+                }
+            }
+            Ok(())
+        })();
+        match seed_result {
+            Ok(()) => {
+                conn.execute_batch("COMMIT")?;
+                Ok(())
+            }
+            Err(err) => {
+                let _ = conn.execute_batch("ROLLBACK");
+                Err(err)
+            }
+        }
+    }
+
     /// Seeds dashboard-heavy tables with deterministic synthetic rows.
     pub fn seed_dashboard(&self, rows: usize) -> Result<()> {
         let conn = self.store.open_connection()?;

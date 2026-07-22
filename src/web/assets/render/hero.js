@@ -3,6 +3,30 @@ import { escapeHtml, formatNumber, statusTone } from '../data.js';
 import { buildKpis } from '../data/derive.js';
 
 const logger = window.console;
+const STATUS_PANEL_MOBILE_QUERY = '(max-width: 720px)';
+let statusPanelMediaQuery = null;
+let statusPanelMediaBound = false;
+
+function syncStatusPanelDisclosure() {
+  const details = document.querySelector('.status-panel-details');
+  if (details && statusPanelMediaQuery) {
+    details.open = !statusPanelMediaQuery.matches;
+  }
+}
+
+function ensureStatusPanelResponsive() {
+  if (!window.matchMedia) return;
+  statusPanelMediaQuery ||= window.matchMedia(STATUS_PANEL_MOBILE_QUERY);
+  if (!statusPanelMediaBound) {
+    if (statusPanelMediaQuery.addEventListener) {
+      statusPanelMediaQuery.addEventListener('change', syncStatusPanelDisclosure);
+    } else {
+      statusPanelMediaQuery.addListener(syncStatusPanelDisclosure);
+    }
+    statusPanelMediaBound = true;
+  }
+  syncStatusPanelDisclosure();
+}
 
 function supportedSourcesLabel() {
   const value = document.body?.dataset?.supportedSources || '';
@@ -52,6 +76,8 @@ export function renderHero(context) {
   const { health } = context;
   const panelTone = ledgerSummary.failure_count > 0 ? 'warn' : 'good';
   const statusLabel = ledgerSummary.failure_count > 0 ? heroCopy.statusWarn : heroCopy.statusOk;
+  const statusPanelSummary = `${heroCopy.statusTitle} · ${statusLabel} ${health.ready_integrations}/${health.total_integrations}`;
+  const statusPanelOpen = !window.matchMedia?.(STATUS_PANEL_MOBILE_QUERY).matches;
 
   const integrationRows = (health.integrations || [])
     .slice(0, 3)
@@ -69,31 +95,35 @@ export function renderHero(context) {
     .join('');
 
   document.getElementById('status-panel').innerHTML = `
-    <div class="status-panel-head">
-      <div>
-        <div class="status-eyebrow">${escapeHtml(heroCopy.statusEyebrow)}</div>
-        <div class="status-panel-title">${escapeHtml(heroCopy.statusTitle)}</div>
+    <details class="status-panel-details" ${statusPanelOpen ? 'open' : ''}>
+      <summary class="status-panel-summary"><span>${escapeHtml(statusPanelSummary)}</span></summary>
+      <div class="status-panel-head">
+        <div>
+          <div class="status-eyebrow">${escapeHtml(heroCopy.statusEyebrow)}</div>
+          <div class="status-panel-title">${escapeHtml(heroCopy.statusTitle)}</div>
+        </div>
+        <span class="status-pill" data-tone="${panelTone}"><span class="pulse"></span>${escapeHtml(statusLabel)}</span>
       </div>
-      <span class="status-pill" data-tone="${panelTone}"><span class="pulse"></span>${escapeHtml(statusLabel)}</span>
-    </div>
-    <div class="status-grid">
-      <div class="status-cell">
-        <div class="status-cell-label">${escapeHtml(heroCopy.cell.integrations)}</div>
-        <div class="status-cell-value">${health.ready_integrations} / ${health.total_integrations}</div>
+      <div class="status-grid">
+        <div class="status-cell">
+          <div class="status-cell-label">${escapeHtml(heroCopy.cell.integrations)}</div>
+          <div class="status-cell-value">${health.ready_integrations} / ${health.total_integrations}</div>
+        </div>
+        <div class="status-cell">
+          <div class="status-cell-label">${escapeHtml(heroCopy.cell.cursors)}</div>
+          <div class="status-cell-value">${formatNumber(health.cursor_count ?? health.cursors?.length ?? 0)}</div>
+        </div>
+        <div class="status-cell">
+          <div class="status-cell-label">${escapeHtml(heroCopy.cell.failures)}</div>
+          <div class="status-cell-value">${ledgerSummary.failure_count}</div>
+        </div>
       </div>
-      <div class="status-cell">
-        <div class="status-cell-label">${escapeHtml(heroCopy.cell.cursors)}</div>
-        <div class="status-cell-value">${formatNumber(health.cursor_count ?? health.cursors?.length ?? 0)}</div>
+      <div class="status-list">
+        ${integrationRows}
       </div>
-      <div class="status-cell">
-        <div class="status-cell-label">${escapeHtml(heroCopy.cell.failures)}</div>
-        <div class="status-cell-value">${ledgerSummary.failure_count}</div>
-      </div>
-    </div>
-    <div class="status-list">
-      ${integrationRows}
-    </div>
+    </details>
   `;
+  ensureStatusPanelResponsive();
 
   // 1.3 填充 4 张 KPI 卡
   const kpis = buildKpis(context);
@@ -105,11 +135,8 @@ export function renderHero(context) {
         <div class="kpi-label">${escapeHtml(kpi.label)}</div>
         <div class="kpi-value num">${escapeHtml(kpi.value)}<span class="unit">${escapeHtml(kpi.unit)}</span></div>
         <div class="kpi-foot">
-          ${kpi.foot.map((line) => `<span>${escapeHtml(line)}</span>`).join('')}
+          ${kpi.foot.map((line) => `<span>${escapeHtml(line.label)} · <strong class="num">${escapeHtml(line.value)}</strong></span>`).join('')}
         </div>
-        <svg class="kpi-spark" width="62" height="22" viewBox="0 0 62 22" fill="none">
-          <polyline points="0,18 10,16 18,10 26,12 34,4 42,7 50,3 62,1" stroke="var(--data-accent-deep)" stroke-width="1.5" fill="none"/>
-        </svg>
       </div>
     `,
     )

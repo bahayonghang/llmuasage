@@ -113,7 +113,7 @@ function renderToolsTable(rows, support) {
   `;
 }
 
-function renderOptimize(optimize) {
+function writeOptimize(optimize, refreshing = false) {
   const support = optimize?.support;
   const findings = Array.isArray(optimize?.findings) ? optimize.findings : [];
   const grade = optimize?.grade || '--';
@@ -145,14 +145,14 @@ function renderOptimize(optimize) {
   const host = document.getElementById('optimize-findings');
   if (!host) return;
   if (!findings.length) {
-    host.innerHTML = emptyState(
+    host.innerHTML = refreshNotice(refreshing) + emptyState(
       support,
       '暂无 optimize finding；建议仅基于 normalized facts 生成，不会自动执行清理。',
       true,
     );
     return;
   }
-  host.innerHTML = findings
+  host.innerHTML = refreshNotice(refreshing) + findings
     .slice(0, 4)
     .map((finding) => `
       <div class="finding-card" data-severity="${escapeHtml(finding.severity || 'low')}">
@@ -178,7 +178,7 @@ function metricValue(metric, key) {
   return formatNumber(value);
 }
 
-function renderCompare(compare) {
+function writeCompare(compare, refreshing = false) {
   const host = document.getElementById('compare-panel');
   if (!host) return;
   const support = compare?.support;
@@ -188,7 +188,7 @@ function renderCompare(compare) {
   const right = compare?.model_b?.model || '--';
   const warning = compare?.warning || support?.reason || '';
   if (!metrics.length) {
-    host.innerHTML = emptyState(
+    host.innerHTML = refreshNotice(refreshing) + emptyState(
       support,
       '至少需要两个模型才会显示 compare；低样本会以 warning 形式显式降级。',
       true,
@@ -203,7 +203,7 @@ function renderCompare(compare) {
     </tr>
   `).join('');
   host.innerHTML = `
-    ${warning ? `<div class="empty-state compact">${escapeHtml(warning)}</div>` : ''}
+    ${refreshNotice(refreshing)}${warning ? `<div class="empty-state compact">${escapeHtml(warning)}</div>` : ''}
     <table class="panel-table">
       <thead>
         <tr>
@@ -219,54 +219,82 @@ function renderCompare(compare) {
 
 /*
  * ========================================================================
- * 步骤1：渲染行为分析区
+ * 步骤1：渲染行为分析区（按 section 拆分）
  * ========================================================================
  * 目标：
- * 1) 展示 normalized activity 和 tool facts 的首批聚合
+ * 1) 每个 secondary section 只写自己的子容器，secondary 到达互不重渲
  * 2) 对 no_data/unsupported 状态显式降级，不伪造零值
- * 3) 保持只读分析，不提供破坏性优化动作
+ * 3) stale/refreshing 元数据（secondary_refreshing）在各 section 内原样保留
+ * 4) dirty-check 由调用方（app.js 面板注册表）按数据指纹完成，这里只写 DOM
  */
-export function renderBehavior(context) {
-  logger.info('开始渲染行为分析区');
-
+export function renderActivity(context) {
   const { panels } = context;
   const activityRows = panels.activity || [];
-  const toolRows = panels.tools || [];
   const activitySupport = panels.activity_support;
-  const toolsSupport = panels.tools_support;
-  const optimize = panels.optimize;
-  const compare = panels.compare;
   const refreshing = Boolean(panels.secondary_refreshing);
 
-  document.getElementById('activity-support').textContent = refreshing ? 'refreshing' : supportLabel(activitySupport);
-  document.getElementById('tools-support').textContent = refreshing ? 'refreshing' : supportLabel(toolsSupport);
-
-  document.getElementById('activity-bars').innerHTML = renderBars(
-    activityRows,
-    'turns',
-    (row) => row.category || '--',
-    (row) => `${formatCompact(row.turns)} turns`,
-  );
-  document.getElementById('activity-table').innerHTML = renderActivityTable(
-    activityRows,
-    activitySupport,
-  ) + refreshNotice(refreshing);
-
-  document.getElementById('tools-bars').innerHTML = renderBars(
-    toolRows,
-    'calls',
-    (row) => row.mcp_server ? `${row.mcp_server} / ${row.tool_name}` : row.tool_name || '--',
-    (row) => `${formatCompact(row.calls)} calls`,
-  );
-  document.getElementById('tools-table').innerHTML = renderToolsTable(toolRows, toolsSupport) + refreshNotice(refreshing);
-  renderOptimize(optimize);
-  renderCompare(compare);
-  if (refreshing) {
-    const optimizeHost = document.getElementById('optimize-findings');
-    if (optimizeHost) optimizeHost.insertAdjacentHTML('afterbegin', refreshNotice(true));
-    const compareHost = document.getElementById('compare-panel');
-    if (compareHost) compareHost.insertAdjacentHTML('afterbegin', refreshNotice(true));
+  const supportEl = document.getElementById('activity-support');
+  if (supportEl) {
+    supportEl.textContent = refreshing ? 'refreshing' : supportLabel(activitySupport);
   }
 
+  const bars = document.getElementById('activity-bars');
+  if (bars) {
+    bars.innerHTML = renderBars(
+      activityRows,
+      'turns',
+      (row) => row.category || '--',
+      (row) => `${formatCompact(row.turns)} turns`,
+    );
+  }
+
+  const table = document.getElementById('activity-table');
+  if (table) {
+    table.innerHTML = renderActivityTable(activityRows, activitySupport) + refreshNotice(refreshing);
+  }
+}
+
+export function renderTools(context) {
+  const { panels } = context;
+  const toolRows = panels.tools || [];
+  const toolsSupport = panels.tools_support;
+  const refreshing = Boolean(panels.secondary_refreshing);
+
+  const supportEl = document.getElementById('tools-support');
+  if (supportEl) {
+    supportEl.textContent = refreshing ? 'refreshing' : supportLabel(toolsSupport);
+  }
+
+  const bars = document.getElementById('tools-bars');
+  if (bars) {
+    bars.innerHTML = renderBars(
+      toolRows,
+      'calls',
+      (row) => row.mcp_server ? `${row.mcp_server} / ${row.tool_name}` : row.tool_name || '--',
+      (row) => `${formatCompact(row.calls)} calls`,
+    );
+  }
+
+  const table = document.getElementById('tools-table');
+  if (table) {
+    table.innerHTML = renderToolsTable(toolRows, toolsSupport) + refreshNotice(refreshing);
+  }
+}
+
+export function renderOptimize(context) {
+  writeOptimize(context?.panels?.optimize, Boolean(context?.panels?.secondary_refreshing));
+}
+
+export function renderCompare(context) {
+  writeCompare(context?.panels?.compare, Boolean(context?.panels?.secondary_refreshing));
+}
+
+// 全量路径（首屏 / 整页重渲）仍一次渲染全部 4 个 section。
+export function renderBehavior(context) {
+  logger.info('开始渲染行为分析区');
+  renderActivity(context);
+  renderTools(context);
+  renderOptimize(context);
+  renderCompare(context);
   logger.info('完成行为分析区渲染');
 }
