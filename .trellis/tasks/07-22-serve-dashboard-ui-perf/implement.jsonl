@@ -1,0 +1,4 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/llmusage/backend/dashboard-performance-contracts.md", "reason": "interactive/core/full scope 契约、性能预算与缓存/并发/取消语义，P1 性能项必须遵守"}
+{"file": ".trellis/spec/llmusage/backend/web-server-contracts.md", "reason": "serve 监听与浏览器策略边界，本任务不得改动"}
+{"file": "docs/agents/domain.md", "reason": "领域模型与分层约定，改 query/web 层前必读"}
