@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 26
+- **Total Sessions**: 27
 - **Last Active**: 2026-07-22
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~883 | Active |
+| `journal-1.md` | ~918 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 27 | 2026-07-22 | 完成 serve 看板视觉与性能优化 | `2c871b6`, `42e45d0`, `62c135e` | `dev` |
 | 26 | 2026-07-22 | 修复 daily cache 统计与汇总展示 | `ebcbbdd420268dabd17778696898ae5523852f2c` | `dev` |
 | 25 | 2026-07-22 | ccusage 报表对齐与来源聚焦视图 | `f3567c1` | `dev` |
 | 24 | 2026-07-21 | 优化 serve 远程监听与 SSH 启动 | `13a8867` | `dev` |
