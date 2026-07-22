@@ -815,3 +815,36 @@ Claude/Codex 以 planned replay 文件数显示 5Hz 解析进度，TTY 显示提
 ### Next Steps
 
 - None - task complete
+
+
+## Session 25: ccusage 报表对齐与来源聚焦视图
+
+**Date**: 2026-07-22
+**Task**: ccusage 报表对齐与来源聚焦视图
+**Branch**: `dev`
+
+### Summary
+
+完成统一 Agent 报表、weekly、no-cost、sections、双日期格式与四来源 focused 子命令，并通过 just ci。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f3567c1` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
