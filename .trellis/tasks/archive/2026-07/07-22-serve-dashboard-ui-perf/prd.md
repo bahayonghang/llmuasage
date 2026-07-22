@@ -59,7 +59,7 @@
 
 ## 父任务验收（全部子任务完成后核对）
 
-- [ ] 5 个子任务均 archive 且各自验收项通过。
+- [x] 5 个子任务均 archive 且各自验收项通过。
 - [x] 汇总证据：viewport 矩阵截图、benchmark 报告、304/压缩 curl 证据、stat 计数证明、`just ci` 记录。
 - [x] docs/dashboard 中英文页面反映最终状态；spec 有新增约定时回写 `.trellis/spec/llmusage/backend/`。
 
