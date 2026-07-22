@@ -59,6 +59,20 @@ unified_report::{report_json, focused_report_json}(..., no_cost) -> JSON
   than comma-separated raw counts. The final `Total` row is preceded by the
   deterministic double-line separator `╞═╪═╡`; neither behavior depends on
   terminal color support.
+- Unified and focused human tables render a zero `Cache Create` or `Cache Read`
+  cell as the `-` placeholder (`format_cache_cell`), signalling that the source
+  does not report that metric rather than an observed zero. Codex/OpenAI and
+  OpenAI-compatible sources never report cache creation, so their `Cache Create`
+  is always `-`; this matches ccusage, which hardcodes `cacheCreationTokens: 0`.
+  The placeholder is presentation-only: CLI JSON keeps the numeric `0`, and the
+  `Total Tokens` visible-channel sum still uses the underlying zero.
+- Unified/focused human-table color is a `ColorMode`-gated projection. When
+  color is enabled, the header and final `Total` row are bold and `-` cache
+  placeholders in right-aligned columns are dimmed; unified tables keep
+  per-source Agent-label coloring and use no single accent color, while focused
+  tables accent with the source color. `ColorMode::Never`, `NO_COLOR`,
+  `LLMUSAGE_NO_COLOR`, and non-TTY output emit plain text with no ANSI, and CLI
+  JSON is never styled.
 - `llmusage <source> <period>` injects the matching `ReportFilter.source` and
   uses the shared loader. Focused reports lift the matching source row after
   query loading, then render without `Agent`/`Detected`; focused JSON has no
@@ -68,18 +82,18 @@ unified_report::{report_json, focused_report_json}(..., no_cost) -> JSON
 
 ### 4. Validation & Error Matrix
 
-| Condition | Required result |
-| --- | --- |
-| `--since` or `--until` uses `YYYYMMDD` or `YYYY-MM-DD` | Parse to the identical inclusive date filter |
-| A focused command also has the same `--source` | Accept it |
-| A focused command has a different `--source` | Fail with a conflict that names the explicit source |
-| Focused `daily --instances` | Fail; project-instance output is not a focused unified projection |
-| `daily --instances --sections ...` or `session --id ... --sections ...` | Fail with the existing incompatible-option error |
-| Source host requests `blocks` | Clap rejects it; `blocks` remains top-level only |
-| Focused source has no matching rows | Render the ordinary empty report state, not an error |
-| Persisted `total_tokens` exceeds the four visible token channels | Text uses the visible-channel sum; JSON retains persisted `totalTokens` |
-| A visible token sum approaches `i64::MAX` | Saturate instead of overflowing or panicking |
-| Human token value crosses a unit boundary | Render with the shared compact formatter and stable `K`/`M`/`B` rounding |
+| Condition                                                               | Required result                                                          |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `--since` or `--until` uses `YYYYMMDD` or `YYYY-MM-DD`                  | Parse to the identical inclusive date filter                             |
+| A focused command also has the same `--source`                          | Accept it                                                                |
+| A focused command has a different `--source`                            | Fail with a conflict that names the explicit source                      |
+| Focused `daily --instances`                                             | Fail; project-instance output is not a focused unified projection        |
+| `daily --instances --sections ...` or `session --id ... --sections ...` | Fail with the existing incompatible-option error                         |
+| Source host requests `blocks`                                           | Clap rejects it; `blocks` remains top-level only                         |
+| Focused source has no matching rows                                     | Render the ordinary empty report state, not an error                     |
+| Persisted `total_tokens` exceeds the four visible token channels        | Text uses the visible-channel sum; JSON retains persisted `totalTokens`  |
+| A visible token sum approaches `i64::MAX`                               | Saturate instead of overflowing or panicking                             |
+| Human token value crosses a unit boundary                               | Render with the shared compact formatter and stable `K`/`M`/`B` rounding |
 
 ### 5. Good/Base/Bad Cases
 

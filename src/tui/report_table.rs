@@ -80,9 +80,11 @@ pub fn render_daily_summary_table(
     render_table_styled(
         &daily_summary_columns(compact),
         &table_rows,
-        Some(DailyTableStyle {
-            source: SourceKind::Codex,
+        Some(TableStyle {
             color_mode,
+            accent: Some(source_color(SourceKind::Codex)),
+            notes_dim: true,
+            dim_placeholders: false,
         }),
     )
 }
@@ -125,9 +127,15 @@ pub fn render_unified_table(
             detected.join(", ")
         }
     );
-    let table = render_table(
+    let table = render_table_styled(
         &unified_columns(report.kind.first_column(), compact, no_cost),
         &table_rows,
+        Some(TableStyle {
+            color_mode,
+            accent: None,
+            notes_dim: false,
+            dim_placeholders: true,
+        }),
     );
     format!(
         "{title}\n{}",
@@ -163,9 +171,15 @@ pub fn render_focused_table(
     );
     format!(
         "{title}\n{}",
-        render_table(
+        render_table_styled(
             &focused_columns(report.kind.first_column(), compact, no_cost),
             &table_rows,
+            Some(TableStyle {
+                color_mode,
+                accent: Some(source_color(source)),
+                notes_dim: false,
+                dim_placeholders: true,
+            }),
         )
     )
 }
@@ -186,7 +200,12 @@ pub fn render_daily_source_table_styled(
     render_table_styled(
         &daily_source_columns(),
         &daily_source_table_rows(rows, totals),
-        Some(DailyTableStyle { source, color_mode }),
+        Some(TableStyle {
+            color_mode,
+            accent: Some(source_color(source)),
+            notes_dim: true,
+            dim_placeholders: false,
+        }),
     )
 }
 
@@ -640,8 +659,8 @@ fn unified_row(
         format_token_compact(row.totals.output_tokens),
     ];
     if !compact {
-        cells.push(format_token_compact(row.totals.cache_creation_tokens));
-        cells.push(format_token_compact(row.totals.cache_read_tokens));
+        cells.push(format_cache_cell(row.totals.cache_creation_tokens));
+        cells.push(format_cache_cell(row.totals.cache_read_tokens));
         cells.push(format_token_compact(table_total_tokens(
             row.totals.input_tokens,
             row.totals.output_tokens,
@@ -664,8 +683,8 @@ fn unified_total_row(totals: &TokenTotals, compact: bool, no_cost: bool) -> Vec<
         format_token_compact(totals.output_tokens),
     ];
     if !compact {
-        cells.push(format_token_compact(totals.cache_creation_tokens));
-        cells.push(format_token_compact(totals.cache_read_tokens));
+        cells.push(format_cache_cell(totals.cache_creation_tokens));
+        cells.push(format_cache_cell(totals.cache_read_tokens));
         cells.push(format_token_compact(table_total_tokens(
             totals.input_tokens,
             totals.output_tokens,
@@ -687,8 +706,8 @@ fn focused_row(row: &UnifiedRow, compact: bool, no_cost: bool) -> Vec<String> {
         format_token_compact(row.totals.output_tokens),
     ];
     if !compact {
-        cells.push(format_token_compact(row.totals.cache_creation_tokens));
-        cells.push(format_token_compact(row.totals.cache_read_tokens));
+        cells.push(format_cache_cell(row.totals.cache_creation_tokens));
+        cells.push(format_cache_cell(row.totals.cache_read_tokens));
         cells.push(format_token_compact(table_total_tokens(
             row.totals.input_tokens,
             row.totals.output_tokens,
@@ -710,8 +729,8 @@ fn focused_total_row(totals: &TokenTotals, compact: bool, no_cost: bool) -> Vec<
         format_token_compact(totals.output_tokens),
     ];
     if !compact {
-        cells.push(format_token_compact(totals.cache_creation_tokens));
-        cells.push(format_token_compact(totals.cache_read_tokens));
+        cells.push(format_cache_cell(totals.cache_creation_tokens));
+        cells.push(format_cache_cell(totals.cache_read_tokens));
         cells.push(format_token_compact(table_total_tokens(
             totals.input_tokens,
             totals.output_tokens,
@@ -854,8 +873,8 @@ fn append_unified_breakdowns(
             format_token_compact(item.output_tokens),
         ];
         if !compact {
-            row.push(format_token_compact(item.cache_creation_tokens));
-            row.push(format_token_compact(item.cache_read_tokens));
+            row.push(format_cache_cell(item.cache_creation_tokens));
+            row.push(format_cache_cell(item.cache_read_tokens));
             row.push(format_token_compact(table_total_tokens(
                 item.input_tokens,
                 item.output_tokens,
@@ -884,8 +903,8 @@ fn append_focused_breakdowns(
             format_token_compact(item.output_tokens),
         ];
         if !compact {
-            row.push(format_token_compact(item.cache_creation_tokens));
-            row.push(format_token_compact(item.cache_read_tokens));
+            row.push(format_cache_cell(item.cache_creation_tokens));
+            row.push(format_cache_cell(item.cache_read_tokens));
             row.push(format_token_compact(table_total_tokens(
                 item.input_tokens,
                 item.output_tokens,
@@ -964,15 +983,17 @@ fn style_unified_source_labels(
 }
 
 #[derive(Clone, Copy)]
-struct DailyTableStyle {
-    source: SourceKind,
+struct TableStyle {
     color_mode: ColorMode,
+    accent: Option<Color>,
+    notes_dim: bool,
+    dim_placeholders: bool,
 }
 
 fn render_table_styled(
     columns: &[Column],
     rows: &[Vec<String>],
-    style_options: Option<DailyTableStyle>,
+    style_options: Option<TableStyle>,
 ) -> String {
     if rows.is_empty() {
         return "No usage data matched the report filters.".to_string();
@@ -996,6 +1017,8 @@ fn render_table_styled(
     }
     fit_widths(columns, &mut widths, terminal_width());
 
+    let dim_placeholders =
+        style_options.is_some_and(|style| style.dim_placeholders && style.color_mode.enabled());
     let mut out = String::new();
     push_border(&mut out, '\u{250C}', '\u{252C}', '\u{2510}', &widths);
     push_row(
@@ -1007,12 +1030,13 @@ fn render_table_styled(
             .collect::<Vec<_>>(),
         &widths,
         style_options.and_then(|style| style.header_style()),
+        dim_placeholders,
     );
     push_border(&mut out, '\u{251C}', '\u{253C}', '\u{2524}', &widths);
     for (idx, row) in rows.iter().enumerate() {
         let is_total = is_total_row(row);
         let row_style = style_options.and_then(|style| style.row_style(is_total));
-        push_row(&mut out, columns, row, &widths, row_style);
+        push_row(&mut out, columns, row, &widths, row_style, dim_placeholders);
         let is_last = idx + 1 == rows.len();
         if is_last {
             push_border(&mut out, '\u{2514}', '\u{2534}', '\u{2518}', &widths);
@@ -1068,12 +1092,23 @@ fn table_total_tokens(
         .saturating_add(cache_read_tokens)
 }
 
+/// Renders unified/focused cache token cells: `0` means the source reported no
+/// data for this metric, so it is shown as a `-` placeholder instead.
+fn format_cache_cell(tokens: i64) -> String {
+    if tokens == 0 {
+        "-".to_string()
+    } else {
+        format_token_compact(tokens)
+    }
+}
+
 fn push_row(
     out: &mut String,
     columns: &[Column],
     row: &[String],
     widths: &[usize],
     row_style: Option<RowStyle>,
+    dim_placeholders: bool,
 ) {
     let split_cells = widths
         .iter()
@@ -1094,8 +1129,18 @@ fn push_row(
                 .get(idx)
                 .map(|column| column.align)
                 .unwrap_or(Align::Left);
+            let dim_placeholder =
+                dim_placeholders && clipped == "-" && matches!(align, Align::Right);
             out.push(' ');
-            push_styled_padded(out, &clipped, *width, align, row_style, idx);
+            push_styled_padded(
+                out,
+                &clipped,
+                *width,
+                align,
+                row_style,
+                idx,
+                dim_placeholder,
+            );
             out.push(' ');
             out.push('\u{2502}');
         }
@@ -1105,15 +1150,15 @@ fn push_row(
 
 #[derive(Clone, Copy)]
 struct RowStyle {
-    color: Color,
+    color: Option<Color>,
     bold: bool,
     notes_dim: bool,
 }
 
-impl DailyTableStyle {
+impl TableStyle {
     fn header_style(self) -> Option<RowStyle> {
         self.color_mode.enabled().then_some(RowStyle {
-            color: source_color(self.source),
+            color: self.accent,
             bold: true,
             notes_dim: false,
         })
@@ -1124,9 +1169,9 @@ impl DailyTableStyle {
             return None;
         }
         Some(RowStyle {
-            color: source_color(self.source),
+            color: self.accent,
             bold: true,
-            notes_dim: true,
+            notes_dim: self.notes_dim,
         })
     }
 }
@@ -1138,6 +1183,7 @@ fn push_styled_padded(
     align: Align,
     row_style: Option<RowStyle>,
     column_idx: usize,
+    dim_placeholder: bool,
 ) {
     let len = value.chars().count();
     let padding = width.saturating_sub(len);
@@ -1146,12 +1192,20 @@ fn push_styled_padded(
         Align::Right => (" ".repeat(padding), String::new()),
     };
     out.push_str(&left);
-    if let Some(row_style) = row_style {
-        let mut content = style(value).with(row_style.color);
-        if row_style.bold {
-            content = content.bold();
+    if row_style.is_some() || dim_placeholder {
+        let mut content = style(value);
+        if let Some(row_style) = row_style {
+            if let Some(color) = row_style.color {
+                content = content.with(color);
+            }
+            if row_style.bold {
+                content = content.bold();
+            }
+            if row_style.notes_dim && column_idx + 1 == 10 {
+                content = content.dim();
+            }
         }
-        if row_style.notes_dim && column_idx + 1 == 10 {
+        if dim_placeholder {
             content = content.dim();
         }
         let _ = write!(out, "{content}");
@@ -1639,6 +1693,114 @@ mod tests {
         assert!(table.contains("5.37M"));
         assert!(table.contains("sonnet-4, gpt-5.4") || table.contains("gpt-5.4, sonnet-4"));
         assert!(table.contains("TOTAL"));
+    }
+
+    fn unified_cache_row(cache_creation: i64, cache_read: i64) -> UnifiedRow {
+        UnifiedRow {
+            period: "2026-07-21".to_string(),
+            agent: UnifiedAgent::All,
+            totals: TokenTotals {
+                input_tokens: 1_000,
+                output_tokens: 2_000,
+                cache_creation_tokens: cache_creation,
+                cache_read_tokens: cache_read,
+                total_tokens: 3_000 + cache_creation + cache_read,
+                ..TokenTotals::default()
+            },
+            models_used: vec!["gpt-5.6-sol".to_string()],
+            agent_breakdowns: Vec::new(),
+            model_breakdowns: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn cache_cell_renders_placeholder_for_zero_and_compact_otherwise() {
+        assert_eq!(format_cache_cell(0), "-");
+        assert_eq!(format_cache_cell(333_333), "333.33K");
+        assert_eq!(format_cache_cell(5_370_000), "5.37M");
+    }
+
+    #[test]
+    fn unified_zero_cache_cells_render_placeholder_and_nonzero_stay_compact() {
+        let zero = unified_cache_row(0, 0);
+        let cells = unified_row(&zero, false, false, false);
+        assert_eq!(cells[5], "-");
+        assert_eq!(cells[6], "-");
+        assert_ne!(cells[7], "-", "Total Tokens keeps the visible-channel sum");
+        let total_cells = unified_total_row(&zero.totals, false, false);
+        assert_eq!(total_cells[5], "-");
+        assert_eq!(total_cells[6], "-");
+        let focused_cells = focused_row(&zero, false, false);
+        assert_eq!(focused_cells[4], "-");
+        assert_eq!(focused_cells[5], "-");
+
+        let nonzero = unified_cache_row(7_847_755, 134_614_939);
+        let cells = unified_row(&nonzero, false, false, false);
+        assert_eq!(cells[5], "7.85M");
+        assert_eq!(cells[6], "134.61M");
+
+        let table = render_table_styled(
+            &unified_columns("Date", false, false),
+            &[
+                unified_row(&zero, false, false, false),
+                unified_total_row(&zero.totals, false, false),
+            ],
+            Some(TableStyle {
+                color_mode: ColorMode::Never,
+                accent: None,
+                notes_dim: false,
+                dim_placeholders: true,
+            }),
+        );
+        assert!(!table.contains("\u{1b}["), "no ANSI in:\n{table}");
+        assert!(table.contains(" - "), "missing placeholder in:\n{table}");
+    }
+
+    #[test]
+    fn unified_table_always_color_bolds_header_total_and_dims_placeholders() {
+        let zero = unified_cache_row(0, 0);
+        let table = render_table_styled(
+            &unified_columns("Date", false, false),
+            &[
+                unified_row(&zero, false, false, false),
+                unified_total_row(&zero.totals, false, false),
+            ],
+            Some(TableStyle {
+                color_mode: ColorMode::Always,
+                accent: None,
+                notes_dim: false,
+                dim_placeholders: true,
+            }),
+        );
+        assert!(table.contains("\u{1b}[1m"), "missing bold in:\n{table}");
+        assert!(table.contains("\u{1b}[2m"), "missing dim in:\n{table}");
+
+        let report = UnifiedReport {
+            kind: PeriodKind::Daily,
+            rows: vec![zero],
+            detected: vec![SourceKind::Codex],
+        };
+        let always = render_unified_table(&report, false, false, ColorMode::Always);
+        assert!(always.contains("\u{1b}[1m"));
+        let never = render_unified_table(&report, false, false, ColorMode::Never);
+        assert!(!never.contains("\u{1b}["));
+    }
+
+    #[test]
+    fn focused_table_ansi_styles_follow_color_mode() {
+        let report = UnifiedReport {
+            kind: PeriodKind::Daily,
+            rows: vec![unified_cache_row(0, 0)],
+            detected: vec![SourceKind::Codex],
+        };
+        let always =
+            render_focused_table(&report, SourceKind::Codex, false, false, ColorMode::Always);
+        assert!(always.contains("\u{1b}[1m"), "missing bold in:\n{always}");
+        assert!(always.contains("\u{1b}[2m"), "missing dim in:\n{always}");
+        let never =
+            render_focused_table(&report, SourceKind::Codex, false, false, ColorMode::Never);
+        assert!(!never.contains("\u{1b}["), "no ANSI in:\n{never}");
+        assert!(never.contains(" - "), "missing placeholder in:\n{never}");
     }
 
     #[test]
