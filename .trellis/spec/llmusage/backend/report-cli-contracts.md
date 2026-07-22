@@ -46,6 +46,19 @@ unified_report::{report_json, focused_report_json}(..., no_cost) -> JSON
 - `--no-cost` is an output projection. It removes text cost columns and every
   JSON key containing `cost`, but never changes query filtering or token
   totals.
+- Unified and focused human tables are an auditable visible-channel
+  projection. Every displayed `Total Tokens` cell is calculated as
+  `input + output + cache creation + cache read`, including period, Agent,
+  model-breakdown, and final `Total` rows. Use saturating addition for this
+  presentation calculation.
+- CLI JSON keeps the authoritative persisted `totalTokens`, which may include
+  source-specific reasoning or extra tokens that have no dedicated human-table
+  column. Do not overwrite query DTO or SQLite `total_tokens` values to make
+  them match the text projection.
+- Human-table token cells use `format_token_compact` (`K`, `M`, `B`) rather
+  than comma-separated raw counts. The final `Total` row is preceded by the
+  deterministic double-line separator `╞═╪═╡`; neither behavior depends on
+  terminal color support.
 - `llmusage <source> <period>` injects the matching `ReportFilter.source` and
   uses the shared loader. Focused reports lift the matching source row after
   query loading, then render without `Agent`/`Detected`; focused JSON has no
@@ -64,6 +77,9 @@ unified_report::{report_json, focused_report_json}(..., no_cost) -> JSON
 | `daily --instances --sections ...` or `session --id ... --sections ...` | Fail with the existing incompatible-option error |
 | Source host requests `blocks` | Clap rejects it; `blocks` remains top-level only |
 | Focused source has no matching rows | Render the ordinary empty report state, not an error |
+| Persisted `total_tokens` exceeds the four visible token channels | Text uses the visible-channel sum; JSON retains persisted `totalTokens` |
+| A visible token sum approaches `i64::MAX` | Saturate instead of overflowing or panicking |
+| Human token value crosses a unit boundary | Render with the shared compact formatter and stable `K`/`M`/`B` rounding |
 
 ### 5. Good/Base/Bad Cases
 
@@ -73,6 +89,14 @@ unified_report::{report_json, focused_report_json}(..., no_cost) -> JSON
   `monthly`, `daily`, `session`, then `totals` in that order.
 - Base: `llmusage daily --source claude` remains a unified report with an
   `All` row; `llmusage claude daily` is its focused presentation equivalent.
+- Good: persisted `total_tokens = 147_857_415` with visible channels totaling
+  `147_780_595` renders `147.78M` in the table while JSON returns `147857415`.
+- Base: zero and sub-thousand token values remain readable through the shared
+  compact formatter; thousand, million, and billion boundaries use the same
+  formatter for every token column.
+- Bad: rendering `TokenTotals.total_tokens` in a table whose visible columns
+  sum to a different number. Readers cannot audit that total and may
+  misdiagnose the difference as duplicate cache accounting.
 - Bad: serializing `UnifiedRow` directly for CLI JSON. That leaks snake_case
   fields and comparison-only agents to consumers that expect the CLI contract.
 - Bad: adding an independent source query for focused reports. It duplicates
@@ -87,6 +111,12 @@ unified_report::{report_json, focused_report_json}(..., no_cost) -> JSON
 - Integration-test source/period totals against the matching top-level
   `--source` report. Cover focused text title without `Agent`/`Detected`,
   focused `--sections`, and focused `--no-cost`.
+- Unit-test a fixture where authoritative `total_tokens` is greater than the
+  visible-channel sum. Assert period, Agent, model-breakdown, and final totals
+  use the visible sum, all token cells use compact units, raw large counts are
+  absent, and the final Total separator uses double-line glyphs.
+- Keep a CLI JSON assertion for that divergent fixture proving `totalTokens`
+  still contains the authoritative persisted value.
 - Keep unified integration coverage for Monday weekly keys, camelCase fields,
   `--by-agent`, both date formats, section order, and no-cost token invariance.
 - Run `cargo fmt --check`, strict clippy, focused report tests, and the full
@@ -117,3 +147,28 @@ println!(
 
 The query remains the single source of token/filter/order semantics, while the
 CLI-specific DTO enforces the focused output contract.
+
+For human tables, keep authoritative and visible totals distinct:
+
+#### Wrong
+
+```rust
+cells.push(format_token_compact(totals.total_tokens));
+```
+
+This can include reasoning or source-specific extra tokens that have no
+visible column in the table.
+
+#### Correct
+
+```rust
+cells.push(format_token_compact(table_total_tokens(
+    totals.input_tokens,
+    totals.output_tokens,
+    totals.cache_creation_tokens,
+    totals.cache_read_tokens,
+)));
+```
+
+This makes the human table auditable while JSON continues to serialize the
+authoritative `total_tokens` field.

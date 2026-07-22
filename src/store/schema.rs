@@ -4,12 +4,22 @@ use rusqlite::OptionalExtension;
 use tracing::info;
 
 use super::{BootstrapOptions, BootstrapProgressEvent, BootstrapProgressSink, Store, migrations};
-use crate::error::Result;
+use crate::{error::Result, models::SourceKind};
 
 const META_RAW_ARCHIVE_KEY: &str = "raw_archive_enabled";
 
-/// Current parser-owned token normalization contract.
+/// Default parser-owned token normalization contract.
 pub const TOKEN_ACCOUNTING_VERSION: u32 = 2;
+
+/// Returns the current token-accounting contract for one parser source.
+pub const fn expected_token_accounting_version(source: SourceKind) -> u32 {
+    match source {
+        SourceKind::Codex => 3,
+        SourceKind::Claude | SourceKind::Opencode | SourceKind::Antigravity => {
+            TOKEN_ACCOUNTING_VERSION
+        }
+    }
+}
 
 impl Store {
     pub fn bootstrap(&self) -> Result<()> {
@@ -124,18 +134,16 @@ impl Store {
     }
 
     /// Returns the token-accounting contract recorded for one parser source.
-    pub fn token_accounting_version(
-        &self,
-        source: crate::models::SourceKind,
-    ) -> Result<Option<u32>> {
+    pub fn token_accounting_version(&self, source: SourceKind) -> Result<Option<u32>> {
         Ok(self
             .meta_value(&token_accounting_key(source))?
             .and_then(|value| value.parse().ok()))
     }
 
     /// True when persisted rows predate the current token-accounting contract.
-    pub fn has_legacy_token_accounting(&self, source: crate::models::SourceKind) -> Result<bool> {
-        if self.token_accounting_version(source)? == Some(TOKEN_ACCOUNTING_VERSION) {
+    pub fn has_legacy_token_accounting(&self, source: SourceKind) -> Result<bool> {
+        if self.token_accounting_version(source)? == Some(expected_token_accounting_version(source))
+        {
             return Ok(false);
         }
         let conn = self.open_connection()?;
@@ -148,15 +156,15 @@ impl Store {
     }
 
     /// Marks a source only after its parser/store sync completes successfully.
-    pub fn mark_current_token_accounting(&self, source: crate::models::SourceKind) -> Result<()> {
+    pub fn mark_current_token_accounting(&self, source: SourceKind) -> Result<()> {
         self.set_meta_value(
             &token_accounting_key(source),
-            &TOKEN_ACCOUNTING_VERSION.to_string(),
+            &expected_token_accounting_version(source).to_string(),
         )
     }
 
     /// Clears the marker before a guarded rebuild starts.
-    pub fn clear_token_accounting_version(&self, source: crate::models::SourceKind) -> Result<()> {
+    pub fn clear_token_accounting_version(&self, source: SourceKind) -> Result<()> {
         let conn = self.open_connection()?;
         conn.execute(
             "DELETE FROM meta WHERE key = ?1",

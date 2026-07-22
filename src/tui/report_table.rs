@@ -636,13 +636,18 @@ fn unified_row(
         period,
         agent,
         models,
-        format_count(row.totals.input_tokens),
-        format_count(row.totals.output_tokens),
+        format_token_compact(row.totals.input_tokens),
+        format_token_compact(row.totals.output_tokens),
     ];
     if !compact {
-        cells.push(format_count(row.totals.cache_creation_tokens));
-        cells.push(format_count(row.totals.cache_read_tokens));
-        cells.push(format_count(row.totals.total_tokens));
+        cells.push(format_token_compact(row.totals.cache_creation_tokens));
+        cells.push(format_token_compact(row.totals.cache_read_tokens));
+        cells.push(format_token_compact(table_total_tokens(
+            row.totals.input_tokens,
+            row.totals.output_tokens,
+            row.totals.cache_creation_tokens,
+            row.totals.cache_read_tokens,
+        )));
     }
     if !no_cost {
         cells.push(format_cost(row.totals.estimated_cost_usd));
@@ -655,13 +660,18 @@ fn unified_total_row(totals: &TokenTotals, compact: bool, no_cost: bool) -> Vec<
         "Total".to_string(),
         String::new(),
         String::new(),
-        format_count(totals.input_tokens),
-        format_count(totals.output_tokens),
+        format_token_compact(totals.input_tokens),
+        format_token_compact(totals.output_tokens),
     ];
     if !compact {
-        cells.push(format_count(totals.cache_creation_tokens));
-        cells.push(format_count(totals.cache_read_tokens));
-        cells.push(format_count(totals.total_tokens));
+        cells.push(format_token_compact(totals.cache_creation_tokens));
+        cells.push(format_token_compact(totals.cache_read_tokens));
+        cells.push(format_token_compact(table_total_tokens(
+            totals.input_tokens,
+            totals.output_tokens,
+            totals.cache_creation_tokens,
+            totals.cache_read_tokens,
+        )));
     }
     if !no_cost {
         cells.push(format_cost(totals.estimated_cost_usd));
@@ -673,13 +683,18 @@ fn focused_row(row: &UnifiedRow, compact: bool, no_cost: bool) -> Vec<String> {
     let mut cells = vec![
         row.period.clone(),
         format_models(&row.models_used),
-        format_count(row.totals.input_tokens),
-        format_count(row.totals.output_tokens),
+        format_token_compact(row.totals.input_tokens),
+        format_token_compact(row.totals.output_tokens),
     ];
     if !compact {
-        cells.push(format_count(row.totals.cache_creation_tokens));
-        cells.push(format_count(row.totals.cache_read_tokens));
-        cells.push(format_count(row.totals.total_tokens));
+        cells.push(format_token_compact(row.totals.cache_creation_tokens));
+        cells.push(format_token_compact(row.totals.cache_read_tokens));
+        cells.push(format_token_compact(table_total_tokens(
+            row.totals.input_tokens,
+            row.totals.output_tokens,
+            row.totals.cache_creation_tokens,
+            row.totals.cache_read_tokens,
+        )));
     }
     if !no_cost {
         cells.push(format_cost(row.totals.estimated_cost_usd));
@@ -691,13 +706,18 @@ fn focused_total_row(totals: &TokenTotals, compact: bool, no_cost: bool) -> Vec<
     let mut cells = vec![
         "Total".to_string(),
         String::new(),
-        format_count(totals.input_tokens),
-        format_count(totals.output_tokens),
+        format_token_compact(totals.input_tokens),
+        format_token_compact(totals.output_tokens),
     ];
     if !compact {
-        cells.push(format_count(totals.cache_creation_tokens));
-        cells.push(format_count(totals.cache_read_tokens));
-        cells.push(format_count(totals.total_tokens));
+        cells.push(format_token_compact(totals.cache_creation_tokens));
+        cells.push(format_token_compact(totals.cache_read_tokens));
+        cells.push(format_token_compact(table_total_tokens(
+            totals.input_tokens,
+            totals.output_tokens,
+            totals.cache_creation_tokens,
+            totals.cache_read_tokens,
+        )));
     }
     if !no_cost {
         cells.push(format_cost(totals.estimated_cost_usd));
@@ -830,13 +850,18 @@ fn append_unified_breakdowns(
             String::new(),
             String::new(),
             format!("- {}", format_model_name(&item.model)),
-            format_count(item.input_tokens),
-            format_count(item.output_tokens),
+            format_token_compact(item.input_tokens),
+            format_token_compact(item.output_tokens),
         ];
         if !compact {
-            row.push(format_count(item.cache_creation_tokens));
-            row.push(format_count(item.cache_read_tokens));
-            row.push(format_count(item.total_tokens));
+            row.push(format_token_compact(item.cache_creation_tokens));
+            row.push(format_token_compact(item.cache_read_tokens));
+            row.push(format_token_compact(table_total_tokens(
+                item.input_tokens,
+                item.output_tokens,
+                item.cache_creation_tokens,
+                item.cache_read_tokens,
+            )));
         }
         if !no_cost {
             row.push(format_cost(item.estimated_cost_usd));
@@ -855,13 +880,18 @@ fn append_focused_breakdowns(
         let mut row = vec![
             String::new(),
             format!("- {}", format_model_name(&item.model)),
-            format_count(item.input_tokens),
-            format_count(item.output_tokens),
+            format_token_compact(item.input_tokens),
+            format_token_compact(item.output_tokens),
         ];
         if !compact {
-            row.push(format_count(item.cache_creation_tokens));
-            row.push(format_count(item.cache_read_tokens));
-            row.push(format_count(item.total_tokens));
+            row.push(format_token_compact(item.cache_creation_tokens));
+            row.push(format_token_compact(item.cache_read_tokens));
+            row.push(format_token_compact(table_total_tokens(
+                item.input_tokens,
+                item.output_tokens,
+                item.cache_creation_tokens,
+                item.cache_read_tokens,
+            )));
         }
         if !no_cost {
             row.push(format_cost(item.estimated_cost_usd));
@@ -980,14 +1010,16 @@ fn render_table_styled(
     );
     push_border(&mut out, '\u{251C}', '\u{253C}', '\u{2524}', &widths);
     for (idx, row) in rows.iter().enumerate() {
-        let is_total = row
-            .first()
-            .is_some_and(|cell| cell == "TOTAL" || cell == "Total");
+        let is_total = is_total_row(row);
         let row_style = style_options.and_then(|style| style.row_style(is_total));
         push_row(&mut out, columns, row, &widths, row_style);
         let is_last = idx + 1 == rows.len();
         if is_last {
             push_border(&mut out, '\u{2514}', '\u{2534}', '\u{2518}', &widths);
+        } else if rows.get(idx + 1).is_some_and(|next| is_total_row(next)) {
+            push_border_with(
+                &mut out, '\u{255E}', '\u{256A}', '\u{2561}', '\u{2550}', &widths,
+            );
         } else {
             push_border(&mut out, '\u{251C}', '\u{253C}', '\u{2524}', &widths);
         }
@@ -996,9 +1028,20 @@ fn render_table_styled(
 }
 
 fn push_border(out: &mut String, left: char, sep: char, right: char, widths: &[usize]) {
+    push_border_with(out, left, sep, right, '\u{2500}', widths);
+}
+
+fn push_border_with(
+    out: &mut String,
+    left: char,
+    sep: char,
+    right: char,
+    fill: char,
+    widths: &[usize],
+) {
     out.push(left);
     for (idx, width) in widths.iter().enumerate() {
-        out.push_str(&repeat_char('\u{2500}', width + 2));
+        out.push_str(&repeat_char(fill, width + 2));
         if idx + 1 == widths.len() {
             out.push(right);
         } else {
@@ -1006,6 +1049,23 @@ fn push_border(out: &mut String, left: char, sep: char, right: char, widths: &[u
         }
     }
     out.push('\n');
+}
+
+fn is_total_row(row: &[String]) -> bool {
+    row.first()
+        .is_some_and(|cell| cell == "TOTAL" || cell == "Total")
+}
+
+fn table_total_tokens(
+    input_tokens: i64,
+    output_tokens: i64,
+    cache_creation_tokens: i64,
+    cache_read_tokens: i64,
+) -> i64 {
+    input_tokens
+        .saturating_add(output_tokens)
+        .saturating_add(cache_creation_tokens)
+        .saturating_add(cache_read_tokens)
 }
 
 fn push_row(
@@ -1488,6 +1548,55 @@ mod tests {
         assert_eq!(table.matches("2026-05-05").count(), 1);
         assert!(table.contains("Total"));
         assert!(table.contains("$0.30"));
+    }
+
+    #[test]
+    fn unified_table_uses_visible_token_total_compact_units_and_total_separator() {
+        let totals = TokenTotals {
+            input_tokens: 4_255_236,
+            output_tokens: 1_062_665,
+            cache_creation_tokens: 7_847_755,
+            cache_read_tokens: 134_614_939,
+            reasoning_output_tokens: 76_820,
+            total_tokens: 147_857_415,
+            estimated_cost_usd: 285.86,
+        };
+        assert_eq!(
+            table_total_tokens(
+                totals.input_tokens,
+                totals.output_tokens,
+                totals.cache_creation_tokens,
+                totals.cache_read_tokens,
+            ),
+            147_780_595
+        );
+        let row = UnifiedRow {
+            period: "2026-07-17".to_string(),
+            agent: UnifiedAgent::All,
+            totals: totals.clone(),
+            models_used: vec!["gpt-5.6-sol".to_string()],
+            agent_breakdowns: Vec::new(),
+            model_breakdowns: Vec::new(),
+        };
+        let table = render_table(
+            &unified_columns("Date", false, false),
+            &[
+                unified_row(&row, false, false, false),
+                unified_total_row(&totals, false, false),
+            ],
+        );
+
+        for value in ["4.26M", "1.06M", "7.85M", "134.61M", "147.78M"] {
+            assert!(table.contains(value), "missing {value} in:\n{table}");
+        }
+        assert!(
+            !table.contains("147.86M"),
+            "hidden reasoning leaked into:\n{table}"
+        );
+        assert!(!table.contains("147,857,415"));
+        assert!(table.contains('\u{255E}'));
+        assert!(table.contains('\u{2550}'));
+        assert!(table.contains('\u{2561}'));
     }
 
     #[test]

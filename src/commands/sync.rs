@@ -456,7 +456,9 @@ async fn run_once_locked(
             events_replayed: source.events_replayed as i64,
             events_inserted: source.events_inserted as i64,
             stored_events: source.stored_events as i64,
-            token_accounting_version: Some(crate::store::TOKEN_ACCOUNTING_VERSION),
+            token_accounting_version: Some(crate::store::expected_token_accounting_version(
+                source.source,
+            )),
             legacy_token_accounting: false,
             token_accounting_warning: None,
             parse_ms: source.parse_ms as i64,
