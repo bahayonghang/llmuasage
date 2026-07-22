@@ -1,7 +1,7 @@
 use std::{
     fs::File,
     future::Future,
-    io::{BufRead, BufReader, Seek, SeekFrom},
+    io::{BufRead, BufReader, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     pin::Pin,
     time::Instant,
@@ -28,6 +28,8 @@ use crate::{
     store::{Store, SyncRunWriter, SyncShard},
     util::{bucket_start_from_rfc3339, hash_string, normalize_model},
 };
+
+const REPLAY_MARKER_SCAN_BYTES: usize = 16 * 1024;
 
 #[derive(Debug, Clone)]
 struct CodexShardPlan {
@@ -332,6 +334,9 @@ fn parse_rollout_file(
     last_model: Option<String>,
     resolver: &mut ProjectResolver,
 ) -> Result<RolloutParseResult> {
+    let replay_second = (start_offset == 0 && is_codex_replay_session(file_path))
+        .then(|| detect_replay_second(file_path))
+        .flatten();
     let file = File::open(file_path)?;
     let file_len = file.metadata()?.len();
     if start_offset >= file_len {
@@ -370,6 +375,7 @@ fn parse_rollout_file(
     let mut turns = Vec::new();
     let mut tool_calls = Vec::new();
     let mut pending_tools = Vec::new();
+    let mut skip_replay = replay_second.is_some();
 
     loop {
         line.clear();
@@ -434,6 +440,19 @@ fn parse_rollout_file(
         let Some((timestamp, info)) = extract_token_count(&value) else {
             continue;
         };
+        if let Some(replay_second) = replay_second.as_ref()
+            && skip_replay
+        {
+            if timestamp_second(&timestamp).as_ref() == Some(replay_second) {
+                if let Some(next_total) = info.get("total_token_usage").and_then(parse_usage_tokens)
+                {
+                    totals = Some(next_total);
+                }
+                pending_tools.clear();
+                continue;
+            }
+            skip_replay = false;
+        }
         let Some(hour_start) = bucket_start_from_rfc3339(&timestamp) else {
             continue;
         };
@@ -491,6 +510,60 @@ fn parse_rollout_file(
         turns,
         tool_calls,
     })
+}
+
+fn is_codex_replay_session(file_path: &Path) -> bool {
+    let Ok(mut file) = File::open(file_path) else {
+        return false;
+    };
+    let mut buffer = [0u8; REPLAY_MARKER_SCAN_BYTES];
+    let Ok(bytes_read) = file.read(&mut buffer) else {
+        return false;
+    };
+    let head = &buffer[..bytes_read];
+    contains_bytes(head, b"thread_spawn") || contains_bytes(head, b"forked_from_id")
+}
+
+fn detect_replay_second(file_path: &Path) -> Option<[u8; 19]> {
+    let file = File::open(file_path).ok()?;
+    let mut reader = BufReader::new(file);
+    let mut line = String::new();
+    let mut first_second = None;
+
+    loop {
+        line.clear();
+        if reader.read_line(&mut line).ok()? == 0 {
+            return None;
+        }
+        if !line.contains("token_count") {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        let Some((timestamp, info)) = extract_token_count(&value) else {
+            continue;
+        };
+        if info.get("last_token_usage").is_none() && info.get("total_token_usage").is_none() {
+            continue;
+        }
+        let current_second = timestamp_second(&timestamp)?;
+        match first_second {
+            None => first_second = Some(current_second),
+            Some(first_second) if first_second == current_second => return Some(current_second),
+            Some(_) => return None,
+        }
+    }
+}
+
+fn timestamp_second(timestamp: &str) -> Option<[u8; 19]> {
+    timestamp.as_bytes().get(..19)?.try_into().ok()
+}
+
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
 }
 
 fn extract_token_count(value: &Value) -> Option<(String, &Value)> {
@@ -643,7 +716,7 @@ fn read_nested_i64(value: &Value, path: &[&str]) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_rollout_file, parse_usage_tokens, pick_delta};
+    use super::{is_codex_replay_session, parse_rollout_file, parse_usage_tokens, pick_delta};
     use crate::models::UsageTokens;
     use anyhow::Result;
     use serde_json::json;
@@ -902,6 +975,210 @@ mod tests {
                 .unwrap()
                 .contains("cargo test")
         );
+        Ok(())
+    }
+
+    #[test]
+    fn codex_parser_skips_fork_replay_prefix_and_keeps_cumulative_baseline() -> Result<()> {
+        let temp = TempDir::new()?;
+        let path = temp.path().join("rollout-replay.jsonl");
+        let mut file = fs::File::create(&path)?;
+        writeln!(
+            file,
+            "{}",
+            json!({
+                "timestamp": "2026-05-12T08:03:00.000Z",
+                "type": "session_meta",
+                "payload": {
+                    "id": "subagent",
+                    "model": "gpt-5.2",
+                    "forked_from_id": "parent",
+                    "source": {"subagent": {"thread_spawn": {"parent_thread_id": "parent"}}}
+                }
+            })
+        )?;
+        writeln!(file, r#"{{"payload":{{"type":"token_count""#)?;
+        writeln!(
+            file,
+            "{}",
+            json!({
+                "type": "response_item",
+                "payload": {
+                    "item": {
+                        "type": "function_call",
+                        "name": "functions.shell_command",
+                        "arguments": {"command": "replayed command"}
+                    }
+                }
+            })
+        )?;
+        for (last, total) in [
+            (
+                json!({
+                    "input_tokens": 100,
+                    "cached_input_tokens": 40,
+                    "output_tokens": 20,
+                    "total_tokens": 120
+                }),
+                json!({
+                    "input_tokens": 100,
+                    "cached_input_tokens": 40,
+                    "output_tokens": 20,
+                    "total_tokens": 120
+                }),
+            ),
+            (
+                json!({
+                    "input_tokens": 50,
+                    "cached_input_tokens": 20,
+                    "output_tokens": 10,
+                    "total_tokens": 60
+                }),
+                json!({
+                    "input_tokens": 150,
+                    "cached_input_tokens": 60,
+                    "output_tokens": 30,
+                    "total_tokens": 180
+                }),
+            ),
+        ] {
+            writeln!(
+                file,
+                "{}",
+                json!({
+                    "timestamp": "2026-05-12T08:03:00.000Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "last_token_usage": last,
+                            "total_token_usage": total
+                        }
+                    }
+                })
+            )?;
+        }
+        writeln!(
+            file,
+            "{}",
+            json!({
+                "timestamp": "2026-05-12T08:04:00.000Z",
+                "type": "event_msg",
+                "payload": {
+                    "type": "token_count",
+                    "info": {
+                        "total_token_usage": {
+                            "input_tokens": 170,
+                            "cached_input_tokens": 65,
+                            "output_tokens": 35,
+                            "total_tokens": 205
+                        }
+                    }
+                }
+            })
+        )?;
+
+        let mut resolver = crate::project::ProjectResolver::default();
+        let parsed = parse_rollout_file(&path, "path-hash", 0, None, None, &mut resolver)?;
+
+        assert_eq!(parsed.events.len(), 1);
+        assert_eq!(parsed.events[0].tokens.input_tokens, 15);
+        assert_eq!(parsed.events[0].tokens.cache_read_tokens, 5);
+        assert_eq!(parsed.events[0].tokens.output_tokens, 5);
+        assert_eq!(parsed.events[0].tokens.total_tokens, 25);
+        assert!(parsed.tool_calls.is_empty());
+        assert_eq!(
+            parsed.last_total,
+            Some(UsageTokens {
+                input_tokens: 105,
+                cache_read_tokens: 65,
+                output_tokens: 35,
+                total_tokens: 205,
+                ..UsageTokens::default()
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn codex_parser_keeps_ordinary_same_second_token_events() -> Result<()> {
+        let temp = TempDir::new()?;
+        let path = temp.path().join("rollout-ordinary.jsonl");
+        let mut file = fs::File::create(&path)?;
+        writeln!(
+            file,
+            "{}",
+            json!({
+                "timestamp": "2026-05-12T08:03:00.000Z",
+                "type": "session_meta",
+                "payload": {"id": "ordinary", "model": "gpt-5.2"}
+            })
+        )?;
+        for input_tokens in [100, 50] {
+            writeln!(
+                file,
+                "{}",
+                json!({
+                    "timestamp": "2026-05-12T08:03:00.000Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "last_token_usage": {
+                                "input_tokens": input_tokens,
+                                "cached_input_tokens": 20,
+                                "output_tokens": 10,
+                                "total_tokens": input_tokens + 10
+                            }
+                        }
+                    }
+                })
+            )?;
+        }
+
+        let mut resolver = crate::project::ProjectResolver::default();
+        let parsed = parse_rollout_file(&path, "path-hash", 0, None, None, &mut resolver)?;
+
+        assert_eq!(parsed.events.len(), 2);
+        assert_eq!(
+            parsed
+                .events
+                .iter()
+                .map(|event| event.tokens.input_tokens)
+                .sum::<i64>(),
+            110
+        );
+        assert_eq!(
+            parsed
+                .events
+                .iter()
+                .map(|event| event.tokens.cache_read_tokens)
+                .sum::<i64>(),
+            40
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn codex_replay_session_accepts_each_upstream_marker() -> Result<()> {
+        let temp = TempDir::new()?;
+        for (name, payload) in [
+            (
+                "thread-spawn.jsonl",
+                json!({"source": {"subagent": {"thread_spawn": {}}}}),
+            ),
+            ("forked.jsonl", json!({"forked_from_id": "parent-session"})),
+        ] {
+            let path = temp.path().join(name);
+            fs::write(
+                &path,
+                json!({"type": "session_meta", "payload": payload}).to_string(),
+            )?;
+            assert!(
+                is_codex_replay_session(&path),
+                "marker not detected: {name}"
+            );
+        }
         Ok(())
     }
 }

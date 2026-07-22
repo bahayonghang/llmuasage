@@ -12,7 +12,7 @@ use tempfile::TempDir;
 use llmusage::{paths::AppPaths, query::Dashboard, store::Store};
 
 #[test]
-fn report_commands_emit_stable_json_from_sqlite() -> Result<()> {
+fn report_commands_emit_unified_camel_case_json_from_sqlite() -> Result<()> {
     let fixture = ReportCliFixture::new()?;
     let today = Utc::now().date_naive();
     let today_arg = today.format("%Y%m%d").to_string();
@@ -67,17 +67,40 @@ fn report_commands_emit_stable_json_from_sqlite() -> Result<()> {
     ])?;
     assert_eq!(daily["daily"].as_array().map(Vec::len), Some(1));
     assert_eq!(
-        daily["daily"][0]["date"].as_str(),
+        daily["daily"][0]["period"].as_str(),
         Some(today_display.as_str())
     );
-    assert_eq!(daily["totals"]["cache_creation_tokens"].as_i64(), Some(30));
+    assert_eq!(daily["daily"][0]["agent"].as_str(), Some("all"));
+    assert_eq!(daily["totals"]["cacheCreationTokens"].as_i64(), Some(30));
+    assert_eq!(daily["daily"][0]["cacheCreationTokens"].as_i64(), Some(30));
+    assert_eq!(daily["totals"]["totalTokens"].as_i64(), Some(385));
+    assert!(daily["daily"][0].get("date").is_none());
+    assert!(daily["daily"][0].get("cache_creation_tokens").is_none());
+
+    let daily_by_agent = fixture.json(&[
+        "daily",
+        "--by-agent",
+        "--json",
+        "--since",
+        &today_arg,
+        "--until",
+        &today_arg,
+        "--timezone",
+        "UTC",
+    ])?;
+    let agents = daily_by_agent["daily"][0]["agents"]
+        .as_array()
+        .expect("daily by-agent rows");
+    assert_eq!(agents.len(), 2);
+    assert_eq!(agents[0]["agent"].as_str(), Some("codex"));
+    assert_eq!(agents[1]["agent"].as_str(), Some("claude"));
     assert_eq!(
-        daily["daily"][0]["cache_creation_tokens"].as_i64(),
-        Some(30)
+        agents
+            .iter()
+            .map(|row| row["totalTokens"].as_i64().unwrap())
+            .sum::<i64>(),
+        daily_by_agent["daily"][0]["totalTokens"].as_i64().unwrap()
     );
-    assert_eq!(daily["totals"]["total_tokens"].as_i64(), Some(385));
-    assert!(daily["daily"][0].get("conversation_count").is_none());
-    assert!(daily["daily"][0].get("conversationCount").is_none());
 
     let projects = fixture.json(&[
         "daily",
@@ -92,14 +115,12 @@ fn report_commands_emit_stable_json_from_sqlite() -> Result<()> {
 
     let monthly = fixture.json(&["monthly", "--json", "--timezone", "UTC"])?;
     assert_eq!(
-        monthly["monthly"][0]["month"].as_str(),
+        monthly["monthly"][0]["period"].as_str(),
         Some(today_month.as_str())
     );
-    assert_eq!(
-        monthly["totals"]["cache_creation_tokens"].as_i64(),
-        Some(30)
-    );
-    assert_eq!(monthly["totals"]["total_tokens"].as_i64(), Some(385));
+    assert_eq!(monthly["monthly"][0]["agent"].as_str(), Some("all"));
+    assert_eq!(monthly["totals"]["cacheCreationTokens"].as_i64(), Some(30));
+    assert_eq!(monthly["totals"]["totalTokens"].as_i64(), Some(385));
 
     let session = fixture.json(&[
         "session",
@@ -110,14 +131,16 @@ fn report_commands_emit_stable_json_from_sqlite() -> Result<()> {
         "UTC",
     ])?;
     assert_eq!(
-        session["session"]["session_id"].as_str(),
+        session["session"][0]["period"].as_str(),
         Some("codex:session-a")
     );
+    assert_eq!(session["session"][0]["agent"].as_str(), Some("codex"));
     assert_eq!(
-        session["session"]["cache_creation_tokens"].as_i64(),
+        session["session"][0]["cacheCreationTokens"].as_i64(),
         Some(30)
     );
-    assert_eq!(session["session"]["total_tokens"].as_i64(), Some(135));
+    assert_eq!(session["totals"]["totalTokens"].as_i64(), Some(135));
+    assert!(session["session"][0].get("agents").is_none());
 
     let blocks = fixture.json(&[
         "blocks",
@@ -133,10 +156,491 @@ fn report_commands_emit_stable_json_from_sqlite() -> Result<()> {
             .is_some_and(|items| !items.is_empty())
     );
 
-    for payload in [&daily, &monthly, &session, &blocks] {
-        assert_json_has_no_camel_case_keys(payload);
+    assert_json_has_no_camel_case_keys(&blocks);
+
+    Ok(())
+}
+
+#[test]
+fn weekly_command_uses_monday_periods_and_shared_agent_json() -> Result<()> {
+    let fixture = ReportCliFixture::new()?;
+    for (event_key, source, model, event_at, total_tokens) in [
+        (
+            "codex:weekly-monday:1",
+            "codex",
+            "gpt-5",
+            "2025-12-29T10:00:00Z",
+            10,
+        ),
+        (
+            "claude:weekly-sunday:1",
+            "claude",
+            "claude-sonnet-4",
+            "2026-01-04T10:00:00Z",
+            20,
+        ),
+    ] {
+        fixture.seed_event(SeedEvent {
+            event_key,
+            source,
+            model,
+            event_at,
+            input_tokens: total_tokens,
+            total_tokens,
+            project_hash: event_key,
+            project_label: event_key,
+            session_id: Some(event_key),
+            source_path_hash: Some(event_key),
+            ..SeedEvent::default()
+        })?;
     }
 
+    let json = fixture.json(&[
+        "weekly",
+        "--by-agent",
+        "--json",
+        "--since",
+        "20251229",
+        "--until",
+        "20260104",
+        "--timezone",
+        "UTC",
+    ])?;
+    assert_eq!(json["weekly"].as_array().map(Vec::len), Some(1));
+    assert_eq!(json["weekly"][0]["period"].as_str(), Some("2025-12-29"));
+    assert_eq!(json["weekly"][0]["agent"].as_str(), Some("all"));
+    assert_eq!(json["weekly"][0]["totalTokens"].as_i64(), Some(30));
+    assert_eq!(
+        json["weekly"][0]["agents"].as_array().map(Vec::len),
+        Some(2)
+    );
+    assert_eq!(json["totals"]["totalTokens"].as_i64(), Some(30));
+
+    let output = fixture.output_with_env(
+        &[
+            "weekly",
+            "--since",
+            "20251229",
+            "--until",
+            "20260104",
+            "--timezone",
+            "UTC",
+        ],
+        &[("COLUMNS", "160"), ("NO_COLOR", "1")],
+    )?;
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8(output.stdout)?;
+    assert!(stdout.contains("Coding (Agent) CLI Usage Report - Weekly"));
+    assert!(stdout.contains("Week"));
+    assert!(stdout.contains("All"));
+    assert!(stdout.contains("- Codex"));
+    assert!(stdout.contains("- Claude"));
+    assert!(!stdout.contains("2026-W01"));
+    Ok(())
+}
+
+#[test]
+fn no_cost_projects_all_report_output_without_changing_tokens() -> Result<()> {
+    let fixture = ReportCliFixture::new()?;
+    for (event_key, source, model, event_at, total_tokens) in [
+        (
+            "codex:no-cost:1",
+            "codex",
+            "gpt-5",
+            "2026-05-05T10:00:00Z",
+            10,
+        ),
+        (
+            "claude:no-cost:1",
+            "claude",
+            "claude-sonnet-4",
+            "2026-05-05T11:00:00Z",
+            20,
+        ),
+    ] {
+        fixture.seed_event(SeedEvent {
+            event_key,
+            source,
+            model,
+            event_at,
+            input_tokens: total_tokens,
+            total_tokens,
+            cost_with_cache_usd: 1.25,
+            project_hash: event_key,
+            project_label: event_key,
+            session_id: Some(event_key),
+            source_path_hash: Some(event_key),
+            ..SeedEvent::default()
+        })?;
+    }
+
+    let normal = fixture.json(&[
+        "daily",
+        "--json",
+        "--since",
+        "20260505",
+        "--until",
+        "20260505",
+        "--timezone",
+        "UTC",
+    ])?;
+    let hidden = fixture.json(&[
+        "daily",
+        "--by-agent",
+        "--breakdown",
+        "--no-cost",
+        "--json",
+        "--since",
+        "20260505",
+        "--until",
+        "20260505",
+        "--timezone",
+        "UTC",
+    ])?;
+    assert_eq!(
+        normal["totals"]["totalTokens"],
+        hidden["totals"]["totalTokens"]
+    );
+    assert_eq!(
+        hidden["daily"][0]["agents"].as_array().map(Vec::len),
+        Some(2)
+    );
+    assert_json_has_no_cost_keys(&hidden);
+
+    for command in ["weekly", "monthly", "session", "blocks"] {
+        let json = fixture.json(&[
+            command,
+            "--no-cost",
+            "--json",
+            "--since",
+            "20260505",
+            "--until",
+            "20260505",
+            "--timezone",
+            "UTC",
+        ])?;
+        assert_json_has_no_cost_keys(&json);
+    }
+
+    let instances = fixture.json(&[
+        "daily",
+        "--instances",
+        "--no-cost",
+        "--json",
+        "--since",
+        "20260505",
+        "--until",
+        "20260505",
+        "--timezone",
+        "UTC",
+    ])?;
+    assert_json_has_no_cost_keys(&instances);
+
+    let daily_text = fixture.output_with_env(
+        &[
+            "daily",
+            "--no-cost",
+            "--since",
+            "20260505",
+            "--until",
+            "20260505",
+            "--timezone",
+            "UTC",
+        ],
+        &[("COLUMNS", "160"), ("NO_COLOR", "1")],
+    )?;
+    let daily_stdout = String::from_utf8(daily_text.stdout)?;
+    assert!(!daily_stdout.contains("Cost (USD)"));
+    assert!(daily_stdout.contains("Total Tokens"));
+    assert!(daily_stdout.contains("- Codex"));
+
+    let weekly_text = fixture.output_with_env(
+        &[
+            "weekly",
+            "--compact",
+            "--no-cost",
+            "--since",
+            "20260505",
+            "--until",
+            "20260505",
+            "--timezone",
+            "UTC",
+        ],
+        &[("NO_COLOR", "1")],
+    )?;
+    let weekly_stdout = String::from_utf8(weekly_text.stdout)?;
+    assert!(!weekly_stdout.contains("Cost (USD)"));
+    assert!(weekly_stdout.contains("Agent"));
+    assert!(weekly_stdout.contains("Input"));
+    Ok(())
+}
+
+#[test]
+fn sections_output_keeps_current_period_first_and_flattens_json() -> Result<()> {
+    let fixture = ReportCliFixture::new()?;
+    for (event_key, source, model, total_tokens) in [
+        ("codex:sections:1", "codex", "gpt-5", 10),
+        ("claude:sections:1", "claude", "claude-sonnet-4", 20),
+    ] {
+        fixture.seed_event(SeedEvent {
+            event_key,
+            source,
+            model,
+            event_at: "2026-05-05T12:00:00Z",
+            input_tokens: total_tokens,
+            total_tokens,
+            cost_with_cache_usd: 1.0,
+            project_hash: event_key,
+            project_label: event_key,
+            session_id: Some(event_key),
+            source_path_hash: Some(event_key),
+            ..SeedEvent::default()
+        })?;
+    }
+
+    let output = fixture.output(&[
+        "monthly",
+        "--sections",
+        "daily,daily,session",
+        "--by-agent",
+        "--json",
+        "--since",
+        "20260505",
+        "--until",
+        "20260505",
+        "--timezone",
+        "UTC",
+    ])?;
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8(output.stdout)?;
+    let monthly_index = stdout.find("\"monthly\"").unwrap();
+    let daily_index = stdout.find("\"daily\"").unwrap();
+    let session_index = stdout.find("\"session\"").unwrap();
+    let totals_index = stdout.rfind("\"totals\"").unwrap();
+    assert!(
+        monthly_index < daily_index && daily_index < session_index && session_index < totals_index
+    );
+    assert_eq!(stdout.matches("\"daily\"").count(), 1);
+
+    let json: serde_json::Value = serde_json::from_str(&stdout)?;
+    assert_eq!(json["monthly"][0]["period"].as_str(), Some("2026-05"));
+    assert_eq!(json["daily"][0]["period"].as_str(), Some("2026-05-05"));
+    assert_eq!(json["totals"]["totalTokens"].as_i64(), Some(30));
+    assert!(json["monthly"][0]["agents"].is_array());
+    assert!(json["daily"][0]["agents"].is_array());
+    assert!(json["session"][0].get("agents").is_none());
+    assert!(json["monthly"][0].get("totals").is_none());
+
+    let no_cost = fixture.json(&[
+        "daily",
+        "--sections",
+        "monthly,session",
+        "--by-agent",
+        "--no-cost",
+        "--json",
+        "--since",
+        "20260505",
+        "--until",
+        "20260505",
+        "--timezone",
+        "UTC",
+    ])?;
+    assert_json_has_no_cost_keys(&no_cost);
+    assert_eq!(no_cost["totals"]["totalTokens"].as_i64(), Some(30));
+
+    let text = fixture.output_with_env(
+        &[
+            "daily",
+            "--sections",
+            "daily,monthly,session",
+            "--since",
+            "20260505",
+            "--until",
+            "20260505",
+            "--timezone",
+            "UTC",
+        ],
+        &[("COLUMNS", "160"), ("NO_COLOR", "1")],
+    )?;
+    assert!(text.status.success(), "{text:?}");
+    let text = String::from_utf8(text.stdout)?;
+    let daily_title = text.find("Report - Daily").unwrap();
+    let monthly_title = text.find("Report - Monthly").unwrap();
+    let session_title = text.find("Report - Session").unwrap();
+    assert!(daily_title < monthly_title && monthly_title < session_title);
+
+    let invalid = fixture.output(&["daily", "--sections", "invalid"])?;
+    assert!(!invalid.status.success());
+    let invalid_stderr = String::from_utf8(invalid.stderr)?;
+    assert!(
+        invalid_stderr.contains("possible values"),
+        "{invalid_stderr}"
+    );
+    Ok(())
+}
+
+#[test]
+fn focused_source_reports_match_source_filters_without_comparison_fields() -> Result<()> {
+    let fixture = ReportCliFixture::new()?;
+    for (event_key, source, model, total_tokens) in [
+        ("claude:focused:1", "claude", "claude-sonnet-4", 20),
+        ("codex:focused:1", "codex", "gpt-5", 10),
+        ("opencode:focused:1", "opencode", "gpt-5-mini", 30),
+        ("antigravity:focused:1", "antigravity", "gemini-2.5-pro", 40),
+    ] {
+        fixture.seed_event(SeedEvent {
+            event_key,
+            source,
+            model,
+            event_at: "2026-05-05T12:00:00Z",
+            input_tokens: total_tokens,
+            total_tokens,
+            cost_with_cache_usd: 1.25,
+            project_hash: event_key,
+            project_label: event_key,
+            session_id: Some(event_key),
+            source_path_hash: Some(event_key),
+            ..SeedEvent::default()
+        })?;
+    }
+
+    let filtered = fixture.json(&[
+        "daily",
+        "--source",
+        "claude",
+        "--by-agent",
+        "--json",
+        "--since",
+        "20260505",
+        "--until",
+        "20260505",
+        "--timezone",
+        "UTC",
+    ])?;
+    let focused = fixture.json(&[
+        "claude",
+        "daily",
+        "--json",
+        "--since",
+        "20260505",
+        "--until",
+        "20260505",
+        "--timezone",
+        "UTC",
+    ])?;
+    assert_eq!(focused["totals"], filtered["totals"]);
+    assert_eq!(
+        focused["daily"][0]["totalTokens"],
+        filtered["daily"][0]["totalTokens"]
+    );
+    assert_json_has_no_agent_keys(&focused);
+
+    for (source, total_tokens) in [
+        ("claude", 20),
+        ("codex", 10),
+        ("opencode", 30),
+        ("antigravity", 40),
+    ] {
+        for period in ["daily", "weekly", "monthly", "session"] {
+            let json = fixture.json(&[
+                source,
+                period,
+                "--json",
+                "--since",
+                "20260505",
+                "--until",
+                "20260505",
+                "--timezone",
+                "UTC",
+            ])?;
+            assert_eq!(
+                json["totals"]["totalTokens"].as_i64(),
+                Some(total_tokens),
+                "{source} {period} should apply its source filter"
+            );
+            assert_json_has_no_agent_keys(&json);
+        }
+    }
+
+    let sections = fixture.json(&[
+        "codex",
+        "monthly",
+        "--sections",
+        "daily,weekly,session",
+        "--no-cost",
+        "--json",
+        "--since",
+        "20260505",
+        "--until",
+        "20260505",
+        "--timezone",
+        "UTC",
+    ])?;
+    assert_eq!(sections["totals"]["totalTokens"].as_i64(), Some(10));
+    assert_json_has_no_agent_keys(&sections);
+    assert_json_has_no_cost_keys(&sections);
+
+    let text = fixture.output_with_env(
+        &[
+            "claude",
+            "daily",
+            "--no-cost",
+            "--since",
+            "20260505",
+            "--until",
+            "20260505",
+            "--timezone",
+            "UTC",
+        ],
+        &[("COLUMNS", "160"), ("NO_COLOR", "1")],
+    )?;
+    assert!(text.status.success(), "{text:?}");
+    let text = String::from_utf8(text.stdout)?;
+    assert!(text.contains("Claude Usage Report - Daily"));
+    assert!(!text.contains("Agent"));
+    assert!(!text.contains("Detected:"));
+    assert!(!text.contains("Cost (USD)"));
+
+    let same_source = fixture.output(&[
+        "claude",
+        "daily",
+        "--source",
+        "claude",
+        "--json",
+        "--since",
+        "20260505",
+        "--until",
+        "20260505",
+        "--timezone",
+        "UTC",
+    ])?;
+    assert!(same_source.status.success(), "{same_source:?}");
+
+    let conflict = fixture.output(&[
+        "claude",
+        "daily",
+        "--source",
+        "codex",
+        "--json",
+        "--since",
+        "20260505",
+        "--until",
+        "20260505",
+        "--timezone",
+        "UTC",
+    ])?;
+    assert!(!conflict.status.success());
+    assert!(
+        String::from_utf8(conflict.stderr)?.contains("conflicts with `--source codex`"),
+        "focused source conflict should explain the incompatible filter"
+    );
+
+    let instances = fixture.output(&["codex", "daily", "--instances"])?;
+    assert!(!instances.status.success());
+    assert!(
+        String::from_utf8(instances.stderr)?.contains("--instances is not supported"),
+        "focused daily instances should be rejected explicitly"
+    );
     Ok(())
 }
 
@@ -186,11 +690,11 @@ fn daily_defaults_to_last_7_days_and_all_restores_history() -> Result<()> {
     let default_dates = daily_dates(&default_daily);
     assert_eq!(default_dates, expected_default_dates);
     assert!(!default_dates.contains(&seven_days_ago.format("%Y-%m-%d").to_string()));
-    assert_eq!(default_daily["totals"]["total_tokens"].as_i64(), Some(70));
+    assert_eq!(default_daily["totals"]["totalTokens"].as_i64(), Some(70));
 
     let all_daily = fixture.json(&["--all", "--json", "--timezone", "UTC"])?;
     assert_eq!(all_daily["daily"].as_array().map(Vec::len), Some(8));
-    assert_eq!(all_daily["totals"]["total_tokens"].as_i64(), Some(80));
+    assert_eq!(all_daily["totals"]["totalTokens"].as_i64(), Some(80));
 
     let range_daily = fixture.json(&[
         "daily",
@@ -219,10 +723,60 @@ fn daily_defaults_to_last_7_days_and_all_restores_history() -> Result<()> {
         vec![seven_days_ago.format("%Y-%m-%d").to_string()]
     );
     assert_eq!(
-        explicit_old_range["totals"]["total_tokens"].as_i64(),
+        explicit_old_range["totals"]["totalTokens"].as_i64(),
         Some(10)
     );
 
+    Ok(())
+}
+
+#[test]
+fn report_date_filters_accept_iso_and_compact_forms_equivalently() -> Result<()> {
+    let fixture = ReportCliFixture::new()?;
+    fixture.seed_event(SeedEvent {
+        event_key: "codex:date-format:1",
+        source: "codex",
+        model: "gpt-5",
+        event_at: "2026-04-25T12:00:00Z",
+        input_tokens: 10,
+        total_tokens: 10,
+        project_hash: "date-format",
+        project_label: "Date Format",
+        session_id: Some("date-format"),
+        source_path_hash: Some("date-format"),
+        ..SeedEvent::default()
+    })?;
+
+    let compact = fixture.json(&[
+        "daily",
+        "--json",
+        "--since",
+        "20260425",
+        "--until",
+        "20260425",
+        "--timezone",
+        "UTC",
+    ])?;
+    let iso = fixture.json(&[
+        "daily",
+        "--json",
+        "--since",
+        "2026-04-25",
+        "--until",
+        "2026-04-25",
+        "--timezone",
+        "UTC",
+    ])?;
+    assert_eq!(compact, iso);
+
+    let invalid = fixture.output(&["daily", "--since", "2026/04/25", "--timezone", "UTC"])?;
+    assert!(!invalid.status.success());
+    let stderr = String::from_utf8(invalid.stderr)?;
+    assert!(stderr.contains("YYYY-MM-DD or YYYYMMDD"), "{stderr}");
+
+    let help = fixture.output(&["daily", "--help"])?;
+    let help_stdout = String::from_utf8(help.stdout)?;
+    assert!(help_stdout.contains("YYYY-MM-DD|YYYYMMDD"));
     Ok(())
 }
 
@@ -233,11 +787,7 @@ fn daily_human_output_uses_aggregate_ccusage_style_columns_and_no_default_info_l
     let today = Utc::now().date_naive();
     let six_days_ago = today - Duration::days(6);
     let today_display = today.format("%Y-%m-%d").to_string();
-    let today_year = today.format("%Y").to_string();
-    let today_month_day = today.format("%m-%d").to_string();
     let six_days_ago_display = six_days_ago.format("%Y-%m-%d").to_string();
-    let six_days_ago_year = six_days_ago.format("%Y").to_string();
-    let six_days_ago_month_day = six_days_ago.format("%m-%d").to_string();
     let today_event = format!("{today_display}T12:00:00Z");
     let six_days_ago_event = format!("{six_days_ago_display}T12:00:00Z");
     fixture.seed_event(SeedEvent {
@@ -312,22 +862,23 @@ fn daily_human_output_uses_aggregate_ccusage_style_columns_and_no_default_info_l
 
     let output = fixture.output_with_env(
         &["--timezone", "UTC"],
-        &[("COLUMNS", "120"), ("NO_COLOR", "1")],
+        &[("COLUMNS", "160"), ("NO_COLOR", "1")],
     )?;
     assert!(output.status.success(), "{output:?}");
     let stdout = String::from_utf8(output.stdout)?;
     let stderr = String::from_utf8(output.stderr)?;
-    assert!(stdout.contains("LLM Usage Report - Daily"));
+    assert!(stdout.contains("Coding (Agent) CLI Usage Report - Daily"));
+    assert!(stdout.contains("Detected: Codex, Claude"));
     assert!(!stdout.contains("Codex daily usage"));
     assert!(!stdout.contains("Claude daily usage"));
     assert!(!stdout.contains("---\nClaude daily usage"));
-    assert!(!stdout.contains(&today_display));
-    assert!(stdout.contains(&today_year));
-    assert!(stdout.contains(&today_month_day));
-    assert!(!stdout.contains(&six_days_ago_display));
-    assert!(stdout.contains(&six_days_ago_year));
-    assert!(stdout.contains(&six_days_ago_month_day));
+    assert!(stdout.contains(&today_display));
+    assert!(stdout.contains(&six_days_ago_display));
     assert!(stdout.contains('\u{250C}'));
+    assert!(stdout.contains("Agent"));
+    assert!(stdout.contains("All"));
+    assert!(stdout.contains("- Codex"));
+    assert!(stdout.contains("- Claude"));
     assert!(stdout.contains("Cache Create"));
     assert!(stdout.contains("Cache Read"));
     assert!(stdout.contains("Total Tokens"));
@@ -339,16 +890,19 @@ fn daily_human_output_uses_aggregate_ccusage_style_columns_and_no_default_info_l
     assert!(!stdout.contains("reason not reported"));
     assert!(stdout.contains("gpt-5.4"));
     assert!(stdout.contains("sonnet-4"));
-    assert!(stdout.contains("6,349,050"));
-    assert!(stdout.contains("333,333"));
-    assert!(stdout.contains("6,348,050"));
-    assert!(stdout.contains("40,330,123,000"));
-    assert!(stdout.contains("40,343,165,778"));
-    assert!(stdout.contains("40,343,167,778"));
+    assert!(stdout.contains("6.35M"));
+    assert!(stdout.contains("333.33K"));
+    assert!(stdout.contains("40.33B"));
+    assert!(stdout.contains("40.34B"));
+    assert!(!stdout.contains("40,343,165,778"));
+    assert!(!stdout.contains("40,343,167,778"));
     assert!(stdout.contains("Total"));
+    assert!(stdout.contains('\u{255E}'));
+    assert!(stdout.contains('\u{2550}'));
+    assert!(stdout.contains('\u{2561}'));
     assert!(!stdout.contains("Total:"));
-    assert!(!stdout.contains("978.05K"));
-    assert!(!stdout.contains("5.37M"));
+    assert!(stdout.contains("978.05K"));
+    assert!(stdout.contains("5.37M"));
     assert!(!stdout.contains("\u{1b}["));
     assert!(!stderr.contains("INFO"));
     assert!(!stderr.contains("开始初始化本地目录与 SQLite schema"));
@@ -358,7 +912,7 @@ fn daily_human_output_uses_aggregate_ccusage_style_columns_and_no_default_info_l
     assert!(colored.status.success(), "{colored:?}");
     let colored_stdout = String::from_utf8(colored.stdout)?;
     assert!(colored_stdout.contains("\u{1b}["));
-    assert!(colored_stdout.contains("LLM Usage Report - Daily"));
+    assert!(colored_stdout.contains("Coding (Agent) CLI Usage Report - Daily"));
 
     Ok(())
 }
@@ -856,8 +1410,8 @@ fn report_commands_use_persisted_cost_columns() -> Result<()> {
     })?;
 
     let daily = fixture.json(&["daily", "--all", "--json", "--timezone", "UTC"])?;
-    assert_eq!(daily["totals"]["estimated_cost_usd"].as_f64(), Some(42.5));
-    assert_eq!(daily["daily"][0]["estimated_cost_usd"].as_f64(), Some(42.5));
+    assert_eq!(daily["totals"]["totalCost"].as_f64(), Some(42.5));
+    assert_eq!(daily["daily"][0]["totalCost"].as_f64(), Some(42.5));
     Ok(())
 }
 
@@ -958,7 +1512,7 @@ fn statusline_outputs_single_line_without_stdin() -> Result<()> {
 }
 
 #[test]
-fn cli_json_outputs_all_snake_case() -> Result<()> {
+fn cli_reports_use_camel_case_without_changing_other_json_surfaces() -> Result<()> {
     let fixture = ReportCliFixture::new()?;
     let today = Utc::now().date_naive();
     let today_display = today.format("%Y-%m-%d").to_string();
@@ -986,11 +1540,20 @@ fn cli_json_outputs_all_snake_case() -> Result<()> {
         vec!["daily", "--json", "--timezone", "UTC"],
         vec!["monthly", "--json", "--timezone", "UTC"],
         vec!["session", "--json", "--timezone", "UTC"],
-        vec!["blocks", "--json", "--timezone", "UTC"],
     ] {
         let json = fixture.json(&args)?;
-        assert_json_has_no_camel_case_keys(&json);
+        assert!(
+            json["totals"].get("totalTokens").is_some(),
+            "{args:?}: {json:#}"
+        );
+        assert!(
+            json["totals"].get("total_tokens").is_none(),
+            "{args:?}: {json:#}"
+        );
     }
+
+    let blocks = fixture.json(&["blocks", "--json", "--timezone", "UTC"])?;
+    assert_json_has_no_camel_case_keys(&blocks);
 
     Ok(())
 }
@@ -1015,12 +1578,57 @@ fn assert_json_has_no_camel_case_keys(value: &serde_json::Value) {
     }
 }
 
+fn assert_json_has_no_cost_keys(value: &serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, value) in map {
+                assert!(
+                    !key.to_ascii_lowercase().contains("cost"),
+                    "JSON key should not expose cost, got {key}"
+                );
+                assert_json_has_no_cost_keys(value);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                assert_json_has_no_cost_keys(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn assert_json_has_no_agent_keys(value: &serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, value) in map {
+                assert!(
+                    key != "agent" && key != "agents",
+                    "focused JSON should not expose comparison field {key}"
+                );
+                assert_json_has_no_agent_keys(value);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                assert_json_has_no_agent_keys(item);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn daily_dates(value: &serde_json::Value) -> Vec<String> {
     value["daily"]
         .as_array()
         .expect("daily array")
         .iter()
-        .map(|row| row["date"].as_str().expect("daily row date").to_string())
+        .map(|row| {
+            row["period"]
+                .as_str()
+                .expect("daily row period")
+                .to_string()
+        })
         .collect()
 }
 

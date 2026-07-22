@@ -35,7 +35,7 @@ pub use pricing_catalog::{
     CatalogApplyResult, CatalogLayerStatus, CatalogResetResult, PricingCatalogStatus,
 };
 pub use run_log::RunLog;
-pub use schema::TOKEN_ACCOUNTING_VERSION;
+pub use schema::{TOKEN_ACCOUNTING_VERSION, expected_token_accounting_version};
 pub use source_file::{LossyRebuildRisk, SourceFileStateCounts, SourceFileStore};
 pub use sync_status::SyncStatusStore;
 pub use trigger::TriggerStore;

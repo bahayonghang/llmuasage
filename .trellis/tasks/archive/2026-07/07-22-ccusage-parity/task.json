@@ -1,0 +1,33 @@
+{
+  "id": "ccusage-parity",
+  "name": "ccusage-parity",
+  "title": "对齐 ccusage README 命令与过滤器 surface",
+  "description": "父任务：为 llmusage 补齐 ccusage README 提到、当前缺失的报表命令与过滤器（weekly、--no-cost、--sections、by-agent 全周期、来源子命令、YYYY-MM-DD 日期），不含 statusline、新增来源解析器与 ccusage 内部 pricing/offline/mode/speed 标志",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-07-22",
+  "completedAt": "2026-07-22",
+  "branch": null,
+  "base_branch": "dev",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-22-daily-by-agent-report",
+    "07-22-weekly-report",
+    "07-22-no-cost-flag",
+    "07-22-sections-composite-report",
+    "07-22-source-subcommands",
+    "07-22-date-filter-format"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

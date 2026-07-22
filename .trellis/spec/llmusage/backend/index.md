@@ -17,6 +17,9 @@ output, and dashboard/TUI consumers.
   behavior.
 - Read [TUI Presentation Contracts](./tui-presentation-contracts.md) before
   changing interactive themes, copy, formatting, or terminal color behavior.
+- Read [Report CLI Contracts](./report-cli-contracts.md) before changing
+  daily/weekly/monthly/session report arguments, report JSON, source-focused
+  commands, or CLI report-table output.
 - Read [TUI Runtime Contracts](./tui-runtime-contracts.md) before changing the
   event loop, redraw policy, render snapshots, or scrollable table construction.
 - Read [Web Server Contracts](./web-server-contracts.md) before changing the
@@ -36,6 +39,7 @@ output, and dashboard/TUI consumers.
 | [Token Accounting Contracts](./token-accounting-contracts.md) | Parser normalization, logical dedupe, authoritative totals, and guarded legacy rebuild | Documented |
 | [TUI Presentation Contracts](./tui-presentation-contracts.md) | Interactive theme slots, English copy, shared formatters, and terminal color fallback | Documented |
 | [TUI Runtime Contracts](./tui-runtime-contracts.md) | Dirty redraws, tick coalescing, frame snapshots, and visible-row caches | Documented |
+| [Report CLI Contracts](./report-cli-contracts.md) | Unified/focused report command surface, DTO projections, and output invariants | Documented |
 | [Web Server Contracts](./web-server-contracts.md) | Dashboard listener, browser-launch, SSH, and network-exposure contracts | Documented |
 
 ## Quality Check

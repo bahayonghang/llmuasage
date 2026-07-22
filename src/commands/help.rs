@@ -298,12 +298,20 @@ const ENGLISH_COMMANDS: &[(&str, &str)] = &[
     ),
     ("monthly", "Group token and estimated-cost usage by month."),
     (
+        "weekly",
+        "Group token and estimated-cost usage by Monday week start.",
+    ),
+    (
         "session",
         "Group usage by source session, optionally filtered by project or session id.",
     ),
     (
         "blocks",
         "Show 5-hour usage blocks and burn-rate projections.",
+    ),
+    (
+        "claude / codex / opencode / antigravity",
+        "Show focused daily, weekly, monthly, or session reports for one source.",
     ),
     (
         "statusline",
@@ -367,11 +375,11 @@ const ENGLISH_GLOBAL_OPTIONS: &[(&str, &str)] = &[
 
 const ENGLISH_REPORT_OPTIONS: &[(&str, &str)] = &[
     (
-        "--since <YYYYMMDD>",
+        "--since <YYYY-MM-DD|YYYYMMDD>",
         "Inclusive report start date. Alias: -s.",
     ),
     (
-        "--until <YYYYMMDD>",
+        "--until <YYYY-MM-DD|YYYYMMDD>",
         "Inclusive report end date. Alias: -u.",
     ),
     (
@@ -393,8 +401,20 @@ const ENGLISH_REPORT_OPTIONS: &[(&str, &str)] = &[
     ),
     ("--compact", "Use a narrower table layout."),
     (
+        "--no-cost",
+        "Hide cost columns and cost fields from report output.",
+    ),
+    (
         "--source <SOURCE>",
         "Restrict reports or sync to codex, claude, opencode, or antigravity.",
+    ),
+    (
+        "-A, --by-agent",
+        "Add per-source rows to unified report JSON; text already includes Agent rows.",
+    ),
+    (
+        "--sections <SECTION,...>",
+        "Include daily, weekly, monthly, or session sections in one report.",
     ),
     (
         "--all",
@@ -418,6 +438,8 @@ const ENGLISH_EXAMPLES: &[(&str, &str)] = &[
         "JSON monthly breakdown",
         "llmusage monthly --json --breakdown",
     ),
+    ("Weekly report", "llmusage weekly --by-agent --json"),
+    ("Focused Codex report", "llmusage codex daily --no-cost"),
     ("Active burn-rate block", "llmusage blocks --active"),
     ("Browser dashboard", "llmusage serve"),
     ("Inspect pricing catalog", "llmusage catalog status --json"),
@@ -435,11 +457,16 @@ const CHINESE_COMMANDS: &[(&str, &str)] = &[
         "显示 daily token 与估算成本；默认最近 7 天。",
     ),
     ("monthly", "按月汇总 token 与估算成本。"),
+    ("weekly", "按周一周起始日期汇总 token 与估算成本。"),
     (
         "session",
         "按来源 session 汇总，可按项目或 session id 过滤。",
     ),
     ("blocks", "显示 5 小时用量窗口和 burn-rate 预测。"),
+    (
+        "claude / codex / opencode / antigravity",
+        "显示单一来源的聚焦 daily、weekly、monthly 或 session 报表。",
+    ),
     ("statusline", "输出一行适合 statusline 的用量摘要。"),
     ("init", "创建本地运行时并安装/探测支持的集成。"),
     (
@@ -471,8 +498,14 @@ const CHINESE_GLOBAL_OPTIONS: &[(&str, &str)] = &[
 ];
 
 const CHINESE_REPORT_OPTIONS: &[(&str, &str)] = &[
-    ("--since <YYYYMMDD>", "报表包含式开始日期；别名：-s。"),
-    ("--until <YYYYMMDD>", "报表包含式结束日期；别名：-u。"),
+    (
+        "--since <YYYY-MM-DD|YYYYMMDD>",
+        "报表包含式开始日期；别名：-s。",
+    ),
+    (
+        "--until <YYYY-MM-DD|YYYYMMDD>",
+        "报表包含式结束日期；别名：-u。",
+    ),
     ("--json", "支持的报表命令输出稳定 JSON；别名：-j。"),
     (
         "--breakdown",
@@ -488,9 +521,18 @@ const CHINESE_REPORT_OPTIONS: &[(&str, &str)] = &[
         "标题和数字格式的轻量 locale 选择；别名：-l。",
     ),
     ("--compact", "使用更窄的表格布局。"),
+    ("--no-cost", "从报表输出隐藏成本列和成本字段。"),
     (
         "--source <SOURCE>",
         "报表或同步限制到 codex、claude、opencode 或 antigravity。",
+    ),
+    (
+        "-A, --by-agent",
+        "统一报表 JSON 增加按来源行；文本已默认包含 Agent 行。",
+    ),
+    (
+        "--sections <SECTION,...>",
+        "在一份报表中组合 daily、weekly、monthly 或 session 段。",
     ),
     ("--all", "daily 显示完整历史，而不是默认最近 7 天。"),
     ("-i, --instances", "daily 按项目/实例分组。"),
@@ -508,6 +550,8 @@ const CHINESE_EXAMPLES: &[(&str, &str)] = &[
         "llmusage daily --source codex --since 20260501 --until 20260518",
     ),
     ("JSON 月报拆分", "llmusage monthly --json --breakdown"),
+    ("周报 JSON", "llmusage weekly --by-agent --json"),
+    ("聚焦 Codex 报表", "llmusage codex daily --no-cost"),
     ("当前 burn-rate 窗口", "llmusage blocks --active"),
     ("浏览器 Dashboard", "llmusage serve"),
     ("查看价格目录", "llmusage catalog status --json"),
@@ -551,6 +595,8 @@ mod tests {
         assert!(help.contains("│ Command"));
         assert!(help.contains("source-status"));
         assert!(help.contains("catalog"));
+        assert!(help.contains("claude"));
+        assert!(help.contains("antigravity"));
         assert!(help.contains("Report options:"));
         assert!(help.contains("llmusage help --zh"));
         assert!(!help.contains("| --- |"));
@@ -563,6 +609,8 @@ mod tests {
         assert!(zh.contains("│ 命令"));
         assert!(zh.contains("source-status"));
         assert!(zh.contains("catalog"));
+        assert!(zh.contains("claude"));
+        assert!(zh.contains("antigravity"));
         assert!(zh.contains("报表参数"));
         assert!(zh.contains("示例"));
         assert!(!zh.contains("| --- |"));

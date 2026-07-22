@@ -1,6 +1,6 @@
 # CLI 参考
 
-本页按版本 `1.0.0` 的 `cargo run -- --help`、`cargo run -- serve --help`、`cargo run -- export html --help` 对齐。顶层 help 使用紧凑表格；子命令 help 继续使用 clap 输出。
+本页按版本 `1.0.1` 的 `cargo run -- --help`、`cargo run -- serve --help`、`cargo run -- export html --help` 对齐。顶层 help 使用紧凑表格；子命令 help 继续使用 clap 输出。
 
 ## 顶层 help
 
@@ -22,15 +22,18 @@ Usage: llmusage [OPTIONS] [COMMAND]
 | 参数 | 含义 |
 | --- | --- |
 | `--home <PATH>` | 覆盖 `LLMUSAGE_HOME` 和默认 `~/.llmusage` 运行时根目录 |
-| `--since <YYYYMMDD>` | 报表命令的包含式开始日期 |
-| `--until <YYYYMMDD>` | 报表命令的包含式结束日期 |
+| `--since <YYYY-MM-DD\|YYYYMMDD>` | 报表命令的包含式开始日期 |
+| `--until <YYYY-MM-DD\|YYYYMMDD>` | 报表命令的包含式结束日期 |
 | `--json` | 支持的报表命令输出稳定 JSON |
 | `--breakdown` | 在支持处包含按模型拆分的行或 payload |
 | `--order asc\|desc` | 按周期/活动排序报表行 |
 | `--timezone UTC\|local\|+08:00` | 报表时区。`local` 使用本机当前固定本地偏移，不是 IANA/DST 感知时区。 |
 | `--locale <LOCALE>` | 标题和数字格式的轻量 locale 选择 |
 | `--compact` | 使用更窄的表格布局 |
-| `--source codex\|claude\|opencode\|antigravity` | 报表或同步限制到一个来源 |
+| `--no-cost` | 从报表输出隐藏成本列与成本字段 |
+| `--source codex\|claude\|opencode\|antigravity` | 将顶层报表或同步命令限制到一个来源 |
+| `-A, --by-agent` | 在统一报表 JSON 中加入嵌套来源行 |
+| `--sections daily\|weekly\|monthly\|session` | 在一次组合输出中加入报表周期 |
 | `--all` | daily 显示完整历史，而不是默认最近 7 天 |
 | `--instances` | daily 按项目/实例分组 |
 | `--project <PROJECT>` | 按项目 label、hash 或 reference 过滤 |
@@ -59,7 +62,17 @@ llmusage daily --source codex --since 20260501 --until 20260518
 llmusage daily --json --breakdown
 ```
 
-默认命令。展示 daily token 与估算成本。
+默认命令。展示 daily token 与估算成本。daily、weekly、monthly 的文本输出采用统一的 `All` 加 `Agent` 行；CLI JSON 使用 camelCase，传入 `--by-agent` 时会加入嵌套来源行。
+
+### `llmusage weekly`
+
+```powershell
+llmusage weekly
+llmusage weekly --since 2026-05-04 --until 2026-05-10
+llmusage weekly --by-agent --json
+```
+
+按每周周一的起始日期分组。
 
 ### `llmusage monthly`
 
@@ -78,6 +91,19 @@ llmusage session --project my-repo
 ```
 
 按来源 session 聚合。`--id <ID>` 支持精确或部分 session id。
+
+### `llmusage <source> <period>`
+
+```powershell
+llmusage claude daily
+llmusage codex monthly --json
+llmusage opencode weekly --no-cost
+llmusage antigravity session
+```
+
+`claude`、`codex`、`opencode`、`antigravity` 都挂载 `daily`、`weekly`、`monthly`、`session`。聚焦命令会注入对应来源筛选，数据与 `<period> --source <source>` 相同，并移除 `Agent`/`Detected` 对比层。其 JSON 不含 `agent` 或 `agents` 字段。重复传入同值 `--source` 可以接受；冲突值会被拒绝。`blocks` 有意不在这个命令树中。
+
+这是 llmusage 的均匀扩展，不是逐来源复刻 ccusage 的能力矩阵。
 
 ### `llmusage blocks`
 

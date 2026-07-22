@@ -815,3 +815,69 @@ Claude/Codex 以 planned replay 文件数显示 5Hz 解析进度，TTY 显示提
 ### Next Steps
 
 - None - task complete
+
+
+## Session 25: ccusage 报表对齐与来源聚焦视图
+
+**Date**: 2026-07-22
+**Task**: ccusage 报表对齐与来源聚焦视图
+**Branch**: `dev`
+
+### Summary
+
+完成统一 Agent 报表、weekly、no-cost、sections、双日期格式与四来源 focused 子命令，并通过 just ci。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f3567c1` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 26: 修复 daily cache 统计与汇总展示
+
+**Date**: 2026-07-22
+**Task**: 修复 daily cache 统计与汇总展示
+**Branch**: `dev`
+
+### Summary
+
+排除 Codex fork replay 重复 token，升级单源 accounting marker；统一 human report 可见总量、K/M/B 格式和 Total 分隔线，并完成真实数据库备份重建与 ccusage 对照。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ebcbbdd420268dabd17778696898ae5523852f2c` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

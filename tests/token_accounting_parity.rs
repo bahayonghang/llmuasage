@@ -113,6 +113,12 @@ fn ccusage_token_semantics_are_consistent_across_sources_and_queries() -> Result
             + 30.0 * rate["output_per_mtok"].as_f64().unwrap())
             / 1_000_000.0;
         assert!((cost - expected_cost).abs() <= 1e-9);
+        assert_eq!(store.token_accounting_version(SourceKind::Codex)?, Some(3));
+        assert_eq!(store.token_accounting_version(SourceKind::Claude)?, Some(2));
+        assert_eq!(
+            store.token_accounting_version(SourceKind::Opencode)?,
+            Some(2)
+        );
 
         Ok::<_, anyhow::Error>(())
     })?;
@@ -135,9 +141,9 @@ fn legacy_source_requires_guarded_explicit_rebuild_before_new_writes() -> Result
             ..Default::default()
         };
         commands::sync::run_once_with_options(&app, &store, 0, &source_options, None).await?;
-        assert_eq!(store.token_accounting_version(SourceKind::Codex)?, Some(2));
+        assert_eq!(store.token_accounting_version(SourceKind::Codex)?, Some(3));
 
-        store.clear_token_accounting_version(SourceKind::Codex)?;
+        store.set_meta_value("token_accounting_version.codex", "2")?;
         assert!(store.has_legacy_token_accounting(SourceKind::Codex)?);
         let status = store
             .sync_status()
@@ -180,7 +186,7 @@ fn legacy_source_requires_guarded_explicit_rebuild_before_new_writes() -> Result
             None,
         )
         .await?;
-        assert_eq!(store.token_accounting_version(SourceKind::Codex)?, Some(2));
+        assert_eq!(store.token_accounting_version(SourceKind::Codex)?, Some(3));
         assert!(!store.has_legacy_token_accounting(SourceKind::Codex)?);
 
         Ok::<_, anyhow::Error>(())
@@ -209,7 +215,7 @@ fn serve_repair_rebuilds_safe_legacy_sources_and_unblocks_normal_sync() -> Resul
         let report = commands::serve::repair_legacy_token_accounting(&app, &store).await?;
         assert_eq!(report.rebuilt_sources, vec![SourceKind::Codex]);
         assert!(report.blocked_sources.is_empty());
-        assert_eq!(store.token_accounting_version(SourceKind::Codex)?, Some(2));
+        assert_eq!(store.token_accounting_version(SourceKind::Codex)?, Some(3));
 
         commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
         let repeated = commands::serve::repair_legacy_token_accounting(&app, &store).await?;

@@ -4,7 +4,7 @@
 
 Local-first usage analytics for AI coding CLIs. `llmusage` reads local Codex, Claude Code, OpenCode, and Google Antigravity artifacts into a local SQLite database, then renders reports, a terminal dashboard, a browser dashboard, and offline HTML exports without upload or login.
 
-> Current crate version: `1.0.0`.
+> Current crate version: `1.0.1`.
 
 ![llmusage web dashboard overview](./docs/public/screenshots/web-dashboard-overview.png)
 
@@ -61,6 +61,8 @@ On the first sync after an embedded pricing catalog upgrade, `sync` reprices his
 
 ```powershell
 llmusage daily --source codex --since 20260501 --until 20260518
+llmusage weekly --sections daily,monthly --no-cost
+llmusage codex daily --since 2026-05-01 --until 2026-05-18
 llmusage monthly --breakdown
 llmusage session --project my-repo
 llmusage blocks --active
@@ -74,6 +76,14 @@ llmusage export html --out .\llmusage-report
 ```
 
 Report commands are read-only SQLite queries; run `llmusage sync` when the database is stale.
+
+## Reports
+
+`daily`, `weekly`, `monthly`, and `session` use the shared coding-agent report shape. Human tables show an aggregate `All` row plus per-source `Agent` rows; CLI JSON uses camelCase fields, and `--by-agent` adds the nested source rows to JSON. `weekly` groups by the Monday that starts each week.
+
+Report date filters accept either `YYYYMMDD` or `YYYY-MM-DD`. Use `--sections daily,weekly,monthly,session` to combine periods in one output (the requested command period stays first), and `--no-cost` to remove cost columns and JSON cost fields without changing token totals.
+
+For a single-source view, use `llmusage <source> <period>`, for example `llmusage claude daily` or `llmusage codex monthly`. The supported source hosts are `claude`, `codex`, `opencode`, and `antigravity`; each supports `daily`, `weekly`, `monthly`, and `session`. They return the same data as `<period> --source <source>`, but remove the Agent comparison layer from text and JSON. `blocks` intentionally remains a top-level command. This uniform source surface is an llmusage extension, not a claim that every source mirrors ccusage's per-source capability matrix.
 
 `llmusage dash` uses a tokscale-style terminal dashboard. Keyboard controls: `tab`/`shift-tab` or `1`-`9` switch views; `j`/`k`, arrows, Page Up/Page Down, Home/End, or the mouse wheel select rows; `o` cycles sortable columns and `O` reverses direction; `s` opens the source picker; `r` refreshes dashboard data; `R` toggles auto-refresh; `x` runs sync for the current source filter; `?` opens help/settings; and `q` exits.
 

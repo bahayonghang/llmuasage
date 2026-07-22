@@ -1,0 +1,188 @@
+# Report CLI Contracts
+
+## Scenario: Unified and focused report commands
+
+### 1. Scope / Trigger
+
+- Apply this contract before changing `src/commands/report_args.rs`,
+  `src/commands/{daily,weekly,monthly,session,focused,unified_report}.rs`,
+  `src/tui/report_table.rs`, or `tests/report_commands.rs`.
+- These commands have two consumers: human tables and CLI JSON. They are
+  presentation projections over the shared query report types; dashboard,
+  export, and interactive-TUI serialization must remain unchanged.
+
+### 2. Signatures
+
+```text
+llmusage daily|weekly|monthly|session [REPORT OPTIONS]
+llmusage <claude|codex|opencode|antigravity> <daily|weekly|monthly|session> [REPORT OPTIONS]
+
+ReportCommonArgs:
+  --since/--until <YYYY-MM-DD|YYYYMMDD>
+  --source <SOURCE>
+  --json --breakdown --compact --no-cost
+
+UnifiedReportArgs:
+  --by-agent
+  --sections <daily|weekly|monthly|session,...>
+
+unified_report::focused_report(&UnifiedReport, SourceKind) -> UnifiedReport
+unified_report::{report_json, focused_report_json}(..., no_cost) -> JSON
+```
+
+### 3. Contracts
+
+- Top-level daily, weekly, monthly, and session commands load through the
+  shared unified report query. Daily, weekly, and monthly text use an `All`
+  row plus source rows in the `Agent` column; session remains source-row based.
+- CLI-only DTOs own camelCase serialization. Query structs retain their
+  existing snake_case serialization for dashboard, export, and interactive TUI
+  callers.
+- `--by-agent` adds nested `agents` only to unified JSON. Human unified tables
+  already show Agent rows.
+- `--sections` produces an ordered flat JSON object: current command period
+  first, then requested daily, weekly, monthly, session periods, then totals
+  from the command period. Duplicate section values do not duplicate a field.
+- `--no-cost` is an output projection. It removes text cost columns and every
+  JSON key containing `cost`, but never changes query filtering or token
+  totals.
+- Unified and focused human tables are an auditable visible-channel
+  projection. Every displayed `Total Tokens` cell is calculated as
+  `input + output + cache creation + cache read`, including period, Agent,
+  model-breakdown, and final `Total` rows. Use saturating addition for this
+  presentation calculation.
+- CLI JSON keeps the authoritative persisted `totalTokens`, which may include
+  source-specific reasoning or extra tokens that have no dedicated human-table
+  column. Do not overwrite query DTO or SQLite `total_tokens` values to make
+  them match the text projection.
+- Human-table token cells use `format_token_compact` (`K`, `M`, `B`) rather
+  than comma-separated raw counts. The final `Total` row is preceded by the
+  deterministic double-line separator `╞═╪═╡`; neither behavior depends on
+  terminal color support.
+- Unified and focused human tables render a zero `Cache Create` or `Cache Read`
+  cell as the `-` placeholder (`format_cache_cell`), signalling that the source
+  does not report that metric rather than an observed zero. Codex/OpenAI and
+  OpenAI-compatible sources never report cache creation, so their `Cache Create`
+  is always `-`; this matches ccusage, which hardcodes `cacheCreationTokens: 0`.
+  The placeholder is presentation-only: CLI JSON keeps the numeric `0`, and the
+  `Total Tokens` visible-channel sum still uses the underlying zero.
+- Unified/focused human-table color is a `ColorMode`-gated projection. When
+  color is enabled, the header and final `Total` row are bold and `-` cache
+  placeholders in right-aligned columns are dimmed; unified tables keep
+  per-source Agent-label coloring and use no single accent color, while focused
+  tables accent with the source color. `ColorMode::Never`, `NO_COLOR`,
+  `LLMUSAGE_NO_COLOR`, and non-TTY output emit plain text with no ANSI, and CLI
+  JSON is never styled.
+- `llmusage <source> <period>` injects the matching `ReportFilter.source` and
+  uses the shared loader. Focused reports lift the matching source row after
+  query loading, then render without `Agent`/`Detected`; focused JSON has no
+  `agent` or `agents` keys. All four hosts uniformly support daily, weekly,
+  monthly, and session. This is an llmusage extension, not a claim of ccusage
+  per-source capability parity.
+
+### 4. Validation & Error Matrix
+
+| Condition                                                               | Required result                                                          |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `--since` or `--until` uses `YYYYMMDD` or `YYYY-MM-DD`                  | Parse to the identical inclusive date filter                             |
+| A focused command also has the same `--source`                          | Accept it                                                                |
+| A focused command has a different `--source`                            | Fail with a conflict that names the explicit source                      |
+| Focused `daily --instances`                                             | Fail; project-instance output is not a focused unified projection        |
+| `daily --instances --sections ...` or `session --id ... --sections ...` | Fail with the existing incompatible-option error                         |
+| Source host requests `blocks`                                           | Clap rejects it; `blocks` remains top-level only                         |
+| Focused source has no matching rows                                     | Render the ordinary empty report state, not an error                     |
+| Persisted `total_tokens` exceeds the four visible token channels        | Text uses the visible-channel sum; JSON retains persisted `totalTokens`  |
+| A visible token sum approaches `i64::MAX`                               | Saturate instead of overflowing or panicking                             |
+| Human token value crosses a unit boundary                               | Render with the shared compact formatter and stable `K`/`M`/`B` rounding |
+
+### 5. Good/Base/Bad Cases
+
+- Good: `llmusage codex weekly --json --no-cost` has Codex-only totals, no
+  `agent`/`agents`, and no cost keys.
+- Good: `llmusage monthly --sections daily,session --by-agent --json` keeps
+  `monthly`, `daily`, `session`, then `totals` in that order.
+- Base: `llmusage daily --source claude` remains a unified report with an
+  `All` row; `llmusage claude daily` is its focused presentation equivalent.
+- Good: persisted `total_tokens = 147_857_415` with visible channels totaling
+  `147_780_595` renders `147.78M` in the table while JSON returns `147857415`.
+- Base: zero and sub-thousand token values remain readable through the shared
+  compact formatter; thousand, million, and billion boundaries use the same
+  formatter for every token column.
+- Bad: rendering `TokenTotals.total_tokens` in a table whose visible columns
+  sum to a different number. Readers cannot audit that total and may
+  misdiagnose the difference as duplicate cache accounting.
+- Bad: serializing `UnifiedRow` directly for CLI JSON. That leaks snake_case
+  fields and comparison-only agents to consumers that expect the CLI contract.
+- Bad: adding an independent source query for focused reports. It duplicates
+  filtering/order/token logic and can drift from `<period> --source <source>`.
+
+### 6. Tests Required
+
+- Unit-test `focused_report` and focused JSON: only the requested source is
+  retained; `agent` and `agents` are absent; token totals match that source.
+- Parse all four source hosts with all four period subcommands and test same
+  versus conflicting `--source` injection.
+- Integration-test source/period totals against the matching top-level
+  `--source` report. Cover focused text title without `Agent`/`Detected`,
+  focused `--sections`, and focused `--no-cost`.
+- Unit-test a fixture where authoritative `total_tokens` is greater than the
+  visible-channel sum. Assert period, Agent, model-breakdown, and final totals
+  use the visible sum, all token cells use compact units, raw large counts are
+  absent, and the final Total separator uses double-line glyphs.
+- Keep a CLI JSON assertion for that divergent fixture proving `totalTokens`
+  still contains the authoritative persisted value.
+- Keep unified integration coverage for Monday weekly keys, camelCase fields,
+  `--by-agent`, both date formats, section order, and no-cost token invariance.
+- Run `cargo fmt --check`, strict clippy, focused report tests, and the full
+  report command suite before the project-wide gate.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+let report = reports::load_daily_report(&store, &filter)?;
+println!("{}", serde_json::to_string_pretty(&report)?);
+```
+
+This couples CLI JSON to a shared query payload and makes a focused command
+need its own data path.
+
+#### Correct
+
+```rust
+let report = reports::load_unified_report(&store, &filter, PeriodKind::Daily)?;
+let focused = unified_report::focused_report(&report, source);
+println!(
+    "{}",
+    serde_json::to_string_pretty(&unified_report::focused_report_json(&focused, no_cost)?)?
+);
+```
+
+The query remains the single source of token/filter/order semantics, while the
+CLI-specific DTO enforces the focused output contract.
+
+For human tables, keep authoritative and visible totals distinct:
+
+#### Wrong
+
+```rust
+cells.push(format_token_compact(totals.total_tokens));
+```
+
+This can include reasoning or source-specific extra tokens that have no
+visible column in the table.
+
+#### Correct
+
+```rust
+cells.push(format_token_compact(table_total_tokens(
+    totals.input_tokens,
+    totals.output_tokens,
+    totals.cache_creation_tokens,
+    totals.cache_read_tokens,
+)));
+```
+
+This makes the human table auditable while JSON continues to serialize the
+authoritative `total_tokens` field.

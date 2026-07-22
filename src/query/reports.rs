@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque};
 
 use anyhow::Result;
 use chrono::{
-    DateTime, Duration, FixedOffset, Local, NaiveDate, Offset, SecondsFormat, Timelike, Utc,
+    DateTime, Datelike, Duration, FixedOffset, Local, NaiveDate, Offset, SecondsFormat, Timelike,
+    Utc,
 };
 use rusqlite::Connection;
 use serde::Serialize;
@@ -10,7 +11,9 @@ use tracing::debug;
 
 pub use super::ReportTimezone;
 use crate::{
-    domain::source_descriptor::registered_source_descriptors, models::SourceKind, store::Store,
+    domain::source_descriptor::{registered_source_descriptors, source_descriptor},
+    models::SourceKind,
+    store::Store,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,6 +111,16 @@ pub struct MonthlyReportRow {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct WeeklyReportRow {
+    pub week: String,
+    pub source: Option<String>,
+    #[serde(flatten)]
+    pub totals: TokenTotals,
+    pub models_used: Vec<String>,
+    pub model_breakdowns: Vec<ModelCostBreakdown>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct SessionReportRow {
     pub session_id: String,
     pub session_label: Option<String>,
@@ -161,9 +174,137 @@ pub struct MonthlyReport {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct WeeklyReport {
+    pub weekly: Vec<WeeklyReportRow>,
+    pub totals: TokenTotals,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct SessionListReport {
     pub sessions: Vec<SessionReportRow>,
     pub totals: TokenTotals,
+}
+
+/// Period grouping used by the CLI's unified cross-source report surface.
+///
+/// `Weekly` is intentionally part of the type before the command is wired so
+/// the shared renderer and JSON projection do not need a second shape later.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PeriodKind {
+    Daily,
+    Weekly,
+    Monthly,
+    Session,
+}
+
+impl PeriodKind {
+    pub fn rows_key(self) -> &'static str {
+        match self {
+            Self::Daily => "daily",
+            Self::Weekly => "weekly",
+            Self::Monthly => "monthly",
+            Self::Session => "session",
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Daily => "Daily",
+            Self::Weekly => "Weekly",
+            Self::Monthly => "Monthly",
+            Self::Session => "Session",
+        }
+    }
+
+    pub fn first_column(self) -> &'static str {
+        match self {
+            Self::Daily => "Date",
+            Self::Weekly => "Week",
+            Self::Monthly => "Month",
+            Self::Session => "Session",
+        }
+    }
+}
+
+/// Identity shown in the unified report's Agent column.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum UnifiedAgent {
+    All,
+    Source(SourceKind),
+    Unknown(String),
+}
+
+impl UnifiedAgent {
+    pub fn id(&self) -> &str {
+        match self {
+            Self::All => "all",
+            Self::Source(source) => source.as_str(),
+            Self::Unknown(source) => source,
+        }
+    }
+
+    pub fn display_name(&self) -> String {
+        match self {
+            Self::All => "All".to_string(),
+            Self::Source(source) => source_descriptor(*source)
+                .map(|descriptor| descriptor.display_name.to_string())
+                .unwrap_or_else(|| source.as_str().to_string()),
+            Self::Unknown(source) => source.clone(),
+        }
+    }
+
+    pub fn source_kind(&self) -> Option<SourceKind> {
+        match self {
+            Self::Source(source) => Some(*source),
+            Self::All | Self::Unknown(_) => None,
+        }
+    }
+}
+
+/// A presentation-only row for CLI reports. It deliberately reuses
+/// `TokenTotals` as a numeric container while keeping its serialization out of
+/// the CLI JSON contract.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnifiedRow {
+    pub period: String,
+    pub agent: UnifiedAgent,
+    pub totals: TokenTotals,
+    pub models_used: Vec<String>,
+    pub agent_breakdowns: Vec<UnifiedRow>,
+    pub model_breakdowns: Vec<ModelCostBreakdown>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnifiedReport {
+    pub kind: PeriodKind,
+    pub rows: Vec<UnifiedRow>,
+    pub detected: Vec<SourceKind>,
+}
+
+impl UnifiedReport {
+    pub fn totals(&self) -> TokenTotals {
+        let mut totals = TokenTotals::default();
+        for row in &self.rows {
+            add_token_totals(&mut totals, &row.totals);
+        }
+        totals
+    }
+
+    pub fn detected_labels(&self) -> Vec<String> {
+        self.detected
+            .iter()
+            .filter_map(|source| source_descriptor(*source))
+            .map(|descriptor| descriptor.display_name.to_string())
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct UnifiedPeriodInput {
+    period: String,
+    totals: TokenTotals,
+    models_used: Vec<String>,
+    model_breakdowns: Vec<ModelCostBreakdown>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -301,6 +442,9 @@ type SessionGroup = (
     String,
 );
 
+type SourcePeriodGroups = BTreeMap<SourceKind, BTreeMap<String, Aggregate>>;
+type SourcePeriodTotals = BTreeMap<SourceKind, TokenTotals>;
+
 impl Aggregate {
     fn add_event(&mut self, event: &EventRow) {
         let tokens = TokenComponents::from(event);
@@ -379,6 +523,16 @@ fn add_tokens(totals: &mut TokenTotals, tokens: TokenComponents, cost: f64) {
     totals.estimated_cost_usd += cost;
 }
 
+fn add_token_totals(target: &mut TokenTotals, source: &TokenTotals) {
+    target.input_tokens += source.input_tokens;
+    target.cache_creation_tokens += source.cache_creation_tokens;
+    target.cache_read_tokens += source.cache_read_tokens;
+    target.output_tokens += source.output_tokens;
+    target.reasoning_output_tokens += source.reasoning_output_tokens;
+    target.total_tokens += source.total_tokens;
+    target.estimated_cost_usd += source.estimated_cost_usd;
+}
+
 pub fn load_daily_report(store: &Store, filter: &ReportFilter) -> Result<DailyReport> {
     if filter.project.is_some() {
         return load_daily_report_from_events(store, filter);
@@ -444,26 +598,8 @@ pub fn load_daily_reports_by_source(
     store: &Store,
     filter: &ReportFilter,
 ) -> Result<Vec<(SourceKind, DailyReport)>> {
-    if filter.project.is_some() {
-        return load_daily_reports_by_source_from_events(store, filter);
-    }
-    let buckets = load_filtered_buckets(store, filter)?;
-    let mut source_groups: BTreeMap<SourceKind, BTreeMap<String, Aggregate>> = BTreeMap::new();
-    let mut source_totals: BTreeMap<SourceKind, TokenTotals> = BTreeMap::new();
-
-    for bucket in &buckets {
-        let Some(source) = SourceKind::parse_id(&bucket.source) else {
-            continue;
-        };
-        source_groups
-            .entry(source)
-            .or_default()
-            .entry(bucket.local_date.format("%Y-%m-%d").to_string())
-            .or_default()
-            .add_bucket(bucket);
-        add_totals_from_bucket(source_totals.entry(source).or_default(), bucket);
-    }
-
+    let (source_groups, source_totals) =
+        load_source_period_aggregates(store, filter, daily_period_key)?;
     Ok(build_daily_reports_by_source(
         filter,
         source_groups,
@@ -471,32 +607,60 @@ pub fn load_daily_reports_by_source(
     ))
 }
 
-fn load_daily_reports_by_source_from_events(
+fn daily_period_key(date: NaiveDate) -> String {
+    date.format("%Y-%m-%d").to_string()
+}
+
+fn monthly_period_key(date: NaiveDate) -> String {
+    date.format("%Y-%m").to_string()
+}
+
+fn weekly_period_key(date: NaiveDate) -> String {
+    week_start(date).format("%Y-%m-%d").to_string()
+}
+
+fn week_start(date: NaiveDate) -> NaiveDate {
+    date - Duration::days(i64::from(date.weekday().num_days_from_monday()))
+}
+
+fn load_source_period_aggregates(
     store: &Store,
     filter: &ReportFilter,
-) -> Result<Vec<(SourceKind, DailyReport)>> {
-    let mut source_groups: BTreeMap<SourceKind, BTreeMap<String, Aggregate>> = BTreeMap::new();
-    let mut source_totals: BTreeMap<SourceKind, TokenTotals> = BTreeMap::new();
+    period_key: fn(NaiveDate) -> String,
+) -> Result<(SourcePeriodGroups, SourcePeriodTotals)> {
+    let mut source_groups = SourcePeriodGroups::new();
+    let mut source_totals = SourcePeriodTotals::new();
 
-    visit_filtered_events(store, filter, |event| {
-        let Some(source) = SourceKind::parse_id(&event.source) else {
-            return Ok(());
-        };
-        source_groups
-            .entry(source)
-            .or_default()
-            .entry(event.local_date.format("%Y-%m-%d").to_string())
-            .or_default()
-            .add_event(&event);
-        add_totals_from_event(source_totals.entry(source).or_default(), &event);
-        Ok(())
-    })?;
+    if filter.project.is_some() {
+        visit_filtered_events(store, filter, |event| {
+            let Some(source) = SourceKind::parse_id(&event.source) else {
+                return Ok(());
+            };
+            source_groups
+                .entry(source)
+                .or_default()
+                .entry(period_key(event.local_date))
+                .or_default()
+                .add_event(&event);
+            add_totals_from_event(source_totals.entry(source).or_default(), &event);
+            Ok(())
+        })?;
+    } else {
+        for bucket in load_filtered_buckets(store, filter)? {
+            let Some(source) = SourceKind::parse_id(&bucket.source) else {
+                continue;
+            };
+            source_groups
+                .entry(source)
+                .or_default()
+                .entry(period_key(bucket.local_date))
+                .or_default()
+                .add_bucket(&bucket);
+            add_totals_from_bucket(source_totals.entry(source).or_default(), &bucket);
+        }
+    }
 
-    Ok(build_daily_reports_by_source(
-        filter,
-        source_groups,
-        source_totals,
-    ))
+    Ok((source_groups, source_totals))
 }
 
 fn build_daily_reports_by_source(
@@ -504,14 +668,11 @@ fn build_daily_reports_by_source(
     mut source_groups: BTreeMap<SourceKind, BTreeMap<String, Aggregate>>,
     mut source_totals: BTreeMap<SourceKind, TokenTotals>,
 ) -> Vec<(SourceKind, DailyReport)> {
-    let source_order = [
-        SourceKind::Codex,
-        SourceKind::Claude,
-        SourceKind::Opencode,
-        SourceKind::Antigravity,
-    ];
     let mut reports = Vec::new();
-    for source in source_order {
+    for source in registered_source_descriptors()
+        .iter()
+        .map(|descriptor| descriptor.kind)
+    {
         let Some(groups) = source_groups.remove(&source) else {
             continue;
         };
@@ -662,6 +823,128 @@ fn load_monthly_report_from_events(store: &Store, filter: &ReportFilter) -> Resu
     Ok(MonthlyReport { monthly, totals })
 }
 
+pub fn load_monthly_reports_by_source(
+    store: &Store,
+    filter: &ReportFilter,
+) -> Result<Vec<(SourceKind, MonthlyReport)>> {
+    let (mut source_groups, mut source_totals) =
+        load_source_period_aggregates(store, filter, monthly_period_key)?;
+    let mut reports = Vec::new();
+    for source in registered_source_descriptors()
+        .iter()
+        .map(|descriptor| descriptor.kind)
+    {
+        let Some(groups) = source_groups.remove(&source) else {
+            continue;
+        };
+        let mut monthly = groups
+            .into_iter()
+            .map(|(month, aggregate)| MonthlyReportRow {
+                month,
+                source: Some(source.as_str().to_string()),
+                totals: aggregate.totals.clone(),
+                models_used: aggregate.model_names(),
+                model_breakdowns: aggregate.model_breakdowns(filter.breakdown),
+            })
+            .collect::<Vec<_>>();
+        sort_by_key(&mut monthly, filter.order, |row| row.month.clone());
+        reports.push((
+            source,
+            MonthlyReport {
+                monthly,
+                totals: source_totals.remove(&source).unwrap_or_default(),
+            },
+        ));
+    }
+    Ok(reports)
+}
+
+pub fn load_weekly_report(store: &Store, filter: &ReportFilter) -> Result<WeeklyReport> {
+    if filter.project.is_some() {
+        return load_weekly_report_from_events(store, filter);
+    }
+    let buckets = load_filtered_buckets(store, filter)?;
+    let mut groups: BTreeMap<String, Aggregate> = BTreeMap::new();
+    let mut totals = TokenTotals::default();
+    for bucket in &buckets {
+        groups
+            .entry(weekly_period_key(bucket.local_date))
+            .or_default()
+            .add_bucket(bucket);
+        add_totals_from_bucket(&mut totals, bucket);
+    }
+    Ok(build_weekly_report(filter, groups, totals))
+}
+
+fn load_weekly_report_from_events(store: &Store, filter: &ReportFilter) -> Result<WeeklyReport> {
+    let mut groups: BTreeMap<String, Aggregate> = BTreeMap::new();
+    let mut totals = TokenTotals::default();
+    visit_filtered_events(store, filter, |event| {
+        groups
+            .entry(weekly_period_key(event.local_date))
+            .or_default()
+            .add_event(&event);
+        add_totals_from_event(&mut totals, &event);
+        Ok(())
+    })?;
+    Ok(build_weekly_report(filter, groups, totals))
+}
+
+fn build_weekly_report(
+    filter: &ReportFilter,
+    groups: BTreeMap<String, Aggregate>,
+    totals: TokenTotals,
+) -> WeeklyReport {
+    let mut weekly = groups
+        .into_iter()
+        .map(|(week, aggregate)| WeeklyReportRow {
+            week,
+            source: filter.source.map(|value| value.as_str().to_string()),
+            totals: aggregate.totals.clone(),
+            models_used: aggregate.model_names(),
+            model_breakdowns: aggregate.model_breakdowns(filter.breakdown),
+        })
+        .collect::<Vec<_>>();
+    sort_by_key(&mut weekly, filter.order, |row| row.week.clone());
+    WeeklyReport { weekly, totals }
+}
+
+pub fn load_weekly_reports_by_source(
+    store: &Store,
+    filter: &ReportFilter,
+) -> Result<Vec<(SourceKind, WeeklyReport)>> {
+    let (mut source_groups, mut source_totals) =
+        load_source_period_aggregates(store, filter, weekly_period_key)?;
+    let mut reports = Vec::new();
+    for source in registered_source_descriptors()
+        .iter()
+        .map(|descriptor| descriptor.kind)
+    {
+        let Some(groups) = source_groups.remove(&source) else {
+            continue;
+        };
+        let mut weekly = groups
+            .into_iter()
+            .map(|(week, aggregate)| WeeklyReportRow {
+                week,
+                source: Some(source.as_str().to_string()),
+                totals: aggregate.totals.clone(),
+                models_used: aggregate.model_names(),
+                model_breakdowns: aggregate.model_breakdowns(filter.breakdown),
+            })
+            .collect::<Vec<_>>();
+        sort_by_key(&mut weekly, filter.order, |row| row.week.clone());
+        reports.push((
+            source,
+            WeeklyReport {
+                weekly,
+                totals: source_totals.remove(&source).unwrap_or_default(),
+            },
+        ));
+    }
+    Ok(reports)
+}
+
 pub fn load_session_report(
     store: &Store,
     filter: &ReportFilter,
@@ -777,6 +1060,237 @@ pub fn load_single_session_report(
     Ok(SingleSessionReport {
         session: report.sessions.pop(),
     })
+}
+
+/// Loads the CLI-only unified projection without changing the report payloads
+/// consumed by the dashboard, export, or interactive TUI.
+pub fn load_unified_report(
+    store: &Store,
+    filter: &ReportFilter,
+    kind: PeriodKind,
+) -> Result<UnifiedReport> {
+    match kind {
+        PeriodKind::Daily => {
+            let aggregate = load_daily_report(store, filter)?;
+            let by_source = load_daily_reports_by_source(store, filter)?;
+            Ok(build_unified_period_report(
+                kind,
+                aggregate
+                    .daily
+                    .into_iter()
+                    .map(unified_period_input_from_daily)
+                    .collect(),
+                by_source
+                    .into_iter()
+                    .flat_map(|(source, report)| {
+                        report
+                            .daily
+                            .into_iter()
+                            .map(move |row| (source, unified_period_input_from_daily(row)))
+                    })
+                    .collect(),
+            ))
+        }
+        PeriodKind::Monthly => {
+            let aggregate = load_monthly_report(store, filter)?;
+            let by_source = load_monthly_reports_by_source(store, filter)?;
+            Ok(build_unified_period_report(
+                kind,
+                aggregate
+                    .monthly
+                    .into_iter()
+                    .map(unified_period_input_from_monthly)
+                    .collect(),
+                by_source
+                    .into_iter()
+                    .flat_map(|(source, report)| {
+                        report
+                            .monthly
+                            .into_iter()
+                            .map(move |row| (source, unified_period_input_from_monthly(row)))
+                    })
+                    .collect(),
+            ))
+        }
+        PeriodKind::Session => load_unified_session_report(store, filter, None),
+        PeriodKind::Weekly => {
+            let aggregate = load_weekly_report(store, filter)?;
+            let by_source = load_weekly_reports_by_source(store, filter)?;
+            Ok(build_unified_period_report(
+                kind,
+                aggregate
+                    .weekly
+                    .into_iter()
+                    .map(unified_period_input_from_weekly)
+                    .collect(),
+                by_source
+                    .into_iter()
+                    .flat_map(|(source, report)| {
+                        report
+                            .weekly
+                            .into_iter()
+                            .map(move |row| (source, unified_period_input_from_weekly(row)))
+                    })
+                    .collect(),
+            ))
+        }
+    }
+}
+
+pub fn load_unified_session_report(
+    store: &Store,
+    filter: &ReportFilter,
+    session_id_filter: Option<&str>,
+) -> Result<UnifiedReport> {
+    let report = load_session_report(store, filter, session_id_filter)?;
+    let mut detected = BTreeSet::new();
+    let mut rows = Vec::with_capacity(report.sessions.len());
+    for row in report.sessions {
+        let agent = row
+            .source
+            .as_deref()
+            .map(unified_agent_from_source_id)
+            .unwrap_or_else(|| UnifiedAgent::Unknown("unknown".to_string()));
+        if let Some(source) = agent.source_kind() {
+            detected.insert(source);
+        }
+        rows.push(UnifiedRow {
+            period: row.session_id,
+            agent,
+            totals: row.totals,
+            models_used: row.models_used,
+            agent_breakdowns: Vec::new(),
+            model_breakdowns: row.model_breakdowns,
+        });
+    }
+    Ok(UnifiedReport {
+        kind: PeriodKind::Session,
+        rows,
+        detected: detected_sources(&detected),
+    })
+}
+
+fn unified_period_input_from_daily(row: DailyReportRow) -> UnifiedPeriodInput {
+    UnifiedPeriodInput {
+        period: row.date,
+        totals: row.totals,
+        models_used: row.models_used,
+        model_breakdowns: row.model_breakdowns,
+    }
+}
+
+fn unified_period_input_from_monthly(row: MonthlyReportRow) -> UnifiedPeriodInput {
+    UnifiedPeriodInput {
+        period: row.month,
+        totals: row.totals,
+        models_used: row.models_used,
+        model_breakdowns: row.model_breakdowns,
+    }
+}
+
+fn unified_period_input_from_weekly(row: WeeklyReportRow) -> UnifiedPeriodInput {
+    UnifiedPeriodInput {
+        period: row.week,
+        totals: row.totals,
+        models_used: row.models_used,
+        model_breakdowns: row.model_breakdowns,
+    }
+}
+
+fn build_unified_period_report(
+    kind: PeriodKind,
+    aggregate_rows: Vec<UnifiedPeriodInput>,
+    source_rows: Vec<(SourceKind, UnifiedPeriodInput)>,
+) -> UnifiedReport {
+    let mut detected = BTreeSet::new();
+    let mut breakdowns_by_period: BTreeMap<String, Vec<UnifiedRow>> = BTreeMap::new();
+    for (source, row) in source_rows {
+        detected.insert(source);
+        breakdowns_by_period
+            .entry(row.period.clone())
+            .or_default()
+            .push(UnifiedRow {
+                period: row.period,
+                agent: UnifiedAgent::Source(source),
+                totals: row.totals,
+                models_used: row.models_used,
+                agent_breakdowns: Vec::new(),
+                model_breakdowns: row.model_breakdowns,
+            });
+    }
+
+    let rows = aggregate_rows
+        .into_iter()
+        .map(|row| {
+            let mut agent_breakdowns = breakdowns_by_period.remove(&row.period).unwrap_or_default();
+            agent_breakdowns.sort_by(|left, right| left.agent.cmp(&right.agent));
+            let model_breakdowns = if agent_breakdowns.is_empty() {
+                row.model_breakdowns
+            } else {
+                merge_unified_model_breakdowns(&agent_breakdowns)
+            };
+            UnifiedRow {
+                period: row.period,
+                agent: UnifiedAgent::All,
+                totals: row.totals,
+                models_used: row.models_used,
+                agent_breakdowns,
+                model_breakdowns,
+            }
+        })
+        .collect();
+
+    UnifiedReport {
+        kind,
+        rows,
+        detected: detected_sources(&detected),
+    }
+}
+
+fn unified_agent_from_source_id(source: &str) -> UnifiedAgent {
+    SourceKind::parse_id(source)
+        .map(UnifiedAgent::Source)
+        .unwrap_or_else(|| UnifiedAgent::Unknown(source.to_string()))
+}
+
+fn detected_sources(sources: &BTreeSet<SourceKind>) -> Vec<SourceKind> {
+    registered_source_descriptors()
+        .iter()
+        .filter(|descriptor| sources.contains(&descriptor.kind))
+        .map(|descriptor| descriptor.kind)
+        .collect()
+}
+
+fn merge_unified_model_breakdowns(rows: &[UnifiedRow]) -> Vec<ModelCostBreakdown> {
+    let mut totals_by_model: BTreeMap<String, TokenTotals> = BTreeMap::new();
+    for row in rows {
+        for breakdown in &row.model_breakdowns {
+            let totals = totals_by_model.entry(breakdown.model.clone()).or_default();
+            totals.input_tokens += breakdown.input_tokens;
+            totals.cache_creation_tokens += breakdown.cache_creation_tokens;
+            totals.cache_read_tokens += breakdown.cache_read_tokens;
+            totals.output_tokens += breakdown.output_tokens;
+            totals.reasoning_output_tokens += breakdown.reasoning_output_tokens;
+            totals.total_tokens += breakdown.total_tokens;
+            totals.estimated_cost_usd += breakdown.estimated_cost_usd;
+        }
+    }
+    let mut merged = totals_by_model
+        .into_iter()
+        .map(|(model, totals)| ModelCostBreakdown {
+            source: String::new(),
+            model,
+            input_tokens: totals.input_tokens,
+            cache_creation_tokens: totals.cache_creation_tokens,
+            cache_read_tokens: totals.cache_read_tokens,
+            output_tokens: totals.output_tokens,
+            reasoning_output_tokens: totals.reasoning_output_tokens,
+            total_tokens: totals.total_tokens,
+            estimated_cost_usd: totals.estimated_cost_usd,
+        })
+        .collect::<Vec<_>>();
+    merged.sort_by(|left, right| right.estimated_cost_usd.total_cmp(&left.estimated_cost_usd));
+    merged
 }
 
 pub fn load_blocks_report(
@@ -2093,6 +2607,203 @@ mod tests {
             current_offset,
             "`local` report rendering must use the same current fixed offset as SQL grouping"
         );
+    }
+
+    #[test]
+    fn unified_daily_rows_preserve_all_agent_invariants_and_internal_payloads() -> Result<()> {
+        let fixture = ReportFixture::new()?;
+        fixture.insert_bucket(SeedBucket {
+            source: "codex",
+            model: "gpt-5",
+            hour_start: "2026-05-05T10:00:00Z",
+            project_hash: "codex-project",
+            project_label: "Codex Project",
+            project_ref: None,
+            input_tokens: 10,
+            cache_creation_tokens: 2,
+            cache_read_tokens: 3,
+            output_tokens: 4,
+            reasoning_output_tokens: 0,
+            total_tokens: 19,
+            cost_with_cache_usd: 0.10,
+            pricing_status: "static",
+        })?;
+        fixture.insert_bucket(SeedBucket {
+            source: "claude",
+            model: "claude-sonnet-4",
+            hour_start: "2026-05-05T11:00:00Z",
+            project_hash: "claude-project",
+            project_label: "Claude Project",
+            project_ref: None,
+            input_tokens: 20,
+            cache_creation_tokens: 5,
+            cache_read_tokens: 6,
+            output_tokens: 7,
+            reasoning_output_tokens: 0,
+            total_tokens: 38,
+            cost_with_cache_usd: 0.20,
+            pricing_status: "static",
+        })?;
+        let filter = ReportFilter {
+            since: Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap()),
+            until: Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap()),
+            order: SortOrder::Asc,
+            timezone: ReportTimezone::Utc,
+            locale: "en-US".to_string(),
+            source: None,
+            project: None,
+            breakdown: true,
+        };
+
+        let report = load_unified_report(&fixture.store, &filter, PeriodKind::Daily)?;
+        assert_eq!(report.detected, vec![SourceKind::Codex, SourceKind::Claude]);
+        assert_eq!(report.rows.len(), 1);
+        let all = &report.rows[0];
+        assert_eq!(all.agent, UnifiedAgent::All);
+        assert_eq!(all.agent_breakdowns.len(), 2);
+        assert_eq!(all.agent_breakdowns[0].agent.id(), "codex");
+        assert_eq!(all.agent_breakdowns[1].agent.id(), "claude");
+        assert_eq!(
+            all.agent_breakdowns
+                .iter()
+                .map(|row| row.totals.input_tokens)
+                .sum::<i64>(),
+            all.totals.input_tokens
+        );
+        assert_eq!(
+            all.agent_breakdowns
+                .iter()
+                .map(|row| row.totals.total_tokens)
+                .sum::<i64>(),
+            all.totals.total_tokens
+        );
+        let source_cost = all
+            .agent_breakdowns
+            .iter()
+            .map(|row| row.totals.estimated_cost_usd)
+            .sum::<f64>();
+        assert!((source_cost - all.totals.estimated_cost_usd).abs() <= 1e-9);
+
+        let internal = serde_json::to_value(load_daily_report(&fixture.store, &filter)?)?;
+        assert!(internal["daily"][0].get("cache_creation_tokens").is_some());
+        assert!(internal["daily"][0].get("cacheCreationTokens").is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn weekly_reports_use_monday_start_across_years_and_match_daily_totals() -> Result<()> {
+        let fixture = ReportFixture::new()?;
+        for (source, model, hour_start, tokens, cost) in [
+            ("codex", "gpt-5", "2025-12-29T10:00:00Z", 10, 0.10),
+            (
+                "claude",
+                "claude-sonnet-4",
+                "2026-01-04T10:00:00Z",
+                20,
+                0.20,
+            ),
+            ("codex", "gpt-5", "2026-01-05T10:00:00Z", 30, 0.30),
+        ] {
+            fixture.insert_bucket(SeedBucket {
+                source,
+                model,
+                hour_start,
+                project_hash: hour_start,
+                project_label: hour_start,
+                project_ref: None,
+                input_tokens: tokens,
+                cache_creation_tokens: 0,
+                cache_read_tokens: 0,
+                output_tokens: 0,
+                reasoning_output_tokens: 0,
+                total_tokens: tokens,
+                cost_with_cache_usd: cost,
+                pricing_status: "static",
+            })?;
+        }
+        let filter = ReportFilter {
+            since: Some(NaiveDate::from_ymd_opt(2025, 12, 29).unwrap()),
+            until: Some(NaiveDate::from_ymd_opt(2026, 1, 5).unwrap()),
+            order: SortOrder::Asc,
+            timezone: ReportTimezone::Utc,
+            locale: "en-US".to_string(),
+            source: None,
+            project: None,
+            breakdown: true,
+        };
+
+        let weekly = load_weekly_report(&fixture.store, &filter)?;
+        assert_eq!(weekly.weekly.len(), 2);
+        assert_eq!(weekly.weekly[0].week, "2025-12-29");
+        assert_eq!(weekly.weekly[1].week, "2026-01-05");
+        assert!(!weekly.weekly[0].week.contains('W'));
+
+        let unified = load_unified_report(&fixture.store, &filter, PeriodKind::Weekly)?;
+        assert_eq!(unified.rows[0].agent, UnifiedAgent::All);
+        assert_eq!(unified.rows[0].agent_breakdowns.len(), 2);
+        assert_eq!(unified.totals().total_tokens, 60);
+        assert_eq!(
+            unified.rows[0]
+                .agent_breakdowns
+                .iter()
+                .map(|row| row.totals.total_tokens)
+                .sum::<i64>(),
+            unified.rows[0].totals.total_tokens
+        );
+        assert_eq!(
+            unified.totals().total_tokens,
+            load_unified_report(&fixture.store, &filter, PeriodKind::Daily)?
+                .totals()
+                .total_tokens
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn weekly_period_key_uses_the_filtered_local_date() -> Result<()> {
+        let fixture = ReportFixture::new()?;
+        fixture.insert_bucket(SeedBucket {
+            source: "codex",
+            model: "gpt-5",
+            hour_start: "2026-01-04T16:30:00Z",
+            project_hash: "timezone-week",
+            project_label: "Timezone Week",
+            project_ref: None,
+            input_tokens: 1,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+            output_tokens: 0,
+            reasoning_output_tokens: 0,
+            total_tokens: 1,
+            cost_with_cache_usd: 0.0,
+            pricing_status: "static",
+        })?;
+        let utc_filter = ReportFilter {
+            since: Some(NaiveDate::from_ymd_opt(2026, 1, 4).unwrap()),
+            until: Some(NaiveDate::from_ymd_opt(2026, 1, 4).unwrap()),
+            order: SortOrder::Asc,
+            timezone: ReportTimezone::Utc,
+            locale: "en-US".to_string(),
+            source: None,
+            project: None,
+            breakdown: false,
+        };
+        let local_filter = ReportFilter {
+            since: Some(NaiveDate::from_ymd_opt(2026, 1, 5).unwrap()),
+            until: Some(NaiveDate::from_ymd_opt(2026, 1, 5).unwrap()),
+            timezone: ReportTimezone::Fixed(FixedOffset::east_opt(8 * 3600).unwrap()),
+            ..utc_filter.clone()
+        };
+
+        assert_eq!(
+            load_weekly_report(&fixture.store, &utc_filter)?.weekly[0].week,
+            "2025-12-29"
+        );
+        assert_eq!(
+            load_weekly_report(&fixture.store, &local_filter)?.weekly[0].week,
+            "2026-01-05"
+        );
+        Ok(())
     }
 
     #[test]

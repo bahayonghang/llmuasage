@@ -3,7 +3,7 @@ use tracing::debug;
 
 use crate::{app::AppContext, query::reports, store::Store, tui::report_table};
 
-use super::report_args::BlocksArgs;
+use super::{report_args::BlocksArgs, unified_report};
 
 pub async fn run(app: &AppContext, args: BlocksArgs) -> Result<()> {
     debug!("starting blocks report output");
@@ -14,12 +14,20 @@ pub async fn run(app: &AppContext, args: BlocksArgs) -> Result<()> {
     let report = reports::load_blocks_report(&store, &filter, &options)?;
 
     if args.common.json {
+        let mut report = serde_json::to_value(&report)?;
+        if args.common.no_cost {
+            unified_report::strip_cost_json(&mut report);
+        }
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         println!("Usage blocks");
         println!(
             "{}",
-            report_table::render_blocks_table(&report.blocks, args.common.compact)
+            report_table::render_blocks_table(
+                &report.blocks,
+                args.common.compact,
+                args.common.no_cost
+            )
         );
     }
 

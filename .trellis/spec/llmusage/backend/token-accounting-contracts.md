@@ -12,7 +12,10 @@ is the compatibility baseline when reference implementations disagree.
 - Parser output: `UsageEvent { tokens: UsageTokens, event_key, ... }`.
 - Persisted contract: `usage_event.total_tokens` ->
   `usage_bucket_30m.total_tokens` -> query/UI `total_tokens`.
-- Version metadata: `meta('token_accounting_version.<source>') = '2'`.
+- Version metadata:
+  `meta('token_accounting_version.codex') = '3'`; Claude and OpenCode remain
+  `2`. `expected_token_accounting_version(SourceKind) -> u32` owns this
+  source-aware contract.
 - Legacy repair: `llmusage sync --rebuild --source <source>`.
 - Serve startup repair:
   `commands::serve::repair_legacy_token_accounting(&AppContext, &Store) -> Result<TokenAccountingRepairReport>`.
@@ -30,6 +33,18 @@ is the compatibility baseline when reference implementations disagree.
 - Codex `cached_input_tokens` is inclusive in raw input and must be clamped and
   subtracted. `cache_read_tokens` and `cache_read_input_tokens` are separate
   aliases and do not trigger subtraction.
+- OpenAI/Codex usage has no independent cache-write channel. Persist
+  `cached_input_tokens` as cache read; `cache_creation_tokens = 0` is correct
+  unless a future raw Codex schema explicitly supplies a creation field.
+- A Codex fork/subagent rollout may replay parent token history with timestamps
+  rewritten to the fork creation second. Detect this only when the first 16
+  KiB contains `thread_spawn` or `forked_from_id` and the first two valid token
+  snapshots share a timestamp second. Skip every token event in that second,
+  clear its pending tool evidence, and keep advancing `total_token_usage` as
+  the cumulative baseline for the first real event.
+- Replay detection runs only for a parse starting at byte zero. Incremental
+  appends continue from the persisted file cursor and must not reapply the
+  prefix filter.
 - Claude dedupes by `message.id + requestId`; sidechain replay can match by
   message id, prefers non-sidechain metadata, and merges streaming channel
   maxima.
@@ -62,6 +77,11 @@ is the compatibility baseline when reference implementations disagree.
 | Rebuild has missing source files | Existing lossy-rebuild guard refuses it |
 | Rebuild parser/store commit fails | Leave marker absent; do not claim parity |
 | Parserless source | Do not invent a marker or token normalization |
+| Persisted Codex marker is `2` | Treat only Codex as legacy and require `sync --rebuild --source codex` |
+| Persisted Claude/OpenCode marker is `2` | Treat it as current |
+| Replay marker exists and first two token snapshots share a second | Skip that second's prefix while retaining the latest cumulative baseline |
+| Two ordinary Codex requests share a second without a replay marker | Keep both events |
+| A malformed line contains `token_count` before valid replay snapshots | Ignore the malformed line and continue detection |
 | Serve finds safe legacy parser source | Rebuild before binding the dashboard port |
 | Serve finds lossy legacy parser source | Warn, preserve history and marker state, continue startup |
 | Serve repair risk query or safe rebuild fails | Return the error and do not bind the port |
@@ -74,6 +94,14 @@ Never enable `--allow-lossy-rebuild` automatically.
 - Good: Codex raw input `100`, cached `40`, output `30`, reasoning `10`, total
   `130` persists as input `60`, cache read `40`, output `30`, reasoning `10`,
   total `130`.
+- Good: a fork prefix contributes `75,064` non-cached input, `381,440` cache
+  read, and `3,629` output before the first real event; all three replayed
+  components are excluded after rebuild, matching ccusage.
+- Base: Codex reports cache read but zero cache creation because OpenAI prompt
+  caching does not expose a cache-write token counter.
+- Bad: relying only on the logical event key to dedupe fork history. Fork
+  rollouts rewrite timestamps, so the copied tuples no longer match the parent
+  event keys.
 - Base: OpenCode without `tokens.total` falls back to known non-reasoning
   components.
 - Bad: a report computes `input + cache + output + reasoning` instead of
@@ -87,6 +115,11 @@ Never enable `--allow-lossy-rebuild` automatically.
 ## 6. Tests Required
 
 - Parser unit tests assert exact integer channel values and total fallbacks.
+- Codex parser tests cover both replay markers, cumulative baseline retention,
+  pending-tool clearing, malformed-line tolerance, and ordinary same-second
+  events that must remain.
+- Accounting marker tests assert Codex `3`, Claude/OpenCode `2`, old Codex `2`
+  refusal, and successful guarded Codex rebuild to `3`.
 - `tests/token_accounting_parity.rs` covers all three sources, copied/streaming
   duplicates, event/bucket/query equality, cost tolerance `1e-9`, marker
   advancement, legacy refusal, warning payload, and guarded rebuild.
@@ -116,6 +149,26 @@ SUM(total_tokens)
 
 The corrected query preserves source semantics and prevents visible diagnostic
 subchannels from being charged or displayed twice.
+
+For Codex fork replay:
+
+### Wrong
+
+```rust
+// Timestamp-based logical dedupe alone cannot identify rewritten fork history.
+events.push(token_event);
+```
+
+### Correct
+
+```rust
+if replay_marker_in_head && first_two_token_snapshots_share_second {
+    skip_creation_second_prefix_and_keep_cumulative_baseline();
+}
+```
+
+The marker plus same-second gate matches ccusage without dropping ordinary
+same-second requests.
 
 For full rebuild deletion boundaries:
 

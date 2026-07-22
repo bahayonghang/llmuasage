@@ -48,7 +48,7 @@ features:
 
 ## 当前产品表面
 
-- 版本：`1.0.0`。
+- 版本：`1.0.1`。
 - 来源：Codex、Claude Code、OpenCode、Google Antigravity（source id 为 `antigravity`）。
 - 报表命令：`daily`、`monthly`、`session`、`blocks`、`statusline`。
 - 本地界面命令：`dash`、`serve`、`export html`。

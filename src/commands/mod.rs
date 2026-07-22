@@ -14,6 +14,7 @@ pub mod dash;
 pub mod diagnostics;
 pub mod doctor;
 pub mod export;
+pub mod focused;
 pub mod help;
 pub mod hook_run;
 pub mod init;
@@ -29,7 +30,9 @@ pub mod sync;
 pub mod sync_progress;
 pub mod sync_summary;
 pub mod tui;
+pub(crate) mod unified_report;
 pub mod uninstall;
+pub mod weekly;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -54,10 +57,20 @@ pub enum Commands {
     Daily(report_args::DailyArgs),
     /// Show monthly token/cost usage.
     Monthly(report_args::MonthlyArgs),
+    /// Show weekly token/cost usage grouped by Monday week start.
+    Weekly(report_args::WeeklyArgs),
     /// Show per-session token/cost usage.
     Session(report_args::SessionArgs),
     /// Show 5-hour usage blocks and burn-rate projections.
     Blocks(report_args::BlocksArgs),
+    /// Show Claude-only daily, weekly, monthly, or session usage.
+    Claude(focused::SourceReportArgs),
+    /// Show Codex-only daily, weekly, monthly, or session usage.
+    Codex(focused::SourceReportArgs),
+    /// Show OpenCode-only daily, weekly, monthly, or session usage.
+    Opencode(focused::SourceReportArgs),
+    /// Show Antigravity-only daily, weekly, monthly, or session usage.
+    Antigravity(focused::SourceReportArgs),
     /// Print a single statusline-friendly usage summary.
     Statusline(report_args::StatuslineArgs),
     Init,
@@ -256,8 +269,17 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
         None => daily::run(&app, cli.default_daily).await,
         Some(Commands::Daily(args)) => daily::run(&app, args).await,
         Some(Commands::Monthly(args)) => monthly::run(&app, args).await,
+        Some(Commands::Weekly(args)) => weekly::run(&app, args).await,
         Some(Commands::Session(args)) => session::run(&app, args).await,
         Some(Commands::Blocks(args)) => blocks::run(&app, args).await,
+        Some(Commands::Claude(args)) => focused::run(&app, SourceKind::Claude, args.command).await,
+        Some(Commands::Codex(args)) => focused::run(&app, SourceKind::Codex, args.command).await,
+        Some(Commands::Opencode(args)) => {
+            focused::run(&app, SourceKind::Opencode, args.command).await
+        }
+        Some(Commands::Antigravity(args)) => {
+            focused::run(&app, SourceKind::Antigravity, args.command).await
+        }
         Some(Commands::Statusline(args)) => statusline::run(&app, args).await,
         Some(Commands::Init) => init::run(&app).await,
         Some(Commands::Sync {

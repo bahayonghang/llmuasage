@@ -15,14 +15,25 @@ Useful filters:
 
 ```powershell
 llmusage daily --all
-llmusage daily --since 20260501 --until 20260518
+llmusage daily --since 2026-05-01 --until 20260518
 llmusage daily --source codex
 llmusage daily --project my-repo
 llmusage daily --breakdown
 llmusage daily --json
 ```
 
-The human table uses aggregate ccusage-style columns: `Date`, `Models`, `Input`, `Output`, `Cache Create`, `Cache Read`, `Total Tokens`, and `Cost (USD)`.
+`--since` and `--until` both accept `YYYYMMDD` and `YYYY-MM-DD`. Daily, weekly, and monthly human tables use a shared coding-agent view: each period has an aggregate `All` row and source rows in the `Agent` column. CLI JSON uses camelCase fields; add `--by-agent` to include the nested source rows in JSON.
+
+Use `--no-cost` to hide cost columns and cost JSON fields without changing the token totals.
+
+## Weekly report
+
+```powershell
+llmusage weekly
+llmusage weekly --since 2026-05-04 --until 2026-05-10
+```
+
+Weekly periods use the Monday date that starts the week. It accepts the same report filters and JSON options as monthly reports.
 
 ## Monthly report
 
@@ -31,6 +42,15 @@ llmusage monthly --breakdown
 ```
 
 Monthly uses the same local usage source and supports date range, source, JSON, and compact layout options.
+
+## Combined periods
+
+```powershell
+llmusage daily --sections weekly,monthly,session
+llmusage monthly --sections daily,session --json
+```
+
+`--sections` combines the current period with requested sections in fixed order: the current command period first, then daily, weekly, monthly, and session. The JSON object uses the same order and ends with the current command period's `totals`.
 
 ## Session report
 
@@ -41,6 +61,19 @@ llmusage session --project my-repo
 ```
 
 Session reports use source session metadata when present. Older databases can fall back to stable source-file keys.
+
+## Focused source reports
+
+```powershell
+llmusage claude daily
+llmusage codex monthly --json
+llmusage opencode weekly --no-cost
+llmusage antigravity session
+```
+
+`claude`, `codex`, `opencode`, and `antigravity` are source hosts. Each supports `daily`, `weekly`, `monthly`, and `session`, with the same data as `<period> --source <source>`. Focused text and JSON remove the Agent comparison layer; JSON has no `agent` or `agents` fields. Passing the same `--source` is accepted, while a conflicting source is rejected. `blocks` is intentionally not available under a source host.
+
+This is a uniform llmusage report surface, not a claim that every source has the same ccusage-specific capability matrix.
 
 ## Blocks report
 
