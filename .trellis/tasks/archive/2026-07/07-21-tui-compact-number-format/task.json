@@ -1,0 +1,32 @@
+{
+  "id": "tui-compact-number-format",
+  "name": "tui-compact-number-format",
+  "title": "TUI 紧凑数字显示",
+  "description": "统一交互式 TUI 中 token 与分析型计数的大数显示，采用 K/M/B/T 紧凑量级并保留查询、排序和非交互输出语义。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "src/tui presentation formatting and render tests",
+  "package": null,
+  "priority": "P2",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-07-21",
+  "completedAt": "2026-07-21",
+  "branch": null,
+  "base_branch": "dev",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "src/tui/format.rs",
+    "src/tui/footer.rs",
+    "src/tui/panels/",
+    "tests/tui_panels_prop.rs",
+    ".trellis/spec/llmusage/backend/tui-presentation-contracts.md"
+  ],
+  "notes": "",
+  "meta": {}
+}

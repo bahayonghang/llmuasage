@@ -18,6 +18,7 @@ use crate::{
     parsers::{
         ProgressSink, SourceParser, SourceSyncStats, SyncEvent,
         behavior::{extract_codex_tools, tool_calls_from_evidence, turn_from_tools},
+        file_progress::{FileProgress, FileProgressCounter},
         file_state::{
             CandidateFile, FileReplayMode, decide_file_replay, finalize_cursor, should_rescan_file,
         },
@@ -107,13 +108,6 @@ async fn sync_codex(
     let inventory_error = listing.error_summary();
     let files = listing.paths;
     let total_files = files.len();
-    emit_progress(
-        &mut progress,
-        SyncEvent::SourceStarted {
-            source: SourceKind::Codex,
-            files_total: total_files as u64,
-        },
-    );
     let cursor_map = store.cursors().load_file_cursors(SourceKind::Codex)?;
 
     let mut shards = std::collections::HashMap::<PathBuf, Vec<CandidateFile>>::new();
@@ -141,12 +135,20 @@ async fn sync_codex(
     let mut bytes_scanned = 0u64;
     let mut inserted = 0usize;
     let mut write_ms = 0u64;
-    let mut files_scanned = 0usize;
     let mut plans = shards
         .into_values()
         .map(|files| CodexShardPlan { files })
         .collect::<Vec<_>>();
     plans.sort_by_key(|plan| plan.files.first().map(|file| file.path.clone()));
+    let planned_files = plans.iter().map(|plan| plan.files.len()).sum::<usize>();
+    emit_progress(
+        &mut progress,
+        SyncEvent::SourceStarted {
+            source: SourceKind::Codex,
+            files_total: planned_files as u64,
+        },
+    );
+    let (mut file_progress, file_progress_counter) = FileProgress::new();
 
     let width = parallelism.max(1);
     for batch in plans.chunks(width) {
@@ -156,17 +158,43 @@ async fn sync_codex(
         let mut tasks = Vec::new();
         for plan in batch {
             let plan = plan.clone();
-            tasks.push(task::spawn_blocking(move || parse_codex_shard(plan)));
+            let counter = file_progress_counter.clone();
+            tasks.push(task::spawn_blocking(move || {
+                parse_codex_shard(plan, counter)
+            }));
         }
 
         for task in tasks {
             if cancel.is_cancelled() {
                 break;
             }
-            let shard = task.await??;
+            let shard = file_progress
+                .wait_for(task, |files_scanned| {
+                    emit_progress(
+                        &mut progress,
+                        SyncEvent::Progress {
+                            source: SourceKind::Codex,
+                            files_scanned,
+                            records_imported: inserted as u64,
+                            current_file: None,
+                        },
+                    );
+                })
+                .await??;
             events_seen += shard.events_seen;
             events_replayed += shard.events_replayed;
             bytes_scanned += shard.bytes_scanned;
+
+            let completed_files = file_progress.boundary_snapshot();
+            emit_progress(
+                &mut progress,
+                SyncEvent::Progress {
+                    source: SourceKind::Codex,
+                    files_scanned: completed_files,
+                    records_imported: inserted as u64,
+                    current_file: None,
+                },
+            );
 
             // 1.3 把 reset / event / cursor 协议交给单写入端原子提交
             let commit = writer.commit_shard(SyncShard {
@@ -179,14 +207,13 @@ async fn sync_codex(
                 turns: shard.turns,
                 tool_calls: shard.tool_calls,
             })?;
-            files_scanned += commit.files_seen;
             inserted += commit.events_inserted;
             write_ms += commit.write_ms;
             emit_progress(
                 &mut progress,
                 SyncEvent::Progress {
                     source: SourceKind::Codex,
-                    files_scanned: files_scanned as u64,
+                    files_scanned: completed_files,
                     records_imported: inserted as u64,
                     current_file: None,
                 },
@@ -227,7 +254,10 @@ fn emit_progress(sink: &mut Option<ProgressSink<'_>>, event: SyncEvent) {
     }
 }
 
-fn parse_codex_shard(plan: CodexShardPlan) -> Result<CodexShardOutput> {
+fn parse_codex_shard(
+    plan: CodexShardPlan,
+    progress: FileProgressCounter,
+) -> Result<CodexShardOutput> {
     let mut resolver = ProjectResolver::default();
     let mut output = CodexShardOutput {
         events: Vec::new(),
@@ -288,6 +318,7 @@ fn parse_codex_shard(plan: CodexShardPlan) -> Result<CodexShardOutput> {
             parsed.last_total,
             parsed.last_model,
         ));
+        progress.advance_file();
     }
 
     Ok(output)

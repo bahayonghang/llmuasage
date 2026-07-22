@@ -250,9 +250,10 @@ Controls: `tab`/`shift-tab` or `1`-`9` switch views; `j`/`k`, arrows, Page Up/Pa
 ```powershell
 llmusage serve
 llmusage serve --port 37421
+llmusage serve --public --no-open --port 37421
 ```
 
-Starts the local web dashboard and JSON API on `127.0.0.1`.
+Starts the web dashboard and JSON API on `127.0.0.1` by default. `--public` binds `0.0.0.0` for remote access; it does not add authentication or TLS. `--no-open` suppresses browser launching, and SSH sessions skip the automatic browser launch automatically.
 
 ### `llmusage codex-tracer`
 

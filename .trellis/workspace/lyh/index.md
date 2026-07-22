@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 21
+- **Total Sessions**: 24
 - **Last Active**: 2026-07-21
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~718 | Active |
+| `journal-1.md` | ~817 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,9 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 24 | 2026-07-21 | 优化 serve 远程监听与 SSH 启动 | `13a8867` | `dev` |
+| 23 | 2026-07-21 | 完成 sync 真实重放进度 | `eeff9ef` | `dev` |
+| 22 | 2026-07-21 | 完成 TUI 大数紧凑显示 | `f995145` | `dev` |
 | 21 | 2026-07-21 | 补齐 TUI 首访渲染线程证据并归档 | `75b9f5a` | `dev` |
 | 20 | 2026-07-20 | 归档 sync 冷跑全量导入写入吞吐 backlog | - | `dev` |
 | 19 | 2026-07-20 | sync 进度条系统、摘要表格与全链路 profiling | `a16f55c`, `36e19a1` | `dev` |

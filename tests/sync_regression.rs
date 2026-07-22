@@ -13,7 +13,7 @@ use llmusage::{
     app::AppContext,
     commands,
     models::SourceKind,
-    parsers::SourceSyncStats,
+    parsers::{SourceSyncStats, SyncEvent},
     query::Dashboard,
     store::{HolderKind, Store},
 };
@@ -168,6 +168,7 @@ fn codex_append_scans_only_changed_file() -> Result<()> {
         let before = fs::metadata(&changed_path)?.len();
         fixture.append_codex("rollout-a.jsonl", 33, "2026-04-22T03:12:00Z")?;
         let appended_bytes = fs::metadata(&changed_path)?.len() - before;
+        let (mut progress_tx, mut progress_rx) = tokio::sync::mpsc::channel(32);
         let summary = commands::sync::run_once_with_options(
             &app,
             &store,
@@ -176,9 +177,14 @@ fn codex_append_scans_only_changed_file() -> Result<()> {
                 source: Some(SourceKind::Codex),
                 ..Default::default()
             },
-            None,
+            Some(&mut progress_tx),
         )
         .await?;
+        drop(progress_tx);
+        let mut progress_events = Vec::new();
+        while let Ok(event) = progress_rx.try_recv() {
+            progress_events.push(event);
+        }
 
         let stats = &summary.sources[0];
         assert_eq!(stats.files_processed, 2);
@@ -186,6 +192,39 @@ fn codex_append_scans_only_changed_file() -> Result<()> {
         assert_eq!(stats.skipped_files, 1);
         assert_eq!(stats.bytes_scanned, appended_bytes);
         assert_eq!(stats.events_seen, 1);
+        assert_eq!(
+            progress_events.iter().find_map(|event| match event {
+                SyncEvent::SourceStarted {
+                    source: SourceKind::Codex,
+                    files_total,
+                } => Some(*files_total),
+                _ => None,
+            }),
+            Some(1),
+            "Codex progress total must count planned replay files"
+        );
+        let progress_snapshots = progress_events
+            .iter()
+            .filter_map(|event| match event {
+                SyncEvent::Progress {
+                    source: SourceKind::Codex,
+                    files_scanned,
+                    records_imported,
+                    ..
+                } => Some((*files_scanned, *records_imported)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            progress_snapshots
+                .iter()
+                .all(|(position, _)| *position <= 1)
+        );
+        assert!(progress_snapshots.contains(&(1, 0)));
+        assert_eq!(
+            progress_snapshots.last(),
+            Some(&(1, stats.events_inserted as u64))
+        );
         Ok::<_, anyhow::Error>(())
     })?;
 
@@ -256,6 +295,7 @@ fn claude_changed_project_does_not_replay_other_projects() -> Result<()> {
         )?;
         let changed_project_bytes =
             fs::metadata(&project_a_main)?.len() + fs::metadata(&project_a_sidechain)?.len();
+        let (mut progress_tx, mut progress_rx) = tokio::sync::mpsc::channel(32);
         let second = commands::sync::run_once_with_options(
             &app,
             &store,
@@ -264,9 +304,14 @@ fn claude_changed_project_does_not_replay_other_projects() -> Result<()> {
                 source: Some(SourceKind::Claude),
                 ..Default::default()
             },
-            None,
+            Some(&mut progress_tx),
         )
         .await?;
+        drop(progress_tx);
+        let mut progress_events = Vec::new();
+        while let Ok(event) = progress_rx.try_recv() {
+            progress_events.push(event);
+        }
 
         let stats = &second.sources[0];
         assert_eq!(stats.files_processed, 3);
@@ -274,6 +319,39 @@ fn claude_changed_project_does_not_replay_other_projects() -> Result<()> {
         assert_eq!(stats.skipped_files, 1);
         assert_eq!(stats.bytes_scanned, changed_project_bytes);
         assert_eq!(stats.events_seen, 3);
+        assert_eq!(
+            progress_events.iter().find_map(|event| match event {
+                SyncEvent::SourceStarted {
+                    source: SourceKind::Claude,
+                    files_total,
+                } => Some(*files_total),
+                _ => None,
+            }),
+            Some(2),
+            "Claude progress total must include every file replayed in the selected project"
+        );
+        let progress_snapshots = progress_events
+            .iter()
+            .filter_map(|event| match event {
+                SyncEvent::Progress {
+                    source: SourceKind::Claude,
+                    files_scanned,
+                    records_imported,
+                    ..
+                } => Some((*files_scanned, *records_imported)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            progress_snapshots
+                .iter()
+                .all(|(position, _)| *position <= 2)
+        );
+        assert!(progress_snapshots.contains(&(2, 0)));
+        assert_eq!(
+            progress_snapshots.last(),
+            Some(&(2, stats.events_inserted as u64))
+        );
         assert_eq!(usage_event_count(&app.paths.db_path)?, 3);
         Ok::<_, anyhow::Error>(())
     })?;

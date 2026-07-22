@@ -133,6 +133,12 @@ pub enum Commands {
     Serve {
         #[arg(long)]
         port: Option<u16>,
+        /// Listen on all network interfaces. This exposes the dashboard and JSON API.
+        #[arg(long)]
+        public: bool,
+        /// Start the dashboard without opening a browser.
+        #[arg(long)]
+        no_open: bool,
     },
     /// Interactive terminal dashboard (replaces `tui`).
     Dash,
@@ -298,7 +304,11 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
             command,
             json,
         }) => logs::run(&app, limit, level, command, json).await,
-        Some(Commands::Serve { port }) => serve::run(&app, port).await,
+        Some(Commands::Serve {
+            port,
+            public,
+            no_open,
+        }) => serve::run_with_options(&app, port, public, no_open).await,
         Some(Commands::Dash) => dash::run(&app, false).await,
         Some(Commands::Tui) => dash::run(&app, true).await,
         Some(Commands::Export { command }) => match command {
@@ -354,6 +364,38 @@ mod tests {
             help.contains("source-status"),
             "expected `source-status` in help output, got: {help}"
         );
+    }
+
+    #[test]
+    fn serve_parses_public_and_no_open_flags() {
+        let local = Cli::try_parse_from(["llmusage", "serve"])
+            .expect("serve should retain its local defaults");
+        assert!(matches!(
+            local.command,
+            Some(Commands::Serve {
+                port: None,
+                public: false,
+                no_open: false,
+            })
+        ));
+
+        let public = Cli::try_parse_from([
+            "llmusage",
+            "serve",
+            "--public",
+            "--no-open",
+            "--port",
+            "37421",
+        ])
+        .expect("serve public flags should parse");
+        assert!(matches!(
+            public.command,
+            Some(Commands::Serve {
+                port: Some(37421),
+                public: true,
+                no_open: true,
+            })
+        ));
     }
 
     #[test]

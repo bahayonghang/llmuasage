@@ -342,7 +342,10 @@ const ENGLISH_COMMANDS: &[(&str, &str)] = &[
         "Query local structured runtime logs and recent run records.",
     ),
     ("dash", "Open the interactive terminal dashboard."),
-    ("serve", "Start the local browser dashboard on 127.0.0.1."),
+    (
+        "serve",
+        "Start the browser dashboard; binds 127.0.0.1 by default.",
+    ),
     ("export html", "Write an offline dashboard bundle."),
     (
         "uninstall",
@@ -450,7 +453,7 @@ const CHINESE_COMMANDS: &[(&str, &str)] = &[
     ("catalog", "应用、查看或重置本地价格目录覆盖。"),
     ("logs", "查询本地结构化运行日志与最近命令记录。"),
     ("dash", "打开交互式终端 Dashboard。"),
-    ("serve", "在 127.0.0.1 启动本地浏览器 Dashboard。"),
+    ("serve", "启动浏览器 Dashboard；默认绑定 127.0.0.1。"),
     ("export html", "写入离线 Dashboard bundle。"),
     ("uninstall", "恢复集成；--purge 还会删除运行时根目录。"),
 ];

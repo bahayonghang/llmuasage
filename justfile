@@ -58,7 +58,8 @@ version-sync version:
 ci:
     cargo fmt --check
     cargo clippy --all-targets --all-features -- -D warnings
-    cargo test -- --test-threads=1
+    cargo test --all-features -- --test-threads=1
+    $env:RUSTDOCFLAGS = "-D warnings"; cargo doc --no-deps
     node --check scripts/benchmark-dashboard-range.mjs
     node --test scripts/tests/dashboard-fetch.test.mjs
     npm --prefix docs run docs:build

@@ -250,9 +250,10 @@ llmusage dash
 ```powershell
 llmusage serve
 llmusage serve --port 37421
+llmusage serve --public --no-open --port 37421
 ```
 
-在 `127.0.0.1` 启动本地 Web Dashboard 和 JSON API。
+默认在 `127.0.0.1` 启动 Web Dashboard 和 JSON API。`--public` 会绑定 `0.0.0.0` 以供远程访问，但不会添加认证或 TLS。`--no-open` 会关闭浏览器启动；SSH 会话也会自动跳过浏览器启动。
 
 ### `llmusage codex-tracer`
 

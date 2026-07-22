@@ -315,10 +315,18 @@ impl BarRenderer {
             let len = active.bar.length().unwrap_or(0);
             let pos = files_scanned.min(len);
             active.bar.set_position(pos);
-            active.bar.set_message(format!(
-                "{}: 重放 {pos}/{len} · 导入 {records_imported} 条",
-                source_label(source)
-            ));
+            let message = if len > 0 && pos == len {
+                format!(
+                    "{}: 重放完成，正在提交... · 已导入 {records_imported} 条",
+                    source_label(source)
+                )
+            } else {
+                format!(
+                    "{}: 重放 {pos}/{len} · 导入 {records_imported} 条",
+                    source_label(source)
+                )
+            };
+            active.bar.set_message(message);
         } else {
             // OpenCode: the spinner position carries scanned row counts.
             active.bar.set_position(files_scanned);
@@ -402,6 +410,11 @@ impl BarRenderer {
     #[cfg(test)]
     fn active_is_determinate(&self) -> Option<bool> {
         self.active.as_ref().map(|active| active.determinate)
+    }
+
+    #[cfg(test)]
+    fn active_message(&self) -> Option<String> {
+        self.active.as_ref().map(|active| active.bar.message())
     }
 }
 
@@ -489,19 +502,33 @@ pub(crate) fn human_progress_line(event: &SyncEvent) -> Option<String> {
         SyncEvent::SourceStarted {
             source,
             files_total,
-        } => Some(format!(
-            "{}: 扫描 {files_total} 个文件...",
-            source_label(*source)
-        )),
+        } => {
+            let action = if uses_determinate_bar(*source) {
+                "本轮重放"
+            } else {
+                "扫描"
+            };
+            Some(format!(
+                "{}: {action} {files_total} 个文件...",
+                source_label(*source)
+            ))
+        }
         SyncEvent::Progress {
             source,
             files_scanned,
             records_imported,
             ..
-        } => Some(format!(
-            "{}: 已处理 {files_scanned}，导入 {records_imported} 条",
-            source_label(*source)
-        )),
+        } => {
+            let action = if uses_determinate_bar(*source) {
+                format!("已重放 {files_scanned} 个文件")
+            } else {
+                format!("已处理 {files_scanned}")
+            };
+            Some(format!(
+                "{}: {action}，导入 {records_imported} 条",
+                source_label(*source)
+            ))
+        }
         SyncEvent::SourceFinished { source, stats } => Some(format!(
             "{}: 完成，文件 {} 个，跳过 {} 个，提交 {} 条",
             source_label(*source),
@@ -586,6 +613,39 @@ mod tests {
         renderer.finish();
         renderer.finish();
         assert!(!renderer.has_active(), "finish must be idempotent");
+    }
+
+    #[test]
+    fn determinate_source_progress_reports_replay_and_commit_phases() {
+        let mut renderer = hidden_bar_renderer();
+        let started = SyncEvent::SourceStarted {
+            source: SourceKind::Codex,
+            files_total: 3,
+        };
+        assert_eq!(
+            human_progress_line(&started).as_deref(),
+            Some("Codex: 本轮重放 3 个文件...")
+        );
+        assert_eq!(
+            human_progress_line(&SyncEvent::SourceStarted {
+                source: SourceKind::Opencode,
+                files_total: 1,
+            })
+            .as_deref(),
+            Some("OpenCode: 扫描 1 个文件...")
+        );
+
+        renderer.render(&started);
+        renderer.render(&SyncEvent::Progress {
+            source: SourceKind::Codex,
+            files_scanned: 3,
+            records_imported: 40,
+            current_file: None,
+        });
+        assert_eq!(
+            renderer.active_message().as_deref(),
+            Some("Codex: 重放完成，正在提交... · 已导入 40 条")
+        );
     }
 
     #[test]

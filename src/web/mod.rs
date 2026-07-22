@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     future::Future,
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -68,6 +68,14 @@ impl WebState {
 }
 
 pub async fn serve(store: Store, preferred_port: Option<u16>) -> Result<SocketAddr> {
+    serve_on(store, preferred_port, IpAddr::V4(Ipv4Addr::LOCALHOST)).await
+}
+
+pub(crate) async fn serve_on(
+    store: Store,
+    preferred_port: Option<u16>,
+    bind_ip: IpAddr,
+) -> Result<SocketAddr> {
     /*
      * ========================================================================
      * 步骤1：组装本地 Web UI 路由
@@ -116,13 +124,13 @@ pub async fn serve(store: Store, preferred_port: Option<u16>) -> Result<SocketAd
      * 步骤2：绑定本地监听端口
      * ========================================================================
      * 目标：
-     * 1) 继续只监听 127.0.0.1
+     * 1) 监听调用方指定的 IPv4 地址
      * 2) 复用既有端口探测顺序
      * 3) 命中端口后立即后台启动 axum 服务
      */
     info!("开始绑定本地 Web UI 监听端口");
 
-    // 2.1 根据优先端口或默认端口组探测本地监听地址
+    // 2.1 根据优先端口或默认端口组探测指定的监听地址
     let ports = if let Some(port) = preferred_port {
         vec![port]
     } else {
@@ -131,7 +139,7 @@ pub async fn serve(store: Store, preferred_port: Option<u16>) -> Result<SocketAd
 
     // 2.2 命中可用端口后启动服务并返回最终监听地址
     for port in ports {
-        let listener = TcpListener::bind(("127.0.0.1", port)).await;
+        let listener = TcpListener::bind((bind_ip, port)).await;
         if let Ok(listener) = listener {
             let addr = listener.local_addr()?;
             tokio::spawn(async move {
@@ -1329,7 +1337,7 @@ mod tests {
     use std::{
         fs,
         io::{Read, Write},
-        net::SocketAddr,
+        net::{IpAddr, Ipv4Addr, SocketAddr},
         sync::{
             Arc,
             atomic::{AtomicUsize, Ordering},
@@ -1345,7 +1353,7 @@ mod tests {
 
     use super::{
         WebState, api_json, asset_manifest, live_index_html, load_via_dashboard_with_timeout,
-        serve, snapshot_index_html,
+        serve, serve_on, snapshot_index_html,
     };
 
     fn make_store() -> anyhow::Result<(TempDir, Store)> {
@@ -1354,6 +1362,18 @@ mod tests {
         let store = Store::new(&paths)?;
         store.bootstrap()?;
         Ok((temp, store))
+    }
+
+    #[tokio::test]
+    async fn public_listener_binds_all_ipv4_interfaces_and_serves_root() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let addr = serve_on(store, Some(0), IpAddr::V4(Ipv4Addr::UNSPECIFIED)).await?;
+        assert_eq!(addr.ip(), IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+
+        let loopback = SocketAddr::from(([127, 0, 0, 1], addr.port()));
+        let (status, _body) = route_text(loopback, "GET", "/").await?;
+        assert_eq!(status, StatusCode::OK);
+        Ok(())
     }
 
     async fn route_json(

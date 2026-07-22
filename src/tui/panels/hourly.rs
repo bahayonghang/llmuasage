@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::query::TrendPoint;
-use crate::tui::{format::tokens as format_tokens, theme};
+use crate::tui::{format::stat_compact, theme};
 
 use super::super::app::ScrollState;
 
@@ -71,18 +71,18 @@ fn render_table(frame: &mut Frame, area: Rect, points: &[TrendPoint], scroll: &S
         let cells = if very_narrow {
             vec![
                 Cell::from(format_hour_label(&point.label, true)),
-                Cell::from(format_tokens(point.total_tokens)),
+                Cell::from(stat_compact(point.total_tokens)),
             ]
         } else if narrow {
             vec![
                 Cell::from(format_hour_label(&point.label, true)),
-                Cell::from(format_tokens(point.total_tokens)),
+                Cell::from(stat_compact(point.total_tokens)),
                 Cell::from(format!("{share:.0}%")),
             ]
         } else {
             vec![
                 Cell::from(format_hour_label(&point.label, false)).style(theme::bold_style()),
-                Cell::from(format_tokens(point.total_tokens)),
+                Cell::from(stat_compact(point.total_tokens)),
                 Cell::from(format!("{share:.1}%")),
                 Cell::from(render_bar(point.total_tokens, peak_tokens, 24))
                     .style(theme::fg_style(theme::positive_fg())),

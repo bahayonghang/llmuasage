@@ -5,7 +5,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 
-use super::{app::AppState, format::footer_compact, theme};
+use super::{app::AppState, format::stat_compact, theme};
 
 pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
     let block = Block::default()
@@ -115,7 +115,7 @@ fn render_status(frame: &mut Frame, area: Rect, state: &AppState) {
         spans.push(Span::styled(
             format!(
                 "{} tokens • ${:.2}",
-                footer_compact(overview.total.total_tokens),
+                stat_compact(overview.total.total_tokens),
                 overview.total_cost_usd
             ),
             theme::muted_style(),

@@ -7,7 +7,7 @@ use ratatui::{
 
 use crate::query::CostLine;
 use crate::tui::panels::longtail;
-use crate::tui::{format::grouped as format_number, theme};
+use crate::tui::{format::stat_compact, theme};
 
 use super::super::app::{ScrollState, SortState, TableSortKey, stable_sort_refs};
 
@@ -108,8 +108,8 @@ fn render_table(
                     Row::new(vec![
                         Cell::from(item.source.clone()),
                         Cell::from(item.model.clone()),
-                        Cell::from(format_number(item.event_count)),
-                        Cell::from(format_number(item.total_tokens)),
+                        Cell::from(stat_compact(item.event_count)),
+                        Cell::from(stat_compact(item.total_tokens)),
                         Cell::from(format!("${:.2}", item.estimated_cost_usd)),
                     ]),
                     false,

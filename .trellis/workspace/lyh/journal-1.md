@@ -716,3 +716,102 @@ indicatif 进度条（OpenCode spinner / Codex/Claude 重放文件确定条）+ 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 22: 完成 TUI 大数紧凑显示
+
+**Date**: 2026-07-21
+**Task**: 完成 TUI 大数紧凑显示
+**Branch**: `dev`
+
+### Summary
+
+新增大写 K/M/B/T 统计格式化并迁移交互式 TUI 分析面板，保留 Usage 同步计数与非交互输出的精确语义；补齐边界、渲染与属性测试并通过 just ci。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f995145` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 23: 完成 sync 真实重放进度
+
+**Date**: 2026-07-21
+**Task**: 完成 sync 真实重放进度
+**Branch**: `dev`
+
+### Summary
+
+Claude/Codex 以 planned replay 文件数显示 5Hz 解析进度，TTY 显示提交阶段；补齐回归测试、同步契约与 9 次 release 性能对照。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `eeff9ef` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 24: 优化 serve 远程监听与 SSH 启动
+
+**Date**: 2026-07-21
+**Task**: 优化 serve 远程监听与 SSH 启动
+**Branch**: `dev`
+
+### Summary
+
+新增 --public 与 --no-open，SSH 跳过浏览器启动，补齐测试、文档与服务契约。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `13a8867` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

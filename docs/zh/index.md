@@ -40,7 +40,7 @@ features:
 
 ## Dashboard 预览
 
-`llmusage serve` 会在 `127.0.0.1` 启动本地浏览器 Dashboard。
+`llmusage serve` 默认在 `127.0.0.1` 启动浏览器 Dashboard；使用 `--public` 才会显式开启远程监听。
 
 ![llmusage 本地 Web Dashboard 概览](/screenshots/web-dashboard-overview.png)
 

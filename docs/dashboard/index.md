@@ -6,7 +6,7 @@
 llmusage serve
 ```
 
-By default it probes local ports starting at `37421`, binds only to `127.0.0.1`, prints the URL, and tries to open the default browser.
+By default it probes local ports starting at `37421`, binds to `127.0.0.1`, prints the URL, and tries to open the default browser.
 
 Before binding a port, `serve` checks parser-backed sources for legacy token
 accounting. Safe sources are rebuilt one at a time in registry order. Sources
@@ -20,6 +20,24 @@ Use a fixed port when you need a stable URL:
 ```powershell
 llmusage serve --port 37421
 ```
+
+## Remote or SSH access
+
+For a remote server, opt in explicitly and suppress browser launching:
+
+```powershell
+llmusage serve --public --no-open --port 37421
+```
+
+`--public` binds `0.0.0.0`; open `http://<server-host-or-ip>:37421` from a machine that can reach the server. The dashboard and JSON API have no authentication or TLS, so use a firewall, SSH tunnel, or reverse proxy before exposing the port.
+
+For a private SSH session, leave out `--public`, then forward the local listener from your client:
+
+```powershell
+ssh -L 37421:127.0.0.1:37421 <user>@<server>
+```
+
+SSH sessions automatically skip browser launching.
 
 ![llmusage web dashboard overview](/screenshots/web-dashboard-overview.png)
 

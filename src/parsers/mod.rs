@@ -9,6 +9,7 @@ pub(crate) mod behavior;
 pub mod claude;
 pub mod codex;
 pub mod driver;
+mod file_progress;
 pub mod file_state;
 pub mod opencode;
 pub(crate) mod source_files;
@@ -76,8 +77,9 @@ pub enum SyncEvent {
         source: SourceKind,
         files_total: u64,
     },
-    /// Throttled source progress snapshot, emitted per shard/page commit
-    /// batch; a single source run may emit many of these.
+    /// Throttled source progress snapshot. File-backed parsers report completed
+    /// replay files during blocking parse work and at commit boundaries;
+    /// streaming parsers report committed page/row work.
     Progress {
         source: SourceKind,
         files_scanned: u64,

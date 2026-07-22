@@ -160,6 +160,7 @@ async fn run_with_human_events(
     if let Ok(stats) = render_stats.lock() {
         tracing::debug!(
             render_calls = stats.calls,
+            render_nanos = stats.nanos,
             render_ms = stats.nanos / 1_000_000,
             "progress render cost"
         );

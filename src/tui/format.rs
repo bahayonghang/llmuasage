@@ -47,6 +47,41 @@ pub fn axis_compact(value: i64) -> String {
     }
 }
 
+/// Formats interactive TUI statistics using one-decimal K/M/B/T units.
+pub fn stat_compact(value: i64) -> String {
+    const UNITS: [(u64, &str); 4] = [
+        (1_000, "K"),
+        (1_000_000, "M"),
+        (1_000_000_000, "B"),
+        (1_000_000_000_000, "T"),
+    ];
+
+    let abs = value.unsigned_abs();
+    let Some(mut unit_index) = UNITS.iter().rposition(|(divisor, _)| abs >= *divisor) else {
+        return value.to_string();
+    };
+
+    let mut rounded_tenths = round_to_tenths(abs, UNITS[unit_index].0);
+    if rounded_tenths >= 10_000 && unit_index + 1 < UNITS.len() {
+        unit_index += 1;
+        rounded_tenths = round_to_tenths(abs, UNITS[unit_index].0);
+    }
+
+    let sign = if value < 0 { "-" } else { "" };
+    let whole = rounded_tenths / 10;
+    let fraction = rounded_tenths % 10;
+    let suffix = UNITS[unit_index].1;
+    if fraction == 0 {
+        format!("{sign}{whole}{suffix}")
+    } else {
+        format!("{sign}{whole}.{fraction}{suffix}")
+    }
+}
+
+fn round_to_tenths(value: u64, divisor: u64) -> u128 {
+    (u128::from(value) * 10 + u128::from(divisor) / 2) / u128::from(divisor)
+}
+
 /// Formats report-table token counts using two-decimal K/M/B suffixes.
 pub fn token_compact(value: i64) -> String {
     let sign = if value < 0 { "-" } else { "" };
@@ -97,5 +132,67 @@ mod tests {
         assert_eq!(cost(12.345), "$12.35");
         assert_eq!(percent_ratio(0.125), "12.5%");
         assert_eq!(metric_value(42.0), "42.00");
+    }
+
+    #[test]
+    fn stat_compact_uses_one_decimal_uppercase_units() {
+        for (value, expected) in [
+            (0, "0"),
+            (999, "999"),
+            (1_000, "1K"),
+            (1_050, "1.1K"),
+            (12_500, "12.5K"),
+            (1_000_000, "1M"),
+            (288_694_891, "288.7M"),
+            (1_000_000_000, "1B"),
+            (18_214_785_227, "18.2B"),
+            (1_000_000_000_000, "1T"),
+        ] {
+            assert_eq!(stat_compact(value), expected, "value={value}");
+        }
+    }
+
+    #[test]
+    fn stat_compact_promotes_rounded_values_and_handles_signed_extremes() {
+        for (value, expected) in [
+            (999_949, "999.9K"),
+            (999_950, "1M"),
+            (999_949_999, "999.9M"),
+            (999_950_000, "1B"),
+            (999_949_999_999, "999.9B"),
+            (999_950_000_000, "1T"),
+            (-12_500, "-12.5K"),
+            (i64::MAX, "9223372T"),
+            (i64::MIN, "-9223372T"),
+        ] {
+            assert_eq!(stat_compact(value), expected, "value={value}");
+        }
+    }
+
+    #[test]
+    fn analytical_panels_use_compact_stats_while_sync_counts_stay_exact() {
+        for (name, source) in [
+            ("overview", include_str!("panels/overview.rs")),
+            ("models", include_str!("panels/models.rs")),
+            ("daily", include_str!("panels/daily.rs")),
+            ("hourly", include_str!("panels/hourly.rs")),
+            ("cost", include_str!("panels/cost.rs")),
+            ("stats", include_str!("panels/stats.rs")),
+            ("behavior", include_str!("panels/behavior.rs")),
+            ("blocks", include_str!("panels/blocks.rs")),
+        ] {
+            assert!(
+                source.contains("stat_compact"),
+                "{name} must use the shared compact statistic formatter"
+            );
+            assert!(
+                !source.contains("format::grouped") && !source.contains("grouped as"),
+                "{name} must not fall back to exact grouped analytics counts"
+            );
+        }
+
+        let usage = include_str!("panels/usage.rs");
+        assert!(usage.contains("grouped as format_number"));
+        assert!(!usage.contains("stat_compact"));
     }
 }

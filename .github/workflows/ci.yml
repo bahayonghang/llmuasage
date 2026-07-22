@@ -7,6 +7,10 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   ci:
     name: Rust and docs
@@ -20,6 +24,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -62,7 +69,7 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Rust tests
-        run: cargo test -- --test-threads=1
+        run: cargo test --all-features -- --test-threads=1
 
       - name: Rust docs
         shell: pwsh
@@ -70,8 +77,33 @@ jobs:
           $env:RUSTDOCFLAGS = "-D warnings"
           cargo doc --no-deps
 
+      - name: Check dashboard benchmark script
+        run: node --check scripts/benchmark-dashboard-range.mjs
+
+      - name: Dashboard JS tests
+        run: node --test scripts/tests/dashboard-fetch.test.mjs
+
       - name: Install docs dependencies
         run: npm ci --prefix docs
 
       - name: Build docs
         run: npm --prefix docs run docs:build
+
+  security:
+    name: Security audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: Run cargo audit
+        run: cargo audit

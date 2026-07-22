@@ -98,7 +98,7 @@ llmusage doctor --refresh-pricing .\litellm-prices.json
 
 ## 浏览器 Dashboard 边界
 
-`llmusage serve` 只绑定 `127.0.0.1`。进程运行期间会暴露本地 HTTP endpoints；不会打开公网监听。
+`llmusage serve` 默认绑定 `127.0.0.1`，只在进程运行期间暴露本地 HTTP endpoints。`llmusage serve --public` 会显式绑定 `0.0.0.0`，暴露不带认证和 TLS 的 Dashboard 与 JSON API。不要直接暴露给不受信任的网络；请使用防火墙、SSH 隧道或带认证的反向代理限制访问。
 
 ## 静态导出边界
 

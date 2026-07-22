@@ -188,16 +188,27 @@ fn sync_progress_message(event: &SyncEvent) -> String {
         SyncEvent::SourceStarted {
             source,
             files_total,
-        } => format!("{}: scanning {files_total} files", source.as_str()),
+        } => {
+            let action = if matches!(source, SourceKind::Codex | SourceKind::Claude) {
+                "replaying"
+            } else {
+                "scanning"
+            };
+            format!("{}: {action} {files_total} files", source.as_str())
+        }
         SyncEvent::Progress {
             source,
             files_scanned,
             records_imported,
             ..
-        } => format!(
-            "{}: {files_scanned} files, {records_imported} records",
-            source.as_str()
-        ),
+        } => {
+            let work = if matches!(source, SourceKind::Codex | SourceKind::Claude) {
+                format!("{files_scanned} files replayed")
+            } else {
+                format!("{files_scanned} rows scanned")
+            };
+            format!("{}: {work}, {records_imported} records", source.as_str())
+        }
         SyncEvent::RecentReady { source } => {
             format!("{}: recent usage ready", source.as_str())
         }
@@ -239,6 +250,35 @@ mod tests {
         assert_eq!(
             sync_progress_message(&event),
             "codex: 12 files, 7 skipped, 42 stored"
+        );
+    }
+
+    #[test]
+    fn progress_message_distinguishes_replay_files_from_stream_rows() {
+        assert_eq!(
+            sync_progress_message(&SyncEvent::SourceStarted {
+                source: SourceKind::Codex,
+                files_total: 2,
+            }),
+            "codex: replaying 2 files"
+        );
+        assert_eq!(
+            sync_progress_message(&SyncEvent::Progress {
+                source: SourceKind::Claude,
+                files_scanned: 2,
+                records_imported: 4,
+                current_file: None,
+            }),
+            "claude: 2 files replayed, 4 records"
+        );
+        assert_eq!(
+            sync_progress_message(&SyncEvent::Progress {
+                source: SourceKind::Opencode,
+                files_scanned: 10,
+                records_imported: 3,
+                current_file: None,
+            }),
+            "opencode: 10 rows scanned, 3 records"
         );
     }
 
