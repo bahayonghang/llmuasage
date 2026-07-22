@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/llmusage/backend/index.md", "reason": "后端改动前置清单与质量门（fmt/clippy/test 要求）"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "totals/去重/成本口径契约，保证 All=Σagents 与 Total 一致不变式不被破坏"}
+{"file": ".trellis/spec/llmusage/backend/tui-presentation-contracts.md", "reason": "report-table 复用的数字/成本格式化 helper 契约，新增列不得改动既有精度"}
