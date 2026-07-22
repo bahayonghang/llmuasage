@@ -48,12 +48,14 @@ SSH sessions automatically skip browser launching.
 The first screen is task-oriented:
 
 1. Confirm the active time/source/model filter.
-2. Read the KPI strip for total tokens, cost, cache, and bucket count.
+2. Read the KPI strip for total tokens, the last 24 hours, source count, and estimated cost.
 3. Check the trend chart for day/week/month/all movement.
 4. Compare project, model, source, and cost rankings.
 5. Review behavior panels for activity, tool usage, optimization hints, and model comparison.
 6. Use Cost Explorer for ad hoc local slice-and-dice questions.
 7. Use sync/export actions or diagnostics when data looks stale.
+
+On screens up to `720px` wide, System Health becomes a compact disclosure in the first screen. Expand it to inspect integrations, cursor count, and recent failures; the full card remains visible on wider screens.
 
 ## Filters
 
@@ -83,7 +85,7 @@ Cost Explorer adds its own query controls on top of the shared filters:
 
 ### KPI and trend
 
-The KPI strip and trend chart come from `Dashboard::snapshot(&QueryFilter)`. The live dashboard prefers `/api/dashboard`, which builds overview, trends, rankings, health, and diagnostics from one local database snapshot.
+Static HTML export builds the KPI strip and trend chart from `Dashboard::snapshot(&QueryFilter)`. The live dashboard initially loads `/api/dashboard`, then range changes, automatic refresh, and post-sync refresh use `scope=interactive` for the selected range plus independent Activity, Tools, Optimize, Explorer, and Compare requests. Each secondary response updates only its own section, so a slow or degraded behavior query does not block the first screen.
 
 ### Rankings
 
@@ -145,6 +147,12 @@ The static bundle includes `snapshot.json` with the default Explorer payload and
 ## Sync jobs
 
 Live mode can start, poll, and cancel in-process sync jobs. Jobs share the same local worker lock as CLI sync, so CLI, hook, and dashboard workers do not write concurrently.
+
+## Live refresh and HTTP transfer
+
+- Automatic refresh (`30s` or `60s`) and a completed sync reuse the interactive dashboard path, including custom `since`/`until` filters. Unchanged panel data is not written to the DOM again.
+- Filesystem diagnostics are cached for 30 seconds at the web-request boundary and shared by `/api/diagnostics` and dashboard scopes. A completed/failed/cancelled sync or an explicit diagnostics forget invalidates the entry immediately; direct library calls to `Dashboard::diagnostics()` remain cold reads.
+- Embedded CSS, JavaScript, and SVG assets return `Cache-Control: no-cache` plus a content ETag, so browsers can revalidate to `304` without stale versioned URLs. Text assets and JSON responses negotiate gzip or Brotli compression. API JSON remains uncached.
 
 ## Screenshot fixture for docs maintainers
 

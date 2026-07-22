@@ -46,12 +46,14 @@ SSH 会话会自动跳过浏览器启动。
 首屏按任务组织：
 
 1. 确认当前时间/来源/模型筛选。
-2. 看 KPI 条：总 token、成本、cache 和 bucket 数。
+2. 看 KPI 条：总 token、近 24 小时、来源数和估算成本。
 3. 用趋势图判断 day/week/month/all 的变化。
 4. 对比 project、model、source、cost 排行。
 5. 查看行为面板：Activity、Tools、Optimize、Compare。
 6. 用 Cost Explorer 回答临时的本地切片分析问题。
 7. 数据过旧时使用 sync/export 动作或 diagnostics。
+
+屏幕宽度不超过 `720px` 时，系统健康卡会收敛为首屏内的紧凑折叠摘要；展开后可查看集成、游标数量和最近失败。宽屏仍显示完整健康卡。
 
 ## 筛选器
 
@@ -81,7 +83,7 @@ Cost Explorer 会在共享筛选之上追加自己的查询控件：
 
 ### KPI 与趋势
 
-KPI 条和趋势图来自 `Dashboard::snapshot(&QueryFilter)`。live Dashboard 优先调用 `/api/dashboard`，用一个本地数据库快照构造 overview、trends、rankings、health 和 diagnostics。
+静态 HTML export 通过 `Dashboard::snapshot(&QueryFilter)` 构造 KPI 条和趋势图。live Dashboard 首次加载 `/api/dashboard`；范围切换、自动刷新和 sync 完成后的刷新则使用所选范围的 `scope=interactive`，再独立请求 Activity、Tools、Optimize、Explorer、Compare。每个 secondary 响应只更新自己的区块，因此慢查询或降级的行为区块不会阻塞首屏。
 
 ### 排行
 
@@ -143,6 +145,12 @@ llmusage export html --out .\llmusage-report
 ## Sync jobs
 
 live 模式可以启动、轮询、取消进程内 sync job。Job 与 CLI sync 共用同一把本地 worker lock，避免 CLI、hook、Dashboard worker 并发写入。
+
+## Live 刷新与 HTTP 传输
+
+- 自动刷新（`30s` 或 `60s`）和 sync 完成后的刷新统一复用 interactive 路径，自定义 `since`/`until` 筛选也不回退 full scope；面板数据未变时不会重复写 DOM。
+- 文件系统 diagnostics 在 Web 请求边界缓存 30 秒，并由 `/api/diagnostics` 与各 dashboard scope 共用。sync 完成、失败或取消，以及显式 forget diagnostics，都会立即失效缓存；库 API 的 `Dashboard::diagnostics()` 仍保持 cold read。
+- 内嵌 CSS、JavaScript、SVG 资源返回 `Cache-Control: no-cache` 和内容 ETag，浏览器可协商得到无 body 的 `304`，无需引入版本化 URL。文本资源和 JSON 响应支持 gzip/Brotli 协商压缩；API JSON 不增加缓存。
 
 ## 文档截图 fixture
 
