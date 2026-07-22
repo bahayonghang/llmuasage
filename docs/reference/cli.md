@@ -1,6 +1,6 @@
 # CLI reference
 
-This page is aligned with `cargo run -- --help`, `cargo run -- serve --help`, and `cargo run -- export html --help` for version `1.0.0`. Top-level help is rendered as a compact table; command-specific help still uses the clap output.
+This page is aligned with `cargo run -- --help`, `cargo run -- serve --help`, and `cargo run -- export html --help` for version `1.0.1`. Top-level help is rendered as a compact table; command-specific help still uses the clap output.
 
 ## Top-level help
 
