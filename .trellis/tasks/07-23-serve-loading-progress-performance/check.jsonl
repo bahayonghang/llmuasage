@@ -1,0 +1,6 @@
+{"file":".trellis/spec/llmusage/backend/dashboard-performance-contracts.md","reason":"复核 API 预算、full 兼容、secondary 独立降级与 cancellation"}
+{"file":".trellis/spec/llmusage/backend/web-server-contracts.md","reason":"复核 serve 网络暴露和 snapshot/live 边界未回归"}
+{"file":"DESIGN.md","reason":"复核 motion、主题、响应式、排版与 reduced-motion 约束"}
+{"file":".trellis/tasks/07-23-serve-loading-progress-performance/research/performance-baseline.md","reason":"前后测量方法、代表库规模、正常性能路径与服务消失后的证据边界"}
+{"file":".trellis/tasks/07-23-serve-loading-progress-performance/research/server-lifecycle.md","reason":"复核 server supervision、端口失败、bootstrap watchdog、无回退风暴与退出证据边界"}
+{"file":".trellis/tasks/07-23-serve-loading-progress-performance/research/loading-progress-ux.md","reason":"状态转换、诚实进度、错误恢复和可访问性验收"}
