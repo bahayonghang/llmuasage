@@ -23,6 +23,24 @@ function abortError() {
 }
 
 test('live dashboard request lifecycle', async (t) => {
+  await t.test('interactive bootstrap failure does not fan out to legacy endpoints', async () => {
+    dashboardFetch.clearLiveRequestCache();
+    const paths = [];
+    globalThis.fetch = async (path) => {
+      paths.push(path);
+      throw new TypeError('connection refused');
+    };
+
+    const state = { mode: 'live', rangePreset: '1d', trendWindow: 'day', filters: {} };
+    await assert.rejects(
+      dashboardFetch.loadDashboardInteractiveSnapshot(state, { legacyFallback: false }),
+      /connection refused/,
+    );
+    assert.equal(paths.length, 1);
+    assert.match(paths[0], /^\/api\/dashboard\?/);
+    assert.match(paths[0], /scope=interactive/);
+  });
+
   await t.test('coalesces normalized in-flight requests', async () => {
     dashboardFetch.clearLiveRequestCache();
     let calls = 0;

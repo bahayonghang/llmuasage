@@ -1,5 +1,33 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+
+const ASSET_ROOT = new URL('../../src/web/assets/', import.meta.url);
+
+async function collectLocalModuleAssetUrls(entryUrl) {
+  const pending = [entryUrl];
+  const seen = new Set();
+  while (pending.length > 0) {
+    const moduleUrl = pending.pop();
+    if (seen.has(moduleUrl.href)) continue;
+    seen.add(moduleUrl.href);
+
+    const source = await readFile(moduleUrl, 'utf8');
+    const importPattern = /(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)["']([^"']+)["']/g;
+    for (const match of source.matchAll(importPattern)) {
+      const specifier = match[1];
+      if (!specifier.startsWith('.')) continue;
+      const importedUrl = new URL(specifier, moduleUrl);
+      if (importedUrl.href.startsWith(ASSET_ROOT.href)) pending.push(importedUrl);
+    }
+  }
+
+  return [...seen]
+    .map((href) => `/assets/${decodeURIComponent(new URL(href).pathname.slice(ASSET_ROOT.pathname.length))}`)
+    .sort();
+}
+
+const liveModuleAssetUrls = await collectLocalModuleAssetUrls(new URL('app.js', ASSET_ROOT));
 
 // window/document stub 必须先于模块 import（各模块顶层有 `const logger = window.console`）。
 globalThis.window = {
@@ -48,7 +76,7 @@ globalThis.document = {
   getElementById: getElement,
 };
 
-const fingerprint = await import('../../src/web/assets/data/fingerprint.js');
+const fingerprint = await import('../../src/web/assets/data/render-key.js');
 const format = await import('../../src/web/assets/data/format.js');
 const derive = await import('../../src/web/assets/data/derive.js');
 const copy = await import('../../src/web/assets/copy.js');
@@ -105,6 +133,14 @@ function behaviorContext(secondaryRefreshing = false) {
     },
   };
 }
+
+test('live module graph avoids filter-sensitive asset URLs', () => {
+  assert.ok(liveModuleAssetUrls.includes('/assets/data/render-key.js'));
+  assert.deepEqual(
+    liveModuleAssetUrls.filter((url) => url.toLowerCase().includes('fingerprint')),
+    [],
+  );
+});
 
 test('fingerprint strips volatile per-query fields', async (t) => {
   await t.test('overview/sync_command_center generated_at never changes the fingerprint', () => {

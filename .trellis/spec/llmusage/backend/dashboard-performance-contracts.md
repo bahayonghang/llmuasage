@@ -43,6 +43,13 @@ TimeWindow::query_filter(&QueryFilter)
   run independently with concurrency `2`. They may update only their own
   section and must retain stale/loading metadata until all current-generation
   sections settle.
+- Live bootstrap requests `scope=interactive` with legacy fan-out disabled. A failed core request
+  issues no overview/trends/models endpoint fallback; full and legacy APIs remain available to
+  explicit compatibility callers, and static snapshots still load their complete payload.
+- Core loading renders before its first await, becomes slow after 2 seconds, and aborts at 6
+  seconds. Retry creates a new generation/controller, so stale responses cannot replace it.
+- After core paint, the five secondary sections expose exact settled `0..5` progress. Fulfilled and
+  degraded results both settle once; complete or error states stop loading motion.
 - Live response caching keeps normalized request keys for 10 seconds, is
   capped at 32 entries, and aborts in-flight requests during invalidation.
 - Server-side dashboard work remains on `spawn_blocking`, holds one of four

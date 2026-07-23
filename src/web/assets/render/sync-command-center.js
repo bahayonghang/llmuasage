@@ -310,6 +310,74 @@ function emptyCenter(host) {
   `;
 }
 
+function loadCopy(key, replacements = {}) {
+  let value = getShellCopy(key);
+  for (const [name, replacement] of Object.entries(replacements)) {
+    value = value.replace(`{${name}}`, String(replacement));
+  }
+  return value;
+}
+
+export function renderDashboardLoadInstrument(loadState) {
+  const host = document.getElementById('sync-command-center');
+  if (!host || !loadState || loadState.phase === 'complete') return;
+
+  if (loadState.phase === 'error') {
+    const titleKey = ['timeout', 'http', 'parse'].includes(loadState.errorKind)
+      ? `shell.load.${loadState.errorKind}`
+      : 'shell.load.network';
+    host.innerHTML = `
+      <div class="dashboard-load-instrument" data-phase="error" data-tone="error" role="status" aria-live="polite">
+        <div class="dashboard-load-status"><span aria-hidden="true">!</span><strong>${escapeHtml(getShellCopy(titleKey))}</strong></div>
+        <p>${escapeHtml(loadState.errorMessage || getShellCopy('shell.load.errorDetail'))}</p>
+        <button class="btn btn-primary" type="button" data-dashboard-retry>${escapeHtml(getShellCopy('shell.load.retry'))}</button>
+      </div>
+    `;
+    return;
+  }
+
+  if (loadState.phase === 'core_pending') {
+    const slow = Boolean(loadState.slow);
+    host.innerHTML = `
+      <div class="dashboard-load-instrument" data-phase="core" data-tone="${slow ? 'warn' : 'running'}" role="status" aria-live="polite">
+        <div class="section-eyebrow">${escapeHtml(getShellCopy('shell.syncCenter.eyebrow'))}</div>
+        <strong>${escapeHtml(getShellCopy(slow ? 'shell.load.slow' : 'shell.load.core'))}</strong>
+        <p>${escapeHtml(getShellCopy(slow ? 'shell.load.slowDetail' : 'shell.load.coreDetail'))}</p>
+        <div class="dashboard-load-rail" aria-hidden="true"><span></span></div>
+      </div>
+    `;
+    return;
+  }
+
+  const degraded = new Set(loadState.degradedSections || []);
+  const settled = new Set(loadState.settledSections || []);
+  const segments = Array.from({ length: loadState.secondaryTotal }, (_, index) => {
+    const section = ['activity', 'tools', 'optimize', 'explorer', 'compare'][index];
+    const stateKey = degraded.has(section)
+      ? 'shell.load.segmentDegraded'
+      : (settled.has(section) ? 'shell.load.segmentReady' : 'shell.load.segmentPending');
+    const tone = degraded.has(section) ? 'warn' : (settled.has(section) ? 'good' : 'neutral');
+    const label = loadCopy('shell.load.segment', { index: index + 1, state: getShellCopy(stateKey) });
+    return `<span role="listitem" data-tone="${tone}" aria-label="${escapeHtml(label)}"></span>`;
+  }).join('');
+  const progress = loadCopy('shell.load.secondaryDetail', {
+    settled: loadState.secondarySettled,
+    total: loadState.secondaryTotal,
+  });
+  const degradedCopy = loadState.secondaryDegraded > 0
+    ? `<p class="dashboard-load-warning"><span aria-hidden="true">!</span>${escapeHtml(loadCopy('shell.load.degraded', { count: loadState.secondaryDegraded }))}</p>`
+    : '';
+  host.innerHTML = `
+    <div class="dashboard-load-instrument" data-phase="${loadState.terminal ? 'complete' : 'secondary'}" data-tone="running" role="status" aria-live="polite">
+      <div class="section-eyebrow">${escapeHtml(getShellCopy('shell.syncCenter.eyebrow'))}</div>
+      <strong>${escapeHtml(getShellCopy('shell.load.secondary'))}</strong>
+      <p>${escapeHtml(progress)}</p>
+      <div class="dashboard-load-segments" role="list">${segments}</div>
+      ${degradedCopy}
+    </div>
+  `;
+}
+
 /*
  * ========================================================================
  * 步骤1：渲染同步命令中心

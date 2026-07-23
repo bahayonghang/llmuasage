@@ -1,4 +1,5 @@
 use std::{
+    future::Future,
     net::{IpAddr, Ipv4Addr},
     process::{Command, Stdio},
 };
@@ -47,18 +48,31 @@ pub(crate) async fn run_with_options(
     let store = Store::new(&app.paths)?;
     store.bootstrap()?;
     repair_legacy_token_accounting(app, &store).await?;
+    store.run_log().recover_running_runs(&["serve"])?;
     let bind_ip = if public {
         IpAddr::V4(Ipv4Addr::UNSPECIFIED)
     } else {
         IpAddr::V4(Ipv4Addr::LOCALHOST)
     };
-    let addr = super::run_tracked(
+    super::run_tracked(
         &store,
         "serve",
-        async { web::serve_on(store.clone(), port, bind_ip).await },
+        serve_session(store.clone(), port, bind_ip, public, no_open),
         |addr| Some(format!("listen={addr}")),
     )
     .await?;
+    Ok(())
+}
+
+async fn serve_session(
+    store: Store,
+    port: Option<u16>,
+    bind_ip: IpAddr,
+    public: bool,
+    no_open: bool,
+) -> Result<std::net::SocketAddr> {
+    let server = web::bind_server(store, port, bind_ip).await?;
+    let addr = server.addr();
 
     /*
      * ========================================================================
@@ -106,9 +120,39 @@ pub(crate) async fn run_with_options(
             info!("serve 在 SSH 会话中跳过浏览器启动");
         }
     }
-    tokio::signal::ctrl_c().await?;
-    info!("收到 Ctrl+C，准备停止本地 Web UI 服务");
-    Ok(())
+    supervise_server(server, tokio::signal::ctrl_c()).await
+}
+
+async fn supervise_server<F>(
+    mut server: web::BoundWebServer,
+    shutdown: F,
+) -> Result<std::net::SocketAddr>
+where
+    F: Future<Output = std::io::Result<()>>,
+{
+    enum StopReason {
+        Shutdown(std::io::Result<()>),
+        Server(Result<()>),
+    }
+
+    let addr = server.addr();
+    let stop_reason = tokio::select! {
+        signal = shutdown => StopReason::Shutdown(signal),
+        result = server.wait() => StopReason::Server(result),
+    };
+
+    match stop_reason {
+        StopReason::Shutdown(result) => {
+            result.context("Failed to wait for Ctrl+C")?;
+            info!(%addr, "收到 Ctrl+C，准备停止本地 Web UI 服务");
+            server.shutdown().await?;
+            Ok(addr)
+        }
+        StopReason::Server(result) => {
+            result?;
+            bail!("Web server at {addr} stopped before a shutdown signal");
+        }
+    }
 }
 
 fn local_dashboard_url(port: u16) -> String {
@@ -282,11 +326,15 @@ impl BrowserLaunchPlan {
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsStr;
+    use std::{ffi::OsStr, future::pending};
+
+    use tempfile::TempDir;
+
+    use crate::{AppPaths, store::Store, web::BoundWebServer};
 
     use super::{
         BrowserLaunchPlan, BrowserOpenDecision, BrowserPlatform, browser_open_decision,
-        is_ssh_session_from, local_dashboard_url, public_dashboard_url,
+        is_ssh_session_from, local_dashboard_url, public_dashboard_url, supervise_server,
     };
 
     #[test]
@@ -360,5 +408,129 @@ mod tests {
         let plan = BrowserLaunchPlan::for_platform(BrowserPlatform::Unix, "http://127.0.0.1:37421");
         assert_eq!(plan.program, "xdg-open");
         assert_eq!(plan.args, vec!["http://127.0.0.1:37421".to_string()]);
+    }
+
+    fn make_store() -> anyhow::Result<(TempDir, Store)> {
+        let temp = TempDir::new()?;
+        let paths = AppPaths::with_root(temp.path().join(".llmusage"))?;
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+        Ok((temp, store))
+    }
+
+    #[tokio::test]
+    async fn supervisor_rejects_early_server_completion_and_panic() {
+        let completed = BoundWebServer::from_test_task(tokio::spawn(async { Ok(()) }));
+        let err = supervise_server(completed, pending())
+            .await
+            .expect_err("early completion must fail serve");
+        assert!(format!("{err:#}").contains("stopped before a shutdown signal"));
+
+        let panicked: tokio::task::JoinHandle<std::io::Result<()>> =
+            tokio::spawn(async { panic!("serve task panic") });
+        let err = supervise_server(BoundWebServer::from_test_task(panicked), pending())
+            .await
+            .expect_err("server panic must fail serve");
+        assert!(format!("{err:#}").contains("panicked"));
+    }
+
+    #[tokio::test]
+    async fn tracked_serve_stays_running_until_clean_shutdown() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let server = crate::web::bind_server(
+            store.clone(),
+            Some(0),
+            std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+        )
+        .await?;
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let tracked_store = store.clone();
+        let task = tokio::spawn(async move {
+            super::super::run_tracked(
+                &tracked_store,
+                "serve",
+                async {
+                    let _ = started_tx.send(());
+                    supervise_server(server, async {
+                        shutdown_rx
+                            .await
+                            .map_err(|_| std::io::Error::other("shutdown sender dropped"))
+                    })
+                    .await
+                },
+                |addr| Some(format!("listen={addr}")),
+            )
+            .await
+        });
+
+        started_rx.await.expect("tracked body started");
+        let running = store.run_log().recent_runs(1)?;
+        assert_eq!(running[0].status, "running");
+
+        shutdown_tx.send(()).expect("shutdown signal");
+        task.await??;
+        let finished = store.run_log().recent_runs(1)?;
+        assert_eq!(finished[0].status, "success");
+        assert!(
+            finished[0]
+                .summary
+                .as_deref()
+                .is_some_and(|value| value.contains("listen="))
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn tracked_bind_and_server_failures_finish_as_failed() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let occupied = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
+        let port = occupied.local_addr()?.port();
+        let bind_result = super::super::run_tracked(
+            &store,
+            "serve",
+            async {
+                crate::web::bind_server(
+                    store.clone(),
+                    Some(port),
+                    std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+                )
+                .await
+                .map(|server| server.addr())
+            },
+            |addr| Some(format!("listen={addr}")),
+        )
+        .await;
+        assert!(bind_result.is_err());
+        assert_eq!(store.run_log().recent_runs(1)?[0].status, "failed");
+
+        let failed_task = tokio::spawn(async { Err(std::io::Error::other("server failed")) });
+        let server_result = super::super::run_tracked(
+            &store,
+            "serve",
+            supervise_server(BoundWebServer::from_test_task(failed_task), pending()),
+            |addr| Some(format!("listen={addr}")),
+        )
+        .await;
+        assert!(server_result.is_err());
+        let latest = store.run_log().recent_runs(1)?;
+        assert_eq!(latest[0].status, "failed");
+        assert!(
+            latest[0]
+                .error
+                .as_deref()
+                .is_some_and(|value| value.contains("server failed"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn stale_serve_run_is_recovered_as_aborted() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        store.run_log().record_run_start("serve")?;
+        assert_eq!(store.run_log().recover_running_runs(&["serve"])?, 1);
+        let recovered = store.run_log().recent_runs(1)?;
+        assert_eq!(recovered[0].status, "aborted");
+        Ok(())
     }
 }

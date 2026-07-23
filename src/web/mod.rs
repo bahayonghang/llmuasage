@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use axum::{
     Json, Router,
     extract::{Path, Query, State},
@@ -23,6 +23,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::net::TcpListener;
 use tokio::sync::{Semaphore, oneshot};
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 use tower_http::compression::CompressionLayer;
 use tracing::{debug, error, info};
 
@@ -54,6 +56,7 @@ const WEB_READ_BUSY_TIMEOUT: Duration = Duration::from_millis(1_500);
 /// job completion invalidates the entry immediately, which covers the main
 /// freshness path. The query layer itself keeps cold-read semantics.
 const DIAGNOSTICS_CACHE_TTL: Duration = Duration::from_secs(30);
+const WEB_SERVER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
 
 mod assets;
 mod brand;
@@ -163,6 +166,97 @@ impl WebState {
     }
 }
 
+pub(crate) struct BoundWebServer {
+    addr: SocketAddr,
+    shutdown: CancellationToken,
+    task: Option<JoinHandle<std::io::Result<()>>>,
+}
+
+impl BoundWebServer {
+    pub(crate) fn addr(&self) -> SocketAddr {
+        self.addr
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_test_task(task: JoinHandle<std::io::Result<()>>) -> Self {
+        Self {
+            addr: SocketAddr::from(([127, 0, 0, 1], 0)),
+            shutdown: CancellationToken::new(),
+            task: Some(task),
+        }
+    }
+
+    pub(crate) async fn wait(&mut self) -> Result<()> {
+        wait_for_server_task(
+            self.task
+                .as_mut()
+                .context("Web server task is no longer owned")?,
+        )
+        .await
+    }
+
+    pub(crate) async fn shutdown(self) -> Result<()> {
+        self.shutdown_with_timeout(WEB_SERVER_SHUTDOWN_TIMEOUT)
+            .await
+    }
+
+    async fn shutdown_with_timeout(mut self, timeout: Duration) -> Result<()> {
+        self.shutdown.cancel();
+        let mut task = self
+            .task
+            .take()
+            .context("Web server task is no longer owned")?;
+        match tokio::time::timeout(timeout, &mut task).await {
+            Ok(result) => server_task_result(result),
+            Err(_) => {
+                task.abort();
+                let _ = task.await;
+                bail!(
+                    "Web server at {} did not stop within {} seconds",
+                    self.addr,
+                    timeout.as_secs_f64()
+                );
+            }
+        }
+    }
+
+    pub(crate) fn detach_with_error_logging(mut self) -> SocketAddr {
+        let addr = self.addr;
+        if let Some(task) = self.task.take() {
+            tokio::spawn(async move {
+                if let Err(err) = server_task_result(task.await) {
+                    error!(%addr, error = %err, "detached Web server stopped unexpectedly");
+                }
+            });
+        }
+        addr
+    }
+}
+
+impl Drop for BoundWebServer {
+    fn drop(&mut self) {
+        if let Some(task) = self.task.take() {
+            self.shutdown.cancel();
+            task.abort();
+        }
+    }
+}
+
+async fn wait_for_server_task(task: &mut JoinHandle<std::io::Result<()>>) -> Result<()> {
+    server_task_result(task.await)
+}
+
+fn server_task_result(
+    result: std::result::Result<std::io::Result<()>, tokio::task::JoinError>,
+) -> Result<()> {
+    match result {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(err)) => Err(err).context("Web server task returned an error"),
+        Err(err) if err.is_panic() => Err(err).context("Web server task panicked"),
+        Err(err) => Err(err).context("Web server task was cancelled"),
+    }
+}
+
 pub async fn serve(store: Store, preferred_port: Option<u16>) -> Result<SocketAddr> {
     serve_on(store, preferred_port, IpAddr::V4(Ipv4Addr::LOCALHOST)).await
 }
@@ -172,6 +266,16 @@ pub(crate) async fn serve_on(
     preferred_port: Option<u16>,
     bind_ip: IpAddr,
 ) -> Result<SocketAddr> {
+    Ok(bind_server(store, preferred_port, bind_ip)
+        .await?
+        .detach_with_error_logging())
+}
+
+pub(crate) async fn bind_server(
+    store: Store,
+    preferred_port: Option<u16>,
+    bind_ip: IpAddr,
+) -> Result<BoundWebServer> {
     /*
      * ========================================================================
      * 步骤1：组装本地 Web UI 路由
@@ -236,19 +340,34 @@ pub(crate) async fn serve_on(
     };
 
     // 2.2 命中可用端口后启动服务并返回最终监听地址
+    let mut bind_errors = Vec::new();
     for port in ports {
-        let listener = TcpListener::bind((bind_ip, port)).await;
-        if let Ok(listener) = listener {
-            let addr = listener.local_addr()?;
-            tokio::spawn(async move {
-                let _ = axum::serve(listener, app).await;
-            });
-            info!("完成本地 Web UI 监听端口绑定");
-            return Ok(addr);
+        let attempted_addr = SocketAddr::new(bind_ip, port);
+        match TcpListener::bind(attempted_addr).await {
+            Ok(listener) => {
+                let addr = listener.local_addr()?;
+                let shutdown = CancellationToken::new();
+                let shutdown_signal = shutdown.clone();
+                let task = tokio::spawn(async move {
+                    axum::serve(listener, app)
+                        .with_graceful_shutdown(shutdown_signal.cancelled_owned())
+                        .await
+                });
+                info!(%addr, "完成本地 Web UI 监听端口绑定");
+                return Ok(BoundWebServer {
+                    addr,
+                    shutdown,
+                    task: Some(task),
+                });
+            }
+            Err(err) => bind_errors.push(format!("{attempted_addr}: {err}")),
         }
     }
 
-    unreachable!("端口探测列表不应为空");
+    bail!(
+        "Unable to bind the Web dashboard listener; attempts: {}",
+        bind_errors.join("; ")
+    );
 }
 
 pub fn snapshot_index_html() -> String {
@@ -1495,9 +1614,9 @@ mod tests {
     };
 
     use super::{
-        DiagnosticsCache, WEB_READ_BUSY_TIMEOUT, WebState, api_json, asset_manifest,
+        DiagnosticsCache, WEB_READ_BUSY_TIMEOUT, WebState, api_json, asset_manifest, bind_server,
         live_index_html, load_diagnostics_cached, load_via_dashboard,
-        load_via_dashboard_with_timeout, serve, serve_on, snapshot_index_html,
+        load_via_dashboard_with_timeout, serve, serve_on, server_task_result, snapshot_index_html,
     };
 
     fn make_store() -> anyhow::Result<(TempDir, Store)> {
@@ -1518,6 +1637,56 @@ mod tests {
         let (status, _body) = route_text(loopback, "GET", "/").await?;
         assert_eq!(status, StatusCode::OK);
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn explicit_occupied_port_returns_structured_bind_error() -> anyhow::Result<()> {
+        let occupied = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
+        let addr = occupied.local_addr()?;
+        let (_temp, store) = make_store()?;
+
+        let err = bind_server(store, Some(addr.port()), IpAddr::V4(Ipv4Addr::LOCALHOST))
+            .await
+            .err()
+            .expect("occupied port must fail");
+        let message = format!("{err:#}");
+        assert!(message.contains("Unable to bind"));
+        assert!(message.contains(&addr.to_string()));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn owned_server_remains_available_until_bounded_shutdown() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let server = bind_server(store, Some(0), IpAddr::V4(Ipv4Addr::LOCALHOST)).await?;
+        let addr = server.addr();
+        let (status, _body) = route_text(addr, "GET", "/").await?;
+        assert_eq!(status, StatusCode::OK);
+        server.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn server_task_errors_and_panics_are_observable() {
+        let failed = tokio::spawn(async { Err(std::io::Error::other("listener failed")) });
+        let err = server_task_result(failed.await).expect_err("task error must propagate");
+        assert!(format!("{err:#}").contains("listener failed"));
+
+        let panicked: tokio::task::JoinHandle<std::io::Result<()>> =
+            tokio::spawn(async { panic!("server panic") });
+        let err = server_task_result(panicked.await).expect_err("panic must propagate");
+        assert!(format!("{err:#}").contains("panicked"));
+    }
+
+    #[tokio::test]
+    async fn shutdown_timeout_aborts_non_cooperative_server_task() {
+        let task = tokio::spawn(std::future::pending::<std::io::Result<()>>());
+        let server = super::BoundWebServer::from_test_task(task);
+        let err = server
+            .shutdown_with_timeout(Duration::from_millis(10))
+            .await
+            .expect_err("non-cooperative task must hit the bounded deadline");
+        assert!(format!("{err:#}").contains("did not stop within"));
     }
 
     async fn route_json(
@@ -1726,6 +1895,11 @@ mod tests {
         ));
         assert!(html.contains("type=\"module\""));
         assert!(html.contains("assets/app.js"));
+        assert!(html.contains("window.__LLMUSAGE_BOOTSTRAP__"));
+        assert!(html.contains("CLAIM_TIMEOUT_MS = 3000"));
+        assert!(html.contains("READY_TIMEOUT_MS = 1000"));
+        assert!(html.contains("PROBE_TIMEOUT_MS = 1500"));
+        assert!(html.contains("window.fetch('/', { cache: 'no-store'"));
         assert!(html.contains("assets/base.css"));
         assert!(html.contains("assets/layout.css"));
         assert!(html.contains("assets/components.css"));
@@ -1785,6 +1959,8 @@ mod tests {
         assert!(html.contains("离线文件"));
         assert!(html.contains("type=\"module\""));
         assert!(html.contains("assets/app.js"));
+        assert!(html.contains("mode === 'snapshot'"));
+        assert!(html.contains("renderFailure('snapshot'"));
     }
 
     #[test]
@@ -1798,9 +1974,8 @@ mod tests {
             .find(|asset| asset.path == "app.js")
             .expect("app.js asset")
             .body;
-        assert!(app_js.contains(
-            "import { renderSyncCommandCenter } from './render/sync-command-center.js';"
-        ));
+        assert!(app_js.contains("renderDashboardLoadInstrument, renderSyncCommandCenter"));
+        assert!(app_js.contains("from './render/sync-command-center.js';"));
         assert!(app_js.contains("renderSyncCommandCenter(context, dashboardState)"));
         assert!(app_js.contains("refreshSyncCommandCenter(state)"));
 
@@ -1943,6 +2118,7 @@ mod tests {
                 "components.css",
                 "charts.css",
                 "app.js",
+                "load-state.js",
                 "copy.js",
                 "i18n.js",
                 "theme.js",
@@ -1951,7 +2127,7 @@ mod tests {
                 "data/fetch.js",
                 "data/format.js",
                 "data/derive.js",
-                "data/fingerprint.js",
+                "data/render-key.js",
                 "render/hero.js",
                 "render/sync-command-center.js",
                 "render/trends.js",
@@ -1965,6 +2141,7 @@ mod tests {
                 "favicon.svg",
             ]
         );
+        assert!(paths.iter().all(|path| !path.contains("fingerprint")));
     }
 
     #[test]
@@ -2146,6 +2323,7 @@ mod tests {
             .expect("app.js asset")
             .body;
         assert!(app_js.contains("loadDashboardSnapshot(state)"));
+        assert!(app_js.contains("loadDashboardProgressive(state)"));
         assert!(app_js.contains("syncUrlFromState(state)"));
         assert!(app_js.contains("state.filters = currentFilterInputs()"));
         assert!(app_js.contains("setupRangePresetControls(state)"));
@@ -2170,6 +2348,7 @@ mod tests {
         assert!(fetch_js.contains("state?.rangePreset"));
         assert!(fetch_js.contains("params.set('range', state.rangePreset)"));
         assert!(fetch_js.contains("回退到旧分段 API"));
+        assert!(fetch_js.contains("options.legacyFallback === false"));
         assert!(fetch_js.contains("snapshot.json"));
     }
 
@@ -2218,13 +2397,11 @@ mod tests {
         assert!(data_js.contains("loadDashboardInteractiveSnapshot"));
         assert!(data_js.contains("loadDashboardSecondarySections"));
         assert!(app_js.contains("async function reloadDashboardFastRange"));
-        assert!(
-            app_js
-                .contains("loadDashboardInteractiveSnapshot(state, { signal: controller.signal })")
-        );
+        assert!(app_js.contains("loadDashboardInteractiveSnapshot(state, {"));
+        assert!(app_js.contains("legacyFallback: false"));
         assert!(app_js.contains("const SECONDARY_LOAD_CONCURRENCY = 2"));
         assert!(app_js.contains("runSecondaryLoaders(loaders"));
-        assert!(app_js.contains("renderPrimaryDashboard(state.rawData)"));
+        assert!(app_js.contains("renderDashboard(state.rawData)"));
         assert!(app_js.contains("sameStableFilters(previousFilters"));
         assert!(app_js.contains("clearLiveRequestCache()"));
         assert!(app_js.contains("!hasUsableExplorer(snapshot) || !isDefaultExplorerState(state)"));
@@ -2416,7 +2593,7 @@ mod tests {
             .expect("app.js asset")
             .body;
         let before_load = app_js
-            .split("state.rawData = await loadDashboardData(state);")
+            .split("  try {\n    // 1.2 live")
             .next()
             .expect("main load marker");
         for marker in [
@@ -2427,6 +2604,8 @@ mod tests {
             "setupSyncJob(state)",
             "setupThemeToggle()",
             "setupLocaleToggle(state)",
+            "setupDashboardRetry(state)",
+            "window.__LLMUSAGE_BOOTSTRAP__?.ready?.()",
         ] {
             assert!(
                 before_load.contains(marker),
@@ -4440,6 +4619,31 @@ mod tests {
         .await?;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body, expected.as_bytes());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn render_key_asset_is_registered_and_served_without_blocked_alias() -> anyhow::Result<()>
+    {
+        let expected = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "data/render-key.js")
+            .expect("render-key.js asset")
+            .body;
+        assert!(
+            asset_manifest()
+                .iter()
+                .all(|asset| !asset.path.contains("fingerprint"))
+        );
+
+        let (_temp, store) = make_store()?;
+        let addr = serve(store, Some(0)).await?;
+        let (status, _, body) = route_bytes(addr, "/assets/data/render-key.js", &[]).await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, expected.as_bytes());
+
+        let (status, _, _) = route_bytes(addr, "/assets/data/fingerprint.js", &[]).await?;
+        assert_eq!(status, StatusCode::NOT_FOUND);
         Ok(())
     }
 

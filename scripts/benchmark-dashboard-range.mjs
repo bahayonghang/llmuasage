@@ -194,7 +194,7 @@ async function pageTarget(browserWebSocketUrl) {
 function browserClickBenchmarkExpression() {
   return `
     (async () => {
-      const presets = ['1d', '7d', '30d', 'all'];
+      const presets = ['7d', '30d', 'all', '1d'];
       const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const waitFor = async (read, timeoutMs, label) => {
         const started = performance.now();
@@ -223,6 +223,11 @@ function browserClickBenchmarkExpression() {
         20000,
         'initial dashboard render',
       );
+
+      // Initial live bootstrap now uses the same interactive 1d request as the
+      // first click. Let the documented 10s request cache expire so every
+      // benchmark click measures a real response instead of a cache hit.
+      await sleep(10100);
 
       const clicks = [];
       for (const preset of presets) {

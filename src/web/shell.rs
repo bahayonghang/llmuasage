@@ -17,6 +17,8 @@ pub fn snapshot_index_html() -> String {
     html_shell("snapshot")
 }
 
+const BOOTSTRAP_WATCHDOG_JS: &str = include_str!("assets/bootstrap-watchdog.js");
+
 fn html_shell(mode: &str) -> String {
     let (environment_chip, environment_chip_key) = if mode == "snapshot" {
         ("离线文件", "shell.tag.snapshot")
@@ -547,6 +549,7 @@ fn html_shell(mode: &str) -> String {
   </main>
 </div>
 
+<script>__LLMUSAGE_BOOTSTRAP_WATCHDOG__</script>
 <script type="module" src="assets/app.js"></script>
 </body>
 </html>"##,
@@ -557,4 +560,5 @@ fn html_shell(mode: &str) -> String {
         environment_chip_key = environment_chip_key,
         brand_mark = super::brand::BRAND_MARK_SVG
     )
+    .replace("__LLMUSAGE_BOOTSTRAP_WATCHDOG__", BOOTSTRAP_WATCHDOG_JS)
 }

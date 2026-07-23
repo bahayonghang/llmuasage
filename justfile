@@ -62,5 +62,7 @@ ci:
     $env:RUSTDOCFLAGS = "-D warnings"; cargo doc --no-deps
     node --check scripts/benchmark-dashboard-range.mjs
     node --test scripts/tests/dashboard-fetch.test.mjs
+    node --test scripts/tests/dashboard-bootstrap-watchdog.test.mjs
+    node --test scripts/tests/dashboard-load-state.test.mjs
     node --test scripts/tests/dashboard-render-lifecycle.test.mjs
     npm --prefix docs run docs:build
