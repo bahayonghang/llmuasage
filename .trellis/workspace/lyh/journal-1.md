@@ -983,3 +983,38 @@ Claude/Codex 以 planned replay 文件数显示 5Hz 解析进度，TTY 显示提
 ### Next Steps
 
 - None - task complete
+
+
+## Session 30: 完成 serve 加载进度与性能修复
+
+**Date**: 2026-07-23
+**Task**: 完成 serve 加载进度与性能修复
+**Branch**: `dev`
+
+### Summary
+
+监督 Web server 完整生命周期，增加 module-independent watchdog、interactive-first 渐进加载和真实 0..5 进度；修复 fingerprint 资产被客户端过滤器拦截的问题，独立提交 1.0.2 版本元数据，并完成 focused/full gate 与用户 Chrome 环境验证。收尾时已停止 37421/37424/37425 相关后台服务。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ed31296` | (see git log) |
+| `b0638a7` | (see git log) |
+| `5399c90` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
