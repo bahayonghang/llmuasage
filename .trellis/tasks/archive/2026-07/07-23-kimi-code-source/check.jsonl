@@ -1,0 +1,4 @@
+{"file": "docs/agents/passive-parser-onboarding.md", "reason": "逐条核对准入门槛的必需测试是否齐备"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "验证 turn-scoped 映射、无重复计数、游标 commit 后推进"}
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "验证 registry/source status 投影与 sync stats 一致"}
+{"file": ".trellis/tasks/07-23-multi-source-sync-table/research/upstream-local-evidence.md", "reason": "核对模型保留（K3/未来后缀）与忽略规则匹配采样事实"}
