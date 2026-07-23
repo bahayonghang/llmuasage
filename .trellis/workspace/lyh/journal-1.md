@@ -916,3 +916,36 @@ Claude/Codex 以 planned replay 文件数显示 5Hz 解析进度，TTY 显示提
 ### Next Steps
 
 - None - task complete
+
+
+## Session 28: 完成多来源同步与终态汇总表
+
+**Date**: 2026-07-23
+**Task**: 完成多来源同步与终态汇总表
+**Branch**: `feat/multi-source-sync-table`
+
+### Summary
+
+新增 Kimi Code 与 Pi/Oh My Pi passive parser，统一 sync 成功终态为逐来源加 TOTAL 表格，补齐双语文档、code-spec、跨层回归并通过 just ci。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4d6b04e` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
