@@ -48,7 +48,7 @@ features:
 
 ## Current product surface
 
-- Version `1.0.1`.
+- Version `1.0.2`.
 - Sources: Codex, Claude Code, OpenCode, Google Antigravity (`antigravity`), Kimi Code (`kimi_code`), and Pi / Oh My Pi (`pi`).
 - Report commands: `daily`, `monthly`, `session`, `blocks`, `statusline`.
 - Local UI commands: `dash`, `serve`, `export html`.
