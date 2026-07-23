@@ -33,7 +33,6 @@ Do not commit local usage data, SQLite databases, or copied user config from `~/
 
 Before non-trivial domain changes, read `docs/agents/domain.md` and relevant ADRs in `docs/adr/`. For passive parser/source work, follow `docs/agents/passive-parser-onboarding.md` and update `docs/agents/passive-source-candidates.md` when appropriate.
 <!-- TRELLIS:START -->
-
 # Trellis Instructions
 
 These instructions are for AI assistants working in this project.
@@ -48,7 +47,6 @@ This project is managed by Trellis. The working knowledge you need lives under `
 If a Trellis command is available on your platform (e.g. `/trellis:finish-work`, `/trellis:continue`), prefer it over manual steps. Not every platform exposes every command.
 
 If you're using Codex or another agent-capable tool, additional project-scoped helpers may live in:
-
 - `.agents/skills/` — reusable Trellis skills
 - `.codex/agents/` — optional custom subagents
 
