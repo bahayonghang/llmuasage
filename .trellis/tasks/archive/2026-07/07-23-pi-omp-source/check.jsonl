@@ -1,0 +1,4 @@
+{"file": "docs/agents/passive-parser-onboarding.md", "reason": "逐条核对准入门槛的必需测试是否齐备（含缺失根/去重）"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "验证 reasoning 不重复计入、权威 total 优先、无重复事件"}
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "验证 Pi/OMP 合并为单一 pi 源、无重复 source 行"}
+{"file": ".trellis/tasks/07-23-multi-source-sync-table/research/upstream-local-evidence.md", "reason": "核对两根合并、模型保留与 Pi-only 证据缺口标注"}
