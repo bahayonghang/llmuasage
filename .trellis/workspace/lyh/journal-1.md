@@ -949,3 +949,37 @@ Claude/Codex 以 planned replay 文件数显示 5Hz 解析进度，TTY 显示提
 ### Next Steps
 
 - None - task complete
+
+
+## Session 29: 添加 llmusage 自更新命令
+
+**Date**: 2026-07-23
+**Task**: 添加 llmusage 自更新命令
+**Branch**: `dev`
+
+### Summary
+
+新增 llmusage update 命令，默认从 main 更新并支持 dev 与 --check；补齐确认、失败传播、无网络测试、双语文档和自更新 spec，just ci 全量通过。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e5437f7` | (see git log) |
+| `6ec3aa8` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

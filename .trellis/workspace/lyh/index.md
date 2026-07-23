@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 28
+- **Total Sessions**: 29
 - **Last Active**: 2026-07-23
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~951 | Active |
+| `journal-1.md` | ~985 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 29 | 2026-07-23 | 添加 llmusage 自更新命令 | `e5437f7`, `6ec3aa8` | `dev` |
 | 28 | 2026-07-23 | 完成多来源同步与终态汇总表 | `4d6b04e` | `feat/multi-source-sync-table` |
 | 27 | 2026-07-22 | 完成 serve 看板视觉与性能优化 | `2c871b6`, `42e45d0`, `62c135e` | `dev` |
 | 26 | 2026-07-22 | 修复 daily cache 统计与汇总展示 | `ebcbbdd420268dabd17778696898ae5523852f2c` | `dev` |
