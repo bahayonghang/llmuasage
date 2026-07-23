@@ -1,0 +1,4 @@
+{"file": "docs/agents/passive-parser-onboarding.md", "reason": "集成评审：确认两个新来源均通过准入门槛"}
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "集成评审：现有来源回归 + 新来源 sync stats/status 一致"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "集成评审：跨层模型保留与无重复计数"}
+{"file": ".trellis/tasks/07-23-multi-source-sync-table/research/source-admission-matrix.md", "reason": "集成评审：核对交付范围与 Reasonix/Grok/Cursor 排除未被逾越"}
