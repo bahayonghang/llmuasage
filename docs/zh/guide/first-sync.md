@@ -8,7 +8,7 @@
 llmusage sync
 ```
 
-人读进度写入 stderr，最终摘要保留在 stdout。
+人读进度写入 stderr。最终 stdout 摘要只保留一张逐来源表，并以 `TOTAL` 行收尾；已完成的进度行会被清理，不会在表格上方重复出现。重定向输出不含 ANSI 控制序列，窄终端会使用紧凑表头，但不会截断数值。
 
 如果内置定价目录自上次运行后发生变化，bootstrap 会在扫描来源前重算历史事件价格。进度会显示新旧目录版本、已处理/总事件数、汇总桶对账和最终耗时。对未固定的内置目录，这是一轮一次性升级；目录已是最新或已固定时会跳过。
 
@@ -21,12 +21,20 @@ llmusage sync --source codex
 llmusage sync --source claude
 llmusage sync --source opencode
 llmusage sync --source antigravity
+llmusage sync --source kimi_code
+llmusage sync --source pi
 # gemini 不再作为来源 id；gemini-* 模型名保持不变
 ```
 
-合法来源与 `cargo run -- --help` 一致：`codex`、`claude`、`opencode`、`antigravity`。`gemini` 不再作为来源 id；`gemini-*` 仍只是模型名前缀。
+合法来源与 `cargo run -- --help` 一致：`codex`、`claude`、`opencode`、`antigravity`、`kimi_code`、`pi`。`gemini` 不再作为来源 id；`gemini-*` 仍只是模型名前缀。
+
+Kimi Code 读取 `~/.kimi-code/sessions/**/wire.jsonl`（或 `KIMI_CODE_HOME/sessions`），只导入显式 turn-scoped `usage.record`。它分别映射非缓存输入、输出、cache read 与 cache creation，保留 `kimi-code/k3` 等原始模型名，并忽略聚合、零 token、非 turn 和损坏记录。
+
+Pi 把 `~/.pi/agent/sessions`（或 `PI_AGENT_DIR`）与 `~/.omp/agent/sessions` 合并到一个 `pi` 来源。Assistant usage 会保留 input、output、cache read/write、权威 total 与诊断型 reasoning token。当前准入证据包含本机 Oh My Pi 样本和脱敏 Pi-compatible fixture；本机没有 Pi-only 样本，因此 Pi 专属格式变化仍是显式证据缺口。
 
 其他平台可能在 `llmusage source-status` 或 `dash` 来源选择器中以仅监控候选出现。它们在具备脱敏 fixture、token 语义、sync-twice 测试、cursor/fingerprint 回归测试和隐私审查之前保持 parserless。
+
+Reasonix 继续保持 monitor-only：当前 session JSONL 没有可重放的逐 turn usage 字段，旧 telemetry sidecar 又是可改写的累计汇总。把 sidecar 当事件导入会引入弱 cursor 语义和重复计数风险，因此不会把它作为 parser fallback。
 
 ## 输出 NDJSON 进度
 
@@ -61,6 +69,8 @@ sync 会拒绝混写新旧结果。请逐个显式重建受影响来源：
 llmusage sync --rebuild --source codex
 llmusage sync --rebuild --source claude
 llmusage sync --rebuild --source opencode
+llmusage sync --rebuild --source kimi_code
+llmusage sync --rebuild --source pi
 ```
 
 只有重建完整成功后才会推进来源 marker。来源仍需重建时，`source-status` 和

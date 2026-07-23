@@ -61,7 +61,7 @@ Dashboard 筛选器映射到 Rust 查询层共享的 `QueryFilter`。
 
 | 筛选 | 含义 |
 | --- | --- |
-| `source` | `codex`、`claude`、`opencode` 或 `antigravity` |
+| `source` | `codex`、`claude`、`opencode`、`antigravity`、`kimi_code` 或 `pi` |
 | `model` | 标准化事件中的精确模型名 |
 | `since` / `until` | Dashboard 查询日期范围 |
 | `window` | day/week/month/all 等快速窗口 |

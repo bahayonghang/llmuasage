@@ -2,7 +2,7 @@
 
 [简体中文](./README.zh-CN.md) · [Docs](https://bahayonghang.github.io/llmuasage/)
 
-Local-first usage analytics for AI coding CLIs. `llmusage` reads local Codex, Claude Code, OpenCode, and Google Antigravity artifacts into a local SQLite database, then renders reports, a terminal dashboard, a browser dashboard, and offline HTML exports without upload or login.
+Local-first usage analytics for AI coding CLIs. `llmusage` reads local Codex, Claude Code, OpenCode, Google Antigravity, Kimi Code, and Pi / Oh My Pi artifacts into a local SQLite database, then renders reports, a terminal dashboard, a browser dashboard, and offline HTML exports without upload or login.
 
 > Current crate version: `1.0.1`.
 
@@ -54,8 +54,10 @@ On the first sync after an embedded pricing catalog upgrade, `sync` reprices his
 | Claude | Claude Code project JSONL plus `Stop` / `SessionEnd` hooks |
 | OpenCode | OpenCode local SQLite usage database plus `session.updated` plugin event |
 | Antigravity | Antigravity CLI `Stop` hook in `~/.gemini/config/hooks.json` (`--source antigravity`); no transcript parser is registered until a verified token-bearing schema exists |
+| Kimi Code | `~/.kimi-code/sessions/**/wire.jsonl` (or `KIMI_CODE_HOME`), turn-scoped `usage.record` rows only |
+| Pi / Oh My Pi | `~/.pi/agent/sessions/**/*.jsonl` and `~/.omp/agent/sessions/**/*.jsonl` as one stable `pi` source |
 
-`source-status` and `dash` also show monitor-only platform candidates such as Gemini CLI, Cursor, Copilot, Zed, Kiro, Goose, Grok, Kimi/Qwen, Roo/Kilo/Cline, Codebuff, Crush, Warp/Oz, Amp, Hermes, and Trae. Monitor-only means llmusage can probe candidate local roots and explain why parsing is blocked; it does not write zero usage rows or untrusted token rows.
+Kimi Code and Pi are passive, precise sources: they keep raw model names, use file cursors for incremental/idempotent replay, and never persist transcript text. Pi support is verified with local Oh My Pi samples plus sanitized Pi-compatible fixtures; Pi-only local evidence is still limited. `source-status` and `dash` also show monitor-only platform candidates such as Reasonix, Gemini CLI, Cursor, Copilot, Zed, Kiro, Goose, Grok, Kimi shell/Qwen, Roo/Kilo/Cline, Codebuff, Crush, Warp/Oz, Amp, Hermes, and Trae. Monitor-only means llmusage can probe candidate local roots and explain why parsing is blocked; it does not write zero usage rows or untrusted token rows.
 
 ## Common commands
 

@@ -31,7 +31,7 @@ Usage: llmusage [OPTIONS] [COMMAND]
 | `--locale <LOCALE>` | Lightweight locale selector for titles and number formatting |
 | `--compact` | Use a narrower table layout |
 | `--no-cost` | Hide cost columns and cost fields from report output |
-| `--source codex\|claude\|opencode\|antigravity` | Restrict a top-level report or sync command to one source |
+| `--source codex\|claude\|opencode\|antigravity\|kimi_code\|pi` | Restrict a top-level report or sync command to one source |
 | `-A, --by-agent` | Add nested source rows to unified report JSON |
 | `--sections daily\|weekly\|monthly\|session` | Add report periods to one combined output |
 | `--all` | Show full daily history instead of the default last 7 days |
@@ -141,6 +141,8 @@ Creates the local runtime and installs/probes integrations.
 ```powershell
 llmusage sync
 llmusage sync --source antigravity
+llmusage sync --source kimi_code
+llmusage sync --source pi
 llmusage sync --recent-days 1
 llmusage sync --json-events
 llmusage sync --rebuild
@@ -153,7 +155,7 @@ Imports local sources. Before source scanning, bootstrap may upgrade an unpinned
 
 Set `LLMUSAGE_LOG=info` for structured pricing start/reconcile/finish file records, or `debug` for throttled page progress. The default `warn` file level records one liveness warning if repricing continues beyond 30 seconds; terminal progress remains visible at every file-log level.
 
-Human summaries include per-source `files`, `changed`, `skipped`, `seen`, `committed`, and `stored_events`. `skipped` is derived from existing cursor/fingerprint evidence for file-backed sources and from the OpenCode SQLite high-water cursor for DB-backed sync. `committed` is the newly inserted event delta after SQLite dedupe.
+The human stdout summary is one aligned table with one row per source plus `TOTAL`; completed progress remains on stderr and is not repeated as permanent success lines. It includes `files`, `changed`, `skipped`, `seen`, `committed`, `stored_events`, bytes, and parse/write duration. `skipped` is derived from existing cursor/fingerprint evidence for file-backed sources and from the OpenCode SQLite high-water cursor for DB-backed sync. `committed` is the newly inserted event delta after SQLite dedupe. Redirected output has no ANSI escapes, and narrow terminals use compact headers without truncating numeric values.
 
 ## Status and diagnostics
 

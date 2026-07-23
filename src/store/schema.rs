@@ -15,9 +15,11 @@ pub const TOKEN_ACCOUNTING_VERSION: u32 = 2;
 pub const fn expected_token_accounting_version(source: SourceKind) -> u32 {
     match source {
         SourceKind::Codex => 3,
-        SourceKind::Claude | SourceKind::Opencode | SourceKind::Antigravity => {
-            TOKEN_ACCOUNTING_VERSION
-        }
+        SourceKind::Claude
+        | SourceKind::Opencode
+        | SourceKind::Antigravity
+        | SourceKind::KimiCode
+        | SourceKind::Pi => TOKEN_ACCOUNTING_VERSION,
     }
 }
 

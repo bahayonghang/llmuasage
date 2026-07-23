@@ -161,6 +161,16 @@ impl LineRenderer {
         if matches!(event, SyncEvent::Failed { .. } | SyncEvent::Cancelled) {
             self.terminated = true;
         }
+        if matches!(event, SyncEvent::SourceFinished { .. }) {
+            // Erase the active TTY line instead of preserving the final progress
+            // snapshot; the stdout summary is the only permanent success view.
+            if self.tty && self.last_line_len > 0 {
+                let _ = write!(self.stderr, "\r{}\r", " ".repeat(self.last_line_len));
+                let _ = self.stderr.flush();
+                self.last_line_len = 0;
+            }
+            return;
+        }
         let Some(line) = human_progress_line(event) else {
             return;
         };
@@ -171,8 +181,7 @@ impl LineRenderer {
             self.last_line_len = line.chars().count();
             if matches!(
                 event,
-                SyncEvent::SourceFinished { .. }
-                    | SyncEvent::MigrationFinished { .. }
+                SyncEvent::MigrationFinished { .. }
                     | SyncEvent::PricingBucketReconcileStarted { .. }
                     | SyncEvent::PricingUpgradeFinished { .. }
                     | SyncEvent::LockAcquired { .. }
@@ -257,9 +266,13 @@ impl BarRenderer {
             }
             SyncEvent::MigrationFinished { .. }
             | SyncEvent::PricingUpgradeFinished { .. }
-            | SyncEvent::LockAcquired { .. }
-            | SyncEvent::SourceFinished { .. } => {
+            | SyncEvent::LockAcquired { .. } => {
                 self.permanent_line(event);
+            }
+            SyncEvent::SourceFinished { .. } => {
+                // Close the active bar without a permanent success line: the
+                // final stdout summary table is the single success surface.
+                self.clear_active();
             }
             SyncEvent::SourceStarted {
                 source,
@@ -529,13 +542,10 @@ pub(crate) fn human_progress_line(event: &SyncEvent) -> Option<String> {
                 source_label(*source)
             ))
         }
-        SyncEvent::SourceFinished { source, stats } => Some(format!(
-            "{}: 完成，文件 {} 个，跳过 {} 个，提交 {} 条",
-            source_label(*source),
-            stats.files_processed,
-            stats.skipped_files,
-            stats.events_inserted
-        )),
+        // SourceFinished drives live progress (bar close / line refresh) but no
+        // longer prints a permanent success line; the final summary table owns
+        // the per-source success surface.
+        SyncEvent::SourceFinished { .. } => None,
         SyncEvent::Failed { error } => Some(format!("同步失败：{error}")),
         SyncEvent::Cancelled => Some("同步已取消".to_string()),
         SyncEvent::Started { .. } | SyncEvent::Finished { .. } | SyncEvent::RecentReady { .. } => {
@@ -544,13 +554,11 @@ pub(crate) fn human_progress_line(event: &SyncEvent) -> Option<String> {
     }
 }
 
+/// Capitalized progress label for a source, read from the static descriptor so
+/// a new `SourceKind` variant populates this display surface with no edit here.
 fn source_label(source: SourceKind) -> &'static str {
-    match source {
-        SourceKind::Codex => "Codex",
-        SourceKind::Claude => "Claude",
-        SourceKind::Opencode => "OpenCode",
-        SourceKind::Antigravity => "Antigravity",
-    }
+    crate::registry::source_descriptor(source)
+        .map_or_else(|| source.as_str(), |descriptor| descriptor.display_name)
 }
 
 #[cfg(test)]
@@ -573,6 +581,14 @@ mod tests {
                 ..SourceSyncStats::default()
             },
         }
+    }
+
+    #[test]
+    fn source_finished_emits_no_permanent_human_line() {
+        // The duplicate per-source completion sentence is gone; the final
+        // summary table owns the per-source success surface.
+        assert!(human_progress_line(&source_finished(SourceKind::Codex)).is_none());
+        assert!(human_progress_line(&source_finished(SourceKind::Opencode)).is_none());
     }
 
     #[test]

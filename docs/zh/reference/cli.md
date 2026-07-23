@@ -31,7 +31,7 @@ Usage: llmusage [OPTIONS] [COMMAND]
 | `--locale <LOCALE>` | 标题和数字格式的轻量 locale 选择 |
 | `--compact` | 使用更窄的表格布局 |
 | `--no-cost` | 从报表输出隐藏成本列与成本字段 |
-| `--source codex\|claude\|opencode\|antigravity` | 将顶层报表或同步命令限制到一个来源 |
+| `--source codex\|claude\|opencode\|antigravity\|kimi_code\|pi` | 将顶层报表或同步命令限制到一个来源 |
 | `-A, --by-agent` | 在统一报表 JSON 中加入嵌套来源行 |
 | `--sections daily\|weekly\|monthly\|session` | 在一次组合输出中加入报表周期 |
 | `--all` | daily 显示完整历史，而不是默认最近 7 天 |
@@ -141,6 +141,8 @@ llmusage init
 ```powershell
 llmusage sync
 llmusage sync --source antigravity
+llmusage sync --source kimi_code
+llmusage sync --source pi
 llmusage sync --recent-days 1
 llmusage sync --json-events
 llmusage sync --rebuild
@@ -153,7 +155,7 @@ llmusage sync --rebuild --allow-lossy-rebuild
 
 设置 `LLMUSAGE_LOG=info` 可记录结构化的定价开始/对账/完成文件日志，`debug` 还会记录节流后的页进度。默认 `warn` 级别会在重算持续超过 30 秒时记录一次存活告警；终端进度不受文件日志级别影响。
 
-人读摘要会按来源显示 `files`、`changed`、`skipped`、`seen`、`committed` 和 `stored_events`。`skipped` 对文件型来源来自现有 cursor/fingerprint 证据，对 OpenCode 这种 DB 来源来自 SQLite 高水位 cursor。`committed` 是 SQLite 去重后本次新增写入数。
+人读 stdout 摘要只输出一张对齐表格：每个来源一行，并以 `TOTAL` 收尾；已完成进度留在 stderr，不再成为重复的永久成功行。表格按来源显示 `files`、`changed`、`skipped`、`seen`、`committed`、`stored_events`、bytes 和 parse/write 耗时。`skipped` 对文件型来源来自现有 cursor/fingerprint 证据，对 OpenCode 这种 DB 来源来自 SQLite 高水位 cursor；`committed` 是 SQLite 去重后本次新增写入数。重定向输出不含 ANSI，窄终端使用紧凑表头且不截断数值。
 
 ## 状态与诊断
 

@@ -2,7 +2,7 @@
 
 [English](./README.md) · [文档](https://bahayonghang.github.io/llmuasage/zh/)
 
-本地优先的 AI CLI 用量分析工具。`llmusage` 会把本机 Codex、Claude Code、OpenCode、Google Antigravity 的本地记录解析进本地 SQLite，然后提供命令行报表、终端 Dashboard、浏览器 Dashboard 和离线 HTML 导出；不上传、不登录、不调用云端用量 API。
+本地优先的 AI CLI 用量分析工具。`llmusage` 会把本机 Codex、Claude Code、OpenCode、Google Antigravity、Kimi Code 和 Pi / Oh My Pi 的本地记录解析进本地 SQLite，然后提供命令行报表、终端 Dashboard、浏览器 Dashboard 和离线 HTML 导出；不上传、不登录、不调用云端用量 API。
 
 > 当前 crate 版本：`1.0.1`。
 
@@ -54,8 +54,10 @@ llmusage serve
 | Claude | Claude Code project JSONL 与 `Stop` / `SessionEnd` hooks |
 | OpenCode | OpenCode 本地 SQLite 用量库与 `session.updated` plugin event |
 | Antigravity | Antigravity CLI `Stop` hook（`~/.gemini/config/hooks.json`，`--source antigravity`）；没有经过验证的 token schema 前不注册 transcript parser |
+| Kimi Code | `~/.kimi-code/sessions/**/wire.jsonl`（或 `KIMI_CODE_HOME`），只读取 turn-scoped `usage.record` |
+| Pi / Oh My Pi | 把 `~/.pi/agent/sessions/**/*.jsonl` 与 `~/.omp/agent/sessions/**/*.jsonl` 合并为一个稳定的 `pi` 来源 |
 
-`source-status` 和 `dash` 还会显示 Gemini CLI、Cursor、Copilot、Zed、Kiro、Goose、Grok、Kimi/Qwen、Roo/Kilo/Cline、Codebuff、Crush、Warp/Oz、Amp、Hermes、Trae 等仅监控平台。仅监控表示 llmusage 可以探测候选本地路径并说明为什么阻塞解析；不会写入 0 用量行，也不会写入未验证 token 行。
+Kimi Code 与 Pi 都是 passive、`precise` 来源：保留原始模型名，通过文件 cursor 保证增量与幂等重放，且不持久化 transcript 正文。Pi 支持由本机 Oh My Pi 样本和脱敏 Pi-compatible fixture 共同验证；Pi-only 的本机证据仍有限。`source-status` 和 `dash` 还会显示 Reasonix、Gemini CLI、Cursor、Copilot、Zed、Kiro、Goose、Grok、Kimi shell/Qwen、Roo/Kilo/Cline、Codebuff、Crush、Warp/Oz、Amp、Hermes、Trae 等仅监控平台。仅监控表示 llmusage 可以探测候选本地路径并说明为什么阻塞解析；不会写入 0 用量行，也不会写入未验证 token 行。
 
 ## 常用命令
 

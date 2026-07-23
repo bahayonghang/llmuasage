@@ -11,13 +11,17 @@ pub mod codex;
 pub mod driver;
 mod file_progress;
 pub mod file_state;
+pub mod kimi_code;
 pub mod opencode;
+pub mod pi;
 pub(crate) mod source_files;
 pub mod source_parser;
 
 pub use claude::ClaudeParser;
 pub use codex::CodexParser;
+pub use kimi_code::KimiCodeParser;
 pub use opencode::OpencodeParser;
+pub use pi::PiParser;
 pub use source_parser::{ProgressSink, SourceParser};
 
 /// Progress and lifecycle events emitted by sync/import flows.

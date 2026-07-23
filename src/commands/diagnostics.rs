@@ -122,7 +122,7 @@ fn resolve_unique_source(store: &Store, file_path: &str) -> Result<SourceKind> {
     let candidates = rows.collect::<rusqlite::Result<Vec<_>>>()?;
     match candidates.as_slice() {
         [] => bail!(
-            "找不到 file_path={file_path} 对应的源；请显式传 --source codex|claude|opencode|antigravity"
+            "找不到 file_path={file_path} 对应的源；请显式传 --source codex|claude|opencode|antigravity|kimi_code|pi"
         ),
         [single] => SourceKind::parse_id(single)
             .ok_or_else(|| anyhow::anyhow!("source_file 表里 source 列出现未知值：{single}")),

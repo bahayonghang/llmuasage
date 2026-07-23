@@ -75,7 +75,7 @@ pub enum LlmusageError {
     /// is for callers that want to bail out rather than silently zero-fill.
     #[error("pricing missing for {source_id}:{model}")]
     PricingMissing {
-        /// Source identifier (`codex` / `claude` / `opencode` / `antigravity`).
+        /// Stable source identifier such as `codex`, `kimi_code`, or `pi`.
         ///
         /// Named `source_id` rather than `source` because thiserror treats a
         /// field literally named `source` as the error chain link.

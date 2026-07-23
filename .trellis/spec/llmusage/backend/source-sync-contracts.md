@@ -23,6 +23,9 @@
 - Schema v15 adds `source_cursor.last_part_rowid` and
   `(source, source_path_hash)` indexes on `usage_turn` and `usage_tool_call`.
   OpenCode owns the part cursor; file-backed sources continue using `FileCursor`.
+- Stable passive parser ids include `kimi_code` for
+  `~/.kimi-code/sessions/**/wire.jsonl` and one `pi` id for both
+  `~/.pi/agent/sessions` and `~/.omp/agent/sessions`.
 - Monitor descriptors live outside parser promotion and report detection status,
   candidate roots, and parser availability.
 
@@ -40,6 +43,14 @@
   parallel batch may share one atomic `SyncShard` commit.
 - Codex remains file-cursor incremental: unchanged files are metadata-only and
   append work reads only bytes after the stored offset.
+- Kimi Code imports only explicit `type=usage.record` plus
+  `usageScope=turn` rows. It preserves the raw model id and maps non-cached
+  input, cache read, cache creation, and output as separate channels.
+- Pi and Oh My Pi share one source id and one source-status row. Discovery
+  merges canonical files across both roots (and comma-separated
+  `PI_AGENT_DIR` roots), then uses the ordinary append/reparse `FileCursor`
+  state machine. Assistant usage keeps the upstream total authoritative and
+  reasoning diagnostic-only.
 - OpenCode database replacement detection uses persisted message anchors
   `(last_time_created, last_processed_ids)`. Preserve all cursors when every
   anchor exists; if any anchor disappeared, reset message and part cursors.
@@ -98,8 +109,12 @@
 - The human `Sync finished` block is an aligned table (files/changed/skipped/
   seen/committed/stored plus human-readable bytes and parse/write durations)
   rendered by the pure `format_summary_lines`; coloring is stdout-TTY-only and
-  applied after width computation. `SyncEvent`/`SourceSyncStats` wire shapes
-  are unaffected by display changes.
+  applied after width computation. It ends with a `TOTAL` row aggregated from
+  per-source stats. `SourceFinished` closes live stderr progress without
+  emitting a second permanent success sentence; failures and cancellation
+  remain diagnostic lines. Narrow rendering may truncate only the display
+  label, never numeric cells. `SyncEvent`/`SourceSyncStats` wire shapes are
+  unaffected by display changes.
 
 ### 4. Validation & Error Matrix
 
@@ -139,6 +154,12 @@
   terminal panels.
 - Registry/monitor tests proving monitored platforms do not accidentally become
   parser-backed sources.
+- Kimi and Pi fixture tests covering normalized fields, raw/future model ids,
+  malformed/non-usage rows, second-sync idempotency, append, rewrite/truncate,
+  deleted history/rebuild protection, missing roots, and status projections.
+- Sync-summary unit/subprocess tests covering the `TOTAL` row, absent and empty
+  sources, ANSI-free redirected output, stderr/stdout separation, removed
+  completion sentences, and narrow/wide column budgets.
 - Claude multi-project tests proving unchanged projects remain skipped while
   cross-file streaming/sidechain dedupe inside the changed project is stable.
 - Codex append tests asserting only the changed file and appended byte range are

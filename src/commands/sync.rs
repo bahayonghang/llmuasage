@@ -282,9 +282,26 @@ async fn run_with_json_events(
 
 fn print_summary(summary: &SyncSummary, options: &SyncRunOptions) {
     let color = std::io::stdout().is_terminal();
-    for line in sync_summary::format_summary_lines(summary, options.rebuild, color) {
+    for line in
+        sync_summary::format_summary_lines(summary, options.rebuild, color, terminal_width())
+    {
         println!("{line}");
     }
+}
+
+/// Terminal column budget for the summary table: `COLUMNS` when set, otherwise
+/// the detected terminal width or a 120-column default.
+fn terminal_width() -> usize {
+    std::env::var("COLUMNS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .or_else(|| {
+            crossterm::terminal::size()
+                .ok()
+                .map(|(width, _)| width as usize)
+        })
+        .unwrap_or(120)
+        .max(60)
 }
 
 pub async fn run_once(_app: &AppContext, store: &Store, lock_wait_ms: u64) -> Result<SyncSummary> {

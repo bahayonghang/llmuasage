@@ -13,9 +13,9 @@ is the compatibility baseline when reference implementations disagree.
 - Persisted contract: `usage_event.total_tokens` ->
   `usage_bucket_30m.total_tokens` -> query/UI `total_tokens`.
 - Version metadata:
-  `meta('token_accounting_version.codex') = '3'`; Claude and OpenCode remain
-  `2`. `expected_token_accounting_version(SourceKind) -> u32` owns this
-  source-aware contract.
+  `meta('token_accounting_version.codex') = '3'`; Claude, OpenCode, Kimi Code,
+  and Pi remain `2`. `expected_token_accounting_version(SourceKind) -> u32`
+  owns this source-aware contract.
 - Legacy repair: `llmusage sync --rebuild --source <source>`.
 - Serve startup repair:
   `commands::serve::repair_legacy_token_accounting(&AppContext, &Store) -> Result<TokenAccountingRepairReport>`.
@@ -51,6 +51,13 @@ is the compatibility baseline when reference implementations disagree.
 - Codex copied events use a source-scoped logical identity derived from
   timestamp, normalized model, and the normalized token tuple.
 - OpenCode uses `max(valid tokens.total, input + cache write + cache read + output)`.
+- Kimi Code maps `inputOther`, `inputCacheRead`, `inputCacheCreation`, and
+  `output` once each; it has no upstream total or reasoning channel, so its
+  total is their saturating sum. Only explicit turn-scoped usage records count.
+- Pi maps `input`, `cacheRead`, `cacheWrite`, and `output` once each. A positive
+  `totalTokens` is authoritative; otherwise the four visible channels form the
+  fallback total. `reasoningTokens` is persisted separately and never added to
+  output or total by default.
 - Pricing receives normalized channels. Prompt-tier selection remains
   `input + cache_read + cache_creation`.
 - `llmusage serve` detects legacy parser sources after store bootstrap and
@@ -79,6 +86,7 @@ is the compatibility baseline when reference implementations disagree.
 | Parserless source | Do not invent a marker or token normalization |
 | Persisted Codex marker is `2` | Treat only Codex as legacy and require `sync --rebuild --source codex` |
 | Persisted Claude/OpenCode marker is `2` | Treat it as current |
+| Persisted Kimi Code/Pi marker is `2` | Treat it as current |
 | Replay marker exists and first two token snapshots share a second | Skip that second's prefix while retaining the latest cumulative baseline |
 | Two ordinary Codex requests share a second without a replay marker | Keep both events |
 | A malformed line contains `token_count` before valid replay snapshots | Ignore the malformed line and continue detection |
@@ -115,6 +123,9 @@ Never enable `--allow-lossy-rebuild` automatically.
 ## 6. Tests Required
 
 - Parser unit tests assert exact integer channel values and total fallbacks.
+- Kimi and Pi parser tests assert raw/future model preservation, authoritative
+  versus fallback totals, reasoning isolation, malformed-row tolerance, and
+  saturating channel sums.
 - Codex parser tests cover both replay markers, cumulative baseline retention,
   pending-tool clearing, malformed-line tolerance, and ordinary same-second
   events that must remain.

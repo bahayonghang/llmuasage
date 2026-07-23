@@ -16,7 +16,7 @@ use crate::{
         Integration, antigravity::AntigravityIntegration, claude::ClaudeIntegration,
         codex::CodexIntegration, opencode::OpencodeIntegration,
     },
-    parsers::{ClaudeParser, CodexParser, OpencodeParser, SourceParser},
+    parsers::{ClaudeParser, CodexParser, KimiCodeParser, OpencodeParser, PiParser, SourceParser},
 };
 
 /// 工厂：当前 build 支持的所有 sync parser。
@@ -25,6 +25,8 @@ pub fn registered_parsers() -> Vec<Box<dyn SourceParser>> {
         Box::new(CodexParser),
         Box::new(ClaudeParser),
         Box::new(OpencodeParser),
+        Box::new(KimiCodeParser),
+        Box::new(PiParser),
     ]
 }
 
@@ -96,7 +98,15 @@ mod tests {
                 "parser source {parser_source} missing descriptor"
             );
         }
-        assert_eq!(descriptor_sources, registered_integration_sources);
+        // A passive-only source (e.g. Kimi Code) legitimately has a descriptor
+        // and a parser without an integration, so the invariant is that every
+        // integration source has a descriptor — not strict set equality.
+        for integration_source in &registered_integration_sources {
+            assert!(
+                descriptor_sources.contains(integration_source),
+                "integration source {integration_source} missing descriptor"
+            );
+        }
     }
 
     #[test]
@@ -130,6 +140,8 @@ mod tests {
             parse_source_id("antigravity"),
             Some(SourceKind::Antigravity)
         );
+        assert_eq!(parse_source_id("kimi_code"), Some(SourceKind::KimiCode));
+        assert_eq!(parse_source_id("pi"), Some(SourceKind::Pi));
         assert_eq!(parse_source_id("gemini"), None);
         assert_eq!(parse_source_id("missing"), None);
     }

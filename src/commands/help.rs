@@ -323,7 +323,7 @@ const ENGLISH_COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "sync",
-        "Import local Codex, Claude, OpenCode, and Antigravity usage artifacts.",
+        "Import local Codex, Claude, OpenCode, Antigravity, Kimi Code, and Pi usage artifacts.",
     ),
     (
         "status",
@@ -406,7 +406,7 @@ const ENGLISH_REPORT_OPTIONS: &[(&str, &str)] = &[
     ),
     (
         "--source <SOURCE>",
-        "Restrict reports or sync to codex, claude, opencode, or antigravity.",
+        "Restrict reports or sync to codex, claude, opencode, antigravity, kimi_code, or pi.",
     ),
     (
         "-A, --by-agent",
@@ -471,7 +471,7 @@ const CHINESE_COMMANDS: &[(&str, &str)] = &[
     ("init", "创建本地运行时并安装/探测支持的集成。"),
     (
         "sync",
-        "导入本地 Codex、Claude、OpenCode 与 Antigravity 用量记录。",
+        "导入本地 Codex、Claude、OpenCode、Antigravity、Kimi Code 与 Pi 用量记录。",
     ),
     ("status", "输出数据库、来源、集成与最近运行状态。"),
     ("source-status", "输出解析器支持的来源与仅监控平台状态。"),
@@ -524,7 +524,7 @@ const CHINESE_REPORT_OPTIONS: &[(&str, &str)] = &[
     ("--no-cost", "从报表输出隐藏成本列和成本字段。"),
     (
         "--source <SOURCE>",
-        "报表或同步限制到 codex、claude、opencode 或 antigravity。",
+        "报表或同步限制到 codex、claude、opencode、antigravity、kimi_code 或 pi。",
     ),
     (
         "-A, --by-agent",

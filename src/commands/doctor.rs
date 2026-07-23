@@ -131,6 +131,8 @@ async fn diagnostics(app: &AppContext, json: bool) -> Result<()> {
                 crate::models::SourceKind::Claude => "claude.hooks",
                 crate::models::SourceKind::Opencode => "opencode.plugin",
                 crate::models::SourceKind::Antigravity => "antigravity.hooks",
+                crate::models::SourceKind::KimiCode => "kimi_code.passive",
+                crate::models::SourceKind::Pi => "pi.passive",
             },
             status: if probe.status == "ready" {
                 "ok"

@@ -14,8 +14,8 @@ use llmusage::{
     commands,
     models::SourceKind,
     parsers::{SourceSyncStats, SyncEvent},
-    query::Dashboard,
-    store::{HolderKind, Store},
+    query::{Dashboard, QueryFilter},
+    store::{HolderKind, Store, expected_token_accounting_version},
 };
 use rusqlite::Connection;
 use tempfile::TempDir;
@@ -44,7 +44,9 @@ fn sync_hot_run_and_append_remain_incremental() -> Result<()> {
         let store = Store::new(&app.paths)?;
         let first_overview = Dashboard::open(&store)?.overview(&Default::default())?;
         let first_sync_status = store.sync_status().load_source_sync_statuses()?;
-        assert_eq!(first_sync_status.len(), 4);
+        // One status per registered source: codex, claude, opencode, kimi_code,
+        // and pi (parser-backed) plus the parserless antigravity source.
+        assert_eq!(first_sync_status.len(), 6);
 
         commands::sync::run(&app).await?;
         let second_overview = Dashboard::open(&store)?.overview(&Default::default())?;
@@ -792,6 +794,61 @@ fn status_renders_lock_holder() -> Result<()> {
     Ok(())
 }
 
+/// End-to-end guard for the sync display contract: the final summary table
+/// (with its aggregated `TOTAL` row) is the only thing on stdout, non-TTY
+/// stdout carries no ANSI, and the removed per-source completion sentence never
+/// appears on either stream — verified across a wide and a narrow `COLUMNS`.
+#[test]
+fn sync_summary_table_is_stdout_only_without_ansi_or_completion_sentence() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_codex("rollout-table.jsonl", 123, "2026-04-22T01:12:00Z")?;
+
+    let run = |columns: &str| -> Result<std::process::Output> {
+        Ok(Command::new(env!("CARGO_BIN_EXE_llmusage"))
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .arg("sync")
+            .env("HOME", &fixture.home)
+            .env("USERPROFILE", &fixture.home)
+            .env("CODEX_HOME", &fixture.codex_home)
+            .env("OPENCODE_HOME", &fixture.opencode_home)
+            .env("RUST_LOG", "off")
+            .env("COLUMNS", columns)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()?)
+    };
+
+    // Wide terminal: the source parses and finishes with data on this first run.
+    let wide = run("120")?;
+    assert!(wide.status.success(), "{wide:?}");
+    let wide_out = String::from_utf8_lossy(&wide.stdout);
+    let wide_err = String::from_utf8_lossy(&wide.stderr);
+    // stdout carries the summary table and its aggregated TOTAL row.
+    assert!(wide_out.contains("Sync finished:"), "stdout={wide_out}");
+    assert!(wide_out.contains("TOTAL"), "stdout={wide_out}");
+    assert!(wide_out.contains("codex"), "stdout={wide_out}");
+    // Non-TTY stdout has no ANSI control sequences.
+    assert!(!wide_out.contains('\u{1b}'), "stdout={wide_out}");
+    // The legacy standalone totals line is gone (replaced by the TOTAL row).
+    assert!(!wide_out.contains("- totals:"), "stdout={wide_out}");
+    // Progress stays on stderr: no progress copy leaks onto stdout.
+    assert!(!wide_out.contains("导入"), "stdout={wide_out}");
+    // The removed per-source completion sentence appears on neither stream.
+    assert!(!wide_out.contains("完成，文件"), "stdout={wide_out}");
+    assert!(!wide_err.contains("完成，文件"), "stderr={wide_err}");
+
+    // Narrow terminal: the table still renders and stays ANSI-free end to end.
+    let narrow = run("60")?;
+    assert!(narrow.status.success(), "{narrow:?}");
+    let narrow_out = String::from_utf8_lossy(&narrow.stdout);
+    assert!(narrow_out.contains("Sync finished:"), "stdout={narrow_out}");
+    assert!(narrow_out.contains("TOTAL"), "stdout={narrow_out}");
+    assert!(!narrow_out.contains('\u{1b}'), "stdout={narrow_out}");
+
+    fixture.restore_env();
+    Ok(())
+}
+
 #[test]
 fn sync_blocks_when_hook_run_holds_lock_then_proceeds() -> Result<()> {
     let fixture = Fixture::new()?;
@@ -1511,6 +1568,907 @@ fn doctor_warns_on_recovered_aborted_runs() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn kimi_first_sync_imports_only_turn_usage_with_raw_model() -> Result<()> {
+    /*
+     * ========================================================================
+     * Kimi 步骤1：首次 sync 只导入 turn-scoped usage.record
+     * ========================================================================
+     * 目标：
+     * 1) 只有 usageScope=turn 的非零 usage.record 成为 kimi_code 事件
+     * 2) 四通道 + 饱和 total 正确
+     * 3) 原始模型字符串（kimi-code/k3）逐字保留
+     */
+    let fixture = Fixture::new()?;
+    fixture.seed_kimi_code(
+        "sess-first",
+        &[
+            kimi_turn_line("kimi-code/k3", 5102, 172, 13312, 8, 1_780_319_377_000),
+            // session-scoped aggregate is not per-turn usage.
+            serde_json::json!({
+                "type": "usage.record", "model": "kimi-code/k3",
+                "usage": {"inputOther": 999, "output": 999, "inputCacheRead": 0, "inputCacheCreation": 0},
+                "usageScope": "session", "time": 1_780_319_378_000i64
+            })
+            .to_string(),
+            // step.end duplicates the turn usage but is not a usage.record.
+            serde_json::json!({
+                "type": "step.end",
+                "usage": {"inputOther": 777, "output": 777, "inputCacheRead": 0, "inputCacheCreation": 0},
+                "usageScope": "turn", "time": 1_780_319_379_000i64
+            })
+            .to_string(),
+            // all-zero turn record is skipped.
+            kimi_turn_line("kimi-code/k3", 0, 0, 0, 0, 1_780_319_380_000),
+            // unrelated line type.
+            serde_json::json!({
+                "type": "context.append_loop_event",
+                "event": {"type": "tool.call"}, "time": 1_780_319_381_000i64
+            })
+            .to_string(),
+            // malformed line must not fail the whole file.
+            "not valid json at all".to_string(),
+            kimi_turn_line("kimi-code/k3", 100, 50, 0, 0, 1_780_319_382_000),
+        ],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+
+        let summary = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::KimiCode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+        let stats = &summary.sources[0];
+        assert_eq!(stats.source, SourceKind::KimiCode);
+        assert_eq!(stats.changed_files, 1);
+        assert_eq!(stats.events_seen, 2);
+        assert_eq!(stats.events_inserted, 2);
+        assert_eq!(stats.stored_events, 2);
+
+        // Only the two turn records survive, with raw model + saturating total.
+        let rows = kimi_event_rows(&app.paths.db_path)?;
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    "kimi-code/k3".to_string(),
+                    5102,
+                    13312,
+                    8,
+                    172,
+                    5102 + 13312 + 8 + 172,
+                ),
+                ("kimi-code/k3".to_string(), 100, 0, 0, 50, 150),
+            ]
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn kimi_sync_twice_is_idempotent() -> Result<()> {
+    /*
+     * ========================================================================
+     * Kimi 步骤2：重复 sync 幂等（onboarding gate 核心测试）
+     * ========================================================================
+     * 目标：二次空跑 changed_files==0、skipped_files>0、事件数不变。
+     */
+    let fixture = Fixture::new()?;
+    fixture.seed_kimi_code(
+        "sess-hot",
+        &[
+            kimi_turn_line("kimi-code/k3", 5102, 172, 13312, 8, 1_780_319_377_000),
+            kimi_turn_line("kimi-code/k3", 100, 50, 0, 0, 1_780_319_380_000),
+        ],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let options = commands::sync::SyncRunOptions {
+            source: Some(SourceKind::KimiCode),
+            ..Default::default()
+        };
+
+        let first = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(first.sources[0].changed_files, 1);
+        assert_eq!(first.sources[0].events_inserted, 2);
+        assert_eq!(kimi_event_count(&app.paths.db_path)?, 2);
+
+        let second = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(second.sources[0].changed_files, 0);
+        assert!(second.sources[0].skipped_files > 0);
+        assert_eq!(second.sources[0].bytes_scanned, 0);
+        assert_eq!(second.sources[0].events_inserted, 0);
+        assert_eq!(second.sources[0].stored_events, 2);
+        assert_eq!(kimi_event_count(&app.paths.db_path)?, 2);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn kimi_append_imports_only_new_record() -> Result<()> {
+    /*
+     * ========================================================================
+     * Kimi 步骤3：追加只导入新增记录（字节偏移事件键幂等）
+     * ========================================================================
+     */
+    let fixture = Fixture::new()?;
+    fixture.seed_kimi_code(
+        "sess-append",
+        &[
+            kimi_turn_line("kimi-code/k3", 5102, 172, 13312, 8, 1_780_319_377_000),
+            kimi_turn_line("kimi-code/k3", 100, 50, 0, 0, 1_780_319_380_000),
+        ],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let options = commands::sync::SyncRunOptions {
+            source: Some(SourceKind::KimiCode),
+            ..Default::default()
+        };
+
+        commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(kimi_event_count(&app.paths.db_path)?, 2);
+
+        fixture.append_kimi_code(
+            "sess-append",
+            &kimi_turn_line("kimi-code/k3", 7, 3, 1, 0, 1_780_319_390_000),
+        )?;
+        let appended =
+            commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(appended.sources[0].changed_files, 1);
+        assert!(appended.sources[0].bytes_scanned > 0);
+        assert_eq!(appended.sources[0].events_seen, 1);
+        assert_eq!(appended.sources[0].events_inserted, 1);
+        // The two earlier events are not duplicated: byte-offset keys hold.
+        assert_eq!(kimi_event_count(&app.paths.db_path)?, 3);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn kimi_rewrite_resets_and_replaces_old_rows() -> Result<()> {
+    /*
+     * ========================================================================
+     * Kimi 步骤4：改写/截断触发整文件重放，旧行清理后替换
+     * ========================================================================
+     */
+    let fixture = Fixture::new()?;
+    fixture.seed_kimi_code(
+        "sess-rewrite",
+        &[
+            kimi_turn_line("kimi-code/k3", 5102, 172, 13312, 8, 1_780_319_377_000),
+            kimi_turn_line("kimi-code/k3", 100, 50, 0, 0, 1_780_319_380_000),
+        ],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let options = commands::sync::SyncRunOptions {
+            source: Some(SourceKind::KimiCode),
+            ..Default::default()
+        };
+
+        commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(kimi_event_count(&app.paths.db_path)?, 2);
+
+        // Rewrite with different, shorter content: fingerprint/size change forces
+        // a full reparse whose reset clears the stale rows for this path.
+        fixture.seed_kimi_code(
+            "sess-rewrite",
+            &[kimi_turn_line(
+                "kimi-code/k4",
+                42,
+                8,
+                0,
+                0,
+                1_780_319_400_000,
+            )],
+        )?;
+        let replaced =
+            commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(replaced.sources[0].changed_files, 1);
+        assert_eq!(replaced.sources[0].events_replayed, 1);
+
+        let rows = kimi_event_rows(&app.paths.db_path)?;
+        assert_eq!(rows, vec![("kimi-code/k4".to_string(), 42, 0, 0, 8, 50)]);
+        assert_eq!(kimi_event_count(&app.paths.db_path)?, 1);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn kimi_deleted_history_survives_regular_sync_and_blocks_rebuild() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let wire_path = fixture.seed_kimi_code(
+        "sess-missing-history",
+        &[kimi_turn_line(
+            "kimi-code/k3",
+            100,
+            50,
+            10,
+            0,
+            1_780_319_377_000,
+        )],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let options = commands::sync::SyncRunOptions {
+            source: Some(SourceKind::KimiCode),
+            ..Default::default()
+        };
+
+        commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(kimi_event_count(&app.paths.db_path)?, 1);
+
+        fs::remove_file(&wire_path)?;
+        commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+
+        assert_eq!(kimi_event_count(&app.paths.db_path)?, 1);
+        assert_eq!(
+            store.source_files().counts(SourceKind::KimiCode)?.missing,
+            1
+        );
+        let risk = store
+            .source_files()
+            .lossy_rebuild_risk(SourceKind::KimiCode)?;
+        assert_eq!(risk.missing_file_count, 1);
+        assert_eq!(risk.protected_event_count, 1);
+
+        let blocked = commands::sync::run_with_options(
+            &app,
+            commands::sync::SyncRunOptions {
+                rebuild: true,
+                source: Some(SourceKind::KimiCode),
+                ..Default::default()
+            },
+        )
+        .await;
+        let error = blocked.expect_err("missing Kimi history must block a lossy rebuild");
+        assert!(
+            error.to_string().contains("Refusing lossy sync --rebuild"),
+            "{error:#}"
+        );
+        assert_eq!(kimi_event_count(&app.paths.db_path)?, 1);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn kimi_missing_root_sync_succeeds_and_status_tracks_passive_data() -> Result<()> {
+    /*
+     * ========================================================================
+     * Kimi 步骤5：缺失根 sync 成功且 source 状态在 passive_no_data/ready 间切换
+     * ========================================================================
+     */
+    let fixture = Fixture::new()?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+
+        // No `.kimi-code` root at all: full sync still succeeds and imports zero
+        // kimi events without marking other sources missing.
+        commands::sync::run(&app).await?;
+        assert_eq!(kimi_event_count(&app.paths.db_path)?, 0);
+        assert_eq!(store.source_files().counts(SourceKind::Codex)?.missing, 0);
+        assert_eq!(kimi_capability_status(&app, &store)?, "passive_no_data");
+
+        // Seed one wire.jsonl: passive status flips to ready after import.
+        fixture.seed_kimi_code(
+            "sess-late",
+            &[kimi_turn_line(
+                "kimi-code/k3",
+                100,
+                50,
+                0,
+                0,
+                1_780_319_377_000,
+            )],
+        )?;
+        commands::sync::run(&app).await?;
+        assert_eq!(kimi_event_count(&app.paths.db_path)?, 1);
+        assert_eq!(kimi_capability_status(&app, &store)?, "passive_ready");
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn kimi_code_home_override_and_raw_models_survive_query_layer() -> Result<()> {
+    /*
+     * ========================================================================
+     * Kimi 步骤6：KIMI_CODE_HOME 覆盖 + 原始模型跨 query 层保留（AC2）
+     * ========================================================================
+     */
+    let fixture = Fixture::new()?;
+    let override_root = fixture.home.join("custom-kimi");
+    fixture.seed_kimi_code_under(
+        &override_root,
+        "sess-override",
+        &[
+            kimi_turn_line("kimi-code/k3", 5102, 172, 13312, 8, 1_780_319_377_000),
+            kimi_turn_line("kimi-code/k4-preview", 10, 5, 0, 0, 1_780_319_380_000),
+        ],
+    )?;
+    unsafe {
+        std::env::set_var("KIMI_CODE_HOME", &override_root);
+    }
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+
+        let summary = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::KimiCode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(summary.sources[0].events_inserted, 2);
+
+        // model_breakdown reads the aggregated buckets: both raw model strings
+        // survive event -> bucket -> query without whitelist/normalization.
+        let filter = QueryFilter {
+            source: Some(SourceKind::KimiCode),
+            ..Default::default()
+        };
+        let mut models = Dashboard::open(&store)?
+            .model_breakdown(&filter)?
+            .into_iter()
+            .map(|breakdown| breakdown.model)
+            .collect::<Vec<_>>();
+        models.sort();
+        assert_eq!(
+            models,
+            vec![
+                "kimi-code/k3".to_string(),
+                "kimi-code/k4-preview".to_string(),
+            ]
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn kimi_first_sync_marks_current_token_accounting() -> Result<()> {
+    /*
+     * ========================================================================
+     * Kimi 步骤7：首次成功 sync 写入记账 marker，二次 sync 不被 legacy 拒绝
+     * ========================================================================
+     */
+    let fixture = Fixture::new()?;
+    fixture.seed_kimi_code(
+        "sess-marker",
+        &[kimi_turn_line(
+            "kimi-code/k3",
+            100,
+            50,
+            0,
+            0,
+            1_780_319_377_000,
+        )],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let options = commands::sync::SyncRunOptions {
+            source: Some(SourceKind::KimiCode),
+            ..Default::default()
+        };
+
+        commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(
+            store.token_accounting_version(SourceKind::KimiCode)?,
+            Some(expected_token_accounting_version(SourceKind::KimiCode)),
+        );
+        assert_eq!(expected_token_accounting_version(SourceKind::KimiCode), 2);
+        assert!(!store.has_legacy_token_accounting(SourceKind::KimiCode)?);
+
+        // Current marker keeps normal incremental writes allowed (no refusal).
+        let second = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(second.sources[0].changed_files, 0);
+        assert_eq!(
+            store.token_accounting_version(SourceKind::KimiCode)?,
+            Some(2)
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn pi_combines_default_roots_and_preserves_usage_across_query() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_pi(
+        "project-pi",
+        "pi-first",
+        &[
+            // Pi accepts usage-bearing message records whose top-level type is absent.
+            serde_json::json!({
+                "timestamp": "2026-06-01T00:00:00Z",
+                "message": {
+                    "role": "assistant",
+                    "model": "pi-future-model",
+                    "usage": {
+                        "input": 11,
+                        "output": 7,
+                        "cacheRead": 3,
+                        "cacheWrite": 2,
+                        "reasoningTokens": 5
+                    }
+                }
+            })
+            .to_string(),
+            serde_json::json!({
+                "type": "title",
+                "message": {"role": "assistant", "usage": {"input": 999}}
+            })
+            .to_string(),
+        ],
+    )?;
+    fixture.seed_omp(
+        "project-omp",
+        "omp-first",
+        &[
+            pi_message_line(
+                "2026-06-01T00:05:00Z",
+                "gpt-5.5",
+                100,
+                50,
+                40,
+                8,
+                333,
+                10,
+            ),
+            // Structurally usage-shaped but malformed token fields are ignored.
+            r#"{"type":"message","timestamp":"2026-06-01T00:06:00Z","message":{"role":"assistant","model":"broken","usage":{"input":"bad","totalTokens":"bad"}}}"#.to_string(),
+            r#"{"type":"message","timestamp":"2026-06-01T00:07:00Z","message":{"role":"user","model":"ignored","usage":{"input":100}}}"#.to_string(),
+            "not json but mentions message and usage".to_string(),
+        ],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let summary = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Pi),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+        assert_eq!(summary.sources.len(), 1);
+        let stats = &summary.sources[0];
+        assert_eq!(stats.source, SourceKind::Pi);
+        assert_eq!(stats.files_processed, 2);
+        assert_eq!(stats.changed_files, 2);
+        assert_eq!(stats.events_seen, 2);
+        assert_eq!(stats.events_inserted, 2);
+        assert_eq!(stats.stored_events, 2);
+        assert_eq!(
+            pi_event_rows(&app.paths.db_path)?,
+            vec![
+                ("pi-future-model".to_string(), 11, 3, 2, 7, 5, 23),
+                ("gpt-5.5".to_string(), 100, 40, 8, 50, 10, 333),
+            ]
+        );
+
+        let mut models = Dashboard::open(&store)?
+            .model_breakdown(&QueryFilter {
+                source: Some(SourceKind::Pi),
+                ..Default::default()
+            })?
+            .into_iter()
+            .map(|row| row.model)
+            .collect::<Vec<_>>();
+        models.sort();
+        assert_eq!(models, vec!["gpt-5.5", "pi-future-model"]);
+        assert_eq!(
+            store.token_accounting_version(SourceKind::Pi)?,
+            Some(expected_token_accounting_version(SourceKind::Pi))
+        );
+        assert_eq!(expected_token_accounting_version(SourceKind::Pi), 2);
+        assert!(!store.has_legacy_token_accounting(SourceKind::Pi)?);
+        assert_eq!(
+            llmusage::registry::source_descriptor(SourceKind::Pi)
+                .expect("pi source descriptor")
+                .display_name,
+            "Pi / Oh My Pi"
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn pi_missing_default_root_still_syncs_omp_and_projects_status() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let options = commands::sync::SyncRunOptions {
+            source: Some(SourceKind::Pi),
+            ..Default::default()
+        };
+
+        let empty = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(empty.sources[0].files_processed, 0);
+        assert_eq!(pi_capability_status(&app, &store)?, "passive_no_data");
+
+        fixture.seed_omp(
+            "project-omp",
+            "omp-only",
+            &[pi_message_line(
+                "2026-06-02T00:00:00Z",
+                "codex-auto-review",
+                9,
+                4,
+                2,
+                1,
+                16,
+                3,
+            )],
+        )?;
+        let imported =
+            commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(imported.sources[0].files_processed, 1);
+        assert_eq!(imported.sources[0].events_inserted, 1);
+        assert_eq!(pi_capability_status(&app, &store)?, "passive_ready");
+
+        let monitor = commands::source_status::build_platform_monitor_statuses()
+            .into_iter()
+            .find(|status| status.platform_id == "pi")
+            .expect("pi platform monitor");
+        assert_eq!(monitor.source, Some(SourceKind::Pi));
+        assert_eq!(monitor.parser_status, "registered");
+        assert_eq!(monitor.roots_checked, 2);
+        assert_eq!(monitor.roots_detected, 1);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn pi_repeat_append_and_rewrite_follow_file_cursor_contract() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_omp(
+        "project-cursor",
+        "cursor",
+        &[
+            pi_message_line("2026-06-03T00:00:00Z", "gpt-5.5", 10, 5, 2, 1, 18, 3),
+            pi_message_line("2026-06-03T00:01:00Z", "gpt-5.5", 20, 6, 3, 1, 30, 4),
+        ],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let options = commands::sync::SyncRunOptions {
+            source: Some(SourceKind::Pi),
+            ..Default::default()
+        };
+
+        let first = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(first.sources[0].events_inserted, 2);
+        assert_eq!(pi_event_count(&app.paths.db_path)?, 2);
+
+        let repeat = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(repeat.sources[0].changed_files, 0);
+        assert_eq!(repeat.sources[0].skipped_files, 1);
+        assert_eq!(repeat.sources[0].bytes_scanned, 0);
+        assert_eq!(repeat.sources[0].events_inserted, 0);
+        assert_eq!(repeat.sources[0].stored_events, 2);
+
+        fixture.append_omp(
+            "project-cursor",
+            "cursor",
+            &pi_message_line("2026-06-03T00:02:00Z", "gpt-5.6", 7, 3, 1, 0, 11, 2),
+        )?;
+        let appended =
+            commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(appended.sources[0].changed_files, 1);
+        assert_eq!(appended.sources[0].events_seen, 1);
+        assert_eq!(appended.sources[0].events_inserted, 1);
+        assert_eq!(pi_event_count(&app.paths.db_path)?, 3);
+
+        fixture.seed_omp(
+            "project-cursor",
+            "cursor",
+            &[pi_message_line(
+                "2026-06-03T01:00:00Z",
+                "gpt-6-rewrite",
+                42,
+                8,
+                0,
+                0,
+                50,
+                6,
+            )],
+        )?;
+        let rewritten =
+            commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(rewritten.sources[0].changed_files, 1);
+        assert_eq!(rewritten.sources[0].events_replayed, 1);
+        assert_eq!(pi_event_count(&app.paths.db_path)?, 1);
+        assert_eq!(
+            pi_event_rows(&app.paths.db_path)?,
+            vec![("gpt-6-rewrite".to_string(), 42, 0, 0, 8, 6, 50)]
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn pi_agent_dir_lists_multiple_roots_and_dedupes_canonical_files() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let custom_root = fixture.home.join("custom-pi-sessions");
+    let omp_root = fixture.home.join(".omp").join("agent").join("sessions");
+    fixture.seed_pi(
+        "project-default",
+        "ignored-default",
+        &[pi_message_line(
+            "2026-06-04T00:00:00Z",
+            "should-not-import",
+            99,
+            1,
+            0,
+            0,
+            100,
+            0,
+        )],
+    )?;
+    fixture.seed_pi_under(
+        &custom_root,
+        "project-custom",
+        "custom",
+        &[pi_message_line(
+            "2026-06-04T00:01:00Z",
+            "custom-pi",
+            10,
+            4,
+            1,
+            0,
+            15,
+            2,
+        )],
+    )?;
+    fixture.seed_omp(
+        "project-omp",
+        "dedupe",
+        &[pi_message_line(
+            "2026-06-04T00:02:00Z",
+            "omp-model",
+            12,
+            5,
+            2,
+            1,
+            20,
+            3,
+        )],
+    )?;
+    let omp_alias = omp_root.join("..").join("sessions");
+    unsafe {
+        std::env::set_var(
+            "PI_AGENT_DIR",
+            format!(
+                "{},{},{},{}",
+                custom_root.display(),
+                omp_root.display(),
+                omp_alias.display(),
+                custom_root.display()
+            ),
+        );
+    }
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let summary = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Pi),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+        assert_eq!(summary.sources[0].files_processed, 2);
+        assert_eq!(summary.sources[0].events_inserted, 2);
+        let models = pi_event_rows(&app.paths.db_path)?
+            .into_iter()
+            .map(|row| row.0)
+            .collect::<Vec<_>>();
+        assert_eq!(models, vec!["custom-pi", "omp-model"]);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+fn pi_event_count(db_path: &Path) -> Result<i64> {
+    let conn = Connection::open(db_path)?;
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM usage_event WHERE source = 'pi'",
+        [],
+        |row| row.get(0),
+    )?)
+}
+
+/// One stored Pi row as `(model, input, cache_read, cache_creation, output, reasoning, total)`.
+type PiEventRow = (String, i64, i64, i64, i64, i64, i64);
+
+fn pi_event_rows(db_path: &Path) -> Result<Vec<PiEventRow>> {
+    let conn = Connection::open(db_path)?;
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT model, input_tokens, cache_read_tokens, cache_creation_tokens,
+               output_tokens, reasoning_output_tokens, total_tokens
+        FROM usage_event
+        WHERE source = 'pi'
+        ORDER BY event_at, model
+        "#,
+    )?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+                row.get(6)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+fn kimi_event_count(db_path: &Path) -> Result<i64> {
+    let conn = Connection::open(db_path)?;
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM usage_event WHERE source = 'kimi_code'",
+        [],
+        |row| row.get(0),
+    )?)
+}
+
+/// One stored kimi row as `(model, input, cache_read, cache_creation, output, total)`.
+type KimiEventRow = (String, i64, i64, i64, i64, i64);
+
+/// Returns every stored `kimi_code` event ordered by event time then model.
+fn kimi_event_rows(db_path: &Path) -> Result<Vec<KimiEventRow>> {
+    let conn = Connection::open(db_path)?;
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT model, input_tokens, cache_read_tokens, cache_creation_tokens,
+               output_tokens, total_tokens
+        FROM usage_event
+        WHERE source = 'kimi_code'
+        ORDER BY event_at, model
+        "#,
+    )?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, i64>(5)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// Projects the Kimi Code passive source status through the same entry point the
+/// `source-status` command uses (`passive_no_data` vs `passive_ready`).
+fn kimi_capability_status(app: &AppContext, store: &Store) -> Result<String> {
+    source_capability_status(app, store, SourceKind::KimiCode)
+}
+
+fn pi_capability_status(app: &AppContext, store: &Store) -> Result<String> {
+    source_capability_status(app, store, SourceKind::Pi)
+}
+
+fn source_capability_status(app: &AppContext, store: &Store, source: SourceKind) -> Result<String> {
+    let sources = Dashboard::open(store)?.source_breakdown(&Default::default())?;
+    let probes = llmusage::integrations::probe_all(app)?;
+    let status =
+        llmusage::commands::source_status::build_source_capability_statuses(&probes, &sources)
+            .into_iter()
+            .find(|status| status.source == source)
+            .expect("source capability status present");
+    Ok(status.status.to_string())
+}
+
 fn usage_event_count(db_path: &Path) -> Result<i64> {
     let conn = Connection::open(db_path)?;
     let count = conn.query_row("SELECT COUNT(*) FROM usage_event", [], |row| row.get(0))?;
@@ -1642,6 +2600,8 @@ impl Fixture {
             "CCR_ROOT",
             "OPENCODE_HOME",
             "OPENCODE_DB",
+            "KIMI_CODE_HOME",
+            "PI_AGENT_DIR",
         ] {
             saved.push((key.to_string(), std::env::var(key).ok()));
         }
@@ -1651,6 +2611,11 @@ impl Fixture {
             std::env::set_var("CODEX_HOME", &codex_home);
             std::env::set_var("CCR_ROOT", &ccr_root);
             std::env::set_var("OPENCODE_HOME", &opencode_home);
+            // Kimi Code discovery falls back to `$HOME/.kimi-code/sessions`;
+            // clear any real developer override so the temp HOME is authoritative.
+            std::env::remove_var("KIMI_CODE_HOME");
+            // Pi discovery falls back to the two roots under the temp HOME.
+            std::env::remove_var("PI_AGENT_DIR");
         }
 
         fs::create_dir_all(home.join(".claude").join("projects").join("demo"))?;
@@ -1765,6 +2730,92 @@ impl Fixture {
             .join("22")
             .join(name);
         fs::remove_file(path)?;
+        Ok(())
+    }
+
+    /// Absolute path of a Kimi Code `wire.jsonl` under the given sessions root,
+    /// mirroring the real `sessions/WORKSPACE/SESSION/agents/AGENT` layout.
+    fn kimi_wire_path(root: &Path, session: &str) -> PathBuf {
+        root.join("sessions")
+            .join("workspace-1")
+            .join(session)
+            .join("agents")
+            .join("main")
+            .join("wire.jsonl")
+    }
+
+    /// Seeds a synthetic `wire.jsonl` under the default `$HOME/.kimi-code` root
+    /// (discovered via the parser's home fallback), overwriting any prior file.
+    fn seed_kimi_code(&self, session: &str, lines: &[String]) -> Result<PathBuf> {
+        self.seed_kimi_code_under(&self.home.join(".kimi-code"), session, lines)
+    }
+
+    /// Seeds a synthetic `wire.jsonl` under an explicit sessions root, used to
+    /// exercise the `KIMI_CODE_HOME` override path.
+    fn seed_kimi_code_under(
+        &self,
+        root: &Path,
+        session: &str,
+        lines: &[String],
+    ) -> Result<PathBuf> {
+        let path = Self::kimi_wire_path(root, session);
+        fs::create_dir_all(path.parent().unwrap())?;
+        fs::write(&path, format!("{}\n", lines.join("\n")))?;
+        Ok(path)
+    }
+
+    /// Appends one raw JSONL line to an existing default-root `wire.jsonl`.
+    fn append_kimi_code(&self, session: &str, line: &str) -> Result<()> {
+        let path = Self::kimi_wire_path(&self.home.join(".kimi-code"), session);
+        fs::OpenOptions::new()
+            .append(true)
+            .open(path)?
+            .write_all(format!("{line}\n").as_bytes())?;
+        Ok(())
+    }
+
+    fn pi_session_path(root: &Path, project: &str, session: &str) -> PathBuf {
+        root.join(project).join(format!("agent_{session}.jsonl"))
+    }
+
+    fn seed_pi(&self, project: &str, session: &str, lines: &[String]) -> Result<PathBuf> {
+        self.seed_pi_under(
+            &self.home.join(".pi").join("agent").join("sessions"),
+            project,
+            session,
+            lines,
+        )
+    }
+
+    fn seed_omp(&self, project: &str, session: &str, lines: &[String]) -> Result<PathBuf> {
+        self.seed_pi_under(
+            &self.home.join(".omp").join("agent").join("sessions"),
+            project,
+            session,
+            lines,
+        )
+    }
+
+    fn seed_pi_under(
+        &self,
+        root: &Path,
+        project: &str,
+        session: &str,
+        lines: &[String],
+    ) -> Result<PathBuf> {
+        let path = Self::pi_session_path(root, project, session);
+        fs::create_dir_all(path.parent().unwrap())?;
+        fs::write(&path, format!("{}\n", lines.join("\n")))?;
+        Ok(path)
+    }
+
+    fn append_omp(&self, project: &str, session: &str, line: &str) -> Result<()> {
+        let root = self.home.join(".omp").join("agent").join("sessions");
+        let path = Self::pi_session_path(&root, project, session);
+        fs::OpenOptions::new()
+            .append(true)
+            .open(path)?
+            .write_all(format!("{line}\n").as_bytes())?;
         Ok(())
     }
 
@@ -1940,6 +2991,61 @@ fn codex_token_line(timestamp: &str, last_total: i64, total_total: i64) -> Strin
                     "reasoning_output_tokens": 0,
                     "total_tokens": total_total,
                 }
+            }
+        }
+    })
+    .to_string()
+}
+
+/// Builds one turn-scoped Kimi Code `usage.record` line with synthetic tokens.
+/// `time` is epoch milliseconds, matching the real wire format.
+fn kimi_turn_line(
+    model: &str,
+    input_other: i64,
+    output: i64,
+    input_cache_read: i64,
+    input_cache_creation: i64,
+    time_ms: i64,
+) -> String {
+    serde_json::json!({
+        "type": "usage.record",
+        "model": model,
+        "usage": {
+            "inputOther": input_other,
+            "output": output,
+            "inputCacheRead": input_cache_read,
+            "inputCacheCreation": input_cache_creation,
+        },
+        "usageScope": "turn",
+        "time": time_ms,
+    })
+    .to_string()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn pi_message_line(
+    timestamp: &str,
+    model: &str,
+    input: i64,
+    output: i64,
+    cache_read: i64,
+    cache_write: i64,
+    total: i64,
+    reasoning: i64,
+) -> String {
+    serde_json::json!({
+        "type": "message",
+        "timestamp": timestamp,
+        "message": {
+            "role": "assistant",
+            "model": model,
+            "usage": {
+                "input": input,
+                "output": output,
+                "cacheRead": cache_read,
+                "cacheWrite": cache_write,
+                "totalTokens": total,
+                "reasoningTokens": reasoning,
             }
         }
     })
