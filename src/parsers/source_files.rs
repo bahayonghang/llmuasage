@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
 
 use tracing::warn;
 use walkdir::WalkDir;
@@ -54,6 +57,64 @@ pub(crate) fn list_claude_project_logs() -> SourceFileListing {
     list_matching_files(home_dir.join(".claude").join("projects"), |name, _path| {
         name.ends_with(".jsonl")
     })
+}
+
+pub(crate) fn list_kimi_wire_files() -> SourceFileListing {
+    let home_dir = resolve_home_dir();
+    let sessions_root = std::env::var_os("KIMI_CODE_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .map(|root| root.join("sessions"))
+        .unwrap_or_else(|| home_dir.join(".kimi-code").join("sessions"));
+    list_matching_files(sessions_root, |name, _path| name == "wire.jsonl")
+}
+
+/// Enumerates Pi / Oh My Pi session JSONL files across both default roots.
+///
+/// Pi and Oh My Pi share one stable `pi` source. Discovery merges the Pi root
+/// (`PI_AGENT_DIR` when set, else `~/.pi/agent/sessions`) with the Oh My Pi root
+/// (`~/.omp/agent/sessions`) and dedupes by canonical path, so a file reachable
+/// under both roots is only counted once. The root only affects discovery and
+/// the per-file path hash; every parsed event still carries `source = pi`.
+pub(crate) fn list_pi_session_files() -> SourceFileListing {
+    let home_dir = resolve_home_dir();
+    let default_pi_root = home_dir.join(".pi").join("agent").join("sessions");
+    let mut pi_roots = std::env::var_os("PI_AGENT_DIR")
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            value
+                .to_string_lossy()
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from)
+                .collect::<Vec<_>>()
+        })
+        .filter(|roots| !roots.is_empty())
+        .unwrap_or_else(|| vec![default_pi_root.clone()]);
+    let omp_root = home_dir.join(".omp").join("agent").join("sessions");
+
+    let mut merged = SourceFileListing {
+        root: pi_roots
+            .first()
+            .cloned()
+            .unwrap_or_else(|| default_pi_root.clone()),
+        ..SourceFileListing::default()
+    };
+    pi_roots.push(omp_root);
+    let mut seen = HashSet::new();
+    for root in pi_roots {
+        let listing = list_matching_files(root, |name, _path| name.ends_with(".jsonl"));
+        merged.errors.extend(listing.errors);
+        for path in listing.paths {
+            let canonical = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+            if seen.insert(canonical.clone()) {
+                merged.paths.push(canonical);
+            }
+        }
+    }
+    merged.paths.sort();
+    merged
 }
 
 fn list_matching_files(

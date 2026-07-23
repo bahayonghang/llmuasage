@@ -1,0 +1,183 @@
+{
+  "generated_at": "2026-07-22T15:42:23.258Z",
+  "url": "http://127.0.0.1:39103",
+  "budgets": {
+    "click_feedback_p95_ms": 100,
+    "interactive_api_p95_ms": 400,
+    "interactive_bytes": 131072
+  },
+  "http": {
+    "1d": {
+      "median_ms": 12.64,
+      "p95_ms": 13.8,
+      "median_bytes": 11304,
+      "max_bytes": 11304,
+      "samples": [
+        {
+          "duration_ms": 11.93,
+          "bytes": 11304
+        },
+        {
+          "duration_ms": 12.64,
+          "bytes": 11304
+        },
+        {
+          "duration_ms": 12.65,
+          "bytes": 11304
+        },
+        {
+          "duration_ms": 13.8,
+          "bytes": 11304
+        },
+        {
+          "duration_ms": 12.52,
+          "bytes": 11304
+        }
+      ]
+    },
+    "7d": {
+      "median_ms": 15.4,
+      "p95_ms": 16.01,
+      "median_bytes": 13614,
+      "max_bytes": 13614,
+      "samples": [
+        {
+          "duration_ms": 15.1,
+          "bytes": 13614
+        },
+        {
+          "duration_ms": 15.45,
+          "bytes": 13614
+        },
+        {
+          "duration_ms": 16.01,
+          "bytes": 13614
+        },
+        {
+          "duration_ms": 15.4,
+          "bytes": 13614
+        },
+        {
+          "duration_ms": 14.66,
+          "bytes": 13614
+        }
+      ]
+    },
+    "30d": {
+      "median_ms": 26.85,
+      "p95_ms": 28.36,
+      "median_bytes": 24833,
+      "max_bytes": 24833,
+      "samples": [
+        {
+          "duration_ms": 26.73,
+          "bytes": 24833
+        },
+        {
+          "duration_ms": 25.81,
+          "bytes": 24833
+        },
+        {
+          "duration_ms": 27.53,
+          "bytes": 24833
+        },
+        {
+          "duration_ms": 26.85,
+          "bytes": 24833
+        },
+        {
+          "duration_ms": 28.36,
+          "bytes": 24833
+        }
+      ]
+    },
+    "all": {
+      "median_ms": 43.73,
+      "p95_ms": 46.28,
+      "median_bytes": 55801,
+      "max_bytes": 55801,
+      "samples": [
+        {
+          "duration_ms": 43.4,
+          "bytes": 55801
+        },
+        {
+          "duration_ms": 46.28,
+          "bytes": 55801
+        },
+        {
+          "duration_ms": 45.36,
+          "bytes": 55801
+        },
+        {
+          "duration_ms": 43.73,
+          "bytes": 55801
+        },
+        {
+          "duration_ms": 42.83,
+          "bytes": 55801
+        }
+      ]
+    }
+  },
+  "browser": {
+    "chrome": "C:/Program Files/Google/Chrome/Application/chrome.exe",
+    "clicks": [
+      {
+        "preset": "1d",
+        "feedback_ms": 1.5,
+        "interactive_response_ms": 18.4,
+        "critical_render_ms": 79.8,
+        "secondary_complete_ms": 115.9,
+        "request_count": 1,
+        "payload_bytes": 2969
+      },
+      {
+        "preset": "7d",
+        "feedback_ms": 2,
+        "interactive_response_ms": 199.9,
+        "critical_render_ms": 208.8,
+        "secondary_complete_ms": 1107.6,
+        "request_count": 2,
+        "payload_bytes": 3829
+      },
+      {
+        "preset": "30d",
+        "feedback_ms": 2.9,
+        "interactive_response_ms": 43.6,
+        "critical_render_ms": 52.9,
+        "secondary_complete_ms": 2110.4,
+        "request_count": 6,
+        "payload_bytes": 7427
+      },
+      {
+        "preset": "all",
+        "feedback_ms": 2.4,
+        "interactive_response_ms": 52.2,
+        "critical_render_ms": 60.6,
+        "secondary_complete_ms": 2104.8,
+        "request_count": 6,
+        "payload_bytes": 15728
+      }
+    ],
+    "long_tasks": [
+      {
+        "start_ms": 123.59999999403954,
+        "duration_ms": 124
+      },
+      {
+        "start_ms": 315.90000000596046,
+        "duration_ms": 60
+      }
+    ],
+    "rapid_switch": {
+      "latest_feedback_ms": 0.7,
+      "latest_response_ms": 992,
+      "complete_ms": 1091.9,
+      "active_preset": "all",
+      "request_count": 8,
+      "interactive_requests": 4,
+      "payload_bytes": 18567
+    }
+  }
+}

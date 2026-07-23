@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/07-23-multi-source-sync-table/research/source-admission-matrix.md", "reason": "来源准入/排除与子任务拆分依据（伞任务地图）"}
+{"file": ".trellis/tasks/07-23-multi-source-sync-table/research/current-architecture.md", "reason": "共享来源边界与展示层边界的代码定位"}
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "跨子任务的 registry / sync stats / source status 契约"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "跨来源的权威 total / cache / reasoning 记账契约"}

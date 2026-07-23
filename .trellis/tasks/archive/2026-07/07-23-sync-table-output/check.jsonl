@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "验证 sync 摘要契约与 event/JSON 形状未破坏"}
+{"file": ".trellis/spec/llmusage/backend/tui-presentation-contracts.md", "reason": "验证非 TTY 无控制序列、着色不改变去色文本、列不错位"}
+{"file": ".trellis/tasks/07-23-multi-source-sync-table/research/current-architecture.md", "reason": "核对不再出现重复来源完成句、stdout/stderr 分离"}

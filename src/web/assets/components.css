@@ -66,8 +66,20 @@ nav a:hover {
 }
 
 nav a.active {
-  background: var(--ink);
-  color: var(--bg);
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+nav a.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 18px;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
 }
 
 nav a.active .nav-icon {
@@ -85,17 +97,6 @@ nav a .nav-icon {
 
 nav a:hover .nav-icon {
   color: var(--accent);
-}
-
-nav a .badge {
-  margin-left: auto;
-  font-size: 10.5px;
-  color: var(--muted);
-  font-family: var(--font-mono);
-}
-
-nav a.active .badge {
-  color: var(--muted-2);
 }
 
 /* Sidebar footer */
@@ -119,21 +120,36 @@ nav a.active .badge {
 }
 
 .pulse {
+  position: relative;
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: var(--good);
-  box-shadow: 0 0 0 0 color-mix(in oklab, var(--good) 62%, transparent);
-  animation: pulse 2s infinite;
+}
+
+/*
+ * R5.10：脉冲用 transform/opacity 的 ::after 光环实现（合成层友好），
+ * 取代作用在 box-shadow 上的常驻重绘；ring 用 inherit 跟随 dot 的 tone。
+ * prefers-reduced-motion 由 base.css 全局规则统一静止。
+ */
+.pulse::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: inherit;
+  animation: pulse 2s ease-out infinite;
 }
 
 @keyframes pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 color-mix(in oklab, var(--good) 52%, transparent);
+  0% {
+    transform: scale(1);
+    opacity: 0.5;
   }
-  50% {
-    box-shadow: 0 0 0 6px color-mix(in oklab, var(--good) 0%, transparent);
+  70%,
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
   }
 }
 
@@ -398,11 +414,9 @@ nav a.active .badge {
 
 .sync-command-center-metric {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px;
-  align-items: baseline;
+  gap: 3px;
   min-width: 0;
-  padding: 8px 10px;
+  padding: 10px 12px;
   border: 1px solid color-mix(in oklab, var(--dark-text) 8%, transparent);
   border-radius: 10px;
   background: color-mix(in oklab, var(--dark-text) 5%, transparent);
@@ -412,7 +426,7 @@ nav a.active .badge {
 .sync-command-center-metric span,
 .sync-command-center-source-head span {
   color: var(--dark-muted);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -438,8 +452,7 @@ nav a.active .badge {
 .sync-command-center-details summary {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   min-height: 30px;
   color: var(--dark-text);
   cursor: pointer;
@@ -459,6 +472,7 @@ nav a.active .badge {
 
 .sync-command-center-details summary::after {
   content: '+';
+  margin-left: auto;
   color: var(--accent);
   font-family: var(--font-mono);
   font-size: 15px;
@@ -523,6 +537,37 @@ nav a.active .badge {
 
 .sync-command-center-segment[data-tone] {
   background: var(--sync-tone);
+}
+
+.sync-command-center-main[data-tone='good'] {
+  --sync-tone: var(--good);
+  --sync-tone-soft: color-mix(in oklab, var(--good) 14%, transparent);
+}
+
+.sync-command-center-main[data-tone='warn'] {
+  --sync-tone: var(--warn);
+  --sync-tone-soft: color-mix(in oklab, var(--warn) 16%, transparent);
+}
+
+.sync-command-center-main[data-tone='running'] {
+  --sync-tone: var(--data-accent);
+  --sync-tone-soft: color-mix(in oklab, var(--data-accent) 14%, transparent);
+}
+
+.sync-command-center-main[data-tone='neutral'] {
+  --sync-tone: var(--dark-muted);
+  --sync-tone-soft: color-mix(in oklab, var(--dark-text) 6%, transparent);
+}
+
+.sync-command-center-main[data-tone] {
+  padding: 10px 12px;
+  border: 1px solid color-mix(in oklab, var(--sync-tone, var(--dark-line)) 40%, transparent);
+  border-radius: 12px;
+  background: linear-gradient(120deg, var(--sync-tone-soft, transparent), transparent 58%);
+}
+
+.sync-command-center-main[data-tone] .section-eyebrow {
+  color: var(--sync-tone, var(--accent));
 }
 
 .sync-command-center-sources {
@@ -599,6 +644,10 @@ nav a.active .badge {
   align-items: center;
   margin-bottom: 14px;
   position: relative;
+}
+
+.status-panel-summary {
+  display: none;
 }
 
 .status-eyebrow {
@@ -779,13 +828,6 @@ nav a.active .badge {
   font-weight: 500;
 }
 
-.kpi-spark {
-  position: absolute;
-  right: 16px;
-  top: 16px;
-  opacity: 0.65;
-}
-
 /* Trends card */
 .trends-card {
   background: var(--dark);
@@ -847,7 +889,6 @@ nav a.active .badge {
   min-height: 32px;
   padding: 6px 13px;
   border-radius: 7px;
-  font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
@@ -885,7 +926,6 @@ nav a.active .badge {
   text-transform: uppercase;
   font-weight: 600;
   margin-bottom: 8px;
-  font-family: var(--font-mono);
 }
 
 .trends-stat-value {
@@ -1200,6 +1240,7 @@ nav a.active .badge {
 }
 
 .finding-card {
+  min-width: 0;
   padding: 13px 14px;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -1226,6 +1267,8 @@ nav a.active .badge {
 }
 
 .finding-head strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-size: 13px;
   font-weight: 600;
   color: var(--ink);
@@ -1233,9 +1276,17 @@ nav a.active .badge {
 
 .finding-evidence,
 .finding-rec {
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: var(--muted);
   font-size: 11.5px;
   line-height: 1.45;
+}
+
+#models-table {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .finding-rec {
@@ -1296,6 +1347,126 @@ nav a.active .badge {
   gap: 18px;
   align-items: start;
   min-width: 0;
+}
+
+.dashboard-load-instrument {
+  display: grid;
+  align-content: center;
+  gap: 10px;
+  min-height: 148px;
+  padding: 18px;
+  border: 1px solid color-mix(in oklab, var(--sync-tone, var(--dark-line)) 42%, transparent);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--sync-tone, var(--dark-text)) 8%, var(--dark-bg));
+  color: var(--dark-text);
+}
+
+.dashboard-load-instrument[data-tone='running'] {
+  --sync-tone: var(--data-accent);
+}
+
+.dashboard-load-instrument[data-tone='warn'] {
+  --sync-tone: var(--warn);
+}
+
+.dashboard-load-instrument[data-tone='error'] {
+  --sync-tone: var(--danger);
+}
+
+.dashboard-load-instrument > strong {
+  font-size: 17px;
+}
+
+.dashboard-load-instrument p {
+  max-width: 72ch;
+  margin: 0;
+  color: var(--dark-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.dashboard-load-status,
+.dashboard-load-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dashboard-load-status > span,
+.dashboard-load-warning > span {
+  display: inline-grid;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  color: var(--sync-tone);
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+
+.dashboard-load-rail {
+  position: relative;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--dark-text) 10%, transparent);
+}
+
+.dashboard-load-rail > span {
+  position: absolute;
+  inset: 0;
+  background: var(--sync-tone);
+  opacity: 0.75;
+  transform: translateX(-75%) scaleX(0.25);
+  transform-origin: left;
+  animation: dashboard-load-scan 1.4s ease-in-out infinite;
+}
+
+@keyframes dashboard-load-scan {
+  0% { transform: translateX(-75%) scaleX(0.25); opacity: 0.45; }
+  55% { transform: translateX(75%) scaleX(0.4); opacity: 0.9; }
+  100% { transform: translateX(175%) scaleX(0.25); opacity: 0.45; }
+}
+
+.dashboard-load-segments {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  min-height: 10px;
+}
+
+.dashboard-load-segments > span {
+  min-height: 10px;
+  border: 1px solid color-mix(in oklab, var(--dark-text) 12%, transparent);
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--dark-text) 8%, transparent);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.dashboard-load-segments > span[data-tone='good'] {
+  background: var(--good);
+}
+
+.dashboard-load-segments > span[data-tone='warn'] {
+  background: var(--warn);
+}
+
+.dashboard-load-warning {
+  color: var(--warn) !important;
+}
+
+.dashboard-load-instrument .btn {
+  justify-self: start;
+  min-height: 44px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-load-rail > span {
+    transform: none;
+    opacity: 0.7;
+  }
 }
 
 .explorer-ranking,
@@ -1398,7 +1569,7 @@ nav a.active .badge {
 
 .explorer-series-peak span {
   color: var(--muted);
-  font-size: 9.5px;
+  font-size: 11px;
   text-transform: uppercase;
 }
 
@@ -1423,7 +1594,7 @@ nav a.active .badge {
   min-width: 0;
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: 10.5px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1889,7 +2060,6 @@ nav a.active .badge {
 }
 
 .insight-label {
-  font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--accent);
   letter-spacing: 0.08em;
@@ -2043,6 +2213,10 @@ svg.i {
     grid-template-columns: 1fr;
   }
 
+  .explorer-controls {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
   .cost-stat-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -2162,6 +2336,39 @@ svg.i {
     display: none;
   }
 
+  .status-panel {
+    padding: 12px 14px;
+  }
+
+  .status-panel-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 32px;
+    color: var(--dark-text);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    list-style: none;
+  }
+
+  .status-panel-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .status-panel-summary::after {
+    content: '+';
+    color: var(--data-accent);
+    font-family: var(--font-mono);
+    font-size: 15px;
+    line-height: 1;
+  }
+
+  .status-panel-details[open] .status-panel-summary::after {
+    content: '-';
+  }
+
   .topbar-actions,
   .filter-actions {
     width: 100%;
@@ -2214,4 +2421,43 @@ svg.i {
   .project-value {
     grid-column: 2;
   }
+}
+
+/*
+ * ========================================================================
+ * R5.2：CJK locale 取消标签字距
+ * ========================================================================
+ * 正向 letter-spacing（tracking）是拉丁小型大写的排版惯例，用在汉字上会把每个字
+ * 拉开（"近 24 小时""同 步"）。默认 data-locale="zh"，这里把标签类元素字距归零；
+ * 英文 locale（[data-locale='en']）不受影响，保留原 tracking。
+ */
+[data-locale='zh'] .nav-label,
+[data-locale='zh'] .section-eyebrow,
+[data-locale='zh'] .status-eyebrow,
+[data-locale='zh'] .kpi-label,
+[data-locale='zh'] .status-cell-label,
+[data-locale='zh'] .trends-stat-label,
+[data-locale='zh'] .cost-stat-label,
+[data-locale='zh'] .insight-label,
+[data-locale='zh'] .trend-observation-label,
+[data-locale='zh'] .refresh-label,
+[data-locale='zh'] .toggle-btn .toggle-label,
+[data-locale='zh'] .filter-group label,
+[data-locale='zh'] .data-table thead th,
+[data-locale='zh'] .panel-table thead th,
+[data-locale='zh'] .sync-command-center-metric .mini-label,
+[data-locale='zh'] .sync-command-center-metric span,
+[data-locale='zh'] .sync-command-center-source-head span {
+  letter-spacing: normal;
+}
+
+/*
+ * R5.7：主题切换时给主要 surface 补背景/边框过渡，避免斑块式突变
+ * （html/body 过渡见 base.css；reduced-motion 下由全局规则抑制）
+ */
+.panel,
+.sidebar,
+.filter-rail,
+.endpoint {
+  transition: background-color 0.18s ease, border-color 0.18s ease;
 }

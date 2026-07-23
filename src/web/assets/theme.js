@@ -8,12 +8,28 @@ const themeListeners = new Set();
 let currentTheme = readStoredTheme();
 
 function readStoredTheme() {
+  // 单一事实源：初始主题由 shell.rs 内联脚本解析（stored ?? prefers-color-scheme ?? light）
+  // 并写入 <html data-theme>；此处优先采信该属性，避免与内联脚本重复解析而分叉。
+  const domTheme = document.documentElement?.getAttribute('data-theme');
+  if (THEMES.includes(domTheme)) return domTheme;
   try {
     const stored = window.localStorage?.getItem(THEME_STORAGE_KEY);
-    return THEMES.includes(stored) ? stored : DEFAULT_THEME;
+    if (THEMES.includes(stored)) return stored;
   } catch (_err) {
-    return DEFAULT_THEME;
+    /* 隐私模式下读失败时回退系统偏好 */
   }
+  return resolvePreferredTheme();
+}
+
+function resolvePreferredTheme() {
+  try {
+    if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) {
+      return 'dark';
+    }
+  } catch (_err) {
+    /* matchMedia 不可用时回退默认 */
+  }
+  return DEFAULT_THEME;
 }
 
 /*

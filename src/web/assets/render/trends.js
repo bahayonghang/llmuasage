@@ -14,36 +14,27 @@ function compactTrendLabel(label) {
   return raw;
 }
 
+let lastSpotlightRows = [];
+let trendResizeObserver = null;
+
 /*
  * ========================================================================
- * 步骤1：渲染趋势区
+ * 步骤0：按容器实测宽度布局趋势条形图
  * ========================================================================
  * 目标：
- * 1) 填充 3 个趋势统计卡
- * 2) 绘制趋势图表（最近 10 个时段）
- * 3) 填充趋势表格和来源分布
+ * 1) viewBox 宽度跟随 SVG 像素宽度（1:1 映射），移除 preserveAspectRatio="none"
+ *    后宽屏下轴标签/描边不再被横向拉伸
+ * 2) 栅格线与基线用 x2="100%" 自适应，无需随 W 重算
+ * 3) ResizeObserver 在容器变宽/变窄后重排，保持无变形
  */
-export function renderTrends(context) {
-  logger.info('开始渲染趋势区');
-
-  const stats = buildTrendStats(context);
-  document.getElementById('trends-stats').innerHTML = stats
-    .map(
-      (stat) => `
-      <div class="trends-stat">
-        <div class="trends-stat-label">${escapeHtml(stat.label)}</div>
-        <div class="trends-stat-value">${escapeHtml(stat.value)}</div>
-        <div class="trends-stat-foot">${escapeHtml(stat.foot)}</div>
-      </div>
-    `,
-    )
-    .join('');
-
-  const spotlightRows = context.trend.spotlightRows || [];
-  const max = Math.max(1, ...spotlightRows.map((row) => Number(row.total_tokens || 0)));
-
-  const W = 720;
+function layoutTrendChart(chart, spotlightRows) {
+  if (!chart) return;
+  const measured = Math.round(chart.getBoundingClientRect().width);
+  const W = measured > 1 ? measured : 720;
   const baseline = 200;
+  chart.setAttribute('viewBox', `0 0 ${W} 220`);
+
+  const max = Math.max(1, ...spotlightRows.map((row) => Number(row.total_tokens || 0)));
   const colW = spotlightRows.length ? W / spotlightRows.length : W;
   const barW = Math.min(46, Math.max(14, colW * 0.58));
 
@@ -83,6 +74,48 @@ export function renderTrends(context) {
 
   document.getElementById('trends-bars').innerHTML = bars;
   document.getElementById('trends-labels').innerHTML = labels;
+}
+
+function ensureTrendResizeObserver(chart) {
+  if (trendResizeObserver || typeof ResizeObserver === 'undefined' || !chart) return;
+  let raf = 0;
+  trendResizeObserver = new ResizeObserver(() => {
+    if (raf) cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(() => layoutTrendChart(chart, lastSpotlightRows));
+  });
+  trendResizeObserver.observe(chart);
+}
+
+/*
+ * ========================================================================
+ * 步骤1：渲染趋势区
+ * ========================================================================
+ * 目标：
+ * 1) 填充 3 个趋势统计卡
+ * 2) 绘制趋势图表（最近 10 个时段）
+ * 3) 填充趋势表格和来源分布
+ */
+export function renderTrends(context) {
+  logger.info('开始渲染趋势区');
+
+  const stats = buildTrendStats(context);
+  document.getElementById('trends-stats').innerHTML = stats
+    .map(
+      (stat) => `
+      <div class="trends-stat">
+        <div class="trends-stat-label">${escapeHtml(stat.label)}</div>
+        <div class="trends-stat-value">${escapeHtml(stat.value)}</div>
+        <div class="trends-stat-foot">${escapeHtml(stat.foot)}</div>
+      </div>
+    `,
+    )
+    .join('');
+
+  const spotlightRows = context.trend.spotlightRows || [];
+  lastSpotlightRows = spotlightRows;
+  const chart = document.getElementById('trends-chart');
+  layoutTrendChart(chart, spotlightRows);
+  ensureTrendResizeObserver(chart);
 
   const tableRows = (context.trend.tableRows || [])
     .map(

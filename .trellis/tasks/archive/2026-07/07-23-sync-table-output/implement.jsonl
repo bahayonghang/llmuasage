@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "sync 摘要 / SourceSyncStats 展示边界，改终端输出前必读"}
+{"file": ".trellis/spec/llmusage/backend/tui-presentation-contracts.md", "reason": "共享 formatter 与终端颜色回退约定，约束非 TTY 无 ANSI"}
+{"file": ".trellis/spec/llmusage/backend/report-cli-contracts.md", "reason": "CLI report-table 宽度/输出不变量，宽度自适应复用其约定"}
+{"file": ".trellis/tasks/07-23-multi-source-sync-table/research/current-architecture.md", "reason": "重复完成句根因定位与展示层边界（父任务研究）"}

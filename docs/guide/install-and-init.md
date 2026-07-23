@@ -15,6 +15,29 @@ cargo run -- --help
 cargo run -- sync --source codex
 ```
 
+## Update an installed copy
+
+The self-update command uses the local Rust/Cargo toolchain to build and install
+the selected official branch:
+
+```powershell
+llmusage update --check
+llmusage update
+llmusage update dev
+```
+
+The default channel is `main`. Before starting Cargo, llmusage shows the current
+version, official repository, selected channel, and equivalent install command,
+then asks for confirmation. `--check` / `-c` stops after this preview. Use `dev`
+only when you intentionally want unreleased changes; it may be less stable or
+temporarily fail to build.
+
+The equivalent stable-channel command is:
+
+```powershell
+cargo install --git https://github.com/bahayonghang/llmuasage llmusage --branch main --locked --force
+```
+
 ## Initialize llmusage
 
 ```powershell

@@ -1,0 +1,30 @@
+{
+  "id": "multi-source-sync-table",
+  "name": "multi-source-sync-table",
+  "title": "新增 Kimi Code 与 Pi/Oh My Pi 数据源并表格化 sync 输出",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "llmusage/backend",
+  "package": null,
+  "priority": "P2",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-07-23",
+  "completedAt": "2026-07-23",
+  "branch": null,
+  "base_branch": "dev",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-23-sync-table-output",
+    "07-23-kimi-code-source",
+    "07-23-pi-omp-source"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

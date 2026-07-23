@@ -17,6 +17,12 @@ pub enum SourceKind {
     Opencode,
     /// Google Antigravity local usage hook source.
     Antigravity,
+    /// Kimi Code local `wire.jsonl` session artifacts.
+    #[value(name = "kimi_code")]
+    KimiCode,
+    /// Pi / Oh My Pi local agent session JSONL artifacts.
+    #[value(name = "pi")]
+    Pi,
 }
 
 impl SourceKind {
@@ -27,6 +33,8 @@ impl SourceKind {
             Self::Claude => "claude",
             Self::Opencode => "opencode",
             Self::Antigravity => "antigravity",
+            Self::KimiCode => "kimi_code",
+            Self::Pi => "pi",
         }
     }
 

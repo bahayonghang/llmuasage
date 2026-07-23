@@ -39,18 +39,27 @@ const UI_COPY_ZH = Object.freeze({
       total: Object.freeze({
         label: '总用量',
         body: '累计 Token',
+        footRawLabel: '累计 Token',
+        footLeaderLabel: '用量最高模型',
       }),
       last24h: Object.freeze({
         label: '近 24 小时',
         body: '最近 24 小时总量',
+        footRawLabel: '原始值',
+        footAverageLabel: '平均每段',
+        bucketUnit: '段',
       }),
       sources: Object.freeze({
         label: '来源数',
         body: '已记录来源',
+        footPrimaryLabel: '主要来源',
+        footLastLabel: '最近记录',
       }),
       cost: Object.freeze({
         label: '估算成本',
         body: '累计成本',
+        footRawLabel: '累计成本',
+        footTopLabel: '最高',
       }),
     }),
     error: Object.freeze({
@@ -252,18 +261,27 @@ const UI_COPY_EN = Object.freeze({
       total: Object.freeze({
         label: 'Total',
         body: 'Cumulative tokens',
+        footRawLabel: 'Cumulative tokens',
+        footLeaderLabel: 'Top model',
       }),
       last24h: Object.freeze({
         label: 'Last 24h',
         body: 'Tokens in last 24 hours',
+        footRawLabel: 'Raw value',
+        footAverageLabel: 'Avg per bucket',
+        bucketUnit: 'buckets',
       }),
       sources: Object.freeze({
         label: 'Sources',
         body: 'Recorded sources',
+        footPrimaryLabel: 'Top source',
+        footLastLabel: 'Last seen',
       }),
       cost: Object.freeze({
         label: 'Est. cost',
         body: 'Cumulative cost',
+        footRawLabel: 'Cumulative cost',
+        footTopLabel: 'Top',
       }),
     }),
     error: Object.freeze({
@@ -459,6 +477,23 @@ const SHELL_COPY_ZH = Object.freeze({
   'shell.sync.snapshotDisabled': '离线快照不可启动同步',
   'shell.syncCenter.eyebrow': 'SYNC',
   'shell.syncCenter.loading': '正在读取同步状态…',
+  'shell.load.core': '正在加载核心看板',
+  'shell.load.coreDetail': '正在读取总览、趋势、模型、来源、项目和成本。',
+  'shell.load.slow': '核心数据耗时较长',
+  'shell.load.slowDetail': '查询仍在进行；若本地服务中断，本页会自动停止等待。',
+  'shell.load.secondary': '正在加载分析区',
+  'shell.load.secondaryDetail': '已完成 {settled}/{total} 个分析区。',
+  'shell.load.degraded': '其中 {count} 个分析区已降级，但核心看板仍可使用。',
+  'shell.load.timeout': '核心看板加载超时',
+  'shell.load.network': '无法连接本地服务',
+  'shell.load.http': '本地服务返回错误',
+  'shell.load.parse': '看板响应无法解析',
+  'shell.load.errorDetail': '请重试看板数据；此操作不会启动同步。',
+  'shell.load.retry': '重试看板',
+  'shell.load.segment': '分析区 {index}，{state}',
+  'shell.load.segmentPending': '等待中',
+  'shell.load.segmentReady': '已完成',
+  'shell.load.segmentDegraded': '已降级',
   'syncCenter.headline.empty': '等待同步状态',
   'syncCenter.headline.ready': '同步状态就绪',
   'syncCenter.headline.running': '同步正在运行',
@@ -651,6 +686,23 @@ const SHELL_COPY_EN = Object.freeze({
   'shell.sync.snapshotDisabled': 'Offline snapshots cannot start sync jobs',
   'shell.syncCenter.eyebrow': 'SYNC',
   'shell.syncCenter.loading': 'Reading sync status…',
+  'shell.load.core': 'Loading the core dashboard',
+  'shell.load.coreDetail': 'Reading overview, trends, models, sources, projects, and costs.',
+  'shell.load.slow': 'Core data is taking longer',
+  'shell.load.slowDetail': 'The query is still running. This page will stop waiting if the local service disconnects.',
+  'shell.load.secondary': 'Loading analysis sections',
+  'shell.load.secondaryDetail': '{settled} of {total} analysis sections settled.',
+  'shell.load.degraded': '{count} analysis sections degraded; the core dashboard remains available.',
+  'shell.load.timeout': 'Core dashboard timed out',
+  'shell.load.network': 'Cannot reach the local service',
+  'shell.load.http': 'The local service returned an error',
+  'shell.load.parse': 'The dashboard response could not be parsed',
+  'shell.load.errorDetail': 'Retry dashboard data. This action will not start sync.',
+  'shell.load.retry': 'Retry dashboard',
+  'shell.load.segment': 'Analysis section {index}, {state}',
+  'shell.load.segmentPending': 'pending',
+  'shell.load.segmentReady': 'complete',
+  'shell.load.segmentDegraded': 'degraded',
   'syncCenter.headline.empty': 'Waiting for sync status',
   'syncCenter.headline.ready': 'Sync status is ready',
   'syncCenter.headline.running': 'Sync is running',
@@ -862,9 +914,17 @@ const STATUS_LABEL_EN = Object.freeze({
  * 1) 默认按 localStorage 决定首屏语言
  * 2) setLocale 保存、切换 UI_COPY 引用、广播事件
  * 3) onLocaleChange 让 toggle 触发后所有渲染层都能 rerender
+ * 4) document.documentElement.lang 随 locale 同步（zh-CN / en）
  */
 let currentLocale = readStoredLocale();
 const localeListeners = new Set();
+
+function syncDocumentLang(locale) {
+  if (typeof document === 'undefined' || !document.documentElement) return;
+  document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en';
+}
+
+syncDocumentLang(currentLocale);
 
 function readStoredLocale() {
   try {
@@ -906,6 +966,7 @@ export function setLocale(locale) {
   // 4.2 更新内部状态并写存储
   currentLocale = next;
   UI_COPY = uiCopyFor(next);
+  syncDocumentLang(next);
   try {
     window.localStorage?.setItem(LOCALE_STORAGE_KEY, next);
   } catch (_err) {

@@ -881,3 +881,140 @@ Claude/Codex 以 planned replay 文件数显示 5Hz 解析进度，TTY 显示提
 ### Next Steps
 
 - None - task complete
+
+
+## Session 27: 完成 serve 看板视觉与性能优化
+
+**Date**: 2026-07-22
+**Task**: 完成 serve 看板视觉与性能优化
+**Branch**: `dev`
+
+### Summary
+
+完成响应式与 i18n、渲染生命周期、diagnostics 查询缓存、HTTP 缓存压缩和视觉打磨；通过代表库性能复测、浏览器矩阵与完整 just ci，并归档父子任务树。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2c871b6` | (see git log) |
+| `42e45d0` | (see git log) |
+| `62c135e` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 28: 完成多来源同步与终态汇总表
+
+**Date**: 2026-07-23
+**Task**: 完成多来源同步与终态汇总表
+**Branch**: `feat/multi-source-sync-table`
+
+### Summary
+
+新增 Kimi Code 与 Pi/Oh My Pi passive parser，统一 sync 成功终态为逐来源加 TOTAL 表格，补齐双语文档、code-spec、跨层回归并通过 just ci。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4d6b04e` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 29: 添加 llmusage 自更新命令
+
+**Date**: 2026-07-23
+**Task**: 添加 llmusage 自更新命令
+**Branch**: `dev`
+
+### Summary
+
+新增 llmusage update 命令，默认从 main 更新并支持 dev 与 --check；补齐确认、失败传播、无网络测试、双语文档和自更新 spec，just ci 全量通过。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e5437f7` | (see git log) |
+| `6ec3aa8` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 30: 完成 serve 加载进度与性能修复
+
+**Date**: 2026-07-23
+**Task**: 完成 serve 加载进度与性能修复
+**Branch**: `dev`
+
+### Summary
+
+监督 Web server 完整生命周期，增加 module-independent watchdog、interactive-first 渐进加载和真实 0..5 进度；修复 fingerprint 资产被客户端过滤器拦截的问题，独立提交 1.0.2 版本元数据，并完成 focused/full gate 与用户 Chrome 环境验证。收尾时已停止 37421/37424/37425 相关后台服务。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ed31296` | (see git log) |
+| `b0638a7` | (see git log) |
+| `5399c90` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

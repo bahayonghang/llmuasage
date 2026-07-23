@@ -194,6 +194,49 @@ pub const SOURCE_DESCRIPTORS: &[SourceDescriptor] = &[
         quality: UsageQuality::TotalOnly,
         privacy: PrivacyClass::LocalArtifacts,
     },
+    SourceDescriptor {
+        kind: SourceKind::KimiCode,
+        stable_id: "kimi_code",
+        aliases: &[],
+        display_name: "Kimi Code",
+        activation: ActivationMode::Passive(PassiveActivation {
+            artifacts: &[
+                ".kimi-code/sessions/**/wire.jsonl",
+                "KIMI_CODE_HOME/sessions/**/wire.jsonl",
+            ],
+            requires_auth: false,
+        }),
+        capabilities: SourceCapabilities {
+            parser: true,
+            integration: false,
+            hook_signal: false,
+            passive_probe: true,
+        },
+        quality: UsageQuality::Precise,
+        privacy: PrivacyClass::LocalArtifacts,
+    },
+    SourceDescriptor {
+        kind: SourceKind::Pi,
+        stable_id: "pi",
+        aliases: &[],
+        display_name: "Pi / Oh My Pi",
+        activation: ActivationMode::Passive(PassiveActivation {
+            artifacts: &[
+                ".pi/agent/sessions/**/*.jsonl",
+                ".omp/agent/sessions/**/*.jsonl",
+                "PI_AGENT_DIR/**/*.jsonl",
+            ],
+            requires_auth: false,
+        }),
+        capabilities: SourceCapabilities {
+            parser: true,
+            integration: false,
+            hook_signal: false,
+            passive_probe: true,
+        },
+        quality: UsageQuality::Precise,
+        privacy: PrivacyClass::LocalArtifacts,
+    },
 ];
 
 /// Current build's source descriptors in stable CLI/display order.

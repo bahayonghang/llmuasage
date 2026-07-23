@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "新增 parser-backed 来源必守的 registry / sync stats / source status 边界"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "四通道 + 权威 total + reasoning 独立不重复计入的记账契约"}
+{"file": "docs/agents/passive-parser-onboarding.md", "reason": "被动 parser 准入门槛：样本/游标/token 语义/隐私/测试清单"}
+{"file": ".trellis/tasks/07-23-multi-source-sync-table/research/reference-repositories.md", "reason": "ccusage Pi adapter 的路径/字段映射与去重策略证据（pinned）"}
+{"file": ".trellis/tasks/07-23-multi-source-sync-table/research/upstream-local-evidence.md", "reason": "本机 OMP 采样与 Pi 根缺失、字段/模型，指导两根合并与证据缺口"}

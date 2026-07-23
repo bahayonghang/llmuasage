@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "新增 parser-backed 来源必守的 registry / sync stats / source status 边界"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "token 字段归一、dedupe、authoritative total、legacy rebuild 契约"}
+{"file": "docs/agents/passive-parser-onboarding.md", "reason": "被动 parser 准入门槛：样本/游标/token 语义/隐私/测试清单"}
+{"file": ".trellis/tasks/07-23-multi-source-sync-table/research/reference-repositories.md", "reason": "tokscale/ccusage 的 Kimi usage.record 字段映射与游标策略证据（pinned）"}
+{"file": ".trellis/tasks/07-23-multi-source-sync-table/research/upstream-local-evidence.md", "reason": "本机 Kimi 采样：路径/字段/计数/K3/无稳定 id，指导事件身份"}

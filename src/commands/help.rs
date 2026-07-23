@@ -323,7 +323,7 @@ const ENGLISH_COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "sync",
-        "Import local Codex, Claude, OpenCode, and Antigravity usage artifacts.",
+        "Import local Codex, Claude, OpenCode, Antigravity, Kimi Code, and Pi usage artifacts.",
     ),
     (
         "status",
@@ -355,6 +355,10 @@ const ENGLISH_COMMANDS: &[(&str, &str)] = &[
         "Start the browser dashboard; binds 127.0.0.1 by default.",
     ),
     ("export html", "Write an offline dashboard bundle."),
+    (
+        "update [main|dev]",
+        "Preview or install the latest official stable/development branch.",
+    ),
     (
         "uninstall",
         "Restore integrations; --purge also removes the runtime root.",
@@ -406,7 +410,7 @@ const ENGLISH_REPORT_OPTIONS: &[(&str, &str)] = &[
     ),
     (
         "--source <SOURCE>",
-        "Restrict reports or sync to codex, claude, opencode, or antigravity.",
+        "Restrict reports or sync to codex, claude, opencode, antigravity, kimi_code, or pi.",
     ),
     (
         "-A, --by-agent",
@@ -471,7 +475,7 @@ const CHINESE_COMMANDS: &[(&str, &str)] = &[
     ("init", "创建本地运行时并安装/探测支持的集成。"),
     (
         "sync",
-        "导入本地 Codex、Claude、OpenCode 与 Antigravity 用量记录。",
+        "导入本地 Codex、Claude、OpenCode、Antigravity、Kimi Code 与 Pi 用量记录。",
     ),
     ("status", "输出数据库、来源、集成与最近运行状态。"),
     ("source-status", "输出解析器支持的来源与仅监控平台状态。"),
@@ -482,6 +486,10 @@ const CHINESE_COMMANDS: &[(&str, &str)] = &[
     ("dash", "打开交互式终端 Dashboard。"),
     ("serve", "启动浏览器 Dashboard；默认绑定 127.0.0.1。"),
     ("export html", "写入离线 Dashboard bundle。"),
+    (
+        "update [main|dev]",
+        "预览或安装官方稳定/开发分支的最新版本。",
+    ),
     ("uninstall", "恢复集成；--purge 还会删除运行时根目录。"),
 ];
 
@@ -524,7 +532,7 @@ const CHINESE_REPORT_OPTIONS: &[(&str, &str)] = &[
     ("--no-cost", "从报表输出隐藏成本列和成本字段。"),
     (
         "--source <SOURCE>",
-        "报表或同步限制到 codex、claude、opencode 或 antigravity。",
+        "报表或同步限制到 codex、claude、opencode、antigravity、kimi_code 或 pi。",
     ),
     (
         "-A, --by-agent",

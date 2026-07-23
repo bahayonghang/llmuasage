@@ -1,3 +1,29 @@
+/*
+ * Intl.NumberFormat 构造昂贵且实例不可变：按 locale+options 做模块级缓存复用。
+ * 调用点固定为 'en-US' 的少量组合，缓存条目数有界。
+ */
+const numberFormatterCache = new Map();
+let numberFormatterConstructions = 0;
+
+function numberFormatter(locale, options) {
+  const key = `${locale}|${JSON.stringify(options || null)}`;
+  let formatter = numberFormatterCache.get(key);
+  if (!formatter) {
+    formatter = new Intl.NumberFormat(locale, options);
+    numberFormatterConstructions += 1;
+    numberFormatterCache.set(key, formatter);
+  }
+  return formatter;
+}
+
+// 插桩：构造次数应为有界常数，不随格式化调用次数增长（供性能回归测试断言）。
+export function numberFormatterStats() {
+  return {
+    constructed: numberFormatterConstructions,
+    cached: numberFormatterCache.size,
+  };
+}
+
 export function escapeHtml(value) {
   return String(value ?? '')
     .replaceAll('&', '&amp;')
@@ -8,7 +34,7 @@ export function escapeHtml(value) {
 }
 
 export function formatNumber(value) {
-  return Intl.NumberFormat('en-US').format(Number(value || 0));
+  return numberFormatter('en-US').format(Number(value || 0));
 }
 
 const COMPACT_UNITS = [
@@ -28,7 +54,7 @@ function formatCompactNumber(value) {
   const abs = Math.abs(amount);
   let unitIndex = COMPACT_UNITS.findIndex((candidate) => abs >= candidate.value);
   if (unitIndex < 0) {
-    return `${sign}${Intl.NumberFormat('en-US').format(abs)}`;
+    return `${sign}${numberFormatter('en-US').format(abs)}`;
   }
 
   let unit = COMPACT_UNITS[unitIndex];
@@ -40,7 +66,7 @@ function formatCompactNumber(value) {
     scaled = abs / unit.value;
   }
 
-  const formatted = Intl.NumberFormat('en-US', {
+  const formatted = numberFormatter('en-US', {
     maximumFractionDigits,
   }).format(scaled);
   return `${sign}${formatted}${unit.suffix}`;
@@ -60,7 +86,7 @@ export function formatCompactCurrency(value) {
     return formatUsd(amount);
   }
 
-  return `$${Intl.NumberFormat('en-US', {
+  return `$${numberFormatter('en-US', {
     notation: 'compact',
     maximumFractionDigits: 1,
   }).format(amount)}`;

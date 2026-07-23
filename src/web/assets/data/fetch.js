@@ -201,6 +201,7 @@ export async function loadDashboardSnapshot(state, options = {}) {
     snapshot = await loadLiveJson(`/api/dashboard${buildDashboardQuery(state, options)}`, options);
   } catch (error) {
     if (error?.name === 'AbortError') throw error;
+    if (options.legacyFallback === false) throw error;
     logger.warn('/api/dashboard 不可用，回退到旧分段 API', error);
     const [overview, trends, models, sources, projects, costs, activity, tools, optimize, explorer, compare, health, diagnostics] = await Promise.all([
       loadSection(state, 'overview', '/api/overview'),

@@ -18,6 +18,7 @@ pub enum ParserSupportStatus {
     Registered,
     Planned,
     BlockedNoSamples,
+    BlockedNoUsage,
     Unsupported,
     ExternalOnly,
 }
@@ -28,6 +29,7 @@ impl ParserSupportStatus {
             Self::Registered => "registered",
             Self::Planned => "planned",
             Self::BlockedNoSamples => "blocked_no_samples",
+            Self::BlockedNoUsage => "blocked_no_usage",
             Self::Unsupported => "unsupported",
             Self::ExternalOnly => "external_only",
         }
@@ -58,6 +60,10 @@ pub enum MonitorRoot {
         env_relative: &'static str,
         home_relative: &'static str,
     },
+    EnvListOrHome {
+        env: &'static str,
+        home_relative: &'static str,
+    },
     XdgData(&'static str),
     XdgConfig(&'static str),
     ConfigDir(&'static str),
@@ -71,6 +77,7 @@ impl MonitorRoot {
         match self {
             Self::Home(_) => "home",
             Self::EnvOrHome { env, .. } => env,
+            Self::EnvListOrHome { env, .. } => env,
             Self::XdgData(_) => "xdg_data",
             Self::XdgConfig(_) => "xdg_config",
             Self::ConfigDir(_) => "config_dir",
@@ -80,9 +87,9 @@ impl MonitorRoot {
         }
     }
 
-    fn resolve(self, home_dir: &std::path::Path) -> Option<PathBuf> {
+    fn resolve_all(self, home_dir: &std::path::Path) -> Vec<PathBuf> {
         match self {
-            Self::Home(relative) => Some(home_dir.join(relative)),
+            Self::Home(relative) => vec![home_dir.join(relative)],
             Self::EnvOrHome {
                 env,
                 env_relative,
@@ -91,21 +98,53 @@ impl MonitorRoot {
                 .filter(|value| !value.is_empty())
                 .map(PathBuf::from)
                 .map(|root| root.join(env_relative))
-                .or_else(|| Some(home_dir.join(home_relative))),
-            Self::XdgData(relative) => xdg_data_dir(home_dir).map(|root| root.join(relative)),
-            Self::XdgConfig(relative) => xdg_config_dir(home_dir).map(|root| root.join(relative)),
-            Self::ConfigDir(relative) => dirs::config_dir().map(|root| root.join(relative)),
-            Self::DataDir(relative) => dirs::data_dir().map(|root| root.join(relative)),
+                .map(|path| vec![path])
+                .unwrap_or_else(|| vec![home_dir.join(home_relative)]),
+            Self::EnvListOrHome { env, home_relative } => std::env::var_os(env)
+                .filter(|value| !value.is_empty())
+                .map(|value| split_path_list(&value))
+                .filter(|paths| !paths.is_empty())
+                .unwrap_or_else(|| vec![home_dir.join(home_relative)]),
+            Self::XdgData(relative) => xdg_data_dir(home_dir)
+                .map(|root| root.join(relative))
+                .into_iter()
+                .collect(),
+            Self::XdgConfig(relative) => xdg_config_dir(home_dir)
+                .map(|root| root.join(relative))
+                .into_iter()
+                .collect(),
+            Self::ConfigDir(relative) => dirs::config_dir()
+                .map(|root| root.join(relative))
+                .into_iter()
+                .collect(),
+            Self::DataDir(relative) => dirs::data_dir()
+                .map(|root| root.join(relative))
+                .into_iter()
+                .collect(),
             Self::AppData(relative) => std::env::var_os("APPDATA")
                 .filter(|value| !value.is_empty())
                 .map(PathBuf::from)
-                .map(|root| root.join(relative)),
+                .map(|root| root.join(relative))
+                .into_iter()
+                .collect(),
             Self::LocalAppData(relative) => std::env::var_os("LOCALAPPDATA")
                 .filter(|value| !value.is_empty())
                 .map(PathBuf::from)
-                .map(|root| root.join(relative)),
+                .map(|root| root.join(relative))
+                .into_iter()
+                .collect(),
         }
     }
+}
+
+fn split_path_list(value: &std::ffi::OsStr) -> Vec<PathBuf> {
+    value
+        .to_string_lossy()
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -193,6 +232,49 @@ pub const PLATFORM_MONITORS: &[PlatformMonitorDescriptor] = &[
         quality: Some(UsageQuality::TotalOnly),
         privacy: PrivacyClass::LocalArtifacts,
         next_action: "integration-only until a token-bearing Antigravity fixture exists",
+    },
+    PlatformMonitorDescriptor {
+        platform_id: "kimi_code",
+        display_name: "Kimi Code",
+        source_kind: Some(SourceKind::KimiCode),
+        roots: &[MonitorRoot::EnvOrHome {
+            env: "KIMI_CODE_HOME",
+            env_relative: "sessions",
+            home_relative: ".kimi-code/sessions",
+        }],
+        artifact_patterns: &["wire.jsonl"],
+        parser_status: ParserSupportStatus::Registered,
+        quality: Some(UsageQuality::Precise),
+        privacy: PrivacyClass::LocalArtifacts,
+        next_action: "parsed by the registered Kimi Code source parser",
+    },
+    PlatformMonitorDescriptor {
+        platform_id: "pi",
+        display_name: "Pi / Oh My Pi",
+        source_kind: Some(SourceKind::Pi),
+        roots: &[
+            MonitorRoot::EnvListOrHome {
+                env: "PI_AGENT_DIR",
+                home_relative: ".pi/agent/sessions",
+            },
+            MonitorRoot::Home(".omp/agent/sessions"),
+        ],
+        artifact_patterns: &["*.jsonl"],
+        parser_status: ParserSupportStatus::Registered,
+        quality: Some(UsageQuality::Precise),
+        privacy: PrivacyClass::LocalArtifacts,
+        next_action: "parsed by the registered Pi source parser",
+    },
+    PlatformMonitorDescriptor {
+        platform_id: "reasonix",
+        display_name: "Reasonix",
+        source_kind: None,
+        roots: &[MonitorRoot::AppData("reasonix/projects")],
+        artifact_patterns: &["sessions/*.jsonl", "*.telemetry.json"],
+        parser_status: ParserSupportStatus::BlockedNoUsage,
+        quality: None,
+        privacy: PrivacyClass::LocalArtifacts,
+        next_action: "monitor-only; current sessions lack replayable per-turn usage",
     },
     PlatformMonitorDescriptor {
         platform_id: "gemini",
@@ -287,11 +369,6 @@ pub const PLATFORM_MONITORS: &[PlatformMonitorDescriptor] = &[
         source_kind: None,
         roots: &[
             MonitorRoot::Home(".kimi/sessions"),
-            MonitorRoot::EnvOrHome {
-                env: "KIMI_CODE_HOME",
-                env_relative: "sessions",
-                home_relative: ".kimi-code/sessions",
-            },
             MonitorRoot::Home(".qwen"),
         ],
         artifact_patterns: &["wire.jsonl", "*.jsonl"],
@@ -384,9 +461,11 @@ pub const PLATFORM_MONITORS: &[PlatformMonitorDescriptor] = &[
         platform_id: "openclaw_pi_droid",
         display_name: "OpenClaw / Pi / Droid",
         source_kind: None,
+        // Pi's `.pi/agent/sessions` root now belongs to the registered `pi`
+        // source monitor; keep only the still-unparsed OpenClaw/Droid roots here
+        // so one root is never reported as both registered and blocked.
         roots: &[
             MonitorRoot::Home(".openclaw/agents"),
-            MonitorRoot::Home(".pi/agent/sessions"),
             MonitorRoot::Home(".factory/sessions"),
         ],
         artifact_patterns: &["*.jsonl", "*.settings.json"],
@@ -445,7 +524,11 @@ pub fn probe_platform_descriptor(
     let resolved_roots = descriptor
         .roots
         .iter()
-        .filter_map(|root| root.resolve(home_dir).map(|path| (*root, path)))
+        .flat_map(|root| {
+            root.resolve_all(home_dir)
+                .into_iter()
+                .map(|path| (*root, path))
+        })
         .collect::<Vec<_>>();
     let detected = resolved_roots
         .iter()
@@ -564,6 +647,30 @@ mod tests {
 
         assert_eq!(gemini.source_kind, None);
         assert_eq!(SourceKind::parse_id("gemini"), None);
+    }
+
+    #[test]
+    fn reasonix_monitor_stays_parserless_without_usage_semantics() {
+        let reasonix = registered_platform_monitors()
+            .iter()
+            .find(|descriptor| descriptor.platform_id == "reasonix")
+            .expect("reasonix monitor should exist");
+
+        assert_eq!(reasonix.source_kind, None);
+        assert_eq!(reasonix.parser_status, ParserSupportStatus::BlockedNoUsage);
+        assert_eq!(SourceKind::parse_id("reasonix"), None);
+    }
+
+    #[test]
+    fn comma_separated_monitor_roots_match_pi_discovery_shape() {
+        assert_eq!(
+            split_path_list(std::ffi::OsStr::new(" C:/pi-a, C:/pi-b ,, C:/pi-a ")),
+            vec![
+                PathBuf::from("C:/pi-a"),
+                PathBuf::from("C:/pi-b"),
+                PathBuf::from("C:/pi-a"),
+            ]
+        );
     }
 
     #[test]

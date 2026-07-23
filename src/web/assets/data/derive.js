@@ -1,3 +1,4 @@
+import { UI_COPY } from '../copy.js';
 import {
   formatCompact,
   formatCompactCurrency,
@@ -254,7 +255,35 @@ function sortDesc(rows, select) {
  * 2) 固定 Top N、图表序列和对比表行
  * 3) 为各面板补齐总量、峰值、占比和紧凑显示值
  */
-export function buildContext({ overview, trends, models, sources, projects, costs, activity, tools, optimize, compare, explorer, health, diagnostics, sync_command_center, _meta }) {
+/*
+ * buildContext 按 rawData 引用做 memo：rawData 约定为不可变替换式更新，
+ * 引用相同即内容相同，直接复用上次派生结果——一次数据到达只派生一次，
+ * 面板级重渲（展开/折叠、locale 切换）不再重复全量派生。
+ */
+let contextMemo = { raw: null, ctx: null };
+let contextComputeCount = 0;
+let contextMemoHitCount = 0;
+
+export function buildContext(rawData) {
+  if (rawData && rawData === contextMemo.raw) {
+    contextMemoHitCount += 1;
+    return contextMemo.ctx;
+  }
+  contextComputeCount += 1;
+  const context = deriveContext(rawData || {});
+  contextMemo = { raw: rawData || null, ctx: context };
+  return context;
+}
+
+// 插桩：派生次数应约等于数据到达次数，而不是渲染次数（供性能回归测试断言）。
+export function buildContextStats() {
+  return {
+    computes: contextComputeCount,
+    memoHits: contextMemoHitCount,
+  };
+}
+
+function deriveContext({ overview, trends, models, sources, projects, costs, activity, tools, optimize, compare, explorer, health, diagnostics, sync_command_center, _meta }) {
   logger.info('开始构建页面上下文');
 
   // 1.1 规范化并排序趋势、排行和健康数据
@@ -440,43 +469,47 @@ export function buildContext({ overview, trends, models, sources, projects, cost
  */
 export function buildKpis(context) {
   const { totals, ledgerSummary, leaders } = context;
+  const kpiCopy = UI_COPY.hero.metrics;
 
   return [
     {
       featured: true,
-      label: '总用量 · TOTAL',
+      label: kpiCopy.total.label,
       value: totals.total_tokens_compact,
       unit: '',
       foot: [
-        `累计 Token · ${totals.total_tokens_raw}`,
-        `用量最高模型 · ${leaders.model?.model || '--'}`,
+        { label: kpiCopy.total.footRawLabel, value: totals.total_tokens_raw },
+        { label: kpiCopy.total.footLeaderLabel, value: leaders.model?.model || '--' },
       ],
     },
     {
-      label: '近 24 小时',
+      label: kpiCopy.last24h.label,
       value: totals.last_24h_tokens_compact,
       unit: '',
       foot: [
-        `原始值 · ${totals.last_24h_tokens_raw}`,
-        `平均每段 · ${formatTokenAmount(context.trend.average)} / ${context.trend.active} 段`,
+        { label: kpiCopy.last24h.footRawLabel, value: totals.last_24h_tokens_raw },
+        {
+          label: kpiCopy.last24h.footAverageLabel,
+          value: `${formatTokenAmount(context.trend.average)} / ${context.trend.active} ${kpiCopy.last24h.bucketUnit}`,
+        },
       ],
     },
     {
-      label: '来源数',
+      label: kpiCopy.sources.label,
       value: String(ledgerSummary.active_sources),
       unit: '',
       foot: [
-        `主要来源 · ${leaders.source?.source || '--'}`,
-        `最近记录 · ${leaders.source?.last_event_at || '--'}`,
+        { label: kpiCopy.sources.footPrimaryLabel, value: leaders.source?.source || '--' },
+        { label: kpiCopy.sources.footLastLabel, value: leaders.source?.last_event_at || '--' },
       ],
     },
     {
-      label: '估算成本',
+      label: kpiCopy.cost.label,
       value: totals.total_cost_compact,
       unit: '',
       foot: [
-        `累计成本 · ${totals.total_cost_raw}`,
-        `最高 · ${leaders.cost?.source || '--'} · ${leaders.cost?.model || '--'}`,
+        { label: kpiCopy.cost.footRawLabel, value: totals.total_cost_raw },
+        { label: kpiCopy.cost.footTopLabel, value: `${leaders.cost?.source || '--'} · ${leaders.cost?.model || '--'}` },
       ],
     },
   ];
@@ -550,30 +583,4 @@ export function buildCostStats(context) {
       foot: cacheSavingsFoot,
     },
   ];
-}
-
-/*
- * ========================================================================
- * 步骤5：构建 sparkline SVG 路径
- * ========================================================================
- * 目标：
- * 1) 为 KPI 卡右上角生成简单折线图
- * 2) 输入数据点数组，输出 SVG polyline points 字符串
- */
-export function buildSparkline(data, width = 62, height = 22) {
-  if (!data || data.length === 0) return '';
-
-  const max = Math.max(...data);
-  const min = Math.min(...data);
-  const range = max - min || 1;
-
-  const points = data
-    .map((value, index) => {
-      const x = (index / (data.length - 1)) * width;
-      const y = height - ((value - min) / range) * height;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(' ');
-
-  return points;
 }

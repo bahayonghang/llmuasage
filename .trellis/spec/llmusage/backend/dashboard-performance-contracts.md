@@ -43,6 +43,13 @@ TimeWindow::query_filter(&QueryFilter)
   run independently with concurrency `2`. They may update only their own
   section and must retain stale/loading metadata until all current-generation
   sections settle.
+- Live bootstrap requests `scope=interactive` with legacy fan-out disabled. A failed core request
+  issues no overview/trends/models endpoint fallback; full and legacy APIs remain available to
+  explicit compatibility callers, and static snapshots still load their complete payload.
+- Core loading renders before its first await, becomes slow after 2 seconds, and aborts at 6
+  seconds. Retry creates a new generation/controller, so stale responses cannot replace it.
+- After core paint, the five secondary sections expose exact settled `0..5` progress. Fulfilled and
+  degraded results both settle once; complete or error states stop loading motion.
 - Live response caching keeps normalized request keys for 10 seconds, is
   capped at 32 entries, and aborts in-flight requests during invalidation.
 - Server-side dashboard work remains on `spawn_blocking`, holds one of four
@@ -186,6 +193,79 @@ cutoff = now - 3 days
 anchor = first event after latest adjacent-event gap >= session_length
 scan = events where event_at >= anchor
 fallback = full history when anchor is absent
+```
+
+## Scenario: Live dashboard read cache and HTTP transfer
+
+### 1. Scope / Trigger
+
+- Apply this contract when changing WebState dashboard reads, diagnostics freshness, sync-job terminal hooks, web SQLite lock waits, embedded asset responses, compression, or automatic refresh routing.
+- This is a web-boundary optimization. Direct query-library calls, sync writers, static export, and API response fields keep their existing semantics.
+
+### 2. Signatures
+
+```text
+Store::open_connection_with_busy_timeout(Duration) -> Result<Connection>
+Dashboard::open_with_busy_timeout(&Store, Duration) -> Result<Dashboard>
+Dashboard::core_snapshot_with_diagnostics(&QueryFilter, &DiagnosticsPayload)
+Dashboard::interactive_snapshot_with_diagnostics(&QueryFilter, window, &DiagnosticsPayload)
+JobRegistry::register_terminal_hook(Fn() + Send + Sync + 'static)
+GET /assets/<path> with If-None-Match / Accept-Encoding
+GET /api/dashboard?scope=interactive&since=<date>&until=<date>
+```
+
+### 3. Contracts
+
+- `WebState` owns one 30-second diagnostics cache shared by `/api/diagnostics` and all dashboard scopes. `Dashboard::diagnostics()` and `Dashboard::home_overview()` remain uncached cold reads.
+- Cold cache fills are single-flight. Every invalidation advances a generation while holding the cache write lock; an older in-flight computation must neither return nor store its pre-invalidation payload and recomputes under the same single-flight guard.
+- Completed, failed, and cancelled sync jobs invalidate diagnostics through a cheap `JobRegistry` terminal hook. `/api/diagnostics/forget` also invalidates. TTL expiry detects external file deletion that bypasses both paths.
+- Web/API `Dashboard` connections use a 1500 ms `busy_timeout`; default Store connections retain 30 seconds for sync writers and migrations.
+- Automatic refresh and post-sync refresh always use `scope=interactive`, including explicit `since`/`until`, then refresh secondary sections with concurrency 2. They never fall back to full scope in live mode.
+- Embedded assets return `Cache-Control: no-cache` and a stable content ETag. Matching strong or weak `If-None-Match` returns `304` with an empty body. gzip/Brotli compression applies to eligible assets and JSON responses; JSON endpoints do not gain cache headers.
+- The live index HTML is generated once per process because it depends only on compile-time/runtime registry metadata.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Diagnostics cache hit before 30s | Return a clone with zero filesystem stat calls |
+| TTL expires | Run exactly one new cold stat pass |
+| Sync terminates during a cold fill | Fence the old generation and recompute before publishing |
+| External file disappears | Keep the cached value only until TTL expiry, then report missing |
+| SQLite remains locked | Surface the lock error near 1500 ms and enter the existing timeout/degraded path |
+| Matching asset ETag | Return `304`, ETag, `Cache-Control: no-cache`, and no body |
+| `Accept-Encoding: gzip` or `br` | Compress eligible asset/API bodies and preserve decoded content |
+| Custom `since`/`until` auto-refresh | Request interactive core plus independent secondary sections, never full scope |
+
+### 5. Good/Base/Bad Cases
+
+- Good: eight concurrent cold dashboard reads perform one diagnostics stat pass and share the payload.
+- Good: a sync completes during that pass; the old generation is discarded and the waiter receives a post-sync recomputation.
+- Base: `Dashboard::diagnostics()` called by a library consumer still performs a cold read on every call.
+- Bad: an invalidation clears the entry, then an older cold task writes its stale payload back for another 30 seconds.
+- Bad: a custom-date automatic refresh silently switches to full scope and recreates connection/DOM fan-out.
+
+### 6. Tests Required
+
+- Rust tests cover TTL hit/expiry, external deletion, terminal invalidation, generation fencing, single-flight concurrency, API/dashboard sharing, short busy timeout, ETag/304, compression, and stable root HTML.
+- Contract tests keep full/core/interactive response shapes unchanged and retain per-section degraded behavior.
+- Node tests cover semantic/panel fingerprints, context/formatter reuse, and section-local DOM writes.
+- Run representative interactive benchmarks and `just ci` before completion.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+invalidate() -> entry = None
+old cold task finishes -> entry = stale payload
+```
+
+#### Correct
+
+```text
+invalidate() -> generation += 1; entry = None
+old cold task sees generation mismatch -> discard and recompute
 ```
 
 ## Scenario: Cold home overview query

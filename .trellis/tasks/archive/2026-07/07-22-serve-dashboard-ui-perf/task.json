@@ -1,0 +1,32 @@
+{
+  "id": "serve-dashboard-ui-perf",
+  "name": "serve-dashboard-ui-perf",
+  "title": "优化 serve 网页看板排版、样式与性能",
+  "description": "基于截图+三路代码审计（布局样式/前端性能/后端数据路径）修复 serve 网页看板：筛选栏溢出、告警无视觉、innerHTML 全量重渲、diagnostics stat 风暴、full scope 连接扇出、静态资源无缓存压缩等 47 项已确认问题，分 P0-P3 优先级，遵守 dashboard-performance 与 web-server 契约。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "web",
+  "package": null,
+  "priority": "P2",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-07-22",
+  "completedAt": "2026-07-22",
+  "branch": null,
+  "base_branch": "dev",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-22-serve-dash-responsive-i18n",
+    "07-22-serve-dash-render-lifecycle",
+    "07-22-serve-dash-query-path",
+    "07-22-serve-dash-http-cache",
+    "07-22-serve-dash-visual-polish"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
