@@ -23,6 +23,20 @@ just install
 cargo run -- --help
 ```
 
+Update an installed copy from the official repository with Cargo:
+
+```powershell
+llmusage update --check
+llmusage update
+llmusage update dev
+```
+
+`update` requires Rust and Cargo. It previews the repository, channel, and
+equivalent `cargo install` command, then asks for confirmation before replacing
+the installed binary. The default `main` channel is the stable choice;
+`llmusage update dev` installs unreleased development changes and may be less
+stable. `--check` / `-c` only prints the update plan and never starts Cargo.
+
 Top-level help is table-oriented for quick scanning. Use `llmusage help --zh` for Chinese help, and `llmusage help <COMMAND>` or `llmusage <COMMAND> --help` for command-specific clap help.
 
 The runtime lives under `~/.llmusage/` by default. Override it with `--home <PATH>` or `LLMUSAGE_HOME`.
@@ -74,6 +88,7 @@ llmusage dash
 llmusage codex-tracer
 llmusage logs --limit 50 --level warn
 llmusage catalog status
+llmusage update --check
 llmusage export html --out .\llmusage-report
 ```
 

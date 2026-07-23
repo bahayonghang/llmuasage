@@ -356,6 +356,10 @@ const ENGLISH_COMMANDS: &[(&str, &str)] = &[
     ),
     ("export html", "Write an offline dashboard bundle."),
     (
+        "update [main|dev]",
+        "Preview or install the latest official stable/development branch.",
+    ),
+    (
         "uninstall",
         "Restore integrations; --purge also removes the runtime root.",
     ),
@@ -482,6 +486,10 @@ const CHINESE_COMMANDS: &[(&str, &str)] = &[
     ("dash", "打开交互式终端 Dashboard。"),
     ("serve", "启动浏览器 Dashboard；默认绑定 127.0.0.1。"),
     ("export html", "写入离线 Dashboard bundle。"),
+    (
+        "update [main|dev]",
+        "预览或安装官方稳定/开发分支的最新版本。",
+    ),
     ("uninstall", "恢复集成；--purge 还会删除运行时根目录。"),
 ];
 

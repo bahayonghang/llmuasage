@@ -23,6 +23,19 @@ just install
 cargo run -- --help
 ```
 
+已安装版本可通过 Cargo 从官方仓库更新：
+
+```powershell
+llmusage update --check
+llmusage update
+llmusage update dev
+```
+
+`update` 需要本机已安装 Rust 和 Cargo。命令会先显示仓库、渠道和等效的
+`cargo install` 命令，实际替换已安装二进制前会请求确认。默认 `main` 是稳定
+渠道；`llmusage update dev` 会安装尚未发布的开发改动，稳定性可能较低。
+`--check` / `-c` 只预览更新计划，绝不启动 Cargo。
+
 顶层 help 现在使用表格形式，方便快速浏览。中文顶层 help 可用 `llmusage help --zh`；子命令旧版 clap help 仍可用 `llmusage help <COMMAND>` 或 `llmusage <COMMAND> --help`。
 
 默认运行时目录是 `~/.llmusage/`。可用 `--home <PATH>` 或 `LLMUSAGE_HOME` 覆盖。
@@ -74,6 +87,7 @@ llmusage dash
 llmusage codex-tracer
 llmusage logs --limit 50 --level warn
 llmusage catalog status
+llmusage update --check
 llmusage export html --out .\llmusage-report
 ```
 

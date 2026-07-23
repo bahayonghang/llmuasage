@@ -32,6 +32,7 @@ pub mod sync_summary;
 pub mod tui;
 pub(crate) mod unified_report;
 pub mod uninstall;
+pub mod update;
 pub mod weekly;
 
 #[derive(Debug, Parser)]
@@ -165,6 +166,15 @@ pub enum Commands {
     Uninstall {
         #[arg(long)]
         purge: bool,
+    },
+    /// Update llmusage from the official GitHub repository.
+    Update {
+        /// Preview the Cargo install command without updating.
+        #[arg(short, long)]
+        check: bool,
+        /// Update channel: main is stable; dev contains unreleased changes.
+        #[arg(value_enum, default_value_t = update::UpdateChannel::Main)]
+        channel: update::UpdateChannel,
     },
     /// Codex-specific usage tracker with detailed token accounting and thread tracking.
     #[command(name = "codex-tracer")]
@@ -337,6 +347,7 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
             ExportCommand::Html { out } => export::run_html(&app, out).await,
         },
         Some(Commands::Uninstall { purge }) => uninstall::run(&app, purge).await,
+        Some(Commands::Update { check, channel }) => update::run(channel, check),
         Some(Commands::CodexTracer {
             port,
             no_open,
@@ -448,5 +459,45 @@ mod tests {
                 command: super::CatalogCommand::Reset
             })
         ));
+    }
+
+    #[test]
+    fn update_parses_supported_channels_and_rejects_others() {
+        let stable = Cli::try_parse_from(["llmusage", "update"])
+            .expect("update should default to the stable channel");
+        assert!(matches!(
+            stable.command,
+            Some(Commands::Update {
+                check: false,
+                channel: super::update::UpdateChannel::Main,
+            })
+        ));
+
+        let dev = Cli::try_parse_from(["llmusage", "update", "--check", "dev"])
+            .expect("dev should be a supported update channel");
+        assert!(matches!(
+            dev.command,
+            Some(Commands::Update {
+                check: true,
+                channel: super::update::UpdateChannel::Dev,
+            })
+        ));
+
+        let error = Cli::try_parse_from(["llmusage", "update", "feature-branch"])
+            .expect_err("arbitrary branches must be rejected");
+        assert!(error.to_string().contains("possible values: main, dev"));
+    }
+
+    #[test]
+    fn update_help_documents_channels_and_check_mode() {
+        let mut command = Cli::command();
+        let help = command
+            .find_subcommand_mut("update")
+            .expect("update subcommand should exist")
+            .render_help()
+            .to_string();
+        assert!(help.contains("[default: main]"));
+        assert!(help.contains("possible values: main, dev"));
+        assert!(help.contains("--check"));
     }
 }
