@@ -376,6 +376,21 @@ impl Store {
         );
         progress.started();
 
+        // DATA-002: write a durable in-progress marker before the first page
+        // commit. If the process crashes mid-recompute, bootstrap detects this
+        // marker and re-runs the recompute to restore a consistent state.
+        conn.execute(
+            r#"
+            INSERT INTO meta(key, value)
+            VALUES (?1, ?2)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            "#,
+            rusqlite::params![
+                pricing_catalog::META_RECOMPUTE_IN_PROGRESS,
+                &catalog.version,
+            ],
+        )?;
+
         // Pass 1: page through usage_event rows and update cost columns.
         // We use event_key as a cursor for keyset pagination (it's the PK).
         let mut updated = 0usize;
@@ -502,6 +517,13 @@ impl Store {
                     params![key, value],
                 )?;
             }
+            // DATA-002: clear the in-progress marker atomically with the
+            // catalog version switch. If the process crashes before this
+            // commit, the marker survives and bootstrap re-runs the recompute.
+            tx.execute(
+                "DELETE FROM meta WHERE key = ?1",
+                [pricing_catalog::META_RECOMPUTE_IN_PROGRESS],
+            )?;
             tx.commit()?;
             Ok(deleted_orphan_buckets)
         })();
