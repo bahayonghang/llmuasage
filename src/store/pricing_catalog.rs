@@ -1120,9 +1120,7 @@ mod tests {
 
         // Marker must be gone after recovery.
         assert!(
-            store
-                .meta_value(META_RECOMPUTE_IN_PROGRESS)?
-                .is_none(),
+            store.meta_value(META_RECOMPUTE_IN_PROGRESS)?.is_none(),
             "in-progress marker must be cleared after recovery"
         );
         Ok(())

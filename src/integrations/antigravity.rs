@@ -128,7 +128,7 @@ pub fn install(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
     if let Some(parent) = target.path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(&target.path, serde_json::to_vec_pretty(&settings)?)?;
+    crate::integrations::write_file_atomic(&target.path, serde_json::to_vec_pretty(&settings)?)?;
 
     let detail = format!("Antigravity Stop hook installed{cleanup}");
     record_action(
@@ -173,7 +173,7 @@ pub fn uninstall(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
         &hook.shell_command(SourceKind::Antigravity, ANTIGRAVITY_HOOK_EVENT),
     )?;
     remove_legacy_antigravity_command(&mut settings)?;
-    fs::write(&target.path, serde_json::to_vec_pretty(&settings)?)?;
+    crate::integrations::write_file_atomic(&target.path, serde_json::to_vec_pretty(&settings)?)?;
 
     let detail = format!("Antigravity Stop hook restored{cleanup}");
     record_action(
@@ -236,7 +236,10 @@ fn cleanup_legacy_llmusage_gemini_hooks(app: &AppContext, hook: &HookTarget) -> 
                 &app.paths.backups_dir,
                 "antigravity-hooks-legacy-cleanup",
             )?;
-            fs::write(&antigravity_path, serde_json::to_vec_pretty(&settings)?)?;
+            crate::integrations::write_file_atomic(
+                &antigravity_path,
+                serde_json::to_vec_pretty(&settings)?,
+            )?;
             cleaned.push("legacy Antigravity --source gemini Stop hook");
         }
     }
@@ -250,7 +253,10 @@ fn cleanup_legacy_llmusage_gemini_hooks(app: &AppContext, hook: &HookTarget) -> 
                 &app.paths.backups_dir,
                 "legacy-gemini-settings-cleanup",
             )?;
-            fs::write(&legacy_path, serde_json::to_vec_pretty(&settings)?)?;
+            crate::integrations::write_file_atomic(
+                &legacy_path,
+                serde_json::to_vec_pretty(&settings)?,
+            )?;
             cleaned.push("legacy Gemini CLI SessionEnd hook");
         }
     }

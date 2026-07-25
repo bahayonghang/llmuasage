@@ -94,7 +94,7 @@ pub fn install(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
 
     let backup_path = backup_file(&settings_path, &app.paths.backups_dir, "claude-settings")?;
 
-    fs::write(&settings_path, serde_json::to_vec_pretty(&settings)?)?;
+    crate::integrations::write_file_atomic(&settings_path, serde_json::to_vec_pretty(&settings)?)?;
     record_action(
         store,
         SourceKind::Claude,
@@ -140,7 +140,7 @@ pub fn uninstall(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
         &hook.shell_command(SourceKind::Claude, "SessionEnd"),
     )?;
 
-    fs::write(&settings_path, serde_json::to_vec_pretty(&settings)?)?;
+    crate::integrations::write_file_atomic(&settings_path, serde_json::to_vec_pretty(&settings)?)?;
     record_action(
         store,
         SourceKind::Claude,

@@ -20,8 +20,8 @@ use crate::{
         behavior::{extract_codex_tools, tool_calls_from_evidence, turn_from_tools},
         file_progress::{FileProgress, FileProgressCounter},
         file_state::{
-            BoundedJsonlReader, CandidateFile, FileReplayMode, decide_file_replay,
-            finalize_cursor, should_rescan_file,
+            BoundedJsonlReader, CandidateFile, FileReplayMode, decide_file_replay, finalize_cursor,
+            should_rescan_file,
         },
         source_files,
     },
@@ -1192,7 +1192,8 @@ mod tests {
         let partial = format!("{complete_line}\n{complete_line}"); // last line missing '\n'
         fs::write(&path, &partial)?;
 
-        let result = parse_rollout_file(&path, "path-hash", 0, None, None, &mut Default::default())?;
+        let result =
+            parse_rollout_file(&path, "path-hash", 0, None, None, &mut Default::default())?;
         assert_eq!(result.events.len(), 2, "both lines parsed");
         assert_eq!(
             result.end_offset,
@@ -1211,7 +1212,11 @@ mod tests {
             None,
             &mut Default::default(),
         )?;
-        assert_eq!(incremental.events.len(), 1, "incremental sync picks up completed line");
+        assert_eq!(
+            incremental.events.len(),
+            1,
+            "incremental sync picks up completed line"
+        );
         Ok(())
     }
 }

@@ -276,7 +276,13 @@ impl Store {
             SET lease_expires_at = ?4, updated_at = ?5
             WHERE lock_name = ?1 AND owner_id = ?2 AND generation = ?3
             "#,
-            params![lock_name, owner_id, generation, lease_expires_at(Utc::now()), now_utc(),],
+            params![
+                lock_name,
+                owner_id,
+                generation,
+                lease_expires_at(Utc::now()),
+                now_utc(),
+            ],
         )?;
         if changed == 0 {
             return Err(LlmusageError::LockLost.into());
@@ -362,8 +368,8 @@ mod tests {
         let store = test_store(&temp)?;
 
         // Acquire the lock.
-        let lock = store
-            .acquire_worker_lock_with(std::time::Duration::from_secs(1), HolderKind::Cli)?;
+        let lock =
+            store.acquire_worker_lock_with(std::time::Duration::from_secs(1), HolderKind::Cli)?;
         let correct_generation = lock.generation;
 
         // A stale generation (e.g. after a re-acquire by another process) should fail.
@@ -386,8 +392,8 @@ mod tests {
         let store = test_store(&temp)?;
 
         // First acquisition.
-        let first = store
-            .acquire_worker_lock_with(std::time::Duration::from_secs(1), HolderKind::Cli)?;
+        let first =
+            store.acquire_worker_lock_with(std::time::Duration::from_secs(1), HolderKind::Cli)?;
         let first_gen = first.generation;
 
         // Manually expire the lease so the second acquisition can steal it.
@@ -400,8 +406,8 @@ mod tests {
         }
 
         // Second acquisition on the same store steals the expired lease.
-        let second = store
-            .acquire_worker_lock_with(std::time::Duration::from_secs(1), HolderKind::Cli)?;
+        let second =
+            store.acquire_worker_lock_with(std::time::Duration::from_secs(1), HolderKind::Cli)?;
         assert!(
             second.generation > first_gen,
             "new generation ({}) must exceed old generation ({})",

@@ -280,9 +280,11 @@ pub(crate) async fn serve_on(
     preferred_port: Option<u16>,
     bind_ip: IpAddr,
 ) -> Result<SocketAddr> {
-    Ok(bind_server(store, preferred_port, bind_ip, WriteExposure::LocalOnly)
-        .await?
-        .detach_with_error_logging())
+    Ok(
+        bind_server(store, preferred_port, bind_ip, WriteExposure::LocalOnly)
+            .await?
+            .detach_with_error_logging(),
+    )
 }
 
 pub(crate) async fn bind_server(
@@ -937,7 +939,6 @@ fn write_guard_error(code: &str, message: &str, detail: Option<String>) -> Respo
     )
         .into_response()
 }
-
 
 struct DashboardQueryGuard {
     cancelled: Arc<AtomicBool>,
@@ -1659,7 +1660,13 @@ mod tests {
     #[tokio::test]
     async fn owned_server_remains_available_until_bounded_shutdown() -> anyhow::Result<()> {
         let (_temp, store) = make_store()?;
-        let server = bind_server(store, Some(0), IpAddr::V4(Ipv4Addr::LOCALHOST), WriteExposure::LocalOnly).await?;
+        let server = bind_server(
+            store,
+            Some(0),
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            WriteExposure::LocalOnly,
+        )
+        .await?;
         let addr = server.addr();
         let (status, _body) = route_text(addr, "GET", "/").await?;
         assert_eq!(status, StatusCode::OK);

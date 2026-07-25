@@ -4,7 +4,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use clap::ValueEnum;
 
 const GITHUB_REPOSITORY: &str = "https://github.com/bahayonghang/llmuasage";

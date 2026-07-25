@@ -20,8 +20,8 @@ use crate::{
         behavior::{extract_claude_tools, tool_calls_from_evidence, turn_from_tools},
         file_progress::{FileProgress, FileProgressCounter},
         file_state::{
-            BoundedJsonlReader, CandidateFile, FileReplayMode, decide_file_replay,
-            finalize_cursor, should_rescan_file,
+            BoundedJsonlReader, CandidateFile, FileReplayMode, decide_file_replay, finalize_cursor,
+            should_rescan_file,
         },
         source_files,
     },
@@ -869,9 +869,12 @@ mod tests {
         // Simulate the tool flushing the final newline and re-syncing.
         let full = format!("{complete_line}\n{complete_line}\n");
         std::fs::write(&path, &full)?;
-        let incremental =
-            parse_project_file(&path, "path-hash", "fp", result.end_offset, None)?;
-        assert_eq!(incremental.events.len(), 1, "incremental sync picks up completed line");
+        let incremental = parse_project_file(&path, "path-hash", "fp", result.end_offset, None)?;
+        assert_eq!(
+            incremental.events.len(),
+            1,
+            "incremental sync picks up completed line"
+        );
         Ok(())
     }
 }

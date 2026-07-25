@@ -95,18 +95,81 @@ impl HookTarget {
     }
 }
 
-fn quote_unix_path(path: &Path) -> String {
-    let raw = path.to_string_lossy();
-    if raw
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || "/._-".contains(ch))
+/// POSIX single-quote escaping.
+///
+/// Double quotes are NOT safe here: inside `"..."` a POSIX shell still expands
+/// `$VAR`, `$(cmd)`, backticks and processes `\`. Single quotes make every byte
+/// literal; the only character needing care is `'` itself, which is emitted by
+/// closing the quote, adding an escaped `\'`, and reopening (`'\''`).
+pub(crate) fn quote_unix_path(path: &Path) -> String {
+    quote_posix(&path.to_string_lossy())
+}
+
+pub(crate) fn quote_posix(raw: &str) -> String {
+    if !raw.is_empty()
+        && raw
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || "/._-".contains(ch))
     {
-        raw.to_string()
-    } else {
-        format!("\"{}\"", raw.replace('"', "\\\""))
+        return raw.to_string();
     }
+    format!("'{}'", raw.replace('\'', r"'\''"))
 }
 
 fn quote_windows_cmd_path(path: &Path) -> String {
     format!("\"{}\"", path.to_string_lossy().replace('"', "\"\""))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// SEC-002: the old implementation wrapped paths in double quotes and only
+    /// escaped `"`. A POSIX shell still expands `$(...)`, backticks, `${...}`
+    /// and processes `\` inside double quotes, so a path containing those
+    /// changed the meaning of the generated hook command.
+    #[test]
+    fn shell_metacharacters_stay_literal_in_posix_quoting() {
+        let hostile = [
+            "/home/u/$(touch /tmp/pwned)/llmusage-hook.sh",
+            "/home/u/`id`/llmusage-hook.sh",
+            "/home/u/${HOME}/llmusage-hook.sh",
+            "/home/u/back\\slash/llmusage-hook.sh",
+            "/home/u/with space/llmusage-hook.sh",
+            "/home/u/\"quoted\"/llmusage-hook.sh",
+        ];
+        for raw in hostile {
+            let quoted = quote_posix(raw);
+            assert!(
+                quoted.starts_with('\'') && quoted.ends_with('\''),
+                "{raw} should be single-quoted, got {quoted}"
+            );
+            // no unescaped expansion characters may survive outside the quotes
+            let inner = &quoted[1..quoted.len() - 1];
+            assert!(
+                !inner.contains('\'') || inner.contains(r"'\''"),
+                "{raw}: single quotes must be escaped as '\\'', got {quoted}"
+            );
+        }
+    }
+
+    #[test]
+    fn single_quote_in_path_is_escaped_posix_style() {
+        // O'Brien is the classic case: naive single-quoting breaks out here.
+        let quoted = quote_posix("/home/o'brien/hook.sh");
+        assert_eq!(quoted, r"'/home/o'\''brien/hook.sh'");
+    }
+
+    #[test]
+    fn plain_paths_are_not_quoted() {
+        assert_eq!(
+            quote_posix("/home/user/.llmusage/bin/llmusage-hook.sh"),
+            "/home/user/.llmusage/bin/llmusage-hook.sh"
+        );
+    }
+
+    #[test]
+    fn empty_path_is_quoted_not_dropped() {
+        assert_eq!(quote_posix(""), "''");
+    }
 }

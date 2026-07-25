@@ -31,8 +31,8 @@ use crate::{
         ProgressSink, SourceParser, SourceSyncStats, SyncEvent,
         file_progress::{FileProgress, FileProgressCounter},
         file_state::{
-            BoundedJsonlReader, CandidateFile, FileReplayMode, decide_file_replay,
-            finalize_cursor, should_rescan_file,
+            BoundedJsonlReader, CandidateFile, FileReplayMode, decide_file_replay, finalize_cursor,
+            should_rescan_file,
         },
         source_files,
     },
@@ -649,6 +649,10 @@ mod tests {
         std::fs::write(&path, &full).expect("write full");
         let incremental =
             parse_session_file(&path, "path-hash", result.end_offset).expect("incremental parse");
-        assert_eq!(incremental.events.len(), 1, "incremental sync picks up completed line");
+        assert_eq!(
+            incremental.events.len(),
+            1,
+            "incremental sync picks up completed line"
+        );
     }
 }

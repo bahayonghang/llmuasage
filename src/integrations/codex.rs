@@ -86,7 +86,7 @@ pub fn install(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
         && current != &expected
         && !backup_value_path.exists()
     {
-        fs::write(
+        crate::integrations::write_file_atomic(
             &backup_value_path,
             serde_json::to_vec_pretty(&json!({ "notify": current }))?,
         )?;
@@ -98,7 +98,7 @@ pub fn install(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
         .map(|entry| Value::from(entry.as_str()))
         .collect::<toml_edit::Array>();
     doc["notify"] = value(notify_array);
-    fs::write(&config_path, doc.to_string())?;
+    crate::integrations::write_file_atomic(&config_path, doc.to_string())?;
 
     record_action(
         store,
@@ -149,7 +149,7 @@ pub fn uninstall(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
         doc.remove("notify");
     }
 
-    fs::write(&config_path, doc.to_string())?;
+    crate::integrations::write_file_atomic(&config_path, doc.to_string())?;
     record_action(
         store,
         SourceKind::Codex,

@@ -74,7 +74,12 @@ pub enum Commands {
     Antigravity(focused::SourceReportArgs),
     /// Print a single statusline-friendly usage summary.
     Statusline(report_args::StatuslineArgs),
-    Init,
+    Init {
+        /// Exit 0 even when some integrations fail to install. Without this,
+        /// a partial failure exits non-zero so automation can detect it.
+        #[arg(long)]
+        best_effort: bool,
+    },
     Sync {
         /// Rebuild usage rows and buckets from local source files/DBs.
         #[arg(long)]
@@ -291,7 +296,7 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
             focused::run(&app, SourceKind::Antigravity, args.command).await
         }
         Some(Commands::Statusline(args)) => statusline::run(&app, args).await,
-        Some(Commands::Init) => init::run(&app).await,
+        Some(Commands::Init { best_effort }) => init::run(&app, best_effort).await,
         Some(Commands::Sync {
             rebuild,
             allow_lossy_rebuild,

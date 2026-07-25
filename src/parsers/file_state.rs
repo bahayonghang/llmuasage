@@ -224,7 +224,7 @@ mod tests {
 
         buf.clear();
         r.read_line(&mut buf).unwrap(); // "partial" — no newline
-                                        // complete_offset must NOT advance past the partial line
+        // complete_offset must NOT advance past the partial line
         assert_eq!(r.complete_offset(), 9);
         assert_eq!(r.current_offset(), 16); // current consumed all bytes
     }

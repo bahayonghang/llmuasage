@@ -775,6 +775,13 @@ fn m_015_optimize_source_sync_cursors_and_behavior_resets(tx: &Transaction<'_>) 
 /// whose lease was stolen by a new owner gets 0 rows affected instead of
 /// silently succeeding (CONC-001).
 fn m_016_add_worker_lock_generation(tx: &Transaction<'_>) -> Result<()> {
+    // Drifted databases may not have `worker_lock` yet (it is created by an
+    // earlier migration that a partially-applied schema can be missing). The
+    // fencing column is only meaningful once the table exists; a later
+    // bootstrap creates it with `generation` already in the definition.
+    if !table_exists(tx, "worker_lock")? {
+        return Ok(());
+    }
     ensure_column(
         tx,
         "worker_lock",

@@ -60,9 +60,9 @@ pub fn normalize_parallelism(requested: Option<usize>) -> Result<usize> {
     match requested {
         None => Ok(default_parallelism),
         Some(value) if (1..=MAX_SYNC_PARALLELISM).contains(&value) => Ok(value),
-        Some(value) => bail!(
-            "invalid parallelism {value}: must be between 1 and {MAX_SYNC_PARALLELISM}"
-        ),
+        Some(value) => {
+            bail!("invalid parallelism {value}: must be between 1 and {MAX_SYNC_PARALLELISM}")
+        }
     }
 }
 

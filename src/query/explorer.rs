@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use rusqlite::{params_from_iter, types::Value, Connection};
+use rusqlite::{Connection, params_from_iter, types::Value};
 use serde::Serialize;
 
-use super::{filter::SqlFilter, Dashboard, QueryFilter};
+use super::{Dashboard, QueryFilter, filter::SqlFilter};
 use crate::error::Result;
 
 const DEFAULT_LIMIT: usize = 8;
@@ -1603,9 +1603,9 @@ mod tests {
     use rusqlite::Connection;
 
     use super::{
-        choose_strategy, load_bucket_rows, load_bucket_series, load_event_rows, load_event_series,
         Dashboard, ExplorerDimension, ExplorerFilters, ExplorerGranularity, ExplorerMetric,
-        ExplorerQuery, ExplorerStrategy, ExplorerTokenType,
+        ExplorerQuery, ExplorerStrategy, ExplorerTokenType, choose_strategy, load_bucket_rows,
+        load_bucket_series, load_event_rows, load_event_series,
     };
     use crate::{
         error::Result,
@@ -2058,11 +2058,13 @@ mod tests {
 
         assert!(payload.support.supported);
         assert_eq!(payload.support.level, "degraded");
-        assert!(payload
-            .support
-            .reason
-            .as_deref()
-            .is_some_and(|reason| reason.contains("claude")));
+        assert!(
+            payload
+                .support
+                .reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("claude"))
+        );
         assert_eq!(payload.rows.len(), 1);
         assert_eq!(payload.rows[0].key, "codex");
         assert_eq!(payload.rows[0].value, 1.0);
