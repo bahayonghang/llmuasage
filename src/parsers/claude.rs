@@ -2,7 +2,6 @@ use std::{
     collections::{HashMap, HashSet},
     fs::File,
     future::Future,
-    io::{BufRead, BufReader, Seek, SeekFrom},
     path::{Path, PathBuf},
     pin::Pin,
     time::Instant,
@@ -21,7 +20,8 @@ use crate::{
         behavior::{extract_claude_tools, tool_calls_from_evidence, turn_from_tools},
         file_progress::{FileProgress, FileProgressCounter},
         file_state::{
-            CandidateFile, FileReplayMode, decide_file_replay, finalize_cursor, should_rescan_file,
+            BoundedJsonlReader, CandidateFile, FileReplayMode, decide_file_replay,
+            finalize_cursor, should_rescan_file,
         },
         source_files,
     },
@@ -386,10 +386,8 @@ fn parse_project_file(
         });
     }
 
-    let mut reader = BufReader::new(file);
-    reader.seek(SeekFrom::Start(start_offset))?;
+    let mut reader = BoundedJsonlReader::new(file, start_offset)?;
 
-    let mut offset = start_offset;
     let fallback_session_label = file_path
         .file_stem()
         .and_then(|value| value.to_str())
@@ -408,7 +406,6 @@ fn parse_project_file(
         if bytes_read == 0 {
             break;
         }
-        offset += bytes_read as u64;
         if !line.contains("\"usage\"") {
             continue;
         }
@@ -480,7 +477,7 @@ fn parse_project_file(
             request_id.as_deref(),
             path_hash,
             file_fingerprint,
-            offset,
+            reader.current_offset(),
             false,
         );
         let event = UsageEvent {
@@ -517,7 +514,7 @@ fn parse_project_file(
     }
 
     Ok(ClaudeParseResult {
-        end_offset: offset,
+        end_offset: reader.complete_offset(),
         events,
         turns,
         tool_calls,
@@ -845,6 +842,36 @@ mod tests {
                 .unwrap()
                 .contains("private text")
         );
+        Ok(())
+    }
+
+    /// DATA-001 contract: a partial last line (no trailing '\n') must not
+    /// advance the durable cursor.
+    #[test]
+    fn partial_tail_does_not_advance_cursor() -> Result<()> {
+        let dir = TempDir::new()?;
+        let path = dir.path().join("project").join("sessions.jsonl");
+        std::fs::create_dir_all(path.parent().unwrap())?;
+
+        let complete_line = r#"{"uuid":"abc","requestId":"req1","message":{"id":"msg1","model":"claude-opus-5","usage":{"input_tokens":10,"output_tokens":5}},"timestamp":"2026-01-01T00:00:00.000Z"}"#;
+        let complete = format!("{complete_line}\n");
+        let partial = format!("{complete_line}\n{complete_line}"); // last line missing '\n'
+        std::fs::write(&path, &partial)?;
+
+        let result = parse_project_file(&path, "path-hash", "fp", 0, None)?;
+        assert_eq!(result.events.len(), 2, "both lines parsed");
+        assert_eq!(
+            result.end_offset,
+            complete.len() as u64,
+            "cursor must not include the partial tail"
+        );
+
+        // Simulate the tool flushing the final newline and re-syncing.
+        let full = format!("{complete_line}\n{complete_line}\n");
+        std::fs::write(&path, &full)?;
+        let incremental =
+            parse_project_file(&path, "path-hash", "fp", result.end_offset, None)?;
+        assert_eq!(incremental.events.len(), 1, "incremental sync picks up completed line");
         Ok(())
     }
 }

@@ -1,7 +1,7 @@
 use std::{
     fs::File,
     future::Future,
-    io::{BufRead, BufReader, Read, Seek, SeekFrom},
+    io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
     pin::Pin,
     time::Instant,
@@ -20,7 +20,8 @@ use crate::{
         behavior::{extract_codex_tools, tool_calls_from_evidence, turn_from_tools},
         file_progress::{FileProgress, FileProgressCounter},
         file_state::{
-            CandidateFile, FileReplayMode, decide_file_replay, finalize_cursor, should_rescan_file,
+            BoundedJsonlReader, CandidateFile, FileReplayMode, decide_file_replay,
+            finalize_cursor, should_rescan_file,
         },
         source_files,
     },
@@ -350,10 +351,8 @@ fn parse_rollout_file(
         });
     }
 
-    let mut reader = BufReader::new(file);
-    reader.seek(SeekFrom::Start(start_offset))?;
+    let mut reader = BoundedJsonlReader::new(file, start_offset)?;
 
-    let mut offset = start_offset;
     let mut model = last_model;
     let mut totals = last_total;
     let session_label = file_path
@@ -383,7 +382,6 @@ fn parse_rollout_file(
         if bytes_read == 0 {
             break;
         }
-        offset += bytes_read as u64;
 
         if !line.contains("token_count")
             && !line.contains("turn_context")
@@ -503,7 +501,7 @@ fn parse_rollout_file(
     }
 
     Ok(RolloutParseResult {
-        end_offset: offset,
+        end_offset: reader.complete_offset(),
         last_total: totals,
         last_model: model,
         events,
@@ -1179,6 +1177,41 @@ mod tests {
                 "marker not detected: {name}"
             );
         }
+        Ok(())
+    }
+
+    /// DATA-001 contract: a partial last line (no trailing '\n') must not
+    /// advance the durable cursor.
+    #[test]
+    fn partial_tail_does_not_advance_cursor() -> Result<()> {
+        let dir = TempDir::new()?;
+        let path = dir.path().join("session.jsonl");
+
+        let complete_line = r#"{"timestamp":"2026-05-12T08:03:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"output_tokens":50,"total_tokens":150},"total_token_usage":{"input_tokens":100,"output_tokens":50,"total_tokens":150}}}}"#;
+        let complete = format!("{complete_line}\n");
+        let partial = format!("{complete_line}\n{complete_line}"); // last line missing '\n'
+        fs::write(&path, &partial)?;
+
+        let result = parse_rollout_file(&path, "path-hash", 0, None, None, &mut Default::default())?;
+        assert_eq!(result.events.len(), 2, "both lines parsed");
+        assert_eq!(
+            result.end_offset,
+            complete.len() as u64,
+            "cursor must not include the partial tail"
+        );
+
+        // Simulate flush + re-sync from saved cursor.
+        let full = format!("{complete_line}\n{complete_line}\n");
+        fs::write(&path, &full)?;
+        let incremental = parse_rollout_file(
+            &path,
+            "path-hash",
+            result.end_offset,
+            None,
+            None,
+            &mut Default::default(),
+        )?;
+        assert_eq!(incremental.events.len(), 1, "incremental sync picks up completed line");
         Ok(())
     }
 }

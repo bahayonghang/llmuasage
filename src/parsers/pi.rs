@@ -14,7 +14,6 @@ use std::{
     collections::HashMap,
     fs::File,
     future::Future,
-    io::{BufRead, BufReader, Seek, SeekFrom},
     path::{Path, PathBuf},
     pin::Pin,
     time::Instant,
@@ -32,7 +31,8 @@ use crate::{
         ProgressSink, SourceParser, SourceSyncStats, SyncEvent,
         file_progress::{FileProgress, FileProgressCounter},
         file_state::{
-            CandidateFile, FileReplayMode, decide_file_replay, finalize_cursor, should_rescan_file,
+            BoundedJsonlReader, CandidateFile, FileReplayMode, decide_file_replay,
+            finalize_cursor, should_rescan_file,
         },
         source_files,
     },
@@ -319,21 +319,17 @@ fn parse_session_file(
 
     let session = build_session(file_path, path_hash);
 
-    let mut reader = BufReader::new(file);
-    reader.seek(SeekFrom::Start(start_offset))?;
-
-    let mut offset = start_offset;
+    let mut reader = BoundedJsonlReader::new(file, start_offset)?;
     let mut line = String::new();
     let mut events = Vec::new();
 
     loop {
         line.clear();
-        let record_offset = offset;
+        let record_offset = reader.current_offset();
         let bytes_read = reader.read_line(&mut line)?;
         if bytes_read == 0 {
             break;
         }
-        offset += bytes_read as u64;
 
         // Cheap prefilter before the JSON parse: a usable Pi line carries token
         // counts under a `usage` key nested in a `message` object.
@@ -402,7 +398,7 @@ fn parse_session_file(
     }
 
     Ok(PiParseResult {
-        end_offset: offset,
+        end_offset: reader.complete_offset(),
         events,
     })
 }
@@ -615,6 +611,7 @@ mod tests {
             r#"{"type":"message","timestamp":"2026-01-02T00:00:00.000Z","message":{"role":"assistant","model":"gpt-5.5","usage":{"input":10,"output":5}}}"#,
             "\n",
             r#"{"type":"message","timestamp":"2026-01-02T00:05:00.000Z","message":{"role":"assistant","model":"gpt-5.5","usage":{"input":20,"output":6}}}"#,
+            "\n",
         );
 
         let (_dir, path) = write_session_file(content);
@@ -627,5 +624,31 @@ mod tests {
         assert_eq!(first.events[0].event_key, second.events[0].event_key);
         assert_eq!(first.events[1].event_key, second.events[1].event_key);
         assert_eq!(first.end_offset, content.len() as u64);
+    }
+
+    /// DATA-001 contract: a partial last line (no trailing '\n') must not
+    /// advance the durable cursor.
+    #[test]
+    fn partial_tail_does_not_advance_cursor() {
+        let complete_line = r#"{"type":"message","timestamp":"2026-01-02T00:00:00.000Z","message":{"role":"assistant","model":"gpt-5.5","usage":{"input":100,"output":50,"cacheRead":40,"cacheWrite":8,"reasoningTokens":10,"totalTokens":333}}}"#;
+        let complete = format!("{complete_line}\n");
+        let partial = format!("{complete_line}\n{complete_line}"); // last line missing '\n'
+
+        let (_dir, path) = write_session_file(&partial);
+
+        let result = parse_session_file(&path, "path-hash", 0).expect("parse");
+        assert_eq!(result.events.len(), 2, "both lines parsed");
+        assert_eq!(
+            result.end_offset,
+            complete.len() as u64,
+            "cursor must not include the partial tail"
+        );
+
+        // Simulate the tool flushing the final newline and re-syncing.
+        let full = format!("{complete_line}\n{complete_line}\n");
+        std::fs::write(&path, &full).expect("write full");
+        let incremental =
+            parse_session_file(&path, "path-hash", result.end_offset).expect("incremental parse");
+        assert_eq!(incremental.events.len(), 1, "incremental sync picks up completed line");
     }
 }

@@ -12,7 +12,6 @@ use std::{
     collections::HashMap,
     fs::File,
     future::Future,
-    io::{BufRead, BufReader, Seek, SeekFrom},
     path::{Path, PathBuf},
     pin::Pin,
     time::Instant,
@@ -30,7 +29,8 @@ use crate::{
         ProgressSink, SourceParser, SourceSyncStats, SyncEvent,
         file_progress::{FileProgress, FileProgressCounter},
         file_state::{
-            CandidateFile, FileReplayMode, decide_file_replay, finalize_cursor, should_rescan_file,
+            BoundedJsonlReader, CandidateFile, FileReplayMode, decide_file_replay,
+            finalize_cursor, should_rescan_file,
         },
         source_files,
     },
@@ -319,21 +319,17 @@ fn parse_wire_file(
     let fallback_ms = file_mtime_ms(file_path);
     let session = build_session(file_path, path_hash);
 
-    let mut reader = BufReader::new(file);
-    reader.seek(SeekFrom::Start(start_offset))?;
-
-    let mut offset = start_offset;
+    let mut reader = BoundedJsonlReader::new(file, start_offset)?;
     let mut line = String::new();
     let mut events = Vec::new();
 
     loop {
         line.clear();
-        let record_offset = offset;
+        let record_offset = reader.current_offset();
         let bytes_read = reader.read_line(&mut line)?;
         if bytes_read == 0 {
             break;
         }
-        offset += bytes_read as u64;
 
         // Cheap prefilter before the JSON parse; every retained line is a
         // `usage.record`.
@@ -395,7 +391,7 @@ fn parse_wire_file(
     }
 
     Ok(KimiParseResult {
-        end_offset: offset,
+        end_offset: reader.complete_offset(),
         events,
     })
 }
@@ -605,6 +601,7 @@ mod tests {
             r#"{"type":"usage.record","model":"kimi-code/k3","usage":{"inputOther":10,"output":5,"inputCacheRead":0,"inputCacheCreation":0},"usageScope":"turn","time":1780319377010}"#,
             "\n",
             r#"{"type":"usage.record","model":"kimi-code/k3","usage":{"inputOther":20,"output":6,"inputCacheRead":0,"inputCacheCreation":0},"usageScope":"turn","time":1780319377020}"#,
+            "\n",
         );
 
         let (_dir, path) = write_wire_file(content);
@@ -617,5 +614,35 @@ mod tests {
         assert_eq!(first.events[0].event_key, second.events[0].event_key);
         assert_eq!(first.events[1].event_key, second.events[1].event_key);
         assert_eq!(first.end_offset, content.len() as u64);
+    }
+
+    /// DATA-001 contract: a partial last line (no trailing '\n') must not
+    /// advance the durable cursor.  The event is picked up on the next sync
+    /// once the line is completed.
+    #[test]
+    fn partial_tail_does_not_advance_cursor() {
+        // Use the exact format from the passing test above.
+        let complete_line = r#"{"type":"usage.record","model":"kimi-code/k3","usage":{"inputOther":5102,"output":172,"inputCacheRead":13312,"inputCacheCreation":8},"usageScope":"turn","time":1780319377014}"#;
+        let complete = format!("{complete_line}\n");
+        let partial = format!("{complete_line}\n{complete_line}"); // last line missing '\n'
+
+        let (_dir, path) = write_wire_file(&partial);
+
+        let result = parse_wire_file(&path, "path-hash", 0).expect("parse");
+        assert_eq!(result.events.len(), 2, "both lines should be parsed");
+        // complete_offset must stop after the first '\n'-terminated line
+        assert_eq!(
+            result.end_offset,
+            complete.len() as u64,
+            "cursor must not include the partial tail"
+        );
+
+        // Simulate the tool flushing the final newline and re-syncing from
+        // the saved cursor: the partial line is now complete.
+        let full = format!("{complete_line}\n{complete_line}\n");
+        std::fs::write(&path, &full).expect("write full");
+        let incremental =
+            parse_wire_file(&path, "path-hash", result.end_offset).expect("incremental parse");
+        assert_eq!(incremental.events.len(), 1, "incremental sync picks up completed line");
     }
 }

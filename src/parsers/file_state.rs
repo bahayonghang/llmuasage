@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    io::{BufRead, BufReader, Read, Seek, SeekFrom},
+    path::{Path, PathBuf},
+};
 
 use anyhow::Result;
 
@@ -126,4 +129,128 @@ fn capture_file_snapshot(path: &Path) -> Result<FileSnapshot> {
         file_fingerprint: read_head_signature(path, SIGNATURE_WINDOW)?,
         tail_signature: read_tail_signature(path, SIGNATURE_WINDOW)?,
     })
+}
+
+/// Wraps a `BufReader` and tracks two byte positions: the current offset
+/// (advanced by every `read_line` call, including partial lines at EOF) and
+/// the *complete* offset (advanced only for lines that end with `'\n'`).
+///
+/// JSONL source files can end with a partial line whose `'\n'` has not yet
+/// been flushed by the source tool. A plain `BufReader` + manual byte
+/// counter would advance past that partial line on the first sync, permanently
+/// skipping it on every subsequent run. `BoundedJsonlReader` avoids this by
+/// letting callers use `complete_offset()` — not the total bytes consumed —
+/// as the durable cursor; the partial tail is re-read next sync and picked up
+/// once the file has been written completely.
+pub struct BoundedJsonlReader<R: Read> {
+    inner: BufReader<R>,
+    complete_offset: u64,
+    current_offset: u64,
+}
+
+impl<R: Read + Seek> BoundedJsonlReader<R> {
+    /// Creates a new reader, seeking to `start_offset` before the first read.
+    pub fn new(reader: R, start_offset: u64) -> Result<Self> {
+        let mut inner = BufReader::new(reader);
+        inner.seek(SeekFrom::Start(start_offset))?;
+        Ok(Self {
+            inner,
+            complete_offset: start_offset,
+            current_offset: start_offset,
+        })
+    }
+
+    /// The byte offset of the start of the next line to be read.
+    ///
+    /// Capture this value *before* calling `read_line` when you need a stable
+    /// `record_offset` (e.g. as a component of an event key).
+    pub fn current_offset(&self) -> u64 {
+        self.current_offset
+    }
+
+    /// The byte offset after the last `'\n'`-terminated line.
+    ///
+    /// Store this as the durable cursor. A partial tail line at EOF is not
+    /// included, so it will be re-read on the next sync.
+    pub fn complete_offset(&self) -> u64 {
+        self.complete_offset
+    }
+
+    /// Reads the next line into `buf` (does *not* clear `buf` before reading,
+    /// matching the `BufRead::read_line` contract). Returns the number of
+    /// bytes appended, or `0` at EOF.
+    ///
+    /// Advances `complete_offset` only when the line ends with `'\n'`.
+    pub fn read_line(&mut self, buf: &mut String) -> std::io::Result<usize> {
+        let bytes_read = self.inner.read_line(buf)?;
+        self.current_offset += bytes_read as u64;
+        if bytes_read > 0 && buf.ends_with('\n') {
+            self.complete_offset = self.current_offset;
+        }
+        Ok(bytes_read)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use super::*;
+
+    fn reader(s: &str) -> BoundedJsonlReader<Cursor<Vec<u8>>> {
+        BoundedJsonlReader::new(Cursor::new(s.as_bytes().to_vec()), 0).expect("new reader")
+    }
+
+    #[test]
+    fn complete_lines_advance_complete_offset() {
+        let mut r = reader("line1\nline2\n");
+        let mut buf = String::new();
+
+        r.read_line(&mut buf).unwrap();
+        assert_eq!(r.complete_offset(), 6); // "line1\n"
+
+        buf.clear();
+        r.read_line(&mut buf).unwrap();
+        assert_eq!(r.complete_offset(), 12); // "line1\nline2\n"
+    }
+
+    #[test]
+    fn partial_tail_does_not_advance_complete_offset() {
+        let mut r = reader("complete\npartial");
+        let mut buf = String::new();
+
+        r.read_line(&mut buf).unwrap(); // "complete\n"
+        assert_eq!(r.complete_offset(), 9);
+
+        buf.clear();
+        r.read_line(&mut buf).unwrap(); // "partial" — no newline
+                                        // complete_offset must NOT advance past the partial line
+        assert_eq!(r.complete_offset(), 9);
+        assert_eq!(r.current_offset(), 16); // current consumed all bytes
+    }
+
+    #[test]
+    fn eof_returns_zero_and_offsets_are_stable() {
+        let mut r = reader("done\n");
+        let mut buf = String::new();
+        r.read_line(&mut buf).unwrap();
+        let before = r.complete_offset();
+        buf.clear();
+        assert_eq!(r.read_line(&mut buf).unwrap(), 0);
+        assert_eq!(r.complete_offset(), before); // stable at EOF
+    }
+
+    #[test]
+    fn start_offset_is_reflected_in_both_positions() {
+        let content = "skip\nkeep\n";
+        let start = 5u64; // position of "keep\n"
+        let mut r = BoundedJsonlReader::new(Cursor::new(content.as_bytes().to_vec()), start)
+            .expect("new reader");
+        assert_eq!(r.current_offset(), 5);
+        assert_eq!(r.complete_offset(), 5);
+        let mut buf = String::new();
+        r.read_line(&mut buf).unwrap();
+        assert_eq!(buf, "keep\n");
+        assert_eq!(r.complete_offset(), 10);
+    }
 }
