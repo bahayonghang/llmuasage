@@ -4,7 +4,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{anyhow, bail, Result};
 use clap::ValueEnum;
 
 const GITHUB_REPOSITORY: &str = "https://github.com/bahayonghang/llmuasage";
@@ -130,6 +130,27 @@ fn print_header(writer: &mut impl Write, channel: UpdateChannel, plan: &InstallP
     writeln!(writer, "Current version: {}", env!("CARGO_PKG_VERSION"))?;
     writeln!(writer, "Repository: {GITHUB_REPOSITORY}")?;
     writeln!(writer, "Channel: {channel}")?;
+    if channel == UpdateChannel::Dev {
+        writeln!(writer)?;
+        writeln!(
+            writer,
+            "⚠  WARNING: dev channel installs the current HEAD of the '{channel}' branch."
+        )?;
+        writeln!(
+            writer,
+            "   The trust anchor is a mutable branch pointer — not a signed release or"
+        )?;
+        writeln!(
+            writer,
+            "   immutable tag. A force-push or compromised repository account would cause"
+        )?;
+        writeln!(writer, "   arbitrary code to execute on your machine.")?;
+        writeln!(
+            writer,
+            "   Use the 'main' channel for stable, tagged releases."
+        )?;
+    }
+    writeln!(writer)?;
     writeln!(writer, "Command: {}", plan.command_line())?;
     writeln!(writer)?;
     Ok(())
