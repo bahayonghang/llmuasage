@@ -1,6 +1,6 @@
 # Architecture
 
-This page explains the current 0.6.x shape. For decision records, see [ADR](../adr/). For historical product plans, see the [PRD archive](../prd/).
+This page explains the current architecture shape. For decision records, see [ADR](../adr/). For historical product plans, see the [PRD archive](../prd/).
 
 ## Runtime layout
 
@@ -67,7 +67,7 @@ Threshold rates are selected per event from input + cache-read + cache-creation 
 
 ## Behavior facts
 
-The 0.6.x line adds normalized behavior tables:
+The current version adds normalized behavior tables:
 
 - `usage_turn`: turn-level facts for Activity, Optimize, Compare, and turn-backed Explorer queries.
 - `usage_tool_call`: bounded tool/action facts for Tools, Optimize, Compare, and tool-attribution Explorer queries.

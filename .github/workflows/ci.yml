@@ -61,6 +61,16 @@ jobs:
           if (-not (Test-Path "docs/package-lock.json")) {
             throw "docs/package-lock.json is required for reproducible docs installs"
           }
+          # Scan for stale historical version patterns like 0.6.x / 0.7.x
+          $stalePattern = '0\.[0-9]+\.x'
+          $scanFiles = Get-ChildItem -Recurse -Include "*.md","*.rs","*.toml","*.yml","*.yaml" |
+            Where-Object { $_.FullName -notmatch '(node_modules|target|\.git|\.vitepress)' }
+          foreach ($f in $scanFiles) {
+            $text = Get-Content -Raw $f.FullName -ErrorAction SilentlyContinue
+            if ($text -match $stalePattern) {
+              throw "$($f.FullName) contains stale version reference matching '$stalePattern'"
+            }
+          }
 
       - name: Rust format
         run: cargo fmt --check

@@ -4,7 +4,7 @@
 //! root-level façade: [`AppPaths`], [`Store`], [`Dashboard`], [`QueryFilter`],
 //! [`ReportTimezone`], [`JobRegistry`], sync job payloads, and the shared
 //! [`Result`] / [`LlmusageError`] types. Broad implementation modules remain
-//! public for 0.7.x compatibility, but callers should prefer the façade or the
+//! public for compatibility, but callers should prefer the façade or the
 //! documented `paths`, `store`, `query`, `sync`, `models`, and `error`
 //! namespaces when embedding the crate.
 
