@@ -1,25 +1,31 @@
 use std::{
-    collections::VecDeque,
     fs::File,
-    io::{BufRead, BufReader},
-    path::Path,
+    io::{Read, Seek, SeekFrom},
+    path::{Path, PathBuf},
     sync::OnceLock,
 };
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
 use crate::paths::AppPaths;
 
 const DEFAULT_FILE_LEVEL: &str = "warn";
-const MAX_LOG_FILE_BYTES: u64 = 10 * 1024 * 1024;
+/// Maximum total bytes kept across all retained daily log files.
+const MAX_TOTAL_LOG_BYTES: u64 = 30 * 1024 * 1024; // 30 MiB (3 × 10 MiB rotations)
+/// Number of daily log files to retain (older files are deleted on startup).
+const MAX_LOG_FILES: usize = 7;
 const RECENT_ERROR_SCAN_LIMIT: usize = 200;
+/// Generous per-line estimate for the reverse tail reader (NDJSON warn entries).
+const AVG_LOG_LINE_BYTES: u64 = 512;
+/// Log filename prefix used by tracing-appender daily rotation.
+const LOG_FILE_PREFIX: &str = "llmusage.ndjson";
 
 static LOG_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceLock::new();
 
-/// One structured entry read back from `logs/llmusage.ndjson`.
+/// One structured entry read back from `logs/llmusage.ndjson.*`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
     /// RFC 3339-ish timestamp emitted by tracing-subscriber.
@@ -45,7 +51,7 @@ pub struct LogEntry {
 /// Runtime log-file status exposed by diagnostics and `llmusage logs`.
 #[derive(Debug, Clone, Serialize)]
 pub struct LogsRuntimeStatus {
-    /// Structured log file path.
+    /// Structured log file path (current daily file, or base path if none yet).
     pub path: String,
     /// Whether the log file currently exists.
     pub exists: bool,
@@ -70,8 +76,9 @@ pub fn init_logging_for_paths(paths: &AppPaths) -> Result<()> {
 
     if let Some(file_filter) = file_filter() {
         std::fs::create_dir_all(&paths.logs_dir)?;
-        enforce_log_size_limit(&paths.log_file_path)?;
-        let file_appender = tracing_appender::rolling::never(&paths.logs_dir, "llmusage.ndjson");
+        cleanup_old_log_files(&paths.logs_dir);
+        // daily rotation: tracing-appender creates files named `llmusage.ndjson.YYYY-MM-DD`
+        let file_appender = tracing_appender::rolling::daily(&paths.logs_dir, LOG_FILE_PREFIX);
         let (writer, guard) = tracing_appender::non_blocking(file_appender);
         let file_layer = fmt::layer()
             .json()
@@ -91,13 +98,19 @@ pub fn init_logging_for_paths(paths: &AppPaths) -> Result<()> {
 }
 
 pub fn runtime_status(paths: &AppPaths) -> Result<LogsRuntimeStatus> {
-    let metadata = std::fs::metadata(&paths.log_file_path).ok();
+    let current = current_log_file(&paths.logs_dir);
+    let display_path = current
+        .as_deref()
+        .unwrap_or(&paths.log_file_path)
+        .display()
+        .to_string();
+    let metadata = current.as_deref().and_then(|p| std::fs::metadata(p).ok());
     let recent_error_count =
         read_recent_log_entries(paths, RECENT_ERROR_SCAN_LIMIT, Some("error"), None)?.len();
     Ok(LogsRuntimeStatus {
-        path: paths.log_file_path.display().to_string(),
+        path: display_path,
         exists: metadata.is_some(),
-        size_bytes: metadata.map_or(0, |item| item.len()),
+        size_bytes: metadata.map_or(0, |m| m.len()),
         recent_error_count,
     })
 }
@@ -108,12 +121,14 @@ pub fn read_recent_log_entries(
     min_level: Option<&str>,
     command: Option<&str>,
 ) -> Result<Vec<LogEntry>> {
-    if limit == 0 || !paths.log_file_path.is_file() {
+    if limit == 0 {
         return Ok(Vec::new());
     }
-
+    let Some(log_file) = current_log_file(&paths.logs_dir) else {
+        return Ok(Vec::new());
+    };
     let scan_limit = limit.saturating_mul(8).max(limit).min(2_000);
-    let lines = read_recent_lines(&paths.log_file_path, scan_limit)?;
+    let lines = read_tail_lines(&log_file, scan_limit)?;
     let mut entries = lines
         .into_iter()
         .filter_map(|line| parse_log_entry(&line))
@@ -129,6 +144,34 @@ pub fn read_recent_log_entries(
     Ok(entries)
 }
 
+/// Returns the path of the most recently modified daily log file in `logs_dir`,
+/// or `None` if no matching file exists.
+pub fn current_log_file(logs_dir: &Path) -> Option<PathBuf> {
+    let mut files: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(logs_dir)
+        .ok()?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(LOG_FILE_PREFIX)
+        })
+        .filter_map(|entry| {
+            let meta = entry.metadata().ok()?;
+            if meta.is_file() {
+                Some((
+                    meta.modified().unwrap_or(std::time::UNIX_EPOCH),
+                    entry.path(),
+                ))
+            } else {
+                None
+            }
+        })
+        .collect();
+    files.sort_by(|a, b| b.0.cmp(&a.0));
+    files.into_iter().next().map(|(_, path)| path)
+}
+
 fn file_filter() -> Option<EnvFilter> {
     let raw = std::env::var("LLMUSAGE_LOG").unwrap_or_else(|_| DEFAULT_FILE_LEVEL.to_string());
     if raw.eq_ignore_ascii_case("off") {
@@ -137,20 +180,45 @@ fn file_filter() -> Option<EnvFilter> {
     Some(EnvFilter::new(normalize_level(&raw)))
 }
 
-fn enforce_log_size_limit(path: &Path) -> Result<()> {
-    let Ok(metadata) = std::fs::metadata(path) else {
-        return Ok(());
+/// Deletes old daily log files, keeping at most `MAX_LOG_FILES` most recent
+/// entries and ensuring total size stays within `MAX_TOTAL_LOG_BYTES`.
+fn cleanup_old_log_files(logs_dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(logs_dir) else {
+        return;
     };
-    if metadata.len() <= MAX_LOG_FILE_BYTES {
-        return Ok(());
-    }
+    let mut files: Vec<(std::time::SystemTime, PathBuf, u64)> = entries
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(LOG_FILE_PREFIX)
+        })
+        .filter_map(|entry| {
+            let meta = entry.metadata().ok()?;
+            if meta.is_file() {
+                Some((
+                    meta.modified().unwrap_or(std::time::UNIX_EPOCH),
+                    entry.path(),
+                    meta.len(),
+                ))
+            } else {
+                None
+            }
+        })
+        .collect();
+    // sort newest first
+    files.sort_by(|a, b| b.0.cmp(&a.0));
 
-    let archived = path.with_extension("ndjson.old");
-    if archived.exists() {
-        std::fs::remove_file(&archived)?;
+    let mut total_bytes: u64 = 0;
+    for (idx, (_, path, size)) in files.iter().enumerate() {
+        total_bytes += size;
+        let over_count = idx >= MAX_LOG_FILES;
+        let over_size = total_bytes > MAX_TOTAL_LOG_BYTES;
+        if over_count || over_size {
+            let _ = std::fs::remove_file(path);
+        }
     }
-    std::fs::rename(path, archived)?;
-    Ok(())
 }
 
 fn normalize_level(raw: &str) -> &str {
@@ -164,17 +232,45 @@ fn normalize_level(raw: &str) -> &str {
     }
 }
 
-fn read_recent_lines(path: &Path, max_lines: usize) -> Result<Vec<String>> {
-    let file = File::open(path)?;
-    let mut lines = VecDeque::with_capacity(max_lines.min(RECENT_ERROR_SCAN_LIMIT));
-    for line in BufReader::new(file).lines() {
-        let line = line?;
-        if lines.len() == max_lines {
-            lines.pop_front();
-        }
-        lines.push_back(line);
+/// Reads the last `max_lines` lines from `path` in O(tail bytes), not O(file size).
+///
+/// Seeks to an estimated tail position based on `AVG_LOG_LINE_BYTES`, skips
+/// any leading partial line, then parses forward. Returns at most `max_lines`
+/// lines from the end of the file.
+fn read_tail_lines(path: &Path, max_lines: usize) -> Result<Vec<String>> {
+    let mut file = File::open(path)?;
+    let file_size = file.seek(SeekFrom::End(0))?;
+    if file_size == 0 {
+        return Ok(Vec::new());
     }
-    Ok(lines.into_iter().collect())
+
+    let tail_bytes = (max_lines as u64)
+        .saturating_mul(AVG_LOG_LINE_BYTES)
+        .min(file_size);
+    let seek_pos = file_size - tail_bytes;
+    file.seek(SeekFrom::Start(seek_pos))?;
+
+    let mut buf = String::new();
+    file.read_to_string(&mut buf)?;
+
+    // If we didn't start at the file beginning, skip the partial leading line.
+    let start = if seek_pos > 0 {
+        buf.find('\n').map(|i| i + 1).unwrap_or(buf.len())
+    } else {
+        0
+    };
+
+    let lines: Vec<String> = buf[start..]
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect();
+
+    if lines.len() > max_lines {
+        Ok(lines[lines.len() - max_lines..].to_vec())
+    } else {
+        Ok(lines)
+    }
 }
 
 fn parse_log_entry(line: &str) -> Option<LogEntry> {
@@ -235,5 +331,73 @@ fn level_rank(level: &str) -> Option<u8> {
         "debug" => Some(3),
         "trace" => Some(4),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::TempDir;
+
+    fn write_ndjson_lines(path: &Path, count: usize) {
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .unwrap();
+        for i in 0..count {
+            writeln!(
+                f,
+                r#"{{"timestamp":"2026-07-25T00:00:{:02}Z","level":"WARN","fields":{{"message":"line {i}"}}}}"#,
+                i % 60
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn tail_reads_last_n_lines_only() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("test.ndjson");
+        write_ndjson_lines(&path, 500);
+
+        let lines = read_tail_lines(&path, 50).unwrap();
+        assert!(lines.len() <= 50, "should not return more than 50 lines");
+        assert!(!lines.is_empty(), "should return some lines");
+        // last line should parse correctly
+        let last = parse_log_entry(lines.last().unwrap());
+        assert!(last.is_some(), "last line should parse as LogEntry");
+    }
+
+    #[test]
+    fn tail_on_empty_file_returns_empty() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("empty.ndjson");
+        std::fs::write(&path, "").unwrap();
+        let lines = read_tail_lines(&path, 100).unwrap();
+        assert!(lines.is_empty());
+    }
+
+    #[test]
+    fn cleanup_keeps_at_most_max_log_files() {
+        let temp = TempDir::new().unwrap();
+        let dir = temp.path();
+        // create MAX_LOG_FILES + 3 log files
+        for i in 0..(MAX_LOG_FILES + 3) {
+            let name = format!("{LOG_FILE_PREFIX}.2026-07-{:02}", i + 1);
+            let path = dir.join(&name);
+            std::fs::write(&path, format!("line {i}\n")).unwrap();
+        }
+        cleanup_old_log_files(dir);
+        let remaining = std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with(LOG_FILE_PREFIX))
+            .count();
+        assert!(
+            remaining <= MAX_LOG_FILES,
+            "should keep at most {MAX_LOG_FILES} files, got {remaining}"
+        );
     }
 }

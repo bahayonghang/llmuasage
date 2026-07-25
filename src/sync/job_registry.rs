@@ -1,4 +1,5 @@
 use std::{
+    collections::VecDeque,
     error::Error,
     fmt,
     sync::{Arc, Mutex},
@@ -70,12 +71,18 @@ struct JobState {
     cancel: CancellationToken,
 }
 
+/// Maximum number of terminal (Completed/Failed/Cancelled) jobs retained in
+/// memory. Active and cancelling jobs are never evicted.
+const MAX_TERMINAL_JOBS: usize = 100;
+
 /// In-memory bridge from future sync progress push events to pollable snapshots.
 #[derive(Debug, Clone, Default)]
 pub struct JobRegistry {
     inner: Arc<DashMap<JobId, Arc<Mutex<JobState>>>>,
     admission: Arc<Mutex<()>>,
     terminal_hooks: TerminalHooks,
+    /// Insertion-ordered deque of terminal job ids, capped at `MAX_TERMINAL_JOBS`.
+    terminal_order: Arc<Mutex<VecDeque<JobId>>>,
 }
 
 /// Callback list fired once after a job reaches a terminal state.
@@ -212,6 +219,8 @@ impl JobRegistry {
         let options = options.clone();
         let job_id_for_task = job_id.clone();
         let terminal_hooks = self.terminal_hooks.clone();
+        let inner = Arc::clone(&self.inner);
+        let terminal_order = Arc::clone(&self.terminal_order);
         tokio::spawn(async move {
             run_job(
                 job_id_for_task,
@@ -221,6 +230,8 @@ impl JobRegistry {
                 tx,
                 state,
                 terminal_hooks,
+                inner,
+                terminal_order,
             )
             .await;
         });
@@ -249,6 +260,7 @@ impl JobRegistry {
         };
         self.inner
             .insert(job_id.clone(), Arc::new(Mutex::new(state)));
+        note_terminal_job(&job_id, &self.inner, &self.terminal_order);
         (job_id, rx)
     }
 
@@ -276,8 +288,8 @@ impl JobRegistry {
         true
     }
 
-    /// Returns recent snapshots. Terminal jobs beyond `limit` may be evicted;
-    /// running jobs are always retained.
+    /// Returns recent snapshots sorted newest-first.
+    /// Terminal jobs are evicted eagerly on completion; this method is read-only.
     pub fn list_recent(&self, limit: usize) -> Vec<JobSnapshot> {
         let mut snapshots = self
             .inner
@@ -289,25 +301,8 @@ impl JobRegistry {
                 .cmp(&a.started_at)
                 .then(b.job_id.cmp(&a.job_id))
         });
-        if limit > 0 {
-            let terminal_ids = snapshots
-                .iter()
-                .filter(|snapshot| {
-                    snapshot.status != JobStatus::Running
-                        && snapshot.status != JobStatus::Cancelling
-                        && snapshots
-                            .iter()
-                            .filter(|item| item.status != JobStatus::Running)
-                            .filter(|item| item.status != JobStatus::Cancelling)
-                            .position(|item| item.job_id == snapshot.job_id)
-                            .is_some_and(|index| index >= limit)
-                })
-                .map(|snapshot| snapshot.job_id.clone())
-                .collect::<Vec<_>>();
-            for id in terminal_ids {
-                self.inner.remove(&id);
-            }
-            snapshots.retain(|snapshot| self.inner.contains_key(&snapshot.job_id));
+        if limit > 0 && snapshots.len() > limit {
+            snapshots.truncate(limit);
         }
         snapshots
     }
@@ -332,6 +327,8 @@ async fn run_job(
     outbound: mpsc::Sender<JobEvent>,
     state: Arc<Mutex<JobState>>,
     terminal_hooks: TerminalHooks,
+    inner: Arc<DashMap<JobId, Arc<Mutex<JobState>>>>,
+    terminal_order: Arc<Mutex<VecDeque<JobId>>>,
 ) {
     let sync_options = SyncRunOptions {
         rebuild: options.rebuild,
@@ -398,6 +395,7 @@ async fn run_job(
                 Some("cancellation requested".to_string()),
                 None,
             );
+            note_terminal_job(&job_id, &inner, &terminal_order);
             terminal_hooks.fire();
             drop(internal_tx);
             let _ = event_forwarder.await;
@@ -442,6 +440,7 @@ async fn run_job(
             finish_state(&state, JobStatus::Failed, None, Some(message));
         }
     }
+    note_terminal_job(&job_id, &inner, &terminal_order);
     terminal_hooks.fire();
     drop(internal_tx);
     let _ = event_forwarder.await;
@@ -499,6 +498,25 @@ fn summary_text(summary: &SyncSummary) -> String {
         summary.total_inserted,
         summary.stored_events
     )
+}
+
+/// Records a terminal job in the bounded deque and evicts the oldest entries
+/// that exceed `MAX_TERMINAL_JOBS`. O(1) amortized — one push, at most one pop
+/// and one DashMap remove per call.
+fn note_terminal_job(
+    job_id: &JobId,
+    inner: &Arc<DashMap<JobId, Arc<Mutex<JobState>>>>,
+    terminal_order: &Arc<Mutex<VecDeque<JobId>>>,
+) {
+    let Ok(mut order) = terminal_order.lock() else {
+        return;
+    };
+    order.push_back(job_id.clone());
+    while order.len() > MAX_TERMINAL_JOBS {
+        if let Some(evicted) = order.pop_front() {
+            inner.remove(&evicted);
+        }
+    }
 }
 
 fn new_job_id() -> JobId {
@@ -703,6 +721,47 @@ mod tests {
                 );
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    #[test]
+    fn rejected_jobs_are_bounded_at_max_terminal_jobs() {
+        let registry = JobRegistry::default();
+        // inject MAX_TERMINAL_JOBS + 50 rejected snapshots directly
+        let total = MAX_TERMINAL_JOBS + 50;
+        let mut ids = Vec::with_capacity(total);
+        for i in 0..total {
+            let job_id = format!("test-job-{i}");
+            let now = crate::util::now_utc();
+            let state = JobState {
+                snapshot: JobSnapshot {
+                    job_id: job_id.clone(),
+                    status: JobStatus::Failed,
+                    summary: None,
+                    last_event: None,
+                    error: Some("rejected".to_string()),
+                    started_at: now.clone(),
+                    finished_at: Some(now),
+                },
+                cancel: CancellationToken::new(),
+            };
+            registry
+                .inner
+                .insert(job_id.clone(), Arc::new(Mutex::new(state)));
+            note_terminal_job(&job_id, &registry.inner, &registry.terminal_order);
+            ids.push(job_id);
+        }
+        assert!(
+            registry.inner.len() <= MAX_TERMINAL_JOBS,
+            "registry should be bounded at {MAX_TERMINAL_JOBS}, got {}",
+            registry.inner.len()
+        );
+        // most recent jobs must still be queryable
+        for id in ids.iter().rev().take(MAX_TERMINAL_JOBS) {
+            assert!(
+                registry.snapshot(id).is_some(),
+                "recent job {id} should still be in registry"
+            );
         }
     }
 
