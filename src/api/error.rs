@@ -43,6 +43,30 @@ pub enum LlmusageError {
         #[source]
         source: serde_json::Error,
     },
+    /// The on-disk database has a schema version newer than this binary knows
+    /// how to handle.  Opening it for writes would silently corrupt data, so
+    /// we refuse and report the mismatch.
+    #[error(
+        "database schema is too new: db={db_version}, binary_knows={binary_version}; \
+         upgrade llmusage to open this database"
+    )]
+    SchemaTooNew {
+        /// Version stored in the database.
+        db_version: u32,
+        /// Latest version this binary understands.
+        binary_version: u32,
+    },
+    /// The schema_version metadata row contains a value that cannot be parsed
+    /// as a non-negative integer — indicates a corrupt or externally modified
+    /// database.
+    #[error(
+        "database has a corrupt schema_version field ({raw:?}); \
+         inspect or delete ~/.llmusage/usage.db to recover"
+    )]
+    SchemaVersionCorrupt {
+        /// Raw string found in the meta table.
+        raw: String,
+    },
     /// The global sync worker lock could not be acquired before the requested
     /// timeout (5.4 / D13). Surfaces enough metadata for a caller to render
     /// "another worker is holding the lock since X" without re-querying the

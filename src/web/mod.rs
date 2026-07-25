@@ -803,6 +803,34 @@ async fn api_jobs_start(
     if let Some(response) = reject_non_local_write(peer) {
         return response;
     }
+    if let Some(s) = options.source.as_deref() {
+        if SourceKind::parse_id(s).is_none() {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": {
+                        "code": "unknown_source",
+                        "message": format!("未知 source: {s}"),
+                    }
+                })),
+            )
+                .into_response();
+        }
+    }
+    if let Some(days) = options.recent_days {
+        if days == 0 || days > 3650 {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": {
+                        "code": "invalid_recent_days",
+                        "message": "recent_days 必须在 1..=3650 范围内",
+                    }
+                })),
+            )
+                .into_response();
+        }
+    }
     let (job_id, _rx) = match state.jobs.try_start(&state.store, options) {
         Ok(started) => started,
         Err(rejected) => {
@@ -4890,5 +4918,63 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[tokio::test]
+    async fn api_jobs_start_rejects_unknown_source() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let server = bind_server(
+            store,
+            Some(0),
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            WriteExposure::LocalOnly,
+        )
+        .await?;
+        let addr = server.addr();
+
+        let body = serde_json::to_string(&SyncOptions {
+            source: Some("not_a_real_source".to_string()),
+            ..Default::default()
+        })?;
+        let (status, payload) = route_json(addr, "POST", "/api/jobs", Some(body)).await?;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(payload["error"]["code"], "unknown_source");
+
+        server.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn api_jobs_start_rejects_invalid_recent_days() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let server = bind_server(
+            store,
+            Some(0),
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            WriteExposure::LocalOnly,
+        )
+        .await?;
+        let addr = server.addr();
+
+        // recent_days = 0 must be rejected
+        let body = serde_json::to_string(&SyncOptions {
+            recent_days: Some(0),
+            ..Default::default()
+        })?;
+        let (status, payload) = route_json(addr, "POST", "/api/jobs", Some(body)).await?;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(payload["error"]["code"], "invalid_recent_days");
+
+        // recent_days = 3651 must be rejected
+        let body = serde_json::to_string(&SyncOptions {
+            recent_days: Some(3651),
+            ..Default::default()
+        })?;
+        let (status, payload) = route_json(addr, "POST", "/api/jobs", Some(body)).await?;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(payload["error"]["code"], "invalid_recent_days");
+
+        server.shutdown().await?;
+        Ok(())
     }
 }

@@ -225,6 +225,7 @@ impl Store {
         let conn = self.open_connection()?;
         conn.execute_batch(
             r#"
+            BEGIN;
             DELETE FROM usage_tool_call;
             DELETE FROM usage_turn;
             DELETE FROM usage_event;
@@ -233,6 +234,7 @@ impl Store {
             DELETE FROM source_cursor;
             DELETE FROM source_sync_status;
             DELETE FROM usage_event_raw;
+            COMMIT;
             "#,
         )?;
 
@@ -244,6 +246,11 @@ impl Store {
         fs::create_dir_all(&self.paths.backups_dir)?;
         let backup_path = self.paths.backups_dir.join("llmusage.db.pre-0.5.0");
         if !backup_path.exists() {
+            // Checkpoint to flush WAL pages into the main database file before
+            // copying, so the backup is self-contained (DATA-005).
+            let conn = self.open_connection()?;
+            conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+            drop(conn);
             fs::copy(&self.paths.db_path, &backup_path)?;
         }
         Ok(())

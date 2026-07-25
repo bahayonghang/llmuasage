@@ -80,7 +80,11 @@ pub fn latest_schema_version() -> u32 {
         .unwrap_or(0)
 }
 
-/// Reads `meta('schema_version')`, treating missing metadata as v0.
+/// Reads `meta('schema_version')`.
+///
+/// Returns `Ok(0)` only when the meta table exists but has no `schema_version`
+/// row yet (fresh database before the first migration).  Any stored value that
+/// cannot be parsed as a `u32` is a hard error (`SchemaVersionCorrupt`).
 pub fn read_schema_version(conn: &Connection) -> Result<u32> {
     conn.execute_batch(
         r#"
@@ -97,10 +101,12 @@ pub fn read_schema_version(conn: &Connection) -> Result<u32> {
             |row| row.get::<_, String>(0),
         )
         .optional()?;
-    Ok(raw
-        .as_deref()
-        .and_then(|value| value.parse::<u32>().ok())
-        .unwrap_or(0))
+    match raw {
+        None => Ok(0),
+        Some(ref s) => s
+            .parse::<u32>()
+            .map_err(|_| LlmusageError::SchemaVersionCorrupt { raw: s.clone() }),
+    }
 }
 
 /// Persists the current schema version inside an active migration transaction.
@@ -130,6 +136,13 @@ pub fn run_migrations_with_events(
     mut sink: Option<MigrationEventSink<'_>>,
 ) -> Result<()> {
     let mut current = read_schema_version(conn)?;
+    let latest = latest_schema_version();
+    if current > latest {
+        return Err(LlmusageError::SchemaTooNew {
+            db_version: current,
+            binary_version: latest,
+        });
+    }
     for (version, name, migration) in MIGRATIONS {
         if *version <= current {
             continue;
@@ -917,6 +930,69 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(count, 0);
+        Ok(())
+    }
+
+    /// DATA-004: a `schema_version` value that is not a valid `u32` must be a
+    /// hard error, not silently treated as v0 (which would re-run every
+    /// migration against an already-populated database).
+    #[test]
+    fn malformed_schema_version_is_hard_error() -> anyhow::Result<()> {
+        for bad in ["not-a-number", "", "1.5", "-3", "9999999999999999999999"] {
+            let conn = Connection::open_in_memory()?;
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+            )?;
+            conn.execute(
+                "INSERT INTO meta(key, value) VALUES ('schema_version', ?1)",
+                [bad],
+            )?;
+
+            let err = read_schema_version(&conn)
+                .expect_err("malformed schema_version must be rejected, not coerced to 0");
+            assert!(
+                matches!(err, LlmusageError::SchemaVersionCorrupt { .. }),
+                "expected SchemaVersionCorrupt for {bad:?}, got {err:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// DATA-004: a database written by a newer binary must fail fast rather
+    /// than skipping every migration and continuing to read/write.
+    #[test]
+    fn future_schema_version_fails_fast() -> anyhow::Result<()> {
+        let mut conn = Connection::open_in_memory()?;
+        let future = latest_schema_version() + 7;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+        )?;
+        conn.execute(
+            "INSERT INTO meta(key, value) VALUES ('schema_version', ?1)",
+            [future.to_string()],
+        )?;
+
+        let err = run_migrations_with_events(&mut conn, None)
+            .expect_err("a future schema version must be rejected");
+        match err {
+            LlmusageError::SchemaTooNew {
+                db_version,
+                binary_version,
+            } => {
+                assert_eq!(db_version, future);
+                assert_eq!(binary_version, latest_schema_version());
+            }
+            other => panic!("expected SchemaTooNew, got {other:?}"),
+        }
+        Ok(())
+    }
+
+    /// A fresh database (meta table present, no schema_version row) still
+    /// reports v0 — the normal upgrade path must not regress.
+    #[test]
+    fn missing_schema_version_still_reads_as_zero() -> anyhow::Result<()> {
+        let conn = Connection::open_in_memory()?;
+        assert_eq!(read_schema_version(&conn)?, 0);
         Ok(())
     }
 

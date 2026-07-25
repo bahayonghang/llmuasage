@@ -39,6 +39,33 @@ pub struct SyncRunOptions {
     pub allow_lossy_rebuild: bool,
 }
 
+/// Hard service-side bound on parser concurrency (RES-001).
+///
+/// An unbounded `parallelism` lets a caller spawn an arbitrary number of
+/// blocking parse tasks, which is a local DoS vector — and a remote one if any
+/// write-path guard is bypassed. 32 is far above the useful range (the default
+/// is `min(cpu, 4)`) while staying bounded.
+pub const MAX_SYNC_PARALLELISM: usize = 32;
+
+/// Validates and resolves the effective parser concurrency.
+///
+/// `None` resolves to `min(available_parallelism, 4)`. An explicit value must
+/// be in `1..=MAX_SYNC_PARALLELISM`; anything outside is rejected rather than
+/// silently clamped, so a caller that asked for 10_000 learns its request was
+/// invalid instead of quietly getting 32.
+pub fn normalize_parallelism(requested: Option<usize>) -> Result<usize> {
+    let default_parallelism = std::thread::available_parallelism()
+        .map(|value| value.get().min(4))
+        .unwrap_or(1);
+    match requested {
+        None => Ok(default_parallelism),
+        Some(value) if (1..=MAX_SYNC_PARALLELISM).contains(&value) => Ok(value),
+        Some(value) => bail!(
+            "invalid parallelism {value}: must be between 1 and {MAX_SYNC_PARALLELISM}"
+        ),
+    }
+}
+
 pub async fn run(app: &AppContext) -> Result<()> {
     run_with_options(app, SyncRunOptions::default()).await
 }
@@ -414,10 +441,7 @@ async fn run_once_locked(
     }
 
     // 2.1 计算并发度并按 source 顺序解析 + 即时写入
-    let default_parallelism = std::thread::available_parallelism()
-        .map(|value| value.get().min(4))
-        .unwrap_or(1);
-    let parallelism = options.parallelism.unwrap_or(default_parallelism).max(1);
+    let parallelism = normalize_parallelism(options.parallelism)?;
     let provider_index = crate::domain::provider_map::ProviderIndex::resolve_for_sync(
         options.provider_map.as_deref(),
     )?;
@@ -667,4 +691,56 @@ fn rebuild_sources(
     parser_sources: &[SourceKind],
 ) -> Vec<SourceKind> {
     selected_source.map_or_else(|| parser_sources.to_vec(), |source| vec![source])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parallelism_none_resolves_to_sensible_default() {
+        let p = normalize_parallelism(None).unwrap();
+        assert!(p >= 1, "default must be at least 1, got {p}");
+        assert!(p <= 4, "default must not exceed 4, got {p}");
+    }
+
+    #[test]
+    fn parallelism_one_is_accepted() {
+        assert_eq!(normalize_parallelism(Some(1)).unwrap(), 1);
+    }
+
+    #[test]
+    fn parallelism_max_is_accepted() {
+        assert_eq!(
+            normalize_parallelism(Some(MAX_SYNC_PARALLELISM)).unwrap(),
+            MAX_SYNC_PARALLELISM
+        );
+    }
+
+    #[test]
+    fn parallelism_zero_is_rejected() {
+        let err = normalize_parallelism(Some(0)).unwrap_err();
+        assert!(
+            err.to_string().contains("invalid parallelism"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn parallelism_above_max_is_rejected() {
+        let err = normalize_parallelism(Some(MAX_SYNC_PARALLELISM + 1)).unwrap_err();
+        assert!(
+            err.to_string().contains("invalid parallelism"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn parallelism_usize_max_is_rejected() {
+        let err = normalize_parallelism(Some(usize::MAX)).unwrap_err();
+        assert!(
+            err.to_string().contains("invalid parallelism"),
+            "unexpected error: {err}"
+        );
+    }
 }
