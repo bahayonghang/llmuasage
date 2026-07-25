@@ -285,7 +285,7 @@ impl Store {
             ],
         )?;
         if changed == 0 {
-            return Err(LlmusageError::LockLost.into());
+            return Err(LlmusageError::LockLost);
         }
         Ok(())
     }

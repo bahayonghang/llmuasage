@@ -218,22 +218,13 @@ impl JobRegistry {
         let store = store.clone();
         let options = options.clone();
         let job_id_for_task = job_id.clone();
-        let terminal_hooks = self.terminal_hooks.clone();
-        let inner = Arc::clone(&self.inner);
-        let terminal_order = Arc::clone(&self.terminal_order);
+        let tracker = TerminalTracker {
+            hooks: self.terminal_hooks.clone(),
+            jobs: Arc::clone(&self.inner),
+            order: Arc::clone(&self.terminal_order),
+        };
         tokio::spawn(async move {
-            run_job(
-                job_id_for_task,
-                store,
-                options,
-                cancel,
-                tx,
-                state,
-                terminal_hooks,
-                inner,
-                terminal_order,
-            )
-            .await;
+            run_job(job_id_for_task, store, options, cancel, tx, state, tracker).await;
         });
         (job_id, rx)
     }
@@ -319,6 +310,24 @@ impl JobRegistry {
     }
 }
 
+/// Registry-side handles a running job needs to retire itself: fire terminal
+/// hooks and keep the terminal-job set bounded.
+#[derive(Clone)]
+struct TerminalTracker {
+    hooks: TerminalHooks,
+    jobs: Arc<DashMap<JobId, Arc<Mutex<JobState>>>>,
+    order: Arc<Mutex<VecDeque<JobId>>>,
+}
+
+impl TerminalTracker {
+    /// Fires terminal hooks, then evicts the oldest terminal jobs beyond
+    /// [`MAX_TERMINAL_JOBS`].
+    fn retire(&self, job_id: &JobId) {
+        note_terminal_job(job_id, &self.jobs, &self.order);
+        self.hooks.fire();
+    }
+}
+
 async fn run_job(
     job_id: JobId,
     store: Store,
@@ -326,9 +335,7 @@ async fn run_job(
     cancel: CancellationToken,
     outbound: mpsc::Sender<JobEvent>,
     state: Arc<Mutex<JobState>>,
-    terminal_hooks: TerminalHooks,
-    inner: Arc<DashMap<JobId, Arc<Mutex<JobState>>>>,
-    terminal_order: Arc<Mutex<VecDeque<JobId>>>,
+    tracker: TerminalTracker,
 ) {
     let sync_options = SyncRunOptions {
         rebuild: options.rebuild,
@@ -395,8 +402,7 @@ async fn run_job(
                 Some("cancellation requested".to_string()),
                 None,
             );
-            note_terminal_job(&job_id, &inner, &terminal_order);
-            terminal_hooks.fire();
+            tracker.retire(&job_id);
             drop(internal_tx);
             let _ = event_forwarder.await;
             return;
@@ -440,8 +446,7 @@ async fn run_job(
             finish_state(&state, JobStatus::Failed, None, Some(message));
         }
     }
-    note_terminal_job(&job_id, &inner, &terminal_order);
-    terminal_hooks.fire();
+    tracker.retire(&job_id);
     drop(internal_tx);
     let _ = event_forwarder.await;
 }

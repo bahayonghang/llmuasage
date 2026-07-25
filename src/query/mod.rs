@@ -20,6 +20,7 @@ pub(crate) mod logs;
 pub mod pricing;
 pub mod pricing_catalog;
 pub mod reports;
+pub(crate) mod timezone;
 
 pub use explorer::{
     ExplorerDimension, ExplorerFilters, ExplorerGranularity, ExplorerMetric, ExplorerPayload,
@@ -876,11 +877,10 @@ impl Dashboard {
                 cutoff.to_rfc3339_opts(SecondsFormat::Secs, true),
             );
         }
-        let modifier = filter.local_time_modifier();
         let label_expr = match window {
             "day" | "hourly" => "hour_start".to_string(),
-            "week" | "month" => format!("date(hour_start, '{modifier}')"),
-            _ => format!("strftime('%Y-%m', hour_start, '{modifier}')"),
+            "week" | "month" => filter.local_date_expr("hour_start"),
+            _ => filter.local_month_expr("hour_start"),
         };
         let sql = format!(
             r#"
@@ -911,11 +911,11 @@ impl Dashboard {
     /// underlying `hour_start` column when the filter requests UTC.
     pub fn trends_daily(&self, filter: &QueryFilter) -> Result<Vec<DailyTrendPoint>> {
         let sql_filter = filter.bucket_filter(None);
-        let modifier = filter.local_time_modifier();
+        let local_date = filter.local_date_expr("hour_start");
         let sql = format!(
             r#"
             SELECT
-                date(hour_start, '{modifier}') AS local_date,
+                {local_date} AS local_date,
                 COALESCE(SUM(input_tokens), 0),
                 COALESCE(SUM(cache_read_tokens), 0),
                 COALESCE(SUM(cache_creation_tokens), 0),

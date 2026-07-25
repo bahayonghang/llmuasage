@@ -168,7 +168,7 @@ pub fn current_log_file(logs_dir: &Path) -> Option<PathBuf> {
             }
         })
         .collect();
-    files.sort_by(|a, b| b.0.cmp(&a.0));
+    files.sort_by_key(|item| std::cmp::Reverse(item.0));
     files.into_iter().next().map(|(_, path)| path)
 }
 
@@ -208,7 +208,7 @@ fn cleanup_old_log_files(logs_dir: &Path) {
         })
         .collect();
     // sort newest first
-    files.sort_by(|a, b| b.0.cmp(&a.0));
+    files.sort_by_key(|item| std::cmp::Reverse(item.0));
 
     let mut total_bytes: u64 = 0;
     for (idx, (_, path, size)) in files.iter().enumerate() {

@@ -39,7 +39,7 @@ dirs = "6.0"
 fs4 = "1.1.0"
 indicatif = "0.17"
 ratatui = "0.30.1"
-rusqlite = { version = "0.40.1", features = ["bundled", "chrono", "trace"] }
+rusqlite = { version = "0.40.1", features = ["bundled", "chrono", "trace", "functions"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.150"
 base64 = "0.22"
@@ -60,6 +60,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"]
 unicode-width = "0.2.2"
 walkdir = "2.5"
 tempfile = { version = "3.23", optional = true }
+chrono-tz = { version = "0.10", features = ["case-insensitive"] }
+iana-time-zone = "0.1"
 
 [dev-dependencies]
 tempfile = "3.23"

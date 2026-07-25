@@ -1,10 +1,7 @@
-use chrono::{
-    DateTime, FixedOffset, Local, NaiveDate, Offset, SecondsFormat, TimeZone, Utc,
-    offset::LocalResult,
-};
+use chrono::{DateTime, FixedOffset, NaiveDate, Offset, SecondsFormat, Utc};
 use rusqlite::types::Value;
 
-use crate::models::SourceKind;
+use crate::{models::SourceKind, query::timezone::ResolvedZone};
 
 /// Timezone used by report and dashboard queries when interpreting date filters.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,13 +68,19 @@ impl QueryFilter {
         self.sql_filter(alias, "occurred_at")
     }
 
-    pub(crate) fn local_time_modifier(&self) -> String {
-        let seconds = self.timezone.fixed_offset().local_minus_utc();
-        if seconds >= 0 {
-            format!("+{seconds} seconds")
-        } else {
-            format!("{seconds} seconds")
-        }
+    /// SQL expression for the local `YYYY-MM-DD` of `column`, DST-aware.
+    pub(crate) fn local_date_expr(&self, column: &str) -> String {
+        self.timezone.resolved().local_date_expr(column)
+    }
+
+    /// SQL expression for the local `YYYY-MM` of `column`, DST-aware.
+    pub(crate) fn local_month_expr(&self, column: &str) -> String {
+        self.timezone.resolved().local_month_expr(column)
+    }
+
+    /// SQL expression for the local `YYYY-WW` of `column`, DST-aware.
+    pub(crate) fn local_week_expr(&self, column: &str) -> String {
+        self.timezone.resolved().local_week_expr(column)
     }
 
     fn sql_filter(&self, alias: Option<&str>, time_column: &str) -> SqlFilter {
@@ -140,29 +143,29 @@ impl QueryFilter {
         filter
     }
 
+    /// UTC instant at which `date` begins in the filter's timezone.
+    ///
+    /// Delegates to the resolved zone so DST spring-forward/fall-back edges are
+    /// handled with real tz rules rather than one snapshot offset.
     fn local_date_start_utc(&self, date: NaiveDate) -> DateTime<Utc> {
-        let local_start = date
-            .and_hms_opt(0, 0, 0)
-            .expect("midnight is always a valid NaiveDateTime");
-        let offset = self.timezone.fixed_offset();
-        match offset.from_local_datetime(&local_start) {
-            LocalResult::Single(value) => value.with_timezone(&Utc),
-            LocalResult::Ambiguous(earliest, _) => earliest.with_timezone(&Utc),
-            LocalResult::None => offset.from_utc_datetime(&local_start).with_timezone(&Utc),
-        }
+        self.timezone.resolved().local_date_start_utc(date)
     }
 }
 
 impl ReportTimezone {
     pub(crate) fn date_at(&self, now: DateTime<Utc>) -> NaiveDate {
-        now.with_timezone(&self.fixed_offset()).date_naive()
+        self.resolved().date_at(now)
     }
 
-    fn fixed_offset(&self) -> FixedOffset {
+    /// Resolves to something that can answer per-instant offset questions.
+    ///
+    /// `Local` becomes the machine's IANA zone when it can be determined, so
+    /// historical dates use the offset that was actually in effect then.
+    pub(crate) fn resolved(&self) -> ResolvedZone {
         match self {
-            Self::Utc => Utc.fix(),
-            Self::Local => Local::now().offset().fix(),
-            Self::Fixed(offset) => *offset,
+            Self::Utc => ResolvedZone::Fixed(Utc.fix()),
+            Self::Local => ResolvedZone::local(),
+            Self::Fixed(offset) => ResolvedZone::Fixed(*offset),
         }
     }
 }

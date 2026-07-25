@@ -620,11 +620,7 @@ fn load_bucket_rows(
 
 fn load_bucket_series(conn: &Connection, query: &ExplorerQuery) -> Result<Vec<SeriesValue>> {
     let spec = bucket_group_spec(query.group_by);
-    let bucket = bucket_expr(
-        query.granularity,
-        "b.hour_start",
-        &query.filter.local_time_modifier(),
-    );
+    let bucket = bucket_expr(query.granularity, "b.hour_start", &query.filter);
     let filter = query.filter.bucket_filter(Some("b"));
     let value_expr = bucket_metric_expr(query.metric);
     let sql = format!(
@@ -653,11 +649,7 @@ fn load_event_series(conn: &Connection, query: &ExplorerQuery) -> Result<Vec<Ser
         return load_event_token_type_series(conn, query);
     }
     let spec = event_group_spec(query.group_by);
-    let bucket_expr = bucket_expr(
-        query.granularity,
-        "e.event_at",
-        &query.filter.local_time_modifier(),
-    );
+    let bucket_expr = bucket_expr(query.granularity, "e.event_at", &query.filter);
     let mut filter = query.filter.event_filter(Some("e"));
     apply_session_filter(&mut filter, Some("e"), query.filters.session_id.as_deref());
     let value_expr = event_metric_expr(query.metric, query.filters.token_type);
@@ -722,11 +714,7 @@ fn load_turn_series(
     scope: &CapabilityScope,
 ) -> Result<Vec<SeriesValue>> {
     let spec = turn_group_spec(query.group_by);
-    let bucket_expr = bucket_expr(
-        query.granularity,
-        "t.started_at",
-        &query.filter.local_time_modifier(),
-    );
+    let bucket_expr = bucket_expr(query.granularity, "t.started_at", &query.filter);
     let mut filter = query.filter.turn_filter(Some("t"));
     apply_session_filter(&mut filter, Some("t"), query.filters.session_id.as_deref());
     apply_source_scope(&mut filter, Some("t"), scope.allowed_sources.as_deref());
@@ -807,11 +795,7 @@ fn load_attribution_series(
     }
 
     let spec = attribution_group_spec(query.group_by);
-    let bucket_expr = bucket_expr(
-        query.granularity,
-        "a.occurred_at",
-        &query.filter.local_time_modifier(),
-    );
+    let bucket_expr = bucket_expr(query.granularity, "a.occurred_at", &query.filter);
     let value_expr = attribution_metric_expr(query.metric, query.filters.token_type);
     let (base_sql, params) = attribution_outer_sql(
         query,
@@ -882,11 +866,7 @@ fn load_event_token_type_series(
 ) -> Result<Vec<SeriesValue>> {
     let mut filter = query.filter.event_filter(Some("e"));
     apply_session_filter(&mut filter, Some("e"), query.filters.session_id.as_deref());
-    let bucket = bucket_expr(
-        query.granularity,
-        "e.event_at",
-        &query.filter.local_time_modifier(),
-    );
+    let bucket = bucket_expr(query.granularity, "e.event_at", &query.filter);
     let sql = token_type_union_sql(
         "usage_event e",
         &filter.where_sql(),
@@ -963,11 +943,7 @@ fn load_attribution_token_type_series(
     query: &ExplorerQuery,
     scope: &CapabilityScope,
 ) -> Result<Vec<SeriesValue>> {
-    let bucket = bucket_expr(
-        query.granularity,
-        "a.occurred_at",
-        &query.filter.local_time_modifier(),
-    );
+    let bucket = bucket_expr(query.granularity, "a.occurred_at", &query.filter);
     let (sql, params) = attribution_outer_sql(
         query,
         scope,
@@ -1344,12 +1320,16 @@ fn attribution_metric_expr(
     }
 }
 
-fn bucket_expr(granularity: ExplorerGranularity, column: &str, modifier: &str) -> String {
+/// Builds the DST-aware bucket key expression for a time column.
+///
+/// Delegates to [`QueryFilter`] so `Local` resolves the offset per row via the
+/// tz database, while `Utc`/`Fixed` keep the original single-modifier SQL.
+fn bucket_expr(granularity: ExplorerGranularity, column: &str, filter: &QueryFilter) -> String {
     match granularity {
         ExplorerGranularity::Total => "'total'".to_string(),
-        ExplorerGranularity::Day => format!("date({column}, '{modifier}')"),
-        ExplorerGranularity::Week => format!("strftime('%Y-%W', {column}, '{modifier}')"),
-        ExplorerGranularity::Month => format!("strftime('%Y-%m', {column}, '{modifier}')"),
+        ExplorerGranularity::Day => filter.local_date_expr(column),
+        ExplorerGranularity::Week => filter.local_week_expr(column),
+        ExplorerGranularity::Month => filter.local_month_expr(column),
     }
 }
 
