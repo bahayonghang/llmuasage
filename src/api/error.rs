@@ -78,6 +78,14 @@ pub enum LlmusageError {
         /// between the busy decision and the response.
         holder: String,
     },
+    /// The worker lease was stolen by a new owner after our lease expired while
+    /// we were paused/hibernated. The heartbeat refresh matched 0 rows because
+    /// the `generation` column no longer matches ours (CONC-001 fencing).
+    #[error(
+        "worker lock lost: lease expired and was stolen by another process \
+         (fencing generation mismatch); this worker must stop writing immediately"
+    )]
+    LockLost,
     /// User-supplied configuration (CLI flag combination, settings JSON,
     /// integration target file, …) was syntactically valid but semantically
     /// rejected before any side effect ran. Always recoverable by adjusting

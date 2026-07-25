@@ -261,6 +261,11 @@ pub struct WorkerLock {
     store: Store,
     lock_name: String,
     owner_id: String,
+    /// Fencing generation captured at acquisition time (CONC-001).
+    /// Heartbeat refreshes match on both `owner_id` and `generation`; a stale
+    /// holder that lost its lease to a new owner gets 0 rows affected and can
+    /// detect the theft immediately.
+    pub(crate) generation: u32,
     meta: WorkerLockMeta,
 }
 

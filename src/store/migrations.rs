@@ -70,6 +70,11 @@ pub const MIGRATIONS: &[(u32, &str, MigrationFn)] = &[
         "optimize_source_sync_cursors_and_behavior_resets",
         m_015_optimize_source_sync_cursors_and_behavior_resets,
     ),
+    (
+        16,
+        "add_worker_lock_generation",
+        m_016_add_worker_lock_generation,
+    ),
 ];
 
 /// Returns the newest schema version known to this binary.
@@ -760,6 +765,22 @@ fn m_015_optimize_source_sync_cursors_and_behavior_resets(tx: &Transaction<'_>) 
             "#,
         )?;
     }
+    Ok(())
+}
+
+/// Migration v16 — add `generation` column to `worker_lock` for fencing.
+///
+/// The generation counter is incremented on every new acquisition.  The
+/// heartbeat refresh matches on `owner_id AND generation`, so a stale holder
+/// whose lease was stolen by a new owner gets 0 rows affected instead of
+/// silently succeeding (CONC-001).
+fn m_016_add_worker_lock_generation(tx: &Transaction<'_>) -> Result<()> {
+    ensure_column(
+        tx,
+        "worker_lock",
+        "generation",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
     Ok(())
 }
 
