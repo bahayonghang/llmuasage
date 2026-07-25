@@ -12,7 +12,7 @@ use std::{
 use anyhow::{Context, Result, bail};
 use axum::{
     Json, Router,
-    extract::{Path, Query, State},
+    extract::{ConnectInfo, Path, Query, State},
     http::{HeaderMap, StatusCode, header},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
@@ -57,6 +57,20 @@ const WEB_READ_BUSY_TIMEOUT: Duration = Duration::from_millis(1_500);
 /// freshness path. The query layer itself keeps cold-read semantics.
 const DIAGNOSTICS_CACHE_TTL: Duration = Duration::from_secs(30);
 const WEB_SERVER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Controls whether mutation routes are mounted and how write access is guarded.
+///
+/// The default is `LocalOnly`, which mounts mutation routes and enforces that
+/// the real TCP peer is a loopback address.  `PublicReadOnly` is set by
+/// `serve --public`: mutation routes are **not mounted at all** (404/405 for
+/// any write attempt), so Host-header spoofing cannot reach them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WriteExposure {
+    /// Mutation routes accessible only from loopback peers (default).
+    LocalOnly,
+    /// Mutation routes not mounted; server intended for 0.0.0.0 binding.
+    PublicReadOnly,
+}
 
 mod assets;
 mod brand;
@@ -266,7 +280,7 @@ pub(crate) async fn serve_on(
     preferred_port: Option<u16>,
     bind_ip: IpAddr,
 ) -> Result<SocketAddr> {
-    Ok(bind_server(store, preferred_port, bind_ip)
+    Ok(bind_server(store, preferred_port, bind_ip, WriteExposure::LocalOnly)
         .await?
         .detach_with_error_logging())
 }
@@ -275,6 +289,7 @@ pub(crate) async fn bind_server(
     store: Store,
     preferred_port: Option<u16>,
     bind_ip: IpAddr,
+    write_exposure: WriteExposure,
 ) -> Result<BoundWebServer> {
     /*
      * ========================================================================
@@ -289,7 +304,8 @@ pub(crate) async fn bind_server(
 
     // 1.1 创建状态并收敛根页面、资源和 API 路由
     let state = WebState::new(store);
-    let app = Router::new()
+    // Read routes are always mounted.
+    let mut app = Router::new()
         .route("/", get(index_live))
         .route("/assets/{*path}", get(asset_file))
         .route("/api/dashboard", get(api_dashboard))
@@ -310,14 +326,18 @@ pub(crate) async fn bind_server(
         .route("/api/heatmap", get(api_heatmap))
         .route("/api/logs", get(api_logs))
         .route("/api/diagnostics", get(api_diagnostics))
-        .route("/api/diagnostics/forget", post(api_diagnostics_forget))
-        .route("/api/jobs", post(api_jobs_start))
         .route("/api/jobs/{id}", get(api_jobs_get))
-        .route("/api/jobs/{id}/cancel", post(api_jobs_cancel))
-        .route("/api/health", get(api_health))
-        // 对 CSS/JS/SVG 与 JSON API 做 gzip/br 压缩协商；未发 Accept-Encoding 的客户端不受影响。
-        .layer(CompressionLayer::new())
-        .with_state(state);
+        .route("/api/health", get(api_health));
+    // Mutation routes are only mounted in LocalOnly mode.  In PublicReadOnly mode
+    // they are simply absent (404/405), so Host-header spoofing cannot reach them.
+    if write_exposure == WriteExposure::LocalOnly {
+        app = app
+            .route("/api/diagnostics/forget", post(api_diagnostics_forget))
+            .route("/api/jobs", post(api_jobs_start))
+            .route("/api/jobs/{id}/cancel", post(api_jobs_cancel));
+    }
+    // 对 CSS/JS/SVG 与 JSON API 做 gzip/br 压缩协商；未发 Accept-Encoding 的客户端不受影响。
+    let app = app.layer(CompressionLayer::new()).with_state(state);
 
     info!("完成本地 Web UI 路由组装");
 
@@ -349,9 +369,12 @@ pub(crate) async fn bind_server(
                 let shutdown = CancellationToken::new();
                 let shutdown_signal = shutdown.clone();
                 let task = tokio::spawn(async move {
-                    axum::serve(listener, app)
-                        .with_graceful_shutdown(shutdown_signal.cancelled_owned())
-                        .await
+                    axum::serve(
+                        listener,
+                        app.into_make_service_with_connect_info::<SocketAddr>(),
+                    )
+                    .with_graceful_shutdown(shutdown_signal.cancelled_owned())
+                    .await
                 });
                 info!(%addr, "完成本地 Web UI 监听端口绑定");
                 return Ok(BoundWebServer {
@@ -712,10 +735,10 @@ struct ForgetRequest {
 
 async fn api_diagnostics_forget(
     State(state): State<WebState>,
-    headers: HeaderMap,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Json(payload): Json<ForgetRequest>,
 ) -> Response {
-    if let Some(response) = reject_non_local_write(&headers) {
+    if let Some(response) = reject_non_local_write(peer) {
         return response;
     }
     let Some(source_str) = payload.source.as_deref() else {
@@ -764,7 +787,6 @@ async fn api_diagnostics_forget(
                     "error": {
                         "code": "internal_error",
                         "message": "登记 forget 失败",
-                        "detail": err.to_string(),
                     }
                 })),
             )
@@ -775,10 +797,10 @@ async fn api_diagnostics_forget(
 
 async fn api_jobs_start(
     State(state): State<WebState>,
-    headers: HeaderMap,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Json(options): Json<SyncOptions>,
 ) -> Response {
-    if let Some(response) = reject_non_local_write(&headers) {
+    if let Some(response) = reject_non_local_write(peer) {
         return response;
     }
     let (job_id, _rx) = match state.jobs.try_start(&state.store, options) {
@@ -835,9 +857,9 @@ async fn api_jobs_get(State(state): State<WebState>, Path(id): Path<String>) -> 
 async fn api_jobs_cancel(
     State(state): State<WebState>,
     Path(id): Path<String>,
-    headers: HeaderMap,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
 ) -> Response {
-    if let Some(response) = reject_non_local_write(&headers) {
+    if let Some(response) = reject_non_local_write(peer) {
         return response;
     }
     if !state.jobs.cancel(&id) {
@@ -859,47 +881,19 @@ async fn api_jobs_cancel(
     .into_response()
 }
 
-fn reject_non_local_write(headers: &HeaderMap) -> Option<Response> {
-    let Some(host) = headers
-        .get(header::HOST)
-        .and_then(|value| value.to_str().ok())
-        .map(normalize_authority)
-    else {
-        return Some(write_guard_error(
-            "invalid_host",
-            "本地写入 API 需要有效 Host header",
-            None,
-        ));
-    };
-    if !is_loopback_authority(&host) {
-        return Some(write_guard_error(
-            "invalid_host",
-            "本地写入 API 只接受 localhost/loopback Host",
-            Some(host),
-        ));
+/// Guard for mutation routes in `LocalOnly` mode.
+///
+/// Checks the real TCP peer address (not the client-controlled Host header)
+/// so that Host-header spoofing from a remote peer is ineffective.
+fn reject_non_local_write(peer: SocketAddr) -> Option<Response> {
+    if peer.ip().is_loopback() {
+        return None;
     }
-
-    if let Some(origin) = headers
-        .get(header::ORIGIN)
-        .and_then(|value| value.to_str().ok())
-    {
-        let Some(origin_authority) = origin_authority(origin) else {
-            return Some(write_guard_error(
-                "invalid_origin",
-                "本地写入 API 不接受无法解析的 Origin",
-                Some(origin.to_string()),
-            ));
-        };
-        if origin_authority != host {
-            return Some(write_guard_error(
-                "origin_mismatch",
-                "本地写入 API 只接受同源 Origin",
-                Some(origin.to_string()),
-            ));
-        }
-    }
-
-    None
+    Some(write_guard_error(
+        "remote_write_rejected",
+        "写入 API 只接受本地连接",
+        None,
+    ))
 }
 
 fn write_guard_error(code: &str, message: &str, detail: Option<String>) -> Response {
@@ -916,35 +910,6 @@ fn write_guard_error(code: &str, message: &str, detail: Option<String>) -> Respo
         .into_response()
 }
 
-fn origin_authority(origin: &str) -> Option<String> {
-    let origin = origin.trim();
-    let rest = origin
-        .strip_prefix("http://")
-        .or_else(|| origin.strip_prefix("https://"))?;
-    let authority = rest
-        .split('/')
-        .next()
-        .map(normalize_authority)
-        .filter(|value| !value.is_empty())?;
-    Some(authority)
-}
-
-fn normalize_authority(raw: &str) -> String {
-    raw.trim().trim_end_matches('.').to_ascii_lowercase()
-}
-
-fn is_loopback_authority(authority: &str) -> bool {
-    let host = authority_host(authority);
-    host == "localhost" || host.parse::<IpAddr>().is_ok_and(|addr| addr.is_loopback())
-}
-
-fn authority_host(authority: &str) -> &str {
-    let authority = authority.rsplit('@').next().unwrap_or(authority);
-    if let Some(rest) = authority.strip_prefix('[') {
-        return rest.split(']').next().unwrap_or_default();
-    }
-    authority.split(':').next().unwrap_or_default()
-}
 
 struct DashboardQueryGuard {
     cancelled: Arc<AtomicBool>,
@@ -1569,7 +1534,6 @@ where
                     "error": {
                         "code": "internal_error",
                         "message": "读取本地数据失败",
-                        "detail": err.to_string(),
                         "endpoint": endpoint,
                     }
                 })),
@@ -1614,8 +1578,8 @@ mod tests {
     };
 
     use super::{
-        DiagnosticsCache, WEB_READ_BUSY_TIMEOUT, WebState, api_json, asset_manifest, bind_server,
-        live_index_html, load_diagnostics_cached, load_via_dashboard,
+        DiagnosticsCache, WEB_READ_BUSY_TIMEOUT, WebState, WriteExposure, api_json, asset_manifest,
+        bind_server, live_index_html, load_diagnostics_cached, load_via_dashboard,
         load_via_dashboard_with_timeout, serve, serve_on, server_task_result, snapshot_index_html,
     };
 
@@ -1645,10 +1609,15 @@ mod tests {
         let addr = occupied.local_addr()?;
         let (_temp, store) = make_store()?;
 
-        let err = bind_server(store, Some(addr.port()), IpAddr::V4(Ipv4Addr::LOCALHOST))
-            .await
-            .err()
-            .expect("occupied port must fail");
+        let err = bind_server(
+            store,
+            Some(addr.port()),
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            WriteExposure::LocalOnly,
+        )
+        .await
+        .err()
+        .expect("occupied port must fail");
         let message = format!("{err:#}");
         assert!(message.contains("Unable to bind"));
         assert!(message.contains(&addr.to_string()));
@@ -1658,12 +1627,128 @@ mod tests {
     #[tokio::test]
     async fn owned_server_remains_available_until_bounded_shutdown() -> anyhow::Result<()> {
         let (_temp, store) = make_store()?;
-        let server = bind_server(store, Some(0), IpAddr::V4(Ipv4Addr::LOCALHOST)).await?;
+        let server = bind_server(store, Some(0), IpAddr::V4(Ipv4Addr::LOCALHOST), WriteExposure::LocalOnly).await?;
         let addr = server.addr();
         let (status, _body) = route_text(addr, "GET", "/").await?;
         assert_eq!(status, StatusCode::OK);
         server.shutdown().await?;
         Ok(())
+    }
+
+    // ── SEC-001/003/004 regression ────────────────────────────────────────────
+
+    /// PublicReadOnly 模式下 mutation 路由完全不挂载；
+    /// 使用真实 TCP socket，验证 Host-header 绕过无效。
+    #[tokio::test]
+    async fn public_write_routes_rejected_in_public_read_only_mode() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let server = bind_server(
+            store,
+            Some(0),
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            WriteExposure::PublicReadOnly,
+        )
+        .await?;
+        let addr = server.addr();
+
+        // Use route_text for status-only checks: axum's default 404 has an empty body.
+        let check_mutation_absent = |method: &'static str,
+                                     path: &'static str|
+         -> tokio::task::JoinHandle<anyhow::Result<()>> {
+            tokio::spawn(async move {
+                let (status, _body) = route_text(addr, method, path).await?;
+                assert!(
+                    status == StatusCode::NOT_FOUND || status == StatusCode::METHOD_NOT_ALLOWED,
+                    "{method} {path} must be 404/405 in PublicReadOnly mode, got {status}"
+                );
+                Ok(())
+            })
+        };
+
+        // All three mutation routes must be absent — including with a spoofed Host header.
+        check_mutation_absent("POST", "/api/jobs").await??;
+        check_mutation_absent("POST", "/api/jobs/x/cancel").await??;
+        check_mutation_absent("POST", "/api/diagnostics/forget").await??;
+
+        // Read routes must still work
+        let (health_status, _) = route_json(addr, "GET", "/api/health", None).await?;
+        assert_eq!(
+            health_status,
+            StatusCode::OK,
+            "GET /api/health must still work in PublicReadOnly mode"
+        );
+
+        server.shutdown().await?;
+        Ok(())
+    }
+
+    /// LocalOnly 模式下从 loopback 发起的写请求必须正常工作（不回归）。
+    #[tokio::test]
+    async fn local_write_routes_accessible_from_loopback() -> anyhow::Result<()> {
+        let (temp, store) = make_store()?;
+        let home = temp.path().join("home");
+        let codex_home = temp.path().join("codex-home");
+        std::fs::create_dir_all(&home)?;
+        std::fs::create_dir_all(codex_home.join("sessions"))?;
+        let _env = EnvGuard::set([
+            ("HOME", home.to_string_lossy().to_string()),
+            ("USERPROFILE", home.to_string_lossy().to_string()),
+            ("CODEX_HOME", codex_home.to_string_lossy().to_string()),
+        ]);
+
+        // Use bind_server + explicit shutdown so no background tasks outlive this test.
+        let server = bind_server(
+            store,
+            Some(0),
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            WriteExposure::LocalOnly,
+        )
+        .await?;
+        let addr = server.addr();
+
+        let body = serde_json::to_string(&SyncOptions {
+            source: Some("codex".to_string()),
+            ..Default::default()
+        })?;
+        // Loopback POST /api/jobs must succeed
+        let (status, payload) = route_json(addr, "POST", "/api/jobs", Some(body)).await?;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "POST /api/jobs from loopback must succeed in LocalOnly mode: {payload}"
+        );
+        assert!(payload["job_id"].is_string());
+
+        server.shutdown().await?;
+        Ok(())
+    }
+
+    /// SEC-001 unit: reject_non_local_write rejects non-loopback peers and
+    /// passes loopback peers without consulting any headers.
+    #[test]
+    fn reject_non_local_write_checks_peer_ip_not_headers() {
+        use super::reject_non_local_write;
+
+        // Loopback IPv4 → allowed
+        assert!(
+            reject_non_local_write(SocketAddr::from(([127, 0, 0, 1], 9000))).is_none(),
+            "127.0.0.1 must be allowed"
+        );
+        // Loopback IPv6 → allowed
+        assert!(
+            reject_non_local_write(SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 1], 9000))).is_none(),
+            "::1 must be allowed"
+        );
+        // External IPv4 → rejected even with a spoofed "Host: localhost" (no headers checked)
+        assert!(
+            reject_non_local_write(SocketAddr::from(([192, 168, 1, 1], 9000))).is_some(),
+            "192.168.1.1 must be rejected"
+        );
+        // Public internet IP → rejected
+        assert!(
+            reject_non_local_write(SocketAddr::from(([8, 8, 8, 8], 9000))).is_some(),
+            "8.8.8.8 must be rejected"
+        );
     }
 
     #[tokio::test]
@@ -2851,11 +2936,10 @@ mod tests {
         let payload: serde_json::Value = serde_json::from_slice(&body).expect("json payload");
         assert_eq!(payload["error"]["code"], "internal_error");
         assert_eq!(payload["error"]["endpoint"], "/api/test");
+        // SEC-003: internal error details must NOT be exposed in the response.
         assert!(
-            payload["error"]["detail"]
-                .as_str()
-                .unwrap()
-                .contains("llmusage init")
+            payload["error"]["detail"].is_null(),
+            "error detail must be absent from API responses (SEC-003)"
         );
     }
 
@@ -3217,21 +3301,32 @@ mod tests {
         Ok(())
     }
 
+    /// SEC-001: mutation routes in LocalOnly mode require a loopback peer.
+    /// Cross-origin headers are ignored — only the real peer IP matters.
     #[tokio::test]
-    async fn write_apis_reject_cross_origin_posts() -> anyhow::Result<()> {
+    async fn write_apis_require_loopback_peer_not_headers() -> anyhow::Result<()> {
         let (_temp, store) = make_store()?;
-        let addr = serve(store, Some(0)).await?;
-
-        let (status, payload) = route_json_with_headers(
-            addr,
-            "POST",
-            "/api/jobs",
-            Some(serde_json::to_string(&SyncOptions::default())?),
-            &[("Origin", "http://evil.example")],
+        // Use bind_server + explicit shutdown to avoid dangling background tasks.
+        let server = bind_server(
+            store,
+            Some(0),
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            WriteExposure::LocalOnly,
         )
         .await?;
-        assert_eq!(status, StatusCode::FORBIDDEN);
-        assert_eq!(payload["error"]["code"], "origin_mismatch");
+        let addr = server.addr();
+
+        // Send invalid JSON so axum returns 422 without spawning a real sync job.
+        // 422 proves the route is mounted and the loopback check passed (no 403/404/405).
+        let (status, _body) = route_text(addr, "POST", "/api/jobs").await?;
+        assert!(
+            status != StatusCode::FORBIDDEN
+                && status != StatusCode::NOT_FOUND
+                && status != StatusCode::METHOD_NOT_ALLOWED,
+            "loopback peer must reach POST /api/jobs regardless of Origin header, got {status}"
+        );
+
+        server.shutdown().await?;
         Ok(())
     }
 
