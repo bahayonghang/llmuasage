@@ -1,6 +1,6 @@
 use std::{
     io::IsTerminal,
-    path::PathBuf,
+
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -20,24 +20,9 @@ use crate::{
     store::{BootstrapProgressEvent, HolderKind, SourceSyncStatus, Store},
 };
 
-#[derive(Debug, Clone)]
-pub struct SyncSummary {
-    pub sources: Vec<SourceSyncStats>,
-    pub total_seen: usize,
-    pub total_inserted: usize,
-    pub stored_events: usize,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct SyncRunOptions {
-    pub rebuild: bool,
-    pub source: Option<SourceKind>,
-    pub recent_days: Option<u32>,
-    pub parallelism: Option<usize>,
-    pub provider_map: Option<PathBuf>,
-    pub json_events: bool,
-    pub allow_lossy_rebuild: bool,
-}
+// These types belong to the sync domain layer. Re-exported here so callers that
+// already import `commands::sync` don't need to change.
+pub use crate::sync::types::{SyncRunOptions, SyncSummary};
 
 /// Hard service-side bound on parser concurrency (RES-001).
 ///
@@ -400,6 +385,33 @@ pub async fn run_once_with_cancel(
     cancel: &CancellationToken,
 ) -> Result<SyncSummary> {
     run_once_locked(store, lock_wait_ms, options, sender, cancel).await
+}
+
+/// CLI adapter that implements `SyncExecutor`.
+///
+/// `JobRegistry` receives an `Arc<dyn SyncExecutor>` rather than calling this
+/// function directly, so the application layer no longer needs to import the
+/// CLI adapter module (ARCH-002).
+pub struct CommandSyncExecutor;
+
+impl crate::sync::executor::SyncExecutor for CommandSyncExecutor {
+    fn run_once<'a>(
+        &'a self,
+        _app: &'a AppContext,
+        store: &'a Store,
+        lock_wait_ms: u64,
+        options: &'a SyncRunOptions,
+        sender: Option<&'a mut mpsc::Sender<SyncEvent>>,
+        cancel: &'a CancellationToken,
+    ) -> crate::sync::executor::BoxFuture<'a, anyhow::Result<SyncSummary>> {
+        Box::pin(run_once_locked(
+            store,
+            lock_wait_ms,
+            options,
+            sender,
+            cancel,
+        ))
+    }
 }
 
 async fn run_once_locked(

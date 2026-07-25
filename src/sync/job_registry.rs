@@ -13,9 +13,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     app::AppContext,
-    commands::sync::{SyncRunOptions, SyncSummary},
     parsers::{SyncEvent, SyncSummaryEvent},
     store::{HolderKind, Store},
+    sync::types::{SyncRunOptions, SyncSummary},
 };
 
 /// In-process identifier for one usage import job.
@@ -76,13 +76,46 @@ struct JobState {
 const MAX_TERMINAL_JOBS: usize = 100;
 
 /// In-memory bridge from future sync progress push events to pollable snapshots.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone)]
 pub struct JobRegistry {
     inner: Arc<DashMap<JobId, Arc<Mutex<JobState>>>>,
     admission: Arc<Mutex<()>>,
     terminal_hooks: TerminalHooks,
     /// Insertion-ordered deque of terminal job ids, capped at `MAX_TERMINAL_JOBS`.
     terminal_order: Arc<Mutex<VecDeque<JobId>>>,
+    /// Executes the actual sync work. Injected by the adapter layer (CLI/web)
+    /// so this module does not import `commands::sync` (ARCH-002).
+    executor: Arc<dyn crate::sync::executor::SyncExecutor>,
+}
+
+impl fmt::Debug for JobRegistry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("JobRegistry")
+            .field("jobs", &self.inner.len())
+            .finish()
+    }
+}
+
+impl Default for JobRegistry {
+    fn default() -> Self {
+        Self::new(Arc::new(crate::commands::sync::CommandSyncExecutor))
+    }
+}
+
+impl JobRegistry {
+    /// Creates a `JobRegistry` with a caller-provided executor.
+    ///
+    /// Use [`Default::default`] in production (injects `CommandSyncExecutor`);
+    /// pass a stub in tests.
+    pub fn new(executor: Arc<dyn crate::sync::executor::SyncExecutor>) -> Self {
+        Self {
+            inner: Arc::default(),
+            admission: Arc::default(),
+            terminal_hooks: TerminalHooks::default(),
+            terminal_order: Arc::default(),
+            executor,
+        }
+    }
 }
 
 /// Callback list fired once after a job reaches a terminal state.
@@ -218,13 +251,14 @@ impl JobRegistry {
         let store = store.clone();
         let options = options.clone();
         let job_id_for_task = job_id.clone();
-        let tracker = TerminalTracker {
+        let ctx = JobContext {
             hooks: self.terminal_hooks.clone(),
             jobs: Arc::clone(&self.inner),
             order: Arc::clone(&self.terminal_order),
+            executor: Arc::clone(&self.executor),
         };
         tokio::spawn(async move {
-            run_job(job_id_for_task, store, options, cancel, tx, state, tracker).await;
+            run_job(job_id_for_task, store, options, cancel, tx, state, ctx).await;
         });
         (job_id, rx)
     }
@@ -310,16 +344,16 @@ impl JobRegistry {
     }
 }
 
-/// Registry-side handles a running job needs to retire itself: fire terminal
-/// hooks and keep the terminal-job set bounded.
+/// Per-job context: retirement handles and the executor that does the sync work.
 #[derive(Clone)]
-struct TerminalTracker {
+struct JobContext {
     hooks: TerminalHooks,
     jobs: Arc<DashMap<JobId, Arc<Mutex<JobState>>>>,
     order: Arc<Mutex<VecDeque<JobId>>>,
+    executor: Arc<dyn crate::sync::executor::SyncExecutor>,
 }
 
-impl TerminalTracker {
+impl JobContext {
     /// Fires terminal hooks, then evicts the oldest terminal jobs beyond
     /// [`MAX_TERMINAL_JOBS`].
     fn retire(&self, job_id: &JobId) {
@@ -335,7 +369,7 @@ async fn run_job(
     cancel: CancellationToken,
     outbound: mpsc::Sender<JobEvent>,
     state: Arc<Mutex<JobState>>,
-    tracker: TerminalTracker,
+    ctx: JobContext,
 ) {
     let sync_options = SyncRunOptions {
         rebuild: options.rebuild,
@@ -381,15 +415,16 @@ async fn run_job(
                     wait_ms: lock_wait_ms,
                 })
                 .await;
-            let result = crate::commands::sync::run_once_with_cancel(
-                &app,
-                &store,
-                lock_wait_ms,
-                &sync_options,
-                Some(&mut internal_tx),
-                &cancel,
-            )
-            .await;
+            let result = ctx.executor
+                .run_once(
+                    &app,
+                    &store,
+                    lock_wait_ms,
+                    &sync_options,
+                    Some(&mut internal_tx),
+                    &cancel,
+                )
+                .await;
             drop(heartbeat);
             drop(lock);
             result
@@ -402,7 +437,7 @@ async fn run_job(
                 Some("cancellation requested".to_string()),
                 None,
             );
-            tracker.retire(&job_id);
+            ctx.retire(&job_id);
             drop(internal_tx);
             let _ = event_forwarder.await;
             return;
@@ -446,7 +481,7 @@ async fn run_job(
             finish_state(&state, JobStatus::Failed, None, Some(message));
         }
     }
-    tracker.retire(&job_id);
+    ctx.retire(&job_id);
     drop(internal_tx);
     let _ = event_forwarder.await;
 }
