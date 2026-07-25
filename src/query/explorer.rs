@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use rusqlite::{Connection, params_from_iter, types::Value};
+use rusqlite::{params_from_iter, types::Value, Connection};
 use serde::Serialize;
 
-use super::{Dashboard, QueryFilter, filter::SqlFilter};
+use super::{filter::SqlFilter, Dashboard, QueryFilter};
 use crate::error::Result;
 
 const DEFAULT_LIMIT: usize = 8;
@@ -287,13 +287,15 @@ pub(super) fn load(dashboard: &Dashboard, query: &ExplorerQuery) -> Result<Explo
         ));
     }
 
-    let all_rows = match strategy {
-        ExplorerStrategy::Bucket => load_bucket_rows(&dashboard.conn, &query)?,
-        ExplorerStrategy::Event => load_event_rows(&dashboard.conn, &query)?,
-        ExplorerStrategy::Turn => load_turn_rows(&dashboard.conn, &query, &scope)?,
-        ExplorerStrategy::Attribution => load_attribution_rows(&dashboard.conn, &query, &scope)?,
+    let (all_rows, grand_total) = match strategy {
+        ExplorerStrategy::Bucket => load_bucket_rows(&dashboard.conn, &query, query.limit)?,
+        ExplorerStrategy::Event => load_event_rows(&dashboard.conn, &query, query.limit)?,
+        ExplorerStrategy::Turn => load_turn_rows(&dashboard.conn, &query, &scope, query.limit)?,
+        ExplorerStrategy::Attribution => {
+            load_attribution_rows(&dashboard.conn, &query, &scope, query.limit)?
+        }
     };
-    let total = all_rows.iter().map(|row| row.value).sum::<f64>();
+    let total = grand_total;
     let selected = select_rows(&all_rows, query.limit, query.include_other, total);
     let series = if matches!(query.granularity, ExplorerGranularity::Total) {
         Vec::new()
@@ -550,15 +552,21 @@ fn capability_sources(conn: &Connection, table: &str) -> Result<BTreeSet<String>
         .collect())
 }
 
-fn load_event_rows(conn: &Connection, query: &ExplorerQuery) -> Result<Vec<GroupValue>> {
+fn load_event_rows(
+    conn: &Connection,
+    query: &ExplorerQuery,
+    top_n: usize,
+) -> Result<(Vec<GroupValue>, f64)> {
     if query.group_by == ExplorerDimension::TokenType {
-        return load_event_token_type_rows(conn, query);
+        let rows = load_event_token_type_rows(conn, query)?;
+        let total = rows.iter().map(|r| r.value).sum::<f64>();
+        return Ok((rows, total));
     }
     let spec = event_group_spec(query.group_by);
     let mut filter = query.filter.event_filter(Some("e"));
     apply_session_filter(&mut filter, Some("e"), query.filters.session_id.as_deref());
     let value_expr = event_metric_expr(query.metric, query.filters.token_type);
-    let sql = format!(
+    let grouped_sql = format!(
         r#"
         SELECT
             {key_expr} AS group_key,
@@ -574,14 +582,21 @@ fn load_event_rows(conn: &Connection, query: &ExplorerQuery) -> Result<Vec<Group
         value_expr = value_expr,
         where_sql = filter.where_sql()
     );
-    query_group_values(conn, &sql, &filter)
+    let grand_total = query_group_grand_total(conn, &grouped_sql, &filter)?;
+    let limited_sql = format!("{grouped_sql} LIMIT {top_n}");
+    let rows = query_group_values(conn, &limited_sql, &filter)?;
+    Ok((rows, grand_total))
 }
 
-fn load_bucket_rows(conn: &Connection, query: &ExplorerQuery) -> Result<Vec<GroupValue>> {
+fn load_bucket_rows(
+    conn: &Connection,
+    query: &ExplorerQuery,
+    top_n: usize,
+) -> Result<(Vec<GroupValue>, f64)> {
     let spec = bucket_group_spec(query.group_by);
     let filter = query.filter.bucket_filter(Some("b"));
     let value_expr = bucket_metric_expr(query.metric);
-    let sql = format!(
+    let grouped_sql = format!(
         r#"
         SELECT
             {key_expr} AS group_key,
@@ -597,7 +612,10 @@ fn load_bucket_rows(conn: &Connection, query: &ExplorerQuery) -> Result<Vec<Grou
         value_expr = value_expr,
         where_sql = filter.where_sql()
     );
-    query_group_values(conn, &sql, &filter)
+    let grand_total = query_group_grand_total(conn, &grouped_sql, &filter)?;
+    let limited_sql = format!("{grouped_sql} LIMIT {top_n}");
+    let rows = query_group_values(conn, &limited_sql, &filter)?;
+    Ok((rows, grand_total))
 }
 
 fn load_bucket_series(conn: &Connection, query: &ExplorerQuery) -> Result<Vec<SeriesValue>> {
@@ -668,13 +686,14 @@ fn load_turn_rows(
     conn: &Connection,
     query: &ExplorerQuery,
     scope: &CapabilityScope,
-) -> Result<Vec<GroupValue>> {
+    top_n: usize,
+) -> Result<(Vec<GroupValue>, f64)> {
     let spec = turn_group_spec(query.group_by);
     let mut filter = query.filter.turn_filter(Some("t"));
     apply_session_filter(&mut filter, Some("t"), query.filters.session_id.as_deref());
     apply_source_scope(&mut filter, Some("t"), scope.allowed_sources.as_deref());
     let value_expr = turn_metric_expr(query.metric, query.filters.token_type);
-    let sql = format!(
+    let grouped_sql = format!(
         r#"
         SELECT
             {key_expr} AS group_key,
@@ -691,7 +710,10 @@ fn load_turn_rows(
         value_expr = value_expr,
         where_sql = filter.where_sql()
     );
-    query_group_values(conn, &sql, &filter)
+    let grand_total = query_group_grand_total(conn, &grouped_sql, &filter)?;
+    let limited_sql = format!("{grouped_sql} LIMIT {top_n}");
+    let rows = query_group_values(conn, &limited_sql, &filter)?;
+    Ok((rows, grand_total))
 }
 
 fn load_turn_series(
@@ -735,9 +757,12 @@ fn load_attribution_rows(
     conn: &Connection,
     query: &ExplorerQuery,
     scope: &CapabilityScope,
-) -> Result<Vec<GroupValue>> {
+    top_n: usize,
+) -> Result<(Vec<GroupValue>, f64)> {
     if query.group_by == ExplorerDimension::TokenType {
-        return load_attribution_token_type_rows(conn, query, scope);
+        let rows = load_attribution_token_type_rows(conn, query, scope)?;
+        let total = rows.iter().map(|r| r.value).sum::<f64>();
+        return Ok((rows, total));
     }
 
     let spec = attribution_group_spec(query.group_by);
@@ -762,7 +787,14 @@ fn load_attribution_rows(
             extra_where = attribution_extra_where(query)
         ),
     )?;
-    query_group_values_with_params(conn, &base_sql, params)
+    // Compute grand total via a wrapping SUM, then fetch limited rows.
+    let total_sql = format!("SELECT COALESCE(SUM(metric_value), 0.0) FROM ({base_sql}) AS _g");
+    let grand_total: f64 = conn.query_row(&total_sql, params_from_iter(params.iter()), |row| {
+        row.get(0)
+    })?;
+    let limited_sql = format!("{base_sql} LIMIT {top_n}");
+    let rows = query_group_values_with_params(conn, &limited_sql, params)?;
+    Ok((rows, grand_total))
 }
 
 fn load_attribution_series(
@@ -1358,6 +1390,25 @@ fn query_group_values(conn: &Connection, sql: &str, filter: &SqlFilter) -> Resul
     query_group_values_with_params(conn, sql, filter.params().to_vec())
 }
 
+/// Returns the grand total of `metric_value` across all groups in `grouped_sql`.
+///
+/// `grouped_sql` must be a SELECT that produces a `metric_value` column (as
+/// returned by `load_*_rows` helpers). The result is used by `load()` to
+/// compute the correct "Other" bucket value after SQL-side Top-N truncation
+/// (PERF-001).
+fn query_group_grand_total(
+    conn: &Connection,
+    grouped_sql: &str,
+    filter: &SqlFilter,
+) -> Result<f64> {
+    let total_sql = format!("SELECT COALESCE(SUM(metric_value), 0.0) FROM ({grouped_sql}) AS _g");
+    let params = filter.params().to_vec();
+    conn.query_row(&total_sql, params_from_iter(params.iter()), |row| {
+        row.get::<_, f64>(0)
+    })
+    .map_err(Into::into)
+}
+
 fn query_group_values_with_params(
     conn: &Connection,
     sql: &str,
@@ -1421,12 +1472,11 @@ fn select_rows(
         })
         .collect::<Vec<_>>();
 
-    if include_other && all_rows.len() > limit {
-        let other_value = all_rows
-            .iter()
-            .skip(limit)
-            .map(|row| row.value)
-            .sum::<f64>();
+    // `all_rows` is already limited to `limit` rows by the SQL layer (PERF-001).
+    // Use the pre-computed grand total to derive "Other" = total - sum(top_N).
+    if include_other {
+        let top_sum: f64 = head.iter().map(|row| row.value).sum();
+        let other_value = (total - top_sum).max(0.0);
         if other_value > 0.0 {
             rows.push(ExplorerRow {
                 key: OTHER_KEY.to_string(),
@@ -1553,9 +1603,9 @@ mod tests {
     use rusqlite::Connection;
 
     use super::{
+        choose_strategy, load_bucket_rows, load_bucket_series, load_event_rows, load_event_series,
         Dashboard, ExplorerDimension, ExplorerFilters, ExplorerGranularity, ExplorerMetric,
-        ExplorerQuery, ExplorerStrategy, ExplorerTokenType, choose_strategy, load_bucket_rows,
-        load_bucket_series, load_event_rows, load_event_series,
+        ExplorerQuery, ExplorerStrategy, ExplorerTokenType,
     };
     use crate::{
         error::Result,
@@ -1721,8 +1771,8 @@ mod tests {
                 };
 
                 assert_eq!(choose_strategy(&query), ExplorerStrategy::Bucket);
-                let bucket_rows = load_bucket_rows(&dashboard.conn, &query)?;
-                let event_rows = load_event_rows(&dashboard.conn, &query)?;
+                let (bucket_rows, _) = load_bucket_rows(&dashboard.conn, &query, query.limit)?;
+                let (event_rows, _) = load_event_rows(&dashboard.conn, &query, query.limit)?;
                 assert_eq!(bucket_rows.len(), event_rows.len());
                 for (bucket, event) in bucket_rows.iter().zip(&event_rows) {
                     assert_eq!((&bucket.key, &bucket.label), (&event.key, &event.label));
@@ -2008,13 +2058,11 @@ mod tests {
 
         assert!(payload.support.supported);
         assert_eq!(payload.support.level, "degraded");
-        assert!(
-            payload
-                .support
-                .reason
-                .as_deref()
-                .is_some_and(|reason| reason.contains("claude"))
-        );
+        assert!(payload
+            .support
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("claude")));
         assert_eq!(payload.rows.len(), 1);
         assert_eq!(payload.rows[0].key, "codex");
         assert_eq!(payload.rows[0].value, 1.0);

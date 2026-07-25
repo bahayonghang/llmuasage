@@ -1090,8 +1090,12 @@ where
             return dashboard_join_result(task.await);
         }
         Err(_) => {
+            // PERF-002: interrupt the blocking task then return immediately.
+            // The task holds its own permit and will release it once SQLite
+            // responds to the interrupt — we must not await it here or the
+            // configured timeout becomes the minimum latency, not the maximum.
             guard.interrupt();
-            let _ = task.await;
+            drop(task); // detach; task cleans up in the background
             guard.disarm();
             debug!(
                 section,
@@ -1107,7 +1111,7 @@ where
 
     let Some(query_remaining) = timeout.checked_sub(started.elapsed()) else {
         guard.interrupt();
-        let _ = task.await;
+        drop(task); // detach — see PERF-002 comment above
         guard.disarm();
         return Err(dashboard_timeout_error(timeout));
     };
@@ -1118,7 +1122,7 @@ where
         }
         Err(_) => {
             guard.interrupt();
-            let _ = task.await;
+            drop(task); // detach — see PERF-002 comment above
             guard.disarm();
             Err(dashboard_timeout_error(timeout))
         }
