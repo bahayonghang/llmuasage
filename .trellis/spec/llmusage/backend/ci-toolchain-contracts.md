@@ -68,3 +68,69 @@ run: cargo check --locked --all-features
 
 `Cargo.toml` must declare the same `1.95`, and `1.95` must be established by
 running the command rather than inferred from direct dependency metadata.
+
+## Scenario: AST-Enforced Layer Dependencies
+
+### 1. Scope / Trigger
+
+- Trigger: adding or changing a forbidden Rust dependency direction between
+  application/domain layers and outer adapters.
+- ARCH-002 currently forbids every `src/sync/** -> crate::commands/**`
+  dependency, including aliases and relative paths.
+
+### 2. Signatures
+
+- Local and Actions gate:
+  `cargo test --locked --all-features --test architecture_dependencies`
+- Violation output: `<source-file>:<line> depends on forbidden target <path>`.
+
+### 3. Contracts
+
+- Parse every Rust file in the protected layer with `syn`; do not enforce the
+  boundary with a grep for one spelling.
+- Resolve `crate`, `self`, `super`, `use crate as <alias>`, and
+  `extern crate self as <alias>` paths before comparing the dependency target.
+- Concrete executors belong to outer adapters or composition roots. The sync
+  layer owns only the stable executor trait and typed request/result contracts.
+- Parser dependencies used only by the architecture test remain
+  `dev-dependencies`.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Protected file parses and resolves to `crate::commands/**` | Fail with file, line, and resolved target |
+| Protected file cannot be parsed or read | Fail the architecture test; never silently skip it |
+| Alias or relative path resolves to the forbidden layer | Fail exactly like a fully qualified path |
+| Dependency resolves outside the forbidden layer | Pass without a violation |
+
+### 5. Good / Base / Bad Cases
+
+- Good: Web/TUI composition roots inject `CommandSyncExecutor` into
+  `JobRegistry::new`, while `src/sync` imports only the executor port.
+- Base: a legitimate `crate::sync/**` dependency passes the fixture gate.
+- Bad: `grep -r "use crate::commands" src/sync` passes while a fully qualified,
+  aliased, or `super` path still reaches `commands`.
+
+### 6. Tests Required
+
+- Violation fixtures for `use`, fully qualified paths, imported aliases,
+  nested modules, crate-root aliases, and relative `self`/`super` paths.
+- One valid dependency-graph fixture that produces no violation.
+- A live scan of `src/sync` asserting the violation list is empty.
+- Every violation fixture must assert the resolved target and a nonzero source
+  line; the live gate must print all violations, not only the first.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```yaml
+run: grep -r "use crate::commands" src/sync/
+```
+
+#### Correct
+
+```yaml
+run: cargo test --locked --all-features --test architecture_dependencies
+```

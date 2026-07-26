@@ -130,14 +130,8 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@b3b07f5b19b9a3af61f1fe79b6a83a40fdc6c39c
 
-      - name: ARCH-002 — sync layer must not import commands
-        shell: bash
-        run: |
-          if grep -r "use crate::commands" src/sync/; then
-            echo "ARCH-002 violation: src/sync/ imports commands layer"
-            exit 1
-          fi
-          echo "ARCH-002 ok: sync layer does not import commands"
+      - name: ARCH-002 — sync layer must not depend on commands
+        run: cargo test --locked --all-features --test architecture_dependencies
 
       - name: Module size report (MAINT-001 tracking)
         # Reports oversized files; does not hard-fail until splits are complete.

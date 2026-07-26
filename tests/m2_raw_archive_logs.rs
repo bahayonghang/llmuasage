@@ -6,6 +6,7 @@ use std::{
     io::Write,
     path::PathBuf,
     pin::Pin,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -645,7 +646,7 @@ fn reset_usage_data_clears_behavior_facts() -> Result<()> {
 async fn start_run_complete_lifecycle_observable_via_snapshot() -> Result<()> {
     let _env = SourceEnvFixture::new()?;
     let (_tmp, store) = make_store()?;
-    let registry = JobRegistry::default();
+    let registry = JobRegistry::new(Arc::new(llmusage::commands::sync::CommandSyncExecutor));
     let (job_id, mut rx) = registry.start(
         &store,
         SyncOptions {
@@ -681,7 +682,7 @@ async fn cancel_within_1500ms() -> Result<()> {
     let (_tmp, store) = make_store()?;
     let blocker = store
         .acquire_worker_lock_with(Duration::from_secs(0), llmusage::store::HolderKind::Library)?;
-    let registry = JobRegistry::default();
+    let registry = JobRegistry::new(Arc::new(llmusage::commands::sync::CommandSyncExecutor));
     let (job_id, mut rx) = registry.start(
         &store,
         SyncOptions {

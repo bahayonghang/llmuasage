@@ -98,17 +98,8 @@ impl fmt::Debug for JobRegistry {
     }
 }
 
-impl Default for JobRegistry {
-    fn default() -> Self {
-        Self::new(Arc::new(crate::commands::sync::CommandSyncExecutor))
-    }
-}
-
 impl JobRegistry {
     /// Creates a `JobRegistry` with a caller-provided executor.
-    ///
-    /// Use [`Default::default`] in production (injects `CommandSyncExecutor`);
-    /// pass a stub in tests.
     pub fn new(executor: Arc<dyn crate::sync::executor::SyncExecutor>) -> Self {
         Self {
             inner: Arc::default(),
@@ -589,9 +580,37 @@ mod tests {
 
     struct FencedAssertionExecutor;
 
+    struct IdleExecutor;
+
     struct DrainAwareExecutor {
         worker_started: Arc<AtomicBool>,
         worker_drained: Arc<AtomicBool>,
+    }
+
+    impl crate::sync::executor::SyncExecutor for IdleExecutor {
+        fn run_once<'a>(
+            &'a self,
+            _app: &'a AppContext,
+            _store: &'a Store,
+            _lock_wait_ms: u64,
+            _options: &'a SyncRunOptions,
+            _sender: Option<&'a mut mpsc::Sender<SyncEvent>>,
+            cancel: &'a CancellationToken,
+        ) -> crate::sync::executor::BoxFuture<'a, anyhow::Result<SyncSummary>> {
+            Box::pin(async move {
+                cancel.cancelled().await;
+                Ok(SyncSummary {
+                    sources: Vec::new(),
+                    total_seen: 0,
+                    total_inserted: 0,
+                    stored_events: 0,
+                })
+            })
+        }
+    }
+
+    fn idle_registry() -> JobRegistry {
+        JobRegistry::new(Arc::new(IdleExecutor))
     }
 
     impl crate::sync::executor::SyncExecutor for DrainAwareExecutor {
@@ -714,7 +733,7 @@ mod tests {
         let temp = TempDir::new()?;
         let paths = AppPaths::with_root(temp.path().to_path_buf())?;
         let store = Store::new(&paths)?;
-        let registry = JobRegistry::default();
+        let registry = idle_registry();
 
         let (job_id, rx) = registry.start(&store, SyncOptions::default());
         let snapshot = registry
@@ -735,7 +754,7 @@ mod tests {
         store.bootstrap()?;
         let blocker =
             store.acquire_worker_lock_with(Duration::from_secs(0), HolderKind::Library)?;
-        let registry = JobRegistry::default();
+        let registry = idle_registry();
 
         let (active_job_id, mut active_rx) = registry.try_start(
             &store,
@@ -808,7 +827,7 @@ mod tests {
         store.bootstrap()?;
         let blocker =
             store.acquire_worker_lock_with(Duration::from_secs(0), HolderKind::Library)?;
-        let registry = JobRegistry::default();
+        let registry = idle_registry();
 
         let (job_id, mut rx) = registry.try_start(
             &store,
@@ -869,7 +888,7 @@ mod tests {
         let temp = TempDir::new()?;
         let paths = AppPaths::with_root(temp.path().to_path_buf())?;
         let store = Store::new(&paths)?;
-        let registry = JobRegistry::default();
+        let registry = idle_registry();
         let cases = [
             (
                 SyncOptions {
@@ -946,7 +965,7 @@ mod tests {
 
     #[test]
     fn rejected_jobs_are_bounded_at_max_terminal_jobs() {
-        let registry = JobRegistry::default();
+        let registry = idle_registry();
         // inject MAX_TERMINAL_JOBS + 50 rejected snapshots directly
         let total = MAX_TERMINAL_JOBS + 50;
         let mut ids = Vec::with_capacity(total);

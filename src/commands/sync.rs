@@ -410,6 +410,15 @@ pub async fn run_once_with_cancel(
 /// CLI adapter module (ARCH-002).
 pub struct CommandSyncExecutor;
 
+// Keep the existing public convenience constructor owned by the adapter layer.
+// Composition roots inject explicitly; the sync/application layer remains
+// independent of this concrete executor.
+impl Default for crate::sync::JobRegistry {
+    fn default() -> Self {
+        Self::new(Arc::new(CommandSyncExecutor))
+    }
+}
+
 impl crate::sync::executor::SyncExecutor for CommandSyncExecutor {
     fn run_once<'a>(
         &'a self,

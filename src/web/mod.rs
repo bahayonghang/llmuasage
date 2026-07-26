@@ -175,7 +175,11 @@ pub struct WebState {
 
 impl WebState {
     pub fn new(store: Store) -> Self {
-        Self::with_jobs_and_query_limit(store, JobRegistry::default(), WEB_DASHBOARD_QUERY_PERMITS)
+        Self::with_jobs_and_query_limit(
+            store,
+            JobRegistry::new(Arc::new(crate::commands::sync::CommandSyncExecutor)),
+            WEB_DASHBOARD_QUERY_PERMITS,
+        )
     }
 
     fn with_jobs_and_query_limit(store: Store, jobs: JobRegistry, permits: usize) -> Self {
@@ -1871,12 +1875,16 @@ mod tests {
 
     use crate::{
         AppPaths, LlmusageError,
+        app::AppContext,
         models::SourceKind,
+        parsers::SyncEvent,
         query::{diagnostics_stat_calls, reset_diagnostics_stat_counter},
         store::Store,
-        sync::{JobRegistry, JobStatus, SyncOptions},
+        sync::{JobRegistry, JobStatus, SyncExecutor, SyncOptions, SyncRunOptions, SyncSummary},
         testing::Fixture,
     };
+    use tokio::sync::mpsc;
+    use tokio_util::sync::CancellationToken;
 
     use super::{
         DiagnosticsCache, LOOPBACK_ONLY_READ_ROUTE_INVENTORY, PUBLIC_READ_ROUTE_INVENTORY,
@@ -1892,6 +1900,33 @@ mod tests {
         let store = Store::new(&paths)?;
         store.bootstrap()?;
         Ok((temp, store))
+    }
+
+    struct ImmediateExecutor;
+
+    impl SyncExecutor for ImmediateExecutor {
+        fn run_once<'a>(
+            &'a self,
+            _app: &'a AppContext,
+            _store: &'a Store,
+            _lock_wait_ms: u64,
+            _options: &'a SyncRunOptions,
+            _sender: Option<&'a mut mpsc::Sender<SyncEvent>>,
+            _cancel: &'a CancellationToken,
+        ) -> crate::sync::executor::BoxFuture<'a, anyhow::Result<SyncSummary>> {
+            Box::pin(async {
+                Ok(SyncSummary {
+                    sources: Vec::new(),
+                    total_seen: 0,
+                    total_inserted: 0,
+                    stored_events: 0,
+                })
+            })
+        }
+    }
+
+    fn test_job_registry() -> JobRegistry {
+        JobRegistry::new(Arc::new(ImmediateExecutor))
     }
 
     #[tokio::test]
@@ -3439,7 +3474,7 @@ mod tests {
     #[tokio::test]
     async fn dashboard_queries_hold_semaphore_around_blocking_work() -> anyhow::Result<()> {
         let (_temp, store) = make_store()?;
-        let state = WebState::with_jobs_and_query_limit(store, Default::default(), 1);
+        let state = WebState::with_jobs_and_query_limit(store, test_job_registry(), 1);
         let active = Arc::new(AtomicUsize::new(0));
         let max_active = Arc::new(AtomicUsize::new(0));
 
@@ -3485,7 +3520,7 @@ mod tests {
     #[tokio::test]
     async fn dashboard_timeout_interrupts_sqlite_and_releases_permit() -> anyhow::Result<()> {
         let (_temp, store) = make_store()?;
-        let state = WebState::with_jobs_and_query_limit(store, Default::default(), 1);
+        let state = WebState::with_jobs_and_query_limit(store, test_job_registry(), 1);
         let started = Instant::now();
         let error = load_via_dashboard_with_timeout(
             state.clone(),
@@ -3540,7 +3575,7 @@ mod tests {
             [],
         )?;
 
-        let state = WebState::with_jobs_and_query_limit(store.clone(), Default::default(), 4);
+        let state = WebState::with_jobs_and_query_limit(store.clone(), test_job_registry(), 4);
         let started = Instant::now();
         let result = load_via_dashboard(state, "overview", |dashboard| {
             dashboard.overview(&Default::default()).map(|_| ())
@@ -3567,7 +3602,7 @@ mod tests {
         fixture.seed_stress_dashboard(200, 1, 2)?;
         let state = WebState::with_diagnostics_cache_ttl(
             fixture.store().clone(),
-            JobRegistry::default(),
+            test_job_registry(),
             4,
             Duration::from_millis(60),
         );
@@ -3629,7 +3664,7 @@ mod tests {
         fixture.seed_stress_dashboard(2, 0, 0)?;
         let state = WebState::with_diagnostics_cache_ttl(
             fixture.store().clone(),
-            JobRegistry::default(),
+            test_job_registry(),
             4,
             Duration::from_millis(60),
         );
@@ -3671,7 +3706,7 @@ mod tests {
     async fn diagnostics_cache_invalidates_when_sync_job_finishes() -> anyhow::Result<()> {
         let fixture = Fixture::new()?;
         fixture.seed_stress_dashboard(50, 0, 1)?;
-        let jobs = JobRegistry::default();
+        let jobs = test_job_registry();
         let state = WebState::with_diagnostics_cache_ttl(
             fixture.store().clone(),
             jobs.clone(),
@@ -3735,7 +3770,7 @@ mod tests {
         fixture.seed_stress_dashboard(2_000, 0, 1)?;
         let state = WebState::with_diagnostics_cache_ttl(
             fixture.store().clone(),
-            JobRegistry::default(),
+            test_job_registry(),
             4,
             Duration::from_secs(60),
         );
