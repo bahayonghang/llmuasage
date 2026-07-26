@@ -1217,3 +1217,37 @@ Public listener 改用最小读路由与脱敏聚合 DTO，并忽略 project sel
 ### Next Steps
 
 - 继续 07-26-runtime-log-bounds。
+
+
+## Session 38: 完成运行期日志有界化与丢弃观测
+
+**Date**: 2026-07-27
+**Task**: 完成运行期日志有界化与丢弃观测
+**Branch**: `dev`
+
+### Summary
+
+实现进程内日志分片轮转、持续 retention、丢弃与维护计数，以及跨分片有界 tail。
+
+### Main Changes
+
+- 新增 10 MiB 分片、30 MiB/7 文件/7 天保留策略，保持 NDJSON 记录完整并处理 Windows 占用重试。
+- 向 logs、diagnostics 与 doctor 暴露 retained、dropped 和 maintenance 状态，并同步双语文档与 backend spec。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7db9b56457f1aa9b025cc83926bdf86b311fb8e4` | (see git log) |
+
+### Testing
+
+- [OK] logging 15/15；report_commands 22/22；M2 NDJSON 1/1；CI=1 python scripts/ci-rust.py；CI=1 just ci。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 推进 07-26-arch-dependency-enforcement。
