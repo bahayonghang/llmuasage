@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 38
+- **Total Sessions**: 39
 - **Last Active**: 2026-07-27
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1253 | Active |
+| `journal-1.md` | ~1289 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 39 | 2026-07-27 | 完成 ARCH-002 依赖边界强制执行 | `0f085ef8e78330214688cc9e2c01b82197b2d766` | `dev` |
 | 38 | 2026-07-27 | 完成运行期日志有界化与丢弃观测 | `7db9b56457f1aa9b025cc83926bdf86b311fb8e4` | `dev` |
 | 37 | 2026-07-26 | 完成 public 只读安全边界闭环 | `6206f5cec193ff15929edcc79a9ee1e40ae828ef` | `dev` |
 | 36 | 2026-07-26 | 完成不可变 self-update 闭环 | `719845d773474b5ce8af08a7a7245548209afb0a` | `dev` |

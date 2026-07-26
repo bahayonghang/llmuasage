@@ -1251,3 +1251,39 @@ Public listener 改用最小读路由与脱敏聚合 DTO，并忽略 project sel
 ### Next Steps
 
 - 推进 07-26-arch-dependency-enforcement。
+
+
+## Session 39: 完成 ARCH-002 依赖边界强制执行
+
+**Date**: 2026-07-27
+**Task**: 完成 ARCH-002 依赖边界强制执行
+**Branch**: `dev`
+
+### Summary
+
+移除 sync 层对 commands adapter 的反向构造依赖，并以可解析别名和相对路径的 Rust AST gate 替换脆弱 grep。
+
+### Main Changes
+
+- Web 与 TUI composition root 显式注入 CommandSyncExecutor，同时保留 commands 层拥有的兼容 Default 实现。
+- 新增 architecture_dependencies 测试与六类违规 fixtures，并将 GitHub Actions ARCH-002 gate 接入该测试。
+- 补充 CI code-spec，记录 AST 依赖边界契约。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0f085ef8e78330214688cc9e2c01b82197b2d766` | (see git log) |
+
+### Testing
+
+- [OK] architecture 2/2；JobRegistry 8/8；M2 15/15；Rust 1.95 MSRV 通过。
+- [OK] CI=1 python scripts/ci-rust.py 与 CI=1 just ci 通过。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 复核父任务 R1-R9，运行最终集成门并完成父任务归档与 journal。
