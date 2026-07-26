@@ -1149,3 +1149,37 @@ Claude/Codex 以 planned replay 文件数显示 5Hz 解析进度，TTY 显示提
 ### Status
 
 [OK] **Completed**
+
+
+## Session 36: 完成不可变 self-update 闭环
+
+**Date**: 2026-07-26
+**Task**: 完成不可变 self-update 闭环
+**Branch**: `dev`
+
+### Summary
+
+稳定渠道解析最高规范 release tag 并锁定不可变 commit；确认后重验目标，dev 保留可变分支警告。
+
+### Main Changes
+
+- stable 安装改用已展示的 --rev commit，拒绝移动、冲突或无效 refs
+- 同步 self-update contract、README 与中英文安装指南
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `719845d773474b5ce8af08a7a7245548209afb0a` | (see git log) |
+
+### Testing
+
+- [OK] 14 个 update focused tests、task.py validate、python scripts/ci-rust.py、just ci、git diff --check 全部通过
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 继续 07-26-public-read-security-boundary
