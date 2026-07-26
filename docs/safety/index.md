@@ -101,7 +101,11 @@ Activation writes SHA-256-addressed files under `~/.llmusage/pricing/`, recomput
 
 ## Browser dashboard boundary
 
-`llmusage serve` binds to `127.0.0.1` by default and exposes local HTTP endpoints only while the process is running. `llmusage serve --public` explicitly binds `0.0.0.0`, exposing the dashboard and JSON API without authentication or TLS. Do not expose that port directly to an untrusted network; restrict it with a firewall, SSH tunnel, or authenticated reverse proxy.
+`llmusage serve` binds to `127.0.0.1` by default. Its loopback router contains the full local dashboard, including projects, logs, diagnostics, integration/cursor health, job reads, behavior analytics, Cost Explorer, and guarded write routes.
+
+`llmusage serve --public` explicitly binds `0.0.0.0` and selects a separate read-only router. Only the browser shell/assets, a field-allowlisted aggregate `/api/dashboard` projection, and a fixed minimal `/api/health` response are mounted. Raw logs, diagnostics, local path/project fields, internal errors, job state, and all mutation routes are absent rather than protected by `Host` or `Origin` headers. Remote diagnostics would require a future explicit opt-in with authentication.
+
+The reduced public view still has no authentication or TLS and reveals aggregate usage, model, and source data. Do not expose it directly to an untrusted network; use a firewall or authenticated reverse proxy. Prefer the loopback listener through an SSH tunnel when full dashboard capabilities are required remotely.
 
 ## Static export boundary
 

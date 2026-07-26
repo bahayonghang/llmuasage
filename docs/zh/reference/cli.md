@@ -284,7 +284,7 @@ llmusage serve --port 37421
 llmusage serve --public --no-open --port 37421
 ```
 
-默认在 `127.0.0.1` 启动 Web Dashboard 和 JSON API。`--public` 会绑定 `0.0.0.0` 以供远程访问，但不会添加认证或 TLS。`--no-open` 会关闭浏览器启动；SSH 会话也会自动跳过浏览器启动。
+默认在 `127.0.0.1` 启动完整 Web Dashboard 和本地 JSON API。`--public` 会绑定 `0.0.0.0`，但只暴露只读聚合 Dashboard allowlist（`/`、静态资源、`/api/dashboard` 和 `/api/health`）；projects、日志、diagnostics、jobs、行为/Explorer 明细和写操作仍只限 loopback。public 聚合视图不提供认证或 TLS。`--no-open` 会关闭浏览器启动；SSH 会话也会自动跳过浏览器启动。远程需要完整本地 API 时，应通过 SSH 隧道访问 loopback 监听。
 
 ### `llmusage codex-tracer`
 

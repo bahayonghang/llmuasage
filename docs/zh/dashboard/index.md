@@ -27,7 +27,9 @@ llmusage serve --port 37421
 llmusage serve --public --no-open --port 37421
 ```
 
-`--public` 会绑定 `0.0.0.0`；请从可访问服务器的机器打开 `http://<server-host-or-ip>:37421`。Dashboard 和 JSON API 不提供认证或 TLS，暴露端口前必须使用防火墙、SSH 隧道或反向代理保护。
+`--public` 会绑定 `0.0.0.0`；请从可访问服务器的机器打开 `http://<server-host-or-ip>:37421`。编译期 route allowlist 只包含页面 shell/静态资源、`/api/dashboard` 和 `/api/health`。Dashboard projection 只返回聚合总览、趋势、模型、来源和成本；project label、原始日志、diagnostics、integration/cursor 明细、job 状态、行为明细、Cost Explorer 和写路由都不可用。public Dashboard 请求也会忽略 `project` 和 `project_hash` filter，避免通过聚合结果间接探测特定 project。
+
+这个精简 public surface 仍不提供认证或 TLS，并仍会显示用量总量和模型/来源名称，因此仍需防火墙或带认证的反向代理。远程使用全部本地 Dashboard 功能时，不要使用 `--public`，应保留默认 loopback 监听并使用下面的 SSH 隧道。
 
 私有 SSH 场景不要传入 `--public`，再从客户端转发本地监听端口：
 

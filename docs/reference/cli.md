@@ -284,7 +284,7 @@ llmusage serve --port 37421
 llmusage serve --public --no-open --port 37421
 ```
 
-Starts the web dashboard and JSON API on `127.0.0.1` by default. `--public` binds `0.0.0.0` for remote access; it does not add authentication or TLS. `--no-open` suppresses browser launching, and SSH sessions skip the automatic browser launch automatically.
+Starts the full web dashboard and local JSON API on `127.0.0.1` by default. `--public` binds `0.0.0.0` but exposes only the read-only aggregate dashboard allowlist (`/`, assets, `/api/dashboard`, and `/api/health`); projects, logs, diagnostics, jobs, behavior/Explorer detail, and writes remain loopback-only. The public aggregate view has no authentication or TLS. `--no-open` suppresses browser launching, and SSH sessions skip the automatic browser launch automatically. Use loopback through an SSH tunnel when remote access needs the full local API.
 
 ### `llmusage codex-tracer`
 

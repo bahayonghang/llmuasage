@@ -32,9 +32,10 @@ use crate::{
     error::{LlmusageError, Result as LlmusageResult},
     models::SourceKind,
     query::{
-        ActivityPayload, BehaviorSupport, Dashboard, DiagnosticsPayload, ExplorerDimension,
-        ExplorerFilters, ExplorerGranularity, ExplorerMetric, ExplorerQuery, ExplorerTokenType,
-        LogsQuery, ModelComparePayload, OptimizePayload, QueryFilter, ToolsPayload,
+        ActivityPayload, BehaviorSupport, CostLine, Dashboard, DiagnosticsPayload,
+        ExplorerDimension, ExplorerFilters, ExplorerGranularity, ExplorerMetric, ExplorerQuery,
+        ExplorerTokenType, LogsQuery, ModelBreakdown, ModelComparePayload, OptimizePayload,
+        OverviewPayload, QueryFilter, SourceBreakdown, TokenSummary, ToolsPayload, TrendPoint,
     },
     store::Store,
     sync::{JobRegistry, JobStartError, SyncOptions},
@@ -71,6 +72,31 @@ pub(crate) enum WriteExposure {
     /// Mutation routes not mounted; server intended for 0.0.0.0 binding.
     PublicReadOnly,
 }
+
+#[cfg(test)]
+const PUBLIC_READ_ROUTE_INVENTORY: &[&str] =
+    &["/", "/assets/{*path}", "/api/dashboard", "/api/health"];
+#[cfg(test)]
+const LOOPBACK_ONLY_READ_ROUTE_INVENTORY: &[&str] = &[
+    "/api/overview",
+    "/api/trends",
+    "/api/trends_daily",
+    "/api/models",
+    "/api/sources",
+    "/api/projects",
+    "/api/costs",
+    "/api/activity",
+    "/api/tools",
+    "/api/explorer",
+    "/api/optimize",
+    "/api/compare/models",
+    "/api/compare",
+    "/api/home_overview",
+    "/api/heatmap",
+    "/api/logs",
+    "/api/diagnostics",
+    "/api/jobs/{id}",
+];
 
 mod assets;
 mod brand;
@@ -304,44 +330,19 @@ pub(crate) async fn bind_server(
      */
     info!("开始组装本地 Web UI 路由");
 
-    // 1.1 创建状态并收敛根页面、资源和 API 路由
+    // 1.1 创建状态并按监听模式选择显式 route inventory
     let state = WebState::new(store);
-    // Read routes are always mounted.
-    let mut app = Router::new()
-        .route("/", get(index_live))
-        .route("/assets/{*path}", get(asset_file))
-        .route("/api/dashboard", get(api_dashboard))
-        .route("/api/overview", get(api_overview))
-        .route("/api/trends", get(api_trends))
-        .route("/api/trends_daily", get(api_trends_daily))
-        .route("/api/models", get(api_models))
-        .route("/api/sources", get(api_sources))
-        .route("/api/projects", get(api_projects))
-        .route("/api/costs", get(api_costs))
-        .route("/api/activity", get(api_activity))
-        .route("/api/tools", get(api_tools))
-        .route("/api/explorer", get(api_explorer))
-        .route("/api/optimize", get(api_optimize))
-        .route("/api/compare/models", get(api_compare_models))
-        .route("/api/compare", get(api_compare))
-        .route("/api/home_overview", get(api_home_overview))
-        .route("/api/heatmap", get(api_heatmap))
-        .route("/api/logs", get(api_logs))
-        .route("/api/diagnostics", get(api_diagnostics))
-        .route("/api/jobs/{id}", get(api_jobs_get))
-        .route("/api/health", get(api_health));
-    // Mutation routes are only mounted in LocalOnly mode.  In PublicReadOnly mode
-    // they are simply absent (404/405), so Host-header spoofing cannot reach them.
-    if write_exposure == WriteExposure::LocalOnly {
-        app = app
-            .route("/api/diagnostics/forget", post(api_diagnostics_forget))
-            .route("/api/jobs", post(api_jobs_start))
-            .route("/api/jobs/{id}/cancel", post(api_jobs_cancel));
-    }
+    let app = match write_exposure {
+        WriteExposure::LocalOnly => loopback_router(),
+        WriteExposure::PublicReadOnly => public_router(),
+    };
     // 对 CSS/JS/SVG 与 JSON API 做 gzip/br 压缩协商；未发 Accept-Encoding 的客户端不受影响。
     let app = app.layer(CompressionLayer::new()).with_state(state);
 
-    info!("完成本地 Web UI 路由组装");
+    info!(
+        exposure = ?write_exposure,
+        "完成本地 Web UI 路由组装"
+    );
 
     /*
      * ========================================================================
@@ -395,6 +396,45 @@ pub(crate) async fn bind_server(
     );
 }
 
+fn browser_shell_router() -> Router<WebState> {
+    Router::new()
+        .route("/", get(index_live))
+        .route("/assets/{*path}", get(asset_file))
+}
+
+fn public_router() -> Router<WebState> {
+    browser_shell_router()
+        .route("/api/dashboard", get(api_public_dashboard))
+        .route("/api/health", get(api_public_health))
+}
+
+fn loopback_router() -> Router<WebState> {
+    browser_shell_router()
+        .route("/api/dashboard", get(api_dashboard))
+        .route("/api/overview", get(api_overview))
+        .route("/api/trends", get(api_trends))
+        .route("/api/trends_daily", get(api_trends_daily))
+        .route("/api/models", get(api_models))
+        .route("/api/sources", get(api_sources))
+        .route("/api/projects", get(api_projects))
+        .route("/api/costs", get(api_costs))
+        .route("/api/activity", get(api_activity))
+        .route("/api/tools", get(api_tools))
+        .route("/api/explorer", get(api_explorer))
+        .route("/api/optimize", get(api_optimize))
+        .route("/api/compare/models", get(api_compare_models))
+        .route("/api/compare", get(api_compare))
+        .route("/api/home_overview", get(api_home_overview))
+        .route("/api/heatmap", get(api_heatmap))
+        .route("/api/logs", get(api_logs))
+        .route("/api/diagnostics", get(api_diagnostics))
+        .route("/api/jobs/{id}", get(api_jobs_get))
+        .route("/api/health", get(api_health))
+        .route("/api/diagnostics/forget", post(api_diagnostics_forget))
+        .route("/api/jobs", post(api_jobs_start))
+        .route("/api/jobs/{id}/cancel", post(api_jobs_cancel))
+}
+
 pub fn snapshot_index_html() -> String {
     shell::snapshot_index_html()
 }
@@ -419,6 +459,241 @@ async fn asset_file(Path(path): Path<String>, headers: HeaderMap) -> Response {
         Some(asset) => asset.as_response(&headers),
         None => StatusCode::NOT_FOUND.into_response(),
     }
+}
+
+#[derive(Serialize)]
+struct PublicDashboardPayload {
+    access: PublicAccessPayload,
+    overview: PublicOverviewPayload,
+    trends: Vec<PublicTrendPoint>,
+    models: Vec<PublicModelBreakdown>,
+    sources: Vec<PublicSourceBreakdown>,
+    projects: [PublicProjectBreakdown; 0],
+    costs: Vec<PublicCostLine>,
+    health: PublicDashboardHealth,
+    diagnostics: PublicDashboardDiagnostics,
+}
+
+#[derive(Serialize)]
+struct PublicAccessPayload {
+    mode: &'static str,
+    local_details_available: bool,
+}
+
+#[derive(Serialize)]
+struct PublicOverviewPayload {
+    generated_at: String,
+    total: PublicTokenSummary,
+    last_24h: PublicTokenSummary,
+    source_count: i64,
+    bucket_count: i64,
+    total_events: i64,
+    last_24h_events: i64,
+    total_cost_usd: f64,
+    cache_efficiency: f64,
+    last_sync_at: Option<String>,
+    last_export_at: Option<String>,
+}
+
+#[derive(Serialize)]
+struct PublicTokenSummary {
+    input_tokens: i64,
+    cache_creation_tokens: i64,
+    cache_read_tokens: i64,
+    output_tokens: i64,
+    reasoning_output_tokens: i64,
+    total_tokens: i64,
+}
+
+#[derive(Serialize)]
+struct PublicTrendPoint {
+    label: String,
+    total_tokens: i64,
+}
+
+#[derive(Serialize)]
+struct PublicModelBreakdown {
+    model: String,
+    input_tokens: i64,
+    cache_creation_tokens: i64,
+    cache_read_tokens: i64,
+    output_tokens: i64,
+    reasoning_output_tokens: i64,
+    total_tokens: i64,
+    event_count: i64,
+    cost_with_cache_usd: f64,
+    cost_without_cache_usd: f64,
+    cache_savings_usd: f64,
+    pricing_status: String,
+}
+
+#[derive(Serialize)]
+struct PublicSourceBreakdown {
+    source: String,
+    total_tokens: i64,
+    last_event_at: Option<String>,
+    event_count: i64,
+}
+
+#[derive(Serialize)]
+struct PublicProjectBreakdown;
+
+#[derive(Serialize)]
+struct PublicCostLine {
+    source: String,
+    model: String,
+    total_tokens: i64,
+    estimated_cost_usd: f64,
+    event_count: i64,
+}
+
+#[derive(Serialize)]
+struct PublicDashboardHealth {
+    available: bool,
+}
+
+#[derive(Serialize)]
+struct PublicDashboardDiagnostics {
+    available: bool,
+}
+
+#[derive(Serialize)]
+struct PublicHealthPayload {
+    status: &'static str,
+    exposure: &'static str,
+}
+
+impl From<TokenSummary> for PublicTokenSummary {
+    fn from(value: TokenSummary) -> Self {
+        Self {
+            input_tokens: value.input_tokens,
+            cache_creation_tokens: value.cache_creation_tokens,
+            cache_read_tokens: value.cache_read_tokens,
+            output_tokens: value.output_tokens,
+            reasoning_output_tokens: value.reasoning_output_tokens,
+            total_tokens: value.total_tokens,
+        }
+    }
+}
+
+impl From<OverviewPayload> for PublicOverviewPayload {
+    fn from(value: OverviewPayload) -> Self {
+        Self {
+            generated_at: value.generated_at,
+            total: value.total.into(),
+            last_24h: value.last_24h.into(),
+            source_count: value.source_count,
+            bucket_count: value.bucket_count,
+            total_events: value.total_events,
+            last_24h_events: value.last_24h_events,
+            total_cost_usd: value.total_cost_usd,
+            cache_efficiency: value.cache_efficiency,
+            last_sync_at: value.last_sync_at,
+            last_export_at: value.last_export_at,
+        }
+    }
+}
+
+impl From<TrendPoint> for PublicTrendPoint {
+    fn from(value: TrendPoint) -> Self {
+        Self {
+            label: value.label,
+            total_tokens: value.total_tokens,
+        }
+    }
+}
+
+impl From<ModelBreakdown> for PublicModelBreakdown {
+    fn from(value: ModelBreakdown) -> Self {
+        Self {
+            model: value.model,
+            input_tokens: value.input_tokens,
+            cache_creation_tokens: value.cache_creation_tokens,
+            cache_read_tokens: value.cache_read_tokens,
+            output_tokens: value.output_tokens,
+            reasoning_output_tokens: value.reasoning_output_tokens,
+            total_tokens: value.total_tokens,
+            event_count: value.event_count,
+            cost_with_cache_usd: value.cost_with_cache_usd,
+            cost_without_cache_usd: value.cost_without_cache_usd,
+            cache_savings_usd: value.cache_savings_usd,
+            pricing_status: value.pricing_status,
+        }
+    }
+}
+
+impl From<SourceBreakdown> for PublicSourceBreakdown {
+    fn from(value: SourceBreakdown) -> Self {
+        Self {
+            source: value.source,
+            total_tokens: value.total_tokens,
+            last_event_at: value.last_event_at,
+            event_count: value.event_count,
+        }
+    }
+}
+
+impl From<CostLine> for PublicCostLine {
+    fn from(value: CostLine) -> Self {
+        Self {
+            source: value.source,
+            model: value.model,
+            total_tokens: value.total_tokens,
+            estimated_cost_usd: value.estimated_cost_usd,
+            event_count: value.event_count,
+        }
+    }
+}
+
+async fn api_public_dashboard(
+    State(state): State<WebState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let filter = public_dashboard_filter_from_params(&params);
+    let window = dashboard_window_from_params(&params).to_string();
+    api_json_async(
+        "/api/dashboard",
+        load_via_dashboard(state, "public-dashboard", move |dashboard| {
+            Ok(PublicDashboardPayload {
+                access: PublicAccessPayload {
+                    mode: "public_read_only",
+                    local_details_available: false,
+                },
+                overview: dashboard.overview(&filter)?.into(),
+                trends: dashboard
+                    .trends(&window, &filter)?
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
+                models: dashboard
+                    .model_breakdown(&filter)?
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
+                sources: dashboard
+                    .source_breakdown(&filter)?
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
+                projects: [],
+                costs: dashboard
+                    .cost_breakdown(&filter)?
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
+                health: PublicDashboardHealth { available: false },
+                diagnostics: PublicDashboardDiagnostics { available: false },
+            })
+        }),
+    )
+    .await
+}
+
+async fn api_public_health() -> Json<PublicHealthPayload> {
+    Json(PublicHealthPayload {
+        status: "ok",
+        exposure: "public_read_only",
+    })
 }
 
 async fn api_dashboard(
@@ -1352,6 +1627,12 @@ fn dashboard_filter_from_params(params: &HashMap<String, String>) -> QueryFilter
     filter
 }
 
+fn public_dashboard_filter_from_params(params: &HashMap<String, String>) -> QueryFilter {
+    let mut filter = dashboard_filter_from_params(params);
+    filter.project_hash = None;
+    filter
+}
+
 fn dashboard_filter_from_params_without_window(params: &HashMap<String, String>) -> QueryFilter {
     QueryFilter {
         source: params
@@ -1572,6 +1853,7 @@ mod tests {
         fs,
         io::{Read, Write},
         net::{IpAddr, Ipv4Addr, SocketAddr},
+        path::Path as FsPath,
         sync::{
             Arc,
             atomic::{AtomicUsize, Ordering},
@@ -1584,10 +1866,12 @@ mod tests {
         http::{HeaderMap, HeaderValue, StatusCode, header},
     };
     use chrono::{Duration as ChronoDuration, SecondsFormat, Utc};
+    use serde_json::json;
     use tempfile::TempDir;
 
     use crate::{
         AppPaths, LlmusageError,
+        models::SourceKind,
         query::{diagnostics_stat_calls, reset_diagnostics_stat_counter},
         store::Store,
         sync::{JobRegistry, JobStatus, SyncOptions},
@@ -1595,9 +1879,11 @@ mod tests {
     };
 
     use super::{
-        DiagnosticsCache, WEB_READ_BUSY_TIMEOUT, WebState, WriteExposure, api_json, asset_manifest,
-        bind_server, live_index_html, load_diagnostics_cached, load_via_dashboard,
-        load_via_dashboard_with_timeout, serve, serve_on, server_task_result, snapshot_index_html,
+        DiagnosticsCache, LOOPBACK_ONLY_READ_ROUTE_INVENTORY, PUBLIC_READ_ROUTE_INVENTORY,
+        WEB_READ_BUSY_TIMEOUT, WebState, WriteExposure, api_json, asset_manifest, bind_server,
+        live_index_html, load_diagnostics_cached, load_via_dashboard,
+        load_via_dashboard_with_timeout, public_dashboard_filter_from_params, serve, serve_on,
+        server_task_result, snapshot_index_html,
     };
 
     fn make_store() -> anyhow::Result<(TempDir, Store)> {
@@ -1700,6 +1986,190 @@ mod tests {
             StatusCode::OK,
             "GET /api/health must still work in PublicReadOnly mode"
         );
+
+        server.shutdown().await?;
+        Ok(())
+    }
+
+    #[test]
+    fn public_read_route_inventory_is_an_explicit_minimal_allowlist() {
+        assert_eq!(
+            PUBLIC_READ_ROUTE_INVENTORY,
+            &["/", "/assets/{*path}", "/api/dashboard", "/api/health"]
+        );
+        assert!(
+            LOOPBACK_ONLY_READ_ROUTE_INVENTORY
+                .iter()
+                .all(|route| !PUBLIC_READ_ROUTE_INVENTORY.contains(route))
+        );
+    }
+
+    #[test]
+    fn public_dashboard_filter_ignores_project_selectors() {
+        for project_key in ["project", "project_hash"] {
+            let params = std::collections::HashMap::from([
+                (project_key.to_string(), "private-project".to_string()),
+                ("source".to_string(), "codex".to_string()),
+                ("model".to_string(), "gpt-5".to_string()),
+            ]);
+
+            let filter = public_dashboard_filter_from_params(&params);
+
+            assert_eq!(filter.project_hash, None);
+            assert_eq!(filter.source, Some(SourceKind::Codex));
+            assert_eq!(filter.model.as_deref(), Some("gpt-5"));
+        }
+    }
+
+    #[tokio::test]
+    async fn public_sensitive_read_routes_are_absent_over_real_tcp() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let server = bind_server(
+            store,
+            Some(0),
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            WriteExposure::PublicReadOnly,
+        )
+        .await?;
+        let addr = SocketAddr::from(([127, 0, 0, 1], server.addr().port()));
+
+        for route in LOOPBACK_ONLY_READ_ROUTE_INVENTORY {
+            let path = route.replace("{id}", "public-probe");
+            let (status, _body) = route_text(addr, "GET", &path).await?;
+            assert!(
+                status == StatusCode::NOT_FOUND || status == StatusCode::METHOD_NOT_ALLOWED,
+                "GET {path} must be absent from the public router, got {status}"
+            );
+        }
+
+        server.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn public_dashboard_projection_excludes_local_details() -> anyhow::Result<()> {
+        let (temp, store) = make_store()?;
+        let windows_path = FsPath::new(r"C:\Users\secret\usage.jsonl");
+        let unix_path = FsPath::new("/home/secret/usage.jsonl");
+        store.integration_state().record_integration_state(
+            SourceKind::Codex,
+            "probe",
+            "error",
+            Some(windows_path),
+            Some(unix_path),
+            Some(&json!({"raw_json": {"path": "/private/raw.jsonl"}})),
+        )?;
+        let run_id = store.run_log().record_run_start("sync")?;
+        store.run_log().finish_run(
+            run_id,
+            "failed",
+            None,
+            Some("SELECT * FROM usage_event; /srv/private/usage.db"),
+        )?;
+
+        let server = bind_server(
+            store,
+            Some(0),
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            WriteExposure::PublicReadOnly,
+        )
+        .await?;
+        let addr = SocketAddr::from(([127, 0, 0, 1], server.addr().port()));
+        let (status, payload) = route_json(addr, "GET", "/api/dashboard?scope=core", None).await?;
+        assert_eq!(status, StatusCode::OK, "public dashboard failed: {payload}");
+        assert_eq!(payload["access"]["mode"], "public_read_only");
+        assert_eq!(payload["projects"], json!([]));
+        assert_eq!(payload["diagnostics"], json!({"available": false}));
+        assert_eq!(payload["health"], json!({"available": false}));
+
+        let forbidden_keys = [
+            "archive_root",
+            "config_path",
+            "backup_path",
+            "details_json",
+            "cursor_key",
+            "recent_failures",
+            "job_id",
+            "current_job",
+            "last_event",
+            "error_key",
+            "worker_lock",
+            "project_hash",
+            "project_label",
+            "project_ref",
+            "project_path",
+            "raw_json",
+            "error",
+            "summary",
+        ];
+        assert_json_keys_absent(&payload, &forbidden_keys);
+
+        let serialized = serde_json::to_string(&payload)?;
+        let temp_path = temp.path().to_string_lossy().into_owned();
+        for forbidden in [
+            temp_path.as_str(),
+            r"C:\Users\secret\usage.jsonl",
+            "/home/secret/usage.jsonl",
+            "/private/raw.jsonl",
+            "SELECT * FROM usage_event",
+            "/srv/private/usage.db",
+        ] {
+            assert!(
+                !serialized.contains(forbidden),
+                "public payload leaked forbidden value {forbidden:?}: {serialized}"
+            );
+        }
+
+        let (health_status, health) = route_json(addr, "GET", "/api/health", None).await?;
+        assert_eq!(health_status, StatusCode::OK);
+        assert_eq!(
+            health,
+            json!({"status": "ok", "exposure": "public_read_only"})
+        );
+
+        server.shutdown().await?;
+        Ok(())
+    }
+
+    fn assert_json_keys_absent(value: &serde_json::Value, forbidden_keys: &[&str]) {
+        match value {
+            serde_json::Value::Object(fields) => {
+                for (key, child) in fields {
+                    assert!(
+                        !forbidden_keys.contains(&key.as_str()),
+                        "public payload contains forbidden key {key:?}: {value}"
+                    );
+                    assert_json_keys_absent(child, forbidden_keys);
+                }
+            }
+            serde_json::Value::Array(values) => {
+                for child in values {
+                    assert_json_keys_absent(child, forbidden_keys);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[tokio::test]
+    async fn loopback_sensitive_read_routes_remain_available() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let server = bind_server(
+            store,
+            Some(0),
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            WriteExposure::LocalOnly,
+        )
+        .await?;
+        let addr = server.addr();
+
+        for path in ["/api/logs", "/api/diagnostics", "/api/projects"] {
+            let (status, payload) = route_json(addr, "GET", path, None).await?;
+            assert_eq!(status, StatusCode::OK, "GET {path} regressed: {payload}");
+        }
+        let (status, payload) = route_json(addr, "GET", "/api/jobs/missing-job", None).await?;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(payload["error"]["code"], "job_not_found");
 
         server.shutdown().await?;
         Ok(())

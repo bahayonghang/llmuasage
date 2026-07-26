@@ -98,7 +98,11 @@ llmusage doctor --refresh-pricing .\litellm-prices.json
 
 ## 浏览器 Dashboard 边界
 
-`llmusage serve` 默认绑定 `127.0.0.1`，只在进程运行期间暴露本地 HTTP endpoints。`llmusage serve --public` 会显式绑定 `0.0.0.0`，暴露不带认证和 TLS 的 Dashboard 与 JSON API。不要直接暴露给不受信任的网络；请使用防火墙、SSH 隧道或带认证的反向代理限制访问。
+`llmusage serve` 默认绑定 `127.0.0.1`。loopback router 保留完整本地 Dashboard，包括 projects、日志、diagnostics、integration/cursor health、job reads、行为分析、Cost Explorer 和带真实 peer 检查的写路由。
+
+`llmusage serve --public` 会显式绑定 `0.0.0.0`，并选择独立的只读 router。只挂载页面 shell/静态资源、字段 allowlist 明确的聚合 `/api/dashboard` projection，以及固定的最小 `/api/health` 响应。原始日志、diagnostics、本地路径/project 字段、内部错误、job 状态和全部 mutation 路由都不存在，而不是依赖 `Host` 或 `Origin` header 保护。未来如需远程 diagnostics，必须另行提供显式 opt-in 和认证。
+
+精简 public 视图仍不提供认证或 TLS，也会显示聚合用量、模型和来源数据。不要直接暴露给不受信任的网络；请使用防火墙或带认证的反向代理。远程需要完整 Dashboard 能力时，应优先通过 SSH 隧道访问默认 loopback 监听。
 
 ## 静态导出边界
 
