@@ -76,6 +76,11 @@ pub const MIGRATIONS: &[(u32, &str, MigrationFn)] = &[
         "add_worker_lock_generation",
         m_016_add_worker_lock_generation,
     ),
+    (
+        17,
+        "add_source_sync_parse_issues",
+        m_017_add_source_sync_parse_issues,
+    ),
 ];
 
 /// Returns the newest schema version known to this binary.
@@ -807,6 +812,20 @@ fn m_016_add_worker_lock_generation(tx: &Transaction<'_>) -> Result<()> {
     Ok(())
 }
 
+/// Migration v17 — persist bounded, privacy-safe JSONL issue diagnostics.
+fn m_017_add_source_sync_parse_issues(tx: &Transaction<'_>) -> Result<()> {
+    if !table_exists(tx, "source_sync_status")? {
+        return Ok(());
+    }
+    ensure_column(
+        tx,
+        "source_sync_status",
+        "parse_issues_json",
+        "TEXT NOT NULL DEFAULT '{\"malformed_lines\":0,\"oversized_lines\":0,\"samples\":[]}'",
+    )?;
+    Ok(())
+}
+
 fn ensure_column(tx: &Transaction<'_>, table: &str, column: &str, definition: &str) -> Result<()> {
     if table_has_column(tx, table, column)? {
         return Ok(());
@@ -1394,6 +1413,43 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(inserted, 42);
+        Ok(())
+    }
+
+    #[test]
+    fn migration_v17_adds_bounded_parse_issue_diagnostics() -> anyhow::Result<()> {
+        let mut conn = Connection::open_in_memory()?;
+        run_migrations_for_test(&mut conn, &[(1, "baseline", m_001_baseline)])?;
+        conn.execute(
+            r#"
+            INSERT INTO source_sync_status(
+                source, files_processed, changed_files, bytes_scanned,
+                events_seen, events_replayed, events_inserted, stored_events,
+                parse_ms, write_ms, lock_wait_ms, updated_at
+            ) VALUES ('codex', 1, 1, 10, 1, 0, 1, 1, 1, 1, 1, '2026-07-26T00:00:00Z')
+            "#,
+            [],
+        )?;
+
+        run_migrations_for_test(
+            &mut conn,
+            &[(
+                17,
+                "add_source_sync_parse_issues",
+                m_017_add_source_sync_parse_issues,
+            )],
+        )?;
+
+        let columns = pragma_columns(&conn, "source_sync_status")?;
+        assert!(columns.contains(&"parse_issues_json".to_string()));
+        let stored: String = conn.query_row(
+            "SELECT parse_issues_json FROM source_sync_status WHERE source='codex'",
+            [],
+            |row| row.get(0),
+        )?;
+        let issues: crate::models::ParseIssues = serde_json::from_str(&stored)?;
+        assert_eq!(issues, crate::models::ParseIssues::default());
+        assert_eq!(read_schema_version(&conn)?, 17);
         Ok(())
     }
 

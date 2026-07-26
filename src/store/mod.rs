@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    models::{SourceKind, UsageEvent, UsageTokens, UsageToolCall, UsageTurn},
+    models::{ParseIssues, SourceKind, UsageEvent, UsageTokens, UsageToolCall, UsageTurn},
     paths::AppPaths,
     query::pricing::{PRICING_MIXED, PRICING_UNPRICED},
 };
@@ -202,6 +202,9 @@ pub struct SourceSyncStatus {
     pub write_ms: i64,
     /// Time spent waiting on the global worker lock in milliseconds.
     pub lock_wait_ms: i64,
+    /// Privacy-safe malformed/oversized JSONL diagnostics from the latest run.
+    #[serde(default)]
+    pub parse_issues: ParseIssues,
     /// Last update time in RFC 3339 format.
     pub updated_at: String,
 }

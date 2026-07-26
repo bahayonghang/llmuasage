@@ -1,7 +1,7 @@
 use std::{
     fs::File,
     future::Future,
-    io::{BufRead, BufReader, Read},
+    io::Read,
     path::{Path, PathBuf},
     pin::Pin,
     time::Instant,
@@ -14,14 +14,16 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::{
-    models::{SessionInfo, SourceKind, UsageEvent, UsageTokens, UsageToolCall, UsageTurn},
+    models::{
+        ParseIssues, SessionInfo, SourceKind, UsageEvent, UsageTokens, UsageToolCall, UsageTurn,
+    },
     parsers::{
         ProgressSink, SourceParser, SourceSyncStats, SyncEvent,
         behavior::{extract_codex_tools, tool_calls_from_evidence, turn_from_tools},
         file_progress::{FileProgress, FileProgressCounter},
         file_state::{
-            BoundedJsonlReader, CandidateFile, FileReplayMode, decide_file_replay, finalize_cursor,
-            should_rescan_file,
+            BoundedJsonlReader, CandidateFile, FileReplayMode, JsonlReadStatus,
+            JsonlRecordDisposition, decide_file_replay, finalize_cursor, should_rescan_file,
         },
         source_files,
     },
@@ -48,6 +50,7 @@ struct CodexShardOutput {
     events_replayed: usize,
     bytes_scanned: u64,
     seen_file_paths: Vec<String>,
+    parse_issues: ParseIssues,
 }
 
 #[derive(Debug)]
@@ -58,6 +61,8 @@ struct RolloutParseResult {
     events: Vec<UsageEvent>,
     turns: Vec<UsageTurn>,
     tool_calls: Vec<UsageToolCall>,
+    parse_issues: ParseIssues,
+    cancelled: bool,
 }
 
 /// Codex rollout parser. Owns the per-file scan + per-shard commit pipeline
@@ -138,6 +143,7 @@ async fn sync_codex(
     let mut bytes_scanned = 0u64;
     let mut inserted = 0usize;
     let mut write_ms = 0u64;
+    let mut parse_issues = ParseIssues::default();
     let mut plans = shards
         .into_values()
         .map(|files| CodexShardPlan { files })
@@ -154,7 +160,7 @@ async fn sync_codex(
     let (mut file_progress, file_progress_counter) = FileProgress::new();
 
     let width = parallelism.max(1);
-    for batch in plans.chunks(width) {
+    'batches: for batch in plans.chunks(width) {
         if cancel.is_cancelled() {
             break;
         }
@@ -162,31 +168,37 @@ async fn sync_codex(
         for plan in batch {
             let plan = plan.clone();
             let counter = file_progress_counter.clone();
+            let task_cancel = cancel.clone();
             tasks.push(task::spawn_blocking(move || {
-                parse_codex_shard(plan, counter)
+                parse_codex_shard(plan, counter, task_cancel)
             }));
         }
 
-        for task in tasks {
+        let batch_outputs = file_progress
+            .wait_for_all(tasks, |files_scanned| {
+                emit_progress(
+                    &mut progress,
+                    SyncEvent::Progress {
+                        source: SourceKind::Codex,
+                        files_scanned,
+                        records_imported: inserted as u64,
+                        current_file: None,
+                    },
+                );
+            })
+            .await?;
+        if cancel.is_cancelled() {
+            break;
+        }
+
+        for shard in batch_outputs {
             if cancel.is_cancelled() {
-                break;
+                break 'batches;
             }
-            let shard = file_progress
-                .wait_for(task, |files_scanned| {
-                    emit_progress(
-                        &mut progress,
-                        SyncEvent::Progress {
-                            source: SourceKind::Codex,
-                            files_scanned,
-                            records_imported: inserted as u64,
-                            current_file: None,
-                        },
-                    );
-                })
-                .await??;
             events_seen += shard.events_seen;
             events_replayed += shard.events_replayed;
             bytes_scanned += shard.bytes_scanned;
+            parse_issues.merge(shard.parse_issues);
 
             let completed_files = file_progress.boundary_snapshot();
             emit_progress(
@@ -235,6 +247,7 @@ async fn sync_codex(
         events_inserted: inserted,
         write_ms,
         last_error: inventory_error,
+        parse_issues,
         ..SourceSyncStats::default()
     };
     let total_elapsed = parse_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
@@ -246,6 +259,8 @@ async fn sync_codex(
         skipped_files = stats.skipped_files,
         events_seen = stats.events_seen,
         bytes_scanned = stats.bytes_scanned,
+        malformed_lines = stats.parse_issues.malformed_lines,
+        oversized_lines = stats.parse_issues.oversized_lines,
         "完成 Codex rollout 真源解析"
     );
     Ok(stats)
@@ -260,6 +275,7 @@ fn emit_progress(sink: &mut Option<ProgressSink<'_>>, event: SyncEvent) {
 fn parse_codex_shard(
     plan: CodexShardPlan,
     progress: FileProgressCounter,
+    cancel: CancellationToken,
 ) -> Result<CodexShardOutput> {
     let mut resolver = ProjectResolver::default();
     let mut output = CodexShardOutput {
@@ -272,9 +288,13 @@ fn parse_codex_shard(
         events_replayed: 0,
         bytes_scanned: 0,
         seen_file_paths: Vec::new(),
+        parse_issues: ParseIssues::default(),
     };
 
     for candidate in plan.files {
+        if cancel.is_cancelled() {
+            break;
+        }
         let existing = candidate.existing.clone();
         let decision = decide_file_replay(candidate)?;
         output
@@ -301,7 +321,12 @@ fn parse_codex_shard(
             last_total,
             last_model,
             &mut resolver,
+            &cancel,
         )?;
+        output.parse_issues.merge(parsed.parse_issues);
+        if parsed.cancelled {
+            break;
+        }
         output.bytes_scanned += decision
             .snapshot
             .file_size
@@ -334,9 +359,10 @@ fn parse_rollout_file(
     last_total: Option<UsageTokens>,
     last_model: Option<String>,
     resolver: &mut ProjectResolver,
+    cancel: &CancellationToken,
 ) -> Result<RolloutParseResult> {
     let replay_second = (start_offset == 0 && is_codex_replay_session(file_path))
-        .then(|| detect_replay_second(file_path))
+        .then(|| detect_replay_second(file_path, cancel))
         .flatten();
     let file = File::open(file_path)?;
     let file_len = file.metadata()?.len();
@@ -348,6 +374,8 @@ fn parse_rollout_file(
             events: Vec::new(),
             turns: Vec::new(),
             tool_calls: Vec::new(),
+            parse_issues: ParseIssues::default(),
+            cancelled: cancel.is_cancelled(),
         });
     }
 
@@ -369,136 +397,128 @@ fn parse_rollout_file(
     });
     let mut current_project = None;
     let mut current_cwd: Option<String> = None;
-    let mut line = String::new();
     let mut events = Vec::new();
     let mut turns = Vec::new();
     let mut tool_calls = Vec::new();
     let mut pending_tools = Vec::new();
     let mut skip_replay = replay_second.is_some();
-
-    loop {
-        line.clear();
-        let bytes_read = reader.read_line(&mut line)?;
-        if bytes_read == 0 {
-            break;
-        }
-
-        if !line.contains("token_count")
-            && !line.contains("turn_context")
-            && !line.contains("session_meta")
-            && !line.contains("function_call")
-            && !line.contains("tool_call")
-            && !line.contains("recipient_name")
-        {
-            continue;
-        }
-
-        let Ok(value) = serde_json::from_str::<Value>(&line) else {
-            continue;
-        };
-
-        if let Some(payload) = value.get("payload").and_then(|value| value.as_object())
-            && matches!(
-                value.get("type").and_then(Value::as_str),
-                Some("turn_context" | "session_meta")
-            )
-        {
-            if let Some(next_model) = payload.get("model").and_then(Value::as_str) {
-                model = Some(next_model.trim().to_string());
-            }
-            if matches!(
-                value.get("type").and_then(Value::as_str),
-                Some("session_meta")
-            ) && let Some(session_id) = payload.get("id").and_then(Value::as_str)
+    let mut parse_issues = ParseIssues::default();
+    let status = reader.read_json_records(
+        SourceKind::Codex,
+        path_hash,
+        cancel,
+        &mut parse_issues,
+        |record| {
+            let value = record.value;
+            if let Some(payload) = value.get("payload").and_then(|value| value.as_object())
+                && matches!(
+                    value.get("type").and_then(Value::as_str),
+                    Some("turn_context" | "session_meta")
+                )
             {
-                let trimmed = session_id.trim();
-                if !trimmed.is_empty() {
-                    current_session = Some(SessionInfo {
-                        session_id: trimmed.to_string(),
-                        session_label: session_label.clone(),
-                        source_path_hash: Some(path_hash.to_string()),
-                    });
+                if let Some(next_model) = payload.get("model").and_then(Value::as_str) {
+                    model = Some(next_model.trim().to_string());
                 }
-            }
-            if let Some(cwd) = payload.get("cwd").and_then(Value::as_str) {
-                let trimmed = cwd.trim().to_string();
-                if !trimmed.is_empty() && current_cwd.as_deref() != Some(trimmed.as_str()) {
-                    current_project = resolver.resolve(Path::new(&trimmed))?;
-                    current_cwd = Some(trimmed);
-                }
-            }
-            continue;
-        }
-
-        let extracted_tools = extract_codex_tools(&value);
-        if !extracted_tools.is_empty() {
-            pending_tools.extend(extracted_tools);
-        }
-
-        let Some((timestamp, info)) = extract_token_count(&value) else {
-            continue;
-        };
-        if let Some(replay_second) = replay_second.as_ref()
-            && skip_replay
-        {
-            if timestamp_second(&timestamp).as_ref() == Some(replay_second) {
-                if let Some(next_total) = info.get("total_token_usage").and_then(parse_usage_tokens)
+                if matches!(
+                    value.get("type").and_then(Value::as_str),
+                    Some("session_meta")
+                ) && let Some(session_id) = payload.get("id").and_then(Value::as_str)
                 {
+                    let trimmed = session_id.trim();
+                    if !trimmed.is_empty() {
+                        current_session = Some(SessionInfo {
+                            session_id: trimmed.to_string(),
+                            session_label: session_label.clone(),
+                            source_path_hash: Some(path_hash.to_string()),
+                        });
+                    }
+                }
+                if let Some(cwd) = payload.get("cwd").and_then(Value::as_str) {
+                    let trimmed = cwd.trim().to_string();
+                    if !trimmed.is_empty() && current_cwd.as_deref() != Some(trimmed.as_str()) {
+                        current_project = resolver.resolve(Path::new(&trimmed))?;
+                        current_cwd = Some(trimmed);
+                    }
+                }
+                return Ok(JsonlRecordDisposition::Accepted);
+            }
+
+            let extracted_tools = extract_codex_tools(&value);
+            if !extracted_tools.is_empty() {
+                pending_tools.extend(extracted_tools);
+            }
+
+            let Some((timestamp, info)) = extract_token_count(&value) else {
+                return Ok(if pending_tools.is_empty() {
+                    JsonlRecordDisposition::Ignored
+                } else {
+                    JsonlRecordDisposition::Accepted
+                });
+            };
+            if let Some(replay_second) = replay_second.as_ref()
+                && skip_replay
+            {
+                if timestamp_second(&timestamp).as_ref() == Some(replay_second) {
+                    if let Some(next_total) =
+                        info.get("total_token_usage").and_then(parse_usage_tokens)
+                    {
+                        totals = Some(next_total);
+                    }
+                    pending_tools.clear();
+                    return Ok(JsonlRecordDisposition::Accepted);
+                }
+                skip_replay = false;
+            }
+            let Some(hour_start) = bucket_start_from_rfc3339(&timestamp) else {
+                return Ok(JsonlRecordDisposition::Malformed);
+            };
+
+            let last_usage = info.get("last_token_usage");
+            let total_usage = info.get("total_token_usage");
+            let delta = pick_delta(last_usage, total_usage, totals.as_ref());
+            if delta.total_tokens == 0
+                && delta.input_tokens == 0
+                && delta.cache_read_tokens == 0
+                && delta.output_tokens == 0
+                && delta.reasoning_output_tokens == 0
+            {
+                if let Some(next_total) = total_usage.and_then(parse_usage_tokens) {
                     totals = Some(next_total);
                 }
-                pending_tools.clear();
-                continue;
+                return Ok(JsonlRecordDisposition::Accepted);
             }
-            skip_replay = false;
-        }
-        let Some(hour_start) = bucket_start_from_rfc3339(&timestamp) else {
-            continue;
-        };
 
-        let last_usage = info.get("last_token_usage");
-        let total_usage = info.get("total_token_usage");
-        let delta = pick_delta(last_usage, total_usage, totals.as_ref());
-        if delta.total_tokens == 0
-            && delta.input_tokens == 0
-            && delta.cache_read_tokens == 0
-            && delta.output_tokens == 0
-            && delta.reasoning_output_tokens == 0
-        {
             if let Some(next_total) = total_usage.and_then(parse_usage_tokens) {
                 totals = Some(next_total);
             }
-            continue;
-        }
 
-        if let Some(next_total) = total_usage.and_then(parse_usage_tokens) {
-            totals = Some(next_total);
-        }
-
-        let normalized_model = normalize_model(model.as_deref());
-        let logical_identity = format!(
-            "{timestamp}\0{normalized_model}\0{}\0{}\0{}\0{}\0{}",
-            delta.input_tokens,
-            delta.cache_read_tokens,
-            delta.output_tokens,
-            delta.reasoning_output_tokens,
-            delta.total_tokens,
-        );
-        let event = UsageEvent {
-            event_key: format!("codex:logical:{}", hash_string(&logical_identity)),
-            source: SourceKind::Codex,
-            provider_label: String::new(),
-            model: normalized_model,
-            event_at: timestamp,
-            hour_start,
-            tokens: delta,
-            project: current_project.clone(),
-            session: current_session.clone(),
-        };
-        let tools = std::mem::take(&mut pending_tools);
-        turns.push(turn_from_tools(&event, &tools));
-        tool_calls.extend(tool_calls_from_evidence(&event, tools));
-        events.push(event);
-    }
+            let normalized_model = normalize_model(model.as_deref());
+            let logical_identity = format!(
+                "{timestamp}\0{normalized_model}\0{}\0{}\0{}\0{}\0{}",
+                delta.input_tokens,
+                delta.cache_read_tokens,
+                delta.output_tokens,
+                delta.reasoning_output_tokens,
+                delta.total_tokens,
+            );
+            let event = UsageEvent {
+                event_key: format!("codex:logical:{}", hash_string(&logical_identity)),
+                source: SourceKind::Codex,
+                provider_label: String::new(),
+                model: normalized_model,
+                event_at: timestamp,
+                hour_start,
+                tokens: delta,
+                project: current_project.clone(),
+                session: current_session.clone(),
+            };
+            let tools = std::mem::take(&mut pending_tools);
+            turns.push(turn_from_tools(&event, &tools));
+            tool_calls.extend(tool_calls_from_evidence(&event, tools));
+            events.push(event);
+            Ok(JsonlRecordDisposition::Accepted)
+        },
+    )?;
 
     Ok(RolloutParseResult {
         end_offset: reader.complete_offset(),
@@ -507,7 +527,23 @@ fn parse_rollout_file(
         events,
         turns,
         tool_calls,
+        parse_issues,
+        cancelled: status == JsonlReadStatus::Cancelled,
     })
+}
+
+#[cfg(test)]
+pub(super) fn bounded_contract_parse(file_path: &Path) -> Result<(ParseIssues, u64, bool)> {
+    let result = parse_rollout_file(
+        file_path,
+        "bounded-contract-path-hash",
+        0,
+        None,
+        None,
+        &mut ProjectResolver::default(),
+        &CancellationToken::new(),
+    )?;
+    Ok((result.parse_issues, result.end_offset, result.cancelled))
 }
 
 fn is_codex_replay_session(file_path: &Path) -> bool {
@@ -522,36 +558,44 @@ fn is_codex_replay_session(file_path: &Path) -> bool {
     contains_bytes(head, b"thread_spawn") || contains_bytes(head, b"forked_from_id")
 }
 
-fn detect_replay_second(file_path: &Path) -> Option<[u8; 19]> {
+fn detect_replay_second(file_path: &Path, cancel: &CancellationToken) -> Option<[u8; 19]> {
     let file = File::open(file_path).ok()?;
-    let mut reader = BufReader::new(file);
-    let mut line = String::new();
+    let mut reader = BoundedJsonlReader::new(file, 0).ok()?;
+    let path_hash = hash_string(&file_path.to_string_lossy());
+    let mut issues = ParseIssues::default();
     let mut first_second = None;
-
-    loop {
-        line.clear();
-        if reader.read_line(&mut line).ok()? == 0 {
-            return None;
-        }
-        if !line.contains("token_count") {
-            continue;
-        }
-        let Ok(value) = serde_json::from_str::<Value>(&line) else {
-            continue;
-        };
-        let Some((timestamp, info)) = extract_token_count(&value) else {
-            continue;
-        };
-        if info.get("last_token_usage").is_none() && info.get("total_token_usage").is_none() {
-            continue;
-        }
-        let current_second = timestamp_second(&timestamp)?;
-        match first_second {
-            None => first_second = Some(current_second),
-            Some(first_second) if first_second == current_second => return Some(current_second),
-            Some(_) => return None,
-        }
-    }
+    let mut replay_second = None;
+    reader
+        .read_json_records(
+            SourceKind::Codex,
+            &path_hash,
+            cancel,
+            &mut issues,
+            |record| {
+                let value = record.value;
+                let Some((timestamp, info)) = extract_token_count(&value) else {
+                    return Ok(JsonlRecordDisposition::Ignored);
+                };
+                if info.get("last_token_usage").is_none() && info.get("total_token_usage").is_none()
+                {
+                    return Ok(JsonlRecordDisposition::Ignored);
+                }
+                let Some(current_second) = timestamp_second(&timestamp) else {
+                    return Ok(JsonlRecordDisposition::Malformed);
+                };
+                match first_second {
+                    None => first_second = Some(current_second),
+                    Some(first) if first == current_second => {
+                        replay_second = Some(current_second);
+                        return Ok(JsonlRecordDisposition::Stop);
+                    }
+                    Some(_) => return Ok(JsonlRecordDisposition::Stop),
+                }
+                Ok(JsonlRecordDisposition::Accepted)
+            },
+        )
+        .ok()?;
+    replay_second
 }
 
 fn timestamp_second(timestamp: &str) -> Option<[u8; 19]> {
@@ -720,6 +764,7 @@ mod tests {
     use serde_json::json;
     use std::{fs, io::Write};
     use tempfile::TempDir;
+    use tokio_util::sync::CancellationToken;
 
     #[test]
     fn codex_parser_accepts_cached_input_tokens_alias() {
@@ -958,7 +1003,15 @@ mod tests {
         )?;
 
         let mut resolver = crate::project::ProjectResolver::default();
-        let parsed = parse_rollout_file(&path, "path-hash", 0, None, None, &mut resolver)?;
+        let parsed = parse_rollout_file(
+            &path,
+            "path-hash",
+            0,
+            None,
+            None,
+            &mut resolver,
+            &CancellationToken::new(),
+        )?;
 
         assert_eq!(parsed.events.len(), 1);
         assert_eq!(parsed.turns.len(), 1);
@@ -1077,7 +1130,15 @@ mod tests {
         )?;
 
         let mut resolver = crate::project::ProjectResolver::default();
-        let parsed = parse_rollout_file(&path, "path-hash", 0, None, None, &mut resolver)?;
+        let parsed = parse_rollout_file(
+            &path,
+            "path-hash",
+            0,
+            None,
+            None,
+            &mut resolver,
+            &CancellationToken::new(),
+        )?;
 
         assert_eq!(parsed.events.len(), 1);
         assert_eq!(parsed.events[0].tokens.input_tokens, 15);
@@ -1135,7 +1196,15 @@ mod tests {
         }
 
         let mut resolver = crate::project::ProjectResolver::default();
-        let parsed = parse_rollout_file(&path, "path-hash", 0, None, None, &mut resolver)?;
+        let parsed = parse_rollout_file(
+            &path,
+            "path-hash",
+            0,
+            None,
+            None,
+            &mut resolver,
+            &CancellationToken::new(),
+        )?;
 
         assert_eq!(parsed.events.len(), 2);
         assert_eq!(
@@ -1192,14 +1261,22 @@ mod tests {
         let partial = format!("{complete_line}\n{complete_line}"); // last line missing '\n'
         fs::write(&path, &partial)?;
 
-        let result =
-            parse_rollout_file(&path, "path-hash", 0, None, None, &mut Default::default())?;
-        assert_eq!(result.events.len(), 2, "both lines parsed");
+        let result = parse_rollout_file(
+            &path,
+            "path-hash",
+            0,
+            None,
+            None,
+            &mut Default::default(),
+            &CancellationToken::new(),
+        )?;
+        assert_eq!(result.events.len(), 2, "valid EOF records are parsed");
         assert_eq!(
             result.end_offset,
             complete.len() as u64,
             "cursor must not include the partial tail"
         );
+        let partial_event_key = result.events[1].event_key.clone();
 
         // Simulate flush + re-sync from saved cursor.
         let full = format!("{complete_line}\n{complete_line}\n");
@@ -1211,12 +1288,14 @@ mod tests {
             None,
             None,
             &mut Default::default(),
+            &CancellationToken::new(),
         )?;
         assert_eq!(
             incremental.events.len(),
             1,
             "incremental sync picks up completed line"
         );
+        assert_eq!(incremental.events[0].event_key, partial_event_key);
         Ok(())
     }
 }

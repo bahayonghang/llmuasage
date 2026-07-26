@@ -66,6 +66,16 @@ pub(crate) fn format_summary_lines(
         if let Some(error) = &stats.last_error {
             lines.push(styled(Style::new().red(), &format!("  ↳ {error}"), color));
         }
+        if stats.parse_issues.total() > 0 {
+            lines.push(styled(
+                Style::new().yellow(),
+                &format!(
+                    "  parse issues: malformed={} oversized={}",
+                    stats.parse_issues.malformed_lines, stats.parse_issues.oversized_lines
+                ),
+                color,
+            ));
+        }
     }
 
     lines.push(render_total_row(&total, &widths, &separator, color));
@@ -417,6 +427,29 @@ mod tests {
                 .iter()
                 .any(|line| line.contains("OpenCode SQLite DB 缺失"))
         );
+    }
+
+    #[test]
+    fn parse_issue_counts_are_visible_without_sample_contents() {
+        let mut summary = summary();
+        summary.sources[0].parse_issues = crate::parsers::ParseIssues {
+            malformed_lines: 2,
+            oversized_lines: 1,
+            samples: vec![crate::parsers::ParseIssueSample {
+                source: SourceKind::Codex,
+                path_hash: "safe-path-hash".to_string(),
+                offset: 42,
+                kind: crate::parsers::ParseIssueKind::Malformed,
+            }],
+        };
+
+        let lines = format_summary_lines(&summary, false, false, WIDE);
+        let issue_line = lines
+            .iter()
+            .find(|line| line.contains("parse issues:"))
+            .expect("parse issue summary line");
+        assert_eq!(issue_line, "  parse issues: malformed=2 oversized=1");
+        assert!(!lines.iter().any(|line| line.contains("safe-path-hash")));
     }
 
     #[test]

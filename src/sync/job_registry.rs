@@ -577,12 +577,51 @@ fn _keep_sync_summary_public_contract(_: Option<SyncSummary>) {}
 #[cfg(test)]
 mod tests {
     use anyhow::Context as _;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     use super::*;
     use crate::paths::AppPaths;
     use tempfile::TempDir;
 
     struct FencedAssertionExecutor;
+
+    struct DrainAwareExecutor {
+        worker_started: Arc<AtomicBool>,
+        worker_drained: Arc<AtomicBool>,
+    }
+
+    impl crate::sync::executor::SyncExecutor for DrainAwareExecutor {
+        fn run_once<'a>(
+            &'a self,
+            _app: &'a AppContext,
+            _store: &'a Store,
+            _lock_wait_ms: u64,
+            _options: &'a SyncRunOptions,
+            _sender: Option<&'a mut mpsc::Sender<SyncEvent>>,
+            cancel: &'a CancellationToken,
+        ) -> crate::sync::executor::BoxFuture<'a, anyhow::Result<SyncSummary>> {
+            let cancel = cancel.clone();
+            let worker_started = Arc::clone(&self.worker_started);
+            let worker_drained = Arc::clone(&self.worker_drained);
+            Box::pin(async move {
+                tokio::task::spawn_blocking(move || {
+                    worker_started.store(true, Ordering::Release);
+                    while !cancel.is_cancelled() {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                    worker_drained.store(true, Ordering::Release);
+                })
+                .await?;
+                Ok(SyncSummary {
+                    sources: Vec::new(),
+                    total_seen: 0,
+                    total_inserted: 0,
+                    stored_events: 0,
+                })
+            })
+        }
+    }
 
     impl crate::sync::executor::SyncExecutor for FencedAssertionExecutor {
         fn run_once<'a>(
@@ -625,6 +664,44 @@ mod tests {
         )
         .await?;
         assert!(completed.error.is_none());
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancellation_stays_cancelling_until_blocking_worker_drains() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = AppPaths::with_root(temp.path().to_path_buf())?;
+        let store = Store::new(&paths)?;
+        let worker_started = Arc::new(AtomicBool::new(false));
+        let worker_drained = Arc::new(AtomicBool::new(false));
+        let registry = JobRegistry::new(Arc::new(DrainAwareExecutor {
+            worker_started: Arc::clone(&worker_started),
+            worker_drained: Arc::clone(&worker_drained),
+        }));
+        let (job_id, _rx) = registry.start(&store, SyncOptions::default());
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !worker_started.load(Ordering::Acquire) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await?;
+        assert!(registry.cancel(&job_id));
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let draining = registry.snapshot(&job_id).expect("job snapshot");
+        assert_eq!(draining.status, JobStatus::Cancelling);
+        assert!(draining.finished_at.is_none());
+        assert!(!worker_drained.load(Ordering::Acquire));
+
+        let cancelled = wait_for_status(
+            &registry,
+            &job_id,
+            JobStatus::Cancelled,
+            Duration::from_secs(2),
+        )
+        .await?;
+        assert!(worker_drained.load(Ordering::Acquire));
+        assert!(cancelled.finished_at.is_some());
         Ok(())
     }
 

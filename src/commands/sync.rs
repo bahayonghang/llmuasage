@@ -535,6 +535,7 @@ async fn run_once_locked(
             parse_ms: source.parse_ms as i64,
             write_ms: source.write_ms as i64,
             lock_wait_ms: source.lock_wait_ms as i64,
+            parse_issues: source.parse_issues.clone(),
             updated_at: crate::util::now_utc(),
         });
         source_stats.push(source);
@@ -557,6 +558,7 @@ async fn run_once_locked(
             parse_ms: 0,
             write_ms: 0,
             lock_wait_ms: lock_wait_ms as i64,
+            parse_issues: Default::default(),
             updated_at: crate::util::now_utc(),
         });
         source_stats.push(SourceSyncStats {

@@ -1375,6 +1375,8 @@ fn source_sync_stats_absent_wire_contract_is_backward_compatible() -> Result<()>
     })?;
     assert_eq!(default_value["absent"], false);
     assert_eq!(default_value["skipped_files"], 0);
+    assert_eq!(default_value["parse_issues"]["malformed_lines"], 0);
+    assert_eq!(default_value["parse_issues"]["oversized_lines"], 0);
 
     let absent_value = serde_json::to_value(SourceSyncStats {
         source: SourceKind::Opencode,
@@ -1400,6 +1402,7 @@ fn source_sync_stats_absent_wire_contract_is_backward_compatible() -> Result<()>
     let legacy_stats: SourceSyncStats = serde_json::from_value(legacy_json)?;
     assert!(!legacy_stats.absent);
     assert_eq!(legacy_stats.skipped_files, 0);
+    assert_eq!(legacy_stats.parse_issues, Default::default());
     assert_eq!(legacy_stats.source, SourceKind::Opencode);
     assert_eq!(
         legacy_stats.last_error.as_deref(),

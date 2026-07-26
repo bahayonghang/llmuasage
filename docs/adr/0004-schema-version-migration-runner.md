@@ -163,3 +163,15 @@ v15 `optimize_source_sync_cursors_and_behavior_resets` 是真实 schema migratio
 - migration 不修改 OpenCode 自有数据库，也不回填伪造的 rowid；列默认值和两个 `CREATE INDEX IF NOT EXISTS` 保持 fresh/upgrade 幂等。与 v13/v14 一致，极端漂移库缺少目标表时该项 no-op，不在后续 migration 中凭空重建旧 schema。
 
 验证：`migration_v15_adds_opencode_part_cursor_and_behavior_reset_indexes` 同时断言 schema version、列默认值、索引存在性以及 reset 查询计划使用对应复合索引。
+
+## 2026-07-26 更新：v17 有界 JSONL 问题诊断
+
+v17 `add_source_sync_parse_issues` 在 `source_sync_status` 增加
+`parse_issues_json TEXT NOT NULL`，默认值是零计数和空样本。该列持久化最近一次
+source sync 的 malformed/oversized 计数与最多 8 条安全样本；样本只包含 source、
+path hash、record offset 和 issue kind，不包含原始 JSONL、prompt、assistant 内容或
+完整路径。
+
+迁移只使用幂等 `ensure_column`，不重建表、不改变 usage/cursor/token accounting
+语义。验证由 `migration_v17_adds_bounded_parse_issue_diagnostics` 和
+`parse_issue_diagnostics_round_trip_and_reject_invalid_json` 覆盖。

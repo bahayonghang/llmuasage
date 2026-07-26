@@ -204,3 +204,105 @@ if !opencode_cursor_anchor_exists(&connection, &cursor)? {
     cursor.last_part_rowid = 0;
 }
 ```
+
+## Scenario: Bounded Passive JSONL Records And Cooperative Cancellation
+
+### 1. Scope / Trigger
+
+- Trigger: any Codex, Claude, Kimi Code, or Pi JSONL read loop, parse issue
+  projection, file cursor update, or blocking parser cancellation change.
+- The shared reader owns byte bounds, JSON decoding, durable record boundaries,
+  privacy-safe issues, and cancellation polling. Source parsers own only the
+  decoded JSON-to-domain mapping.
+
+### 2. Signatures
+
+- `BoundedJsonlReader::new(reader, start_offset)` uses a 4 MiB maximum record
+  size; tests may use `with_limit` for smaller boundaries.
+- `read_json_records(source, path_hash, cancel, issues, callback)` passes
+  `JsonlRecord { start_offset, end_offset, value }` to the source callback.
+- Domain-owned `ParseIssues { malformed_lines, oversized_lines, samples }` is
+  embedded in `SourceSyncStats` and `SourceSyncStatus` with serde defaults;
+  parser modules may re-export it but storage must not depend on parser modules.
+- Schema v17 persists the latest bounded diagnostic payload in
+  `source_sync_status.parse_issues_json TEXT NOT NULL`.
+
+### 3. Contracts
+
+- The reader searches for newlines through `BufRead::fill_buf`; it buffers at
+  most 4 MiB of record content and discards the rest of an oversized record in
+  bounded chunks through the next newline.
+- `complete_offset` advances only after a newline record boundary. A
+  syntactically complete JSON value at EOF may still produce an event for
+  compatibility, but it cannot advance the durable cursor until its newline is
+  observed. A truncated EOF value produces neither an event nor a malformed
+  issue.
+- Cancellation is checked before each buffered read/discard chunk and between
+  files. Async parser loops must await every spawned blocking handle in the
+  current batch before returning; a cancelled batch is drained and not
+  committed.
+- Malformed and oversized samples contain only source id, bounded path hash,
+  byte offset, and issue kind. Raw JSON, prompts, assistant content, and full
+  paths are forbidden in samples, human summaries, and logs.
+- At most eight samples are retained per source run. Counters continue with
+  saturating arithmetic after the sample budget is exhausted.
+
+### 4. Validation & Error Matrix
+
+- Record exceeds 4 MiB and reaches newline -> increment `oversized_lines`,
+  advance to that boundary, continue with the next record.
+- Complete record is invalid JSON -> increment `malformed_lines`, skip it, and
+  continue without failing the file.
+- EOF contains invalid/incomplete JSON -> keep the prior durable offset and do
+  not count malformed until a record boundary exists.
+- Cancellation during ordinary read or oversized discard -> stop without a
+  cursor for the interrupted file; drain every blocking worker before terminal
+  cancellation.
+- Persisted issue JSON is invalid -> diagnostics/status loading fails as a
+  SQLite conversion error instead of silently inventing clean counters.
+
+### 5. Good/Base/Bad Cases
+
+- Good: a 10 MiB line yields one oversized issue while the in-memory record
+  buffer stays at or below 4 MiB, then the following valid line is parsed.
+- Base: valid newline-delimited records advance `complete_offset` and emit the
+  same source events as before.
+- Good: a valid EOF record is visible immediately but is retried from the prior
+  durable boundary; event keys/store dedupe keep the retry idempotent.
+- Bad: `BufRead::read_line`, `lines()`, or a source-local `serde_json::from_str`
+  loop in a passive JSONL parser.
+- Bad: dropping `JoinHandle`s when cancellation is observed; blocking tasks
+  continue consuming CPU/I/O after the job reports cancelled.
+
+### 6. Tests Required
+
+- Shared Codex/Claude/Kimi/Pi contract harness: 10 MiB oversized line,
+  malformed line with secret content, UTF-8 record, EOF tail, identical issue
+  counters, safe samples, and durable offset.
+- Reader unit tests: maximum buffered bytes, discard continuation, malformed
+  privacy, mid-discard cancellation, start offsets, and EOF stability.
+- Per-source partial-tail/append tests plus `tests/sync_regression.rs` for
+  rewrite, retry, idempotency, and stored totals.
+- JobRegistry test: status remains `cancelling` and `finished_at` stays absent
+  until a blocking worker confirms drain.
+- Migration/status tests: v17 default payload and `ParseIssues` round trip.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+let mut line = String::new();
+while reader.read_line(&mut line)? != 0 {
+    let Ok(value) = serde_json::from_str(&line) else { continue };
+    parse_source_value(value)?;
+}
+```
+
+#### Correct
+
+```rust
+reader.read_json_records(source, path_hash, cancel, &mut issues, |record| {
+    parse_source_value(record.value)
+})?;
+```

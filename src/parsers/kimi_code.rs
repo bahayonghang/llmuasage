@@ -24,13 +24,13 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::{
-    models::{SessionInfo, SourceKind, UsageEvent, UsageTokens},
+    models::{ParseIssues, SessionInfo, SourceKind, UsageEvent, UsageTokens},
     parsers::{
         ProgressSink, SourceParser, SourceSyncStats, SyncEvent,
         file_progress::{FileProgress, FileProgressCounter},
         file_state::{
-            BoundedJsonlReader, CandidateFile, FileReplayMode, decide_file_replay, finalize_cursor,
-            should_rescan_file,
+            BoundedJsonlReader, CandidateFile, FileReplayMode, JsonlReadStatus,
+            JsonlRecordDisposition, decide_file_replay, finalize_cursor, should_rescan_file,
         },
         source_files,
     },
@@ -56,12 +56,15 @@ struct KimiShardOutput {
     events_replayed: usize,
     bytes_scanned: u64,
     seen_file_paths: Vec<String>,
+    parse_issues: ParseIssues,
 }
 
 #[derive(Debug)]
 struct KimiParseResult {
     end_offset: u64,
     events: Vec<UsageEvent>,
+    parse_issues: ParseIssues,
+    cancelled: bool,
 }
 
 /// Kimi Code `wire.jsonl` parser. Owns the per-file scan + per-shard commit
@@ -142,6 +145,7 @@ async fn sync_kimi_code(
     let mut bytes_scanned = 0u64;
     let mut inserted = 0usize;
     let mut write_ms = 0u64;
+    let mut parse_issues = ParseIssues::default();
     let mut plans = shards
         .into_values()
         .map(|files| KimiShardPlan { files })
@@ -158,7 +162,7 @@ async fn sync_kimi_code(
     let (mut file_progress, file_progress_counter) = FileProgress::new();
 
     let width = parallelism.max(1);
-    for batch in plans.chunks(width) {
+    'batches: for batch in plans.chunks(width) {
         if cancel.is_cancelled() {
             break;
         }
@@ -166,31 +170,37 @@ async fn sync_kimi_code(
         for plan in batch {
             let plan = plan.clone();
             let counter = file_progress_counter.clone();
+            let task_cancel = cancel.clone();
             tasks.push(task::spawn_blocking(move || {
-                parse_kimi_shard(plan, counter)
+                parse_kimi_shard(plan, counter, task_cancel)
             }));
         }
 
-        for task in tasks {
+        let batch_outputs = file_progress
+            .wait_for_all(tasks, |files_scanned| {
+                emit_progress(
+                    &mut progress,
+                    SyncEvent::Progress {
+                        source: SourceKind::KimiCode,
+                        files_scanned,
+                        records_imported: inserted as u64,
+                        current_file: None,
+                    },
+                );
+            })
+            .await?;
+        if cancel.is_cancelled() {
+            break;
+        }
+
+        for shard in batch_outputs {
             if cancel.is_cancelled() {
-                break;
+                break 'batches;
             }
-            let shard = file_progress
-                .wait_for(task, |files_scanned| {
-                    emit_progress(
-                        &mut progress,
-                        SyncEvent::Progress {
-                            source: SourceKind::KimiCode,
-                            files_scanned,
-                            records_imported: inserted as u64,
-                            current_file: None,
-                        },
-                    );
-                })
-                .await??;
             events_seen += shard.events_seen;
             events_replayed += shard.events_replayed;
             bytes_scanned += shard.bytes_scanned;
+            parse_issues.merge(shard.parse_issues);
 
             let completed_files = file_progress.boundary_snapshot();
             emit_progress(
@@ -239,6 +249,7 @@ async fn sync_kimi_code(
         events_inserted: inserted,
         write_ms,
         last_error: inventory_error,
+        parse_issues,
         ..SourceSyncStats::default()
     };
     let total_elapsed = parse_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
@@ -250,6 +261,8 @@ async fn sync_kimi_code(
         skipped_files = stats.skipped_files,
         events_seen = stats.events_seen,
         bytes_scanned = stats.bytes_scanned,
+        malformed_lines = stats.parse_issues.malformed_lines,
+        oversized_lines = stats.parse_issues.oversized_lines,
         "完成 Kimi Code wire.jsonl 真源解析"
     );
     Ok(stats)
@@ -261,10 +274,17 @@ fn emit_progress(sink: &mut Option<ProgressSink<'_>>, event: SyncEvent) {
     }
 }
 
-fn parse_kimi_shard(plan: KimiShardPlan, progress: FileProgressCounter) -> Result<KimiShardOutput> {
+fn parse_kimi_shard(
+    plan: KimiShardPlan,
+    progress: FileProgressCounter,
+    cancel: CancellationToken,
+) -> Result<KimiShardOutput> {
     let mut output = KimiShardOutput::default();
 
     for candidate in plan.files {
+        if cancel.is_cancelled() {
+            break;
+        }
         let existing = candidate.existing.clone();
         let decision = decide_file_replay(candidate)?;
         output
@@ -272,7 +292,16 @@ fn parse_kimi_shard(plan: KimiShardPlan, progress: FileProgressCounter) -> Resul
             .push(decision.snapshot.path.to_string_lossy().to_string());
         let path_hash = hash_string(&decision.snapshot.path.to_string_lossy());
 
-        let parsed = parse_wire_file(&decision.snapshot.path, &path_hash, decision.start_offset)?;
+        let parsed = parse_wire_file(
+            &decision.snapshot.path,
+            &path_hash,
+            decision.start_offset,
+            &cancel,
+        )?;
+        output.parse_issues.merge(parsed.parse_issues);
+        if parsed.cancelled {
+            break;
+        }
         output.bytes_scanned += decision
             .snapshot
             .file_size
@@ -306,6 +335,7 @@ fn parse_wire_file(
     file_path: &Path,
     path_hash: &str,
     start_offset: u64,
+    cancel: &CancellationToken,
 ) -> Result<KimiParseResult> {
     let file = File::open(file_path)?;
     let file_len = file.metadata()?.len();
@@ -313,6 +343,8 @@ fn parse_wire_file(
         return Ok(KimiParseResult {
             end_offset: file_len,
             events: Vec::new(),
+            parse_issues: ParseIssues::default(),
+            cancelled: cancel.is_cancelled(),
         });
     }
 
@@ -320,80 +352,86 @@ fn parse_wire_file(
     let session = build_session(file_path, path_hash);
 
     let mut reader = BoundedJsonlReader::new(file, start_offset)?;
-    let mut line = String::new();
     let mut events = Vec::new();
+    let mut parse_issues = ParseIssues::default();
+    let status = reader.read_json_records(
+        SourceKind::KimiCode,
+        path_hash,
+        cancel,
+        &mut parse_issues,
+        |record| {
+            let value = record.value;
+            if value.get("type").and_then(Value::as_str) != Some("usage.record") {
+                return Ok(JsonlRecordDisposition::Ignored);
+            }
+            // kimi-code treats a missing `usageScope` as session-scoped, so require
+            // an explicit `"turn"` to avoid counting aggregate/compaction records.
+            if value.get("usageScope").and_then(Value::as_str) != Some("turn") {
+                return Ok(JsonlRecordDisposition::Ignored);
+            }
+            let Some(tokens) = value.get("usage").and_then(parse_kimi_tokens) else {
+                return Ok(JsonlRecordDisposition::Accepted);
+            };
+            let time_ms = value
+                .get("time")
+                .and_then(Value::as_i64)
+                .unwrap_or(fallback_ms);
+            let Some(timestamp) = chrono::DateTime::from_timestamp_millis(time_ms) else {
+                return Ok(JsonlRecordDisposition::Malformed);
+            };
+            let event_at = timestamp.to_rfc3339();
+            let Some(hour_start) = bucket_start_from_rfc3339(&event_at) else {
+                return Ok(JsonlRecordDisposition::Malformed);
+            };
+            let model = value
+                .get("model")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| FALLBACK_MODEL.to_string());
 
-    loop {
-        line.clear();
-        let record_offset = reader.current_offset();
-        let bytes_read = reader.read_line(&mut line)?;
-        if bytes_read == 0 {
-            break;
-        }
-
-        // Cheap prefilter before the JSON parse; every retained line is a
-        // `usage.record`.
-        if !line.contains("usage.record") {
-            continue;
-        }
-        let Ok(value) = serde_json::from_str::<Value>(&line) else {
-            continue;
-        };
-        if value.get("type").and_then(Value::as_str) != Some("usage.record") {
-            continue;
-        }
-        // kimi-code treats a missing `usageScope` as session-scoped, so require
-        // an explicit `"turn"` to avoid counting aggregate/compaction records.
-        if value.get("usageScope").and_then(Value::as_str) != Some("turn") {
-            continue;
-        }
-        let Some(tokens) = value.get("usage").and_then(parse_kimi_tokens) else {
-            continue;
-        };
-        let time_ms = value
-            .get("time")
-            .and_then(Value::as_i64)
-            .unwrap_or(fallback_ms);
-        let Some(timestamp) = chrono::DateTime::from_timestamp_millis(time_ms) else {
-            continue;
-        };
-        let event_at = timestamp.to_rfc3339();
-        let Some(hour_start) = bucket_start_from_rfc3339(&event_at) else {
-            continue;
-        };
-        let model = value
-            .get("model")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-            .unwrap_or_else(|| FALLBACK_MODEL.to_string());
-
-        let logical_identity = format!(
-            "{path_hash}\0{record_offset}\0{time_ms}\0{model}\0{}\0{}\0{}\0{}\0{}",
-            tokens.input_tokens,
-            tokens.cache_read_tokens,
-            tokens.cache_creation_tokens,
-            tokens.output_tokens,
-            tokens.total_tokens,
-        );
-        events.push(UsageEvent {
-            event_key: format!("kimi_code:{}", hash_string(&logical_identity)),
-            source: SourceKind::KimiCode,
-            provider_label: String::new(),
-            model,
-            event_at,
-            hour_start,
-            tokens,
-            project: None,
-            session: session.clone(),
-        });
-    }
+            let logical_identity = format!(
+                "{path_hash}\0{}\0{time_ms}\0{model}\0{}\0{}\0{}\0{}\0{}",
+                record.start_offset,
+                tokens.input_tokens,
+                tokens.cache_read_tokens,
+                tokens.cache_creation_tokens,
+                tokens.output_tokens,
+                tokens.total_tokens,
+            );
+            events.push(UsageEvent {
+                event_key: format!("kimi_code:{}", hash_string(&logical_identity)),
+                source: SourceKind::KimiCode,
+                provider_label: String::new(),
+                model,
+                event_at,
+                hour_start,
+                tokens,
+                project: None,
+                session: session.clone(),
+            });
+            Ok(JsonlRecordDisposition::Accepted)
+        },
+    )?;
 
     Ok(KimiParseResult {
         end_offset: reader.complete_offset(),
         events,
+        parse_issues,
+        cancelled: status == JsonlReadStatus::Cancelled,
     })
+}
+
+#[cfg(test)]
+pub(super) fn bounded_contract_parse(file_path: &Path) -> Result<(ParseIssues, u64, bool)> {
+    let result = parse_wire_file(
+        file_path,
+        "bounded-contract-path-hash",
+        0,
+        &CancellationToken::new(),
+    )?;
+    Ok((result.parse_issues, result.end_offset, result.cancelled))
 }
 
 /// Maps a Kimi Code `usage` object to normalized [`UsageTokens`].
@@ -471,6 +509,7 @@ mod tests {
     use super::{FALLBACK_MODEL, parse_wire_file};
     use std::{fs, path::PathBuf};
     use tempfile::TempDir;
+    use tokio_util::sync::CancellationToken;
 
     /// Builds a synthetic `wire.jsonl` under a fake kimi-code layout so
     /// `extract_session_id` resolves the `sess-abc-123` segment.
@@ -491,8 +530,9 @@ mod tests {
     }
 
     fn parse(content: &str) -> Vec<crate::models::UsageEvent> {
-        let (_dir, path) = write_wire_file(content);
-        parse_wire_file(&path, "path-hash", 0)
+        let complete = format!("{}\n", content.trim_end_matches('\n'));
+        let (_dir, path) = write_wire_file(&complete);
+        parse_wire_file(&path, "path-hash", 0, &CancellationToken::new())
             .expect("parse wire.jsonl")
             .events
     }
@@ -605,8 +645,10 @@ mod tests {
         );
 
         let (_dir, path) = write_wire_file(content);
-        let first = parse_wire_file(&path, "path-hash", 0).expect("first parse");
-        let second = parse_wire_file(&path, "path-hash", 0).expect("second parse");
+        let first =
+            parse_wire_file(&path, "path-hash", 0, &CancellationToken::new()).expect("first parse");
+        let second = parse_wire_file(&path, "path-hash", 0, &CancellationToken::new())
+            .expect("second parse");
 
         assert_eq!(first.events.len(), 2);
         assert_ne!(first.events[0].event_key, first.events[1].event_key);
@@ -628,25 +670,33 @@ mod tests {
 
         let (_dir, path) = write_wire_file(&partial);
 
-        let result = parse_wire_file(&path, "path-hash", 0).expect("parse");
-        assert_eq!(result.events.len(), 2, "both lines should be parsed");
+        let result =
+            parse_wire_file(&path, "path-hash", 0, &CancellationToken::new()).expect("parse");
+        assert_eq!(result.events.len(), 2, "valid EOF records are parsed");
         // complete_offset must stop after the first '\n'-terminated line
         assert_eq!(
             result.end_offset,
             complete.len() as u64,
             "cursor must not include the partial tail"
         );
+        let partial_event_key = result.events[1].event_key.clone();
 
         // Simulate the tool flushing the final newline and re-syncing from
         // the saved cursor: the partial line is now complete.
         let full = format!("{complete_line}\n{complete_line}\n");
         std::fs::write(&path, &full).expect("write full");
-        let incremental =
-            parse_wire_file(&path, "path-hash", result.end_offset).expect("incremental parse");
+        let incremental = parse_wire_file(
+            &path,
+            "path-hash",
+            result.end_offset,
+            &CancellationToken::new(),
+        )
+        .expect("incremental parse");
         assert_eq!(
             incremental.events.len(),
             1,
             "incremental sync picks up completed line"
         );
+        assert_eq!(incremental.events[0].event_key, partial_event_key);
     }
 }

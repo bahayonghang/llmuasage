@@ -26,13 +26,13 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::{
-    models::{SessionInfo, SourceKind, UsageEvent, UsageTokens},
+    models::{ParseIssues, SessionInfo, SourceKind, UsageEvent, UsageTokens},
     parsers::{
         ProgressSink, SourceParser, SourceSyncStats, SyncEvent,
         file_progress::{FileProgress, FileProgressCounter},
         file_state::{
-            BoundedJsonlReader, CandidateFile, FileReplayMode, decide_file_replay, finalize_cursor,
-            should_rescan_file,
+            BoundedJsonlReader, CandidateFile, FileReplayMode, JsonlReadStatus,
+            JsonlRecordDisposition, decide_file_replay, finalize_cursor, should_rescan_file,
         },
         source_files,
     },
@@ -58,12 +58,15 @@ struct PiShardOutput {
     events_replayed: usize,
     bytes_scanned: u64,
     seen_file_paths: Vec<String>,
+    parse_issues: ParseIssues,
 }
 
 #[derive(Debug)]
 struct PiParseResult {
     end_offset: u64,
     events: Vec<UsageEvent>,
+    parse_issues: ParseIssues,
+    cancelled: bool,
 }
 
 /// Pi / Oh My Pi session parser. Owns the per-file scan + per-shard commit
@@ -144,6 +147,7 @@ async fn sync_pi(
     let mut bytes_scanned = 0u64;
     let mut inserted = 0usize;
     let mut write_ms = 0u64;
+    let mut parse_issues = ParseIssues::default();
     let mut plans = shards
         .into_values()
         .map(|files| PiShardPlan { files })
@@ -160,7 +164,7 @@ async fn sync_pi(
     let (mut file_progress, file_progress_counter) = FileProgress::new();
 
     let width = parallelism.max(1);
-    for batch in plans.chunks(width) {
+    'batches: for batch in plans.chunks(width) {
         if cancel.is_cancelled() {
             break;
         }
@@ -168,29 +172,37 @@ async fn sync_pi(
         for plan in batch {
             let plan = plan.clone();
             let counter = file_progress_counter.clone();
-            tasks.push(task::spawn_blocking(move || parse_pi_shard(plan, counter)));
+            let task_cancel = cancel.clone();
+            tasks.push(task::spawn_blocking(move || {
+                parse_pi_shard(plan, counter, task_cancel)
+            }));
         }
 
-        for task in tasks {
+        let batch_outputs = file_progress
+            .wait_for_all(tasks, |files_scanned| {
+                emit_progress(
+                    &mut progress,
+                    SyncEvent::Progress {
+                        source: SourceKind::Pi,
+                        files_scanned,
+                        records_imported: inserted as u64,
+                        current_file: None,
+                    },
+                );
+            })
+            .await?;
+        if cancel.is_cancelled() {
+            break;
+        }
+
+        for shard in batch_outputs {
             if cancel.is_cancelled() {
-                break;
+                break 'batches;
             }
-            let shard = file_progress
-                .wait_for(task, |files_scanned| {
-                    emit_progress(
-                        &mut progress,
-                        SyncEvent::Progress {
-                            source: SourceKind::Pi,
-                            files_scanned,
-                            records_imported: inserted as u64,
-                            current_file: None,
-                        },
-                    );
-                })
-                .await??;
             events_seen += shard.events_seen;
             events_replayed += shard.events_replayed;
             bytes_scanned += shard.bytes_scanned;
+            parse_issues.merge(shard.parse_issues);
 
             let completed_files = file_progress.boundary_snapshot();
             emit_progress(
@@ -239,6 +251,7 @@ async fn sync_pi(
         events_inserted: inserted,
         write_ms,
         last_error: inventory_error,
+        parse_issues,
         ..SourceSyncStats::default()
     };
     let total_elapsed = parse_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
@@ -250,6 +263,8 @@ async fn sync_pi(
         skipped_files = stats.skipped_files,
         events_seen = stats.events_seen,
         bytes_scanned = stats.bytes_scanned,
+        malformed_lines = stats.parse_issues.malformed_lines,
+        oversized_lines = stats.parse_issues.oversized_lines,
         "完成 Pi / Oh My Pi 会话真源解析"
     );
     Ok(stats)
@@ -261,10 +276,17 @@ fn emit_progress(sink: &mut Option<ProgressSink<'_>>, event: SyncEvent) {
     }
 }
 
-fn parse_pi_shard(plan: PiShardPlan, progress: FileProgressCounter) -> Result<PiShardOutput> {
+fn parse_pi_shard(
+    plan: PiShardPlan,
+    progress: FileProgressCounter,
+    cancel: CancellationToken,
+) -> Result<PiShardOutput> {
     let mut output = PiShardOutput::default();
 
     for candidate in plan.files {
+        if cancel.is_cancelled() {
+            break;
+        }
         let existing = candidate.existing.clone();
         let decision = decide_file_replay(candidate)?;
         output
@@ -272,8 +294,16 @@ fn parse_pi_shard(plan: PiShardPlan, progress: FileProgressCounter) -> Result<Pi
             .push(decision.snapshot.path.to_string_lossy().to_string());
         let path_hash = hash_string(&decision.snapshot.path.to_string_lossy());
 
-        let parsed =
-            parse_session_file(&decision.snapshot.path, &path_hash, decision.start_offset)?;
+        let parsed = parse_session_file(
+            &decision.snapshot.path,
+            &path_hash,
+            decision.start_offset,
+            &cancel,
+        )?;
+        output.parse_issues.merge(parsed.parse_issues);
+        if parsed.cancelled {
+            break;
+        }
         output.bytes_scanned += decision
             .snapshot
             .file_size
@@ -307,6 +337,7 @@ fn parse_session_file(
     file_path: &Path,
     path_hash: &str,
     start_offset: u64,
+    cancel: &CancellationToken,
 ) -> Result<PiParseResult> {
     let file = File::open(file_path)?;
     let file_len = file.metadata()?.len();
@@ -314,93 +345,101 @@ fn parse_session_file(
         return Ok(PiParseResult {
             end_offset: file_len,
             events: Vec::new(),
+            parse_issues: ParseIssues::default(),
+            cancelled: cancel.is_cancelled(),
         });
     }
 
     let session = build_session(file_path, path_hash);
 
     let mut reader = BoundedJsonlReader::new(file, start_offset)?;
-    let mut line = String::new();
     let mut events = Vec::new();
+    let mut parse_issues = ParseIssues::default();
+    let status = reader.read_json_records(
+        SourceKind::Pi,
+        path_hash,
+        cancel,
+        &mut parse_issues,
+        |record| {
+            let value = record.value;
+            // `type` is absent or `"message"` on usage-bearing records; anything else
+            // (title/session/model_change/thinking-level metadata) is ignored.
+            if value
+                .get("type")
+                .and_then(Value::as_str)
+                .is_some_and(|message_type| message_type != "message")
+            {
+                return Ok(JsonlRecordDisposition::Ignored);
+            }
+            let Some(message) = value.get("message") else {
+                return Ok(JsonlRecordDisposition::Ignored);
+            };
+            if message.get("role").and_then(Value::as_str) != Some("assistant") {
+                return Ok(JsonlRecordDisposition::Ignored);
+            }
+            let Some(tokens) = message.get("usage").and_then(parse_pi_tokens) else {
+                return Ok(JsonlRecordDisposition::Accepted);
+            };
+            let Some(timestamp_raw) = value.get("timestamp").and_then(Value::as_str) else {
+                return Ok(JsonlRecordDisposition::Malformed);
+            };
+            let Ok(timestamp) = chrono::DateTime::parse_from_rfc3339(timestamp_raw) else {
+                return Ok(JsonlRecordDisposition::Malformed);
+            };
+            let event_at = timestamp.with_timezone(&chrono::Utc).to_rfc3339();
+            let Some(hour_start) = bucket_start_from_rfc3339(&event_at) else {
+                return Ok(JsonlRecordDisposition::Malformed);
+            };
+            let model = message
+                .get("model")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| FALLBACK_MODEL.to_string());
 
-    loop {
-        line.clear();
-        let record_offset = reader.current_offset();
-        let bytes_read = reader.read_line(&mut line)?;
-        if bytes_read == 0 {
-            break;
-        }
-
-        // Cheap prefilter before the JSON parse: a usable Pi line carries token
-        // counts under a `usage` key nested in a `message` object.
-        if !(line.contains("usage") && line.contains("message")) {
-            continue;
-        }
-        let Ok(value) = serde_json::from_str::<Value>(&line) else {
-            continue;
-        };
-        // `type` is absent or `"message"` on usage-bearing records; anything else
-        // (title/session/model_change/thinking-level metadata) is ignored.
-        if value
-            .get("type")
-            .and_then(Value::as_str)
-            .is_some_and(|message_type| message_type != "message")
-        {
-            continue;
-        }
-        let Some(message) = value.get("message") else {
-            continue;
-        };
-        if message.get("role").and_then(Value::as_str) != Some("assistant") {
-            continue;
-        }
-        let Some(tokens) = message.get("usage").and_then(parse_pi_tokens) else {
-            continue;
-        };
-        let Some(timestamp_raw) = value.get("timestamp").and_then(Value::as_str) else {
-            continue;
-        };
-        let Ok(timestamp) = chrono::DateTime::parse_from_rfc3339(timestamp_raw) else {
-            continue;
-        };
-        let event_at = timestamp.with_timezone(&chrono::Utc).to_rfc3339();
-        let Some(hour_start) = bucket_start_from_rfc3339(&event_at) else {
-            continue;
-        };
-        let model = message
-            .get("model")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-            .unwrap_or_else(|| FALLBACK_MODEL.to_string());
-
-        let logical_identity = format!(
-            "{path_hash}\0{record_offset}\0{event_at}\0{model}\0{}\0{}\0{}\0{}\0{}\0{}",
-            tokens.input_tokens,
-            tokens.cache_read_tokens,
-            tokens.cache_creation_tokens,
-            tokens.output_tokens,
-            tokens.reasoning_output_tokens,
-            tokens.total_tokens,
-        );
-        events.push(UsageEvent {
-            event_key: format!("pi:{}", hash_string(&logical_identity)),
-            source: SourceKind::Pi,
-            provider_label: String::new(),
-            model,
-            event_at,
-            hour_start,
-            tokens,
-            project: None,
-            session: session.clone(),
-        });
-    }
+            let logical_identity = format!(
+                "{path_hash}\0{}\0{event_at}\0{model}\0{}\0{}\0{}\0{}\0{}\0{}",
+                record.start_offset,
+                tokens.input_tokens,
+                tokens.cache_read_tokens,
+                tokens.cache_creation_tokens,
+                tokens.output_tokens,
+                tokens.reasoning_output_tokens,
+                tokens.total_tokens,
+            );
+            events.push(UsageEvent {
+                event_key: format!("pi:{}", hash_string(&logical_identity)),
+                source: SourceKind::Pi,
+                provider_label: String::new(),
+                model,
+                event_at,
+                hour_start,
+                tokens,
+                project: None,
+                session: session.clone(),
+            });
+            Ok(JsonlRecordDisposition::Accepted)
+        },
+    )?;
 
     Ok(PiParseResult {
         end_offset: reader.complete_offset(),
         events,
+        parse_issues,
+        cancelled: status == JsonlReadStatus::Cancelled,
     })
+}
+
+#[cfg(test)]
+pub(super) fn bounded_contract_parse(file_path: &Path) -> Result<(ParseIssues, u64, bool)> {
+    let result = parse_session_file(
+        file_path,
+        "bounded-contract-path-hash",
+        0,
+        &CancellationToken::new(),
+    )?;
+    Ok((result.parse_issues, result.end_offset, result.cancelled))
 }
 
 /// Maps a Pi `usage` object to normalized [`UsageTokens`].
@@ -483,6 +522,7 @@ mod tests {
     use super::{FALLBACK_MODEL, parse_session_file};
     use std::{fs, path::PathBuf};
     use tempfile::TempDir;
+    use tokio_util::sync::CancellationToken;
 
     /// Builds a synthetic Pi session file under a fake `.omp` layout so
     /// `extract_session_id` resolves the `sess-abc-123` stem segment.
@@ -501,8 +541,9 @@ mod tests {
     }
 
     fn parse(content: &str) -> Vec<crate::models::UsageEvent> {
-        let (_dir, path) = write_session_file(content);
-        parse_session_file(&path, "path-hash", 0)
+        let complete = format!("{}\n", content.trim_end_matches('\n'));
+        let (_dir, path) = write_session_file(&complete);
+        parse_session_file(&path, "path-hash", 0, &CancellationToken::new())
             .expect("parse session file")
             .events
     }
@@ -615,8 +656,10 @@ mod tests {
         );
 
         let (_dir, path) = write_session_file(content);
-        let first = parse_session_file(&path, "path-hash", 0).expect("first parse");
-        let second = parse_session_file(&path, "path-hash", 0).expect("second parse");
+        let first = parse_session_file(&path, "path-hash", 0, &CancellationToken::new())
+            .expect("first parse");
+        let second = parse_session_file(&path, "path-hash", 0, &CancellationToken::new())
+            .expect("second parse");
 
         assert_eq!(first.events.len(), 2);
         assert_ne!(first.events[0].event_key, first.events[1].event_key);
@@ -636,23 +679,31 @@ mod tests {
 
         let (_dir, path) = write_session_file(&partial);
 
-        let result = parse_session_file(&path, "path-hash", 0).expect("parse");
-        assert_eq!(result.events.len(), 2, "both lines parsed");
+        let result =
+            parse_session_file(&path, "path-hash", 0, &CancellationToken::new()).expect("parse");
+        assert_eq!(result.events.len(), 2, "valid EOF records are parsed");
         assert_eq!(
             result.end_offset,
             complete.len() as u64,
             "cursor must not include the partial tail"
         );
+        let partial_event_key = result.events[1].event_key.clone();
 
         // Simulate the tool flushing the final newline and re-syncing.
         let full = format!("{complete_line}\n{complete_line}\n");
         std::fs::write(&path, &full).expect("write full");
-        let incremental =
-            parse_session_file(&path, "path-hash", result.end_offset).expect("incremental parse");
+        let incremental = parse_session_file(
+            &path,
+            "path-hash",
+            result.end_offset,
+            &CancellationToken::new(),
+        )
+        .expect("incremental parse");
         assert_eq!(
             incremental.events.len(),
             1,
             "incremental sync picks up completed line"
         );
+        assert_eq!(incremental.events[0].event_key, partial_event_key);
     }
 }

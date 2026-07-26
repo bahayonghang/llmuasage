@@ -93,3 +93,12 @@ SourceDiagnostics {
 - deleted_then_seen_again_resurrects_to_live
 - 三入口对同一 path 调一次后状态一致集测
 - diagnostics 与 source_file group by 计数一致集测
+
+## 2026-07-26 更新：JSONL durable record boundary
+
+文件型 JSONL source 的 `FileCursor.offset` 统一取共享
+`BoundedJsonlReader::complete_offset()`：只有读到换行 record boundary 才能推进。
+语法完整但尚未写入换行的 EOF JSON 可以沿用旧行为产出事件，但 cursor 保持在上一
+boundary，下一轮会重读并依赖稳定 event key/store dedupe 保持幂等；截断 EOF JSON
+既不产出事件，也不计 malformed。超长记录只有在读到其换行 boundary 后才能作为
+oversized issue 消费并推进 cursor。
