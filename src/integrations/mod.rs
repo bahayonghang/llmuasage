@@ -11,12 +11,14 @@ use tracing::info;
 use crate::{app::AppContext, models::SourceKind, registry, store::Store, util::now_utc};
 
 pub mod antigravity;
+mod atomic;
 pub mod claude;
 pub mod codex;
 pub mod hook_target;
 pub mod integration;
 pub mod opencode;
 
+pub use atomic::{remove_file_atomic_and_record, write_file_atomic, write_file_atomic_and_record};
 pub use hook_target::{HookKind, HookTarget};
 pub use integration::Integration;
 
@@ -142,62 +144,6 @@ pub fn backup_file(original: &Path, backups_dir: &Path, stem: &str) -> Result<Pa
         }
     }
     anyhow::bail!("无法为 {stem} 创建唯一备份文件名（已尝试 1000 次）")
-}
-
-/// Crash-atomic file write: sibling temp file, fsync, then atomic rename.
-///
-/// A plain `fs::write` can leave a truncated config behind if the process dies,
-/// the disk fills, or an AV scanner interferes mid-write. Writing to a sibling
-/// temp file and renaming means readers observe either the old or the new
-/// content, never a partial one. Existing permissions are preserved.
-pub fn write_file_atomic(target: &Path, contents: impl AsRef<[u8]>) -> Result<()> {
-    if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let existing_perms = fs::metadata(target).ok().map(|meta| meta.permissions());
-
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.subsec_nanos())
-        .unwrap_or(0);
-    let file_name = target
-        .file_name()
-        .map(|name| name.to_string_lossy().to_string())
-        .unwrap_or_else(|| "llmusage-config".to_string());
-    let temp_path = target.with_file_name(format!(
-        ".{file_name}.llmusage-tmp.{}.{nanos:09}",
-        std::process::id()
-    ));
-
-    let write_result = (|| -> Result<()> {
-        let mut temp = fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&temp_path)?;
-        std::io::Write::write_all(&mut temp, contents.as_ref())?;
-        temp.sync_all()?;
-        drop(temp);
-
-        if let Some(perms) = existing_perms.clone() {
-            let _ = fs::set_permissions(&temp_path, perms);
-        }
-        // On Windows, rename fails when the destination exists; remove it first.
-        // The temp file already holds the full new content, so a crash between
-        // remove and rename leaves the temp file recoverable on disk.
-        #[cfg(windows)]
-        if target.exists() {
-            fs::remove_file(target)?;
-        }
-        fs::rename(&temp_path, target)?;
-        Ok(())
-    })();
-
-    if write_result.is_err() {
-        // roll back: never leave the temp file behind on failure
-        let _ = fs::remove_file(&temp_path);
-    }
-    write_result
 }
 
 pub fn record_probe(store: &Store, probe: &IntegrationProbe) -> Result<()> {

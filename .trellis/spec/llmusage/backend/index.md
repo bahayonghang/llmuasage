@@ -30,6 +30,8 @@ output, and dashboard/TUI consumers.
   dependencies, `rust-version`, Rust CI commands, or subprocess test harnesses.
 - Read [Write Fencing Contracts](./write-fencing-contracts.md) before changing
   worker locks, bootstrap, migrations, sync writers, or any Store mutation.
+- Read [Integration File Contracts](./integration-file-contracts.md) before
+  changing third-party hook/plugin configuration writes or action recording.
 - Also read `docs/agents/domain.md` and
   `docs/agents/passive-parser-onboarding.md` before promoting a monitored
   platform into a parser-backed source.
@@ -50,6 +52,7 @@ output, and dashboard/TUI consumers.
 | [Self-Update Contracts](./self-update-contracts.md) | Official channels, Cargo invocation, confirmation, and no-network test boundaries | Documented |
 | [CI And Toolchain Contracts](./ci-toolchain-contracts.md) | Shared Rust gate, verified MSRV, and subprocess-test evidence rules | Documented |
 | [Write Fencing Contracts](./write-fencing-contracts.md) | Generation permits, transaction fencing, bootstrap ordering, and mutation entrypoints | Documented |
+| [Integration File Contracts](./integration-file-contracts.md) | Cross-platform atomic replace, recovery, and integration action recording | Documented |
 
 ## Quality Check
 

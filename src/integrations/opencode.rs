@@ -10,6 +10,7 @@ use crate::{app::AppContext, models::SourceKind, store::Store};
 
 use super::{
     HookTarget, Integration, IntegrationAction, IntegrationProbe, backup_file, record_action,
+    remove_file_atomic_and_record, write_file_atomic_and_record,
 };
 
 const PLUGIN_MARKER: &str = "LLMUSAGE_LOCAL_PLUGIN";
@@ -79,16 +80,17 @@ pub fn install(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
         None
     };
 
-    crate::integrations::write_file_atomic(&plugin_path, build_plugin(app))?;
-    record_action(
-        store,
-        SourceKind::Opencode,
-        "init",
-        "ready",
-        "OpenCode plugin 已安装",
-        Some(&plugin_path),
-        backup_path.as_deref(),
-    )?;
+    write_file_atomic_and_record(&plugin_path, build_plugin(app), || {
+        record_action(
+            store,
+            SourceKind::Opencode,
+            "init",
+            "ready",
+            "OpenCode plugin 已安装",
+            Some(&plugin_path),
+            backup_path.as_deref(),
+        )
+    })?;
 
     Ok(IntegrationAction {
         source: SourceKind::Opencode,
@@ -113,19 +115,22 @@ pub fn uninstall(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
         "opencode-plugin-restore",
     )?;
     let content = fs::read_to_string(&plugin_path)?;
+    let record = || {
+        record_action(
+            store,
+            SourceKind::Opencode,
+            "uninstall",
+            "restored",
+            "OpenCode plugin 已移除",
+            Some(&plugin_path),
+            Some(&backup_path),
+        )
+    };
     if content.contains(PLUGIN_MARKER) {
-        fs::remove_file(&plugin_path)?;
+        remove_file_atomic_and_record(&plugin_path, record)?;
+    } else {
+        record()?;
     }
-
-    record_action(
-        store,
-        SourceKind::Opencode,
-        "uninstall",
-        "restored",
-        "OpenCode plugin 已移除",
-        Some(&plugin_path),
-        Some(&backup_path),
-    )?;
 
     Ok(IntegrationAction {
         source: SourceKind::Opencode,

@@ -147,6 +147,41 @@ fn local_flow_installs_syncs_exports_and_uninstalls() -> Result<()> {
 }
 
 #[test]
+fn antigravity_install_and_uninstall_stay_inside_temp_home() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let config_dir = fixture.home.join(".gemini").join("config");
+    let hooks_path = config_dir.join("hooks.json");
+    fs::create_dir_all(&config_dir)?;
+    fs::write(
+        &hooks_path,
+        r#"{"Stop":[{"type":"command","command":"user-hook"}]}"#,
+    )?;
+
+    let app = AppContext::discover()?;
+    let store = Store::new(&app.paths)?;
+    store.bootstrap()?;
+
+    integrations::antigravity::install(&app, &store)?;
+    let installed = fs::read_to_string(&hooks_path)?;
+    assert!(installed.contains("user-hook"));
+    assert!(installed.contains("llmusage-hook"));
+
+    integrations::antigravity::uninstall(&app, &store)?;
+    let restored = fs::read_to_string(&hooks_path)?;
+    assert!(restored.contains("user-hook"));
+    assert!(!restored.contains("llmusage-hook"));
+    assert!(
+        fs::read_dir(&config_dir)?
+            .filter_map(|entry| entry.ok())
+            .all(|entry| !entry.file_name().to_string_lossy().contains("llmusage-")),
+        "integration must clean sibling temp and recovery files"
+    );
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
 fn claude_install_reports_invalid_settings_shapes() -> Result<()> {
     let cases = [
         ("top-level", "[]", "顶层必须是 object"),

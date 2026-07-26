@@ -8,7 +8,7 @@ use crate::{app::AppContext, models::SourceKind, store::Store, util::resolve_hom
 
 use super::{
     HookTarget, Integration, IntegrationAction, IntegrationProbe, backup_file, record_action,
-    record_probe,
+    record_probe, write_file_atomic_and_record,
 };
 
 /// ZST handle implementing [`Integration`] for the Codex `notify` array.
@@ -98,17 +98,17 @@ pub fn install(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
         .map(|entry| Value::from(entry.as_str()))
         .collect::<toml_edit::Array>();
     doc["notify"] = value(notify_array);
-    crate::integrations::write_file_atomic(&config_path, doc.to_string())?;
-
-    record_action(
-        store,
-        SourceKind::Codex,
-        "init",
-        "ready",
-        "Codex notify 已安装",
-        Some(&config_path),
-        Some(&backup_path),
-    )?;
+    write_file_atomic_and_record(&config_path, doc.to_string(), || {
+        record_action(
+            store,
+            SourceKind::Codex,
+            "init",
+            "ready",
+            "Codex notify 已安装",
+            Some(&config_path),
+            Some(&backup_path),
+        )
+    })?;
 
     Ok(IntegrationAction {
         source: SourceKind::Codex,
@@ -149,16 +149,17 @@ pub fn uninstall(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
         doc.remove("notify");
     }
 
-    crate::integrations::write_file_atomic(&config_path, doc.to_string())?;
-    record_action(
-        store,
-        SourceKind::Codex,
-        "uninstall",
-        "restored",
-        "Codex notify 已恢复",
-        Some(&config_path),
-        Some(&backup_path),
-    )?;
+    write_file_atomic_and_record(&config_path, doc.to_string(), || {
+        record_action(
+            store,
+            SourceKind::Codex,
+            "uninstall",
+            "restored",
+            "Codex notify 已恢复",
+            Some(&config_path),
+            Some(&backup_path),
+        )
+    })?;
 
     Ok(IntegrationAction {
         source: SourceKind::Codex,
