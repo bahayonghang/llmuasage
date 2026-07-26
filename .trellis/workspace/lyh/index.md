@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 31
+- **Total Sessions**: 32
 - **Last Active**: 2026-07-26
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1057 | Active |
+| `journal-1.md` | ~1078 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 32 | 2026-07-26 | 恢复写入 fencing 与 bootstrap 排他性 | `1d81fd91062f1becbbcb6fcc1ae3b80d6b28675e` | `dev` |
 | 31 | 2026-07-26 | 完成 MSRV 与验证基线诚实化 | `6b67cfa` | `dev` |
 | 30 | 2026-07-23 | 完成 serve 加载进度与性能修复 | `ed31296`, `b0638a7`, `5399c90` | `dev` |
 | 29 | 2026-07-23 | 添加 llmusage 自更新命令 | `e5437f7`, `6ec3aa8` | `dev` |

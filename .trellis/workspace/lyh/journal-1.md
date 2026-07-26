@@ -1055,3 +1055,24 @@ Claude/Codex 以 planned replay 文件数显示 5Hz 解析进度，TTY 显示提
 ### Next Steps
 
 - 继续 07-26-write-fencing-closure 子任务
+
+
+## Session 32: 恢复写入 fencing 与 bootstrap 排他性
+
+**Date**: 2026-07-26
+**Task**: 恢复写入 fencing 与 bootstrap 排他性
+**Branch**: `dev`
+
+### Summary
+
+完成 lease generation fencing、bootstrap 排他与只读初始化边界修复，并通过完整 CI。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1d81fd91062f1becbbcb6fcc1ae3b80d6b28675e` | (see git log) |
+
+### Status
+
+[OK] **Completed**
