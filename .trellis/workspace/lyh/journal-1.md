@@ -1076,3 +1076,34 @@ Claude/Codex 以 planned replay 文件数显示 5Hz 解析进度，TTY 显示提
 ### Status
 
 [OK] **Completed**
+
+
+## Session 33: 完成 Windows integration 原子替换闭环
+
+**Date**: 2026-07-26
+**Task**: 完成 Windows integration 原子替换闭环
+**Branch**: `dev`
+
+### Summary
+
+使用 ReplaceFileW 与 sibling recovery 协议消除 Windows 先删后替换窗口，并在 action 记录失败时恢复外部配置。
+
+### Main Changes
+
+- 统一 Claude、Codex、OpenCode、Antigravity 的原子写入与记录协议
+- 新增 integration file contract、failpoint 与临时 HOME 回归测试
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `078006e990fb48bb5ba031ab4c9f565f55f5c82f` | (see git log) |
+
+### Testing
+
+- [OK] integration atomic 8/8；local_flow 10/10
+- [OK] python scripts/ci-rust.py；just ci；task.py validate
+
+### Status
+
+[OK] **Completed**
