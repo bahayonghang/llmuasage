@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 33
+- **Total Sessions**: 34
 - **Last Active**: 2026-07-26
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1109 | Active |
+| `journal-1.md` | ~1130 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 34 | 2026-07-26 | 完成 R6 有界 JSONL 与协作取消 | `d258d33` | `dev` |
 | 33 | 2026-07-26 | 完成 Windows integration 原子替换闭环 | `078006e990fb48bb5ba031ab4c9f565f55f5c82f` | `dev` |
 | 32 | 2026-07-26 | 恢复写入 fencing 与 bootstrap 排他性 | `1d81fd91062f1becbbcb6fcc1ae3b80d6b28675e` | `dev` |
 | 31 | 2026-07-26 | 完成 MSRV 与验证基线诚实化 | `6b67cfa` | `dev` |

@@ -1107,3 +1107,24 @@ Claude/Codex 以 planned replay 文件数显示 5Hz 解析进度，TTY 显示提
 ### Status
 
 [OK] **Completed**
+
+
+## Session 34: 完成 R6 有界 JSONL 与协作取消
+
+**Date**: 2026-07-26
+**Task**: 完成 R6 有界 JSONL 与协作取消
+**Branch**: `dev`
+
+### Summary
+
+实现共享 4 MiB JSONL reader、隐私安全 parse issue 持久化、durable cursor 与 blocking worker drain；完成四 parser 迁移并通过 ci-rust.py 和 just ci。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d258d33` | (see git log) |
+
+### Status
+
+[OK] **Completed**
