@@ -33,11 +33,14 @@ llmusage update
 llmusage update dev
 ```
 
-`update` requires Rust and Cargo. It previews the repository, channel, and
-equivalent `cargo install` command, then asks for confirmation before replacing
-the installed binary. The default `main` channel is the stable choice;
-`llmusage update dev` installs unreleased development changes and may be less
-stable. `--check` / `-c` only prints the update plan and never starts Cargo.
+`update` requires Git, Rust, and Cargo. The default `main` channel resolves the
+highest stable release tag from the official repository, displays its tag and
+commit, and installs that immutable commit with Cargo's `--rev`. The command
+resolves the target again after confirmation and refuses to continue if it
+changed. `llmusage update dev` displays the current commit but intentionally
+follows the mutable `dev` branch and is not a verified stable release.
+`--check` / `-c` contacts the official repository to resolve refs and prints the
+plan, but never starts Cargo.
 
 Top-level help is table-oriented for quick scanning. Use `llmusage help --zh` for Chinese help, and `llmusage help <COMMAND>` or `llmusage <COMMAND> --help` for command-specific clap help.
 

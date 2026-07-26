@@ -17,7 +17,7 @@ cargo run -- sync --source codex
 
 ## 更新已安装版本
 
-自更新命令使用本机 Rust/Cargo 工具链构建并安装指定的官方分支：
+自更新命令使用 Git 和本机 Rust/Cargo 工具链解析、构建并安装官方更新目标：
 
 ```powershell
 llmusage update --check
@@ -25,16 +25,17 @@ llmusage update
 llmusage update dev
 ```
 
-默认渠道是 `main`。启动 Cargo 前，llmusage 会显示当前版本、官方仓库、所选
-渠道和等效安装命令，然后请求确认。`--check` / `-c` 在预览后直接退出。
-只有明确需要尚未发布的改动时才使用 `dev`；该分支稳定性较低，也可能暂时
-无法构建。
-
-稳定渠道的等效命令是：
+默认 `main` 渠道表示最高的稳定语义版本 release tag。llmusage 会从官方仓库
+解析 tag 与 commit，显示两者和准确安装命令，然后请求确认。确认后会再次解析
+目标；目标发生变化时立即停止。稳定渠道安装锁定到已显示的不可变 commit：
 
 ```powershell
-cargo install --git https://github.com/bahayonghang/llmuasage llmusage --branch main --locked --force
+cargo install --git https://github.com/bahayonghang/llmuasage llmusage --rev <resolved-sha> --locked --force
 ```
+
+`--check` / `-c` 会联网解析官方 refs 并在预览后退出，绝不启动 Cargo。只有明确
+需要尚未发布的改动时才使用 `dev`：预览会显示当前 dev commit，但 Cargo 仍会
+跟踪可变的 `dev` 分支，该分支可能继续变化或暂时无法构建。
 
 ## 初始化 llmusage
 

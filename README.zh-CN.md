@@ -33,10 +33,12 @@ llmusage update
 llmusage update dev
 ```
 
-`update` 需要本机已安装 Rust 和 Cargo。命令会先显示仓库、渠道和等效的
-`cargo install` 命令，实际替换已安装二进制前会请求确认。默认 `main` 是稳定
-渠道；`llmusage update dev` 会安装尚未发布的开发改动，稳定性可能较低。
-`--check` / `-c` 只预览更新计划，绝不启动 Cargo。
+`update` 需要本机已安装 Git、Rust 和 Cargo。默认 `main` 渠道会从官方仓库
+解析最高稳定 release tag，显示 tag 与 commit，并通过 Cargo 的 `--rev` 安装该
+不可变 commit。确认后命令会再次解析目标；目标发生变化时拒绝继续。
+`llmusage update dev` 会显示当前 commit，但仍明确跟踪可变的 `dev` 分支，不是
+经过稳定发布验证的版本。`--check` / `-c` 会联网解析官方 refs 并打印计划，
+但绝不启动 Cargo。
 
 顶层 help 现在使用表格形式，方便快速浏览。中文顶层 help 可用 `llmusage help --zh`；子命令旧版 clap help 仍可用 `llmusage help <COMMAND>` 或 `llmusage <COMMAND> --help`。
 
