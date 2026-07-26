@@ -40,14 +40,14 @@ Usage: llmusage [OPTIONS] [COMMAND]
 
 ## 运行时日志
 
-`llmusage` 默认把结构化运行诊断写到 `~/.llmusage/logs/llmusage.ndjson`。该文件只保存在本地，每行一个 JSON 对象。
+`llmusage` 默认把结构化运行诊断写到本地 NDJSON 分片 `~/.llmusage/logs/llmusage.ndjson.*`，每行一个 JSON 对象。
 
 | 环境变量 | 含义 |
 | --- | --- |
 | `LLMUSAGE_LOG=off\|error\|warn\|info\|debug\|trace` | 控制本地 NDJSON 日志文件；默认 `warn` |
 | `RUST_LOG=...` | 继续控制控制台 stderr 日志 |
 
-文件日志不会写入报表 stdout，也不会改变 `sync --json-events` stdout。初版保留一个活动日志文件；启动时如果超过 10 MiB，会轮转为 `llmusage.ndjson.old`。
+文件日志不会写入报表 stdout，也不会改变 `sync --json-events` stdout。分片在进程运行期间达到 10 MiB 即轮转，总量最多保留 30 MiB、7 个文件和 7 天；`logs` 与 `diagnostics` 状态会包含保留文件/字节数、队列丢弃事件数和维护失败数。
 
 ## 报表命令
 

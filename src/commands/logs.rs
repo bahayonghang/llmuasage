@@ -26,7 +26,7 @@ pub async fn run(
      * 步骤1：查询本地运行/排障日志
      * ========================================================================
      * 目标：
-     * 1) 从 logs/llmusage.ndjson 读取最近结构化 tracing 事件
+     * 1) 从 logs/llmusage.ndjson.* 分片读取最近结构化 tracing 事件
      * 2) 同时展示 SQLite run_log 的最近命令审计记录
      * 3) 不读取 usage_event_raw，不暴露 prompt/response/raw JSON
      */
@@ -66,7 +66,16 @@ fn print_human(payload: &LogsPayload) {
     println!("- File: {}", payload.logs.path);
     println!("- Exists: {}", payload.logs.exists);
     println!("- Size: {} bytes", payload.logs.size_bytes);
+    println!(
+        "- Retained: {} files, {} bytes total",
+        payload.logs.retained_files, payload.logs.total_size_bytes
+    );
     println!("- Recent errors: {}", payload.logs.recent_error_count);
+    println!("- Dropped events: {}", payload.logs.dropped_event_count);
+    println!(
+        "- Maintenance errors: {}",
+        payload.logs.maintenance_error_count
+    );
 
     println!("Entries:");
     if payload.entries.is_empty() {

@@ -45,7 +45,7 @@ plan, but never starts Cargo.
 Top-level help is table-oriented for quick scanning. Use `llmusage help --zh` for Chinese help, and `llmusage help <COMMAND>` or `llmusage <COMMAND> --help` for command-specific clap help.
 
 The runtime lives under `~/.llmusage/` by default. Override it with `--home <PATH>` or `LLMUSAGE_HOME`.
-Structured runtime logs are local-only NDJSON at `~/.llmusage/logs/llmusage.ndjson`. Control file logging with `LLMUSAGE_LOG=off|error|warn|info|debug|trace` (default: `warn`); `RUST_LOG` continues to control console stderr logging.
+Structured runtime logs are local-only NDJSON shards at `~/.llmusage/logs/llmusage.ndjson.*`. Control file logging with `LLMUSAGE_LOG=off|error|warn|info|debug|trace` (default: `warn`); `RUST_LOG` continues to control console stderr logging. Shards rotate at 10 MiB while the process is running and retain at most 30 MiB, seven files, and seven days.
 
 ## Fast path
 

@@ -124,6 +124,32 @@ async fn diagnostics(app: &AppContext, json: bool) -> Result<()> {
         ),
     });
 
+    checks.push(DoctorCheck {
+        id: "logs.dropped_events",
+        status: if logs.dropped_event_count == 0 {
+            "ok"
+        } else {
+            "warn"
+        },
+        detail: format!(
+            "{} events dropped by the non-blocking log queue",
+            logs.dropped_event_count
+        ),
+    });
+
+    checks.push(DoctorCheck {
+        id: "logs.maintenance_errors",
+        status: if logs.maintenance_error_count == 0 {
+            "ok"
+        } else {
+            "warn"
+        },
+        detail: format!(
+            "{} runtime log rotation or retention errors",
+            logs.maintenance_error_count
+        ),
+    });
+
     for probe in probes {
         checks.push(DoctorCheck {
             id: match probe.source {

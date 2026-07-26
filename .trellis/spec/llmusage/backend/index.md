@@ -32,6 +32,8 @@ output, and dashboard/TUI consumers.
   worker locks, bootstrap, migrations, sync writers, or any Store mutation.
 - Read [Integration File Contracts](./integration-file-contracts.md) before
   changing third-party hook/plugin configuration writes or action recording.
+- Read [Runtime Log Contracts](./runtime-log-contracts.md) before changing
+  structured runtime logging, rotation, retention, tail reads, or log status.
 - Also read `docs/agents/domain.md` and
   `docs/agents/passive-parser-onboarding.md` before promoting a monitored
   platform into a parser-backed source.
@@ -53,6 +55,7 @@ output, and dashboard/TUI consumers.
 | [CI And Toolchain Contracts](./ci-toolchain-contracts.md) | Shared Rust gate, verified MSRV, and subprocess-test evidence rules | Documented |
 | [Write Fencing Contracts](./write-fencing-contracts.md) | Generation permits, transaction fencing, bootstrap ordering, and mutation entrypoints | Documented |
 | [Integration File Contracts](./integration-file-contracts.md) | Cross-platform atomic replace, recovery, and integration action recording | Documented |
+| [Runtime Log Contracts](./runtime-log-contracts.md) | Bounded runtime-log rotation, retention, counters, and tail reads | Documented |
 
 ## Quality Check
 

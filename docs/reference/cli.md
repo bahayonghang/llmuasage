@@ -40,14 +40,14 @@ Usage: llmusage [OPTIONS] [COMMAND]
 
 ## Runtime logging
 
-`llmusage` writes structured runtime diagnostics to `~/.llmusage/logs/llmusage.ndjson` by default. The file is local-only and uses one JSON object per line.
+`llmusage` writes structured runtime diagnostics to local-only NDJSON shards at `~/.llmusage/logs/llmusage.ndjson.*` by default. Each line is one JSON object.
 
 | Environment variable | Meaning |
 | --- | --- |
 | `LLMUSAGE_LOG=off\|error\|warn\|info\|debug\|trace` | Controls the local NDJSON log file; default is `warn` |
 | `RUST_LOG=...` | Continues to control console stderr logging |
 
-File logging does not write to report stdout and does not change `sync --json-events` stdout. The first implementation keeps one active log file and rotates it to `llmusage.ndjson.old` when it is over 10 MiB on startup.
+File logging does not write to report stdout and does not change `sync --json-events` stdout. Shards rotate at 10 MiB while the process is running and retain at most 30 MiB, seven files, and seven days. `logs` and `diagnostics` status include retained size/count plus dropped-event and maintenance-failure counters.
 
 ## Report commands
 

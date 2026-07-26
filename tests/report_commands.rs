@@ -1047,6 +1047,14 @@ fn diagnostics_includes_logs_summary_without_dumping_entries() -> Result<()> {
     );
     assert_eq!(payload["logs"]["exists"].as_bool(), Some(true));
     assert_eq!(payload["logs"]["recent_error_count"].as_u64(), Some(1));
+    assert_eq!(payload["logs"]["retained_files"].as_u64(), Some(1));
+    assert!(payload["logs"]["total_size_bytes"].as_u64().is_some());
+    assert!(payload["logs"]["dropped_event_count"].as_u64().is_some());
+    assert!(
+        payload["logs"]["maintenance_error_count"]
+            .as_u64()
+            .is_some()
+    );
     assert!(
         payload["logs"].get("entries").is_none(),
         "diagnostics should expose only log summary, not dump log contents"
