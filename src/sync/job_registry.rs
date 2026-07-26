@@ -15,7 +15,9 @@ use crate::{
     app::AppContext,
     parsers::{SyncEvent, SyncSummaryEvent},
     store::{HolderKind, Store},
-    sync::types::{SyncRunOptions, SyncSummary},
+    sync::types::{
+        SyncRequestError, SyncRequestInput, SyncRunOptions, SyncSummary, ValidatedSyncRequest,
+    },
 };
 
 /// In-process identifier for one usage import job.
@@ -166,20 +168,24 @@ impl fmt::Display for JobStartRejected {
 
 impl Error for JobStartRejected {}
 
-/// Options accepted by the usage import job starter.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub struct SyncOptions {
-    /// Rebuild local usage tables before importing.
-    pub rebuild: bool,
-    /// Restrict import to recent days. M0- stores the option only.
-    pub recent_days: Option<u32>,
-    /// Restrict import to one source string.
-    pub source: Option<String>,
-    /// Optional parser concurrency override. Values below 1 are ignored by the
-    /// sync runner; callers can use this to throttle library/API imports.
-    pub parallelism: Option<usize>,
+pub type SyncOptions = SyncRequestInput;
+
+#[derive(Debug)]
+pub enum JobStartError {
+    InvalidRequest(SyncRequestError),
+    Active(JobStartRejected),
 }
+
+impl fmt::Display for JobStartError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidRequest(error) => error.fmt(f),
+            Self::Active(error) => error.fmt(f),
+        }
+    }
+}
+
+impl Error for JobStartError {}
 
 impl JobRegistry {
     /// Starts a real in-process sync task when the in-process admission slot is
@@ -188,18 +194,19 @@ impl JobRegistry {
         &self,
         store: &Store,
         options: SyncOptions,
-    ) -> Result<(JobId, mpsc::Receiver<JobEvent>), JobStartRejected> {
+    ) -> Result<(JobId, mpsc::Receiver<JobEvent>), JobStartError> {
+        let request = ValidatedSyncRequest::new(options).map_err(JobStartError::InvalidRequest)?;
         let _admission = self
             .admission
             .lock()
             .expect("job registry admission mutex poisoned");
         if let Some(active) = self.active_job_id() {
-            return Err(JobStartRejected {
+            return Err(JobStartError::Active(JobStartRejected {
                 active_job_id: active,
-            });
+            }));
         }
 
-        Ok(self.spawn_start(store, options))
+        Ok(self.spawn_start(store, request))
     }
 
     /// Starts a real in-process sync task and returns its id plus a progress
@@ -227,7 +234,7 @@ impl JobRegistry {
     fn spawn_start(
         &self,
         store: &Store,
-        options: SyncOptions,
+        request: ValidatedSyncRequest,
     ) -> (JobId, mpsc::Receiver<JobEvent>) {
         let job_id = new_job_id();
         let (tx, rx) = mpsc::channel(128);
@@ -249,7 +256,7 @@ impl JobRegistry {
         self.inner.insert(job_id.clone(), Arc::clone(&state));
 
         let store = store.clone();
-        let options = options.clone();
+        let request = request.clone();
         let job_id_for_task = job_id.clone();
         let ctx = JobContext {
             hooks: self.terminal_hooks.clone(),
@@ -258,14 +265,14 @@ impl JobRegistry {
             executor: Arc::clone(&self.executor),
         };
         tokio::spawn(async move {
-            run_job(job_id_for_task, store, options, cancel, tx, state, ctx).await;
+            run_job(job_id_for_task, store, request, cancel, tx, state, ctx).await;
         });
         (job_id, rx)
     }
 
     fn insert_rejected_snapshot(
         &self,
-        rejected: JobStartRejected,
+        rejected: JobStartError,
     ) -> (JobId, mpsc::Receiver<JobEvent>) {
         let job_id = new_job_id();
         let (_tx, rx) = mpsc::channel(1);
@@ -365,20 +372,17 @@ impl JobContext {
 async fn run_job(
     job_id: JobId,
     store: Store,
-    options: SyncOptions,
+    request: ValidatedSyncRequest,
     cancel: CancellationToken,
     outbound: mpsc::Sender<JobEvent>,
     state: Arc<Mutex<JobState>>,
     ctx: JobContext,
 ) {
     let sync_options = SyncRunOptions {
-        rebuild: options.rebuild,
-        source: options
-            .source
-            .as_deref()
-            .and_then(crate::models::SourceKind::parse_id),
-        recent_days: options.recent_days,
-        parallelism: options.parallelism,
+        rebuild: request.rebuild(),
+        source: request.source_kind(),
+        recent_days: request.recent_days(),
+        parallelism: Some(request.parallelism()),
         provider_map: None,
         json_events: false,
         allow_lossy_rebuild: false,
@@ -751,7 +755,10 @@ mod tests {
                 },
             )
             .expect_err("second active job should be rejected");
-        assert_eq!(rejected.active_job_id, active_job_id);
+        assert!(matches!(
+            rejected,
+            JobStartError::Active(JobStartRejected { active_job_id: ref id }) if id == &active_job_id
+        ));
 
         for _ in 0..8 {
             let (rejected_id, rejected_rx) = registry.start(
@@ -854,6 +861,48 @@ mod tests {
         let payload = serde_json::to_value(&options)?;
         assert_eq!(payload["source"], "codex");
         assert_eq!(payload["parallelism"], 2);
+        Ok(())
+    }
+
+    #[test]
+    fn try_start_rejects_invalid_requests_without_creating_jobs() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = AppPaths::with_root(temp.path().to_path_buf())?;
+        let store = Store::new(&paths)?;
+        let registry = JobRegistry::default();
+        let cases = [
+            (
+                SyncOptions {
+                    source: Some("not-a-source".to_string()),
+                    ..Default::default()
+                },
+                crate::sync::SyncRequestErrorCode::UnknownSource,
+            ),
+            (
+                SyncOptions {
+                    recent_days: Some(0),
+                    ..Default::default()
+                },
+                crate::sync::SyncRequestErrorCode::InvalidRecentDays,
+            ),
+            (
+                SyncOptions {
+                    parallelism: Some(crate::sync::MAX_SYNC_PARALLELISM + 1),
+                    ..Default::default()
+                },
+                crate::sync::SyncRequestErrorCode::InvalidParallelism,
+            ),
+        ];
+        for (options, code) in cases {
+            let error = registry
+                .try_start(&store, options)
+                .expect_err("invalid request must fail before spawning");
+            assert!(matches!(
+                error,
+                JobStartError::InvalidRequest(SyncRequestError { code: actual, .. }) if actual == code
+            ));
+            assert!(registry.list_recent(10).is_empty());
+        }
         Ok(())
     }
 

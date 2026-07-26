@@ -144,10 +144,13 @@ llmusage sync --source antigravity
 llmusage sync --source kimi_code
 llmusage sync --source pi
 llmusage sync --recent-days 1
+llmusage sync --recent-days 30 --parallelism 4
 llmusage sync --json-events
 llmusage sync --rebuild
 llmusage sync --rebuild --allow-lossy-rebuild
 ```
+
+`--source`, `--recent-days`, and `--parallelism` use the same validation contract as `POST /api/jobs` and the public `JobRegistry` API. Invalid values fail with stable codes: `unknown_source`, `invalid_recent_days`, or `invalid_parallelism`.
 
 Imports local sources. Before source scanning, bootstrap may upgrade an unpinned embedded pricing catalog and reprice historical events. Human stderr reports catalog versions, processed/total events, bucket reconciliation, and elapsed completion time instead of leaving one generic database-initialization line active.
 

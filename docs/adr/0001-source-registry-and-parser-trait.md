@@ -33,6 +33,7 @@ pub trait SourceParser: Send + Sync {
         store: &'a Store,
         writer: &'a mut SyncRunWriter,
         parallelism: usize,
+        recent_cutoff: Option<DateTime<Utc>>,
         cancel: &'a CancellationToken,
         progress: Option<ProgressSink<'a>>,
     ) -> Pin<Box<dyn Future<Output = Result<SourceSyncStats>> + Send + 'a>>;
@@ -102,7 +103,7 @@ match source {
 
 ### 备选 C：trait 分裂为 `BatchedParser` / `StreamingParser`
 
-否决（实施期评估后）：阶段 2 的 `commit_shard` 已把 OpenCode 流式 vs Codex/Claude 批式的差异完全压到 writer 内部。三者签名都是 `(store, writer, parallelism, cancel, progress) -> SourceSyncStats`，trait 统一签名是自然结果，分裂会引入两套 driver。
+否决（实施期评估后）：阶段 2 的 `commit_shard` 已把 OpenCode 流式 vs Codex/Claude 批式的差异完全压到 writer 内部。parser 签名统一为 `(store, writer, parallelism, recent_cutoff, cancel, progress) -> SourceSyncStats`；`recent_cutoff` 是 driver 计算一次的 UTC instant，避免来源各自解释 `recent_days`。trait 统一签名是自然结果，分裂会引入两套 driver。
 
 ### 备选 D：`registered_parsers()` 返回 `&'static [&'static dyn SourceParser]`
 

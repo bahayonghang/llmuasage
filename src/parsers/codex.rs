@@ -8,6 +8,7 @@ use std::{
 };
 
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use serde_json::Value;
 use tokio::task;
 use tokio_util::sync::CancellationToken;
@@ -79,10 +80,18 @@ impl SourceParser for CodexParser {
         store: &'a Store,
         writer: &'a mut SyncRunWriter,
         parallelism: usize,
+        recent_cutoff: Option<DateTime<Utc>>,
         cancel: &'a CancellationToken,
         progress: Option<ProgressSink<'a>>,
     ) -> Pin<Box<dyn Future<Output = Result<SourceSyncStats>> + Send + 'a>> {
-        Box::pin(sync_codex(store, writer, parallelism, cancel, progress))
+        Box::pin(sync_codex(
+            store,
+            writer,
+            parallelism,
+            recent_cutoff,
+            cancel,
+            progress,
+        ))
     }
 }
 
@@ -90,6 +99,7 @@ async fn sync_codex(
     store: &Store,
     writer: &mut SyncRunWriter,
     parallelism: usize,
+    recent_cutoff: Option<DateTime<Utc>>,
     cancel: &CancellationToken,
     mut progress: Option<ProgressSink<'_>>,
 ) -> Result<SourceSyncStats> {
@@ -191,9 +201,24 @@ async fn sync_codex(
             break;
         }
 
-        for shard in batch_outputs {
+        for mut shard in batch_outputs {
             if cancel.is_cancelled() {
                 break 'batches;
+            }
+            if let Some(cutoff) = recent_cutoff.as_ref() {
+                shard.events.retain(|event| {
+                    crate::parsers::timestamp_in_recent_window(&event.event_at, Some(cutoff))
+                });
+                shard.turns.retain(|turn| {
+                    crate::parsers::timestamp_in_recent_window(&turn.started_at, Some(cutoff))
+                });
+                shard.tool_calls.retain(|call| {
+                    crate::parsers::timestamp_in_recent_window(&call.occurred_at, Some(cutoff))
+                });
+                shard.events_seen = shard.events.len();
+                shard.events_replayed = shard.events.len();
+                shard.cursors.clear();
+                shard.reset_path_hashes.clear();
             }
             events_seen += shard.events_seen;
             events_replayed += shard.events_replayed;

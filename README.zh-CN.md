@@ -138,6 +138,7 @@ llmusage codex-tracer --rebuild
 
 - 不需要账号登录、device token、上传队列或远端用量 API。
 - 普通 `llmusage sync` 遇到原始源文件缺失时会保留已导入 usage。
+- `llmusage sync --recent-days N` 只导入最近的 UTC 事件窗口（`1..=3650`），且不推进全历史 cursor；`--parallelism` 合法范围为 `1..=32`。
 - `llmusage sync --rebuild` 默认拒绝有损重建，除非同时传入 `--allow-lossy-rebuild`。
 - 无 source 的 `llmusage sync --rebuild` 只重置 parser-backed 来源；parserless Antigravity 的历史和诊断状态会保留。
 - `llmusage serve` 会在绑定端口前自动重建可安全迁移的旧版 parser 来源。源文件缺失的来源只会告警并跳过，旧历史仍可读取且继续拒绝混写。

@@ -37,7 +37,7 @@ use crate::{
         LogsQuery, ModelComparePayload, OptimizePayload, QueryFilter, ToolsPayload,
     },
     store::Store,
-    sync::{JobRegistry, SyncOptions},
+    sync::{JobRegistry, JobStartError, SyncOptions},
 };
 
 const WEB_API_TIMEOUT: Duration = Duration::from_secs(5);
@@ -805,37 +805,21 @@ async fn api_jobs_start(
     if let Some(response) = reject_non_local_write(peer) {
         return response;
     }
-    if let Some(s) = options.source.as_deref()
-        && SourceKind::parse_id(s).is_none()
-    {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": {
-                    "code": "unknown_source",
-                    "message": format!("未知 source: {s}"),
-                }
-            })),
-        )
-            .into_response();
-    }
-    if let Some(days) = options.recent_days
-        && (days == 0 || days > 3650)
-    {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": {
-                    "code": "invalid_recent_days",
-                    "message": "recent_days 必须在 1..=3650 范围内",
-                }
-            })),
-        )
-            .into_response();
-    }
     let (job_id, _rx) = match state.jobs.try_start(&state.store, options) {
         Ok(started) => started,
-        Err(rejected) => {
+        Err(JobStartError::InvalidRequest(error)) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": {
+                        "code": error.code.as_str(),
+                        "message": error.message,
+                    }
+                })),
+            )
+                .into_response();
+        }
+        Err(JobStartError::Active(rejected)) => {
             return (
                 StatusCode::CONFLICT,
                 Json(json!({
@@ -4984,6 +4968,32 @@ mod tests {
         let (status, payload) = route_json(addr, "POST", "/api/jobs", Some(body)).await?;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(payload["error"]["code"], "invalid_recent_days");
+
+        server.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn api_jobs_start_rejects_invalid_parallelism() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let server = bind_server(
+            store,
+            Some(0),
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            WriteExposure::LocalOnly,
+        )
+        .await?;
+        let addr = server.addr();
+
+        for parallelism in [0, crate::sync::MAX_SYNC_PARALLELISM + 1] {
+            let body = serde_json::to_string(&SyncOptions {
+                parallelism: Some(parallelism),
+                ..Default::default()
+            })?;
+            let (status, payload) = route_json(addr, "POST", "/api/jobs", Some(body)).await?;
+            assert_eq!(status, StatusCode::BAD_REQUEST);
+            assert_eq!(payload["error"]["code"], "invalid_parallelism");
+        }
 
         server.shutdown().await?;
         Ok(())

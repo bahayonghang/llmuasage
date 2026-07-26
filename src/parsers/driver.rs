@@ -1,4 +1,5 @@
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -34,7 +35,7 @@ pub async fn drive(
         writer,
         parallelism,
         lock_wait_ms,
-        recent_days: None,
+        recent_cutoff: None,
         sender: None,
         cancel: &CancellationToken::new(),
     })
@@ -49,7 +50,7 @@ pub struct DriveContext<'a, 'b> {
     pub writer: &'a mut SyncRunWriter,
     pub parallelism: usize,
     pub lock_wait_ms: u64,
-    pub recent_days: Option<u32>,
+    pub recent_cutoff: Option<DateTime<Utc>>,
     pub sender: Option<&'b mut mpsc::Sender<SyncEvent>>,
     pub cancel: &'a CancellationToken,
 }
@@ -94,6 +95,7 @@ pub async fn drive_with_events(mut ctx: DriveContext<'_, '_>) -> Result<Vec<Sour
                 ctx.store,
                 ctx.writer,
                 ctx.parallelism,
+                ctx.recent_cutoff,
                 ctx.cancel,
                 ctx.sender.as_ref().map(|_| &mut progress_sink as _),
             )
@@ -122,13 +124,6 @@ pub async fn drive_with_events(mut ctx: DriveContext<'_, '_>) -> Result<Vec<Sour
             if swept > 0 {
                 info!(source = %source, swept, "标记 missing 文件完成");
             }
-        }
-
-        if ctx.recent_days.is_some() {
-            ctx.store
-                .sync_status()
-                .mark_recent_completed(source, crate::util::now_utc())?;
-            emit(ctx.sender.as_deref_mut(), SyncEvent::RecentReady { source }).await?;
         }
 
         emit(

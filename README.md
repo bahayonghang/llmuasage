@@ -139,6 +139,7 @@ llmusage codex-tracer --rebuild
 
 - No account login, device token, upload queue, or remote usage API call.
 - Normal `llmusage sync` keeps imported usage when original source files are missing.
+- `llmusage sync --recent-days N` imports only the latest UTC event window (`1..=3650`) without advancing full-history cursors; `--parallelism` accepts `1..=32`.
 - `llmusage sync --rebuild` refuses lossy rebuilds unless you also pass `--allow-lossy-rebuild`.
 - A full `llmusage sync --rebuild` resets only parser-backed sources; parserless Antigravity history and diagnostics are preserved.
 - `llmusage serve` automatically rebuilds safe legacy parser sources before binding a port. Sources with missing files are skipped with a warning, keep their readable history, and remain write-protected.

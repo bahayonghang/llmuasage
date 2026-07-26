@@ -144,10 +144,13 @@ llmusage sync --source antigravity
 llmusage sync --source kimi_code
 llmusage sync --source pi
 llmusage sync --recent-days 1
+llmusage sync --recent-days 30 --parallelism 4
 llmusage sync --json-events
 llmusage sync --rebuild
 llmusage sync --rebuild --allow-lossy-rebuild
 ```
+
+`--source`、`--recent-days` 与 `--parallelism` 和 `POST /api/jobs`、公开 `JobRegistry` API 共用同一校验契约。非法值分别返回稳定错误码 `unknown_source`、`invalid_recent_days` 或 `invalid_parallelism`。
 
 导入本地来源。扫描来源前，bootstrap 可能升级未固定的内置定价目录并重算历史事件价格。人读 stderr 会显示目录版本、已处理/总事件数、汇总桶对账和完成耗时，不再一直停留在一条笼统的数据库初始化提示。
 

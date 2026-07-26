@@ -52,7 +52,7 @@ llmusage sync --json-events
 llmusage sync --recent-days 1
 ```
 
-`--recent-days` 为调用方启用 recent-window 信号。当前 parser 表面仍会按需扫描已有 cursor，以保持正确性。
+`--recent-days` 只导入 UTC 事件时间落在窗口内的记录（合法范围 `1..=3650`）。仅靠文件 metadata 无法安全排除旧记录时，文件型来源仍会读取并按事件时间过滤；OpenCode 会把 cutoff 下推到 SQLite 查询。bounded import 不推进全历史 cursor，因此后续普通 `llmusage sync` 仍能补回更早事件。可用 `--parallelism 1..32` 设置 parser worker 上限。
 
 ## 安全重建
 

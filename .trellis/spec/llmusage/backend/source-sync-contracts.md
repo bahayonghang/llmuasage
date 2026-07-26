@@ -66,6 +66,15 @@
   table. Never issue one source-range event scan per touched bucket.
 - `stored_events` is the committed event count after store dedupe and reset
   behavior; it can be lower than parser-emitted raw events.
+- Sync request validation has one owner: `ValidatedSyncRequest`. CLI, Web, and
+  public `JobRegistry::try_start` must return `unknown_source`,
+  `invalid_recent_days`, or `invalid_parallelism` before creating work.
+- A `recent_days` run uses one UTC cutoff. File-backed sources must filter by
+  normalized event time when metadata cannot safely exclude a file. OpenCode
+  must apply the cutoff in its SQLite page queries. Bounded runs may reuse an
+  existing full-history cursor as a lower bound, but must not advance that
+  cursor or execute whole-file resets; a later full sync must still recover
+  window-excluded history.
 - Monitor-only platforms must surface as diagnostics/status entries with token
   quality labels, not as parser-backed usage, until sanitized fixtures and token
   semantics exist.
@@ -132,6 +141,13 @@
 - OpenCode `part` table absent -> message sync succeeds and part cursor does not
   advance.
 - Existing JSON without `skipped_files` -> serde default must load as `0`.
+- Omitted source -> `SyncSourceSelection::All`; an unknown source string ->
+  `unknown_source` before a job id or sync worker is created.
+- `recent_days` outside `1..=3650` -> `invalid_recent_days`; parser parallelism
+  outside `1..=32` -> `invalid_parallelism`. Do not clamp either value.
+- A bounded run succeeds -> mark `recent_completed_at` and emit
+  `RecentReady` only after every requested parser stage and status write
+  completes; cancellation/failure emits neither completion signal.
 
 ### 5. Good/Base/Bad Cases
 
@@ -141,9 +157,16 @@
   of parsed projects shares one writer transaction.
 - Base: Codex/Claude/OpenCode parser stats include processed, changed, skipped,
   emitted, and stored counts in CLI JSON/human output and TUI payloads.
+- Base: an omitted source selects all registered parsers through the validated
+  request; no transport adapter interprets `None` independently.
+- Good: a recent event appended to an old JSONL file is imported by a bounded
+  run, while the old event remains recoverable by a later full sync.
 - Bad: treating a growing OpenCode DB as replaced because its mtime/length
   changed, or refreshing pricing with one `usage_event WHERE source = ?` scan
   per bucket.
+- Bad: converting an unknown source to `None`, advancing the full-history
+  cursor during a bounded run, or emitting `RecentReady` after only one parser
+  when the request selected all sources.
 - Bad: adding a Gemini/Cursor/etc. parser ID only because a root directory was
   detected, without token fixtures and cursor/fingerprint tests.
 
@@ -168,6 +191,11 @@
   scanned.
 - OpenCode growth/replacement and part high-water tests covering hot zero-row,
   one-row append, closed upper bounds, and idempotent replacement replay.
+- Table-driven CLI, Web, and public `JobRegistry::try_start` tests asserting
+  the same validation codes and no job creation for invalid input.
+- Recent-window regressions asserting event-time filtering, an old file with a
+  recent append, no bounded cursor/reset writes, later full-history recovery,
+  OpenCode SQL lower-bound pruning, and `RecentReady` ordering.
 - Migration/query-plan tests proving behavior reset indexes exist; writer tests
   proving shard-local behavior dedupe and shared-bucket pricing recovery.
 - Human and subprocess tests covering pricing phase text, ordered additive
@@ -203,6 +231,15 @@ if !opencode_cursor_anchor_exists(&connection, &cursor)? {
     cursor.last_processed_ids.clear();
     cursor.last_part_rowid = 0;
 }
+```
+
+```rust
+// Wrong: unknown source silently becomes the all-sources sentinel.
+let source = input.source.as_deref().and_then(SourceKind::parse_id);
+
+// Correct: validate transport input once, then pass only typed selection.
+let request = ValidatedSyncRequest::new(input)?;
+let source = request.source_kind();
 ```
 
 ## Scenario: Bounded Passive JSONL Records And Cooperative Cancellation

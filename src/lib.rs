@@ -82,7 +82,9 @@ pub use query::{
 pub use runtime::paths::AppPaths;
 pub use store::{BootstrapOptions, HolderKind, Store, WorkerLock};
 pub use sync::{
-    JobEvent, JobId, JobRegistry, JobSnapshot, JobStartRejected, JobStatus, SyncOptions,
+    JobEvent, JobId, JobRegistry, JobSnapshot, JobStartError, JobStartRejected, JobStatus,
+    SyncOptions, SyncRequestError, SyncRequestErrorCode, SyncRequestInput, SyncSourceSelection,
+    ValidatedSyncRequest,
 };
 
 #[cfg(any(feature = "testing", test))]

@@ -57,7 +57,7 @@ impl SyncController {
                 self.events = Some(events);
                 "Sync running... press x to cancel".to_string()
             }
-            Err(err) => format!("Sync already running: {}", err.active_job_id),
+            Err(err) => format!("Sync start rejected: {err}"),
         }
     }
 

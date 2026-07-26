@@ -52,7 +52,7 @@ Human progress does not depend on structured logging. For file diagnostics, use 
 llmusage sync --recent-days 1
 ```
 
-`--recent-days` enables recent-window signalling for callers. The current parser surface still scans existing cursors as needed to preserve correctness.
+`--recent-days` imports only events whose UTC timestamp is inside the requested window (valid range: `1..=3650`). File-backed sources still inspect records when metadata alone cannot safely exclude them, while OpenCode pushes the cutoff into its SQLite query. Bounded imports never advance the full-history cursor, so a later ordinary `llmusage sync` can still recover older events. Use `--parallelism 1..32` to set the parser worker limit.
 
 ## Rebuild safely
 

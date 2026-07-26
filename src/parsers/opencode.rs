@@ -1,6 +1,7 @@
 use std::{future::Future, path::PathBuf, pin::Pin, time::Instant};
 
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use rusqlite::{Connection, params};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
@@ -54,10 +55,18 @@ impl SourceParser for OpencodeParser {
         store: &'a Store,
         writer: &'a mut SyncRunWriter,
         parallelism: usize,
+        recent_cutoff: Option<DateTime<Utc>>,
         cancel: &'a CancellationToken,
         progress: Option<ProgressSink<'a>>,
     ) -> Pin<Box<dyn Future<Output = Result<SourceSyncStats>> + Send + 'a>> {
-        Box::pin(sync_opencode(store, writer, parallelism, cancel, progress))
+        Box::pin(sync_opencode(
+            store,
+            writer,
+            parallelism,
+            recent_cutoff,
+            cancel,
+            progress,
+        ))
     }
 }
 
@@ -65,6 +74,7 @@ async fn sync_opencode(
     store: &Store,
     writer: &mut SyncRunWriter,
     _parallelism: usize,
+    recent_cutoff: Option<DateTime<Utc>>,
     cancel: &CancellationToken,
     mut progress: Option<ProgressSink<'_>>,
 ) -> Result<SourceSyncStats> {
@@ -100,7 +110,9 @@ async fn sync_opencode(
         cursor.updated_at = now_utc();
         stats.absent = true;
         stats.last_error = Some("OpenCode SQLite DB 缺失".to_string());
-        store.cursors().save_opencode_cursor(&cursor)?;
+        if recent_cutoff.is_none() {
+            store.cursors().save_opencode_cursor(&cursor)?;
+        }
         return Ok(stats);
     }
 
@@ -129,13 +141,20 @@ async fn sync_opencode(
     let mut write_ms = 0u64;
     let initial_part_rowid = cursor.last_part_rowid;
     let mut part_rows_seen = 0usize;
-    let mut page_last_time = cursor.last_time_created;
-    let mut page_last_id = cursor
-        .last_processed_ids
-        .iter()
-        .max()
-        .cloned()
-        .unwrap_or_default();
+    let recent_cutoff_ms = recent_cutoff.as_ref().map(DateTime::timestamp_millis);
+    let mut page_last_time = recent_cutoff_ms
+        .map(|cutoff| cutoff.max(cursor.last_time_created))
+        .unwrap_or(cursor.last_time_created);
+    let mut page_last_id = if page_last_time == cursor.last_time_created {
+        cursor
+            .last_processed_ids
+            .iter()
+            .max()
+            .cloned()
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
 
     loop {
         if cancel.is_cancelled() {
@@ -228,7 +247,12 @@ async fn sync_opencode(
     {
         let mut page_rowid = cursor.last_part_rowid;
         while page_rowid < upper_rowid && !cancel.is_cancelled() {
-            let rows = load_opencode_tool_part_page(&connection, page_rowid, upper_rowid)?;
+            let rows = load_opencode_tool_part_page(
+                &connection,
+                page_rowid,
+                upper_rowid,
+                recent_cutoff_ms,
+            )?;
             if rows.is_empty() {
                 break;
             }
@@ -273,11 +297,13 @@ async fn sync_opencode(
         }
     }
 
-    cursor.last_time_created = latest_time;
-    cursor.last_processed_ids = latest_ids;
-    cursor.sqlite_status = "ok".to_string();
-    cursor.updated_at = now_utc();
-    store.cursors().save_opencode_cursor(&cursor)?;
+    if recent_cutoff.is_none() {
+        cursor.last_time_created = latest_time;
+        cursor.last_processed_ids = latest_ids;
+        cursor.sqlite_status = "ok".to_string();
+        cursor.updated_at = now_utc();
+        store.cursors().save_opencode_cursor(&cursor)?;
+    }
 
     stats.files_processed = 1;
     let part_cursor_advanced = cursor.last_part_rowid > initial_part_rowid;
@@ -558,19 +584,26 @@ fn load_opencode_tool_part_page(
     connection: &Connection,
     last_rowid: i64,
     upper_rowid: i64,
+    recent_cutoff_ms: Option<i64>,
 ) -> Result<Vec<OpencodeToolPartRow>> {
     let mut statement = connection.prepare(
         r#"
         SELECT rowid, time_created, data
         FROM part
         WHERE rowid > ?1 AND rowid <= ?2
+          AND (?3 IS NULL OR time_created >= ?3)
           AND data LIKE '%"type":"tool"%'
         ORDER BY rowid ASC
-        LIMIT ?3
+        LIMIT ?4
         "#,
     )?;
     let rows = statement.query_map(
-        params![last_rowid, upper_rowid, OPENCODE_PART_PAGE_SIZE],
+        params![
+            last_rowid,
+            upper_rowid,
+            recent_cutoff_ms,
+            OPENCODE_PART_PAGE_SIZE
+        ],
         |row| {
             Ok(OpencodeToolPartRow {
                 rowid: row.get(0)?,
@@ -630,8 +663,35 @@ fn part_to_tool_call(part: &Value, time_created: i64, rowid: i64) -> Option<Usag
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_opencode_tokens;
+    use super::{load_opencode_page, normalize_opencode_tokens};
+    use rusqlite::Connection;
     use serde_json::json;
+
+    #[test]
+    fn recent_lower_bound_prunes_old_message_rows_in_sql() -> anyhow::Result<()> {
+        let connection = Connection::open_in_memory()?;
+        connection.execute_batch(
+            r#"
+            CREATE TABLE project(id TEXT PRIMARY KEY, worktree TEXT);
+            CREATE TABLE session(id TEXT PRIMARY KEY, project_id TEXT);
+            CREATE TABLE message(
+                id TEXT PRIMARY KEY,
+                session_id TEXT,
+                time_created INTEGER,
+                data TEXT
+            );
+            INSERT INTO message(id, time_created, data)
+            VALUES
+                ('old', 100, '{"role":"assistant"}'),
+                ('recent', 200, '{"role":"assistant"}');
+            "#,
+        )?;
+
+        let rows = load_opencode_page(&connection, 150, "")?;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "recent");
+        Ok(())
+    }
 
     #[test]
     fn opencode_cache_write_maps_to_cache_creation_not_input() {

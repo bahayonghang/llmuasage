@@ -9,7 +9,7 @@ crate 暴露了一组较小的适配层接口，用于本地桌面集成和测�
 ```rust
 use llmusage::{
     AppPaths, Dashboard, JobRegistry, QueryFilter, ReportTimezone, Result, SourceKind, Store,
-    SyncOptions,
+    JobStartError, SyncOptions, SyncRequestErrorCode, ValidatedSyncRequest,
 };
 ```
 
@@ -17,7 +17,7 @@ use llmusage::{
 
 - Runtime/store：`AppPaths`、`Store`、`BootstrapOptions`、`HolderKind`、`WorkerLock`
 - Query：`Dashboard`、`QueryFilter`、`ReportTimezone`、Dashboard payload、Explorer payload/query 类型、logs payload/query 类型
-- Sync jobs：`JobRegistry`、`SyncOptions`、`JobSnapshot`、`JobStatus`、`JobEvent`
+- Sync jobs：`JobRegistry`、`SyncOptions`、`ValidatedSyncRequest`、`SyncRequestErrorCode`、`JobStartError`、`JobSnapshot`、`JobStatus`、`JobEvent`
 - Domain/error：`SourceKind`、`LlmusageError`、`Result`
 - 启用 `features = ["testing"]` 时的测试辅助：`Fixture`、`SeedEvent`
 
@@ -77,6 +77,28 @@ fn load_dashboard(store: &Store) -> Result<()> {
 ## 进程内 sync jobs
 
 `JobRegistry` 提供进程内 sync job 的 start/get/cancel。它不是持久 job 队列；重启后的可恢复状态仍来自 SQLite 中的 usage、cursor、source-file diagnostics 和 run log。
+
+调用方需要区分 admission 与输入校验错误时，应使用 `JobRegistry::try_start`。CLI、Web 和公开 Rust API 共用 `ValidatedSyncRequest`：未知 source、超出 `1..=3650` 的 `recent_days` 或超出 `1..=32` 的 parallelism 都会在创建 job 前失败，并分别返回稳定错误码 `unknown_source`、`invalid_recent_days` 或 `invalid_parallelism`。
+
+```rust
+use llmusage::{JobRegistry, JobStartError, Store, SyncOptions, SyncRequestErrorCode};
+
+fn reject_invalid_source(registry: &JobRegistry, store: &Store) {
+    let error = registry.try_start(
+        store,
+        SyncOptions {
+            source: Some("not-a-source".to_string()),
+            recent_days: Some(30),
+            parallelism: Some(4),
+            ..Default::default()
+        },
+    ).expect_err("invalid source must fail before creating a job");
+
+    if let JobStartError::InvalidRequest(error) = error {
+        assert_eq!(error.code, SyncRequestErrorCode::UnknownSource);
+    }
+}
+```
 
 CLI、hook、library sync 共用同一把 `worker_lock`。嵌入自定义 sync 路径时使用 `Store::acquire_worker_lock_with`。
 

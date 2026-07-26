@@ -29,7 +29,7 @@ pub use crate::sync::types::{SyncRunOptions, SyncSummary};
 /// blocking parse tasks, which is a local DoS vector — and a remote one if any
 /// write-path guard is bypassed. 32 is far above the useful range (the default
 /// is `min(cpu, 4)`) while staying bounded.
-pub const MAX_SYNC_PARALLELISM: usize = 32;
+pub use crate::sync::types::MAX_SYNC_PARALLELISM;
 
 /// Validates and resolves the effective parser concurrency.
 ///
@@ -38,16 +38,12 @@ pub const MAX_SYNC_PARALLELISM: usize = 32;
 /// silently clamped, so a caller that asked for 10_000 learns its request was
 /// invalid instead of quietly getting 32.
 pub fn normalize_parallelism(requested: Option<usize>) -> Result<usize> {
-    let default_parallelism = std::thread::available_parallelism()
-        .map(|value| value.get().min(4))
-        .unwrap_or(1);
-    match requested {
-        None => Ok(default_parallelism),
-        Some(value) if (1..=MAX_SYNC_PARALLELISM).contains(&value) => Ok(value),
-        Some(value) => {
-            bail!("invalid parallelism {value}: must be between 1 and {MAX_SYNC_PARALLELISM}")
-        }
-    }
+    crate::sync::ValidatedSyncRequest::new(crate::sync::SyncRequestInput {
+        parallelism: requested,
+        ..Default::default()
+    })
+    .map(|request| request.parallelism())
+    .map_err(anyhow::Error::from)
 }
 
 pub async fn run(app: &AppContext) -> Result<()> {
@@ -55,6 +51,7 @@ pub async fn run(app: &AppContext) -> Result<()> {
 }
 
 pub async fn run_with_options(app: &AppContext, options: SyncRunOptions) -> Result<()> {
+    options.validate()?;
     /*
      * ========================================================================
      * 步骤1：执行全量本地真源同步
@@ -340,6 +337,7 @@ pub async fn run_store_once_with_options(
     store: &Store,
     options: &SyncRunOptions,
 ) -> Result<SyncSummary> {
+    options.validate()?;
     let lock_started = Instant::now();
     let lock = store.acquire_worker_lock_with(Duration::from_secs(30), HolderKind::Cli)?;
     let fenced_store = lock.fenced_store();
@@ -436,9 +434,10 @@ async fn run_once_locked(
     store: &Store,
     lock_wait_ms: u64,
     options: &SyncRunOptions,
-    sender: Option<&mut mpsc::Sender<SyncEvent>>,
+    mut sender: Option<&mut mpsc::Sender<SyncEvent>>,
     cancel: &CancellationToken,
 ) -> Result<SyncSummary> {
+    let request = options.validate()?;
     /*
      * ========================================================================
      * 步骤2：执行三阶段同步流水线
@@ -471,7 +470,8 @@ async fn run_once_locked(
     }
 
     // 2.1 计算并发度并按 source 顺序解析 + 即时写入
-    let parallelism = normalize_parallelism(options.parallelism)?;
+    let parallelism = request.parallelism();
+    let recent_cutoff = request.recent_cutoff(chrono::Utc::now());
     let provider_index = crate::domain::provider_map::ProviderIndex::resolve_for_sync(
         options.provider_map.as_deref(),
     )?;
@@ -497,8 +497,8 @@ async fn run_once_locked(
         writer: &mut writer,
         parallelism,
         lock_wait_ms,
-        recent_days: options.recent_days,
-        sender,
+        recent_cutoff,
+        sender: sender.as_deref_mut(),
         cancel,
     })
     .await?;
@@ -584,6 +584,20 @@ async fn run_once_locked(
     store
         .sync_status()
         .save_source_sync_statuses(&sync_statuses)?;
+    if recent_cutoff.is_some() && !cancel.is_cancelled() {
+        for source in &source_stats {
+            store
+                .sync_status()
+                .mark_recent_completed(source.source, crate::util::now_utc())?;
+            if let Some(sender) = sender.as_deref_mut() {
+                sender
+                    .send(SyncEvent::RecentReady {
+                        source: source.source,
+                    })
+                    .await?;
+            }
+        }
+    }
 
     let stored_events = stored_event_count(store, options.source)?;
     let stats = source_stats;
@@ -753,7 +767,7 @@ mod tests {
     fn parallelism_zero_is_rejected() {
         let err = normalize_parallelism(Some(0)).unwrap_err();
         assert!(
-            err.to_string().contains("invalid parallelism"),
+            err.to_string().contains("invalid_parallelism"),
             "unexpected error: {err}"
         );
     }
@@ -762,7 +776,7 @@ mod tests {
     fn parallelism_above_max_is_rejected() {
         let err = normalize_parallelism(Some(MAX_SYNC_PARALLELISM + 1)).unwrap_err();
         assert!(
-            err.to_string().contains("invalid parallelism"),
+            err.to_string().contains("invalid_parallelism"),
             "unexpected error: {err}"
         );
     }
@@ -771,7 +785,7 @@ mod tests {
     fn parallelism_usize_max_is_rejected() {
         let err = normalize_parallelism(Some(usize::MAX)).unwrap_err();
         assert!(
-            err.to_string().contains("invalid parallelism"),
+            err.to_string().contains("invalid_parallelism"),
             "unexpected error: {err}"
         );
     }

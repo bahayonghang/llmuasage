@@ -25,6 +25,17 @@ pub use opencode::OpencodeParser;
 pub use pi::PiParser;
 pub use source_parser::{ProgressSink, SourceParser};
 
+pub(crate) fn timestamp_in_recent_window(
+    timestamp: &str,
+    cutoff: Option<&chrono::DateTime<chrono::Utc>>,
+) -> bool {
+    cutoff.is_none_or(|cutoff| {
+        chrono::DateTime::parse_from_rfc3339(timestamp)
+            .map(|value| value.with_timezone(&chrono::Utc) >= *cutoff)
+            .unwrap_or(false)
+    })
+}
+
 /// Progress and lifecycle events emitted by sync/import flows.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", tag = "event")]
