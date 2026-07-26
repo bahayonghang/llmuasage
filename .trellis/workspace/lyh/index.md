@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 30
-- **Last Active**: 2026-07-23
+- **Total Sessions**: 31
+- **Last Active**: 2026-07-26
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1020 | Active |
+| `journal-1.md` | ~1057 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 31 | 2026-07-26 | 完成 MSRV 与验证基线诚实化 | `6b67cfa` | `dev` |
 | 30 | 2026-07-23 | 完成 serve 加载进度与性能修复 | `ed31296`, `b0638a7`, `5399c90` | `dev` |
 | 29 | 2026-07-23 | 添加 llmusage 自更新命令 | `e5437f7`, `6ec3aa8` | `dev` |
 | 28 | 2026-07-23 | 完成多来源同步与终态汇总表 | `4d6b04e` | `feat/multi-source-sync-table` |

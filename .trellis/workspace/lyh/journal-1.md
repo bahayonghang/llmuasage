@@ -1018,3 +1018,40 @@ Claude/Codex 以 planned replay 文件数显示 5Hz 解析进度，TTY 显示提
 ### Next Steps
 
 - None - task complete
+
+
+## Session 31: 完成 MSRV 与验证基线诚实化
+
+**Date**: 2026-07-26
+**Task**: 完成 MSRV 与验证基线诚实化
+**Branch**: `dev`
+
+### Summary
+
+将真实 MSRV 对齐为 Rust 1.95，统一本地与 CI Rust gate，修复 rolling log subprocess 测试和完整 JSONL fixture 基线。
+
+### Main Changes
+
+- Cargo.toml、GitHub Actions 与 CHANGELOG 统一声明 Rust 1.95
+- just ci 与 CI matrix 共用 scripts/ci-rust.py
+- 测试改用 rolling-log 公共读取接口并补充 subprocess spawn context
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6b67cfa` | (see git log) |
+
+### Testing
+
+- [OK] python scripts/ci-rust.py
+- [OK] cargo +1.95.0 check --locked --all-features（隔离 target）
+- [OK] just ci
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 继续 07-26-write-fencing-closure 子任务
