@@ -1128,3 +1128,24 @@ Claude/Codex 以 planned replay 文件数显示 5Hz 解析进度，TTY 显示提
 ### Status
 
 [OK] **Completed**
+
+
+## Session 35: 完成同步 Job 契约闭环
+
+**Date**: 2026-07-26
+**Task**: 完成同步 Job 契约闭环
+**Branch**: `dev`
+
+### Summary
+
+统一 CLI、Web 与公开 Rust API 的 typed validation，兑现 recent_days 事件窗口与 RecentReady 时序，并保持全历史 cursor 可恢复。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d23e94f8ea87071d9c688be0c35042effa1d3c2d` | (see git log) |
+
+### Status
+
+[OK] **Completed**
