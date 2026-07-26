@@ -83,9 +83,7 @@ impl<'a> SyncStatusStore<'a> {
             return Ok(());
         }
 
-        let mut conn = self.store.open_connection()?;
-        let tx = conn.transaction()?;
-        {
+        self.store.write_transaction(|tx| {
             let mut stmt = tx.prepare_cached(
                 r#"
                 INSERT INTO source_sync_status(
@@ -132,8 +130,8 @@ impl<'a> SyncStatusStore<'a> {
                     status.updated_at,
                 ])?;
             }
-        }
-        tx.commit()?;
+            Ok(())
+        })?;
         Ok(())
     }
 
@@ -147,9 +145,9 @@ impl<'a> SyncStatusStore<'a> {
         source: crate::models::SourceKind,
         at: String,
     ) -> Result<()> {
-        let conn = self.store.open_connection()?;
-        conn.execute(
-            r#"
+        self.store.write_transaction(|tx| {
+            tx.execute(
+                r#"
             INSERT INTO source_sync_status(
                 source,
                 files_processed,
@@ -169,8 +167,10 @@ impl<'a> SyncStatusStore<'a> {
                 recent_completed_at = excluded.recent_completed_at,
                 updated_at = excluded.updated_at
             "#,
-            params![source.as_str(), at],
-        )?;
+                params![source.as_str(), at],
+            )?;
+            Ok(())
+        })?;
         Ok(())
     }
 }

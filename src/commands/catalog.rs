@@ -25,7 +25,8 @@ pub async fn apply(app: &AppContext, path: &Path) -> Result<()> {
 }
 
 pub async fn status(app: &AppContext, json: bool) -> Result<()> {
-    let store = initialized_store(app)?;
+    let store = Store::new(&app.paths)?;
+    store.require_initialized()?;
     let status = store.pricing_catalog_status()?;
     if json {
         println!("{}", serde_json::to_string_pretty(&status)?);

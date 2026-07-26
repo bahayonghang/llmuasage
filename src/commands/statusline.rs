@@ -20,7 +20,7 @@ pub async fn run(app: &AppContext, args: StatuslineArgs) -> Result<()> {
     debug!("starting statusline output");
     let hook_input = read_hook_input()?;
     let store = Store::new(&app.paths)?;
-    store.bootstrap()?;
+    store.require_initialized()?;
     let cache_path = app
         .paths
         .root_dir

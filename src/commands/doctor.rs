@@ -56,7 +56,7 @@ async fn diagnostics(app: &AppContext, json: bool) -> Result<()> {
 
     // 1.1 读取探针结果、最近运行结果与关键文件存在性
     let store = Store::new(&app.paths)?;
-    store.bootstrap()?;
+    store.require_initialized()?;
     let probes = integrations::probe_all(app)?;
     let recent_runs = store.run_log().recent_runs(10)?;
     let logs = crate::logging::runtime_status(&app.paths)?;

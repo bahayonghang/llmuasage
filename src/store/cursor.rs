@@ -100,9 +100,16 @@ impl<'a> CursorStore<'a> {
     }
 
     pub fn save_opencode_cursor(&self, cursor: &OpencodeCursor) -> Result<()> {
-        let conn = self.store.open_connection()?;
-        conn.execute(
-            r#"
+        let processed_ids =
+            serde_json::to_string(&cursor.last_processed_ids).map_err(|source| {
+                LlmusageError::Parse {
+                    context: "opencode cursor",
+                    source,
+                }
+            })?;
+        self.store.write_transaction(|tx| {
+            tx.execute(
+                r#"
             INSERT INTO source_cursor(
                 source, cursor_key, inode, last_time_created, last_processed_ids_json,
                 last_part_rowid, sqlite_status, updated_at
@@ -115,20 +122,17 @@ impl<'a> CursorStore<'a> {
                 sqlite_status = excluded.sqlite_status,
                 updated_at = excluded.updated_at
             "#,
-            params![
-                cursor.inode as i64,
-                cursor.last_time_created,
-                serde_json::to_string(&cursor.last_processed_ids).map_err(|source| {
-                    LlmusageError::Parse {
-                        context: "opencode cursor",
-                        source,
-                    }
-                })?,
-                cursor.last_part_rowid,
-                cursor.sqlite_status,
-                cursor.updated_at,
-            ],
-        )?;
+                params![
+                    cursor.inode as i64,
+                    cursor.last_time_created,
+                    processed_ids,
+                    cursor.last_part_rowid,
+                    cursor.sqlite_status,
+                    cursor.updated_at,
+                ],
+            )?;
+            Ok(())
+        })?;
         Ok(())
     }
 }

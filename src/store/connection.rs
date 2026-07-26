@@ -15,6 +15,7 @@ impl Store {
     pub fn new(paths: &AppPaths) -> Result<Self> {
         Ok(Self {
             paths: paths.clone(),
+            write_permit: None,
         })
     }
 

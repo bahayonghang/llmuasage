@@ -87,6 +87,18 @@ async fn run_with_human_events(
     let render_stats = Arc::new(Mutex::new(sync_progress::RenderStats::default()));
     let bootstrap_started = Instant::now();
     sync_progress::render_shared_timed(&renderer, &render_stats, &SyncEvent::BootstrapStarted);
+    sync_progress::render_shared(&renderer, &SyncEvent::LockWaiting { timeout_ms: 30_000 });
+    let lock_started = Instant::now();
+    let lock = store.acquire_worker_lock_with(Duration::from_secs(30), HolderKind::Cli)?;
+    let fenced_store = lock.fenced_store();
+    let heartbeat = lock.start_default_heartbeat();
+    let lock_wait_ms = lock_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+    sync_progress::render_shared(
+        &renderer,
+        &SyncEvent::LockAcquired {
+            wait_ms: lock_wait_ms,
+        },
+    );
     let bootstrap_renderer = Arc::clone(&renderer);
     let bootstrap_stats = Arc::clone(&render_stats);
     let mut bootstrap_sink = move |event: BootstrapProgressEvent| {
@@ -96,23 +108,12 @@ async fn run_with_human_events(
             &SyncEvent::from(event),
         );
     };
-    store.bootstrap_with_progress(Some(&mut bootstrap_sink))?;
+    fenced_store.bootstrap_with_progress(Some(&mut bootstrap_sink))?;
     tracing::debug!(
         bootstrap_ms = bootstrap_started.elapsed().as_millis() as u64,
         "bootstrap finished"
     );
-    sync_progress::render_shared(&renderer, &SyncEvent::LockWaiting { timeout_ms: 30_000 });
-    let lock_started = Instant::now();
-    let lock = store.acquire_worker_lock_with(Duration::from_secs(30), HolderKind::Cli)?;
-    let heartbeat = lock.start_default_heartbeat();
-    let lock_wait_ms = lock_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
-    sync_progress::render_shared(
-        &renderer,
-        &SyncEvent::LockAcquired {
-            wait_ms: lock_wait_ms,
-        },
-    );
-    store
+    fenced_store
         .run_log()
         .recover_running_runs(&["sync", "hook-run"])?;
     let (mut tx, mut rx) = mpsc::channel(128);
@@ -139,10 +140,18 @@ async fn run_with_human_events(
         "sync"
     };
     let summary_result = super::run_tracked(
-        store,
+        &fenced_store,
         command_name,
         async {
-            run_once_with_cancel(app, store, lock_wait_ms, options, Some(&mut tx), &cancel).await
+            run_once_with_cancel(
+                app,
+                &fenced_store,
+                lock_wait_ms,
+                options,
+                Some(&mut tx),
+                &cancel,
+            )
+            .await
         },
         |item| {
             Some(format!(
@@ -214,24 +223,25 @@ async fn run_with_json_events(
     });
 
     let result = async {
-        {
-            let bootstrap_tx = tx.clone();
-            let mut bootstrap_sink = move |event: BootstrapProgressEvent| {
-                let _ = bootstrap_tx.try_send(SyncEvent::from(event));
-            };
-            store.bootstrap_with_progress(Some(&mut bootstrap_sink))?;
-        }
         tx.send(SyncEvent::LockWaiting { timeout_ms: 30_000 })
             .await?;
         let lock_started = Instant::now();
         let lock = store.acquire_worker_lock_with(Duration::from_secs(30), HolderKind::Cli)?;
+        let fenced_store = lock.fenced_store();
         let heartbeat = lock.start_default_heartbeat();
         let lock_wait_ms = lock_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
         tx.send(SyncEvent::LockAcquired {
             wait_ms: lock_wait_ms,
         })
         .await?;
-        store
+        {
+            let bootstrap_tx = tx.clone();
+            let mut bootstrap_sink = move |event: BootstrapProgressEvent| {
+                let _ = bootstrap_tx.try_send(SyncEvent::from(event));
+            };
+            fenced_store.bootstrap_with_progress(Some(&mut bootstrap_sink))?;
+        }
+        fenced_store
             .run_log()
             .recover_running_runs(&["sync", "hook-run"])?;
         let command_name = if options.rebuild {
@@ -240,11 +250,18 @@ async fn run_with_json_events(
             "sync"
         };
         let summary = super::run_tracked(
-            store,
+            &fenced_store,
             command_name,
             async {
-                run_once_with_cancel(app, store, lock_wait_ms, options, Some(&mut tx), &cancel)
-                    .await
+                run_once_with_cancel(
+                    app,
+                    &fenced_store,
+                    lock_wait_ms,
+                    options,
+                    Some(&mut tx),
+                    &cancel,
+                )
+                .await
             },
             |item| {
                 Some(format!(
@@ -323,12 +340,13 @@ pub async fn run_store_once_with_options(
     store: &Store,
     options: &SyncRunOptions,
 ) -> Result<SyncSummary> {
-    store.bootstrap()?;
     let lock_started = Instant::now();
     let lock = store.acquire_worker_lock_with(Duration::from_secs(30), HolderKind::Cli)?;
+    let fenced_store = lock.fenced_store();
     let heartbeat = lock.start_default_heartbeat();
     let lock_wait_ms = lock_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
-    store
+    fenced_store.bootstrap()?;
+    fenced_store
         .run_log()
         .recover_running_runs(&["sync", "hook-run"])?;
     let command_name = if options.rebuild {
@@ -338,9 +356,9 @@ pub async fn run_store_once_with_options(
     };
     let cancel = CancellationToken::new();
     let summary = super::run_tracked(
-        store,
+        &fenced_store,
         command_name,
-        async { run_once_locked(store, lock_wait_ms, options, None, &cancel).await },
+        async { run_once_locked(&fenced_store, lock_wait_ms, options, None, &cancel).await },
         |item| {
             Some(format!(
                 "sources={} seen={} inserted_delta={} stored_events={}",
@@ -383,7 +401,8 @@ pub async fn run_once_with_cancel(
     sender: Option<&mut mpsc::Sender<SyncEvent>>,
     cancel: &CancellationToken,
 ) -> Result<SyncSummary> {
-    run_once_locked(store, lock_wait_ms, options, sender, cancel).await
+    let operation = store.write_operation(HolderKind::Library)?;
+    run_once_locked(&operation.store, lock_wait_ms, options, sender, cancel).await
 }
 
 /// CLI adapter that implements `SyncExecutor`.

@@ -706,11 +706,11 @@ fn worker_lock_heartbeat_refreshes_existing_lease() -> Result<()> {
 
     let lock = store.acquire_worker_lock_with(Duration::from_millis(1), HolderKind::Cli)?;
     let stale_updated_at = "2000-01-01T00:00:00Z";
-    let stale_lease_expires_at = "2000-01-01T00:00:00Z";
+    let valid_lease_expires_at = (chrono::Utc::now() + chrono::Duration::minutes(5)).to_rfc3339();
     let conn = Connection::open(&app.paths.db_path)?;
     conn.execute(
         "UPDATE worker_lock SET updated_at = ?1, lease_expires_at = ?2",
-        (stale_updated_at, stale_lease_expires_at),
+        (stale_updated_at, &valid_lease_expires_at),
     )?;
     drop(conn);
 
@@ -724,7 +724,7 @@ fn worker_lock_heartbeat_refreshes_existing_lease() -> Result<()> {
             [],
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
         )?;
-        if row.0 != stale_updated_at && row.1 != stale_lease_expires_at {
+        if row.0 != stale_updated_at && row.1 != valid_lease_expires_at {
             refreshed = Some(row);
             break;
         }

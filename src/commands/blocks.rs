@@ -8,7 +8,7 @@ use super::{report_args::BlocksArgs, unified_report};
 pub async fn run(app: &AppContext, args: BlocksArgs) -> Result<()> {
     debug!("starting blocks report output");
     let store = Store::new(&app.paths)?;
-    store.bootstrap()?;
+    store.require_initialized()?;
     let filter = args.common.to_filter(None)?;
     let options = args.to_options();
     let report = reports::load_blocks_report(&store, &filter, &options)?;

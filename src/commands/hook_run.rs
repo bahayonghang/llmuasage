@@ -27,7 +27,6 @@ pub async fn run(app: &AppContext, source: SourceKind, trigger: &str, _auto: boo
 
     // 1.1 先落 trigger_state，再尝试拿全局 worker 锁
     let store = Store::new(&app.paths)?;
-    store.bootstrap()?;
     let signaled_at = now_utc();
     store
         .triggers()
@@ -37,26 +36,28 @@ pub async fn run(app: &AppContext, source: SourceKind, trigger: &str, _auto: boo
         return Ok(());
     };
     debug_assert_eq!(lock.meta().holder_kind, HolderKind::Hook.as_str());
+    let fenced_store = lock.fenced_store();
     let heartbeat = lock.start_default_heartbeat();
-    store
+    fenced_store.bootstrap()?;
+    fenced_store
         .run_log()
         .recover_running_runs(&["sync", "hook-run"])?;
 
     // 1.2 当前 worker 按 snapshot 差异循环补跑
     let total_inserted = super::run_tracked(
-        &store,
+        &fenced_store,
         "hook-run",
         async {
-            let mut snapshot = store.triggers().trigger_snapshot()?;
+            let mut snapshot = fenced_store.triggers().trigger_snapshot()?;
             let mut total_inserted = 0usize;
             for _ in 0..3 {
                 let started_at = now_utc();
-                store
+                fenced_store
                     .triggers()
                     .mark_trigger_worker_started(source, &started_at)?;
                 let attempt = run_once_with_options(
                     app,
-                    &store,
+                    &fenced_store,
                     0,
                     &SyncRunOptions {
                         source: Some(source),
@@ -66,13 +67,13 @@ pub async fn run(app: &AppContext, source: SourceKind, trigger: &str, _auto: boo
                 )
                 .await;
                 let finished_at = now_utc();
-                store
+                fenced_store
                     .triggers()
                     .mark_trigger_worker_finished(source, &finished_at)?;
                 let summary = attempt?;
                 total_inserted += summary.total_inserted;
 
-                let next_snapshot = store.triggers().trigger_snapshot()?;
+                let next_snapshot = fenced_store.triggers().trigger_snapshot()?;
                 if next_snapshot == snapshot {
                     break;
                 }

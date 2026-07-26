@@ -31,7 +31,7 @@ pub async fn run(
      * 3) 不读取 usage_event_raw，不暴露 prompt/response/raw JSON
      */
     let store = Store::new(&app.paths)?;
-    store.bootstrap()?;
+    store.require_initialized()?;
 
     let limit = limit.max(1);
     let entries = crate::logging::read_recent_log_entries(

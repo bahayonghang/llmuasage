@@ -19,7 +19,7 @@ pub async fn run(app: &AppContext) -> Result<()> {
 
     // 1.1 读取概览、来源、健康和实时集成探针
     let store = Store::new(&app.paths)?;
-    store.bootstrap()?;
+    store.require_initialized()?;
     let dashboard = Dashboard::open(&store)?;
     let overview = dashboard.overview(&Default::default())?;
     let sources = dashboard.source_breakdown(&Default::default())?;

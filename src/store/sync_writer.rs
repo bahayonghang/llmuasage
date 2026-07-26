@@ -8,8 +8,8 @@ use rusqlite::{Transaction, TransactionBehavior};
 use tracing::info;
 
 use super::{
-    BucketKey, BucketRollup, FileCursor, PricingRollup, ShardCommitStats, Store, SyncRunWriter,
-    SyncShard,
+    BucketKey, BucketRollup, FileCursor, HolderKind, PricingRollup, ShardCommitStats, Store,
+    SyncRunWriter, SyncShard,
 };
 use crate::{
     domain::provider_map::ProviderIndex,
@@ -97,7 +97,9 @@ impl Store {
         let pricing_catalog = self.active_pricing_catalog()?;
         info!(raw_archive_enabled, "完成 sync 单写入端建立");
         Ok(SyncRunWriter {
+            store: self.clone(),
             conn,
+            permit: self.write_permit.clone(),
             run_started_at: crate::util::now_utc_millis(),
             raw_archive_enabled,
             pricing_catalog,
@@ -537,9 +539,24 @@ impl SyncRunWriter {
         let pricing_catalog = &self.pricing_catalog;
         let raw_archive_enabled = self.raw_archive_enabled;
         let run_started_at = self.run_started_at.clone();
+        let operation = if self.permit.is_none() {
+            Some(self.store.write_operation(HolderKind::Library)?)
+        } else {
+            None
+        };
+        let permit = match self.permit.as_ref() {
+            Some(permit) => permit.clone(),
+            None => operation
+                .as_ref()
+                .expect("unfenced writer must own a temporary operation")
+                .store
+                .write_permit()?
+                .clone(),
+        };
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        permit.validate_in_transaction(&tx)?;
 
         // 7.2 先清旧 event，再批写 event，最后落 cursor —— 顺序由协议保证
         if !shard.reset_path_hashes.is_empty() {
@@ -587,6 +604,7 @@ impl SyncRunWriter {
             stats.tool_calls_inserted += Self::write_tool_call_batch_tx(&tx, &shard.tool_calls)?;
         }
         fail_shard_commit_at(failpoint, ShardCommitFailpoint::ToolCalls)?;
+        permit.validate_in_transaction(&tx)?;
         tx.commit()?;
 
         stats.files_seen = shard.seen_file_paths.len();
@@ -1166,6 +1184,47 @@ mod tests {
                 ..build_tool_call(&replacement, "Edit")
             }],
         }
+    }
+
+    #[test]
+    fn stale_generation_cannot_commit_next_shard_transaction() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let store = Store::new(&build_paths(temp.path()))?;
+        store.bootstrap()?;
+
+        let first =
+            store.acquire_worker_lock_with(std::time::Duration::from_secs(1), HolderKind::Cli)?;
+        let fenced_first = first.fenced_store();
+        let mut writer = fenced_first.begin_sync_run()?;
+
+        let conn = store.open_connection()?;
+        conn.execute(
+            "UPDATE worker_lock SET lease_expires_at = '2000-01-01T00:00:00Z'",
+            [],
+        )?;
+        drop(conn);
+        let second = store
+            .acquire_worker_lock_with(std::time::Duration::from_secs(1), HolderKind::Library)?;
+
+        let event = build_event("stale", "stale-generation", 10);
+        let event_key = event.event_key.clone();
+        let mut shard = SyncShard::new(SourceKind::Codex);
+        shard.events.push(event);
+        let error = writer
+            .commit_shard(shard)
+            .expect_err("a stolen generation must fence the stale writer");
+        assert!(matches!(error, LlmusageError::LockLost));
+
+        let conn = store.open_connection()?;
+        let persisted: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_event WHERE event_key = ?1",
+            [event_key],
+            |row| row.get(0),
+        )?;
+        assert_eq!(persisted, 0, "stale shard must not commit any event");
+        drop(second);
+        drop(first);
+        Ok(())
     }
 
     fn assert_seed_only_after_failed_shard(store: &Store, path_hash: &str) -> anyhow::Result<()> {

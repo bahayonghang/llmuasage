@@ -28,6 +28,8 @@ output, and dashboard/TUI consumers.
   `update` command, supported channels, confirmation flow, or Cargo invocation.
 - Read [CI And Toolchain Contracts](./ci-toolchain-contracts.md) before changing
   dependencies, `rust-version`, Rust CI commands, or subprocess test harnesses.
+- Read [Write Fencing Contracts](./write-fencing-contracts.md) before changing
+  worker locks, bootstrap, migrations, sync writers, or any Store mutation.
 - Also read `docs/agents/domain.md` and
   `docs/agents/passive-parser-onboarding.md` before promoting a monitored
   platform into a parser-backed source.
@@ -47,6 +49,7 @@ output, and dashboard/TUI consumers.
 | [Web Server Contracts](./web-server-contracts.md) | Dashboard listener, browser-launch, SSH, and network-exposure contracts | Documented |
 | [Self-Update Contracts](./self-update-contracts.md) | Official channels, Cargo invocation, confirmation, and no-network test boundaries | Documented |
 | [CI And Toolchain Contracts](./ci-toolchain-contracts.md) | Shared Rust gate, verified MSRV, and subprocess-test evidence rules | Documented |
+| [Write Fencing Contracts](./write-fencing-contracts.md) | Generation permits, transaction fencing, bootstrap ordering, and mutation entrypoints | Documented |
 
 ## Quality Check
 

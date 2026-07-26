@@ -69,11 +69,13 @@
 - Monitor-only platforms must surface as diagnostics/status entries with token
   quality labels, not as parser-backed usage, until sanitized fixtures and token
   semantics exist.
-- Sync bootstrap progress is an observational pre-lock stream. Existing
-  migration events keep their names and meaning; embedded pricing upgrades add
+- Sync emits `BootstrapStarted` before lock acquisition for immediate feedback,
+  then emits `LockWaiting` / `LockAcquired`; migration and pricing progress run
+  only after acquisition on the fenced Store. Existing migration events keep
+  their names and meaning; embedded pricing upgrades add
   `pricing_upgrade_started`, `pricing_upgrade_progress`,
   `pricing_bucket_reconcile_started`, and `pricing_upgrade_finished` before
-  `lock_waiting`.
+  parser source events.
 - Pricing started/progress events carry source/target catalog versions and
   processed/total event counts. Reconcile/finished events carry bucket counts;
   finished also carries deleted orphan count and elapsed milliseconds.

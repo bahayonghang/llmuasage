@@ -18,12 +18,13 @@ impl<'a> RunLog<'a> {
 
     pub fn record_run_start(&self, command: &str) -> Result<i64> {
         let now = now_utc();
-        let conn = self.store.open_connection()?;
-        conn.execute(
-            "INSERT INTO run_log(command, status, started_at) VALUES (?1, 'running', ?2)",
-            params![command, now],
-        )?;
-        Ok(conn.last_insert_rowid())
+        self.store.write_transaction(|tx| {
+            tx.execute(
+                "INSERT INTO run_log(command, status, started_at) VALUES (?1, 'running', ?2)",
+                params![command, now],
+            )?;
+            Ok(tx.last_insert_rowid())
+        })
     }
 
     pub fn finish_run(
@@ -34,9 +35,9 @@ impl<'a> RunLog<'a> {
         error: Option<&str>,
     ) -> Result<()> {
         let now = now_utc();
-        let conn = self.store.open_connection()?;
-        conn.execute(
-            r#"
+        self.store.write_transaction(|tx| {
+            tx.execute(
+                r#"
             UPDATE run_log
             SET status = ?2,
                 summary = ?3,
@@ -45,8 +46,10 @@ impl<'a> RunLog<'a> {
                 duration_ms = CAST((julianday(?5) - julianday(started_at)) * 86400000 AS INTEGER)
             WHERE id = ?1
             "#,
-            params![id, status, summary, error, now],
-        )?;
+                params![id, status, summary, error, now],
+            )?;
+            Ok(())
+        })?;
         Ok(())
     }
 
@@ -83,9 +86,8 @@ impl<'a> RunLog<'a> {
               AND command IN ({placeholders})
             "#
         );
-        let conn = self.store.open_connection()?;
-        let changed = conn.execute(&sql, params_from_iter(params))?;
-        Ok(changed)
+        self.store
+            .write_transaction(|tx| Ok(tx.execute(&sql, params_from_iter(params))?))
     }
 
     pub fn recent_runs(&self, limit: usize) -> Result<Vec<RunRecord>> {

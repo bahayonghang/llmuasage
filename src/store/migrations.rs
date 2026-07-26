@@ -4,6 +4,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde::Serialize;
 use tracing::info;
 
+use super::WritePermit;
 use crate::{
     error::{LlmusageError, Result},
     query::PRICING_UNPRICED,
@@ -91,14 +92,14 @@ pub fn latest_schema_version() -> u32 {
 /// row yet (fresh database before the first migration).  Any stored value that
 /// cannot be parsed as a `u32` is a hard error (`SchemaVersionCorrupt`).
 pub fn read_schema_version(conn: &Connection) -> Result<u32> {
-    conn.execute_batch(
-        r#"
-        CREATE TABLE IF NOT EXISTS meta (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL
-        );
-        "#,
+    let meta_exists = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta')",
+        [],
+        |row| row.get::<_, bool>(0),
     )?;
+    if !meta_exists {
+        return Ok(0);
+    }
     let raw = conn
         .query_row(
             "SELECT value FROM meta WHERE key = 'schema_version'",
@@ -136,9 +137,18 @@ pub fn write_schema_version(tx: &Transaction<'_>, version: u32) -> Result<()> {
 }
 
 /// Applies all pending migrations, optionally emitting start/finish callbacks.
+#[cfg(test)]
 pub fn run_migrations_with_events(
     conn: &mut Connection,
+    sink: Option<MigrationEventSink<'_>>,
+) -> Result<()> {
+    run_migrations_with_events_and_permit(conn, sink, None)
+}
+
+pub(crate) fn run_migrations_with_events_and_permit(
+    conn: &mut Connection,
     mut sink: Option<MigrationEventSink<'_>>,
+    permit: Option<&WritePermit>,
 ) -> Result<()> {
     let mut current = read_schema_version(conn)?;
     let latest = latest_schema_version();
@@ -168,8 +178,14 @@ pub fn run_migrations_with_events(
         let started = Instant::now();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let result = (|| -> Result<()> {
+            if let Some(permit) = permit {
+                permit.validate_in_transaction(&tx)?;
+            }
             migration(&tx)?;
             write_schema_version(&tx, *version)?;
+            if let Some(permit) = permit {
+                permit.validate_in_transaction(&tx)?;
+            }
             Ok(())
         })();
 
@@ -871,6 +887,10 @@ pub(crate) fn run_migrations_for_test_with_events(
         let started = Instant::now();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let result = (|| -> Result<()> {
+            // Isolated migration tests may start at vN without running the
+            // baseline first. Seed the same meta surface the real ordered
+            // runner would already have established.
+            write_schema_version(&tx, current)?;
             migration(&tx)?;
             write_schema_version(&tx, *version)?;
             Ok(())
@@ -1021,6 +1041,12 @@ mod tests {
     fn missing_schema_version_still_reads_as_zero() -> anyhow::Result<()> {
         let conn = Connection::open_in_memory()?;
         assert_eq!(read_schema_version(&conn)?, 0);
+        let meta_exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta')",
+            [],
+            |row| row.get(0),
+        )?;
+        assert!(!meta_exists, "schema inspection must remain read-only");
         Ok(())
     }
 

@@ -408,6 +408,7 @@ async fn run_job(
     let lock_started = Instant::now();
     let result = match acquire_worker_lock_for_job(&store, Duration::from_secs(30), &cancel).await {
         Ok(Some(lock)) => {
+            let fenced_store = lock.fenced_store();
             let heartbeat = lock.start_default_heartbeat();
             let lock_wait_ms = lock_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
             let _ = internal_tx
@@ -415,17 +416,21 @@ async fn run_job(
                     wait_ms: lock_wait_ms,
                 })
                 .await;
-            let result = ctx
-                .executor
-                .run_once(
-                    &app,
-                    &store,
-                    lock_wait_ms,
-                    &sync_options,
-                    Some(&mut internal_tx),
-                    &cancel,
-                )
-                .await;
+            let result = match fenced_store.bootstrap() {
+                Ok(()) => {
+                    ctx.executor
+                        .run_once(
+                            &app,
+                            &fenced_store,
+                            lock_wait_ms,
+                            &sync_options,
+                            Some(&mut internal_tx),
+                            &cancel,
+                        )
+                        .await
+                }
+                Err(err) => Err(anyhow::Error::new(err)),
+            };
             drop(heartbeat);
             drop(lock);
             result
@@ -571,9 +576,57 @@ fn _keep_sync_summary_public_contract(_: Option<SyncSummary>) {}
 
 #[cfg(test)]
 mod tests {
+    use anyhow::Context as _;
+
     use super::*;
     use crate::paths::AppPaths;
     use tempfile::TempDir;
+
+    struct FencedAssertionExecutor;
+
+    impl crate::sync::executor::SyncExecutor for FencedAssertionExecutor {
+        fn run_once<'a>(
+            &'a self,
+            _app: &'a AppContext,
+            store: &'a Store,
+            _lock_wait_ms: u64,
+            _options: &'a SyncRunOptions,
+            _sender: Option<&'a mut mpsc::Sender<SyncEvent>>,
+            _cancel: &'a CancellationToken,
+        ) -> crate::sync::executor::BoxFuture<'a, anyhow::Result<SyncSummary>> {
+            Box::pin(async move {
+                store
+                    .write_permit()
+                    .map_err(anyhow::Error::new)
+                    .context("JobRegistry executor received an unfenced Store")?;
+                Ok(SyncSummary {
+                    sources: Vec::new(),
+                    total_seen: 0,
+                    total_inserted: 0,
+                    stored_events: 0,
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn executor_receives_store_fenced_by_acquired_generation() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = AppPaths::with_root(temp.path().to_path_buf())?;
+        let store = Store::new(&paths)?;
+        let registry = JobRegistry::new(Arc::new(FencedAssertionExecutor));
+
+        let (job_id, _rx) = registry.start(&store, SyncOptions::default());
+        let completed = wait_for_status(
+            &registry,
+            &job_id,
+            JobStatus::Completed,
+            Duration::from_secs(2),
+        )
+        .await?;
+        assert!(completed.error.is_none());
+        Ok(())
+    }
 
     #[tokio::test]
     async fn start_returns_running_snapshot() -> anyhow::Result<()> {

@@ -80,10 +80,11 @@ pub enum LlmusageError {
     },
     /// The worker lease was stolen by a new owner after our lease expired while
     /// we were paused/hibernated. The heartbeat refresh matched 0 rows because
-    /// the `generation` column no longer matches ours (CONC-001 fencing).
+    /// the lease expired or the persisted owner/generation no longer matches
+    /// this worker (CONC-001 fencing).
     #[error(
-        "worker lock lost: lease expired and was stolen by another process \
-         (fencing generation mismatch); this worker must stop writing immediately"
+        "worker lock lost: lease expired or owner/generation no longer matches; \
+         this worker must stop writing immediately"
     )]
     LockLost,
     /// User-supplied configuration (CLI flag combination, settings JSON,

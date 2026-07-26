@@ -7,7 +7,7 @@ use std::{
 use rusqlite::OptionalExtension;
 use serde::Serialize;
 
-use super::{BootstrapProgressSink, Store};
+use super::{BootstrapProgressSink, HolderKind, Store};
 use crate::{
     error::{LlmusageError, Result},
     query::{PricingCatalog, PricingStatus},
@@ -206,6 +206,11 @@ impl Store {
     /// Applies a v2 overlay to the recorded base layer and atomically selects
     /// the merged effective catalog after event and bucket recomputation.
     pub fn apply_pricing_overlay(&self, source_path: &Path) -> Result<CatalogApplyResult> {
+        let operation = self.write_operation(HolderKind::Library)?;
+        operation.store.apply_pricing_overlay_fenced(source_path)
+    }
+
+    fn apply_pricing_overlay_fenced(&self, source_path: &Path) -> Result<CatalogApplyResult> {
         validate_local_file(source_path, "pricing overlay")?;
         let overlay_document = PricingCatalog::load_overlay(source_path)?;
         let overlay_json = overlay_document.canonical_json()?;
@@ -272,6 +277,13 @@ impl Store {
     /// Activates a complete base snapshot. This is the shared implementation
     /// behind the legacy `doctor --refresh-pricing` entrypoint.
     pub fn activate_pricing_snapshot(&self, source_path: &Path) -> Result<CatalogResetResult> {
+        let operation = self.write_operation(HolderKind::Library)?;
+        operation
+            .store
+            .activate_pricing_snapshot_fenced(source_path)
+    }
+
+    fn activate_pricing_snapshot_fenced(&self, source_path: &Path) -> Result<CatalogResetResult> {
         validate_local_file(source_path, "pricing snapshot")?;
         let mut catalog = PricingCatalog::load_snapshot(source_path)?;
         let canonical = catalog.document().canonical_json()?;
@@ -294,6 +306,11 @@ impl Store {
     /// Removes the active overlay. A snapshot base remains pinned; an embedded
     /// base returns to the current binary's embedded catalog.
     pub fn reset_pricing_catalog(&self) -> Result<CatalogResetResult> {
+        let operation = self.write_operation(HolderKind::Library)?;
+        operation.store.reset_pricing_catalog_fenced()
+    }
+
+    fn reset_pricing_catalog_fenced(&self) -> Result<CatalogResetResult> {
         let meta = self.pricing_meta()?;
         if meta.has_overlay() {
             let (base_identity, base_file) =
