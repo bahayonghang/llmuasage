@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 36
+- **Total Sessions**: 37
 - **Last Active**: 2026-07-26
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1185 | Active |
+| `journal-1.md` | ~1219 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 37 | 2026-07-26 | 完成 public 只读安全边界闭环 | `6206f5cec193ff15929edcc79a9ee1e40ae828ef` | `dev` |
 | 36 | 2026-07-26 | 完成不可变 self-update 闭环 | `719845d773474b5ce8af08a7a7245548209afb0a` | `dev` |
 | 35 | 2026-07-26 | 完成同步 Job 契约闭环 | `d23e94f8ea87071d9c688be0c35042effa1d3c2d` | `dev` |
 | 34 | 2026-07-26 | 完成 R6 有界 JSONL 与协作取消 | `d258d33` | `dev` |

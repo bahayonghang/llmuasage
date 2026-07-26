@@ -1183,3 +1183,37 @@ Claude/Codex 以 planned replay 文件数显示 5Hz 解析进度，TTY 显示提
 ### Next Steps
 
 - 继续 07-26-public-read-security-boundary
+
+
+## Session 37: 完成 public 只读安全边界闭环
+
+**Date**: 2026-07-26
+**Task**: 完成 public 只读安全边界闭环
+**Branch**: `dev`
+
+### Summary
+
+Public listener 改用最小读路由与脱敏聚合 DTO，并忽略 project selector；loopback 全功能保持不变。
+
+### Main Changes
+
+- 拆分 public/loopback router，public 仅保留 shell、aggregate dashboard 与最小 health。
+- 禁止 public project filter 推断，并覆盖路径、日志、诊断、job、SQL 和内部错误泄露。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6206f5cec193ff15929edcc79a9ee1e40ae828ef` | (see git log) |
+
+### Testing
+
+- [OK] public security 6/6；web 88/88；python scripts/ci-rust.py；just ci；task.py validate；git diff --check。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 继续 07-26-runtime-log-bounds。
