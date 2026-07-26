@@ -2652,18 +2652,21 @@ impl Fixture {
             .join("22");
         fs::create_dir_all(&sessions_dir)?;
         let repo_root = self.home.join("workspace").join("demo-repo");
-        let payload = [
-            serde_json::json!({
-                "type": "session_meta",
-                "payload": {
-                    "model": "gpt-5",
-                    "cwd": repo_root.to_string_lossy().to_string(),
-                }
-            })
-            .to_string(),
-            codex_token_line(timestamp, total_tokens, total_tokens),
-        ]
-        .join("\n");
+        let payload = format!(
+            "{}\n",
+            [
+                serde_json::json!({
+                    "type": "session_meta",
+                    "payload": {
+                        "model": "gpt-5",
+                        "cwd": repo_root.to_string_lossy().to_string(),
+                    }
+                })
+                .to_string(),
+                codex_token_line(timestamp, total_tokens, total_tokens),
+            ]
+            .join("\n")
+        );
         fs::write(sessions_dir.join(name), payload)?;
         Ok(())
     }
@@ -2688,7 +2691,7 @@ impl Fixture {
             .join("04")
             .join("22")
             .join(name);
-        let payload = format!("\n{}", codex_token_line(timestamp, total_tokens, 153));
+        let payload = format!("{}\n", codex_token_line(timestamp, total_tokens, 153));
         fs::OpenOptions::new()
             .append(true)
             .open(path)?

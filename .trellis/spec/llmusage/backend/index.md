@@ -26,6 +26,8 @@ output, and dashboard/TUI consumers.
   `serve` listener, browser-launch policy, or dashboard network exposure.
 - Read [Self-Update Contracts](./self-update-contracts.md) before changing the
   `update` command, supported channels, confirmation flow, or Cargo invocation.
+- Read [CI And Toolchain Contracts](./ci-toolchain-contracts.md) before changing
+  dependencies, `rust-version`, Rust CI commands, or subprocess test harnesses.
 - Also read `docs/agents/domain.md` and
   `docs/agents/passive-parser-onboarding.md` before promoting a monitored
   platform into a parser-backed source.
@@ -44,11 +46,12 @@ output, and dashboard/TUI consumers.
 | [Report CLI Contracts](./report-cli-contracts.md) | Unified/focused report command surface, DTO projections, and output invariants | Documented |
 | [Web Server Contracts](./web-server-contracts.md) | Dashboard listener, browser-launch, SSH, and network-exposure contracts | Documented |
 | [Self-Update Contracts](./self-update-contracts.md) | Official channels, Cargo invocation, confirmation, and no-network test boundaries | Documented |
+| [CI And Toolchain Contracts](./ci-toolchain-contracts.md) | Shared Rust gate, verified MSRV, and subprocess-test evidence rules | Documented |
 
 ## Quality Check
 
-- Run `cargo fmt --check`.
-- Run `cargo clippy --all-targets --all-features -- -D warnings`.
-- Run the focused Rust test slice for the changed contract.
+- Run `python scripts/ci-rust.py` for the shared format, clippy, Rust test, and
+  rustdoc gate.
+- Run the focused Rust test slice first for the changed contract.
 - Run `cargo test -- --test-threads=1` for cross-layer source/query/TUI changes.
 - Run `npm --prefix docs run docs:build` when docs changed.

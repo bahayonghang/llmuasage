@@ -805,33 +805,33 @@ async fn api_jobs_start(
     if let Some(response) = reject_non_local_write(peer) {
         return response;
     }
-    if let Some(s) = options.source.as_deref() {
-        if SourceKind::parse_id(s).is_none() {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": {
-                        "code": "unknown_source",
-                        "message": format!("未知 source: {s}"),
-                    }
-                })),
-            )
-                .into_response();
-        }
+    if let Some(s) = options.source.as_deref()
+        && SourceKind::parse_id(s).is_none()
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": {
+                    "code": "unknown_source",
+                    "message": format!("未知 source: {s}"),
+                }
+            })),
+        )
+            .into_response();
     }
-    if let Some(days) = options.recent_days {
-        if days == 0 || days > 3650 {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": {
-                        "code": "invalid_recent_days",
-                        "message": "recent_days 必须在 1..=3650 范围内",
-                    }
-                })),
-            )
-                .into_response();
-        }
+    if let Some(days) = options.recent_days
+        && (days == 0 || days > 3650)
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": {
+                    "code": "invalid_recent_days",
+                    "message": "recent_days 必须在 1..=3650 范围内",
+                }
+            })),
+        )
+            .into_response();
     }
     let (job_id, _rx) = match state.jobs.try_start(&state.store, options) {
         Ok(started) => started,

@@ -8,10 +8,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use llmusage::{
     AppPaths, Dashboard, QueryFilter,
+    logging::read_recent_log_entries,
     models::{
         ActivityCategory, SourceKind, ToolKind, UsageEvent, UsageTokens, UsageToolCall, UsageTurn,
     },
@@ -841,7 +842,13 @@ fn json_events_subprocess_emits_ndjson_per_event() -> Result<()> {
     store.mark_current_token_accounting(SourceKind::Codex)?;
     store.set_meta_value("pricing_catalog_version", "static-v1")?;
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_llmusage"))
+    let binary = PathBuf::from(env!("CARGO_BIN_EXE_llmusage"));
+    anyhow::ensure!(
+        binary.is_file(),
+        "Cargo binary does not exist: {}",
+        binary.display()
+    );
+    let output = std::process::Command::new(&binary)
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .arg("--home")
         .arg(&root)
@@ -852,7 +859,14 @@ fn json_events_subprocess_emits_ndjson_per_event() -> Result<()> {
         .env("OPENCODE_HOME", home.join("opencode"))
         .env("LLMUSAGE_LOG", "info")
         .env("RUST_LOG", "off")
-        .output()?;
+        .output()
+        .with_context(|| {
+            format!(
+                "failed to spawn {} from {}",
+                binary.display(),
+                env!("CARGO_MANIFEST_DIR")
+            )
+        })?;
     assert!(output.status.success(), "{output:?}");
 
     let stdout = String::from_utf8(output.stdout)?;
@@ -918,13 +932,10 @@ fn json_events_subprocess_emits_ndjson_per_event() -> Result<()> {
     );
     assert!(json_lines.iter().any(|line| line["event"] == "finished"));
 
-    let log_lines = fs::read_to_string(&paths.log_file_path)?
-        .lines()
-        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-        .collect::<Vec<_>>();
+    let log_entries = read_recent_log_entries(&paths, 100, Some("info"), None)?;
     for phase in ["started", "bucket_reconcile", "finished"] {
-        assert!(log_lines.iter().any(|line| {
-            line["fields"]["operation"] == "pricing_recompute" && line["fields"]["phase"] == phase
+        assert!(log_entries.iter().any(|entry| {
+            entry.fields["operation"] == "pricing_recompute" && entry.fields["phase"] == phase
         }));
     }
     Ok(())

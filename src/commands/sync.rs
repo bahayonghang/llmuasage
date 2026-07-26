@@ -1,6 +1,5 @@
 use std::{
     io::IsTerminal,
-
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };

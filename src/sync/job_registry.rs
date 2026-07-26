@@ -415,7 +415,8 @@ async fn run_job(
                     wait_ms: lock_wait_ms,
                 })
                 .await;
-            let result = ctx.executor
+            let result = ctx
+                .executor
                 .run_once(
                     &app,
                     &store,

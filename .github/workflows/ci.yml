@@ -31,35 +31,21 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@9bdad043e88c75890e36ad3bbc8d27f0090dd609 # v2.7.8
 
-      - name: Rust format
-        run: cargo fmt --check
-
-      - name: Rust clippy
-        run: cargo clippy --locked --all-targets --all-features -- -D warnings
-
-      - name: Rust tests
-        # --test-threads=1 serialises SQLite-backed integration tests that share
-        # the same on-disk home. Tracked for replacement with nextest groups.
-        run: cargo test --locked --all-features -- --test-threads=1
-
-      - name: Rust docs
-        env:
-          RUSTDOCFLAGS: "-D warnings"
-        shell: bash
-        run: cargo doc --locked --no-deps
+      - name: Rust quality gate
+        run: python scripts/ci-rust.py
 
   msrv:
-    name: MSRV (1.89)
+    name: MSRV (1.95)
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Install Rust 1.89
+      - name: Install Rust 1.95
         uses: dtolnay/rust-toolchain@b3b07f5b19b9a3af61f1fe79b6a83a40fdc6c39c
         with:
-          toolchain: "1.89"
+          toolchain: "1.95"
 
       - name: Check MSRV compilation
         run: cargo check --locked --all-features

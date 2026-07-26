@@ -1,15 +1,16 @@
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::{fs, path::PathBuf, process::Command};
 
 use anyhow::{Result, bail};
 use chrono::{Duration, Utc};
 use rusqlite::{Connection, params};
 use tempfile::TempDir;
 
-use llmusage::{paths::AppPaths, query::Dashboard, store::Store};
+use llmusage::{
+    logging::{read_recent_log_entries, runtime_status},
+    paths::AppPaths,
+    query::Dashboard,
+    store::Store,
+};
 
 #[test]
 fn report_commands_emit_unified_camel_case_json_from_sqlite() -> Result<()> {
@@ -926,16 +927,17 @@ fn logging_runtime_writes_ndjson_file() -> Result<()> {
     )?;
     assert!(output.status.success(), "{output:?}");
 
-    let entries = read_log_json_lines(&fixture.paths.log_file_path)?;
+    let entries = read_recent_log_entries(&fixture.paths, 100, Some("info"), None)?;
+    let status = runtime_status(&fixture.paths)?;
     assert!(
         entries.iter().any(|entry| {
-            entry["level"] == "INFO"
-                && entry["fields"]["message"]
+            entry.level == "INFO"
+                && entry.fields["message"]
                     .as_str()
                     .is_some_and(|message| message.contains("doctor"))
         }),
         "expected INFO doctor event in {}: {entries:#?}",
-        fixture.paths.log_file_path.display()
+        status.path
     );
     Ok(())
 }
@@ -967,7 +969,7 @@ fn report_stdout_is_not_polluted_by_logging() -> Result<()> {
     assert!(parsed["daily"].is_array());
     assert!(!stdout.contains("INFO"), "{stdout}");
     assert!(!stdout.contains("开始初始化本地目录"), "{stdout}");
-    assert!(fixture.paths.log_file_path.is_file());
+    assert!(runtime_status(&fixture.paths)?.exists);
     Ok(())
 }
 
@@ -1794,14 +1796,6 @@ impl ReportCliFixture {
         }
         Ok(command.output()?)
     }
-}
-
-fn read_log_json_lines(path: &Path) -> Result<Vec<serde_json::Value>> {
-    let raw = fs::read_to_string(path)?;
-    raw.lines()
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| Ok(serde_json::from_str(line)?))
-        .collect()
 }
 
 struct SeedEvent<'a> {
