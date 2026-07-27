@@ -5,9 +5,9 @@
 ### 1. Scope / Trigger
 
 - Trigger: any code that migrates schema or mutates usage, cursor, source-file,
-  sync-status, run-log, trigger-worker, integration, pricing, or meta state.
+  sync-status, run-log, legacy-cleanup audit, pricing, or meta state.
 - The global `worker_lock` lease is the single coordinator for bootstrap,
-  sync, catalog, hook workers, and standalone Store mutation APIs.
+  sync, catalog, and standalone Store mutation APIs.
 
 ### 2. Signatures
 
@@ -37,9 +37,9 @@
   pass that Store through run-log, parser driver, shard writer, and status writes.
 - Catalog apply/reset/snapshot and standalone Store mutation APIs own one
   operation guard or reuse an existing fenced Store.
-- Hook `trigger_state` signal upsert is the sole control-plane exception: it may
-  write while another worker owns the data permit so catch-up signals are not
-  dropped. Hook worker start/finish, sync, cursor, and run-log writes are fenced.
+- Historical note: hook-enabled releases allowed `trigger_state` signal upsert
+  as the sole control-plane exception. Current releases have no hook worker or
+  trigger-state write API; the table and old rows remain migration-compatible.
 - Read-only report/status/doctor/TUI/catalog-status commands call
   `require_initialized()` and must not run migration or pricing recomputation.
 
@@ -50,8 +50,8 @@
 - Heartbeat observes stolen generation -> mark lost, stop refreshing, next write fails.
 - Heartbeat observes its own expired lease -> `LockLost`; never extend the expired row.
 - Non-expired holder blocks acquisition past timeout -> `LlmusageError::LockBusy`.
-- SQLite `BUSY` / `LOCKED` during coordination is a missed acquisition attempt:
-  blocking callers retry until timeout, while non-blocking hook callers skip.
+- SQLite `BUSY` / `LOCKED` during coordination is a missed acquisition attempt;
+  blocking callers retry until timeout.
 - Missing or stale schema on read-only entry -> `LlmusageError::NotInitialized`.
 - A schema newer than the binary -> `LlmusageError::SchemaTooNew`.
 - Fresh database acquisition -> create only coordination schema, acquire, then migrate.
@@ -61,8 +61,8 @@
 - Good: A acquires, pauses, B steals after expiry, then A's next shard commit
   fails before inserting any event.
 - Base: A heartbeat renews normally; every transaction validates and commits.
-- Good: a hook signal is recorded while a sync worker is busy; the signal is
-  visible to the current or next hook worker without bypassing usage fencing.
+- Good: historical `trigger_state` and `holder_kind='hook'` rows remain readable
+  without granting a current write-fencing exception.
 - Bad: call `bootstrap()` before acquiring the sync operation lock.
 - Bad: pass the original unfenced Store to a JobRegistry executor after lock acquisition.
 - Bad: add another control-plane exception for cursor, status, run-log, or catalog data.

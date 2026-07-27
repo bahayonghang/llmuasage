@@ -1,0 +1,8 @@
+{"file": ".trellis/tasks/07-27-remove-hook-realtime-sync/research/hook-surface-map.md", "reason": "hook 机制逐文件代码面全图：命令、集成、store、领域、呈现、文档、移除影响判定"}
+{"file": ".trellis/tasks/07-27-remove-hook-realtime-sync/research/local-hooks-inventory.md", "reason": "本机安装实证 + 精确匹配卸载缺陷证据（宽匹配加固的依据）"}
+{"file": ".trellis/spec/llmusage/backend/integration-file-contracts.md", "reason": "第三方配置原子写入协议：遗留清理必须继续遵守，任务后需收窄该 spec"}
+{"file": ".trellis/spec/llmusage/backend/write-fencing-contracts.md", "reason": "trigger_state 控制面豁免（:40-42）需标注历史；Store 变更入口约束"}
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "源注册/激活模式/sync 汇总契约，descriptor 收敛后需更新"}
+{"file": "docs/adr/0001-source-registry-and-parser-trait.md", "reason": "§5 HookTarget 聚合点结论需被新 ADR supersede"}
+{"file": "docs/adr/0008-source-capability-registry.md", "reason": "激活模式枚举与 hook-run 后果，需被新 ADR supersede"}
+{"file": "docs/adr/0009-antigravity-source-cutover.md", "reason": "Antigravity integration-only 决策，需被新 ADR supersede"}

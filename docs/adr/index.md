@@ -16,6 +16,7 @@ ADRs are engineering records, not end-user tutorials. Start with [Architecture](
 - [0008 — Source Capability Registry and passive-reader gate](./0008-source-capability-registry)
 - [0009 — Antigravity source cutover](./0009-antigravity-source-cutover)
 - [0010 — Provider label dimension for usage attribution](./0010-provider-label-dimension)
+- [0011 — Passive-only synchronization](./0011-passive-only-synchronization)
 
 ## Companion docs
 

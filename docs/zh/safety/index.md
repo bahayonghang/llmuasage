@@ -15,14 +15,14 @@
 | 路径 | 用途 |
 | --- | --- |
 | `~/.llmusage/llmusage.db` | 保存 usage、bucket、cursor、diagnostics、jobs、run logs 和 metadata 的 SQLite 数据库 |
-| `~/.llmusage/bin/llmusage-hook.cmd` | Windows hook wrapper |
-| `~/.llmusage/bin/llmusage-hook.sh` | POSIX hook wrapper |
-| `~/.llmusage/backups/` | 卸载时使用的集成配置备份 |
+| `~/.llmusage/backups/` | 历史集成备份以及数据库/价格恢复材料 |
 | `~/.llmusage/exports/` | 静态 HTML 导出 |
 | `~/.llmusage/logs/llmusage.ndjson.*` | 本地结构化运行诊断和命令追踪 |
 | `~/.llmusage/pricing/` | 内容寻址的本地 base、overlay 和 effective 价格目录 |
 
 运行时根目录优先级：`--home <PATH>` > `LLMUSAGE_HOME` > `~/.llmusage`。
+
+当前版本不安装 hook 或 plugin。从会安装 hook 的旧版本升级后，请执行一次 `llmusage uninstall`，只移除 llmusage 自有的遗留配置条目、wrapper 和原子写入残留。历史 `*.bak` 与用量数据继续保留；只有显式执行 `uninstall --purge` 才会删除运行时根目录。
 
 ## 不上传什么
 
@@ -48,7 +48,7 @@ llmusage sync
 llmusage sync --rebuild
 ```
 
-`--rebuild` 会按来源重置 parser-backed 用量状态，再重新解析本地来源。无 source 的 full rebuild 以 parser registry 作为删除边界，因此 parserless Antigravity 的 event、bucket、行为事实、cursor 和 source-file 诊断都会保留。如果 parser 来源的已导入文件型历史依赖现在缺失的源文件，llmusage 会在任何 reset 发生前拒绝重建。
+`--rebuild` 会按来源重置 parser-backed 用量状态，再重新解析本地来源。无 source 的 full rebuild 以 parser registry 作为删除边界，因此 parserless Antigravity 的 event、bucket、行为事实、cursor 和 source-file 诊断都会保留。即使带 `--allow-lossy-rebuild`，定向重建 Antigravity 也会被拒绝，因为没有被动 parser 能重建这部分历史。如果 parser 来源的已导入文件型历史依赖现在缺失的源文件，llmusage 会在任何 reset 发生前拒绝重建。
 
 显式覆盖参数是：
 
@@ -98,7 +98,7 @@ llmusage doctor --refresh-pricing .\litellm-prices.json
 
 ## 浏览器 Dashboard 边界
 
-`llmusage serve` 默认绑定 `127.0.0.1`。loopback router 保留完整本地 Dashboard，包括 projects、日志、diagnostics、integration/cursor health、job reads、行为分析、Cost Explorer 和带真实 peer 检查的写路由。
+`llmusage serve` 默认绑定 `127.0.0.1`。loopback router 保留完整本地 Dashboard，包括 projects、日志、diagnostics、cursor health、job reads、行为分析、Cost Explorer 和带真实 peer 检查的写路由。
 
 `llmusage serve --public` 会显式绑定 `0.0.0.0`，并选择独立的只读 router。只挂载页面 shell/静态资源、字段 allowlist 明确的聚合 `/api/dashboard` projection，以及固定的最小 `/api/health` 响应。原始日志、diagnostics、本地路径/project 字段、内部错误、job 状态和全部 mutation 路由都不存在，而不是依赖 `Host` 或 `Origin` header 保护。未来如需远程 diagnostics，必须另行提供显式 opt-in 和认证。
 

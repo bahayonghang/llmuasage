@@ -134,13 +134,13 @@ llmusage statusline --refresh-interval 10 --cost-source llmusage
 llmusage init
 ```
 
-创建本地运行时并安装/探测集成。
+创建本地运行时并初始化用量数据库，不修改第三方工具配置。
 
 ### `llmusage sync`
 
 ```powershell
 llmusage sync
-llmusage sync --source antigravity
+llmusage sync --source codex
 llmusage sync --source kimi_code
 llmusage sync --source pi
 llmusage sync --recent-days 1
@@ -168,7 +168,7 @@ llmusage sync --rebuild --allow-lossy-rebuild
 llmusage status
 ```
 
-输出人读的数据库、来源、集成和最近运行摘要。
+输出人读的数据库、来源和最近运行摘要。
 
 ### `llmusage source-status`
 
@@ -315,8 +315,4 @@ llmusage uninstall
 llmusage uninstall --purge
 ```
 
-恢复被修改的集成文件。`--purge` 还会删除运行时根目录。
-
-## 隐藏命令
-
-`hook-run` 对普通 help 隐藏，由生成的 hook wrapper 调用。
+清理由旧版 llmusage 留下的 hook、plugin、wrapper 和原子写入残留。只移除 llmusage 自有条目，保留同级用户配置与历史备份；无清理对象时不会创建备份或 integration 审计行。从会安装 hook 的旧版本升级后，应执行一次本命令。`--purge` 还会删除运行时根目录及其中的用量数据库。

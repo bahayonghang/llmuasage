@@ -10,6 +10,8 @@
   status, SQLite-derived query payloads, CLI summaries, docs, and TUI rendering.
 - Platform monitoring is not parsing. A platform can be detected and shown as
   monitor-only without adding a stable `SourceKind` or importing token rows.
+- Usage import is passive-only. Source descriptors do not carry hook/plugin
+  activation or integration capabilities, and `init` never installs them.
 
 ### 2. Signatures
 
@@ -26,6 +28,9 @@
 - Stable passive parser ids include `kimi_code` for
   `~/.kimi-code/sessions/**/wire.jsonl` and one `pi` id for both
   `~/.pi/agent/sessions` and `~/.omp/agent/sessions`.
+- Registered passive parsers are Codex, Claude, OpenCode, Kimi Code, and Pi.
+  Antigravity retains its stable persisted descriptor for historical query
+  compatibility but has no parser or passive probe.
 - Monitor descriptors live outside parser promotion and report detection status,
   candidate roots, and parser availability.
 
@@ -78,6 +83,15 @@
 - Monitor-only platforms must surface as diagnostics/status entries with token
   quality labels, not as parser-backed usage, until sanitized fixtures and token
   semantics exist.
+- A persisted source descriptor without a parser, currently Antigravity, must
+  surface as `historical_only`, never `passive_ready` or `passive_no_data`.
+  Historical events remain queryable and dashboard filters remain valid, but
+  sync writes no new events. The separate Antigravity platform monitor remains
+  monitor-only with `blocked_no_samples` and wording that explains the retained
+  history and missing passive evidence.
+- `sync --rebuild --source <source>` must reject a persisted source without a
+  registered passive parser even when `--allow-lossy-rebuild` is present. It
+  must never delete historical-only events that no parser can reconstruct.
 - Sync emits `BootstrapStarted` before lock acquisition for immediate feedback,
   then emits `LockWaiting` / `LockAcquired`; migration and pricing progress run
   only after acquisition on the fenced Store. Existing migration events keep
@@ -179,6 +193,13 @@
   terminal panels.
 - Registry/monitor tests proving monitored platforms do not accidentally become
   parser-backed sources.
+- Descriptor/status tests proving parser capabilities match the registry and
+  Antigravity remains `historical_only` plus monitor-only
+  `blocked_no_samples`.
+- Behavior-level rebuild coverage proving a targeted Antigravity rebuild is
+  rejected and existing historical rows remain intact.
+- Report and dashboard projection coverage proving historical Antigravity rows
+  remain aggregated and selectable.
 - Kimi and Pi fixture tests covering normalized fields, raw/future model ids,
   malformed/non-usage rows, second-sync idempotency, append, rewrite/truncate,
   deleted history/rebuild protection, missing roots, and status projections.

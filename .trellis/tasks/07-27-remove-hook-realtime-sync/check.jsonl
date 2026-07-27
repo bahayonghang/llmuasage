@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/07-27-remove-hook-realtime-sync/prd.md", "reason": "R1-R13 与验收标准清单（含旧库兼容、遗留清理矩阵、Antigravity 历史保留）"}
+{"file": ".trellis/tasks/07-27-remove-hook-realtime-sync/design.md", "reason": "终态定义、拆除顺序、保留清单（迁移/表/字面量/HolderKind）核对基准"}
+{"file": ".trellis/tasks/07-27-remove-hook-realtime-sync/research/hook-surface-map.md", "reason": "§6 保留项清单（'hook-run' 字面量、backups_dir、HolderKind::Hook）逐项核对"}
+{"file": ".trellis/spec/llmusage/backend/integration-file-contracts.md", "reason": "遗留清理写入是否仍满足原子协议与测试类别"}

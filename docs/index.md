@@ -18,7 +18,7 @@ hero:
 
 features:
   - title: Local-only data path
-    details: Hooks and plugins trigger local parsing. No login, no sync service, no remote usage API.
+    details: Sync passively reads local artifacts. No hooks, plugins, login, sync service, or remote usage API.
   - title: SQLite as the source of truth
     details: Cursors, usage events, 30-minute buckets, behavior facts, source-file diagnostics, and run logs live in one local database.
   - title: One query model, four surfaces
@@ -29,7 +29,7 @@ features:
 
 | Task | Start here |
 | --- | --- |
-| Install and initialize local hooks | [Install and initialize](./guide/install-and-init) |
+| Install and initialize the local database | [Install and initialize](./guide/install-and-init) |
 | Import local usage | [First sync](./guide/first-sync) |
 | Read token and cost reports | [First report](./guide/first-report) |
 | Inspect Codex-only call details | [Codex Tracer](./guide/codex-tracer) |
@@ -49,7 +49,7 @@ features:
 ## Current product surface
 
 - Version `1.1.0`.
-- Sources: Codex, Claude Code, OpenCode, Google Antigravity (`antigravity`), Kimi Code (`kimi_code`), and Pi / Oh My Pi (`pi`).
+- Sources: passive Codex, Claude Code, OpenCode, Kimi Code (`kimi_code`), and Pi / Oh My Pi (`pi`), plus retained historical Antigravity (`antigravity`) data.
 - Report commands: `daily`, `monthly`, `session`, `blocks`, `statusline`.
 - Local UI commands: `dash`, `serve`, `export html`.
 - Safety commands: `status`, `diagnostics`, `doctor`, `uninstall`.

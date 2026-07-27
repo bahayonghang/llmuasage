@@ -17,13 +17,13 @@ just install
 
 This installs docs dependencies under `docs/` and installs the CLI with `cargo install --path . --locked --force`.
 
-## 2. Initialize local runtime and hooks
+## 2. Initialize the local runtime
 
 ```powershell
 llmusage init
 ```
 
-`init` creates the runtime root, bootstraps SQLite, writes hook wrappers, and installs supported integrations for Codex, Claude Code, OpenCode, and Google Antigravity when their local config files are present.
+`init` creates the runtime root and bootstraps SQLite. It does not install hooks/plugins or modify Codex, Claude Code, OpenCode, or Antigravity configuration.
 
 Default paths:
 
@@ -31,7 +31,6 @@ Default paths:
 | --- | --- |
 | Runtime root | `~/.llmusage/` |
 | Database | `~/.llmusage/llmusage.db` |
-| Hook wrappers | `~/.llmusage/bin/llmusage-hook.cmd`, `~/.llmusage/bin/llmusage-hook.sh` |
 | Static exports | `~/.llmusage/exports/` |
 
 Override the runtime root with `--home <PATH>` or `LLMUSAGE_HOME`.
@@ -43,6 +42,10 @@ llmusage sync
 ```
 
 `sync` parses local sources incrementally and writes normalized usage rows, 30-minute buckets, source-file diagnostics, and behavior facts.
+
+Sync is passive-only. Antigravity has no verified passive parser, so existing Antigravity history remains queryable but does not grow; `source-status` reports it as `historical_only`.
+
+If this machine previously used a hook-enabled llmusage release, run `llmusage uninstall` once to remove legacy llmusage-owned hooks, plugins, and wrappers without deleting usage data.
 
 Use a source filter when you only want one source:
 

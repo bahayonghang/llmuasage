@@ -18,7 +18,7 @@ hero:
 
 features:
   - title: 全本地数据链路
-    details: 外部工具只触发本地 hook 或 plugin；解析、聚合、展示都在本机完成。
+    details: sync 只被动读取本地产物；不安装 hook/plugin，解析、聚合、展示都在本机完成。
   - title: SQLite 单一真源
     details: cursor、usage event、30 分钟 bucket、行为事实、source-file 诊断和 run log 都放在本地数据库里。
   - title: 一套查询层复用四种界面
@@ -29,7 +29,7 @@ features:
 
 | 任务 | 入口 |
 | --- | --- |
-| 安装并初始化本地 hook | [安装与初始化](./guide/install-and-init) |
+| 安装并初始化本地数据库 | [安装与初始化](./guide/install-and-init) |
 | 导入本地用量 | [第一次同步](./guide/first-sync) |
 | 查看 token 与成本报表 | [第一次报表](./guide/first-report) |
 | 查看 Codex 专属调用明细 | [Codex Tracer](./guide/codex-tracer) |
@@ -49,7 +49,7 @@ features:
 ## 当前产品表面
 
 - 版本：`1.1.0`。
-- 来源：Codex、Claude Code、OpenCode、Google Antigravity（`antigravity`）、Kimi Code（`kimi_code`）与 Pi / Oh My Pi（`pi`）。
+- 来源：被动读取 Codex、Claude Code、OpenCode、Kimi Code（`kimi_code`）与 Pi / Oh My Pi（`pi`），并保留 Antigravity（`antigravity`）历史数据。
 - 报表命令：`daily`、`monthly`、`session`、`blocks`、`statusline`。
 - 本地界面命令：`dash`、`serve`、`export html`。
 - 安全/运维命令：`status`、`diagnostics`、`doctor`、`uninstall`。

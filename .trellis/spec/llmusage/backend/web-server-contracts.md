@@ -108,7 +108,7 @@ reachable from the browser's own network namespace.
 ### 1. Scope / Trigger
 
 - Apply this contract when adding or changing browser routes, dashboard DTOs, diagnostics, runtime
-  logs, project data, integration/cursor health, or sync-job polling.
+  logs, project data, cursor health, or sync-job polling.
 - The public listener is an unauthenticated aggregate reporting surface. It is not a remote
   administration or troubleshooting API.
 
@@ -159,7 +159,8 @@ GET /api/health    (public) -> { status: "ok", exposure: "public_read_only" }
 ### 5. Good / Base / Bad Cases
 
 - Good: public clients can compare aggregate usage while local paths, project labels, run failures,
-  cursor/integration details, and job ids never cross the response boundary.
+  cursor details and job ids never cross the response boundary. Integration
+  health is absent from both local and public dashboard payloads.
 - Base: loopback users retain the full local dashboard and API behavior.
 - Bad: building public mode by starting with `loopback_router`, then trying to deny sensitive paths
   with headers or request-time guards.
