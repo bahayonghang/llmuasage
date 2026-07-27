@@ -42,6 +42,16 @@ llmusage sync
 
 普通 sync 导入新增/变化的本地源记录。如果之前导入过的文件型来源现在缺失，sync 会保留已导入 usage history，并把源文件标为 missing 供 diagnostics 使用。
 
+## 普通 sync 自动修复安全的旧版 accounting
+
+普通无界 `llmusage sync` 会检测本次所选 parser 来源是否仍使用旧版 token-accounting
+合约。修改数据前先告警，并对全部自动目标检查缺失输入和受保护历史；全部安全时，只
+reset legacy 子集，且每个所选来源只解析一次。
+
+任一目标存在有损风险时，不会 reset 任何自动目标。请恢复源文件后重新运行普通 sync；
+只有明确接受文档所述删除时才使用显式 rebuild 参数。`sync --recent-days N` 永远不会
+自动修复旧版 accounting，因为全量 reset 后只做 bounded import 会丢掉窗口外历史。
+
 ## rebuild 可能有破坏性
 
 ```powershell
@@ -65,7 +75,8 @@ llmusage sync --rebuild --allow-lossy-rebuild
 跳过：历史仍可读取，普通写入继续被 guard 拒绝，Dashboard 也会继续启动。来源通过安全
 预检后若发生意外错误，则会终止启动。
 
-启动自动迁移永远不会启用 `--allow-lossy-rebuild`，parserless 来源也不是迁移目标。
+普通 sync 与启动迁移两条自动路径都永远不会启用 `--allow-lossy-rebuild`，
+parserless 来源也不是迁移目标。
 
 ## 诊断缺失源文件
 

@@ -17,6 +17,8 @@ is the compatibility baseline when reference implementations disagree.
   Pi, and Grok remain `2`. `expected_token_accounting_version(SourceKind) -> u32`
   owns this source-aware contract.
 - Legacy repair: `llmusage sync --rebuild --source <source>`.
+- Normal-sync repair lifecycle:
+  `SyncEvent::TokenAccountingRepairStarted/TokenAccountingRepairFinished`.
 - Serve startup repair:
   `commands::serve::repair_legacy_token_accounting(&AppContext, &Store) -> Result<TokenAccountingRepairReport>`.
 - Repair reports list `rebuilt_sources` and `blocked_sources`; each blocked row
@@ -65,6 +67,19 @@ is the compatibility baseline when reference implementations disagree.
   subchannels must remain `unpriced`, never falsely matched at zero cost.
 - Pricing receives normalized channels. Prompt-tier selection remains
   `input + cache_read + cache_creation`.
+- An unbounded normal sync discovers legacy sources only within its selected
+  parser set. It emits a repair-started event, preflights every target before
+  any reset, resets only the legacy subset, then drives every selected parser
+  once under the existing fenced Store.
+- Any lossy target blocks every automatic reset for that normal sync. The
+  automatic policy ignores `allow_lossy_rebuild` even if a library caller
+  constructs inconsistent options.
+- A bounded `recent_days` sync with legacy sources fails before reset and
+  directs the caller to run unbounded sync first. Resetting full history while
+  applying one shared recent cutoff is forbidden.
+- The normal-sync repair-finished event is emitted only after writer finish,
+  current markers, and source statuses succeed. Failure or cancellation leaves
+  legacy markers absent and emits no repair-finished event.
 - `llmusage serve` detects legacy parser sources after store bootstrap and
   before binding a port. It rebuilds safe sources one at a time in parser
   registry order with `allow_lossy_rebuild=false`.
@@ -84,12 +99,14 @@ is the compatibility baseline when reference implementations disagree.
 | Condition | Required behavior |
 | --- | --- |
 | Source has rows and marker `2` | Normal incremental writes are allowed |
-| Source has rows and no/currently different marker | Refuse normal writes and name the rebuild command |
+| Source has rows and no/currently different marker; unbounded normal sync; lossless inputs | Warn, reset only selected legacy sources, parse selected sources once, then advance successful markers |
+| Any selected legacy source has lossy rebuild risk | Refuse before every automatic reset; preserve all rows and markers |
+| Bounded normal sync selects a legacy source | Refuse before reset and direct the caller to unbounded sync |
 | Source has no rows and no marker | Allow first sync; write marker only after success |
 | Rebuild has missing source files | Existing lossy-rebuild guard refuses it |
 | Rebuild parser/store commit fails | Leave marker absent; do not claim parity |
 | Parserless source | Do not invent a marker or token normalization |
-| Persisted Codex marker is `2` | Treat only Codex as legacy and require `sync --rebuild --source codex` |
+| Persisted Codex marker is `2` | Treat only Codex as legacy and automatically repair it during safe unbounded normal sync |
 | Persisted Claude/OpenCode marker is `2` | Treat it as current |
 | Persisted Kimi Code/Pi/Grok marker is `2` | Treat it as current |
 | Replay marker exists and first two token snapshots share a second | Skip that second's prefix while retaining the latest cumulative baseline |
@@ -121,6 +138,12 @@ Never enable `--allow-lossy-rebuild` automatically.
   summing persisted `total_tokens`.
 - Good: serve repairs Codex, Claude, and OpenCode in registry order while an
   unrelated parserless Antigravity archive remains untouched.
+- Good: normal sync repairs safe legacy Codex while current Claude keeps its
+  incremental cursor and each selected parser runs exactly once.
+- Bad: one lossy source is discovered after another source was already reset,
+  or normal sync honors an inconsistent `allow_lossy_rebuild=true`.
+- Bad: bounded sync resets a legacy source and advances its marker after
+  importing only the requested time window.
 - Base: an already-current or empty parser source makes serve repair a no-op.
 - Bad: a full rebuild calls `reset_usage_data`, deleting parserless history
   that no registered parser can reconstruct.
@@ -135,10 +158,14 @@ Never enable `--allow-lossy-rebuild` automatically.
   pending-tool clearing, malformed-line tolerance, and ordinary same-second
   events that must remain.
 - Accounting marker tests assert Codex `3`, Claude/OpenCode `2`, old Codex `2`
-  refusal, and successful guarded Codex rebuild to `3`.
+  automatic repair to `3`, and successful explicit guarded rebuild.
 - `tests/token_accounting_parity.rs` covers all three sources, copied/streaming
   duplicates, event/bucket/query equality, cost tolerance `1e-9`, marker
-  advancement, legacy refusal, warning payload, and guarded rebuild.
+  advancement, automatic repair lifecycle, mixed current/legacy behavior,
+  bounded refusal, warning payload, and guarded rebuild.
+- Automatic normal-sync tests cover multi-source registry order, exactly-once
+  parsing, all-target preflight, lossy opt-in isolation, parserless
+  preservation, and no completion marker/event after failure.
 - `tests/sync_regression.rs` keeps hot sync, append, replacement, and rebuild
   behavior idempotent.
 - Serve repair tests assert safe marker advancement, normal-sync unblocking,

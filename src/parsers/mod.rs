@@ -90,6 +90,10 @@ pub enum SyncEvent {
     LockWaiting { timeout_ms: u64 },
     /// Global SQLite sync worker lock was acquired.
     LockAcquired { wait_ms: u64 },
+    /// A normal unbounded sync is about to rebuild safe legacy accounting rows.
+    TokenAccountingRepairStarted { sources: Vec<SourceKind> },
+    /// Safe legacy accounting rows were rebuilt and their markers advanced.
+    TokenAccountingRepairFinished { sources: Vec<SourceKind> },
     /// A source parser is about to run.
     SourceStarted {
         source: SourceKind,

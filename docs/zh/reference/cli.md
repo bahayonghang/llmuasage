@@ -153,9 +153,9 @@ llmusage sync --rebuild --allow-lossy-rebuild
 
 `--source`、`--recent-days` 与 `--parallelism` 和 `POST /api/jobs`、公开 `JobRegistry` API 共用同一校验契约。非法值分别返回稳定错误码 `unknown_source`、`invalid_recent_days` 或 `invalid_parallelism`。
 
-导入本地来源。扫描来源前，bootstrap 可能升级未固定的内置定价目录并重算历史事件价格。人读 stderr 会显示目录版本、已处理/总事件数、汇总桶对账和完成耗时，不再一直停留在一条笼统的数据库初始化提示。
+导入本地来源。扫描来源前，bootstrap 可能升级未固定的内置定价目录并重算历史事件价格。普通无界 sync 还会检测所选的旧版 token-accounting 来源，先告警，并且只在全部目标都通过无损预检后自动重建；一个风险目标会阻止全部自动 reset。存在旧版 accounting 时，bounded `--recent-days` 请求必须先运行一次无界 sync。
 
-`--json-events` 在 stdout 写 NDJSON 生命周期事件；发生内置升级时会额外输出 `pricing_upgrade_started`、`pricing_upgrade_progress`、`pricing_bucket_reconcile_started`、`pricing_upgrade_finished`。目录已是最新或固定了 snapshot/overlay 时不会输出这些定价事件。`--allow-lossy-rebuild` 必须配合 `--rebuild`。
+人读 stderr 会显示目录版本、已处理/总事件数、汇总桶对账、token-accounting 自动修复边界和完成耗时。`--json-events` 在纯 NDJSON stdout 写同一生命周期，包括新增的 `token_accounting_repair_started` / `token_accounting_repair_finished` 和既有 pricing 事件。目录已是最新或固定了 snapshot/overlay 时不会输出 pricing 事件；accounting 已是当前版本时不会输出 repair 事件。`--allow-lossy-rebuild` 必须显式配合 `--rebuild`，普通 sync 永远不会推断该授权。
 
 设置 `LLMUSAGE_LOG=info` 可记录结构化的定价开始/对账/完成文件日志，`debug` 还会记录节流后的页进度。默认 `warn` 级别会在重算持续超过 30 秒时记录一次存活告警；终端进度不受文件日志级别影响。
 

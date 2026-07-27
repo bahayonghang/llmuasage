@@ -42,6 +42,19 @@ llmusage sync
 
 Normal sync imports new/changed local source artifacts. If a file-backed source that was previously imported is now missing, sync keeps imported usage history and marks the source file as missing for diagnostics.
 
+## Normal sync repairs safe legacy accounting
+
+An unbounded normal `llmusage sync` detects selected parser sources that still
+use an older token-accounting contract. It warns before changing data, checks
+every automatic target for missing inputs and protected history, then resets
+only the legacy subset and parses each selected source once.
+
+If any target is lossy, no automatic target is reset. Restore the source files
+and rerun normal sync, or use explicit rebuild flags only when you intentionally
+accept the documented deletion. `sync --recent-days N` never auto-repairs
+legacy accounting because a full reset followed by a bounded import would
+discard history outside the window.
+
 ## Rebuild can be destructive
 
 ```powershell
@@ -67,8 +80,8 @@ warning; its history remains readable, normal writes remain guarded, and the
 dashboard continues to start. Unexpected failures after a source passes the
 safety check stop startup.
 
-This startup path never enables `--allow-lossy-rebuild`. Parserless sources are
-not migration targets.
+Neither normal-sync nor startup automatic repair enables
+`--allow-lossy-rebuild`. Parserless sources are not migration targets.
 
 ## Diagnose missing source files
 

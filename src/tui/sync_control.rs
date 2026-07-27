@@ -185,6 +185,22 @@ fn sync_progress_message(event: &SyncEvent) -> String {
         SyncEvent::LockAcquired { wait_ms } => {
             format!("Sync worker lock acquired after {wait_ms}ms")
         }
+        SyncEvent::TokenAccountingRepairStarted { sources } => format!(
+            "Repairing legacy token accounting: {}",
+            sources
+                .iter()
+                .map(|source| source.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        SyncEvent::TokenAccountingRepairFinished { sources } => format!(
+            "Token accounting repair complete: {}",
+            sources
+                .iter()
+                .map(|source| source.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
         SyncEvent::SourceStarted {
             source,
             files_total,
@@ -279,6 +295,21 @@ mod tests {
                 current_file: None,
             }),
             "opencode: 10 rows scanned, 3 records"
+        );
+    }
+
+    #[test]
+    fn progress_message_reports_token_accounting_repair_boundaries() {
+        let sources = vec![SourceKind::Codex, SourceKind::Claude];
+        assert_eq!(
+            sync_progress_message(&SyncEvent::TokenAccountingRepairStarted {
+                sources: sources.clone(),
+            }),
+            "Repairing legacy token accounting: codex, claude"
+        );
+        assert_eq!(
+            sync_progress_message(&SyncEvent::TokenAccountingRepairFinished { sources }),
+            "Token accounting repair complete: codex, claude"
         );
     }
 
