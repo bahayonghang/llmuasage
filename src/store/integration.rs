@@ -28,6 +28,25 @@ impl<'a> IntegrationStateStore<'a> {
         backup_path: Option<&Path>,
         details: Option<&Value>,
     ) -> Result<()> {
+        self.record_integration_state_for_key(
+            source.as_str(),
+            install_type,
+            status,
+            config_path,
+            backup_path,
+            details,
+        )
+    }
+
+    pub(crate) fn record_integration_state_for_key(
+        &self,
+        audit_key: &str,
+        install_type: &str,
+        status: &str,
+        config_path: Option<&Path>,
+        backup_path: Option<&Path>,
+        details: Option<&Value>,
+    ) -> Result<()> {
         let details_json = details
             .map(serde_json::to_string)
             .transpose()
@@ -50,7 +69,7 @@ impl<'a> IntegrationStateStore<'a> {
                 updated_at = excluded.updated_at
             "#,
                 params![
-                    source.as_str(),
+                    audit_key,
                     install_type,
                     status,
                     config_path.map(|path| path.to_string_lossy().to_string()),

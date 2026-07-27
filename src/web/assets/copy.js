@@ -31,7 +31,6 @@ const UI_COPY_ZH = Object.freeze({
       topModel: '用量最高模型',
     }),
     cell: Object.freeze({
-      integrations: '集成',
       cursors: '游标数',
       failures: '失败',
     }),
@@ -159,14 +158,11 @@ const UI_COPY_ZH = Object.freeze({
       kicker: '状态',
       title: '运行状态',
       chips: Object.freeze({
-        integrations: '集成就绪',
         cursors: '游标数',
         failures: '失败记录',
       }),
       failuresTitle: '最近失败',
       failuresEmpty: '当前没有失败记录。',
-      integrationsTitle: '集成状态',
-      integrationsEmpty: '暂无集成状态。',
     }),
     syncCenter: Object.freeze({
       eyebrow: '同步',
@@ -253,7 +249,6 @@ const UI_COPY_EN = Object.freeze({
       topModel: 'Top model',
     }),
     cell: Object.freeze({
-      integrations: 'Integrations',
       cursors: 'Cursors',
       failures: 'Failures',
     }),
@@ -381,14 +376,11 @@ const UI_COPY_EN = Object.freeze({
       kicker: 'Status',
       title: 'Health',
       chips: Object.freeze({
-        integrations: 'Integrations ready',
         cursors: 'Cursors',
         failures: 'Failures',
       }),
       failuresTitle: 'Recent failures',
       failuresEmpty: 'No failures recorded.',
-      integrationsTitle: 'Integrations',
-      integrationsEmpty: 'No integration status.',
     }),
     syncCenter: Object.freeze({
       eyebrow: 'Sync',
@@ -646,8 +638,6 @@ const SHELL_COPY_ZH = Object.freeze({
   'shell.cost.collapse': '收起全部成本项 ↑',
   'shell.failures.eyebrow': 'FAILURES',
   'shell.failures.title': '最近失败',
-  'shell.integrations.eyebrow': 'INTEGRATIONS',
-  'shell.integrations.title': '集成状态',
   'shell.insights.eyebrow': 'INSIGHTS',
   'shell.insights.title': '诊断线索',
   'shell.insights.sub': '信号只表示可能的下一步，不代表最终诊断。',
@@ -855,8 +845,6 @@ const SHELL_COPY_EN = Object.freeze({
   'shell.cost.collapse': 'Collapse cost entries ↑',
   'shell.failures.eyebrow': 'FAILURES',
   'shell.failures.title': 'Recent failures',
-  'shell.integrations.eyebrow': 'INTEGRATIONS',
-  'shell.integrations.title': 'Integrations',
   'shell.insights.eyebrow': 'INSIGHTS',
   'shell.insights.title': 'Diagnostic signals',
   'shell.insights.sub': 'Signals suggest next steps; they are not final diagnoses.',

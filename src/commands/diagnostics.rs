@@ -4,7 +4,7 @@ use anyhow::{Result, bail};
 use serde_json::json;
 use tracing::info;
 
-use crate::{app::AppContext, integrations, models::SourceKind, query::Dashboard, store::Store};
+use crate::{app::AppContext, models::SourceKind, query::Dashboard, store::Store};
 
 pub async fn run(
     app: &AppContext,
@@ -25,7 +25,7 @@ pub async fn run(
      * 步骤1：导出本地机器可读诊断 JSON
      * ========================================================================
      * 目标：
-     * 1) 输出 env / paths / integrations / sqlite / cursors / sources / health_checks
+     * 1) 输出 env / paths / sqlite / cursors / sources / health_checks
      * 2) 让 doctor 与外部调试都复用同一份诊断真源
      * 3) 支持写到文件或直接输出 stdout
      */
@@ -37,7 +37,6 @@ pub async fn run(
     let health = dashboard.health()?;
     let sources = dashboard.source_breakdown(&Default::default())?;
     let archive = dashboard.diagnostics()?;
-    let probes = integrations::probe_all(app)?;
     let recent_runs = store.run_log().recent_runs(20)?;
     let sync_status = store.sync_status().load_source_sync_statuses()?;
     let logs = crate::logging::runtime_status(&app.paths)?;
@@ -49,13 +48,9 @@ pub async fn run(
         "paths": {
             "root_dir": app.paths.root_dir,
             "db_path": app.paths.db_path,
-            "bin_dir": app.paths.bin_dir,
             "logs_dir": app.paths.logs_dir,
             "log_file_path": app.paths.log_file_path,
-            "hook_cmd_path": app.paths.hook_cmd_path,
-            "hook_sh_path": app.paths.hook_sh_path,
         },
-        "integrations": probes,
         "sqlite": {
             "bucket_count": overview.bucket_count,
             "last_sync_at": overview.last_sync_at,
@@ -68,7 +63,6 @@ pub async fn run(
         "logs": logs,
         "health_checks": {
             "recent_failures": health.recent_failures,
-            "integration_records": health.integrations,
         },
         "recent_runs": recent_runs,
     });

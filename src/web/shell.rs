@@ -533,10 +533,6 @@ fn html_shell(mode: &str) -> String {
               <div id="failures-card"></div>
             </div>
 
-            <div class="subpanel-section">
-              <h3 class="subpanel-title" data-i18n="shell.integrations.title">集成状态</h3>
-              <div id="integrations-rows" class="integration-list"></div>
-            </div>
           </div>
         </div>
       </div>

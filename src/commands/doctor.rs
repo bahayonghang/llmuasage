@@ -4,7 +4,7 @@ use anyhow::Result;
 use serde::Serialize;
 use tracing::info;
 
-use crate::{app::AppContext, integrations, store::Store};
+use crate::{app::AppContext, store::Store};
 
 #[derive(Debug, Clone, Serialize)]
 struct DoctorCheck {
@@ -48,51 +48,30 @@ async fn diagnostics(app: &AppContext, json: bool) -> Result<()> {
      * 步骤1：基于本地真源执行健康检查
      * ========================================================================
      * 目标：
-     * 1) 覆盖 hook 漂移、包装器缺失、OpenCode DB 缺失、最近失败
+     * 1) 覆盖被动数据源、OpenCode DB、运行日志与最近失败
      * 2) 用一份规则清单输出人读或 JSON 结果
      * 3) 保持 doctor 只读，不修复任何配置
      */
     info!("开始执行 doctor 健康检查");
 
-    // 1.1 读取探针结果、最近运行结果与关键文件存在性
+    // 1.1 读取最近运行结果与关键文件存在性
     let store = Store::new(&app.paths)?;
     store.require_initialized()?;
-    let probes = integrations::probe_all(app)?;
     let recent_runs = store.run_log().recent_runs(10)?;
     let logs = crate::logging::runtime_status(&app.paths)?;
     let logging_disabled =
         std::env::var("LLMUSAGE_LOG").is_ok_and(|value| value.eq_ignore_ascii_case("off"));
-    let opencode_db_path = integrations::opencode::resolve_db_path();
+    let opencode_db_path = crate::integrations::opencode::resolve_db_path();
 
-    let mut checks = vec![
-        DoctorCheck {
-            id: "wrapper.cmd",
-            status: if app.paths.hook_cmd_path.is_file() {
-                "ok"
-            } else {
-                "warn"
-            },
-            detail: format!("hook cmd: {}", app.paths.hook_cmd_path.display()),
+    let mut checks = vec![DoctorCheck {
+        id: "opencode.db",
+        status: if opencode_db_path.is_file() {
+            "ok"
+        } else {
+            "warn"
         },
-        DoctorCheck {
-            id: "wrapper.sh",
-            status: if app.paths.hook_sh_path.is_file() {
-                "ok"
-            } else {
-                "warn"
-            },
-            detail: format!("hook sh: {}", app.paths.hook_sh_path.display()),
-        },
-        DoctorCheck {
-            id: "opencode.db",
-            status: if opencode_db_path.is_file() {
-                "ok"
-            } else {
-                "warn"
-            },
-            detail: format!("OpenCode DB: {}", opencode_db_path.display()),
-        },
-    ];
+        detail: format!("OpenCode DB: {}", opencode_db_path.display()),
+    }];
 
     checks.push(DoctorCheck {
         id: "logs.file",
@@ -149,25 +128,6 @@ async fn diagnostics(app: &AppContext, json: bool) -> Result<()> {
             logs.maintenance_error_count
         ),
     });
-
-    for probe in probes {
-        checks.push(DoctorCheck {
-            id: match probe.source {
-                crate::models::SourceKind::Codex => "codex.notify",
-                crate::models::SourceKind::Claude => "claude.hooks",
-                crate::models::SourceKind::Opencode => "opencode.plugin",
-                crate::models::SourceKind::Antigravity => "antigravity.hooks",
-                crate::models::SourceKind::KimiCode => "kimi_code.passive",
-                crate::models::SourceKind::Pi => "pi.passive",
-            },
-            status: if probe.status == "ready" {
-                "ok"
-            } else {
-                "warn"
-            },
-            detail: probe.detail,
-        });
-    }
 
     if recent_runs
         .iter()

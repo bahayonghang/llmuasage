@@ -57,8 +57,8 @@ pub async fn run_with_options(app: &AppContext, options: SyncRunOptions) -> Resu
      * 步骤1：执行全量本地真源同步
      * ========================================================================
      * 目标：
-     * 1) 拿 SQLite 租约锁，避免 hook-run 与手动 sync 并发
-     * 2) 并行解析 Codex、Claude、OpenCode 三类真源
+     * 1) 拿 SQLite 租约锁，避免多个 sync worker 并发
+     * 2) 并行解析已注册的本地真源
      * 3) 用单 writer 批量落库并记录 run_log
      */
     info!("开始执行全量本地真源同步");
@@ -110,6 +110,7 @@ async fn run_with_human_events(
         bootstrap_ms = bootstrap_started.elapsed().as_millis() as u64,
         "bootstrap finished"
     );
+    // Keep the historical hook-run label so stale rows from older releases recover.
     fenced_store
         .run_log()
         .recover_running_runs(&["sync", "hook-run"])?;
@@ -238,6 +239,7 @@ async fn run_with_json_events(
             };
             fenced_store.bootstrap_with_progress(Some(&mut bootstrap_sink))?;
         }
+        // Keep the historical hook-run label so stale rows from older releases recover.
         fenced_store
             .run_log()
             .recover_running_runs(&["sync", "hook-run"])?;
@@ -344,6 +346,7 @@ pub async fn run_store_once_with_options(
     let heartbeat = lock.start_default_heartbeat();
     let lock_wait_ms = lock_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
     fenced_store.bootstrap()?;
+    // Keep the historical hook-run label so stale rows from older releases recover.
     fenced_store
         .run_log()
         .recover_running_runs(&["sync", "hook-run"])?;
@@ -646,7 +649,7 @@ fn reset_for_rebuild(
     options: &SyncRunOptions,
     parser_sources: &[SourceKind],
 ) -> Result<()> {
-    let rebuild_sources = rebuild_sources(options.source, parser_sources);
+    let rebuild_sources = rebuild_sources(options.source, parser_sources)?;
     assert_lossless_rebuild(store, options, &rebuild_sources)?;
     if let Some(source) = options.source {
         store.reset_for_source(source)?;
@@ -744,8 +747,16 @@ fn legacy_token_accounting_sources_for(
 fn rebuild_sources(
     selected_source: Option<SourceKind>,
     parser_sources: &[SourceKind],
-) -> Vec<SourceKind> {
-    selected_source.map_or_else(|| parser_sources.to_vec(), |source| vec![source])
+) -> Result<Vec<SourceKind>> {
+    if let Some(source) = selected_source {
+        if !parser_sources.contains(&source) {
+            bail!(
+                "Cannot rebuild source `{source}` because it has no passive parser; historical usage was preserved."
+            );
+        }
+        return Ok(vec![source]);
+    }
+    Ok(parser_sources.to_vec())
 }
 
 #[cfg(test)]
@@ -797,5 +808,16 @@ mod tests {
             err.to_string().contains("invalid_parallelism"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn rebuild_sources_rejects_parserless_historical_source() {
+        let error = rebuild_sources(
+            Some(SourceKind::Antigravity),
+            &[SourceKind::Codex, SourceKind::Claude],
+        )
+        .expect_err("parserless history must never be selected for rebuild");
+
+        assert!(error.to_string().contains("no passive parser"));
     }
 }

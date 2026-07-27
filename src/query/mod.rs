@@ -7,7 +7,7 @@ use serde::Serialize;
 use crate::{
     domain::source_descriptor::registered_source_descriptors,
     error::Result,
-    store::{IntegrationState, RunRecord, Store},
+    store::{RunRecord, Store},
     util::now_utc,
 };
 
@@ -93,7 +93,7 @@ pub struct OverviewPayload {
     pub total_cost_usd: f64,
     /// Cross-source cache read ratio for the filtered lifetime total.
     pub cache_efficiency: f64,
-    /// Last successful sync/hook-run finish time.
+    /// Last successful usage-import finish time, including historical hook runs.
     pub last_sync_at: Option<String>,
     /// Last successful HTML export finish time.
     pub last_export_at: Option<String>,
@@ -511,11 +511,9 @@ pub struct CursorHealth {
     pub sqlite_status: Option<String>,
 }
 
-/// Health payload combining integrations, cursors, and recent failures.
+/// Health payload combining cursors and recent failures.
 #[derive(Debug, Clone, Serialize)]
 pub struct HealthPayload {
-    /// Latest install/probe states for known integrations.
-    pub integrations: Vec<IntegrationState>,
     /// Cursor freshness/health rows.
     pub cursors: Vec<CursorHealth>,
     /// Recent non-success command runs.
@@ -525,8 +523,6 @@ pub struct HealthPayload {
 /// Compact health projection used by latency-sensitive live dashboard reads.
 #[derive(Debug, Clone, Serialize)]
 pub struct HealthSummaryPayload {
-    /// Latest install/probe states for known integrations.
-    pub integrations: Vec<IntegrationState>,
     /// Number of persisted cursors without serializing every cursor key.
     pub cursor_count: i64,
     /// Recent non-success command runs.
@@ -583,7 +579,7 @@ pub struct DiagnosticsPayload {
     pub archive_root: String,
     /// One row per source, ordered by source identifier.
     pub by_source: Vec<SourceDiagnostics>,
-    /// Most recent failed sync/hook-run records, oldest-first.
+    /// Most recent failed usage-import records, including historical hook runs.
     pub recent_failures: Vec<RunRecord>,
 }
 
@@ -832,6 +828,7 @@ impl Dashboard {
             &bucket_count_sql,
             params_from_iter(bucket_filter.params().iter()),
         )?;
+        // `hook-run` is retained as a historical run_log label for old databases.
         let last_sync_at = scalar_optional_string(
             &self.conn,
             "SELECT MAX(finished_at) FROM run_log WHERE command IN ('sync', 'hook-run') AND status = 'success'",
@@ -2118,12 +2115,8 @@ impl Dashboard {
         logs::load(self, query)
     }
 
-    /// Loads integration, cursor, and recent failure health signals.
+    /// Loads cursor and recent failure health signals.
     pub fn health(&self) -> Result<HealthPayload> {
-        let integrations = self
-            .store
-            .integration_state()
-            .load_integration_states_with_conn(&self.conn)?;
         let recent_failures = self
             .store
             .run_log()
@@ -2149,7 +2142,6 @@ impl Dashboard {
         })?;
 
         Ok(HealthPayload {
-            integrations,
             cursors: rows.collect::<rusqlite::Result<Vec<_>>>()?,
             recent_failures,
         })
@@ -2158,10 +2150,6 @@ impl Dashboard {
     /// Loads the health fields used by the live web shell without returning
     /// thousands of cursor keys that the shell only counts.
     pub fn health_summary(&self) -> Result<HealthSummaryPayload> {
-        let integrations = self
-            .store
-            .integration_state()
-            .load_integration_states_with_conn(&self.conn)?;
         let recent_failures = self
             .store
             .run_log()
@@ -2172,7 +2160,6 @@ impl Dashboard {
         let cursor_count = scalar_i64(&self.conn, "SELECT COUNT(*) FROM source_cursor", [])?;
 
         Ok(HealthSummaryPayload {
-            integrations,
             cursor_count,
             recent_failures,
         })
@@ -2192,6 +2179,7 @@ impl Dashboard {
         let statuses = load_sync_statuses_with_conn(&self.conn, filter)?;
         let recent_runs = self.store.run_log().recent_runs_with_conn(&self.conn, 10)?;
         let current_lock = Store::current_worker_lock_with_conn(&self.conn)?;
+        // `hook-run` remains readable as a historical run_log command label.
         let recent_failures = recent_runs
             .iter()
             .filter(|run| matches!(run.command.as_str(), "sync" | "sync --rebuild" | "hook-run"))
@@ -2224,6 +2212,7 @@ impl Dashboard {
             .max()
             .unwrap_or_default()
             .max(1);
+        // `hook-run` remains eligible as the last historical usage-import run.
         let last_run = recent_runs
             .iter()
             .find(|run| matches!(run.command.as_str(), "sync" | "sync --rebuild" | "hook-run"))
@@ -3210,6 +3199,36 @@ mod tests {
                 .find(|row| row.source == "claude")
                 .and_then(|row| row.last_event_at.as_deref()),
             Some("2026-05-05T00:00:00Z")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn dashboard_snapshot_keeps_historical_antigravity_usage() -> Result<()> {
+        let fixture = Fixture::new()?;
+        fixture.seed_event(SeedEvent {
+            event_key: "antigravity:historical:1",
+            source: "antigravity",
+            model: "gemini-2.5-pro",
+            event_at: "2026-05-06T00:00:00Z",
+            input_tokens: 70,
+            output_tokens: 7,
+            total_tokens: 77,
+            ..Default::default()
+        })?;
+
+        let dashboard = Dashboard::open(fixture.store())?;
+        let snapshot = dashboard.snapshot(&QueryFilter::default())?;
+        let historical = snapshot
+            .sources
+            .iter()
+            .find(|row| row.source == "antigravity")
+            .expect("dashboard source projection should retain Antigravity history");
+        assert_eq!(historical.total_tokens, 77);
+        assert_eq!(historical.event_count, 1);
+        assert_eq!(
+            historical.last_event_at.as_deref(),
+            Some("2026-05-06T00:00:00Z")
         );
         Ok(())
     }

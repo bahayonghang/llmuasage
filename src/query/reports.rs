@@ -2436,6 +2436,56 @@ mod tests {
     }
 
     #[test]
+    fn reports_keep_historical_antigravity_usage() -> Result<()> {
+        let fixture = ReportFixture::new()?;
+        fixture.insert_event(SeedEvent {
+            event_key: "antigravity:historical:report",
+            source: "antigravity",
+            model: "gemini-2.5-pro",
+            event_at: "2026-05-06T00:00:00Z",
+            total_tokens: 77,
+            project_hash: "historical-project",
+            project_label: "Historical",
+            session_id: "historical-session",
+        })?;
+        fixture.insert_bucket(SeedBucket {
+            source: "antigravity",
+            model: "gemini-2.5-pro",
+            hour_start: "2026-05-06T00:00:00Z",
+            project_hash: "historical-project",
+            project_label: "Historical",
+            project_ref: None,
+            input_tokens: 70,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+            output_tokens: 7,
+            reasoning_output_tokens: 0,
+            total_tokens: 77,
+            cost_with_cache_usd: 0.0,
+            pricing_status: "unpriced",
+        })?;
+        let filter = ReportFilter {
+            since: Some(NaiveDate::from_ymd_opt(2026, 5, 6).unwrap()),
+            until: Some(NaiveDate::from_ymd_opt(2026, 5, 6).unwrap()),
+            order: SortOrder::Desc,
+            timezone: ReportTimezone::Utc,
+            locale: "en-US".to_string(),
+            source: Some(SourceKind::Antigravity),
+            project: None,
+            breakdown: true,
+        };
+
+        let report = load_daily_report(&fixture.store, &filter)?;
+        assert_eq!(report.totals.total_tokens, 77);
+        assert_eq!(report.daily.len(), 1);
+        let by_source = load_daily_reports_by_source(&fixture.store, &filter)?;
+        assert_eq!(by_source.len(), 1);
+        assert_eq!(by_source[0].0, SourceKind::Antigravity);
+        assert_eq!(by_source[0].1.totals.total_tokens, 77);
+        Ok(())
+    }
+
+    #[test]
     fn daily_monthly_reports_read_bucket_rows_without_events() -> Result<()> {
         let fixture = ReportFixture::new()?;
         fixture.insert_bucket(SeedBucket {

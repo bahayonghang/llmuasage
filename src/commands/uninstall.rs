@@ -6,11 +6,11 @@ use crate::{app::AppContext, integrations, store::Store};
 pub async fn run(app: &AppContext, purge: bool) -> Result<()> {
     /*
      * ========================================================================
-     * 步骤1：恢复已安装 hook / plugin，并按需清理本地目录
+     * 步骤1：清理旧版 hook / plugin 遗留，并按需清理本地目录
      * ========================================================================
      * 目标：
-     * 1) 恢复 Codex notify、Claude hooks、OpenCode plugin
-     * 2) 记录卸载 run_log 与每个集成的恢复状态
+     * 1) 恢复 Codex notify，并摘除 Claude/Antigravity hooks、OpenCode plugin
+     * 2) 仅在实际清理或失败时记录 integration_install 审计
      * 3) 只有 --purge 才删除 ~/.llmusage
      */
     info!("开始执行本地卸载");
@@ -20,12 +20,12 @@ pub async fn run(app: &AppContext, purge: bool) -> Result<()> {
     let actions = super::run_tracked(
         &store,
         "uninstall",
-        async { integrations::uninstall_all(app, &store) },
-        |_| Some("local uninstall completed".to_string()),
+        async { integrations::cleanup_all(app, &store) },
+        |_| Some("legacy hook cleanup completed".to_string()),
     )
     .await?;
 
-    println!("Uninstall finished:");
+    println!("Legacy cleanup finished:");
     for action in actions {
         println!("- {}: {} ({})", action.source, action.status, action.detail);
     }

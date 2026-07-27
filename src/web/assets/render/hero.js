@@ -1,5 +1,5 @@
 import { UI_COPY } from '../copy.js';
-import { escapeHtml, formatNumber, statusTone } from '../data.js';
+import { escapeHtml, formatNumber } from '../data.js';
 import { buildKpis } from '../data/derive.js';
 
 const logger = window.console;
@@ -76,23 +76,8 @@ export function renderHero(context) {
   const { health } = context;
   const panelTone = ledgerSummary.failure_count > 0 ? 'warn' : 'good';
   const statusLabel = ledgerSummary.failure_count > 0 ? heroCopy.statusWarn : heroCopy.statusOk;
-  const statusPanelSummary = `${heroCopy.statusTitle} · ${statusLabel} ${health.ready_integrations}/${health.total_integrations}`;
+  const statusPanelSummary = `${heroCopy.statusTitle} · ${statusLabel}`;
   const statusPanelOpen = !window.matchMedia?.(STATUS_PANEL_MOBILE_QUERY).matches;
-
-  const integrationRows = (health.integrations || [])
-    .slice(0, 3)
-    .map((row) => {
-      const tone = statusTone(row.status);
-      const label = tone === 'good' ? heroCopy.statusOk : row.status || heroCopy.statusUnknown;
-      return `
-      <div class="status-row">
-        <span class="status-row-name">${escapeHtml(row.source || '--')}</span>
-        <span class="status-row-time">${escapeHtml(row.updated_at || '--')}</span>
-        <span class="status-row-state"><span class="dot"></span>${escapeHtml(label)}</span>
-      </div>
-    `;
-    })
-    .join('');
 
   document.getElementById('status-panel').innerHTML = `
     <details class="status-panel-details" ${statusPanelOpen ? 'open' : ''}>
@@ -106,10 +91,6 @@ export function renderHero(context) {
       </div>
       <div class="status-grid">
         <div class="status-cell">
-          <div class="status-cell-label">${escapeHtml(heroCopy.cell.integrations)}</div>
-          <div class="status-cell-value">${health.ready_integrations} / ${health.total_integrations}</div>
-        </div>
-        <div class="status-cell">
           <div class="status-cell-label">${escapeHtml(heroCopy.cell.cursors)}</div>
           <div class="status-cell-value">${formatNumber(health.cursor_count ?? health.cursors?.length ?? 0)}</div>
         </div>
@@ -117,9 +98,6 @@ export function renderHero(context) {
           <div class="status-cell-label">${escapeHtml(heroCopy.cell.failures)}</div>
           <div class="status-cell-value">${ledgerSummary.failure_count}</div>
         </div>
-      </div>
-      <div class="status-list">
-        ${integrationRows}
       </div>
     </details>
   `;

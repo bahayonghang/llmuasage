@@ -376,12 +376,7 @@ fn render_health_summary(frame: &mut Frame, area: Rect, payload: &StatsPanelPayl
 
     let lines = vec![
         Line::from(vec![
-            Span::styled("integrations ", theme::muted_style()),
-            Span::styled(
-                payload.health.integrations.len().to_string(),
-                metric_style(theme::metric_input()),
-            ),
-            Span::styled("  cursors ", theme::muted_style()),
+            Span::styled("cursors ", theme::muted_style()),
             Span::styled(
                 payload.health.cursors.len().to_string(),
                 metric_style(theme::positive_fg()),

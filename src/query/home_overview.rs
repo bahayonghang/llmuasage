@@ -403,6 +403,7 @@ fn summarize_series(events: &[HomeOverviewEvent]) -> Vec<HomeOverviewSeriesItem>
 }
 
 fn last_completed_usage_run(conn: &Connection) -> Result<Option<String>> {
+    // `hook-run` is retained as a historical run_log label for old databases.
     Ok(conn.query_row(
         "SELECT MAX(finished_at) FROM run_log WHERE command IN ('sync', 'hook-run') AND status = 'success'",
         [],
@@ -411,6 +412,7 @@ fn last_completed_usage_run(conn: &Connection) -> Result<Option<String>> {
 }
 
 fn has_successful_usage_run(conn: &Connection) -> Result<bool> {
+    // `hook-run` is retained as a historical run_log label for old databases.
     Ok(conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM run_log WHERE command IN ('sync', 'hook-run') AND status = 'success')",
         [],

@@ -15,7 +15,7 @@ pub enum SourceKind {
     Claude,
     /// OpenCode local SQLite usage database.
     Opencode,
-    /// Google Antigravity local usage hook source.
+    /// Historical Google Antigravity usage source (no passive parser).
     Antigravity,
     /// Kimi Code local `wire.jsonl` session artifacts.
     #[value(name = "kimi_code")]

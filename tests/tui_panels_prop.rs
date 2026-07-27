@@ -17,7 +17,6 @@ use llmusage::query::{
     SyncCommandCenterPayload, SyncMetricsPayload, SyncSafetyPayload, SyncSourcePayload,
     TokenSummary, ToolBreakdown, ToolsPayload, TrendPoint, ZombieItem, ZombieReport,
 };
-use llmusage::store::IntegrationState;
 use llmusage::tui::app::{
     ActiveDialog, AppState, BehaviorPanelPayload, Panel, ScrollState, StatsPanelPayload,
 };
@@ -480,15 +479,6 @@ fn sample_stats_payload() -> StatsPanelPayload {
             },
         ],
         health: HealthPayload {
-            integrations: vec![IntegrationState {
-                source: "codex".to_string(),
-                install_type: "init".to_string(),
-                status: "ok".to_string(),
-                config_path: None,
-                backup_path: None,
-                details_json: None,
-                updated_at: "2026-06-12T00:00:00Z".to_string(),
-            }],
             cursors: vec![CursorHealth {
                 source: "codex".to_string(),
                 cursor_key: "session".to_string(),

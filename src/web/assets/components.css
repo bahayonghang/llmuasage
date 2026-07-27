@@ -1912,8 +1912,7 @@ nav a:hover .nav-icon {
   border-radius: 12px;
 }
 
-.failure-list,
-.integration-list {
+.failure-list {
   display: grid;
   gap: 10px;
 }
@@ -1965,35 +1964,6 @@ nav a:hover .nav-icon {
 .failure-card-status,
 .failure-card-detail {
   color: var(--muted);
-}
-
-.integration-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 14px;
-  padding: 12px 14px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface-2);
-}
-
-.integration-row-main {
-  min-width: 0;
-}
-
-.integration-row-source {
-  overflow: hidden;
-  font-weight: 600;
-  font-size: 13px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.integration-row-meta {
-  margin-top: 2px;
-  color: var(--muted);
-  font-size: 11px;
 }
 
 .cost-stat-label {
