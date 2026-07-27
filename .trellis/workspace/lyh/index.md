@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 42
-- **Last Active**: 2026-07-27
+- **Total Sessions**: 43
+- **Last Active**: 2026-07-28
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1353 | Active |
+| `journal-1.md` | ~1374 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 43 | 2026-07-28 | 普通同步自动修复旧版 token 统计 | `8591059` | `dev` |
 | 42 | 2026-07-27 | 接入 Grok Build 被动用量源 | `a5cb8cf` | `dev` |
 | 41 | 2026-07-27 | 移除 hook 实时同步并保留遗留清理 | `972878a`, `bbb6e82` | `dev` |
 | 40 | 2026-07-27 | 审计整改二次闭环 | `1540e3effeaedec9144ced34ec5ffd4b901a17cc` | `dev` |

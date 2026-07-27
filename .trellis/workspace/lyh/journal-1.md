@@ -1351,3 +1351,24 @@ Public listener 改用最小读路由与脱敏聚合 DTO，并忽略 project sel
 ### Status
 
 [OK] **Completed**
+
+
+## Session 43: 普通同步自动修复旧版 token 统计
+
+**Date**: 2026-07-28
+**Task**: 普通同步自动修复旧版 token 统计
+**Branch**: `dev`
+
+### Summary
+
+让普通无界 sync 在全部 legacy parser 来源通过无损预检后，于同一 fenced run 内自动重建并继续同步；保留 lossy、bounded、parserless、失败与取消安全边界，补齐共享生命周期事件、诊断建议、回归测试、双语文档和 Trellis 合约。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8591059` | (see git log) |
+
+### Status
+
+[OK] **Completed**
