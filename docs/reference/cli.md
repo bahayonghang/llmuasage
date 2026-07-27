@@ -153,9 +153,9 @@ llmusage sync --rebuild --allow-lossy-rebuild
 
 `--source`, `--recent-days`, and `--parallelism` use the same validation contract as `POST /api/jobs` and the public `JobRegistry` API. Invalid values fail with stable codes: `unknown_source`, `invalid_recent_days`, or `invalid_parallelism`.
 
-Imports local sources. Before source scanning, bootstrap may upgrade an unpinned embedded pricing catalog and reprice historical events. Human stderr reports catalog versions, processed/total events, bucket reconciliation, and elapsed completion time instead of leaving one generic database-initialization line active.
+Imports local sources. Before source scanning, bootstrap may upgrade an unpinned embedded pricing catalog and reprice historical events. An unbounded normal sync also detects selected legacy token-accounting sources, warns, and automatically rebuilds them only when every target passes the lossless preflight. A risky target blocks all automatic resets. A bounded `--recent-days` request must first be preceded by an unbounded sync when legacy accounting exists.
 
-`--json-events` writes NDJSON lifecycle events to stdout, including additive `pricing_upgrade_started`, `pricing_upgrade_progress`, `pricing_bucket_reconcile_started`, and `pricing_upgrade_finished` events when an embedded upgrade runs. A current catalog or pinned snapshot/overlay emits none of these pricing events. `--allow-lossy-rebuild` requires `--rebuild`.
+Human stderr reports catalog versions, processed/total events, bucket reconciliation, automatic token-accounting repair boundaries, and elapsed completion time. `--json-events` writes the same lifecycle to NDJSON-only stdout, including additive `token_accounting_repair_started` / `token_accounting_repair_finished` events and the existing pricing events. A current catalog or pinned snapshot/overlay emits no pricing events; a current accounting set emits no repair events. `--allow-lossy-rebuild` requires explicit `--rebuild` and is never inferred by normal sync.
 
 Set `LLMUSAGE_LOG=info` for structured pricing start/reconcile/finish file records, or `debug` for throttled page progress. The default `warn` file level records one liveness warning if repricing continues beyond 30 seconds; terminal progress remains visible at every file-log level.
 

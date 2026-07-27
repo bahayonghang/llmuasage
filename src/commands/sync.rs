@@ -476,10 +476,39 @@ async fn run_once_locked(
         .map(|parser| parser.source())
         .collect::<Vec<_>>();
 
-    assert_token_accounting_write_allowed(store, options, &parser_sources)?;
-    if options.rebuild {
+    let automatic_repair_sources = if options.rebuild {
         reset_for_rebuild(store, options, &parser_sources)?;
-    }
+        Vec::new()
+    } else {
+        let sources = automatic_token_accounting_repair_sources(store, options, &parser_sources)?;
+        if cancel.is_cancelled() {
+            Vec::new()
+        } else {
+            if !sources.is_empty() {
+                let source_names = source_names(&sources);
+                tracing::warn!(
+                    sources = %source_names,
+                    "普通 sync 检测到 legacy token accounting，开始安全自动重建"
+                );
+                if let Some(sender) = sender.as_deref_mut() {
+                    sender
+                        .send(SyncEvent::TokenAccountingRepairStarted {
+                            sources: sources.clone(),
+                        })
+                        .await?;
+                }
+                if let Err(error) = reset_sources_for_rebuild(store, &sources) {
+                    tracing::error!(
+                        sources = %source_names,
+                        error = %error,
+                        "legacy token accounting 自动重建 reset 失败"
+                    );
+                    return Err(error);
+                }
+            }
+            sources
+        }
+    };
 
     // 2.1 计算并发度并按 source 顺序解析 + 即时写入
     let parallelism = request.parallelism();
@@ -503,7 +532,7 @@ async fn run_once_locked(
             .collect(),
     };
     let driver_started = Instant::now();
-    let sources = driver::drive_with_events(driver::DriveContext {
+    let drive_result = driver::drive_with_events(driver::DriveContext {
         parsers: &parsers,
         store,
         writer: &mut writer,
@@ -513,7 +542,20 @@ async fn run_once_locked(
         sender: sender.as_deref_mut(),
         cancel,
     })
-    .await?;
+    .await;
+    let sources = match drive_result {
+        Ok(sources) => sources,
+        Err(error) => {
+            if !automatic_repair_sources.is_empty() {
+                tracing::error!(
+                    sources = %source_names(&automatic_repair_sources),
+                    error = %error,
+                    "legacy token accounting 自动重建 parser/store 失败"
+                );
+            }
+            return Err(error);
+        }
+    };
     tracing::debug!(
         driver_ms = driver_started.elapsed().as_millis() as u64,
         "driver finished"
@@ -586,16 +628,32 @@ async fn run_once_locked(
         stored_queries,
         "stored_events queries finished"
     );
-    for source in &source_stats {
-        if registry::source_descriptor(source.source)
-            .is_some_and(|descriptor| descriptor.capabilities.parser)
-        {
-            store.mark_current_token_accounting(source.source)?;
+    if !cancel.is_cancelled() {
+        for source in &source_stats {
+            if registry::source_descriptor(source.source)
+                .is_some_and(|descriptor| descriptor.capabilities.parser)
+            {
+                store.mark_current_token_accounting(source.source)?;
+            }
         }
     }
     store
         .sync_status()
         .save_source_sync_statuses(&sync_statuses)?;
+    if !automatic_repair_sources.is_empty() && !cancel.is_cancelled() {
+        let source_names = source_names(&automatic_repair_sources);
+        tracing::info!(
+            sources = %source_names,
+            "普通 sync 完成 legacy token accounting 安全自动重建"
+        );
+        if let Some(sender) = sender.as_deref_mut() {
+            sender
+                .send(SyncEvent::TokenAccountingRepairFinished {
+                    sources: automatic_repair_sources.clone(),
+                })
+                .await?;
+        }
+    }
     if recent_cutoff.is_some() && !cancel.is_cancelled() {
         for source in &source_stats {
             store
@@ -651,37 +709,52 @@ fn reset_for_rebuild(
 ) -> Result<()> {
     let rebuild_sources = rebuild_sources(options.source, parser_sources)?;
     assert_lossless_rebuild(store, options, &rebuild_sources)?;
-    if let Some(source) = options.source {
+    reset_sources_for_rebuild(store, &rebuild_sources)
+}
+
+fn reset_sources_for_rebuild(store: &Store, sources: &[SourceKind]) -> Result<()> {
+    for source in sources {
+        let source = *source;
         store.reset_for_source(source)?;
         store.clear_token_accounting_version(source)?;
-    } else {
-        for source in rebuild_sources {
-            store.reset_for_source(source)?;
-            store.clear_token_accounting_version(source)?;
-        }
     }
     Ok(())
 }
 
-fn assert_token_accounting_write_allowed(
+fn automatic_token_accounting_repair_sources(
     store: &Store,
     options: &SyncRunOptions,
     parser_sources: &[SourceKind],
-) -> Result<()> {
-    if options.rebuild {
-        return Ok(());
-    }
+) -> Result<Vec<SourceKind>> {
     let legacy = legacy_token_accounting_sources_for(store, parser_sources)?;
     if legacy.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
-    let sources = legacy
-        .iter()
-        .map(|source| source.as_str())
-        .collect::<Vec<_>>()
-        .join(", ");
+    let sources = source_names(&legacy);
+    if options.recent_days.is_some() {
+        tracing::warn!(
+            sources = %sources,
+            recent_days = options.recent_days,
+            "bounded sync 拒绝自动重建 legacy token accounting"
+        );
+        bail!(
+            "Refusing automatic token-accounting repair during bounded sync for source(s): {sources}. No source was reset. Run `llmusage sync` without --recent-days to perform a safe full-history repair, then retry the bounded sync."
+        );
+    }
+
+    let risks = lossy_rebuild_risks(store, &legacy)?;
+    if risks.is_empty() {
+        return Ok(legacy);
+    }
+    let details = format_lossy_rebuild_risks(&risks);
+    tracing::warn!(
+        sources = %sources,
+        risks = %details,
+        risk_count = risks.len(),
+        "普通 sync 的 legacy token accounting 自动重建存在数据丢失风险，已拒绝"
+    );
     bail!(
-        "Refusing to mix legacy and current token accounting for source(s): {sources}. Existing reports remain readable but may use the legacy accounting contract. Run `llmusage sync --rebuild --source <source>` for each listed source. The existing lossy-rebuild guard remains active; --allow-lossy-rebuild is never enabled automatically."
+        "Refusing automatic token-accounting repair because imported usage has missing source files ({details}). No source was reset and --allow-lossy-rebuild was not enabled automatically. Restore the source files and rerun `llmusage sync`, or explicitly run `llmusage sync --rebuild --source <source> --allow-lossy-rebuild` for each source whose unrebuildable history you intentionally accept clearing."
     )
 }
 
@@ -694,18 +767,36 @@ fn assert_lossless_rebuild(
         return Ok(());
     }
 
+    let risks = lossy_rebuild_risks(store, rebuild_sources)?;
+    if risks.is_empty() {
+        return Ok(());
+    }
+
+    let details = format_lossy_rebuild_risks(&risks);
+    bail!(
+        "Refusing lossy sync --rebuild because imported usage has missing source files ({details}). \
+Regular `llmusage sync` is safe: it marks missing source files for diagnostics but does not delete usage history. \
+`llmusage sync --rebuild` first deletes rebuildable usage rows and cannot reconstruct records whose original source files are gone. \
+Restore the source files or pass --allow-lossy-rebuild to explicitly accept clearing unrebuildable history."
+    );
+}
+
+fn lossy_rebuild_risks(
+    store: &Store,
+    sources: &[SourceKind],
+) -> Result<Vec<crate::store::LossyRebuildRisk>> {
     let mut risks = Vec::new();
-    for source in rebuild_sources {
+    for source in sources {
         let risk = store.source_files().lossy_rebuild_risk(*source)?;
         if risk.has_risk() {
             risks.push(risk);
         }
     }
-    if risks.is_empty() {
-        return Ok(());
-    }
+    Ok(risks)
+}
 
-    let details = risks
+fn format_lossy_rebuild_risks(risks: &[crate::store::LossyRebuildRisk]) -> String {
+    risks
         .iter()
         .map(|risk| {
             format!(
@@ -714,13 +805,15 @@ fn assert_lossless_rebuild(
             )
         })
         .collect::<Vec<_>>()
-        .join("; ");
-    bail!(
-        "Refusing lossy sync --rebuild because imported usage has missing source files ({details}). \
-Regular `llmusage sync` is safe: it marks missing source files for diagnostics but does not delete usage history. \
-`llmusage sync --rebuild` first deletes rebuildable usage rows and cannot reconstruct records whose original source files are gone. \
-Restore the source files or pass --allow-lossy-rebuild to explicitly accept clearing unrebuildable history."
-    );
+        .join("; ")
+}
+
+fn source_names(sources: &[SourceKind]) -> String {
+    sources
+        .iter()
+        .map(|source| source.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 pub(crate) fn legacy_token_accounting_sources(store: &Store) -> Result<Vec<SourceKind>> {

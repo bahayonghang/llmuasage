@@ -76,7 +76,7 @@ impl<'a> SyncStatusStore<'a> {
             status.legacy_token_accounting = self.store.has_legacy_token_accounting(source)?;
             if status.legacy_token_accounting {
                 status.token_accounting_warning = Some(format!(
-                    "legacy token accounting; run `llmusage sync --rebuild --source {}`",
+                    "legacy token accounting; run unbounded `llmusage sync` for automatic safe repair; if blocked, restore source files and run `llmusage sync --rebuild --source {}`",
                     source.as_str()
                 ));
             }

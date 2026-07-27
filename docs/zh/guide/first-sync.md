@@ -66,7 +66,13 @@ llmusage sync --rebuild
 `--rebuild` 会按来源重置 parser-backed 用量状态，再重新解析本地真源。parserless Antigravity 的 event、bucket、行为事实、cursor 和 source-file 诊断都会保留。如果 parser 来源的已导入文件型历史依赖现在缺失的源文件，默认拒绝执行。
 
 Token 统计口径按 parser 来源单独记录版本。含旧口径行的数据库仍可读取，但普通
-sync 会拒绝混写新旧结果。请逐个显式重建受影响来源：
+无界 `llmusage sync` 会检测本次所选 parser 集合中的旧版来源，先输出警告，再确认
+全部目标都能无损重建；预检通过后只 reset 这些 legacy 来源，并让本轮所选 parser
+各执行一次。只有 parser、Store 和状态写入全部成功后才会推进 accounting marker。
+
+如果任一所选 legacy 来源同时存在缺失输入和受保护历史，普通 sync 会在 reset 任何
+自动目标前拒绝修复。恢复源文件后重新运行 `llmusage sync`。诊断或需要显式控制时，
+仍可逐源执行：
 
 ```powershell
 llmusage sync --rebuild --source codex
@@ -77,13 +83,16 @@ llmusage sync --rebuild --source pi
 llmusage sync --rebuild --source grok
 ```
 
-只有重建完整成功后才会推进来源 marker。来源仍需重建时，`source-status` 和
-diagnostics 会返回 `legacy_token_accounting`、`token_accounting_version` 和可执行的警告信息。
+`sync --recent-days N` 不会自动修复旧版 accounting。清空来源全历史后只导入时间
+窗口会造成隐式丢失，因此请先运行无界 `llmusage sync`。来源仍需重建时，
+`source-status` 和 diagnostics 会返回 `legacy_token_accounting`、
+`token_accounting_version` 和可执行的警告信息。
 
 `llmusage serve` 会在绑定 Dashboard 端口前自动修复可安全迁移的旧版 parser 来源。
 存在有损重建风险的来源会告警并跳过：历史报表仍可读取，普通写入继续被 guard 拒绝，
-Dashboard 仍会启动。已通过安全预检的来源若发生 parser、SQLite 或提交错误，Dashboard
-会停止启动。自动修复永远不会启用 `--allow-lossy-rebuild`。
+Dashboard 仍会启动。与普通 sync 的全量预检不同，serve 会逐个跳过风险来源，因为只读
+报表仍有价值。已通过安全预检的来源若发生 parser、SQLite 或提交错误，Dashboard 会停止
+启动。两条自动路径都永远不会启用 `--allow-lossy-rebuild`。
 
 只有明确接受清掉不可重建历史时才使用：
 

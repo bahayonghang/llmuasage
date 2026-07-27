@@ -108,6 +108,12 @@
   `pricing_upgrade_started`, `pricing_upgrade_progress`,
   `pricing_bucket_reconcile_started`, and `pricing_upgrade_finished` before
   parser source events.
+- Safe legacy accounting repair adds
+  `token_accounting_repair_started` before targeted resets and
+  `token_accounting_repair_finished` only after writer, marker, and source
+  status success. These are additive lifecycle events shared by human stderr,
+  NDJSON, TUI, and Web jobs; failure/cancellation remains terminal through the
+  existing events.
 - Pricing started/progress events carry source/target catalog versions and
   processed/total event counts. Reconcile/finished events carry bucket counts;
   finished also carries deleted orphan count and elapsed milliseconds.

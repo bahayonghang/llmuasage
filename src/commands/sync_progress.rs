@@ -185,6 +185,8 @@ impl LineRenderer {
                     | SyncEvent::PricingBucketReconcileStarted { .. }
                     | SyncEvent::PricingUpgradeFinished { .. }
                     | SyncEvent::LockAcquired { .. }
+                    | SyncEvent::TokenAccountingRepairStarted { .. }
+                    | SyncEvent::TokenAccountingRepairFinished { .. }
             ) {
                 let _ = writeln!(self.stderr);
                 self.last_line_len = 0;
@@ -266,7 +268,9 @@ impl BarRenderer {
             }
             SyncEvent::MigrationFinished { .. }
             | SyncEvent::PricingUpgradeFinished { .. }
-            | SyncEvent::LockAcquired { .. } => {
+            | SyncEvent::LockAcquired { .. }
+            | SyncEvent::TokenAccountingRepairStarted { .. }
+            | SyncEvent::TokenAccountingRepairFinished { .. } => {
                 self.permanent_line(event);
             }
             SyncEvent::SourceFinished { .. } => {
@@ -511,6 +515,24 @@ pub(crate) fn human_progress_line(event: &SyncEvent) -> Option<String> {
         SyncEvent::LockWaiting { .. } => Some("等待 SQLite sync worker 锁...".to_string()),
         SyncEvent::LockAcquired { wait_ms } => {
             Some(format!("已获取 SQLite sync worker 锁（等待 {wait_ms}ms）"))
+        }
+        SyncEvent::TokenAccountingRepairStarted { sources } => {
+            let sources = sources
+                .iter()
+                .map(|source| source.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            Some(format!(
+                "警告：检测到旧版 token accounting（{sources}）；本轮将自动执行无损重建，不会自动启用 --allow-lossy-rebuild。"
+            ))
+        }
+        SyncEvent::TokenAccountingRepairFinished { sources } => {
+            let sources = sources
+                .iter()
+                .map(|source| source.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            Some(format!("Token accounting 自动修复完成：{sources}"))
         }
         SyncEvent::SourceStarted {
             source,
@@ -938,6 +960,42 @@ mod tests {
         assert_eq!(value["event"], "pricing_upgrade_progress");
         assert_eq!(value["processed_events"], 25_000);
         assert_eq!(value["total_events"], 50_000);
+        Ok(())
+    }
+
+    #[test]
+    fn token_accounting_repair_events_have_actionable_copy_and_ndjson_shape() -> anyhow::Result<()>
+    {
+        let sources = vec![SourceKind::Codex, SourceKind::Claude];
+        let started = SyncEvent::TokenAccountingRepairStarted {
+            sources: sources.clone(),
+        };
+        let finished = SyncEvent::TokenAccountingRepairFinished { sources };
+
+        assert_eq!(
+            human_progress_line(&started).as_deref(),
+            Some(
+                "警告：检测到旧版 token accounting（codex, claude）；本轮将自动执行无损重建，不会自动启用 --allow-lossy-rebuild。"
+            )
+        );
+        assert_eq!(
+            human_progress_line(&finished).as_deref(),
+            Some("Token accounting 自动修复完成：codex, claude")
+        );
+
+        let started_json = serde_json::to_value(&started)?;
+        let finished_json = serde_json::to_value(&finished)?;
+        assert_eq!(started_json["event"], "token_accounting_repair_started");
+        assert_eq!(finished_json["event"], "token_accounting_repair_finished");
+        assert_eq!(
+            started_json["sources"],
+            serde_json::json!(["codex", "claude"])
+        );
+        assert_eq!(serde_json::from_value::<SyncEvent>(started_json)?, started);
+        assert_eq!(
+            serde_json::from_value::<SyncEvent>(finished_json)?,
+            finished
+        );
         Ok(())
     }
 }

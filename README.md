@@ -59,7 +59,7 @@ llmusage serve
 What this does:
 
 1. `init` creates `~/.llmusage/` and bootstraps `llmusage.db`; it does not modify third-party tool configuration.
-2. `sync` passively parses local sources incrementally and writes usage rows, 30-minute buckets, source-file diagnostics, and behavior facts.
+2. `sync` passively parses local sources incrementally and writes usage rows, 30-minute buckets, source-file diagnostics, and behavior facts. An unbounded sync also warns and automatically rebuilds safe legacy token-accounting sources before writing new rows.
 3. `llmusage` shows the default daily report for the last 7 calendar days.
 4. `serve` safely rebuilds legacy parser-backed token accounting when needed, then starts the dashboard on `127.0.0.1` by default. Use `serve --public` only when you intentionally need remote access: it exposes an unauthenticated, non-TLS aggregate dashboard, but keeps project labels, logs, diagnostics, job state, and all write routes local-only.
 
@@ -144,11 +144,13 @@ llmusage codex-tracer --rebuild
 ## Safety defaults
 
 - No account login, device token, upload queue, or remote usage API call.
+- Normal unbounded `llmusage sync` automatically rebuilds selected legacy token-accounting sources only after every target passes the lossless-rebuild preflight. If any target is unsafe, no automatic target is reset.
 - Normal `llmusage sync` keeps imported usage when original source files are missing.
 - `llmusage sync --recent-days N` imports only the latest UTC event window (`1..=3650`) without advancing full-history cursors; `--parallelism` accepts `1..=32`.
+- A bounded sync never auto-rebuilds legacy accounting because resetting full history and importing only a time window would be lossy. Run unbounded `llmusage sync` first.
 - `llmusage sync --rebuild` refuses lossy rebuilds unless you also pass `--allow-lossy-rebuild`.
 - A full `llmusage sync --rebuild` resets only parser-backed sources; parserless Antigravity history and diagnostics are preserved. A targeted Antigravity rebuild is rejected even with `--allow-lossy-rebuild` because no parser can reconstruct that history.
-- `llmusage serve` automatically rebuilds safe legacy parser sources before binding a port. Sources with missing files are skipped with a warning, keep their readable history, and remain write-protected.
+- `llmusage serve` also automatically rebuilds safe legacy parser sources before binding a port. Unlike the all-or-nothing normal sync preflight, serve skips only risky sources so the read-only dashboard can still start.
 - Automatic repair never enables `--allow-lossy-rebuild`; use `llmusage sync --rebuild --source <source>` explicitly after restoring missing source files.
 - `llmusage diagnostics --forget-file <PATH> --source <SOURCE>` is the explicit write path for intentionally ignored source files.
 - `llmusage logs` queries local runtime logs and recent command audit rows without changing report stdout or `sync --json-events` stdout contracts.

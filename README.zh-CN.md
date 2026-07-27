@@ -57,7 +57,7 @@ llmusage serve
 含义：
 
 1. `init` 创建 `~/.llmusage/` 并初始化 `llmusage.db`，不会修改第三方工具配置。
-2. `sync` 被动、增量解析本地真源，写入 usage 行、30 分钟 bucket、source-file 诊断和行为事实。
+2. `sync` 被动、增量解析本地真源，写入 usage 行、30 分钟 bucket、source-file 诊断和行为事实。无界 sync 还会先告警，并在写入新数据前自动重建可无损修复的旧版 token accounting 来源。
 3. `llmusage` 显示默认 daily 报表：所选时区下最近 7 个自然日。
 4. `serve` 会按需安全重建旧版 parser token 统计口径，然后默认在 `127.0.0.1` 启动浏览器 Dashboard。只有明确需要远程访问时才使用 `serve --public`：它会暴露不带认证和 TLS 的聚合 Dashboard，但 project label、日志、诊断、job 状态和所有写路由仍只允许本地访问。
 
@@ -142,11 +142,13 @@ llmusage codex-tracer --rebuild
 ## 安全默认值
 
 - 不需要账号登录、device token、上传队列或远端用量 API。
+- 普通无界 `llmusage sync` 只会在全部目标都通过无损预检后，自动重建所选的旧版 token accounting 来源；任一目标不安全时，不会 reset 任何自动修复目标。
 - 普通 `llmusage sync` 遇到原始源文件缺失时会保留已导入 usage。
 - `llmusage sync --recent-days N` 只导入最近的 UTC 事件窗口（`1..=3650`），且不推进全历史 cursor；`--parallelism` 合法范围为 `1..=32`。
+- bounded sync 不会自动重建旧版 accounting，因为清空全历史后只导入时间窗口会造成丢失；请先运行无界 `llmusage sync`。
 - `llmusage sync --rebuild` 默认拒绝有损重建，除非同时传入 `--allow-lossy-rebuild`。
 - 无 source 的 `llmusage sync --rebuild` 只重置 parser-backed 来源；parserless Antigravity 的历史和诊断状态会保留。即使带 `--allow-lossy-rebuild`，定向重建 Antigravity 也会被拒绝，因为没有 parser 能重建这部分历史。
-- `llmusage serve` 会在绑定端口前自动重建可安全迁移的旧版 parser 来源。源文件缺失的来源只会告警并跳过，旧历史仍可读取且继续拒绝混写。
+- `llmusage serve` 也会在绑定端口前自动重建可安全迁移的旧版 parser 来源。与普通 sync 的全量预检不同，serve 只跳过有风险的来源，让只读 Dashboard 仍可启动。
 - 自动修复永远不会启用 `--allow-lossy-rebuild`；请先恢复缺失源文件，再显式执行 `llmusage sync --rebuild --source <source>`。
 - `llmusage diagnostics --forget-file <PATH> --source <SOURCE>` 是显式忽略源文件的写入入口。
 - `llmusage logs` 查询本地运行日志和最近命令审计记录，不改变报表 stdout 或 `sync --json-events` stdout 合同。

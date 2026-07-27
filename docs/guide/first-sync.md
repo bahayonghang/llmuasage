@@ -66,8 +66,17 @@ llmusage sync --rebuild
 `--rebuild` resets parser-backed usage state source by source before reparsing local sources. Parserless Antigravity events, buckets, behavior facts, cursors, and source-file diagnostics are preserved. The rebuild is refused by default when file-backed imported history for a parser source depends on files that are now missing.
 
 Token accounting is versioned per parser source. Databases containing rows
-from the older accounting contract remain readable, but normal sync refuses to
-mix old and corrected rows. Rebuild each affected source explicitly:
+from an older accounting contract remain readable. An unbounded normal
+`llmusage sync` detects legacy sources in the selected parser set, prints a
+warning, verifies that every target can be rebuilt without losing imported
+history, resets only those legacy sources, and parses the selected sources once.
+The accounting marker advances only after parser, Store, and status writes
+succeed.
+
+If any selected legacy source has missing inputs and protected events, normal
+sync refuses the automatic repair before resetting any target. Restore the
+source files and rerun `llmusage sync`. You can still rebuild a source
+explicitly when diagnosing or deliberately controlling the operation:
 
 ```powershell
 llmusage sync --rebuild --source codex
@@ -78,16 +87,20 @@ llmusage sync --rebuild --source pi
 llmusage sync --rebuild --source grok
 ```
 
-The source marker advances only after the rebuild succeeds. `source-status` and
-diagnostics expose `legacy_token_accounting`, `token_accounting_version`, and
-an actionable warning while a source still needs rebuilding.
+`sync --recent-days N` does not auto-repair legacy accounting. Resetting a
+source's full history and then importing only a bounded window would be lossy,
+so run unbounded `llmusage sync` first. `source-status` and diagnostics expose
+`legacy_token_accounting`, `token_accounting_version`, and an actionable
+warning while a source still needs rebuilding.
 
 `llmusage serve` performs this repair automatically for safe legacy parser
 sources before it binds the dashboard port. A source with lossy rebuild risk is
 skipped with a warning: its historical reports remain readable, its normal
-writes stay guarded, and the dashboard still starts. Parser, SQLite, or commit
+writes remain blocked from mixing contracts, and the dashboard still starts.
+Unlike normal sync's all-or-nothing preflight, serve skips risky sources
+individually because read-only reports remain useful. Parser, SQLite, or commit
 failures for a source that passed the safety check stop dashboard startup.
-Automatic repair never enables `--allow-lossy-rebuild`.
+Neither automatic path enables `--allow-lossy-rebuild`.
 
 Only pass the lossy flag when you intentionally accept clearing unrebuildable history:
 
