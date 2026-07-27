@@ -667,26 +667,29 @@ mod tests {
     #[test]
     fn stolen_lock_causes_old_owner_refresh_to_fail() -> Result<()> {
         let temp = TempDir::new()?;
-        let store = test_store(&temp)?;
+        let paths = AppPaths::with_root(temp.path().to_path_buf())?;
+        let first_store = Store::new(&paths)?;
+        first_store.bootstrap()?;
+        let second_store = Store::new(&paths)?;
 
         // First acquisition.
-        let first =
-            store.acquire_worker_lock_with(std::time::Duration::from_secs(1), HolderKind::Cli)?;
+        let first = first_store
+            .acquire_worker_lock_with(std::time::Duration::from_secs(1), HolderKind::Cli)?;
         let first_gen = first.generation;
         let stale_store = first.fenced_store();
 
-        // Manually expire the lease so the second acquisition can steal it.
+        // Expire through the second Store so both lock owners use independently
+        // opened SQLite connections to the shared database.
         {
-            let conn = store.open_connection()?;
+            let conn = second_store.open_connection()?;
             conn.execute(
                 "UPDATE worker_lock SET lease_expires_at = '2000-01-01T00:00:00Z'",
                 [],
             )?;
         }
 
-        // Second acquisition on the same store steals the expired lease.
-        let second =
-            store.acquire_worker_lock_with(std::time::Duration::from_secs(1), HolderKind::Cli)?;
+        let second = second_store
+            .acquire_worker_lock_with(std::time::Duration::from_secs(1), HolderKind::Cli)?;
         assert!(
             second.generation > first_gen,
             "new generation ({}) must exceed old generation ({})",
@@ -706,7 +709,7 @@ mod tests {
         assert!(matches!(err, LlmusageError::LockLost));
 
         // The new holder's refresh still succeeds.
-        store.refresh_worker_lock(&second.lock_name, &second.owner_id, second.generation)?;
+        second_store.refresh_worker_lock(&second.lock_name, &second.owner_id, second.generation)?;
         Ok(())
     }
 }

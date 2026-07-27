@@ -1189,21 +1189,23 @@ mod tests {
     #[test]
     fn stale_generation_cannot_commit_next_shard_transaction() -> anyhow::Result<()> {
         let temp = TempDir::new()?;
-        let store = Store::new(&build_paths(temp.path()))?;
-        store.bootstrap()?;
+        let paths = build_paths(temp.path());
+        let first_store = Store::new(&paths)?;
+        first_store.bootstrap()?;
+        let second_store = Store::new(&paths)?;
 
-        let first =
-            store.acquire_worker_lock_with(std::time::Duration::from_secs(1), HolderKind::Cli)?;
+        let first = first_store
+            .acquire_worker_lock_with(std::time::Duration::from_secs(1), HolderKind::Cli)?;
         let fenced_first = first.fenced_store();
         let mut writer = fenced_first.begin_sync_run()?;
 
-        let conn = store.open_connection()?;
+        let conn = second_store.open_connection()?;
         conn.execute(
             "UPDATE worker_lock SET lease_expires_at = '2000-01-01T00:00:00Z'",
             [],
         )?;
         drop(conn);
-        let second = store
+        let second = second_store
             .acquire_worker_lock_with(std::time::Duration::from_secs(1), HolderKind::Library)?;
 
         let event = build_event("stale", "stale-generation", 10);
@@ -1215,7 +1217,7 @@ mod tests {
             .expect_err("a stolen generation must fence the stale writer");
         assert!(matches!(error, LlmusageError::LockLost));
 
-        let conn = store.open_connection()?;
+        let conn = second_store.open_connection()?;
         let persisted: i64 = conn.query_row(
             "SELECT COUNT(*) FROM usage_event WHERE event_key = ?1",
             [event_key],
