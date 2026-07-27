@@ -764,10 +764,9 @@ fn project_from_session_dir(session_dir: &Path) -> Option<ProjectInfo> {
     if workspace.is_empty() {
         return None;
     }
-    let label = Path::new(workspace)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .filter(|value| !value.is_empty())
+    let label = workspace
+        .rsplit(['/', '\\'])
+        .find(|value| !value.is_empty())
         .unwrap_or(workspace)
         .to_string();
     let workspace_hash = hash_string(workspace);
