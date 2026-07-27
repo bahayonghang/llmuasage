@@ -1,7 +1,4 @@
-use chrono::{
-    Duration, FixedOffset, Local, NaiveDate, Offset, SecondsFormat, TimeZone, Utc,
-    offset::LocalResult,
-};
+use chrono::{Duration, Local, NaiveDate, SecondsFormat, Utc};
 use rusqlite::{Connection, params_from_iter};
 use serde::Serialize;
 
@@ -63,27 +60,22 @@ fn load_observed(
     earliest_local: &NaiveDate,
 ) -> Result<Vec<(String, i64, i64)>> {
     let mut sql_filter = filter.bucket_filter(None);
-    let earliest_local_start = earliest_local
-        .and_hms_opt(0, 0, 0)
-        .expect("midnight always valid");
-    let offset = fixed_offset_for(&filter.timezone);
-    let earliest_utc = match offset.from_local_datetime(&earliest_local_start) {
-        LocalResult::Single(value) => value.with_timezone(&Utc),
-        LocalResult::Ambiguous(earliest, _) => earliest.with_timezone(&Utc),
-        LocalResult::None => offset
-            .from_utc_datetime(&earliest_local_start)
-            .with_timezone(&Utc),
-    };
+    // DATA-003: resolve the day boundary with real tz rules, not one snapshot
+    // offset, so the lower bound is correct across a DST transition.
+    let earliest_utc = filter
+        .timezone
+        .resolved()
+        .local_date_start_utc(*earliest_local);
     sql_filter.push(
         "hour_start >= ?",
         earliest_utc.to_rfc3339_opts(SecondsFormat::Secs, true),
     );
 
-    let modifier = filter.local_time_modifier();
+    let local_date = filter.local_date_expr("hour_start");
     let sql = format!(
         r#"
         SELECT
-            date(hour_start, '{modifier}') AS local_date,
+            {local_date} AS local_date,
             COALESCE(SUM(event_count), 0),
             COALESCE(SUM(total_tokens), 0)
         FROM usage_bucket_30m
@@ -110,13 +102,5 @@ fn today_in(timezone: &ReportTimezone) -> NaiveDate {
         ReportTimezone::Utc => utc.date_naive(),
         ReportTimezone::Local => Local::now().date_naive(),
         ReportTimezone::Fixed(offset) => utc.with_timezone(offset).date_naive(),
-    }
-}
-
-fn fixed_offset_for(timezone: &ReportTimezone) -> FixedOffset {
-    match timezone {
-        ReportTimezone::Utc => Utc.fix(),
-        ReportTimezone::Local => Local::now().offset().fix(),
-        ReportTimezone::Fixed(offset) => *offset,
     }
 }

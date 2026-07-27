@@ -10,7 +10,7 @@ use crate::{app::AppContext, models::SourceKind, store::Store, util::resolve_hom
 
 use super::{
     HookTarget, Integration, IntegrationAction, IntegrationProbe, backup_file, record_action,
-    record_probe,
+    record_probe, write_file_atomic_and_record,
 };
 
 /// ZST handle implementing [`Integration`] for the Claude `settings.json` hooks.
@@ -94,15 +94,20 @@ pub fn install(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
 
     let backup_path = backup_file(&settings_path, &app.paths.backups_dir, "claude-settings")?;
 
-    fs::write(&settings_path, serde_json::to_vec_pretty(&settings)?)?;
-    record_action(
-        store,
-        SourceKind::Claude,
-        "init",
-        "ready",
-        "Claude hooks 已安装",
-        Some(&settings_path),
-        Some(&backup_path),
+    write_file_atomic_and_record(
+        &settings_path,
+        serde_json::to_vec_pretty(&settings)?,
+        || {
+            record_action(
+                store,
+                SourceKind::Claude,
+                "init",
+                "ready",
+                "Claude hooks 已安装",
+                Some(&settings_path),
+                Some(&backup_path),
+            )
+        },
     )?;
 
     Ok(IntegrationAction {
@@ -140,15 +145,20 @@ pub fn uninstall(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
         &hook.shell_command(SourceKind::Claude, "SessionEnd"),
     )?;
 
-    fs::write(&settings_path, serde_json::to_vec_pretty(&settings)?)?;
-    record_action(
-        store,
-        SourceKind::Claude,
-        "uninstall",
-        "restored",
-        "Claude hooks 已恢复",
-        Some(&settings_path),
-        Some(&backup_path),
+    write_file_atomic_and_record(
+        &settings_path,
+        serde_json::to_vec_pretty(&settings)?,
+        || {
+            record_action(
+                store,
+                SourceKind::Claude,
+                "uninstall",
+                "restored",
+                "Claude hooks 已恢复",
+                Some(&settings_path),
+                Some(&backup_path),
+            )
+        },
     )?;
 
     Ok(IntegrationAction {

@@ -56,7 +56,7 @@ async fn diagnostics(app: &AppContext, json: bool) -> Result<()> {
 
     // 1.1 读取探针结果、最近运行结果与关键文件存在性
     let store = Store::new(&app.paths)?;
-    store.bootstrap()?;
+    store.require_initialized()?;
     let probes = integrations::probe_all(app)?;
     let recent_runs = store.run_log().recent_runs(10)?;
     let logs = crate::logging::runtime_status(&app.paths)?;
@@ -121,6 +121,32 @@ async fn diagnostics(app: &AppContext, json: bool) -> Result<()> {
         detail: format!(
             "{} ERROR entries in the recent local log scan",
             logs.recent_error_count
+        ),
+    });
+
+    checks.push(DoctorCheck {
+        id: "logs.dropped_events",
+        status: if logs.dropped_event_count == 0 {
+            "ok"
+        } else {
+            "warn"
+        },
+        detail: format!(
+            "{} events dropped by the non-blocking log queue",
+            logs.dropped_event_count
+        ),
+    });
+
+    checks.push(DoctorCheck {
+        id: "logs.maintenance_errors",
+        status: if logs.maintenance_error_count == 0 {
+            "ok"
+        } else {
+            "warn"
+        },
+        detail: format!(
+            "{} runtime log rotation or retention errors",
+            logs.maintenance_error_count
         ),
     });
 

@@ -3,15 +3,18 @@
 use std::{
     fs,
     future::Future,
+    io::Write,
     path::PathBuf,
     pin::Pin,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use llmusage::{
     AppPaths, Dashboard, QueryFilter,
+    logging::read_recent_log_entries,
     models::{
         ActivityCategory, SourceKind, ToolKind, UsageEvent, UsageTokens, UsageToolCall, UsageTurn,
     },
@@ -364,8 +367,7 @@ async fn opencode_row_serialized_as_json_in_raw_table() -> Result<()> {
 }
 
 /// Validates D27: when a recent window is requested, `RecentReady` is emitted
-/// independently per source and persisted into `source_sync_status` without
-/// waiting for a final full-history marker.
+/// after the requested bounded stage and persisted into `source_sync_status`.
 #[tokio::test]
 async fn recent_ready_emitted_per_source_when_recent_days_set() -> Result<()> {
     let _env = SourceEnvFixture::new()?;
@@ -403,6 +405,18 @@ async fn recent_ready_emitted_per_source_when_recent_days_set() -> Result<()> {
             }
         )
     }));
+    let source_finished = events
+        .iter()
+        .position(|event| matches!(event, SyncEvent::SourceFinished { .. }))
+        .expect("source finished event");
+    let recent_ready = events
+        .iter()
+        .position(|event| matches!(event, SyncEvent::RecentReady { .. }))
+        .expect("recent ready event");
+    assert!(
+        recent_ready > source_finished,
+        "RecentReady must follow completion of the requested bounded stage"
+    );
     assert!(events.iter().any(|event| {
         matches!(
             event,
@@ -420,6 +434,97 @@ async fn recent_ready_emitted_per_source_when_recent_days_set() -> Result<()> {
         .find(|row| row.source == "codex")
         .expect("codex diagnostics row");
     assert!(codex.recent_completed_at.is_some());
+    Ok(())
+}
+
+#[tokio::test]
+async fn recent_window_filters_old_events_without_advancing_full_history_cursor() -> Result<()> {
+    let _env = SourceEnvFixture::new()?;
+    let codex_home = PathBuf::from(std::env::var("CODEX_HOME")?);
+    let old_directory = codex_home.join("sessions/2020/01/01");
+    fs::create_dir_all(&old_directory)?;
+    let rollout = old_directory.join("rollout-old-file.jsonl");
+    let old_at = (chrono::Utc::now() - chrono::Duration::days(90)).to_rfc3339();
+    let recent_at = (chrono::Utc::now() - chrono::Duration::days(1)).to_rfc3339();
+    let token_line = |timestamp: &str, total: i64| {
+        serde_json::json!({
+            "timestamp": timestamp,
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "info": {
+                    "last_token_usage": {
+                        "input_tokens": 10,
+                        "output_tokens": 0,
+                        "total_tokens": 10
+                    },
+                    "total_token_usage": {
+                        "input_tokens": total,
+                        "output_tokens": 0,
+                        "total_tokens": total
+                    }
+                }
+            }
+        })
+        .to_string()
+    };
+    fs::write(&rollout, format!("{}\n", token_line(&old_at, 10)))?;
+
+    let (_tmp, store) = make_store()?;
+    let app = llmusage::app::AppContext {
+        paths: store.paths.clone(),
+        current_exe: std::env::current_exe()?,
+    };
+    let bounded = llmusage::commands::sync::SyncRunOptions {
+        source: Some(SourceKind::Codex),
+        recent_days: Some(30),
+        ..Default::default()
+    };
+    llmusage::commands::sync::run_once_with_options(&app, &store, 0, &bounded, None).await?;
+    assert_eq!(
+        count_rows(&store, "usage_event", "")?,
+        0,
+        "old event must be outside the window"
+    );
+    assert!(
+        store
+            .cursors()
+            .load_file_cursors(SourceKind::Codex)?
+            .is_empty(),
+        "bounded scan must not advance the sole full-history cursor"
+    );
+
+    fs::OpenOptions::new()
+        .append(true)
+        .open(&rollout)?
+        .write_all(format!("{}\n", token_line(&recent_at, 20)).as_bytes())?;
+    llmusage::commands::sync::run_once_with_options(&app, &store, 0, &bounded, None).await?;
+    assert_eq!(
+        count_rows(&store, "usage_event", "")?,
+        1,
+        "recent append must be imported"
+    );
+    assert!(
+        store
+            .cursors()
+            .load_file_cursors(SourceKind::Codex)?
+            .is_empty()
+    );
+
+    let full = llmusage::commands::sync::SyncRunOptions {
+        source: Some(SourceKind::Codex),
+        ..Default::default()
+    };
+    llmusage::commands::sync::run_once_with_options(&app, &store, 0, &full, None).await?;
+    assert_eq!(
+        count_rows(&store, "usage_event", "")?,
+        2,
+        "later full sync must recover the older event"
+    );
+    assert_eq!(
+        store.cursors().load_file_cursors(SourceKind::Codex)?.len(),
+        1
+    );
     Ok(())
 }
 
@@ -541,7 +646,7 @@ fn reset_usage_data_clears_behavior_facts() -> Result<()> {
 async fn start_run_complete_lifecycle_observable_via_snapshot() -> Result<()> {
     let _env = SourceEnvFixture::new()?;
     let (_tmp, store) = make_store()?;
-    let registry = JobRegistry::default();
+    let registry = JobRegistry::new(Arc::new(llmusage::commands::sync::CommandSyncExecutor));
     let (job_id, mut rx) = registry.start(
         &store,
         SyncOptions {
@@ -577,7 +682,7 @@ async fn cancel_within_1500ms() -> Result<()> {
     let (_tmp, store) = make_store()?;
     let blocker = store
         .acquire_worker_lock_with(Duration::from_secs(0), llmusage::store::HolderKind::Library)?;
-    let registry = JobRegistry::default();
+    let registry = JobRegistry::new(Arc::new(llmusage::commands::sync::CommandSyncExecutor));
     let (job_id, mut rx) = registry.start(
         &store,
         SyncOptions {
@@ -637,7 +742,7 @@ async fn file_boundary_cancel_preserves_written_events() -> Result<()> {
         writer: &mut writer,
         parallelism: 1,
         lock_wait_ms: 0,
-        recent_days: None,
+        recent_cutoff: None,
         sender: Some(&mut tx),
         cancel: &cancel,
     })
@@ -711,7 +816,9 @@ async fn cancel_within_1500ms_with_5_pending_files() -> Result<()> {
     };
     let started = Instant::now();
     let mut writer = store.begin_sync_run()?;
-    let stats = parser.parse(&store, &mut writer, 1, &cancel, None).await?;
+    let stats = parser
+        .parse(&store, &mut writer, 1, None, &cancel, None)
+        .await?;
     writer.finish_sync_run()?;
 
     assert!(started.elapsed() < Duration::from_millis(1500));
@@ -745,6 +852,7 @@ impl SourceParser for CancelAfterFilesParser {
         _store: &'a Store,
         writer: &'a mut SyncRunWriter,
         _parallelism: usize,
+        _recent_cutoff: Option<chrono::DateTime<chrono::Utc>>,
         cancel: &'a CancellationToken,
         mut progress: Option<llmusage::parsers::ProgressSink<'a>>,
     ) -> Pin<Box<dyn Future<Output = Result<SourceSyncStats>> + Send + 'a>> {
@@ -841,7 +949,13 @@ fn json_events_subprocess_emits_ndjson_per_event() -> Result<()> {
     store.mark_current_token_accounting(SourceKind::Codex)?;
     store.set_meta_value("pricing_catalog_version", "static-v1")?;
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_llmusage"))
+    let binary = PathBuf::from(env!("CARGO_BIN_EXE_llmusage"));
+    anyhow::ensure!(
+        binary.is_file(),
+        "Cargo binary does not exist: {}",
+        binary.display()
+    );
+    let output = std::process::Command::new(&binary)
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .arg("--home")
         .arg(&root)
@@ -852,7 +966,14 @@ fn json_events_subprocess_emits_ndjson_per_event() -> Result<()> {
         .env("OPENCODE_HOME", home.join("opencode"))
         .env("LLMUSAGE_LOG", "info")
         .env("RUST_LOG", "off")
-        .output()?;
+        .output()
+        .with_context(|| {
+            format!(
+                "failed to spawn {} from {}",
+                binary.display(),
+                env!("CARGO_MANIFEST_DIR")
+            )
+        })?;
     assert!(output.status.success(), "{output:?}");
 
     let stdout = String::from_utf8(output.stdout)?;
@@ -918,13 +1039,10 @@ fn json_events_subprocess_emits_ndjson_per_event() -> Result<()> {
     );
     assert!(json_lines.iter().any(|line| line["event"] == "finished"));
 
-    let log_lines = fs::read_to_string(&paths.log_file_path)?
-        .lines()
-        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-        .collect::<Vec<_>>();
+    let log_entries = read_recent_log_entries(&paths, 100, Some("info"), None)?;
     for phase in ["started", "bucket_reconcile", "finished"] {
-        assert!(log_lines.iter().any(|line| {
-            line["fields"]["operation"] == "pricing_recompute" && line["fields"]["phase"] == phase
+        assert!(log_entries.iter().any(|entry| {
+            entry.fields["operation"] == "pricing_recompute" && entry.fields["phase"] == phase
         }));
     }
     Ok(())

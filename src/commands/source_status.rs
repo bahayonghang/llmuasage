@@ -51,7 +51,7 @@ pub struct PlatformMonitorStatus {
 
 pub async fn run(app: &AppContext) -> Result<()> {
     let store = Store::new(&app.paths)?;
-    store.bootstrap()?;
+    store.require_initialized()?;
     let dashboard = Dashboard::open(&store)?;
     let sources = dashboard.source_breakdown(&Default::default())?;
     let probes = integrations::probe_all(app)?;

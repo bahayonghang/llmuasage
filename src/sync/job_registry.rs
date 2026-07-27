@@ -1,4 +1,5 @@
 use std::{
+    collections::VecDeque,
     error::Error,
     fmt,
     sync::{Arc, Mutex},
@@ -12,9 +13,11 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     app::AppContext,
-    commands::sync::{SyncRunOptions, SyncSummary},
     parsers::{SyncEvent, SyncSummaryEvent},
     store::{HolderKind, Store},
+    sync::types::{
+        SyncRequestError, SyncRequestInput, SyncRunOptions, SyncSummary, ValidatedSyncRequest,
+    },
 };
 
 /// In-process identifier for one usage import job.
@@ -70,12 +73,42 @@ struct JobState {
     cancel: CancellationToken,
 }
 
+/// Maximum number of terminal (Completed/Failed/Cancelled) jobs retained in
+/// memory. Active and cancelling jobs are never evicted.
+const MAX_TERMINAL_JOBS: usize = 100;
+
 /// In-memory bridge from future sync progress push events to pollable snapshots.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone)]
 pub struct JobRegistry {
     inner: Arc<DashMap<JobId, Arc<Mutex<JobState>>>>,
     admission: Arc<Mutex<()>>,
     terminal_hooks: TerminalHooks,
+    /// Insertion-ordered deque of terminal job ids, capped at `MAX_TERMINAL_JOBS`.
+    terminal_order: Arc<Mutex<VecDeque<JobId>>>,
+    /// Executes the actual sync work. Injected by the adapter layer (CLI/web)
+    /// so this module does not import `commands::sync` (ARCH-002).
+    executor: Arc<dyn crate::sync::executor::SyncExecutor>,
+}
+
+impl fmt::Debug for JobRegistry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("JobRegistry")
+            .field("jobs", &self.inner.len())
+            .finish()
+    }
+}
+
+impl JobRegistry {
+    /// Creates a `JobRegistry` with a caller-provided executor.
+    pub fn new(executor: Arc<dyn crate::sync::executor::SyncExecutor>) -> Self {
+        Self {
+            inner: Arc::default(),
+            admission: Arc::default(),
+            terminal_hooks: TerminalHooks::default(),
+            terminal_order: Arc::default(),
+            executor,
+        }
+    }
 }
 
 /// Callback list fired once after a job reaches a terminal state.
@@ -126,20 +159,24 @@ impl fmt::Display for JobStartRejected {
 
 impl Error for JobStartRejected {}
 
-/// Options accepted by the usage import job starter.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub struct SyncOptions {
-    /// Rebuild local usage tables before importing.
-    pub rebuild: bool,
-    /// Restrict import to recent days. M0- stores the option only.
-    pub recent_days: Option<u32>,
-    /// Restrict import to one source string.
-    pub source: Option<String>,
-    /// Optional parser concurrency override. Values below 1 are ignored by the
-    /// sync runner; callers can use this to throttle library/API imports.
-    pub parallelism: Option<usize>,
+pub type SyncOptions = SyncRequestInput;
+
+#[derive(Debug)]
+pub enum JobStartError {
+    InvalidRequest(SyncRequestError),
+    Active(JobStartRejected),
 }
+
+impl fmt::Display for JobStartError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidRequest(error) => error.fmt(f),
+            Self::Active(error) => error.fmt(f),
+        }
+    }
+}
+
+impl Error for JobStartError {}
 
 impl JobRegistry {
     /// Starts a real in-process sync task when the in-process admission slot is
@@ -148,18 +185,19 @@ impl JobRegistry {
         &self,
         store: &Store,
         options: SyncOptions,
-    ) -> Result<(JobId, mpsc::Receiver<JobEvent>), JobStartRejected> {
+    ) -> Result<(JobId, mpsc::Receiver<JobEvent>), JobStartError> {
+        let request = ValidatedSyncRequest::new(options).map_err(JobStartError::InvalidRequest)?;
         let _admission = self
             .admission
             .lock()
             .expect("job registry admission mutex poisoned");
         if let Some(active) = self.active_job_id() {
-            return Err(JobStartRejected {
+            return Err(JobStartError::Active(JobStartRejected {
                 active_job_id: active,
-            });
+            }));
         }
 
-        Ok(self.spawn_start(store, options))
+        Ok(self.spawn_start(store, request))
     }
 
     /// Starts a real in-process sync task and returns its id plus a progress
@@ -187,7 +225,7 @@ impl JobRegistry {
     fn spawn_start(
         &self,
         store: &Store,
-        options: SyncOptions,
+        request: ValidatedSyncRequest,
     ) -> (JobId, mpsc::Receiver<JobEvent>) {
         let job_id = new_job_id();
         let (tx, rx) = mpsc::channel(128);
@@ -209,27 +247,23 @@ impl JobRegistry {
         self.inner.insert(job_id.clone(), Arc::clone(&state));
 
         let store = store.clone();
-        let options = options.clone();
+        let request = request.clone();
         let job_id_for_task = job_id.clone();
-        let terminal_hooks = self.terminal_hooks.clone();
+        let ctx = JobContext {
+            hooks: self.terminal_hooks.clone(),
+            jobs: Arc::clone(&self.inner),
+            order: Arc::clone(&self.terminal_order),
+            executor: Arc::clone(&self.executor),
+        };
         tokio::spawn(async move {
-            run_job(
-                job_id_for_task,
-                store,
-                options,
-                cancel,
-                tx,
-                state,
-                terminal_hooks,
-            )
-            .await;
+            run_job(job_id_for_task, store, request, cancel, tx, state, ctx).await;
         });
         (job_id, rx)
     }
 
     fn insert_rejected_snapshot(
         &self,
-        rejected: JobStartRejected,
+        rejected: JobStartError,
     ) -> (JobId, mpsc::Receiver<JobEvent>) {
         let job_id = new_job_id();
         let (_tx, rx) = mpsc::channel(1);
@@ -249,6 +283,7 @@ impl JobRegistry {
         };
         self.inner
             .insert(job_id.clone(), Arc::new(Mutex::new(state)));
+        note_terminal_job(&job_id, &self.inner, &self.terminal_order);
         (job_id, rx)
     }
 
@@ -276,8 +311,8 @@ impl JobRegistry {
         true
     }
 
-    /// Returns recent snapshots. Terminal jobs beyond `limit` may be evicted;
-    /// running jobs are always retained.
+    /// Returns recent snapshots sorted newest-first.
+    /// Terminal jobs are evicted eagerly on completion; this method is read-only.
     pub fn list_recent(&self, limit: usize) -> Vec<JobSnapshot> {
         let mut snapshots = self
             .inner
@@ -289,25 +324,8 @@ impl JobRegistry {
                 .cmp(&a.started_at)
                 .then(b.job_id.cmp(&a.job_id))
         });
-        if limit > 0 {
-            let terminal_ids = snapshots
-                .iter()
-                .filter(|snapshot| {
-                    snapshot.status != JobStatus::Running
-                        && snapshot.status != JobStatus::Cancelling
-                        && snapshots
-                            .iter()
-                            .filter(|item| item.status != JobStatus::Running)
-                            .filter(|item| item.status != JobStatus::Cancelling)
-                            .position(|item| item.job_id == snapshot.job_id)
-                            .is_some_and(|index| index >= limit)
-                })
-                .map(|snapshot| snapshot.job_id.clone())
-                .collect::<Vec<_>>();
-            for id in terminal_ids {
-                self.inner.remove(&id);
-            }
-            snapshots.retain(|snapshot| self.inner.contains_key(&snapshot.job_id));
+        if limit > 0 && snapshots.len() > limit {
+            snapshots.truncate(limit);
         }
         snapshots
     }
@@ -324,23 +342,38 @@ impl JobRegistry {
     }
 }
 
+/// Per-job context: retirement handles and the executor that does the sync work.
+#[derive(Clone)]
+struct JobContext {
+    hooks: TerminalHooks,
+    jobs: Arc<DashMap<JobId, Arc<Mutex<JobState>>>>,
+    order: Arc<Mutex<VecDeque<JobId>>>,
+    executor: Arc<dyn crate::sync::executor::SyncExecutor>,
+}
+
+impl JobContext {
+    /// Fires terminal hooks, then evicts the oldest terminal jobs beyond
+    /// [`MAX_TERMINAL_JOBS`].
+    fn retire(&self, job_id: &JobId) {
+        note_terminal_job(job_id, &self.jobs, &self.order);
+        self.hooks.fire();
+    }
+}
+
 async fn run_job(
     job_id: JobId,
     store: Store,
-    options: SyncOptions,
+    request: ValidatedSyncRequest,
     cancel: CancellationToken,
     outbound: mpsc::Sender<JobEvent>,
     state: Arc<Mutex<JobState>>,
-    terminal_hooks: TerminalHooks,
+    ctx: JobContext,
 ) {
     let sync_options = SyncRunOptions {
-        rebuild: options.rebuild,
-        source: options
-            .source
-            .as_deref()
-            .and_then(crate::models::SourceKind::parse_id),
-        recent_days: options.recent_days,
-        parallelism: options.parallelism,
+        rebuild: request.rebuild(),
+        source: request.source_kind(),
+        recent_days: request.recent_days(),
+        parallelism: Some(request.parallelism()),
         provider_map: None,
         json_events: false,
         allow_lossy_rebuild: false,
@@ -370,6 +403,7 @@ async fn run_job(
     let lock_started = Instant::now();
     let result = match acquire_worker_lock_for_job(&store, Duration::from_secs(30), &cancel).await {
         Ok(Some(lock)) => {
+            let fenced_store = lock.fenced_store();
             let heartbeat = lock.start_default_heartbeat();
             let lock_wait_ms = lock_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
             let _ = internal_tx
@@ -377,15 +411,21 @@ async fn run_job(
                     wait_ms: lock_wait_ms,
                 })
                 .await;
-            let result = crate::commands::sync::run_once_with_cancel(
-                &app,
-                &store,
-                lock_wait_ms,
-                &sync_options,
-                Some(&mut internal_tx),
-                &cancel,
-            )
-            .await;
+            let result = match fenced_store.bootstrap() {
+                Ok(()) => {
+                    ctx.executor
+                        .run_once(
+                            &app,
+                            &fenced_store,
+                            lock_wait_ms,
+                            &sync_options,
+                            Some(&mut internal_tx),
+                            &cancel,
+                        )
+                        .await
+                }
+                Err(err) => Err(anyhow::Error::new(err)),
+            };
             drop(heartbeat);
             drop(lock);
             result
@@ -398,7 +438,7 @@ async fn run_job(
                 Some("cancellation requested".to_string()),
                 None,
             );
-            terminal_hooks.fire();
+            ctx.retire(&job_id);
             drop(internal_tx);
             let _ = event_forwarder.await;
             return;
@@ -442,7 +482,7 @@ async fn run_job(
             finish_state(&state, JobStatus::Failed, None, Some(message));
         }
     }
-    terminal_hooks.fire();
+    ctx.retire(&job_id);
     drop(internal_tx);
     let _ = event_forwarder.await;
 }
@@ -501,6 +541,25 @@ fn summary_text(summary: &SyncSummary) -> String {
     )
 }
 
+/// Records a terminal job in the bounded deque and evicts the oldest entries
+/// that exceed `MAX_TERMINAL_JOBS`. O(1) amortized — one push, at most one pop
+/// and one DashMap remove per call.
+fn note_terminal_job(
+    job_id: &JobId,
+    inner: &Arc<DashMap<JobId, Arc<Mutex<JobState>>>>,
+    terminal_order: &Arc<Mutex<VecDeque<JobId>>>,
+) {
+    let Ok(mut order) = terminal_order.lock() else {
+        return;
+    };
+    order.push_back(job_id.clone());
+    while order.len() > MAX_TERMINAL_JOBS {
+        if let Some(evicted) = order.pop_front() {
+            inner.remove(&evicted);
+        }
+    }
+}
+
 fn new_job_id() -> JobId {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let sequence = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -512,16 +571,169 @@ fn _keep_sync_summary_public_contract(_: Option<SyncSummary>) {}
 
 #[cfg(test)]
 mod tests {
+    use anyhow::Context as _;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     use super::*;
     use crate::paths::AppPaths;
     use tempfile::TempDir;
+
+    struct FencedAssertionExecutor;
+
+    struct IdleExecutor;
+
+    struct DrainAwareExecutor {
+        worker_started: Arc<AtomicBool>,
+        worker_drained: Arc<AtomicBool>,
+    }
+
+    impl crate::sync::executor::SyncExecutor for IdleExecutor {
+        fn run_once<'a>(
+            &'a self,
+            _app: &'a AppContext,
+            _store: &'a Store,
+            _lock_wait_ms: u64,
+            _options: &'a SyncRunOptions,
+            _sender: Option<&'a mut mpsc::Sender<SyncEvent>>,
+            cancel: &'a CancellationToken,
+        ) -> crate::sync::executor::BoxFuture<'a, anyhow::Result<SyncSummary>> {
+            Box::pin(async move {
+                cancel.cancelled().await;
+                Ok(SyncSummary {
+                    sources: Vec::new(),
+                    total_seen: 0,
+                    total_inserted: 0,
+                    stored_events: 0,
+                })
+            })
+        }
+    }
+
+    fn idle_registry() -> JobRegistry {
+        JobRegistry::new(Arc::new(IdleExecutor))
+    }
+
+    impl crate::sync::executor::SyncExecutor for DrainAwareExecutor {
+        fn run_once<'a>(
+            &'a self,
+            _app: &'a AppContext,
+            _store: &'a Store,
+            _lock_wait_ms: u64,
+            _options: &'a SyncRunOptions,
+            _sender: Option<&'a mut mpsc::Sender<SyncEvent>>,
+            cancel: &'a CancellationToken,
+        ) -> crate::sync::executor::BoxFuture<'a, anyhow::Result<SyncSummary>> {
+            let cancel = cancel.clone();
+            let worker_started = Arc::clone(&self.worker_started);
+            let worker_drained = Arc::clone(&self.worker_drained);
+            Box::pin(async move {
+                tokio::task::spawn_blocking(move || {
+                    worker_started.store(true, Ordering::Release);
+                    while !cancel.is_cancelled() {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                    worker_drained.store(true, Ordering::Release);
+                })
+                .await?;
+                Ok(SyncSummary {
+                    sources: Vec::new(),
+                    total_seen: 0,
+                    total_inserted: 0,
+                    stored_events: 0,
+                })
+            })
+        }
+    }
+
+    impl crate::sync::executor::SyncExecutor for FencedAssertionExecutor {
+        fn run_once<'a>(
+            &'a self,
+            _app: &'a AppContext,
+            store: &'a Store,
+            _lock_wait_ms: u64,
+            _options: &'a SyncRunOptions,
+            _sender: Option<&'a mut mpsc::Sender<SyncEvent>>,
+            _cancel: &'a CancellationToken,
+        ) -> crate::sync::executor::BoxFuture<'a, anyhow::Result<SyncSummary>> {
+            Box::pin(async move {
+                store
+                    .write_permit()
+                    .map_err(anyhow::Error::new)
+                    .context("JobRegistry executor received an unfenced Store")?;
+                Ok(SyncSummary {
+                    sources: Vec::new(),
+                    total_seen: 0,
+                    total_inserted: 0,
+                    stored_events: 0,
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn executor_receives_store_fenced_by_acquired_generation() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = AppPaths::with_root(temp.path().to_path_buf())?;
+        let store = Store::new(&paths)?;
+        let registry = JobRegistry::new(Arc::new(FencedAssertionExecutor));
+
+        let (job_id, _rx) = registry.start(&store, SyncOptions::default());
+        let completed = wait_for_status(
+            &registry,
+            &job_id,
+            JobStatus::Completed,
+            Duration::from_secs(2),
+        )
+        .await?;
+        assert!(completed.error.is_none());
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancellation_stays_cancelling_until_blocking_worker_drains() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = AppPaths::with_root(temp.path().to_path_buf())?;
+        let store = Store::new(&paths)?;
+        let worker_started = Arc::new(AtomicBool::new(false));
+        let worker_drained = Arc::new(AtomicBool::new(false));
+        let registry = JobRegistry::new(Arc::new(DrainAwareExecutor {
+            worker_started: Arc::clone(&worker_started),
+            worker_drained: Arc::clone(&worker_drained),
+        }));
+        let (job_id, _rx) = registry.start(&store, SyncOptions::default());
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !worker_started.load(Ordering::Acquire) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await?;
+        assert!(registry.cancel(&job_id));
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let draining = registry.snapshot(&job_id).expect("job snapshot");
+        assert_eq!(draining.status, JobStatus::Cancelling);
+        assert!(draining.finished_at.is_none());
+        assert!(!worker_drained.load(Ordering::Acquire));
+
+        let cancelled = wait_for_status(
+            &registry,
+            &job_id,
+            JobStatus::Cancelled,
+            Duration::from_secs(2),
+        )
+        .await?;
+        assert!(worker_drained.load(Ordering::Acquire));
+        assert!(cancelled.finished_at.is_some());
+        Ok(())
+    }
 
     #[tokio::test]
     async fn start_returns_running_snapshot() -> anyhow::Result<()> {
         let temp = TempDir::new()?;
         let paths = AppPaths::with_root(temp.path().to_path_buf())?;
         let store = Store::new(&paths)?;
-        let registry = JobRegistry::default();
+        let registry = idle_registry();
 
         let (job_id, rx) = registry.start(&store, SyncOptions::default());
         let snapshot = registry
@@ -542,7 +754,7 @@ mod tests {
         store.bootstrap()?;
         let blocker =
             store.acquire_worker_lock_with(Duration::from_secs(0), HolderKind::Library)?;
-        let registry = JobRegistry::default();
+        let registry = idle_registry();
 
         let (active_job_id, mut active_rx) = registry.try_start(
             &store,
@@ -562,7 +774,10 @@ mod tests {
                 },
             )
             .expect_err("second active job should be rejected");
-        assert_eq!(rejected.active_job_id, active_job_id);
+        assert!(matches!(
+            rejected,
+            JobStartError::Active(JobStartRejected { active_job_id: ref id }) if id == &active_job_id
+        ));
 
         for _ in 0..8 {
             let (rejected_id, rejected_rx) = registry.start(
@@ -612,7 +827,7 @@ mod tests {
         store.bootstrap()?;
         let blocker =
             store.acquire_worker_lock_with(Duration::from_secs(0), HolderKind::Library)?;
-        let registry = JobRegistry::default();
+        let registry = idle_registry();
 
         let (job_id, mut rx) = registry.try_start(
             &store,
@@ -668,6 +883,48 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn try_start_rejects_invalid_requests_without_creating_jobs() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = AppPaths::with_root(temp.path().to_path_buf())?;
+        let store = Store::new(&paths)?;
+        let registry = idle_registry();
+        let cases = [
+            (
+                SyncOptions {
+                    source: Some("not-a-source".to_string()),
+                    ..Default::default()
+                },
+                crate::sync::SyncRequestErrorCode::UnknownSource,
+            ),
+            (
+                SyncOptions {
+                    recent_days: Some(0),
+                    ..Default::default()
+                },
+                crate::sync::SyncRequestErrorCode::InvalidRecentDays,
+            ),
+            (
+                SyncOptions {
+                    parallelism: Some(crate::sync::MAX_SYNC_PARALLELISM + 1),
+                    ..Default::default()
+                },
+                crate::sync::SyncRequestErrorCode::InvalidParallelism,
+            ),
+        ];
+        for (options, code) in cases {
+            let error = registry
+                .try_start(&store, options)
+                .expect_err("invalid request must fail before spawning");
+            assert!(matches!(
+                error,
+                JobStartError::InvalidRequest(SyncRequestError { code: actual, .. }) if actual == code
+            ));
+            assert!(registry.list_recent(10).is_empty());
+        }
+        Ok(())
+    }
+
     async fn wait_for_lock_waiting(rx: &mut mpsc::Receiver<JobEvent>) -> anyhow::Result<()> {
         let found = tokio::time::timeout(Duration::from_secs(2), async {
             while let Some(event) = rx.recv().await {
@@ -703,6 +960,47 @@ mod tests {
                 );
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    #[test]
+    fn rejected_jobs_are_bounded_at_max_terminal_jobs() {
+        let registry = idle_registry();
+        // inject MAX_TERMINAL_JOBS + 50 rejected snapshots directly
+        let total = MAX_TERMINAL_JOBS + 50;
+        let mut ids = Vec::with_capacity(total);
+        for i in 0..total {
+            let job_id = format!("test-job-{i}");
+            let now = crate::util::now_utc();
+            let state = JobState {
+                snapshot: JobSnapshot {
+                    job_id: job_id.clone(),
+                    status: JobStatus::Failed,
+                    summary: None,
+                    last_event: None,
+                    error: Some("rejected".to_string()),
+                    started_at: now.clone(),
+                    finished_at: Some(now),
+                },
+                cancel: CancellationToken::new(),
+            };
+            registry
+                .inner
+                .insert(job_id.clone(), Arc::new(Mutex::new(state)));
+            note_terminal_job(&job_id, &registry.inner, &registry.terminal_order);
+            ids.push(job_id);
+        }
+        assert!(
+            registry.inner.len() <= MAX_TERMINAL_JOBS,
+            "registry should be bounded at {MAX_TERMINAL_JOBS}, got {}",
+            registry.inner.len()
+        );
+        // most recent jobs must still be queryable
+        for id in ids.iter().rev().take(MAX_TERMINAL_JOBS) {
+            assert!(
+                registry.snapshot(id).is_some(),
+                "recent job {id} should still be in registry"
+            );
         }
     }
 

@@ -1018,3 +1018,293 @@ Claude/Codex 以 planned replay 文件数显示 5Hz 解析进度，TTY 显示提
 ### Next Steps
 
 - None - task complete
+
+
+## Session 31: 完成 MSRV 与验证基线诚实化
+
+**Date**: 2026-07-26
+**Task**: 完成 MSRV 与验证基线诚实化
+**Branch**: `dev`
+
+### Summary
+
+将真实 MSRV 对齐为 Rust 1.95，统一本地与 CI Rust gate，修复 rolling log subprocess 测试和完整 JSONL fixture 基线。
+
+### Main Changes
+
+- Cargo.toml、GitHub Actions 与 CHANGELOG 统一声明 Rust 1.95
+- just ci 与 CI matrix 共用 scripts/ci-rust.py
+- 测试改用 rolling-log 公共读取接口并补充 subprocess spawn context
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6b67cfa` | (see git log) |
+
+### Testing
+
+- [OK] python scripts/ci-rust.py
+- [OK] cargo +1.95.0 check --locked --all-features（隔离 target）
+- [OK] just ci
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 继续 07-26-write-fencing-closure 子任务
+
+
+## Session 32: 恢复写入 fencing 与 bootstrap 排他性
+
+**Date**: 2026-07-26
+**Task**: 恢复写入 fencing 与 bootstrap 排他性
+**Branch**: `dev`
+
+### Summary
+
+完成 lease generation fencing、bootstrap 排他与只读初始化边界修复，并通过完整 CI。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1d81fd91062f1becbbcb6fcc1ae3b80d6b28675e` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 33: 完成 Windows integration 原子替换闭环
+
+**Date**: 2026-07-26
+**Task**: 完成 Windows integration 原子替换闭环
+**Branch**: `dev`
+
+### Summary
+
+使用 ReplaceFileW 与 sibling recovery 协议消除 Windows 先删后替换窗口，并在 action 记录失败时恢复外部配置。
+
+### Main Changes
+
+- 统一 Claude、Codex、OpenCode、Antigravity 的原子写入与记录协议
+- 新增 integration file contract、failpoint 与临时 HOME 回归测试
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `078006e990fb48bb5ba031ab4c9f565f55f5c82f` | (see git log) |
+
+### Testing
+
+- [OK] integration atomic 8/8；local_flow 10/10
+- [OK] python scripts/ci-rust.py；just ci；task.py validate
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 34: 完成 R6 有界 JSONL 与协作取消
+
+**Date**: 2026-07-26
+**Task**: 完成 R6 有界 JSONL 与协作取消
+**Branch**: `dev`
+
+### Summary
+
+实现共享 4 MiB JSONL reader、隐私安全 parse issue 持久化、durable cursor 与 blocking worker drain；完成四 parser 迁移并通过 ci-rust.py 和 just ci。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d258d33` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 35: 完成同步 Job 契约闭环
+
+**Date**: 2026-07-26
+**Task**: 完成同步 Job 契约闭环
+**Branch**: `dev`
+
+### Summary
+
+统一 CLI、Web 与公开 Rust API 的 typed validation，兑现 recent_days 事件窗口与 RecentReady 时序，并保持全历史 cursor 可恢复。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d23e94f8ea87071d9c688be0c35042effa1d3c2d` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 36: 完成不可变 self-update 闭环
+
+**Date**: 2026-07-26
+**Task**: 完成不可变 self-update 闭环
+**Branch**: `dev`
+
+### Summary
+
+稳定渠道解析最高规范 release tag 并锁定不可变 commit；确认后重验目标，dev 保留可变分支警告。
+
+### Main Changes
+
+- stable 安装改用已展示的 --rev commit，拒绝移动、冲突或无效 refs
+- 同步 self-update contract、README 与中英文安装指南
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `719845d773474b5ce8af08a7a7245548209afb0a` | (see git log) |
+
+### Testing
+
+- [OK] 14 个 update focused tests、task.py validate、python scripts/ci-rust.py、just ci、git diff --check 全部通过
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 继续 07-26-public-read-security-boundary
+
+
+## Session 37: 完成 public 只读安全边界闭环
+
+**Date**: 2026-07-26
+**Task**: 完成 public 只读安全边界闭环
+**Branch**: `dev`
+
+### Summary
+
+Public listener 改用最小读路由与脱敏聚合 DTO，并忽略 project selector；loopback 全功能保持不变。
+
+### Main Changes
+
+- 拆分 public/loopback router，public 仅保留 shell、aggregate dashboard 与最小 health。
+- 禁止 public project filter 推断，并覆盖路径、日志、诊断、job、SQL 和内部错误泄露。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6206f5cec193ff15929edcc79a9ee1e40ae828ef` | (see git log) |
+
+### Testing
+
+- [OK] public security 6/6；web 88/88；python scripts/ci-rust.py；just ci；task.py validate；git diff --check。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 继续 07-26-runtime-log-bounds。
+
+
+## Session 38: 完成运行期日志有界化与丢弃观测
+
+**Date**: 2026-07-27
+**Task**: 完成运行期日志有界化与丢弃观测
+**Branch**: `dev`
+
+### Summary
+
+实现进程内日志分片轮转、持续 retention、丢弃与维护计数，以及跨分片有界 tail。
+
+### Main Changes
+
+- 新增 10 MiB 分片、30 MiB/7 文件/7 天保留策略，保持 NDJSON 记录完整并处理 Windows 占用重试。
+- 向 logs、diagnostics 与 doctor 暴露 retained、dropped 和 maintenance 状态，并同步双语文档与 backend spec。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7db9b56457f1aa9b025cc83926bdf86b311fb8e4` | (see git log) |
+
+### Testing
+
+- [OK] logging 15/15；report_commands 22/22；M2 NDJSON 1/1；CI=1 python scripts/ci-rust.py；CI=1 just ci。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 推进 07-26-arch-dependency-enforcement。
+
+
+## Session 39: 完成 ARCH-002 依赖边界强制执行
+
+**Date**: 2026-07-27
+**Task**: 完成 ARCH-002 依赖边界强制执行
+**Branch**: `dev`
+
+### Summary
+
+移除 sync 层对 commands adapter 的反向构造依赖，并以可解析别名和相对路径的 Rust AST gate 替换脆弱 grep。
+
+### Main Changes
+
+- Web 与 TUI composition root 显式注入 CommandSyncExecutor，同时保留 commands 层拥有的兼容 Default 实现。
+- 新增 architecture_dependencies 测试与六类违规 fixtures，并将 GitHub Actions ARCH-002 gate 接入该测试。
+- 补充 CI code-spec，记录 AST 依赖边界契约。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0f085ef8e78330214688cc9e2c01b82197b2d766` | (see git log) |
+
+### Testing
+
+- [OK] architecture 2/2；JobRegistry 8/8；M2 15/15；Rust 1.95 MSRV 通过。
+- [OK] CI=1 python scripts/ci-rust.py 与 CI=1 just ci 通过。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 复核父任务 R1-R9，运行最终集成门并完成父任务归档与 journal。
+
+
+## Session 40: 审计整改二次闭环
+
+**Date**: 2026-07-27
+**Task**: 审计整改二次闭环
+**Branch**: `dev`
+
+### Summary
+
+完成九个审计整改 child 的 R1-R9 集成复审，加固双持有者 SQLite fencing 测试，验证完整 CI，并归档父任务。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1540e3effeaedec9144ced34ec5ffd4b901a17cc` | (see git log) |
+
+### Status
+
+[OK] **Completed**

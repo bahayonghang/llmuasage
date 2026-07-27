@@ -12,24 +12,54 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  ci:
-    name: Rust and docs
+  rust:
+    name: Rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install Rust toolchain
+        # channel, components, and targets read from rust-toolchain.toml
+        uses: dtolnay/rust-toolchain@b3b07f5b19b9a3af61f1fe79b6a83a40fdc6c39c
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@9bdad043e88c75890e36ad3bbc8d27f0090dd609 # v2.7.8
+
+      - name: Rust quality gate
+        run: python scripts/ci-rust.py
+
+  msrv:
+    name: MSRV (1.95)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install Rust 1.95
+        uses: dtolnay/rust-toolchain@b3b07f5b19b9a3af61f1fe79b6a83a40fdc6c39c
+        with:
+          toolchain: "1.95"
+
+      - name: Check MSRV compilation
+        run: cargo check --locked --all-features
+
+  docs-and-js:
+    name: Docs and dashboard JS
     runs-on: windows-latest
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
           cache: npm
@@ -61,27 +91,27 @@ jobs:
           if (-not (Test-Path "docs/package-lock.json")) {
             throw "docs/package-lock.json is required for reproducible docs installs"
           }
-
-      - name: Rust format
-        run: cargo fmt --check
-
-      - name: Rust clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
-
-      - name: Rust tests
-        run: cargo test --all-features -- --test-threads=1
-
-      - name: Rust docs
-        shell: pwsh
-        run: |
-          $env:RUSTDOCFLAGS = "-D warnings"
-          cargo doc --no-deps
+          # Scan for stale historical version patterns like 0.6.x / 0.7.x
+          $stalePattern = '0\.[0-9]+\.x'
+          $scanFiles = Get-ChildItem -Recurse -Include "*.md","*.rs","*.toml","*.yml","*.yaml" |
+            Where-Object { $_.FullName -notmatch '(node_modules|target|\.git|\.vitepress)' }
+          foreach ($f in $scanFiles) {
+            $text = Get-Content -Raw $f.FullName -ErrorAction SilentlyContinue
+            if ($text -match $stalePattern) {
+              throw "$($f.FullName) contains stale version reference matching '$stalePattern'"
+            }
+          }
 
       - name: Check dashboard benchmark script
         run: node --check scripts/benchmark-dashboard-range.mjs
 
-      - name: Dashboard JS tests
-        run: node --test scripts/tests/dashboard-fetch.test.mjs
+      - name: Dashboard JS tests (all 4 suites)
+        run: |
+          node --test `
+            scripts/tests/dashboard-fetch.test.mjs `
+            scripts/tests/dashboard-bootstrap-watchdog.test.mjs `
+            scripts/tests/dashboard-load-state.test.mjs `
+            scripts/tests/dashboard-render-lifecycle.test.mjs
 
       - name: Install docs dependencies
         run: npm ci --prefix docs
@@ -89,19 +119,56 @@ jobs:
       - name: Build docs
         run: npm --prefix docs run docs:build
 
+  arch-gate:
+    name: Architecture checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@b3b07f5b19b9a3af61f1fe79b6a83a40fdc6c39c
+
+      - name: ARCH-002 — sync layer must not depend on commands
+        run: cargo test --locked --all-features --test architecture_dependencies
+
+      - name: Module size report (MAINT-001 tracking)
+        # Reports oversized files; does not hard-fail until splits are complete.
+        shell: bash
+        run: |
+          echo "=== Module line counts (target: <800 excl. tests) ==="
+          for f in src/query/mod.rs src/web/mod.rs src/query/explorer.rs src/store/sync_writer.rs; do
+            lines=$(wc -l < "$f")
+            flag=""
+            if [ "$lines" -gt 800 ]; then flag=" ← over budget"; fi
+            echo "$lines  $f$flag"
+          done
+
+      - name: Install cargo-semver-checks
+        uses: taiki-e/install-action@5e1cf6b7a4b10c7e4de24e784cc95e9ba58c5f3a # v2
+        with:
+          tool: cargo-semver-checks
+
+      - name: API-002 semver check (against published crate)
+        # Runs only on pushes to main so PR builds are not blocked while the
+        # public API is still being stabilised.
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: cargo semver-checks --locked
+
   security:
     name: Security audit
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b3b07f5b19b9a3af61f1fe79b6a83a40fdc6c39c
 
       - name: Install cargo-audit
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@5e1cf6b7a4b10c7e4de24e784cc95e9ba58c5f3a # v2
         with:
           tool: cargo-audit
 

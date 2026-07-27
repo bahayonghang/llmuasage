@@ -13,11 +13,12 @@ pub async fn run(
     source: Option<SourceKind>,
 ) -> Result<()> {
     let store = Store::new(&app.paths)?;
-    store.bootstrap()?;
 
     if let Some(file_path) = forget_file {
+        store.bootstrap()?;
         return run_forget_file(&store, file_path, source);
     }
+    store.require_initialized()?;
 
     /*
      * ========================================================================

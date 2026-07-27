@@ -207,9 +207,9 @@ fn collect_query_plan_evidence(
     filter: &QueryFilter,
 ) -> Result<BTreeMap<String, QueryPlanEvidence>> {
     let sql_filter = filter.event_filter(None);
-    let modifier = filter.local_time_modifier();
+    let local_date = filter.local_date_expr("event_at");
     let sql = format!(
-        "SELECT source, event_key, session_id, source_path_hash, date(event_at, '{modifier}'), input_tokens, cache_creation_tokens, cache_read_tokens, total_tokens, cost_with_cache_usd FROM usage_event {}",
+        "SELECT source, event_key, session_id, source_path_hash, {local_date}, input_tokens, cache_creation_tokens, cache_read_tokens, total_tokens, cost_with_cache_usd FROM usage_event {}",
         sql_filter.where_sql()
     );
     let mut plan_stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
@@ -249,7 +249,7 @@ struct HomeOverviewEvent {
 
 fn load_event_rows(conn: &Connection, filter: &QueryFilter) -> Result<Vec<HomeOverviewEvent>> {
     let sql_filter = filter.event_filter(None);
-    let modifier = filter.local_time_modifier();
+    let local_date = filter.local_date_expr("event_at");
     let sql = format!(
         r#"
         SELECT
@@ -257,7 +257,7 @@ fn load_event_rows(conn: &Connection, filter: &QueryFilter) -> Result<Vec<HomeOv
             event_key,
             session_id,
             source_path_hash,
-            date(event_at, '{modifier}') AS local_date,
+            {local_date} AS local_date,
             input_tokens,
             cache_creation_tokens,
             cache_read_tokens,

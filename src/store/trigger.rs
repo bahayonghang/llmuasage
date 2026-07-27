@@ -23,9 +23,21 @@ impl<'a> TriggerStore<'a> {
         signal_at: &str,
     ) -> Result<()> {
         let now = now_utc();
-        let conn = self.store.open_connection()?;
-        conn.execute(
-            r#"
+        self.store.control_plane_transaction(|tx| {
+            tx.execute_batch(
+                r#"
+                CREATE TABLE IF NOT EXISTS trigger_state (
+                    source TEXT PRIMARY KEY,
+                    last_signal_at TEXT NOT NULL,
+                    trigger TEXT NOT NULL,
+                    last_worker_started_at TEXT,
+                    last_worker_finished_at TEXT,
+                    updated_at TEXT NOT NULL
+                );
+                "#,
+            )?;
+            tx.execute(
+                r#"
             INSERT INTO trigger_state(source, last_signal_at, trigger, updated_at)
             VALUES (?1, ?2, ?3, ?4)
             ON CONFLICT(source) DO UPDATE SET
@@ -33,21 +45,25 @@ impl<'a> TriggerStore<'a> {
                 trigger = excluded.trigger,
                 updated_at = excluded.updated_at
             "#,
-            params![source.as_str(), signal_at, trigger, now],
-        )?;
+                params![source.as_str(), signal_at, trigger, now],
+            )?;
+            Ok(())
+        })?;
         Ok(())
     }
 
     pub fn mark_trigger_worker_started(&self, source: SourceKind, started_at: &str) -> Result<()> {
-        let conn = self.store.open_connection()?;
-        conn.execute(
-            r#"
+        self.store.write_transaction(|tx| {
+            tx.execute(
+                r#"
             UPDATE trigger_state
             SET last_worker_started_at = ?2, updated_at = ?2
             WHERE source = ?1
             "#,
-            params![source.as_str(), started_at],
-        )?;
+                params![source.as_str(), started_at],
+            )?;
+            Ok(())
+        })?;
         Ok(())
     }
 
@@ -56,15 +72,17 @@ impl<'a> TriggerStore<'a> {
         source: SourceKind,
         finished_at: &str,
     ) -> Result<()> {
-        let conn = self.store.open_connection()?;
-        conn.execute(
-            r#"
+        self.store.write_transaction(|tx| {
+            tx.execute(
+                r#"
             UPDATE trigger_state
             SET last_worker_finished_at = ?2, updated_at = ?2
             WHERE source = ?1
             "#,
-            params![source.as_str(), finished_at],
-        )?;
+                params![source.as_str(), finished_at],
+            )?;
+            Ok(())
+        })?;
         Ok(())
     }
 

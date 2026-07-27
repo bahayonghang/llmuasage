@@ -74,7 +74,12 @@ pub enum Commands {
     Antigravity(focused::SourceReportArgs),
     /// Print a single statusline-friendly usage summary.
     Statusline(report_args::StatuslineArgs),
-    Init,
+    Init {
+        /// Exit 0 even when some integrations fail to install. Without this,
+        /// a partial failure exits non-zero so automation can detect it.
+        #[arg(long)]
+        best_effort: bool,
+    },
     Sync {
         /// Rebuild usage rows and buckets from local source files/DBs.
         #[arg(long)]
@@ -84,12 +89,15 @@ pub enum Commands {
         #[arg(long, requires = "rebuild")]
         allow_lossy_rebuild: bool,
         /// Restrict sync to one local source.
-        #[arg(long, value_enum)]
-        source: Option<SourceKind>,
-        /// Restrict import to a recent-day window. The current parser surface
-        /// still scans existing cursors, but this enables RecentReady signalling.
+        #[arg(long, value_name = "SOURCE")]
+        source: Option<String>,
+        /// Import only events inside the latest N-day UTC window (1..=3650).
+        /// Bounded imports do not advance full-history cursors.
         #[arg(long)]
         recent_days: Option<u32>,
+        /// Maximum parser worker concurrency (1..=32).
+        #[arg(long)]
+        parallelism: Option<usize>,
         /// CCR provider activation JSONL used to attribute relay provider labels.
         #[arg(long, value_name = "PATH")]
         provider_map: Option<PathBuf>,
@@ -291,22 +299,29 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
             focused::run(&app, SourceKind::Antigravity, args.command).await
         }
         Some(Commands::Statusline(args)) => statusline::run(&app, args).await,
-        Some(Commands::Init) => init::run(&app).await,
+        Some(Commands::Init { best_effort }) => init::run(&app, best_effort).await,
         Some(Commands::Sync {
             rebuild,
             allow_lossy_rebuild,
             source,
             recent_days,
+            parallelism,
             provider_map,
             json_events,
         }) => {
+            let request = crate::sync::ValidatedSyncRequest::new(crate::sync::SyncRequestInput {
+                rebuild,
+                source,
+                recent_days,
+                parallelism,
+            })?;
             sync::run_with_options(
                 &app,
                 sync::SyncRunOptions {
-                    rebuild,
-                    source,
-                    recent_days,
-                    parallelism: None,
+                    rebuild: request.rebuild(),
+                    source: request.source_kind(),
+                    recent_days: request.recent_days(),
+                    parallelism: Some(request.parallelism()),
                     provider_map,
                     json_events,
                     allow_lossy_rebuild,
@@ -368,19 +383,27 @@ mod tests {
     use super::{Cli, Commands};
 
     #[test]
-    fn source_filter_accepts_antigravity_and_rejects_gemini() {
+    fn source_filter_parses_transport_text_and_shared_validator_rejects_unknown() {
         let cli = Cli::try_parse_from(["llmusage", "sync", "--source", "antigravity"])
             .expect("antigravity should be accepted");
         match cli.command {
             Some(Commands::Sync { source, .. }) => {
-                assert_eq!(source.map(|value| value.as_str()), Some("antigravity"));
+                assert_eq!(source.as_deref(), Some("antigravity"));
             }
             other => panic!("unexpected command: {other:?}"),
         }
 
-        let err = Cli::try_parse_from(["llmusage", "sync", "--source", "gemini"])
-            .expect_err("gemini source id should be rejected");
-        assert!(err.to_string().contains("antigravity"));
+        let cli = Cli::try_parse_from(["llmusage", "sync", "--source", "gemini"])
+            .expect("transport layer accepts text before shared validation");
+        let Some(Commands::Sync { source, .. }) = cli.command else {
+            panic!("unexpected command")
+        };
+        let error = crate::sync::ValidatedSyncRequest::new(crate::sync::SyncRequestInput {
+            source,
+            ..Default::default()
+        })
+        .expect_err("unknown source must fail shared validation");
+        assert_eq!(error.code.as_str(), "unknown_source");
     }
 
     #[test]

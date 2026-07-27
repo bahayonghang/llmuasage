@@ -28,9 +28,16 @@ impl<'a> IntegrationStateStore<'a> {
         backup_path: Option<&Path>,
         details: Option<&Value>,
     ) -> Result<()> {
-        let conn = self.store.open_connection()?;
-        conn.execute(
-            r#"
+        let details_json = details
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|source| LlmusageError::Parse {
+                context: "integration details",
+                source,
+            })?;
+        self.store.write_transaction(|tx| {
+            tx.execute(
+                r#"
             INSERT INTO integration_install(
                 source, install_type, status, config_path, backup_path, details_json, updated_at
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
@@ -42,22 +49,18 @@ impl<'a> IntegrationStateStore<'a> {
                 details_json = excluded.details_json,
                 updated_at = excluded.updated_at
             "#,
-            params![
-                source.as_str(),
-                install_type,
-                status,
-                config_path.map(|path| path.to_string_lossy().to_string()),
-                backup_path.map(|path| path.to_string_lossy().to_string()),
-                details
-                    .map(serde_json::to_string)
-                    .transpose()
-                    .map_err(|source| LlmusageError::Parse {
-                        context: "integration details",
-                        source,
-                    })?,
-                now_utc(),
-            ],
-        )?;
+                params![
+                    source.as_str(),
+                    install_type,
+                    status,
+                    config_path.map(|path| path.to_string_lossy().to_string()),
+                    backup_path.map(|path| path.to_string_lossy().to_string()),
+                    details_json,
+                    now_utc(),
+                ],
+            )?;
+            Ok(())
+        })?;
         Ok(())
     }
 

@@ -2,26 +2,29 @@ use std::{
     collections::{HashMap, HashSet},
     fs::File,
     future::Future,
-    io::{BufRead, BufReader, Seek, SeekFrom},
     path::{Path, PathBuf},
     pin::Pin,
     time::Instant,
 };
 
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use serde_json::Value;
 use tokio::task;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::{
-    models::{SessionInfo, SourceKind, UsageEvent, UsageTokens, UsageToolCall, UsageTurn},
+    models::{
+        ParseIssues, SessionInfo, SourceKind, UsageEvent, UsageTokens, UsageToolCall, UsageTurn,
+    },
     parsers::{
         ProgressSink, SourceParser, SourceSyncStats, SyncEvent,
         behavior::{extract_claude_tools, tool_calls_from_evidence, turn_from_tools},
         file_progress::{FileProgress, FileProgressCounter},
         file_state::{
-            CandidateFile, FileReplayMode, decide_file_replay, finalize_cursor, should_rescan_file,
+            BoundedJsonlReader, CandidateFile, FileReplayMode, JsonlReadStatus,
+            JsonlRecordDisposition, decide_file_replay, finalize_cursor, should_rescan_file,
         },
         source_files,
     },
@@ -47,6 +50,7 @@ struct ClaudeShardOutput {
     events_replayed: usize,
     bytes_scanned: u64,
     seen_file_paths: Vec<String>,
+    parse_issues: ParseIssues,
 }
 
 #[derive(Debug)]
@@ -55,6 +59,8 @@ struct ClaudeParseResult {
     events: Vec<ClaudeEventCandidate>,
     turns: Vec<UsageTurn>,
     tool_calls: Vec<UsageToolCall>,
+    parse_issues: ParseIssues,
+    cancelled: bool,
 }
 
 #[derive(Debug)]
@@ -80,10 +86,18 @@ impl SourceParser for ClaudeParser {
         store: &'a Store,
         writer: &'a mut SyncRunWriter,
         parallelism: usize,
+        recent_cutoff: Option<DateTime<Utc>>,
         cancel: &'a CancellationToken,
         progress: Option<ProgressSink<'a>>,
     ) -> Pin<Box<dyn Future<Output = Result<SourceSyncStats>> + Send + 'a>> {
-        Box::pin(sync_claude(store, writer, parallelism, cancel, progress))
+        Box::pin(sync_claude(
+            store,
+            writer,
+            parallelism,
+            recent_cutoff,
+            cancel,
+            progress,
+        ))
     }
 }
 
@@ -91,6 +105,7 @@ async fn sync_claude(
     store: &Store,
     writer: &mut SyncRunWriter,
     parallelism: usize,
+    recent_cutoff: Option<DateTime<Utc>>,
     cancel: &CancellationToken,
     mut progress: Option<ProgressSink<'_>>,
 ) -> Result<SourceSyncStats> {
@@ -144,6 +159,7 @@ async fn sync_claude(
     let mut inserted = 0usize;
     let mut write_ms = 0u64;
     let mut files_scanned = 0usize;
+    let mut parse_issues = ParseIssues::default();
     let mut plans = projects
         .into_values()
         .filter(|files| files.iter().any(|(_, _, changed)| *changed))
@@ -188,43 +204,56 @@ async fn sync_claude(
         for plan in batch {
             let plan = plan.clone();
             let counter = file_progress_counter.clone();
+            let task_cancel = cancel.clone();
             tasks.push(task::spawn_blocking(move || {
-                parse_claude_shard(plan, counter)
+                parse_claude_shard(plan, counter, task_cancel)
             }));
         }
 
+        let batch_outputs = file_progress
+            .wait_for_all(tasks, |files_scanned| {
+                emit_progress(
+                    &mut progress,
+                    SyncEvent::Progress {
+                        source: SourceKind::Claude,
+                        files_scanned,
+                        records_imported: inserted as u64,
+                        current_file: None,
+                    },
+                );
+            })
+            .await?;
+        if cancel.is_cancelled() {
+            break;
+        }
+
         let mut combined = SyncShard::new(SourceKind::Claude);
-        let mut batch_cancelled = false;
-        for task in tasks {
-            if cancel.is_cancelled() {
-                batch_cancelled = true;
-                break;
+        for mut shard in batch_outputs {
+            if let Some(cutoff) = recent_cutoff.as_ref() {
+                shard.events.retain(|event| {
+                    crate::parsers::timestamp_in_recent_window(&event.event_at, Some(cutoff))
+                });
+                shard.turns.retain(|turn| {
+                    crate::parsers::timestamp_in_recent_window(&turn.started_at, Some(cutoff))
+                });
+                shard.tool_calls.retain(|call| {
+                    crate::parsers::timestamp_in_recent_window(&call.occurred_at, Some(cutoff))
+                });
+                shard.events_seen = shard.events.len();
+                shard.events_replayed = shard.events.len();
+                shard.cursors.clear();
+                shard.reset_path_hashes.clear();
             }
-            let shard = file_progress
-                .wait_for(task, |files_scanned| {
-                    emit_progress(
-                        &mut progress,
-                        SyncEvent::Progress {
-                            source: SourceKind::Claude,
-                            files_scanned,
-                            records_imported: inserted as u64,
-                            current_file: None,
-                        },
-                    );
-                })
-                .await??;
             events_seen += shard.events_seen;
             events_replayed += shard.events_replayed;
             bytes_scanned += shard.bytes_scanned;
+            parse_issues.merge(shard.parse_issues);
             combined.reset_path_hashes.extend(shard.reset_path_hashes);
             combined.events.extend(shard.events);
             combined.cursors.extend(shard.cursors);
             combined.seen_file_paths.extend(shard.seen_file_paths);
             combined.turns.extend(shard.turns);
             combined.tool_calls.extend(shard.tool_calls);
-        }
-        if batch_cancelled {
-            break;
         }
 
         let completed_files = file_progress.boundary_snapshot();
@@ -267,6 +296,7 @@ async fn sync_claude(
         events_inserted: inserted,
         write_ms,
         last_error: inventory_error,
+        parse_issues,
         ..SourceSyncStats::default()
     };
     let total_elapsed = parse_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
@@ -279,6 +309,8 @@ async fn sync_claude(
         skipped_files = stats.skipped_files,
         events_seen = stats.events_seen,
         bytes_scanned = stats.bytes_scanned,
+        malformed_lines = stats.parse_issues.malformed_lines,
+        oversized_lines = stats.parse_issues.oversized_lines,
         "完成 Claude 项目真源解析"
     );
     Ok(stats)
@@ -303,6 +335,7 @@ fn emit_progress(sink: &mut Option<ProgressSink<'_>>, event: SyncEvent) {
 fn parse_claude_shard(
     plan: ClaudeShardPlan,
     progress: FileProgressCounter,
+    cancel: CancellationToken,
 ) -> Result<ClaudeShardOutput> {
     let mut resolver = ProjectResolver::default();
     let replay_path_hashes = plan
@@ -320,10 +353,14 @@ fn parse_claude_shard(
         events_replayed: 0,
         bytes_scanned: 0,
         seen_file_paths: Vec::new(),
+        parse_issues: ParseIssues::default(),
     };
 
     let mut candidates = Vec::new();
     for candidate in plan.files {
+        if cancel.is_cancelled() {
+            break;
+        }
         let existing = candidate.existing.clone();
         let decision = decide_file_replay(candidate)?;
         output
@@ -338,7 +375,12 @@ fn parse_claude_shard(
             &decision.snapshot.file_fingerprint,
             decision.start_offset,
             project,
+            &cancel,
         )?;
+        output.parse_issues.merge(parsed.parse_issues);
+        if parsed.cancelled {
+            break;
+        }
 
         output.bytes_scanned += decision
             .snapshot
@@ -374,6 +416,7 @@ fn parse_project_file(
     file_fingerprint: &str,
     start_offset: u64,
     project: Option<crate::models::ProjectInfo>,
+    cancel: &CancellationToken,
 ) -> Result<ClaudeParseResult> {
     let file = File::open(file_path)?;
     let file_len = file.metadata()?.len();
@@ -383,13 +426,13 @@ fn parse_project_file(
             events: Vec::new(),
             turns: Vec::new(),
             tool_calls: Vec::new(),
+            parse_issues: ParseIssues::default(),
+            cancelled: cancel.is_cancelled(),
         });
     }
 
-    let mut reader = BufReader::new(file);
-    reader.seek(SeekFrom::Start(start_offset))?;
+    let mut reader = BoundedJsonlReader::new(file, start_offset)?;
 
-    let mut offset = start_offset;
     let fallback_session_label = file_path
         .file_stem()
         .and_then(|value| value.to_str())
@@ -397,131 +440,139 @@ fn parse_project_file(
     let fallback_session_id = fallback_session_label
         .clone()
         .unwrap_or_else(|| path_hash.to_string());
-    let mut line = String::new();
     let mut events = Vec::new();
     let mut turns = Vec::new();
     let mut tool_calls = Vec::new();
+    let mut parse_issues = ParseIssues::default();
+    let status = reader.read_json_records(
+        SourceKind::Claude,
+        path_hash,
+        cancel,
+        &mut parse_issues,
+        |record| {
+            let value = record.value;
+            let usage = value
+                .get("message")
+                .and_then(|message| message.get("usage"))
+                .or_else(|| value.get("usage"));
+            let Some(usage) = usage else {
+                return Ok(JsonlRecordDisposition::Ignored);
+            };
+            let Some(timestamp) = value.get("timestamp").and_then(Value::as_str) else {
+                return Ok(JsonlRecordDisposition::Malformed);
+            };
+            let Some(hour_start) = bucket_start_from_rfc3339(timestamp) else {
+                return Ok(JsonlRecordDisposition::Malformed);
+            };
 
-    loop {
-        line.clear();
-        let bytes_read = reader.read_line(&mut line)?;
-        if bytes_read == 0 {
-            break;
-        }
-        offset += bytes_read as u64;
-        if !line.contains("\"usage\"") {
-            continue;
-        }
+            let tokens = normalize_claude_usage(usage);
+            if tokens.total_tokens == 0
+                && tokens.input_tokens == 0
+                && tokens.output_tokens == 0
+                && tokens.cache_read_tokens == 0
+                && tokens.cache_creation_tokens == 0
+            {
+                return Ok(JsonlRecordDisposition::Accepted);
+            }
 
-        let Ok(value) = serde_json::from_str::<Value>(&line) else {
-            continue;
-        };
+            let session_id = value
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .or_else(|| value.get("session_id").and_then(Value::as_str))
+                .or_else(|| {
+                    value
+                        .get("message")
+                        .and_then(|message| message.get("sessionId"))
+                        .and_then(Value::as_str)
+                })
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or(fallback_session_id.as_str())
+                .to_string();
 
-        let usage = value
-            .get("message")
-            .and_then(|message| message.get("usage"))
-            .or_else(|| value.get("usage"));
-        let Some(usage) = usage else {
-            continue;
-        };
-        let Some(timestamp) = value.get("timestamp").and_then(Value::as_str) else {
-            continue;
-        };
-        let Some(hour_start) = bucket_start_from_rfc3339(timestamp) else {
-            continue;
-        };
-
-        let tokens = normalize_claude_usage(usage);
-        if tokens.total_tokens == 0
-            && tokens.input_tokens == 0
-            && tokens.output_tokens == 0
-            && tokens.cache_read_tokens == 0
-            && tokens.cache_creation_tokens == 0
-        {
-            continue;
-        }
-
-        let session_id = value
-            .get("sessionId")
-            .and_then(Value::as_str)
-            .or_else(|| value.get("session_id").and_then(Value::as_str))
-            .or_else(|| {
-                value
-                    .get("message")
-                    .and_then(|message| message.get("sessionId"))
-                    .and_then(Value::as_str)
-            })
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or(fallback_session_id.as_str())
-            .to_string();
-
-        let message_id = value
-            .get("message")
-            .and_then(|message| message.get("id"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string);
-        let request_id = value
-            .get("requestId")
-            .or_else(|| value.get("request_id"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string);
-        let is_sidechain = value
-            .get("isSidechain")
-            .or_else(|| value.get("is_sidechain"))
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let event_key = claude_event_key(
-            message_id.as_deref(),
-            request_id.as_deref(),
-            path_hash,
-            file_fingerprint,
-            offset,
-            false,
-        );
-        let event = UsageEvent {
-            event_key,
-            source: SourceKind::Claude,
-            provider_label: String::new(),
-            model: normalize_model(
-                value
-                    .get("message")
-                    .and_then(|message| message.get("model"))
-                    .and_then(Value::as_str)
-                    .or_else(|| value.get("model").and_then(Value::as_str)),
-            ),
-            event_at: timestamp.to_string(),
-            hour_start,
-            tokens,
-            project: project.clone(),
-            session: Some(SessionInfo {
-                session_id,
-                session_label: fallback_session_label.clone(),
-                source_path_hash: Some(path_hash.to_string()),
-            }),
-        };
-        let tools = extract_claude_tools(&value);
-        turns.push(turn_from_tools(&event, &tools));
-        tool_calls.extend(tool_calls_from_evidence(&event, tools));
-        events.push(ClaudeEventCandidate {
-            event,
-            message_id,
-            request_id,
-            is_sidechain,
-            message_only_key: false,
-        });
-    }
+            let message_id = value
+                .get("message")
+                .and_then(|message| message.get("id"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+            let request_id = value
+                .get("requestId")
+                .or_else(|| value.get("request_id"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+            let is_sidechain = value
+                .get("isSidechain")
+                .or_else(|| value.get("is_sidechain"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let event_key = claude_event_key(
+                message_id.as_deref(),
+                request_id.as_deref(),
+                path_hash,
+                file_fingerprint,
+                record.start_offset,
+                false,
+            );
+            let event = UsageEvent {
+                event_key,
+                source: SourceKind::Claude,
+                provider_label: String::new(),
+                model: normalize_model(
+                    value
+                        .get("message")
+                        .and_then(|message| message.get("model"))
+                        .and_then(Value::as_str)
+                        .or_else(|| value.get("model").and_then(Value::as_str)),
+                ),
+                event_at: timestamp.to_string(),
+                hour_start,
+                tokens,
+                project: project.clone(),
+                session: Some(SessionInfo {
+                    session_id,
+                    session_label: fallback_session_label.clone(),
+                    source_path_hash: Some(path_hash.to_string()),
+                }),
+            };
+            let tools = extract_claude_tools(&value);
+            turns.push(turn_from_tools(&event, &tools));
+            tool_calls.extend(tool_calls_from_evidence(&event, tools));
+            events.push(ClaudeEventCandidate {
+                event,
+                message_id,
+                request_id,
+                is_sidechain,
+                message_only_key: false,
+            });
+            Ok(JsonlRecordDisposition::Accepted)
+        },
+    )?;
 
     Ok(ClaudeParseResult {
-        end_offset: offset,
+        end_offset: reader.complete_offset(),
         events,
         turns,
         tool_calls,
+        parse_issues,
+        cancelled: status == JsonlReadStatus::Cancelled,
     })
+}
+
+#[cfg(test)]
+pub(super) fn bounded_contract_parse(file_path: &Path) -> Result<(ParseIssues, u64, bool)> {
+    let result = parse_project_file(
+        file_path,
+        "bounded-contract-path-hash",
+        "bounded-contract-fingerprint",
+        0,
+        None,
+        &CancellationToken::new(),
+    )?;
+    Ok((result.parse_issues, result.end_offset, result.cancelled))
 }
 
 fn dedupe_claude_events(candidates: Vec<ClaudeEventCandidate>) -> Vec<UsageEvent> {
@@ -702,6 +753,7 @@ mod tests {
     use serde_json::json;
     use std::{fs, io::Write};
     use tempfile::TempDir;
+    use tokio_util::sync::CancellationToken;
 
     /// Validates D8: Claude's `cache_creation_input_tokens` populates the
     /// dedicated `cache_creation_tokens` column instead of being merged back
@@ -822,7 +874,14 @@ mod tests {
             })
         )?;
 
-        let parsed = parse_project_file(&path, "path-hash", "fingerprint", 0, None)?;
+        let parsed = parse_project_file(
+            &path,
+            "path-hash",
+            "fingerprint",
+            0,
+            None,
+            &CancellationToken::new(),
+        )?;
 
         assert_eq!(parsed.events.len(), 1);
         assert_eq!(parsed.turns.len(), 1);
@@ -844,6 +903,52 @@ mod tests {
                 .as_deref()
                 .unwrap()
                 .contains("private text")
+        );
+        Ok(())
+    }
+
+    /// DATA-001 contract: a partial last line (no trailing '\n') must not
+    /// advance the durable cursor.
+    #[test]
+    fn partial_tail_does_not_advance_cursor() -> Result<()> {
+        let dir = TempDir::new()?;
+        let path = dir.path().join("project").join("sessions.jsonl");
+        std::fs::create_dir_all(path.parent().unwrap())?;
+
+        let complete_line = r#"{"uuid":"abc","message":{"model":"claude-opus-5","usage":{"input_tokens":10,"output_tokens":5}},"timestamp":"2026-01-01T00:00:00.000Z"}"#;
+        let complete = format!("{complete_line}\n");
+        let partial = format!("{complete_line}\n{complete_line}"); // last line missing '\n'
+        std::fs::write(&path, &partial)?;
+
+        let result =
+            parse_project_file(&path, "path-hash", "fp", 0, None, &CancellationToken::new())?;
+        assert_eq!(result.events.len(), 2, "valid EOF records are parsed");
+        assert_eq!(
+            result.end_offset,
+            complete.len() as u64,
+            "cursor must not include the partial tail"
+        );
+        let partial_event_key = result.events[1].event.event_key.clone();
+
+        // Simulate the tool flushing the final newline and re-syncing.
+        let full = format!("{complete_line}\n{complete_line}\n");
+        std::fs::write(&path, &full)?;
+        let incremental = parse_project_file(
+            &path,
+            "path-hash",
+            "fp",
+            result.end_offset,
+            None,
+            &CancellationToken::new(),
+        )?;
+        assert_eq!(
+            incremental.events.len(),
+            1,
+            "incremental sync picks up completed line"
+        );
+        assert_eq!(
+            incremental.events[0].event.event_key, partial_event_key,
+            "newline flush retry must preserve the fallback event key"
         );
         Ok(())
     }

@@ -22,7 +22,7 @@ commands::serve::run(app, port) -> Result<()>        // compatibility wrapper
 commands::serve::run_with_options(app, port, public, no_open) -> Result<()>
 web::serve(store, preferred_port) -> Result<SocketAddr> // loopback compatibility wrapper
 web::serve_on(store, preferred_port, bind_ip) -> Result<SocketAddr>
-web::bind_server(store, preferred_port, bind_ip) -> Result<BoundWebServer>
+web::bind_server(store, preferred_port, bind_ip, write_exposure) -> Result<BoundWebServer>
 ```
 
 ### 3. Contracts
@@ -36,8 +36,10 @@ web::bind_server(store, preferred_port, bind_ip) -> Result<BoundWebServer>
 - `0.0.0.0` is a bind address, never a browser URL. Browser/local output uses
   `http://127.0.0.1:<port>`; public output uses the placeholder
   `http://<server-host-or-ip>:<port>`.
-- `--public` exposes the dashboard and JSON API without authentication or TLS. Output and
-  documentation must tell users to use a firewall, SSH tunnel, or authenticated reverse proxy.
+- `--public` exposes a reduced aggregate dashboard without authentication or TLS. Output and
+  documentation must distinguish its explicit read allowlist from the full loopback API and tell
+  users to use a firewall or authenticated reverse proxy. An SSH tunnel to loopback is the path to
+  the full local dashboard.
 - The CLI owns and supervises `BoundWebServer` until Ctrl+C. An early server return, task error,
   or panic fails the `serve` command; graceful shutdown has a finite deadline.
 - The `serve` run-log record spans the full listener session. Clean shutdown records success,
@@ -51,7 +53,7 @@ web::bind_server(store, preferred_port, bind_ip) -> Result<BoundWebServer>
 | Condition | Required result |
 | --- | --- |
 | Default invocation | Bind loopback and retain existing port order `37421/37422/37423/0` |
-| `--public` | Bind `0.0.0.0` using the same port order and print the exposure warning |
+| `--public` | Bind `0.0.0.0`, select the public read allowlist, and print the exposure warning |
 | `--no-open` | Do not invoke a browser launcher |
 | SSH environment | Do not invoke a browser launcher or log its expected failure; print an access hint |
 | Non-SSH launcher failure | Warn but keep the server running |
@@ -63,7 +65,8 @@ web::bind_server(store, preferred_port, bind_ip) -> Result<BoundWebServer>
 ### 5. Good / Base / Bad Cases
 
 - Good: `llmusage serve --public --no-open --port 37421` listens on all IPv4 interfaces,
-  prints a server-host placeholder, and explains the authentication/TLS boundary.
+  prints a server-host placeholder, and explains both the reduced read surface and the
+  authentication/TLS boundary.
 - Base: `llmusage serve` remains local-only and attempts to open the default browser.
 - Bad: making `0.0.0.0` the default listener, or passing `http://0.0.0.0:<port>` to the
   browser launcher.
@@ -76,6 +79,8 @@ web::bind_server(store, preferred_port, bind_ip) -> Result<BoundWebServer>
   placeholder for instructions.
 - Web tests bind port `0` to `0.0.0.0`, assert the returned address, and fetch `/` through
   loopback to preserve the live-route contract.
+- Real TCP tests assert every loopback-only read/write route is absent from the public router and
+  that the public dashboard projection contains no path, raw-log, error, diagnostic, or job fields.
 - CLI help and the English/Chinese Dashboard, Safety, and CLI-reference docs must mention
   the default, flags, SSH behavior, and unauthenticated/TLS-free boundary.
 
@@ -97,6 +102,98 @@ let remote_hint = format!("http://<server-host-or-ip>:{}", addr.port());
 
 The listener address controls where the process accepts connections; the browser URL must be
 reachable from the browser's own network namespace.
+
+## Scenario: Public read security boundary
+
+### 1. Scope / Trigger
+
+- Apply this contract when adding or changing browser routes, dashboard DTOs, diagnostics, runtime
+  logs, project data, integration/cursor health, or sync-job polling.
+- The public listener is an unauthenticated aggregate reporting surface. It is not a remote
+  administration or troubleshooting API.
+
+### 2. Signatures
+
+```text
+loopback_router() -> Router<WebState>
+public_router() -> Router<WebState>
+
+GET /api/dashboard (public) -> PublicDashboardPayload
+GET /api/health    (public) -> { status: "ok", exposure: "public_read_only" }
+```
+
+### 3. Contracts
+
+- `loopback_router` retains the full local API, including logs, diagnostics, project breakdowns,
+  job reads, behavior/Explorer reads, and mutation routes guarded by the real TCP peer.
+- `public_router` is built from a positive allowlist containing only `/`, `/assets/{*path}`,
+  `/api/dashboard`, and `/api/health`. Loopback routes are not merged into it.
+- The public dashboard DTO copies an explicit set of aggregate overview, trend, model, source, and
+  cost fields. It never serializes query-layer project, health, diagnostics, sync-command-center,
+  log, or job DTOs wholesale.
+- The public dashboard ignores `project` and `project_hash` query selectors so omitted project
+  identities cannot be inferred by probing aggregate totals. Other aggregate filters remain
+  available.
+- Public `projects` is always empty, `health` contains no local details, and `diagnostics` only says
+  that local details are unavailable. The health endpoint is a fixed DTO and performs no local
+  diagnostic query.
+- Public route selection depends only on the server exposure configured before binding. `Host`,
+  `Origin`, `Forwarded`, and `X-Forwarded-For` are not authentication or route-selection inputs.
+- Adding remote diagnostics requires a new explicit opt-in plus authentication. It must not expand
+  the default public allowlist.
+- API failures return the generic client error contract. Paths, SQL, raw logs, and database error
+  detail remain server-side structured logs only.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Public aggregate dashboard | 200 with only the typed aggregate projection |
+| Public minimal health | 200 with fixed `status` and `exposure` fields |
+| Public logs/diagnostics/projects/job/detail reads | Route absent: 404/405 |
+| Public behavior/Explorer/legacy section reads | Route absent: 404/405 |
+| Public mutation request | Route absent: 404/405 |
+| Loopback sensitive read | Existing handler and payload remain available |
+| Query or serialization failure | Generic 500 response without internal detail |
+
+### 5. Good / Base / Bad Cases
+
+- Good: public clients can compare aggregate usage while local paths, project labels, run failures,
+  cursor/integration details, and job ids never cross the response boundary.
+- Base: loopback users retain the full local dashboard and API behavior.
+- Bad: building public mode by starting with `loopback_router`, then trying to deny sensitive paths
+  with headers or request-time guards.
+
+### 6. Tests Required
+
+- A real TCP public-listener test enumerates every loopback-only read route and expects 404/405.
+- A public payload test seeds Windows/Unix paths, raw JSON-shaped details, SQL text, run errors, and
+  job-adjacent state, then recursively rejects forbidden keys and values.
+- The public route inventory test pins the complete positive allowlist so additions require an
+  intentional security review.
+- Loopback regression tests cover logs, diagnostics, projects, and job polling in addition to the
+  existing write-route tests.
+- English/Chinese README, Dashboard, Safety, and CLI-reference docs state the capability split.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+let app = loopback_router().layer(reject_public_sensitive_reads);
+```
+
+#### Correct
+
+```rust
+let app = match exposure {
+    WriteExposure::LocalOnly => loopback_router(),
+    WriteExposure::PublicReadOnly => public_router(),
+};
+```
+
+The public boundary is the router inventory plus a dedicated DTO projection, not a client-header
+policy layered over local diagnostic payloads.
 
 ## Scenario: Client-filter-safe embedded module URLs
 

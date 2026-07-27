@@ -1,0 +1,1 @@
+{"file": "docs/adr/0002-sync-shard-as-commit-protocol.md", "reason": "Authoritative write protocol and transaction ownership"}

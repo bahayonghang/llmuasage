@@ -71,7 +71,17 @@ async fn serve_session(
     public: bool,
     no_open: bool,
 ) -> Result<std::net::SocketAddr> {
-    let server = web::bind_server(store, port, bind_ip).await?;
+    let server = web::bind_server(
+        store,
+        port,
+        bind_ip,
+        if public {
+            web::WriteExposure::PublicReadOnly
+        } else {
+            web::WriteExposure::LocalOnly
+        },
+    )
+    .await?;
     let addr = server.addr();
 
     /*
@@ -441,6 +451,7 @@ mod tests {
             store.clone(),
             Some(0),
             std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+            crate::web::WriteExposure::LocalOnly,
         )
         .await?;
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
@@ -494,6 +505,7 @@ mod tests {
                     store.clone(),
                     Some(port),
                     std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+                    crate::web::WriteExposure::LocalOnly,
                 )
                 .await
                 .map(|server| server.addr())

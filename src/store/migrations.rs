@@ -4,6 +4,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde::Serialize;
 use tracing::info;
 
+use super::WritePermit;
 use crate::{
     error::{LlmusageError, Result},
     query::PRICING_UNPRICED,
@@ -70,6 +71,16 @@ pub const MIGRATIONS: &[(u32, &str, MigrationFn)] = &[
         "optimize_source_sync_cursors_and_behavior_resets",
         m_015_optimize_source_sync_cursors_and_behavior_resets,
     ),
+    (
+        16,
+        "add_worker_lock_generation",
+        m_016_add_worker_lock_generation,
+    ),
+    (
+        17,
+        "add_source_sync_parse_issues",
+        m_017_add_source_sync_parse_issues,
+    ),
 ];
 
 /// Returns the newest schema version known to this binary.
@@ -80,16 +91,20 @@ pub fn latest_schema_version() -> u32 {
         .unwrap_or(0)
 }
 
-/// Reads `meta('schema_version')`, treating missing metadata as v0.
+/// Reads `meta('schema_version')`.
+///
+/// Returns `Ok(0)` only when the meta table exists but has no `schema_version`
+/// row yet (fresh database before the first migration).  Any stored value that
+/// cannot be parsed as a `u32` is a hard error (`SchemaVersionCorrupt`).
 pub fn read_schema_version(conn: &Connection) -> Result<u32> {
-    conn.execute_batch(
-        r#"
-        CREATE TABLE IF NOT EXISTS meta (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL
-        );
-        "#,
+    let meta_exists = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta')",
+        [],
+        |row| row.get::<_, bool>(0),
     )?;
+    if !meta_exists {
+        return Ok(0);
+    }
     let raw = conn
         .query_row(
             "SELECT value FROM meta WHERE key = 'schema_version'",
@@ -97,10 +112,12 @@ pub fn read_schema_version(conn: &Connection) -> Result<u32> {
             |row| row.get::<_, String>(0),
         )
         .optional()?;
-    Ok(raw
-        .as_deref()
-        .and_then(|value| value.parse::<u32>().ok())
-        .unwrap_or(0))
+    match raw {
+        None => Ok(0),
+        Some(ref s) => s
+            .parse::<u32>()
+            .map_err(|_| LlmusageError::SchemaVersionCorrupt { raw: s.clone() }),
+    }
 }
 
 /// Persists the current schema version inside an active migration transaction.
@@ -125,11 +142,27 @@ pub fn write_schema_version(tx: &Transaction<'_>, version: u32) -> Result<()> {
 }
 
 /// Applies all pending migrations, optionally emitting start/finish callbacks.
+#[cfg(test)]
 pub fn run_migrations_with_events(
     conn: &mut Connection,
+    sink: Option<MigrationEventSink<'_>>,
+) -> Result<()> {
+    run_migrations_with_events_and_permit(conn, sink, None)
+}
+
+pub(crate) fn run_migrations_with_events_and_permit(
+    conn: &mut Connection,
     mut sink: Option<MigrationEventSink<'_>>,
+    permit: Option<&WritePermit>,
 ) -> Result<()> {
     let mut current = read_schema_version(conn)?;
+    let latest = latest_schema_version();
+    if current > latest {
+        return Err(LlmusageError::SchemaTooNew {
+            db_version: current,
+            binary_version: latest,
+        });
+    }
     for (version, name, migration) in MIGRATIONS {
         if *version <= current {
             continue;
@@ -150,8 +183,14 @@ pub fn run_migrations_with_events(
         let started = Instant::now();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let result = (|| -> Result<()> {
+            if let Some(permit) = permit {
+                permit.validate_in_transaction(&tx)?;
+            }
             migration(&tx)?;
             write_schema_version(&tx, *version)?;
+            if let Some(permit) = permit {
+                permit.validate_in_transaction(&tx)?;
+            }
             Ok(())
         })();
 
@@ -750,6 +789,43 @@ fn m_015_optimize_source_sync_cursors_and_behavior_resets(tx: &Transaction<'_>) 
     Ok(())
 }
 
+/// Migration v16 — add `generation` column to `worker_lock` for fencing.
+///
+/// The generation counter is incremented on every new acquisition.  The
+/// heartbeat refresh matches on `owner_id AND generation`, so a stale holder
+/// whose lease was stolen by a new owner gets 0 rows affected instead of
+/// silently succeeding (CONC-001).
+fn m_016_add_worker_lock_generation(tx: &Transaction<'_>) -> Result<()> {
+    // Drifted databases may not have `worker_lock` yet (it is created by an
+    // earlier migration that a partially-applied schema can be missing). The
+    // fencing column is only meaningful once the table exists; a later
+    // bootstrap creates it with `generation` already in the definition.
+    if !table_exists(tx, "worker_lock")? {
+        return Ok(());
+    }
+    ensure_column(
+        tx,
+        "worker_lock",
+        "generation",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    Ok(())
+}
+
+/// Migration v17 — persist bounded, privacy-safe JSONL issue diagnostics.
+fn m_017_add_source_sync_parse_issues(tx: &Transaction<'_>) -> Result<()> {
+    if !table_exists(tx, "source_sync_status")? {
+        return Ok(());
+    }
+    ensure_column(
+        tx,
+        "source_sync_status",
+        "parse_issues_json",
+        "TEXT NOT NULL DEFAULT '{\"malformed_lines\":0,\"oversized_lines\":0,\"samples\":[]}'",
+    )?;
+    Ok(())
+}
+
 fn ensure_column(tx: &Transaction<'_>, table: &str, column: &str, definition: &str) -> Result<()> {
     if table_has_column(tx, table, column)? {
         return Ok(());
@@ -830,6 +906,10 @@ pub(crate) fn run_migrations_for_test_with_events(
         let started = Instant::now();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let result = (|| -> Result<()> {
+            // Isolated migration tests may start at vN without running the
+            // baseline first. Seed the same meta surface the real ordered
+            // runner would already have established.
+            write_schema_version(&tx, current)?;
             migration(&tx)?;
             write_schema_version(&tx, *version)?;
             Ok(())
@@ -917,6 +997,75 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(count, 0);
+        Ok(())
+    }
+
+    /// DATA-004: a `schema_version` value that is not a valid `u32` must be a
+    /// hard error, not silently treated as v0 (which would re-run every
+    /// migration against an already-populated database).
+    #[test]
+    fn malformed_schema_version_is_hard_error() -> anyhow::Result<()> {
+        for bad in ["not-a-number", "", "1.5", "-3", "9999999999999999999999"] {
+            let conn = Connection::open_in_memory()?;
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+            )?;
+            conn.execute(
+                "INSERT INTO meta(key, value) VALUES ('schema_version', ?1)",
+                [bad],
+            )?;
+
+            let err = read_schema_version(&conn)
+                .expect_err("malformed schema_version must be rejected, not coerced to 0");
+            assert!(
+                matches!(err, LlmusageError::SchemaVersionCorrupt { .. }),
+                "expected SchemaVersionCorrupt for {bad:?}, got {err:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// DATA-004: a database written by a newer binary must fail fast rather
+    /// than skipping every migration and continuing to read/write.
+    #[test]
+    fn future_schema_version_fails_fast() -> anyhow::Result<()> {
+        let mut conn = Connection::open_in_memory()?;
+        let future = latest_schema_version() + 7;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+        )?;
+        conn.execute(
+            "INSERT INTO meta(key, value) VALUES ('schema_version', ?1)",
+            [future.to_string()],
+        )?;
+
+        let err = run_migrations_with_events(&mut conn, None)
+            .expect_err("a future schema version must be rejected");
+        match err {
+            LlmusageError::SchemaTooNew {
+                db_version,
+                binary_version,
+            } => {
+                assert_eq!(db_version, future);
+                assert_eq!(binary_version, latest_schema_version());
+            }
+            other => panic!("expected SchemaTooNew, got {other:?}"),
+        }
+        Ok(())
+    }
+
+    /// A fresh database (meta table present, no schema_version row) still
+    /// reports v0 — the normal upgrade path must not regress.
+    #[test]
+    fn missing_schema_version_still_reads_as_zero() -> anyhow::Result<()> {
+        let conn = Connection::open_in_memory()?;
+        assert_eq!(read_schema_version(&conn)?, 0);
+        let meta_exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta')",
+            [],
+            |row| row.get(0),
+        )?;
+        assert!(!meta_exists, "schema inspection must remain read-only");
         Ok(())
     }
 
@@ -1264,6 +1413,43 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(inserted, 42);
+        Ok(())
+    }
+
+    #[test]
+    fn migration_v17_adds_bounded_parse_issue_diagnostics() -> anyhow::Result<()> {
+        let mut conn = Connection::open_in_memory()?;
+        run_migrations_for_test(&mut conn, &[(1, "baseline", m_001_baseline)])?;
+        conn.execute(
+            r#"
+            INSERT INTO source_sync_status(
+                source, files_processed, changed_files, bytes_scanned,
+                events_seen, events_replayed, events_inserted, stored_events,
+                parse_ms, write_ms, lock_wait_ms, updated_at
+            ) VALUES ('codex', 1, 1, 10, 1, 0, 1, 1, 1, 1, 1, '2026-07-26T00:00:00Z')
+            "#,
+            [],
+        )?;
+
+        run_migrations_for_test(
+            &mut conn,
+            &[(
+                17,
+                "add_source_sync_parse_issues",
+                m_017_add_source_sync_parse_issues,
+            )],
+        )?;
+
+        let columns = pragma_columns(&conn, "source_sync_status")?;
+        assert!(columns.contains(&"parse_issues_json".to_string()));
+        let stored: String = conn.query_row(
+            "SELECT parse_issues_json FROM source_sync_status WHERE source='codex'",
+            [],
+            |row| row.get(0),
+        )?;
+        let issues: crate::models::ParseIssues = serde_json::from_str(&stored)?;
+        assert_eq!(issues, crate::models::ParseIssues::default());
+        assert_eq!(read_schema_version(&conn)?, 17);
         Ok(())
     }
 

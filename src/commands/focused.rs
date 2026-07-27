@@ -81,7 +81,7 @@ async fn run_daily(app: &AppContext, source: SourceKind, args: DailyArgs) -> Res
         "starting focused daily report output"
     );
     let store = Store::new(&app.paths)?;
-    store.bootstrap()?;
+    store.require_initialized()?;
     let mut filter = args.common.to_filter(args.project.clone())?;
     if args.all && (filter.since.is_some() || filter.until.is_some()) {
         bail!("--all cannot be combined with --since or --until");
@@ -133,7 +133,7 @@ async fn run_period(
         "starting focused report output"
     );
     let store = Store::new(&app.paths)?;
-    store.bootstrap()?;
+    store.require_initialized()?;
     let filter = common.to_filter(None)?;
 
     if !unified.sections.is_empty() {
@@ -168,7 +168,7 @@ async fn run_session(app: &AppContext, source: SourceKind, args: SessionArgs) ->
         "starting focused session report output"
     );
     let store = Store::new(&app.paths)?;
-    store.bootstrap()?;
+    store.require_initialized()?;
     let filter = args.common.to_filter(args.project.clone())?;
 
     if !args.unified.sections.is_empty() {

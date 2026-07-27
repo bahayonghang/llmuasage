@@ -40,14 +40,14 @@ Usage: llmusage [OPTIONS] [COMMAND]
 
 ## 运行时日志
 
-`llmusage` 默认把结构化运行诊断写到 `~/.llmusage/logs/llmusage.ndjson`。该文件只保存在本地，每行一个 JSON 对象。
+`llmusage` 默认把结构化运行诊断写到本地 NDJSON 分片 `~/.llmusage/logs/llmusage.ndjson.*`，每行一个 JSON 对象。
 
 | 环境变量 | 含义 |
 | --- | --- |
 | `LLMUSAGE_LOG=off\|error\|warn\|info\|debug\|trace` | 控制本地 NDJSON 日志文件；默认 `warn` |
 | `RUST_LOG=...` | 继续控制控制台 stderr 日志 |
 
-文件日志不会写入报表 stdout，也不会改变 `sync --json-events` stdout。初版保留一个活动日志文件；启动时如果超过 10 MiB，会轮转为 `llmusage.ndjson.old`。
+文件日志不会写入报表 stdout，也不会改变 `sync --json-events` stdout。分片在进程运行期间达到 10 MiB 即轮转，总量最多保留 30 MiB、7 个文件和 7 天；`logs` 与 `diagnostics` 状态会包含保留文件/字节数、队列丢弃事件数和维护失败数。
 
 ## 报表命令
 
@@ -144,10 +144,13 @@ llmusage sync --source antigravity
 llmusage sync --source kimi_code
 llmusage sync --source pi
 llmusage sync --recent-days 1
+llmusage sync --recent-days 30 --parallelism 4
 llmusage sync --json-events
 llmusage sync --rebuild
 llmusage sync --rebuild --allow-lossy-rebuild
 ```
+
+`--source`、`--recent-days` 与 `--parallelism` 和 `POST /api/jobs`、公开 `JobRegistry` API 共用同一校验契约。非法值分别返回稳定错误码 `unknown_source`、`invalid_recent_days` 或 `invalid_parallelism`。
 
 导入本地来源。扫描来源前，bootstrap 可能升级未固定的内置定价目录并重算历史事件价格。人读 stderr 会显示目录版本、已处理/总事件数、汇总桶对账和完成耗时，不再一直停留在一条笼统的数据库初始化提示。
 
@@ -281,7 +284,7 @@ llmusage serve --port 37421
 llmusage serve --public --no-open --port 37421
 ```
 
-默认在 `127.0.0.1` 启动 Web Dashboard 和 JSON API。`--public` 会绑定 `0.0.0.0` 以供远程访问，但不会添加认证或 TLS。`--no-open` 会关闭浏览器启动；SSH 会话也会自动跳过浏览器启动。
+默认在 `127.0.0.1` 启动完整 Web Dashboard 和本地 JSON API。`--public` 会绑定 `0.0.0.0`，但只暴露只读聚合 Dashboard allowlist（`/`、静态资源、`/api/dashboard` 和 `/api/health`）；projects、日志、diagnostics、jobs、行为/Explorer 明细和写操作仍只限 loopback。public 聚合视图不提供认证或 TLS。`--no-open` 会关闭浏览器启动；SSH 会话也会自动跳过浏览器启动。远程需要完整本地 API 时，应通过 SSH 隧道访问 loopback 监听。
 
 ### `llmusage codex-tracer`
 

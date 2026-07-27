@@ -2,6 +2,8 @@
 
 [简体中文](./README.zh-CN.md) · [Docs](https://bahayonghang.github.io/llmuasage/)
 
+> **Naming note:** the crate and binary are `llmusage`; the GitHub repository is `llmuasage` (extra `a`). Links to the hosted docs use the repo spelling.
+
 Local-first usage analytics for AI coding CLIs. `llmusage` reads local Codex, Claude Code, OpenCode, Google Antigravity, Kimi Code, and Pi / Oh My Pi artifacts into a local SQLite database, then renders reports, a terminal dashboard, a browser dashboard, and offline HTML exports without upload or login.
 
 > Current crate version: `1.0.2`.
@@ -31,16 +33,19 @@ llmusage update
 llmusage update dev
 ```
 
-`update` requires Rust and Cargo. It previews the repository, channel, and
-equivalent `cargo install` command, then asks for confirmation before replacing
-the installed binary. The default `main` channel is the stable choice;
-`llmusage update dev` installs unreleased development changes and may be less
-stable. `--check` / `-c` only prints the update plan and never starts Cargo.
+`update` requires Git, Rust, and Cargo. The default `main` channel resolves the
+highest stable release tag from the official repository, displays its tag and
+commit, and installs that immutable commit with Cargo's `--rev`. The command
+resolves the target again after confirmation and refuses to continue if it
+changed. `llmusage update dev` displays the current commit but intentionally
+follows the mutable `dev` branch and is not a verified stable release.
+`--check` / `-c` contacts the official repository to resolve refs and prints the
+plan, but never starts Cargo.
 
 Top-level help is table-oriented for quick scanning. Use `llmusage help --zh` for Chinese help, and `llmusage help <COMMAND>` or `llmusage <COMMAND> --help` for command-specific clap help.
 
 The runtime lives under `~/.llmusage/` by default. Override it with `--home <PATH>` or `LLMUSAGE_HOME`.
-Structured runtime logs are local-only NDJSON at `~/.llmusage/logs/llmusage.ndjson`. Control file logging with `LLMUSAGE_LOG=off|error|warn|info|debug|trace` (default: `warn`); `RUST_LOG` continues to control console stderr logging.
+Structured runtime logs are local-only NDJSON shards at `~/.llmusage/logs/llmusage.ndjson.*`. Control file logging with `LLMUSAGE_LOG=off|error|warn|info|debug|trace` (default: `warn`); `RUST_LOG` continues to control console stderr logging. Shards rotate at 10 MiB while the process is running and retain at most 30 MiB, seven files, and seven days.
 
 ## Fast path
 
@@ -56,20 +61,20 @@ What this does:
 1. `init` creates `~/.llmusage/`, bootstraps `llmusage.db`, writes hook wrappers, and installs supported local integrations.
 2. `sync` parses local sources incrementally and writes usage rows, 30-minute buckets, source-file diagnostics, and behavior facts.
 3. `llmusage` shows the default daily report for the last 7 calendar days.
-4. `serve` safely rebuilds legacy parser-backed token accounting when needed, then starts the dashboard on `127.0.0.1` by default. Use `serve --public` only when you intentionally need remote access: it exposes an unauthenticated, non-TLS dashboard and JSON API.
+4. `serve` safely rebuilds legacy parser-backed token accounting when needed, then starts the dashboard on `127.0.0.1` by default. Use `serve --public` only when you intentionally need remote access: it exposes an unauthenticated, non-TLS aggregate dashboard, but keeps project labels, logs, diagnostics, job state, and all write routes local-only.
 
 On the first sync after an embedded pricing catalog upgrade, `sync` reprices historical events before scanning sources. Stderr reports the catalog versions, processed/total events, bucket reconciliation, and completion. `sync --json-events` exposes the same pricing lifecycle as NDJSON-only stdout.
 
 ## Supported local sources
 
-| Source | Local artifacts |
-| --- | --- |
-| Codex | OpenAI Codex rollout/session JSONL and `config.toml notify` |
-| Claude | Claude Code project JSONL plus `Stop` / `SessionEnd` hooks |
-| OpenCode | OpenCode local SQLite usage database plus `session.updated` plugin event |
-| Antigravity | Antigravity CLI `Stop` hook in `~/.gemini/config/hooks.json` (`--source antigravity`); no transcript parser is registered until a verified token-bearing schema exists |
-| Kimi Code | `~/.kimi-code/sessions/**/wire.jsonl` (or `KIMI_CODE_HOME`), turn-scoped `usage.record` rows only |
-| Pi / Oh My Pi | `~/.pi/agent/sessions/**/*.jsonl` and `~/.omp/agent/sessions/**/*.jsonl` as one stable `pi` source |
+| Source        | Local artifacts                                                                                                                                                        |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Codex         | OpenAI Codex rollout/session JSONL and `config.toml notify`                                                                                                            |
+| Claude        | Claude Code project JSONL plus `Stop` / `SessionEnd` hooks                                                                                                             |
+| OpenCode      | OpenCode local SQLite usage database plus `session.updated` plugin event                                                                                               |
+| Antigravity   | Antigravity CLI `Stop` hook in `~/.gemini/config/hooks.json` (`--source antigravity`); no transcript parser is registered until a verified token-bearing schema exists |
+| Kimi Code     | `~/.kimi-code/sessions/**/wire.jsonl` (or `KIMI_CODE_HOME`), turn-scoped `usage.record` rows only                                                                      |
+| Pi / Oh My Pi | `~/.pi/agent/sessions/**/*.jsonl` and `~/.omp/agent/sessions/**/*.jsonl` as one stable `pi` source                                                                     |
 
 Kimi Code and Pi are passive, precise sources: they keep raw model names, use file cursors for incremental/idempotent replay, and never persist transcript text. Pi support is verified with local Oh My Pi samples plus sanitized Pi-compatible fixtures; Pi-only local evidence is still limited. `source-status` and `dash` also show monitor-only platform candidates such as Reasonix, Gemini CLI, Cursor, Copilot, Zed, Kiro, Goose, Grok, Kimi shell/Qwen, Roo/Kilo/Cline, Codebuff, Crush, Warp/Oz, Amp, Hermes, and Trae. Monitor-only means llmusage can probe candidate local roots and explain why parsing is blocked; it does not write zero usage rows or untrusted token rows.
 
@@ -137,12 +142,14 @@ llmusage codex-tracer --rebuild
 
 - No account login, device token, upload queue, or remote usage API call.
 - Normal `llmusage sync` keeps imported usage when original source files are missing.
+- `llmusage sync --recent-days N` imports only the latest UTC event window (`1..=3650`) without advancing full-history cursors; `--parallelism` accepts `1..=32`.
 - `llmusage sync --rebuild` refuses lossy rebuilds unless you also pass `--allow-lossy-rebuild`.
 - A full `llmusage sync --rebuild` resets only parser-backed sources; parserless Antigravity history and diagnostics are preserved.
 - `llmusage serve` automatically rebuilds safe legacy parser sources before binding a port. Sources with missing files are skipped with a warning, keep their readable history, and remain write-protected.
 - Automatic repair never enables `--allow-lossy-rebuild`; use `llmusage sync --rebuild --source <source>` explicitly after restoring missing source files.
 - `llmusage diagnostics --forget-file <PATH> --source <SOURCE>` is the explicit write path for intentionally ignored source files.
 - `llmusage logs` queries local runtime logs and recent command audit rows without changing report stdout or `sync --json-events` stdout contracts.
+- `llmusage serve --public` exposes only aggregate dashboard totals/trends/models/sources/costs plus a minimal health response. Use the default loopback listener, normally through an SSH tunnel, for projects, logs, diagnostics, jobs, behavior detail, Cost Explorer, and writes.
 - `llmusage catalog apply <file>` and `doctor --refresh-pricing <file>` read local catalog files; URLs are refused.
 
 ## Documentation

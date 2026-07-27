@@ -706,11 +706,11 @@ fn worker_lock_heartbeat_refreshes_existing_lease() -> Result<()> {
 
     let lock = store.acquire_worker_lock_with(Duration::from_millis(1), HolderKind::Cli)?;
     let stale_updated_at = "2000-01-01T00:00:00Z";
-    let stale_lease_expires_at = "2000-01-01T00:00:00Z";
+    let valid_lease_expires_at = (chrono::Utc::now() + chrono::Duration::minutes(5)).to_rfc3339();
     let conn = Connection::open(&app.paths.db_path)?;
     conn.execute(
         "UPDATE worker_lock SET updated_at = ?1, lease_expires_at = ?2",
-        (stale_updated_at, stale_lease_expires_at),
+        (stale_updated_at, &valid_lease_expires_at),
     )?;
     drop(conn);
 
@@ -724,7 +724,7 @@ fn worker_lock_heartbeat_refreshes_existing_lease() -> Result<()> {
             [],
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
         )?;
-        if row.0 != stale_updated_at && row.1 != stale_lease_expires_at {
+        if row.0 != stale_updated_at && row.1 != valid_lease_expires_at {
             refreshed = Some(row);
             break;
         }
@@ -1375,6 +1375,8 @@ fn source_sync_stats_absent_wire_contract_is_backward_compatible() -> Result<()>
     })?;
     assert_eq!(default_value["absent"], false);
     assert_eq!(default_value["skipped_files"], 0);
+    assert_eq!(default_value["parse_issues"]["malformed_lines"], 0);
+    assert_eq!(default_value["parse_issues"]["oversized_lines"], 0);
 
     let absent_value = serde_json::to_value(SourceSyncStats {
         source: SourceKind::Opencode,
@@ -1400,6 +1402,7 @@ fn source_sync_stats_absent_wire_contract_is_backward_compatible() -> Result<()>
     let legacy_stats: SourceSyncStats = serde_json::from_value(legacy_json)?;
     assert!(!legacy_stats.absent);
     assert_eq!(legacy_stats.skipped_files, 0);
+    assert_eq!(legacy_stats.parse_issues, Default::default());
     assert_eq!(legacy_stats.source, SourceKind::Opencode);
     assert_eq!(
         legacy_stats.last_error.as_deref(),
@@ -2652,18 +2655,21 @@ impl Fixture {
             .join("22");
         fs::create_dir_all(&sessions_dir)?;
         let repo_root = self.home.join("workspace").join("demo-repo");
-        let payload = [
-            serde_json::json!({
-                "type": "session_meta",
-                "payload": {
-                    "model": "gpt-5",
-                    "cwd": repo_root.to_string_lossy().to_string(),
-                }
-            })
-            .to_string(),
-            codex_token_line(timestamp, total_tokens, total_tokens),
-        ]
-        .join("\n");
+        let payload = format!(
+            "{}\n",
+            [
+                serde_json::json!({
+                    "type": "session_meta",
+                    "payload": {
+                        "model": "gpt-5",
+                        "cwd": repo_root.to_string_lossy().to_string(),
+                    }
+                })
+                .to_string(),
+                codex_token_line(timestamp, total_tokens, total_tokens),
+            ]
+            .join("\n")
+        );
         fs::write(sessions_dir.join(name), payload)?;
         Ok(())
     }
@@ -2688,7 +2694,7 @@ impl Fixture {
             .join("04")
             .join("22")
             .join(name);
-        let payload = format!("\n{}", codex_token_line(timestamp, total_tokens, 153));
+        let payload = format!("{}\n", codex_token_line(timestamp, total_tokens, 153));
         fs::OpenOptions::new()
             .append(true)
             .open(path)?

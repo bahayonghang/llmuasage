@@ -8,7 +8,7 @@ use super::{report_args::MonthlyArgs, unified_report};
 pub async fn run(app: &AppContext, args: MonthlyArgs) -> Result<()> {
     debug!("starting monthly report output");
     let store = Store::new(&app.paths)?;
-    store.bootstrap()?;
+    store.require_initialized()?;
     let filter = args.common.to_filter(None)?;
     if !args.unified.sections.is_empty() {
         let reports = unified_report::load_sections(

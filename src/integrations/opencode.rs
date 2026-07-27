@@ -10,6 +10,7 @@ use crate::{app::AppContext, models::SourceKind, store::Store};
 
 use super::{
     HookTarget, Integration, IntegrationAction, IntegrationProbe, backup_file, record_action,
+    remove_file_atomic_and_record, write_file_atomic_and_record,
 };
 
 const PLUGIN_MARKER: &str = "LLMUSAGE_LOCAL_PLUGIN";
@@ -79,16 +80,17 @@ pub fn install(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
         None
     };
 
-    fs::write(&plugin_path, build_plugin(app))?;
-    record_action(
-        store,
-        SourceKind::Opencode,
-        "init",
-        "ready",
-        "OpenCode plugin 已安装",
-        Some(&plugin_path),
-        backup_path.as_deref(),
-    )?;
+    write_file_atomic_and_record(&plugin_path, build_plugin(app), || {
+        record_action(
+            store,
+            SourceKind::Opencode,
+            "init",
+            "ready",
+            "OpenCode plugin 已安装",
+            Some(&plugin_path),
+            backup_path.as_deref(),
+        )
+    })?;
 
     Ok(IntegrationAction {
         source: SourceKind::Opencode,
@@ -113,19 +115,22 @@ pub fn uninstall(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
         "opencode-plugin-restore",
     )?;
     let content = fs::read_to_string(&plugin_path)?;
+    let record = || {
+        record_action(
+            store,
+            SourceKind::Opencode,
+            "uninstall",
+            "restored",
+            "OpenCode plugin 已移除",
+            Some(&plugin_path),
+            Some(&backup_path),
+        )
+    };
     if content.contains(PLUGIN_MARKER) {
-        fs::remove_file(&plugin_path)?;
+        remove_file_atomic_and_record(&plugin_path, record)?;
+    } else {
+        record()?;
     }
-
-    record_action(
-        store,
-        SourceKind::Opencode,
-        "uninstall",
-        "restored",
-        "OpenCode plugin 已移除",
-        Some(&plugin_path),
-        Some(&backup_path),
-    )?;
 
     Ok(IntegrationAction {
         source: SourceKind::Opencode,
@@ -301,8 +306,21 @@ fn resolve_plugin_path(_app: &AppContext) -> PathBuf {
     config_dir.join("plugin").join(PLUGIN_NAME)
 }
 
+/// Escapes a string for literal embedding inside a JS template literal.
+///
+/// Without this, a `` ` `` or `${` in the generated command breaks out of the
+/// `` $`...` `` literal and becomes attacker-controlled JavaScript. Backslash
+/// must be escaped first so the later escapes are not themselves re-escaped.
+fn escape_js_template_literal(raw: &str) -> String {
+    raw.replace('\\', "\\\\")
+        .replace('`', "\\`")
+        .replace("${", "\\${")
+}
+
 fn build_plugin(app: &AppContext) -> String {
-    let command = HookTarget::current(app).shell_command(SourceKind::Opencode, "session.updated");
+    let command = escape_js_template_literal(
+        &HookTarget::current(app).shell_command(SourceKind::Opencode, "session.updated"),
+    );
     format!(
         "// {PLUGIN_MARKER}\n\
          export const LlmusagePlugin = async ({{ $ }}) => {{\n\
@@ -322,6 +340,30 @@ fn build_plugin(app: &AppContext) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// SEC-002 (second injection layer): the generated command is embedded in a
+    /// JS template literal `$`...``. A backtick or `${` in the path would break
+    /// out of the literal and become attacker-controlled JavaScript.
+    #[test]
+    fn js_template_literal_escaping_neutralises_breakouts() {
+        assert_eq!(
+            escape_js_template_literal("a`b"),
+            "a\\`b",
+            "backtick must be escaped"
+        );
+        assert_eq!(
+            escape_js_template_literal("a${b}c"),
+            "a\\${b}c",
+            "template interpolation must be escaped"
+        );
+        assert_eq!(
+            escape_js_template_literal(r"a\b"),
+            r"a\\b",
+            "backslash must be escaped first"
+        );
+        // combined: backslash escaping must not re-escape the later escapes
+        assert_eq!(escape_js_template_literal(r"\`"), r"\\\`");
+    }
 
     #[test]
     fn default_storage_prefers_official_home_data_dir() {

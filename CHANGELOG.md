@@ -5,7 +5,7 @@
 ### Changed
 
 - Harden CI: unify the Rust and dashboard-JS gates, run tests with `--all-features`, add build caching and cancel-in-progress, and add a `cargo audit` security job.
-- Declare a minimum supported Rust version (`rust-version = "1.85"`) and enable GitHub branch protection on `main`.
+- Declare the verified minimum supported Rust version (`rust-version = "1.95"`) and enable GitHub branch protection on `main`.
 
 ## 1.0.0 - 2026-07-21
 

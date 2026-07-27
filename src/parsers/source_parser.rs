@@ -2,6 +2,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -47,6 +48,7 @@ pub trait SourceParser: Send + Sync {
         store: &'a Store,
         writer: &'a mut SyncRunWriter,
         parallelism: usize,
+        recent_cutoff: Option<DateTime<Utc>>,
         cancel: &'a CancellationToken,
         progress: Option<ProgressSink<'a>>,
     ) -> Pin<Box<dyn Future<Output = Result<SourceSyncStats>> + Send + 'a>>;

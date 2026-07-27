@@ -2,6 +2,8 @@
 
 [English](./README.md) · [文档](https://bahayonghang.github.io/llmuasage/zh/)
 
+> **命名说明：** crate 与二进制文件名为 `llmusage`；GitHub 仓库名为 `llmuasage`（多一个 `a`）。托管文档的链接使用仓库拼写。
+
 本地优先的 AI CLI 用量分析工具。`llmusage` 会把本机 Codex、Claude Code、OpenCode、Google Antigravity、Kimi Code 和 Pi / Oh My Pi 的本地记录解析进本地 SQLite，然后提供命令行报表、终端 Dashboard、浏览器 Dashboard 和离线 HTML 导出；不上传、不登录、不调用云端用量 API。
 
 > 当前 crate 版本：`1.0.2`。
@@ -31,15 +33,17 @@ llmusage update
 llmusage update dev
 ```
 
-`update` 需要本机已安装 Rust 和 Cargo。命令会先显示仓库、渠道和等效的
-`cargo install` 命令，实际替换已安装二进制前会请求确认。默认 `main` 是稳定
-渠道；`llmusage update dev` 会安装尚未发布的开发改动，稳定性可能较低。
-`--check` / `-c` 只预览更新计划，绝不启动 Cargo。
+`update` 需要本机已安装 Git、Rust 和 Cargo。默认 `main` 渠道会从官方仓库
+解析最高稳定 release tag，显示 tag 与 commit，并通过 Cargo 的 `--rev` 安装该
+不可变 commit。确认后命令会再次解析目标；目标发生变化时拒绝继续。
+`llmusage update dev` 会显示当前 commit，但仍明确跟踪可变的 `dev` 分支，不是
+经过稳定发布验证的版本。`--check` / `-c` 会联网解析官方 refs 并打印计划，
+但绝不启动 Cargo。
 
 顶层 help 现在使用表格形式，方便快速浏览。中文顶层 help 可用 `llmusage help --zh`；子命令旧版 clap help 仍可用 `llmusage help <COMMAND>` 或 `llmusage <COMMAND> --help`。
 
 默认运行时目录是 `~/.llmusage/`。可用 `--home <PATH>` 或 `LLMUSAGE_HOME` 覆盖。
-结构化运行日志只写本地 NDJSON：`~/.llmusage/logs/llmusage.ndjson`。文件日志可用 `LLMUSAGE_LOG=off|error|warn|info|debug|trace` 控制（默认 `warn`）；`RUST_LOG` 继续只控制控制台 stderr 日志。
+结构化运行日志只写本地 NDJSON 分片：`~/.llmusage/logs/llmusage.ndjson.*`。文件日志可用 `LLMUSAGE_LOG=off|error|warn|info|debug|trace` 控制（默认 `warn`）；`RUST_LOG` 继续只控制控制台 stderr 日志。分片在进程运行期间达到 10 MiB 即轮转，总量最多保留 30 MiB、7 个文件和 7 天。
 
 ## 最短路径
 
@@ -55,7 +59,7 @@ llmusage serve
 1. `init` 创建 `~/.llmusage/`、初始化 `llmusage.db`、写入 hook 包装器，并安装支持的本地集成。
 2. `sync` 增量解析本地真源，写入 usage 行、30 分钟 bucket、source-file 诊断和行为事实。
 3. `llmusage` 显示默认 daily 报表：所选时区下最近 7 个自然日。
-4. `serve` 会按需安全重建旧版 parser token 统计口径，然后默认在 `127.0.0.1` 启动浏览器 Dashboard。只有明确需要远程访问时才使用 `serve --public`：它会暴露不带认证和 TLS 的 Dashboard 与 JSON API。
+4. `serve` 会按需安全重建旧版 parser token 统计口径，然后默认在 `127.0.0.1` 启动浏览器 Dashboard。只有明确需要远程访问时才使用 `serve --public`：它会暴露不带认证和 TLS 的聚合 Dashboard，但 project label、日志、诊断、job 状态和所有写路由仍只允许本地访问。
 
 内置定价目录升级后的第一次 sync 会在扫描来源前重算历史事件价格。stderr 会显示目录版本、已处理/总事件数、汇总桶对账和完成状态；`sync --json-events` 会在纯 NDJSON stdout 中提供同一套定价生命周期。
 
@@ -136,12 +140,14 @@ llmusage codex-tracer --rebuild
 
 - 不需要账号登录、device token、上传队列或远端用量 API。
 - 普通 `llmusage sync` 遇到原始源文件缺失时会保留已导入 usage。
+- `llmusage sync --recent-days N` 只导入最近的 UTC 事件窗口（`1..=3650`），且不推进全历史 cursor；`--parallelism` 合法范围为 `1..=32`。
 - `llmusage sync --rebuild` 默认拒绝有损重建，除非同时传入 `--allow-lossy-rebuild`。
 - 无 source 的 `llmusage sync --rebuild` 只重置 parser-backed 来源；parserless Antigravity 的历史和诊断状态会保留。
 - `llmusage serve` 会在绑定端口前自动重建可安全迁移的旧版 parser 来源。源文件缺失的来源只会告警并跳过，旧历史仍可读取且继续拒绝混写。
 - 自动修复永远不会启用 `--allow-lossy-rebuild`；请先恢复缺失源文件，再显式执行 `llmusage sync --rebuild --source <source>`。
 - `llmusage diagnostics --forget-file <PATH> --source <SOURCE>` 是显式忽略源文件的写入入口。
 - `llmusage logs` 查询本地运行日志和最近命令审计记录，不改变报表 stdout 或 `sync --json-events` stdout 合同。
+- `llmusage serve --public` 只暴露聚合 Dashboard 的总量、趋势、模型、来源、成本和最小 health 响应。Projects、日志、诊断、jobs、行为明细、Cost Explorer 和写操作必须使用默认 loopback 监听，远程场景通常通过 SSH 隧道访问。
 - `llmusage catalog apply <file>` 与 `doctor --refresh-pricing <file>` 只读取本地目录文件；URL 会被拒绝。
 
 ## 文档

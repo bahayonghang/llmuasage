@@ -98,8 +98,8 @@ impl<'a> SourceFileStore<'a> {
     /// Called once per parser by the sync driver after the parser's last
     /// `commit_shard` returns. Returns the number of rows transitioned.
     pub fn sweep_missing(&self, source: SourceKind, run_started_at: &str) -> Result<usize> {
-        let conn = self.store.open_connection()?;
-        update_missing_with_conn(&conn, source.as_str(), run_started_at)
+        self.store
+            .write_transaction(|tx| update_missing_with_conn(tx, source.as_str(), run_started_at))
     }
 
     /// Marks all candidate files enumerated for this source as observed before
@@ -118,10 +118,8 @@ impl<'a> SourceFileStore<'a> {
         if file_paths.is_empty() {
             return Ok(());
         }
-        let mut conn = self.store.open_connection()?;
-        let tx = conn.transaction()?;
-        upsert_live_in_tx(&tx, source.as_str(), file_paths, seen_at)?;
-        tx.commit()?;
+        self.store
+            .write_transaction(|tx| upsert_live_in_tx(tx, source.as_str(), file_paths, seen_at))?;
         Ok(())
     }
 
@@ -311,11 +309,10 @@ impl Store {
     /// The next sync run will resurrect it back to `live` if the file is
     /// still present on disk; that's intentional — "forget" is not "ban".
     pub fn mark_source_file_deleted(&self, source: SourceKind, file_path: &str) -> Result<()> {
-        let mut conn = self.open_connection()?;
-        let tx = conn.transaction()?;
-        let now = now_utc();
-        tx.execute(
-            r#"
+        self.write_transaction(|tx| {
+            let now = now_utc();
+            tx.execute(
+                r#"
             INSERT INTO source_file(
                 source, file_path, state, last_seen_at, last_state_change_at
             )
@@ -324,13 +321,14 @@ impl Store {
                 state = 'deleted_by_user',
                 last_state_change_at = excluded.last_state_change_at
             "#,
-            params![source.as_str(), file_path, now],
-        )?;
-        tx.execute(
-            "DELETE FROM source_cursor WHERE source = ?1 AND file_path = ?2",
-            params![source.as_str(), file_path],
-        )?;
-        tx.commit()?;
+                params![source.as_str(), file_path, now],
+            )?;
+            tx.execute(
+                "DELETE FROM source_cursor WHERE source = ?1 AND file_path = ?2",
+                params![source.as_str(), file_path],
+            )?;
+            Ok(())
+        })?;
         Ok(())
     }
 }

@@ -29,7 +29,9 @@ For a remote server, opt in explicitly and suppress browser launching:
 llmusage serve --public --no-open --port 37421
 ```
 
-`--public` binds `0.0.0.0`; open `http://<server-host-or-ip>:37421` from a machine that can reach the server. The dashboard and JSON API have no authentication or TLS, so use a firewall, SSH tunnel, or reverse proxy before exposing the port.
+`--public` binds `0.0.0.0`; open `http://<server-host-or-ip>:37421` from a machine that can reach the server. Its compile-time route allowlist contains only the browser shell/assets, `/api/dashboard`, and `/api/health`. The dashboard projection includes aggregate overview, trend, model, source, and cost values; project labels, raw logs, diagnostics, integration/cursor details, job state, behavior detail, Cost Explorer, and write routes remain unavailable. Public dashboard requests also ignore `project` and `project_hash` filters so project-specific totals cannot be probed indirectly.
+
+The public aggregate surface still has no authentication or TLS and still reveals usage totals and model/source names. Use a firewall or authenticated reverse proxy even for this reduced view. To use every local dashboard feature remotely, keep the default loopback listener and use the SSH tunnel below instead of `--public`.
 
 For a private SSH session, leave out `--public`, then forward the local listener from your client:
 

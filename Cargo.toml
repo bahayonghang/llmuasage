@@ -1,8 +1,8 @@
 [package]
 name = "llmusage"
-version = "1.0.2"
+version = "1.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.95"
 description = "Local-first AI CLI usage analytics with Rust, SQLite, hooks, and zero upload."
 repository = "https://github.com/bahayonghang/llmuasage"
 homepage = "https://github.com/bahayonghang/llmuasage"
@@ -28,39 +28,46 @@ default = []
 testing = ["dep:tempfile"]
 
 [dependencies]
-anyhow = "1.0"
-axum = { version = "0.8", features = ["http1", "json", "tokio"] }
+anyhow = "1.0.104"
+axum = { version = "0.8.9", features = ["http1", "json", "tokio"] }
 chrono = { version = "0.4.45", features = ["clock", "serde"] }
-clap = { version = "4.5", features = ["derive"] }
-console = "0.15"
-crossterm = "0.29"
+clap = { version = "4.6.4", features = ["derive"] }
+console = "0.16.4"
+crossterm = "0.29.0"
 dashmap = "6.2.1"
-dirs = "6.0"
+dirs = "6.0.0"
 fs4 = "1.1.0"
-indicatif = "0.17"
-ratatui = "0.30.1"
-rusqlite = { version = "0.40.1", features = ["bundled", "chrono", "trace"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0.150"
-base64 = "0.22"
-thiserror = "2.0"
+indicatif = "0.18.6"
+ratatui = "0.30.2"
+rusqlite = { version = "0.40.1", features = ["bundled", "chrono", "trace", "functions"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+base64 = "0.23.0"
+thiserror = "2.0.19"
 sha2 = "0.11.0"
-tokio = { version = "1.52.3", features = [
+tokio = { version = "1.53.1", features = [
     "macros",
     "net",
     "rt-multi-thread",
     "signal",
 ] }
-tokio-util = "0.7"
-toml_edit = "0.25.12"
+tokio-util = "0.7.19"
+toml_edit = "0.25.13"
 tower-http = { version = "0.7.0", features = ["fs", "compression-gzip", "compression-br"] }
-tracing = "0.1"
-tracing-appender = "0.2"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+tracing = "0.1.44"
+tracing-appender = "0.2.5"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "json"] }
 unicode-width = "0.2.2"
-walkdir = "2.5"
-tempfile = { version = "3.23", optional = true }
+walkdir = "2.5.0"
+tempfile = { version = "3.27.0", optional = true }
+chrono-tz = { version = "0.10.4", features = ["case-insensitive"] }
+iana-time-zone = "0.1.65"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
-tempfile = "3.23"
-proptest = "1.6"
+tempfile = "3.27.0"
+proptest = "1.11.0"
+proc-macro2 = { version = "1.0.107", features = ["span-locations"] }
+syn = { version = "2.0.107", features = ["full", "visit"] }

@@ -56,10 +56,7 @@ version-sync version:
     cargo metadata --format-version 1 --no-deps | Out-Null
 
 ci:
-    cargo fmt --check
-    cargo clippy --all-targets --all-features -- -D warnings
-    cargo test --all-features -- --test-threads=1
-    $env:RUSTDOCFLAGS = "-D warnings"; cargo doc --no-deps
+    python scripts/ci-rust.py
     node --check scripts/benchmark-dashboard-range.mjs
     node --test scripts/tests/dashboard-fetch.test.mjs
     node --test scripts/tests/dashboard-bootstrap-watchdog.test.mjs

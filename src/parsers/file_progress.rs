@@ -74,6 +74,37 @@ impl FileProgress {
         }
     }
 
+    pub(crate) async fn wait_for_all<T, F>(
+        &mut self,
+        tasks: Vec<JoinHandle<anyhow::Result<T>>>,
+        mut report: F,
+    ) -> anyhow::Result<Vec<T>>
+    where
+        F: FnMut(u64),
+    {
+        let mut outputs = Vec::with_capacity(tasks.len());
+        let mut first_error = None;
+        for task in tasks {
+            match self.wait_for(task, &mut report).await {
+                Ok(Ok(output)) => outputs.push(output),
+                Ok(Err(error)) => {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+                Err(error) => {
+                    if first_error.is_none() {
+                        first_error = Some(error.into());
+                    }
+                }
+            }
+        }
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(outputs),
+        }
+    }
+
     fn take_advanced(&mut self) -> Option<u64> {
         let completed = self.completed();
         if completed <= self.last_emitted {
@@ -92,6 +123,8 @@ impl FileProgressCounter {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
+
     use super::*;
 
     #[test]
@@ -134,5 +167,28 @@ mod tests {
 
         assert_eq!(snapshots, vec![1]);
         assert_eq!(progress.completed(), 2);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn wait_for_all_drains_remaining_workers_before_returning_an_error() {
+        let (mut progress, _counter) = FileProgress::new();
+        let drained = Arc::new(AtomicBool::new(false));
+        let worker_drained = Arc::clone(&drained);
+        let tasks = vec![
+            tokio::task::spawn_blocking(|| anyhow::bail!("first worker failed")),
+            tokio::task::spawn_blocking(move || {
+                std::thread::sleep(Duration::from_millis(50));
+                worker_drained.store(true, AtomicOrdering::Release);
+                Ok(())
+            }),
+        ];
+
+        let error = progress
+            .wait_for_all(tasks, |_| {})
+            .await
+            .expect_err("batch should return its first error");
+
+        assert_eq!(error.to_string(), "first worker failed");
+        assert!(drained.load(AtomicOrdering::Acquire));
     }
 }

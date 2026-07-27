@@ -22,7 +22,7 @@ fn local_flow_installs_syncs_exports_and_uninstalls() -> Result<()> {
     runtime.block_on(async {
         let app = AppContext::discover()?;
 
-        commands::init::run(&app).await?;
+        commands::init::run(&app, false).await?;
         assert!(app.paths.db_path.is_file());
         assert!(app.paths.hook_cmd_path.is_file());
         assert!(app.paths.hook_sh_path.is_file());
@@ -147,6 +147,41 @@ fn local_flow_installs_syncs_exports_and_uninstalls() -> Result<()> {
 }
 
 #[test]
+fn antigravity_install_and_uninstall_stay_inside_temp_home() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let config_dir = fixture.home.join(".gemini").join("config");
+    let hooks_path = config_dir.join("hooks.json");
+    fs::create_dir_all(&config_dir)?;
+    fs::write(
+        &hooks_path,
+        r#"{"Stop":[{"type":"command","command":"user-hook"}]}"#,
+    )?;
+
+    let app = AppContext::discover()?;
+    let store = Store::new(&app.paths)?;
+    store.bootstrap()?;
+
+    integrations::antigravity::install(&app, &store)?;
+    let installed = fs::read_to_string(&hooks_path)?;
+    assert!(installed.contains("user-hook"));
+    assert!(installed.contains("llmusage-hook"));
+
+    integrations::antigravity::uninstall(&app, &store)?;
+    let restored = fs::read_to_string(&hooks_path)?;
+    assert!(restored.contains("user-hook"));
+    assert!(!restored.contains("llmusage-hook"));
+    assert!(
+        fs::read_dir(&config_dir)?
+            .filter_map(|entry| entry.ok())
+            .all(|entry| !entry.file_name().to_string_lossy().contains("llmusage-")),
+        "integration must clean sibling temp and recovery files"
+    );
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
 fn claude_install_reports_invalid_settings_shapes() -> Result<()> {
     let cases = [
         ("top-level", "[]", "顶层必须是 object"),
@@ -192,7 +227,10 @@ fn init_continues_when_claude_install_fails_and_records_error() -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let app = AppContext::discover()?;
-        commands::init::run(&app).await?;
+        // REL-002: a partial failure now exits non-zero by default. This test
+        // asserts the "keep going and record the error" behavior, which is what
+        // --best-effort preserves.
+        commands::init::run(&app, true).await?;
 
         let codex_config = fs::read_to_string(fixture.codex_home.join("config.toml"))?;
         assert!(codex_config.contains("llmusage-hook"));
@@ -239,6 +277,37 @@ fn init_continues_when_claude_install_fails_and_records_error() -> Result<()> {
     Ok(())
 }
 
+/// REL-002: `install_all` folds per-integration errors into `status: error`
+/// rows and returns Ok, so `init` used to print the failure and still exit 0.
+/// Automation then believed hooks were installed when they were not.
+#[test]
+fn init_without_best_effort_fails_when_an_integration_fails() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fs::write(
+        fixture.home.join(".claude").join("settings.json"),
+        "{\"hooks\":\"invalid\"}",
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    let result = runtime.block_on(async {
+        let app = AppContext::discover()?;
+        commands::init::run(&app, false).await
+    });
+
+    fixture.restore_env();
+    let err = result.expect_err("init must fail when an integration install fails");
+    let message = err.to_string();
+    assert!(
+        message.contains("claude"),
+        "error must name the failing integration, got: {message}"
+    );
+    assert!(
+        message.contains("--best-effort"),
+        "error must point at the --best-effort escape hatch, got: {message}"
+    );
+    Ok(())
+}
+
 #[test]
 fn init_writes_quoted_windows_string_commands_for_spaced_paths() -> Result<()> {
     let fixture = Fixture::new_with_spaces()?;
@@ -246,7 +315,7 @@ fn init_writes_quoted_windows_string_commands_for_spaced_paths() -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let app = AppContext::discover()?;
-        commands::init::run(&app).await?;
+        commands::init::run(&app, false).await?;
 
         let expected_stop =
             integrations::HookTarget::current(&app).shell_command(SourceKind::Claude, "Stop");
@@ -284,7 +353,17 @@ fn init_writes_quoted_windows_string_commands_for_spaced_paths() -> Result<()> {
         )?;
         let expected_opencode = integrations::HookTarget::current(&app)
             .shell_command(SourceKind::Opencode, "session.updated");
-        assert!(plugin_body.contains(&expected_opencode));
+        // SEC-002: the command is embedded in a JS template literal, so `\`,
+        // backtick and `${` are escaped before being written. On Windows this
+        // also stops JS from eating the backslashes in the hook path.
+        let expected_in_js = expected_opencode
+            .replace('\\', "\\\\")
+            .replace('`', "\\`")
+            .replace("${", "\\${");
+        assert!(
+            plugin_body.contains(&expected_in_js),
+            "plugin body must contain the JS-escaped command"
+        );
         if cfg!(windows) {
             assert!(plugin_body.contains("cmd /c \"\""));
         }
@@ -332,7 +411,7 @@ fn antigravity_install_cleans_legacy_gemini_hooks() -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let app = AppContext::discover()?;
-        commands::init::run(&app).await?;
+        commands::init::run(&app, false).await?;
 
         let expected_stop =
             integrations::HookTarget::current(&app).shell_command(SourceKind::Antigravity, "Stop");

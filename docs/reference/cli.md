@@ -40,14 +40,14 @@ Usage: llmusage [OPTIONS] [COMMAND]
 
 ## Runtime logging
 
-`llmusage` writes structured runtime diagnostics to `~/.llmusage/logs/llmusage.ndjson` by default. The file is local-only and uses one JSON object per line.
+`llmusage` writes structured runtime diagnostics to local-only NDJSON shards at `~/.llmusage/logs/llmusage.ndjson.*` by default. Each line is one JSON object.
 
 | Environment variable | Meaning |
 | --- | --- |
 | `LLMUSAGE_LOG=off\|error\|warn\|info\|debug\|trace` | Controls the local NDJSON log file; default is `warn` |
 | `RUST_LOG=...` | Continues to control console stderr logging |
 
-File logging does not write to report stdout and does not change `sync --json-events` stdout. The first implementation keeps one active log file and rotates it to `llmusage.ndjson.old` when it is over 10 MiB on startup.
+File logging does not write to report stdout and does not change `sync --json-events` stdout. Shards rotate at 10 MiB while the process is running and retain at most 30 MiB, seven files, and seven days. `logs` and `diagnostics` status include retained size/count plus dropped-event and maintenance-failure counters.
 
 ## Report commands
 
@@ -144,10 +144,13 @@ llmusage sync --source antigravity
 llmusage sync --source kimi_code
 llmusage sync --source pi
 llmusage sync --recent-days 1
+llmusage sync --recent-days 30 --parallelism 4
 llmusage sync --json-events
 llmusage sync --rebuild
 llmusage sync --rebuild --allow-lossy-rebuild
 ```
+
+`--source`, `--recent-days`, and `--parallelism` use the same validation contract as `POST /api/jobs` and the public `JobRegistry` API. Invalid values fail with stable codes: `unknown_source`, `invalid_recent_days`, or `invalid_parallelism`.
 
 Imports local sources. Before source scanning, bootstrap may upgrade an unpinned embedded pricing catalog and reprice historical events. Human stderr reports catalog versions, processed/total events, bucket reconciliation, and elapsed completion time instead of leaving one generic database-initialization line active.
 
@@ -281,7 +284,7 @@ llmusage serve --port 37421
 llmusage serve --public --no-open --port 37421
 ```
 
-Starts the web dashboard and JSON API on `127.0.0.1` by default. `--public` binds `0.0.0.0` for remote access; it does not add authentication or TLS. `--no-open` suppresses browser launching, and SSH sessions skip the automatic browser launch automatically.
+Starts the full web dashboard and local JSON API on `127.0.0.1` by default. `--public` binds `0.0.0.0` but exposes only the read-only aggregate dashboard allowlist (`/`, assets, `/api/dashboard`, and `/api/health`); projects, logs, diagnostics, jobs, behavior/Explorer detail, and writes remain loopback-only. The public aggregate view has no authentication or TLS. `--no-open` suppresses browser launching, and SSH sessions skip the automatic browser launch automatically. Use loopback through an SSH tunnel when remote access needs the full local API.
 
 ### `llmusage codex-tracer`
 

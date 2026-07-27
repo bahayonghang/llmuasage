@@ -3,7 +3,9 @@ use std::fs;
 use rusqlite::OptionalExtension;
 use tracing::info;
 
-use super::{BootstrapOptions, BootstrapProgressEvent, BootstrapProgressSink, Store, migrations};
+use super::{
+    BootstrapOptions, BootstrapProgressEvent, BootstrapProgressSink, HolderKind, Store, migrations,
+};
 use crate::{error::Result, models::SourceKind};
 
 const META_RAW_ARCHIVE_KEY: &str = "raw_archive_enabled";
@@ -24,6 +26,27 @@ pub const fn expected_token_accounting_version(source: SourceKind) -> u32 {
 }
 
 impl Store {
+    /// Verifies that an existing database is ready for read-only commands
+    /// without running migrations or pricing recomputation as a side effect.
+    pub fn require_initialized(&self) -> Result<()> {
+        if !self.paths.db_path.is_file() {
+            return Err(crate::error::LlmusageError::NotInitialized);
+        }
+        let conn = self.open_connection()?;
+        let db_version = migrations::read_schema_version(&conn)?;
+        let binary_version = migrations::latest_schema_version();
+        if db_version > binary_version {
+            return Err(crate::error::LlmusageError::SchemaTooNew {
+                db_version,
+                binary_version,
+            });
+        }
+        if db_version < binary_version {
+            return Err(crate::error::LlmusageError::NotInitialized);
+        }
+        Ok(())
+    }
+
     pub fn bootstrap(&self) -> Result<()> {
         self.bootstrap_with(BootstrapOptions::default())
     }
@@ -63,6 +86,17 @@ impl Store {
     fn bootstrap_with_events(
         &self,
         options: BootstrapOptions,
+        progress_sink: Option<BootstrapProgressSink<'_>>,
+    ) -> Result<()> {
+        let operation = self.write_operation(HolderKind::Library)?;
+        operation
+            .store
+            .bootstrap_with_events_fenced(options, progress_sink)
+    }
+
+    fn bootstrap_with_events_fenced(
+        &self,
+        options: BootstrapOptions,
         mut progress_sink: Option<BootstrapProgressSink<'_>>,
     ) -> Result<()> {
         /*
@@ -89,13 +123,21 @@ impl Store {
         }
         if let Some(sink) = progress_sink.as_deref_mut() {
             let mut migration_sink = |event| sink(BootstrapProgressEvent::Migration(event));
-            migrations::run_migrations_with_events(&mut conn, Some(&mut migration_sink))?;
+            migrations::run_migrations_with_events_and_permit(
+                &mut conn,
+                Some(&mut migration_sink),
+                Some(self.write_permit()?),
+            )?;
         } else {
-            migrations::run_migrations_with_events(&mut conn, None)?;
+            migrations::run_migrations_with_events_and_permit(
+                &mut conn,
+                None,
+                Some(self.write_permit()?),
+            )?;
         }
 
         if let Some(enabled) = options.enable_raw_archive {
-            write_meta_flag(&conn, META_RAW_ARCHIVE_KEY, enabled)?;
+            self.write_transaction(|tx| write_meta_flag(tx, META_RAW_ARCHIVE_KEY, enabled))?;
         }
         drop(conn);
         self.upgrade_embedded_pricing_if_needed(progress_sink)?;
@@ -119,8 +161,7 @@ impl Store {
 
     /// Persists the raw archive flag without touching schema.
     pub fn set_raw_archive(&self, enabled: bool) -> Result<()> {
-        let conn = self.open_connection()?;
-        write_meta_flag(&conn, META_RAW_ARCHIVE_KEY, enabled)
+        self.write_transaction(|tx| write_meta_flag(tx, META_RAW_ARCHIVE_KEY, enabled))
     }
 
     /// Reads a raw string value from the `meta` table.
@@ -131,8 +172,7 @@ impl Store {
 
     /// Persists a raw string value into the `meta` table.
     pub fn set_meta_value(&self, key: &str, value: &str) -> Result<()> {
-        let conn = self.open_connection()?;
-        write_meta_value(&conn, key, value)
+        self.write_transaction(|tx| write_meta_value(tx, key, value))
     }
 
     /// Returns the token-accounting contract recorded for one parser source.
@@ -167,11 +207,13 @@ impl Store {
 
     /// Clears the marker before a guarded rebuild starts.
     pub fn clear_token_accounting_version(&self, source: SourceKind) -> Result<()> {
-        let conn = self.open_connection()?;
-        conn.execute(
-            "DELETE FROM meta WHERE key = ?1",
-            [token_accounting_key(source)],
-        )?;
+        self.write_transaction(|tx| {
+            tx.execute(
+                "DELETE FROM meta WHERE key = ?1",
+                [token_accounting_key(source)],
+            )?;
+            Ok(())
+        })?;
         Ok(())
     }
 
@@ -181,9 +223,7 @@ impl Store {
     /// by multiple sources and are cheap stale metadata until the next full GC.
     pub fn reset_for_source(&self, source: crate::models::SourceKind) -> Result<()> {
         info!(source = %source, "开始按源清空可重建用量数据");
-        let mut conn = self.open_connection()?;
-        let tx = conn.transaction()?;
-        {
+        self.write_transaction(|tx| {
             let source = source.as_str();
             tx.execute("DELETE FROM usage_tool_call WHERE source = ?1", [source])?;
             tx.execute("DELETE FROM usage_turn WHERE source = ?1", [source])?;
@@ -203,8 +243,8 @@ impl Store {
                 "#,
                 [format!("{source}:%")],
             )?;
-        }
-        tx.commit()?;
+            Ok(())
+        })?;
         info!(source = %source, "完成按源清空可重建用量数据");
         Ok(())
     }
@@ -222,9 +262,9 @@ impl Store {
          */
         info!("开始清空可重建用量数据");
 
-        let conn = self.open_connection()?;
-        conn.execute_batch(
-            r#"
+        self.write_transaction(|tx| {
+            tx.execute_batch(
+                r#"
             DELETE FROM usage_tool_call;
             DELETE FROM usage_turn;
             DELETE FROM usage_event;
@@ -234,7 +274,9 @@ impl Store {
             DELETE FROM source_sync_status;
             DELETE FROM usage_event_raw;
             "#,
-        )?;
+            )?;
+            Ok(())
+        })?;
 
         info!("完成清空可重建用量数据");
         Ok(())
@@ -244,6 +286,11 @@ impl Store {
         fs::create_dir_all(&self.paths.backups_dir)?;
         let backup_path = self.paths.backups_dir.join("llmusage.db.pre-0.5.0");
         if !backup_path.exists() {
+            // Checkpoint to flush WAL pages into the main database file before
+            // copying, so the backup is self-contained (DATA-005).
+            let conn = self.open_connection()?;
+            conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+            drop(conn);
             fs::copy(&self.paths.db_path, &backup_path)?;
         }
         Ok(())
@@ -282,4 +329,46 @@ fn write_meta_value(conn: &rusqlite::Connection, key: &str, value: &str) -> Resu
         rusqlite::params![key, value],
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use tempfile::TempDir;
+
+    use super::*;
+    use crate::{error::LlmusageError, paths::AppPaths};
+
+    #[test]
+    fn require_initialized_never_creates_or_migrates_a_database() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = AppPaths::with_root(temp.path().join("runtime"))?;
+        let store = Store::new(&paths)?;
+
+        let error = store
+            .require_initialized()
+            .expect_err("read-only initialization check must reject a missing database");
+        assert!(matches!(error, LlmusageError::NotInitialized));
+        assert!(
+            !paths.db_path.exists(),
+            "read-only check must not create SQLite"
+        );
+
+        store.bootstrap()?;
+        store.require_initialized()?;
+
+        let future_version = migrations::latest_schema_version() + 1;
+        store.set_meta_value("schema_version", &future_version.to_string())?;
+        let error = store
+            .require_initialized()
+            .expect_err("a newer schema must keep the stable SchemaTooNew error");
+        assert!(matches!(
+            error,
+            LlmusageError::SchemaTooNew {
+                db_version,
+                binary_version,
+            } if db_version == future_version
+                && binary_version == migrations::latest_schema_version()
+        ));
+        Ok(())
+    }
 }

@@ -1,6 +1,5 @@
 use std::{
     io::IsTerminal,
-    path::PathBuf,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -20,23 +19,31 @@ use crate::{
     store::{BootstrapProgressEvent, HolderKind, SourceSyncStatus, Store},
 };
 
-#[derive(Debug, Clone)]
-pub struct SyncSummary {
-    pub sources: Vec<SourceSyncStats>,
-    pub total_seen: usize,
-    pub total_inserted: usize,
-    pub stored_events: usize,
-}
+// These types belong to the sync domain layer. Re-exported here so callers that
+// already import `commands::sync` don't need to change.
+pub use crate::sync::types::{SyncRunOptions, SyncSummary};
 
-#[derive(Debug, Clone, Default)]
-pub struct SyncRunOptions {
-    pub rebuild: bool,
-    pub source: Option<SourceKind>,
-    pub recent_days: Option<u32>,
-    pub parallelism: Option<usize>,
-    pub provider_map: Option<PathBuf>,
-    pub json_events: bool,
-    pub allow_lossy_rebuild: bool,
+/// Hard service-side bound on parser concurrency (RES-001).
+///
+/// An unbounded `parallelism` lets a caller spawn an arbitrary number of
+/// blocking parse tasks, which is a local DoS vector — and a remote one if any
+/// write-path guard is bypassed. 32 is far above the useful range (the default
+/// is `min(cpu, 4)`) while staying bounded.
+pub use crate::sync::types::MAX_SYNC_PARALLELISM;
+
+/// Validates and resolves the effective parser concurrency.
+///
+/// `None` resolves to `min(available_parallelism, 4)`. An explicit value must
+/// be in `1..=MAX_SYNC_PARALLELISM`; anything outside is rejected rather than
+/// silently clamped, so a caller that asked for 10_000 learns its request was
+/// invalid instead of quietly getting 32.
+pub fn normalize_parallelism(requested: Option<usize>) -> Result<usize> {
+    crate::sync::ValidatedSyncRequest::new(crate::sync::SyncRequestInput {
+        parallelism: requested,
+        ..Default::default()
+    })
+    .map(|request| request.parallelism())
+    .map_err(anyhow::Error::from)
 }
 
 pub async fn run(app: &AppContext) -> Result<()> {
@@ -44,6 +51,7 @@ pub async fn run(app: &AppContext) -> Result<()> {
 }
 
 pub async fn run_with_options(app: &AppContext, options: SyncRunOptions) -> Result<()> {
+    options.validate()?;
     /*
      * ========================================================================
      * 步骤1：执行全量本地真源同步
@@ -76,6 +84,18 @@ async fn run_with_human_events(
     let render_stats = Arc::new(Mutex::new(sync_progress::RenderStats::default()));
     let bootstrap_started = Instant::now();
     sync_progress::render_shared_timed(&renderer, &render_stats, &SyncEvent::BootstrapStarted);
+    sync_progress::render_shared(&renderer, &SyncEvent::LockWaiting { timeout_ms: 30_000 });
+    let lock_started = Instant::now();
+    let lock = store.acquire_worker_lock_with(Duration::from_secs(30), HolderKind::Cli)?;
+    let fenced_store = lock.fenced_store();
+    let heartbeat = lock.start_default_heartbeat();
+    let lock_wait_ms = lock_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+    sync_progress::render_shared(
+        &renderer,
+        &SyncEvent::LockAcquired {
+            wait_ms: lock_wait_ms,
+        },
+    );
     let bootstrap_renderer = Arc::clone(&renderer);
     let bootstrap_stats = Arc::clone(&render_stats);
     let mut bootstrap_sink = move |event: BootstrapProgressEvent| {
@@ -85,23 +105,12 @@ async fn run_with_human_events(
             &SyncEvent::from(event),
         );
     };
-    store.bootstrap_with_progress(Some(&mut bootstrap_sink))?;
+    fenced_store.bootstrap_with_progress(Some(&mut bootstrap_sink))?;
     tracing::debug!(
         bootstrap_ms = bootstrap_started.elapsed().as_millis() as u64,
         "bootstrap finished"
     );
-    sync_progress::render_shared(&renderer, &SyncEvent::LockWaiting { timeout_ms: 30_000 });
-    let lock_started = Instant::now();
-    let lock = store.acquire_worker_lock_with(Duration::from_secs(30), HolderKind::Cli)?;
-    let heartbeat = lock.start_default_heartbeat();
-    let lock_wait_ms = lock_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
-    sync_progress::render_shared(
-        &renderer,
-        &SyncEvent::LockAcquired {
-            wait_ms: lock_wait_ms,
-        },
-    );
-    store
+    fenced_store
         .run_log()
         .recover_running_runs(&["sync", "hook-run"])?;
     let (mut tx, mut rx) = mpsc::channel(128);
@@ -128,10 +137,18 @@ async fn run_with_human_events(
         "sync"
     };
     let summary_result = super::run_tracked(
-        store,
+        &fenced_store,
         command_name,
         async {
-            run_once_with_cancel(app, store, lock_wait_ms, options, Some(&mut tx), &cancel).await
+            run_once_with_cancel(
+                app,
+                &fenced_store,
+                lock_wait_ms,
+                options,
+                Some(&mut tx),
+                &cancel,
+            )
+            .await
         },
         |item| {
             Some(format!(
@@ -203,24 +220,25 @@ async fn run_with_json_events(
     });
 
     let result = async {
-        {
-            let bootstrap_tx = tx.clone();
-            let mut bootstrap_sink = move |event: BootstrapProgressEvent| {
-                let _ = bootstrap_tx.try_send(SyncEvent::from(event));
-            };
-            store.bootstrap_with_progress(Some(&mut bootstrap_sink))?;
-        }
         tx.send(SyncEvent::LockWaiting { timeout_ms: 30_000 })
             .await?;
         let lock_started = Instant::now();
         let lock = store.acquire_worker_lock_with(Duration::from_secs(30), HolderKind::Cli)?;
+        let fenced_store = lock.fenced_store();
         let heartbeat = lock.start_default_heartbeat();
         let lock_wait_ms = lock_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
         tx.send(SyncEvent::LockAcquired {
             wait_ms: lock_wait_ms,
         })
         .await?;
-        store
+        {
+            let bootstrap_tx = tx.clone();
+            let mut bootstrap_sink = move |event: BootstrapProgressEvent| {
+                let _ = bootstrap_tx.try_send(SyncEvent::from(event));
+            };
+            fenced_store.bootstrap_with_progress(Some(&mut bootstrap_sink))?;
+        }
+        fenced_store
             .run_log()
             .recover_running_runs(&["sync", "hook-run"])?;
         let command_name = if options.rebuild {
@@ -229,11 +247,18 @@ async fn run_with_json_events(
             "sync"
         };
         let summary = super::run_tracked(
-            store,
+            &fenced_store,
             command_name,
             async {
-                run_once_with_cancel(app, store, lock_wait_ms, options, Some(&mut tx), &cancel)
-                    .await
+                run_once_with_cancel(
+                    app,
+                    &fenced_store,
+                    lock_wait_ms,
+                    options,
+                    Some(&mut tx),
+                    &cancel,
+                )
+                .await
             },
             |item| {
                 Some(format!(
@@ -312,12 +337,14 @@ pub async fn run_store_once_with_options(
     store: &Store,
     options: &SyncRunOptions,
 ) -> Result<SyncSummary> {
-    store.bootstrap()?;
+    options.validate()?;
     let lock_started = Instant::now();
     let lock = store.acquire_worker_lock_with(Duration::from_secs(30), HolderKind::Cli)?;
+    let fenced_store = lock.fenced_store();
     let heartbeat = lock.start_default_heartbeat();
     let lock_wait_ms = lock_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
-    store
+    fenced_store.bootstrap()?;
+    fenced_store
         .run_log()
         .recover_running_runs(&["sync", "hook-run"])?;
     let command_name = if options.rebuild {
@@ -327,9 +354,9 @@ pub async fn run_store_once_with_options(
     };
     let cancel = CancellationToken::new();
     let summary = super::run_tracked(
-        store,
+        &fenced_store,
         command_name,
-        async { run_once_locked(store, lock_wait_ms, options, None, &cancel).await },
+        async { run_once_locked(&fenced_store, lock_wait_ms, options, None, &cancel).await },
         |item| {
             Some(format!(
                 "sources={} seen={} inserted_delta={} stored_events={}",
@@ -372,16 +399,54 @@ pub async fn run_once_with_cancel(
     sender: Option<&mut mpsc::Sender<SyncEvent>>,
     cancel: &CancellationToken,
 ) -> Result<SyncSummary> {
-    run_once_locked(store, lock_wait_ms, options, sender, cancel).await
+    let operation = store.write_operation(HolderKind::Library)?;
+    run_once_locked(&operation.store, lock_wait_ms, options, sender, cancel).await
+}
+
+/// CLI adapter that implements `SyncExecutor`.
+///
+/// `JobRegistry` receives an `Arc<dyn SyncExecutor>` rather than calling this
+/// function directly, so the application layer no longer needs to import the
+/// CLI adapter module (ARCH-002).
+pub struct CommandSyncExecutor;
+
+// Keep the existing public convenience constructor owned by the adapter layer.
+// Composition roots inject explicitly; the sync/application layer remains
+// independent of this concrete executor.
+impl Default for crate::sync::JobRegistry {
+    fn default() -> Self {
+        Self::new(Arc::new(CommandSyncExecutor))
+    }
+}
+
+impl crate::sync::executor::SyncExecutor for CommandSyncExecutor {
+    fn run_once<'a>(
+        &'a self,
+        _app: &'a AppContext,
+        store: &'a Store,
+        lock_wait_ms: u64,
+        options: &'a SyncRunOptions,
+        sender: Option<&'a mut mpsc::Sender<SyncEvent>>,
+        cancel: &'a CancellationToken,
+    ) -> crate::sync::executor::BoxFuture<'a, anyhow::Result<SyncSummary>> {
+        Box::pin(run_once_locked(
+            store,
+            lock_wait_ms,
+            options,
+            sender,
+            cancel,
+        ))
+    }
 }
 
 async fn run_once_locked(
     store: &Store,
     lock_wait_ms: u64,
     options: &SyncRunOptions,
-    sender: Option<&mut mpsc::Sender<SyncEvent>>,
+    mut sender: Option<&mut mpsc::Sender<SyncEvent>>,
     cancel: &CancellationToken,
 ) -> Result<SyncSummary> {
+    let request = options.validate()?;
     /*
      * ========================================================================
      * 步骤2：执行三阶段同步流水线
@@ -414,10 +479,8 @@ async fn run_once_locked(
     }
 
     // 2.1 计算并发度并按 source 顺序解析 + 即时写入
-    let default_parallelism = std::thread::available_parallelism()
-        .map(|value| value.get().min(4))
-        .unwrap_or(1);
-    let parallelism = options.parallelism.unwrap_or(default_parallelism).max(1);
+    let parallelism = request.parallelism();
+    let recent_cutoff = request.recent_cutoff(chrono::Utc::now());
     let provider_index = crate::domain::provider_map::ProviderIndex::resolve_for_sync(
         options.provider_map.as_deref(),
     )?;
@@ -443,8 +506,8 @@ async fn run_once_locked(
         writer: &mut writer,
         parallelism,
         lock_wait_ms,
-        recent_days: options.recent_days,
-        sender,
+        recent_cutoff,
+        sender: sender.as_deref_mut(),
         cancel,
     })
     .await?;
@@ -481,6 +544,7 @@ async fn run_once_locked(
             parse_ms: source.parse_ms as i64,
             write_ms: source.write_ms as i64,
             lock_wait_ms: source.lock_wait_ms as i64,
+            parse_issues: source.parse_issues.clone(),
             updated_at: crate::util::now_utc(),
         });
         source_stats.push(source);
@@ -503,6 +567,7 @@ async fn run_once_locked(
             parse_ms: 0,
             write_ms: 0,
             lock_wait_ms: lock_wait_ms as i64,
+            parse_issues: Default::default(),
             updated_at: crate::util::now_utc(),
         });
         source_stats.push(SourceSyncStats {
@@ -528,6 +593,20 @@ async fn run_once_locked(
     store
         .sync_status()
         .save_source_sync_statuses(&sync_statuses)?;
+    if recent_cutoff.is_some() && !cancel.is_cancelled() {
+        for source in &source_stats {
+            store
+                .sync_status()
+                .mark_recent_completed(source.source, crate::util::now_utc())?;
+            if let Some(sender) = sender.as_deref_mut() {
+                sender
+                    .send(SyncEvent::RecentReady {
+                        source: source.source,
+                    })
+                    .await?;
+            }
+        }
+    }
 
     let stored_events = stored_event_count(store, options.source)?;
     let stats = source_stats;
@@ -667,4 +746,56 @@ fn rebuild_sources(
     parser_sources: &[SourceKind],
 ) -> Vec<SourceKind> {
     selected_source.map_or_else(|| parser_sources.to_vec(), |source| vec![source])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parallelism_none_resolves_to_sensible_default() {
+        let p = normalize_parallelism(None).unwrap();
+        assert!(p >= 1, "default must be at least 1, got {p}");
+        assert!(p <= 4, "default must not exceed 4, got {p}");
+    }
+
+    #[test]
+    fn parallelism_one_is_accepted() {
+        assert_eq!(normalize_parallelism(Some(1)).unwrap(), 1);
+    }
+
+    #[test]
+    fn parallelism_max_is_accepted() {
+        assert_eq!(
+            normalize_parallelism(Some(MAX_SYNC_PARALLELISM)).unwrap(),
+            MAX_SYNC_PARALLELISM
+        );
+    }
+
+    #[test]
+    fn parallelism_zero_is_rejected() {
+        let err = normalize_parallelism(Some(0)).unwrap_err();
+        assert!(
+            err.to_string().contains("invalid_parallelism"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn parallelism_above_max_is_rejected() {
+        let err = normalize_parallelism(Some(MAX_SYNC_PARALLELISM + 1)).unwrap_err();
+        assert!(
+            err.to_string().contains("invalid_parallelism"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn parallelism_usize_max_is_rejected() {
+        let err = normalize_parallelism(Some(usize::MAX)).unwrap_err();
+        assert!(
+            err.to_string().contains("invalid_parallelism"),
+            "unexpected error: {err}"
+        );
+    }
 }

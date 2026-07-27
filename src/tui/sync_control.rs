@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use anyhow::Result;
 
@@ -29,7 +29,7 @@ impl SyncController {
         Ok(Self {
             runtime: tokio::runtime::Handle::try_current()
                 .map_err(|err| anyhow::anyhow!("TUI requires a Tokio runtime: {err}"))?,
-            registry: JobRegistry::default(),
+            registry: JobRegistry::new(Arc::new(crate::commands::sync::CommandSyncExecutor)),
             active_job_id: None,
             events: None,
         })
@@ -57,7 +57,7 @@ impl SyncController {
                 self.events = Some(events);
                 "Sync running... press x to cancel".to_string()
             }
-            Err(err) => format!("Sync already running: {}", err.active_job_id),
+            Err(err) => format!("Sync start rejected: {err}"),
         }
     }
 

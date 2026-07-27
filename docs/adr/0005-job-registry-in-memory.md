@@ -71,6 +71,10 @@ pub fn snapshot(&self, id: &str) -> Option<JobSnapshot> {
 
 DashMap 不无限增长。`list_recent` 默认上限 50 条；超过时按 `finished_at` 老的先 evict。运行中 job 永不 evict。
 
+### 6. 输入校验与 bounded recent
+
+JobRegistry 不解释 transport 字符串。CLI、Web 与 public `try_start` 都通过 `ValidatedSyncRequest` 校验 source、`recent_days` 与 parallelism；非法输入在创建 job 前返回稳定错误码。`recent_days` 使用单一 UTC cutoff：文件型来源按事件时间过滤，OpenCode 在 SQL 层裁剪旧行。bounded run 不写 full-history cursor 或整文件 reset，因此后续 full sync 仍可恢复窗口外历史。
+
 ## 备选方案与否决理由
 
 ### 备选 A：SQLite job 表持久化

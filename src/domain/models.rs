@@ -50,6 +50,73 @@ impl Display for SourceKind {
     }
 }
 
+pub(crate) const MAX_PARSE_ISSUE_SAMPLES: usize = 8;
+pub(crate) const MAX_PATH_HASH_CHARS: usize = 128;
+
+/// Classification for a bounded, privacy-safe passive JSONL parse issue.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ParseIssueKind {
+    Malformed,
+    Oversized,
+}
+
+/// Bounded diagnostic sample that never contains raw source content or paths.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ParseIssueSample {
+    pub source: SourceKind,
+    pub path_hash: String,
+    pub offset: u64,
+    pub kind: ParseIssueKind,
+}
+
+/// Aggregate malformed/oversized record diagnostics for one source sync.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ParseIssues {
+    pub malformed_lines: u64,
+    pub oversized_lines: u64,
+    pub samples: Vec<ParseIssueSample>,
+}
+
+impl ParseIssues {
+    pub fn total(&self) -> u64 {
+        self.malformed_lines.saturating_add(self.oversized_lines)
+    }
+
+    pub fn merge(&mut self, other: Self) {
+        self.malformed_lines = self.malformed_lines.saturating_add(other.malformed_lines);
+        self.oversized_lines = self.oversized_lines.saturating_add(other.oversized_lines);
+        let remaining = MAX_PARSE_ISSUE_SAMPLES.saturating_sub(self.samples.len());
+        self.samples
+            .extend(other.samples.into_iter().take(remaining));
+    }
+
+    pub(crate) fn record(
+        &mut self,
+        source: SourceKind,
+        path_hash: &str,
+        offset: u64,
+        kind: ParseIssueKind,
+    ) {
+        match kind {
+            ParseIssueKind::Malformed => {
+                self.malformed_lines = self.malformed_lines.saturating_add(1);
+            }
+            ParseIssueKind::Oversized => {
+                self.oversized_lines = self.oversized_lines.saturating_add(1);
+            }
+        }
+        if self.samples.len() < MAX_PARSE_ISSUE_SAMPLES {
+            self.samples.push(ParseIssueSample {
+                source,
+                path_hash: path_hash.chars().take(MAX_PATH_HASH_CHARS).collect(),
+                offset,
+                kind,
+            });
+        }
+    }
+}
+
 /// Token counters stored on usage events and aggregated buckets.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UsageTokens {

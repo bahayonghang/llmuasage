@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 30
-- **Last Active**: 2026-07-23
+- **Total Sessions**: 40
+- **Last Active**: 2026-07-27
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1020 | Active |
+| `journal-1.md` | ~1310 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,16 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 40 | 2026-07-27 | 审计整改二次闭环 | `1540e3effeaedec9144ced34ec5ffd4b901a17cc` | `dev` |
+| 39 | 2026-07-27 | 完成 ARCH-002 依赖边界强制执行 | `0f085ef8e78330214688cc9e2c01b82197b2d766` | `dev` |
+| 38 | 2026-07-27 | 完成运行期日志有界化与丢弃观测 | `7db9b56457f1aa9b025cc83926bdf86b311fb8e4` | `dev` |
+| 37 | 2026-07-26 | 完成 public 只读安全边界闭环 | `6206f5cec193ff15929edcc79a9ee1e40ae828ef` | `dev` |
+| 36 | 2026-07-26 | 完成不可变 self-update 闭环 | `719845d773474b5ce8af08a7a7245548209afb0a` | `dev` |
+| 35 | 2026-07-26 | 完成同步 Job 契约闭环 | `d23e94f8ea87071d9c688be0c35042effa1d3c2d` | `dev` |
+| 34 | 2026-07-26 | 完成 R6 有界 JSONL 与协作取消 | `d258d33` | `dev` |
+| 33 | 2026-07-26 | 完成 Windows integration 原子替换闭环 | `078006e990fb48bb5ba031ab4c9f565f55f5c82f` | `dev` |
+| 32 | 2026-07-26 | 恢复写入 fencing 与 bootstrap 排他性 | `1d81fd91062f1becbbcb6fcc1ae3b80d6b28675e` | `dev` |
+| 31 | 2026-07-26 | 完成 MSRV 与验证基线诚实化 | `6b67cfa` | `dev` |
 | 30 | 2026-07-23 | 完成 serve 加载进度与性能修复 | `ed31296`, `b0638a7`, `5399c90` | `dev` |
 | 29 | 2026-07-23 | 添加 llmusage 自更新命令 | `e5437f7`, `6ec3aa8` | `dev` |
 | 28 | 2026-07-23 | 完成多来源同步与终态汇总表 | `4d6b04e` | `feat/multi-source-sync-table` |

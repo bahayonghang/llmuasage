@@ -15,6 +15,7 @@ impl Store {
     pub fn new(paths: &AppPaths) -> Result<Self> {
         Ok(Self {
             paths: paths.clone(),
+            write_permit: None,
         })
     }
 
@@ -43,6 +44,8 @@ impl Store {
             PRAGMA temp_store = MEMORY;
             "#,
         )?;
+        // DATA-003: DST-aware local date/month grouping for IANA timezones.
+        crate::query::timezone::register_functions(&conn)?;
         Ok(conn)
     }
 

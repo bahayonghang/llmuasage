@@ -19,7 +19,7 @@
 | `~/.llmusage/bin/llmusage-hook.sh` | POSIX hook wrapper |
 | `~/.llmusage/backups/` | 卸载时使用的集成配置备份 |
 | `~/.llmusage/exports/` | 静态 HTML 导出 |
-| `~/.llmusage/logs/llmusage.ndjson` | 本地结构化运行诊断和命令追踪 |
+| `~/.llmusage/logs/llmusage.ndjson.*` | 本地结构化运行诊断和命令追踪 |
 | `~/.llmusage/pricing/` | 内容寻址的本地 base、overlay 和 effective 价格目录 |
 
 运行时根目录优先级：`--home <PATH>` > `LLMUSAGE_HOME` > `~/.llmusage`。
@@ -30,9 +30,9 @@
 
 项目 label 在本地推导。需要稳定分组的敏感路径维度会存为 hash。
 
-运行诊断也只保存在本地。`LLMUSAGE_LOG` 控制 NDJSON 日志文件（`off`、`error`、`warn`、`info`、`debug`、`trace`，默认 `warn`），`RUST_LOG` 控制控制台 stderr。运行日志会记录命令标签、run id、source、模块 target 和错误摘要；不会主动记录 prompt、response 或原始 source JSON。路径可能出现在人读错误摘要中，因此 diagnostics bundle 仍应当作本地排障材料处理。
+运行诊断也只保存在本地。`LLMUSAGE_LOG` 控制 NDJSON 日志文件（`off`、`error`、`warn`、`info`、`debug`、`trace`，默认 `warn`），`RUST_LOG` 控制控制台 stderr。日志在单进程运行期间按 10 MiB 分片轮转，总量最多保留 30 MiB、7 个文件和 7 天；本地 `logs`/`diagnostics` 状态会报告保留文件与字节数、队列丢弃事件数以及轮转/保留失败数。运行日志会记录命令标签、run id、source、模块 target 和错误摘要；不会主动记录 prompt、response 或原始 source JSON。路径可能出现在人读错误摘要中，因此 diagnostics bundle 仍应当作本地排障材料处理。
 
-可用 `llmusage logs --limit 50 --level warn` 查询最近运行日志和 SQLite `run_log` 记录。该命令只读取本地文件/数据库，不上传数据。活动日志文件采用保守上限：启动时如果超过 10 MiB，会轮转为 `llmusage.ndjson.old`；不再需要的旧日志可手动删除。
+可用 `llmusage logs --limit 50 --level warn` 跨保留分片查询最近运行日志和 SQLite `run_log` 记录。该命令只读取本地文件/数据库，不上传数据。轮转和保留清理会在进程持续写日志时执行，不需要重启触发。
 
 ## 普通 sync 保留数据
 
@@ -98,7 +98,11 @@ llmusage doctor --refresh-pricing .\litellm-prices.json
 
 ## 浏览器 Dashboard 边界
 
-`llmusage serve` 默认绑定 `127.0.0.1`，只在进程运行期间暴露本地 HTTP endpoints。`llmusage serve --public` 会显式绑定 `0.0.0.0`，暴露不带认证和 TLS 的 Dashboard 与 JSON API。不要直接暴露给不受信任的网络；请使用防火墙、SSH 隧道或带认证的反向代理限制访问。
+`llmusage serve` 默认绑定 `127.0.0.1`。loopback router 保留完整本地 Dashboard，包括 projects、日志、diagnostics、integration/cursor health、job reads、行为分析、Cost Explorer 和带真实 peer 检查的写路由。
+
+`llmusage serve --public` 会显式绑定 `0.0.0.0`，并选择独立的只读 router。只挂载页面 shell/静态资源、字段 allowlist 明确的聚合 `/api/dashboard` projection，以及固定的最小 `/api/health` 响应。原始日志、diagnostics、本地路径/project 字段、内部错误、job 状态和全部 mutation 路由都不存在，而不是依赖 `Host` 或 `Origin` header 保护。未来如需远程 diagnostics，必须另行提供显式 opt-in 和认证。
+
+精简 public 视图仍不提供认证或 TLS，也会显示聚合用量、模型和来源数据。不要直接暴露给不受信任的网络；请使用防火墙或带认证的反向代理。远程需要完整 Dashboard 能力时，应优先通过 SSH 隧道访问默认 loopback 监听。
 
 ## 静态导出边界
 

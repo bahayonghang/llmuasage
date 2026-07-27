@@ -8,7 +8,7 @@ use super::{report_args::SessionArgs, unified_report};
 pub async fn run(app: &AppContext, args: SessionArgs) -> Result<()> {
     debug!("starting session report output");
     let store = Store::new(&app.paths)?;
-    store.bootstrap()?;
+    store.require_initialized()?;
     let filter = args.common.to_filter(args.project.clone())?;
 
     if args.id.is_some() && !args.unified.sections.is_empty() {

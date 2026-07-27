@@ -1,5 +1,9 @@
 use std::{
     collections::HashMap,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -8,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    models::{SourceKind, UsageEvent, UsageTokens, UsageToolCall, UsageTurn},
+    models::{ParseIssues, SourceKind, UsageEvent, UsageTokens, UsageToolCall, UsageTurn},
     paths::AppPaths,
     query::pricing::{PRICING_MIXED, PRICING_UNPRICED},
 };
@@ -198,6 +202,9 @@ pub struct SourceSyncStatus {
     pub write_ms: i64,
     /// Time spent waiting on the global worker lock in milliseconds.
     pub lock_wait_ms: i64,
+    /// Privacy-safe malformed/oversized JSONL diagnostics from the latest run.
+    #[serde(default)]
+    pub parse_issues: ParseIssues,
     /// Last update time in RFC 3339 format.
     pub updated_at: String,
 }
@@ -261,6 +268,12 @@ pub struct WorkerLock {
     store: Store,
     lock_name: String,
     owner_id: String,
+    /// Fencing generation captured at acquisition time (CONC-001).
+    /// Heartbeat refreshes match on both `owner_id` and `generation`; a stale
+    /// holder that lost its lease to a new owner gets 0 rows affected and can
+    /// detect the theft immediately.
+    pub(crate) generation: u32,
+    permit: WritePermit,
     meta: WorkerLockMeta,
 }
 
@@ -271,14 +284,56 @@ pub struct WorkerLockHeartbeat {
     handle: Option<std::thread::JoinHandle<()>>,
 }
 
+/// Unforgeable capability proving that this store clone owns the current
+/// worker-lock generation. Fields stay private so callers cannot manufacture
+/// a permit from persisted lock metadata.
+#[derive(Debug, Clone)]
+pub(crate) struct WritePermit {
+    lock_name: String,
+    owner_id: String,
+    generation: u32,
+    lost: Arc<AtomicBool>,
+}
+
+impl WritePermit {
+    fn mark_lost(&self) {
+        self.lost.store(true, Ordering::Release);
+    }
+
+    fn ensure_not_lost(&self) -> crate::error::Result<()> {
+        if self.lost.load(Ordering::Acquire) {
+            return Err(crate::error::LlmusageError::LockLost);
+        }
+        Ok(())
+    }
+}
+
+/// Keeps an implicitly acquired operation lock alive for compatibility APIs
+/// such as `Store::bootstrap()` and standalone mutation calls.
+pub(crate) struct WriteOperation {
+    pub(crate) store: Store,
+    _heartbeat: Option<WorkerLockHeartbeat>,
+    _lock: Option<WorkerLock>,
+}
+
 /// Main SQLite-backed store façade used across commands, parsers, and queries.
 #[derive(Debug, Clone)]
 pub struct Store {
     /// Runtime paths that locate the DB, wrappers, backups, and exports.
     pub paths: AppPaths,
+    write_permit: Option<WritePermit>,
 }
 
 impl Store {
+    pub(crate) fn write_permit(&self) -> crate::error::Result<&WritePermit> {
+        let permit = self
+            .write_permit
+            .as_ref()
+            .ok_or(crate::error::LlmusageError::LockLost)?;
+        permit.ensure_not_lost()?;
+        Ok(permit)
+    }
+
     /// Borrowed view onto the `source_cursor` surface.
     pub fn cursors(&self) -> CursorStore<'_> {
         CursorStore::new(self)
@@ -349,6 +404,18 @@ impl Store {
         activation: &pricing_catalog::PricingMetaChange,
         progress_sink: Option<BootstrapProgressSink<'_>>,
     ) -> crate::error::Result<PricingRecomputeSummary> {
+        let operation = self.write_operation(HolderKind::Library)?;
+        operation
+            .store
+            .recompute_costs_fenced(catalog, activation, progress_sink)
+    }
+
+    fn recompute_costs_fenced(
+        &self,
+        catalog: &crate::query::pricing_catalog::PricingCatalog,
+        activation: &pricing_catalog::PricingMetaChange,
+        progress_sink: Option<BootstrapProgressSink<'_>>,
+    ) -> crate::error::Result<PricingRecomputeSummary> {
         const PAGE_SIZE: usize = 5000;
 
         let mut conn = self.open_connection()?;
@@ -371,6 +438,27 @@ impl Store {
         );
         progress.started();
 
+        // DATA-002: write a durable in-progress marker before the first page
+        // commit. If the process crashes mid-recompute, bootstrap detects this
+        // marker and re-runs the recompute to restore a consistent state.
+        {
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            self.validate_write_transaction(&tx)?;
+            tx.execute(
+                r#"
+            INSERT INTO meta(key, value)
+            VALUES (?1, ?2)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            "#,
+                rusqlite::params![
+                    pricing_catalog::META_RECOMPUTE_IN_PROGRESS,
+                    &catalog.version,
+                ],
+            )?;
+            self.validate_write_transaction(&tx)?;
+            tx.commit()?;
+        }
+
         // Pass 1: page through usage_event rows and update cost columns.
         // We use event_key as a cursor for keyset pagination (it's the PK).
         let mut updated = 0usize;
@@ -379,7 +467,9 @@ impl Store {
 
         let event_result: crate::error::Result<()> = (|| {
             loop {
-                let tx = conn.transaction()?;
+                let tx =
+                    conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+                self.validate_write_transaction(&tx)?;
                 let page: Vec<PricingRecomputeRow> = {
                     let mut stmt = tx.prepare(
                         r#"
@@ -468,6 +558,7 @@ impl Store {
                 }
 
                 last_event_key = page.last().unwrap().event_key.clone();
+                self.validate_write_transaction(&tx)?;
                 tx.commit()?;
                 progress.page_committed(updated);
             }
@@ -482,7 +573,8 @@ impl Store {
         let bucket_count = buckets.len();
         progress.bucket_reconcile_started(bucket_count);
         let reconcile_result: crate::error::Result<usize> = (|| {
-            let tx = conn.transaction()?;
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            self.validate_write_transaction(&tx)?;
             let deleted_orphan_buckets = reconcile_pricing_buckets(&tx, &buckets)?;
             for key in &activation.deletes {
                 tx.execute("DELETE FROM meta WHERE key = ?1", [key])?;
@@ -497,6 +589,14 @@ impl Store {
                     params![key, value],
                 )?;
             }
+            // DATA-002: clear the in-progress marker atomically with the
+            // catalog version switch. If the process crashes before this
+            // commit, the marker survives and bootstrap re-runs the recompute.
+            tx.execute(
+                "DELETE FROM meta WHERE key = ?1",
+                [pricing_catalog::META_RECOMPUTE_IN_PROGRESS],
+            )?;
+            self.validate_write_transaction(&tx)?;
             tx.commit()?;
             Ok(deleted_orphan_buckets)
         })();
@@ -598,7 +698,9 @@ fn reconcile_pricing_buckets(
 
 /// Single-connection writer used by sync to batch event/cursor updates transactionally.
 pub struct SyncRunWriter {
+    store: Store,
     conn: Connection,
+    permit: Option<WritePermit>,
     run_started_at: String,
     raw_archive_enabled: bool,
     pricing_catalog: crate::query::PricingCatalog,

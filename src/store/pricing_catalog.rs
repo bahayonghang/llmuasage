@@ -7,7 +7,7 @@ use std::{
 use rusqlite::OptionalExtension;
 use serde::Serialize;
 
-use super::{BootstrapProgressSink, Store};
+use super::{BootstrapProgressSink, HolderKind, Store};
 use crate::{
     error::{LlmusageError, Result},
     query::{PricingCatalog, PricingStatus},
@@ -20,6 +20,11 @@ const META_BASE_VERSION: &str = "pricing_catalog_base_version";
 const META_BASE_FILE: &str = "pricing_catalog_base_file";
 const META_OVERLAY_VERSION: &str = "pricing_catalog_overlay_version";
 const META_OVERLAY_FILE: &str = "pricing_catalog_overlay_file";
+/// Written at the start of a pricing recompute and cleared in the same
+/// atomic transaction that commits the bucket reconcile and catalog metadata
+/// switch (DATA-002). Its presence on bootstrap means the previous run crashed
+/// mid-recompute; bootstrap re-runs the recompute to restore consistency.
+pub(super) const META_RECOMPUTE_IN_PROGRESS: &str = "pricing_recompute_in_progress";
 
 const CATALOG_META_KEYS: [&str; 6] = [
     META_ACTIVE_VERSION,
@@ -201,6 +206,11 @@ impl Store {
     /// Applies a v2 overlay to the recorded base layer and atomically selects
     /// the merged effective catalog after event and bucket recomputation.
     pub fn apply_pricing_overlay(&self, source_path: &Path) -> Result<CatalogApplyResult> {
+        let operation = self.write_operation(HolderKind::Library)?;
+        operation.store.apply_pricing_overlay_fenced(source_path)
+    }
+
+    fn apply_pricing_overlay_fenced(&self, source_path: &Path) -> Result<CatalogApplyResult> {
         validate_local_file(source_path, "pricing overlay")?;
         let overlay_document = PricingCatalog::load_overlay(source_path)?;
         let overlay_json = overlay_document.canonical_json()?;
@@ -267,6 +277,13 @@ impl Store {
     /// Activates a complete base snapshot. This is the shared implementation
     /// behind the legacy `doctor --refresh-pricing` entrypoint.
     pub fn activate_pricing_snapshot(&self, source_path: &Path) -> Result<CatalogResetResult> {
+        let operation = self.write_operation(HolderKind::Library)?;
+        operation
+            .store
+            .activate_pricing_snapshot_fenced(source_path)
+    }
+
+    fn activate_pricing_snapshot_fenced(&self, source_path: &Path) -> Result<CatalogResetResult> {
         validate_local_file(source_path, "pricing snapshot")?;
         let mut catalog = PricingCatalog::load_snapshot(source_path)?;
         let canonical = catalog.document().canonical_json()?;
@@ -289,6 +306,11 @@ impl Store {
     /// Removes the active overlay. A snapshot base remains pinned; an embedded
     /// base returns to the current binary's embedded catalog.
     pub fn reset_pricing_catalog(&self) -> Result<CatalogResetResult> {
+        let operation = self.write_operation(HolderKind::Library)?;
+        operation.store.reset_pricing_catalog_fenced()
+    }
+
+    fn reset_pricing_catalog_fenced(&self) -> Result<CatalogResetResult> {
         let meta = self.pricing_meta()?;
         if meta.has_overlay() {
             let (base_identity, base_file) =
@@ -399,6 +421,30 @@ impl Store {
         &self,
         progress_sink: Option<BootstrapProgressSink<'_>>,
     ) -> Result<()> {
+        // DATA-002 crash recovery: if a previous recompute was interrupted
+        // mid-way, the in-progress marker survived.  Re-run the recompute
+        // with the catalog version that was being targeted so the database
+        // reaches a consistent state before returning to the caller.
+        let conn = self.open_connection()?;
+        let in_progress_version: Option<String> = conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = ?1",
+                [META_RECOMPUTE_IN_PROGRESS],
+                |row| row.get(0),
+            )
+            .optional()?;
+        drop(conn);
+        if let Some(ref target_version) = in_progress_version {
+            tracing::warn!(
+                target_version = %target_version,
+                "发现定价重算未完成标记，正在恢复一致性重算"
+            );
+            let catalog = self.active_pricing_catalog()?;
+            let activation = PricingMetaChange::for_catalog(self, &catalog)?;
+            self.recompute_costs_with_meta_and_progress(&catalog, &activation, None)?;
+            return Ok(());
+        }
+
         let meta = self.pricing_meta()?;
         if meta.has_overlay() || meta.active_file.is_some() {
             return Ok(());
@@ -1068,6 +1114,32 @@ mod tests {
         let mut pinned_sink = |event| pinned_events.push(event);
         store.bootstrap_with_progress(Some(&mut pinned_sink))?;
         assert!(pinned_events.is_empty());
+        Ok(())
+    }
+
+    /// DATA-002: if the process crashes between the last page commit and the
+    /// final bucket-reconcile/catalog-version commit, the in-progress marker
+    /// survives.  The next bootstrap must re-run the recompute so the database
+    /// reaches a fully consistent state.
+    #[test]
+    fn bootstrap_recovers_from_interrupted_recompute() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let store = test_store(&temp)?;
+
+        // Simulate a crash: write the in-progress marker but never clear it.
+        let catalog = store.active_pricing_catalog()?;
+        store.set_meta_value(META_RECOMPUTE_IN_PROGRESS, &catalog.version)?;
+
+        // Bootstrap should detect the marker and re-run the recompute.
+        let mut events = Vec::new();
+        let mut sink = |event| events.push(event);
+        store.bootstrap_with_progress(Some(&mut sink))?;
+
+        // Marker must be gone after recovery.
+        assert!(
+            store.meta_value(META_RECOMPUTE_IN_PROGRESS)?.is_none(),
+            "in-progress marker must be cleared after recovery"
+        );
         Ok(())
     }
 }
