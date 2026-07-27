@@ -21,7 +21,7 @@ use llmusage::{
 - Domain/error：`SourceKind`、`LlmusageError`、`Result`
 - 启用 `features = ["testing"]` 时的测试辅助：`Fixture`、`SeedEvent`
 
-`commands`、`parsers`、`integrations`、`runtime`、`web`、`tui` 等宽模块在 0.7.x 兼容窗口内仍保持 public，但它们是实现命名空间，不是推荐的适配层 API。下游迁移到上述 façade 后，后续 minor/major 版本可再把内部表面收窄。
+`commands`、`parsers`、`integrations`、`runtime`、`web`、`tui` 等宽模块为兼容现有调用方仍保持 public，但它们是实现命名空间，不是推荐的适配层 API。下游迁移到上述 façade 后，后续 minor/major 版本可再把内部表面收窄。
 
 ## 打开 Store
 

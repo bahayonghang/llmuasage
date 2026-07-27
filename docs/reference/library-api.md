@@ -21,7 +21,7 @@ The compatible stable set is:
 - Domain/error: `SourceKind`, `LlmusageError`, `Result`
 - Test helpers when `features = ["testing"]`: `Fixture`, `SeedEvent`
 
-Broad modules such as `commands`, `parsers`, `integrations`, `runtime`, `web`, and `tui` remain public for the 0.7.x compatibility window, but they are implementation namespaces rather than the recommended adapter API. Future minor/major releases may move internals behind narrower modules after downstream callers migrate to the façade above.
+Broad modules such as `commands`, `parsers`, `integrations`, `runtime`, `web`, and `tui` remain public for compatibility, but they are implementation namespaces rather than the recommended adapter API. Future minor/major releases may move internals behind narrower modules after downstream callers migrate to the façade above.
 
 ## Open a store
 
