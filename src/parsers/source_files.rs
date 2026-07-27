@@ -8,6 +8,13 @@ use walkdir::WalkDir;
 
 use crate::util::resolve_home_dir;
 
+pub(crate) const GROK_SIDECAR_NAMES: [&str; 4] = [
+    "updates.jsonl",
+    "signals.json",
+    "summary.json",
+    "events.jsonl",
+];
+
 /// Result of enumerating a file-backed source's candidate files.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SourceFileListing {
@@ -67,6 +74,87 @@ pub(crate) fn list_kimi_wire_files() -> SourceFileListing {
         .map(|root| root.join("sessions"))
         .unwrap_or_else(|| home_dir.join(".kimi-code").join("sessions"));
     list_matching_files(sessions_root, |name, _path| name == "wire.jsonl")
+}
+
+/// Enumerates only direct Grok Build session sidecars.
+///
+/// The fixed `sessions/*/*` walk is intentional. Grok session directories can
+/// contain a `terminal/` subtree with blocking special files, so this source
+/// must never use the recursive [`list_matching_files`] helper.
+pub(crate) fn list_grok_session_files() -> SourceFileListing {
+    let home_dir = resolve_home_dir();
+    let sessions_root = std::env::var_os("GROK_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .map(|root| root.join("sessions"))
+        .unwrap_or_else(|| home_dir.join(".grok").join("sessions"));
+    list_grok_session_files_under(sessions_root)
+}
+
+fn list_grok_session_files_under(root: PathBuf) -> SourceFileListing {
+    let mut listing = SourceFileListing {
+        root: root.clone(),
+        ..SourceFileListing::default()
+    };
+    if !root.exists() {
+        return listing;
+    }
+
+    let workspace_dirs = match std::fs::read_dir(&root) {
+        Ok(entries) => entries,
+        Err(error) => {
+            listing
+                .errors
+                .push(format!("source file inventory error: {error}"));
+            return listing;
+        }
+    };
+    for workspace_entry in workspace_dirs {
+        let workspace_entry = match workspace_entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                listing
+                    .errors
+                    .push(format!("source file inventory error: {error}"));
+                continue;
+            }
+        };
+        if !workspace_entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            continue;
+        }
+        let session_dirs = match std::fs::read_dir(workspace_entry.path()) {
+            Ok(entries) => entries,
+            Err(error) => {
+                listing
+                    .errors
+                    .push(format!("source file inventory error: {error}"));
+                continue;
+            }
+        };
+        for session_entry in session_dirs {
+            let session_entry = match session_entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    listing
+                        .errors
+                        .push(format!("source file inventory error: {error}"));
+                    continue;
+                }
+            };
+            if !session_entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                continue;
+            }
+            let session_dir = session_entry.path();
+            for file_name in GROK_SIDECAR_NAMES {
+                let sidecar = session_dir.join(file_name);
+                if sidecar.is_file() {
+                    listing.paths.push(sidecar);
+                }
+            }
+        }
+    }
+    listing.paths.sort();
+    listing
 }
 
 /// Enumerates Pi / Oh My Pi session JSONL files across both default roots.
@@ -153,4 +241,63 @@ fn list_matching_files(
     }
     listing.paths.sort();
     listing
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use tempfile::TempDir;
+
+    use super::list_grok_session_files_under;
+
+    #[test]
+    fn grok_listing_only_returns_root_sidecars_from_two_directory_levels() {
+        let temp = TempDir::new().expect("temp dir");
+        let sessions = temp.path().join("sessions");
+        let session = sessions.join("D%3A%5Cwork").join("session-1");
+        fs::create_dir_all(session.join("terminal").join("nested")).expect("create fixture layout");
+        for name in [
+            "updates.jsonl",
+            "signals.json",
+            "summary.json",
+            "events.jsonl",
+        ] {
+            fs::write(session.join(name), "{}").expect("write sidecar");
+        }
+        fs::write(session.join("updates.jsonl.lock"), "").expect("write lock");
+        fs::write(session.join("chat_history.jsonl"), "private").expect("write private file");
+        fs::write(
+            session
+                .join("terminal")
+                .join("nested")
+                .join("updates.jsonl"),
+            "sentinel",
+        )
+        .expect("write nested sentinel");
+
+        let listing = list_grok_session_files_under(sessions);
+        let names = listing
+            .paths
+            .iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+
+        assert!(listing.errors.is_empty());
+        assert_eq!(
+            names,
+            vec![
+                "events.jsonl",
+                "signals.json",
+                "summary.json",
+                "updates.jsonl"
+            ]
+        );
+        assert!(
+            listing
+                .paths
+                .iter()
+                .all(|path| path.parent() == Some(session.as_path()))
+        );
+    }
 }

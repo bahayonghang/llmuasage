@@ -23,14 +23,17 @@ llmusage sync --source opencode
 llmusage sync --source antigravity
 llmusage sync --source kimi_code
 llmusage sync --source pi
+llmusage sync --source grok
 # gemini 不再作为来源 id；gemini-* 模型名保持不变
 ```
 
-合法来源与 `cargo run -- --help` 一致：`codex`、`claude`、`opencode`、`antigravity`、`kimi_code`、`pi`。`gemini` 不再作为来源 id；`gemini-*` 仍只是模型名前缀。
+合法来源与 `cargo run -- --help` 一致：`codex`、`claude`、`opencode`、`antigravity`、`kimi_code`、`pi`、`grok`。`gemini` 不再作为来源 id；`gemini-*` 仍只是模型名前缀。
 
 Kimi Code 读取 `~/.kimi-code/sessions/**/wire.jsonl`（或 `KIMI_CODE_HOME/sessions`），只导入显式 turn-scoped `usage.record`。它分别映射非缓存输入、输出、cache read 与 cache creation，保留 `kimi-code/k3` 等原始模型名，并忽略聚合、零 token、非 turn 和损坏记录。
 
 Pi 把 `~/.pi/agent/sessions`（或 `PI_AGENT_DIR`）与 `~/.omp/agent/sessions` 合并到一个 `pi` 来源。Assistant usage 会保留 input、output、cache read/write、权威 total 与诊断型 reasoning token。当前准入证据包含本机 Oh My Pi 样本和脱敏 Pi-compatible fixture；本机没有 Pi-only 样本，因此 Pi 专属格式变化仍是显式证据缺口。
+
+Grok Build 只读取 `~/.grok/sessions/*/*/`（或 `GROK_HOME/sessions`）会话根目录下的 sidecar。它从 `updates.jsonl` 累计计数器计算逐轮增量，再用 `signals.json` 对账会话总量。Grok 是 `total_only`：子通道保持 0，总量权威，成本保持 `unpriced`。任一 sidecar 变化会整体重放该会话；已追踪 sidecar 缺失时保留旧行，并在文件恢复前拒绝有损 rebuild。
 
 其他平台可能在 `llmusage source-status` 或 `dash` 来源选择器中以仅监控候选出现。它们在具备脱敏 fixture、token 语义、sync-twice 测试、cursor/fingerprint 回归测试和隐私审查之前保持 parserless。
 
@@ -71,6 +74,7 @@ llmusage sync --rebuild --source claude
 llmusage sync --rebuild --source opencode
 llmusage sync --rebuild --source kimi_code
 llmusage sync --rebuild --source pi
+llmusage sync --rebuild --source grok
 ```
 
 只有重建完整成功后才会推进来源 marker。来源仍需重建时，`source-status` 和

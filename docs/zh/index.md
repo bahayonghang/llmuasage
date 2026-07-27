@@ -4,7 +4,7 @@ layout: home
 hero:
   name: "llmusage"
   text: "本地优先的 AI CLI 用量分析"
-  tagline: "用本地记录、SQLite 和 Rust 追踪 Codex、Claude、OpenCode、Antigravity、Kimi Code 与 Pi，全程不上传。"
+  tagline: "用本地记录、SQLite 和 Rust 追踪 Codex、Claude、OpenCode、Antigravity、Kimi Code、Pi 与 Grok Build，全程不上传。"
   actions:
     - theme: brand
       text: 从指南开始
@@ -49,7 +49,7 @@ features:
 ## 当前产品表面
 
 - 版本：`1.1.0`。
-- 来源：被动读取 Codex、Claude Code、OpenCode、Kimi Code（`kimi_code`）与 Pi / Oh My Pi（`pi`），并保留 Antigravity（`antigravity`）历史数据。
+- 来源：被动读取 Codex、Claude Code、OpenCode、Kimi Code（`kimi_code`）、Pi / Oh My Pi（`pi`）与 total-only Grok Build（`grok`），并保留 Antigravity（`antigravity`）历史数据。
 - 报表命令：`daily`、`monthly`、`session`、`blocks`、`statusline`。
 - 本地界面命令：`dash`、`serve`、`export html`。
 - 安全/运维命令：`status`、`diagnostics`、`doctor`、`uninstall`。

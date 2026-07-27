@@ -92,6 +92,17 @@ impl<'a> SourceFileStore<'a> {
         counts_with_conn(&conn, source.as_str())
     }
 
+    /// Returns every sidecar path previously observed for one source.
+    pub fn tracked_paths(&self, source: SourceKind) -> Result<Vec<String>> {
+        let conn = self.store.open_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT file_path FROM source_file WHERE source = ?1 ORDER BY file_path ASC",
+        )?;
+        let rows = stmt.query_map([source.as_str()], |row| row.get::<_, String>(0))?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
     /// Promotes any `live` rows for this source whose `last_seen_at` is older
     /// than `run_started_at` to `missing`.
     ///

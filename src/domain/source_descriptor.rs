@@ -113,6 +113,18 @@ pub const SOURCE_DESCRIPTORS: &[SourceDescriptor] = &[
         quality: UsageQuality::Precise,
         privacy: PrivacyClass::LocalArtifacts,
     },
+    SourceDescriptor {
+        kind: SourceKind::Grok,
+        stable_id: "grok",
+        aliases: &[],
+        display_name: "Grok Build",
+        capabilities: SourceCapabilities {
+            parser: true,
+            passive_probe: true,
+        },
+        quality: UsageQuality::TotalOnly,
+        privacy: PrivacyClass::LocalArtifacts,
+    },
 ];
 
 pub fn registered_source_descriptors() -> &'static [SourceDescriptor] {

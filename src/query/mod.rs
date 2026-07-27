@@ -542,7 +542,7 @@ pub struct HealthSummaryPayload {
 ///   file. `None` until full-history sweeps are tracked.
 #[derive(Debug, Clone, Serialize)]
 pub struct SourceDiagnostics {
-    /// Stable source identifier such as `codex`, `kimi_code`, or `pi`.
+    /// Stable source identifier such as `codex`, `kimi_code`, `pi`, or `grok`.
     pub source: String,
     /// Number of `source_file` rows currently in `live` state.
     pub live_files: u64,

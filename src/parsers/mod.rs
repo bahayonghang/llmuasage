@@ -11,6 +11,7 @@ pub mod codex;
 pub mod driver;
 mod file_progress;
 pub mod file_state;
+pub mod grok;
 pub mod kimi_code;
 pub mod opencode;
 pub mod pi;
@@ -20,6 +21,7 @@ pub mod source_parser;
 pub use crate::models::{ParseIssueKind, ParseIssueSample, ParseIssues};
 pub use claude::ClaudeParser;
 pub use codex::CodexParser;
+pub use grok::GrokParser;
 pub use kimi_code::KimiCodeParser;
 pub use opencode::OpencodeParser;
 pub use pi::PiParser;
@@ -285,12 +287,12 @@ mod bounded_jsonl_contract_tests {
     use anyhow::Result;
     use tempfile::TempDir;
 
-    use super::{ParseIssues, SourceKind, claude, codex, kimi_code, pi};
+    use super::{ParseIssues, SourceKind, claude, codex, grok, kimi_code, pi};
 
     type ContractParser = fn(&Path) -> Result<(ParseIssues, u64, bool)>;
 
     #[test]
-    fn codex_claude_kimi_and_pi_share_the_bounded_jsonl_contract() -> Result<()> {
+    fn file_jsonl_parsers_share_the_bounded_jsonl_contract() -> Result<()> {
         let temp = TempDir::new()?;
         let path = temp.path().join("shared-contract.jsonl");
         let secret = "private prompt must never appear in diagnostics";
@@ -304,11 +306,12 @@ mod bounded_jsonl_contract_tests {
         file.write_all("{\"partial\":\"界\"}".as_bytes())?;
         drop(file);
 
-        let cases: [(SourceKind, ContractParser); 4] = [
+        let cases: [(SourceKind, ContractParser); 5] = [
             (SourceKind::Codex, codex::bounded_contract_parse),
             (SourceKind::Claude, claude::bounded_contract_parse),
             (SourceKind::KimiCode, kimi_code::bounded_contract_parse),
             (SourceKind::Pi, pi::bounded_contract_parse),
+            (SourceKind::Grok, grok::bounded_contract_parse),
         ];
 
         for (source, parse) in cases {

@@ -31,7 +31,7 @@ Usage: llmusage [OPTIONS] [COMMAND]
 | `--locale <LOCALE>` | Lightweight locale selector for titles and number formatting |
 | `--compact` | Use a narrower table layout |
 | `--no-cost` | Hide cost columns and cost fields from report output |
-| `--source codex\|claude\|opencode\|antigravity\|kimi_code\|pi` | Restrict a top-level report or sync command to one source |
+| `--source codex\|claude\|opencode\|antigravity\|kimi_code\|pi\|grok` | Restrict a top-level report or sync command to one source |
 | `-A, --by-agent` | Add nested source rows to unified report JSON |
 | `--sections daily\|weekly\|monthly\|session` | Add report periods to one combined output |
 | `--all` | Show full daily history instead of the default last 7 days |
@@ -143,6 +143,7 @@ llmusage sync
 llmusage sync --source codex
 llmusage sync --source kimi_code
 llmusage sync --source pi
+llmusage sync --source grok
 llmusage sync --recent-days 1
 llmusage sync --recent-days 30 --parallelism 4
 llmusage sync --json-events

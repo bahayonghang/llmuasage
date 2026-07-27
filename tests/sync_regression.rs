@@ -44,8 +44,8 @@ fn sync_hot_run_and_append_remain_incremental() -> Result<()> {
         let first_overview = Dashboard::open(&store)?.overview(&Default::default())?;
         let first_sync_status = store.sync_status().load_source_sync_statuses()?;
         // One status per registered source: codex, claude, opencode, kimi_code,
-        // and pi (parser-backed) plus the parserless antigravity source.
-        assert_eq!(first_sync_status.len(), 6);
+        // pi, and grok (parser-backed) plus the parserless antigravity source.
+        assert_eq!(first_sync_status.len(), 7);
 
         commands::sync::run(&app).await?;
         let second_overview = Dashboard::open(&store)?.overview(&Default::default())?;
@@ -2358,6 +2358,289 @@ fn pi_agent_dir_lists_multiple_roots_and_dedupes_canonical_files() -> Result<()>
     Ok(())
 }
 
+#[test]
+fn grok_session_replay_converges_and_protects_missing_sidecars() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let updates = concat!(
+        "{\"params\":{\"update\":{\"sessionUpdate\":\"available_commands_update\"},\"_meta\":{\"totalTokens\":100,\"agentTimestampMs\":1700000000000}}}\n",
+        "{\"params\":{\"update\":{\"sessionUpdate\":\"user_message_chunk\",\"_meta\":{\"modelId\":\"grok-4.5\"}},\"_meta\":{\"agentTimestampMs\":1700000001000}}}\n",
+        "{\"params\":{\"update\":{\"sessionUpdate\":\"agent_message_chunk\"},\"_meta\":{\"totalTokens\":300,\"agentTimestampMs\":1700000003000}}}\n"
+    );
+    let session_dir = fixture.seed_grok(
+        "session-replay",
+        updates,
+        Some("{\"current_model_id\":\"grok-4.5\",\"updated_at\":\"2023-11-14T22:13:20Z\"}"),
+        Some("{\"primaryModelId\":\"grok-4.5\",\"contextTokensUsed\":500}"),
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let options = commands::sync::SyncRunOptions {
+            source: Some(SourceKind::Grok),
+            ..Default::default()
+        };
+
+        let first = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(first.sources[0].source, SourceKind::Grok);
+        assert_eq!(first.sources[0].changed_files, 3);
+        assert_eq!(first.sources[0].events_replayed, 0);
+        assert_eq!(first.sources[0].events_inserted, 2);
+        assert_grok_totals(&app.paths.db_path, 2, 500)?;
+        assert!(grok_event_rows(&app.paths.db_path)?.iter().all(|row| {
+            row.model == "grok-4.5"
+                && row.input_tokens == 0
+                && row.cache_read_tokens == 0
+                && row.cache_creation_tokens == 0
+                && row.output_tokens == 0
+                && row.reasoning_tokens == 0
+                && row.pricing_status == "unpriced"
+                && row.provider_label.is_empty()
+                && row.project_label.as_deref() == Some("demo")
+        }));
+        assert_eq!(
+            llmusage::registry::source_descriptor(SourceKind::Grok)
+                .expect("grok descriptor")
+                .quality,
+            llmusage::domain::source_descriptor::UsageQuality::TotalOnly
+        );
+        assert_eq!(
+            source_capability_status(&app, &store, SourceKind::Grok)?,
+            "passive_ready"
+        );
+        let grok_monitor = llmusage::registry::registered_platform_monitors()
+            .iter()
+            .find(|monitor| monitor.platform_id == "grok")
+            .expect("grok monitor");
+        let probe = llmusage::domain::platform_monitor::probe_platform_descriptor(
+            grok_monitor,
+            &fixture.home,
+        );
+        assert_eq!(
+            probe.parser_status,
+            llmusage::domain::platform_monitor::ParserSupportStatus::Registered
+        );
+        assert_eq!(
+            probe.status,
+            llmusage::domain::platform_monitor::PlatformProbeStatus::Detected
+        );
+
+        let second = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(second.sources[0].changed_files, 0);
+        assert_eq!(second.sources[0].events_inserted, 0);
+        assert_eq!(second.sources[0].bytes_scanned, 0);
+        assert_grok_totals(&app.paths.db_path, 2, 500)?;
+
+        fixture.append_grok_updates(
+            "session-replay",
+            concat!(
+                "{\"params\":{\"update\":{\"sessionUpdate\":\"user_message_chunk\"},\"_meta\":{\"agentTimestampMs\":1700000004000}}}\n",
+                "{\"params\":{\"update\":{\"sessionUpdate\":\"agent_message_chunk\"},\"_meta\":{\"totalTokens\":500,\"agentTimestampMs\":1700000005000}}}\n"
+            ),
+        )?;
+        let appended =
+            commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(appended.sources[0].changed_files, 3);
+        assert_eq!(appended.sources[0].events_replayed, 3);
+        assert_grok_totals(&app.paths.db_path, 3, 500)?;
+
+        fixture.write_grok_sidecar(
+            "session-replay",
+            "signals.json",
+            "{\"primaryModelId\":\"grok-4.5\",\"contextTokensUsed\":700,\"revision\":2}",
+        )?;
+        commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_grok_totals(&app.paths.db_path, 3, 700)?;
+
+        // Later updates can cover the complete signals total. Session replay
+        // removes the old reconciliation row instead of double counting it.
+        fixture.write_grok_sidecar(
+            "session-replay",
+            "updates.jsonl",
+            concat!(
+                "{\"params\":{\"update\":{\"sessionUpdate\":\"user_message_chunk\",\"_meta\":{\"modelId\":\"grok-4.5\"}},\"_meta\":{\"agentTimestampMs\":1700000010000}}}\n",
+                "{\"params\":{\"update\":{\"sessionUpdate\":\"agent_message_chunk\"},\"_meta\":{\"totalTokens\":700,\"agentTimestampMs\":1700000011000}}}\n"
+            ),
+        )?;
+        commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_grok_totals(&app.paths.db_path, 1, 700)?;
+        assert_eq!(
+            store.token_accounting_version(SourceKind::Grok)?,
+            Some(expected_token_accounting_version(SourceKind::Grok))
+        );
+
+        let signals_path = session_dir.join("signals.json");
+        fs::remove_file(&signals_path)?;
+        let missing =
+            commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(missing.sources[0].changed_files, 0);
+        assert_grok_totals(&app.paths.db_path, 1, 700)?;
+        assert_eq!(store.source_files().counts(SourceKind::Grok)?.missing, 1);
+
+        let blocked = commands::sync::run_with_options(
+            &app,
+            commands::sync::SyncRunOptions {
+                rebuild: true,
+                source: Some(SourceKind::Grok),
+                ..Default::default()
+            },
+        )
+        .await;
+        assert!(
+            blocked
+                .expect_err("missing Grok sidecar must block rebuild")
+                .to_string()
+                .contains("Refusing lossy sync --rebuild")
+        );
+
+        fixture.write_grok_sidecar(
+            "session-replay",
+            "signals.json",
+            "{\"primaryModelId\":\"grok-4.5\",\"contextTokensUsed\":800,\"revision\":3}",
+        )?;
+        commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_grok_totals(&app.paths.db_path, 2, 800)?;
+        assert_eq!(store.source_files().counts(SourceKind::Grok)?.missing, 0);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn grok_missing_root_reports_passive_no_data() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let result = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Grok),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+        assert_eq!(result.sources[0].files_processed, 0);
+        assert_eq!(result.sources[0].events_inserted, 0);
+        assert_eq!(
+            source_capability_status(&app, &store, SourceKind::Grok)?,
+            "passive_no_data"
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn grok_home_override_is_honored() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let custom_root = fixture.home.join("custom-grok");
+    fixture.seed_grok_under(
+        &custom_root,
+        "session-override",
+        "{\"timestamp\":1700000000,\"totalTokens\":123}\n",
+        Some("{\"current_model_id\":\"grok-future\",\"updated_at\":\"2023-11-14T22:13:20Z\"}"),
+        None,
+    )?;
+    unsafe {
+        std::env::set_var("GROK_HOME", &custom_root);
+    }
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Grok),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+        assert_grok_totals(&app.paths.db_path, 1, 123)?;
+        assert_eq!(grok_event_rows(&app.paths.db_path)?[0].model, "grok-future");
+        Ok::<_, anyhow::Error>(())
+    })?;
+    fixture.restore_env();
+    Ok(())
+}
+
+#[derive(Debug)]
+struct GrokEventRow {
+    model: String,
+    input_tokens: i64,
+    cache_read_tokens: i64,
+    cache_creation_tokens: i64,
+    output_tokens: i64,
+    reasoning_tokens: i64,
+    pricing_status: String,
+    provider_label: String,
+    project_label: Option<String>,
+}
+
+fn grok_event_rows(db_path: &Path) -> Result<Vec<GrokEventRow>> {
+    let conn = Connection::open(db_path)?;
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT model, input_tokens, cache_read_tokens, cache_creation_tokens,
+               output_tokens, reasoning_output_tokens, pricing_status,
+               provider_label, project_label
+        FROM usage_event
+        WHERE source = 'grok'
+        ORDER BY event_key
+        "#,
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(GrokEventRow {
+            model: row.get(0)?,
+            input_tokens: row.get(1)?,
+            cache_read_tokens: row.get(2)?,
+            cache_creation_tokens: row.get(3)?,
+            output_tokens: row.get(4)?,
+            reasoning_tokens: row.get(5)?,
+            pricing_status: row.get(6)?,
+            provider_label: row.get(7)?,
+            project_label: row.get(8)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn assert_grok_totals(db_path: &Path, expected_events: i64, expected_total: i64) -> Result<()> {
+    let conn = Connection::open(db_path)?;
+    let (events, total): (i64, i64) = conn.query_row(
+        "SELECT COUNT(*), COALESCE(SUM(total_tokens), 0) FROM usage_event WHERE source = 'grok'",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let bucket_total: i64 = conn.query_row(
+        "SELECT COALESCE(SUM(total_tokens), 0) FROM usage_bucket_30m WHERE source = 'grok'",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(events, expected_events);
+    assert_eq!(total, expected_total);
+    assert_eq!(bucket_total, expected_total);
+    Ok(())
+}
+
 fn pi_event_count(db_path: &Path) -> Result<i64> {
     let conn = Connection::open(db_path)?;
     Ok(conn.query_row(
@@ -2575,6 +2858,7 @@ impl Fixture {
             "OPENCODE_DB",
             "KIMI_CODE_HOME",
             "PI_AGENT_DIR",
+            "GROK_HOME",
         ] {
             saved.push((key.to_string(), std::env::var(key).ok()));
         }
@@ -2589,6 +2873,8 @@ impl Fixture {
             std::env::remove_var("KIMI_CODE_HOME");
             // Pi discovery falls back to the two roots under the temp HOME.
             std::env::remove_var("PI_AGENT_DIR");
+            // Grok discovery also falls back under the isolated temp HOME.
+            std::env::remove_var("GROK_HOME");
         }
 
         fs::create_dir_all(home.join(".claude").join("projects").join("demo"))?;
@@ -2747,6 +3033,60 @@ impl Fixture {
             .append(true)
             .open(path)?
             .write_all(format!("{line}\n").as_bytes())?;
+        Ok(())
+    }
+
+    fn grok_session_dir(&self, session: &str) -> PathBuf {
+        self.home
+            .join(".grok")
+            .join("sessions")
+            .join("D%3A%5Cwork%5Cdemo")
+            .join(session)
+    }
+
+    fn seed_grok(
+        &self,
+        session: &str,
+        updates: &str,
+        summary: Option<&str>,
+        signals: Option<&str>,
+    ) -> Result<PathBuf> {
+        self.seed_grok_under(&self.home.join(".grok"), session, updates, summary, signals)
+    }
+
+    fn seed_grok_under(
+        &self,
+        root: &Path,
+        session: &str,
+        updates: &str,
+        summary: Option<&str>,
+        signals: Option<&str>,
+    ) -> Result<PathBuf> {
+        let session_dir = root
+            .join("sessions")
+            .join("D%3A%5Cwork%5Cdemo")
+            .join(session);
+        fs::create_dir_all(&session_dir)?;
+        fs::write(session_dir.join("updates.jsonl"), updates)?;
+        if let Some(summary) = summary {
+            fs::write(session_dir.join("summary.json"), summary)?;
+        }
+        if let Some(signals) = signals {
+            fs::write(session_dir.join("signals.json"), signals)?;
+        }
+        Ok(session_dir)
+    }
+
+    fn write_grok_sidecar(&self, session: &str, name: &str, content: &str) -> Result<()> {
+        fs::write(self.grok_session_dir(session).join(name), content)?;
+        Ok(())
+    }
+
+    fn append_grok_updates(&self, session: &str, content: &str) -> Result<()> {
+        fs::OpenOptions::new()
+            .append(true)
+            .open(self.grok_session_dir(session).join("updates.jsonl"))?
+            .write_all(content.as_bytes())?;
         Ok(())
     }
 
