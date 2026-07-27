@@ -23,6 +23,9 @@ pub enum SourceKind {
     /// Pi / Oh My Pi local agent session JSONL artifacts.
     #[value(name = "pi")]
     Pi,
+    /// Grok Build local session sidecars.
+    #[value(name = "grok")]
+    Grok,
 }
 
 impl SourceKind {
@@ -35,6 +38,7 @@ impl SourceKind {
             Self::Antigravity => "antigravity",
             Self::KimiCode => "kimi_code",
             Self::Pi => "pi",
+            Self::Grok => "grok",
         }
     }
 

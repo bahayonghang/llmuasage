@@ -21,7 +21,8 @@ pub const fn expected_token_accounting_version(source: SourceKind) -> u32 {
         | SourceKind::Opencode
         | SourceKind::Antigravity
         | SourceKind::KimiCode
-        | SourceKind::Pi => TOKEN_ACCOUNTING_VERSION,
+        | SourceKind::Pi
+        | SourceKind::Grok => TOKEN_ACCOUNTING_VERSION,
     }
 }
 

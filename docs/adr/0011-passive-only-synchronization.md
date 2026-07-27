@@ -14,17 +14,17 @@ command. The active path modified third-party configuration, required wrapper
 scripts and trigger coordination, and exposed installation state throughout
 doctor, diagnostics, TUI, and dashboard payloads.
 
-Codex, Claude, and OpenCode already have passive parsers. Kimi Code and Pi were
-designed as passive readers. Antigravity is the only persisted source without a
-verified token-bearing passive artifact, so removing its hook transport stops
-new Antigravity events while leaving historical rows useful.
+Codex, Claude, and OpenCode already have passive parsers. Kimi Code, Pi, and
+Grok Build are passive readers. Antigravity is the only persisted source
+without a verified token-bearing passive artifact, so removing its hook
+transport stops new Antigravity events while leaving historical rows useful.
 
 ## Decision
 
 Use passive parsing as the only usage-import mechanism.
 
-- `sync` walks registered parsers for Codex, Claude, OpenCode, Kimi Code, and
-  Pi. `init` only prepares the runtime root and bootstraps SQLite.
+- `sync` walks registered parsers for Codex, Claude, OpenCode, Kimi Code, Pi,
+  and Grok Build. `init` only prepares the runtime root and bootstraps SQLite.
 - Remove hook/plugin installation, probing, wrapper generation, `hook-run`,
   trigger-state writes, integration capability fields, and integration health
   presentation.
@@ -84,4 +84,6 @@ and does not construct new executable command strings.
   `hook-run` run-log rows, and `holder_kind='hook'` compatibility.
 - Source-status tests assert Antigravity `historical_only` and monitor-only
   `blocked_no_samples` behavior.
+- Grok tests assert parser-backed `total_only` status, fixed-depth sidecar
+  discovery, session replay, and `unpriced` cost.
 - Dashboard/TUI payload tests assert integration health is absent.

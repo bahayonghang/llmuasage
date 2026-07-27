@@ -7,7 +7,10 @@ use crate::{
         platform_monitor::{self, PlatformMonitorDescriptor},
         source_descriptor::{self, SourceDescriptor},
     },
-    parsers::{ClaudeParser, CodexParser, KimiCodeParser, OpencodeParser, PiParser, SourceParser},
+    parsers::{
+        ClaudeParser, CodexParser, GrokParser, KimiCodeParser, OpencodeParser, PiParser,
+        SourceParser,
+    },
 };
 
 /// 工厂：当前 build 支持的所有 sync parser。
@@ -18,6 +21,7 @@ pub fn registered_parsers() -> Vec<Box<dyn SourceParser>> {
         Box::new(OpencodeParser),
         Box::new(KimiCodeParser),
         Box::new(PiParser),
+        Box::new(GrokParser),
     ]
 }
 
@@ -105,6 +109,7 @@ mod tests {
         );
         assert_eq!(parse_source_id("kimi_code"), Some(SourceKind::KimiCode));
         assert_eq!(parse_source_id("pi"), Some(SourceKind::Pi));
+        assert_eq!(parse_source_id("grok"), Some(SourceKind::Grok));
         assert_eq!(parse_source_id("gemini"), None);
         assert_eq!(parse_source_id("missing"), None);
     }

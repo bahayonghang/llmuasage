@@ -13,7 +13,7 @@
 
 ## Source Registry
 
-`SourceKind` 当前包含 Codex、Claude、OpenCode、Antigravity、Kimi Code 与 Pi。`antigravity`、`kimi_code`、`pi` 是稳定 CLI/API/SQLite 来源 id；Pi 与 Oh My Pi 有意共享 `pi`，`gemini-*` 字符串仍只是模型 id。
+`SourceKind` 当前包含 Codex、Claude、OpenCode、Antigravity、Kimi Code、Pi 与 Grok Build。`antigravity`、`kimi_code`、`pi`、`grok` 是稳定 CLI/API/SQLite 来源 id；Pi 与 Oh My Pi 有意共享 `pi`，`gemini-*` 字符串仍只是模型 id。
 
 `SourceDescriptor` 是来源能力注册表，声明每个来源的稳定 id、别名、parser/passive-probe 能力、token 质量标签和本地隐私边界。Registry 是 parser 与 descriptor 的唯一 fan-out 点：
 
@@ -22,20 +22,20 @@
 
 新增来源意味着新增 `SourceKind` variant 和 descriptor。只有 descriptor 的能力声明与测试证据支持时，才新增 parser。Passive reader 写入 usage 行之前还必须具备真实本地样本、fixture 覆盖、sync-twice 幂等、cursor/rebuild 行为、token 质量声明和隐私审查。Antigravity descriptor 继续用于解析和查询历史行；它没有 parser 或 passive probe，因此 `source-status` 推导为 `historical_only`。
 
-`PlatformMonitorDescriptor` 是更宽的监控目录：既描述 Kimi Code、Pi 这类已注册 passive 来源，也描述 Reasonix、Gemini CLI、Cursor、Copilot、Zed、Kiro、Goose、Grok、Kimi shell/Qwen、Roo/Kilo/Cline、Codebuff、Crush、Warp/Oz、Amp、Hermes 和 Trae 等 parserless 候选。Monitor descriptor 可以在 `source-status` 与 `dash` 中展示 detected/unavailable 根目录、parser 支持状态、隐私类别、token 质量和下一步动作；只有同时具备已注册 `SourceKind` 与 parser 的 descriptor 才能写入 usage 行。
+`PlatformMonitorDescriptor` 是更宽的监控目录：既描述 Kimi Code、Pi、Grok Build 这类已注册 passive 来源，也描述 Reasonix、Gemini CLI、Cursor、Copilot、Zed、Kiro、Goose、Kimi shell/Qwen、Roo/Kilo/Cline、Codebuff、Crush、Warp/Oz、Amp、Hermes 和 Trae 等 parserless 候选。Monitor descriptor 可以在 `source-status` 与 `dash` 中展示 detected/unavailable 根目录、parser 支持状态、隐私类别、token 质量和下一步动作；只有同时具备已注册 `SourceKind` 与 parser 的 descriptor 才能写入 usage 行。
 
 ## 同步流程
 
 1. 用户或进程内 Dashboard job 运行 `llmusage sync`。
 2. 命令 bootstrap/migrate SQLite，并获取本地 `worker_lock`。
-3. sync 按来源顺序执行注册的被动 parser：Codex、Claude、OpenCode、Kimi Code、Pi。Antigravity 没有经过验证的被动 parser，因此历史行继续可见，但不再导入新事件。
+3. sync 按来源顺序执行注册的被动 parser：Codex、Claude、OpenCode、Kimi Code、Pi、Grok Build。Antigravity 没有经过验证的被动 parser，因此历史行继续可见，但不再导入新事件。
 4. 每个 parser 产出 `SyncShard`。
 5. `SyncRunWriter::commit_shard` 执行 reset、event 写入、cursor 写入、raw archive 写入、行为事实写入和 source-file 标记。
 6. Store 保存 per-source sync status 与 run-log 记录。
 
 `SyncShard` 是 parser/writer 边界。Parser 不直接写 SQLite。
 
-重复 sync 工作通过每个来源自己的 cursor 避免。Codex、Claude、Kimi Code 和 Pi 会在重解析前比较文件大小、mtime、头部 fingerprint、尾部签名和 offset；OpenCode 会比较 DB 身份和 message 高水位 cursor。Kimi 只导入 turn-scoped `usage.record`；Pi 把 Pi/Oh My Pi 两根合并为一个来源，以上游 total 为权威，并把 reasoning 保持为独立诊断通道。Sync stats 会把未变化工作显示为 skipped，把变化 artifact 显示为 parsed，把本次新增写入显示为 committed，把数据库持久总量显示为 stored events。
+重复 sync 工作通过每个来源自己的 cursor 避免。Codex、Claude、Kimi Code、Pi 和 Grok Build 会在重解析前比较文件大小、mtime、头部 fingerprint、尾部签名和 offset；OpenCode 会比较 DB 身份和 message 高水位 cursor。Kimi 只导入 turn-scoped `usage.record`；Pi 把 Pi/Oh My Pi 两根合并为一个来源，以上游 total 为权威，并把 reasoning 保持为独立诊断通道。Grok 只扫描会话根 sidecar，任一 sidecar 变化时整体重放会话，并把权威 total-only token 以 unpriced 成本写入。Sync stats 会把未变化工作显示为 skipped，把变化 artifact 显示为 parsed，把本次新增写入显示为 committed，把数据库持久总量显示为 stored events。
 
 ## 查询与 Dashboard 流程
 

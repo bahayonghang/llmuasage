@@ -4,7 +4,7 @@ layout: home
 hero:
   name: "llmusage"
   text: "Local-first analytics for AI coding CLIs"
-  tagline: "Track Codex, Claude, OpenCode, Antigravity, Kimi Code, and Pi with local artifacts, SQLite, and zero upload."
+  tagline: "Track Codex, Claude, OpenCode, Antigravity, Kimi Code, Pi, and Grok Build with local artifacts, SQLite, and zero upload."
   actions:
     - theme: brand
       text: Start the guide
@@ -49,7 +49,7 @@ features:
 ## Current product surface
 
 - Version `1.1.0`.
-- Sources: passive Codex, Claude Code, OpenCode, Kimi Code (`kimi_code`), and Pi / Oh My Pi (`pi`), plus retained historical Antigravity (`antigravity`) data.
+- Sources: passive Codex, Claude Code, OpenCode, Kimi Code (`kimi_code`), Pi / Oh My Pi (`pi`), and total-only Grok Build (`grok`), plus retained historical Antigravity (`antigravity`) data.
 - Report commands: `daily`, `monthly`, `session`, `blocks`, `statusline`.
 - Local UI commands: `dash`, `serve`, `export html`.
 - Safety commands: `status`, `diagnostics`, `doctor`, `uninstall`.

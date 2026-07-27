@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/07-27-grok-build-passive-source/prd.md", "reason": "验收标准清单（R1-R13 与 AC）"}
+{"file": ".trellis/tasks/07-27-grok-build-passive-source/design.md", "reason": "解析算法、幂等语义与触点清单的核对基准"}
+{"file": "docs/agents/passive-parser-onboarding.md", "reason": "必备测试矩阵：fixture、sync-twice、cursor 回归、probe 状态"}
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "sync 汇总/状态载荷契约核对"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "token 通道与去重契约核对"}

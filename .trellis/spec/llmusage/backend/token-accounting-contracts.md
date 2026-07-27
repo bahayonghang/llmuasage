@@ -14,7 +14,7 @@ is the compatibility baseline when reference implementations disagree.
   `usage_bucket_30m.total_tokens` -> query/UI `total_tokens`.
 - Version metadata:
   `meta('token_accounting_version.codex') = '3'`; Claude, OpenCode, Kimi Code,
-  and Pi remain `2`. `expected_token_accounting_version(SourceKind) -> u32`
+  Pi, and Grok remain `2`. `expected_token_accounting_version(SourceKind) -> u32`
   owns this source-aware contract.
 - Legacy repair: `llmusage sync --rebuild --source <source>`.
 - Serve startup repair:
@@ -58,6 +58,11 @@ is the compatibility baseline when reference implementations disagree.
   `totalTokens` is authoritative; otherwise the four visible channels form the
   fallback total. `reasoningTokens` is persisted separately and never added to
   output or total by default.
+- Grok maps cumulative update deltas plus the remaining signals reconciliation
+  into authoritative `total_tokens`. Input, cache read, cache creation, output,
+  and reasoning stay zero because the local artifacts expose no trustworthy
+  split. Grok has no pricing row: a total-only event with zero chargeable
+  subchannels must remain `unpriced`, never falsely matched at zero cost.
 - Pricing receives normalized channels. Prompt-tier selection remains
   `input + cache_read + cache_creation`.
 - `llmusage serve` detects legacy parser sources after store bootstrap and
@@ -86,7 +91,7 @@ is the compatibility baseline when reference implementations disagree.
 | Parserless source | Do not invent a marker or token normalization |
 | Persisted Codex marker is `2` | Treat only Codex as legacy and require `sync --rebuild --source codex` |
 | Persisted Claude/OpenCode marker is `2` | Treat it as current |
-| Persisted Kimi Code/Pi marker is `2` | Treat it as current |
+| Persisted Kimi Code/Pi/Grok marker is `2` | Treat it as current |
 | Replay marker exists and first two token snapshots share a second | Skip that second's prefix while retaining the latest cumulative baseline |
 | Two ordinary Codex requests share a second without a replay marker | Keep both events |
 | A malformed line contains `token_count` before valid replay snapshots | Ignore the malformed line and continue detection |
@@ -123,7 +128,7 @@ Never enable `--allow-lossy-rebuild` automatically.
 ## 6. Tests Required
 
 - Parser unit tests assert exact integer channel values and total fallbacks.
-- Kimi and Pi parser tests assert raw/future model preservation, authoritative
+- Kimi, Pi, and Grok parser tests assert raw/future model preservation, authoritative
   versus fallback totals, reasoning isolation, malformed-row tolerance, and
   saturating channel sums.
 - Codex parser tests cover both replay markers, cumulative baseline retention,

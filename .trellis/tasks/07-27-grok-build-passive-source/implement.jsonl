@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/07-27-grok-build-passive-source/research/grok-build-evidence.md", "reason": "Grok Build 数据形态、token 语义、本机样本证据与工程坑（terminal/ 阻塞、mtime 陷阱）"}
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "新增源注册、parser 边界、sync 汇总与 source-status 契约"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "total_only 质量、去重键、权威 total 与 rebuild 保护契约"}
+{"file": ".trellis/spec/llmusage/backend/write-fencing-contracts.md", "reason": "Store 写入必须经由的 fencing/事务入口"}
+{"file": ".trellis/spec/llmusage/backend/pricing-catalog-contracts.md", "reason": "确认 total-only Grok 不添加价格行，并验证 pricing_status 保持 unpriced"}
+{"file": "docs/agents/passive-parser-onboarding.md", "reason": "被动源接入门禁：证据、测试与停手规则"}
+{"file": "docs/agents/passive-source-candidates.md", "reason": "Grok 候选行现状（Monitor-only），完成后需更新决定"}

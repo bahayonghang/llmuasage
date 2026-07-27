@@ -4,7 +4,7 @@
 
 > **Naming note:** the crate and binary are `llmusage`; the GitHub repository is `llmuasage` (extra `a`). Links to the hosted docs use the repo spelling.
 
-Local-first usage analytics for AI coding CLIs. `llmusage` passively reads local Codex, Claude Code, OpenCode, Kimi Code, and Pi / Oh My Pi artifacts into SQLite, preserves historical Google Antigravity usage, then renders reports, terminal and browser dashboards, and offline HTML exports without upload or login.
+Local-first usage analytics for AI coding CLIs. `llmusage` passively reads local Codex, Claude Code, OpenCode, Kimi Code, Pi / Oh My Pi, and Grok Build artifacts into SQLite, preserves historical Google Antigravity usage, then renders reports, terminal and browser dashboards, and offline HTML exports without upload or login.
 
 > Current crate version: `1.1.0`.
 
@@ -75,8 +75,9 @@ On the first sync after an embedded pricing catalog upgrade, `sync` reprices his
 | Antigravity   | Historical rows remain queryable, but no new events are imported; `source-status` reports `historical_only` until a verified passive schema exists                   |
 | Kimi Code     | `~/.kimi-code/sessions/**/wire.jsonl` (or `KIMI_CODE_HOME`), turn-scoped `usage.record` rows only                                                                    |
 | Pi / Oh My Pi | `~/.pi/agent/sessions/**/*.jsonl` and `~/.omp/agent/sessions/**/*.jsonl` as one stable `pi` source                                                                   |
+| Grok Build    | `~/.grok/sessions/*/*/` (or `GROK_HOME`), reading only the session-root `updates.jsonl`, `signals.json`, `summary.json`, and optional `events.jsonl` sidecars       |
 
-Kimi Code and Pi are passive, precise sources: they keep raw model names, use file cursors for incremental/idempotent replay, and never persist transcript text. Pi support is verified with local Oh My Pi samples plus sanitized Pi-compatible fixtures; Pi-only local evidence is still limited. `source-status` and `dash` also show monitor-only platform candidates such as Reasonix, Gemini CLI, Cursor, Copilot, Zed, Kiro, Goose, Grok, Kimi shell/Qwen, Roo/Kilo/Cline, Codebuff, Crush, Warp/Oz, Amp, Hermes, and Trae. Monitor-only means llmusage can probe candidate local roots and explain why parsing is blocked; it does not write zero usage rows or untrusted token rows.
+Kimi Code and Pi are passive, precise sources: they keep raw model names, use file cursors for incremental/idempotent replay, and never persist transcript text. Pi support is verified with local Oh My Pi samples plus sanitized Pi-compatible fixtures; Pi-only local evidence is still limited. Grok Build is passive and `total_only`: it records authoritative session/turn totals without inventing input/output/cache splits, replays a whole session when a sidecar changes, and leaves cost `unpriced` because the local artifacts do not expose chargeable subchannels. `source-status` and `dash` also show monitor-only platform candidates such as Reasonix, Gemini CLI, Cursor, Copilot, Zed, Kiro, Goose, Kimi shell/Qwen, Roo/Kilo/Cline, Codebuff, Crush, Warp/Oz, Amp, Hermes, and Trae. Monitor-only means llmusage can probe candidate local roots and explain why parsing is blocked; it does not write zero usage rows or untrusted token rows.
 
 Machines upgraded from a release that installed hooks or plugins should run `llmusage uninstall` once. The command removes only legacy llmusage-owned entries and wrappers while preserving historical backups and usage data; `--purge` additionally removes the runtime root.
 

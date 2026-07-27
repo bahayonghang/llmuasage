@@ -31,7 +31,7 @@ Usage: llmusage [OPTIONS] [COMMAND]
 | `--locale <LOCALE>` | 标题和数字格式的轻量 locale 选择 |
 | `--compact` | 使用更窄的表格布局 |
 | `--no-cost` | 从报表输出隐藏成本列与成本字段 |
-| `--source codex\|claude\|opencode\|antigravity\|kimi_code\|pi` | 将顶层报表或同步命令限制到一个来源 |
+| `--source codex\|claude\|opencode\|antigravity\|kimi_code\|pi\|grok` | 将顶层报表或同步命令限制到一个来源 |
 | `-A, --by-agent` | 在统一报表 JSON 中加入嵌套来源行 |
 | `--sections daily\|weekly\|monthly\|session` | 在一次组合输出中加入报表周期 |
 | `--all` | daily 显示完整历史，而不是默认最近 7 天 |
@@ -143,6 +143,7 @@ llmusage sync
 llmusage sync --source codex
 llmusage sync --source kimi_code
 llmusage sync --source pi
+llmusage sync --source grok
 llmusage sync --recent-days 1
 llmusage sync --recent-days 30 --parallelism 4
 llmusage sync --json-events

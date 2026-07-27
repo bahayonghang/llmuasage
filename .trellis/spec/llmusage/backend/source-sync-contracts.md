@@ -27,8 +27,10 @@
   OpenCode owns the part cursor; file-backed sources continue using `FileCursor`.
 - Stable passive parser ids include `kimi_code` for
   `~/.kimi-code/sessions/**/wire.jsonl` and one `pi` id for both
-  `~/.pi/agent/sessions` and `~/.omp/agent/sessions`.
-- Registered passive parsers are Codex, Claude, OpenCode, Kimi Code, and Pi.
+  `~/.pi/agent/sessions` and `~/.omp/agent/sessions`. Grok Build uses `grok`
+  for direct sidecars under `~/.grok/sessions/*/*/` or `GROK_HOME/sessions`.
+- Registered passive parsers are Codex, Claude, OpenCode, Kimi Code, Pi, and
+  Grok Build.
   Antigravity retains its stable persisted descriptor for historical query
   compatibility but has no parser or passive probe.
 - Monitor descriptors live outside parser promotion and report detection status,
@@ -56,6 +58,13 @@
   `PI_AGENT_DIR` roots), then uses the ordinary append/reparse `FileCursor`
   state machine. Assistant usage keeps the upstream total authoritative and
   reasoning diagnostic-only.
+- Grok Build discovery uses exactly two `read_dir` levels for
+  `sessions/<workspace>/<session>` and only joins the whitelisted direct
+  sidecars `updates.jsonl`, `signals.json`, `summary.json`, and optional
+  `events.jsonl`; it never uses recursive `WalkDir` discovery. Any sidecar
+  change reparses the complete session and resets one shared session path hash.
+  A tracked missing sidecar preserves prior events and lets the ordinary
+  source-file sweep plus lossy-rebuild guard own recovery until it returns.
 - OpenCode database replacement detection uses persisted message anchors
   `(last_time_created, last_processed_ids)`. Preserve all cursors when every
   anchor exists; if any anchor disappeared, reset message and part cursors.
@@ -200,7 +209,7 @@
   rejected and existing historical rows remain intact.
 - Report and dashboard projection coverage proving historical Antigravity rows
   remain aggregated and selectable.
-- Kimi and Pi fixture tests covering normalized fields, raw/future model ids,
+- Kimi, Pi, and Grok fixture tests covering normalized fields, raw/future model ids,
   malformed/non-usage rows, second-sync idempotency, append, rewrite/truncate,
   deleted history/rebuild protection, missing roots, and status projections.
 - Sync-summary unit/subprocess tests covering the `TOTAL` row, absent and empty
@@ -267,7 +276,7 @@ let source = request.source_kind();
 
 ### 1. Scope / Trigger
 
-- Trigger: any Codex, Claude, Kimi Code, or Pi JSONL read loop, parse issue
+- Trigger: any Codex, Claude, Kimi Code, Pi, or Grok JSONL read loop, parse issue
   projection, file cursor update, or blocking parser cancellation change.
 - The shared reader owns byte bounds, JSON decoding, durable record boundaries,
   privacy-safe issues, and cancellation polling. Source parsers own only the
@@ -334,7 +343,7 @@ let source = request.source_kind();
 
 ### 6. Tests Required
 
-- Shared Codex/Claude/Kimi/Pi contract harness: 10 MiB oversized line,
+- Shared Codex/Claude/Kimi/Pi/Grok contract harness: 10 MiB oversized line,
   malformed line with secret content, UTF-8 record, EOF tail, identical issue
   counters, safe samples, and durable offset.
 - Reader unit tests: maximum buffered bytes, discard continuation, malformed
