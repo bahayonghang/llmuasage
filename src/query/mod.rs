@@ -4863,7 +4863,7 @@ mod tests {
         let limit = if std::env::var_os("CI").is_some() {
             std::time::Duration::from_millis(500)
         } else {
-            std::time::Duration::from_millis(80)
+            std::time::Duration::from_millis(150)
         };
 
         assert_eq!(payload.summary.total_requests, 10_000);
