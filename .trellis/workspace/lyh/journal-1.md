@@ -1308,3 +1308,25 @@ Public listener 改用最小读路由与脱敏聚合 DTO，并忽略 project sel
 ### Status
 
 [OK] **Completed**
+
+
+## Session 41: 移除 hook 实时同步并保留遗留清理
+
+**Date**: 2026-07-27
+**Task**: 移除 hook 实时同步并保留遗留清理
+**Branch**: `dev`
+
+### Summary
+
+删除 hook-run 与安装探测链路，将 init 收敛为数据库引导，并保留可审计、幂等的遗留 hook 清理；Antigravity 明确为 historical_only，历史数据与旧库兼容性保留，文档、ADR 和 Trellis 规范同步更新。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `972878a` | (see git log) |
+| `bbb6e82` | (see git log) |
+
+### Status
+
+[OK] **Completed**
