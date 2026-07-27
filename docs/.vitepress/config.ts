@@ -11,6 +11,8 @@ const adrItems = [
   { text: "0007 — Error surface", link: "/adr/0007-llmusage-error-surface" },
   { text: "0008 — Source capability registry", link: "/adr/0008-source-capability-registry" },
   { text: "0009 — Antigravity source cutover", link: "/adr/0009-antigravity-source-cutover" },
+  { text: "0010 — Provider label dimension", link: "/adr/0010-provider-label-dimension" },
+  { text: "0011 — Passive-only synchronization", link: "/adr/0011-passive-only-synchronization" },
 ];
 
 const enSidebar = [
@@ -79,7 +81,7 @@ const zhSidebar = [
 
 export default defineConfig({
   title: "llmusage",
-  description: "Local-first AI CLI usage analytics with Rust, SQLite, hooks, and zero upload.",
+  description: "Local-first passive AI CLI usage analytics with Rust, SQLite, and zero upload.",
   cleanUrls: true,
   lastUpdated: true,
   themeConfig: {
@@ -124,7 +126,7 @@ export default defineConfig({
       lang: "zh-CN",
       link: "/zh/",
       title: "llmusage",
-      description: "本地优先的 AI CLI 用量分析工具，基于 Rust、SQLite 和本地 hook。",
+      description: "本地优先的被动式 AI CLI 用量分析工具，基于 Rust 与 SQLite。",
       themeConfig: {
         nav: [
           { text: "指南", link: "/zh/guide/getting-started" },

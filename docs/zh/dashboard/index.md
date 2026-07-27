@@ -27,7 +27,7 @@ llmusage serve --port 37421
 llmusage serve --public --no-open --port 37421
 ```
 
-`--public` 会绑定 `0.0.0.0`；请从可访问服务器的机器打开 `http://<server-host-or-ip>:37421`。编译期 route allowlist 只包含页面 shell/静态资源、`/api/dashboard` 和 `/api/health`。Dashboard projection 只返回聚合总览、趋势、模型、来源和成本；project label、原始日志、diagnostics、integration/cursor 明细、job 状态、行为明细、Cost Explorer 和写路由都不可用。public Dashboard 请求也会忽略 `project` 和 `project_hash` filter，避免通过聚合结果间接探测特定 project。
+`--public` 会绑定 `0.0.0.0`；请从可访问服务器的机器打开 `http://<server-host-or-ip>:37421`。编译期 route allowlist 只包含页面 shell/静态资源、`/api/dashboard` 和 `/api/health`。Dashboard projection 只返回聚合总览、趋势、模型、来源和成本；project label、原始日志、diagnostics、cursor 明细、job 状态、行为明细、Cost Explorer 和写路由都不可用。public Dashboard 请求也会忽略 `project` 和 `project_hash` filter，避免通过聚合结果间接探测特定 project。
 
 这个精简 public surface 仍不提供认证或 TLS，并仍会显示用量总量和模型/来源名称，因此仍需防火墙或带认证的反向代理。远程使用全部本地 Dashboard 功能时，不要使用 `--public`，应保留默认 loopback 监听并使用下面的 SSH 隧道。
 
@@ -55,7 +55,7 @@ SSH 会话会自动跳过浏览器启动。
 6. 用 Cost Explorer 回答临时的本地切片分析问题。
 7. 数据过旧时使用 sync/export 动作或 diagnostics。
 
-屏幕宽度不超过 `720px` 时，系统健康卡会收敛为首屏内的紧凑折叠摘要；展开后可查看集成、游标数量和最近失败。宽屏仍显示完整健康卡。
+屏幕宽度不超过 `720px` 时，系统健康卡会收敛为首屏内的紧凑折叠摘要；展开后可查看游标数量和最近失败。宽屏仍显示完整健康卡；Dashboard 不再展示 integration 安装健康。
 
 ## 筛选器
 
@@ -70,6 +70,8 @@ Dashboard 筛选器映射到 Rust 查询层共享的 `QueryFilter`。
 | `timezone` | `UTC`、`local` 或 `+08:00` 这样的固定偏移；`local` 表示本机当前固定本地偏移，不是 IANA/DST 感知时区 |
 
 URL 会保留筛选，刷新页面或复制本地 URL 时仍保持同一视图。
+
+Antigravity 历史仍可在报表和 Dashboard 筛选中查看，但不再产生新事件。`source-status` 将其显示为 `historical_only`；独立平台探针仍为 monitor-only / `blocked_no_samples`。
 
 Cost Explorer 会在共享筛选之上追加自己的查询控件：
 
@@ -130,7 +132,7 @@ Dashboard 必须显式展示能力缺口，不能把缺失数据伪装成 0。
 - `insufficient_models`：模型比较至少需要两个模型候选。
 - `low_sample`：可以比较，但样本太少，不能给强结论。
 - `unsupported`：所选 Explorer 指标、维度或筛选组合没有明确语义。
-- 来源能力限制：Antigravity 和 OpenCode 在源日志不暴露工具级证据时，会退化为保守 turn facts。
+- 来源能力限制：Antigravity 历史行和 OpenCode 行在源日志不暴露工具级证据时，会退化为保守 turn facts。
 
 Activity、Tools、Optimize、Explorer、Compare 降级时，核心 `/api/dashboard` 数据仍应保持可响应。
 
@@ -146,7 +148,7 @@ llmusage export html --out .\llmusage-report
 
 ## Sync jobs
 
-live 模式可以启动、轮询、取消进程内 sync job。Job 与 CLI sync 共用同一把本地 worker lock，避免 CLI、hook、Dashboard worker 并发写入。
+live 模式可以启动、轮询、取消进程内 sync job。Job 与 CLI sync 共用同一把本地 worker lock，避免 CLI 与 Dashboard worker 并发写入。
 
 ## Live 刷新与 HTTP 传输
 

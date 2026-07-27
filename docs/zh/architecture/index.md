@@ -6,36 +6,32 @@
 
 运行时状态默认在 `~/.llmusage/`，可用 `--home <PATH>` 或 `LLMUSAGE_HOME` 覆盖。
 
-- `llmusage.db` 保存 schema metadata、cursor、event、30 分钟 bucket、行为事实、项目元数据、source-file 诊断、集成状态、trigger 状态、价格元信息、worker lock 元信息和 run log。
-- `bin/llmusage-hook.cmd` 与 `bin/llmusage-hook.sh` 是外部工具调用的本地 wrapper。
+- `llmusage.db` 保存 schema metadata、cursor、event、30 分钟 bucket、行为事实、项目元数据、source-file 诊断、价格元信息、worker lock 元信息和 run log。历史 `trigger_state` 与 `integration_install` 表只为旧库兼容而保留；只有实际遗留清理会追加 integration 审计行。
 - `exports/` 保存静态 HTML 报告。
-- `backups/` 保存卸载时用于回滚的集成配置备份。
+- `backups/` 保留历史集成配置备份以及价格/数据库恢复材料。
 - `pricing/` 保存由 `catalog` 或 `doctor --refresh-pricing` 激活的内容寻址 base、overlay 和 effective 价格目录。
 
 ## Source Registry
 
 `SourceKind` 当前包含 Codex、Claude、OpenCode、Antigravity、Kimi Code 与 Pi。`antigravity`、`kimi_code`、`pi` 是稳定 CLI/API/SQLite 来源 id；Pi 与 Oh My Pi 有意共享 `pi`，`gemini-*` 字符串仍只是模型 id。
 
-`SourceDescriptor` 是来源能力注册表，声明每个来源的稳定 id、别名、激活方式（`hook`、`plugin`、`passive` 或 `hybrid`）、parser/integration 能力、token 质量标签和本地隐私边界。Registry 是 parser、integration 与 descriptor 的唯一 fan-out 点：
+`SourceDescriptor` 是来源能力注册表，声明每个来源的稳定 id、别名、parser/passive-probe 能力、token 质量标签和本地隐私边界。Registry 是 parser 与 descriptor 的唯一 fan-out 点：
 
 - `registered_parsers()` 驱动 `llmusage sync`。
-- `registered_integrations()` 驱动 `init`、`doctor` 和 `uninstall` 类集成流程。
-- `registered_source_descriptors()` 驱动 capability/status 语义，并用测试防止 parser/integration 漂移。
+- `registered_source_descriptors()` 驱动 capability/status 语义，并用测试防止 parser 漂移。
 
-新增来源意味着新增 `SourceKind` variant 和 descriptor。只有 descriptor 的能力声明与测试证据支持时，才新增 parser 或 integration。Passive reader 写入 usage 行之前还必须具备真实本地样本、fixture 覆盖、sync-twice 幂等、cursor/rebuild 行为、token 质量声明和隐私审查。
+新增来源意味着新增 `SourceKind` variant 和 descriptor。只有 descriptor 的能力声明与测试证据支持时，才新增 parser。Passive reader 写入 usage 行之前还必须具备真实本地样本、fixture 覆盖、sync-twice 幂等、cursor/rebuild 行为、token 质量声明和隐私审查。Antigravity descriptor 继续用于解析和查询历史行；它没有 parser 或 passive probe，因此 `source-status` 推导为 `historical_only`。
 
 `PlatformMonitorDescriptor` 是更宽的监控目录：既描述 Kimi Code、Pi 这类已注册 passive 来源，也描述 Reasonix、Gemini CLI、Cursor、Copilot、Zed、Kiro、Goose、Grok、Kimi shell/Qwen、Roo/Kilo/Cline、Codebuff、Crush、Warp/Oz、Amp、Hermes 和 Trae 等 parserless 候选。Monitor descriptor 可以在 `source-status` 与 `dash` 中展示 detected/unavailable 根目录、parser 支持状态、隐私类别、token 质量和下一步动作；只有同时具备已注册 `SourceKind` 与 parser 的 descriptor 才能写入 usage 行。
 
 ## 同步流程
 
-1. 工具专属 hook/plugin 触发 `llmusage hook-run`，或用户运行 `llmusage sync`。
+1. 用户或进程内 Dashboard job 运行 `llmusage sync`。
 2. 命令 bootstrap/migrate SQLite，并获取本地 `worker_lock`。
-3. 手动 sync 按来源顺序执行注册 parser：Codex、Claude、OpenCode、Kimi Code、Pi。Antigravity 在有验证过的 transcript schema 前仅作为 hook/integration 来源。hook-run sync 会限制到触发来源，避免一个 hook 导入所有 parser-backed 来源。
+3. sync 按来源顺序执行注册的被动 parser：Codex、Claude、OpenCode、Kimi Code、Pi。Antigravity 没有经过验证的被动 parser，因此历史行继续可见，但不再导入新事件。
 4. 每个 parser 产出 `SyncShard`。
 5. `SyncRunWriter::commit_shard` 执行 reset、event 写入、cursor 写入、raw archive 写入、行为事实写入和 source-file 标记。
 6. Store 保存 per-source sync status 与 run-log 记录。
-
-Codex `notify` 是 singleton integration。llmusage 安装时会备份不同的原 notify，并在自身 hook 处理后 best-effort 链式启动；递归/自身命令会被跳过，链式命令失败不会阻塞 hook 成功。
 
 `SyncShard` 是 parser/writer 边界。Parser 不直接写 SQLite。
 
@@ -76,7 +72,7 @@ SQLite meta 记录 active、base、overlay 的身份和文件。已选择文件�
 
 ## Store façade
 
-`Store` 是 paths、connections、worker locks、bootstrap、rebuild/reset 和 sync writer 创建的 façade。领域 store 通过 borrowed view 暴露，例如 `CursorStore`、`RunLog`、`SyncStatusStore`、`TriggerStore`、`SourceFileStore`。
+`Store` 是 paths、connections、worker locks、bootstrap、rebuild/reset 和 sync writer 创建的 façade。领域 store 通过 borrowed view 暴露，例如 `CursorStore`、`RunLog`、`SyncStatusStore`、`SourceFileStore`。当前没有活动 hook worker 或 trigger-state 写入 API。
 
 ## JobRegistry
 

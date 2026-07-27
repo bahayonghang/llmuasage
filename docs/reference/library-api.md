@@ -100,7 +100,7 @@ fn reject_invalid_source(registry: &JobRegistry, store: &Store) {
 }
 ```
 
-CLI, hook, and library sync share the same `worker_lock`. Use `Store::acquire_worker_lock_with` when embedding custom sync paths.
+CLI and library/dashboard sync share the same `worker_lock`. Use `Store::acquire_worker_lock_with` when embedding custom sync paths.
 
 ## Testing fixture
 

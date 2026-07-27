@@ -47,18 +47,20 @@ still follows the mutable `dev` branch, which may change or fail to build.
 llmusage init
 ```
 
-`init` is a local setup command. It prepares the runtime root, bootstraps the database, writes hook wrapper scripts, and installs or probes supported integrations.
+`init` is a local setup command. It prepares the runtime root and bootstraps the database. It does not write third-party configuration.
 
-## Supported integrations
+## Passive sources
 
-| Source | Integration surface | Parsed local data |
+| Source | Parsed local data | Status |
 | --- | --- | --- |
-| Codex | `config.toml notify` | OpenAI Codex rollout/session JSONL |
-| Claude | `Stop` / `SessionEnd` hooks | Claude Code project JSONL |
-| OpenCode | `session.updated` plugin event | OpenCode local SQLite usage database |
-| Antigravity | Antigravity `Stop` hook in `~/.gemini/config/hooks.json` | Hook trigger metadata only; transcript import is intentionally absent until a verified schema exists |
+| Codex | OpenAI Codex rollout/session JSONL | Passive parser |
+| Claude | Claude Code project JSONL | Passive parser |
+| OpenCode | OpenCode local SQLite usage database | Passive parser |
+| Kimi Code | Turn-scoped `usage.record` rows | Passive parser |
+| Pi / Oh My Pi | Session JSONL from both supported roots | Passive parser |
+| Antigravity | Historical database rows only | `historical_only`; no new events until a verified passive schema exists |
 
-If a tool is not installed on the machine, llmusage records the probe/install state and continues with the sources it can see. The Google local CLI source id is `antigravity`; `gemini` is not accepted as a source id. During init/uninstall, llmusage best-effort removes only llmusage-owned legacy `--source gemini` hook commands while preserving user hooks.
+The Google local CLI source id remains `antigravity`; `gemini` is not accepted as a source id. Machines upgraded from hook-enabled releases should run `llmusage uninstall` once. Cleanup removes only llmusage-owned legacy commands/plugins/wrappers, preserves sibling user configuration and historical backups, and leaves the usage database intact unless `--purge` is passed.
 
 ## Runtime root precedence
 
@@ -83,4 +85,4 @@ llmusage status
 llmusage doctor
 ```
 
-`status` summarizes the local database and integrations. `doctor` runs read-only health checks unless you explicitly pass `--refresh-pricing <file>`.
+`status` summarizes the local database and sources. `doctor` runs read-only health checks unless you explicitly pass `--refresh-pricing <file>`.

@@ -100,7 +100,7 @@ fn reject_invalid_source(registry: &JobRegistry, store: &Store) {
 }
 ```
 
-CLI、hook、library sync 共用同一把 `worker_lock`。嵌入自定义 sync 路径时使用 `Store::acquire_worker_lock_with`。
+CLI 与 library/Dashboard sync 共用同一把 `worker_lock`。嵌入自定义 sync 路径时使用 `Store::acquire_worker_lock_with`。
 
 ## 测试 fixture
 

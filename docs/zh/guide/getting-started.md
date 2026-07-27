@@ -17,13 +17,13 @@ just install
 
 该任务会安装 `docs/` 下的 VitePress 依赖，并通过 `cargo install --path . --locked --force` 安装 CLI。
 
-## 2. 初始化本地运行时与 hooks
+## 2. 初始化本地运行时
 
 ```powershell
 llmusage init
 ```
 
-`init` 会创建运行时目录、初始化 SQLite、写入 hook 包装器，并在本地配置存在时安装 Codex、Claude Code、OpenCode、Google Antigravity 集成。
+`init` 会创建运行时目录并初始化 SQLite，不会安装 hook/plugin，也不会修改 Codex、Claude Code、OpenCode 或 Antigravity 配置。
 
 默认路径：
 
@@ -31,7 +31,6 @@ llmusage init
 | --- | --- |
 | 运行时根目录 | `~/.llmusage/` |
 | 数据库 | `~/.llmusage/llmusage.db` |
-| hook 包装器 | `~/.llmusage/bin/llmusage-hook.cmd`、`~/.llmusage/bin/llmusage-hook.sh` |
 | 静态导出 | `~/.llmusage/exports/` |
 
 可用 `--home <PATH>` 或 `LLMUSAGE_HOME` 覆盖运行时根目录。
@@ -43,6 +42,10 @@ llmusage sync
 ```
 
 `sync` 会增量解析本地真源，写入标准化 usage 行、30 分钟 bucket、source-file 诊断和行为事实。
+
+sync 只被动读取。Antigravity 尚无经过验证的被动 parser，因此已有历史仍可查询但不再增长；`source-status` 会显示 `historical_only`。
+
+如果这台机器曾使用会安装 hook 的旧版 llmusage，请执行一次 `llmusage uninstall`，清理 llmusage 自有的遗留 hook、plugin 和 wrapper；已有用量数据不会被删除。
 
 只同步单个来源：
 

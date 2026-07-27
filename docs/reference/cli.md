@@ -134,13 +134,13 @@ Prints one statusline-friendly usage summary.
 llmusage init
 ```
 
-Creates the local runtime and installs/probes integrations.
+Creates the local runtime and bootstraps the usage database. It does not modify third-party tool configuration.
 
 ### `llmusage sync`
 
 ```powershell
 llmusage sync
-llmusage sync --source antigravity
+llmusage sync --source codex
 llmusage sync --source kimi_code
 llmusage sync --source pi
 llmusage sync --recent-days 1
@@ -168,7 +168,7 @@ The human stdout summary is one aligned table with one row per source plus `TOTA
 llmusage status
 ```
 
-Prints a human-readable database, source, integration, and recent-run summary.
+Prints a human-readable database, source, and recent-run summary.
 
 ### `llmusage source-status`
 
@@ -315,8 +315,4 @@ llmusage uninstall
 llmusage uninstall --purge
 ```
 
-Restores modified integration files. `--purge` also removes the runtime root.
-
-## Hidden command
-
-`hook-run` is intentionally hidden from normal help. It is called by generated hook wrappers.
+Cleans up hooks, plugins, wrapper scripts, and atomic-write residue left by older llmusage releases. Only llmusage-owned entries are removed; sibling user configuration and historical backups are preserved. A no-op cleanup does not create backups or integration audit rows. Machines upgraded from a hook-enabled release should run this command once. `--purge` also removes the runtime root and its usage database.

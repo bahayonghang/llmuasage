@@ -6,36 +6,32 @@ This page explains the current architecture shape. For decision records, see [AD
 
 The runtime state lives under `~/.llmusage/` unless overridden by `--home <PATH>` or `LLMUSAGE_HOME`.
 
-- `llmusage.db` stores schema metadata, cursors, events, 30-minute buckets, behavior facts, project metadata, source-file diagnostics, integration state, trigger state, pricing metadata, worker lock metadata, and run logs.
-- `bin/llmusage-hook.cmd` and `bin/llmusage-hook.sh` are local wrappers called by external tools.
+- `llmusage.db` stores schema metadata, cursors, events, 30-minute buckets, behavior facts, project metadata, source-file diagnostics, pricing metadata, worker lock metadata, and run logs. Historical `trigger_state` and `integration_install` tables remain for database compatibility; only actual legacy cleanup can append integration audit rows.
 - `exports/` stores static HTML reports.
-- `backups/` stores integration config backups used by uninstall.
+- `backups/` retains historical integration config backups and pricing/database recovery material.
 - `pricing/` stores content-addressed base, overlay, and effective pricing catalogs activated by `catalog` or `doctor --refresh-pricing`.
 
 ## Source registry
 
 `SourceKind` currently includes Codex, Claude, OpenCode, Antigravity, Kimi Code, and Pi. `antigravity`, `kimi_code`, and `pi` are stable CLI/API/SQLite source ids; Pi and Oh My Pi intentionally share `pi`, while `gemini-*` strings remain model ids only.
 
-`SourceDescriptor` is the source capability registry. It declares each source's stable id, aliases, activation mode (`hook`, `plugin`, `passive`, or `hybrid`), parser/integration capabilities, token-quality label, and local privacy boundary. The registry is the single fan-out point for parsers, integrations, and source descriptors:
+`SourceDescriptor` is the source capability registry. It declares each source's stable id, aliases, parser/passive-probe capabilities, token-quality label, and local privacy boundary. The registry is the single fan-out point for parsers and source descriptors:
 
 - `registered_parsers()` powers `llmusage sync`.
-- `registered_integrations()` powers `init`, `doctor`, and `uninstall`-style integration flows.
-- `registered_source_descriptors()` powers capability/status semantics and guards parser/integration drift.
+- `registered_source_descriptors()` powers capability/status semantics and guards parser drift.
 
-Adding a source means adding a `SourceKind` variant plus a descriptor. A parser or integration is added only when the descriptor's capability declaration and tests justify it. Passive readers also require real local samples, fixture coverage, sync-twice idempotency, cursor/rebuild behavior, token-quality declaration, and privacy review before they can write usage rows.
+Adding a source means adding a `SourceKind` variant plus a descriptor. A parser is added only when the descriptor's capability declaration and tests justify it. Passive readers also require real local samples, fixture coverage, sync-twice idempotency, cursor/rebuild behavior, token-quality declaration, and privacy review before they can write usage rows. Antigravity keeps a descriptor so historical rows can still be parsed and queried; because it has no parser or passive probe, `source-status` derives `historical_only`.
 
 `PlatformMonitorDescriptor` is the wider monitoring catalog. It describes registered passive sources such as Kimi Code and Pi alongside parserless candidates such as Reasonix, Gemini CLI, Cursor, Copilot, Zed, Kiro, Goose, Grok, Kimi shell/Qwen, Roo/Kilo/Cline, Codebuff, Crush, Warp/Oz, Amp, Hermes, and Trae. Monitor descriptors may surface detected/unavailable roots, parser support, privacy class, token quality, and next action in `source-status` and `dash`; only descriptors backed by a registered `SourceKind` and parser can write usage rows.
 
 ## Sync flow
 
-1. A tool-specific hook or plugin triggers `llmusage hook-run`, or the user runs `llmusage sync`.
+1. The user or an in-process dashboard job runs `llmusage sync`.
 2. The command bootstraps/migrates SQLite and acquires the local `worker_lock`.
-3. A manual sync walks registered parsers in source order: Codex, Claude, OpenCode, Kimi Code, and Pi. Antigravity is hook/integration-only until a verified transcript schema exists. A hook-run sync is filtered to the triggering source so one hook does not import every parser-backed source.
+3. Sync walks registered passive parsers in source order: Codex, Claude, OpenCode, Kimi Code, and Pi. Antigravity has no verified passive parser, so its historical rows remain visible but no new events are imported.
 4. Each parser emits `SyncShard` values.
 5. `SyncRunWriter::commit_shard` performs reset, event write, cursor write, raw archive write, behavior fact write, and source-file stamping as the commit protocol.
 6. The store saves per-source sync status and run-log records.
-
-Codex `notify` is a singleton integration. llmusage backs up a distinct original notify during install and chains it best-effort after llmusage hook handling, skipping recursive/self commands and never blocking hook success on the chained command.
 
 `SyncShard` is the parser/writer boundary. Parsers do not write SQLite directly.
 
@@ -76,7 +72,7 @@ Privacy boundary: behavior facts must not store full prompts, full assistant tex
 
 ## Store façade
 
-`Store` is a façade for paths, connections, worker locks, bootstrap, rebuild/reset, and sync writer creation. Domain stores are exposed as borrowed views such as `CursorStore`, `RunLog`, `SyncStatusStore`, `TriggerStore`, and `SourceFileStore`.
+`Store` is a façade for paths, connections, worker locks, bootstrap, rebuild/reset, and sync writer creation. Domain stores are exposed as borrowed views such as `CursorStore`, `RunLog`, `SyncStatusStore`, and `SourceFileStore`. There is no active hook worker or trigger-state write API.
 
 ## JobRegistry
 

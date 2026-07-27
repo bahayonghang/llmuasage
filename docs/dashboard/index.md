@@ -29,7 +29,7 @@ For a remote server, opt in explicitly and suppress browser launching:
 llmusage serve --public --no-open --port 37421
 ```
 
-`--public` binds `0.0.0.0`; open `http://<server-host-or-ip>:37421` from a machine that can reach the server. Its compile-time route allowlist contains only the browser shell/assets, `/api/dashboard`, and `/api/health`. The dashboard projection includes aggregate overview, trend, model, source, and cost values; project labels, raw logs, diagnostics, integration/cursor details, job state, behavior detail, Cost Explorer, and write routes remain unavailable. Public dashboard requests also ignore `project` and `project_hash` filters so project-specific totals cannot be probed indirectly.
+`--public` binds `0.0.0.0`; open `http://<server-host-or-ip>:37421` from a machine that can reach the server. Its compile-time route allowlist contains only the browser shell/assets, `/api/dashboard`, and `/api/health`. The dashboard projection includes aggregate overview, trend, model, source, and cost values; project labels, raw logs, diagnostics, cursor details, job state, behavior detail, Cost Explorer, and write routes remain unavailable. Public dashboard requests also ignore `project` and `project_hash` filters so project-specific totals cannot be probed indirectly.
 
 The public aggregate surface still has no authentication or TLS and still reveals usage totals and model/source names. Use a firewall or authenticated reverse proxy even for this reduced view. To use every local dashboard feature remotely, keep the default loopback listener and use the SSH tunnel below instead of `--public`.
 
@@ -57,7 +57,7 @@ The first screen is task-oriented:
 6. Use Cost Explorer for ad hoc local slice-and-dice questions.
 7. Use sync/export actions or diagnostics when data looks stale.
 
-On screens up to `720px` wide, System Health becomes a compact disclosure in the first screen. Expand it to inspect integrations, cursor count, and recent failures; the full card remains visible on wider screens.
+On screens up to `720px` wide, System Health becomes a compact disclosure in the first screen. Expand it to inspect cursor count and recent failures; the full card remains visible on wider screens. Integration installation health is no longer part of the dashboard.
 
 ## Filters
 
@@ -72,6 +72,8 @@ Dashboard filters map to the shared `QueryFilter` used by the Rust query layer.
 | `timezone` | `UTC`, `local`, or a fixed offset such as `+08:00`; `local` means the machine's current fixed local offset, not an IANA/DST-aware timezone |
 
 The URL preserves filters so a refreshed page or shared local URL keeps the same view.
+
+Antigravity history remains selectable in reports and dashboard filters, but it no longer receives new events. `source-status` exposes this as `historical_only`; its separate platform monitor remains monitor-only and `blocked_no_samples`.
 
 Cost Explorer adds its own query controls on top of the shared filters:
 
@@ -132,7 +134,7 @@ Common states:
 - `insufficient_models`: model comparison needs at least two model candidates.
 - `low_sample`: comparison exists but the sample is too small for a strong claim.
 - `unsupported`: the selected Explorer metric/dimension/filter combination is not meaningful.
-- source-limited facts: Antigravity and OpenCode can degrade to conservative turn facts when source logs do not expose tool-level evidence.
+- source-limited facts: historical Antigravity rows and OpenCode rows can degrade to conservative turn facts when source logs do not expose tool-level evidence.
 
 Core `/api/dashboard` data should remain responsive even when Activity, Tools, Optimize, Explorer, or Compare is degraded.
 
@@ -148,7 +150,7 @@ The static bundle includes `snapshot.json` with the default Explorer payload and
 
 ## Sync jobs
 
-Live mode can start, poll, and cancel in-process sync jobs. Jobs share the same local worker lock as CLI sync, so CLI, hook, and dashboard workers do not write concurrently.
+Live mode can start, poll, and cancel in-process sync jobs. Jobs share the same local worker lock as CLI sync, so CLI and dashboard workers do not write concurrently.
 
 ## Live refresh and HTTP transfer
 

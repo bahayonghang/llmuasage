@@ -88,7 +88,7 @@
 
 - Switched report command JSON (`daily`, `monthly`, `session`, `blocks`) and web/export derived keys to snake_case. See the JSON naming migration below.
 - Reworked sync writes around `SyncShard` and `commit_shard`, preserving incremental cursors while reducing full-source buffering.
-- Renamed the worker table from `worker_lease` to `worker_lock`; CLI/library sync now waits on a holder-aware lock while hook-run remains non-blocking.
+- Renamed the worker table from `worker_lease` to `worker_lock`; CLI/library sync waited on a holder-aware lock while the former real-time hook worker remained non-blocking.
 - Report commands remain read-only and no longer imply sync. Run `llmusage sync` or `llmusage sync --rebuild` when local source data or upgrade-derived metadata needs refreshing.
 
 ### Local-only boundary

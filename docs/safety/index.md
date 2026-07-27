@@ -15,14 +15,14 @@ Common files and directories:
 | Path | Purpose |
 | --- | --- |
 | `~/.llmusage/llmusage.db` | SQLite database for usage, buckets, cursors, diagnostics, jobs, run logs, and metadata |
-| `~/.llmusage/bin/llmusage-hook.cmd` | Windows hook wrapper |
-| `~/.llmusage/bin/llmusage-hook.sh` | POSIX hook wrapper |
-| `~/.llmusage/backups/` | Integration config backups used by uninstall |
+| `~/.llmusage/backups/` | Historical integration backups plus database/pricing recovery material |
 | `~/.llmusage/exports/` | Static HTML exports |
 | `~/.llmusage/logs/llmusage.ndjson.*` | Local structured runtime diagnostics and command tracing |
 | `~/.llmusage/pricing/` | Content-addressed local base, overlay, and effective pricing catalogs |
 
 Runtime root precedence: `--home <PATH>` > `LLMUSAGE_HOME` > `~/.llmusage`.
+
+Current releases do not install hooks or plugins. After upgrading a machine that used a hook-enabled release, run `llmusage uninstall` once to remove only llmusage-owned legacy configuration entries, wrappers, and atomic-write residue. Historical `*.bak` files and usage data remain; `uninstall --purge` is the explicit command that removes the runtime root.
 
 ## What is not uploaded
 
@@ -48,7 +48,7 @@ Normal sync imports new/changed local source artifacts. If a file-backed source 
 llmusage sync --rebuild
 ```
 
-`--rebuild` resets parser-backed usage state source by source before reparsing local sources. A full rebuild uses the parser registry as its deletion boundary, so parserless Antigravity events, buckets, behavior facts, cursors, and source-file diagnostics are preserved. If imported file-backed history for a parser source depends on files that are now missing, llmusage refuses the rebuild before any reset.
+`--rebuild` resets parser-backed usage state source by source before reparsing local sources. A full rebuild uses the parser registry as its deletion boundary, so parserless Antigravity events, buckets, behavior facts, cursors, and source-file diagnostics are preserved. A targeted Antigravity rebuild is rejected even with `--allow-lossy-rebuild` because no passive parser can reconstruct that history. If imported file-backed history for a parser source depends on files that are now missing, llmusage refuses the rebuild before any reset.
 
 The explicit override is:
 
@@ -101,7 +101,7 @@ Activation writes SHA-256-addressed files under `~/.llmusage/pricing/`, recomput
 
 ## Browser dashboard boundary
 
-`llmusage serve` binds to `127.0.0.1` by default. Its loopback router contains the full local dashboard, including projects, logs, diagnostics, integration/cursor health, job reads, behavior analytics, Cost Explorer, and guarded write routes.
+`llmusage serve` binds to `127.0.0.1` by default. Its loopback router contains the full local dashboard, including projects, logs, diagnostics, cursor health, job reads, behavior analytics, Cost Explorer, and guarded write routes.
 
 `llmusage serve --public` explicitly binds `0.0.0.0` and selects a separate read-only router. Only the browser shell/assets, a field-allowlisted aggregate `/api/dashboard` projection, and a fixed minimal `/api/health` response are mounted. Raw logs, diagnostics, local path/project fields, internal errors, job state, and all mutation routes are absent rather than protected by `Host` or `Origin` headers. Remote diagnostics would require a future explicit opt-in with authentication.
 
