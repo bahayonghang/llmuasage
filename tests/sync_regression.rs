@@ -3,7 +3,6 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::mpsc,
     thread,
     time::Duration,
 };
@@ -678,20 +677,109 @@ fn sqlite_worker_lock_is_exclusive() -> Result<()> {
 }
 
 #[test]
-fn legacy_nonblocking_worker_lock_records_hook_kind() -> Result<()> {
+fn historical_hook_rows_and_holder_kind_remain_read_compatible() -> Result<()> {
     let fixture = Fixture::new()?;
     let app = AppContext::discover()?;
     let store = Store::new(&app.paths)?;
     store.bootstrap()?;
+    let conn = store.open_connection()?;
+    conn.execute(
+        "INSERT INTO trigger_state (
+            source, last_signal_at, trigger, last_worker_started_at,
+            last_worker_finished_at, updated_at
+         ) VALUES ('codex', '2026-01-01T00:00:00Z', 'Stop', NULL, NULL, '2026-01-01T00:00:00Z')",
+        [],
+    )?;
+    conn.execute(
+        "INSERT INTO integration_install (
+            source, install_type, status, config_path, backup_path, details_json, updated_at
+         ) VALUES ('codex', 'init', 'ready', NULL, NULL, '{}', '2026-01-01T00:00:00Z')",
+        [],
+    )?;
+    conn.execute(
+        "INSERT INTO run_log (
+            command, started_at, finished_at, status, summary, error, duration_ms
+         ) VALUES ('hook-run', '2026-01-02T00:00:00Z', '2026-01-02T00:00:01Z',
+                   'success', NULL, NULL, 1000)",
+        [],
+    )?;
+    conn.execute(
+        "INSERT OR REPLACE INTO worker_lock (
+            lock_name, owner_id, lease_expires_at, holder_pid, holder_kind,
+            acquired_at, updated_at, generation
+         ) VALUES ('sync-worker', 'legacy-owner', '2000-01-01T00:00:00Z',
+                   1, 'hook', '1999-12-31T23:59:00Z', '1999-12-31T23:59:00Z', 1)",
+        [],
+    )?;
+    drop(conn);
 
-    #[allow(deprecated)]
-    let first = store
-        .acquire_worker_lock()?
-        .expect("legacy hook lock should acquire");
-    assert_eq!(first.meta().holder_kind, "hook");
-    #[allow(deprecated)]
-    let second = store.acquire_worker_lock()?;
-    assert!(second.is_none());
+    let overview = Dashboard::open(&store)?.overview(&Default::default())?;
+    assert_eq!(
+        overview.last_sync_at.as_deref(),
+        Some("2026-01-02T00:00:01Z")
+    );
+    assert!(store.current_worker_lock()?.is_none());
+    let conn = store.open_connection()?;
+    let trigger_count: i64 =
+        conn.query_row("SELECT COUNT(*) FROM trigger_state", [], |row| row.get(0))?;
+    let integration_count: i64 =
+        conn.query_row("SELECT COUNT(*) FROM integration_install", [], |row| {
+            row.get(0)
+        })?;
+    assert_eq!(trigger_count, 1);
+    assert_eq!(integration_count, 1);
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn rebuild_rejects_parserless_antigravity_and_preserves_history() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_codex(
+        "rollout-antigravity-history.jsonl",
+        120,
+        "2026-04-22T01:12:00Z",
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        commands::sync::run(&app).await?;
+        let store = Store::new(&app.paths)?;
+        let conn = store.open_connection()?;
+        conn.execute("UPDATE usage_event SET source = 'antigravity'", [])?;
+        conn.execute("UPDATE usage_bucket_30m SET source = 'antigravity'", [])?;
+        let before: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_event WHERE source = 'antigravity'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert!(before > 0);
+        drop(conn);
+
+        let error = commands::sync::run_with_options(
+            &app,
+            commands::sync::SyncRunOptions {
+                rebuild: true,
+                source: Some(SourceKind::Antigravity),
+                allow_lossy_rebuild: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect_err("parserless Antigravity rebuild must be rejected");
+        assert!(error.to_string().contains("no passive parser"));
+
+        let after: i64 = store.open_connection()?.query_row(
+            "SELECT COUNT(*) FROM usage_event WHERE source = 'antigravity'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(after, before);
+
+        Ok::<_, anyhow::Error>(())
+    })?;
 
     fixture.restore_env();
     Ok(())
@@ -735,35 +823,6 @@ fn worker_lock_heartbeat_refreshes_existing_lease() -> Result<()> {
         refreshed.is_some(),
         "heartbeat should refresh updated_at and lease_expires_at before the lease can expire"
     );
-
-    fixture.restore_env();
-    Ok(())
-}
-
-#[test]
-fn hook_run_skips_when_sync_holds_lock() -> Result<()> {
-    let fixture = Fixture::new()?;
-    let app = AppContext::discover()?;
-    let store = Store::new(&app.paths)?;
-    store.bootstrap()?;
-    let _lock = store.acquire_worker_lock_with(Duration::from_millis(1), HolderKind::Cli)?;
-
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
-        commands::hook_run::run(&app, SourceKind::Codex, "manual-test", false).await?;
-        Ok::<_, anyhow::Error>(())
-    })?;
-
-    let conn = Connection::open(&app.paths.db_path)?;
-    let hook_runs: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM run_log WHERE command='hook-run'",
-        [],
-        |row| row.get(0),
-    )?;
-    assert_eq!(hook_runs, 0);
-    let (started_at, finished_at) = trigger_worker_times(&app.paths.db_path, "codex")?;
-    assert!(started_at.is_none());
-    assert!(finished_at.is_none());
 
     fixture.restore_env();
     Ok(())
@@ -844,54 +903,6 @@ fn sync_summary_table_is_stdout_only_without_ansi_or_completion_sentence() -> Re
     assert!(narrow_out.contains("Sync finished:"), "stdout={narrow_out}");
     assert!(narrow_out.contains("TOTAL"), "stdout={narrow_out}");
     assert!(!narrow_out.contains('\u{1b}'), "stdout={narrow_out}");
-
-    fixture.restore_env();
-    Ok(())
-}
-
-#[test]
-fn sync_blocks_when_hook_run_holds_lock_then_proceeds() -> Result<()> {
-    let fixture = Fixture::new()?;
-    fixture.seed_codex("rollout-wait.jsonl", 77, "2026-04-22T01:12:00Z")?;
-    let app = AppContext::discover()?;
-    let store = Store::new(&app.paths)?;
-    store.bootstrap()?;
-    let lock = {
-        #[allow(deprecated)]
-        store
-            .acquire_worker_lock()?
-            .expect("hook-style lock should acquire")
-    };
-    let (ready_tx, ready_rx) = mpsc::channel();
-    let (release_tx, release_rx) = mpsc::channel();
-    let home = fixture.home.clone();
-    let codex_home = fixture.codex_home.clone();
-    let opencode_home = fixture.opencode_home.clone();
-    let handle = thread::spawn(move || -> Result<std::process::Output> {
-        let child = Command::new(env!("CARGO_BIN_EXE_llmusage"))
-            .current_dir(env!("CARGO_MANIFEST_DIR"))
-            .arg("sync")
-            .env("HOME", &home)
-            .env("USERPROFILE", &home)
-            .env("CODEX_HOME", &codex_home)
-            .env("OPENCODE_HOME", &opencode_home)
-            .env("RUST_LOG", "off")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
-        ready_tx.send(()).expect("send ready");
-        release_rx.recv().expect("wait release signal");
-        drop(lock);
-        Ok(child.wait_with_output()?)
-    });
-
-    ready_rx.recv_timeout(Duration::from_secs(5))?;
-    thread::sleep(Duration::from_millis(200));
-    assert_eq!(usage_event_count(&app.paths.db_path)?, 0);
-    release_tx.send(())?;
-    let output = handle.join().expect("sync thread should not panic")?;
-    assert!(output.status.success(), "{output:?}");
-    assert_eq!(usage_event_count(&app.paths.db_path)?, 1);
 
     fixture.restore_env();
     Ok(())
@@ -1426,32 +1437,6 @@ fn sync_failure_marks_run_failed_immediately() -> Result<()> {
 
         let run = latest_run_record(&app.paths.db_path, "sync")?;
         assert_failed_run(&run);
-        Ok::<_, anyhow::Error>(())
-    })?;
-
-    fixture.restore_env();
-    Ok(())
-}
-
-#[test]
-fn hook_run_failure_marks_run_failed_and_finishes_worker() -> Result<()> {
-    let fixture = Fixture::new()?;
-    fixture.seed_broken_opencode_schema()?;
-
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
-        let app = AppContext::discover()?;
-        let err = commands::hook_run::run(&app, SourceKind::Opencode, "manual-test", false)
-            .await
-            .expect_err("hook-run should fail");
-        assert!(!err.to_string().trim().is_empty());
-
-        let run = latest_run_record(&app.paths.db_path, "hook-run")?;
-        assert_failed_run(&run);
-
-        let (started_at, finished_at) = trigger_worker_times(&app.paths.db_path, "opencode")?;
-        assert!(started_at.is_some());
-        assert!(finished_at.is_some());
         Ok::<_, anyhow::Error>(())
     })?;
 
@@ -2463,12 +2448,11 @@ fn pi_capability_status(app: &AppContext, store: &Store) -> Result<String> {
 
 fn source_capability_status(app: &AppContext, store: &Store, source: SourceKind) -> Result<String> {
     let sources = Dashboard::open(store)?.source_breakdown(&Default::default())?;
-    let probes = llmusage::integrations::probe_all(app)?;
-    let status =
-        llmusage::commands::source_status::build_source_capability_statuses(&probes, &sources)
-            .into_iter()
-            .find(|status| status.source == source)
-            .expect("source capability status present");
+    let _ = app;
+    let status = llmusage::commands::source_status::build_source_capability_statuses(&sources)
+        .into_iter()
+        .find(|status| status.source == source)
+        .expect("source capability status present");
     Ok(status.status.to_string())
 }
 
@@ -2547,20 +2531,6 @@ fn latest_run_record(db_path: &Path, command: &str) -> Result<RunLogRecord> {
         },
     )?;
     Ok(run)
-}
-
-fn trigger_worker_times(db_path: &Path, source: &str) -> Result<(Option<String>, Option<String>)> {
-    let conn = Connection::open(db_path)?;
-    let times = conn.query_row(
-        r#"
-        SELECT last_worker_started_at, last_worker_finished_at
-        FROM trigger_state
-        WHERE source = ?1
-        "#,
-        [source],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )?;
-    Ok(times)
 }
 
 fn assert_failed_run(run: &RunLogRecord) {

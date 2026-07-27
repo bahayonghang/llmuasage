@@ -7,9 +7,8 @@ use crate::{
     app::AppContext,
     domain::{
         platform_monitor::{self, ParserSupportStatus, PlatformProbe},
-        source_descriptor::{ActivationMode, SourceDescriptor, UsageQuality},
+        source_descriptor::{SourceDescriptor, UsageQuality},
     },
-    integrations::{self, IntegrationProbe},
     models::SourceKind,
     query::{Dashboard, SourceBreakdown},
     registry,
@@ -21,8 +20,6 @@ pub struct SourceCapabilityStatus {
     pub source: SourceKind,
     pub stable_id: &'static str,
     pub display_name: &'static str,
-    pub activation: &'static str,
-    pub configured: bool,
     pub status: &'static str,
     pub quality: &'static str,
     pub total_tokens: i64,
@@ -54,8 +51,7 @@ pub async fn run(app: &AppContext) -> Result<()> {
     store.require_initialized()?;
     let dashboard = Dashboard::open(&store)?;
     let sources = dashboard.source_breakdown(&Default::default())?;
-    let probes = integrations::probe_all(app)?;
-    let mut capability_statuses = build_source_capability_statuses(&probes, &sources);
+    let mut capability_statuses = build_source_capability_statuses(&sources);
     apply_token_accounting_statuses(&store, &mut capability_statuses)?;
     let platform_statuses = build_platform_monitor_statuses();
 
@@ -65,13 +61,8 @@ pub async fn run(app: &AppContext) -> Result<()> {
 }
 
 pub fn build_source_capability_statuses(
-    probes: &[IntegrationProbe],
     sources: &[SourceBreakdown],
 ) -> Vec<SourceCapabilityStatus> {
-    let probes = probes
-        .iter()
-        .map(|probe| (probe.source, probe))
-        .collect::<BTreeMap<_, _>>();
     let usage = sources
         .iter()
         .filter_map(|source| {
@@ -82,9 +73,8 @@ pub fn build_source_capability_statuses(
     registry::registered_source_descriptors()
         .iter()
         .map(|descriptor| {
-            let probe = probes.get(&descriptor.kind).copied();
             let source_usage = usage.get(&descriptor.kind);
-            source_status_from_parts(descriptor, probe, source_usage)
+            source_status_from_parts(descriptor, source_usage)
         })
         .collect()
 }
@@ -124,11 +114,9 @@ pub fn print_human_statuses(
 ) {
     for status in capability_statuses {
         println!(
-            "- Source status {}: activation={} status={} configured={} quality={} total={} last={} accounting={} ({})",
+            "- Source status {}: status={} quality={} total={} last={} accounting={} ({})",
             status.source,
-            status.activation,
             status.status,
-            status.configured,
             status.quality,
             status.total_tokens,
             status.last_event_at.as_deref().unwrap_or("never"),
@@ -180,43 +168,29 @@ fn platform_monitor_status_from_probe(probe: PlatformProbe) -> PlatformMonitorSt
 
 fn source_status_from_parts(
     descriptor: &SourceDescriptor,
-    probe: Option<&IntegrationProbe>,
     usage: Option<&SourceBreakdown>,
 ) -> SourceCapabilityStatus {
-    let configured =
-        probe.is_some_and(|probe| matches!(probe.status.as_str(), "ready" | "partial"));
     let has_data = usage.is_some_and(|usage| usage.event_count > 0 || usage.total_tokens > 0);
-    let status = match descriptor.activation {
-        ActivationMode::Hook(_) | ActivationMode::Plugin(_) | ActivationMode::Hybrid(_) => {
-            if configured {
-                "configured"
-            } else if has_data {
-                "degraded_hook_missing"
-            } else {
-                "not_detected"
-            }
-        }
-        ActivationMode::Passive(_) => {
-            if has_data {
-                "passive_ready"
-            } else {
-                "passive_no_data"
-            }
-        }
+    let status = if !descriptor.capabilities.parser {
+        "historical_only"
+    } else if has_data {
+        "passive_ready"
+    } else {
+        "passive_no_data"
     };
     let quality = quality_label(descriptor.quality);
     let total_tokens = usage.map(|usage| usage.total_tokens).unwrap_or_default();
     let last_event_at = usage.and_then(|usage| usage.last_event_at.clone());
-    let detail = probe
-        .map(|probe| probe.detail.clone())
-        .unwrap_or_else(|| "no integration probe available".to_string());
+    let detail = if descriptor.capabilities.parser {
+        "passive local artifact reader".to_string()
+    } else {
+        "historical usage is retained; no passive reader is available".to_string()
+    };
 
     SourceCapabilityStatus {
         source: descriptor.kind,
         stable_id: descriptor.stable_id,
         display_name: descriptor.display_name,
-        activation: activation_label(descriptor.activation),
-        configured,
         status,
         quality,
         total_tokens,
@@ -225,15 +199,6 @@ fn source_status_from_parts(
         legacy_token_accounting: false,
         token_accounting_warning: None,
         detail,
-    }
-}
-
-fn activation_label(activation: ActivationMode) -> &'static str {
-    match activation {
-        ActivationMode::Hook(_) => "hook",
-        ActivationMode::Plugin(_) => "plugin",
-        ActivationMode::Passive(_) => "passive",
-        ActivationMode::Hybrid(_) => "hybrid",
     }
 }
 
@@ -256,10 +221,8 @@ mod tests {
             ParserSupportStatus, PlatformProbe, PlatformProbeStatus, registered_platform_monitors,
         },
         domain::source_descriptor::{
-            ActivationMode, HookActivation, PrivacyClass, SourceCapabilities, SourceDescriptor,
-            UsageQuality,
+            PrivacyClass, SourceCapabilities, SourceDescriptor, UsageQuality,
         },
-        integrations::IntegrationProbe,
         models::SourceKind,
         query::SourceBreakdown,
     };
@@ -271,15 +234,8 @@ mod tests {
         stable_id: "codex",
         aliases: &[],
         display_name: "Codex",
-        activation: ActivationMode::Hook(HookActivation {
-            events: &["notify"],
-            singleton: true,
-            passive_fallback: true,
-        }),
         capabilities: SourceCapabilities {
             parser: true,
-            integration: true,
-            hook_signal: true,
             passive_probe: false,
         },
         quality: UsageQuality::Precise,
@@ -287,24 +243,15 @@ mod tests {
     };
 
     #[test]
-    fn status_reports_configured_when_probe_ready() {
-        let probe = IntegrationProbe {
-            source: SourceKind::Codex,
-            status: "ready".to_string(),
-            detail: "ready".to_string(),
-            config_path: None,
-        };
+    fn status_reports_passive_no_data_without_history() {
+        let status = source_status_from_parts(&TEST_DESCRIPTOR, None);
 
-        let status = source_status_from_parts(&TEST_DESCRIPTOR, Some(&probe), None);
-
-        assert!(status.configured);
-        assert_eq!(status.status, "configured");
-        assert_eq!(status.activation, "hook");
+        assert_eq!(status.status, "passive_no_data");
         assert_eq!(status.quality, "precise");
     }
 
     #[test]
-    fn status_reports_hook_missing_when_data_exists_without_ready_probe() {
+    fn status_reports_passive_ready_when_data_exists() {
         let usage = SourceBreakdown {
             source: "codex".to_string(),
             total_tokens: 42,
@@ -312,11 +259,30 @@ mod tests {
             event_count: 1,
         };
 
-        let status = source_status_from_parts(&TEST_DESCRIPTOR, None, Some(&usage));
+        let status = source_status_from_parts(&TEST_DESCRIPTOR, Some(&usage));
 
-        assert!(!status.configured);
-        assert_eq!(status.status, "degraded_hook_missing");
+        assert_eq!(status.status, "passive_ready");
         assert_eq!(status.total_tokens, 42);
+    }
+
+    #[test]
+    fn parserless_antigravity_is_historical_only() {
+        let descriptor = SourceDescriptor {
+            kind: SourceKind::Antigravity,
+            stable_id: "antigravity",
+            aliases: &[],
+            display_name: "Antigravity",
+            capabilities: SourceCapabilities {
+                parser: false,
+                passive_probe: false,
+            },
+            quality: UsageQuality::TotalOnly,
+            privacy: PrivacyClass::LocalArtifacts,
+        };
+
+        let status = source_status_from_parts(&descriptor, None);
+
+        assert_eq!(status.status, "historical_only");
     }
 
     #[test]

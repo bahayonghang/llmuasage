@@ -2123,6 +2123,7 @@ mod tests {
             "backup_path",
             "details_json",
             "cursor_key",
+            "integrations",
             "recent_failures",
             "job_id",
             "current_job",

@@ -196,28 +196,6 @@ impl Store {
         self.write_permit()?.validate_in_transaction(tx)
     }
 
-    /// Writes coordination state that must remain observable while another
-    /// worker owns the business-data permit. This is restricted to hook signal
-    /// delivery; it must not be used for usage, cursor, status, or catalog data.
-    pub(crate) fn control_plane_transaction<T>(
-        &self,
-        write: impl FnOnce(&Transaction<'_>) -> Result<T>,
-    ) -> Result<T> {
-        std::fs::create_dir_all(&self.paths.root_dir)?;
-        let mut conn = self.open_connection()?;
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let value = write(&tx)?;
-        tx.commit()?;
-        Ok(value)
-    }
-
-    /// Legacy non-blocking lock acquisition. Hook workers intentionally keep
-    /// this path so high-frequency tool signals skip rather than queue.
-    #[deprecated(note = "use acquire_worker_lock_with for blocking callers")]
-    pub fn acquire_worker_lock(&self) -> Result<Option<WorkerLock>> {
-        self.try_acquire_worker_lock(HolderKind::Hook)
-    }
-
     /// Waits until the global worker lock can be acquired or `timeout` elapses.
     pub fn acquire_worker_lock_with(
         &self,

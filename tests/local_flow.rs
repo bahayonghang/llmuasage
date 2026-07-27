@@ -4,15 +4,12 @@ use std::{
 };
 
 use anyhow::Result;
-use llmusage::{
-    app::AppContext, commands, integrations, models::SourceKind, query::Dashboard, store::Store,
-    web,
-};
+use llmusage::{app::AppContext, commands, integrations, query::Dashboard, store::Store, web};
 use rusqlite::Connection;
 use tempfile::TempDir;
 
 #[test]
-fn local_flow_installs_syncs_exports_and_uninstalls() -> Result<()> {
+fn local_flow_bootstraps_and_syncs_without_installing_integrations() -> Result<()> {
     let fixture = Fixture::new()?;
     fixture.seed_codex()?;
     fixture.seed_claude()?;
@@ -22,26 +19,28 @@ fn local_flow_installs_syncs_exports_and_uninstalls() -> Result<()> {
     runtime.block_on(async {
         let app = AppContext::discover()?;
 
-        commands::init::run(&app, false).await?;
+        commands::init::run(&app).await?;
         assert!(app.paths.db_path.is_file());
-        assert!(app.paths.hook_cmd_path.is_file());
-        assert!(app.paths.hook_sh_path.is_file());
-
-        let codex_config = fs::read_to_string(fixture.codex_home.join("config.toml"))?;
-        assert!(codex_config.contains("llmusage-hook"));
-        let claude_settings =
-            fs::read_to_string(fixture.home.join(".claude").join("settings.json"))?;
-        assert!(claude_settings.contains("SessionEnd"));
+        assert!(!app.paths.hook_cmd_path.exists());
+        assert!(!app.paths.hook_sh_path.exists());
+        assert_eq!(
+            fs::read_to_string(fixture.codex_home.join("config.toml"))?,
+            "notify = [\"echo\", \"hello\"]\n"
+        );
+        assert_eq!(
+            fs::read_to_string(fixture.home.join(".claude").join("settings.json"))?,
+            "{}"
+        );
         assert!(
-            fixture
+            !fixture
                 .opencode_config
                 .join("plugin")
                 .join("llmusage-tracker.js")
-                .is_file()
+                .exists()
         );
 
         commands::sync::run(&app).await?;
-        let store = llmusage::store::Store::new(&app.paths)?;
+        let store = Store::new(&app.paths)?;
         let dashboard = Dashboard::open(&store)?;
         let overview = dashboard.overview(&Default::default())?;
         assert_eq!(overview.source_count, 3);
@@ -125,18 +124,16 @@ fn local_flow_installs_syncs_exports_and_uninstalls() -> Result<()> {
         .await?;
         commands::doctor::run(&app, true, None).await?;
 
+        let historical_backup = app.paths.backups_dir.join("historical.bak");
+        fs::write(&historical_backup, "keep")?;
         commands::uninstall::run(&app, false).await?;
-        let codex_restored = fs::read_to_string(fixture.codex_home.join("config.toml"))?;
-        assert!(codex_restored.contains("echo"));
-        let claude_restored =
-            fs::read_to_string(fixture.home.join(".claude").join("settings.json"))?;
-        assert!(!claude_restored.contains("llmusage-hook"));
+        commands::uninstall::run(&app, false).await?;
+        assert_eq!(fs::read_to_string(historical_backup)?, "keep");
         assert!(
-            !fixture
-                .opencode_config
-                .join("plugin")
-                .join("llmusage-tracker.js")
-                .exists()
+            store
+                .integration_state()
+                .load_integration_states()?
+                .is_empty()
         );
 
         Ok::<_, anyhow::Error>(())
@@ -147,366 +144,325 @@ fn local_flow_installs_syncs_exports_and_uninstalls() -> Result<()> {
 }
 
 #[test]
-fn antigravity_install_and_uninstall_stay_inside_temp_home() -> Result<()> {
+fn legacy_cleanup_handles_all_owned_artifacts_and_is_idempotent() -> Result<()> {
     let fixture = Fixture::new()?;
-    let config_dir = fixture.home.join(".gemini").join("config");
-    let hooks_path = config_dir.join("hooks.json");
-    fs::create_dir_all(&config_dir)?;
-    fs::write(
-        &hooks_path,
-        r#"{"Stop":[{"type":"command","command":"user-hook"}]}"#,
-    )?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        commands::init::run(&app).await?;
 
+        let claude_path = fixture.home.join(".claude").join("settings.json");
+        let user_claude = serde_json::json!({ "type": "command", "command": "notify-user" });
+        fs::write(
+            &claude_path,
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "hooks": {
+                    "Stop": [
+                        { "hooks": [
+                            user_claude.clone(),
+                            { "type": "command", "command": "cmd /c \"C:\\\\old\\\\llmusage-hook.cmd --source claude\"" }
+                        ] },
+                        { "hooks": [
+                            { "type": "command", "command": "cmd /c \"\"C:\\\\new\\\\llmusage-hook.cmd\" --source claude\"" }
+                        ] }
+                    ],
+                    "SessionEnd": [
+                        { "hooks": [{ "type": "command", "command": "/tmp/llmusage-hook --source claude" }] }
+                    ]
+                },
+                "user": { "value": 7 }
+            }))?,
+        )?;
+
+        fs::write(
+            fixture.codex_home.join("config.toml"),
+            "model = \"gpt-5\"\nnotify = [\"cmd\", \"/c\", \"llmusage-hook.cmd\"]\n",
+        )?;
+        fs::write(
+            app.paths.backups_dir.join("codex_notify_original.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "notify": ["echo", "user-notify"]
+            }))?,
+        )?;
+
+        let antigravity_path = fixture
+            .home
+            .join(".gemini")
+            .join("config")
+            .join("hooks.json");
+        fs::create_dir_all(antigravity_path.parent().expect("parent"))?;
+        let antigravity_seed = serde_json::to_vec_pretty(&serde_json::json!({
+            "Stop": [
+                { "type": "command", "command": "notify-antigravity-user" },
+                { "type": "command", "command": "llmusage-hook --source antigravity" },
+                { "type": "command", "command": "llmusage-hook --source gemini" }
+            ]
+        }))?;
+        fs::write(&antigravity_path, &antigravity_seed)?;
+        fs::write(
+            fixture.home.join(".gemini").join("settings.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "hooks": {
+                    "SessionEnd": [{ "hooks": [
+                        { "type": "command", "command": "notify-gemini-user" },
+                        { "type": "command", "command": "llmusage-hook --source gemini" }
+                    ] }]
+                }
+            }))?,
+        )?;
+
+        let plugin_path = fixture
+            .opencode_config
+            .join("plugin")
+            .join("llmusage-tracker.js");
+        fs::write(&plugin_path, "// LLMUSAGE_LOCAL_PLUGIN\nexport default {};\n")?;
+        fs::create_dir_all(&app.paths.bin_dir)?;
+        fs::write(&app.paths.hook_cmd_path, "legacy")?;
+        fs::write(&app.paths.hook_sh_path, "legacy")?;
+
+        let antigravity_name = antigravity_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("file name");
+        let antigravity_dir = antigravity_path.parent().expect("parent");
+        fs::write(
+            antigravity_dir.join(format!(".{antigravity_name}.llmusage-pending")),
+            "present\n",
+        )?;
+        fs::write(
+            antigravity_dir.join(format!(".{antigravity_name}.llmusage-recovery")),
+            &antigravity_seed,
+        )?;
+        fs::write(
+            antigravity_dir.join(format!(".{antigravity_name}.llmusage-tmp.1.2.3")),
+            "stale",
+        )?;
+
+        let historical_backup = app.paths.backups_dir.join("keep-history.bak");
+        let database_backup = app.paths.backups_dir.join("llmusage.db.pre-0.5.0");
+        fs::write(&historical_backup, "keep")?;
+        fs::write(&database_backup, "keep-db")?;
+
+        commands::uninstall::run(&app, false).await?;
+
+        let claude: serde_json::Value = serde_json::from_slice(&fs::read(&claude_path)?)?;
+        assert_eq!(claude["hooks"]["Stop"], serde_json::json!([{ "hooks": [user_claude] }]));
+        assert_eq!(claude["hooks"]["SessionEnd"], serde_json::json!([]));
+        assert_eq!(claude["user"], serde_json::json!({ "value": 7 }));
+
+        let codex = fs::read_to_string(fixture.codex_home.join("config.toml"))?;
+        assert!(codex.contains("model = \"gpt-5\""));
+        assert!(codex.contains("notify = [\"echo\", \"user-notify\"]"));
+        assert!(!app.paths.backups_dir.join("codex_notify_original.json").exists());
+
+        let antigravity: serde_json::Value =
+            serde_json::from_slice(&fs::read(&antigravity_path)?)?;
+        assert_eq!(
+            antigravity["Stop"],
+            serde_json::json!([{ "type": "command", "command": "notify-antigravity-user" }])
+        );
+        let gemini: serde_json::Value = serde_json::from_slice(&fs::read(
+            fixture.home.join(".gemini").join("settings.json"),
+        )?)?;
+        assert_eq!(
+            gemini["hooks"]["SessionEnd"][0]["hooks"],
+            serde_json::json!([{ "type": "command", "command": "notify-gemini-user" }])
+        );
+        assert!(!plugin_path.exists());
+        assert!(!app.paths.hook_cmd_path.exists());
+        assert!(!app.paths.hook_sh_path.exists());
+        assert_eq!(fs::read_to_string(&historical_backup)?, "keep");
+        assert_eq!(fs::read_to_string(&database_backup)?, "keep-db");
+        assert!(
+            fs::read_dir(antigravity_dir)?
+                .filter_map(|entry| entry.ok())
+                .all(|entry| !entry.file_name().to_string_lossy().contains("llmusage-"))
+        );
+
+        fs::write(&plugin_path, "// user-owned plugin\n")?;
+        let plugin_name = plugin_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("plugin file name");
+        let plugin_residue = plugin_path
+            .parent()
+            .expect("plugin parent")
+            .join(format!(".{plugin_name}.llmusage-tmp.4.5.6"));
+        fs::write(&plugin_residue, "stale")?;
+        let store = Store::new(&app.paths)?;
+        let before_rows: i64 = store.open_connection()?.query_row(
+            "SELECT COUNT(*) FROM integration_install",
+            [],
+            |row| row.get(0),
+        )?;
+        let before_opencode_state = store
+            .integration_state()
+            .load_integration_states()?
+            .into_iter()
+            .find(|state| state.source == "opencode")
+            .expect("OpenCode cleanup audit state");
+        assert!(
+            store
+                .integration_state()
+                .load_integration_states()?
+                .iter()
+                .any(|state| state.source == "legacy_hook_wrappers")
+        );
+        let before_backups = fs::read_dir(&app.paths.backups_dir)?.count();
+        let claude_before = fs::read(&claude_path)?;
+        let codex_before = fs::read(fixture.codex_home.join("config.toml"))?;
+        let antigravity_before = fs::read(&antigravity_path)?;
+        let gemini_before = fs::read(fixture.home.join(".gemini").join("settings.json"))?;
+
+        commands::uninstall::run(&app, false).await?;
+
+        let after_rows: i64 = store.open_connection()?.query_row(
+            "SELECT COUNT(*) FROM integration_install",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(after_rows, before_rows);
+        let after_opencode_state = store
+            .integration_state()
+            .load_integration_states()?
+            .into_iter()
+            .find(|state| state.source == "opencode")
+            .expect("updated OpenCode cleanup audit state");
+        assert_ne!(
+            after_opencode_state.details_json,
+            before_opencode_state.details_json
+        );
+        assert!(
+            after_opencode_state
+                .details_json
+                .as_deref()
+                .is_some_and(|detail| detail.contains("recovered residue"))
+        );
+        let after_opencode_state_json = serde_json::to_value(&after_opencode_state)?;
+        assert!(!plugin_residue.exists());
+        assert_eq!(fs::read_dir(&app.paths.backups_dir)?.count(), before_backups);
+        assert_eq!(fs::read(&claude_path)?, claude_before);
+        assert_eq!(fs::read(fixture.codex_home.join("config.toml"))?, codex_before);
+        assert_eq!(fs::read(&antigravity_path)?, antigravity_before);
+        assert_eq!(
+            fs::read(fixture.home.join(".gemini").join("settings.json"))?,
+            gemini_before
+        );
+        assert_eq!(fs::read_to_string(&plugin_path)?, "// user-owned plugin\n");
+        let before_noop_states =
+            serde_json::to_value(store.integration_state().load_integration_states()?)?;
+
+        commands::uninstall::run(&app, false).await?;
+        let final_rows: i64 = store.open_connection()?.query_row(
+            "SELECT COUNT(*) FROM integration_install",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(final_rows, after_rows);
+        let final_opencode_state = store
+            .integration_state()
+            .load_integration_states()?
+            .into_iter()
+            .find(|state| state.source == "opencode")
+            .expect("final OpenCode cleanup audit state");
+        assert_eq!(
+            serde_json::to_value(final_opencode_state)?,
+            after_opencode_state_json
+        );
+        assert_eq!(fs::read_dir(&app.paths.backups_dir)?.count(), before_backups);
+        assert_eq!(fs::read_to_string(plugin_path)?, "// user-owned plugin\n");
+        assert_eq!(
+            serde_json::to_value(store.integration_state().load_integration_states()?)?,
+            before_noop_states
+        );
+
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn wrapper_only_cleanup_is_audited_once_and_then_becomes_a_noop() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let app = AppContext::discover()?;
+    let store = Store::new(&app.paths)?;
+    store.bootstrap()?;
+    fs::write(&app.paths.hook_cmd_path, "legacy wrapper")?;
+
+    integrations::cleanup_all(&app, &store)?;
+    assert!(!app.paths.hook_cmd_path.exists());
+    let after_cleanup = store.integration_state().load_integration_states()?;
+    assert_eq!(after_cleanup.len(), 1);
+    assert_eq!(after_cleanup[0].source, "legacy_hook_wrappers");
+    assert_eq!(after_cleanup[0].status, "restored");
+    let backup_count = fs::read_dir(&app.paths.backups_dir)?.count();
+
+    integrations::cleanup_all(&app, &store)?;
+    assert_eq!(
+        serde_json::to_value(store.integration_state().load_integration_states()?)?,
+        serde_json::to_value(after_cleanup)?
+    );
+    assert_eq!(fs::read_dir(&app.paths.backups_dir)?.count(), backup_count);
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn cleanup_continues_after_one_integration_fails() -> Result<()> {
+    let fixture = Fixture::new()?;
     let app = AppContext::discover()?;
     let store = Store::new(&app.paths)?;
     store.bootstrap()?;
 
-    integrations::antigravity::install(&app, &store)?;
-    let installed = fs::read_to_string(&hooks_path)?;
-    assert!(installed.contains("user-hook"));
-    assert!(installed.contains("llmusage-hook"));
-
-    integrations::antigravity::uninstall(&app, &store)?;
-    let restored = fs::read_to_string(&hooks_path)?;
-    assert!(restored.contains("user-hook"));
-    assert!(!restored.contains("llmusage-hook"));
-    assert!(
-        fs::read_dir(&config_dir)?
-            .filter_map(|entry| entry.ok())
-            .all(|entry| !entry.file_name().to_string_lossy().contains("llmusage-")),
-        "integration must clean sibling temp and recovery files"
-    );
-
-    fixture.restore_env();
-    Ok(())
-}
-
-#[test]
-fn claude_install_reports_invalid_settings_shapes() -> Result<()> {
-    let cases = [
-        ("top-level", "[]", "顶层必须是 object"),
-        (
-            "hooks-shape",
-            "{\"hooks\":\"invalid\"}",
-            "hooks 字段必须是 object",
-        ),
-        (
-            "event-shape",
-            "{\"hooks\":{\"Stop\":{}}}",
-            "Claude hooks.Stop 必须是数组",
-        ),
-    ];
-
-    for (_name, raw, expected) in cases {
-        let fixture = Fixture::new()?;
-        fs::write(fixture.home.join(".claude").join("settings.json"), raw)?;
-        let app = AppContext::discover()?;
-        let store = Store::new(&app.paths)?;
-        store.bootstrap()?;
-
-        let err = integrations::claude::install(&app, &store).expect_err("shape should fail");
-        assert!(
-            err.to_string().contains(expected),
-            "unexpected error: {err:#}"
-        );
-
-        fixture.restore_env();
-    }
-
-    Ok(())
-}
-
-#[test]
-fn init_continues_when_claude_install_fails_and_records_error() -> Result<()> {
-    let fixture = Fixture::new()?;
+    fs::write(fixture.home.join(".claude").join("settings.json"), "{")?;
+    let plugin_path = fixture
+        .opencode_config
+        .join("plugin")
+        .join("llmusage-tracker.js");
+    fs::write(&plugin_path, "// LLMUSAGE_LOCAL_PLUGIN\n")?;
+    let antigravity_path = fixture
+        .home
+        .join(".gemini")
+        .join("config")
+        .join("hooks.json");
+    fs::create_dir_all(antigravity_path.parent().expect("parent"))?;
     fs::write(
-        fixture.home.join(".claude").join("settings.json"),
-        "{\"hooks\":\"invalid\"}",
-    )?;
-
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
-        let app = AppContext::discover()?;
-        // REL-002: a partial failure now exits non-zero by default. This test
-        // asserts the "keep going and record the error" behavior, which is what
-        // --best-effort preserves.
-        commands::init::run(&app, true).await?;
-
-        let codex_config = fs::read_to_string(fixture.codex_home.join("config.toml"))?;
-        assert!(codex_config.contains("llmusage-hook"));
-        assert!(
-            fixture
-                .opencode_config
-                .join("plugin")
-                .join("llmusage-tracker.js")
-                .is_file()
-        );
-        assert_eq!(
-            fs::read_to_string(fixture.home.join(".claude").join("settings.json"))?,
-            "{\"hooks\":\"invalid\"}"
-        );
-
-        let store = Store::new(&app.paths)?;
-        let states = store.integration_state().load_integration_states()?;
-        assert_eq!(
-            states
-                .iter()
-                .find(|item| item.source == "claude")
-                .map(|item| item.status.as_str()),
-            Some("error")
-        );
-        assert_eq!(
-            states
-                .iter()
-                .find(|item| item.source == "codex")
-                .map(|item| item.status.as_str()),
-            Some("ready")
-        );
-        assert_eq!(
-            states
-                .iter()
-                .find(|item| item.source == "opencode")
-                .map(|item| item.status.as_str()),
-            Some("ready")
-        );
-
-        Ok::<_, anyhow::Error>(())
-    })?;
-
-    fixture.restore_env();
-    Ok(())
-}
-
-/// REL-002: `install_all` folds per-integration errors into `status: error`
-/// rows and returns Ok, so `init` used to print the failure and still exit 0.
-/// Automation then believed hooks were installed when they were not.
-#[test]
-fn init_without_best_effort_fails_when_an_integration_fails() -> Result<()> {
-    let fixture = Fixture::new()?;
-    fs::write(
-        fixture.home.join(".claude").join("settings.json"),
-        "{\"hooks\":\"invalid\"}",
-    )?;
-
-    let runtime = tokio::runtime::Runtime::new()?;
-    let result = runtime.block_on(async {
-        let app = AppContext::discover()?;
-        commands::init::run(&app, false).await
-    });
-
-    fixture.restore_env();
-    let err = result.expect_err("init must fail when an integration install fails");
-    let message = err.to_string();
-    assert!(
-        message.contains("claude"),
-        "error must name the failing integration, got: {message}"
-    );
-    assert!(
-        message.contains("--best-effort"),
-        "error must point at the --best-effort escape hatch, got: {message}"
-    );
-    Ok(())
-}
-
-#[test]
-fn init_writes_quoted_windows_string_commands_for_spaced_paths() -> Result<()> {
-    let fixture = Fixture::new_with_spaces()?;
-
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
-        let app = AppContext::discover()?;
-        commands::init::run(&app, false).await?;
-
-        let expected_stop =
-            integrations::HookTarget::current(&app).shell_command(SourceKind::Claude, "Stop");
-        let claude_settings: serde_json::Value = serde_json::from_slice(&fs::read(
-            fixture.home.join(".claude").join("settings.json"),
-        )?)?;
-        let stop_commands = claude_settings
-            .get("hooks")
-            .and_then(|hooks| hooks.get("Stop"))
-            .and_then(serde_json::Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|entry| entry.get("hooks").and_then(serde_json::Value::as_array))
-            .flatten()
-            .filter_map(|hook| hook.get("command").and_then(serde_json::Value::as_str))
-            .collect::<Vec<_>>();
-        assert!(
-            stop_commands
-                .iter()
-                .any(|command| *command == expected_stop)
-        );
-
-        if cfg!(windows) {
-            assert!(expected_stop.contains("cmd /c \"\""));
-            assert!(
-                expected_stop.contains("llmusage-hook.cmd\" --source claude --trigger Stop --auto")
-            );
-        }
-
-        let plugin_body = fs::read_to_string(
-            fixture
-                .opencode_config
-                .join("plugin")
-                .join("llmusage-tracker.js"),
-        )?;
-        let expected_opencode = integrations::HookTarget::current(&app)
-            .shell_command(SourceKind::Opencode, "session.updated");
-        // SEC-002: the command is embedded in a JS template literal, so `\`,
-        // backtick and `${` are escaped before being written. On Windows this
-        // also stops JS from eating the backslashes in the hook path.
-        let expected_in_js = expected_opencode
-            .replace('\\', "\\\\")
-            .replace('`', "\\`")
-            .replace("${", "\\${");
-        assert!(
-            plugin_body.contains(&expected_in_js),
-            "plugin body must contain the JS-escaped command"
-        );
-        if cfg!(windows) {
-            assert!(plugin_body.contains("cmd /c \"\""));
-        }
-
-        Ok::<_, anyhow::Error>(())
-    })?;
-
-    fixture.restore_env();
-    Ok(())
-}
-
-#[test]
-fn antigravity_install_cleans_legacy_gemini_hooks() -> Result<()> {
-    let fixture = Fixture::new()?;
-    fs::create_dir_all(fixture.home.join(".gemini").join("config"))?;
-    let user_antigravity_command = "echo user-antigravity";
-    let legacy_antigravity_command = "llmusage-hook --source gemini --trigger Stop --auto";
-    fs::write(
-        fixture
-            .home
-            .join(".gemini")
-            .join("config")
-            .join("hooks.json"),
-        serde_json::to_vec_pretty(&serde_json::json!({
+        &antigravity_path,
+        serde_json::to_vec(&serde_json::json!({
             "Stop": [
-                { "type": "command", "command": user_antigravity_command },
-                { "type": "command", "command": legacy_antigravity_command }
+                { "type": "command", "command": "llmusage-hook --source antigravity" },
+                { "type": "command", "command": "notify-user" }
             ]
         }))?,
     )?;
-    let user_legacy_settings_command = "echo user-legacy-gemini";
-    let legacy_settings_command = "llmusage-hook --source gemini --trigger SessionEnd --auto";
-    fs::write(
-        fixture.home.join(".gemini").join("settings.json"),
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "hooks": {
-                "SessionEnd": [
-                    { "hooks": [{ "type": "command", "command": user_legacy_settings_command }] },
-                    { "hooks": [{ "type": "command", "command": legacy_settings_command }] }
-                ]
-            }
-        }))?,
-    )?;
+    fs::write(&app.paths.hook_sh_path, "legacy wrapper")?;
 
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
-        let app = AppContext::discover()?;
-        commands::init::run(&app, false).await?;
-
-        let expected_stop =
-            integrations::HookTarget::current(&app).shell_command(SourceKind::Antigravity, "Stop");
-        let hooks: serde_json::Value = serde_json::from_slice(&fs::read(
-            fixture
-                .home
-                .join(".gemini")
-                .join("config")
-                .join("hooks.json"),
-        )?)?;
-        let stop_commands = hooks
-            .get("Stop")
-            .and_then(serde_json::Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|hook| hook.get("command").and_then(serde_json::Value::as_str))
-            .collect::<Vec<_>>();
-        assert!(
-            stop_commands
-                .iter()
-                .any(|command| *command == expected_stop)
-        );
-        assert!(expected_stop.contains("--source antigravity"));
-        assert!(!expected_stop.contains("--source gemini"));
-        assert!(stop_commands.contains(&user_antigravity_command));
-        assert!(!stop_commands.contains(&legacy_antigravity_command));
-
-        let legacy_settings: serde_json::Value = serde_json::from_slice(&fs::read(
-            fixture.home.join(".gemini").join("settings.json"),
-        )?)?;
-        let session_end_commands = legacy_settings
-            .get("hooks")
-            .and_then(|hooks| hooks.get("SessionEnd"))
-            .and_then(serde_json::Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|entry| entry.get("hooks").and_then(serde_json::Value::as_array))
-            .flatten()
-            .filter_map(|hook| hook.get("command").and_then(serde_json::Value::as_str))
-            .collect::<Vec<_>>();
-        assert!(session_end_commands.contains(&user_legacy_settings_command));
-        assert!(!session_end_commands.contains(&legacy_settings_command));
-
-        commands::uninstall::run(&app, false).await?;
-        let restored_hooks: serde_json::Value = serde_json::from_slice(&fs::read(
-            fixture
-                .home
-                .join(".gemini")
-                .join("config")
-                .join("hooks.json"),
-        )?)?;
-        let remaining = restored_hooks
-            .get("Stop")
-            .and_then(serde_json::Value::as_array)
-            .map(Vec::len)
-            .unwrap_or_default();
-        assert_eq!(remaining, 1);
-        let restored_commands = restored_hooks
-            .get("Stop")
-            .and_then(serde_json::Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|hook| hook.get("command").and_then(serde_json::Value::as_str))
-            .collect::<Vec<_>>();
-        assert_eq!(restored_commands, vec![user_antigravity_command]);
-
-        Ok::<_, anyhow::Error>(())
-    })?;
-
-    fixture.restore_env();
-    Ok(())
-}
-
-#[test]
-fn hook_run_syncs_only_triggered_source() -> Result<()> {
-    let fixture = Fixture::new()?;
-    fixture.seed_codex()?;
-    fixture.seed_claude()?;
-    fixture.seed_opencode()?;
-
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
-        let app = AppContext::discover()?;
-
-        commands::hook_run::run(&app, SourceKind::Claude, "Stop", true).await?;
-
-        let store = Store::new(&app.paths)?;
-        let dashboard = Dashboard::open(&store)?;
-        let sources = dashboard.source_breakdown(&Default::default())?;
-        assert_eq!(sources.len(), 1);
-        assert_eq!(sources[0].source, "claude");
-        assert!(sources[0].total_tokens > 0);
-
-        Ok::<_, anyhow::Error>(())
-    })?;
+    let error = integrations::cleanup_all(&app, &store)
+        .expect_err("invalid Claude settings should fail the aggregate cleanup");
+    assert!(error.to_string().contains("claude"));
+    assert!(!plugin_path.exists());
+    assert!(!app.paths.hook_sh_path.exists());
+    let antigravity: serde_json::Value = serde_json::from_slice(&fs::read(antigravity_path)?)?;
+    assert_eq!(
+        antigravity["Stop"],
+        serde_json::json!([{ "type": "command", "command": "notify-user" }])
+    );
+    let states = store.integration_state().load_integration_states()?;
+    assert!(
+        states
+            .iter()
+            .any(|state| state.source == "claude" && state.status == "error")
+    );
+    assert!(states.iter().any(|state| state.source == "opencode"));
+    assert!(states.iter().any(|state| state.source == "antigravity"));
+    assert!(
+        states
+            .iter()
+            .any(|state| state.source == "legacy_hook_wrappers")
+    );
 
     fixture.restore_env();
     Ok(())
@@ -651,10 +607,6 @@ struct Fixture {
 impl Fixture {
     fn new() -> Result<Self> {
         Self::new_with_names("home", "opencode-home", "opencode-config")
-    }
-
-    fn new_with_spaces() -> Result<Self> {
-        Self::new_with_names("home with spaces", "opencode home", "opencode config")
     }
 
     fn new_with_names(

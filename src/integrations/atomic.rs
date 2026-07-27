@@ -497,6 +497,49 @@ where
     AtomicConfigWriter::new(target).remove_and_record(record)
 }
 
+/// Restores an interrupted atomic operation, then removes exact sibling
+/// residue left by older llmusage integration writes.
+pub fn recover_and_cleanup_residue(target: &Path) -> Result<bool> {
+    let writer = AtomicConfigWriter::new(target);
+    let marker_path = writer.marker_path();
+    let recovery_path = writer.recovery_path();
+    let mut changed = marker_path.exists() || recovery_path.exists();
+
+    writer.recover_pending()?;
+
+    for control_path in [&marker_path, &recovery_path] {
+        if control_path.exists() {
+            fs::remove_file(control_path)?;
+            changed = true;
+        }
+    }
+
+    let Some(parent) = target.parent() else {
+        return Ok(changed);
+    };
+    let Some(file_name) = target.file_name().and_then(|name| name.to_str()) else {
+        return Ok(changed);
+    };
+    let temp_prefix = format!(".{file_name}.llmusage-tmp.");
+    if parent.is_dir() {
+        for entry in fs::read_dir(parent)? {
+            let entry = entry?;
+            if entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.starts_with(&temp_prefix))
+            {
+                fs::remove_file(entry.path())?;
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        writer.sync_parent()?;
+    }
+    Ok(changed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

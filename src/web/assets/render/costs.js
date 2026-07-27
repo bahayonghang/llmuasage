@@ -11,7 +11,7 @@ const logger = window.console;
  * 1) 填充成本条形图（前 5 个）
  * 2) 填充成本表格
  * 3) 填充 4 个成本统计卡
- * 4) 填充失败记录和集成状态
+ * 4) 填充失败记录
  */
 export function renderCosts(context, state = {}) {
   logger.info('开始渲染成本估算区');
@@ -130,29 +130,6 @@ export function renderCosts(context, state = {}) {
       </div>
     `;
   }
-
-  // 1.5 填充集成状态
-  const integrationRows = health.integrations || [];
-
-  const integrationHtml = integrationRows
-    .map((row) => {
-      const tone = statusTone(row.status);
-      const statusLabel = tone === 'good' ? '● 正常' : `● ${row.status || '未知'}`;
-      return `
-      <div class="integration-row">
-        <div class="integration-row-main">
-          <div class="mono integration-row-source">${escapeHtml(row.source || '--')}</div>
-          <div class="mono integration-row-meta">${escapeHtml(row.install_type || 'probe')} · ${escapeHtml(row.updated_at || '--')}</div>
-        </div>
-        <span class="tag ok">${escapeHtml(statusLabel)}</span>
-      </div>
-    `;
-    })
-    .join('');
-
-  document.getElementById('integrations-rows').innerHTML = integrationHtml || `
-    <div class="empty-state compact">暂无集成状态。</div>
-  `;
 
   logger.info('完成成本估算区渲染');
 }

@@ -16,7 +16,6 @@ pub mod doctor;
 pub mod export;
 pub mod focused;
 pub mod help;
-pub mod hook_run;
 pub mod init;
 pub mod logs;
 pub mod monthly;
@@ -74,12 +73,8 @@ pub enum Commands {
     Antigravity(focused::SourceReportArgs),
     /// Print a single statusline-friendly usage summary.
     Statusline(report_args::StatuslineArgs),
-    Init {
-        /// Exit 0 even when some integrations fail to install. Without this,
-        /// a partial failure exits non-zero so automation can detect it.
-        #[arg(long)]
-        best_effort: bool,
-    },
+    /// Bootstrap the local runtime and database.
+    Init,
     Sync {
         /// Rebuild usage rows and buckets from local source files/DBs.
         #[arg(long)]
@@ -197,15 +192,6 @@ pub enum Commands {
         #[arg(long)]
         rebuild: bool,
     },
-    #[command(name = "hook-run", hide = true)]
-    HookRun {
-        #[arg(long, value_enum)]
-        source: SourceKind,
-        #[arg(long)]
-        trigger: String,
-        #[arg(long, default_value_t = false)]
-        auto: bool,
-    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -299,7 +285,7 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
             focused::run(&app, SourceKind::Antigravity, args.command).await
         }
         Some(Commands::Statusline(args)) => statusline::run(&app, args).await,
-        Some(Commands::Init { best_effort }) => init::run(&app, best_effort).await,
+        Some(Commands::Init) => init::run(&app).await,
         Some(Commands::Sync {
             rebuild,
             allow_lossy_rebuild,
@@ -368,11 +354,6 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
             no_open,
             rebuild,
         }) => codex_tracer::run(&app, port, !no_open, rebuild).await,
-        Some(Commands::HookRun {
-            source,
-            trigger,
-            auto,
-        }) => hook_run::run(&app, source, &trigger, auto).await,
     }
 }
 

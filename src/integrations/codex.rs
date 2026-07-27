@@ -1,262 +1,169 @@
 use std::{fs, path::PathBuf};
 
-use anyhow::Result;
-use serde_json::json;
+use anyhow::{Result, bail};
 use toml_edit::{DocumentMut, Item, Value, value};
 
 use crate::{app::AppContext, models::SourceKind, store::Store, util::resolve_home_dir};
 
 use super::{
-    HookTarget, Integration, IntegrationAction, IntegrationProbe, backup_file, record_action,
-    record_probe, write_file_atomic_and_record,
+    IntegrationAction, backup_file, record_action, recover_and_cleanup_residue,
+    write_file_atomic_and_record,
 };
 
-/// ZST handle implementing [`Integration`] for the Codex `notify` array.
-pub struct CodexIntegration;
-
-impl Integration for CodexIntegration {
-    fn source(&self) -> SourceKind {
-        SourceKind::Codex
-    }
-
-    fn probe(&self, app: &AppContext) -> Result<IntegrationProbe> {
-        probe(app)
-    }
-
-    fn install(&self, app: &AppContext, store: &Store) -> Result<IntegrationAction> {
-        install(app, store)
-    }
-
-    fn uninstall(&self, app: &AppContext, store: &Store) -> Result<IntegrationAction> {
-        uninstall(app, store)
-    }
-}
-
-pub fn probe(app: &AppContext) -> Result<IntegrationProbe> {
-    let config_path = resolve_codex_config(app);
-    let expected = HookTarget::current(app).notify_args(SourceKind::Codex, "notify");
-
-    let probe = if !config_path.is_file() {
-        IntegrationProbe {
-            source: SourceKind::Codex,
-            status: "missing".to_string(),
-            detail: "Codex config.toml 不存在".to_string(),
-            config_path: Some(config_path.to_string_lossy().to_string()),
+pub fn cleanup(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
+    let config_path = resolve_codex_config();
+    let backup_value_path = app.paths.backups_dir.join("codex_notify_original.json");
+    let residue_removed = recover_and_cleanup_residue(&config_path)?;
+    if !config_path.is_file() {
+        if backup_value_path.exists() {
+            bail!(
+                "cannot restore {} because {} is missing",
+                backup_value_path.display(),
+                config_path.display()
+            );
         }
-    } else {
-        let current = read_notify(&config_path)?;
-        let matches = current
-            .as_ref()
-            .map(|value| value == &expected)
-            .unwrap_or(false);
-        IntegrationProbe {
-            source: SourceKind::Codex,
-            status: if matches { "ready" } else { "drifted" }.to_string(),
-            detail: if matches {
-                "Codex notify 已对齐".to_string()
-            } else {
-                "Codex notify 需要重装".to_string()
-            },
-            config_path: Some(config_path.to_string_lossy().to_string()),
-        }
-    };
-
-    Ok(probe)
-}
-
-pub fn install(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
-    let config_path = resolve_codex_config(app);
-    let probe = probe(app)?;
-    if probe.status == "missing" {
-        record_probe(store, &probe)?;
-        return Ok(IntegrationAction {
-            source: SourceKind::Codex,
-            status: "skipped".to_string(),
-            detail: "Codex config.toml 缺失，跳过安装".to_string(),
-        });
+        return finish_residue_only(store, &config_path, residue_removed);
     }
 
-    let expected = HookTarget::current(app).notify_args(SourceKind::Codex, "notify");
     let raw = fs::read_to_string(&config_path)?;
     let mut doc = raw.parse::<DocumentMut>()?;
-    let current = read_notify(&config_path)?;
-    let backup_value_path = app.paths.backups_dir.join("codex_notify_original.json");
+    let current = read_notify(&doc);
+    let restore_marker = backup_value_path.is_file();
+    let mut changed = false;
 
-    if let Some(current) = current.as_ref()
-        && current != &expected
-        && !backup_value_path.exists()
+    if restore_marker {
+        let backup_json: serde_json::Value =
+            serde_json::from_slice(&fs::read(&backup_value_path)?)?;
+        match backup_json
+            .get("notify")
+            .and_then(serde_json::Value::as_array)
+        {
+            Some(values) => {
+                let restored = values
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(Value::from)
+                    .collect::<toml_edit::Array>();
+                doc["notify"] = value(restored);
+            }
+            None => {
+                doc.remove("notify");
+            }
+        }
+        changed = doc.to_string() != raw;
+    } else if current
+        .as_ref()
+        .is_some_and(|args| is_llmusage_notify(args))
     {
-        crate::integrations::write_file_atomic(
-            &backup_value_path,
-            serde_json::to_vec_pretty(&json!({ "notify": current }))?,
+        doc.remove("notify");
+        changed = true;
+    }
+
+    if !changed && !restore_marker {
+        return finish_residue_only(store, &config_path, residue_removed);
+    }
+
+    let backup_path = changed
+        .then(|| {
+            backup_file(
+                &config_path,
+                &app.paths.backups_dir,
+                "codex-config-legacy-cleanup",
+            )
+        })
+        .transpose()?;
+    if changed {
+        write_file_atomic_and_record(&config_path, doc.to_string(), || {
+            record_action(
+                store,
+                SourceKind::Codex,
+                "legacy-cleanup",
+                "restored",
+                "restored Codex notify after legacy llmusage hook removal",
+                Some(&config_path),
+                backup_path.as_deref(),
+            )
+        })?;
+    } else {
+        record_action(
+            store,
+            SourceKind::Codex,
+            "legacy-cleanup",
+            "restored",
+            "consumed an already-restored Codex notify marker",
+            Some(&config_path),
+            None,
         )?;
     }
 
-    let backup_path = backup_file(&config_path, &app.paths.backups_dir, "codex-config")?;
-    let notify_array = expected
-        .iter()
-        .map(|entry| Value::from(entry.as_str()))
-        .collect::<toml_edit::Array>();
-    doc["notify"] = value(notify_array);
-    write_file_atomic_and_record(&config_path, doc.to_string(), || {
-        record_action(
-            store,
-            SourceKind::Codex,
-            "init",
-            "ready",
-            "Codex notify 已安装",
-            Some(&config_path),
-            Some(&backup_path),
-        )
-    })?;
-
-    Ok(IntegrationAction {
-        source: SourceKind::Codex,
-        status: "ready".to_string(),
-        detail: "Codex notify 已安装".to_string(),
-    })
-}
-
-pub fn uninstall(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
-    let config_path = resolve_codex_config(app);
-    if !config_path.is_file() {
-        return Ok(IntegrationAction {
-            source: SourceKind::Codex,
-            status: "skipped".to_string(),
-            detail: "Codex config.toml 不存在".to_string(),
-        });
+    if restore_marker {
+        fs::remove_file(&backup_value_path)?;
     }
-
-    let raw = fs::read_to_string(&config_path)?;
-    let mut doc = raw.parse::<DocumentMut>()?;
-    let backup_path = backup_file(&config_path, &app.paths.backups_dir, "codex-config-restore")?;
-    let backup_value_path = app.paths.backups_dir.join("codex_notify_original.json");
-
-    if backup_value_path.exists() {
-        let backup_json: serde_json::Value =
-            serde_json::from_slice(&fs::read(&backup_value_path)?)?;
-        if let Some(notify_values) = backup_json.get("notify").and_then(|value| value.as_array()) {
-            let restored = notify_values
-                .iter()
-                .filter_map(|value| value.as_str().map(str::to_string))
-                .map(|value| Value::from(value.as_str()))
-                .collect::<toml_edit::Array>();
-            doc["notify"] = value(restored);
-        } else {
-            doc.remove("notify");
-        }
-    } else {
-        doc.remove("notify");
-    }
-
-    write_file_atomic_and_record(&config_path, doc.to_string(), || {
-        record_action(
-            store,
-            SourceKind::Codex,
-            "uninstall",
-            "restored",
-            "Codex notify 已恢复",
-            Some(&config_path),
-            Some(&backup_path),
-        )
-    })?;
-
     Ok(IntegrationAction {
         source: SourceKind::Codex,
         status: "restored".to_string(),
-        detail: "Codex notify 已恢复".to_string(),
+        detail: "legacy Codex notify cleanup completed".to_string(),
     })
 }
 
-pub fn original_notify(app: &AppContext) -> Result<Option<Vec<String>>> {
-    let backup_value_path = app.paths.backups_dir.join("codex_notify_original.json");
-    if !backup_value_path.is_file() {
-        return Ok(None);
-    }
-
-    let backup_json: serde_json::Value = serde_json::from_slice(&fs::read(backup_value_path)?)?;
-    Ok(backup_json
-        .get("notify")
-        .and_then(|value| value.as_array())
-        .map(|values| {
-            values
-                .iter()
-                .filter_map(|value| value.as_str().map(str::to_string))
-                .collect::<Vec<_>>()
+fn finish_residue_only(
+    store: &Store,
+    config_path: &std::path::Path,
+    residue_removed: bool,
+) -> Result<IntegrationAction> {
+    if residue_removed {
+        record_action(
+            store,
+            SourceKind::Codex,
+            "legacy-cleanup",
+            "restored",
+            "recovered legacy Codex atomic-write residue",
+            Some(config_path),
+            None,
+        )?;
+        Ok(IntegrationAction {
+            source: SourceKind::Codex,
+            status: "restored".to_string(),
+            detail: "recovered legacy Codex atomic-write residue".to_string(),
         })
-        .filter(|values| !values.is_empty()))
+    } else {
+        Ok(IntegrationAction {
+            source: SourceKind::Codex,
+            status: "skipped".to_string(),
+            detail: "no legacy Codex notify found".to_string(),
+        })
+    }
 }
 
-pub fn should_chain_original_notify(current: &[String], original: &[String]) -> bool {
-    !original.is_empty() && current != original && !is_llmusage_notify(original)
+fn resolve_codex_config() -> PathBuf {
+    std::env::var("CODEX_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| resolve_home_dir().join(".codex"))
+        .join("config.toml")
+}
+
+fn read_notify(doc: &DocumentMut) -> Option<Vec<String>> {
+    doc.get("notify").and_then(Item::as_array).map(|array| {
+        array
+            .iter()
+            .filter_map(|value| value.as_str().map(str::to_string))
+            .collect()
+    })
 }
 
 fn is_llmusage_notify(args: &[String]) -> bool {
     args.iter().any(|arg| arg.contains("llmusage-hook"))
-        || args
-            .windows(2)
-            .any(|window| window[0] == "--source" && window[1] == SourceKind::Codex.as_str())
-}
-
-fn resolve_codex_config(_app: &AppContext) -> PathBuf {
-    let home_dir = resolve_home_dir();
-    std::env::var("CODEX_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| home_dir.join(".codex"))
-        .join("config.toml")
-}
-
-fn read_notify(config_path: &PathBuf) -> Result<Option<Vec<String>>> {
-    let raw = fs::read_to_string(config_path)?;
-    let doc = raw.parse::<DocumentMut>()?;
-    let notify = doc.get("notify").and_then(Item::as_array).map(|array| {
-        array
-            .iter()
-            .filter_map(|value| value.as_str().map(str::to_string))
-            .collect::<Vec<_>>()
-    });
-    Ok(notify)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{SourceKind, should_chain_original_notify};
+    use super::is_llmusage_notify;
 
     #[test]
-    fn chaining_skips_empty_self_and_current_notify() {
-        let current = vec![
-            "cmd".to_string(),
-            "/c".to_string(),
-            "llmusage-hook.cmd".to_string(),
-        ];
-        assert!(!should_chain_original_notify(&current, &[]));
-        assert!(!should_chain_original_notify(&current, &current));
-        assert!(!should_chain_original_notify(
-            &current,
-            &[
-                "cmd".to_string(),
-                "/c".to_string(),
-                "llmusage-hook.cmd".to_string()
-            ],
-        ));
-        assert!(!should_chain_original_notify(
-            &current,
-            &[
-                "--source".to_string(),
-                SourceKind::Codex.as_str().to_string()
-            ],
-        ));
-    }
-
-    #[test]
-    fn chaining_allows_distinct_user_notify() {
-        let current = vec![
-            "cmd".to_string(),
-            "/c".to_string(),
-            "llmusage-hook.cmd".to_string(),
-        ];
-        let original = vec!["echo".to_string(), "hello".to_string()];
-
-        assert!(should_chain_original_notify(&current, &original));
+    fn notify_matching_uses_the_stable_wrapper_name() {
+        assert!(is_llmusage_notify(&["C:/x/llmusage-hook.cmd".into()]));
+        assert!(!is_llmusage_notify(&[
+            "C:/work/llmusage/codex-computer-use.exe".into()
+        ]));
     }
 }

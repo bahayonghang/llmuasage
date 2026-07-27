@@ -226,12 +226,12 @@ pub const PLATFORM_MONITORS: &[PlatformMonitorDescriptor] = &[
         platform_id: "antigravity",
         display_name: "Antigravity",
         source_kind: Some(SourceKind::Antigravity),
-        roots: &[MonitorRoot::Home(".gemini/config/hooks.json")],
-        artifact_patterns: &["hooks.json"],
+        roots: &[MonitorRoot::Home(".gemini/antigravity-cli")],
+        artifact_patterns: &["token-bearing session artifacts (not yet verified)"],
         parser_status: ParserSupportStatus::BlockedNoSamples,
         quality: Some(UsageQuality::TotalOnly),
         privacy: PrivacyClass::LocalArtifacts,
-        next_action: "integration-only until a token-bearing Antigravity fixture exists",
+        next_action: "monitor-only; historical usage is retained while passive samples are unavailable",
     },
     PlatformMonitorDescriptor {
         platform_id: "kimi_code",
@@ -659,6 +659,23 @@ mod tests {
         assert_eq!(reasonix.source_kind, None);
         assert_eq!(reasonix.parser_status, ParserSupportStatus::BlockedNoUsage);
         assert_eq!(SourceKind::parse_id("reasonix"), None);
+    }
+
+    #[test]
+    fn antigravity_monitor_uses_the_evidenced_cli_root_only() {
+        let antigravity = registered_platform_monitors()
+            .iter()
+            .find(|descriptor| descriptor.platform_id == "antigravity")
+            .expect("Antigravity monitor should exist");
+
+        assert_eq!(
+            antigravity.roots,
+            &[MonitorRoot::Home(".gemini/antigravity-cli")]
+        );
+        assert_eq!(
+            antigravity.parser_status,
+            ParserSupportStatus::BlockedNoSamples
+        );
     }
 
     #[test]

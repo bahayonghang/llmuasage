@@ -319,16 +319,13 @@ const ENGLISH_COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "init",
-        "Create the local runtime and install/probe supported integrations.",
+        "Create the local runtime and bootstrap the usage database.",
     ),
     (
         "sync",
-        "Import local Codex, Claude, OpenCode, Antigravity, Kimi Code, and Pi usage artifacts.",
+        "Passively import local Codex, Claude, OpenCode, Kimi Code, and Pi usage artifacts.",
     ),
-    (
-        "status",
-        "Print database, source, integration, and recent-run status.",
-    ),
+    ("status", "Print database, source, and recent-run status."),
     (
         "source-status",
         "Print parser-backed source and monitor-only platform status.",
@@ -361,7 +358,7 @@ const ENGLISH_COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "uninstall",
-        "Restore integrations; --purge also removes the runtime root.",
+        "Clean up legacy hooks/plugins; --purge also removes the runtime root.",
     ),
 ];
 
@@ -472,12 +469,12 @@ const CHINESE_COMMANDS: &[(&str, &str)] = &[
         "显示单一来源的聚焦 daily、weekly、monthly 或 session 报表。",
     ),
     ("statusline", "输出一行适合 statusline 的用量摘要。"),
-    ("init", "创建本地运行时并安装/探测支持的集成。"),
+    ("init", "创建本地运行时并引导用量数据库。"),
     (
         "sync",
-        "导入本地 Codex、Claude、OpenCode、Antigravity、Kimi Code 与 Pi 用量记录。",
+        "被动导入本地 Codex、Claude、OpenCode、Kimi Code 与 Pi 用量记录。",
     ),
-    ("status", "输出数据库、来源、集成与最近运行状态。"),
+    ("status", "输出数据库、来源与最近运行状态。"),
     ("source-status", "输出解析器支持的来源与仅监控平台状态。"),
     ("diagnostics", "输出诊断 JSON，或显式忽略某个来源文件。"),
     ("doctor", "运行健康检查，也可从本地文件刷新价格。"),
@@ -490,7 +487,10 @@ const CHINESE_COMMANDS: &[(&str, &str)] = &[
         "update [main|dev]",
         "预览或安装官方稳定/开发分支的最新版本。",
     ),
-    ("uninstall", "恢复集成；--purge 还会删除运行时根目录。"),
+    (
+        "uninstall",
+        "清理遗留 hook/plugin；--purge 还会删除运行时根目录。",
+    ),
 ];
 
 const CHINESE_GLOBAL_OPTIONS: &[(&str, &str)] = &[

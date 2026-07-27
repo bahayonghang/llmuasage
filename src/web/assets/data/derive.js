@@ -203,7 +203,7 @@ function buildInsights({ overview, modelRows, projectRows, costRows, sourceRows,
       label: '来源新鲜度',
       title: '某些来源近期无新事件',
       evidence: `${row.source || '--'} 最近事件 ${row.last_event_at || '--'}。`,
-      action: '如果该来源仍在使用，可检查 hook/integration 是否启用。',
+      action: '如果该来源仍在使用，请确认本地产物仍存在，并重新运行 sync。',
     });
   }
 
@@ -301,7 +301,6 @@ function deriveContext({ overview, trends, models, sources, projects, costs, act
   const toolRows = sortDesc(tools?.breakdown, (row) => row?.calls);
   const pricedCostRows = positiveRows(costRows, (row) => row?.estimated_cost_usd);
   const pricedModelRows = positiveRows(modelRows, (row) => row?.cost_with_cache_usd);
-  const integrationRows = normalizeRows(health?.integrations);
   const cursorRows = normalizeRows(health?.cursors);
   const diagnosticRows = normalizeRows(diagnostics?.by_source);
   const diagnosticFailureRows = normalizeRows(diagnostics?.recent_failures);
@@ -337,10 +336,6 @@ function deriveContext({ overview, trends, models, sources, projects, costs, act
   const average_cost_per_event = cost_event_count > 0 ? total_cost / cost_event_count : 0;
   const top_cost_row = pricedCostRows[0] || costRows[0] || null;
   const top_model_cost_row = pricedModelRows[0] || modelRows[0] || null;
-  const ready_integrations = integrationRows.filter(
-    (row) => statusTone(row?.status) === 'good',
-  ).length;
-
   // 1.3 派生图表与表格数据，避免 render 层重复计算
   const model_table_rows = modelRows.slice(0, PANEL_LIMITS.modelTable).map((row) => {
     const output_tokens = Number(row.output_tokens || 0);
@@ -410,12 +405,9 @@ function deriveContext({ overview, trends, models, sources, projects, costs, act
       secondary_refreshing: Boolean(_meta?.secondary_refreshing),
     },
     health: {
-      integrations: integrationRows,
       cursors: cursorRows,
       cursor_count: Number(health?.cursor_count ?? cursorRows.length),
       failures: combinedFailureRows,
-      ready_integrations,
-      total_integrations: integrationRows.length,
     },
     diagnostics: {
       archive_root: diagnostics?.archive_root || '',

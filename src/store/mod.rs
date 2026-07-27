@@ -28,7 +28,6 @@ mod schema;
 mod source_file;
 mod sync_status;
 mod sync_writer;
-mod trigger;
 
 pub use cursor::CursorStore;
 pub use integration::IntegrationStateStore;
@@ -42,7 +41,6 @@ pub use run_log::RunLog;
 pub use schema::{TOKEN_ACCOUNTING_VERSION, expected_token_accounting_version};
 pub use source_file::{LossyRebuildRisk, SourceFileStateCounts, SourceFileStore};
 pub use sync_status::SyncStatusStore;
-pub use trigger::TriggerStore;
 
 const WORKER_LOCK_NAME: &str = "sync-worker";
 const WORKER_LOCK_LEASE_MINUTES: i64 = 30;
@@ -105,14 +103,15 @@ pub struct OpencodeCursor {
     pub updated_at: String,
 }
 
-/// Latest known install/probe state for one integration surface.
+/// Historical cleanup audit state for one legacy integration surface.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IntegrationState {
-    /// Source the integration belongs to.
+    /// Source id, or an explicit shared-artifact audit key such as
+    /// `legacy_hook_wrappers`.
     pub source: String,
-    /// Action family that wrote the record, such as `init`, `uninstall`, or `probe`.
+    /// Action family that wrote the record (`legacy-cleanup`).
     pub install_type: String,
-    /// Current state, for example `ready`, `restored`, `skipped`, or `error`.
+    /// Current state (`restored` or `error`).
     pub status: String,
     /// Optional config path touched by the integration.
     pub config_path: Option<String>,
@@ -148,23 +147,6 @@ impl RunRecord {
     pub fn counts_as_failure(&self) -> bool {
         self.status != "success" && self.status != "running"
     }
-}
-
-/// Hook signal bookkeeping used by `hook-run` workers.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TriggerStateRecord {
-    /// Source the hook signal belongs to.
-    pub source: String,
-    /// Last signal time seen for the source.
-    pub last_signal_at: String,
-    /// Raw trigger/event name reported by the integration.
-    pub trigger: String,
-    /// Last worker start time for this source.
-    pub last_worker_started_at: Option<String>,
-    /// Last worker finish time for this source.
-    pub last_worker_finished_at: Option<String>,
-    /// Last update time in RFC 3339 format.
-    pub updated_at: String,
 }
 
 /// Latest sync metrics persisted per source for status and diagnostics.
@@ -217,7 +199,7 @@ pub enum HolderKind {
     Cli,
     /// Library/Tauri/HTTP job caller.
     Library,
-    /// Tool hook caller; intentionally uses non-blocking acquisition.
+    /// Historical tool-hook value retained for persisted worker-lock rows.
     Hook,
 }
 
@@ -352,11 +334,6 @@ impl Store {
     /// Borrowed view onto the `source_sync_status` surface.
     pub fn sync_status(&self) -> SyncStatusStore<'_> {
         SyncStatusStore::new(self)
-    }
-
-    /// Borrowed view onto the `trigger_state` surface.
-    pub fn triggers(&self) -> TriggerStore<'_> {
-        TriggerStore::new(self)
     }
 
     /// Recomputes and persists per-event cost columns from the active pricing
