@@ -1330,3 +1330,24 @@ Public listener 改用最小读路由与脱敏聚合 DTO，并忽略 project sel
 ### Status
 
 [OK] **Completed**
+
+
+## Session 42: 接入 Grok Build 被动用量源
+
+**Date**: 2026-07-27
+**Task**: 接入 Grok Build 被动用量源
+**Branch**: `dev`
+
+### Summary
+
+新增 parser-backed grok 被动源，按会话原子重放 updates/signals/summary/events sidecar，保持 total_only 与 unpriced；补齐状态、TUI/Web、双语文档和回归测试。just ci 全绿，隔离真机同步验证 2 条 grok-4.5 事件共 155,329 token，临时服务与目录已清理。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a5cb8cf` | (see git log) |
+
+### Status
+
+[OK] **Completed**
