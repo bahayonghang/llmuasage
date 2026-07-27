@@ -1,6 +1,6 @@
 # 架构说明
 
-本页说明当前 0.6.x 结构。设计决策见 [ADR](../adr/)，历史产品计划见 [PRD 历史档案](../prd/)。
+本页说明当前架构形态。设计决策见 [ADR](../adr/)，历史产品计划见 [PRD 历史档案](../prd/)。
 
 ## 运行时目录
 
@@ -67,7 +67,7 @@ SQLite meta 记录 active、base、overlay 的身份和文件。已选择文件�
 
 ## 行为事实
 
-0.6.x line 增加标准化行为表：
+当前版本增加了标准化行为表：
 
 - `usage_turn`：Activity、Optimize、Compare 和 turn-backed Explorer 查询使用的 turn-level facts。
 - `usage_tool_call`：Tools、Optimize、Compare 和 tool-attribution Explorer 查询使用的 bounded tool/action facts。
