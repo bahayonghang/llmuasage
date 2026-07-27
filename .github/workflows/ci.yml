@@ -25,8 +25,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust toolchain
-        # channel, components, and targets read from rust-toolchain.toml
+        # Keep channel/components in sync with rust-toolchain.toml;
+        # dtolnay/rust-toolchain requires an explicit toolchain input.
         uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        with:
+          toolchain: "1.97.0"
+          components: rustfmt, clippy
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@9f151aca7c3990bab7afe2d82ac58088d3b01074 # v2.7.8
@@ -91,14 +95,19 @@ jobs:
           if (-not (Test-Path "docs/package-lock.json")) {
             throw "docs/package-lock.json is required for reproducible docs installs"
           }
-          # Scan for stale historical version patterns like 0.6.x / 0.7.x
+          # Scan user-facing docs for stale historical version patterns like 0.N.x.
+          # Historical records (CHANGELOG, ADR, PRD archive, reports), source code
+          # comments, and upstream reference code legitimately mention old versions,
+          # so the scan is limited to README and current-state docs pages.
           $stalePattern = '0\.[0-9]+\.x'
-          $scanFiles = Get-ChildItem -Recurse -Include "*.md","*.rs","*.toml","*.yml","*.yaml" |
-            Where-Object { $_.FullName -notmatch '(node_modules|target|\.git|\.vitepress)' }
+          $scanFiles = @("README.md", "README.zh-CN.md")
+          $scanFiles += Get-ChildItem -Recurse "docs" -Filter "*.md" |
+            Where-Object { $_.FullName -notmatch '(node_modules|\.vitepress|[\\/](adr|prd|reports)[\\/])' } |
+            ForEach-Object { $_.FullName }
           foreach ($f in $scanFiles) {
-            $text = Get-Content -Raw $f.FullName -ErrorAction SilentlyContinue
+            $text = Get-Content -Raw $f -ErrorAction SilentlyContinue
             if ($text -match $stalePattern) {
-              throw "$($f.FullName) contains stale version reference matching '$stalePattern'"
+              throw "$f contains stale version reference matching '$stalePattern'"
             }
           }
 
@@ -129,6 +138,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        with:
+          toolchain: "1.97.0"
 
       - name: ARCH-002 — sync layer must not depend on commands
         run: cargo test --locked --all-features --test architecture_dependencies
@@ -166,6 +177,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        with:
+          toolchain: "1.97.0"
 
       - name: Install cargo-audit
         uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2
