@@ -42,7 +42,7 @@ use crate::{
 };
 
 const WEB_API_TIMEOUT: Duration = Duration::from_secs(5);
-const WEB_BEHAVIOR_API_TIMEOUT: Duration = Duration::from_secs(1);
+const WEB_BEHAVIOR_API_TIMEOUT: Duration = Duration::from_secs(3);
 const WEB_DASHBOARD_QUERY_PERMITS: usize = 4;
 /// Web/API read connections fail lock waits fast so section timeouts and
 /// degraded fallbacks trigger inside the request budget; sync writers keep
@@ -1888,10 +1888,11 @@ mod tests {
 
     use super::{
         DiagnosticsCache, LOOPBACK_ONLY_READ_ROUTE_INVENTORY, PUBLIC_READ_ROUTE_INVENTORY,
-        WEB_READ_BUSY_TIMEOUT, WebState, WriteExposure, api_json, asset_manifest, bind_server,
-        live_index_html, load_diagnostics_cached, load_via_dashboard,
-        load_via_dashboard_with_timeout, public_dashboard_filter_from_params, serve, serve_on,
-        server_task_result, snapshot_index_html,
+        WEB_API_TIMEOUT, WEB_BEHAVIOR_API_TIMEOUT, WEB_READ_BUSY_TIMEOUT, WebState, WriteExposure,
+        api_json, asset_manifest, bind_server, live_index_html, load_behavior_api,
+        load_diagnostics_cached, load_via_dashboard, load_via_dashboard_with_timeout,
+        public_dashboard_filter_from_params, serve, serve_on, server_task_result,
+        snapshot_index_html,
     };
 
     fn make_store() -> anyhow::Result<(TempDir, Store)> {
@@ -3544,6 +3545,39 @@ mod tests {
             |dashboard| dashboard.overview(&Default::default()).map(|_| ()),
         )
         .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn behavior_query_completes_past_legacy_one_second_deadline() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let state = WebState::with_jobs_and_query_limit(store, test_job_registry(), 1);
+        assert_eq!(WEB_API_TIMEOUT, Duration::from_secs(5));
+        assert_eq!(WEB_BEHAVIOR_API_TIMEOUT, Duration::from_secs(3));
+
+        let started = Instant::now();
+        let level = load_behavior_api(
+            state,
+            "behavior-deadline-regression",
+            |dashboard| {
+                std::thread::sleep(Duration::from_millis(1_100));
+                dashboard
+                    .activity_breakdown(&Default::default())
+                    .map(|payload| payload.support.level)
+            },
+            |reason| reason,
+        )
+        .await?;
+
+        assert_eq!(
+            level, "no_data",
+            "the legacy failure was `invalid config: dashboard query exceeded 1000 ms timeout`"
+        );
+        assert!(started.elapsed() >= Duration::from_secs(1));
+        assert!(
+            started.elapsed() < WEB_BEHAVIOR_API_TIMEOUT,
+            "focused fixture should complete before the Behavior deadline"
+        );
         Ok(())
     }
 

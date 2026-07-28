@@ -1,0 +1,4 @@
+{"file":".trellis/spec/llmusage/backend/index.md","reason":"Backend layer checklist and validation gate for query/store changes."}
+{"file":".trellis/spec/llmusage/backend/dashboard-performance-contracts.md","reason":"Behavior endpoint deadlines, independent degradation, filters, permits, and representative measurement contracts."}
+{"file":".trellis/spec/llmusage/backend/write-fencing-contracts.md","reason":"Schema bootstrap and migration writes must retain fencing and transactional behavior."}
+{"file":".trellis/tasks/07-28-fix-serve-behavior-query-timeout/research/diagnosis.md","reason":"Reproduction, query plans, index-only disproof, and measured rewrite evidence for the implementation."}

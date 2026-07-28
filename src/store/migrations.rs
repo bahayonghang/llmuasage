@@ -81,6 +81,11 @@ pub const MIGRATIONS: &[(u32, &str, MigrationFn)] = &[
         "add_source_sync_parse_issues",
         m_017_add_source_sync_parse_issues,
     ),
+    (
+        18,
+        "optimize_behavior_query_indexes",
+        m_018_optimize_behavior_query_indexes,
+    ),
 ];
 
 /// Returns the newest schema version known to this binary.
@@ -826,6 +831,43 @@ fn m_017_add_source_sync_parse_issues(tx: &Transaction<'_>) -> Result<()> {
     Ok(())
 }
 
+/// Migration v18 — add the range and attribution indexes used by Behavior reads.
+fn m_018_optimize_behavior_query_indexes(tx: &Transaction<'_>) -> Result<()> {
+    if table_exists(tx, "usage_event")? {
+        tx.execute_batch(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_usage_event_event_at
+                ON usage_event(event_at);
+            "#,
+        )?;
+    }
+    if table_exists(tx, "usage_turn")? {
+        tx.execute_batch(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_usage_turn_started_at
+                ON usage_turn(started_at);
+            CREATE INDEX IF NOT EXISTS idx_usage_turn_session_id
+                ON usage_turn(session_id);
+            CREATE INDEX IF NOT EXISTS idx_usage_turn_event_key_expr
+                ON usage_turn(substr(turn_key, 6));
+            "#,
+        )?;
+    }
+    if table_exists(tx, "usage_tool_call")? {
+        tx.execute_batch(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_usage_tool_call_event_key
+                ON usage_tool_call(event_key);
+            CREATE INDEX IF NOT EXISTS idx_usage_tool_call_occurred_at
+                ON usage_tool_call(occurred_at);
+            CREATE INDEX IF NOT EXISTS idx_usage_tool_call_model_occurred
+                ON usage_tool_call(model, occurred_at);
+            "#,
+        )?;
+    }
+    Ok(())
+}
+
 fn ensure_column(tx: &Transaction<'_>, table: &str, column: &str, definition: &str) -> Result<()> {
     if table_has_column(tx, table, column)? {
         return Ok(());
@@ -1450,6 +1492,47 @@ mod tests {
         let issues: crate::models::ParseIssues = serde_json::from_str(&stored)?;
         assert_eq!(issues, crate::models::ParseIssues::default());
         assert_eq!(read_schema_version(&conn)?, 17);
+        Ok(())
+    }
+
+    const BEHAVIOR_QUERY_INDEXES: &[&str] = &[
+        "idx_usage_event_event_at",
+        "idx_usage_turn_started_at",
+        "idx_usage_turn_session_id",
+        "idx_usage_tool_call_event_key",
+        "idx_usage_tool_call_occurred_at",
+        "idx_usage_tool_call_model_occurred",
+        "idx_usage_turn_event_key_expr",
+    ];
+
+    fn assert_behavior_query_indexes(conn: &Connection) -> anyhow::Result<()> {
+        for index in BEHAVIOR_QUERY_INDEXES {
+            let exists: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1)",
+                [index],
+                |row| row.get(0),
+            )?;
+            assert!(exists, "expected Behavior query index {index}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn migration_v18_repairs_v17_index_drift_and_matches_fresh_schema() -> anyhow::Result<()> {
+        let mut drifted = Connection::open_in_memory()?;
+        run_migrations_for_test(&mut drifted, &MIGRATIONS[..17])?;
+        drifted.execute_batch("DROP INDEX idx_usage_turn_event_key_expr;")?;
+        assert_eq!(read_schema_version(&drifted)?, 17);
+
+        run_migrations_with_events(&mut drifted, None)?;
+
+        assert_eq!(read_schema_version(&drifted)?, 18);
+        assert_behavior_query_indexes(&drifted)?;
+
+        let mut fresh = Connection::open_in_memory()?;
+        run_migrations_with_events(&mut fresh, None)?;
+        assert_eq!(read_schema_version(&fresh)?, 18);
+        assert_behavior_query_indexes(&fresh)?;
         Ok(())
     }
 

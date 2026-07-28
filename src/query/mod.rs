@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use chrono::{Duration, SecondsFormat, Utc};
 use rusqlite::{Connection, OptionalExtension, params_from_iter};
@@ -261,8 +261,8 @@ pub struct ActivityBreakdown {
     pub call_count: i64,
     /// Summed tokens attributed to the turns.
     pub total_tokens: i64,
-    /// Estimated cost attributed to this category by joining persisted event cost
-    /// on `(source, session_id, source_path_hash, primary_model, started_at)`.
+    /// Estimated cost attributed through the conservative event key embedded in
+    /// each normalized turn key.
     pub estimated_cost_usd: f64,
     /// `one_shot_turns / edit_turns`, or 0 when there are no edit turns.
     pub one_shot_rate: f64,
@@ -314,7 +314,7 @@ pub struct ToolsPayload {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 struct AttributedToolRow {
     tool_kind: String,
     tool_name: String,
@@ -330,6 +330,117 @@ struct AttributedToolRow {
     reasoning_output_tokens: f64,
     first_seen_at: Option<String>,
     last_seen_at: Option<String>,
+}
+
+#[derive(Default)]
+struct ActivityAggregate {
+    turns: i64,
+    edit_turns: i64,
+    one_shot_turns: i64,
+    retries: i64,
+    call_count: i64,
+    total_tokens: i64,
+    estimated_cost_usd: f64,
+}
+
+struct ToolEventAttribution {
+    event_key: String,
+    event_at: String,
+    session_id: Option<String>,
+    estimated_cost_usd: f64,
+    input_tokens: i64,
+    cache_read_tokens: i64,
+    cache_creation_tokens: i64,
+    output_tokens: i64,
+    reasoning_output_tokens: i64,
+}
+
+struct FilteredToolFact {
+    event_key: Option<String>,
+    turn_key: Option<String>,
+    session_id: Option<String>,
+    occurred_at: String,
+    tool_kind: String,
+    tool_name: String,
+    mcp_server: Option<String>,
+}
+
+fn tool_event_attribution_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<ToolEventAttribution> {
+    Ok(ToolEventAttribution {
+        event_key: row.get(0)?,
+        event_at: row.get(1)?,
+        session_id: row.get(2)?,
+        estimated_cost_usd: row.get(3)?,
+        input_tokens: row.get(4)?,
+        cache_read_tokens: row.get(5)?,
+        cache_creation_tokens: row.get(6)?,
+        output_tokens: row.get(7)?,
+        reasoning_output_tokens: row.get(8)?,
+    })
+}
+
+#[derive(Default)]
+struct ToolAggregate {
+    calls: i64,
+    turn_keys: HashSet<String>,
+    session_ids: HashSet<String>,
+    estimated_cost_usd: f64,
+    input_tokens: f64,
+    cache_read_tokens: f64,
+    cache_creation_tokens: f64,
+    output_tokens: f64,
+    reasoning_output_tokens: f64,
+    first_seen_at: Option<String>,
+    last_seen_at: Option<String>,
+}
+
+type ToolAggregateKey = (String, String, Option<String>);
+
+impl ToolAggregate {
+    fn observe_at(&mut self, occurred_at: &str) {
+        if self
+            .first_seen_at
+            .as_deref()
+            .is_none_or(|current| occurred_at < current)
+        {
+            self.first_seen_at = Some(occurred_at.to_string());
+        }
+        if self
+            .last_seen_at
+            .as_deref()
+            .is_none_or(|current| occurred_at > current)
+        {
+            self.last_seen_at = Some(occurred_at.to_string());
+        }
+    }
+}
+
+fn attribute_non_tool_event(
+    aggregates: &mut BTreeMap<ToolAggregateKey, ToolAggregate>,
+    event_tool_counts: &HashMap<String, i64>,
+    event: &ToolEventAttribution,
+) {
+    if event_tool_counts.contains_key(&event.event_key) {
+        return;
+    }
+    let aggregate = aggregates
+        .entry(("(non-tool)".to_string(), "(non-tool)".to_string(), None))
+        .or_default();
+    aggregate
+        .turn_keys
+        .insert(format!("turn:{}", event.event_key));
+    if let Some(session_id) = &event.session_id {
+        aggregate.session_ids.insert(session_id.clone());
+    }
+    aggregate.estimated_cost_usd += event.estimated_cost_usd;
+    aggregate.input_tokens += event.input_tokens as f64;
+    aggregate.cache_read_tokens += event.cache_read_tokens as f64;
+    aggregate.cache_creation_tokens += event.cache_creation_tokens as f64;
+    aggregate.output_tokens += event.output_tokens as f64;
+    aggregate.reasoning_output_tokens += event.reasoning_output_tokens as f64;
+    aggregate.observe_at(&event.event_at);
 }
 
 /// One read-only optimization finding derived from normalized local facts.
@@ -445,6 +556,26 @@ pub struct ModelCompareStats {
     pub planning_rate: f64,
     /// True when calls or edit turns are below the comparison threshold.
     pub low_sample: bool,
+}
+
+#[derive(Clone, Copy)]
+struct CompareBucketStats {
+    calls: i64,
+    total_tokens: i64,
+    estimated_cost_usd: f64,
+    input_tokens: i64,
+    cache_creation_tokens: i64,
+    cache_read_tokens: i64,
+}
+
+#[derive(Clone, Copy, Default)]
+struct CompareTurnStats {
+    turns: i64,
+    edit_turns: i64,
+    one_shot_turns: i64,
+    retries: i64,
+    delegation_turns: i64,
+    planning_turns: i64,
 }
 
 /// Side-by-side scalar comparison metric.
@@ -1234,9 +1365,99 @@ impl Dashboard {
     /// Loads activity category aggregates from normalized `usage_turn` facts.
     ///
     /// This intentionally does not read raw JSONL or frontend-owned data. Cost
-    /// is attribution-only: the query joins persisted `usage_event` cost rows
-    /// that match the conservative one-event turn identity.
+    /// is attribution-only: persisted event costs are looked up by the
+    /// conservative event key embedded in each turn key.
     pub fn activity_breakdown(&self, filter: &QueryFilter) -> Result<ActivityPayload> {
+        let support = behavior_support(&self.conn, "usage_turn", filter.turn_filter(None))?;
+        if !support.supported {
+            return Ok(ActivityPayload {
+                support,
+                breakdown: Vec::new(),
+            });
+        }
+
+        let mut event_costs = HashMap::new();
+        let mut event_stmt = self
+            .conn
+            .prepare("SELECT event_key, COALESCE(cost_with_cache_usd, 0.0) FROM usage_event")?;
+        let event_rows = event_stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+        })?;
+        for row in event_rows {
+            let (event_key, cost) = row?;
+            event_costs.insert(event_key, cost);
+        }
+
+        let turn_filter = filter.turn_filter(Some("t"));
+        let sql = format!(
+            r#"
+            SELECT
+                substr(t.turn_key, 6),
+                t.category,
+                t.has_edits,
+                t.one_shot,
+                t.retries,
+                t.call_count,
+                t.total_tokens
+            FROM usage_turn t
+            {}
+            "#,
+            turn_filter.where_sql()
+        );
+        let mut aggregates: BTreeMap<String, ActivityAggregate> = BTreeMap::new();
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(turn_filter.params().iter()), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, i64>(6)?,
+            ))
+        })?;
+        for row in rows {
+            let (event_key, category, has_edits, one_shot, retries, call_count, total_tokens) =
+                row?;
+            let aggregate = aggregates.entry(category).or_default();
+            aggregate.turns += 1;
+            aggregate.edit_turns += has_edits;
+            aggregate.one_shot_turns += one_shot;
+            aggregate.retries += retries;
+            aggregate.call_count += call_count;
+            aggregate.total_tokens += total_tokens;
+            aggregate.estimated_cost_usd +=
+                event_costs.get(&event_key).copied().unwrap_or_default();
+        }
+        let mut breakdown = aggregates
+            .into_iter()
+            .map(|(category, aggregate)| ActivityBreakdown {
+                category,
+                turns: aggregate.turns,
+                edit_turns: aggregate.edit_turns,
+                one_shot_turns: aggregate.one_shot_turns,
+                retries: aggregate.retries,
+                call_count: aggregate.call_count,
+                total_tokens: aggregate.total_tokens,
+                estimated_cost_usd: aggregate.estimated_cost_usd,
+                one_shot_rate: ratio(aggregate.one_shot_turns, aggregate.edit_turns),
+                retry_rate: ratio(aggregate.retries, aggregate.turns),
+            })
+            .collect::<Vec<_>>();
+        breakdown.sort_by(|left, right| {
+            right
+                .estimated_cost_usd
+                .total_cmp(&left.estimated_cost_usd)
+                .then_with(|| right.total_tokens.cmp(&left.total_tokens))
+                .then_with(|| right.turns.cmp(&left.turns))
+                .then_with(|| left.category.cmp(&right.category))
+        });
+        Ok(ActivityPayload { support, breakdown })
+    }
+
+    #[cfg(test)]
+    fn legacy_activity_breakdown(&self, filter: &QueryFilter) -> Result<ActivityPayload> {
         let turn_filter = filter.turn_filter(Some("t"));
         let support = behavior_support(&self.conn, "usage_turn", filter.turn_filter(None))?;
         let sql = format!(
@@ -1251,8 +1472,7 @@ impl Dashboard {
                 COALESCE(SUM(t.total_tokens), 0) AS total_tokens,
                 COALESCE(SUM(e.cost_with_cache_usd), 0.0) AS estimated_cost_usd
             FROM usage_turn t
-            LEFT JOIN usage_event e
-                ON e.event_key = substr(t.turn_key, 6)
+            LEFT JOIN usage_event e ON e.event_key = substr(t.turn_key, 6)
             {}
             GROUP BY t.category
             ORDER BY estimated_cost_usd DESC, total_tokens DESC, turns DESC, t.category ASC
@@ -1318,6 +1538,208 @@ impl Dashboard {
     }
 
     fn tool_attribution_rows(&self, filter: &QueryFilter) -> Result<Vec<AttributedToolRow>> {
+        let tool_filter = filter.tool_filter(Some("tc"));
+        let sql = format!(
+            r#"
+            SELECT
+                tc.event_key,
+                tc.turn_key,
+                tc.session_id,
+                tc.occurred_at,
+                tc.tool_kind,
+                tc.tool_name,
+                tc.mcp_server
+            FROM usage_tool_call tc
+            {}
+            "#,
+            tool_filter.where_sql()
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(tool_filter.params().iter()), |row| {
+            Ok(FilteredToolFact {
+                event_key: row.get(0)?,
+                turn_key: row.get(1)?,
+                session_id: row.get(2)?,
+                occurred_at: row.get(3)?,
+                tool_kind: row.get(4)?,
+                tool_name: row.get(5)?,
+                mcp_server: row.get(6)?,
+            })
+        })?;
+        let mut tool_facts = Vec::new();
+        let mut event_tool_counts: HashMap<String, i64> = HashMap::new();
+        for row in rows {
+            let fact = row?;
+            if let Some(event_key) = &fact.event_key {
+                *event_tool_counts.entry(event_key.clone()).or_default() += 1;
+            }
+            tool_facts.push(fact);
+        }
+
+        let event_filter = filter.event_filter(Some("e"));
+        let has_event_filter = !event_filter.where_sql().is_empty();
+        let event_sql = format!(
+            r#"
+            SELECT
+                e.event_key,
+                e.event_at,
+                e.session_id,
+                COALESCE(e.cost_with_cache_usd, 0.0),
+                COALESCE(e.input_tokens, 0),
+                COALESCE(e.cache_read_tokens, 0),
+                COALESCE(e.cache_creation_tokens, 0),
+                COALESCE(e.output_tokens, 0),
+                COALESCE(e.reasoning_output_tokens, 0)
+            FROM usage_event e
+            {}
+            "#,
+            event_filter.where_sql()
+        );
+        let mut events = Vec::new();
+        let mut event_indexes = HashMap::new();
+        let mut filtered_event_keys = has_event_filter.then(HashSet::new);
+        let mut event_stmt = self.conn.prepare(&event_sql)?;
+        let event_rows = event_stmt.query_map(
+            params_from_iter(event_filter.params().iter()),
+            tool_event_attribution_from_row,
+        )?;
+        for row in event_rows {
+            let event = row?;
+            if let Some(keys) = &mut filtered_event_keys {
+                keys.insert(event.event_key.clone());
+            }
+            event_indexes.insert(event.event_key.clone(), events.len());
+            events.push(event);
+        }
+
+        if has_event_filter {
+            let missing_tool_event_keys = event_tool_counts
+                .keys()
+                .filter(|event_key| !event_indexes.contains_key(*event_key))
+                .cloned()
+                .collect::<Vec<_>>();
+            for event_keys in missing_tool_event_keys.chunks(500) {
+                let placeholders = std::iter::repeat_n("?", event_keys.len())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let sql = format!(
+                    r#"
+                    SELECT
+                        event_key,
+                        event_at,
+                        session_id,
+                        COALESCE(cost_with_cache_usd, 0.0),
+                        COALESCE(input_tokens, 0),
+                        COALESCE(cache_read_tokens, 0),
+                        COALESCE(cache_creation_tokens, 0),
+                        COALESCE(output_tokens, 0),
+                        COALESCE(reasoning_output_tokens, 0)
+                    FROM usage_event
+                    WHERE event_key IN ({placeholders})
+                    "#
+                );
+                let mut stmt = self.conn.prepare(&sql)?;
+                let rows = stmt.query_map(
+                    params_from_iter(event_keys.iter()),
+                    tool_event_attribution_from_row,
+                )?;
+                for row in rows {
+                    let event = row?;
+                    event_indexes.insert(event.event_key.clone(), events.len());
+                    events.push(event);
+                }
+            }
+        }
+
+        let mut aggregates: BTreeMap<ToolAggregateKey, ToolAggregate> = BTreeMap::new();
+        for fact in tool_facts {
+            let Some(event_key) = fact.event_key.as_deref() else {
+                continue;
+            };
+            let Some(event) = event_indexes
+                .get(event_key)
+                .and_then(|index| events.get(*index))
+            else {
+                continue;
+            };
+            let sibling_count = event_tool_counts
+                .get(event_key)
+                .copied()
+                .unwrap_or_default();
+            if sibling_count <= 0 {
+                continue;
+            }
+            let aggregate = aggregates
+                .entry((fact.tool_kind, fact.tool_name, fact.mcp_server))
+                .or_default();
+            aggregate.calls += 1;
+            aggregate
+                .turn_keys
+                .insert(fact.turn_key.unwrap_or_else(|| format!("turn:{event_key}")));
+            if let Some(session_id) = fact.session_id.or_else(|| event.session_id.clone()) {
+                aggregate.session_ids.insert(session_id);
+            }
+            aggregate.estimated_cost_usd += event.estimated_cost_usd / sibling_count as f64;
+            let fraction = 1.0 / sibling_count as f64;
+            aggregate.input_tokens += event.input_tokens as f64 * fraction;
+            aggregate.cache_read_tokens += event.cache_read_tokens as f64 * fraction;
+            aggregate.cache_creation_tokens += event.cache_creation_tokens as f64 * fraction;
+            aggregate.output_tokens += event.output_tokens as f64 * fraction;
+            aggregate.reasoning_output_tokens += event.reasoning_output_tokens as f64 * fraction;
+            aggregate.observe_at(&fact.occurred_at);
+        }
+
+        if let Some(filtered_event_keys) = filtered_event_keys {
+            for event_key in filtered_event_keys {
+                if let Some(event) = event_indexes
+                    .get(&event_key)
+                    .and_then(|index| events.get(*index))
+                {
+                    attribute_non_tool_event(&mut aggregates, &event_tool_counts, event);
+                }
+            }
+        } else {
+            for event in &events {
+                attribute_non_tool_event(&mut aggregates, &event_tool_counts, event);
+            }
+        }
+
+        let mut rows = aggregates
+            .into_iter()
+            .map(
+                |((tool_kind, tool_name, mcp_server), aggregate)| AttributedToolRow {
+                    tool_kind,
+                    tool_name,
+                    mcp_server,
+                    calls: aggregate.calls,
+                    turn_count: aggregate.turn_keys.len() as i64,
+                    session_count: aggregate.session_ids.len() as i64,
+                    estimated_cost_usd: aggregate.estimated_cost_usd,
+                    input_tokens: aggregate.input_tokens,
+                    cache_read_tokens: aggregate.cache_read_tokens,
+                    cache_creation_tokens: aggregate.cache_creation_tokens,
+                    output_tokens: aggregate.output_tokens,
+                    reasoning_output_tokens: aggregate.reasoning_output_tokens,
+                    first_seen_at: aggregate.first_seen_at,
+                    last_seen_at: aggregate.last_seen_at,
+                },
+            )
+            .collect::<Vec<_>>();
+        rows.sort_by(|left, right| {
+            right
+                .calls
+                .cmp(&left.calls)
+                .then_with(|| right.estimated_cost_usd.total_cmp(&left.estimated_cost_usd))
+                .then_with(|| left.tool_kind.cmp(&right.tool_kind))
+                .then_with(|| left.tool_name.cmp(&right.tool_name))
+                .then_with(|| left.mcp_server.cmp(&right.mcp_server))
+        });
+        rows.truncate(50);
+        Ok(rows)
+    }
+
+    #[cfg(test)]
+    fn legacy_tool_attribution_rows(&self, filter: &QueryFilter) -> Result<Vec<AttributedToolRow>> {
         let event_filter = filter.event_filter(Some("e"));
         let tool_filter = filter.tool_filter(Some("tc"));
         let sql = format!(
@@ -1519,6 +1941,70 @@ impl Dashboard {
         })
     }
 
+    #[cfg(test)]
+    fn legacy_optimize(&self, filter: &QueryFilter) -> Result<OptimizePayload> {
+        let support = behavior_support(&self.conn, "usage_turn", filter.turn_filter(None))?;
+        if !support.supported {
+            return Ok(OptimizePayload {
+                support,
+                score: 100,
+                grade: "A".to_string(),
+                estimated_savings_tokens: 0,
+                estimated_savings_usd: 0.0,
+                findings: Vec::new(),
+            });
+        }
+
+        let mut findings = Vec::new();
+        if let Some(finding) = self.legacy_detect_low_read_edit_ratio(filter)? {
+            findings.push(finding);
+        }
+        if let Some(finding) = self.detect_duplicate_reads(filter)? {
+            findings.push(finding);
+        }
+        if let Some(finding) = self.detect_junk_reads(filter)? {
+            findings.push(finding);
+        }
+        if let Some(finding) = self.legacy_detect_session_outlier(filter)? {
+            findings.push(finding);
+        }
+        findings.sort_by(|left, right| {
+            severity_rank(&right.severity)
+                .cmp(&severity_rank(&left.severity))
+                .then_with(|| {
+                    right
+                        .estimated_savings_tokens
+                        .cmp(&left.estimated_savings_tokens)
+                })
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        let estimated_savings_tokens = findings
+            .iter()
+            .map(|finding| finding.estimated_savings_tokens)
+            .sum();
+        let estimated_savings_usd = findings
+            .iter()
+            .map(|finding| finding.estimated_savings_usd)
+            .sum();
+        let penalty = findings
+            .iter()
+            .map(|finding| match finding.severity.as_str() {
+                "high" => 25,
+                "medium" => 15,
+                _ => 7,
+            })
+            .sum::<i64>();
+        let score = (100 - penalty).clamp(0, 100);
+        Ok(OptimizePayload {
+            support,
+            score,
+            grade: health_grade(score).to_string(),
+            estimated_savings_tokens,
+            estimated_savings_usd,
+            findings,
+        })
+    }
+
     /// Diffs locally-installed skills / MCP servers against the actually-called
     /// set in `usage_tool_call`, returning never-called ("zombie") candidates.
     ///
@@ -1571,6 +2057,73 @@ impl Dashboard {
     }
 
     fn detect_low_read_edit_ratio(&self, filter: &QueryFilter) -> Result<Option<OptimizeFinding>> {
+        let tool_filter = filter.tool_filter(Some("tc"));
+        let count_sql = format!(
+            r#"
+            SELECT
+                COALESCE(SUM(CASE WHEN tc.tool_kind IN ('read', 'search') THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN tc.tool_kind = 'edit' THEN 1 ELSE 0 END), 0)
+            FROM usage_tool_call tc
+            {}
+            "#,
+            tool_filter.where_sql()
+        );
+        let (read_calls, edit_calls): (i64, i64) = self.conn.query_row(
+            &count_sql,
+            params_from_iter(tool_filter.params().iter()),
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        if edit_calls < 3 {
+            return Ok(None);
+        }
+        let read_edit_ratio = read_calls as f64 / edit_calls as f64;
+        if read_edit_ratio >= 0.5 {
+            return Ok(None);
+        }
+
+        let mut edit_filter = filter.tool_filter(Some("tc"));
+        edit_filter.push_raw("tc.tool_kind = 'edit'");
+        let edit_sql = format!(
+            r#"
+            SELECT
+                COALESCE(SUM(e.total_tokens), 0),
+                COALESCE(SUM(e.cost_with_cache_usd), 0.0)
+            FROM usage_tool_call tc
+            LEFT JOIN usage_event e ON e.event_key = tc.event_key
+            {}
+            "#,
+            edit_filter.where_sql()
+        );
+        let (edit_tokens, edit_cost): (i64, f64) = self.conn.query_row(
+            &edit_sql,
+            params_from_iter(edit_filter.params().iter()),
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        Ok(Some(OptimizeFinding {
+            id: "low_read_edit_ratio".to_string(),
+            title: "Low Read/Edit ratio".to_string(),
+            severity: if read_edit_ratio < 0.25 {
+                "high"
+            } else {
+                "medium"
+            }
+            .to_string(),
+            evidence: format!(
+                "{read_calls} read/search calls for {edit_calls} edit calls in this filter."
+            ),
+            recommendation:
+                "Review files before larger edit runs; this is a read-only signal, not an automatic rewrite."
+                    .to_string(),
+            estimated_savings_tokens: (edit_tokens / 5).max(0),
+            estimated_savings_usd: (edit_cost * 0.20).max(0.0),
+        }))
+    }
+
+    #[cfg(test)]
+    fn legacy_detect_low_read_edit_ratio(
+        &self,
+        filter: &QueryFilter,
+    ) -> Result<Option<OptimizeFinding>> {
         let tool_filter = filter.tool_filter(Some("tc"));
         let sql = format!(
             r#"
@@ -1724,6 +2277,84 @@ impl Dashboard {
     }
 
     fn detect_session_outlier(&self, filter: &QueryFilter) -> Result<Option<OptimizeFinding>> {
+        let mut turn_filter = filter.turn_filter(Some("t"));
+        turn_filter.push_raw("t.session_id IS NOT NULL");
+        let sql = format!(
+            r#"
+            WITH session_totals AS (
+                SELECT
+                    t.session_id,
+                    COUNT(*) AS turns,
+                    COALESCE(SUM(t.total_tokens), 0) AS tokens
+                FROM usage_turn t
+                {}
+                GROUP BY t.session_id
+            )
+            SELECT
+                session_id,
+                turns,
+                tokens,
+                COALESCE(SUM(tokens) OVER (), 0) AS total_tokens
+            FROM session_totals
+            ORDER BY tokens DESC
+            LIMIT 1
+            "#,
+            turn_filter.where_sql()
+        );
+        let top = self
+            .conn
+            .query_row(&sql, params_from_iter(turn_filter.params().iter()), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            })
+            .optional()?;
+        let Some((session_id, turns, tokens, total_tokens)) = top else {
+            return Ok(None);
+        };
+        if total_tokens <= 0 || tokens * 100 / total_tokens < 40 || turns < 3 {
+            return Ok(None);
+        }
+
+        let mut session_filter = filter.turn_filter(Some("t"));
+        session_filter.push("t.session_id = ?", session_id.clone());
+        let cost = self.conn.query_row(
+            &format!(
+                r#"
+                SELECT COALESCE(SUM(e.cost_with_cache_usd), 0.0)
+                FROM usage_turn t
+                LEFT JOIN usage_event e ON e.event_key = substr(t.turn_key, 6)
+                {}
+                "#,
+                session_filter.where_sql()
+            ),
+            params_from_iter(session_filter.params().iter()),
+            |row| row.get::<_, f64>(0),
+        )?;
+        Ok(Some(OptimizeFinding {
+            id: "session_outlier".to_string(),
+            title: "One session dominates behavior cost".to_string(),
+            severity: "medium".to_string(),
+            evidence: format!(
+                "Session {session_id} accounts for {:.1}% of turn tokens in this filter.",
+                tokens as f64 * 100.0 / total_tokens as f64
+            ),
+            recommendation:
+                "Inspect this session before optimizing globally; long context or repeated retries may be local to it."
+                    .to_string(),
+            estimated_savings_tokens: (tokens / 4).max(0),
+            estimated_savings_usd: (cost * 0.25).max(0.0),
+        }))
+    }
+
+    #[cfg(test)]
+    fn legacy_detect_session_outlier(
+        &self,
+        filter: &QueryFilter,
+    ) -> Result<Option<OptimizeFinding>> {
         let turn_filter = filter.turn_filter(Some("t"));
         let sql = format!(
             r#"
@@ -1832,8 +2463,7 @@ impl Dashboard {
                     .unwrap_or(candidates[1].model.as_str())
             });
 
-        let stats_a = self.model_compare_stats(filter, selected_a)?;
-        let stats_b = self.model_compare_stats(filter, selected_b)?;
+        let (stats_a, stats_b) = self.model_compare_stats_pair(filter, selected_a, selected_b)?;
         let (support, warning) = match (&stats_a, &stats_b) {
             (Some(left), Some(right)) => {
                 let warning = if left.low_sample || right.low_sample {
@@ -1878,7 +2508,7 @@ impl Dashboard {
         };
         let category_head_to_head = match (&stats_a, &stats_b) {
             (Some(left), Some(right)) => {
-                self.category_compare(filter, &left.model, &right.model)?
+                self.category_compare_pair(filter, &left.model, &right.model)?
             }
             _ => Vec::new(),
         };
@@ -1895,7 +2525,227 @@ impl Dashboard {
         })
     }
 
-    fn model_compare_stats(
+    #[cfg(test)]
+    fn legacy_model_compare(
+        &self,
+        filter: &QueryFilter,
+        model_a: Option<&str>,
+        model_b: Option<&str>,
+    ) -> Result<ModelComparePayload> {
+        let candidates = self.compare_models(filter)?;
+        if candidates.len() < 2 {
+            return Ok(ModelComparePayload {
+                support: BehaviorSupport {
+                    supported: false,
+                    level: "insufficient_models".to_string(),
+                    reason: Some(
+                        "At least two models with local usage are required for comparison."
+                            .to_string(),
+                    ),
+                },
+                candidates,
+                model_a: None,
+                model_b: None,
+                metrics: Vec::new(),
+                category_head_to_head: Vec::new(),
+                working_style: Vec::new(),
+                warning: Some("Need at least two models in the current filter.".to_string()),
+            });
+        }
+
+        let selected_a = model_a
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(candidates[0].model.as_str());
+        let selected_b = model_b
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| {
+                candidates
+                    .iter()
+                    .find(|candidate| candidate.model != selected_a)
+                    .map(|candidate| candidate.model.as_str())
+                    .unwrap_or(candidates[1].model.as_str())
+            });
+        let stats_a = self.legacy_model_compare_stats(filter, selected_a)?;
+        let stats_b = self.legacy_model_compare_stats(filter, selected_b)?;
+        let (support, warning) = match (&stats_a, &stats_b) {
+            (Some(left), Some(right)) => {
+                let warning = if left.low_sample || right.low_sample {
+                    Some(
+                        "Low sample: compare directionally until each model has more calls/edit turns."
+                            .to_string(),
+                    )
+                } else {
+                    None
+                };
+                (
+                    BehaviorSupport {
+                        supported: true,
+                        level: if warning.is_some() {
+                            "low_sample"
+                        } else {
+                            "normalized"
+                        }
+                        .to_string(),
+                        reason: warning.clone(),
+                    },
+                    warning,
+                )
+            }
+            _ => (
+                BehaviorSupport {
+                    supported: false,
+                    level: "missing_model".to_string(),
+                    reason: Some("One selected model has no data in this filter.".to_string()),
+                },
+                Some("One selected model has no data in this filter.".to_string()),
+            ),
+        };
+        let metrics = match (&stats_a, &stats_b) {
+            (Some(left), Some(right)) => compare_metrics(left, right),
+            _ => Vec::new(),
+        };
+        let working_style = match (&stats_a, &stats_b) {
+            (Some(left), Some(right)) => working_style_metrics(left, right),
+            _ => Vec::new(),
+        };
+        let category_head_to_head = match (&stats_a, &stats_b) {
+            (Some(left), Some(right)) => {
+                self.legacy_category_compare(filter, &left.model, &right.model)?
+            }
+            _ => Vec::new(),
+        };
+        Ok(ModelComparePayload {
+            support,
+            candidates,
+            model_a: stats_a,
+            model_b: stats_b,
+            metrics,
+            category_head_to_head,
+            working_style,
+            warning,
+        })
+    }
+
+    fn model_compare_stats_pair(
+        &self,
+        filter: &QueryFilter,
+        model_a: &str,
+        model_b: &str,
+    ) -> Result<(Option<ModelCompareStats>, Option<ModelCompareStats>)> {
+        let mut pair_filter = filter.clone();
+        pair_filter.model = None;
+
+        let mut bucket_filter = pair_filter.bucket_filter(Some("b"));
+        bucket_filter.push_raw("b.model IN (?, ?)");
+        bucket_filter.push_value(rusqlite::types::Value::Text(model_a.to_string()));
+        bucket_filter.push_value(rusqlite::types::Value::Text(model_b.to_string()));
+        let bucket_sql = format!(
+            r#"
+            SELECT
+                b.model,
+                COALESCE(SUM(b.event_count), 0),
+                COALESCE(SUM(b.total_tokens), 0),
+                COALESCE(SUM(b.cost_with_cache_usd), 0.0),
+                COALESCE(SUM(b.input_tokens), 0),
+                COALESCE(SUM(b.cache_creation_tokens), 0),
+                COALESCE(SUM(b.cache_read_tokens), 0)
+            FROM usage_bucket_30m b
+            {}
+            GROUP BY b.model
+            "#,
+            bucket_filter.where_sql()
+        );
+        let mut bucket_stmt = self.conn.prepare(&bucket_sql)?;
+        let bucket_rows =
+            bucket_stmt.query_map(params_from_iter(bucket_filter.params().iter()), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    CompareBucketStats {
+                        calls: row.get(1)?,
+                        total_tokens: row.get(2)?,
+                        estimated_cost_usd: row.get(3)?,
+                        input_tokens: row.get(4)?,
+                        cache_creation_tokens: row.get(5)?,
+                        cache_read_tokens: row.get(6)?,
+                    },
+                ))
+            })?;
+        let mut buckets = HashMap::new();
+        for row in bucket_rows {
+            let (model, stats) = row?;
+            buckets.insert(model, stats);
+        }
+
+        let mut turn_filter = pair_filter.turn_filter(Some("t"));
+        turn_filter.push_raw("t.primary_model IN (?, ?)");
+        turn_filter.push_value(rusqlite::types::Value::Text(model_a.to_string()));
+        turn_filter.push_value(rusqlite::types::Value::Text(model_b.to_string()));
+        let turn_sql = format!(
+            r#"
+            SELECT
+                t.primary_model,
+                COUNT(*),
+                COALESCE(SUM(t.has_edits), 0),
+                COALESCE(SUM(t.one_shot), 0),
+                COALESCE(SUM(t.retries), 0),
+                COALESCE(SUM(CASE WHEN t.category = 'delegation' THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN t.category = 'planning' THEN 1 ELSE 0 END), 0)
+            FROM usage_turn t
+            {}
+            GROUP BY t.primary_model
+            "#,
+            turn_filter.where_sql()
+        );
+        let mut turn_stmt = self.conn.prepare(&turn_sql)?;
+        let turn_rows =
+            turn_stmt.query_map(params_from_iter(turn_filter.params().iter()), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    CompareTurnStats {
+                        turns: row.get(1)?,
+                        edit_turns: row.get(2)?,
+                        one_shot_turns: row.get(3)?,
+                        retries: row.get(4)?,
+                        delegation_turns: row.get(5)?,
+                        planning_turns: row.get(6)?,
+                    },
+                ))
+            })?;
+        let mut turns = HashMap::new();
+        for row in turn_rows {
+            let (model, stats) = row?;
+            turns.insert(model, stats);
+        }
+
+        let mut tool_filter = pair_filter.tool_filter(Some("tc"));
+        tool_filter.push_raw("tc.model IN (?, ?)");
+        tool_filter.push_value(rusqlite::types::Value::Text(model_a.to_string()));
+        tool_filter.push_value(rusqlite::types::Value::Text(model_b.to_string()));
+        let tool_sql = format!(
+            "SELECT tc.model, COUNT(*) FROM usage_tool_call tc{} GROUP BY tc.model",
+            tool_filter.where_sql()
+        );
+        let mut tool_stmt = self.conn.prepare(&tool_sql)?;
+        let tool_rows = tool_stmt
+            .query_map(params_from_iter(tool_filter.params().iter()), |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })?;
+        let mut tool_calls = HashMap::new();
+        for row in tool_rows {
+            let (model, calls) = row?;
+            tool_calls.insert(model, calls);
+        }
+
+        Ok((
+            build_model_compare_stats(model_a, &buckets, &turns, &tool_calls),
+            build_model_compare_stats(model_b, &buckets, &turns, &tool_calls),
+        ))
+    }
+
+    #[cfg(test)]
+    fn legacy_model_compare_stats(
         &self,
         filter: &QueryFilter,
         model: &str,
@@ -2011,7 +2861,70 @@ impl Dashboard {
         }))
     }
 
-    fn category_compare(
+    fn category_compare_pair(
+        &self,
+        filter: &QueryFilter,
+        model_a: &str,
+        model_b: &str,
+    ) -> Result<Vec<CategoryCompareRow>> {
+        let mut pair_filter = filter.clone();
+        pair_filter.model = None;
+        let mut turn_filter = pair_filter.turn_filter(Some("t"));
+        turn_filter.push_raw("t.primary_model IN (?, ?)");
+        turn_filter.push_value(rusqlite::types::Value::Text(model_a.to_string()));
+        turn_filter.push_value(rusqlite::types::Value::Text(model_b.to_string()));
+        let sql = format!(
+            r#"
+            SELECT
+                t.primary_model,
+                t.category,
+                COALESCE(SUM(t.has_edits), 0) AS edit_turns,
+                COALESCE(SUM(t.one_shot), 0) AS one_shot_turns
+            FROM usage_turn t
+            {}
+            GROUP BY t.primary_model, t.category
+            HAVING edit_turns > 0
+            "#,
+            turn_filter.where_sql()
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(turn_filter.params().iter()), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        })?;
+        let mut rows_by_category: BTreeMap<String, (i64, i64, i64, i64)> = BTreeMap::new();
+        for row in rows {
+            let (model, category, edit_turns, one_shot_turns) = row?;
+            let entry = rows_by_category.entry(category).or_default();
+            if model == model_a {
+                entry.0 = edit_turns;
+                entry.1 = one_shot_turns;
+            }
+            if model == model_b {
+                entry.2 = edit_turns;
+                entry.3 = one_shot_turns;
+            }
+        }
+        Ok(rows_by_category
+            .into_iter()
+            .map(
+                |(category, (a_edits, a_one_shot, b_edits, b_one_shot))| CategoryCompareRow {
+                    category,
+                    model_a_edit_turns: a_edits,
+                    model_a_one_shot_rate: ratio(a_one_shot, a_edits),
+                    model_b_edit_turns: b_edits,
+                    model_b_one_shot_rate: ratio(b_one_shot, b_edits),
+                },
+            )
+            .collect())
+    }
+
+    #[cfg(test)]
+    fn legacy_category_compare(
         &self,
         filter: &QueryFilter,
         model_a: &str,
@@ -2454,12 +3367,15 @@ fn behavior_support(
     table: &str,
     filter: crate::query::filter::SqlFilter,
 ) -> Result<BehaviorSupport> {
-    let count = scalar_i64(
-        conn,
-        &format!("SELECT COUNT(*) FROM {table}{}", filter.where_sql()),
+    let exists = conn.query_row(
+        &format!(
+            "SELECT EXISTS(SELECT 1 FROM {table}{} LIMIT 1)",
+            filter.where_sql()
+        ),
         params_from_iter(filter.params().iter()),
+        |row| row.get::<_, bool>(0),
     )?;
-    Ok(if count > 0 {
+    Ok(if exists {
         BehaviorSupport {
             supported: true,
             level: "normalized".to_string(),
@@ -2594,6 +3510,43 @@ fn ratio_f64(numerator: f64, denominator: i64) -> f64 {
     } else {
         numerator / denominator as f64
     }
+}
+
+fn build_model_compare_stats(
+    model: &str,
+    buckets: &HashMap<String, CompareBucketStats>,
+    turns: &HashMap<String, CompareTurnStats>,
+    tool_calls: &HashMap<String, i64>,
+) -> Option<ModelCompareStats> {
+    let bucket = buckets.get(model)?;
+    if bucket.calls == 0 {
+        return None;
+    }
+    let turn = turns.get(model).copied().unwrap_or_default();
+    let tool_calls = tool_calls.get(model).copied().unwrap_or_default();
+    let cache_efficiency = ratio(
+        bucket.cache_read_tokens,
+        bucket.input_tokens + bucket.cache_creation_tokens + bucket.cache_read_tokens,
+    );
+    Some(ModelCompareStats {
+        model: model.to_string(),
+        calls: bucket.calls,
+        turns: turn.turns,
+        edit_turns: turn.edit_turns,
+        one_shot_turns: turn.one_shot_turns,
+        retries: turn.retries,
+        total_tokens: bucket.total_tokens,
+        estimated_cost_usd: bucket.estimated_cost_usd,
+        cache_efficiency,
+        cost_per_call: ratio_f64(bucket.estimated_cost_usd, bucket.calls),
+        cost_per_edit_turn: ratio_f64(bucket.estimated_cost_usd, turn.edit_turns),
+        one_shot_rate: ratio(turn.one_shot_turns, turn.edit_turns),
+        retry_rate: ratio(turn.retries, turn.turns),
+        avg_tools_per_turn: ratio(tool_calls, turn.turns),
+        delegation_rate: ratio(turn.delegation_turns, turn.turns),
+        planning_rate: ratio(turn.planning_turns, turn.turns),
+        low_sample: bucket.calls < 20 || turn.edit_turns < 10,
+    })
 }
 
 fn compare_metrics(left: &ModelCompareStats, right: &ModelCompareStats) -> Vec<CompareMetric> {
@@ -2930,55 +3883,12 @@ where
 }
 
 #[cfg(test)]
-pub(crate) fn activity_query_plan_for_test(
-    conn: &Connection,
-    filter: &QueryFilter,
-) -> Result<Vec<String>> {
-    let turn_filter = filter.turn_filter(Some("t"));
-    let sql = format!(
-        r#"
-        EXPLAIN QUERY PLAN
-        SELECT
-            t.category,
-            COALESCE(SUM(e.cost_with_cache_usd), 0.0) AS estimated_cost_usd
-        FROM usage_turn t
-        LEFT JOIN usage_event e
-            ON e.event_key = substr(t.turn_key, 6)
-        {}
-        GROUP BY t.category
-        "#,
-        turn_filter.where_sql()
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(params_from_iter(turn_filter.params().iter()), |row| {
-        row.get::<_, String>(3)
-    })?;
-    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
-}
-
-#[cfg(test)]
-pub(crate) fn session_outlier_query_plan_for_test(
-    conn: &Connection,
-    filter: &QueryFilter,
-) -> Result<Vec<String>> {
-    let turn_filter = filter.turn_filter(Some("t"));
-    let sql = format!(
-        r#"
-        EXPLAIN QUERY PLAN
-        SELECT
-            t.session_id,
-            COALESCE(SUM(e.cost_with_cache_usd), 0.0) AS cost
-        FROM usage_turn t
-        LEFT JOIN usage_event e ON e.event_key = substr(t.turn_key, 6)
-        {}
-        GROUP BY t.session_id
-        "#,
-        turn_filter.where_sql()
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(params_from_iter(turn_filter.params().iter()), |row| {
-        row.get::<_, String>(3)
-    })?;
+fn explain_query_plan<P>(conn: &Connection, sql: &str, params: P) -> Result<Vec<String>>
+where
+    P: rusqlite::Params,
+{
+    let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
+    let rows = stmt.query_map(params, |row| row.get::<_, String>(3))?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
@@ -3730,64 +4640,189 @@ mod tests {
             .sum();
         assert!((day_two_cost - 0.25).abs() < f64::EPSILON);
         assert_eq!(day_two.breakdown[0].tool_name, "(non-tool)");
+
+        let equivalence_filters = [
+            QueryFilter::default(),
+            QueryFilter {
+                source: Some(SourceKind::Codex),
+                model: Some("gpt-5".to_string()),
+                ..Default::default()
+            },
+            QueryFilter {
+                source: Some(SourceKind::Codex),
+                model: Some("gpt-5".to_string()),
+                since: Some(NaiveDate::from_ymd_opt(2026, 5, 1).unwrap()),
+                until: Some(NaiveDate::from_ymd_opt(2026, 5, 1).unwrap()),
+                timezone: ReportTimezone::Utc,
+                ..Default::default()
+            },
+        ];
+        for filter in &equivalence_filters {
+            assert_eq!(
+                serde_json::to_value(dashboard.activity_breakdown(filter)?)?,
+                serde_json::to_value(dashboard.legacy_activity_breakdown(filter)?)?,
+                "Activity JSON must match the legacy join/group query for {filter:?}"
+            );
+            assert_eq!(
+                serde_json::to_value(dashboard.tool_attribution_rows(filter)?)?,
+                serde_json::to_value(dashboard.legacy_tool_attribution_rows(filter)?)?,
+                "Tools attribution must match the legacy CTE query for {filter:?}"
+            );
+        }
         Ok(())
     }
 
     #[test]
-    fn behavior_event_join_query_plan_uses_event_key_index() -> Result<()> {
+    fn tool_attribution_preserves_filter_asymmetry_and_excludes_orphans() -> Result<()> {
         let fixture = Fixture::new()?;
+        fixture.seed_event(crate::testing::SeedEvent {
+            event_key: "codex:asymmetry:linked",
+            model: "event-model",
+            event_at: "2026-05-01T00:00:00Z",
+            hour_start: Some("2026-05-01T00:00:00Z"),
+            total_tokens: 100,
+            cost_with_cache_usd: 1.0,
+            cost_without_cache_usd: 1.0,
+            pricing_status: "static",
+            pricing_source: Some("static-v1"),
+            session_id: Some("event-session"),
+            ..Default::default()
+        })?;
+        fixture.seed_event(crate::testing::SeedEvent {
+            event_key: "codex:asymmetry:non-tool",
+            model: "tool-model",
+            event_at: "2026-05-02T00:00:00Z",
+            hour_start: Some("2026-05-02T00:00:00Z"),
+            total_tokens: 50,
+            cost_with_cache_usd: 0.5,
+            cost_without_cache_usd: 0.5,
+            pricing_status: "static",
+            pricing_source: Some("static-v1"),
+            session_id: Some("non-tool-session"),
+            ..Default::default()
+        })?;
         let conn = fixture.store().open_connection()?;
-        for idx in 0..2_000 {
-            fixture.seed_event(crate::testing::SeedEvent {
-                event_key: &format!("codex:plan:{idx}"),
-                source: "codex",
-                model: "gpt-5",
-                event_at: "2026-05-01T00:00:00Z",
-                hour_start: Some("2026-05-01T00:00:00Z"),
-                input_tokens: 10,
-                output_tokens: 5,
-                total_tokens: 15,
-                cost_with_cache_usd: 0.01,
-                cost_without_cache_usd: 0.01,
-                pricing_status: "static",
-                pricing_source: Some("static-v1"),
-                source_path_hash: Some("path-plan"),
-                session_id: Some("session-plan"),
-                ..crate::testing::SeedEvent::default()
-            })?;
-            conn.execute(
-                r#"
-                INSERT INTO usage_turn(
-                    turn_key, source, session_id, source_path_hash, project_hash,
-                    primary_model, started_at, category, has_edits, retries,
-                    one_shot, call_count, input_tokens, cache_read_tokens,
-                    cache_creation_tokens, output_tokens, reasoning_output_tokens,
-                    total_tokens, created_at
-                ) VALUES (?1, 'codex', 'session-plan', 'path-plan',
-                    'project-test', 'gpt-5', '2026-05-01T00:00:00Z', 'coding',
-                    1, 0, 1, 1, 10, 0, 0, 5, 0, 15, '2026-05-01T00:00:00Z')
-                "#,
-                [format!("turn:codex:plan:{idx}")],
-            )?;
-        }
+        conn.execute_batch(
+            r#"
+            INSERT INTO usage_tool_call(
+                tool_call_key, turn_key, event_key, source, session_id,
+                source_path_hash, project_hash, model, occurred_at, tool_name,
+                tool_kind, mcp_server, mcp_tool, input_fingerprint, safe_preview, created_at
+            ) VALUES
+                ('tool:asymmetry:filtered', NULL, 'codex:asymmetry:linked', 'codex', NULL,
+                 'path-test', 'project-test', 'tool-model', '2026-05-02T00:00:00Z',
+                 'Read', 'read', NULL, NULL, 'read-filtered', 'Read filtered', '2026-05-02T00:00:00Z'),
+                ('tool:asymmetry:sibling', 'turn:sibling', 'codex:asymmetry:linked', 'codex', 'sibling-session',
+                 'path-test', 'project-test', 'event-model', '2026-05-01T00:00:00Z',
+                 'Edit', 'edit', NULL, NULL, 'edit-sibling', 'Edit sibling', '2026-05-01T00:00:00Z'),
+                ('tool:asymmetry:orphan', NULL, 'codex:asymmetry:missing', 'codex', NULL,
+                 'path-test', 'project-test', 'tool-model', '2026-05-02T00:00:00Z',
+                 'Orphan', 'read', NULL, NULL, 'orphan', 'Read orphan', '2026-05-02T00:00:00Z');
+            "#,
+        )?;
+        drop(conn);
 
+        let dashboard = Dashboard::open(fixture.store())?;
         let filter = QueryFilter {
             source: Some(SourceKind::Codex),
-            ..QueryFilter::default()
+            model: Some("tool-model".to_string()),
+            since: Some(NaiveDate::from_ymd_opt(2026, 5, 2).unwrap()),
+            until: Some(NaiveDate::from_ymd_opt(2026, 5, 2).unwrap()),
+            timezone: ReportTimezone::Utc,
+            ..Default::default()
         };
-        for plan in [
-            super::activity_query_plan_for_test(&conn, &filter)?,
-            super::session_outlier_query_plan_for_test(&conn, &filter)?,
-        ] {
+        let tools = dashboard.tool_breakdown(&filter)?;
+        assert!(tools.support.supported);
+        assert_eq!(tools.breakdown.len(), 2);
+        assert!(tools.breakdown.iter().all(|row| row.tool_name != "Orphan"));
+        let read = tools
+            .breakdown
+            .iter()
+            .find(|row| row.tool_name == "Read")
+            .expect("filtered linked tool");
+        assert_eq!(read.turn_count, 1);
+        assert_eq!(read.session_count, 1);
+        assert_eq!(read.estimated_cost_usd, 1.0);
+        let non_tool = tools
+            .breakdown
+            .iter()
+            .find(|row| row.tool_name == "(non-tool)")
+            .expect("filtered non-tool event");
+        assert_eq!(non_tool.estimated_cost_usd, 0.5);
+        assert_eq!(
+            serde_json::to_value(dashboard.tool_attribution_rows(&filter)?)?,
+            serde_json::to_value(dashboard.legacy_tool_attribution_rows(&filter)?)?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn behavior_query_plans_use_v18_indexes() -> Result<()> {
+        let fixture = Fixture::new()?;
+        let conn = fixture.store().open_connection()?;
+        let plans = [
+            (
+                "idx_usage_event_event_at",
+                super::explain_query_plan(
+                    &conn,
+                    "SELECT event_key FROM usage_event WHERE event_at >= ?1 AND event_at < ?2",
+                    ["2026-05-01T00:00:00Z", "2026-05-02T00:00:00Z"],
+                )?,
+            ),
+            (
+                "idx_usage_turn_started_at",
+                super::explain_query_plan(
+                    &conn,
+                    "SELECT category FROM usage_turn WHERE started_at >= ?1 AND started_at < ?2",
+                    ["2026-05-01T00:00:00Z", "2026-05-02T00:00:00Z"],
+                )?,
+            ),
+            (
+                "idx_usage_turn_session_id",
+                super::explain_query_plan(
+                    &conn,
+                    "SELECT turn_key FROM usage_turn WHERE session_id = ?1",
+                    ["session-plan"],
+                )?,
+            ),
+            (
+                "idx_usage_tool_call_event_key",
+                super::explain_query_plan(
+                    &conn,
+                    "SELECT tool_call_key FROM usage_tool_call WHERE event_key = ?1",
+                    ["codex:plan:1"],
+                )?,
+            ),
+            (
+                "idx_usage_tool_call_occurred_at",
+                super::explain_query_plan(
+                    &conn,
+                    "SELECT tool_call_key FROM usage_tool_call WHERE occurred_at >= ?1 AND occurred_at < ?2",
+                    ["2026-05-01T00:00:00Z", "2026-05-02T00:00:00Z"],
+                )?,
+            ),
+            (
+                "idx_usage_tool_call_model_occurred",
+                super::explain_query_plan(
+                    &conn,
+                    "SELECT COUNT(*) FROM usage_tool_call WHERE model = ?1 AND occurred_at >= ?2",
+                    ["gpt-5", "2026-05-01T00:00:00Z"],
+                )?,
+            ),
+            (
+                "idx_usage_turn_event_key_expr",
+                super::explain_query_plan(
+                    &conn,
+                    "SELECT turn_key FROM usage_turn WHERE substr(turn_key, 6) = ?1",
+                    ["codex:plan:1"],
+                )?,
+            ),
+        ];
+        for (index, plan) in plans {
             let details = plan.join("\n");
             assert!(
-                details.contains("USING INDEX sqlite_autoindex_usage_event_1")
-                    || details.contains("USING COVERING INDEX sqlite_autoindex_usage_event_1"),
-                "usage_event join must probe event_key index, plan was:\n{details}"
-            );
-            assert!(
-                !details.contains("SCAN e"),
-                "usage_event join must not full-scan e, plan was:\n{details}"
+                details.contains(index),
+                "expected {index} in query plan, got:\n{details}"
             );
         }
         Ok(())
@@ -3956,11 +4991,13 @@ mod tests {
         }
         drop(conn);
 
-        let optimize = Dashboard::open(fixture.store())?.optimize(&QueryFilter {
+        let dashboard = Dashboard::open(fixture.store())?;
+        let filtered = QueryFilter {
             source: Some(SourceKind::Codex),
             model: Some("gpt-5".to_string()),
             ..Default::default()
-        })?;
+        };
+        let optimize = dashboard.optimize(&filtered)?;
 
         assert!(optimize.support.supported);
         assert!(optimize.score < 100);
@@ -3989,6 +5026,21 @@ mod tests {
                 .to_ascii_lowercase()
                 .contains("delete")
         }));
+        assert_eq!(
+            serde_json::to_value(&optimize)?,
+            serde_json::to_value(dashboard.legacy_optimize(&filtered)?)?,
+            "optimized detectors must preserve the complete filtered payload"
+        );
+
+        let no_match = QueryFilter {
+            project_hash: Some("project-with-no-behavior".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            serde_json::to_value(dashboard.optimize(&no_match)?)?,
+            serde_json::to_value(dashboard.legacy_optimize(&no_match)?)?,
+            "negative/no-data detector output must remain unchanged"
+        );
         Ok(())
     }
 
@@ -4098,6 +5150,50 @@ mod tests {
                 .category_head_to_head
                 .iter()
                 .any(|row| row.category == "coding")
+        );
+        assert_eq!(
+            serde_json::to_value(&compare)?,
+            serde_json::to_value(dashboard.legacy_model_compare(
+                &QueryFilter::default(),
+                Some("gpt-5"),
+                Some("sonnet"),
+            )?)?,
+            "batched selected-model stats must preserve the complete low-sample payload"
+        );
+
+        let missing = dashboard.model_compare(
+            &QueryFilter::default(),
+            Some("gpt-5"),
+            Some("missing-model"),
+        )?;
+        assert_eq!(missing.support.level, "missing_model");
+        assert_eq!(
+            serde_json::to_value(&missing)?,
+            serde_json::to_value(dashboard.legacy_model_compare(
+                &QueryFilter::default(),
+                Some("gpt-5"),
+                Some("missing-model"),
+            )?)?,
+            "missing-model warning and empty metric/category fields must remain unchanged"
+        );
+
+        let normalized_fixture = Fixture::new()?;
+        normalized_fixture.seed_stress_dashboard(0, 0, 2)?;
+        let normalized_dashboard = Dashboard::open(normalized_fixture.store())?;
+        let normalized = normalized_dashboard.model_compare(
+            &QueryFilter::default(),
+            Some("stress-model-00"),
+            Some("stress-model-01"),
+        )?;
+        assert_eq!(normalized.support.level, "normalized");
+        assert_eq!(
+            serde_json::to_value(&normalized)?,
+            serde_json::to_value(normalized_dashboard.legacy_model_compare(
+                &QueryFilter::default(),
+                Some("stress-model-00"),
+                Some("stress-model-01"),
+            )?)?,
+            "normalized metrics, categories, and working style must remain unchanged"
         );
         Ok(())
     }
@@ -4257,12 +5353,31 @@ mod tests {
 
     static COMPARE_TURN_STATEMENTS: std::sync::atomic::AtomicUsize =
         std::sync::atomic::AtomicUsize::new(0);
+    static COMPARE_BUCKET_STATEMENTS: std::sync::atomic::AtomicUsize =
+        std::sync::atomic::AtomicUsize::new(0);
+    static COMPARE_TOOL_STATEMENTS: std::sync::atomic::AtomicUsize =
+        std::sync::atomic::AtomicUsize::new(0);
 
     fn count_compare_turn_statements(event: rusqlite::trace::TraceEvent<'_>) {
         if let rusqlite::trace::TraceEvent::Stmt(_, sql) = event
             && sql.contains("usage_turn")
         {
             COMPARE_TURN_STATEMENTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    fn count_full_compare_statements(event: rusqlite::trace::TraceEvent<'_>) {
+        let rusqlite::trace::TraceEvent::Stmt(_, sql) = event else {
+            return;
+        };
+        if sql.contains("FROM usage_bucket_30m b") {
+            COMPARE_BUCKET_STATEMENTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        if sql.contains("FROM usage_turn t") {
+            COMPARE_TURN_STATEMENTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        if sql.contains("FROM usage_tool_call tc") {
+            COMPARE_TOOL_STATEMENTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
     }
 
@@ -4290,6 +5405,46 @@ mod tests {
                 .conn
                 .trace_v2(rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT, None);
         }
+        Ok(())
+    }
+
+    #[test]
+    fn model_compare_batches_each_selected_model_query_family() -> Result<()> {
+        let fixture = Fixture::new()?;
+        fixture.seed_stress_dashboard(0, 0, 2)?;
+        let dashboard = Dashboard::open(fixture.store())?;
+        dashboard.conn.trace_v2(
+            rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT,
+            Some(count_full_compare_statements),
+        );
+        COMPARE_BUCKET_STATEMENTS.store(0, std::sync::atomic::Ordering::Relaxed);
+        COMPARE_TURN_STATEMENTS.store(0, std::sync::atomic::Ordering::Relaxed);
+        COMPARE_TOOL_STATEMENTS.store(0, std::sync::atomic::Ordering::Relaxed);
+
+        let payload = dashboard.model_compare(
+            &QueryFilter::default(),
+            Some("stress-model-00"),
+            Some("stress-model-01"),
+        )?;
+        assert_eq!(payload.support.level, "normalized");
+        assert_eq!(
+            COMPARE_BUCKET_STATEMENTS.load(std::sync::atomic::Ordering::Relaxed),
+            2,
+            "candidate selection and selected-model stats each use one bucket query"
+        );
+        assert_eq!(
+            COMPARE_TURN_STATEMENTS.load(std::sync::atomic::Ordering::Relaxed),
+            3,
+            "candidate, selected-model, and category stats each use one turn query"
+        );
+        assert_eq!(
+            COMPARE_TOOL_STATEMENTS.load(std::sync::atomic::Ordering::Relaxed),
+            1,
+            "both selected models share one tool-count query"
+        );
+        dashboard
+            .conn
+            .trace_v2(rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT, None);
         Ok(())
     }
 

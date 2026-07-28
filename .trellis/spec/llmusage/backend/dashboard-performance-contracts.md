@@ -195,6 +195,138 @@ scan = events where event_at >= anchor
 fallback = full history when anchor is absent
 ```
 
+## Scenario: Behavior exact reads under bounded deadlines
+
+### 1. Scope / Trigger
+
+- Apply this contract when changing Activity, Tools, Optimize, or Compare
+  queries, their loopback HTTP handlers, Behavior deadlines, or indexes used by
+  normalized behavior facts.
+- Behavior output stays exact. Performance work must not approximate distinct
+  turns/sessions, sibling attribution, costs, filters, findings, or model
+  comparison fields.
+
+### 2. Signatures
+
+```text
+GET /api/activity|tools|optimize|compare?range=<1d|7d|30d|all>&...
+Dashboard::activity_breakdown(&QueryFilter) -> Result<ActivityPayload>
+Dashboard::tool_breakdown(&QueryFilter) -> Result<ToolsPayload>
+Dashboard::optimize(&QueryFilter) -> Result<OptimizePayload>
+Dashboard::model_compare(&QueryFilter, model_a, model_b)
+    -> Result<ModelComparePayload>
+WEB_BEHAVIOR_API_TIMEOUT = 3 seconds
+WEB_API_TIMEOUT = 5 seconds
+schema v18 = Behavior range/attribution indexes
+```
+
+Schema v18 creates `usage_event(event_at)`, `usage_turn(started_at)`,
+`usage_turn(session_id)`, `usage_tool_call(event_key)`,
+`usage_tool_call(occurred_at)`, and `usage_tool_call(model, occurred_at)`, and
+recreates `idx_usage_turn_event_key_expr` for already-versioned drifted
+databases.
+
+### 3. Contracts
+
+- Activity streams persisted event costs and filtered turns, then aggregates
+  exact category fields in Rust. A turn without a matching event contributes
+  zero cost, and row ordering remains cost, tokens, turns, category.
+- Tools counts filtered siblings first, attributes each linked event equally,
+  excludes orphan tools, and preserves the deliberate asymmetry: tool rows use
+  the tool filter while `(non-tool)` rows use the event filter. Bounded requests
+  load range-matching events plus missing filtered-tool event keys; `all` may
+  use the sequential full-event projection.
+- Optimize probes support with `EXISTS`, counts read/edit calls without joining
+  every event, joins only edit rows for savings, selects the top session before
+  its cost lookup, and leaves the other detector thresholds unchanged.
+- Compare aggregates both selected models in one bucket query, one turn query,
+  one tool query, and one category query while preserving missing-model,
+  low-sample, metric, category, and working-style payloads.
+- The browser keeps Behavior concurrency at two and each section settles
+  independently. The Behavior deadline is three seconds; the general API
+  deadline remains five seconds. PERF-002 still interrupts and awaits timed-out
+  blocking work before releasing its query permit.
+- On representative data, every `1d` three-sample median must be below one
+  second and every `all` sample must finish below three seconds without timeout
+  degradation.
+- Before a real database first bootstraps to a newer index schema, create and
+  retain a separate SQLite online backup. Verify it read-only with the old
+  schema version, `PRAGMA integrity_check=ok`, matching aggregate row counts,
+  and a recorded restore path. A migrated profiling copy is not that backup.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| No matching normalized facts | Existing explicit `no_data` payload |
+| Valid low-sample comparison | `low_sample`, not degraded |
+| Tool row has no matching event | Exclude it from attributed output |
+| Event has no filtered tool sibling | Include it in `(non-tool)` under the event filter |
+| Query exceeds three seconds | Section-local degraded payload; interrupt and await work |
+| Another Behavior section fails | Other sections continue and settle independently |
+| v17 lacks the historical expression index | v18 creates it with all final indexes |
+| Pre-migration backup is missing or fails integrity | Do not bootstrap the real database |
+| Older binary opens schema v18 | Reject as newer schema; restore the retained v17 backup for rollback |
+
+### 5. Good/Base/Bad Cases
+
+- Good: `range=1d` uses bounded projections, returns exact normalized payloads,
+  and has a sub-second three-sample median.
+- Base: `range=all` performs exact sequential aggregation and completes below
+  the three-second Behavior deadline.
+- Good: a model/date filter includes a linked filtered tool even when the
+  linked event does not match the event filter, while non-tool rows still obey
+  that event filter.
+- Bad: raising or removing the old one-second timeout without changing the
+  query shape.
+- Bad: migrating the only v17 copy during profiling and then calling that v18
+  database a rollback backup.
+
+### 6. Tests Required
+
+- Migration tests start from a v17-shaped database with the expression index
+  removed, then assert schema v18 and all seven indexes; fresh bootstrap must
+  expose the same set.
+- Activity and Tools compare complete serialized results against test-only
+  legacy SQL across empty, filtered, multi-tool, non-tool, and orphan cases.
+- Optimize and Compare compare complete serialized results against legacy
+  implementations for positive, negative, filtered, missing-model,
+  low-sample, and normalized cases.
+- Query-plan tests assert every v18 index is usable; trace tests assert selected
+  Compare models share each query family.
+- Web tests prove Behavior may complete after the former one-second deadline,
+  while the general five-second deadline and cancellation/permit contracts are
+  unchanged.
+- Representative validation records three `1d` and three `all` samples for
+  each section, a concurrency-two round, and a real browser DOM check with no
+  loading or timeout text.
+- Run `python scripts/ci-rust.py` and `just ci` before completion.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```sql
+SELECT ...
+FROM usage_tool_call tc
+JOIN usage_event e ON e.event_key = tc.event_key
+GROUP BY ...;
+```
+
+This repeats random event lookups and builds several temporary group/distinct
+B-trees across the full history; a larger deadline only hides that cost.
+
+#### Correct
+
+```text
+filtered tool projection -> sibling counts
+bounded event projection + missing linked event keys -> attribution map
+single Rust reducer -> exact tool/non-tool rows, distinct counts, sort, top 50
+```
+
+Optimize should likewise reduce before joining: count tool kinds first, join
+only edit rows for savings, and choose the top session before its cost lookup.
+
 ## Scenario: Live dashboard read cache and HTTP transfer
 
 ### 1. Scope / Trigger
