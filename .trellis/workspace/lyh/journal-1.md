@@ -1372,3 +1372,24 @@ Public listener 改用最小读路由与脱敏聚合 DTO，并忽略 project sel
 ### Status
 
 [OK] **Completed**
+
+
+## Session 44: 修复 serve 行为分析查询超时
+
+**Date**: 2026-07-29
+**Task**: 修复 serve 行为分析查询超时
+**Branch**: `dev`
+
+### Summary
+
+优化行为分析热点查询与索引，将专用截止时间调整为 3 秒；完成 schema v18 迁移、真实库性能验证、浏览器验收和完整 CI。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d8fb8d41f438dbcfc8da8c12e63a0b89b8acb8e5` | (see git log) |
+
+### Status
+
+[OK] **Completed**
