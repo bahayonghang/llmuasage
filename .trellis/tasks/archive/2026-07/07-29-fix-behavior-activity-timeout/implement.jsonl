@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/llmusage/backend/dashboard-performance-contracts.md", "reason": "Behavior 精确读取、3 秒截止、许可与取消语义契约"}
+{"file": ".trellis/spec/llmusage/backend/index.md", "reason": "backend 层编码与验证入口"}
+{"file": ".trellis/tasks/archive/2026-07/07-24-web-hard-timeout/prd.md", "reason": "PERF-002 硬响应截止、permit 所有权与 supervisor 原始要求"}
+{"file": ".trellis/tasks/archive/2026-07/07-28-fix-serve-behavior-query-timeout/research/diagnosis.md", "reason": "07-28 查询形态与 legacy JOIN 淘汰证据"}
+{"file": ".trellis/tasks/07-29-fix-behavior-activity-timeout/research/diagnosis.md", "reason": "当前根因假设、代理冷态局限与 v3 修订"}
+{"file": ".trellis/tasks/07-29-fix-behavior-activity-timeout/research/baseline.md", "reason": "Step 1A NO-GO 数据、计时字段与隐私边界"}
+{"file": ".trellis/tasks/07-29-fix-behavior-activity-timeout/research/first-touch-runbook.md", "reason": "首触 prepare/run 操作边界与人工重启检查点"}
+{"file": "docs/adr/0004-schema-version-migration-runner.md", "reason": "若因果门通过并采用 D1，后续 v19 migration 必须遵循"}

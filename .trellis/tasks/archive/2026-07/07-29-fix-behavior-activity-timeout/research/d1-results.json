@@ -1,0 +1,134 @@
+{
+  "active_page_delta": 4256,
+  "active_page_delta_bytes": 17432576,
+  "after": {
+    "database_bytes": 1160073216,
+    "freelist_count": 134426,
+    "page_count": 283221,
+    "page_size": 4096,
+    "schema_version": 18,
+    "user_version": 0,
+    "wal_bytes": 0
+  },
+  "before": {
+    "database_bytes": 1160073216,
+    "freelist_count": 138682,
+    "page_count": 283221,
+    "page_size": 4096,
+    "schema_version": 18,
+    "user_version": 0,
+    "wal_bytes": 0
+  },
+  "captured_at_utc": "2026-07-30T03:22:08Z",
+  "cleanup": {
+    "database_removed": true,
+    "port_released": true,
+    "process_exited": true,
+    "raw_logs_removed": true,
+    "sidecars_removed": true
+  },
+  "confirmation_decision": "GO D1",
+  "format": "llmusage.activity-d1.v1",
+  "freelist_delta": -4256,
+  "http_attempts": [
+    {
+      "attempt": 1,
+      "degraded": false,
+      "http_status": 200,
+      "server": {
+        "cancelled": false,
+        "query_ms": 2094,
+        "semaphore_wait_ms": 0
+      },
+      "support_level": "normalized",
+      "timeout": false,
+      "wall_ms": 2127.34
+    },
+    {
+      "attempt": 2,
+      "degraded": false,
+      "http_status": 200,
+      "server": {
+        "cancelled": false,
+        "query_ms": 632,
+        "semaphore_wait_ms": 0
+      },
+      "support_level": "normalized",
+      "timeout": false,
+      "wall_ms": 657.64
+    },
+    {
+      "attempt": 3,
+      "degraded": false,
+      "http_status": 200,
+      "server": {
+        "cancelled": false,
+        "query_ms": 716,
+        "semaphore_wait_ms": 0
+      },
+      "support_level": "normalized",
+      "timeout": false,
+      "wall_ms": 737.83
+    },
+    {
+      "attempt": 4,
+      "degraded": false,
+      "http_status": 200,
+      "server": {
+        "cancelled": false,
+        "query_ms": 665,
+        "semaphore_wait_ms": 0
+      },
+      "support_level": "normalized",
+      "timeout": false,
+      "wall_ms": 681.14
+    },
+    {
+      "attempt": 5,
+      "degraded": false,
+      "http_status": 200,
+      "server": {
+        "cancelled": false,
+        "query_ms": 701,
+        "semaphore_wait_ms": 0
+      },
+      "support_level": "normalized",
+      "timeout": false,
+      "wall_ms": 702.87
+    }
+  ],
+  "index_build_ms": 3993.71,
+  "index_sql": "CREATE INDEX idx_usage_event_activity_cost ON usage_event(event_key, cost_with_cache_usd)",
+  "physical_database_delta_bytes": 0,
+  "physical_page_delta": 0,
+  "plan_after": [
+    "SCAN usage_event USING COVERING INDEX idx_usage_event_activity_cost"
+  ],
+  "plan_before": [
+    "SCAN usage_event"
+  ],
+  "production_changes": false,
+  "retained_snapshot_unchanged": true,
+  "schema_version_unchanged": true,
+  "sqlite_busy_or_locked": false,
+  "user_version_unchanged": true,
+  "write_probe_after": {
+    "inserted_rows": 100,
+    "label": "with_candidate",
+    "page_count_inside_transaction": 283221,
+    "rolled_back": true,
+    "updated_rows": 100,
+    "wal_bytes_after_insert": 379072,
+    "wal_bytes_after_insert_and_update": 828152
+  },
+  "write_probe_before": {
+    "inserted_rows": 100,
+    "label": "without_candidate",
+    "page_count_inside_transaction": 283221,
+    "rolled_back": true,
+    "updated_rows": 100,
+    "wal_bytes_after_insert": 341992,
+    "wal_bytes_after_insert_and_update": 770472
+  },
+  "write_wal_ratio": 1.075
+}

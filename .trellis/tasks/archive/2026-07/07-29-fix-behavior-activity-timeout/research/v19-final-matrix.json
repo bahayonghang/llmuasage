@@ -1,0 +1,1368 @@
+{
+  "binary": {
+    "sha256": "c985be4d8e92d8f2369aecdcfb070537de8ca3ed980aae2fe94095d9eb272fcd",
+    "version": "llmusage 1.1.1"
+  },
+  "captured_at": "2026-07-31T01:22:31+00:00",
+  "database": {
+    "counts": {
+      "usage_event": 178795,
+      "usage_turn": 174569
+    },
+    "indexes": {
+      "usage_event": [
+        "idx_usage_event_activity_cost",
+        "idx_usage_event_event_at",
+        "idx_usage_event_session",
+        "idx_usage_event_source_event_at",
+        "idx_usage_event_source_event_key",
+        "idx_usage_event_source_path_hash",
+        "sqlite_autoindex_usage_event_1"
+      ],
+      "usage_turn": [
+        "idx_usage_turn_category_started",
+        "idx_usage_turn_event_key_expr",
+        "idx_usage_turn_model_started",
+        "idx_usage_turn_session_id",
+        "idx_usage_turn_source_path_hash",
+        "idx_usage_turn_source_started",
+        "idx_usage_turn_started_at",
+        "sqlite_autoindex_usage_turn_1"
+      ]
+    },
+    "quick_check": "ok",
+    "schema_version": 19,
+    "size_bytes": 1160073216
+  },
+  "direct_profiles": [
+    {
+      "elapsed_ms": 97.51,
+      "iteration": 1,
+      "plan": [
+        "SCAN usage_event USING COVERING INDEX idx_usage_event_activity_cost"
+      ],
+      "query": "activity_event_cost_projection",
+      "result_rows": 178795,
+      "scope": "1d"
+    },
+    {
+      "elapsed_ms": 0.08,
+      "iteration": 1,
+      "plan": [
+        "SEARCH t USING INDEX idx_usage_turn_started_at (started_at>? AND started_at<?)"
+      ],
+      "query": "activity_turn_projection",
+      "result_rows": 0,
+      "scope": "1d"
+    },
+    {
+      "elapsed_ms": 87.58,
+      "iteration": 2,
+      "plan": [
+        "SCAN usage_event USING COVERING INDEX idx_usage_event_activity_cost"
+      ],
+      "query": "activity_event_cost_projection",
+      "result_rows": 178795,
+      "scope": "1d"
+    },
+    {
+      "elapsed_ms": 0.04,
+      "iteration": 2,
+      "plan": [
+        "SEARCH t USING INDEX idx_usage_turn_started_at (started_at>? AND started_at<?)"
+      ],
+      "query": "activity_turn_projection",
+      "result_rows": 0,
+      "scope": "1d"
+    },
+    {
+      "elapsed_ms": 86.02,
+      "iteration": 3,
+      "plan": [
+        "SCAN usage_event USING COVERING INDEX idx_usage_event_activity_cost"
+      ],
+      "query": "activity_event_cost_projection",
+      "result_rows": 178795,
+      "scope": "1d"
+    },
+    {
+      "elapsed_ms": 0.04,
+      "iteration": 3,
+      "plan": [
+        "SEARCH t USING INDEX idx_usage_turn_started_at (started_at>? AND started_at<?)"
+      ],
+      "query": "activity_turn_projection",
+      "result_rows": 0,
+      "scope": "1d"
+    },
+    {
+      "elapsed_ms": 80.41,
+      "iteration": 4,
+      "plan": [
+        "SCAN usage_event USING COVERING INDEX idx_usage_event_activity_cost"
+      ],
+      "query": "activity_event_cost_projection",
+      "result_rows": 178795,
+      "scope": "1d"
+    },
+    {
+      "elapsed_ms": 0.04,
+      "iteration": 4,
+      "plan": [
+        "SEARCH t USING INDEX idx_usage_turn_started_at (started_at>? AND started_at<?)"
+      ],
+      "query": "activity_turn_projection",
+      "result_rows": 0,
+      "scope": "1d"
+    },
+    {
+      "elapsed_ms": 79.69,
+      "iteration": 5,
+      "plan": [
+        "SCAN usage_event USING COVERING INDEX idx_usage_event_activity_cost"
+      ],
+      "query": "activity_event_cost_projection",
+      "result_rows": 178795,
+      "scope": "1d"
+    },
+    {
+      "elapsed_ms": 0.04,
+      "iteration": 5,
+      "plan": [
+        "SEARCH t USING INDEX idx_usage_turn_started_at (started_at>? AND started_at<?)"
+      ],
+      "query": "activity_turn_projection",
+      "result_rows": 0,
+      "scope": "1d"
+    },
+    {
+      "elapsed_ms": 83.87,
+      "iteration": 1,
+      "plan": [
+        "SCAN usage_event USING COVERING INDEX idx_usage_event_activity_cost"
+      ],
+      "query": "activity_event_cost_projection",
+      "result_rows": 178795,
+      "scope": "all"
+    },
+    {
+      "elapsed_ms": 265.38,
+      "iteration": 1,
+      "plan": [
+        "SCAN t"
+      ],
+      "query": "activity_turn_projection",
+      "result_rows": 174569,
+      "scope": "all"
+    },
+    {
+      "elapsed_ms": 93.61,
+      "iteration": 2,
+      "plan": [
+        "SCAN usage_event USING COVERING INDEX idx_usage_event_activity_cost"
+      ],
+      "query": "activity_event_cost_projection",
+      "result_rows": 178795,
+      "scope": "all"
+    },
+    {
+      "elapsed_ms": 273.58,
+      "iteration": 2,
+      "plan": [
+        "SCAN t"
+      ],
+      "query": "activity_turn_projection",
+      "result_rows": 174569,
+      "scope": "all"
+    },
+    {
+      "elapsed_ms": 95.43,
+      "iteration": 3,
+      "plan": [
+        "SCAN usage_event USING COVERING INDEX idx_usage_event_activity_cost"
+      ],
+      "query": "activity_event_cost_projection",
+      "result_rows": 178795,
+      "scope": "all"
+    },
+    {
+      "elapsed_ms": 281.2,
+      "iteration": 3,
+      "plan": [
+        "SCAN t"
+      ],
+      "query": "activity_turn_projection",
+      "result_rows": 174569,
+      "scope": "all"
+    },
+    {
+      "elapsed_ms": 96.69,
+      "iteration": 4,
+      "plan": [
+        "SCAN usage_event USING COVERING INDEX idx_usage_event_activity_cost"
+      ],
+      "query": "activity_event_cost_projection",
+      "result_rows": 178795,
+      "scope": "all"
+    },
+    {
+      "elapsed_ms": 286.75,
+      "iteration": 4,
+      "plan": [
+        "SCAN t"
+      ],
+      "query": "activity_turn_projection",
+      "result_rows": 174569,
+      "scope": "all"
+    },
+    {
+      "elapsed_ms": 97.82,
+      "iteration": 5,
+      "plan": [
+        "SCAN usage_event USING COVERING INDEX idx_usage_event_activity_cost"
+      ],
+      "query": "activity_event_cost_projection",
+      "result_rows": 178795,
+      "scope": "all"
+    },
+    {
+      "elapsed_ms": 285.79,
+      "iteration": 5,
+      "plan": [
+        "SCAN t"
+      ],
+      "query": "activity_turn_projection",
+      "result_rows": 174569,
+      "scope": "all"
+    }
+  ],
+  "http_results": [
+    {
+      "load": "solo",
+      "requests": [
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 59.33
+        }
+      ],
+      "round": 1,
+      "scope": "1d",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 11,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "copy-backed-cold"
+    },
+    {
+      "load": "solo",
+      "requests": [
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 24.7
+        }
+      ],
+      "round": 2,
+      "scope": "1d",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 11,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "copy-backed-cold"
+    },
+    {
+      "load": "solo",
+      "requests": [
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 28.97
+        }
+      ],
+      "round": 3,
+      "scope": "1d",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 10,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "copy-backed-cold"
+    },
+    {
+      "load": "solo",
+      "requests": [
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 29.53
+        }
+      ],
+      "round": 4,
+      "scope": "1d",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 10,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "copy-backed-cold"
+    },
+    {
+      "load": "solo",
+      "requests": [
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 40.31
+        }
+      ],
+      "round": 5,
+      "scope": "1d",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 11,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "copy-backed-cold"
+    },
+    {
+      "load": "solo",
+      "requests": [
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 21.78
+        }
+      ],
+      "round": 1,
+      "scope": "1d",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 2,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "warm-after-one-unmeasured-round"
+    },
+    {
+      "load": "solo",
+      "requests": [
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 14.77
+        }
+      ],
+      "round": 2,
+      "scope": "1d",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 2,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "warm-after-one-unmeasured-round"
+    },
+    {
+      "load": "solo",
+      "requests": [
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 15.45
+        }
+      ],
+      "round": 3,
+      "scope": "1d",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 2,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "warm-after-one-unmeasured-round"
+    },
+    {
+      "load": "solo",
+      "requests": [
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 3.52
+        }
+      ],
+      "round": 4,
+      "scope": "1d",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 2,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "warm-after-one-unmeasured-round"
+    },
+    {
+      "load": "solo",
+      "requests": [
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 27.34
+        }
+      ],
+      "round": 5,
+      "scope": "1d",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 2,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "warm-after-one-unmeasured-round"
+    },
+    {
+      "load": "concurrency-2",
+      "requests": [
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 14.33
+        },
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 31.07
+        }
+      ],
+      "round": 1,
+      "scope": "1d",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 11,
+          "semaphore_wait_ms": 0
+        },
+        {
+          "cancelled": false,
+          "query_ms": 17,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "copy-backed-cold"
+    },
+    {
+      "load": "concurrency-2",
+      "requests": [
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 14.27
+        },
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 14.25
+        }
+      ],
+      "round": 2,
+      "scope": "1d",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 11,
+          "semaphore_wait_ms": 0
+        },
+        {
+          "cancelled": false,
+          "query_ms": 11,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "copy-backed-cold"
+    },
+    {
+      "load": "concurrency-2",
+      "requests": [
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 13.45
+        },
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 18.76
+        }
+      ],
+      "round": 3,
+      "scope": "1d",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 10,
+          "semaphore_wait_ms": 0
+        },
+        {
+          "cancelled": false,
+          "query_ms": 2,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "copy-backed-cold"
+    },
+    {
+      "load": "concurrency-2",
+      "requests": [
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 13.84
+        },
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 13.81
+        }
+      ],
+      "round": 4,
+      "scope": "1d",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 10,
+          "semaphore_wait_ms": 0
+        },
+        {
+          "cancelled": false,
+          "query_ms": 10,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "copy-backed-cold"
+    },
+    {
+      "load": "concurrency-2",
+      "requests": [
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 13.89
+        },
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 13.8
+        }
+      ],
+      "round": 5,
+      "scope": "1d",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 10,
+          "semaphore_wait_ms": 0
+        },
+        {
+          "cancelled": false,
+          "query_ms": 10,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "copy-backed-cold"
+    },
+    {
+      "load": "concurrency-2",
+      "requests": [
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 18.44
+        },
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 18.41
+        }
+      ],
+      "round": 1,
+      "scope": "1d",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 2,
+          "semaphore_wait_ms": 0
+        },
+        {
+          "cancelled": false,
+          "query_ms": 2,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "warm-after-one-unmeasured-round"
+    },
+    {
+      "load": "concurrency-2",
+      "requests": [
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 2.73
+        },
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 3.0
+        }
+      ],
+      "round": 2,
+      "scope": "1d",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 1,
+          "semaphore_wait_ms": 0
+        },
+        {
+          "cancelled": false,
+          "query_ms": 1,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "warm-after-one-unmeasured-round"
+    },
+    {
+      "load": "concurrency-2",
+      "requests": [
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 27.92
+        },
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 2.57
+        }
+      ],
+      "round": 3,
+      "scope": "1d",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 1,
+          "semaphore_wait_ms": 0
+        },
+        {
+          "cancelled": false,
+          "query_ms": 2,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "warm-after-one-unmeasured-round"
+    },
+    {
+      "load": "concurrency-2",
+      "requests": [
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 14.58
+        },
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 2.64
+        }
+      ],
+      "round": 4,
+      "scope": "1d",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 1,
+          "semaphore_wait_ms": 0
+        },
+        {
+          "cancelled": false,
+          "query_ms": 2,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "warm-after-one-unmeasured-round"
+    },
+    {
+      "load": "concurrency-2",
+      "requests": [
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 15.18
+        },
+        {
+          "degraded": true,
+          "http_status": 200,
+          "support_level": "no_data",
+          "timeout_reason": false,
+          "wall_ms": 14.95
+        }
+      ],
+      "round": 5,
+      "scope": "1d",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 2,
+          "semaphore_wait_ms": 0
+        },
+        {
+          "cancelled": false,
+          "query_ms": 2,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "warm-after-one-unmeasured-round"
+    },
+    {
+      "load": "solo",
+      "requests": [
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 625.26
+        }
+      ],
+      "round": 1,
+      "scope": "all",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 622,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "copy-backed-cold"
+    },
+    {
+      "load": "solo",
+      "requests": [
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 622.58
+        }
+      ],
+      "round": 2,
+      "scope": "all",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 619,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "copy-backed-cold"
+    },
+    {
+      "load": "solo",
+      "requests": [
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 640.45
+        }
+      ],
+      "round": 3,
+      "scope": "all",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 623,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "copy-backed-cold"
+    },
+    {
+      "load": "solo",
+      "requests": [
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 651.18
+        }
+      ],
+      "round": 4,
+      "scope": "all",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 633,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "copy-backed-cold"
+    },
+    {
+      "load": "solo",
+      "requests": [
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 654.77
+        }
+      ],
+      "round": 5,
+      "scope": "all",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 636,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "copy-backed-cold"
+    },
+    {
+      "load": "solo",
+      "requests": [
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 634.98
+        }
+      ],
+      "round": 1,
+      "scope": "all",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 632,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "warm-after-one-unmeasured-round"
+    },
+    {
+      "load": "solo",
+      "requests": [
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 644.39
+        }
+      ],
+      "round": 2,
+      "scope": "all",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 630,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "warm-after-one-unmeasured-round"
+    },
+    {
+      "load": "solo",
+      "requests": [
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 653.77
+        }
+      ],
+      "round": 3,
+      "scope": "all",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 652,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "warm-after-one-unmeasured-round"
+    },
+    {
+      "load": "solo",
+      "requests": [
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 829.47
+        }
+      ],
+      "round": 4,
+      "scope": "all",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 810,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "warm-after-one-unmeasured-round"
+    },
+    {
+      "load": "solo",
+      "requests": [
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 703.25
+        }
+      ],
+      "round": 5,
+      "scope": "all",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 683,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "warm-after-one-unmeasured-round"
+    },
+    {
+      "load": "concurrency-2",
+      "requests": [
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 652.88
+        },
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 651.32
+        }
+      ],
+      "round": 1,
+      "scope": "all",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 648,
+          "semaphore_wait_ms": 0
+        },
+        {
+          "cancelled": false,
+          "query_ms": 649,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "copy-backed-cold"
+    },
+    {
+      "load": "concurrency-2",
+      "requests": [
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 684.69
+        },
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 679.31
+        }
+      ],
+      "round": 2,
+      "scope": "all",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 662,
+          "semaphore_wait_ms": 0
+        },
+        {
+          "cancelled": false,
+          "query_ms": 667,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "copy-backed-cold"
+    },
+    {
+      "load": "concurrency-2",
+      "requests": [
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 663.49
+        },
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 664.51
+        }
+      ],
+      "round": 3,
+      "scope": "all",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 660,
+          "semaphore_wait_ms": 0
+        },
+        {
+          "cancelled": false,
+          "query_ms": 648,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "copy-backed-cold"
+    },
+    {
+      "load": "concurrency-2",
+      "requests": [
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 666.12
+        },
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 667.62
+        }
+      ],
+      "round": 4,
+      "scope": "all",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 662,
+          "semaphore_wait_ms": 0
+        },
+        {
+          "cancelled": false,
+          "query_ms": 664,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "copy-backed-cold"
+    },
+    {
+      "load": "concurrency-2",
+      "requests": [
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 663.9
+        },
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 665.3
+        }
+      ],
+      "round": 5,
+      "scope": "all",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 650,
+          "semaphore_wait_ms": 0
+        },
+        {
+          "cancelled": false,
+          "query_ms": 652,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "copy-backed-cold"
+    },
+    {
+      "load": "concurrency-2",
+      "requests": [
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 692.97
+        },
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 691.18
+        }
+      ],
+      "round": 1,
+      "scope": "all",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 666,
+          "semaphore_wait_ms": 0
+        },
+        {
+          "cancelled": false,
+          "query_ms": 668,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "warm-after-one-unmeasured-round"
+    },
+    {
+      "load": "concurrency-2",
+      "requests": [
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 675.79
+        },
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 678.74
+        }
+      ],
+      "round": 2,
+      "scope": "all",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 673,
+          "semaphore_wait_ms": 0
+        },
+        {
+          "cancelled": false,
+          "query_ms": 676,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "warm-after-one-unmeasured-round"
+    },
+    {
+      "load": "concurrency-2",
+      "requests": [
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 801.56
+        },
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 820.43
+        }
+      ],
+      "round": 3,
+      "scope": "all",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 799,
+          "semaphore_wait_ms": 0
+        },
+        {
+          "cancelled": false,
+          "query_ms": 801,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "warm-after-one-unmeasured-round"
+    },
+    {
+      "load": "concurrency-2",
+      "requests": [
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 823.68
+        },
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 790.38
+        }
+      ],
+      "round": 4,
+      "scope": "all",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 788,
+          "semaphore_wait_ms": 0
+        },
+        {
+          "cancelled": false,
+          "query_ms": 803,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "warm-after-one-unmeasured-round"
+    },
+    {
+      "load": "concurrency-2",
+      "requests": [
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 878.61
+        },
+        {
+          "degraded": false,
+          "http_status": 200,
+          "support_level": "normalized",
+          "timeout_reason": false,
+          "wall_ms": 873.83
+        }
+      ],
+      "round": 5,
+      "scope": "all",
+      "server_metrics": [
+        {
+          "cancelled": false,
+          "query_ms": 871,
+          "semaphore_wait_ms": 0
+        },
+        {
+          "cancelled": false,
+          "query_ms": 876,
+          "semaphore_wait_ms": 0
+        }
+      ],
+      "temperature": "warm-after-one-unmeasured-round"
+    }
+  ],
+  "methodology": {
+    "cold_proxy": "fresh database copy plus fresh server process per measured round; Windows OS file cache was not evicted",
+    "iterations_per_cell": 5,
+    "privacy": "only timings, support state, counts, and plan operators persisted",
+    "source_access": "SQLite online backup from a read-only source connection",
+    "warm": "same copied database and process after one unmeasured request round"
+  }
+}

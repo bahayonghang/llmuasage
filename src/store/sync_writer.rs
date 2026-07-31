@@ -1186,6 +1186,106 @@ mod tests {
         }
     }
 
+    fn build_activity_index_benchmark_shards() -> Vec<SyncShard> {
+        const SHARDS: usize = 8;
+        const EVENTS_PER_SHARD: usize = 500;
+
+        (0..SHARDS)
+            .map(|shard_index| {
+                let path_hash = format!("activity-index-benchmark-{shard_index:02}");
+                let events = (0..EVENTS_PER_SHARD)
+                    .map(|event_index| {
+                        build_event(
+                            &format!("{event_index:04}"),
+                            &path_hash,
+                            100 + (event_index % 17) as i64,
+                        )
+                    })
+                    .collect();
+                SyncShard {
+                    source: SourceKind::Codex,
+                    reset_path_hashes: Vec::new(),
+                    events,
+                    cursors: vec![build_cursor(&path_hash)],
+                    seen_file_paths: vec![format!("/tmp/{path_hash}.jsonl")],
+                    raw_records: Vec::new(),
+                    turns: Vec::new(),
+                    tool_calls: Vec::new(),
+                }
+            })
+            .collect()
+    }
+
+    fn measure_activity_index_sync(indexed: bool) -> anyhow::Result<std::time::Duration> {
+        let temp = TempDir::new()?;
+        let paths = build_paths(temp.path());
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+        if !indexed {
+            store
+                .open_connection()?
+                .execute_batch("DROP INDEX idx_usage_event_activity_cost;")?;
+        }
+        let shards = build_activity_index_benchmark_shards();
+        let lock = store
+            .acquire_worker_lock_with(std::time::Duration::from_secs(1), HolderKind::Library)?;
+        let fenced_store = lock.fenced_store();
+
+        let started = Instant::now();
+        let mut writer = fenced_store.begin_sync_run()?;
+        for shard in shards {
+            writer.commit_shard(shard)?;
+        }
+        writer.finish_sync_run()?;
+        let elapsed = started.elapsed();
+        let event_count: i64 =
+            store
+                .open_connection()?
+                .query_row("SELECT COUNT(*) FROM usage_event", [], |row| row.get(0))?;
+        assert_eq!(event_count, 4_000, "benchmark must persist every event");
+        drop(lock);
+        Ok(elapsed)
+    }
+
+    fn median_duration(samples: &mut [std::time::Duration]) -> std::time::Duration {
+        samples.sort_unstable();
+        samples[samples.len() / 2]
+    }
+
+    #[test]
+    #[ignore = "explicit single-thread production D1 throughput acceptance benchmark"]
+    fn activity_cost_index_sync_throughput_regression_stays_within_ten_percent()
+    -> anyhow::Result<()> {
+        const ROUNDS: usize = 7;
+        const MAX_REGRESSION_RATIO: f64 = 1.10;
+
+        let mut baseline = Vec::with_capacity(ROUNDS);
+        let mut indexed = Vec::with_capacity(ROUNDS);
+        for round in 0..ROUNDS {
+            if round % 2 == 0 {
+                baseline.push(measure_activity_index_sync(false)?);
+                indexed.push(measure_activity_index_sync(true)?);
+            } else {
+                indexed.push(measure_activity_index_sync(true)?);
+                baseline.push(measure_activity_index_sync(false)?);
+            }
+        }
+
+        let baseline_median = median_duration(&mut baseline);
+        let indexed_median = median_duration(&mut indexed);
+        let ratio = indexed_median.as_secs_f64() / baseline_median.as_secs_f64();
+        eprintln!(
+            "activity index sync throughput: baseline_median_ms={:.3} indexed_median_ms={:.3} ratio={ratio:.6} rounds={ROUNDS}",
+            baseline_median.as_secs_f64() * 1_000.0,
+            indexed_median.as_secs_f64() * 1_000.0,
+        );
+        assert!(
+            ratio <= MAX_REGRESSION_RATIO,
+            "Activity covering index sync regression ratio {ratio:.6} exceeds {MAX_REGRESSION_RATIO:.2}"
+        );
+        Ok(())
+    }
+
     #[test]
     fn stale_generation_cannot_commit_next_shard_transaction() -> anyhow::Result<()> {
         let temp = TempDir::new()?;

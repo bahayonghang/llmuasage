@@ -1,0 +1,4 @@
+{"file":".trellis/spec/llmusage/backend/index.md","reason":"Required backend quality gate and focused/full validation order."}
+{"file":".trellis/spec/llmusage/backend/dashboard-performance-contracts.md","reason":"Audit exact payload, cancellation, range, degradation, and benchmark contracts."}
+{"file":".trellis/spec/llmusage/backend/write-fencing-contracts.md","reason":"Audit migration atomicity and already-versioned database behavior."}
+{"file":".trellis/tasks/07-28-fix-serve-behavior-query-timeout/research/diagnosis.md","reason":"Compare final behavior and timing against the confirmed root-cause evidence."}

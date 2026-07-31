@@ -1,0 +1,32 @@
+{
+  "id": "fix-serve-behavior-query-timeout",
+  "name": "fix-serve-behavior-query-timeout",
+  "title": "Fix serve behavior analytics query timeout",
+  "description": "Diagnose and fix llmusage serve behavior analytics sections that degrade with a 1000 ms dashboard query timeout on the current local usage database.",
+  "status": "completed",
+  "dev_type": "bugfix",
+  "scope": "serve behavior analytics query path",
+  "package": "llmusage",
+  "priority": "P2",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-07-28",
+  "completedAt": "2026-07-29",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "src/web/mod.rs",
+    "src/query/mod.rs",
+    "src/query/filter.rs",
+    "src/store/migrations.rs",
+    "tests"
+  ],
+  "notes": "",
+  "meta": {}
+}

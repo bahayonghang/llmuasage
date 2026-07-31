@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/llmusage/backend/dashboard-performance-contracts.md", "reason": "检查未放宽超时、未改变许可/取消与精确语义"}
+{"file": ".trellis/tasks/archive/2026-07/07-24-web-hard-timeout/prd.md", "reason": "检查硬响应截止、后台收尾、permit 与观测字段"}
+{"file": ".trellis/tasks/07-29-fix-behavior-activity-timeout/prd.md", "reason": "检查两阶段协议、boot guard、隐私与机械 gate 验收"}
+{"file": ".trellis/tasks/07-29-fix-behavior-activity-timeout/design.md", "reason": "检查 prepare/run 顺序、首触前禁止内容预读与样本消费语义"}
+{"file": ".trellis/tasks/07-29-fix-behavior-activity-timeout/research/baseline.md", "reason": "确保实现没有把 copy-backed-cold 错称为真实冷态"}

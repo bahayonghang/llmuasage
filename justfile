@@ -53,9 +53,10 @@ version-sync version:
         [System.IO.File]::WriteAllText($target.Path, $content, $utf8NoBom)
     }
 
-    cargo metadata --format-version 1 --no-deps | Out-Null
+    cargo update --offline --package llmusage
 
 ci:
+    cargo update --offline --package llmusage
     python scripts/ci-rust.py
     node --check scripts/benchmark-dashboard-range.mjs
     node --test scripts/tests/dashboard-fetch.test.mjs

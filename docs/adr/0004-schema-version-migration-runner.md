@@ -1,7 +1,7 @@
 # ADR 0004 — schema_version + 自家 versioned migration runner
 
 - 状态：拟稿（0.5.0 sprint M0- 落地）
-- 落地阶段：M0- 落 runner + v1 baseline；M1/M2/M3 随功能追加 v2-v10；0.6.x 追加 v11 行为事实表；v12 修复 `source_sync_status` 历史列漂移；M0- 不单独发布 rc
+- 落地阶段：M0- 落 runner + v1 baseline；M1/M2/M3 随功能追加 v2-v10；0.6.x 追加 v11 行为事实表；v12 修复 `source_sync_status` 历史列漂移；v18 修复 Behavior 查询索引；v19 增加 Activity 成本覆盖索引；M0- 不单独发布 rc
 - 落地日期：TBD
 - 相关代码：`src/store/schema.rs`、`src/store/migrations.rs`（新）、`src/store/mod.rs::bootstrap`
 - 相关术语：Migration / SchemaVersion / Store（见仓库根目录 CONTEXT.md）
@@ -175,3 +175,49 @@ path hash、record offset 和 issue kind，不包含原始 JSONL、prompt、assi
 迁移只使用幂等 `ensure_column`，不重建表、不改变 usage/cursor/token accounting
 语义。验证由 `migration_v17_adds_bounded_parse_issue_diagnostics` 和
 `parse_issue_diagnostics_round_trip_and_reject_invalid_json` 覆盖。
+
+## 2026-07-28 更新：v18 Behavior 查询索引
+
+v18 `optimize_behavior_query_indexes` 为 Activity、Tools、Optimize、Compare
+的有界时间投影、session cost lookup、event/tool attribution 和 selected-model
+tool count 增加索引，并重新创建历史 v11 已声明但部分既有库缺失的
+`idx_usage_turn_event_key_expr`。迁移只创建索引，不重写 usage facts；fresh schema
+与漂移的 schema-v17 数据库必须得到相同的索引集合。
+
+schema_version 升到 18 后，旧二进制会按本 ADR 的 newer-schema 约束拒绝打开。
+因此对真实既有数据库执行首次 v18 bootstrap 前必须创建并验证独立的 SQLite
+online backup。回滚方式是恢复该备份或继续使用支持 v18 的二进制；仅删除索引
+不是版本回滚。验证由
+`migration_v18_repairs_v17_index_drift_and_matches_fresh_schema` 和 Behavior 查询计划
+测试覆盖。
+
+## 2026-07-30 更新：v19 Activity 成本覆盖索引
+
+v19 `optimize_activity_event_cost_projection` 只创建
+`idx_usage_event_activity_cost`：
+
+```sql
+CREATE INDEX IF NOT EXISTS idx_usage_event_activity_cost
+    ON usage_event(event_key, cost_with_cache_usd);
+```
+
+该索引把 Activity 的全量 `event_key + cost_with_cache_usd` 投影从表扫描变为 covering
+index scan。migration 不修改 Activity SQL、Rust reducer、filter、cache、并发、前端、
+PERF-002 生命周期或 3 秒截止线，也不执行数据回填。schema-v18 升级与 fresh bootstrap
+必须得到相同的两列索引；v18 自身的测试固定使用 `MIGRATIONS[..18]`，避免 latest schema
+推进后混入 v19 证据。
+
+接受 v19 还需要两项 migration 以外的门：Activity 在建索引前后对 missing event、
+NULL cost、`edit_turns=0`、category 并列和各类 filter 的序列化字节完全一致；固定
+4,000-event `SyncRunWriter` 合成基准的七轮中位数回归不得超过 10%。任何一项失败都
+回滚 v19，不自动进入 D2 查询设计。
+
+真实数据库首次升级前仍须保留并验证独立 pre-v19 online backup。旧二进制会按
+newer-schema 约束拒绝 v19；回滚方式是恢复该备份，而不是仅删除索引或手工下调
+`schema_version`。最终冷启动验收使用五份由固定 binary 准备且尚未发起 Activity 请求
+的 v19 快照，并在人工重启后消费。
+
+验证由 `migration_v19_upgrades_v18_and_matches_fresh_schema`、
+`activity_serialization_is_identical_before_and_after_v19_index`、显式单线程
+`activity_cost_index_sync_throughput_regression_stays_within_ten_percent` 及重启后首次触库
+矩阵覆盖。
