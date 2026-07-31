@@ -1393,3 +1393,24 @@ Public listener 改用最小读路由与脱敏聚合 DTO，并忽略 project sel
 ### Status
 
 [OK] **Completed**
+
+
+## Session 45: 完成 Activity 首次触库超时修复
+
+**Date**: 2026-07-31
+**Task**: 完成 Activity 首次触库超时修复
+**Branch**: `dev`
+
+### Summary
+
+实现 PERF-002 受管后台收尾与 schema v19 Activity 成本覆盖索引；完成逐字节精确性、sync 写入回归、重启后五样本 first-touch、1d/all 矩阵和 Chromium DOM 验收，全部通过且未进入 D2。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8776d6d` | (see git log) |
+
+### Status
+
+[OK] **Completed**
