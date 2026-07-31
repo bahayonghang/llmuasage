@@ -86,6 +86,11 @@ pub const MIGRATIONS: &[(u32, &str, MigrationFn)] = &[
         "optimize_behavior_query_indexes",
         m_018_optimize_behavior_query_indexes,
     ),
+    (
+        19,
+        "optimize_activity_event_cost_projection",
+        m_019_optimize_activity_event_cost_projection,
+    ),
 ];
 
 /// Returns the newest schema version known to this binary.
@@ -868,6 +873,20 @@ fn m_018_optimize_behavior_query_indexes(tx: &Transaction<'_>) -> Result<()> {
     Ok(())
 }
 
+/// Migration v19 — cover the full Activity event-cost projection.
+fn m_019_optimize_activity_event_cost_projection(tx: &Transaction<'_>) -> Result<()> {
+    if !table_exists(tx, "usage_event")? {
+        return Ok(());
+    }
+    tx.execute_batch(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_usage_event_activity_cost
+            ON usage_event(event_key, cost_with_cache_usd);
+        "#,
+    )?;
+    Ok(())
+}
+
 fn ensure_column(tx: &Transaction<'_>, table: &str, column: &str, definition: &str) -> Result<()> {
     if table_has_column(tx, table, column)? {
         return Ok(());
@@ -1524,15 +1543,56 @@ mod tests {
         drifted.execute_batch("DROP INDEX idx_usage_turn_event_key_expr;")?;
         assert_eq!(read_schema_version(&drifted)?, 17);
 
-        run_migrations_with_events(&mut drifted, None)?;
+        run_migrations_for_test(&mut drifted, &MIGRATIONS[..18])?;
 
         assert_eq!(read_schema_version(&drifted)?, 18);
         assert_behavior_query_indexes(&drifted)?;
 
         let mut fresh = Connection::open_in_memory()?;
-        run_migrations_with_events(&mut fresh, None)?;
+        run_migrations_for_test(&mut fresh, &MIGRATIONS[..18])?;
         assert_eq!(read_schema_version(&fresh)?, 18);
         assert_behavior_query_indexes(&fresh)?;
+        Ok(())
+    }
+
+    fn assert_activity_cost_index(conn: &Connection) -> anyhow::Result<()> {
+        let columns = conn
+            .prepare("PRAGMA index_info(idx_usage_event_activity_cost)")?
+            .query_map([], |row| row.get::<_, String>(2))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        assert_eq!(
+            columns,
+            vec!["event_key".to_string(), "cost_with_cache_usd".to_string()]
+        );
+
+        let plan = conn
+            .prepare(
+                "EXPLAIN QUERY PLAN SELECT event_key, COALESCE(cost_with_cache_usd, 0.0) FROM usage_event",
+            )?
+            .query_map([], |row| row.get::<_, String>(3))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+            .join("\n");
+        assert!(
+            plan.contains("USING COVERING INDEX idx_usage_event_activity_cost"),
+            "Activity event-cost projection should use the covering index: {plan}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn migration_v19_upgrades_v18_and_matches_fresh_schema() -> anyhow::Result<()> {
+        let mut upgraded = Connection::open_in_memory()?;
+        run_migrations_for_test(&mut upgraded, &MIGRATIONS[..18])?;
+        assert_eq!(read_schema_version(&upgraded)?, 18);
+
+        run_migrations_for_test(&mut upgraded, &MIGRATIONS[..19])?;
+        assert_eq!(read_schema_version(&upgraded)?, 19);
+        assert_activity_cost_index(&upgraded)?;
+
+        let mut fresh = Connection::open_in_memory()?;
+        run_migrations_with_events(&mut fresh, None)?;
+        assert_eq!(read_schema_version(&fresh)?, 19);
+        assert_activity_cost_index(&fresh)?;
         Ok(())
     }
 

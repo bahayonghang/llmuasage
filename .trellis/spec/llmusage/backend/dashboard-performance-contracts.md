@@ -20,6 +20,11 @@ GET /api/dashboard?scope=interactive&range=<1d|7d|30d|all>&window=<day|week|mont
 Dashboard::interactive_snapshot(&QueryFilter, window: &str)
     -> Result<DashboardInteractiveSnapshot>
 load_via_dashboard(state, section, query) -> Future<Result<T>>
+DashboardQuerySupervisor::supervise(query_id, section, blocking_task)
+    -> hard-deadline response + background JoinHandle settlement
+GET /api/diagnostics
+    -> DiagnosticsPayload fields + dashboard_query_inflight + timed_out_tasks
+       + orphaned_tasks + orphan_duration_ms
 TUI PanelRequest(panel, filter, time_window, generation, refreshing)
     -> bounded PanelResult channel
 TimeWindow::query_filter(&QueryFilter)
@@ -53,9 +58,12 @@ TimeWindow::query_filter(&QueryFilter)
 - Live response caching keeps normalized request keys for 10 seconds, is
   capped at 32 entries, and aborts in-flight requests during invalidation.
 - Server-side dashboard work remains on `spawn_blocking`, holds one of four
-  query permits for the blocking task lifetime, publishes an SQLite
-  `InterruptHandle`, and interrupts plus awaits abandoned work before releasing
-  the permit.
+  query permits for the blocking task lifetime, and publishes an SQLite
+  `InterruptHandle`. A timeout interrupts when possible and returns the
+  structured timeout at the configured hard deadline; it does not await the
+  blocking task in the request future. `DashboardQuerySupervisor` takes the
+  `JoinHandle`, awaits it in a background Tokio task, and the blocking closure
+  retains its permit until it actually exits.
 - TUI panel reads follow the same cancellation boundary from its synchronous
   event loop: every request opens a fresh `Dashboard` inside `spawn_blocking`,
   holds one of five TUI-local permits, publishes an interrupt handle through a
@@ -86,9 +94,16 @@ TimeWindow::query_filter(&QueryFilter)
 - Source totals come from `usage_bucket_30m`. `SourceBreakdown.last_event_at`
   remains the exact filtered `MAX(usage_event.event_at)` and must be queried per
   returned source so `(source, event_at)` can be used.
-- Debug timing fields are `section`, `semaphore_wait_ms`, `query_ms`, and
-  `cancelled`; API serialization adds `endpoint`, `serialization_ms`, and
-  `payload_bytes`.
+- Debug timing fields are `query_id`, `section`, `semaphore_wait_ms`, `query_ms`,
+  and `cancelled`; API serialization adds `endpoint`, `serialization_ms`, and
+  `payload_bytes`. A timed-out blocking task emits `Dashboard query orphan
+  settled` with the same `query_id` and `section`, plus `orphan_duration_ms`
+  and a bounded join-outcome label after the task really ends.
+- `/api/diagnostics` appends live `dashboard_query_inflight`,
+  `timed_out_tasks`, `orphaned_tasks`, and nullable `orphan_duration_ms` fields
+  after loading the existing diagnostics payload. These values never enter the
+  30-second diagnostics cache, and dashboard archive payloads keep their
+  existing shape.
 
 ### 4. Validation & Error Matrix
 
@@ -105,7 +120,9 @@ TimeWindow::query_filter(&QueryFilter)
 | TUI window changes on a fixed/lifetime panel | Update the visible window label without changing that panel's payload semantics |
 | Recent Blocks finds no pre-cutoff gap | Fall back to the historical full scan and retain identical block rows |
 | Recent Blocks uses project filtering or `token_limit=max` | Keep the full scan so fuzzy-project and historical-maximum semantics remain exact |
-| Query timeout before/after handle publication | Interrupt when possible, await the blocking task, return the structured timeout error |
+| Query timeout before/after handle publication | Interrupt when possible, transfer the JoinHandle to the supervisor, return the structured timeout at the hard deadline, and retain the permit until background settlement |
+| Timed-out task ignores SQLite interrupt | Request still returns within timeout +100 ms; inflight/orphan metrics remain nonzero until the closure really exits |
+| Supervisor task settles | Emit the matching query-ID settled event, decrement inflight/orphan counts, and record orphan duration without user dimensions |
 | SQLite reports `OperationInterrupted` | Map to `LlmusageError::Cancelled`, not configuration failure |
 | Semaphore closes | Return structured `ConfigInvalid` detail |
 | Secondary section fails | Keep other sections usable and mark only that section degraded/stale |
@@ -119,6 +136,10 @@ TimeWindow::query_filter(&QueryFilter)
   windows and secondary sections for compatibility.
 - Bad: a rapid `1d -> 7d -> 30d -> all` sequence lets a slower `1d` response
   overwrite the selected `all` state or leaves its SQLite statement running.
+- Good: a timed-out non-cooperative closure returns at the hard deadline, keeps
+  its permit while running, then produces a query-ID-matched settled event.
+- Bad: `drop(task)` detaches an unobservable query, or `task.await` in the
+  request future turns the configured timeout into an unbounded response.
 - Good: switching from Stats to Blocks immediately paints the Blocks loading
   state; a late Stats result is discarded after its SQLite statement is
   interrupted.
@@ -138,8 +159,10 @@ TimeWindow::query_filter(&QueryFilter)
 
 - Rust contract tests assert interactive fields, one selected trend, no cursor
   array, and unchanged full/core behavior.
-- Rust cancellation tests force a slow SQLite statement, assert interruption,
-  and prove the semaphore permit is released.
+- Rust cancellation tests force both an interruptible SQLite statement and an
+  interrupt-ignoring closure. They assert the hard response boundary, permit
+  ownership through real completion, supervisor counters/duration, matching
+  settled lifecycle, and the additive live diagnostics fields.
 - TUI tests force a slow SQLite statement, assert bounded cancellation, reject
   stale generation/filter results, render cold loading states through
   `TestBackend`, and compare parallel Stats/Behavior payloads to serial reads.
@@ -163,6 +186,27 @@ TimeWindow::query_filter(&QueryFilter)
 - Run `just ci` before completion.
 
 ### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+timeout -> interrupt -> drop(blocking JoinHandle) -> return
+```
+
+This preserves response latency but loses the completion boundary needed for
+permit diagnostics and paired performance evidence. Awaiting the handle in the
+request future is also wrong because non-cooperative work can exceed the public
+deadline.
+
+#### Correct
+
+```text
+timeout -> interrupt -> supervisor owns JoinHandle -> return
+background await -> same query_id settled log -> permit/inflight released
+```
+
+The supervisor exposes only bounded lifecycle metrics; it never persists query
+inputs or response data.
 
 #### Wrong
 
@@ -218,6 +262,7 @@ Dashboard::model_compare(&QueryFilter, model_a, model_b)
 WEB_BEHAVIOR_API_TIMEOUT = 3 seconds
 WEB_API_TIMEOUT = 5 seconds
 schema v18 = Behavior range/attribution indexes
+schema v19 = idx_usage_event_activity_cost(event_key, cost_with_cache_usd)
 ```
 
 Schema v18 creates `usage_event(event_at)`, `usage_turn(started_at)`,
@@ -226,11 +271,20 @@ Schema v18 creates `usage_event(event_at)`, `usage_turn(started_at)`,
 recreates `idx_usage_turn_event_key_expr` for already-versioned drifted
 databases.
 
+Schema v19 adds only `idx_usage_event_activity_cost` on
+`usage_event(event_key, cost_with_cache_usd)`. It covers Activity's full
+event-cost projection without changing the query text or Rust reducer.
+
 ### 3. Contracts
 
 - Activity streams persisted event costs and filtered turns, then aggregates
   exact category fields in Rust. A turn without a matching event contributes
   zero cost, and row ordering remains cost, tokens, turns, category.
+- The v19 Activity index is schema-only. It must not change filters, NULL and
+  missing-event cost handling, floating-point accumulation order, cache,
+  concurrency, frontend behavior, PERF-002 settlement, or the three-second
+  deadline. A fixed synthetic `SyncRunWriter` benchmark must keep the indexed
+  median at or below `1.10` times the no-index median.
 - Tools counts filtered siblings first, attributes each linked event equally,
   excludes orphan tools, and preserves the deliberate asymmetry: tool rows use
   the tool filter while `(non-tool)` rows use the event filter. Bounded requests
@@ -244,8 +298,9 @@ databases.
   low-sample, metric, category, and working-style payloads.
 - The browser keeps Behavior concurrency at two and each section settles
   independently. The Behavior deadline is three seconds; the general API
-  deadline remains five seconds. PERF-002 still interrupts and awaits timed-out
-  blocking work before releasing its query permit.
+  deadline remains five seconds. PERF-002 interrupts timed-out work, returns at
+  the hard deadline, and transfers the JoinHandle to the background supervisor;
+  the blocking closure keeps its query permit until it actually exits.
 - On representative data, every `1d` three-sample median must be below one
   second and every `all` sample must finish below three seconds without timeout
   degradation.
@@ -262,11 +317,13 @@ databases.
 | Valid low-sample comparison | `low_sample`, not degraded |
 | Tool row has no matching event | Exclude it from attributed output |
 | Event has no filtered tool sibling | Include it in `(non-tool)` under the event filter |
-| Query exceeds three seconds | Section-local degraded payload; interrupt and await work |
+| Query exceeds three seconds | Section-local degraded payload; interrupt, return at the hard deadline, and supervise background settlement while retaining the permit |
 | Another Behavior section fails | Other sections continue and settle independently |
 | v17 lacks the historical expression index | v18 creates it with all final indexes |
+| Schema v18 opens in a v19 binary | Apply only the Activity covering-index migration and advance to v19 |
+| v19 sync benchmark ratio exceeds `1.10` | Block the migration release; do not enter D2 automatically |
 | Pre-migration backup is missing or fails integrity | Do not bootstrap the real database |
-| Older binary opens schema v18 | Reject as newer schema; restore the retained v17 backup for rollback |
+| Older binary opens schema v19 | Reject as newer schema; restore the retained pre-v19 backup for rollback |
 
 ### 5. Good/Base/Bad Cases
 
@@ -277,29 +334,43 @@ databases.
 - Good: a model/date filter includes a linked filtered tool even when the
   linked event does not match the event filter, while non-tool rows still obey
   that event filter.
+- Good: a v18 database upgrades to v19 and Activity serializes byte-for-byte
+  identically for missing events, NULL costs, zero edit turns, category ties,
+  and source/model/project/date/no-data filters.
 - Bad: raising or removing the old one-second timeout without changing the
   query shape.
 - Bad: migrating the only v17 copy during profiling and then calling that v18
   database a rollback backup.
+- Bad: rewriting Activity as SQL `SUM`/`GROUP BY`, changing the reducer, or
+  accepting an indexed sync median more than 10% slower as part of v19.
 
 ### 6. Tests Required
 
 - Migration tests start from a v17-shaped database with the expression index
   removed, then assert schema v18 and all seven indexes; fresh bootstrap must
-  expose the same set.
+  expose the same set. Keep this test isolated with `MIGRATIONS[..18]`.
+- The v19 migration test upgrades a v18 schema and bootstraps a fresh schema;
+  both must reach version 19, expose the exact two index columns in order, and
+  show the full event-cost projection using the covering index.
 - Activity and Tools compare complete serialized results against test-only
   legacy SQL across empty, filtered, multi-tool, non-tool, and orphan cases.
+- Activity additionally compares serialized bytes before and after creating
+  the v19 index across missing-event, nullable-cost, zero-edit, category-tie,
+  source/model/project/date, and no-data cases.
 - Optimize and Compare compare complete serialized results against legacy
   implementations for positive, negative, filtered, missing-model,
   low-sample, and normalized cases.
 - Query-plan tests assert every v18 index is usable; trace tests assert selected
   Compare models share each query family.
 - Web tests prove Behavior may complete after the former one-second deadline,
-  while the general five-second deadline and cancellation/permit contracts are
-  unchanged.
+  while the general five-second deadline and supervised cancellation/permit
+  contracts remain intact.
 - Representative validation records three `1d` and three `all` samples for
   each section, a concurrency-two round, and a real browser DOM check with no
   loading or timeout text.
+- Run the ignored acceptance benchmark explicitly with one test thread. It
+  must alternate indexed/no-index order over fixed 4,000-event shards, compare
+  seven-sample medians, and hard-fail above ratio `1.10`.
 - Run `python scripts/ci-rust.py` and `just ci` before completion.
 
 ### 7. Wrong vs Correct
@@ -327,6 +398,20 @@ single Rust reducer -> exact tool/non-tool rows, distinct counts, sort, top 50
 Optimize should likewise reduce before joining: count tool kinds first, join
 only edit rows for savings, and choose the top session before its cost lookup.
 
+For Activity's event-cost projection, do not change the reducer to chase the
+deadline:
+
+```sql
+-- Wrong: changes floating-point aggregation order and result semantics.
+SELECT t.category, SUM(e.cost_with_cache_usd)
+FROM usage_turn t LEFT JOIN usage_event e ON ...
+GROUP BY t.category;
+
+-- Correct schema-only optimization: preserves the existing row stream.
+CREATE INDEX IF NOT EXISTS idx_usage_event_activity_cost
+    ON usage_event(event_key, cost_with_cache_usd);
+```
+
 ## Scenario: Live dashboard read cache and HTTP transfer
 
 ### 1. Scope / Trigger
@@ -350,6 +435,10 @@ GET /api/dashboard?scope=interactive&since=<date>&until=<date>
 
 - `WebState` owns one 30-second diagnostics cache shared by `/api/diagnostics` and all dashboard scopes. `Dashboard::diagnostics()` and `Dashboard::home_overview()` remain uncached cold reads.
 - Cold cache fills are single-flight. Every invalidation advances a generation while holding the cache write lock; an older in-flight computation must neither return nor store its pre-invalidation payload and recomputes under the same single-flight guard.
+- Web query supervisor counters are attached to `/api/diagnostics` after the
+  cached filesystem payload is obtained, so cache hits never freeze live
+  inflight/orphan state. Dashboard archive fields do not gain these Web-only
+  counters.
 - Completed, failed, and cancelled sync jobs invalidate diagnostics through a cheap `JobRegistry` terminal hook. `/api/diagnostics/forget` also invalidates. TTL expiry detects external file deletion that bypasses both paths.
 - Web/API `Dashboard` connections use a 1500 ms `busy_timeout`; default Store connections retain 30 seconds for sync writers and migrations.
 - Automatic refresh and post-sync refresh always use `scope=interactive`, including explicit `since`/`until`, then refresh secondary sections with concurrency 2. They never fall back to full scope in live mode.

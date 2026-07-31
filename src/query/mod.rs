@@ -3897,6 +3897,7 @@ mod tests {
     use anyhow::Result;
 
     use chrono::{FixedOffset, NaiveDate};
+    use rusqlite::Connection;
 
     use super::{
         Dashboard, QueryFilter, ReportTimezone, context_pressure_event_filter, home_overview,
@@ -4667,6 +4668,140 @@ mod tests {
                 serde_json::to_value(dashboard.tool_attribution_rows(filter)?)?,
                 serde_json::to_value(dashboard.legacy_tool_attribution_rows(filter)?)?,
                 "Tools attribution must match the legacy CTE query for {filter:?}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn activity_serialization_is_identical_before_and_after_v19_index() -> Result<()> {
+        let fixture = Fixture::new()?;
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(
+            r#"
+            CREATE TABLE usage_event (
+                event_key TEXT PRIMARY KEY,
+                cost_with_cache_usd REAL
+            );
+            CREATE TABLE usage_turn (
+                turn_key TEXT PRIMARY KEY,
+                source TEXT NOT NULL,
+                project_hash TEXT,
+                primary_model TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                category TEXT NOT NULL,
+                has_edits INTEGER NOT NULL,
+                retries INTEGER NOT NULL,
+                one_shot INTEGER NOT NULL,
+                call_count INTEGER NOT NULL,
+                total_tokens INTEGER NOT NULL
+            );
+            INSERT INTO usage_event(event_key, cost_with_cache_usd) VALUES
+                ('codex:activity-index:coding', 1.0),
+                ('codex:activity-index:planning', 1.0),
+                ('claude:activity-index:null-cost', NULL);
+            INSERT INTO usage_turn(
+                turn_key, source, project_hash, primary_model, started_at,
+                category, has_edits, retries, one_shot, call_count, total_tokens
+            ) VALUES
+                ('turn:codex:activity-index:coding', 'codex', 'project-a', 'gpt-5',
+                 '2026-05-01T01:00:00Z', 'coding', 1, 0, 1, 1, 100),
+                ('turn:codex:activity-index:planning', 'codex', 'project-a', 'gpt-5',
+                 '2026-05-01T02:00:00Z', 'planning', 0, 0, 0, 1, 100),
+                ('turn:claude:activity-index:null-cost', 'claude', 'project-b',
+                 'claude-sonnet-4', '2026-05-02T01:00:00Z', 'review', 0, 1, 0, 1, 50),
+                ('turn:missing:activity-index:event', 'codex', 'project-a', 'gpt-5',
+                 '2026-05-01T03:00:00Z', 'exploration', 0, 0, 0, 1, 20);
+            "#,
+        )?;
+        let dashboard = Dashboard {
+            store: fixture.store().clone(),
+            conn,
+        };
+
+        let day_one = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap();
+        let filters = vec![
+            ("default", QueryFilter::default()),
+            (
+                "source",
+                QueryFilter {
+                    source: Some(SourceKind::Codex),
+                    ..Default::default()
+                },
+            ),
+            (
+                "model",
+                QueryFilter {
+                    model: Some("gpt-5".to_string()),
+                    ..Default::default()
+                },
+            ),
+            (
+                "project",
+                QueryFilter {
+                    project_hash: Some("project-a".to_string()),
+                    ..Default::default()
+                },
+            ),
+            (
+                "date",
+                QueryFilter {
+                    since: Some(day_one),
+                    until: Some(day_one),
+                    timezone: ReportTimezone::Utc,
+                    ..Default::default()
+                },
+            ),
+            (
+                "no-data",
+                QueryFilter {
+                    model: Some("missing-model".to_string()),
+                    ..Default::default()
+                },
+            ),
+        ];
+
+        let default_payload = dashboard.activity_breakdown(&filters[0].1)?;
+        assert_eq!(
+            default_payload
+                .breakdown
+                .iter()
+                .take(2)
+                .map(|row| row.category.as_str())
+                .collect::<Vec<_>>(),
+            vec!["coding", "planning"],
+            "equal aggregates must retain the category tie-break"
+        );
+        assert_eq!(
+            default_payload
+                .breakdown
+                .iter()
+                .find(|row| row.category == "planning")
+                .expect("planning category")
+                .edit_turns,
+            0
+        );
+
+        let mut baseline = Vec::with_capacity(filters.len());
+        for (label, filter) in &filters {
+            let current = serde_json::to_vec(&dashboard.activity_breakdown(filter)?)?;
+            let legacy = serde_json::to_vec(&dashboard.legacy_activity_breakdown(filter)?)?;
+            assert_eq!(current, legacy, "pre-index legacy mismatch for {label}");
+            baseline.push(current);
+        }
+        dashboard.conn.execute_batch(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_usage_event_activity_cost
+                ON usage_event(event_key, cost_with_cache_usd);
+            "#,
+        )?;
+        for ((label, filter), expected) in filters.iter().zip(baseline) {
+            let current = serde_json::to_vec(&dashboard.activity_breakdown(filter)?)?;
+            let legacy = serde_json::to_vec(&dashboard.legacy_activity_breakdown(filter)?)?;
+            assert_eq!(current, legacy, "post-index legacy mismatch for {label}");
+            assert_eq!(
+                current, expected,
+                "Activity serialization changed after creating v19 index for {label}"
             );
         }
         Ok(())

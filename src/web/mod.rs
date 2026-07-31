@@ -4,7 +4,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::{
         Arc, OnceLock,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -122,6 +122,115 @@ struct DiagnosticsCacheEntry {
     computed_at: Instant,
 }
 
+#[derive(Debug, Clone, Copy, Serialize)]
+struct DashboardQuerySnapshot {
+    dashboard_query_inflight: usize,
+    timed_out_tasks: u64,
+    orphaned_tasks: usize,
+    orphan_duration_ms: Option<u64>,
+}
+
+struct DashboardQuerySupervisor {
+    next_query_id: AtomicU64,
+    inflight: AtomicUsize,
+    timed_out_tasks: AtomicU64,
+    orphaned_tasks: AtomicUsize,
+    orphan_duration_ms: AtomicU64,
+    has_orphan_duration: AtomicBool,
+}
+
+impl DashboardQuerySupervisor {
+    fn new() -> Self {
+        Self {
+            next_query_id: AtomicU64::new(1),
+            inflight: AtomicUsize::new(0),
+            timed_out_tasks: AtomicU64::new(0),
+            orphaned_tasks: AtomicUsize::new(0),
+            orphan_duration_ms: AtomicU64::new(0),
+            has_orphan_duration: AtomicBool::new(false),
+        }
+    }
+
+    fn next_query_id(&self) -> u64 {
+        self.next_query_id.fetch_add(1, Ordering::Relaxed)
+    }
+
+    fn begin_work(self: &Arc<Self>) -> DashboardQueryWorkGuard {
+        self.inflight.fetch_add(1, Ordering::AcqRel);
+        DashboardQueryWorkGuard {
+            supervisor: Arc::clone(self),
+        }
+    }
+
+    fn supervise<T>(
+        self: &Arc<Self>,
+        task: JoinHandle<LlmusageResult<T>>,
+        query_id: u64,
+        section: &'static str,
+    ) where
+        T: Send + 'static,
+    {
+        self.timed_out_tasks.fetch_add(1, Ordering::AcqRel);
+        self.orphaned_tasks.fetch_add(1, Ordering::AcqRel);
+        let supervisor = Arc::clone(self);
+        let orphan_started = Instant::now();
+        let _supervisor_task = tokio::spawn(async move {
+            let outcome = match task.await {
+                Ok(Ok(_)) => "ok",
+                Ok(Err(LlmusageError::Cancelled { .. })) => "cancelled",
+                Ok(Err(_)) => "error",
+                Err(error) if error.is_cancelled() => "join_cancelled",
+                Err(_) => "join_error",
+            };
+            let elapsed_ms = orphan_started.elapsed().as_millis() as u64;
+            supervisor
+                .orphan_duration_ms
+                .store(elapsed_ms, Ordering::Release);
+            supervisor
+                .has_orphan_duration
+                .store(true, Ordering::Release);
+            supervisor.orphaned_tasks.fetch_sub(1, Ordering::AcqRel);
+            debug!(
+                query_id,
+                section,
+                orphan_duration_ms = elapsed_ms,
+                join_outcome = outcome,
+                "Dashboard query orphan settled"
+            );
+        });
+    }
+
+    fn snapshot(&self) -> DashboardQuerySnapshot {
+        DashboardQuerySnapshot {
+            dashboard_query_inflight: self.inflight.load(Ordering::Acquire),
+            timed_out_tasks: self.timed_out_tasks.load(Ordering::Acquire),
+            orphaned_tasks: self.orphaned_tasks.load(Ordering::Acquire),
+            orphan_duration_ms: self
+                .has_orphan_duration
+                .load(Ordering::Acquire)
+                .then(|| self.orphan_duration_ms.load(Ordering::Acquire)),
+        }
+    }
+}
+
+struct DashboardQueryWorkGuard {
+    supervisor: Arc<DashboardQuerySupervisor>,
+}
+
+impl Drop for DashboardQueryWorkGuard {
+    fn drop(&mut self) {
+        self.supervisor.inflight.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+#[derive(Serialize)]
+struct WebDiagnosticsPayload {
+    #[serde(flatten)]
+    diagnostics: DiagnosticsPayload,
+    #[serde(flatten)]
+    dashboard_queries: DashboardQuerySnapshot,
+}
+
 impl DiagnosticsCache {
     fn new(ttl: Duration) -> Self {
         Self {
@@ -171,6 +280,7 @@ pub struct WebState {
     #[doc(hidden)]
     pub dashboard_query_semaphore: Arc<Semaphore>,
     diagnostics_cache: Arc<DiagnosticsCache>,
+    dashboard_query_supervisor: Arc<DashboardQuerySupervisor>,
 }
 
 impl WebState {
@@ -206,6 +316,7 @@ impl WebState {
             jobs,
             dashboard_query_semaphore: Arc::new(Semaphore::new(permits.max(1))),
             diagnostics_cache,
+            dashboard_query_supervisor: Arc::new(DashboardQuerySupervisor::new()),
         }
     }
 }
@@ -1002,7 +1113,14 @@ async fn api_health(State(state): State<WebState>) -> Response {
 }
 
 async fn api_diagnostics(State(state): State<WebState>) -> Response {
-    api_json_async("/api/diagnostics", load_diagnostics_cached(&state)).await
+    api_json_async("/api/diagnostics", async {
+        let diagnostics = load_diagnostics_cached(&state).await?;
+        Ok(WebDiagnosticsPayload {
+            diagnostics,
+            dashboard_queries: state.dashboard_query_supervisor.snapshot(),
+        })
+    })
+    .await
 }
 
 #[derive(Debug, Deserialize)]
@@ -1326,13 +1444,18 @@ where
         return Err(dashboard_timeout_error(timeout));
     }
 
+    let query_id = state.dashboard_query_supervisor.next_query_id();
+    let work_guard = state.dashboard_query_supervisor.begin_work();
+    let supervisor = Arc::clone(&state.dashboard_query_supervisor);
+    let store = state.store.clone();
     let cancelled = Arc::new(AtomicBool::new(false));
     let blocking_cancelled = Arc::clone(&cancelled);
     let (interrupt_tx, interrupt_rx) = oneshot::channel();
     let query_started = Instant::now();
     let mut task = tokio::task::spawn_blocking(move || {
+        let _work_guard = work_guard;
         let _permit = permit;
-        let dashboard = Dashboard::open_with_busy_timeout(&state.store, WEB_READ_BUSY_TIMEOUT)?;
+        let dashboard = Dashboard::open_with_busy_timeout(&store, WEB_READ_BUSY_TIMEOUT)?;
         let interrupt = dashboard.interrupt_handle();
         if blocking_cancelled.load(Ordering::SeqCst) {
             interrupt.interrupt();
@@ -1354,14 +1477,11 @@ where
             return dashboard_join_result(task.await);
         }
         Err(_) => {
-            // PERF-002: interrupt the blocking task then return immediately.
-            // The task holds its own permit and will release it once SQLite
-            // responds to the interrupt — we must not await it here or the
-            // configured timeout becomes the minimum latency, not the maximum.
             guard.interrupt();
-            drop(task); // detach; task cleans up in the background
+            supervisor.supervise(task, query_id, section);
             guard.disarm();
             debug!(
+                query_id,
                 section,
                 semaphore_wait_ms = semaphore_wait.as_millis(),
                 query_ms = query_started.elapsed().as_millis(),
@@ -1375,23 +1495,39 @@ where
 
     let Some(query_remaining) = timeout.checked_sub(started.elapsed()) else {
         guard.interrupt();
-        drop(task); // detach — see PERF-002 comment above
+        supervisor.supervise(task, query_id, section);
         guard.disarm();
+        debug!(
+            query_id,
+            section,
+            semaphore_wait_ms = semaphore_wait.as_millis(),
+            query_ms = query_started.elapsed().as_millis(),
+            cancelled = true,
+            "Dashboard query timed out before awaiting blocking work"
+        );
         return Err(dashboard_timeout_error(timeout));
     };
-    let result = match tokio::time::timeout(query_remaining, &mut task).await {
-        Ok(joined) => {
-            guard.disarm();
-            dashboard_join_result(joined)
-        }
+    let joined = match tokio::time::timeout(query_remaining, &mut task).await {
+        Ok(joined) => joined,
         Err(_) => {
             guard.interrupt();
-            drop(task); // detach — see PERF-002 comment above
+            supervisor.supervise(task, query_id, section);
             guard.disarm();
-            Err(dashboard_timeout_error(timeout))
+            debug!(
+                query_id,
+                section,
+                semaphore_wait_ms = semaphore_wait.as_millis(),
+                query_ms = query_started.elapsed().as_millis(),
+                cancelled = true,
+                "Dashboard query timed out"
+            );
+            return Err(dashboard_timeout_error(timeout));
         }
     };
+    guard.disarm();
+    let result = dashboard_join_result(joined);
     debug!(
+        query_id,
         section,
         semaphore_wait_ms = semaphore_wait.as_millis(),
         query_ms = query_started.elapsed().as_millis(),
@@ -3549,6 +3685,77 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dashboard_hard_timeout_supervises_non_cooperative_work() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let state = WebState::with_jobs_and_query_limit(store, test_job_registry(), 1);
+        let active = Arc::new(AtomicUsize::new(0));
+        let blocking_active = Arc::clone(&active);
+        let (started_tx, started_rx) = std::sync::mpsc::sync_channel(1);
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+        let started = Instant::now();
+        let query_state = state.clone();
+        let request = tokio::spawn(async move {
+            load_via_dashboard_with_timeout(
+                query_state,
+                "test-non-cooperative-timeout",
+                Duration::from_millis(100),
+                move |_dashboard| {
+                    blocking_active.fetch_add(1, Ordering::SeqCst);
+                    let _ = started_tx.send(());
+                    let _ = release_rx.recv_timeout(Duration::from_secs(2));
+                    blocking_active.fetch_sub(1, Ordering::SeqCst);
+                    Ok::<(), LlmusageError>(())
+                },
+            )
+            .await
+        });
+        tokio::task::spawn_blocking(move || started_rx.recv_timeout(Duration::from_secs(1)))
+            .await??;
+        let error = request
+            .await?
+            .expect_err("the non-cooperative closure must exceed the hard timeout");
+
+        assert!(error.to_string().contains("dashboard query exceeded"));
+        assert!(
+            started.elapsed() <= Duration::from_millis(200),
+            "the request must return within timeout + 100ms"
+        );
+        assert_eq!(active.load(Ordering::SeqCst), 1);
+        assert_eq!(state.dashboard_query_semaphore.available_permits(), 0);
+        let during = state.dashboard_query_supervisor.snapshot();
+        assert_eq!(during.dashboard_query_inflight, 1);
+        assert_eq!(during.timed_out_tasks, 1);
+        assert_eq!(during.orphaned_tasks, 1);
+        assert_eq!(during.orphan_duration_ms, None);
+
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        release_tx.send(())?;
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let snapshot = state.dashboard_query_supervisor.snapshot();
+                if snapshot.dashboard_query_inflight == 0 && snapshot.orphaned_tasks == 0 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await?;
+
+        let settled = state.dashboard_query_supervisor.snapshot();
+        assert_eq!(active.load(Ordering::SeqCst), 0);
+        assert_eq!(state.dashboard_query_semaphore.available_permits(), 1);
+        assert_eq!(settled.dashboard_query_inflight, 0);
+        assert_eq!(settled.timed_out_tasks, 1);
+        assert_eq!(settled.orphaned_tasks, 0);
+        assert!(
+            settled
+                .orphan_duration_ms
+                .is_some_and(|elapsed| elapsed >= 100)
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn behavior_query_completes_past_legacy_one_second_deadline() -> anyhow::Result<()> {
         let (_temp, store) = make_store()?;
         let state = WebState::with_jobs_and_query_limit(store, test_job_registry(), 1);
@@ -3856,6 +4063,10 @@ mod tests {
         let (status, payload) = route_json(addr, "GET", "/api/diagnostics", None).await?;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(payload["by_source"].as_array().unwrap().len(), 3);
+        assert_eq!(payload["dashboard_query_inflight"], 0);
+        assert_eq!(payload["timed_out_tasks"], 0);
+        assert_eq!(payload["orphaned_tasks"], 0);
+        assert!(payload["orphan_duration_ms"].is_null());
         assert_eq!(
             diagnostics_stat_calls(),
             stats_after_core,

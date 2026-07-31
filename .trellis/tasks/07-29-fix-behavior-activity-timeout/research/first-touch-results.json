@@ -1,0 +1,187 @@
+{
+  "binary": {
+    "sha256": "66f6eb899149f8dbc8669addcf13c6e97739310e82e99c5cfcfcc9d5ca32e1de",
+    "version": "llmusage 1.1.1"
+  },
+  "captured_at_utc": "2026-07-30T02:28:50Z",
+  "format": "llmusage.activity-first-touch.v3",
+  "gate": {
+    "decision": "NO-GO D1/D2",
+    "evidence_complete": false,
+    "first_touch_median_ms": 3023.9,
+    "first_touch_median_over_3000_ms": true,
+    "permit_wait_not_primary": true,
+    "sqlite_busy_or_locked_absent": true,
+    "timeout_sample_count": 5,
+    "wait_and_lock_not_primary": true,
+    "warm_all_under_3000_ms": false
+  },
+  "method": {
+    "first_touch": "fresh server after reboot; server bootstrap precedes request",
+    "range": "all",
+    "sample_count": 5,
+    "warm": "paired request in the same server process"
+  },
+  "samples": [
+    {
+      "first_touch": {
+        "degraded": true,
+        "http_status": 200,
+        "server": {
+          "cancelled": true,
+          "query_ms": 3005,
+          "semaphore_wait_ms": 0
+        },
+        "support_level": "degraded",
+        "timeout": true,
+        "wall_ms": 3140.01
+      },
+      "sample_id": "sample-01",
+      "server_cleanup": {
+        "port_released": true,
+        "process_exited": true
+      },
+      "sqlite_busy_or_locked": false,
+      "warm": {
+        "degraded": true,
+        "http_status": 200,
+        "server": {
+          "cancelled": true,
+          "query_ms": 3013,
+          "semaphore_wait_ms": 0
+        },
+        "support_level": "degraded",
+        "timeout": true,
+        "wall_ms": 3037.21
+      }
+    },
+    {
+      "first_touch": {
+        "degraded": true,
+        "http_status": 200,
+        "server": {
+          "cancelled": true,
+          "query_ms": 3006,
+          "semaphore_wait_ms": 0
+        },
+        "support_level": "degraded",
+        "timeout": true,
+        "wall_ms": 3009.43
+      },
+      "sample_id": "sample-02",
+      "server_cleanup": {
+        "port_released": true,
+        "process_exited": true
+      },
+      "sqlite_busy_or_locked": false,
+      "warm": {
+        "degraded": true,
+        "http_status": 200,
+        "server": {
+          "cancelled": true,
+          "query_ms": 3004,
+          "semaphore_wait_ms": 0
+        },
+        "support_level": "degraded",
+        "timeout": true,
+        "wall_ms": 3023.93
+      }
+    },
+    {
+      "first_touch": {
+        "degraded": true,
+        "http_status": 200,
+        "server": {
+          "cancelled": true,
+          "query_ms": 3005,
+          "semaphore_wait_ms": 0
+        },
+        "support_level": "degraded",
+        "timeout": true,
+        "wall_ms": 3023.9
+      },
+      "sample_id": "sample-03",
+      "server_cleanup": {
+        "port_released": true,
+        "process_exited": true
+      },
+      "sqlite_busy_or_locked": false,
+      "warm": {
+        "degraded": true,
+        "http_status": 200,
+        "server": {
+          "cancelled": true,
+          "query_ms": 3014,
+          "semaphore_wait_ms": 0
+        },
+        "support_level": "degraded",
+        "timeout": true,
+        "wall_ms": 3015.98
+      }
+    },
+    {
+      "first_touch": {
+        "degraded": true,
+        "http_status": 200,
+        "server": {
+          "cancelled": true,
+          "query_ms": 3008,
+          "semaphore_wait_ms": 0
+        },
+        "support_level": "degraded",
+        "timeout": true,
+        "wall_ms": 3025.45
+      },
+      "sample_id": "sample-04",
+      "server_cleanup": {
+        "port_released": true,
+        "process_exited": true
+      },
+      "sqlite_busy_or_locked": false,
+      "warm": {
+        "degraded": true,
+        "http_status": 200,
+        "server": {
+          "cancelled": true,
+          "query_ms": 3017,
+          "semaphore_wait_ms": 0
+        },
+        "support_level": "degraded",
+        "timeout": true,
+        "wall_ms": 3043.36
+      }
+    },
+    {
+      "first_touch": {
+        "degraded": true,
+        "http_status": 200,
+        "server": {
+          "cancelled": true,
+          "query_ms": 3006,
+          "semaphore_wait_ms": 0
+        },
+        "support_level": "degraded",
+        "timeout": true,
+        "wall_ms": 3009.36
+      },
+      "sample_id": "sample-05",
+      "server_cleanup": {
+        "port_released": true,
+        "process_exited": true
+      },
+      "sqlite_busy_or_locked": false,
+      "warm": {
+        "degraded": true,
+        "http_status": 200,
+        "server": {
+          "cancelled": true,
+          "query_ms": 3005,
+          "semaphore_wait_ms": 0
+        },
+        "support_level": "degraded",
+        "timeout": true,
+        "wall_ms": 3023.32
+      }
+    }
+  ]
+}

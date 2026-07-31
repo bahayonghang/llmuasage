@@ -1,0 +1,187 @@
+{
+  "binary": {
+    "sha256": "c985be4d8e92d8f2369aecdcfb070537de8ca3ed980aae2fe94095d9eb272fcd",
+    "version": "llmusage 1.1.1"
+  },
+  "captured_at_utc": "2026-07-31T01:18:56Z",
+  "format": "llmusage.activity-first-touch.v19.v1",
+  "gate": {
+    "decision": "NO-GO D1/D2",
+    "evidence_complete": true,
+    "first_touch_median_ms": 2572.02,
+    "first_touch_median_over_3000_ms": false,
+    "permit_wait_not_primary": true,
+    "sqlite_busy_or_locked_absent": true,
+    "timeout_sample_count": 0,
+    "wait_and_lock_not_primary": true,
+    "warm_all_under_3000_ms": true
+  },
+  "method": {
+    "first_touch": "fresh server after reboot; server bootstrap precedes request",
+    "range": "all",
+    "sample_count": 5,
+    "warm": "paired request in the same server process"
+  },
+  "samples": [
+    {
+      "first_touch": {
+        "degraded": false,
+        "http_status": 200,
+        "server": {
+          "cancelled": false,
+          "query_ms": 2596,
+          "semaphore_wait_ms": 0
+        },
+        "support_level": "normalized",
+        "timeout": false,
+        "wall_ms": 2675.67
+      },
+      "sample_id": "sample-01",
+      "server_cleanup": {
+        "port_released": true,
+        "process_exited": true
+      },
+      "sqlite_busy_or_locked": false,
+      "warm": {
+        "degraded": false,
+        "http_status": 200,
+        "server": {
+          "cancelled": false,
+          "query_ms": 839,
+          "semaphore_wait_ms": 0
+        },
+        "support_level": "normalized",
+        "timeout": false,
+        "wall_ms": 857.29
+      }
+    },
+    {
+      "first_touch": {
+        "degraded": false,
+        "http_status": 200,
+        "server": {
+          "cancelled": false,
+          "query_ms": 2548,
+          "semaphore_wait_ms": 0
+        },
+        "support_level": "normalized",
+        "timeout": false,
+        "wall_ms": 2566.04
+      },
+      "sample_id": "sample-02",
+      "server_cleanup": {
+        "port_released": true,
+        "process_exited": true
+      },
+      "sqlite_busy_or_locked": false,
+      "warm": {
+        "degraded": false,
+        "http_status": 200,
+        "server": {
+          "cancelled": false,
+          "query_ms": 780,
+          "semaphore_wait_ms": 0
+        },
+        "support_level": "normalized",
+        "timeout": false,
+        "wall_ms": 806.49
+      }
+    },
+    {
+      "first_touch": {
+        "degraded": false,
+        "http_status": 200,
+        "server": {
+          "cancelled": false,
+          "query_ms": 2492,
+          "semaphore_wait_ms": 0
+        },
+        "support_level": "normalized",
+        "timeout": false,
+        "wall_ms": 2510.26
+      },
+      "sample_id": "sample-03",
+      "server_cleanup": {
+        "port_released": true,
+        "process_exited": true
+      },
+      "sqlite_busy_or_locked": false,
+      "warm": {
+        "degraded": false,
+        "http_status": 200,
+        "server": {
+          "cancelled": false,
+          "query_ms": 792,
+          "semaphore_wait_ms": 0
+        },
+        "support_level": "normalized",
+        "timeout": false,
+        "wall_ms": 817.34
+      }
+    },
+    {
+      "first_touch": {
+        "degraded": false,
+        "http_status": 200,
+        "server": {
+          "cancelled": false,
+          "query_ms": 2824,
+          "semaphore_wait_ms": 0
+        },
+        "support_level": "normalized",
+        "timeout": false,
+        "wall_ms": 2827.1
+      },
+      "sample_id": "sample-04",
+      "server_cleanup": {
+        "port_released": true,
+        "process_exited": true
+      },
+      "sqlite_busy_or_locked": false,
+      "warm": {
+        "degraded": false,
+        "http_status": 200,
+        "server": {
+          "cancelled": false,
+          "query_ms": 928,
+          "semaphore_wait_ms": 0
+        },
+        "support_level": "normalized",
+        "timeout": false,
+        "wall_ms": 947.89
+      }
+    },
+    {
+      "first_touch": {
+        "degraded": false,
+        "http_status": 200,
+        "server": {
+          "cancelled": false,
+          "query_ms": 2569,
+          "semaphore_wait_ms": 0
+        },
+        "support_level": "normalized",
+        "timeout": false,
+        "wall_ms": 2572.02
+      },
+      "sample_id": "sample-05",
+      "server_cleanup": {
+        "port_released": true,
+        "process_exited": true
+      },
+      "sqlite_busy_or_locked": false,
+      "warm": {
+        "degraded": false,
+        "http_status": 200,
+        "server": {
+          "cancelled": false,
+          "query_ms": 761,
+          "semaphore_wait_ms": 0
+        },
+        "support_level": "normalized",
+        "timeout": false,
+        "wall_ms": 778.18
+      }
+    }
+  ]
+}
