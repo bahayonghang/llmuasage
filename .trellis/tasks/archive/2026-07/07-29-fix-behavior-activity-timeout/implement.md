@@ -104,10 +104,12 @@ Production 门已由用户批准：采用 schema v19 的单一 covering index，
   `2572.02 ms`；代表矩阵的 `1d` solo 中位数为 `29.53 ms`，`all` solo 中位数为
   `640.45 ms`，全部 HTTP 200 且无 timeout。真实 Chromium 首屏 Activity settled 为
   合法 `no_data`，DOM 无 loading/timeout 文本，server/port/process cleanup 通过。
-- [ ] 最终验证后检查 diff、提交、archive、journal；不 push，除非用户另行要求。
+- [x] 最终验证后检查 diff、提交、archive、journal；不 push，除非用户另行要求。
 
-当前检查点：最终 v19 验收已通过；`research/v19-final-validation.md` 汇总重启首触、
-代表矩阵、浏览器与 cleanup 证据，下一步执行最终 diff/check、提交、archive、journal。
+最终 v19 验收已通过；`research/v19-final-validation.md` 汇总重启首触、代表矩阵、
+浏览器与 process/port cleanup 证据，工作提交为 `8776d6d`。本机执行策略拒绝递归删除，
+九个精确 `target/tmp/activity-*` 任务目录约 `12.96 GiB` 仍作为 gitignored 本地残留；
+它们没有运行进程或监听端口占用，需在策略允许时手工清理。
 
 ## 审查门
 
