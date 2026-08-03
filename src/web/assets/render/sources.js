@@ -42,7 +42,7 @@ export function renderSources(context) {
       return `
         <div class="source-row">
           <div>
-            <div class="src-name">${escapeHtml(row.source || '--')}</div>
+            <div class="src-name" data-source="${escapeHtml(row.source || '--')}">${escapeHtml(row.source || '--')}</div>
             <div class="src-meta">${last_event_at}</div>
           </div>
           <div>
