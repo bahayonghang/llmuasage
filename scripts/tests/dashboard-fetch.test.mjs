@@ -147,17 +147,22 @@ test('ready-widget fetchers preserve shared filtering and snapshot compatibility
       rangePreset: '7d',
       trendWindow: 'week',
       filters: { source: 'codex', timezone: 'Asia/Shanghai' },
+      topSessionsSort: 'duration',
     };
     const controller = new AbortController();
 
     await dashboardFetch.fetchHomeOverview(state, { signal: controller.signal });
     await dashboardFetch.fetchHeatmap(state, { signal: controller.signal });
     await dashboardFetch.fetchTrendsDaily(state, { signal: controller.signal });
+    await dashboardFetch.fetchTopSessions(state, { signal: controller.signal });
+    await dashboardFetch.fetchHourOfWeek(state, { signal: controller.signal });
 
     assert.deepEqual(paths.map(({ path }) => new URL(path, window.location.origin).pathname), [
       '/api/home_overview',
       '/api/heatmap',
       '/api/trends_daily',
+      '/api/sessions',
+      '/api/hour_of_week',
     ]);
     for (const { path, signal } of paths) {
       const params = new URL(path, window.location.origin).searchParams;
@@ -169,6 +174,7 @@ test('ready-widget fetchers preserve shared filtering and snapshot compatibility
     assert.equal(homeOverviewParams.get('compact'), 'true');
     assert.equal(new URL(paths[1].path, window.location.origin).searchParams.get('compact'), null);
     assert.equal(new URL(paths[1].path, window.location.origin).searchParams.get('days'), '7');
+    assert.equal(new URL(paths[3].path, window.location.origin).searchParams.get('sort'), 'duration');
   });
 
   await t.test('old snapshots without ready-widget keys return empty states', async () => {
@@ -181,10 +187,14 @@ test('ready-widget fetchers preserve shared filtering and snapshot compatibility
     assert.equal(await dashboardFetch.fetchHomeOverview(state), null);
     assert.deepEqual(await dashboardFetch.fetchHeatmap(state), []);
     assert.deepEqual(await dashboardFetch.fetchTrendsDaily(state), []);
+    assert.deepEqual(await dashboardFetch.fetchTopSessions(state), []);
+    assert.deepEqual(await dashboardFetch.fetchHourOfWeek(state), []);
     const startup = await dashboardFetch.loadDashboardSnapshot(state);
     assert.equal(startup.home_overview, null);
     assert.deepEqual(startup.heatmap, []);
     assert.deepEqual(startup.trends_daily, []);
+    assert.deepEqual(startup.top_sessions, []);
+    assert.deepEqual(startup.hour_of_week, []);
     assert.equal(requests, 0);
   });
 });

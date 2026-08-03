@@ -119,6 +119,10 @@ fn html_shell(mode: &str) -> String {
         <span class="nav-icon"><svg aria-hidden="true" class="i" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
         <span data-i18n="shell.nav.item.status">运行状态</span>
       </a>
+      <a href="#logs" data-target="logs">
+        <span class="nav-icon"><svg aria-hidden="true" class="i" viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg></span>
+        <span data-i18n="shell.nav.item.logs">事件日志</span>
+      </a>
     </nav>
 
     <div class="sidebar-footer">
@@ -167,7 +171,7 @@ fn html_shell(mode: &str) -> String {
         </span>
         <button class="btn" id="btn-export">
           <svg aria-hidden="true" class="i" viewBox="0 0 24 24" style="width: 13px; height: 13px;"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-          <span data-i18n="shell.btn.export">导出 JSON</span>
+          <span data-i18n="shell.btn.export">导出 CSV</span>
         </button>
         <div class="refresh-toggle" id="auto-refresh" role="group" data-i18n-attr="aria-label=shell.refresh.aria">
           <span class="refresh-label" data-i18n="shell.refresh.label">刷新</span>
@@ -234,7 +238,12 @@ fn html_shell(mode: &str) -> String {
       <div class="summary-cards" id="summary-cards" aria-live="polite"></div>
 
       <div class="ready-widgets-grid dash-grid">
-        <div class="panel ready-widget-panel wide" id="calendar-heatmap" aria-live="polite"></div>
+        <div class="panel ready-widget-panel wide analytics-heatmaps" aria-live="polite">
+          <div id="calendar-heatmap"></div>
+          <div class="analytics-divider"></div>
+          <div id="hour-of-week"></div>
+        </div>
+        <div class="panel ready-widget-panel" id="top-sessions" aria-live="polite"></div>
         <div class="panel ready-widget-panel wide" id="trends-daily" aria-live="polite"></div>
       </div>
 
@@ -498,6 +507,16 @@ fn html_shell(mode: &str) -> String {
         </div>
         <div id="explorer-series-details"></div>
       </div>
+    </section>
+
+    <section id="logs" class="block">
+      <div class="section-head">
+        <div>
+          <h2 class="section-title" data-i18n="shell.logs.title">事件日志</h2>
+          <div class="section-desc" data-i18n="shell.logs.sub">按游标分页查看本地标准化事件；展开行时按需读取原始记录。</div>
+        </div>
+      </div>
+      <div class="panel" id="logs-viewer" aria-live="polite"></div>
     </section>
 
     <!-- Cost -->

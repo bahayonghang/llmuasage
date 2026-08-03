@@ -2547,3 +2547,24 @@ svg.i {
     flex-direction: column;
   }
 }
+
+.analytics-divider { height: 1px; margin: 14px 0; background: var(--line); }
+.timezone-note { margin-left: 6px; color: var(--muted); font-size: 10px; font-weight: 500; }
+.top-session-list { display: flex; flex-direction: column; margin-top: 10px; }
+.top-session-row { display: flex; align-items: center; width: 100%; min-height: 44px; gap: 8px; padding: 6px 4px; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
+.top-session-row:hover { background: var(--surface-2); }
+.top-session-rank { width: 18px; color: var(--muted); font-family: var(--font-mono); text-align: right; }
+.top-session-dot { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: var(--accent-green); }
+.top-session-name { display: flex; min-width: 0; flex: 1; flex-direction: column; }
+.top-session-name strong, .top-session-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.top-session-name strong { font-size: 12px; font-weight: 600; }
+.top-session-name small { color: var(--muted); font-size: 10px; }
+.top-session-value { min-width: 86px; color: var(--accent-blue); font-family: var(--font-mono); font-size: 11px; text-align: right; }
+.logs-session-filter { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.logs-table-wrap { overflow-x: auto; }
+.logs-table { min-width: 900px; }
+.logs-table tbody tr[data-log-key] { cursor: pointer; }
+.log-raw-row pre { max-height: 320px; margin: 0; overflow: auto; padding: 12px; background: var(--bg-inset); color: var(--ink); font: 11px/1.5 var(--font-mono); white-space: pre-wrap; }
+.logs-more { display: block; margin: 12px auto 0; }
+.agent-tag { font-size: 8px; font-weight: 650; text-transform: uppercase; opacity: .75; }
+@media (max-width: 720px) { .top-session-sort { align-self: flex-start; } .top-session-value { min-width: 72px; } }

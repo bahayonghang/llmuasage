@@ -67,7 +67,7 @@ pub(crate) fn find_asset(path: &str) -> Option<&'static WebAsset> {
     ASSET_MANIFEST.iter().find(|asset| asset.path == path)
 }
 
-static ASSET_MANIFEST: [WebAsset; 29] = [
+static ASSET_MANIFEST: [WebAsset; 33] = [
     WebAsset {
         path: "base.css",
         content_type: "text/css; charset=utf-8",
@@ -180,6 +180,30 @@ static ASSET_MANIFEST: [WebAsset; 29] = [
         path: "render/trends-daily.js",
         content_type: "application/javascript; charset=utf-8",
         body: include_str!("render/trends-daily.js"),
+        etag: OnceLock::new(),
+    },
+    WebAsset {
+        path: "render/top-sessions.js",
+        content_type: "application/javascript; charset=utf-8",
+        body: include_str!("render/top-sessions.js"),
+        etag: OnceLock::new(),
+    },
+    WebAsset {
+        path: "render/logs-viewer.js",
+        content_type: "application/javascript; charset=utf-8",
+        body: include_str!("render/logs-viewer.js"),
+        etag: OnceLock::new(),
+    },
+    WebAsset {
+        path: "render/hour-of-week.js",
+        content_type: "application/javascript; charset=utf-8",
+        body: include_str!("render/hour-of-week.js"),
+        etag: OnceLock::new(),
+    },
+    WebAsset {
+        path: "csv-export.js",
+        content_type: "application/javascript; charset=utf-8",
+        body: include_str!("csv-export.js"),
         etag: OnceLock::new(),
     },
     WebAsset {

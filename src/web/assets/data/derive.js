@@ -283,7 +283,7 @@ export function buildContextStats() {
   };
 }
 
-function deriveContext({ overview, trends, models, sources, projects, costs, activity, tools, optimize, compare, explorer, home_overview, heatmap, trends_daily, health, diagnostics, sync_command_center, _meta }) {
+function deriveContext({ overview, trends, models, sources, projects, costs, activity, tools, optimize, compare, explorer, home_overview, heatmap, trends_daily, top_sessions, hour_of_week, health, diagnostics, sync_command_center, _meta }) {
   logger.info('开始构建页面上下文');
 
   // 1.1 规范化并排序趋势、排行和健康数据
@@ -405,6 +405,8 @@ function deriveContext({ overview, trends, models, sources, projects, costs, act
       heatmap_support: heatmap?.support || null,
       trends_daily: Array.isArray(trends_daily) ? trends_daily : normalizeRows(trends_daily?.rows),
       trends_daily_support: trends_daily?.support || null,
+      top_sessions: top_sessions || null,
+      hour_of_week: hour_of_week || null,
       activity_support: activity?.support || { supported: false, level: 'no_data' },
       tools_support: tools?.support || { supported: false, level: 'no_data' },
       secondary_refreshing: Boolean(_meta?.secondary_refreshing),

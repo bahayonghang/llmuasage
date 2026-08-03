@@ -93,6 +93,11 @@ const UI_COPY_ZH = Object.freeze({
       oneDay: '24 小时范围请查看下方小时趋势；每日图从 7 天范围开始显示。',
     }),
   }),
+  sessionAnalytics: Object.freeze({
+    topSessions: Object.freeze({ title: '热门会话', sub: '按服务端聚合结果查看当前范围内的高用量会话。', loading: '正在加载会话排行…', empty: '当前范围暂无会话。', untitled: '未命名会话', noProject: '无项目', sortAria: '会话排序', sort: Object.freeze({ tokens: 'Token', duration: '时长', cost: '成本' }) }),
+    hourOfWeek: Object.freeze({ title: '星期与小时', sub: '按浏览器时区折叠 30 分钟用量桶。', loading: '正在加载小时分布…', empty: '当前范围暂无小时活动。', tokens: 'Token', events: '事件', weekdays: Object.freeze(['周一','周二','周三','周四','周五','周六','周日']) }),
+    logs: Object.freeze({ liveOnly: '事件日志仅在 live 看板中可用。', session: '会话', clear: '清除', time: '时间', source: '来源', model: '模型', tokens: 'Token', cost: '成本', project: '项目', loading: '正在加载事件日志…', empty: '当前筛选暂无事件。', more: '加载更多', rawLoading: '正在读取原始记录…', rawUnavailable: '未保留原始记录。' }),
+  }),
   sections: Object.freeze({
     trend: Object.freeze({
       kicker: '趋势',
@@ -331,6 +336,11 @@ const UI_COPY_EN = Object.freeze({
       oneDay: 'Use the hourly chart below for the 24-hour range; daily trends start at 7 days.',
     }),
   }),
+  sessionAnalytics: Object.freeze({
+    topSessions: Object.freeze({ title: 'Top sessions', sub: 'Highest-usage sessions in the current range, ranked by the server.', loading: 'Loading session ranking…', empty: 'No sessions in this range.', untitled: 'Untitled session', noProject: 'No project', sortAria: 'Session ranking', sort: Object.freeze({ tokens: 'Tokens', duration: 'Duration', cost: 'Cost' }) }),
+    hourOfWeek: Object.freeze({ title: 'Day and hour', sub: '30-minute usage buckets folded into the browser timezone.', loading: 'Loading hourly activity…', empty: 'No hourly activity in this range.', tokens: 'tokens', events: 'events', weekdays: Object.freeze(['Mon','Tue','Wed','Thu','Fri','Sat','Sun']) }),
+    logs: Object.freeze({ liveOnly: 'Event logs are available only in the live dashboard.', session: 'Session', clear: 'Clear', time: 'Time', source: 'Source', model: 'Model', tokens: 'Tokens', cost: 'Cost', project: 'Project', loading: 'Loading events…', empty: 'No events match these filters.', more: 'Load more', rawLoading: 'Loading raw record…', rawUnavailable: 'Raw record was not retained.' }),
+  }),
   sections: Object.freeze({
     trend: Object.freeze({
       kicker: 'Trends',
@@ -497,7 +507,7 @@ const SHELL_COPY_ZH = Object.freeze({
   'shell.crumb.local': '本地用量概览',
   'shell.tag.local': '仅本地',
   'shell.tag.snapshot': '离线文件',
-  'shell.btn.export': '导出 JSON',
+  'shell.btn.export': '导出 CSV',
   'shell.btn.sync': '同步',
   'shell.sync.idle': '待同步',
   'shell.sync.running': '同步中',
@@ -564,6 +574,9 @@ const SHELL_COPY_ZH = Object.freeze({
   'shell.nav.item.explorer': '切片分析',
   'shell.nav.item.cost': '成本估算',
   'shell.nav.item.status': '运行状态',
+  'shell.nav.item.logs': '事件日志',
+  'shell.logs.title': '事件日志',
+  'shell.logs.sub': '按游标分页查看本地标准化事件；展开行时按需读取原始记录。',
   'shell.endpoint.lastSync': '最近同步',
   'shell.filters.source': '来源',
   'shell.filters.allSources': '全部来源',
@@ -704,7 +717,7 @@ const SHELL_COPY_EN = Object.freeze({
   'shell.crumb.local': 'Local usage',
   'shell.tag.local': 'Local-only',
   'shell.tag.snapshot': 'Snapshot',
-  'shell.btn.export': 'Export JSON',
+  'shell.btn.export': 'Export CSV',
   'shell.btn.sync': 'Sync',
   'shell.sync.idle': 'Idle',
   'shell.sync.running': 'Syncing',
@@ -771,6 +784,9 @@ const SHELL_COPY_EN = Object.freeze({
   'shell.nav.item.explorer': 'Explorer',
   'shell.nav.item.cost': 'Cost',
   'shell.nav.item.status': 'Status',
+  'shell.nav.item.logs': 'Event logs',
+  'shell.logs.title': 'Event logs',
+  'shell.logs.sub': 'Cursor-paginated normalized events with raw records loaded on demand.',
   'shell.endpoint.lastSync': 'Last sync',
   'shell.filters.source': 'Source',
   'shell.filters.allSources': 'All sources',

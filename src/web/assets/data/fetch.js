@@ -202,6 +202,8 @@ export async function loadDashboardSnapshot(state, options = {}) {
       home_overview: snapshot?.home_overview ?? null,
       heatmap: snapshot?.heatmap ?? [],
       trends_daily: snapshot?.trends_daily ?? [],
+      top_sessions: snapshot?.top_sessions ?? [],
+      hour_of_week: snapshot?.hour_of_week ?? [],
     };
   }
 
@@ -247,6 +249,8 @@ export async function loadDashboardSnapshot(state, options = {}) {
     home_overview: snapshot?.home_overview ?? null,
     heatmap: snapshot?.heatmap ?? [],
     trends_daily: snapshot?.trends_daily ?? [],
+    top_sessions: snapshot?.top_sessions ?? [],
+    hour_of_week: snapshot?.hour_of_week ?? [],
   };
 }
 
@@ -343,6 +347,29 @@ export async function fetchTrendsDaily(state, options = {}) {
   return loadLiveJson(`/api/trends_daily${buildFilterQuery(state)}`, options);
 }
 
+export async function fetchTopSessions(state, options = {}) {
+  if (state.mode === 'snapshot') return (await ensureSnapshot(state))?.top_sessions ?? [];
+  const params = new URLSearchParams(buildFilterQuery(state).slice(1));
+  params.set('sort', options.sort || state.topSessionsSort || 'tokens');
+  params.set('limit', '10');
+  return loadLiveJson(`/api/sessions?${params}`, options);
+}
+
+export async function fetchHourOfWeek(state, options = {}) {
+  if (state.mode === 'snapshot') return (await ensureSnapshot(state))?.hour_of_week ?? [];
+  return loadLiveJson(`/api/hour_of_week${buildFilterQuery(state)}`, options);
+}
+
+export async function fetchLogs(state, options = {}) {
+  if (state.mode === 'snapshot') return { records: [], next_cursor: null };
+  const params = new URLSearchParams(buildFilterQuery(state).slice(1));
+  params.set('page_size', '50');
+  if (options.session) params.set('session', options.session);
+  if (options.cursor) params.set('cursor', options.cursor);
+  if (options.eventKey) params.set('event_key', options.eventKey);
+  return loadLiveJson(`/api/logs?${params}`, options);
+}
+
 export function loadDashboardSecondarySections(state, options = {}) {
   return {
     activity: () => loadOptionalSection(state, 'activity', '/api/activity', emptyActivity, options),
@@ -353,6 +380,8 @@ export function loadDashboardSecondarySections(state, options = {}) {
     home_overview: () => fetchHomeOverview(state, options),
     heatmap: () => fetchHeatmap(state, options),
     trends_daily: () => fetchTrendsDaily(state, options),
+    top_sessions: () => fetchTopSessions(state, options),
+    hour_of_week: () => fetchHourOfWeek(state, options),
   };
 }
 

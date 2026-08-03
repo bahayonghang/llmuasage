@@ -13,6 +13,9 @@ export {
   fetchHomeOverview,
   fetchHeatmap,
   fetchTrendsDaily,
+  fetchTopSessions,
+  fetchHourOfWeek,
+  fetchLogs,
   clearLiveRequestCache,
 } from './data/fetch.js';
 export {

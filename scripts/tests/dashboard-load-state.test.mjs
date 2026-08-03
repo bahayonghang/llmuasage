@@ -89,7 +89,7 @@ test('eight secondary loaders use concurrency two and all settle after one rejec
 
 test('ready-widget sections settle last and reject stale generations independently', () => {
   const readySections = ['home_overview', 'heatmap', 'trends_daily'];
-  assert.equal(SECONDARY_SECTIONS.length, 8);
+  assert.equal(SECONDARY_SECTIONS.length, 10);
   for (const target of readySections) {
     let state = reduceDashboardLoadState(createDashboardLoadState(12), {
       type: 'core_succeeded',
