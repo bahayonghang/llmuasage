@@ -4,9 +4,9 @@ use std::time::{Duration, Instant};
 #[cfg(test)]
 use rusqlite::OpenFlags;
 use rusqlite::{Connection, params_from_iter};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-use super::{Dashboard, DiagnosticsPayload, QueryFilter};
+use super::{Dashboard, DiagnosticsPayload, HomeOverviewSnapshot, QueryFilter};
 use crate::{error::Result, util::now_utc};
 #[cfg(test)]
 use crate::{paths::AppPaths, store::Store};
@@ -32,7 +32,7 @@ pub struct HomeOverviewPayload {
 }
 
 /// Compact totals for the ccr-ui home overview cards.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct HomeOverviewSummary {
     pub total_sessions: i64,
     pub total_requests: i64,
@@ -44,7 +44,7 @@ pub struct HomeOverviewSummary {
 }
 
 /// Per-platform home overview totals.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct HomeOverviewPlatformStats {
     pub sessions: i64,
     pub requests: i64,
@@ -99,6 +99,91 @@ pub(super) fn load(dashboard: &Dashboard, filter: &QueryFilter) -> Result<HomeOv
     load_inner(dashboard, filter, None).map(|(payload, _)| payload)
 }
 
+pub(super) fn load_compact(
+    dashboard: &Dashboard,
+    filter: &QueryFilter,
+) -> Result<HomeOverviewSnapshot> {
+    let sql_filter = filter.event_filter(None);
+    let local_date = filter.local_date_expr("event_at");
+    let sql = format!(
+        r#"
+        SELECT
+            source,
+            COALESCE(NULLIF(session_id, ''), NULLIF(source_path_hash, ''), event_key),
+            {local_date},
+            input_tokens,
+            cache_creation_tokens,
+            cache_read_tokens,
+            total_tokens,
+            cost_with_cache_usd
+        FROM usage_event
+        {}
+        "#,
+        sql_filter.where_sql()
+    );
+    let mut stmt = dashboard.conn.prepare(&sql)?;
+    let mut rows = stmt.query(params_from_iter(sql_filter.params().iter()))?;
+    let mut platforms: HashMap<String, CompactPlatformAggregate> = HashMap::new();
+    let mut active_days = HashSet::new();
+    let mut summary = HomeOverviewSummary::default();
+    let mut input_tokens = 0;
+    let mut cache_creation_tokens = 0;
+    let mut cache_read_tokens = 0;
+
+    while let Some(row) = rows.next()? {
+        let source: String = row.get(0)?;
+        let identity: String = row.get(1)?;
+        active_days.insert(row.get::<_, String>(2)?);
+        input_tokens += row.get::<_, i64>(3)?;
+        cache_creation_tokens += row.get::<_, i64>(4)?;
+        cache_read_tokens += row.get::<_, i64>(5)?;
+        let tokens = row.get::<_, i64>(6)?;
+        summary.total_requests += 1;
+        summary.total_tokens += tokens;
+        summary.total_cost_usd += row.get::<_, f64>(7)?;
+
+        let platform = platforms.entry(source).or_default();
+        platform.sessions.insert(identity);
+        platform.requests += 1;
+        platform.tokens += tokens;
+    }
+
+    summary.total_sessions = platforms
+        .values()
+        .map(|platform| platform.sessions.len() as i64)
+        .sum();
+    summary.active_days = active_days.len() as i64;
+    summary.platforms = platforms.len() as i64;
+    let cache_denominator = input_tokens + cache_creation_tokens + cache_read_tokens;
+    if cache_denominator != 0 {
+        summary.cache_efficiency = cache_read_tokens as f64 / cache_denominator as f64;
+    }
+
+    let mut by_platform = default_platform_map();
+    for (source, aggregate) in platforms {
+        by_platform.insert(
+            source,
+            HomeOverviewPlatformStats {
+                sessions: aggregate.sessions.len() as i64,
+                requests: aggregate.requests,
+                tokens: aggregate.tokens,
+            },
+        );
+    }
+
+    Ok(HomeOverviewSnapshot {
+        summary,
+        by_platform,
+    })
+}
+
+#[derive(Default)]
+struct CompactPlatformAggregate {
+    sessions: HashSet<String>,
+    requests: i64,
+    tokens: i64,
+}
+
 #[cfg(test)]
 pub(super) fn load_profile(
     dashboard: &Dashboard,
@@ -120,6 +205,7 @@ pub(super) fn load_profile_read_only(
     let paths = AppPaths::with_root(root)?;
     let store = Store::new(&paths)?;
     let conn = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    super::timezone::register_functions(&conn)?;
     let dashboard = Dashboard { store, conn };
     load_profile(&dashboard, filter)
 }

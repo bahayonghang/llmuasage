@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use chrono::{Duration, SecondsFormat, Utc};
 use rusqlite::{Connection, OptionalExtension, params_from_iter};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     domain::source_descriptor::registered_source_descriptors,
@@ -131,7 +131,7 @@ pub struct ContextPressurePayload {
 ///
 /// Output tokens include reasoning tokens (D9): the API surface ccr-ui
 /// consumes intentionally collapses output + reasoning into one number.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DailyTrendPoint {
     /// Local calendar date in `YYYY-MM-DD`, computed in [`QueryFilter::timezone`].
     pub date: String,
@@ -837,6 +837,19 @@ pub struct DashboardSnapshot {
     pub health: HealthPayload,
     /// Archive/source-file diagnostics plus recent failed run records.
     pub diagnostics: DiagnosticsPayload,
+    /// Compact home overview data used by the summary card row.
+    pub home_overview: Option<HomeOverviewSnapshot>,
+    /// Calendar activity for the most recent 366 days.
+    pub heatmap: Option<Vec<HeatmapPoint>>,
+    /// Per-day token breakdown used by the stacked daily chart.
+    pub trends_daily: Option<Vec<DailyTrendPoint>>,
+}
+
+/// Snapshot-only projection of [`HomeOverviewPayload`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HomeOverviewSnapshot {
+    pub summary: HomeOverviewSummary,
+    pub by_platform: BTreeMap<String, HomeOverviewPlatformStats>,
 }
 
 /// Dashboard snapshot core sections that must stay responsive even when
@@ -2987,6 +3000,12 @@ impl Dashboard {
         home_overview::load(self, filter)
     }
 
+    /// Loads the summary-card projection without the full overview's series,
+    /// run-state, or diagnostics work.
+    pub fn home_overview_compact(&self, filter: &QueryFilter) -> Result<HomeOverviewSnapshot> {
+        home_overview::load_compact(self, filter)
+    }
+
     /// Loads per-source archive diagnostics (F4.4 / F5.3).
     ///
     /// Reads the `source_file` state-machine counts plus
@@ -3010,10 +3029,10 @@ impl Dashboard {
         })
     }
 
-    /// Loads a `days`-day activity heatmap (F4.3) ending today in
-    /// [`QueryFilter::timezone`]. Days without activity are zero-filled so
-    /// the caller renders a continuous grid; values are clamped to a
-    /// 1..=366 window to bound the query.
+    /// Loads a `days`-day activity heatmap (F4.3) ending at the explicit
+    /// [`QueryFilter::until`] date, or today in [`QueryFilter::timezone`]
+    /// when the filter has no upper bound. Days without activity are
+    /// zero-filled; values are clamped to a 1..=366 window.
     pub fn heatmap(&self, filter: &QueryFilter, days: u32) -> Result<Vec<HeatmapPoint>> {
         heatmap::load(self, filter, days)
     }
@@ -3250,6 +3269,7 @@ impl Dashboard {
     /// exposes that contract.
     pub fn snapshot(&self, filter: &QueryFilter) -> Result<DashboardSnapshot> {
         let core = self.core_snapshot(filter)?;
+        let home_overview = self.home_overview_compact(filter)?;
         Ok(DashboardSnapshot {
             overview: core.overview,
             sync_command_center: core.sync_command_center,
@@ -3271,6 +3291,9 @@ impl Dashboard {
             })?,
             health: core.health,
             diagnostics: core.diagnostics,
+            home_overview: Some(home_overview),
+            heatmap: Some(self.heatmap(filter, 366)?),
+            trends_daily: Some(self.trends_daily(filter)?),
         })
     }
 
@@ -3896,11 +3919,13 @@ where
 mod tests {
     use anyhow::Result;
 
-    use chrono::{FixedOffset, NaiveDate};
+    use chrono::NaiveDate;
     use rusqlite::Connection;
+    use serde::Deserialize;
 
     use super::{
-        Dashboard, QueryFilter, ReportTimezone, context_pressure_event_filter, home_overview,
+        DailyTrendPoint, Dashboard, HeatmapPoint, HomeOverviewSnapshot, QueryFilter,
+        ReportTimezone, context_pressure_event_filter, home_overview,
     };
     use crate::{
         models::SourceKind,
@@ -3909,6 +3934,45 @@ mod tests {
     };
 
     const EPSILON: f64 = 1e-9;
+
+    fn assert_home_overview_projection_equivalent(
+        compact: &HomeOverviewSnapshot,
+        full: &home_overview::HomeOverviewPayload,
+    ) -> Result<()> {
+        assert_eq!(compact.summary.total_sessions, full.summary.total_sessions);
+        assert_eq!(compact.summary.total_requests, full.summary.total_requests);
+        assert_eq!(compact.summary.total_tokens, full.summary.total_tokens);
+        assert_eq!(compact.summary.active_days, full.summary.active_days);
+        assert_eq!(compact.summary.platforms, full.summary.platforms);
+        assert!(
+            (compact.summary.total_cost_usd - full.summary.total_cost_usd).abs() <= EPSILON,
+            "compact/full total cost delta exceeded {EPSILON}: compact={} full={}",
+            compact.summary.total_cost_usd,
+            full.summary.total_cost_usd
+        );
+        assert!(
+            (compact.summary.cache_efficiency - full.summary.cache_efficiency).abs() <= EPSILON,
+            "compact/full cache efficiency delta exceeded {EPSILON}: compact={} full={}",
+            compact.summary.cache_efficiency,
+            full.summary.cache_efficiency
+        );
+        assert_eq!(
+            serde_json::to_value(&compact.by_platform)?,
+            serde_json::to_value(&full.by_platform)?,
+            "compact/full platform keys and integer aggregates must match exactly"
+        );
+        Ok(())
+    }
+
+    #[derive(Deserialize)]
+    struct ReadyWidgetsSnapshotCompatibility {
+        #[serde(default)]
+        home_overview: Option<HomeOverviewSnapshot>,
+        #[serde(default)]
+        heatmap: Option<Vec<HeatmapPoint>>,
+        #[serde(default)]
+        trends_daily: Option<Vec<DailyTrendPoint>>,
+    }
 
     #[test]
     fn diagnostics_counts_protected_events_from_aggregate_projection() -> Result<()> {
@@ -3994,6 +4058,16 @@ mod tests {
             serde_json::to_value(&snapshot.health)?,
             serde_json::to_value(dashboard.health()?)?
         );
+        let serialized = serde_json::to_value(&snapshot)?;
+        assert!(serialized.get("home_overview").is_some());
+        assert!(serialized.get("heatmap").is_some());
+        assert!(serialized.get("trends_daily").is_some());
+
+        let old_snapshot: ReadyWidgetsSnapshotCompatibility =
+            serde_json::from_str(r#"{"overview":{}}"#)?;
+        assert!(old_snapshot.home_overview.is_none());
+        assert!(old_snapshot.heatmap.is_none());
+        assert!(old_snapshot.trends_daily.is_none());
 
         assert!(snapshot.overview.bucket_count >= 180);
         assert_eq!(snapshot.sources.len(), 3);
@@ -5632,6 +5706,44 @@ mod tests {
         assert_eq!(last_date, today_local.format("%Y-%m-%d").to_string());
         Ok(())
     }
+
+    #[test]
+    fn heatmap_uses_explicit_until_as_the_calendar_window_end() -> Result<()> {
+        let fixture = Fixture::new()?;
+        let conn = fixture.store().open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_bucket_30m(
+                source, model, hour_start, project_hash, project_label, project_ref,
+                input_tokens, cache_read_tokens, cache_creation_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens, event_count, updated_at
+            )
+            VALUES ('codex', 'gpt-5', '2024-02-10T08:00:00Z', '', NULL, NULL,
+                    42, 0, 0, 0, 0, 42, 1, '2024-02-10T08:00:00Z')
+            "#,
+            [],
+        )?;
+        drop(conn);
+
+        let historical_day = NaiveDate::from_ymd_opt(2024, 2, 10).expect("valid date");
+        let filter = QueryFilter {
+            since: historical_day.checked_sub_days(chrono::Days::new(2)),
+            until: Some(historical_day),
+            timezone: ReportTimezone::Utc,
+            ..Default::default()
+        };
+        let rows = Dashboard::open(fixture.store())?.heatmap(&filter, 3)?;
+
+        assert_eq!(rows.len(), 3);
+        assert_eq!(
+            rows.first().map(|row| row.date.as_str()),
+            Some("2024-02-08")
+        );
+        assert_eq!(rows.last().map(|row| row.date.as_str()), Some("2024-02-10"));
+        assert_eq!(rows.last().map(|row| row.total_tokens), Some(42));
+        Ok(())
+    }
+
     #[test]
     fn trends_daily_groups_by_local_date_with_timezone() -> Result<()> {
         let fixture = Fixture::new()?;
@@ -6109,17 +6221,18 @@ mod tests {
         )?;
 
         let dashboard = Dashboard::open(fixture.store())?;
-        let utc_plus_eight = FixedOffset::east_opt(8 * 60 * 60).expect("valid offset");
         let all_filter = QueryFilter {
-            timezone: ReportTimezone::Fixed(utc_plus_eight),
+            timezone: ReportTimezone::Iana(chrono_tz::Asia::Shanghai),
             ..Default::default()
         };
         let payload = dashboard.home_overview(&all_filter)?;
+        let compact = dashboard.home_overview_compact(&all_filter)?;
         let (profiled_payload, _) = home_overview::load_profile(&dashboard, &all_filter)?;
         assert_eq!(
             serde_json::to_value(&payload)?,
             serde_json::to_value(&profiled_payload)?
         );
+        assert_home_overview_projection_equivalent(&compact, &payload)?;
         assert_eq!(payload.summary.total_sessions, 3);
         assert_eq!(payload.summary.total_requests, 4);
         assert_eq!(payload.summary.total_tokens, 100);
@@ -6139,14 +6252,17 @@ mod tests {
         assert!(payload.bootstrap.is_warm);
         assert_eq!(payload.last_updated, "2026-04-03T00:01:00Z");
 
-        let filtered = dashboard.home_overview(&QueryFilter {
+        let filtered_filter = QueryFilter {
             source: Some(SourceKind::Codex),
             model: Some("gpt-5".to_string()),
             project_hash: Some("project-a".to_string()),
             since: Some(NaiveDate::from_ymd_opt(2026, 4, 2).expect("valid date")),
             until: Some(NaiveDate::from_ymd_opt(2026, 4, 2).expect("valid date")),
-            timezone: ReportTimezone::Fixed(utc_plus_eight),
-        })?;
+            timezone: ReportTimezone::Iana(chrono_tz::Asia::Shanghai),
+        };
+        let filtered = dashboard.home_overview(&filtered_filter)?;
+        let filtered_compact = dashboard.home_overview_compact(&filtered_filter)?;
+        assert_home_overview_projection_equivalent(&filtered_compact, &filtered)?;
         assert_eq!(filtered.summary.total_sessions, 1);
         assert_eq!(filtered.summary.total_requests, 2);
         assert_eq!(filtered.summary.total_tokens, 30);
