@@ -280,3 +280,77 @@ import { panelFingerprint } from './data/render-key.js';
 
 The implementation can retain domain-accurate internal symbol names; the compatibility boundary
 is the browser-visible URL that client filters evaluate before module execution.
+
+## Scenario: Embedded dashboard asset manifest
+
+### 1. Scope / Trigger
+
+- Apply this contract when adding, removing, or renaming a browser asset under
+  `src/web/assets/`, or changing an ES module import used by live or snapshot
+  dashboards.
+
+### 2. Signatures
+
+```text
+ASSET_MANIFEST: [WebAsset; N]
+GET /assets/<manifest path> -> embedded body + declared MIME type
+export html -> assets/<manifest path>
+```
+
+### 3. Contracts
+
+- Every browser-visible asset is registered exactly once in `ASSET_MANIFEST`.
+  The Rust array length `N` equals the actual entry count; it is not a loose
+  capacity or a stale historical number.
+- Live serving and `export html` iterate the same manifest, so an asset cannot
+  exist only in one mode. New modules keep their relative import path identical
+  in the served and exported directory trees.
+- Manifest entries declare the correct JavaScript or CSS MIME type. Removing or
+  renaming a path updates all imports and does not leave a compatibility alias
+  unless a separate public contract explicitly requires one.
+- Asset edits preserve the established module exports consumed by Node tests,
+  including dashboard fetch, load-state, and render lifecycle helpers.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| File exists but is absent from manifest | Fail the manifest inventory test |
+| Manifest path has no source file | Fail before archive; live/export must not diverge |
+| Array length differs from entry count | Rust compile failure or exact-count test failure |
+| New module imports another embedded module | Relative path resolves in both live and export trees |
+| Removed browser-visible path is requested | 404 unless an explicit compatibility contract exists |
+
+### 5. Good/Base/Bad Cases
+
+- Good: add four analytics modules, register all four, update `[WebAsset; 29]`
+  to `[WebAsset; 33]`, and extend the exact inventory assertion.
+- Base: edit an existing asset body without changing its manifest entry or
+  browser-visible path.
+- Bad: add a renderer that works from the source checkout but is missing from
+  the embedded/export manifest, or update `N` without updating the inventory
+  test.
+
+### 6. Tests Required
+
+- Rust tests compare manifest paths with the expected inventory, assert unique
+  paths and MIME types, and fetch newly added assets through the live router.
+- `export html` integration coverage asserts representative nested assets are
+  written beside `index.html` and `snapshot.json`.
+- Node syntax and module tests import the real manifest-backed files. Run
+  `just ci` after any inventory change.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+create assets/render/new-panel.js -> import it from app.js -> forget ASSET_MANIFEST
+```
+
+#### Correct
+
+```text
+create module -> register path/body/MIME -> update exact N and inventory test
+-> verify live route + export tree + Node import
+```

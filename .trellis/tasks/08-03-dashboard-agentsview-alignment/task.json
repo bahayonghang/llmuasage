@@ -1,0 +1,31 @@
+{
+  "id": "dashboard-agentsview-alignment",
+  "name": "dashboard-agentsview-alignment",
+  "title": "看板对齐 AgentsView：功能补齐与视觉重构（父任务）",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-08-03",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-03-dashboard-visual-system",
+    "08-03-dashboard-ready-widgets",
+    "08-03-dashboard-session-analytics",
+    "08-03-dashboard-timezone-iana"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
