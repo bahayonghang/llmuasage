@@ -127,6 +127,12 @@ export function buildFilterQuery(state, options = {}) {
       params.set(key, value);
     }
   }
+  if (!params.has('timezone')) {
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (timezone) {
+      params.set('timezone', timezone);
+    }
+  }
 
   const query = params.toString();
   return query ? `?${query}` : '';

@@ -1,4 +1,5 @@
 use chrono::{DateTime, FixedOffset, NaiveDate, Offset, SecondsFormat, Utc};
+use chrono_tz::Tz;
 use rusqlite::types::Value;
 
 use crate::{models::SourceKind, query::timezone::ResolvedZone};
@@ -15,6 +16,8 @@ pub enum ReportTimezone {
     Local,
     /// Interpret dates with a caller-provided fixed offset.
     Fixed(FixedOffset),
+    /// Interpret dates with a caller-provided IANA timezone and its DST rules.
+    Iana(Tz),
 }
 
 /// Stable read-side filter accepted by dashboard and ccr-ui integration APIs.
@@ -166,6 +169,7 @@ impl ReportTimezone {
             Self::Utc => ResolvedZone::Fixed(Utc.fix()),
             Self::Local => ResolvedZone::local(),
             Self::Fixed(offset) => ResolvedZone::Fixed(*offset),
+            Self::Iana(tz) => ResolvedZone::Iana(*tz),
         }
     }
 }

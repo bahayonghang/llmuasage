@@ -1,4 +1,4 @@
-use chrono::{Duration, Local, NaiveDate, SecondsFormat, Utc};
+use chrono::{Duration, NaiveDate, SecondsFormat, Utc};
 use rusqlite::{Connection, params_from_iter};
 use serde::Serialize;
 
@@ -97,10 +97,5 @@ fn load_observed(
 }
 
 fn today_in(timezone: &ReportTimezone) -> NaiveDate {
-    let utc = Utc::now();
-    match timezone {
-        ReportTimezone::Utc => utc.date_naive(),
-        ReportTimezone::Local => Local::now().date_naive(),
-        ReportTimezone::Fixed(offset) => utc.with_timezone(offset).date_naive(),
-    }
+    timezone.date_at(Utc::now())
 }

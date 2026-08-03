@@ -23,6 +23,40 @@ function abortError() {
 }
 
 test('live dashboard request lifecycle', async (t) => {
+  await t.test('adds the browser IANA timezone unless an explicit timezone is set', async () => {
+    dashboardFetch.clearLiveRequestCache();
+    const originalIntl = globalThis.Intl;
+    globalThis.Intl = {
+      ...originalIntl,
+      DateTimeFormat: () => ({ resolvedOptions: () => ({ timeZone: 'America/New_York' }) }),
+    };
+    const paths = [];
+    globalThis.fetch = async (path) => {
+      paths.push(path);
+      return response({});
+    };
+
+    try {
+      const state = { mode: 'live', rangePreset: '7d', trendWindow: 'week', filters: {} };
+      await dashboardFetch.loadDashboardInteractiveSnapshot(state);
+      assert.equal(
+        new URL(paths[0], window.location.origin).searchParams.get('timezone'),
+        'America/New_York',
+      );
+
+      dashboardFetch.clearLiveRequestCache();
+      await dashboardFetch.loadDashboardInteractiveSnapshot({
+        ...state,
+        filters: { timezone: 'UTC+8' },
+      });
+      assert.equal(
+        new URL(paths[1], window.location.origin).searchParams.get('timezone'),
+        'UTC+8',
+      );
+    } finally {
+      globalThis.Intl = originalIntl;
+    }
+  });
   await t.test('interactive bootstrap failure does not fan out to legacy endpoints', async () => {
     dashboardFetch.clearLiveRequestCache();
     const paths = [];

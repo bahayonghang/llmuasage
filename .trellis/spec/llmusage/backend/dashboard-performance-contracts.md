@@ -526,3 +526,72 @@ query, delayed work, platform exception, or threshold relaxation is allowed.
 The first query uses the aggregate projection. The second runs once per
 returned source, preserves exact fact semantics, and can use
 `idx_usage_event_source_event_at`.
+
+## Scenario: Browser IANA timezone queries
+
+### 1. Scope / Trigger
+
+- Apply this contract when a Dashboard HTTP query, browser request builder, or
+  date-grouped query changes timezone handling.
+- This is additive to the existing UTC, local, and fixed-offset behavior.
+
+### 2. Signatures
+
+```text
+GET /api/<dashboard-endpoint>?timezone=<IANA name|UTC|local|fixed offset>
+ReportTimezone::Iana(chrono_tz::Tz)
+buildFilterQuery(state, options) -> query string
+```
+
+### 3. Contracts
+
+- HTTP parsing order is UTC/`Z`, `local`, fixed offset, IANA name, then the
+  legacy `Local` fallback for an unknown or omitted value.
+- Live browser requests add
+  `Intl.DateTimeFormat().resolvedOptions().timeZone` unless `filters.timezone`
+  already supplies a value. Static snapshots do not require a live timezone.
+- IANA date bounds, labels, heatmaps, and daily groupings use the historical
+  offset for each instant, including daylight-saving transitions.
+- Existing exports from `data/fetch.js` and existing UTC/local/fixed-offset SQL
+  behavior remain unchanged.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Canonical IANA name | Use `ResolvedZone::Iana` with historical DST rules |
+| Explicit browser timezone filter | Preserve it instead of auto-detecting |
+| `UTC`, `Z`, `local`, or fixed offset | Preserve the existing parse path |
+| Unknown or omitted HTTP value | Fall back to `Local` without a request error |
+| Browser cannot resolve a timezone | Omit the automatic parameter |
+
+### 5. Good/Base/Bad Cases
+
+- Good: `timezone=America/New_York` groups winter and summer instants with the
+  offsets active on those dates.
+- Base: `timezone=UTC+8` produces the same date bounds as before.
+- Bad: treating an IANA zone as one current fixed offset, or replacing an
+  explicit timezone with the browser default.
+
+### 6. Tests Required
+
+- Rust parser tests cover Shanghai, New York, UTC/`Z`, local, fixed offset, and
+  unknown-name fallback.
+- At least one HTTP date-grouping endpoint proves a no-DST boundary and a DST
+  boundary.
+- Node request tests prove automatic IANA propagation and explicit override.
+- Run `just ci` before completion.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+IANA name -> current numeric offset -> all historical dates
+```
+
+#### Correct
+
+```text
+IANA name -> ReportTimezone::Iana -> ResolvedZone::Iana -> per-instant offset
+```

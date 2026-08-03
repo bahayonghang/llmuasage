@@ -18,6 +18,7 @@ use axum::{
     routing::{get, post},
 };
 use chrono::{FixedOffset, NaiveDate};
+use chrono_tz::Tz;
 use rusqlite::InterruptHandle;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -1852,6 +1853,11 @@ fn query_date(params: &HashMap<String, String>, key: &str) -> Option<NaiveDate> 
         .and_then(|raw| NaiveDate::parse_from_str(raw.trim(), "%Y-%m-%d").ok())
 }
 
+/// Parses an HTTP dashboard timezone while preserving the legacy fallback.
+///
+/// Unknown names remain `Local` rather than making previously accepted query
+/// strings fail. Fixed offsets are checked before IANA names so their existing
+/// parsing behavior remains unchanged.
 fn query_timezone(value: Option<&String>) -> crate::query::ReportTimezone {
     let Some(raw) = value
         .map(|value| value.trim())
@@ -1865,8 +1871,11 @@ fn query_timezone(value: Option<&String>) -> crate::query::ReportTimezone {
     if raw.eq_ignore_ascii_case("local") {
         return crate::query::ReportTimezone::Local;
     }
-    parse_fixed_offset(raw)
-        .map(crate::query::ReportTimezone::Fixed)
+    if let Some(offset) = parse_fixed_offset(raw) {
+        return crate::query::ReportTimezone::Fixed(offset);
+    }
+    raw.parse::<Tz>()
+        .map(crate::query::ReportTimezone::Iana)
         .unwrap_or(crate::query::ReportTimezone::Local)
 }
 
@@ -2005,7 +2014,7 @@ mod tests {
         body::to_bytes,
         http::{HeaderMap, HeaderValue, StatusCode, header},
     };
-    use chrono::{Duration as ChronoDuration, SecondsFormat, Utc};
+    use chrono::{Duration as ChronoDuration, FixedOffset, SecondsFormat, Utc};
     use serde_json::json;
     use tempfile::TempDir;
 
@@ -2027,7 +2036,7 @@ mod tests {
         WEB_API_TIMEOUT, WEB_BEHAVIOR_API_TIMEOUT, WEB_READ_BUSY_TIMEOUT, WebState, WriteExposure,
         api_json, asset_manifest, bind_server, live_index_html, load_behavior_api,
         load_diagnostics_cached, load_via_dashboard, load_via_dashboard_with_timeout,
-        public_dashboard_filter_from_params, serve, serve_on, server_task_result,
+        public_dashboard_filter_from_params, query_timezone, serve, serve_on, server_task_result,
         snapshot_index_html,
     };
 
@@ -2037,6 +2046,38 @@ mod tests {
         let store = Store::new(&paths)?;
         store.bootstrap()?;
         Ok((temp, store))
+    }
+
+    #[test]
+    fn query_timezone_accepts_iana_and_preserves_legacy_fallbacks() {
+        use crate::query::ReportTimezone;
+
+        assert_eq!(
+            query_timezone(Some(&"Asia/Shanghai".to_string())),
+            ReportTimezone::Iana(chrono_tz::Asia::Shanghai)
+        );
+        assert_eq!(
+            query_timezone(Some(&"America/New_York".to_string())),
+            ReportTimezone::Iana(chrono_tz::America::New_York)
+        );
+        assert_eq!(
+            query_timezone(Some(&"UTC+8".to_string())),
+            ReportTimezone::Fixed(FixedOffset::east_opt(8 * 3_600).unwrap())
+        );
+        assert_eq!(
+            query_timezone(Some(&"utc".to_string())),
+            ReportTimezone::Utc
+        );
+        assert_eq!(query_timezone(Some(&"Z".to_string())), ReportTimezone::Utc);
+        assert_eq!(
+            query_timezone(Some(&"local".to_string())),
+            ReportTimezone::Local
+        );
+        assert_eq!(
+            query_timezone(Some(&"Not/AZone".to_string())),
+            ReportTimezone::Local
+        );
+        assert_eq!(query_timezone(None), ReportTimezone::Local);
     }
 
     struct ImmediateExecutor;
@@ -4202,6 +4243,67 @@ mod tests {
         assert_eq!(first["date"], "2026-05-01");
         assert_eq!(first["event_count"], 1);
         assert_eq!(first["cost_with_cache_usd"], 0.25);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn api_trends_daily_groups_by_iana_timezone_with_dst_rules() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let conn = store.open_connection()?;
+        for hour_start in [
+            "2026-01-15T04:30:00Z",
+            "2026-04-04T16:00:00Z",
+            "2026-07-15T04:30:00Z",
+        ] {
+            conn.execute(
+                r#"
+                INSERT INTO usage_bucket_30m(
+                    source, model, hour_start, project_hash, project_label, project_ref,
+                    input_tokens, cache_read_tokens, cache_creation_tokens,
+                    output_tokens, reasoning_output_tokens, total_tokens,
+                    cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source,
+                    event_count, updated_at
+                )
+                VALUES ('codex', 'gpt-5', ?1, '', NULL, NULL,
+                        10, 0, 0, 0, 0, 10, 0.1, 0.1, 'static', 'static-v1', 1, ?1)
+                "#,
+                [hour_start],
+            )?;
+        }
+        drop(conn);
+
+        let addr = serve(store, Some(0)).await?;
+        let (shanghai_status, shanghai) = route_json(
+            addr,
+            "GET",
+            "/api/trends_daily?timezone=Asia%2FShanghai",
+            None,
+        )
+        .await?;
+        assert_eq!(shanghai_status, StatusCode::OK);
+        let shanghai_dates = shanghai
+            .as_array()
+            .expect("Shanghai trend rows")
+            .iter()
+            .map(|row| row["date"].as_str().expect("date"))
+            .collect::<Vec<_>>();
+        assert_eq!(shanghai_dates, ["2026-01-15", "2026-04-05", "2026-07-15"]);
+
+        let (new_york_status, new_york) = route_json(
+            addr,
+            "GET",
+            "/api/trends_daily?timezone=America%2FNew_York",
+            None,
+        )
+        .await?;
+        assert_eq!(new_york_status, StatusCode::OK);
+        let new_york_dates = new_york
+            .as_array()
+            .expect("New York trend rows")
+            .iter()
+            .map(|row| row["date"].as_str().expect("date"))
+            .collect::<Vec<_>>();
+        assert_eq!(new_york_dates, ["2026-01-14", "2026-04-04", "2026-07-15"]);
         Ok(())
     }
 
