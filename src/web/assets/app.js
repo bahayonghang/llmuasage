@@ -35,6 +35,9 @@ import {
   renderTools,
 } from './render/behavior.js';
 import { renderExplorer } from './render/explorer.js';
+import { renderSummaryCards } from './render/summary-cards.js';
+import { renderCalendarHeatmap } from './render/calendar-heatmap.js';
+import { renderTrendsDaily } from './render/trends-daily.js';
 import { applyDomI18n, bindI18nDomSync } from './i18n.js';
 import { initTheme, toggleTheme } from './theme.js';
 import { setRenderer, setRuntimeState } from './runtime.js';
@@ -296,6 +299,9 @@ const SECONDARY_SECTION_RENDERERS = {
   tools: renderTools,
   optimize: renderOptimize,
   compare: renderCompare,
+  home_overview: renderSummaryCards,
+  heatmap: renderCalendarHeatmap,
+  trends_daily: renderTrendsDaily,
 };
 
 function secondaryPanelOptions(rawData) {
@@ -309,7 +315,7 @@ function renderBehaviorSections(rawData) {
   const options = secondaryPanelOptions(rawData);
   for (const [section, renderer] of Object.entries(SECONDARY_SECTION_RENDERERS)) {
     // 先算指纹、脏才 buildContext：数据未变时整条链零派生、零 DOM 写入
-    renderPanel(section, panelFingerprint(section, rawData, options), () => renderer(buildContext(rawData)));
+    renderPanel(section, panelFingerprint(section, rawData, options), () => renderer(buildContext(rawData), dashboardState));
   }
 }
 
@@ -321,6 +327,9 @@ function secondaryLoadingPayload(section) {
     case 'optimize': return { support, findings: [], score: null, grade: null };
     case 'explorer': return { support, rows: [], series: [], totals: { value: 0 } };
     case 'compare': return { support, candidates: [], metrics: [], working_style: [] };
+    case 'home_overview': return { support, summary: null, by_platform: {} };
+    case 'heatmap': return { support, rows: [] };
+    case 'trends_daily': return { support, rows: [] };
     default: return { support };
   }
 }
@@ -501,7 +510,7 @@ function renderSecondarySection(section, rawData) {
   }
   const renderer = SECONDARY_SECTION_RENDERERS[section];
   if (!renderer) return;
-  renderPanel(section, panelFingerprint(section, rawData, secondaryPanelOptions(rawData)), () => renderer(buildContext(rawData)));
+  renderPanel(section, panelFingerprint(section, rawData, secondaryPanelOptions(rawData)), () => renderer(buildContext(rawData), dashboardState));
 }
 
 function isAbortError(error) {

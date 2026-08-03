@@ -231,8 +231,12 @@ fn html_shell(mode: &str) -> String {
         </div>
       </div>
 
-      <!-- KPI cards -->
-      <div class="kpi-grid" id="kpi-grid"></div>
+      <div class="summary-cards" id="summary-cards" aria-live="polite"></div>
+
+      <div class="ready-widgets-grid dash-grid">
+        <div class="panel ready-widget-panel wide" id="calendar-heatmap" aria-live="polite"></div>
+        <div class="panel ready-widget-panel wide" id="trends-daily" aria-live="polite"></div>
+      </div>
 
       <div class="sync-command-center" id="sync-command-center" aria-live="polite">
         <div class="sync-command-center-empty">

@@ -10,6 +10,9 @@ export {
   buildFilterQuery,
   buildExplorerQuery,
   loadExplorer,
+  fetchHomeOverview,
+  fetchHeatmap,
+  fetchTrendsDaily,
   clearLiveRequestCache,
 } from './data/fetch.js';
 export {

@@ -108,3 +108,93 @@
   font-size: 10px;
   pointer-events: none;
 }
+
+
+.heatmap-scroll,
+.daily-chart-scroll {
+  width: 100%;
+  margin-top: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.calendar-heatmap-svg,
+.daily-chart {
+  display: block;
+  max-width: none;
+}
+
+.heatmap-axis,
+.daily-axis {
+  fill: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0;
+}
+
+.hm-cell {
+  cursor: pointer;
+  outline: none;
+}
+
+.hm-cell.selected {
+  stroke: var(--text-primary);
+  stroke-width: 2;
+}
+
+.hm-l0 { fill: var(--hm-l0); background: var(--hm-l0); }
+.hm-l1 { fill: var(--hm-l1); background: var(--hm-l1); }
+.hm-l2 { fill: var(--hm-l2); background: var(--hm-l2); }
+.hm-l3 { fill: var(--hm-l3); background: var(--hm-l3); }
+.hm-l4 { fill: var(--hm-l4); background: var(--hm-l4); }
+
+.heatmap-scale {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  min-height: 16px;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.hm-key {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+
+.daily-grid {
+  stroke: color-mix(in oklab, var(--ink) 10%, transparent);
+  stroke-dasharray: 2 4;
+  vector-effect: non-scaling-stroke;
+}
+
+.daily-series-0 { fill: var(--chart-cat-1); background: var(--chart-cat-1); }
+.daily-series-1 { fill: var(--chart-cat-2); background: var(--chart-cat-2); }
+.daily-series-2 { fill: var(--chart-cat-3); background: var(--chart-cat-3); }
+.daily-series-3 { fill: var(--chart-cat-4); background: var(--chart-cat-4); }
+
+.daily-legend-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.daily-legend-row span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.daily-legend {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}

@@ -38,6 +38,9 @@ const PANEL_DATA_KEYS = Object.freeze({
   optimize: Object.freeze(['optimize']),
   compare: Object.freeze(['compare']),
   explorer: Object.freeze(['explorer']),
+  home_overview: Object.freeze(['home_overview']),
+  heatmap: Object.freeze(['heatmap']),
+  trends_daily: Object.freeze(['trends_daily']),
 });
 
 // key 排序的稳定序列化：相同语义内容必得相同字符串，与对象键序无关。

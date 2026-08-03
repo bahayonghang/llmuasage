@@ -1,4 +1,4 @@
-export const SECONDARY_SECTIONS = Object.freeze(['activity', 'tools', 'optimize', 'explorer', 'compare']);
+export const SECONDARY_SECTIONS = Object.freeze(['activity', 'tools', 'optimize', 'explorer', 'compare', 'home_overview', 'heatmap', 'trends_daily']);
 export const CORE_SLOW_MS = 2000;
 export const CORE_TIMEOUT_MS = 6000;
 

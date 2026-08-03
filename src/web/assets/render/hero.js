@@ -1,6 +1,5 @@
 import { UI_COPY } from '../copy.js';
 import { escapeHtml, formatNumber } from '../data.js';
-import { buildKpis } from '../data/derive.js';
 
 const logger = window.console;
 const STATUS_PANEL_MOBILE_QUERY = '(max-width: 720px)';
@@ -44,8 +43,7 @@ function supportedSourcesLabel() {
  * 目标：
  * 1) 填充 hero-meta（生成时间、最近同步、来源数）
  * 2) 填充右侧 status-panel（运行概览卡）
- * 3) 填充 4 张 KPI 卡
- * 4) 文案统一从 UI_COPY 取，不在渲染层散落硬编码字符串
+ * 3) 文案统一从 UI_COPY 取，不在渲染层散落硬编码字符串
  */
 export function renderHero(context) {
   logger.info('开始渲染首屏 hero 区');
@@ -102,23 +100,6 @@ export function renderHero(context) {
     </details>
   `;
   ensureStatusPanelResponsive();
-
-  // 1.3 填充 4 张 KPI 卡
-  const kpis = buildKpis(context);
-
-  document.getElementById('kpi-grid').innerHTML = kpis
-    .map(
-      (kpi) => `
-      <div class="kpi${kpi.featured ? ' featured' : ''}">
-        <div class="kpi-label">${escapeHtml(kpi.label)}</div>
-        <div class="kpi-value num">${escapeHtml(kpi.value)}<span class="unit">${escapeHtml(kpi.unit)}</span></div>
-        <div class="kpi-foot">
-          ${kpi.foot.map((line) => `<span>${escapeHtml(line.label)} · <strong class="num">${escapeHtml(line.value)}</strong></span>`).join('')}
-        </div>
-      </div>
-    `,
-    )
-    .join('');
 
   const endpointHost = document.getElementById('endpoint-host');
   if (endpointHost) {

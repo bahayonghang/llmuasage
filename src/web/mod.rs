@@ -1035,6 +1035,15 @@ async fn api_home_overview(
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
     let filter = dashboard_filter_from_params(&params);
+    if parse_bool_query(params.get("compact")) {
+        return api_json_async(
+            "/api/home_overview",
+            load_via_dashboard(state, "home-overview", move |d| {
+                d.home_overview_compact(&filter)
+            }),
+        )
+        .await;
+    }
     api_json_async(
         "/api/home_overview",
         load_via_dashboard(state, "home-overview", move |d| d.home_overview(&filter)),
@@ -2026,7 +2035,7 @@ mod tests {
         query::{diagnostics_stat_calls, reset_diagnostics_stat_counter},
         store::Store,
         sync::{JobRegistry, JobStatus, SyncExecutor, SyncOptions, SyncRunOptions, SyncSummary},
-        testing::Fixture,
+        testing::{Fixture, SeedEvent},
     };
     use tokio::sync::mpsc;
     use tokio_util::sync::CancellationToken;
@@ -2254,6 +2263,8 @@ mod tests {
                 "GET {path} must be absent from the public router, got {status}"
             );
         }
+        let (status, _body) = route_text(addr, "GET", "/api/home_overview?compact=true").await?;
+        assert_eq!(status, StatusCode::NOT_FOUND);
 
         server.shutdown().await?;
         Ok(())
@@ -2921,6 +2932,9 @@ mod tests {
                 "data/derive.js",
                 "data/render-key.js",
                 "render/hero.js",
+                "render/summary-cards.js",
+                "render/calendar-heatmap.js",
+                "render/trends-daily.js",
                 "render/sync-command-center.js",
                 "render/trends.js",
                 "render/models.js",
@@ -4209,6 +4223,95 @@ mod tests {
             route_json(addr, "GET", "/api/logs?cursor=not-base64-json", None).await?;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(payload["error"]["code"], "invalid_cursor");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn api_home_overview_compact_preserves_full_projection() -> anyhow::Result<()> {
+        let fixture = Fixture::new()?;
+        fixture.seed_event(SeedEvent {
+            event_key: "codex:http-compact:1",
+            event_at: "2026-04-01T23:30:00Z",
+            hour_start: Some("2026-04-01T23:00:00Z"),
+            project_hash: "project-a",
+            session_id: Some("session-a"),
+            input_tokens: 10,
+            total_tokens: 10,
+            cost_with_cache_usd: 0.1,
+            ..Default::default()
+        })?;
+        fixture.seed_event(SeedEvent {
+            event_key: "codex:http-compact:2",
+            event_at: "2026-04-02T00:30:00Z",
+            hour_start: Some("2026-04-02T00:00:00Z"),
+            project_hash: "project-a",
+            session_id: Some("session-a"),
+            input_tokens: 20,
+            total_tokens: 20,
+            cost_with_cache_usd: 0.2,
+            ..Default::default()
+        })?;
+        fixture.seed_event(SeedEvent {
+            event_key: "claude:http-compact:excluded",
+            source: "claude",
+            model: "claude-sonnet-4",
+            event_at: "2026-04-02T01:00:00Z",
+            hour_start: Some("2026-04-02T01:00:00Z"),
+            project_hash: "project-b",
+            total_tokens: 100,
+            cost_with_cache_usd: 1.0,
+            ..Default::default()
+        })?;
+        let addr = serve(fixture.store().clone(), Some(0)).await?;
+        let filter = "source=codex&model=gpt-5&project_hash=project-a&since=2026-04-02&until=2026-04-02&timezone=Asia%2FShanghai";
+
+        let (full_status, full) =
+            route_json(addr, "GET", &format!("/api/home_overview?{filter}"), None).await?;
+        let (compact_status, compact) = route_json(
+            addr,
+            "GET",
+            &format!("/api/home_overview?compact=true&{filter}"),
+            None,
+        )
+        .await?;
+
+        assert_eq!(full_status, StatusCode::OK);
+        assert_eq!(compact_status, StatusCode::OK);
+        let mut compact_summary = compact["summary"].clone();
+        let mut full_summary = full["summary"].clone();
+        for field in ["total_cost_usd", "cache_efficiency"] {
+            let compact_value = compact_summary[field]
+                .as_f64()
+                .expect("compact floating summary field");
+            let full_value = full_summary[field]
+                .as_f64()
+                .expect("full floating summary field");
+            assert!(
+                (compact_value - full_value).abs() <= 1e-9,
+                "compact/full {field} delta exceeded 1e-9: compact={compact_value} full={full_value}"
+            );
+            compact_summary
+                .as_object_mut()
+                .expect("compact summary object")
+                .remove(field);
+            full_summary
+                .as_object_mut()
+                .expect("full summary object")
+                .remove(field);
+        }
+        assert_eq!(compact_summary, full_summary);
+        assert_eq!(compact["by_platform"], full["by_platform"]);
+        assert_eq!(compact["summary"]["total_requests"], 2);
+        assert_eq!(compact["summary"]["total_sessions"], 1);
+        assert_eq!(compact["summary"]["total_tokens"], 30);
+        assert_eq!(compact.as_object().expect("compact object").len(), 2);
+        for field in ["series", "bootstrap", "archive", "last_updated"] {
+            assert!(full.get(field).is_some(), "full response must keep {field}");
+            assert!(
+                compact.get(field).is_none(),
+                "compact response omits {field}"
+            );
+        }
         Ok(())
     }
 

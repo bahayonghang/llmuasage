@@ -73,6 +73,26 @@ const UI_COPY_ZH = Object.freeze({
   actions: Object.freeze({
     exportDone: '已导出',
   }),
+  readyWidgets: Object.freeze({
+    summary: Object.freeze({
+      sessions: '会话', requests: '请求', tokens: 'Token', cost: '成本', activeDays: '活跃天数',
+      cacheEfficiency: '缓存效率', platforms: '个平台', perSession: '次 / 会话', topPlatform: '最高平台',
+      currentRange: '当前范围', cacheHint: '缓存读取占输入 Token 的比例', empty: '当前范围暂无汇总数据。',
+      loading: '正在加载汇总数据…',
+    }),
+    heatmap: Object.freeze({
+      title: '活动日历', sub: '按本地日期汇总最近范围内的用量活动。', tokens: 'Token', events: '事件',
+      less: '少', more: '多', empty: '当前范围暂无日历活动。', loading: '正在加载活动日历…',
+      recentYear: '全部范围按最近一年展示', eventCount: '事件', tokenCount: 'Token',
+      metricAria: '活动日历指标', weekdays: Object.freeze(['', '周一', '', '周三', '', '周五', '']),
+    }),
+    trendsDaily: Object.freeze({
+      title: '每日 Token 构成', sub: '按日查看输入、缓存读取、缓存写入与输出 Token。',
+      input: '输入', cacheRead: '缓存读取', cacheCreation: '缓存写入', output: '输出', cost: '成本',
+      empty: '当前范围暂无每日趋势。', loading: '正在加载每日趋势…',
+      oneDay: '24 小时范围请查看下方小时趋势；每日图从 7 天范围开始显示。',
+    }),
+  }),
   sections: Object.freeze({
     trend: Object.freeze({
       kicker: '趋势',
@@ -290,6 +310,26 @@ const UI_COPY_EN = Object.freeze({
   }),
   actions: Object.freeze({
     exportDone: 'Exported',
+  }),
+  readyWidgets: Object.freeze({
+    summary: Object.freeze({
+      sessions: 'Sessions', requests: 'Requests', tokens: 'Tokens', cost: 'Cost', activeDays: 'Active days',
+      cacheEfficiency: 'Cache efficiency', platforms: 'platforms', perSession: 'per session', topPlatform: 'Top platform',
+      currentRange: 'Current range', cacheHint: 'Share of input tokens served from cache', empty: 'No summary data in this range.',
+      loading: 'Loading summary data…',
+    }),
+    heatmap: Object.freeze({
+      title: 'Activity calendar', sub: 'Usage activity grouped by local calendar date.', tokens: 'Tokens', events: 'Events',
+      less: 'Less', more: 'More', empty: 'No calendar activity in this range.', loading: 'Loading activity calendar…',
+      recentYear: 'All-time range shows the most recent year', eventCount: 'events', tokenCount: 'tokens',
+      metricAria: 'Activity calendar metric', weekdays: Object.freeze(['', 'Mon', '', 'Wed', '', 'Fri', '']),
+    }),
+    trendsDaily: Object.freeze({
+      title: 'Daily token mix', sub: 'Daily input, cache read, cache creation, and output tokens.',
+      input: 'Input', cacheRead: 'Cache read', cacheCreation: 'Cache creation', output: 'Output', cost: 'Cost',
+      empty: 'No daily trend data in this range.', loading: 'Loading daily trends…',
+      oneDay: 'Use the hourly chart below for the 24-hour range; daily trends start at 7 days.',
+    }),
   }),
   sections: Object.freeze({
     trend: Object.freeze({

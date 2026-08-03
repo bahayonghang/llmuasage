@@ -1432,7 +1432,7 @@ nav a:hover .nav-icon {
 
 .dashboard-load-segments {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(8, minmax(0, 1fr));
   gap: 6px;
   min-height: 10px;
 }
@@ -2450,4 +2450,100 @@ svg.i {
 .filter-rail,
 .endpoint {
   transition: background-color 0.18s ease, border-color 0.18s ease;
+}
+
+
+.summary-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.summary-card {
+  flex: 1 1 120px;
+  min-width: 120px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.summary-card.featured {
+  border: 2px solid var(--accent-blue);
+  padding: 11px;
+}
+
+.summary-card-value {
+  color: var(--ink);
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+.summary-card-label {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.summary-card-sub {
+  min-height: 15px;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+
+.ready-widgets-grid {
+  margin-top: 12px;
+}
+
+.ready-widget-panel {
+  min-width: 0;
+  padding: 14px;
+}
+
+.ready-widget-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ready-widget-head h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+
+.ready-widget-head p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+  letter-spacing: 0;
+}
+
+.heatmap-metric button {
+  min-height: 28px;
+  padding: 4px 9px;
+  font-size: 11px;
+}
+
+@media (max-width: 720px) {
+  .summary-card {
+    flex-basis: calc(50% - 4px);
+  }
+
+  .ready-widget-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
