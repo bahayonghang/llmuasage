@@ -296,7 +296,7 @@ fn html_shell(mode: &str) -> String {
         </div>
       </div>
 
-      <div class="distribution-grid">
+      <div class="distribution-grid dash-grid">
         <div class="panel distribution-models">
           <div class="panel-title" data-i18n="shell.models.panelTitle">用量最高的 8 个模型</div>
           <div class="panel-sub" data-i18n="shell.models.panelSub">单位：Token，按累计计算</div>
@@ -317,7 +317,7 @@ fn html_shell(mode: &str) -> String {
           <div class="source-rows" id="sources-rows"></div>
         </div>
 
-        <div class="panel distribution-projects" id="projects">
+        <div class="panel distribution-projects wide" id="projects">
           <div class="panel-head">
             <h3 class="panel-title" data-i18n="shell.projects.title">项目排行</h3>
             <span class="tag" id="projects-count">--</span>
@@ -505,8 +505,8 @@ fn html_shell(mode: &str) -> String {
         </div>
       </div>
 
-      <div class="cost-status-grid">
-        <div class="panel cost-summary-panel">
+      <div class="cost-status-grid dash-grid">
+        <div class="panel cost-summary-panel wide">
           <div class="cost-stat-grid" id="costs-stats"></div>
         </div>
 
