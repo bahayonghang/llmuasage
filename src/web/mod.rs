@@ -36,7 +36,8 @@ use crate::{
         ActivityPayload, BehaviorSupport, CostLine, Dashboard, DiagnosticsPayload,
         ExplorerDimension, ExplorerFilters, ExplorerGranularity, ExplorerMetric, ExplorerQuery,
         ExplorerTokenType, LogsQuery, ModelBreakdown, ModelComparePayload, OptimizePayload,
-        OverviewPayload, QueryFilter, SourceBreakdown, TokenSummary, ToolsPayload, TrendPoint,
+        OverviewPayload, QueryFilter, SourceBreakdown, TokenSummary, ToolsPayload, TopSessionRow,
+        TopSessionsQuery, TopSessionsSort, TrendPoint,
     },
     store::Store,
     sync::{JobRegistry, JobStartError, SyncOptions},
@@ -94,6 +95,8 @@ const LOOPBACK_ONLY_READ_ROUTE_INVENTORY: &[&str] = &[
     "/api/compare",
     "/api/home_overview",
     "/api/heatmap",
+    "/api/sessions",
+    "/api/hour_of_week",
     "/api/logs",
     "/api/diagnostics",
     "/api/jobs/{id}",
@@ -542,6 +545,8 @@ fn loopback_router() -> Router<WebState> {
         .route("/api/compare", get(api_compare))
         .route("/api/home_overview", get(api_home_overview))
         .route("/api/heatmap", get(api_heatmap))
+        .route("/api/sessions", get(api_sessions))
+        .route("/api/hour_of_week", get(api_hour_of_week))
         .route("/api/logs", get(api_logs))
         .route("/api/diagnostics", get(api_diagnostics))
         .route("/api/jobs/{id}", get(api_jobs_get))
@@ -1067,6 +1072,61 @@ async fn api_heatmap(
     .await
 }
 
+#[derive(Debug, Serialize)]
+struct TopSessionsPayload {
+    support: BehaviorSupport,
+    rows: Vec<TopSessionRow>,
+}
+
+async fn api_sessions(
+    State(state): State<WebState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let query = TopSessionsQuery {
+        filter: dashboard_filter_from_params(&params),
+        sort: params
+            .get("sort")
+            .and_then(|raw| TopSessionsSort::parse(raw))
+            .unwrap_or_default(),
+        limit: params
+            .get("limit")
+            .and_then(|raw| raw.parse::<u32>().ok())
+            .unwrap_or(10),
+    };
+    api_json_async(
+        "/api/sessions",
+        load_behavior_api(
+            state,
+            "sessions",
+            move |dashboard| {
+                Ok(TopSessionsPayload {
+                    support: supported_section(),
+                    rows: dashboard.top_sessions(&query)?,
+                })
+            },
+            |reason| TopSessionsPayload {
+                support: degraded_support(reason),
+                rows: Vec::new(),
+            },
+        ),
+    )
+    .await
+}
+
+async fn api_hour_of_week(
+    State(state): State<WebState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let filter = dashboard_filter_from_params(&params);
+    api_json_async(
+        "/api/hour_of_week",
+        load_via_dashboard(state, "hour-of-week", move |dashboard| {
+            dashboard.hour_of_week(&filter)
+        }),
+    )
+    .await
+}
+
 async fn api_logs(
     State(state): State<WebState>,
     Query(params): Query<HashMap<String, String>>,
@@ -1076,7 +1136,8 @@ async fn api_logs(
         .map(|raw| raw.trim().to_string())
         .filter(|raw| !raw.is_empty());
 
-    if let Some(cursor) = cursor.as_deref()
+    if query_string(&params, "event_key").is_none()
+        && let Some(cursor) = cursor.as_deref()
         && crate::query::logs::try_decode_cursor(cursor).is_none()
     {
         return (
@@ -1105,6 +1166,8 @@ async fn api_logs(
                 .get("include_raw")
                 .or_else(|| params.get("include_raw_json")),
         ),
+        session: query_string(&params, "session"),
+        event_key: query_string(&params, "event_key"),
     };
 
     api_json_async(
@@ -1722,6 +1785,14 @@ fn degraded_support(reason: String) -> BehaviorSupport {
         supported: false,
         level: "degraded".to_string(),
         reason: Some(reason),
+    }
+}
+
+fn supported_section() -> BehaviorSupport {
+    BehaviorSupport {
+        supported: true,
+        level: "supported".to_string(),
+        reason: None,
     }
 }
 
@@ -2388,7 +2459,13 @@ mod tests {
         .await?;
         let addr = server.addr();
 
-        for path in ["/api/logs", "/api/diagnostics", "/api/projects"] {
+        for path in [
+            "/api/logs",
+            "/api/diagnostics",
+            "/api/projects",
+            "/api/sessions",
+            "/api/hour_of_week?timezone=UTC",
+        ] {
             let (status, payload) = route_json(addr, "GET", path, None).await?;
             assert_eq!(status, StatusCode::OK, "GET {path} regressed: {payload}");
         }
@@ -2935,6 +3012,10 @@ mod tests {
                 "render/summary-cards.js",
                 "render/calendar-heatmap.js",
                 "render/trends-daily.js",
+                "render/top-sessions.js",
+                "render/logs-viewer.js",
+                "render/hour-of-week.js",
+                "csv-export.js",
                 "render/sync-command-center.js",
                 "render/trends.js",
                 "render/models.js",

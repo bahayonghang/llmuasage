@@ -15,12 +15,14 @@ mod explorer;
 pub mod filter;
 mod heatmap;
 mod home_overview;
+mod hour_of_week;
 pub mod inventory;
 pub(crate) mod logs;
 pub mod pricing;
 pub mod pricing_catalog;
 pub mod reports;
 pub(crate) mod timezone;
+mod top_sessions;
 
 pub use explorer::{
     ExplorerDimension, ExplorerFilters, ExplorerGranularity, ExplorerMetric, ExplorerPayload,
@@ -33,10 +35,12 @@ pub use home_overview::{
     HomeOverviewBootstrap, HomeOverviewPayload, HomeOverviewPlatformStats, HomeOverviewSeriesItem,
     HomeOverviewSummary,
 };
+pub use hour_of_week::HourOfWeekCell;
 pub use inventory::{InstalledItem, InventoryKind, InventoryRoots, InventorySource};
 pub use logs::{LogRecord, LogsPage, LogsQuery};
 pub use pricing::{CostBreakdown, PRICING_MIXED, PRICING_UNPRICED, PricingStatus};
 pub use pricing_catalog::PricingCatalog;
+pub use top_sessions::{TopSessionRow, TopSessionsQuery, TopSessionsSort};
 
 /// Aggregated token counters returned by overview and trend queries.
 #[derive(Debug, Clone, Default, Serialize)]
@@ -843,6 +847,10 @@ pub struct DashboardSnapshot {
     pub heatmap: Option<Vec<HeatmapPoint>>,
     /// Per-day token breakdown used by the stacked daily chart.
     pub trends_daily: Option<Vec<DailyTrendPoint>>,
+    /// Top sessions ranked by total tokens for offline analytics.
+    pub top_sessions: Option<Vec<TopSessionRow>>,
+    /// Local-time 7x24 activity grid for offline analytics.
+    pub hour_of_week: Option<Vec<HourOfWeekCell>>,
 }
 
 /// Snapshot-only projection of [`HomeOverviewPayload`].
@@ -3047,6 +3055,16 @@ impl Dashboard {
         logs::load(self, query)
     }
 
+    /// Loads a stable, server-ranked Top Sessions list.
+    pub fn top_sessions(&self, query: &TopSessionsQuery) -> Result<Vec<TopSessionRow>> {
+        top_sessions::load(self, query)
+    }
+
+    /// Loads a zero-filled Monday-first 7x24 activity grid.
+    pub fn hour_of_week(&self, filter: &QueryFilter) -> Result<Vec<HourOfWeekCell>> {
+        hour_of_week::load(self, filter)
+    }
+
     /// Loads cursor and recent failure health signals.
     pub fn health(&self) -> Result<HealthPayload> {
         let recent_failures = self
@@ -3294,6 +3312,11 @@ impl Dashboard {
             home_overview: Some(home_overview),
             heatmap: Some(self.heatmap(filter, 366)?),
             trends_daily: Some(self.trends_daily(filter)?),
+            top_sessions: Some(self.top_sessions(&TopSessionsQuery {
+                filter: filter.clone(),
+                ..TopSessionsQuery::default()
+            })?),
+            hour_of_week: Some(self.hour_of_week(filter)?),
         })
     }
 

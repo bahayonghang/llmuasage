@@ -78,6 +78,7 @@ pub use query::{
     ExplorerTotals, HomeOverviewPayload, LogRecord, LogsPage, LogsQuery, ModelBreakdown,
     ModelComparePayload, ModelCompareStats, OptimizeFinding, OptimizePayload, OverviewPayload,
     ProjectBreakdown, QueryFilter, ReportTimezone, SourceDiagnostics, ToolBreakdown, ToolsPayload,
+    TopSessionRow, TopSessionsQuery, TopSessionsSort,
 };
 pub use runtime::paths::AppPaths;
 pub use store::{BootstrapOptions, HolderKind, Store, WorkerLock};
