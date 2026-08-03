@@ -50,8 +50,8 @@ SSH sessions automatically skip browser launching.
 The first screen is task-oriented:
 
 1. Confirm the active time/source/model filter.
-2. Read the KPI strip for total tokens, the last 24 hours, source count, and estimated cost.
-3. Check the trend chart for day/week/month/all movement.
+2. Read the six summary cards for sessions, requests, tokens, cost, active days, and cache efficiency.
+3. Check the contribution calendar and daily token mix, then use the short-window trend for 24-hour detail.
 4. Compare project, model, source, and cost rankings.
 5. Review behavior panels for activity, tool usage, optimization hints, and model comparison.
 6. Use Cost Explorer for ad hoc local slice-and-dice questions.
@@ -87,9 +87,28 @@ Cost Explorer adds its own query controls on top of the shared filters:
 
 ## Sections
 
-### KPI and trend
+### Summary, contribution calendar, and trends
 
-Static HTML export builds the KPI strip and trend chart from `Dashboard::snapshot(&QueryFilter)`. The live dashboard initially loads `/api/dashboard`, then range changes, automatic refresh, and post-sync refresh use `scope=interactive` for the selected range plus independent Activity, Tools, Optimize, Explorer, and Compare requests. Each secondary response updates only its own section, so a slow or degraded behavior query does not block the first screen.
+The six summary cards use the current filter to show sessions, requests, tokens,
+estimated cost, active days, and cache efficiency. The highlighted Tokens card
+also names the highest-token platform. The contribution calendar switches
+between token and event intensity, supports keyboard focus and tooltips, and
+clicks a date to drill the global filter into that day; clicking it again
+restores the previous range.
+
+The daily stacked chart separates input, cache read, cache creation, and output
+tokens and includes daily cost in its tooltip. It intentionally shows an empty
+state for the 24-hour range, where the existing short-window chart provides the
+finer view. Live data for these panels is loaded as secondary work through the
+same latest-request-wins lifecycle as Activity, Tools, Optimize, Explorer, and
+Compare, so stale responses cannot overwrite a newer filter.
+
+Static HTML export stores compact summary data, up to 366 heatmap days, and the
+daily series in `snapshot.json`. Older snapshots without these keys load the
+panels as empty states instead of failing. The live dashboard initially loads
+`/api/dashboard`; range changes, automatic refresh, and post-sync refresh use
+`scope=interactive` plus independent secondary requests. A slow or degraded
+secondary query does not block the first screen.
 
 ### Rankings
 
@@ -146,7 +165,7 @@ The live dashboard can export the current JSON snapshot, including the currently
 llmusage export html --out .\llmusage-report
 ```
 
-The static bundle includes `snapshot.json` with the default Explorer payload and the same Explorer renderer assets. Snapshot mode disables live Explorer controls because it reads from the captured JSON instead of `/api/explorer`.
+The static bundle includes `snapshot.json` with the summary cards, contribution calendar, daily token series, default Explorer payload, and their renderer assets. Snapshot mode disables live Explorer controls because it reads from the captured JSON instead of `/api/explorer`.
 
 ## Sync jobs
 

@@ -48,8 +48,8 @@ SSH 会话会自动跳过浏览器启动。
 首屏按任务组织：
 
 1. 确认当前时间/来源/模型筛选。
-2. 看 KPI 条：总 token、近 24 小时、来源数和估算成本。
-3. 用趋势图判断 day/week/month/all 的变化。
+2. 看六张摘要卡：session、request、token、成本、活跃天数和缓存效率。
+3. 查看贡献日历和每日 token 构成，再用短窗口趋势观察近 24 小时细节。
 4. 对比 project、model、source、cost 排行。
 5. 查看行为面板：Activity、Tools、Optimize、Compare。
 6. 用 Cost Explorer 回答临时的本地切片分析问题。
@@ -85,9 +85,13 @@ Cost Explorer 会在共享筛选之上追加自己的查询控件：
 
 ## 页面区块
 
-### KPI 与趋势
+### 摘要、贡献日历与趋势
 
-静态 HTML export 通过 `Dashboard::snapshot(&QueryFilter)` 构造 KPI 条和趋势图。live Dashboard 首次加载 `/api/dashboard`；范围切换、自动刷新和 sync 完成后的刷新则使用所选范围的 `scope=interactive`，再独立请求 Activity、Tools、Optimize、Explorer、Compare。每个 secondary 响应只更新自己的区块，因此慢查询或降级的行为区块不会阻塞首屏。
+六张摘要卡会随当前筛选显示 session、request、token、估算成本、活跃天数和缓存效率；高亮的 Tokens 卡还会标出 token 最多的平台。贡献日历可以切换 Tokens / Events 强度，支持键盘焦点和 tooltip；点击日期会把全局筛选下钻到当天，再次点击则恢复之前的范围。
+
+每日堆叠图分开展示 input、cache read、cache creation 和 output token，并在 tooltip 中显示当日成本。`24h` 范围会明确显示空态，由现有短窗口图提供更细粒度的观察。live 模式下，这些面板与 Activity、Tools、Optimize、Explorer、Compare 一样进入 latest-request-wins 的 secondary 加载生命周期，因此旧响应不能覆盖新筛选。
+
+静态 HTML export 会在 `snapshot.json` 中保存精简摘要、最多 366 天的热力图和每日序列。缺少这些键的旧快照会显示空态，不会导致页面报错。live Dashboard 首次加载 `/api/dashboard`；范围切换、自动刷新和 sync 完成后的刷新使用 `scope=interactive` 并独立加载 secondary 面板，因此慢查询或降级面板不会阻塞首屏。
 
 ### 排行
 
@@ -144,7 +148,7 @@ live Dashboard 可以导出当前 JSON 快照，其中包含当前已加载的 E
 llmusage export html --out .\llmusage-report
 ```
 
-静态 bundle 的 `snapshot.json` 会包含默认 Explorer payload，并带有同一套 Explorer 渲染资产。Snapshot 模式会禁用 live Explorer 控件，因为它读取捕获的 JSON，而不是访问 `/api/explorer`。
+静态 bundle 的 `snapshot.json` 会包含摘要卡、贡献日历、每日 token 序列、默认 Explorer payload 和对应渲染资产。Snapshot 模式会禁用 live Explorer 控件，因为它读取捕获的 JSON，而不是访问 `/api/explorer`。
 
 ## Sync jobs
 

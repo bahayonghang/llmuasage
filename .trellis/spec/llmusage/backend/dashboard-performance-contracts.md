@@ -496,6 +496,30 @@ pre-warmed projection. The local seeded 10k-event test retains its strict
 80 ms budget in both debug and release builds; CI-only tolerance must not be
 used as completion evidence.
 
+The loopback-only HTTP route has two additive response modes:
+
+```text
+GET /api/home_overview?<QueryFilter fields>
+    -> HomeOverviewPayload (unchanged full response)
+GET /api/home_overview?compact=true&<QueryFilter fields>
+    -> { summary, by_platform }
+Dashboard::home_overview_compact(&QueryFilter) -> HomeOverviewSnapshot
+```
+
+Only the existing truthy query values accepted by `parse_bool_query` (`1`,
+`true`, `yes`, or `on`, case-insensitive) select compact mode. Omitted, false,
+or unknown values retain the full response. Compact mode applies the same
+source, model, project, inclusive date, and timezone filters as the full mode;
+its two fields must preserve exact integer, key, and structural semantics from
+the full response projection. Floating-point fields are equivalent when their
+absolute delta is at most the shared test tolerance `EPSILON = 1e-9`; index
+scan ordering may change only floating-point accumulation order within that
+tolerance.
+It reads and aggregates the shared event stream but skips daily series,
+run-state, and archive diagnostics work. Static snapshots use this same compact
+query path. The route remains absent from the public read-only router in both
+modes, and query failures retain the existing structured 500 response.
+
 The query must preserve the exact event semantics for `QueryFilter` source,
 model, project, date bounds, and fixed/local timezone conversion. Session
 identity is `source` plus the first non-empty value of `session_id`,
@@ -513,19 +537,47 @@ event-read, summary, by-platform, series, run-state, and diagnostics elapsed
 time plus `EXPLAIN QUERY PLAN` details and opcode count. Production payloads do
 not expose these fields.
 
+Schema v20 adds exactly one compact-query index:
+
+```sql
+CREATE INDEX idx_usage_event_home_compact_cover
+ON usage_event(
+    event_at, source, model, project_hash,
+    COALESCE(NULLIF(session_id, ''), NULLIF(source_path_hash, ''), event_key),
+    input_tokens, cache_creation_tokens, cache_read_tokens, total_tokens,
+    cost_with_cache_usd
+);
+```
+
+The all-range and date-range compact projection must be covering under this
+index. Do not add a second identity-first index or a table-order cost rescan:
+the former duplicates about one index footprint without clearing the end-to-end
+budget, while the latter violates the 400 ms representative-data budget solely
+to recover byte-level floating-point accumulation order.
+
 Archive diagnostics may aggregate `usage_bucket_30m` only for sources with
 missing source files; when all files are live, the bucket scan is skipped.
 This is a query-path optimization with no schema or migration change, and it
 must retain protected-event counts and archive payload fields exactly.
 
 Validation requires the focused 80 ms test to pass three consecutive times in
-debug and release, exact cross-day/session/filter coverage, and a read-only or
+debug and release, exact cross-day/session/filter integer and structural
+coverage, floating-point deltas within `EPSILON = 1e-9`, and a read-only or
 online-backup profile for representative databases. No process cache, warm-up
 query, delayed work, platform exception, or threshold relaxation is allowed.
 
-The first query uses the aggregate projection. The second runs once per
-returned source, preserves exact fact semantics, and can use
-`idx_usage_event_source_event_at`.
+| HTTP condition | Required result |
+| --- | --- |
+| `compact=true` with any stable `QueryFilter` fields | Exactly `summary` and `by_platform`; integer/key/structure exact and `f64` delta ≤ `1e-9` versus the full projection |
+| `compact` omitted, false, or unknown | Existing full payload and byte/shape semantics |
+| `compact=true` on the public read-only listener | 404; the loopback-only route is not mounted |
+| SQLite/query failure in either mode | Existing structured `internal_error` response |
+
+Tests must compare compact and full projections through both the query API and
+the real loopback HTTP boundary, cover combined source/model/project/date/IANA
+filters, assert the default full-only keys remain present, assert the compact
+response has only two keys, verify the browser requests `compact=true`, and
+verify schema v20 upgrades/fresh installs plus the covering plans.
 
 ## Scenario: Browser IANA timezone queries
 
@@ -552,6 +604,9 @@ buildFilterQuery(state, options) -> query string
   already supplies a value. Static snapshots do not require a live timezone.
 - IANA date bounds, labels, heatmaps, and daily groupings use the historical
   offset for each instant, including daylight-saving transitions.
+- Heatmap zero-fill windows end at an explicit `QueryFilter.until`; only an
+  unbounded request ends at the current local date. This keeps historical
+  custom ranges aligned with their rendered calendar cells.
 - Existing exports from `data/fetch.js` and existing UTC/local/fixed-offset SQL
   behavior remain unchanged.
 

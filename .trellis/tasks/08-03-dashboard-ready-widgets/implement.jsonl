@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/08-03-dashboard-agentsview-alignment/research/agentsview-inventory.md", "reason": "热力图/统计卡/趋势图几何与配色规格"}
+{"file": ".trellis/tasks/08-03-dashboard-agentsview-alignment/research/llmusage-web-current-state.md", "reason": "未消费端点清单 渐进加载模式 快照导出与 CI 约束"}
+{"file": ".trellis/spec/llmusage/backend/dashboard-performance-contracts.md", "reason": "交互载荷 查询路由与降级预算契约"}
+{"file": ".trellis/spec/llmusage/backend/index.md", "reason": "spec 入口与 Quality Check"}
+{"file": ".trellis/tasks/08-03-dashboard-agentsview-alignment/research/review-verification.md", "reason": "审阅核验出的真实契约事实（签名/字段/预算），design 的权威依据"}
