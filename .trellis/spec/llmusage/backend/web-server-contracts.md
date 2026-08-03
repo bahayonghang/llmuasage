@@ -120,6 +120,8 @@ public_router() -> Router<WebState>
 
 GET /api/dashboard (public) -> PublicDashboardPayload
 GET /api/health    (public) -> { status: "ok", exposure: "public_read_only" }
+GET /api/sessions      (loopback only)
+GET /api/hour_of_week  (loopback only)
 ```
 
 ### 3. Contracts
@@ -152,6 +154,7 @@ GET /api/health    (public) -> { status: "ok", exposure: "public_read_only" }
 | Public minimal health | 200 with fixed `status` and `exposure` fields |
 | Public logs/diagnostics/projects/job/detail reads | Route absent: 404/405 |
 | Public behavior/Explorer/legacy section reads | Route absent: 404/405 |
+| Public sessions/hour-of-week reads | Route absent: 404/405 |
 | Public mutation request | Route absent: 404/405 |
 | Loopback sensitive read | Existing handler and payload remain available |
 | Query or serialization failure | Generic 500 response without internal detail |

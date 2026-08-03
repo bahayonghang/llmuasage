@@ -650,3 +650,94 @@ IANA name -> current numeric offset -> all historical dates
 ```text
 IANA name -> ReportTimezone::Iana -> ResolvedZone::Iana -> per-instant offset
 ```
+
+## Scenario: Session analytics dashboard reads
+
+### 1. Scope / Trigger
+
+- Apply this contract when changing Top Sessions, the 7x24 hour grid, Logs
+  session/detail filtering, analytics CSV export, or their browser loading
+  lifecycle.
+
+### 2. Signatures
+
+```text
+GET /api/sessions?sort=<tokens|duration|cost>&limit=<1..50>&<QueryFilter>
+GET /api/hour_of_week?<QueryFilter>
+GET /api/logs?session=<id|canonical id|label>&event_key=<exact key>
+Dashboard::top_sessions(&TopSessionsQuery) -> Vec<TopSessionRow>
+Dashboard::hour_of_week(&QueryFilter) -> HourOfWeekPayload
+```
+
+### 3. Contracts
+
+- Top Sessions applies the complete `QueryFilter`, clamps the limit to 50,
+  sorts on the server, and uses canonical session id as the stable tiebreaker.
+- Duration means active minutes: sum only positive adjacent-event gaps of at
+  most 30 minutes. Duration ranking must compute every filtered candidate
+  before truncation; a span-ranked `3 * limit` preselection is not exact.
+- Event times for duration ranking are loaded in one ordered batch and reduced
+  by canonical session id. Do not add one query per candidate.
+- `hour_of_week` returns a zero-filled 7x24 grid. Each source bucket is
+  converted through `ResolvedZone` before folding, so DST fallback instants may
+  contribute to the same local cell.
+- Logs `session` accepts an exact source session id, an exact canonical session
+  id, or a case-insensitive label substring. `event_key` selects zero-or-one
+  record detail mode, includes raw JSON when available, and ignores cursor,
+  page size, total counting, and the page-wide raw flag.
+- Top Sessions and hour grid participate in the shared generation-guarded
+  secondary lifecycle. Logs additionally fences responses by filter signature;
+  reset clears loading state before the replacement request starts.
+- CSV export uses the six visible summary metrics, localized labels, UTF-8 BOM,
+  and prefixes cells matching `^[=+\\-@\\t\\r\\n]` with a single quote before
+  standard CSV quoting.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Equal primary sort values | Canonical session id ascending decides order |
+| Long idle spans outrank active span in rough order | Exact active-duration order still wins |
+| DST fallback repeats a local hour | Both UTC buckets fold into the same local cell |
+| Logs detail URL retains pagination parameters | Return at most one record and no next cursor/total |
+| Global filters change while Logs is loading | Stale response is discarded and replacement load proceeds |
+| Old snapshot omits new keys | New panels render an empty/degraded state without throwing |
+| CSV cell starts with a formula trigger | Export it as inert text |
+
+### 5. Good/Base/Bad Cases
+
+- Good: a canonical Top Session row opens Logs and the server returns only that
+  session while a rapid range change discards the older response.
+- Base: token and cost rankings aggregate filtered events and return at most the
+  requested limit with stable ordering.
+- Bad: select `3 * limit` sessions by wall-clock span and then call that result
+  the active-duration Top N, or issue an unguarded panel-specific fetch.
+
+### 6. Tests Required
+
+- Rust integration tests cover empty data, all filters, all three sorts and
+  equal-value tiebreaks, limit clamping, an idle-span duration counterexample,
+  canonical Top-to-Logs matching, detail-mode precedence, UTC/IANA folding,
+  and a DST fallback repeated hour.
+- Real TCP tests prove `/api/sessions` and `/api/hour_of_week` work on loopback
+  and remain absent from the public router.
+- Node tests cover generation/filter-signature stale rejection, sorting reload,
+  old snapshots, the six localized CSV metrics, BOM, quoting, and formula
+  injection protection.
+- Representative warm timings remain within 400 ms per interactive endpoint,
+  128 KiB per response, and 30 ms per Logs page. Run `just ci` before archive.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+ORDER BY wall_clock_span DESC LIMIT 3 * N -> calculate active minutes -> LIMIT N
+```
+
+#### Correct
+
+```text
+aggregate all filtered sessions -> batch-load ordered event times
+-> calculate active minutes for every candidate -> stable sort -> LIMIT N
+```

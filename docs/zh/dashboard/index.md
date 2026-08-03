@@ -49,11 +49,11 @@ SSH 会话会自动跳过浏览器启动。
 
 1. 确认当前时间/来源/模型筛选。
 2. 看六张摘要卡：session、request、token、成本、活跃天数和缓存效率。
-3. 查看贡献日历和每日 token 构成，再用短窗口趋势观察近 24 小时细节。
-4. 对比 project、model、source、cost 排行。
+3. 查看贡献日历、星期/小时热力图和每日 token 构成，再用短窗口趋势观察近 24 小时细节。
+4. 对比 Top Sessions 与 project、model、source、cost 排行。
 5. 查看行为面板：Activity、Tools、Optimize、Compare。
 6. 用 Cost Explorer 回答临时的本地切片分析问题。
-7. 数据过旧时使用 sync/export 动作或 diagnostics。
+7. 在事件日志中分页查看事件细节；数据过旧时使用 sync/CSV export 或 diagnostics。
 
 屏幕宽度不超过 `720px` 时，系统健康卡会收敛为首屏内的紧凑折叠摘要；展开后可查看游标数量和最近失败。宽屏仍显示完整健康卡；Dashboard 不再展示 integration 安装健康。
 
@@ -92,6 +92,11 @@ Cost Explorer 会在共享筛选之上追加自己的查询控件：
 每日堆叠图分开展示 input、cache read、cache creation 和 output token，并在 tooltip 中显示当日成本。`24h` 范围会明确显示空态，由现有短窗口图提供更细粒度的观察。live 模式下，这些面板与 Activity、Tools、Optimize、Explorer、Compare 一样进入 latest-request-wins 的 secondary 加载生命周期，因此旧响应不能覆盖新筛选。
 
 静态 HTML export 会在 `snapshot.json` 中保存精简摘要、最多 366 天的热力图和每日序列。缺少这些键的旧快照会显示空态，不会导致页面报错。live Dashboard 首次加载 `/api/dashboard`；范围切换、自动刷新和 sync 完成后的刷新使用 `scope=interactive` 并独立加载 secondary 面板，因此慢查询或降级面板不会阻塞首屏。
+
+星期/小时热力图会按浏览器 IANA 时区把 30 分钟桶折叠成 Monday-first 的
+`7 x 24` 网格。Top Sessions 支持由服务端按 Token、活跃时长、成本排序；点击会话会跳转到
+事件日志，并由服务端过滤该会话。展开事件行时才按需读取保留的 raw JSON。事件日志仅在
+live 模式可用，沿用每页 50 条的游标分页。
 
 ### 排行
 
@@ -140,15 +145,17 @@ Dashboard 必须显式展示能力缺口，不能把缺失数据伪装成 0。
 
 Activity、Tools、Optimize、Explorer、Compare 降级时，核心 `/api/dashboard` 数据仍应保持可响应。
 
-## JSON 导出与静态导出
+## CSV 导出与静态导出
 
-live Dashboard 可以导出当前 JSON 快照，其中包含当前已加载的 Explorer 结果。离线 HTML bundle 使用：
+live Dashboard 会把当前已加载的摘要、每日趋势、project、model、source 与 Top Sessions
+导出为带 UTF-8 BOM 的 CSV；不可信标签会先做公式注入防护，再按标准 CSV 规则转义。
+离线 HTML bundle 使用：
 
 ```powershell
 llmusage export html --out .\llmusage-report
 ```
 
-静态 bundle 的 `snapshot.json` 会包含摘要卡、贡献日历、每日 token 序列、默认 Explorer payload 和对应渲染资产。Snapshot 模式会禁用 live Explorer 控件，因为它读取捕获的 JSON，而不是访问 `/api/explorer`。
+静态 bundle 的 `snapshot.json` 会包含摘要卡、贡献日历、星期/小时网格、Top Sessions、每日 token 序列、默认 Explorer payload 和对应渲染资产。旧快照缺少新键时仍可安全显示空态。Snapshot 模式会禁用 live Explorer 控件，并把事件日志显示为仅 live 可用。
 
 ## Sync jobs
 
