@@ -1414,3 +1414,33 @@ Public listener 改用最小读路由与脱敏聚合 DTO，并忽略 project sel
 ### Status
 
 [OK] **Completed**
+
+
+## Session 46: 完成 Dashboard AgentsView 对齐任务树
+
+**Date**: 2026-08-03
+**Task**: 完成 Dashboard AgentsView 对齐任务树
+**Branch**: `dev`
+
+### Summary
+
+完成视觉系统、IANA 时区、ready widgets 与会话分析四个子任务；通过 Node 22 全量 CI、四组合浏览器验收、快照/public/performance 检查，更新双语文档与截图并归档父子五个任务。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `aa8ade9` | (see git log) |
+| `b1f89b4` | (see git log) |
+| `006959d` | (see git log) |
+| `e63808b` | (see git log) |
+| `961a368` | (see git log) |
+| `6e7addb` | (see git log) |
+| `6a4663c` | (see git log) |
+| `70126b6` | (see git log) |
+| `a341bdb` | (see git log) |
+| `268d3ed` | (see git log) |
+
+### Status
+
+[OK] **Completed**
