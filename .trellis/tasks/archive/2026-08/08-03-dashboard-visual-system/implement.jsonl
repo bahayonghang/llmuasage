@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/08-03-dashboard-agentsview-alignment/research/agentsview-inventory.md", "reason": "AgentsView 精确 token 值与组件规格,视觉对齐权威来源"}
+{"file": ".trellis/tasks/08-03-dashboard-agentsview-alignment/research/llmusage-web-current-state.md", "reason": "现有 CSS/资产结构 CI 约束与 ASSET_MANIFEST 规则"}
+{"file": ".trellis/tasks/08-03-dashboard-agentsview-alignment/research/gap-analysis.md", "reason": "视觉差距表与风险约束清单"}
+{"file": ".trellis/spec/llmusage/backend/index.md", "reason": "spec 入口与 Quality Check 命令"}
+{"file": ".trellis/tasks/08-03-dashboard-agentsview-alignment/research/review-verification.md", "reason": "审阅核验出的真实契约事实（签名/字段/预算），design 的权威依据"}
