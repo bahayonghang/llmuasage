@@ -6,7 +6,7 @@
 
 Local-first usage analytics for AI coding CLIs. `llmusage` passively reads local Codex, Claude Code, OpenCode, Kimi Code, Pi / Oh My Pi, and Grok Build artifacts into SQLite, preserves historical Google Antigravity usage, then renders reports, terminal and browser dashboards, and offline HTML exports without upload or login.
 
-> Current crate version: `1.1.0`.
+> Current crate version: `1.1.2`.
 
 ![llmusage web dashboard overview](./docs/public/screenshots/web-dashboard-overview.png)
 
