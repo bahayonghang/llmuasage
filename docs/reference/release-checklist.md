@@ -16,6 +16,7 @@ Use this checklist before publishing a crate, tagging a release, or updating pub
 
 ## Reproducible quality gate
 
+- `main` branch protection requires the GitHub Actions check `CI gate`. That name is the `ci-gate` job in `.github/workflows/ci.yml`. Run `python scripts/check-ci-gate.py` after workflow edits, and `python scripts/check-ci-gate.py --github-protection` after protection edits.
 - Run `cargo fmt --check`.
 - Run `cargo clippy --all-targets --all-features -- -D warnings`.
 - Run `cargo test -- --test-threads=1`.

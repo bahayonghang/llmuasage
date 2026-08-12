@@ -16,6 +16,7 @@
 
 ## 可复现质量门
 
+- `main` 的分支保护要求 GitHub Actions 检查 `CI gate`。该名称是 `.github/workflows/ci.yml` 里 `ci-gate` job 的 `name`。改工作流后运行 `python scripts/check-ci-gate.py`；改保护规则后运行 `python scripts/check-ci-gate.py --github-protection`。
 - 运行 `cargo fmt --check`。
 - 运行 `cargo clippy --all-targets --all-features -- -D warnings`。
 - 运行 `cargo test -- --test-threads=1`。
