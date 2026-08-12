@@ -3173,15 +3173,11 @@ mod tests {
             .body;
 
         // Hero fills the main column instead of capping at 640px + 360px.
-        assert!(layout_css.contains(
-            "grid-template-columns: minmax(0, 1fr) minmax(280px, 360px)"
-        ));
+        assert!(layout_css.contains("grid-template-columns: minmax(0, 1fr) minmax(280px, 360px)"));
         assert!(!layout_css.contains("grid-template-columns: minmax(0, 640px) 360px"));
 
         // Alone between wide widgets, top-sessions must span full grid width.
-        assert!(html.contains(
-            "class=\"panel ready-widget-panel wide\" id=\"top-sessions\""
-        ));
+        assert!(html.contains("class=\"panel ready-widget-panel wide\" id=\"top-sessions\""));
 
         // Status metrics use two cells; grid columns must match to avoid empty slots.
         assert!(components_css.contains("grid-template-columns: repeat(2, minmax(0, 1fr))"));
