@@ -4,7 +4,7 @@ default:
     just --list
 
 install:
-    cargo install --path . --locked --force
+    cargo +1.97.0 install --path . --locked --force
 
 serve:
     cargo run -- serve

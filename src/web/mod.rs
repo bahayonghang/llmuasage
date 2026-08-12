@@ -18,6 +18,7 @@ use axum::{
     routing::{get, post},
 };
 use chrono::{FixedOffset, NaiveDate};
+use chrono_tz::Tz;
 use rusqlite::InterruptHandle;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -35,7 +36,8 @@ use crate::{
         ActivityPayload, BehaviorSupport, CostLine, Dashboard, DiagnosticsPayload,
         ExplorerDimension, ExplorerFilters, ExplorerGranularity, ExplorerMetric, ExplorerQuery,
         ExplorerTokenType, LogsQuery, ModelBreakdown, ModelComparePayload, OptimizePayload,
-        OverviewPayload, QueryFilter, SourceBreakdown, TokenSummary, ToolsPayload, TrendPoint,
+        OverviewPayload, QueryFilter, SourceBreakdown, TokenSummary, ToolsPayload, TopSessionRow,
+        TopSessionsQuery, TopSessionsSort, TrendPoint,
     },
     store::Store,
     sync::{JobRegistry, JobStartError, SyncOptions},
@@ -93,6 +95,8 @@ const LOOPBACK_ONLY_READ_ROUTE_INVENTORY: &[&str] = &[
     "/api/compare",
     "/api/home_overview",
     "/api/heatmap",
+    "/api/sessions",
+    "/api/hour_of_week",
     "/api/logs",
     "/api/diagnostics",
     "/api/jobs/{id}",
@@ -541,6 +545,8 @@ fn loopback_router() -> Router<WebState> {
         .route("/api/compare", get(api_compare))
         .route("/api/home_overview", get(api_home_overview))
         .route("/api/heatmap", get(api_heatmap))
+        .route("/api/sessions", get(api_sessions))
+        .route("/api/hour_of_week", get(api_hour_of_week))
         .route("/api/logs", get(api_logs))
         .route("/api/diagnostics", get(api_diagnostics))
         .route("/api/jobs/{id}", get(api_jobs_get))
@@ -1034,6 +1040,15 @@ async fn api_home_overview(
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
     let filter = dashboard_filter_from_params(&params);
+    if parse_bool_query(params.get("compact")) {
+        return api_json_async(
+            "/api/home_overview",
+            load_via_dashboard(state, "home-overview", move |d| {
+                d.home_overview_compact(&filter)
+            }),
+        )
+        .await;
+    }
     api_json_async(
         "/api/home_overview",
         load_via_dashboard(state, "home-overview", move |d| d.home_overview(&filter)),
@@ -1057,6 +1072,61 @@ async fn api_heatmap(
     .await
 }
 
+#[derive(Debug, Serialize)]
+struct TopSessionsPayload {
+    support: BehaviorSupport,
+    rows: Vec<TopSessionRow>,
+}
+
+async fn api_sessions(
+    State(state): State<WebState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let query = TopSessionsQuery {
+        filter: dashboard_filter_from_params(&params),
+        sort: params
+            .get("sort")
+            .and_then(|raw| TopSessionsSort::parse(raw))
+            .unwrap_or_default(),
+        limit: params
+            .get("limit")
+            .and_then(|raw| raw.parse::<u32>().ok())
+            .unwrap_or(10),
+    };
+    api_json_async(
+        "/api/sessions",
+        load_behavior_api(
+            state,
+            "sessions",
+            move |dashboard| {
+                Ok(TopSessionsPayload {
+                    support: supported_section(),
+                    rows: dashboard.top_sessions(&query)?,
+                })
+            },
+            |reason| TopSessionsPayload {
+                support: degraded_support(reason),
+                rows: Vec::new(),
+            },
+        ),
+    )
+    .await
+}
+
+async fn api_hour_of_week(
+    State(state): State<WebState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let filter = dashboard_filter_from_params(&params);
+    api_json_async(
+        "/api/hour_of_week",
+        load_via_dashboard(state, "hour-of-week", move |dashboard| {
+            dashboard.hour_of_week(&filter)
+        }),
+    )
+    .await
+}
+
 async fn api_logs(
     State(state): State<WebState>,
     Query(params): Query<HashMap<String, String>>,
@@ -1066,7 +1136,8 @@ async fn api_logs(
         .map(|raw| raw.trim().to_string())
         .filter(|raw| !raw.is_empty());
 
-    if let Some(cursor) = cursor.as_deref()
+    if query_string(&params, "event_key").is_none()
+        && let Some(cursor) = cursor.as_deref()
         && crate::query::logs::try_decode_cursor(cursor).is_none()
     {
         return (
@@ -1095,6 +1166,8 @@ async fn api_logs(
                 .get("include_raw")
                 .or_else(|| params.get("include_raw_json")),
         ),
+        session: query_string(&params, "session"),
+        event_key: query_string(&params, "event_key"),
     };
 
     api_json_async(
@@ -1715,6 +1788,14 @@ fn degraded_support(reason: String) -> BehaviorSupport {
     }
 }
 
+fn supported_section() -> BehaviorSupport {
+    BehaviorSupport {
+        supported: true,
+        level: "supported".to_string(),
+        reason: None,
+    }
+}
+
 fn degraded_activity(reason: String) -> ActivityPayload {
     ActivityPayload {
         support: degraded_support(reason),
@@ -1852,6 +1933,11 @@ fn query_date(params: &HashMap<String, String>, key: &str) -> Option<NaiveDate> 
         .and_then(|raw| NaiveDate::parse_from_str(raw.trim(), "%Y-%m-%d").ok())
 }
 
+/// Parses an HTTP dashboard timezone while preserving the legacy fallback.
+///
+/// Unknown names remain `Local` rather than making previously accepted query
+/// strings fail. Fixed offsets are checked before IANA names so their existing
+/// parsing behavior remains unchanged.
 fn query_timezone(value: Option<&String>) -> crate::query::ReportTimezone {
     let Some(raw) = value
         .map(|value| value.trim())
@@ -1865,8 +1951,11 @@ fn query_timezone(value: Option<&String>) -> crate::query::ReportTimezone {
     if raw.eq_ignore_ascii_case("local") {
         return crate::query::ReportTimezone::Local;
     }
-    parse_fixed_offset(raw)
-        .map(crate::query::ReportTimezone::Fixed)
+    if let Some(offset) = parse_fixed_offset(raw) {
+        return crate::query::ReportTimezone::Fixed(offset);
+    }
+    raw.parse::<Tz>()
+        .map(crate::query::ReportTimezone::Iana)
         .unwrap_or(crate::query::ReportTimezone::Local)
 }
 
@@ -2005,7 +2094,7 @@ mod tests {
         body::to_bytes,
         http::{HeaderMap, HeaderValue, StatusCode, header},
     };
-    use chrono::{Duration as ChronoDuration, SecondsFormat, Utc};
+    use chrono::{Duration as ChronoDuration, FixedOffset, SecondsFormat, Utc};
     use serde_json::json;
     use tempfile::TempDir;
 
@@ -2017,7 +2106,7 @@ mod tests {
         query::{diagnostics_stat_calls, reset_diagnostics_stat_counter},
         store::Store,
         sync::{JobRegistry, JobStatus, SyncExecutor, SyncOptions, SyncRunOptions, SyncSummary},
-        testing::Fixture,
+        testing::{Fixture, SeedEvent},
     };
     use tokio::sync::mpsc;
     use tokio_util::sync::CancellationToken;
@@ -2027,7 +2116,7 @@ mod tests {
         WEB_API_TIMEOUT, WEB_BEHAVIOR_API_TIMEOUT, WEB_READ_BUSY_TIMEOUT, WebState, WriteExposure,
         api_json, asset_manifest, bind_server, live_index_html, load_behavior_api,
         load_diagnostics_cached, load_via_dashboard, load_via_dashboard_with_timeout,
-        public_dashboard_filter_from_params, serve, serve_on, server_task_result,
+        public_dashboard_filter_from_params, query_timezone, serve, serve_on, server_task_result,
         snapshot_index_html,
     };
 
@@ -2037,6 +2126,38 @@ mod tests {
         let store = Store::new(&paths)?;
         store.bootstrap()?;
         Ok((temp, store))
+    }
+
+    #[test]
+    fn query_timezone_accepts_iana_and_preserves_legacy_fallbacks() {
+        use crate::query::ReportTimezone;
+
+        assert_eq!(
+            query_timezone(Some(&"Asia/Shanghai".to_string())),
+            ReportTimezone::Iana(chrono_tz::Asia::Shanghai)
+        );
+        assert_eq!(
+            query_timezone(Some(&"America/New_York".to_string())),
+            ReportTimezone::Iana(chrono_tz::America::New_York)
+        );
+        assert_eq!(
+            query_timezone(Some(&"UTC+8".to_string())),
+            ReportTimezone::Fixed(FixedOffset::east_opt(8 * 3_600).unwrap())
+        );
+        assert_eq!(
+            query_timezone(Some(&"utc".to_string())),
+            ReportTimezone::Utc
+        );
+        assert_eq!(query_timezone(Some(&"Z".to_string())), ReportTimezone::Utc);
+        assert_eq!(
+            query_timezone(Some(&"local".to_string())),
+            ReportTimezone::Local
+        );
+        assert_eq!(
+            query_timezone(Some(&"Not/AZone".to_string())),
+            ReportTimezone::Local
+        );
+        assert_eq!(query_timezone(None), ReportTimezone::Local);
     }
 
     struct ImmediateExecutor;
@@ -2213,6 +2334,8 @@ mod tests {
                 "GET {path} must be absent from the public router, got {status}"
             );
         }
+        let (status, _body) = route_text(addr, "GET", "/api/home_overview?compact=true").await?;
+        assert_eq!(status, StatusCode::NOT_FOUND);
 
         server.shutdown().await?;
         Ok(())
@@ -2336,7 +2459,13 @@ mod tests {
         .await?;
         let addr = server.addr();
 
-        for path in ["/api/logs", "/api/diagnostics", "/api/projects"] {
+        for path in [
+            "/api/logs",
+            "/api/diagnostics",
+            "/api/projects",
+            "/api/sessions",
+            "/api/hour_of_week?timezone=UTC",
+        ] {
             let (status, payload) = route_json(addr, "GET", path, None).await?;
             assert_eq!(status, StatusCode::OK, "GET {path} regressed: {payload}");
         }
@@ -2880,6 +3009,13 @@ mod tests {
                 "data/derive.js",
                 "data/render-key.js",
                 "render/hero.js",
+                "render/summary-cards.js",
+                "render/calendar-heatmap.js",
+                "render/trends-daily.js",
+                "render/top-sessions.js",
+                "render/logs-viewer.js",
+                "render/hour-of-week.js",
+                "csv-export.js",
                 "render/sync-command-center.js",
                 "render/trends.js",
                 "render/models.js",
@@ -3015,6 +3151,37 @@ mod tests {
         assert!(hero_js.contains("STATUS_PANEL_MOBILE_QUERY = '(max-width: 720px)'"));
         assert!(hero_js.contains("details.open = !statusPanelMediaQuery.matches"));
         assert!(hero_js.contains("addEventListener('change', syncStatusPanelDisclosure)"));
+    }
+
+    #[test]
+    fn overview_wide_layout_avoids_orphan_blank_columns() {
+        let html = live_index_html();
+        let layout_css = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "layout.css")
+            .expect("layout.css asset")
+            .body;
+        let components_css = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "components.css")
+            .expect("components.css asset")
+            .body;
+        let hero_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "render/hero.js")
+            .expect("hero.js asset")
+            .body;
+
+        // Hero fills the main column instead of capping at 640px + 360px.
+        assert!(layout_css.contains("grid-template-columns: minmax(0, 1fr) minmax(280px, 360px)"));
+        assert!(!layout_css.contains("grid-template-columns: minmax(0, 640px) 360px"));
+
+        // Alone between wide widgets, top-sessions must span full grid width.
+        assert!(html.contains("class=\"panel ready-widget-panel wide\" id=\"top-sessions\""));
+
+        // Status metrics use two cells; grid columns must match to avoid empty slots.
+        assert!(components_css.contains("grid-template-columns: repeat(2, minmax(0, 1fr))"));
+        assert_eq!(hero_js.matches("class=\"status-cell\"").count(), 2);
     }
 
     #[test]
@@ -4172,6 +4339,95 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn api_home_overview_compact_preserves_full_projection() -> anyhow::Result<()> {
+        let fixture = Fixture::new()?;
+        fixture.seed_event(SeedEvent {
+            event_key: "codex:http-compact:1",
+            event_at: "2026-04-01T23:30:00Z",
+            hour_start: Some("2026-04-01T23:00:00Z"),
+            project_hash: "project-a",
+            session_id: Some("session-a"),
+            input_tokens: 10,
+            total_tokens: 10,
+            cost_with_cache_usd: 0.1,
+            ..Default::default()
+        })?;
+        fixture.seed_event(SeedEvent {
+            event_key: "codex:http-compact:2",
+            event_at: "2026-04-02T00:30:00Z",
+            hour_start: Some("2026-04-02T00:00:00Z"),
+            project_hash: "project-a",
+            session_id: Some("session-a"),
+            input_tokens: 20,
+            total_tokens: 20,
+            cost_with_cache_usd: 0.2,
+            ..Default::default()
+        })?;
+        fixture.seed_event(SeedEvent {
+            event_key: "claude:http-compact:excluded",
+            source: "claude",
+            model: "claude-sonnet-4",
+            event_at: "2026-04-02T01:00:00Z",
+            hour_start: Some("2026-04-02T01:00:00Z"),
+            project_hash: "project-b",
+            total_tokens: 100,
+            cost_with_cache_usd: 1.0,
+            ..Default::default()
+        })?;
+        let addr = serve(fixture.store().clone(), Some(0)).await?;
+        let filter = "source=codex&model=gpt-5&project_hash=project-a&since=2026-04-02&until=2026-04-02&timezone=Asia%2FShanghai";
+
+        let (full_status, full) =
+            route_json(addr, "GET", &format!("/api/home_overview?{filter}"), None).await?;
+        let (compact_status, compact) = route_json(
+            addr,
+            "GET",
+            &format!("/api/home_overview?compact=true&{filter}"),
+            None,
+        )
+        .await?;
+
+        assert_eq!(full_status, StatusCode::OK);
+        assert_eq!(compact_status, StatusCode::OK);
+        let mut compact_summary = compact["summary"].clone();
+        let mut full_summary = full["summary"].clone();
+        for field in ["total_cost_usd", "cache_efficiency"] {
+            let compact_value = compact_summary[field]
+                .as_f64()
+                .expect("compact floating summary field");
+            let full_value = full_summary[field]
+                .as_f64()
+                .expect("full floating summary field");
+            assert!(
+                (compact_value - full_value).abs() <= 1e-9,
+                "compact/full {field} delta exceeded 1e-9: compact={compact_value} full={full_value}"
+            );
+            compact_summary
+                .as_object_mut()
+                .expect("compact summary object")
+                .remove(field);
+            full_summary
+                .as_object_mut()
+                .expect("full summary object")
+                .remove(field);
+        }
+        assert_eq!(compact_summary, full_summary);
+        assert_eq!(compact["by_platform"], full["by_platform"]);
+        assert_eq!(compact["summary"]["total_requests"], 2);
+        assert_eq!(compact["summary"]["total_sessions"], 1);
+        assert_eq!(compact["summary"]["total_tokens"], 30);
+        assert_eq!(compact.as_object().expect("compact object").len(), 2);
+        for field in ["series", "bootstrap", "archive", "last_updated"] {
+            assert!(full.get(field).is_some(), "full response must keep {field}");
+            assert!(
+                compact.get(field).is_none(),
+                "compact response omits {field}"
+            );
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn api_trends_daily_exposes_daily_cost_series() -> anyhow::Result<()> {
         let (_temp, store) = make_store()?;
         let conn = store.open_connection()?;
@@ -4202,6 +4458,67 @@ mod tests {
         assert_eq!(first["date"], "2026-05-01");
         assert_eq!(first["event_count"], 1);
         assert_eq!(first["cost_with_cache_usd"], 0.25);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn api_trends_daily_groups_by_iana_timezone_with_dst_rules() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let conn = store.open_connection()?;
+        for hour_start in [
+            "2026-01-15T04:30:00Z",
+            "2026-04-04T16:00:00Z",
+            "2026-07-15T04:30:00Z",
+        ] {
+            conn.execute(
+                r#"
+                INSERT INTO usage_bucket_30m(
+                    source, model, hour_start, project_hash, project_label, project_ref,
+                    input_tokens, cache_read_tokens, cache_creation_tokens,
+                    output_tokens, reasoning_output_tokens, total_tokens,
+                    cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source,
+                    event_count, updated_at
+                )
+                VALUES ('codex', 'gpt-5', ?1, '', NULL, NULL,
+                        10, 0, 0, 0, 0, 10, 0.1, 0.1, 'static', 'static-v1', 1, ?1)
+                "#,
+                [hour_start],
+            )?;
+        }
+        drop(conn);
+
+        let addr = serve(store, Some(0)).await?;
+        let (shanghai_status, shanghai) = route_json(
+            addr,
+            "GET",
+            "/api/trends_daily?timezone=Asia%2FShanghai",
+            None,
+        )
+        .await?;
+        assert_eq!(shanghai_status, StatusCode::OK);
+        let shanghai_dates = shanghai
+            .as_array()
+            .expect("Shanghai trend rows")
+            .iter()
+            .map(|row| row["date"].as_str().expect("date"))
+            .collect::<Vec<_>>();
+        assert_eq!(shanghai_dates, ["2026-01-15", "2026-04-05", "2026-07-15"]);
+
+        let (new_york_status, new_york) = route_json(
+            addr,
+            "GET",
+            "/api/trends_daily?timezone=America%2FNew_York",
+            None,
+        )
+        .await?;
+        assert_eq!(new_york_status, StatusCode::OK);
+        let new_york_dates = new_york
+            .as_array()
+            .expect("New York trend rows")
+            .iter()
+            .map(|row| row["date"].as_str().expect("date"))
+            .collect::<Vec<_>>();
+        assert_eq!(new_york_dates, ["2026-01-14", "2026-04-04", "2026-07-15"]);
         Ok(())
     }
 

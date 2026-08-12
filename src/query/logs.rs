@@ -14,6 +14,12 @@ const MAX_PAGE_SIZE: u32 = 500;
 /// The cursor is an opaque base64url-encoded JSON payload containing the last
 /// `(event_at, event_key)` pair returned by the previous page. Pagination sorts
 /// by newest event first and uses the event key as a deterministic tie-breaker.
+///
+/// `event_key` selects single-record detail mode. In that mode cursor, page
+/// size, total counting and the page-wide raw flag are ignored; exactly zero or
+/// one record is returned, raw JSON is requested for that record, and there is
+/// no next cursor. This precedence keeps the detail URL unambiguous when a
+/// caller accidentally retains pagination parameters.
 #[derive(Debug, Clone, Default)]
 pub struct LogsQuery {
     /// Stable read-side filter shared with dashboard/report queries.
@@ -26,6 +32,10 @@ pub struct LogsQuery {
     pub include_total: bool,
     /// When true, include the opt-in raw archive JSON if present.
     pub include_raw_json: bool,
+    /// Exact source session id/canonical session id, or case-insensitive label substring.
+    pub session: Option<String>,
+    /// Exact event key for single-record detail mode.
+    pub event_key: Option<String>,
 }
 
 /// One page of usage events for the logs view.
@@ -123,15 +133,29 @@ struct CursorPayload {
 }
 
 pub(crate) fn load(dashboard: &Dashboard, query: &LogsQuery) -> Result<LogsPage> {
-    let page_size = normalize_page_size(query.page_size);
-    let cursor = query
-        .cursor
+    let event_key = query
+        .event_key
         .as_deref()
-        .filter(|value| !value.trim().is_empty())
-        .map(decode_cursor)
-        .transpose()?;
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let detail_mode = event_key.is_some();
+    let page_size = normalize_page_size(query.page_size);
+    let cursor = if detail_mode {
+        None
+    } else {
+        query
+            .cursor
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .map(decode_cursor)
+            .transpose()?
+    };
 
     let mut filter = query.filter.event_filter(Some("e"));
+    apply_session_filter(&mut filter, query.session.as_deref());
+    if let Some(event_key) = event_key {
+        filter.push("e.event_key = ?", event_key.to_string());
+    }
     if let Some(cursor) = &cursor {
         filter.push_raw("(e.event_at < ? OR (e.event_at = ? AND e.event_key < ?))");
         filter.push_value(SqlValue::Text(cursor.event_at.clone()));
@@ -139,8 +163,9 @@ pub(crate) fn load(dashboard: &Dashboard, query: &LogsQuery) -> Result<LogsPage>
         filter.push_value(SqlValue::Text(cursor.event_key.clone()));
     }
 
-    let total = if query.include_total {
-        let total_filter = query.filter.event_filter(Some("e"));
+    let total = if query.include_total && !detail_mode {
+        let mut total_filter = query.filter.event_filter(Some("e"));
+        apply_session_filter(&mut total_filter, query.session.as_deref());
         let sql = format!(
             "SELECT COUNT(*) FROM usage_event e{}",
             total_filter.where_sql()
@@ -154,7 +179,7 @@ pub(crate) fn load(dashboard: &Dashboard, query: &LogsQuery) -> Result<LogsPage>
         None
     };
 
-    let raw_column = if query.include_raw_json {
+    let raw_column = if query.include_raw_json || detail_mode {
         "r.raw_json"
     } else {
         "NULL"
@@ -197,7 +222,11 @@ pub(crate) fn load(dashboard: &Dashboard, query: &LogsQuery) -> Result<LogsPage>
     );
 
     let mut params = filter.into_params();
-    params.push(SqlValue::Integer(page_size as i64 + 1));
+    params.push(SqlValue::Integer(if detail_mode {
+        1
+    } else {
+        page_size as i64 + 1
+    }));
 
     let mut stmt = dashboard.conn.prepare(&sql)?;
     let rows = stmt.query_map(params_from_iter(params.iter()), |row| {
@@ -254,7 +283,7 @@ pub(crate) fn load(dashboard: &Dashboard, query: &LogsQuery) -> Result<LogsPage>
     })?;
     let mut records = rows.collect::<rusqlite::Result<Vec<_>>>()?;
 
-    let next_cursor = if records.len() > page_size as usize {
+    let next_cursor = if !detail_mode && records.len() > page_size as usize {
         records.truncate(page_size as usize);
         records
             .last()
@@ -268,6 +297,21 @@ pub(crate) fn load(dashboard: &Dashboard, query: &LogsQuery) -> Result<LogsPage>
         next_cursor,
         total,
     })
+}
+
+fn apply_session_filter(filter: &mut super::filter::SqlFilter, session: Option<&str>) {
+    let Some(session) = session.map(str::trim).filter(|value| !value.is_empty()) else {
+        return;
+    };
+    let identity = super::top_sessions::session_identity_sql("e");
+    filter.push_raw(format!(
+        "(lower(COALESCE(e.session_id, '')) = lower(?) \
+         OR lower({identity}) = lower(?) \
+         OR instr(lower(COALESCE(e.session_label, '')), lower(?)) > 0)"
+    ));
+    for _ in 0..3 {
+        filter.push_value(SqlValue::Text(session.to_string()));
+    }
 }
 
 /// Encodes a logs cursor as base64url(JSON{event_at,event_key}).

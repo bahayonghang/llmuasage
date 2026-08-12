@@ -23,6 +23,40 @@ function abortError() {
 }
 
 test('live dashboard request lifecycle', async (t) => {
+  await t.test('adds the browser IANA timezone unless an explicit timezone is set', async () => {
+    dashboardFetch.clearLiveRequestCache();
+    const originalIntl = globalThis.Intl;
+    globalThis.Intl = {
+      ...originalIntl,
+      DateTimeFormat: () => ({ resolvedOptions: () => ({ timeZone: 'America/New_York' }) }),
+    };
+    const paths = [];
+    globalThis.fetch = async (path) => {
+      paths.push(path);
+      return response({});
+    };
+
+    try {
+      const state = { mode: 'live', rangePreset: '7d', trendWindow: 'week', filters: {} };
+      await dashboardFetch.loadDashboardInteractiveSnapshot(state);
+      assert.equal(
+        new URL(paths[0], window.location.origin).searchParams.get('timezone'),
+        'America/New_York',
+      );
+
+      dashboardFetch.clearLiveRequestCache();
+      await dashboardFetch.loadDashboardInteractiveSnapshot({
+        ...state,
+        filters: { timezone: 'UTC+8' },
+      });
+      assert.equal(
+        new URL(paths[1], window.location.origin).searchParams.get('timezone'),
+        'UTC+8',
+      );
+    } finally {
+      globalThis.Intl = originalIntl;
+    }
+  });
   await t.test('interactive bootstrap failure does not fan out to legacy endpoints', async () => {
     dashboardFetch.clearLiveRequestCache();
     const paths = [];
@@ -96,5 +130,71 @@ test('live dashboard request lifecycle', async (t) => {
     }
     await dashboardFetch.loadSection(state, 'section-0', '/api/test/0');
     assert.equal(calls, 34, 'the oldest entry should be evicted after the 33rd unique request');
+  });
+});
+
+
+test('ready-widget fetchers preserve shared filtering and snapshot compatibility', async (t) => {
+  await t.test('home overview, heatmap, and daily trends use filtered live requests', async () => {
+    dashboardFetch.clearLiveRequestCache();
+    const paths = [];
+    globalThis.fetch = async (path, { signal } = {}) => {
+      paths.push({ path, signal });
+      return response(path.includes('home_overview') ? { summary: {} } : []);
+    };
+    const state = {
+      mode: 'live',
+      rangePreset: '7d',
+      trendWindow: 'week',
+      filters: { source: 'codex', timezone: 'Asia/Shanghai' },
+      topSessionsSort: 'duration',
+    };
+    const controller = new AbortController();
+
+    await dashboardFetch.fetchHomeOverview(state, { signal: controller.signal });
+    await dashboardFetch.fetchHeatmap(state, { signal: controller.signal });
+    await dashboardFetch.fetchTrendsDaily(state, { signal: controller.signal });
+    await dashboardFetch.fetchTopSessions(state, { signal: controller.signal });
+    await dashboardFetch.fetchHourOfWeek(state, { signal: controller.signal });
+
+    assert.deepEqual(paths.map(({ path }) => new URL(path, window.location.origin).pathname), [
+      '/api/home_overview',
+      '/api/heatmap',
+      '/api/trends_daily',
+      '/api/sessions',
+      '/api/hour_of_week',
+    ]);
+    for (const { path, signal } of paths) {
+      const params = new URL(path, window.location.origin).searchParams;
+      assert.equal(params.get('source'), 'codex');
+      assert.equal(params.get('timezone'), 'Asia/Shanghai');
+      assert.ok(signal instanceof AbortSignal);
+    }
+    const homeOverviewParams = new URL(paths[0].path, window.location.origin).searchParams;
+    assert.equal(homeOverviewParams.get('compact'), 'true');
+    assert.equal(new URL(paths[1].path, window.location.origin).searchParams.get('compact'), null);
+    assert.equal(new URL(paths[1].path, window.location.origin).searchParams.get('days'), '7');
+    assert.equal(new URL(paths[3].path, window.location.origin).searchParams.get('sort'), 'duration');
+  });
+
+  await t.test('old snapshots without ready-widget keys return empty states', async () => {
+    let requests = 0;
+    globalThis.fetch = async () => {
+      requests += 1;
+      return response({});
+    };
+    const state = { mode: 'snapshot', snapshot: {} };
+    assert.equal(await dashboardFetch.fetchHomeOverview(state), null);
+    assert.deepEqual(await dashboardFetch.fetchHeatmap(state), []);
+    assert.deepEqual(await dashboardFetch.fetchTrendsDaily(state), []);
+    assert.deepEqual(await dashboardFetch.fetchTopSessions(state), []);
+    assert.deepEqual(await dashboardFetch.fetchHourOfWeek(state), []);
+    const startup = await dashboardFetch.loadDashboardSnapshot(state);
+    assert.equal(startup.home_overview, null);
+    assert.deepEqual(startup.heatmap, []);
+    assert.deepEqual(startup.trends_daily, []);
+    assert.deepEqual(startup.top_sessions, []);
+    assert.deepEqual(startup.hour_of_week, []);
+    assert.equal(requests, 0);
   });
 });

@@ -91,6 +91,11 @@ pub const MIGRATIONS: &[(u32, &str, MigrationFn)] = &[
         "optimize_activity_event_cost_projection",
         m_019_optimize_activity_event_cost_projection,
     ),
+    (
+        20,
+        "optimize_home_overview_compact_projection",
+        m_020_optimize_home_overview_compact_projection,
+    ),
 ];
 
 /// Returns the newest schema version known to this binary.
@@ -887,6 +892,31 @@ fn m_019_optimize_activity_event_cost_projection(tx: &Transaction<'_>) -> Result
     Ok(())
 }
 
+/// Migration v20 — cover the compact home overview event projection.
+fn m_020_optimize_home_overview_compact_projection(tx: &Transaction<'_>) -> Result<()> {
+    if !table_exists(tx, "usage_event")? {
+        return Ok(());
+    }
+    tx.execute_batch(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_usage_event_home_compact_cover
+            ON usage_event(
+                event_at,
+                source,
+                model,
+                project_hash,
+                COALESCE(NULLIF(session_id, ''), NULLIF(source_path_hash, ''), event_key),
+                input_tokens,
+                cache_creation_tokens,
+                cache_read_tokens,
+                total_tokens,
+                cost_with_cache_usd
+            );
+        "#,
+    )?;
+    Ok(())
+}
+
 fn ensure_column(tx: &Transaction<'_>, table: &str, column: &str, definition: &str) -> Result<()> {
     if table_has_column(tx, table, column)? {
         return Ok(());
@@ -1590,9 +1620,116 @@ mod tests {
         assert_activity_cost_index(&upgraded)?;
 
         let mut fresh = Connection::open_in_memory()?;
-        run_migrations_with_events(&mut fresh, None)?;
+        run_migrations_for_test(&mut fresh, &MIGRATIONS[..19])?;
         assert_eq!(read_schema_version(&fresh)?, 19);
         assert_activity_cost_index(&fresh)?;
+        Ok(())
+    }
+
+    fn assert_home_compact_covering_index(conn: &Connection) -> anyhow::Result<()> {
+        let columns = conn
+            .prepare("PRAGMA index_xinfo(idx_usage_event_home_compact_cover)")?
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, i64>(5)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        assert_eq!(
+            columns,
+            vec![
+                (3, Some("event_at".to_string()), 1),
+                (1, Some("source".to_string()), 1),
+                (2, Some("model".to_string()), 1),
+                (10, Some("project_hash".to_string()), 1),
+                (-2, None, 1),
+                (5, Some("input_tokens".to_string()), 1),
+                (18, Some("cache_creation_tokens".to_string()), 1),
+                (6, Some("cache_read_tokens".to_string()), 1),
+                (9, Some("total_tokens".to_string()), 1),
+                (19, Some("cost_with_cache_usd".to_string()), 1),
+                (-1, None, 0),
+            ]
+        );
+
+        let index_sql: String = conn.query_row(
+            "SELECT sql FROM sqlite_schema WHERE type = 'index' AND name = 'idx_usage_event_home_compact_cover'",
+            [],
+            |row| row.get(0),
+        )?;
+        let normalized = index_sql.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert_eq!(
+            normalized,
+            "CREATE INDEX idx_usage_event_home_compact_cover ON usage_event( event_at, source, model, project_hash, COALESCE(NULLIF(session_id, ''), NULLIF(source_path_hash, ''), event_key), input_tokens, cache_creation_tokens, cache_read_tokens, total_tokens, cost_with_cache_usd )"
+        );
+
+        let home_indexes = conn
+            .prepare(
+                "SELECT name FROM sqlite_schema WHERE type = 'index' AND name GLOB 'idx_usage_event_home_*' ORDER BY name",
+            )?
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        assert_eq!(
+            home_indexes,
+            vec!["idx_usage_event_home_compact_cover".to_string()],
+            "v20 must create exactly one home-overview index"
+        );
+        Ok(())
+    }
+
+    fn assert_home_compact_covering_plan(conn: &Connection, where_sql: &str) -> anyhow::Result<()> {
+        let sql = format!(
+            r#"
+            EXPLAIN QUERY PLAN
+            SELECT
+                source,
+                COALESCE(NULLIF(session_id, ''), NULLIF(source_path_hash, ''), event_key),
+                substr(event_at, 1, 10),
+                input_tokens,
+                cache_creation_tokens,
+                cache_read_tokens,
+                total_tokens,
+                cost_with_cache_usd
+            FROM usage_event
+            {where_sql}
+            "#
+        );
+        let plan = conn
+            .prepare(&sql)?
+            .query_map([], |row| row.get::<_, String>(3))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+            .join("\n");
+        assert!(
+            plan.contains("USING COVERING INDEX idx_usage_event_home_compact_cover"),
+            "compact home overview projection should use the v20 covering index: {plan}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn migration_v20_upgrades_v19_and_matches_fresh_schema() -> anyhow::Result<()> {
+        let mut upgraded = Connection::open_in_memory()?;
+        run_migrations_for_test(&mut upgraded, &MIGRATIONS[..19])?;
+        assert_eq!(read_schema_version(&upgraded)?, 19);
+
+        run_migrations_for_test(&mut upgraded, &MIGRATIONS[..20])?;
+        assert_eq!(read_schema_version(&upgraded)?, 20);
+        assert_home_compact_covering_index(&upgraded)?;
+        assert_home_compact_covering_plan(&upgraded, "")?;
+        assert_home_compact_covering_plan(
+            &upgraded,
+            "WHERE event_at >= '2026-05-01T00:00:00Z' AND event_at < '2026-06-01T00:00:00Z'",
+        )?;
+        run_migrations_for_test(&mut upgraded, &MIGRATIONS[..20])?;
+        assert_eq!(read_schema_version(&upgraded)?, 20);
+        assert_home_compact_covering_index(&upgraded)?;
+
+        let mut fresh = Connection::open_in_memory()?;
+        run_migrations_with_events(&mut fresh, None)?;
+        assert_eq!(read_schema_version(&fresh)?, 20);
+        assert_home_compact_covering_index(&fresh)?;
         Ok(())
     }
 

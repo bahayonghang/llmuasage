@@ -631,7 +631,9 @@ ALTER TABLE worker_lock ADD COLUMN acquired_at TEXT;
 0.5.0 新增（8 个）：
   GET  /api/home_overview
   GET  /api/heatmap?source=&days=365
-  GET  /api/logs?source=&model=&since=&until=&page_size=&cursor=&include_total=&include_raw=
+  GET  /api/sessions?source=&model=&project_hash=&since=&until=&timezone=&sort=tokens|duration|cost&limit=
+  GET  /api/hour_of_week?source=&model=&project_hash=&since=&until=&timezone=
+  GET  /api/logs?source=&model=&since=&until=&page_size=&cursor=&include_total=&include_raw=&session=&event_key=
   GET  /api/diagnostics
   POST /api/diagnostics/forget                     # body={source,path}
   POST /api/jobs                                   # body=SyncOptions, return {job_id, snapshot}

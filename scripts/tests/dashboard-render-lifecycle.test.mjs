@@ -48,6 +48,8 @@ function getElement(id) {
         this.mutations.push(['insertAdjacentHTML', position]);
         this._innerHTML = position === 'afterbegin' ? html + this._innerHTML : this._innerHTML + html;
       },
+      querySelector() { return { hidden: true, style: {}, textContent: '' }; },
+      querySelectorAll() { return []; },
     };
     Object.defineProperty(el, 'textContent', {
       get() { return this._textContent ?? ''; },
@@ -81,6 +83,10 @@ const format = await import('../../src/web/assets/data/format.js');
 const derive = await import('../../src/web/assets/data/derive.js');
 const copy = await import('../../src/web/assets/copy.js');
 const behavior = await import('../../src/web/assets/render/behavior.js');
+const summaryCards = await import('../../src/web/assets/render/summary-cards.js');
+const calendarHeatmap = await import('../../src/web/assets/render/calendar-heatmap.js');
+const trendsDaily = await import('../../src/web/assets/render/trends-daily.js');
+const loadState = await import('../../src/web/assets/load-state.js');
 
 function minimalRaw() {
   return {
@@ -338,5 +344,109 @@ test('stale refresh notice follows secondary_refreshing and locale', () => {
     );
   } finally {
     copy.setLocale('zh');
+  }
+});
+
+
+test('ready-widget pure derivations preserve approved mappings and boundaries', () => {
+  const cards = derive.buildSummaryCards({
+    summary: {
+      total_sessions: 2,
+      total_requests: 5,
+      total_tokens: 1200,
+      total_cost_usd: 1.25,
+      cache_efficiency: 0.75,
+      active_days: 3,
+      platforms: 2,
+    },
+    by_platform: {
+      codex: { tokens: 900 },
+      claude: { tokens: 300 },
+    },
+  });
+  assert.equal(cards.length, 6);
+  assert.equal(cards[1].sub, '2.5 次 / 会话');
+  assert.equal(cards[2].featured, true);
+  assert.match(cards[2].sub, /codex/);
+  assert.equal(cards[5].value, '75.0%');
+
+  assert.deepEqual(derive.heatmapLevels([0, 0, 0]), [0, 0, 0]);
+  assert.deepEqual(derive.heatmapLevels([0, 7]), [0, 4]);
+  assert.deepEqual(derive.heatmapLevels([0, 1, 2, 3, 4]), [0, 1, 2, 3, 4]);
+  assert.equal(trendsDaily.niceScale(0), 1);
+  assert.equal(trendsDaily.niceScale(187), 200);
+  assert.equal(trendsDaily.niceScale(501), 1000);
+});
+
+test('ready-widget renderers mutate only their section containers', () => {
+  const context = {
+    panels: {
+      home_overview: {
+        summary: {
+          total_sessions: 2,
+          total_requests: 5,
+          total_tokens: 1200,
+          total_cost_usd: 1.25,
+          cache_efficiency: 0.75,
+          active_days: 3,
+          platforms: 2,
+        },
+        by_platform: { codex: { tokens: 1200 } },
+      },
+      heatmap: [
+        { date: '2026-01-31', event_count: 1, total_tokens: 10 },
+        { date: '2026-02-01', event_count: 2, total_tokens: 20 },
+        { date: '2026-02-02', event_count: 3, total_tokens: 30 },
+      ],
+      heatmap_support: null,
+      trends_daily: [
+        { date: '2026-02-01', input_tokens: 10, cache_read_tokens: 20, cache_creation_tokens: 30, output_tokens: 40, cost_with_cache_usd: 1 },
+        { date: '2026-02-02', input_tokens: 20, cache_read_tokens: 30, cache_creation_tokens: 40, output_tokens: 50, cost_with_cache_usd: 2 },
+        { date: '2026-02-03', input_tokens: 30, cache_read_tokens: 40, cache_creation_tokens: 50, output_tokens: 60, cost_with_cache_usd: 3 },
+      ],
+      trends_daily_support: null,
+    },
+  };
+  const state = { rangePreset: '7d', filters: {} };
+
+  resetMutations();
+  summaryCards.renderSummaryCards(context, state);
+  assert.deepEqual(mutatedIds(), ['summary-cards']);
+  assert.ok(getElement('summary-cards').innerHTML.includes('summary-card featured'));
+
+  resetMutations();
+  calendarHeatmap.renderCalendarHeatmap(context, state);
+  assert.deepEqual(mutatedIds(), ['calendar-heatmap']);
+  assert.ok(getElement('calendar-heatmap').innerHTML.includes('viewBox="0 0'));
+  assert.ok(getElement('calendar-heatmap').innerHTML.includes('周一'));
+  assert.ok(getElement('calendar-heatmap').innerHTML.includes('aria-label='));
+
+  resetMutations();
+  trendsDaily.renderTrendsDaily(context, state);
+  assert.deepEqual(mutatedIds(), ['trends-daily']);
+  assert.ok(getElement('trends-daily').innerHTML.includes('daily-series-3'));
+  assert.ok(getElement('trends-daily').innerHTML.includes('2026-02-03'));
+});
+
+test('ready-widget render lifecycle rejects stale results and waits for every section', () => {
+  for (const target of ['home_overview', 'heatmap', 'trends_daily']) {
+    let state = loadState.reduceDashboardLoadState(loadState.createDashboardLoadState(4), {
+      type: 'core_succeeded',
+      generation: 4,
+    });
+    for (const section of loadState.SECONDARY_SECTIONS.filter((section) => section !== target)) {
+      state = loadState.reduceDashboardLoadState(state, {
+        type: 'secondary_settled', generation: 4, section, degraded: false,
+      });
+    }
+    assert.equal(state.phase, 'secondary_loading');
+    const stale = loadState.reduceDashboardLoadState(state, {
+      type: 'secondary_settled', generation: 3, section: target, degraded: false,
+    });
+    assert.equal(stale, state);
+    const complete = loadState.reduceDashboardLoadState(state, {
+      type: 'secondary_settled', generation: 4, section: target, degraded: false,
+    });
+    assert.equal(complete.phase, 'complete');
   }
 });

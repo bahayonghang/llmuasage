@@ -35,6 +35,13 @@ import {
   renderTools,
 } from './render/behavior.js';
 import { renderExplorer } from './render/explorer.js';
+import { renderSummaryCards } from './render/summary-cards.js';
+import { renderCalendarHeatmap } from './render/calendar-heatmap.js';
+import { renderTrendsDaily } from './render/trends-daily.js';
+import { renderTopSessions } from './render/top-sessions.js';
+import { renderHourOfWeek } from './render/hour-of-week.js';
+import { refreshLogsViewer, setupLogsViewer } from './render/logs-viewer.js';
+import { downloadAnalyticsCsv } from './csv-export.js';
 import { applyDomI18n, bindI18nDomSync } from './i18n.js';
 import { initTheme, toggleTheme } from './theme.js';
 import { setRenderer, setRuntimeState } from './runtime.js';
@@ -119,6 +126,7 @@ async function main() {
   setupExplorerControls(state);
   setupPanelToggles(state);
   setupExport(state);
+  setupLogsViewer(state);
   setupSyncJob(state);
   setupAutoRefresh(state);
   setupThemeToggle();
@@ -296,6 +304,11 @@ const SECONDARY_SECTION_RENDERERS = {
   tools: renderTools,
   optimize: renderOptimize,
   compare: renderCompare,
+  home_overview: renderSummaryCards,
+  heatmap: renderCalendarHeatmap,
+  trends_daily: renderTrendsDaily,
+  top_sessions: renderTopSessions,
+  hour_of_week: renderHourOfWeek,
 };
 
 function secondaryPanelOptions(rawData) {
@@ -309,7 +322,7 @@ function renderBehaviorSections(rawData) {
   const options = secondaryPanelOptions(rawData);
   for (const [section, renderer] of Object.entries(SECONDARY_SECTION_RENDERERS)) {
     // 先算指纹、脏才 buildContext：数据未变时整条链零派生、零 DOM 写入
-    renderPanel(section, panelFingerprint(section, rawData, options), () => renderer(buildContext(rawData)));
+    renderPanel(section, panelFingerprint(section, rawData, options), () => renderer(buildContext(rawData), dashboardState));
   }
 }
 
@@ -321,6 +334,11 @@ function secondaryLoadingPayload(section) {
     case 'optimize': return { support, findings: [], score: null, grade: null };
     case 'explorer': return { support, rows: [], series: [], totals: { value: 0 } };
     case 'compare': return { support, candidates: [], metrics: [], working_style: [] };
+    case 'home_overview': return { support, summary: null, by_platform: {} };
+    case 'heatmap': return { support, rows: [] };
+    case 'trends_daily': return { support, rows: [] };
+    case 'top_sessions': return { support, rows: [] };
+    case 'hour_of_week': return { support, rows: [] };
     default: return { support };
   }
 }
@@ -423,6 +441,7 @@ async function loadDashboardProgressive(state, options = {}) {
 
     state.loadState = reduceDashboardLoadState(state.loadState, { type: 'core_succeeded', generation });
     state.rawData = mergeCoreSnapshot(previous, core, { secondaryRefreshing: state.secondaryRefreshing });
+    refreshLogsViewer(state);
     if (!previous) {
       for (const section of SECONDARY_SECTIONS) {
         state.rawData = { ...state.rawData, [section]: secondaryLoadingPayload(section) };
@@ -501,7 +520,7 @@ function renderSecondarySection(section, rawData) {
   }
   const renderer = SECONDARY_SECTION_RENDERERS[section];
   if (!renderer) return;
-  renderPanel(section, panelFingerprint(section, rawData, secondaryPanelOptions(rawData)), () => renderer(buildContext(rawData)));
+  renderPanel(section, panelFingerprint(section, rawData, secondaryPanelOptions(rawData)), () => renderer(buildContext(rawData), dashboardState));
 }
 
 function isAbortError(error) {
@@ -730,7 +749,7 @@ function escapeHtml(value) {
  * 2) 当区域进入视口时，高亮对应侧边栏链接
  */
 function setupNavigation() {
-  const sections = ['overview', 'trends', 'models', 'sources', 'projects', 'behavior', 'explorer', 'cost', 'status'];
+  const sections = ['overview', 'trends', 'models', 'sources', 'projects', 'behavior', 'explorer', 'logs', 'cost', 'status'];
   const navLinks = document.querySelectorAll('aside nav a');
 
   function setActive(id) {
@@ -1557,12 +1576,12 @@ function setupTrendSegments(state) {
 
 /*
  * ========================================================================
- * 步骤4：把当前 dashboard 数据导出为本地 JSON 文件
+ * 步骤4：把当前 dashboard 数据导出为本地 CSV 文件
  * ========================================================================
  * 目标：
  * 1) 复用浏览器内已加载的 state.rawData，不发起额外网络请求
- * 2) 在 payload 头部写入生成时间、模式、来源、当前窗口和应用版本，便于回查
- * 3) 通过 Blob + 临时 anchor 触发下载，文件名带 ISO 时间戳
+ * 2) 由 CSV 纯函数完成本地化多段结构和公式注入防护
+ * 3) 通过 Blob + 临时 anchor 触发下载，文件名带日期
  * 4) 按钮短暂置为「已导出」，给用户一个完成反馈
  */
 function setupExport(state) {
@@ -1576,31 +1595,8 @@ function setupExport(state) {
       return;
     }
 
-    // 4.2 组装 payload，所见即所得地反映当前窗口
-    const payload = {
-      generated_at: new Date().toISOString(),
-      mode: state.mode,
-      source: window.location.host,
-      trend_window: state.trendWindow,
-      range_preset: state.rangePreset,
-      filter: state.filters || {},
-      app: { name: 'llmusage', version: appVersion() },
-      data: state.rawData,
-    };
-
-    // 4.3 序列化并触发下载
-    const json = JSON.stringify(payload, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `llmusage-${stamp}.json`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-    logger.info('完成本地 JSON 导出');
+    downloadAnalyticsCsv(state.rawData, getLocale());
+    logger.info('完成本地 CSV 导出');
 
     // 4.4 临时反馈，避免用户怀疑没生效
     const original = btn.innerHTML;

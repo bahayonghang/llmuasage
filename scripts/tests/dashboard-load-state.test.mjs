@@ -66,7 +66,7 @@ test('dashboard load reducer tracks slow core and exact secondary progress', () 
   assert.equal(duplicate, state, 'a section settles at most once');
 });
 
-test('five secondary loaders use concurrency two and all settle after one rejects', async () => {
+test('eight secondary loaders use concurrency two and all settle after one rejects', async () => {
   let active = 0;
   let maxActive = 0;
   const seen = [];
@@ -85,6 +85,40 @@ test('five secondary loaders use concurrency two and all settle after one reject
   assert.equal(maxActive, 2);
   assert.deepEqual(seen.map((entry) => entry.section).sort(), [...SECONDARY_SECTIONS].sort());
   assert.equal(seen.find((entry) => entry.section === 'tools').error.message, 'tools failed');
+});
+
+test('ready-widget sections settle last and reject stale generations independently', () => {
+  const readySections = ['home_overview', 'heatmap', 'trends_daily'];
+  assert.equal(SECONDARY_SECTIONS.length, 10);
+  for (const target of readySections) {
+    let state = reduceDashboardLoadState(createDashboardLoadState(12), {
+      type: 'core_succeeded',
+      generation: 12,
+    });
+    for (const section of SECONDARY_SECTIONS.filter((section) => section !== target)) {
+      state = reduceDashboardLoadState(state, {
+        type: 'secondary_settled',
+        generation: 12,
+        section,
+        degraded: false,
+      });
+    }
+    assert.equal(state.phase, 'secondary_loading', `${target} must keep progress open`);
+    const stale = reduceDashboardLoadState(state, {
+      type: 'secondary_settled',
+      generation: 11,
+      section: target,
+      degraded: false,
+    });
+    assert.equal(stale, state, `${target} stale result must be discarded`);
+    state = reduceDashboardLoadState(state, {
+      type: 'secondary_settled',
+      generation: 12,
+      section: target,
+      degraded: false,
+    });
+    assert.equal(state.phase, 'complete', `${target} current result completes progress`);
+  }
 });
 
 test('secondary result callback failures are not retried as loader failures', async () => {

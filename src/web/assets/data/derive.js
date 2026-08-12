@@ -283,7 +283,7 @@ export function buildContextStats() {
   };
 }
 
-function deriveContext({ overview, trends, models, sources, projects, costs, activity, tools, optimize, compare, explorer, health, diagnostics, sync_command_center, _meta }) {
+function deriveContext({ overview, trends, models, sources, projects, costs, activity, tools, optimize, compare, explorer, home_overview, heatmap, trends_daily, top_sessions, hour_of_week, health, diagnostics, sync_command_center, _meta }) {
   logger.info('开始构建页面上下文');
 
   // 1.1 规范化并排序趋势、排行和健康数据
@@ -400,6 +400,13 @@ function deriveContext({ overview, trends, models, sources, projects, costs, act
       optimize: optimize || { support: { supported: false, level: 'no_data' }, findings: [] },
       compare: compare || { support: { supported: false, level: 'no_data' }, candidates: [] },
       explorer: explorerPayload,
+      home_overview: home_overview || null,
+      heatmap: Array.isArray(heatmap) ? heatmap : normalizeRows(heatmap?.rows),
+      heatmap_support: heatmap?.support || null,
+      trends_daily: Array.isArray(trends_daily) ? trends_daily : normalizeRows(trends_daily?.rows),
+      trends_daily_support: trends_daily?.support || null,
+      top_sessions: top_sessions || null,
+      hour_of_week: hour_of_week || null,
       activity_support: activity?.support || { supported: false, level: 'no_data' },
       tools_support: tools?.support || { supported: false, level: 'no_data' },
       secondary_refreshing: Boolean(_meta?.secondary_refreshing),
@@ -452,59 +459,73 @@ function deriveContext({ overview, trends, models, sources, projects, costs, act
 
 /*
  * ========================================================================
- * 步骤2：构建 KPI 卡片数据
+ * Ready widgets: summary cards and heatmap levels
  * ========================================================================
- * 目标：
- * 1) 为 4 个 KPI 卡生成标题、数值、单位、脚注
- * 2) 标记 featured 卡（总用量）
- * 3) 返回渲染就绪的数组
  */
-export function buildKpis(context) {
-  const { totals, ledgerSummary, leaders } = context;
-  const kpiCopy = UI_COPY.hero.metrics;
+export function buildSummaryCards(homeOverview) {
+  const summary = homeOverview?.summary;
+  if (!summary) return [];
+  const cardCopy = UI_COPY.readyWidgets.summary;
+  const platforms = Object.entries(homeOverview?.by_platform || {});
+  const topPlatform = platforms.reduce((best, entry) => (
+    !best || Number(entry[1]?.tokens || 0) > Number(best[1]?.tokens || 0) ? entry : best
+  ), null);
+  const sessions = Number(summary.total_sessions || 0);
+  const requests = Number(summary.total_requests || 0);
+  const requestAverage = sessions > 0 ? requests / sessions : 0;
+  const cacheEfficiency = Math.max(0, Number(summary.cache_efficiency || 0));
 
   return [
     {
+      label: cardCopy.sessions,
+      value: formatNumber(sessions),
+      sub: `${formatNumber(summary.platforms || 0)} ${cardCopy.platforms}`,
+    },
+    {
+      label: cardCopy.requests,
+      value: formatNumber(requests),
+      sub: `${requestAverage.toFixed(1)} ${cardCopy.perSession}`,
+    },
+    {
       featured: true,
-      label: kpiCopy.total.label,
-      value: totals.total_tokens_compact,
-      unit: '',
-      foot: [
-        { label: kpiCopy.total.footRawLabel, value: totals.total_tokens_raw },
-        { label: kpiCopy.total.footLeaderLabel, value: leaders.model?.model || '--' },
-      ],
+      label: cardCopy.tokens,
+      value: formatTokenAmount(summary.total_tokens || 0),
+      sub: topPlatform ? `${cardCopy.topPlatform}: ${topPlatform[0]}` : '--',
     },
     {
-      label: kpiCopy.last24h.label,
-      value: totals.last_24h_tokens_compact,
-      unit: '',
-      foot: [
-        { label: kpiCopy.last24h.footRawLabel, value: totals.last_24h_tokens_raw },
-        {
-          label: kpiCopy.last24h.footAverageLabel,
-          value: `${formatTokenAmount(context.trend.average)} / ${context.trend.active} ${kpiCopy.last24h.bucketUnit}`,
-        },
-      ],
+      label: cardCopy.cost,
+      value: formatUsd(summary.total_cost_usd || 0),
+      sub: '',
     },
     {
-      label: kpiCopy.sources.label,
-      value: String(ledgerSummary.active_sources),
-      unit: '',
-      foot: [
-        { label: kpiCopy.sources.footPrimaryLabel, value: leaders.source?.source || '--' },
-        { label: kpiCopy.sources.footLastLabel, value: leaders.source?.last_event_at || '--' },
-      ],
+      label: cardCopy.activeDays,
+      value: formatNumber(summary.active_days || 0),
+      sub: cardCopy.currentRange,
     },
     {
-      label: kpiCopy.cost.label,
-      value: totals.total_cost_compact,
-      unit: '',
-      foot: [
-        { label: kpiCopy.cost.footRawLabel, value: totals.total_cost_raw },
-        { label: kpiCopy.cost.footTopLabel, value: `${leaders.cost?.source || '--'} · ${leaders.cost?.model || '--'}` },
-      ],
+      label: cardCopy.cacheEfficiency,
+      value: `${(cacheEfficiency * 100).toFixed(1)}%`,
+      sub: cardCopy.cacheHint,
     },
   ];
+}
+
+export function heatmapLevels(values) {
+  const normalized = normalizeRows(values).map((value) => Math.max(0, Number(value || 0)));
+  const nonzero = normalized.filter((value) => value > 0).sort((a, b) => a - b);
+  if (!nonzero.length) return normalized.map(() => 0);
+  if (nonzero[0] === nonzero[nonzero.length - 1]) {
+    return normalized.map((value) => (value > 0 ? 4 : 0));
+  }
+  const quantile = (fraction) => nonzero[Math.max(0, Math.ceil(nonzero.length * fraction) - 1)];
+  const [q25, q50, q75] = [quantile(0.25), quantile(0.5), quantile(0.75)];
+  return normalized.map((value) => {
+    if (value <= 0) return 0;
+    if (value <= q25) return 1;
+    if (value <= q50) return 2;
+    if (value <= q75) return 3;
+    return 4;
+  });
 }
 
 /*

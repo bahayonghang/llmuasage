@@ -1781,6 +1781,9 @@ fn push_bucket_filter(
 }
 
 fn bucket_local_date_expr(column: &str, timezone: &ReportTimezone) -> String {
+    if matches!(timezone, ReportTimezone::Iana(_)) {
+        return timezone.resolved().local_date_expr(column);
+    }
     let seconds = fixed_offset_for(timezone).local_minus_utc();
     if seconds == 0 {
         format!("date({column})")
@@ -1951,6 +1954,12 @@ where
 /// Converts a local NaiveDate midnight to a UTC RFC 3339 string for SQL filtering.
 fn local_date_to_utc_start(date: NaiveDate, timezone: &ReportTimezone) -> String {
     use chrono::{SecondsFormat, TimeZone, offset::LocalResult};
+    if matches!(timezone, ReportTimezone::Iana(_)) {
+        return timezone
+            .resolved()
+            .local_date_start_utc(date)
+            .to_rfc3339_opts(SecondsFormat::Secs, true);
+    }
     let local_start = date.and_hms_opt(0, 0, 0).expect("midnight is always valid");
     let offset = fixed_offset_for(timezone);
     let utc = match offset.from_local_datetime(&local_start) {
@@ -1966,6 +1975,7 @@ fn fixed_offset_for(timezone: &ReportTimezone) -> FixedOffset {
         ReportTimezone::Utc => Utc.fix(),
         ReportTimezone::Local => Local::now().offset().fix(),
         ReportTimezone::Fixed(offset) => *offset,
+        ReportTimezone::Iana(_) => unreachable!("IANA date bounds use ResolvedZone"),
     }
 }
 
@@ -2120,7 +2130,10 @@ fn display_time(value: DateTime<Utc>, timezone: &ReportTimezone) -> String {
 }
 
 fn apply_timezone(value: DateTime<Utc>, timezone: &ReportTimezone) -> DateTime<FixedOffset> {
-    value.with_timezone(&fixed_offset_for(timezone))
+    match timezone {
+        ReportTimezone::Iana(tz) => value.with_timezone(tz).fixed_offset(),
+        _ => value.with_timezone(&fixed_offset_for(timezone)),
+    }
 }
 
 #[cfg(test)]
@@ -2640,6 +2653,57 @@ mod tests {
         assert_eq!(report.daily.len(), 1);
         assert_eq!(report.daily[0].date, "2026-03-08");
         assert_eq!(report.daily[0].totals.total_tokens, 10);
+        Ok(())
+    }
+
+    #[test]
+    fn daily_report_iana_timezone_groups_buckets_with_per_date_dst_offsets() -> Result<()> {
+        let fixture = ReportFixture::new()?;
+        for (hour_start, project_hash) in [
+            ("2026-01-15T04:30:00Z", "winter"),
+            ("2026-07-15T04:30:00Z", "summer"),
+        ] {
+            fixture.insert_bucket(SeedBucket {
+                source: "codex",
+                model: "gpt-5",
+                hour_start,
+                project_hash,
+                project_label: project_hash,
+                project_ref: None,
+                input_tokens: 5,
+                cache_creation_tokens: 0,
+                cache_read_tokens: 0,
+                output_tokens: 0,
+                reasoning_output_tokens: 0,
+                total_tokens: 5,
+                cost_with_cache_usd: 0.0,
+                pricing_status: "static",
+            })?;
+        }
+
+        let report = load_daily_report(
+            &fixture.store,
+            &ReportFilter {
+                since: None,
+                until: None,
+                order: SortOrder::Asc,
+                timezone: ReportTimezone::Iana(chrono_tz::America::New_York),
+                locale: "en-US".to_string(),
+                source: None,
+                project: None,
+                breakdown: false,
+            },
+        )?;
+
+        assert_eq!(
+            report
+                .daily
+                .iter()
+                .map(|row| row.date.as_str())
+                .collect::<Vec<_>>(),
+            ["2026-01-14", "2026-07-15"]
+        );
+        assert_eq!(report.totals.total_tokens, 10);
         Ok(())
     }
 

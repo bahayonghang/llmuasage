@@ -48,7 +48,7 @@ features:
 
 ## Current product surface
 
-- Version `1.1.0`.
+- Version `1.1.2`.
 - Sources: passive Codex, Claude Code, OpenCode, Kimi Code (`kimi_code`), Pi / Oh My Pi (`pi`), and total-only Grok Build (`grok`), plus retained historical Antigravity (`antigravity`) data.
 - Report commands: `daily`, `monthly`, `session`, `blocks`, `statusline`.
 - Local UI commands: `dash`, `serve`, `export html`.

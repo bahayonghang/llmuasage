@@ -1,6 +1,6 @@
-use chrono::{Duration, Local, NaiveDate, SecondsFormat, Utc};
+use chrono::{Duration, NaiveDate, SecondsFormat, Utc};
 use rusqlite::{Connection, params_from_iter};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::{Dashboard, QueryFilter, ReportTimezone};
 use crate::error::Result;
@@ -11,7 +11,7 @@ use crate::error::Result;
 /// using [`QueryFilter::timezone`] to fold UTC `hour_start` rows into
 /// local calendar dates. Days without activity are zero-filled so
 /// callers can render a continuous grid.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct HeatmapPoint {
     /// Local calendar date in `YYYY-MM-DD`.
     pub date: String,
@@ -29,10 +29,10 @@ pub(super) fn load(
     days: u32,
 ) -> Result<Vec<HeatmapPoint>> {
     let window = days.clamp(1, MAX_DAYS);
-    let today = today_in(&filter.timezone);
-    let earliest = today
+    let window_end = filter.until.unwrap_or_else(|| today_in(&filter.timezone));
+    let earliest = window_end
         .checked_sub_signed(Duration::days((window - 1) as i64))
-        .unwrap_or(today);
+        .unwrap_or(window_end);
 
     let observed = load_observed(&dashboard.conn, filter, &earliest)?;
 
@@ -97,10 +97,5 @@ fn load_observed(
 }
 
 fn today_in(timezone: &ReportTimezone) -> NaiveDate {
-    let utc = Utc::now();
-    match timezone {
-        ReportTimezone::Utc => utc.date_naive(),
-        ReportTimezone::Local => Local::now().date_naive(),
-        ReportTimezone::Fixed(offset) => utc.with_timezone(offset).date_naive(),
-    }
+    timezone.date_at(Utc::now())
 }

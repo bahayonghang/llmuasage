@@ -58,7 +58,8 @@ main {
 
 .hero {
   display: grid;
-  grid-template-columns: minmax(0, 640px) 360px;
+  /* Fill the main column: copy takes remaining width, status card docks right. */
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
   gap: 28px;
   align-items: start;
   margin-bottom: 18px;
@@ -104,9 +105,9 @@ main {
 }
 
 .kpi-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .sync-command-center-metrics {
@@ -203,9 +204,9 @@ main {
 }
 
 .range-presets button.active {
-  background: var(--accent-soft);
-  color: var(--accent-deep);
-  box-shadow: 0 1px 0 color-mix(in oklab, var(--accent) 10%, transparent), 0 6px 14px color-mix(in oklab, var(--accent) 14%, transparent);
+  background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
+  color: var(--accent-blue);
+  font-weight: 600;
 }
 
 .range-presets button:disabled {
@@ -218,11 +219,11 @@ main {
   z-index: 80;
   width: 268px;
   padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface);
-  color: var(--ink-2);
-  box-shadow: var(--shadow-soft);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
 }
 
 .date-picker-head {
@@ -359,28 +360,22 @@ main {
   align-items: start;
 }
 
-.distribution-grid {
+.dash-grid {
   display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: 18px;
-  align-items: start;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
 }
 
-.distribution-grid > .panel {
+.dash-grid > * {
   min-width: 0;
 }
 
-.distribution-models {
-  grid-column: span 7;
-}
-
-.distribution-sources,
-.distribution-projects {
-  grid-column: span 5;
-}
-
-.distribution-projects {
+.dash-grid > .wide {
   grid-column: 1 / -1;
+}
+
+.distribution-grid {
+  align-items: start;
 }
 
 .behavior-grid {
@@ -403,23 +398,11 @@ main {
 }
 
 .cost-status-grid {
-  display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: 18px;
   align-items: start;
 }
 
 .cost-summary-panel {
-  grid-column: 1 / -1;
   padding-bottom: 18px;
-}
-
-.cost-ranking-panel {
-  grid-column: 1 / -1;
-}
-
-.status-diagnostics-panel {
-  grid-column: 1 / -1;
 }
 
 .trends-bottom {
@@ -474,20 +457,12 @@ section.block {
     grid-template-columns: 1fr;
   }
 
-  .distribution-grid,
-  .behavior-grid,
-  .cost-status-grid {
+  .behavior-grid {
     grid-template-columns: 1fr;
   }
 
-  .distribution-models,
-  .distribution-sources,
-  .distribution-projects,
   .behavior-primary,
-  .behavior-secondary,
-  .cost-summary-panel,
-  .cost-ranking-panel,
-  .status-diagnostics-panel {
+  .behavior-secondary {
     grid-column: auto;
   }
 
@@ -514,6 +489,16 @@ section.block {
 
   .explorer-results-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .dash-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dash-grid > .wide {
+    grid-column: auto;
   }
 }
 
