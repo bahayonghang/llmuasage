@@ -11,6 +11,8 @@ tests.
 - Shared Rust gate: `python scripts/ci-rust.py`
 - Full local gate: `just ci`
 - MSRV proof: `cargo +<rust-version> check --locked --all-features`
+- Required-check contract: `python scripts/check-ci-gate.py`
+- Live protection probe: `python scripts/check-ci-gate.py --github-protection`
 
 ## 3. Contracts
 
@@ -23,6 +25,16 @@ tests.
   `scripts/ci-rust.py` instead of maintaining duplicate Rust command lists.
 - All dependency-sensitive CI commands use `--locked`; clippy and tests use
   `--all-features`.
+- GitHub branch protection on `main` requires exactly one Actions check:
+  `CI gate`. That string is the `ci-gate` job `name:` in
+  `.github/workflows/ci.yml`. GitHub matches the job display name, not the
+  job id.
+- `ci-gate` must use `if: always()` and `needs` every other job in that
+  workflow. A skipped required check blocks merge the same way a missing
+  check does.
+- Do not put matrix cell names such as `Rust (windows-latest)` or versioned
+  names such as `MSRV (1.95)` in branch protection. Those names move when
+  the matrix or MSRV changes.
 
 ## 4. Validation & Error Matrix
 
@@ -31,6 +43,9 @@ tests.
 | Declared MSRV fails the locked all-features check | Block; raise `rust-version` or deliberately select compatible dependencies |
 | Version immediately below declared MSRV passes | Lower the declaration and repeat the proof |
 | Shared Rust gate fails locally or in one CI OS | Block; do not bypass that command in only one environment |
+| `main` required check name is absent from workflow job names | Block merge; restore `CI gate` or update protection in the same change |
+| A new CI job is omitted from `ci-gate.needs` | `python scripts/check-ci-gate.py` fails |
+| `ci-gate` is skipped after a leaf job fails | Block; keep `if: always()` so the required check still reports |
 | Subprocess test reports an OS error | Locate the exact failing operation; do not label it an environment failure without context |
 
 ## 5. Good / Base / Bad Cases
@@ -40,12 +55,17 @@ tests.
 - Base: the pinned development toolchain passes the same shared Rust gate.
 - Bad: `Cargo.toml` claims an old MSRV while CI silently tests a newer version,
   or local and CI gates use different argument sets.
+- Bad: branch protection still requires `Rust and docs` after that job name
+  is removed, so pull requests stay `BLOCKED` while every current job is green.
 
 ## 6. Tests Required
 
 - Run the MSRV proof with an isolated `CARGO_TARGET_DIR` after dependency
   updates.
 - Run `python scripts/ci-rust.py` before committing Rust changes.
+- Run `python scripts/check-ci-gate.py --self-test` and
+  `python scripts/check-ci-gate.py` before committing workflow or required-check
+  changes. Run `--github-protection` after changing `main` protection.
 - Subprocess regression tests must assert the executable exists and attach
   spawn context; they must consume current public runtime paths/readers rather
   than stale compatibility fields.
@@ -68,6 +88,28 @@ run: cargo check --locked --all-features
 
 `Cargo.toml` must declare the same `1.95`, and `1.95` must be established by
 running the command rather than inferred from direct dependency metadata.
+
+### Wrong
+
+```yaml
+# branch protection requires "Rust and docs"
+jobs:
+  rust:
+    name: Rust (${{ matrix.os }})
+  docs-and-js:
+    name: Docs and dashboard JS
+```
+
+### Correct
+
+```yaml
+ci-gate:
+  name: CI gate
+  if: always()
+  needs: [rust, msrv, docs-and-js, arch-gate, security]
+```
+
+`main` required checks must be exactly `CI gate`.
 
 ## Scenario: AST-Enforced Layer Dependencies
 

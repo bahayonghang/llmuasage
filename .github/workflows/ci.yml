@@ -187,3 +187,27 @@ jobs:
 
       - name: Run cargo audit
         run: cargo audit
+
+  # `name` is the GitHub check that branch protection on `main` requires.
+  # Do not rename it without updating that required-check list.
+  ci-gate:
+    name: CI gate
+    if: always()
+    needs:
+      - rust
+      - msrv
+      - docs-and-js
+      - arch-gate
+      - security
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify workflow gate membership
+        run: python scripts/check-ci-gate.py
+
+      - name: Require all jobs
+        env:
+          NEEDS_JSON: ${{ toJson(needs) }}
+        run: python scripts/check-ci-gate.py --needs-json "$NEEDS_JSON"

@@ -10,7 +10,7 @@
 - `just serve`: start the local web dashboard.
 - `just docs`: run the VitePress docs dev server.
 - `just build`: build the release binary and production docs.
-- `just ci`: full gate: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test --all-features -- --test-threads=1`, `cargo doc --no-deps`, the dashboard JS checks (`node --check` / `node --test`), and `npm --prefix docs run docs:build`.
+- `just ci`: full gate: `python scripts/check-ci-gate.py`, `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test --all-features -- --test-threads=1`, `cargo doc --no-deps`, the dashboard JS checks (`node --check` / `node --test`), and `npm --prefix docs run docs:build`.
 - `just install`: install the CLI from this checkout.
 
 ## Coding Style & Naming Conventions

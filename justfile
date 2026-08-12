@@ -57,6 +57,8 @@ version-sync version:
 
 ci:
     cargo update --offline --package llmusage
+    python scripts/check-ci-gate.py --self-test
+    python scripts/check-ci-gate.py
     python scripts/ci-rust.py
     node --check scripts/benchmark-dashboard-range.mjs
     node --test scripts/tests/dashboard-fetch.test.mjs
