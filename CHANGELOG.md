@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Replace the stale `main` required check `Rust and docs` with a stable `CI gate` job that depends on every current CI job.
+
 ### Changed
 
 - Harden CI: unify the Rust and dashboard-JS gates, run tests with `--all-features`, add build caching and cancel-in-progress, and add a `cargo audit` security job.
