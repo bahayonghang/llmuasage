@@ -58,7 +58,8 @@ main {
 
 .hero {
   display: grid;
-  grid-template-columns: minmax(0, 640px) 360px;
+  /* Fill the main column: copy takes remaining width, status card docks right. */
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
   gap: 28px;
   align-items: start;
   margin-bottom: 18px;

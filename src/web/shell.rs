@@ -243,7 +243,7 @@ fn html_shell(mode: &str) -> String {
           <div class="analytics-divider"></div>
           <div id="hour-of-week"></div>
         </div>
-        <div class="panel ready-widget-panel" id="top-sessions" aria-live="polite"></div>
+        <div class="panel ready-widget-panel wide" id="top-sessions" aria-live="polite"></div>
         <div class="panel ready-widget-panel wide" id="trends-daily" aria-live="polite"></div>
       </div>
 

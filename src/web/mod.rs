@@ -3154,6 +3154,41 @@ mod tests {
     }
 
     #[test]
+    fn overview_wide_layout_avoids_orphan_blank_columns() {
+        let html = live_index_html();
+        let layout_css = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "layout.css")
+            .expect("layout.css asset")
+            .body;
+        let components_css = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "components.css")
+            .expect("components.css asset")
+            .body;
+        let hero_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "render/hero.js")
+            .expect("hero.js asset")
+            .body;
+
+        // Hero fills the main column instead of capping at 640px + 360px.
+        assert!(layout_css.contains(
+            "grid-template-columns: minmax(0, 1fr) minmax(280px, 360px)"
+        ));
+        assert!(!layout_css.contains("grid-template-columns: minmax(0, 640px) 360px"));
+
+        // Alone between wide widgets, top-sessions must span full grid width.
+        assert!(html.contains(
+            "class=\"panel ready-widget-panel wide\" id=\"top-sessions\""
+        ));
+
+        // Status metrics use two cells; grid columns must match to avoid empty slots.
+        assert!(components_css.contains("grid-template-columns: repeat(2, minmax(0, 1fr))"));
+        assert_eq!(hero_js.matches("class=\"status-cell\"").count(), 2);
+    }
+
+    #[test]
     fn app_entry_wires_real_panel_toggles_and_project_navigation() {
         let app_js = asset_manifest()
             .iter()

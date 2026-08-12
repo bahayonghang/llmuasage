@@ -684,7 +684,8 @@ nav a:hover .nav-icon {
 
 .status-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* Hero currently renders two metric cells; match column count to avoid empty slots. */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 18px;
   position: relative;
