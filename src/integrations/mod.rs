@@ -14,6 +14,7 @@ mod atomic;
 pub mod claude;
 pub mod codex;
 pub mod opencode;
+pub mod zcode;
 
 pub use atomic::{
     recover_and_cleanup_residue, remove_file_atomic_and_record, write_file_atomic,

@@ -71,7 +71,7 @@ Dashboard 筛选器映射到 Rust 查询层共享的 `QueryFilter`。
 
 URL 会保留筛选，刷新页面或复制本地 URL 时仍保持同一视图。
 
-Antigravity 历史仍可在报表和 Dashboard 筛选中查看，但不再产生新事件。`source-status` 将其显示为 `historical_only`；独立平台探针仍为 monitor-only / `blocked_no_samples`。
+Antigravity CLI conversations 由已注册 parser 导入。hook 时代的 Antigravity 行仍可在报表和 Dashboard 筛选中查看。这些行没有文件归属时，rebuild 会被拒绝。IDE 侧 `conversations/*.pb` 仍为 planned。
 
 Cost Explorer 会在共享筛选之上追加自己的查询控件：
 

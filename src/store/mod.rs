@@ -103,6 +103,25 @@ pub struct OpencodeCursor {
     pub updated_at: String,
 }
 
+/// Incremental cursor for the ZCode SQLite `model_usage` source.
+///
+/// The watermark anchors on `completed_at` (visibility semantics): only
+/// completed rows are visible to the parser, and anchoring on `started_at`
+/// would permanently miss requests that start before but finish after the
+/// watermark advances. `last_processed_ids` holds the ids of the rows sharing
+/// the high-water `completed_at` so pagination is idempotent.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ZcodeCursor {
+    /// Highest `completed_at` (epoch ms) fully processed so far.
+    pub last_completed_at: i64,
+    /// Row ids already consumed at the high-water `completed_at`.
+    pub last_processed_ids: Vec<String>,
+    /// Last observed SQLite status such as `ok` or `missing-db`.
+    pub sqlite_status: String,
+    /// Last cursor refresh time in RFC 3339 format.
+    pub updated_at: String,
+}
+
 /// Historical cleanup audit state for one legacy integration surface.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IntegrationState {

@@ -1,0 +1,6 @@
+{"file": "docs/agents/passive-parser-onboarding.md", "reason": "被动解析器 onboarding 闸门：所需证据/测试/停止规则，三个子任务共同约束"}
+{"file": "docs/agents/passive-source-candidates.md", "reason": "候选表现状（omp/kimi/grok 已批准、antigravity blocked），交付时需更新 zcode/antigravity/deepseek 三行"}
+{"file": ".trellis/tasks/08-16-passive-sources-zcode-antigravity-deepseek/research/ccusage-tokscale-reference.md", "reason": "ref 参考架构与 tokscale zcode/antigravity 实现定位"}
+{"file": ".trellis/tasks/08-16-passive-sources-zcode-antigravity-deepseek/research/zcode-artifacts.md", "reason": "zcode 本机 schema/token 语义证据（cache-inclusive 结论）"}
+{"file": ".trellis/tasks/08-16-passive-sources-zcode-antigravity-deepseek/research/antigravity-artifacts.md", "reason": "antigravity CLI gen_metadata 证据与解码字段表"}
+{"file": ".trellis/tasks/08-16-passive-sources-zcode-antigravity-deepseek/research/deepseek-harness.md", "reason": "DSH 调研：无样本结论、登记要点、解锁条件"}

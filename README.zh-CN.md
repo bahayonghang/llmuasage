@@ -4,9 +4,9 @@
 
 > **命名说明：** crate 与二进制文件名为 `llmusage`；GitHub 仓库名为 `llmuasage`（多一个 `a`）。托管文档的链接使用仓库拼写。
 
-本地优先的 AI CLI 用量分析工具。`llmusage` 会被动读取本机 Codex、Claude Code、OpenCode、Kimi Code、Pi / Oh My Pi 和 Grok Build 的本地记录，保留已有 Google Antigravity 历史，并写入本地 SQLite；随后提供命令行报表、终端 Dashboard、浏览器 Dashboard 和离线 HTML 导出，全程不上传、不登录、不调用云端用量 API。
+本地优先的 AI CLI 用量分析工具。`llmusage` 会被动读取本机 Codex、Claude Code、OpenCode、Kimi Code、Pi / Oh My Pi、Grok Build、ZCode、Antigravity CLI 和 DeepSeek Harness 的本地记录，并写入本地 SQLite；随后提供命令行报表、终端 Dashboard、浏览器 Dashboard 和离线 HTML 导出，全程不上传、不登录、不调用云端用量 API。
 
-> 当前 crate 版本：`1.1.2`。
+> 当前 crate 版本：`1.2.0`。
 
 ![llmusage 本地 Web Dashboard 概览](./docs/public/screenshots/web-dashboard-overview.png)
 
@@ -70,12 +70,14 @@ llmusage serve
 | Codex | OpenAI Codex rollout/session JSONL |
 | Claude | Claude Code project JSONL |
 | OpenCode | OpenCode 本地 SQLite 用量库 |
-| Antigravity | 历史行继续可查，但不再导入新事件；在验证被动 schema 前，`source-status` 显示 `historical_only` |
+| Antigravity | `~/.gemini/antigravity-cli/conversations/*.db`（或 `GEMINI_CLI_HOME`）；hook 时代的历史行继续可查，存在未归属历史时拒绝 rebuild |
 | Kimi Code | `~/.kimi-code/sessions/**/wire.jsonl`（或 `KIMI_CODE_HOME`），只读取 turn-scoped `usage.record` |
 | Pi / Oh My Pi | 把 `~/.pi/agent/sessions/**/*.jsonl` 与 `~/.omp/agent/sessions/**/*.jsonl` 合并为一个稳定的 `pi` 来源 |
 | Grok Build | `~/.grok/sessions/*/*/`（或 `GROK_HOME`），只读取会话根目录的 `updates.jsonl`、`signals.json`、`summary.json` 和可选 `events.jsonl` sidecar |
+| ZCode | `~/.zcode/cli/db/db.sqlite`（或 `ZCODE_HOME`）中 `model_usage` 的 completed 行 |
+| DeepSeek Harness | `~/.dsh/sessions/**/session.jsonl.zstd` 或 `session.jsonl`（或 `DSH_HOME`）；按帧魔数分派压缩与否 |
 
-Kimi Code 与 Pi 都是 passive、`precise` 来源：保留原始模型名，通过文件 cursor 保证增量与幂等重放，且不持久化 transcript 正文。Pi 支持由本机 Oh My Pi 样本和脱敏 Pi-compatible fixture 共同验证；Pi-only 的本机证据仍有限。Grok Build 是 passive、`total_only` 来源：只记录权威总 token，不猜测 input/output/cache 拆分；任一 sidecar 变化时按会话整体重放。由于本地记录没有可计价子通道，成本保持 `unpriced`。`source-status` 和 `dash` 还会显示 Reasonix、Gemini CLI、Cursor、Copilot、Zed、Kiro、Goose、Kimi shell/Qwen、Roo/Kilo/Cline、Codebuff、Crush、Warp/Oz、Amp、Hermes、Trae 等仅监控平台。仅监控表示 llmusage 可以探测候选本地路径并说明为什么阻塞解析；不会写入 0 用量行，也不会写入未验证 token 行。
+Kimi Code、Pi、ZCode、Antigravity CLI 和 DeepSeek Harness 都是 passive、`precise` 来源：保留原始模型名，通过来源级 cursor 保证增量与幂等重放，且不持久化 transcript 正文。Pi 支持由本机 Oh My Pi 样本和脱敏 Pi-compatible fixture 共同验证；Pi-only 的本机证据仍有限。Grok Build 是 passive、`total_only` 来源：只记录权威总 token，不猜测 input/output/cache 拆分；任一 sidecar 变化时按会话整体重放。由于本地记录没有可计价子通道，成本保持 `unpriced`。`source-status` 和 `dash` 还会显示 Reasonix、Gemini CLI、Cursor、Copilot、Zed、Kiro、Goose、Kimi shell/Qwen、Roo/Kilo/Cline、Codebuff、Crush、Warp/Oz、Amp、Hermes、Trae 等仅监控平台。仅监控表示 llmusage 可以探测候选本地路径并说明为什么阻塞解析；不会写入 0 用量行，也不会写入未验证 token 行。
 
 从曾安装 hook/plugin 的旧版本升级后，应执行一次 `llmusage uninstall`。该命令只清理 llmusage 自有的遗留条目和 wrapper，保留历史备份与用量数据；`--purge` 才会额外删除整个运行时根目录。
 
@@ -147,7 +149,7 @@ llmusage codex-tracer --rebuild
 - `llmusage sync --recent-days N` 只导入最近的 UTC 事件窗口（`1..=3650`），且不推进全历史 cursor；`--parallelism` 合法范围为 `1..=32`。
 - bounded sync 不会自动重建旧版 accounting，因为清空全历史后只导入时间窗口会造成丢失；请先运行无界 `llmusage sync`。
 - `llmusage sync --rebuild` 默认拒绝有损重建，除非同时传入 `--allow-lossy-rebuild`。
-- 无 source 的 `llmusage sync --rebuild` 只重置 parser-backed 来源；parserless Antigravity 的历史和诊断状态会保留。即使带 `--allow-lossy-rebuild`，定向重建 Antigravity 也会被拒绝，因为没有 parser 能重建这部分历史。
+- 无 source 的 `llmusage sync --rebuild` 会重置 parser-backed 来源。若重建会删除未归属的 hook 时代 Antigravity 行，即使带 `--allow-lossy-rebuild` 也会拒绝。
 - `llmusage serve` 也会在绑定端口前自动重建可安全迁移的旧版 parser 来源。与普通 sync 的全量预检不同，serve 只跳过有风险的来源，让只读 Dashboard 仍可启动。
 - 自动修复永远不会启用 `--allow-lossy-rebuild`；请先恢复缺失源文件，再显式执行 `llmusage sync --rebuild --source <source>`。
 - `llmusage diagnostics --forget-file <PATH> --source <SOURCE>` 是显式忽略源文件的写入入口。

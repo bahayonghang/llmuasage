@@ -54,7 +54,10 @@ llmusage init
 | OpenCode | OpenCode 本地 SQLite 用量库 | 被动 parser |
 | Kimi Code | turn-scoped `usage.record` 行 | 被动 parser |
 | Pi / Oh My Pi | 两个支持目录中的 session JSONL | 被动 parser |
-| Antigravity | 仅历史数据库行 | `historical_only`；验证被动 schema 前不再产生新事件 |
+| Grok Build | 会话根目录 sidecar | 被动 parser（`total_only`） |
+| Antigravity | CLI `conversations/*.db`，并保留 hook 时代历史行 | 被动 parser；存在未归属历史时拒绝 rebuild |
+| ZCode | `cli/db/db.sqlite` 的 `model_usage` completed 行 | 被动 parser |
+| DeepSeek Harness | `sessions/**/session.jsonl(.zstd)` | 被动 parser |
 
 Google 本地 CLI 来源 id 仍是 `antigravity`；`gemini` 不作为来源 id。从会安装 hook 的旧版本升级后，应执行一次 `llmusage uninstall`。清理只移除 llmusage 自有的遗留命令、plugin 和 wrapper，保留同级用户配置与历史备份；除非传入 `--purge`，否则不会删除用量数据库。
 

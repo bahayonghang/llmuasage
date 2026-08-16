@@ -1,6 +1,6 @@
 [package]
 name = "llmusage"
-version = "1.1.2"
+version = "1.2.0"
 edition = "2024"
 rust-version = "1.95"
 description = "Local-first AI CLI usage analytics with Rust, SQLite, hooks, and zero upload."
@@ -62,6 +62,7 @@ walkdir = "2.5.0"
 tempfile = { version = "3.27.0", optional = true }
 chrono-tz = { version = "0.10.4", features = ["case-insensitive"] }
 iana-time-zone = "0.1.65"
+zstd = "0.13.3"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }

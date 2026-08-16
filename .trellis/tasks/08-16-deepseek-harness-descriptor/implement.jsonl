@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "monitor 登记（source_kind: None 模式）与后续 SourceKind+parser 同批注册的契约"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "DSH input 不含 cache（与 zcode 相反）、reasoning 诊断不计 total 的契约依据"}
+{"file": ".trellis/spec/llmusage/backend/ci-toolchain-contracts.md", "reason": "ruzstd/zstd 新依赖评审 gate 的 CI 契约"}
+{"file": ".trellis/spec/llmusage/backend/write-fencing-contracts.md", "reason": "FileCursor 与 shard 提交的写围栏契约"}
+{"file": "docs/agents/passive-parser-onboarding.md", "reason": "onboarding 闸门（15 样本已到位，剩余 gate 见 prd R1）"}
+{"file": ".trellis/tasks/08-16-passive-sources-zcode-antigravity-deepseek/research/deepseek-harness.md", "reason": "官方落盘/TokenUsage 合同 + 15 样本实测 + zstd 决策（~/.dsh 修正版）"}

@@ -187,23 +187,24 @@ pub struct BoundedJsonlReader<R: Read> {
     max_buffered_bytes: usize,
 }
 
-impl<R: Read + Seek> BoundedJsonlReader<R> {
-    /// Creates a new reader, seeking to `start_offset` before the first read.
-    pub fn new(reader: R, start_offset: u64) -> Result<Self> {
-        Self::with_limit(reader, start_offset, DEFAULT_MAX_JSONL_RECORD_BYTES)
+impl<R: Read> BoundedJsonlReader<R> {
+    /// Creates a reader over a non-seekable stream starting at byte 0.
+    ///
+    /// Use this for decoded frames (zstd) where the physical file offset is
+    /// not a durable JSONL cursor. Seekable files should keep using [`Self::new`].
+    pub fn from_read(reader: R) -> Self {
+        Self::from_read_with_limit(reader, DEFAULT_MAX_JSONL_RECORD_BYTES)
     }
 
-    pub fn with_limit(reader: R, start_offset: u64, max_record_bytes: usize) -> Result<Self> {
-        let mut inner = BufReader::new(reader);
-        inner.seek(SeekFrom::Start(start_offset))?;
-        Ok(Self {
-            inner,
-            complete_offset: start_offset,
-            current_offset: start_offset,
+    pub fn from_read_with_limit(reader: R, max_record_bytes: usize) -> Self {
+        Self {
+            inner: BufReader::new(reader),
+            complete_offset: 0,
+            current_offset: 0,
             max_record_bytes,
             record: Vec::new(),
             max_buffered_bytes: 0,
-        })
+        }
     }
 
     /// The byte offset of the start of the next line to be read.
@@ -341,6 +342,26 @@ impl<R: Read + Seek> BoundedJsonlReader<R> {
                 });
             }
         }
+    }
+}
+
+impl<R: Read + Seek> BoundedJsonlReader<R> {
+    /// Creates a new reader, seeking to `start_offset` before the first read.
+    pub fn new(reader: R, start_offset: u64) -> Result<Self> {
+        Self::with_limit(reader, start_offset, DEFAULT_MAX_JSONL_RECORD_BYTES)
+    }
+
+    pub fn with_limit(reader: R, start_offset: u64, max_record_bytes: usize) -> Result<Self> {
+        let mut inner = BufReader::new(reader);
+        inner.seek(SeekFrom::Start(start_offset))?;
+        Ok(Self {
+            inner,
+            complete_offset: start_offset,
+            current_offset: start_offset,
+            max_record_bytes,
+            record: Vec::new(),
+            max_buffered_bytes: 0,
+        })
     }
 }
 

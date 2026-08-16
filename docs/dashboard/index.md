@@ -73,7 +73,7 @@ Dashboard filters map to the shared `QueryFilter` used by the Rust query layer.
 
 The URL preserves filters so a refreshed page or shared local URL keeps the same view.
 
-Antigravity history remains selectable in reports and dashboard filters, but it no longer receives new events. `source-status` exposes this as `historical_only`; its separate platform monitor remains monitor-only and `blocked_no_samples`.
+Antigravity CLI conversations are imported by the registered parser. Hook-era Antigravity rows remain selectable in reports and dashboard filters. A rebuild is refused while those rows have no file attribution. The IDE-side `conversations/*.pb` family stays planned.
 
 Cost Explorer adds its own query controls on top of the shared filters:
 

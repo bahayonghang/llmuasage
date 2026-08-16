@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Added
+
+- Add passive parsers for ZCode (`zcode`), Antigravity CLI (`antigravity`), and DeepSeek Harness (`deepseek_harness`).
+
+### Changed
+
+- Raise the crate version from `1.1.2` to `1.2.0`.
+- Flip Antigravity from `historical_only` to a parser-backed source. Hook-era rows stay queryable, and rebuilds that would delete unattributed history are refused.
+
 ### Fixed
 
 - Replace the stale `main` required check `Rust and docs` with a stable `CI gate` job that depends on every current CI job.

@@ -4,9 +4,9 @@
 
 > **Naming note:** the crate and binary are `llmusage`; the GitHub repository is `llmuasage` (extra `a`). Links to the hosted docs use the repo spelling.
 
-Local-first usage analytics for AI coding CLIs. `llmusage` passively reads local Codex, Claude Code, OpenCode, Kimi Code, Pi / Oh My Pi, and Grok Build artifacts into SQLite, preserves historical Google Antigravity usage, then renders reports, terminal and browser dashboards, and offline HTML exports without upload or login.
+Local-first usage analytics for AI coding CLIs. `llmusage` passively reads local Codex, Claude Code, OpenCode, Kimi Code, Pi / Oh My Pi, Grok Build, ZCode, Antigravity CLI, and DeepSeek Harness artifacts into SQLite, then renders reports, terminal and browser dashboards, and offline HTML exports without upload or login.
 
-> Current crate version: `1.1.2`.
+> Current crate version: `1.2.0`.
 
 ![llmusage web dashboard overview](./docs/public/screenshots/web-dashboard-overview.png)
 
@@ -72,12 +72,14 @@ On the first sync after an embedded pricing catalog upgrade, `sync` reprices his
 | Codex         | OpenAI Codex rollout/session JSONL                                                                                                                                    |
 | Claude        | Claude Code project JSONL                                                                                                                                             |
 | OpenCode      | OpenCode local SQLite usage database                                                                                                                                  |
-| Antigravity   | Historical rows remain queryable, but no new events are imported; `source-status` reports `historical_only` until a verified passive schema exists                   |
+| Antigravity   | `~/.gemini/antigravity-cli/conversations/*.db` (or `GEMINI_CLI_HOME`); hook-era rows stay queryable and a rebuild is refused while unattributed history exists       |
 | Kimi Code     | `~/.kimi-code/sessions/**/wire.jsonl` (or `KIMI_CODE_HOME`), turn-scoped `usage.record` rows only                                                                    |
 | Pi / Oh My Pi | `~/.pi/agent/sessions/**/*.jsonl` and `~/.omp/agent/sessions/**/*.jsonl` as one stable `pi` source                                                                   |
 | Grok Build    | `~/.grok/sessions/*/*/` (or `GROK_HOME`), reading only the session-root `updates.jsonl`, `signals.json`, `summary.json`, and optional `events.jsonl` sidecars       |
+| ZCode         | `~/.zcode/cli/db/db.sqlite` (or `ZCODE_HOME`) `model_usage` completed rows                                                                                           |
+| DeepSeek Harness | `~/.dsh/sessions/**/session.jsonl.zstd` or `session.jsonl` (or `DSH_HOME`); zstd frames dispatched by magic bytes                                                 |
 
-Kimi Code and Pi are passive, precise sources: they keep raw model names, use file cursors for incremental/idempotent replay, and never persist transcript text. Pi support is verified with local Oh My Pi samples plus sanitized Pi-compatible fixtures; Pi-only local evidence is still limited. Grok Build is passive and `total_only`: it records authoritative session/turn totals without inventing input/output/cache splits, replays a whole session when a sidecar changes, and leaves cost `unpriced` because the local artifacts do not expose chargeable subchannels. `source-status` and `dash` also show monitor-only platform candidates such as Reasonix, Gemini CLI, Cursor, Copilot, Zed, Kiro, Goose, Kimi shell/Qwen, Roo/Kilo/Cline, Codebuff, Crush, Warp/Oz, Amp, Hermes, and Trae. Monitor-only means llmusage can probe candidate local roots and explain why parsing is blocked; it does not write zero usage rows or untrusted token rows.
+Kimi Code, Pi, ZCode, Antigravity CLI, and DeepSeek Harness are passive, precise sources: they keep raw model names, use source-scoped cursors for incremental/idempotent replay, and never persist transcript text. Pi support is verified with local Oh My Pi samples plus sanitized Pi-compatible fixtures; Pi-only local evidence is still limited. Grok Build is passive and `total_only`: it records authoritative session/turn totals without inventing input/output/cache splits, replays a whole session when a sidecar changes, and leaves cost `unpriced` because the local artifacts do not expose chargeable subchannels. `source-status` and `dash` also show monitor-only platform candidates such as Reasonix, Gemini CLI, Cursor, Copilot, Zed, Kiro, Goose, Kimi shell/Qwen, Roo/Kilo/Cline, Codebuff, Crush, Warp/Oz, Amp, Hermes, and Trae. Monitor-only means llmusage can probe candidate local roots and explain why parsing is blocked; it does not write zero usage rows or untrusted token rows.
 
 Machines upgraded from a release that installed hooks or plugins should run `llmusage uninstall` once. The command removes only legacy llmusage-owned entries and wrappers while preserving historical backups and usage data; `--purge` additionally removes the runtime root.
 
@@ -149,7 +151,7 @@ llmusage codex-tracer --rebuild
 - `llmusage sync --recent-days N` imports only the latest UTC event window (`1..=3650`) without advancing full-history cursors; `--parallelism` accepts `1..=32`.
 - A bounded sync never auto-rebuilds legacy accounting because resetting full history and importing only a time window would be lossy. Run unbounded `llmusage sync` first.
 - `llmusage sync --rebuild` refuses lossy rebuilds unless you also pass `--allow-lossy-rebuild`.
-- A full `llmusage sync --rebuild` resets only parser-backed sources; parserless Antigravity history and diagnostics are preserved. A targeted Antigravity rebuild is rejected even with `--allow-lossy-rebuild` because no parser can reconstruct that history.
+- A full `llmusage sync --rebuild` resets parser-backed sources. A rebuild that would delete unattributed hook-era Antigravity rows is refused even with `--allow-lossy-rebuild`.
 - `llmusage serve` also automatically rebuilds safe legacy parser sources before binding a port. Unlike the all-or-nothing normal sync preflight, serve skips only risky sources so the read-only dashboard can still start.
 - Automatic repair never enables `--allow-lossy-rebuild`; use `llmusage sync --rebuild --source <source>` explicitly after restoring missing source files.
 - `llmusage diagnostics --forget-file <PATH> --source <SOURCE>` is the explicit write path for intentionally ignored source files.

@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "检查 descriptor/monitor/stats/status 是否符合契约"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "检查 cache-inclusive 修正与 total 一致性处理"}
+{"file": "docs/agents/passive-parser-onboarding.md", "reason": "检查 Required evidence / Required tests 逐项满足"}
+{"file": ".trellis/tasks/08-16-zcode-passive-parser/prd.md", "reason": "验收标准清单"}

@@ -22,7 +22,9 @@ pub const fn expected_token_accounting_version(source: SourceKind) -> u32 {
         | SourceKind::Antigravity
         | SourceKind::KimiCode
         | SourceKind::Pi
-        | SourceKind::Grok => TOKEN_ACCOUNTING_VERSION,
+        | SourceKind::Grok
+        | SourceKind::Zcode
+        | SourceKind::DeepseekHarness => TOKEN_ACCOUNTING_VERSION,
     }
 }
 
@@ -216,6 +218,28 @@ impl Store {
             Ok(())
         })?;
         Ok(())
+    }
+
+    /// Counts stored events for one source that carry no file attribution
+    /// (`source_path_hash` NULL/empty).
+    ///
+    /// Hook-era Antigravity rows are the only rows that can be unattributed:
+    /// they predate the passive parser and cannot be reconstructed from any
+    /// local artifact, so `--rebuild` guards use this count to refuse
+    /// destructive resets while such history exists.
+    pub fn unattributed_event_count(&self, source: SourceKind) -> Result<i64> {
+        let conn = self.open_connection()?;
+        let count = conn.query_row(
+            r#"
+            SELECT COUNT(*)
+            FROM usage_event
+            WHERE source = ?1
+              AND (source_path_hash IS NULL OR source_path_hash = '')
+            "#,
+            [source.as_str()],
+            |row| row.get(0),
+        )?;
+        Ok(count)
     }
 
     /// Deletes rebuildable usage state for exactly one source (D20 / F3.3).

@@ -58,7 +58,10 @@ llmusage init
 | OpenCode | OpenCode local SQLite usage database | Passive parser |
 | Kimi Code | Turn-scoped `usage.record` rows | Passive parser |
 | Pi / Oh My Pi | Session JSONL from both supported roots | Passive parser |
-| Antigravity | Historical database rows only | `historical_only`; no new events until a verified passive schema exists |
+| Grok Build | Direct session sidecars | Passive parser (`total_only`) |
+| Antigravity | CLI `conversations/*.db` plus retained hook-era rows | Passive parser; rebuild refused while unattributed history exists |
+| ZCode | `cli/db/db.sqlite` `model_usage` completed rows | Passive parser |
+| DeepSeek Harness | `sessions/**/session.jsonl(.zstd)` | Passive parser |
 
 The Google local CLI source id remains `antigravity`; `gemini` is not accepted as a source id. Machines upgraded from hook-enabled releases should run `llmusage uninstall` once. Cleanup removes only llmusage-owned legacy commands/plugins/wrappers, preserves sibling user configuration and historical backups, and leaves the usage database intact unless `--purge` is passed.
 

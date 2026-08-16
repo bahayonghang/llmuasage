@@ -13,9 +13,10 @@ is the compatibility baseline when reference implementations disagree.
 - Persisted contract: `usage_event.total_tokens` ->
   `usage_bucket_30m.total_tokens` -> query/UI `total_tokens`.
 - Version metadata:
-  `meta('token_accounting_version.codex') = '3'`; Claude, OpenCode, Kimi Code,
-  Pi, and Grok remain `2`. `expected_token_accounting_version(SourceKind) -> u32`
-  owns this source-aware contract.
+  `meta('token_accounting_version.codex') = '3'`; Claude, OpenCode, Antigravity,
+  Kimi Code, Pi, Grok, ZCode, and DeepSeek Harness remain `2`.
+  `expected_token_accounting_version(SourceKind) -> u32` owns this source-aware
+  contract.
 - Legacy repair: `llmusage sync --rebuild --source <source>`.
 - Normal-sync repair lifecycle:
   `SyncEvent::TokenAccountingRepairStarted/TokenAccountingRepairFinished`.
@@ -65,6 +66,19 @@ is the compatibility baseline when reference implementations disagree.
   and reasoning stay zero because the local artifacts expose no trustworthy
   split. Grok has no pricing row: a total-only event with zero chargeable
   subchannels must remain `unpriced`, never falsely matched at zero cost.
+- ZCode `input_tokens` is cache-inclusive. Subtract cache read and cache
+  creation from input. Keep `output_tokens` verbatim (reasoning is already
+  inside it). Persist `reasoning_tokens` as the diagnostic channel. Trust
+  `computed_total_tokens` when present; otherwise fall back to
+  `provider_total_tokens`, then the channel sum.
+- Antigravity CLI maps `input = #2 + #1`, `cache_read = #5`, `output = #9`
+  (text only), and `reasoning = #10`. The `#3 == #9 + #10` checksum proves
+  thinking tokens are disjoint from text output, so the total is the channel
+  sum including reasoning. There is no authoritative grand total.
+- DeepSeek Harness `inputTokens` already excludes cache. Map cache read and
+  cache write once each. Keep `outputTokens` verbatim. Persist
+  `reasoningTokens` as the diagnostic channel and do not add it to total.
+  Total is `input + cache_read + cache_creation + outputTokens`.
 - Pricing receives normalized channels. Prompt-tier selection remains
   `input + cache_read + cache_creation`.
 - An unbounded normal sync discovers legacy sources only within its selected
@@ -108,7 +122,7 @@ is the compatibility baseline when reference implementations disagree.
 | Parserless source | Do not invent a marker or token normalization |
 | Persisted Codex marker is `2` | Treat only Codex as legacy and automatically repair it during safe unbounded normal sync |
 | Persisted Claude/OpenCode marker is `2` | Treat it as current |
-| Persisted Kimi Code/Pi/Grok marker is `2` | Treat it as current |
+| Persisted Kimi Code/Pi/Grok/ZCode/Antigravity/DeepSeek Harness marker is `2` | Treat it as current |
 | Replay marker exists and first two token snapshots share a second | Skip that second's prefix while retaining the latest cumulative baseline |
 | Two ordinary Codex requests share a second without a replay marker | Keep both events |
 | A malformed line contains `token_count` before valid replay snapshots | Ignore the malformed line and continue detection |

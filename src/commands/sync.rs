@@ -708,8 +708,33 @@ fn reset_for_rebuild(
     parser_sources: &[SourceKind],
 ) -> Result<()> {
     let rebuild_sources = rebuild_sources(options.source, parser_sources)?;
+    assert_no_unattributed_antigravity_history(store, &rebuild_sources)?;
     assert_lossless_rebuild(store, options, &rebuild_sources)?;
     reset_sources_for_rebuild(store, &rebuild_sources)
+}
+
+/// Refuses any rebuild that would delete hook-era Antigravity history.
+///
+/// Those rows predate the passive parser, carry no `source_path_hash`
+/// attribution, and do not exist in `conversations/*.db`, so once deleted they
+/// are gone forever. The guard is absolute (not bypassed by
+/// `--allow-lossy-rebuild`): export a backup first if you truly need to clear
+/// them. Once no unattributed rows remain, rebuild behaves like any other
+/// parser-backed source.
+fn assert_no_unattributed_antigravity_history(
+    store: &Store,
+    rebuild_sources: &[SourceKind],
+) -> Result<()> {
+    if !rebuild_sources.contains(&SourceKind::Antigravity) {
+        return Ok(());
+    }
+    let unattributed = store.unattributed_event_count(SourceKind::Antigravity)?;
+    if unattributed == 0 {
+        return Ok(());
+    }
+    bail!(
+        "Refusing `sync --rebuild` for antigravity because {unattributed} stored event(s) are hook-era history without file attribution; they cannot be reconstructed from local artifacts and are not covered by --allow-lossy-rebuild. Export a backup first (e.g. `llmusage export`) if you intentionally want to drop them."
+    )
 }
 
 fn reset_sources_for_rebuild(store: &Store, sources: &[SourceKind]) -> Result<()> {

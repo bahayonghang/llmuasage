@@ -83,11 +83,11 @@ pub const SOURCE_DESCRIPTORS: &[SourceDescriptor] = &[
         aliases: &[],
         display_name: "Antigravity",
         capabilities: SourceCapabilities {
-            parser: false,
-            passive_probe: false,
+            parser: true,
+            passive_probe: true,
         },
-        quality: UsageQuality::TotalOnly,
-        privacy: PrivacyClass::LocalArtifacts,
+        quality: UsageQuality::Precise,
+        privacy: PrivacyClass::LocalDatabase,
     },
     SourceDescriptor {
         kind: SourceKind::KimiCode,
@@ -123,6 +123,30 @@ pub const SOURCE_DESCRIPTORS: &[SourceDescriptor] = &[
             passive_probe: true,
         },
         quality: UsageQuality::TotalOnly,
+        privacy: PrivacyClass::LocalArtifacts,
+    },
+    SourceDescriptor {
+        kind: SourceKind::Zcode,
+        stable_id: "zcode",
+        aliases: &[],
+        display_name: "ZCode",
+        capabilities: SourceCapabilities {
+            parser: true,
+            passive_probe: true,
+        },
+        quality: UsageQuality::Precise,
+        privacy: PrivacyClass::LocalDatabase,
+    },
+    SourceDescriptor {
+        kind: SourceKind::DeepseekHarness,
+        stable_id: "deepseek_harness",
+        aliases: &[],
+        display_name: "DeepSeek Harness",
+        capabilities: SourceCapabilities {
+            parser: true,
+            passive_probe: true,
+        },
+        quality: UsageQuality::Precise,
         privacy: PrivacyClass::LocalArtifacts,
     },
 ];

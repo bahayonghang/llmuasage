@@ -58,7 +58,7 @@ reset legacy 子集，且每个所选来源只解析一次。
 llmusage sync --rebuild
 ```
 
-`--rebuild` 会按来源重置 parser-backed 用量状态，再重新解析本地来源。无 source 的 full rebuild 以 parser registry 作为删除边界，因此 parserless Antigravity 的 event、bucket、行为事实、cursor 和 source-file 诊断都会保留。即使带 `--allow-lossy-rebuild`，定向重建 Antigravity 也会被拒绝，因为没有被动 parser 能重建这部分历史。如果 parser 来源的已导入文件型历史依赖现在缺失的源文件，llmusage 会在任何 reset 发生前拒绝重建。
+`--rebuild` 会按来源重置 parser-backed 用量状态，再重新解析本地来源。若重建会删除未归属的 hook 时代 Antigravity 行，即使带 `--allow-lossy-rebuild` 也会拒绝。如果 parser 来源的已导入文件型历史依赖现在缺失的源文件，llmusage 会在任何 reset 发生前拒绝重建。
 
 显式覆盖参数是：
 

@@ -226,12 +226,16 @@ pub const PLATFORM_MONITORS: &[PlatformMonitorDescriptor] = &[
         platform_id: "antigravity",
         display_name: "Antigravity",
         source_kind: Some(SourceKind::Antigravity),
-        roots: &[MonitorRoot::Home(".gemini/antigravity-cli")],
-        artifact_patterns: &["token-bearing session artifacts (not yet verified)"],
-        parser_status: ParserSupportStatus::BlockedNoSamples,
-        quality: Some(UsageQuality::TotalOnly),
-        privacy: PrivacyClass::LocalArtifacts,
-        next_action: "monitor-only; historical usage is retained while passive samples are unavailable",
+        roots: &[MonitorRoot::EnvOrHome {
+            env: "GEMINI_CLI_HOME",
+            env_relative: "antigravity-cli/conversations",
+            home_relative: ".gemini/antigravity-cli/conversations",
+        }],
+        artifact_patterns: &["*.db"],
+        parser_status: ParserSupportStatus::Registered,
+        quality: Some(UsageQuality::Precise),
+        privacy: PrivacyClass::LocalDatabase,
+        next_action: "parsed by the registered Antigravity CLI source parser (gen_metadata usage fields); the IDE-side conversations/*.pb family stays planned",
     },
     PlatformMonitorDescriptor {
         platform_id: "kimi_code",
@@ -284,6 +288,42 @@ pub const PLATFORM_MONITORS: &[PlatformMonitorDescriptor] = &[
         quality: Some(UsageQuality::TotalOnly),
         privacy: PrivacyClass::LocalArtifacts,
         next_action: "parsed by the registered Grok Build source parser",
+    },
+    PlatformMonitorDescriptor {
+        platform_id: "zcode",
+        display_name: "ZCode",
+        source_kind: Some(SourceKind::Zcode),
+        roots: &[MonitorRoot::EnvOrHome {
+            env: "ZCODE_HOME",
+            env_relative: "cli/db",
+            home_relative: ".zcode/cli/db",
+        }],
+        artifact_patterns: &["db.sqlite"],
+        parser_status: ParserSupportStatus::Registered,
+        quality: Some(UsageQuality::Precise),
+        privacy: PrivacyClass::LocalDatabase,
+        next_action: "parsed by the registered ZCode source parser (model_usage table)",
+    },
+    PlatformMonitorDescriptor {
+        platform_id: "deepseek_harness",
+        display_name: "DeepSeek Harness",
+        source_kind: Some(SourceKind::DeepseekHarness),
+        roots: &[
+            MonitorRoot::EnvOrHome {
+                env: "DSH_HOME",
+                env_relative: "",
+                home_relative: ".dsh",
+            },
+            MonitorRoot::Home(".deepseek"),
+        ],
+        artifact_patterns: &[
+            "sessions/**/session.jsonl.zstd",
+            "sessions/**/session.jsonl",
+        ],
+        parser_status: ParserSupportStatus::Registered,
+        quality: Some(UsageQuality::Precise),
+        privacy: PrivacyClass::LocalArtifacts,
+        next_action: "parsed by the registered DeepSeek Harness source parser (session.jsonl.zstd)",
     },
     PlatformMonitorDescriptor {
         platform_id: "reasonix",
@@ -679,11 +719,34 @@ mod tests {
 
         assert_eq!(
             antigravity.roots,
-            &[MonitorRoot::Home(".gemini/antigravity-cli")]
+            &[MonitorRoot::EnvOrHome {
+                env: "GEMINI_CLI_HOME",
+                env_relative: "antigravity-cli/conversations",
+                home_relative: ".gemini/antigravity-cli/conversations",
+            }]
         );
+        assert_eq!(antigravity.parser_status, ParserSupportStatus::Registered);
+    }
+
+    #[test]
+    fn deepseek_harness_monitor_probes_dsh_and_legacy_deepseek_roots() {
+        let dsh = registered_platform_monitors()
+            .iter()
+            .find(|descriptor| descriptor.platform_id == "deepseek_harness")
+            .expect("DeepSeek Harness monitor should exist");
+
+        assert_eq!(dsh.source_kind, Some(SourceKind::DeepseekHarness));
+        assert_eq!(dsh.parser_status, ParserSupportStatus::Registered);
         assert_eq!(
-            antigravity.parser_status,
-            ParserSupportStatus::BlockedNoSamples
+            dsh.roots,
+            &[
+                MonitorRoot::EnvOrHome {
+                    env: "DSH_HOME",
+                    env_relative: "",
+                    home_relative: ".dsh",
+                },
+                MonitorRoot::Home(".deepseek"),
+            ]
         );
     }
 

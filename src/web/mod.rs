@@ -2768,11 +2768,14 @@ mod tests {
     #[test]
     fn live_shell_uses_module_entry() {
         let html = live_index_html();
+        let supported_sources = crate::registry::registered_source_descriptors()
+            .iter()
+            .map(|descriptor| descriptor.stable_id)
+            .collect::<Vec<_>>()
+            .join(", ");
         assert!(html.contains("data-mode=\"live\""));
         assert!(html.contains("data-app-version=\""));
-        assert!(html.contains(
-            "data-supported-sources=\"codex, claude, opencode, antigravity, kimi_code, pi, grok\""
-        ));
+        assert!(html.contains(&format!("data-supported-sources=\"{supported_sources}\"")));
         assert!(html.contains("type=\"module\""));
         assert!(html.contains("assets/app.js"));
         assert!(html.contains("window.__LLMUSAGE_BOOTSTRAP__"));

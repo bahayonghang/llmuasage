@@ -63,7 +63,7 @@ llmusage sync --recent-days 1
 llmusage sync --rebuild
 ```
 
-`--rebuild` 会按来源重置 parser-backed 用量状态，再重新解析本地真源。parserless Antigravity 的 event、bucket、行为事实、cursor 和 source-file 诊断都会保留。如果 parser 来源的已导入文件型历史依赖现在缺失的源文件，默认拒绝执行。
+`--rebuild` 会按来源重置 parser-backed 用量状态，再重新解析本地真源。若重建会删除未归属的 hook 时代 Antigravity 行，操作会被拒绝。如果 parser 来源的已导入文件型历史依赖现在缺失的源文件，默认拒绝执行。
 
 Token 统计口径按 parser 来源单独记录版本。含旧口径行的数据库仍可读取，但普通
 无界 `llmusage sync` 会检测本次所选 parser 集合中的旧版来源，先输出警告，再确认

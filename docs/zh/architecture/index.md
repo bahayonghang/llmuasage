@@ -20,9 +20,9 @@
 - `registered_parsers()` 驱动 `llmusage sync`。
 - `registered_source_descriptors()` 驱动 capability/status 语义，并用测试防止 parser 漂移。
 
-新增来源意味着新增 `SourceKind` variant 和 descriptor。只有 descriptor 的能力声明与测试证据支持时，才新增 parser。Passive reader 写入 usage 行之前还必须具备真实本地样本、fixture 覆盖、sync-twice 幂等、cursor/rebuild 行为、token 质量声明和隐私审查。Antigravity descriptor 继续用于解析和查询历史行；它没有 parser 或 passive probe，因此 `source-status` 推导为 `historical_only`。
+新增来源意味着新增 `SourceKind` variant 和 descriptor。只有 descriptor 的能力声明与测试证据支持时，才新增 parser。Passive reader 写入 usage 行之前还必须具备真实本地样本、fixture 覆盖、sync-twice 幂等、cursor/rebuild 行为、token 质量声明和隐私审查。Antigravity 已对 CLI `conversations/*.db` 注册 parser；hook 时代的历史行仍可查询，且在没有文件归属时拒绝 rebuild。
 
-`PlatformMonitorDescriptor` 是更宽的监控目录：既描述 Kimi Code、Pi、Grok Build 这类已注册 passive 来源，也描述 Reasonix、Gemini CLI、Cursor、Copilot、Zed、Kiro、Goose、Kimi shell/Qwen、Roo/Kilo/Cline、Codebuff、Crush、Warp/Oz、Amp、Hermes 和 Trae 等 parserless 候选。Monitor descriptor 可以在 `source-status` 与 `dash` 中展示 detected/unavailable 根目录、parser 支持状态、隐私类别、token 质量和下一步动作；只有同时具备已注册 `SourceKind` 与 parser 的 descriptor 才能写入 usage 行。
+`PlatformMonitorDescriptor` 是更宽的监控目录：既描述 Kimi Code、Pi、Grok Build、ZCode、Antigravity CLI、DeepSeek Harness 这类已注册 passive 来源，也描述 Reasonix、Gemini CLI、Cursor、Copilot、Zed、Kiro、Goose、Kimi shell/Qwen、Roo/Kilo/Cline、Codebuff、Crush、Warp/Oz、Amp、Hermes 和 Trae 等 parserless 候选。Monitor descriptor 可以在 `source-status` 与 `dash` 中展示 detected/unavailable 根目录、parser 支持状态、隐私类别、token 质量和下一步动作；只有同时具备已注册 `SourceKind` 与 parser 的 descriptor 才能写入 usage 行。
 
 ## 同步流程
 

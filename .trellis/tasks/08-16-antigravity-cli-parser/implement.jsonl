@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "来源翻转（parserless→parser）涉及的 sync 命令/status 契约"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "通道归一化与 event_key 幂等契约"}
+{"file": ".trellis/spec/llmusage/backend/write-fencing-contracts.md", "reason": "per-file cursor 与 shard 提交遵循的写围栏"}
+{"file": ".trellis/spec/llmusage/backend/ci-toolchain-contracts.md", "reason": "零新依赖约束（手写 protobuf wire 解码）的 CI 契约"}
+{"file": "docs/agents/passive-parser-onboarding.md", "reason": "R1 fixture 硬闸门与停止规则"}
+{"file": ".trellis/tasks/08-16-passive-sources-zcode-antigravity-deepseek/research/antigravity-artifacts.md", "reason": "gen_metadata 字段表、本机样本证据、待验证清单 §8"}
+{"file": ".trellis/tasks/08-16-passive-sources-zcode-antigravity-deepseek/research/ccusage-tokscale-reference.md", "reason": "tokscale antigravity_cli.rs 参考实现定位"}

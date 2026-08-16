@@ -15,7 +15,8 @@ pub enum SourceKind {
     Claude,
     /// OpenCode local SQLite usage database.
     Opencode,
-    /// Historical Google Antigravity usage source (no passive parser).
+    /// Google Antigravity usage source: hook-era history plus the CLI
+    /// `conversations/*.db` passive parser.
     Antigravity,
     /// Kimi Code local `wire.jsonl` session artifacts.
     #[value(name = "kimi_code")]
@@ -26,6 +27,12 @@ pub enum SourceKind {
     /// Grok Build local session sidecars.
     #[value(name = "grok")]
     Grok,
+    /// Z.ai ZCode CLI local SQLite `model_usage` database.
+    #[value(name = "zcode")]
+    Zcode,
+    /// DeepSeek Harness (dsh) local `session.jsonl.zstd` artifacts.
+    #[value(name = "deepseek_harness")]
+    DeepseekHarness,
 }
 
 impl SourceKind {
@@ -39,6 +46,8 @@ impl SourceKind {
             Self::KimiCode => "kimi_code",
             Self::Pi => "pi",
             Self::Grok => "grok",
+            Self::Zcode => "zcode",
+            Self::DeepseekHarness => "deepseek_harness",
         }
     }
 

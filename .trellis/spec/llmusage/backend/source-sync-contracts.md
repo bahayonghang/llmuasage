@@ -29,10 +29,8 @@
   `~/.kimi-code/sessions/**/wire.jsonl` and one `pi` id for both
   `~/.pi/agent/sessions` and `~/.omp/agent/sessions`. Grok Build uses `grok`
   for direct sidecars under `~/.grok/sessions/*/*/` or `GROK_HOME/sessions`.
-- Registered passive parsers are Codex, Claude, OpenCode, Kimi Code, Pi, and
-  Grok Build.
-  Antigravity retains its stable persisted descriptor for historical query
-  compatibility but has no parser or passive probe.
+- Registered passive parsers are Codex, Claude, OpenCode, Antigravity, Kimi
+  Code, Pi, Grok Build, ZCode, and DeepSeek Harness.
 - Monitor descriptors live outside parser promotion and report detection status,
   candidate roots, and parser availability.
 
@@ -92,12 +90,22 @@
 - Monitor-only platforms must surface as diagnostics/status entries with token
   quality labels, not as parser-backed usage, until sanitized fixtures and token
   semantics exist.
-- A persisted source descriptor without a parser, currently Antigravity, must
-  surface as `historical_only`, never `passive_ready` or `passive_no_data`.
-  Historical events remain queryable and dashboard filters remain valid, but
-  sync writes no new events. The separate Antigravity platform monitor remains
-  monitor-only with `blocked_no_samples` and wording that explains the retained
-  history and missing passive evidence.
+- A persisted source descriptor without a parser must surface as
+  `historical_only`, never `passive_ready` or `passive_no_data`. Historical
+  events remain queryable and dashboard filters remain valid, but sync writes
+  no new events.
+- Antigravity is parser-backed for CLI `conversations/*.db`. Hook-era rows
+  with an empty `source_path_hash` stay queryable. `sync --rebuild` that
+  includes Antigravity must refuse when any such unattributed row exists, even
+  when `--allow-lossy-rebuild` is present.
+- ZCode reads `~/.zcode/cli/db/db.sqlite` `model_usage` completed rows with a
+  `completed_at` high-water cursor. A bounded run may reuse that cursor as a
+  lower bound but must not advance it.
+- DeepSeek Harness discovers `$DSH_HOME` (default `~/.dsh`) `sessions/` at any
+  depth for files named exactly `session.jsonl` or `session.jsonl.zstd`.
+  Compression is dispatched by zstd frame magic. An unbounded fingerprint
+  change replays the session family; a bounded run must not reset or advance
+  cursors.
 - `sync --rebuild --source <source>` must reject a persisted source without a
   registered passive parser even when `--allow-lossy-rebuild` is present. It
   must never delete historical-only events that no parser can reconstruct.

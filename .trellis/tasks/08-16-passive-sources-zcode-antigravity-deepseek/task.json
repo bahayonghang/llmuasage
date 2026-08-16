@@ -1,0 +1,30 @@
+{
+  "id": "passive-sources-zcode-antigravity-deepseek",
+  "name": "passive-sources-zcode-antigravity-deepseek",
+  "title": "新增 zcode / antigravity / deepseek-harness 被动数据源（父任务）",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-08-16",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-16-zcode-passive-parser",
+    "08-16-antigravity-cli-parser",
+    "08-16-deepseek-harness-descriptor"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

@@ -43,9 +43,9 @@ fn sync_hot_run_and_append_remain_incremental() -> Result<()> {
         let store = Store::new(&app.paths)?;
         let first_overview = Dashboard::open(&store)?.overview(&Default::default())?;
         let first_sync_status = store.sync_status().load_source_sync_statuses()?;
-        // One status per registered source: codex, claude, opencode, kimi_code,
-        // pi, and grok (parser-backed) plus the parserless antigravity source.
-        assert_eq!(first_sync_status.len(), 7);
+        // One status per registered source: codex, claude, opencode,
+        // antigravity, kimi_code, pi, grok, zcode, and deepseek_harness.
+        assert_eq!(first_sync_status.len(), 9);
 
         commands::sync::run(&app).await?;
         let second_overview = Dashboard::open(&store)?.overview(&Default::default())?;
@@ -734,7 +734,7 @@ fn historical_hook_rows_and_holder_kind_remain_read_compatible() -> Result<()> {
 }
 
 #[test]
-fn rebuild_rejects_parserless_antigravity_and_preserves_history() -> Result<()> {
+fn rebuild_rejects_unattributed_antigravity_history_and_preserves_rows() -> Result<()> {
     let fixture = Fixture::new()?;
     fixture.seed_codex(
         "rollout-antigravity-history.jsonl",
@@ -748,7 +748,13 @@ fn rebuild_rejects_parserless_antigravity_and_preserves_history() -> Result<()> 
         commands::sync::run(&app).await?;
         let store = Store::new(&app.paths)?;
         let conn = store.open_connection()?;
+        // Simulate hook-era antigravity rows: renamed source AND no file
+        // attribution (source_path_hash NULL), the real legacy shape.
         conn.execute("UPDATE usage_event SET source = 'antigravity'", [])?;
+        conn.execute(
+            "UPDATE usage_event SET source_path_hash = NULL WHERE source = 'antigravity'",
+            [],
+        )?;
         conn.execute("UPDATE usage_bucket_30m SET source = 'antigravity'", [])?;
         let before: i64 = conn.query_row(
             "SELECT COUNT(*) FROM usage_event WHERE source = 'antigravity'",
@@ -768,8 +774,8 @@ fn rebuild_rejects_parserless_antigravity_and_preserves_history() -> Result<()> 
             },
         )
         .await
-        .expect_err("parserless Antigravity rebuild must be rejected");
-        assert!(error.to_string().contains("no passive parser"));
+        .expect_err("rebuild must refuse while unattributed antigravity history exists");
+        assert!(error.to_string().contains("hook-era history"));
 
         let after: i64 = store.open_connection()?.query_row(
             "SELECT COUNT(*) FROM usage_event WHERE source = 'antigravity'",
@@ -2739,6 +2745,1835 @@ fn source_capability_status(app: &AppContext, store: &Store, source: SourceKind)
     Ok(status.status.to_string())
 }
 
+/// One synthetic ZCode `model_usage` row used by the zcode fixture helpers.
+#[derive(Debug, Clone)]
+struct ZcodeRowFixture {
+    id: &'static str,
+    session_id: &'static str,
+    model_id: &'static str,
+    status: &'static str,
+    started_at: i64,
+    completed_at: i64,
+    input_tokens: i64,
+    output_tokens: i64,
+    reasoning_tokens: i64,
+    cache_creation_tokens: i64,
+    cache_read_tokens: i64,
+    provider_total_tokens: Option<i64>,
+    computed_total_tokens: Option<i64>,
+}
+
+impl Default for ZcodeRowFixture {
+    fn default() -> Self {
+        Self {
+            id: "usage-row",
+            session_id: "sess-1",
+            model_id: "GLM-5.3",
+            status: "completed",
+            started_at: 1_780_000_000_000,
+            completed_at: 1_780_000_001_000,
+            input_tokens: 0,
+            output_tokens: 0,
+            reasoning_tokens: 0,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+            provider_total_tokens: None,
+            computed_total_tokens: None,
+        }
+    }
+}
+
+fn zcode_row(id: &'static str, completed_at: i64, input: i64, output: i64) -> ZcodeRowFixture {
+    ZcodeRowFixture {
+        id,
+        completed_at,
+        input_tokens: input,
+        output_tokens: output,
+        computed_total_tokens: Some(input + output),
+        ..ZcodeRowFixture::default()
+    }
+}
+
+fn zcode_source_count(db_path: &Path) -> Result<i64> {
+    let conn = Connection::open(db_path)?;
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM usage_event WHERE source = 'zcode'",
+        [],
+        |row| row.get(0),
+    )?)
+}
+
+// ============================================================================
+// Antigravity 合成 wire 编码（protobuf varint / len-delimited，全脱敏）
+// ============================================================================
+
+fn ag_varint(value: u64, out: &mut Vec<u8>) {
+    let mut value = value;
+    loop {
+        let mut byte = (value & 0x7F) as u8;
+        value >>= 7;
+        if value != 0 {
+            byte |= 0x80;
+        }
+        out.push(byte);
+        if value == 0 {
+            break;
+        }
+    }
+}
+
+fn ag_varint_field(field_no: u32, value: u64) -> Vec<u8> {
+    let mut out = Vec::new();
+    ag_varint(u64::from(field_no) << 3, &mut out);
+    ag_varint(value, &mut out);
+    out
+}
+
+fn ag_bytes_field(field_no: u32, payload: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    ag_varint((u64::from(field_no) << 3) | 2, &mut out);
+    ag_varint(payload.len() as u64, &mut out);
+    out.extend_from_slice(payload);
+    out
+}
+
+fn ag_string_field(field_no: u32, value: &str) -> Vec<u8> {
+    ag_bytes_field(field_no, value.as_bytes())
+}
+
+/// `chatModel.#9.#4` timestamp message `{#1 秒, #2 纳秒}` wrapper.
+fn ag_timestamp_message(seconds: u64, nanos: u64) -> Vec<u8> {
+    let mut stamp = Vec::new();
+    stamp.extend_from_slice(&ag_varint_field(1, seconds));
+    stamp.extend_from_slice(&ag_varint_field(2, nanos));
+    ag_bytes_field(4, &stamp)
+}
+
+/// usage 子消息（chatModel.#4）：#3 checksum 恒 = #9 + #10。
+fn ag_usage_message(
+    input: u64,
+    output: u64,
+    thinking: u64,
+    cache_read: u64,
+    response_id: &str,
+) -> Vec<u8> {
+    let mut usage = Vec::new();
+    usage.extend_from_slice(&ag_varint_field(1, 1132));
+    usage.extend_from_slice(&ag_varint_field(2, input));
+    usage.extend_from_slice(&ag_varint_field(3, output + thinking));
+    if cache_read > 0 {
+        usage.extend_from_slice(&ag_varint_field(5, cache_read));
+    }
+    usage.extend_from_slice(&ag_varint_field(6, 24));
+    usage.extend_from_slice(&ag_varint_field(9, output));
+    usage.extend_from_slice(&ag_varint_field(10, thinking));
+    usage.extend_from_slice(&ag_string_field(11, response_id));
+    usage
+}
+
+/// 完整 gen_metadata blob：chatModel(#1) 嵌套 usage/model/label/timestamp +
+/// 顶层 #4 干扰字段。
+#[allow(clippy::too_many_arguments)]
+fn ag_gen_metadata_blob(
+    input: u64,
+    output: u64,
+    thinking: u64,
+    cache_read: u64,
+    response_id: &str,
+    model: Option<&str>,
+    label: Option<&str>,
+    timestamp_seconds: u64,
+) -> Vec<u8> {
+    let usage = ag_usage_message(input, output, thinking, cache_read, response_id);
+    let mut chat_model = Vec::new();
+    chat_model.extend_from_slice(&ag_bytes_field(4, &usage));
+    chat_model.extend_from_slice(&ag_bytes_field(
+        9,
+        &ag_timestamp_message(timestamp_seconds, 657_105_100),
+    ));
+    if let Some(model) = model {
+        chat_model.extend_from_slice(&ag_string_field(19, model));
+    }
+    if let Some(label) = label {
+        chat_model.extend_from_slice(&ag_string_field(21, label));
+    }
+    let mut blob = Vec::new();
+    blob.extend_from_slice(&ag_bytes_field(1, &chat_model));
+    blob.extend_from_slice(&ag_bytes_field(4, &[0u8; 36]));
+    blob
+}
+
+/// `trajectory_metadata_blob` 行：#2 created-at + #1.#1 workspace URI。
+fn antigravity_trajectory_blob() -> Vec<u8> {
+    let mut stamp = Vec::new();
+    stamp.extend_from_slice(&ag_varint_field(1, 1_785_140_245));
+    stamp.extend_from_slice(&ag_varint_field(2, 657_105_100));
+    let mut workspace = Vec::new();
+    workspace.extend_from_slice(&ag_string_field(1, "file:///D:/Documents/demo"));
+    let mut trajectory = Vec::new();
+    trajectory.extend_from_slice(&ag_bytes_field(1, &workspace));
+    trajectory.extend_from_slice(&ag_bytes_field(2, &stamp));
+    trajectory
+}
+
+fn antigravity_event_count(db_path: &Path) -> Result<i64> {
+    let conn = Connection::open(db_path)?;
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM usage_event WHERE source = 'antigravity'",
+        [],
+        |row| row.get(0),
+    )?)
+}
+
+#[test]
+fn antigravity_sync_twice_is_idempotent() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_antigravity(
+        "11111111-1111-1111-1111-111111111111",
+        &[
+            (
+                1,
+                ag_gen_metadata_blob(
+                    500,
+                    234,
+                    50,
+                    1200,
+                    "resp-1",
+                    Some("gemini-3.6-flash"),
+                    Some("Gemini 3.6 Flash (High)"),
+                    1_785_140_200,
+                ),
+            ),
+            (
+                2,
+                ag_gen_metadata_blob(
+                    300,
+                    100,
+                    20,
+                    0,
+                    "resp-2",
+                    Some("gemini-3.6-flash"),
+                    Some("Gemini 3.6 Flash (High)"),
+                    1_785_140_300,
+                ),
+            ),
+        ],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let first = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Antigravity),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(first.total_inserted, 2);
+
+        let second = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Antigravity),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(second.total_inserted, 0);
+        assert_eq!(second.sources[0].skipped_files, 1);
+        assert_eq!(antigravity_event_count(&app.paths.db_path)?, 2);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn antigravity_tokens_separate_output_from_reasoning() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_antigravity(
+        "22222222-2222-2222-2222-222222222222",
+        &[(
+            1,
+            ag_gen_metadata_blob(
+                500,
+                234,
+                50,
+                1200,
+                "resp-1",
+                Some("gemini-3.6-flash"),
+                None,
+                1_785_140_200,
+            ),
+        )],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Antigravity),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+        let conn = Connection::open(&app.paths.db_path)?;
+        let row = conn.query_row(
+            "SELECT input_tokens, cache_read_tokens, output_tokens, reasoning_output_tokens, total_tokens, model FROM usage_event WHERE source = 'antigravity'",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            },
+        )?;
+        // input = #2 + #1（system prompt）；total 含 reasoning（#9/#10 不相交）。
+        assert_eq!(row.0, 500 + 1132);
+        assert_eq!(row.1, 1200);
+        assert_eq!(row.2, 234);
+        assert_eq!(row.3, 50);
+        assert_eq!(row.4, 1632 + 1200 + 234 + 50);
+        assert_eq!(row.5, "gemini-3.6-flash");
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn antigravity_append_replays_file_and_replaces_stale_rows() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let uuid = "33333333-3333-3333-3333-333333333333";
+    fixture.seed_antigravity(
+        uuid,
+        &[(
+            1,
+            ag_gen_metadata_blob(
+                500,
+                234,
+                50,
+                1200,
+                "resp-1",
+                Some("gemini-3.6-flash"),
+                None,
+                1_785_140_200,
+            ),
+        )],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Antigravity),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(antigravity_event_count(&app.paths.db_path)?, 1);
+
+        // 重写同一 conversation（新增一行）：fingerprint 变化 → 全文件重解析 +
+        // reset_path_hashes 替换旧行。
+        fixture.seed_antigravity(
+            uuid,
+            &[
+                (
+                    1,
+                    ag_gen_metadata_blob(
+                        500,
+                        234,
+                        50,
+                        1200,
+                        "resp-1",
+                        Some("gemini-3.6-flash"),
+                        None,
+                        1_785_140_200,
+                    ),
+                ),
+                (
+                    2,
+                    ag_gen_metadata_blob(
+                        300,
+                        100,
+                        10,
+                        0,
+                        "resp-2",
+                        Some("gemini-3.6-flash"),
+                        None,
+                        1_785_140_400,
+                    ),
+                ),
+            ],
+        )?;
+        let second = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Antigravity),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(second.total_inserted, 2, "reparse re-inserts both rows");
+        assert_eq!(
+            antigravity_event_count(&app.paths.db_path)?,
+            2,
+            "stale row is replaced, not duplicated"
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn antigravity_deleted_conversation_preserves_history() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let uuid = "44444444-4444-4444-4444-444444444444";
+    let path = fixture.seed_antigravity(
+        uuid,
+        &[(
+            1,
+            ag_gen_metadata_blob(
+                500,
+                234,
+                50,
+                1200,
+                "resp-1",
+                Some("gemini-3.6-flash"),
+                None,
+                1_785_140_200,
+            ),
+        )],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Antigravity),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+        fs::remove_file(&path)?;
+        let second = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Antigravity),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(second.total_inserted, 0);
+        assert_eq!(
+            antigravity_event_count(&app.paths.db_path)?,
+            1,
+            "deleted conversation history is preserved"
+        );
+        let counts = store.source_files().counts(SourceKind::Antigravity)?;
+        assert_eq!(counts.missing, 1);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn antigravity_missing_root_reports_no_data() -> Result<()> {
+    let fixture = Fixture::new()?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let summary = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Antigravity),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(summary.total_inserted, 0);
+        assert_eq!(
+            source_capability_status(&app, &store, SourceKind::Antigravity)?,
+            "passive_no_data",
+            "parser-backed antigravity reports passive_no_data without artifacts"
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn antigravity_cli_home_override() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let custom_root = fixture.home.join("custom-gemini");
+    let conversations = custom_root.join("antigravity-cli").join("conversations");
+    fs::create_dir_all(&conversations)?;
+    let conn = Connection::open(conversations.join("55555555-5555-5555-5555-555555555555.db"))?;
+    conn.execute_batch(
+        r#"
+        CREATE TABLE gen_metadata(idx INTEGER PRIMARY KEY, data BLOB, size INTEGER);
+        CREATE TABLE trajectory_metadata_blob(id TEXT, data BLOB);
+        "#,
+    )?;
+    let blob = ag_gen_metadata_blob(
+        100,
+        40,
+        5,
+        0,
+        "resp-x",
+        Some("gemini-3.6-flash"),
+        None,
+        1_785_140_200,
+    );
+    conn.execute(
+        "INSERT INTO gen_metadata(idx, data, size) VALUES (1, ?1, ?2)",
+        rusqlite::params![&blob, blob.len() as i64],
+    )?;
+    conn.execute(
+        "INSERT INTO trajectory_metadata_blob(id, data) VALUES ('traj', ?1)",
+        rusqlite::params![&antigravity_trajectory_blob()],
+    )?;
+    drop(conn);
+    unsafe {
+        std::env::set_var("GEMINI_CLI_HOME", &custom_root);
+    }
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let summary = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Antigravity),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(summary.total_inserted, 1);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+/// P0 升级路径：真实旧 key 形状的存量行（ADR-0009：迁移只改 source 不改
+/// key）与新导入行共存；无界 sync / 自动 legacy 修复不删除存量行。
+#[test]
+fn antigravity_upgrade_from_historical_only_keeps_legacy_rows() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_antigravity(
+        "66666666-6666-6666-6666-666666666666",
+        &[(
+            1,
+            ag_gen_metadata_blob(
+                500,
+                234,
+                50,
+                1200,
+                "resp-1",
+                Some("gemini-3.6-flash"),
+                None,
+                1_785_140_200,
+            ),
+        )],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+
+        // 预置 hook 时代存量行：真实旧 key 形状 + 无文件归属。
+        // v21 marker 预置后 has_legacy_token_accounting 必须为 false。
+        let conn = store.open_connection()?;
+        conn.execute_batch(
+            r#"
+            INSERT INTO usage_event(
+                event_key, source, model, event_at, hour_start,
+                input_tokens, cache_read_tokens, cache_creation_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens, created_at
+            ) VALUES ('antigravity:test:event', 'antigravity', 'gemini-2.5-pro',
+                      '2026-07-15T03:00:00Z', '2026-07-15T03:00:00Z',
+                      20, 0, 0, 5, 0, 25, '2026-07-15T03:00:00Z');
+            "#,
+        )?;
+        drop(conn);
+        assert!(
+            !store.has_legacy_token_accounting(SourceKind::Antigravity)?,
+            "v21 marker must keep hook-era rows out of automatic legacy repair"
+        );
+
+        // 无界 sync：解析器导入新行，存量行不动、不重复。
+        let summary = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Antigravity),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(summary.total_inserted, 1);
+
+        let conn = Connection::open(&app.paths.db_path)?;
+        let legacy: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_event WHERE event_key = 'antigravity:test:event'",
+            [],
+            |row| row.get(0),
+        )?;
+        let total: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_event WHERE source = 'antigravity'",
+            [],
+            |row| row.get(0),
+        )?;
+        let distinct: i64 = conn.query_row(
+            "SELECT COUNT(DISTINCT event_key) FROM usage_event WHERE source = 'antigravity'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(legacy, 1, "unbounded sync must not delete hook-era rows");
+        assert_eq!(total, 2, "legacy row and parser row coexist");
+        assert_eq!(distinct, total);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+/// bounded run：按事件时间过滤，不推进 cursor、不 reset；窗口外历史由
+/// 随后的全量 sync 恢复。
+#[test]
+fn antigravity_recent_days_run_skips_reset_and_window_filters() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_antigravity(
+        "77777777-7777-7777-7777-777777777777",
+        &[(
+            1,
+            ag_gen_metadata_blob(
+                500,
+                234,
+                50,
+                1200,
+                "resp-old",
+                Some("gemini-3.6-flash"),
+                None,
+                1_785_140_200,
+            ),
+        )],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Antigravity),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(antigravity_event_count(&app.paths.db_path)?, 1);
+
+        // 窗口内的追加 + 窗口外的旧行重写（fingerprint 变化）。
+        let uuid = "77777777-7777-7777-7777-777777777777";
+        let now_seconds = chrono::Utc::now().timestamp().unsigned_abs();
+        fixture.seed_antigravity(
+            uuid,
+            &[
+                (
+                    1,
+                    ag_gen_metadata_blob(
+                        500,
+                        234,
+                        50,
+                        1200,
+                        "resp-old",
+                        Some("gemini-3.6-flash"),
+                        None,
+                        1_785_140_200,
+                    ),
+                ),
+                (
+                    2,
+                    ag_gen_metadata_blob(
+                        300,
+                        100,
+                        10,
+                        0,
+                        "resp-new",
+                        Some("gemini-3.6-flash"),
+                        None,
+                        now_seconds,
+                    ),
+                ),
+            ],
+        )?;
+        let bounded = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Antigravity),
+                recent_days: Some(1),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(
+            bounded.total_inserted, 1,
+            "bounded run imports only the in-window event"
+        );
+
+        // bounded 不 reset：窗口外旧行不被重放删除（仍 1 条旧 + 1 条新）。
+        assert_eq!(antigravity_event_count(&app.paths.db_path)?, 2);
+
+        // 随后的全量 sync 恢复窗口外历史语义（重放替换，行数不膨胀）。
+        let full = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Antigravity),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(full.total_inserted, 2, "full sync replays both rows");
+        assert_eq!(antigravity_event_count(&app.paths.db_path)?, 2);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn zcode_sync_twice_is_idempotent() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.insert_zcode_row(zcode_row("row-a", 1_000, 100, 40))?;
+    fixture.insert_zcode_row(zcode_row("row-b", 2_000, 200, 60))?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let first = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Zcode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(first.total_inserted, 2);
+
+        let second = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Zcode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(second.total_inserted, 0);
+        assert_eq!(second.sources[0].changed_files, 0);
+        assert_eq!(second.sources[0].skipped_files, 1);
+        assert_eq!(zcode_source_count(&app.paths.db_path)?, 2);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn zcode_append_imports_only_new_rows() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.insert_zcode_row(zcode_row("row-a", 1_000, 100, 40))?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Zcode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+        fixture.insert_zcode_row(zcode_row("row-b", 2_000, 200, 60))?;
+        let second = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Zcode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(second.total_inserted, 1);
+        assert_eq!(zcode_source_count(&app.paths.db_path)?, 2);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+/// A request that starts before the watermark but completes after it must not
+/// be missed: the watermark anchors on `completed_at`, not `started_at`.
+#[test]
+fn zcode_late_completing_request_is_not_missed() -> Result<()> {
+    let fixture = Fixture::new()?;
+    // Row A starts early but is still running (no completed_at).
+    let mut row_a = zcode_row("row-a", 5_000, 100, 40);
+    row_a.started_at = 1_000;
+    row_a.status = "running";
+    row_a.completed_at = 0;
+    fixture.insert_zcode_row(row_a)?;
+    // Row B starts and completes later, advancing the watermark to 2_000.
+    let mut row_b = zcode_row("row-b", 2_000, 200, 60);
+    row_b.started_at = 1_500;
+    fixture.insert_zcode_row(row_b)?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let first = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Zcode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(first.total_inserted, 1, "only the completed row B imports");
+
+        // Row A finishes after the watermark advanced.
+        let conn = Connection::open(fixture.zcode_db_path())?;
+        conn.execute(
+            "UPDATE model_usage SET status = 'completed', completed_at = 6_000 WHERE id = 'row-a'",
+            [],
+        )?;
+        drop(conn);
+
+        let second = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Zcode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(
+            second.total_inserted, 1,
+            "late-completing row A must import"
+        );
+        assert_eq!(zcode_source_count(&app.paths.db_path)?, 2);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn zcode_skips_error_and_cancelled_rows_and_counts_them() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.insert_zcode_row(zcode_row("ok-1", 1_000, 100, 40))?;
+    let mut error_row = zcode_row("err-1", 2_000, 0, 0);
+    error_row.status = "error";
+    fixture.insert_zcode_row(error_row)?;
+    let mut cancelled_row = zcode_row("cancel-1", 3_000, 0, 0);
+    cancelled_row.status = "cancelled";
+    fixture.insert_zcode_row(cancelled_row)?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let summary = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Zcode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(summary.total_inserted, 1);
+        assert_eq!(
+            summary.sources[0].parse_issues.malformed_lines, 2,
+            "error and cancelled rows are counted, not imported"
+        );
+        assert_eq!(zcode_source_count(&app.paths.db_path)?, 1);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn zcode_db_rebuild_replays_from_zero() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.insert_zcode_row(zcode_row("row-a", 1_000, 100, 40))?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Zcode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(zcode_source_count(&app.paths.db_path)?, 1);
+
+        // The DB is replaced with fresh ids; the persisted anchor no longer
+        // exists, so the cursor must reset and replay from zero.
+        fixture.rebuild_zcode_db(&[zcode_row("row-new", 1_000, 300, 90)])?;
+        let second = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Zcode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(second.total_inserted, 1, "rebuilt DB replays from zero");
+        // The pre-rebuild event is preserved (opencode semantics); no
+        // duplicate event keys exist.
+        let conn = Connection::open(&app.paths.db_path)?;
+        let distinct_keys: i64 = conn.query_row(
+            "SELECT COUNT(DISTINCT event_key) FROM usage_event WHERE source = 'zcode'",
+            [],
+            |row| row.get(0),
+        )?;
+        let total_rows: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_event WHERE source = 'zcode'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(distinct_keys, total_rows);
+        assert_eq!(total_rows, 2);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn zcode_missing_root_sync_succeeds_and_reports_no_data() -> Result<()> {
+    let fixture = Fixture::new()?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let summary = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Zcode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(summary.total_inserted, 0);
+        assert!(summary.sources[0].absent, "missing DB reports absent");
+        assert_eq!(
+            source_capability_status(&app, &store, SourceKind::Zcode)?,
+            "passive_no_data"
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn zcode_home_override_points_parser_at_custom_root() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let custom_root = fixture.home.join("custom-zcode");
+    let db_path = custom_root.join("cli").join("db").join("db.sqlite");
+    fs::create_dir_all(db_path.parent().unwrap())?;
+    let conn = Connection::open(&db_path)?;
+    conn.execute_batch(
+        r#"
+        CREATE TABLE model_usage(
+            id TEXT PRIMARY KEY, session_id TEXT, model_id TEXT, status TEXT,
+            started_at INTEGER, completed_at INTEGER, input_tokens INTEGER,
+            output_tokens INTEGER, reasoning_tokens INTEGER,
+            cache_creation_input_tokens INTEGER, cache_read_input_tokens INTEGER,
+            provider_total_tokens INTEGER, computed_total_tokens INTEGER
+        );
+        INSERT INTO model_usage(id, model_id, status, started_at, completed_at,
+            input_tokens, output_tokens, computed_total_tokens)
+        VALUES ('override-row', 'GLM-5.3', 'completed', 1, 2, 10, 5, 15);
+        "#,
+    )?;
+    drop(conn);
+    unsafe {
+        std::env::set_var("ZCODE_HOME", &custom_root);
+    }
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let summary = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Zcode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(summary.total_inserted, 1);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn zcode_first_sync_marks_current_token_accounting() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.insert_zcode_row(zcode_row("row-a", 1_000, 100, 40))?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        assert_eq!(store.token_accounting_version(SourceKind::Zcode)?, None);
+
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Zcode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+        assert_eq!(
+            store.token_accounting_version(SourceKind::Zcode)?,
+            Some(expected_token_accounting_version(SourceKind::Zcode))
+        );
+        assert_eq!(expected_token_accounting_version(SourceKind::Zcode), 2);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+/// A bounded `--recent-days` run may reuse the stored watermark as a lower
+/// bound but must not advance it; a later full sync still recovers history
+/// outside the window (source-sync-contracts).
+#[test]
+fn zcode_recent_days_run_filters_window_without_advancing_cursor() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.insert_zcode_row(zcode_row("row-old", 1_000_000_000, 100, 40))?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Zcode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(zcode_source_count(&app.paths.db_path)?, 1);
+
+        // An append inside the recent window must import during the bounded
+        // run, while the watermark and anchors stay untouched.
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        fixture.insert_zcode_row(zcode_row("row-new", now_ms, 300, 90))?;
+        let bounded = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Zcode),
+                recent_days: Some(1),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(
+            bounded.total_inserted, 1,
+            "bounded run imports only the in-window append"
+        );
+
+        let cursor = store.cursors().load_zcode_cursor()?;
+        assert_eq!(
+            cursor.last_completed_at, 1_000_000_000,
+            "bounded run must not advance the watermark"
+        );
+        assert!(
+            !cursor.last_processed_ids.iter().any(|id| id == "row-new"),
+            "bounded run must not promote in-window rows to anchors"
+        );
+        assert_eq!(zcode_source_count(&app.paths.db_path)?, 2);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+fn dsh_event_count(db_path: &Path) -> Result<i64> {
+    let conn = Connection::open(db_path)?;
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM usage_event WHERE source = 'deepseek_harness'",
+        [],
+        |row| row.get(0),
+    )?)
+}
+
+fn dsh_event_keys(db_path: &Path) -> Result<Vec<String>> {
+    let conn = Connection::open(db_path)?;
+    let mut stmt = conn.prepare(
+        "SELECT event_key FROM usage_event WHERE source = 'deepseek_harness' ORDER BY event_key",
+    )?;
+    Ok(stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn dsh_session_line(id: &str, parent: Option<&str>, seed_length: Option<i64>) -> String {
+    let mut value = serde_json::json!({
+        "type": "session",
+        "version": 0,
+        "id": id,
+        "cwd": "/tmp/demo",
+    });
+    if let Some(parent) = parent {
+        value["parentSession"] = serde_json::json!(parent);
+    }
+    if let Some(seed) = seed_length {
+        value["seedLength"] = serde_json::json!(seed);
+    }
+    value.to_string()
+}
+
+fn dsh_usage_line(seq: i64, time_ms: i64, message_id: &str, input: i64, output: i64) -> String {
+    serde_json::json!({
+        "type": "assistant/message",
+        "seq": seq,
+        "time": time_ms,
+        "data": {
+            "usage": {
+                "inputTokens": input,
+                "outputTokens": output,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "reasoningTokens": 0,
+            },
+            "message": {
+                "id": message_id,
+                "source": {
+                    "kind": "model",
+                    "provider": "deepseek-official",
+                    "model": "deepseek-v4-flash",
+                }
+            }
+        }
+    })
+    .to_string()
+}
+
+fn dsh_encode_frames(lines: &[String]) -> Result<Vec<u8>> {
+    let mut out = Vec::new();
+    for line in lines {
+        let mut encoder = zstd::stream::write::Encoder::new(Vec::new(), 0)?;
+        encoder.write_all(format!("{line}\n").as_bytes())?;
+        out.extend(encoder.finish()?);
+    }
+    Ok(out)
+}
+
+#[test]
+fn dsh_sync_twice_is_idempotent() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_dsh(
+        "sess-a",
+        &[
+            dsh_session_line("sess-a", None, None),
+            dsh_usage_line(1, 1_700_000_000_000, "msg-1", 10, 4),
+        ],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let first = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::DeepseekHarness),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(first.total_inserted, 1);
+        let second = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::DeepseekHarness),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(second.total_inserted, 0);
+        assert_eq!(dsh_event_count(&app.paths.db_path)?, 1);
+        assert_eq!(
+            source_capability_status(&app, &store, SourceKind::DeepseekHarness)?,
+            "passive_ready"
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn dsh_append_imports_new_frame_after_reparse() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_dsh_zstd(
+        "sess-a",
+        &[
+            dsh_session_line("sess-a", None, None),
+            dsh_usage_line(1, 1_700_000_000_000, "msg-1", 10, 4),
+        ],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::DeepseekHarness),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        fixture.seed_dsh_zstd(
+            "sess-a",
+            &[
+                dsh_session_line("sess-a", None, None),
+                dsh_usage_line(1, 1_700_000_000_000, "msg-1", 10, 4),
+                dsh_usage_line(2, 1_700_000_000_100, "msg-2", 6, 2),
+            ],
+        )?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::DeepseekHarness),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(
+            dsh_event_count(&app.paths.db_path)?,
+            2,
+            "reparse after a new frame must keep the old event and add the new one"
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn dsh_rewrite_replaces_stale_rows() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_dsh(
+        "sess-a",
+        &[
+            dsh_session_line("sess-a", None, None),
+            dsh_usage_line(1, 1_700_000_000_000, "old", 10, 4),
+        ],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::DeepseekHarness),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        fixture.seed_dsh(
+            "sess-a",
+            &[
+                dsh_session_line("sess-a", None, None),
+                dsh_usage_line(1, 1_700_000_000_200, "new", 20, 5),
+            ],
+        )?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::DeepseekHarness),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(dsh_event_count(&app.paths.db_path)?, 1);
+        let models = {
+            let conn = Connection::open(&app.paths.db_path)?;
+            conn.query_row(
+                "SELECT input_tokens FROM usage_event WHERE source = 'deepseek_harness'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )?
+        };
+        assert_eq!(models, 20);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn dsh_deleted_session_preserves_history() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let path = fixture.seed_dsh(
+        "sess-a",
+        &[
+            dsh_session_line("sess-a", None, None),
+            dsh_usage_line(1, 1_700_000_000_000, "msg-1", 10, 4),
+        ],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::DeepseekHarness),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        fs::remove_file(path)?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::DeepseekHarness),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(dsh_event_count(&app.paths.db_path)?, 1);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn dsh_missing_root_reports_no_data() -> Result<()> {
+    let fixture = Fixture::new()?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let summary = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::DeepseekHarness),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(summary.total_inserted, 0);
+        assert_eq!(
+            source_capability_status(&app, &store, SourceKind::DeepseekHarness)?,
+            "passive_no_data"
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn dsh_home_override_points_parser_at_custom_root() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let custom_root = fixture.home.join("custom-dsh");
+    fixture.seed_dsh_under(
+        &custom_root,
+        "sess-custom",
+        &[
+            dsh_session_line("sess-custom", None, None),
+            dsh_usage_line(1, 1_700_000_000_000, "msg-1", 7, 3),
+        ],
+    )?;
+    unsafe {
+        std::env::set_var("DSH_HOME", &custom_root);
+    }
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let summary = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::DeepseekHarness),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(summary.total_inserted, 1);
+        assert_eq!(dsh_event_count(&app.paths.db_path)?, 1);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn dsh_first_sync_marks_current_token_accounting() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_dsh(
+        "sess-a",
+        &[
+            dsh_session_line("sess-a", None, None),
+            dsh_usage_line(1, 1_700_000_000_000, "msg-1", 10, 4),
+        ],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        assert_eq!(
+            store.token_accounting_version(SourceKind::DeepseekHarness)?,
+            None
+        );
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::DeepseekHarness),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(
+            store.token_accounting_version(SourceKind::DeepseekHarness)?,
+            Some(expected_token_accounting_version(
+                SourceKind::DeepseekHarness
+            ))
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn dsh_fork_parent_and_child_do_not_double_count() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let shared = dsh_usage_line(1, 1_700_000_000_000, "shared-msg", 10, 4);
+    fixture.seed_dsh(
+        "parent",
+        &[
+            dsh_session_line("parent", None, None),
+            shared.clone(),
+            dsh_usage_line(2, 1_700_000_000_010, "parent-only", 3, 1),
+        ],
+    )?;
+    fixture.seed_dsh(
+        "child",
+        &[
+            dsh_session_line("child", Some("parent"), Some(2)),
+            shared,
+            dsh_usage_line(1, 1_700_000_000_010, "parent-only", 3, 1),
+            dsh_usage_line(2, 1_700_000_000_020, "child-only", 8, 2),
+        ],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::DeepseekHarness),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(
+            dsh_event_count(&app.paths.db_path)?,
+            3,
+            "shared fork rows collapse; seedLength skips the child prefix"
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn dsh_family_replay_keeps_shared_event_when_owner_rewrites() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let shared = dsh_usage_line(1, 1_700_000_000_000, "shared-msg", 10, 4);
+    fixture.seed_dsh(
+        "parent",
+        &[
+            dsh_session_line("parent", None, None),
+            shared.clone(),
+            dsh_usage_line(2, 1_700_000_000_010, "parent-only", 3, 1),
+        ],
+    )?;
+    fixture.seed_dsh(
+        "child",
+        &[
+            dsh_session_line("child", Some("parent"), None),
+            shared,
+            dsh_usage_line(2, 1_700_000_000_020, "child-only", 8, 2),
+        ],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::DeepseekHarness),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(dsh_event_count(&app.paths.db_path)?, 3);
+        let before = dsh_event_keys(&app.paths.db_path)?;
+
+        fixture.seed_dsh(
+            "parent",
+            &[
+                dsh_session_line("parent", None, None),
+                dsh_usage_line(2, 1_700_000_000_010, "parent-only", 3, 1),
+            ],
+        )?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::DeepseekHarness),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(
+            dsh_event_count(&app.paths.db_path)?,
+            3,
+            "family replay must reinsert the shared key from the unchanged child"
+        );
+        let after = dsh_event_keys(&app.paths.db_path)?;
+        assert_eq!(before, after);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn dsh_recent_days_run_skips_reset_and_does_not_advance_cursor() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let path = fixture.seed_dsh(
+        "sess-a",
+        &[
+            dsh_session_line("sess-a", None, None),
+            dsh_usage_line(1, 1_577_836_800_000, "old", 10, 4),
+        ],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::DeepseekHarness),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        let cursors = store
+            .cursors()
+            .load_file_cursors(SourceKind::DeepseekHarness)?;
+        let before = cursors
+            .get(&path.to_string_lossy().to_string())
+            .cloned()
+            .expect("cursor after first sync");
+
+        fixture.seed_dsh(
+            "sess-a",
+            &[
+                dsh_session_line("sess-a", None, None),
+                dsh_usage_line(1, 1_577_836_800_000, "old", 10, 4),
+                dsh_usage_line(2, chrono::Utc::now().timestamp_millis(), "new", 6, 2),
+            ],
+        )?;
+        let bounded = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::DeepseekHarness),
+                recent_days: Some(1),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(bounded.total_inserted, 1);
+        let cursors = store
+            .cursors()
+            .load_file_cursors(SourceKind::DeepseekHarness)?;
+        let after = cursors
+            .get(&path.to_string_lossy().to_string())
+            .cloned()
+            .expect("cursor after bounded sync");
+        assert_eq!(before.file_fingerprint, after.file_fingerprint);
+        assert_eq!(before.file_size, after.file_size);
+        assert_eq!(dsh_event_count(&app.paths.db_path)?, 2);
+
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::DeepseekHarness),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(dsh_event_count(&app.paths.db_path)?, 2);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
 fn usage_event_count(db_path: &Path) -> Result<i64> {
     let conn = Connection::open(db_path)?;
     let count = conn.query_row("SELECT COUNT(*) FROM usage_event", [], |row| row.get(0))?;
@@ -2859,6 +4694,9 @@ impl Fixture {
             "KIMI_CODE_HOME",
             "PI_AGENT_DIR",
             "GROK_HOME",
+            "ZCODE_HOME",
+            "GEMINI_CLI_HOME",
+            "DSH_HOME",
         ] {
             saved.push((key.to_string(), std::env::var(key).ok()));
         }
@@ -2875,6 +4713,10 @@ impl Fixture {
             std::env::remove_var("PI_AGENT_DIR");
             // Grok discovery also falls back under the isolated temp HOME.
             std::env::remove_var("GROK_HOME");
+            // ZCode / Antigravity CLI / dsh discovery fall back under the temp HOME.
+            std::env::remove_var("ZCODE_HOME");
+            std::env::remove_var("GEMINI_CLI_HOME");
+            std::env::remove_var("DSH_HOME");
         }
 
         fs::create_dir_all(home.join(".claude").join("projects").join("demo"))?;
@@ -3275,6 +5117,155 @@ impl Fixture {
             (&part_id, &message_id, &session_id, &time_created, &data.to_string()),
         )?;
         Ok(())
+    }
+
+    /// Path of the synthetic ZCode usage DB under the fixture HOME.
+    fn zcode_db_path(&self) -> PathBuf {
+        self.home
+            .join(".zcode")
+            .join("cli")
+            .join("db")
+            .join("db.sqlite")
+    }
+
+    /// Creates or reopens the synthetic ZCode `model_usage` database.
+    fn zcode_connection(&self) -> Result<Connection> {
+        let db_path = self.zcode_db_path();
+        fs::create_dir_all(db_path.parent().unwrap())?;
+        let conn = Connection::open(&db_path)?;
+        conn.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS session(
+                id TEXT PRIMARY KEY,
+                directory TEXT,
+                path TEXT
+            );
+            CREATE TABLE IF NOT EXISTS model_usage(
+                id TEXT PRIMARY KEY,
+                session_id TEXT,
+                model_id TEXT,
+                status TEXT,
+                started_at INTEGER,
+                completed_at INTEGER,
+                input_tokens INTEGER,
+                output_tokens INTEGER,
+                reasoning_tokens INTEGER,
+                cache_creation_input_tokens INTEGER,
+                cache_read_input_tokens INTEGER,
+                provider_total_tokens INTEGER,
+                computed_total_tokens INTEGER
+            );
+            INSERT OR IGNORE INTO session(id, directory, path)
+            VALUES ('sess-1', '', '');
+            "#,
+        )?;
+        Ok(conn)
+    }
+
+    /// Inserts one synthetic completed `model_usage` row.
+    fn insert_zcode_row(&self, row: ZcodeRowFixture) -> Result<()> {
+        let conn = self.zcode_connection()?;
+        conn.execute(
+            "INSERT OR REPLACE INTO model_usage(
+                id, session_id, model_id, status, started_at, completed_at,
+                input_tokens, output_tokens, reasoning_tokens,
+                cache_creation_input_tokens, cache_read_input_tokens,
+                provider_total_tokens, computed_total_tokens
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            rusqlite::params![
+                row.id,
+                row.session_id,
+                row.model_id,
+                row.status,
+                row.started_at,
+                row.completed_at,
+                row.input_tokens,
+                row.output_tokens,
+                row.reasoning_tokens,
+                row.cache_creation_tokens,
+                row.cache_read_tokens,
+                row.provider_total_tokens,
+                row.computed_total_tokens,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Rebuilds the synthetic ZCode DB from scratch, simulating database
+    /// replacement (fresh ids, no anchor rows).
+    fn rebuild_zcode_db(&self, rows: &[ZcodeRowFixture]) -> Result<()> {
+        let db_path = self.zcode_db_path();
+        if db_path.exists() {
+            fs::remove_file(&db_path)?;
+        }
+        for row in rows {
+            self.insert_zcode_row(row.clone())?;
+        }
+        Ok(())
+    }
+
+    /// Root of the synthetic Antigravity CLI conversations directory.
+    fn antigravity_conversations_root(&self) -> PathBuf {
+        self.home
+            .join(".gemini")
+            .join("antigravity-cli")
+            .join("conversations")
+    }
+
+    /// Writes one synthetic Antigravity conversation DB carrying the given
+    /// `gen_metadata` blobs (fully synthesized wire bytes, no prompt text).
+    /// An existing file is replaced (rewrite semantics).
+    fn seed_antigravity(&self, uuid: &str, blobs: &[(i64, Vec<u8>)]) -> Result<PathBuf> {
+        let path = self
+            .antigravity_conversations_root()
+            .join(format!("{uuid}.db"));
+        fs::create_dir_all(path.parent().unwrap())?;
+        if path.exists() {
+            fs::remove_file(&path)?;
+        }
+        let conn = Connection::open(&path)?;
+        conn.execute_batch(
+            r#"
+            CREATE TABLE gen_metadata(idx INTEGER PRIMARY KEY, data BLOB, size INTEGER);
+            CREATE TABLE trajectory_metadata_blob(id TEXT, data BLOB);
+            "#,
+        )?;
+        for (idx, blob) in blobs {
+            conn.execute(
+                "INSERT INTO gen_metadata(idx, data, size) VALUES (?1, ?2, ?3)",
+                rusqlite::params![idx, blob, blob.len() as i64],
+            )?;
+        }
+        let trajectory = antigravity_trajectory_blob();
+        conn.execute(
+            "INSERT INTO trajectory_metadata_blob(id, data) VALUES ('traj', ?1)",
+            rusqlite::params![&trajectory],
+        )?;
+        drop(conn);
+        Ok(path)
+    }
+
+    fn dsh_session_dir(root: &Path, session: &str) -> PathBuf {
+        root.join("sessions").join("--tmp-demo--").join(session)
+    }
+
+    fn seed_dsh(&self, session: &str, lines: &[String]) -> Result<PathBuf> {
+        self.seed_dsh_under(&self.home.join(".dsh"), session, lines)
+    }
+
+    fn seed_dsh_under(&self, root: &Path, session: &str, lines: &[String]) -> Result<PathBuf> {
+        let path = Self::dsh_session_dir(root, session).join("session.jsonl");
+        fs::create_dir_all(path.parent().unwrap())?;
+        fs::write(&path, format!("{}\n", lines.join("\n")))?;
+        Ok(path)
+    }
+
+    fn seed_dsh_zstd(&self, session: &str, lines: &[String]) -> Result<PathBuf> {
+        let path =
+            Self::dsh_session_dir(&self.home.join(".dsh"), session).join("session.jsonl.zstd");
+        fs::create_dir_all(path.parent().unwrap())?;
+        fs::write(&path, dsh_encode_frames(lines)?)?;
+        Ok(path)
     }
 }
 

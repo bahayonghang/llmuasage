@@ -61,7 +61,7 @@ discard history outside the window.
 llmusage sync --rebuild
 ```
 
-`--rebuild` resets parser-backed usage state source by source before reparsing local sources. A full rebuild uses the parser registry as its deletion boundary, so parserless Antigravity events, buckets, behavior facts, cursors, and source-file diagnostics are preserved. A targeted Antigravity rebuild is rejected even with `--allow-lossy-rebuild` because no passive parser can reconstruct that history. If imported file-backed history for a parser source depends on files that are now missing, llmusage refuses the rebuild before any reset.
+`--rebuild` resets parser-backed usage state source by source before reparsing local sources. A rebuild that would delete unattributed hook-era Antigravity rows is refused even with `--allow-lossy-rebuild`. If imported file-backed history for a parser source depends on files that are now missing, llmusage refuses the rebuild before any reset.
 
 The explicit override is:
 

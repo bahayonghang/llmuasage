@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "检查 parserless 特判收缩后 status/rebuild 行为"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "检查通道映射与旧钩子时代行共存"}
+{"file": "docs/agents/passive-parser-onboarding.md", "reason": "检查证据/测试闸门（fixture 先行）"}
+{"file": ".trellis/tasks/08-16-antigravity-cli-parser/prd.md", "reason": "验收标准清单"}
