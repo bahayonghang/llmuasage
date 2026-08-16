@@ -1483,3 +1483,24 @@ Public listener 改用最小读路由与脱敏聚合 DTO，并忽略 project sel
 ### Next Steps
 
 - 按需把 dev 合入 main 并做 1.2.0 发布
+
+
+## Session 48: 优化用量概览布局与术语
+
+**Date**: 2026-08-17
+**Task**: 优化用量概览布局与术语
+**Branch**: `dev`
+
+### Summary
+
+修复宽屏组合热力图空白与全年日历滚动，统一看板静态和动态中英文术语，补充响应式、i18n、CSV 与导出回归，并通过完整 just ci 和多视口浏览器验收。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `79b71f8` | (see git log) |
+
+### Status
+
+[OK] **Completed**
