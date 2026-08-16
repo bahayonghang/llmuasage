@@ -1444,3 +1444,42 @@ Public listener 改用最小读路由与脱敏聚合 DTO，并忽略 project sel
 ### Status
 
 [OK] **Completed**
+
+
+## Session 47: 新增三源被动解析器并升至 1.2.0
+
+**Date**: 2026-08-16
+**Task**: 新增三源被动解析器并升至 1.2.0
+**Branch**: `dev`
+
+### Summary
+
+落地 zcode、antigravity CLI、deepseek-harness 被动解析器，版本升至 1.2.0。clipy 与全量 cargo test 通过，MSRV 1.95 isolated check 通过。
+
+### Main Changes
+
+- 新增 SourceKind::Zcode / DeepseekHarness，翻转 antigravity 为 parser-backed
+- zcode 读 model_usage completed 行，水位锚 completed_at
+- antigravity 解码 gen_metadata protobuf，rebuild 拒绝未归属 hook 行
+- deepseek_harness 流式 zstd 解码，会话家族重放，引入 zstd crate
+- 文档、候选表、ADR-0012/0013、token 契约同步；crate 1.2.0
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7843f6e` | (see git log) |
+
+### Testing
+
+- [OK] cargo clippy --all-targets --all-features -- -D warnings
+- [OK] cargo test --all-features -- --test-threads=1
+- [OK] cargo +1.95.0 check --locked --all-features（隔离 target）
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 按需把 dev 合入 main 并做 1.2.0 发布
