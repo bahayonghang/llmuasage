@@ -1,17 +1,26 @@
-import { getShellCopy } from '../copy.js';
+import { getLocale, getShellCopy, UI_COPY } from '../copy.js';
 import { escapeHtml, formatCompact, formatNumber, formatTokenAmount, formatUsd, ratio } from '../data.js';
 
 const logger = window.console;
 
 function supportLabel(support) {
-  if (support?.supported) {
-    return 'normalized';
-  }
-  return support?.level || 'no_data';
+  const level = support?.level || (support?.supported ? 'normalized' : 'no_data');
+  return UI_COPY.behavior.support[level] || level;
+}
+
+function localizedReason(reason, fallback) {
+  const raw = String(reason || '');
+  if (!raw) return fallback;
+  const reasons = UI_COPY.behavior.reasons;
+  if (raw.startsWith('No normalized behavior facts')) return reasons.noFacts;
+  if (raw.startsWith('At least two models') || raw.startsWith('Need at least two models')) return reasons.insufficientModels;
+  if (raw.startsWith('Low sample:')) return reasons.lowSample;
+  if (raw.startsWith('One selected model')) return reasons.missingModel;
+  return getLocale() === 'zh' ? fallback : raw;
 }
 
 function emptyState(support, fallback, compact = false) {
-  const reason = support?.reason || fallback;
+  const reason = localizedReason(support?.reason, fallback);
   return `
     <div class="empty-state${compact ? ' compact' : ''}">
       ${escapeHtml(reason)}
@@ -47,14 +56,15 @@ function renderBars(rows, valueKey, labelFn, valueFn) {
 }
 
 function renderActivityTable(rows, support) {
+  const copy = UI_COPY.behavior.activity;
   if (!rows.length) {
-    return emptyState(support, '暂无 activity 数据。', true);
+    return emptyState(support, copy.empty, true);
   }
   const rowsHtml = rows
     .slice(0, 8)
     .map((row) => `
       <tr>
-        <td class="name-cell">${escapeHtml(row.category || '--')}</td>
+        <td class="name-cell">${escapeHtml(copy.categories[row.category] || row.category || '--')}</td>
         <td class="r">${formatNumber(row.turns)}</td>
         <td class="r">${formatNumber(row.edit_turns)}</td>
         <td class="r">${formatNumber(Number(row.one_shot_rate || 0) * 100)}%</td>
@@ -66,11 +76,11 @@ function renderActivityTable(rows, support) {
     <table class="panel-table">
       <thead>
         <tr>
-          <th>类别</th>
-          <th class="r">Turns</th>
-          <th class="r">Edit</th>
-          <th class="r">One-shot</th>
-          <th class="r">估算成本</th>
+          <th>${escapeHtml(copy.category)}</th>
+          <th class="r">${escapeHtml(copy.turns)}</th>
+          <th class="r">${escapeHtml(copy.editTurns)}</th>
+          <th class="r">${escapeHtml(copy.oneShot)}</th>
+          <th class="r">${escapeHtml(copy.cost)}</th>
         </tr>
       </thead>
       <tbody>${rowsHtml}</tbody>
@@ -79,17 +89,19 @@ function renderActivityTable(rows, support) {
 }
 
 function renderToolsTable(rows, support) {
+  const copy = UI_COPY.behavior.tools;
   if (!rows.length) {
-    return emptyState(support, '暂无 tool 数据。', true);
+    return emptyState(support, copy.empty, true);
   }
   const rowsHtml = rows
     .slice(0, 8)
     .map((row) => {
-      const name = row.mcp_server ? `${row.mcp_server} / ${row.tool_name}` : row.tool_name;
+      const rawName = row.tool_name === '(non-tool)' ? copy.kinds['(non-tool)'] : row.tool_name;
+      const name = row.mcp_server ? `${row.mcp_server} / ${rawName}` : rawName;
       return `
         <tr>
           <td class="name-cell">${escapeHtml(name || '--')}</td>
-          <td>${escapeHtml(row.tool_kind || '--')}</td>
+          <td>${escapeHtml(copy.kinds[row.tool_kind] || row.tool_kind || '--')}</td>
           <td class="r">${formatNumber(row.calls)}</td>
           <td class="r">${formatNumber(Number(row.call_share || 0) * 100)}%</td>
           <td class="r">${formatUsd(row.estimated_cost_usd)}</td>
@@ -101,11 +113,11 @@ function renderToolsTable(rows, support) {
     <table class="panel-table">
       <thead>
         <tr>
-          <th>工具</th>
-          <th>类型</th>
-          <th class="r">Calls</th>
-          <th class="r">占比</th>
-          <th class="r">估算成本</th>
+          <th>${escapeHtml(copy.tool)}</th>
+          <th>${escapeHtml(copy.type)}</th>
+          <th class="r">${escapeHtml(copy.calls)}</th>
+          <th class="r">${escapeHtml(copy.share)}</th>
+          <th class="r">${escapeHtml(copy.cost)}</th>
         </tr>
       </thead>
       <tbody>${rowsHtml}</tbody>
@@ -114,6 +126,7 @@ function renderToolsTable(rows, support) {
 }
 
 function writeOptimize(optimize, refreshing = false) {
+  const copy = UI_COPY.behavior.optimize;
   const support = optimize?.support;
   const findings = Array.isArray(optimize?.findings) ? optimize.findings : [];
   const grade = optimize?.grade || '--';
@@ -125,18 +138,18 @@ function writeOptimize(optimize, refreshing = false) {
   if (summary) {
     summary.innerHTML = `
       <div class="mini-stat">
-        <span>Grade</span>
+        <span>${escapeHtml(copy.score)}</span>
         <strong>${escapeHtml(grade)}</strong>
         <small>${formatNumber(score)} / 100</small>
       </div>
       <div class="mini-stat">
-        <span>Potential</span>
+        <span>${escapeHtml(copy.potential)}</span>
         <strong>${escapeHtml(savingsTokens)}</strong>
-        <small>${escapeHtml(savingsUsd)} est.</small>
+        <small>${escapeHtml(savingsUsd)} ${escapeHtml(copy.estimated)}</small>
       </div>
       <div class="mini-stat">
-        <span>Mode</span>
-        <strong>Read-only</strong>
+        <span>${escapeHtml(copy.mode)}</span>
+        <strong>${escapeHtml(copy.readOnly)}</strong>
         <small>${escapeHtml(supportLabel(support))}</small>
       </div>
     `;
@@ -147,23 +160,30 @@ function writeOptimize(optimize, refreshing = false) {
   if (!findings.length) {
     host.innerHTML = refreshNotice(refreshing) + emptyState(
       support,
-      '暂无 optimize finding；建议仅基于 normalized facts 生成，不会自动执行清理。',
+      copy.empty,
       true,
     );
     return;
   }
   host.innerHTML = refreshNotice(refreshing) + findings
     .slice(0, 4)
-    .map((finding) => `
+    .map((finding) => {
+      const localized = copy.findings[finding.id];
+      const title = localized?.title || finding.title || finding.id || '--';
+      const evidence = getLocale() === 'zh' && localized ? localized.evidence : finding.evidence || localized?.evidence || '';
+      const recommendation = localized?.recommendation || finding.recommendation || '';
+      const severity = copy.severity[finding.severity] || finding.severity || copy.severity.low;
+      return `
       <div class="finding-card" data-severity="${escapeHtml(finding.severity || 'low')}">
         <div class="finding-head">
-          <span class="tag">${escapeHtml(finding.severity || 'low')}</span>
-          <strong>${escapeHtml(finding.title || finding.id || '--')}</strong>
+          <span class="tag">${escapeHtml(severity)}</span>
+          <strong>${escapeHtml(title)}</strong>
         </div>
-        <div class="finding-evidence">${escapeHtml(finding.evidence || '')}</div>
-        <div class="finding-rec">${escapeHtml(finding.recommendation || '')}</div>
+        <div class="finding-evidence">${escapeHtml(evidence)}</div>
+        <div class="finding-rec">${escapeHtml(recommendation)}</div>
       </div>
-    `)
+    `;
+    })
     .join('');
 }
 
@@ -179,6 +199,7 @@ function metricValue(metric, key) {
 }
 
 function writeCompare(compare, refreshing = false) {
+  const copy = UI_COPY.behavior.compare;
   const host = document.getElementById('compare-panel');
   if (!host) return;
   const support = compare?.support;
@@ -186,18 +207,18 @@ function writeCompare(compare, refreshing = false) {
   const style = Array.isArray(compare?.working_style) ? compare.working_style : [];
   const left = compare?.model_a?.model || '--';
   const right = compare?.model_b?.model || '--';
-  const warning = compare?.warning || support?.reason || '';
+  const warning = localizedReason(compare?.warning || support?.reason, '');
   if (!metrics.length) {
     host.innerHTML = refreshNotice(refreshing) + emptyState(
       support,
-      '至少需要两个模型才会显示 compare；低样本会以 warning 形式显式降级。',
+      copy.empty,
       true,
     );
     return;
   }
   const metricRows = [...metrics, ...style].slice(0, 8).map((metric) => `
     <tr>
-      <td class="name-cell">${escapeHtml(metric.label || metric.id || '--')}</td>
+      <td class="name-cell">${escapeHtml(copy.metrics[metric.id] || metric.label || metric.id || '--')}</td>
       <td class="r">${escapeHtml(metricValue(metric, 'model_a_value'))}</td>
       <td class="r">${escapeHtml(metricValue(metric, 'model_b_value'))}</td>
     </tr>
@@ -207,7 +228,7 @@ function writeCompare(compare, refreshing = false) {
     <table class="panel-table">
       <thead>
         <tr>
-          <th>Metric</th>
+          <th>${escapeHtml(copy.metric)}</th>
           <th class="r">${escapeHtml(left)}</th>
           <th class="r">${escapeHtml(right)}</th>
         </tr>
@@ -235,7 +256,7 @@ export function renderActivity(context) {
 
   const supportEl = document.getElementById('activity-support');
   if (supportEl) {
-    supportEl.textContent = refreshing ? 'refreshing' : supportLabel(activitySupport);
+    supportEl.textContent = refreshing ? UI_COPY.behavior.support.refreshing : supportLabel(activitySupport);
   }
 
   const bars = document.getElementById('activity-bars');
@@ -243,8 +264,8 @@ export function renderActivity(context) {
     bars.innerHTML = renderBars(
       activityRows,
       'turns',
-      (row) => row.category || '--',
-      (row) => `${formatCompact(row.turns)} turns`,
+      (row) => UI_COPY.behavior.activity.categories[row.category] || row.category || '--',
+      (row) => `${formatCompact(row.turns)} ${UI_COPY.behavior.activity.turnsUnit}`,
     );
   }
 
@@ -262,7 +283,7 @@ export function renderTools(context) {
 
   const supportEl = document.getElementById('tools-support');
   if (supportEl) {
-    supportEl.textContent = refreshing ? 'refreshing' : supportLabel(toolsSupport);
+    supportEl.textContent = refreshing ? UI_COPY.behavior.support.refreshing : supportLabel(toolsSupport);
   }
 
   const bars = document.getElementById('tools-bars');
@@ -270,8 +291,11 @@ export function renderTools(context) {
     bars.innerHTML = renderBars(
       toolRows,
       'calls',
-      (row) => row.mcp_server ? `${row.mcp_server} / ${row.tool_name}` : row.tool_name || '--',
-      (row) => `${formatCompact(row.calls)} calls`,
+      (row) => {
+        const name = row.tool_name === '(non-tool)' ? UI_COPY.behavior.tools.kinds['(non-tool)'] : row.tool_name;
+        return row.mcp_server ? `${row.mcp_server} / ${name}` : name || '--';
+      },
+      (row) => `${formatCompact(row.calls)} ${UI_COPY.behavior.tools.callsUnit}`,
     );
   }
 

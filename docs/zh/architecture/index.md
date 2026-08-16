@@ -41,9 +41,9 @@
 
 报表命令、TUI、Web Dashboard 和 HTML export 都通过 query 层读取本地 SQLite。
 
-`Dashboard::snapshot(&QueryFilter)` 是主要 Dashboard seam。`llmusage serve` 优先使用 `/api/dashboard`，用一个核心快照加载 overview、trend series、model/source/project/cost 排行、health、diagnostics 和默认 Explorer payload。Activity、Tools、Optimize、Explorer、Compare 是行为/查询区块；当来源事实不可用或查询超时时，可以独立降级。
+`Dashboard::snapshot(&QueryFilter)` 是看板的主要接口。`llmusage serve` 优先使用 `/api/dashboard`，通过一个核心快照加载概览、趋势序列、模型/来源/项目/成本排行、运行状态、诊断和默认用量分析数据。活动类型（`activity`）、工具使用（`tools`）、优化建议（`optimize`）、用量分析（`explorer`）和模型对比（`compare`）在来源明细不可用或查询超时时可以独立降级。
 
-自定义 Cost Explorer 查询使用 `Dashboard::explorer(&ExplorerQuery)` 和 `/api/explorer` endpoint。Explorer 叠加在固定 Dashboard snapshot 之上：它支持时间粒度、指标、分组、Top N/Other、session/tool/token 过滤，但仍返回后端聚合后的 rows 和 series，不让浏览器透视原始事件。查询层会根据所选指标和维度选择 event、turn 或 tool-attribution 策略，每个 payload 都携带 `normalized`、`no_data`、`degraded` 或 `unsupported` 等 support metadata。
+自定义用量分析查询使用 `Dashboard::explorer(&ExplorerQuery)` 和 `/api/explorer` 接口。用量分析叠加在固定看板快照之上：它支持时间粒度、指标、分组维度、结果上限、会话、工具和 Token 类型筛选，但仍返回后端聚合后的行与序列，不让浏览器透视原始事件。查询层会根据所选指标和维度选择事件、轮次或工具归因策略；每个响应都携带 `normalized`、`no_data`、`degraded` 或 `unsupported` 等内部能力状态。
 
 ## 价格目录流程
 
@@ -65,8 +65,8 @@ SQLite meta 记录 active、base、overlay 的身份和文件。已选择文件�
 
 当前版本增加了标准化行为表：
 
-- `usage_turn`：Activity、Optimize、Compare 和 turn-backed Explorer 查询使用的 turn-level facts。
-- `usage_tool_call`：Tools、Optimize、Compare 和 tool-attribution Explorer 查询使用的 bounded tool/action facts。
+- `usage_turn`：活动类型、优化建议、模型对比和轮次型用量分析查询使用的轮次级明细。
+- `usage_tool_call`：工具使用、优化建议、模型对比和工具归因型用量分析查询使用的有限工具/操作明细。
 
 隐私边界：行为事实不得保存完整 prompt、完整 assistant 文本或文件内容。`safe_preview` 只能是有界展示文本。
 

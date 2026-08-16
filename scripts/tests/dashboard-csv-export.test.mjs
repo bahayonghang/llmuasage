@@ -15,7 +15,10 @@ test('analytics CSV emits BOM, localized multi-section headers, and untrusted la
   assert.match(zh, /汇总\r\n指标,值/);
   assert.equal(zh.split('\r\n\r\n')[0].split('\r\n').length, 8, 'summary contains a title, header, and six cards');
   assert.doesNotMatch(zh, /platforms/);
+  assert.match(zh, /缓存读取占比/);
+  assert.match(zh, /高用量会话/);
   assert.match(en, /Summary\r\nMetric,Value/);
+  assert.match(en, /Cache-read share/);
   assert.match(zh, /'=cmd\(\)/);
   assert.match(zh, /'@x/);
   assert.ok(zh.split('\r\n\r\n').length >= 6);

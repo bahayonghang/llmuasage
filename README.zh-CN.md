@@ -112,7 +112,7 @@ llmusage export html --out .\llmusage-report
 
 `llmusage dash` 使用 tokscale 风格的终端 Dashboard。快捷键：`tab`/`shift-tab` 或 `1`-`9` 切换视图；`j`/`k`、方向键、Page Up/Page Down、Home/End 或鼠标滚轮选择行；`o` 循环可排序列，`O` 反转排序方向；`s` 打开来源选择器；`r` 刷新 Dashboard 数据；`R` 切换自动刷新；`x` 按当前来源筛选运行 sync；`?` 打开帮助/设置；`q` 退出。
 
-浏览器 Dashboard 包含行为面板和本地 Cost Explorer workbench，可按时间 × 指标 × 分组做切片分析，并支持工具/非工具成本归因与离线快照导出。
+浏览器看板包含行为分析面板和本地用量分析工作台，可按时间、指标和分组维度分析用量，并支持工具/非工具成本归因与离线快照导出。
 
 ## 模型价格目录
 
@@ -154,7 +154,7 @@ llmusage codex-tracer --rebuild
 - 自动修复永远不会启用 `--allow-lossy-rebuild`；请先恢复缺失源文件，再显式执行 `llmusage sync --rebuild --source <source>`。
 - `llmusage diagnostics --forget-file <PATH> --source <SOURCE>` 是显式忽略源文件的写入入口。
 - `llmusage logs` 查询本地运行日志和最近命令审计记录，不改变报表 stdout 或 `sync --json-events` stdout 合同。
-- `llmusage serve --public` 只暴露聚合 Dashboard 的总量、趋势、模型、来源、成本和最小 health 响应。Projects、日志、诊断、jobs、行为明细、Cost Explorer 和写操作必须使用默认 loopback 监听，远程场景通常通过 SSH 隧道访问。
+- `llmusage serve --public` 只暴露聚合看板的总量、趋势、模型、来源、成本和最小健康状态响应。项目、日志、诊断、任务状态、行为明细、用量分析和写操作必须使用默认回环地址监听，远程场景通常通过 SSH 隧道访问。
 - `llmusage catalog apply <file>` 与 `doctor --refresh-pricing <file>` 只读取本地目录文件；URL 会被拒绝。
 
 ## 文档

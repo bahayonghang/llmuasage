@@ -834,7 +834,7 @@ pub struct DashboardSnapshot {
     /// Default model comparison payload. If fewer than two models are present
     /// it carries candidates plus an explicit warning.
     pub compare: ModelComparePayload,
-    /// Default Cost Explorer slice captured for live dashboard bootstrap and
+    /// Default Usage analysis slice captured for live dashboard bootstrap and
     /// static HTML exports.
     pub explorer: ExplorerPayload,
     /// Integration/cursor/run health payload.
@@ -3045,7 +3045,7 @@ impl Dashboard {
         heatmap::load(self, filter, days)
     }
 
-    /// Loads the flexible Cost Explorer-style aggregate for the requested slice.
+    /// Loads the flexible Usage analysis aggregate for the requested slice.
     pub fn explorer(&self, query: &ExplorerQuery) -> Result<ExplorerPayload> {
         explorer::load(self, query)
     }

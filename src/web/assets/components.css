@@ -1295,7 +1295,7 @@ nav a:hover .nav-icon {
   color: var(--ink-2);
 }
 
-/* Cost Explorer */
+/* Usage analysis */
 .explorer-workbench {
   display: grid;
   gap: 18px;
@@ -2440,6 +2440,7 @@ svg.i {
 [data-locale='zh'] .sync-command-center-metric span,
 [data-locale='zh'] .sync-command-center-source-head span {
   letter-spacing: normal;
+  text-transform: none;
 }
 
 /*
@@ -2549,7 +2550,37 @@ svg.i {
   }
 }
 
-.analytics-divider { height: 1px; margin: 14px 0; background: var(--line); }
+.analytics-heatmaps {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 1px minmax(489px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.analytics-heatmaps > * {
+  min-width: 0;
+}
+
+.analytics-divider {
+  width: 1px;
+  height: auto;
+  margin: 0;
+  align-self: stretch;
+  background: var(--line);
+}
+
+@media (max-width: 1399px) {
+  .analytics-heatmaps {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .analytics-divider {
+    width: auto;
+    height: 1px;
+    margin: 14px 0;
+  }
+}
 .timezone-note { margin-left: 6px; color: var(--muted); font-size: 10px; font-weight: 500; }
 .top-session-list { display: flex; flex-direction: column; margin-top: 10px; }
 .top-session-row { display: flex; align-items: center; width: 100%; min-height: 44px; gap: 8px; padding: 6px 4px; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--ink); text-align: left; cursor: pointer; }

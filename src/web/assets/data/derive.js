@@ -146,92 +146,74 @@ function buildInsights({ overview, modelRows, projectRows, costRows, sourceRows,
 
   if (totalTokens > 0 && cacheEfficiency < 0.05) {
     insights.push({
+      id: 'cache_low',
       tone: 'warn',
-      label: '缓存线索',
-      title: '缓存复用率偏低',
-      evidence: `当前窗口 cache efficiency ${(cacheEfficiency * 100).toFixed(1)}%。`,
-      action: '可检查提示复用、长上下文缓存或模型缓存支持；这是线索，不是最终诊断。',
+      params: { percentage: (cacheEfficiency * 100).toFixed(1) },
     });
   }
 
   if (pricingConcernRows.length > 0) {
     const row = pricingConcernRows[0];
     insights.push({
+      id: 'pricing_gap',
       tone: 'warn',
-      label: '定价可靠性',
-      title: '存在 mixed / unpriced 成本项',
-      evidence: `${pricingConcernRows.length} 个模型聚合项含不完整定价，示例 ${row.model || '--'} · ${row.pricing_status || '--'}。`,
-      action: '成本估算可用于趋势判断；对账前先刷新 pricing snapshot 或检查未命中模型。',
+      params: { count: pricingConcernRows.length, model: row.model || '--', status: row.pricing_status || '--' },
     });
   }
 
   if (failureRows.length > 0) {
     const row = failureRows[0];
     insights.push({
+      id: 'sync_failure',
       tone: 'warn',
-      label: '同步失败',
-      title: '最近有失败运行',
-      evidence: `${failureRows.length} 条失败记录，最近命令 ${row.command || '--'}。`,
-      action: '打开最近失败详情或重新运行 sync；完成后 Dashboard 会刷新当前筛选窗口。',
+      params: { count: failureRows.length, command: row.command || '--' },
     });
   }
 
   if (lossyRows.length > 0) {
     const row = lossyRows[0];
     insights.push({
+      id: 'lossy_rebuild',
       tone: 'warn',
-      label: '保留边界',
-      title: '检测到 lossy rebuild 风险',
-      evidence: `${row.source || '--'} 缺失 ${formatNumber(row.missing_file_count)} 个源文件，默认保护 ${formatNumber(row.protected_event_count)} 条已导入事件。`,
-      action: '普通 sync 不会删除已导入历史；只有 sync --rebuild 可能触发保护，除非显式 allow-lossy-rebuild。',
+      params: { source: row.source || '--', missingCount: formatNumber(row.missing_file_count), protectedCount: formatNumber(row.protected_event_count) },
     });
   } else if (missingRows.length > 0) {
     const row = missingRows[0];
     insights.push({
+      id: 'missing_source',
       tone: 'neutral',
-      label: '源文件状态',
-      title: '有源文件缺失记录',
-      evidence: `${row.source || '--'} 当前记录 ${formatNumber(row.missing_file_count || row.missing_files)} 个缺失文件。`,
-      action: '这通常只影响 diagnostics；普通 sync 会保留已导入 usage 历史。',
+      params: { source: row.source || '--', missingCount: formatNumber(row.missing_file_count || row.missing_files) },
     });
   }
 
   if (staleRows.length > 0) {
     const row = staleRows[0];
     insights.push({
+      id: 'stale_source',
       tone: 'neutral',
-      label: '来源新鲜度',
-      title: '某些来源近期无新事件',
-      evidence: `${row.source || '--'} 最近事件 ${row.last_event_at || '--'}。`,
-      action: '如果该来源仍在使用，请确认本地产物仍存在，并重新运行 sync。',
+      params: { source: row.source || '--', lastEvent: row.last_event_at || '--' },
     });
   }
 
   if (topCost) {
     insights.push({
+      id: 'top_cost',
       tone: 'good',
-      label: '成本主因',
-      title: '当前窗口主要成本来源',
-      evidence: `${topCost.source || '--'} · ${topCost.model || '--'} 约 ${formatUsd(topCost.estimated_cost_usd)}。`,
-      action: '优先从这个来源/模型组合排查成本变化。',
+      params: { source: topCost.source || '--', model: topCost.model || '--', cost: formatUsd(topCost.estimated_cost_usd) },
     });
   } else if (topModel && Number(topModel.total_tokens || 0) > 0) {
     insights.push({
+      id: 'top_model',
       tone: 'neutral',
-      label: '用量主因',
-      title: '当前窗口主要模型来源',
-      evidence: `${topModel.model || '--'} 使用 ${formatTokenAmount(topModel.total_tokens)} tokens。`,
-      action: '无可用成本时，先用 token 排名定位主要消耗。',
+      params: { model: topModel.model || '--', tokens: formatTokenAmount(topModel.total_tokens) },
     });
   }
 
   if (topProject && Number(topProject.total_tokens || 0) > 0) {
     insights.push({
+      id: 'top_project',
       tone: 'neutral',
-      label: '项目聚焦',
-      title: '当前窗口主项目',
-      evidence: `${topProject.project_label || topProject.project_hash || '--'} 使用 ${formatTokenAmount(topProject.total_tokens)} tokens。`,
-      action: '若要降低用量，先从该项目的会话模式和模型选择入手。',
+      params: { project: topProject.project_label || topProject.project_hash || '--', tokens: formatTokenAmount(topProject.total_tokens) },
     });
   }
 
@@ -252,7 +234,7 @@ function sortDesc(rows, select) {
  * ========================================================================
  * 目标：
  * 1) 把趋势、排行和健康状态整理成渲染友好的结构
- * 2) 固定 Top N、图表序列和对比表行
+ * 2) 固定显示上限、图表序列和对比表行
  * 3) 为各面板补齐总量、峰值、占比和紧凑显示值
  */
 /*

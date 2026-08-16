@@ -106,7 +106,7 @@ fn local_flow_bootstraps_and_syncs_without_installing_integrations() -> Result<(
         assert!(exported_index.contains("<title>llmusage · 本地用量概览</title>"));
         assert!(exported_index.contains(">本地用量概览</strong>"));
         assert!(exported_index.contains("用量趋势"));
-        assert!(exported_index.contains("Cost Explorer"));
+        assert!(exported_index.contains("用量分析"));
         let snapshot_json = fs::read_to_string(html_out.join("snapshot.json"))?;
         let snapshot: serde_json::Value = serde_json::from_str(&snapshot_json)?;
         assert!(snapshot["explorer"].is_object());

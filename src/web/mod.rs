@@ -3169,10 +3169,20 @@ mod tests {
             .find(|asset| asset.path == "components.css")
             .expect("components.css asset")
             .body;
+        let charts_css = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "charts.css")
+            .expect("charts.css asset")
+            .body;
         let hero_js = asset_manifest()
             .iter()
             .find(|asset| asset.path == "render/hero.js")
             .expect("hero.js asset")
+            .body;
+        let calendar_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "render/calendar-heatmap.js")
+            .expect("calendar heatmap asset")
             .body;
 
         // Hero fills the main column instead of capping at 640px + 360px.
@@ -3185,6 +3195,72 @@ mod tests {
         // Status metrics use two cells; grid columns must match to avoid empty slots.
         assert!(components_css.contains("grid-template-columns: repeat(2, minmax(0, 1fr))"));
         assert_eq!(hero_js.matches("class=\"status-cell\"").count(), 2);
+
+        // The paired heatmaps use the available width on large screens and
+        // return to a vertical flow before either chart becomes unreadable.
+        assert!(html.contains("panel ready-widget-panel wide analytics-heatmaps"));
+        assert!(
+            components_css.contains("grid-template-columns: minmax(0, 1fr) 1px minmax(489px, 1fr)")
+        );
+        assert!(components_css.contains("@media (max-width: 1399px)"));
+        assert!(charts_css.contains(".hour-week-svg"));
+        assert!(charts_css.contains("min-width: 489px"));
+        assert!(charts_css.contains("width: 100%"));
+        assert!(charts_css.contains(".calendar-heatmap-svg.is-long-range"));
+        assert!(charts_css.contains("min-width: 640px"));
+        assert!(calendar_js.contains("weekCount >= 40 ? ' is-long-range' : ''"));
+    }
+
+    #[test]
+    fn dashboard_copy_uses_consistent_user_facing_terms() {
+        let html = live_index_html();
+        let copy_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "copy.js")
+            .expect("copy.js asset")
+            .body;
+
+        for expected in [
+            "'用量最高来源'",
+            "'缓存读取占比'",
+            "'每日活跃度'",
+            "'每周活跃时段'",
+            "'高用量会话'",
+            "'shell.filters.modelPlaceholder': '全部模型'",
+        ] {
+            assert!(
+                copy_js.contains(expected),
+                "missing dashboard term: {expected}"
+            );
+        }
+
+        for obsolete in [
+            "'最高平台'",
+            "'个平台'",
+            "'缓存效率'",
+            "'活动日历'",
+            "'星期与小时'",
+            "'热门会话'",
+            "'all models'",
+        ] {
+            assert!(
+                !copy_js.contains(obsolete),
+                "obsolete dashboard term remains: {obsolete}"
+            );
+        }
+
+        for expected in [">用量分析</span>", ">运行</div>", ">看板</span>"] {
+            assert!(
+                html.contains(expected),
+                "shell fallback is stale: {expected}"
+            );
+        }
+        for obsolete in [">切片分析</span>", ">运营</div>", ">dashboard</span>"] {
+            assert!(
+                !html.contains(obsolete),
+                "obsolete shell fallback remains: {obsolete}"
+            );
+        }
     }
 
     #[test]
@@ -3695,8 +3771,10 @@ mod tests {
         assert!(derive_js.contains("cache_efficiency"));
         assert!(derive_js.contains("pricing_status"));
         assert!(derive_js.contains("lossy_rebuild_risk"));
-        assert!(derive_js.contains("普通 sync 不会删除已导入历史"));
+        assert!(derive_js.contains("id: 'lossy_rebuild'"));
         assert!(insights_js.contains("insight-note"));
+        assert!(insights_js.contains("fillTemplate"));
+        assert!(copy_js.contains("普通同步不会删除已导入历史"));
         assert!(copy_js.contains("not final diagnoses"));
         assert!(copy_js.contains("不是最终诊断"));
     }

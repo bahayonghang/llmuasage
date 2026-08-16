@@ -105,11 +105,11 @@ fn html_shell(mode: &str) -> String {
       </a>
       <a href="#explorer" data-target="explorer">
         <span class="nav-icon"><svg aria-hidden="true" class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-5-5"/><path d="M8 11h6M11 8v6"/></svg></span>
-        <span data-i18n="shell.nav.item.explorer">切片分析</span>
+        <span data-i18n="shell.nav.item.explorer">用量分析</span>
       </a>
     </nav>
 
-    <div class="nav-label" id="nav-label-ops" data-i18n="shell.nav.label.ops">运营</div>
+    <div class="nav-label" id="nav-label-ops" data-i18n="shell.nav.label.ops">运行</div>
     <nav aria-labelledby="nav-label-ops">
       <a href="#cost" data-target="cost">
         <span class="nav-icon"><svg aria-hidden="true" class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M15 9h-4a2 2 0 100 4h2a2 2 0 110 4H9M12 7v2M12 15v2"/></svg></span>
@@ -160,7 +160,7 @@ fn html_shell(mode: &str) -> String {
       <div class="crumbs">
         <span>llmusage</span>
         <span class="sep">/</span>
-        <span data-i18n="shell.crumb.dashboard">dashboard</span>
+        <span data-i18n="shell.crumb.dashboard">看板</span>
         <span class="sep">/</span>
         <strong data-i18n="shell.crumb.local">本地用量概览</strong>
       </div>
@@ -201,7 +201,7 @@ fn html_shell(mode: &str) -> String {
         <div class="status-panel" id="status-panel"></div>
       </div>
 
-      <div class="filter-rail" id="filter-rail" aria-label="Dashboard filters">
+      <div class="filter-rail" id="filter-rail" aria-label="看板筛选条件" data-i18n-attr="aria-label=shell.filters.aria">
         <div class="filter-group">
           <label for="filter-source" data-i18n="shell.filters.source">来源</label>
           <select id="filter-source" data-filter="source">
@@ -210,7 +210,7 @@ fn html_shell(mode: &str) -> String {
         </div>
         <div class="filter-group">
           <label for="filter-model" data-i18n="shell.filters.model">模型</label>
-          <input id="filter-model" data-filter="model" type="search" placeholder="all models" data-i18n-attr="placeholder=shell.filters.modelPlaceholder" />
+          <input id="filter-model" data-filter="model" type="search" placeholder="全部模型" data-i18n-attr="placeholder=shell.filters.modelPlaceholder" />
         </div>
         <div class="filter-group filter-range-group">
           <label id="range-presets-label" data-i18n="shell.filters.range">时间范围</label>
@@ -349,7 +349,7 @@ fn html_shell(mode: &str) -> String {
       <div class="section-head">
         <div>
           <h2 class="section-title" data-i18n="shell.behavior.title">行为分析</h2>
-          <div class="section-desc" data-i18n="shell.behavior.sub">基于同步阶段提取的 normalized turn/tool facts；低样本或未支持来源会显式显示降级状态。</div>
+          <div class="section-desc" data-i18n="shell.behavior.sub">基于同步阶段提取的标准化交互与工具调用数据；样本不足或来源不支持时会明确提示。</div>
         </div>
       </div>
 
@@ -357,8 +357,8 @@ fn html_shell(mode: &str) -> String {
         <div class="panel behavior-primary">
           <div class="panel-head">
             <div>
-              <div class="panel-title" data-i18n="shell.behavior.activity.title">Activity</div>
-              <div class="panel-sub" data-i18n="shell.behavior.activity.sub">按 turn category 聚合 turns、one-shot 与 retry</div>
+            <div class="panel-title" data-i18n="shell.behavior.activity.title">活动类型</div>
+            <div class="panel-sub" data-i18n="shell.behavior.activity.sub">按活动类型汇总轮次、编辑轮次和一次完成率。</div>
             </div>
             <span class="tag" id="activity-support">--</span>
           </div>
@@ -369,8 +369,8 @@ fn html_shell(mode: &str) -> String {
         <div class="panel behavior-primary">
           <div class="panel-head">
             <div>
-              <div class="panel-title" data-i18n="shell.behavior.tools.title">Tools</div>
-              <div class="panel-sub" data-i18n="shell.behavior.tools.sub">Core tools / shell / MCP / agent actions</div>
+            <div class="panel-title" data-i18n="shell.behavior.tools.title">工具使用</div>
+            <div class="panel-sub" data-i18n="shell.behavior.tools.sub">汇总内置工具、命令行、MCP 与子代理操作。</div>
             </div>
             <span class="tag" id="tools-support">--</span>
           </div>
@@ -380,8 +380,8 @@ fn html_shell(mode: &str) -> String {
 
         <div class="panel behavior-secondary">
           <div>
-            <div class="panel-title" data-i18n="shell.behavior.optimize.title">Optimize</div>
-            <div class="panel-sub" data-i18n="shell.behavior.optimize.sub">只读浪费检测；不会自动执行删除、归档或重写。</div>
+            <div class="panel-title" data-i18n="shell.behavior.optimize.title">优化建议</div>
+            <div class="panel-sub" data-i18n="shell.behavior.optimize.sub">只读分析潜在浪费；不会自动删除、归档或改写数据。</div>
           </div>
           <div id="optimize-summary" class="mini-stat-grid"></div>
           <div id="optimize-findings" class="finding-list"></div>
@@ -389,8 +389,8 @@ fn html_shell(mode: &str) -> String {
 
         <div class="panel behavior-secondary">
           <div>
-            <div class="panel-title" data-i18n="shell.behavior.compare.title">Compare</div>
-            <div class="panel-sub" data-i18n="shell.behavior.compare.sub">按模型对比成本、one-shot、retry 与工作风格；低样本显式提示。</div>
+            <div class="panel-title" data-i18n="shell.behavior.compare.title">模型对比</div>
+            <div class="panel-sub" data-i18n="shell.behavior.compare.sub">按模型对比成本、单轮完成率、重试率与使用模式；样本不足时会明确提示。</div>
           </div>
           <div id="compare-panel"></div>
         </div>
@@ -401,8 +401,8 @@ fn html_shell(mode: &str) -> String {
     <section id="explorer" class="block">
       <div class="section-head">
         <div>
-          <h2 class="section-title" data-i18n="shell.explorer.title">Cost Explorer</h2>
-          <div class="section-desc" data-i18n="shell.explorer.sub">按时间粒度、指标、维度与工具过滤做本地切片分析；结果来自后端聚合，不在前端透视原始行。</div>
+          <h2 class="section-title" data-i18n="shell.explorer.title">用量分析</h2>
+          <div class="section-desc" data-i18n="shell.explorer.sub">按时间粒度、指标、维度与工具筛选本地用量；结果由后端聚合，不在浏览器中处理原始记录。</div>
         </div>
         <span class="tag" id="explorer-support">--</span>
       </div>
@@ -414,13 +414,13 @@ fn html_shell(mode: &str) -> String {
             <select id="explorer-metric" data-explorer-control="metric">
               <option value="attributed_cost_usd" data-i18n="shell.explorer.metric.cost">归因成本</option>
               <option value="calls" data-i18n="shell.explorer.metric.calls">调用数</option>
-              <option value="turns" data-i18n="shell.explorer.metric.turns">Turns</option>
+              <option value="turns" data-i18n="shell.explorer.metric.turns">轮次</option>
               <option value="sessions" data-i18n="shell.explorer.metric.sessions">会话数</option>
               <option value="total_tokens" data-i18n="shell.explorer.metric.tokens">总 Token</option>
             </select>
           </div>
           <div class="filter-group">
-            <label for="explorer-group-by" data-i18n="shell.explorer.groupBy">分组</label>
+            <label for="explorer-group-by" data-i18n="shell.explorer.groupBy">分组维度</label>
             <select id="explorer-group-by" data-explorer-control="groupBy">
               <option value="source" data-i18n="shell.explorer.group.source">来源</option>
               <option value="model" data-i18n="shell.explorer.group.model">模型</option>
@@ -433,7 +433,7 @@ fn html_shell(mode: &str) -> String {
             </select>
           </div>
           <div class="filter-group">
-            <label for="explorer-granularity" data-i18n="shell.explorer.granularity">粒度</label>
+            <label for="explorer-granularity" data-i18n="shell.explorer.granularity">时间粒度</label>
             <select id="explorer-granularity" data-explorer-control="granularity">
               <option value="total" data-i18n="shell.explorer.granularity.total">总计</option>
               <option value="day" data-i18n="shell.explorer.granularity.day">按日</option>
@@ -442,12 +442,12 @@ fn html_shell(mode: &str) -> String {
             </select>
           </div>
           <div class="filter-group">
-            <label for="explorer-limit" data-i18n="shell.explorer.limit">Top N</label>
+            <label for="explorer-limit" data-i18n="shell.explorer.limit">最多显示</label>
             <input id="explorer-limit" data-explorer-control="limit" type="number" min="1" max="50" step="1" />
           </div>
           <div class="filter-group">
             <label for="explorer-session" data-i18n="shell.explorer.session">会话过滤</label>
-            <input id="explorer-session" data-explorer-control="sessionId" type="search" placeholder="session id" data-i18n-attr="placeholder=shell.explorer.sessionPlaceholder" />
+            <input id="explorer-session" data-explorer-control="sessionId" type="search" placeholder="会话 ID" data-i18n-attr="placeholder=shell.explorer.sessionPlaceholder" />
           </div>
           <div class="filter-group">
             <label for="explorer-tool-name" data-i18n="shell.explorer.tool">工具过滤</label>
@@ -457,28 +457,28 @@ fn html_shell(mode: &str) -> String {
             <label for="explorer-tool-kind" data-i18n="shell.explorer.toolKind">工具类型</label>
             <select id="explorer-tool-kind" data-explorer-control="toolKind">
               <option value="" data-i18n="shell.explorer.all">全部</option>
-              <option value="read">read</option>
-              <option value="edit">edit</option>
-              <option value="shell">shell</option>
-              <option value="mcp">mcp</option>
-              <option value="agent">agent</option>
-              <option value="(non-tool)">(non-tool)</option>
+              <option value="read" data-i18n="shell.explorer.toolKind.read">读取</option>
+              <option value="edit" data-i18n="shell.explorer.toolKind.edit">编辑</option>
+              <option value="shell" data-i18n="shell.explorer.toolKind.shell">命令行</option>
+              <option value="mcp" data-i18n="shell.explorer.toolKind.mcp">MCP 工具</option>
+              <option value="agent" data-i18n="shell.explorer.toolKind.agent">子代理</option>
+              <option value="(non-tool)" data-i18n="shell.explorer.toolKind.nonTool">非工具调用</option>
             </select>
           </div>
           <div class="filter-group">
             <label for="explorer-token-type" data-i18n="shell.explorer.tokenType">Token 类型</label>
             <select id="explorer-token-type" data-explorer-control="tokenType">
               <option value="" data-i18n="shell.explorer.all">全部</option>
-              <option value="input">input</option>
-              <option value="cache_read">cache_read</option>
-              <option value="cache_creation">cache_creation</option>
-              <option value="output">output</option>
-              <option value="reasoning_output">reasoning_output</option>
+              <option value="input" data-i18n="shell.explorer.tokenType.input">输入 Token</option>
+              <option value="cache_read" data-i18n="shell.explorer.tokenType.cacheRead">缓存读取 Token</option>
+              <option value="cache_creation" data-i18n="shell.explorer.tokenType.cacheCreation">缓存写入 Token</option>
+              <option value="output" data-i18n="shell.explorer.tokenType.output">输出 Token</option>
+              <option value="reasoning_output" data-i18n="shell.explorer.tokenType.reasoningOutput">推理输出 Token</option>
             </select>
           </div>
           <label class="explorer-check">
             <input id="explorer-include-other" data-explorer-control="includeOther" type="checkbox" />
-            <span data-i18n="shell.explorer.includeOther">合并 Other</span>
+            <span data-i18n="shell.explorer.includeOther">合并其他项</span>
           </label>
           <label class="explorer-check">
             <input id="explorer-include-non-tool" data-explorer-control="includeNonTool" type="checkbox" />
@@ -495,7 +495,7 @@ fn html_shell(mode: &str) -> String {
         <div class="explorer-results-grid">
           <div class="explorer-ranking">
             <div class="panel-title" data-i18n="shell.explorer.rowsTitle">维度排行</div>
-            <div class="panel-sub" data-i18n="shell.explorer.rowsSub">按当前指标排序，Top N 之外可合并为 Other。</div>
+            <div class="panel-sub" data-i18n="shell.explorer.rowsSub">按当前指标排序，超出显示上限的结果可合并为其他项。</div>
             <div class="panel-bars" id="explorer-bars"></div>
             <div id="explorer-rows"></div>
           </div>
@@ -534,7 +534,7 @@ fn html_shell(mode: &str) -> String {
         </div>
 
         <div class="panel cost-ranking-panel">
-          <div class="panel-title" data-i18n="shell.cost.panelTitle">成本最高的 5 个 来源 / 模型 组合</div>
+          <div class="panel-title" data-i18n="shell.cost.panelTitle">成本最高的 5 个来源 / 模型组合</div>
           <div class="panel-sub" data-i18n="shell.cost.panelSub">单位：USD</div>
 
           <div class="panel-bars" id="costs-bars"></div>
