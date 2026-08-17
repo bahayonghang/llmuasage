@@ -1540,3 +1540,39 @@ Public listener 改用最小读路由与脱敏聚合 DTO，并忽略 project sel
 ### Status
 
 [OK] **Completed**
+
+
+## Session 50: 完善 parse issue 诊断与日志
+
+**Date**: 2026-08-17
+**Task**: 完善 parse issue 诊断与日志
+**Branch**: `dev`
+
+### Summary
+
+为 parse issue 样本补上闭集 reason，并用独立 skip 水位让同一条 ZCode 未完成行只报告一次。
+
+### Main Changes
+
+- ParseIssueSample 增加 reason；CLI 有 reason 时不再打印 @0
+- ZCode schema v22 独立 skip 水位；取消与 --recent-days 不推进
+- driver 对非零 parse issue 打一条 info 事件，默认 warn 不落盘
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2df934a` | (see git log) |
+
+### Testing
+
+- [OK] python scripts/ci-rust.py
+- [OK] cargo test --test sync_regression zcode_ -- --test-threads=1
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 本机再跑一次 llmusage sync，确认首次出现 reason 后第二次 unchanged 不再出现

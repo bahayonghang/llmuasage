@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 49
+- **Total Sessions**: 50
 - **Last Active**: 2026-08-17
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1542 | Active |
+| `journal-1.md` | ~1578 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 50 | 2026-08-17 | 完善 parse issue 诊断与日志 | `2df934a` | `dev` |
 | 49 | 2026-08-17 | 优化用量概览布局与术语 | `79b71f8` | `dev` |
 | 48 | 2026-08-17 | Parse issue 分类纠偏与可观测性 | `5d7435c` | `dev` |
 | 47 | 2026-08-16 | 新增三源被动解析器并升至 1.2.0 | `7843f6e` | `dev` |
