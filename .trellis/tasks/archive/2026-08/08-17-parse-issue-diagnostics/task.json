@@ -1,0 +1,29 @@
+{
+  "id": "parse-issue-diagnostics",
+  "name": "parse-issue-diagnostics",
+  "title": "完善 parse issue 诊断与日志",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-08-17",
+  "completedAt": "2026-08-17",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "description": "Enrich parse-issue samples/logs so skipped ZCode rows are diagnosable; decide whether unchanged syncs re-report the same row.",
+    "notes": "User chose: do not re-report the same ZCode unfinished row on later unchanged syncs."
+  }
+}
