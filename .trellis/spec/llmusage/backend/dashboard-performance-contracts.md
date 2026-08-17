@@ -39,6 +39,10 @@ TimeWindow::query_filter(&QueryFilter)
 - The interactive response contains exactly one selected `trends` series plus
   `overview`, `models`, `sources`, `projects`, `costs`,
   `sync_command_center`, `diagnostics`, and `health`.
+- `sync_command_center` source rows may include four parse-issue counters
+  (`malformed_lines`, `oversized_lines`, `skipped_lines`,
+  `accounting_anomaly_lines`) with serde defaults. Parse-issue samples stay
+  out of interactive dashboard JSON.
 - Interactive `health` is a summary with `cursor_count`; it must not serialize
   the full cursor array. Full and core contracts keep their existing shapes.
 - A range click updates selected/loading state before its first `await`, aborts

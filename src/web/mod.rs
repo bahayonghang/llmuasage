@@ -2883,6 +2883,9 @@ mod tests {
         assert!(renderer.contains("return { kind, source, summary, stats }"));
         assert!(renderer.contains("copy.sourceShareAria"));
         assert!(renderer.contains("statusLabels"));
+        assert!(renderer.contains("parseIssueCountSpans(source, copy)"));
+        assert!(renderer.contains("malformed_lines"));
+        assert!(renderer.contains("accounting_anomaly_lines"));
         for forbidden in [
             "snapshot.error",
             "current.error",
@@ -2909,6 +2912,8 @@ mod tests {
         assert!(copy_js.contains("detailsHint"));
         assert!(copy_js.contains("statusLabels"));
         assert!(copy_js.contains("syncCenter.reason.sourceError"));
+        assert!(copy_js.contains("parseIssues"));
+        assert!(copy_js.contains("accounting"));
     }
 
     #[test]
@@ -5619,6 +5624,11 @@ mod tests {
         assert_eq!(center["metrics"]["stored_events"], 42);
         assert_eq!(center["sources"][0]["source"], "codex");
         assert_eq!(center["sources"][0]["events_inserted"], 5);
+        assert_eq!(center["sources"][0]["malformed_lines"], 0);
+        assert_eq!(center["sources"][0]["oversized_lines"], 0);
+        assert_eq!(center["sources"][0]["skipped_lines"], 0);
+        assert_eq!(center["sources"][0]["accounting_anomaly_lines"], 0);
+        assert!(center["sources"][0].get("samples").is_none());
         assert!(center["sources"][0]["share"].as_f64().unwrap() > 0.0);
         assert!(center["sources"][0].get("last_error").is_none());
         Ok(())

@@ -287,6 +287,7 @@ fn source_row(
             Cell::from(format_number(source.events_inserted)),
             Cell::from(format_number(source.skipped_files)),
             Cell::from(format_number(source.stored_events)),
+            Cell::from(Line::from(issue_spans(source))),
             Cell::from(format!("{:.0}%", source.share * 100.0)),
             Cell::from(source.updated_at.clone().unwrap_or_else(|| "-".to_string())),
         ])
@@ -307,7 +308,8 @@ fn source_header(very_narrow: bool, narrow: bool) -> Vec<Cell<'static>> {
         &["Source", "Status", "Seen", "Stored"]
     } else {
         &[
-            "Source", "Status", "Seen", "Inserted", "Skipped", "Stored", "Share", "Updated",
+            "Source", "Status", "Seen", "Inserted", "Skipped", "Stored", "Issues", "Share",
+            "Updated",
         ]
     };
     labels
@@ -332,15 +334,56 @@ fn source_widths(very_narrow: bool, narrow: bool) -> Vec<Constraint> {
         ]
     } else {
         vec![
-            Constraint::Length(14),
-            Constraint::Length(14),
-            Constraint::Length(10),
-            Constraint::Length(10),
-            Constraint::Length(10),
+            Constraint::Length(12),
+            Constraint::Length(12),
+            Constraint::Length(8),
             Constraint::Length(10),
             Constraint::Length(8),
-            Constraint::Min(18),
+            Constraint::Length(8),
+            Constraint::Min(16),
+            Constraint::Length(7),
+            Constraint::Length(16),
         ]
+    }
+}
+
+fn issue_spans(source: &SyncSourcePayload) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    let mut push = |label: &'static str, count: u64, style: Style| {
+        if count == 0 {
+            return;
+        }
+        if !spans.is_empty() {
+            spans.push(Span::raw(" "));
+        }
+        spans.push(Span::styled(
+            format!(
+                "{label}={}",
+                format_number(i64::try_from(count).unwrap_or(i64::MAX))
+            ),
+            style,
+        ));
+    };
+    push(
+        "malformed",
+        source.malformed_lines,
+        metric_style(theme::warning_fg()),
+    );
+    push(
+        "oversized",
+        source.oversized_lines,
+        metric_style(theme::warning_fg()),
+    );
+    push("skipped", source.skipped_lines, theme::muted_style());
+    push(
+        "accounting",
+        source.accounting_anomaly_lines,
+        theme::muted_style(),
+    );
+    if spans.is_empty() {
+        vec![Span::styled("-", theme::muted_style())]
+    } else {
+        spans
     }
 }
 

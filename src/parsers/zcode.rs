@@ -360,7 +360,7 @@ fn count_skipped_rows(
     for row in rows {
         let (status, count) = row?;
         for _ in 0..count {
-            issues.record(SourceKind::Zcode, path_hash, 0, ParseIssueKind::Malformed);
+            issues.record(SourceKind::Zcode, path_hash, 0, ParseIssueKind::Skipped);
         }
         tracing::debug!(status, count, "ZCode 跳过未完成 model_usage 行");
     }
@@ -476,7 +476,7 @@ fn row_to_event(
             SourceKind::Zcode,
             path_hash,
             row.started_at.max(0) as u64,
-            ParseIssueKind::Malformed,
+            ParseIssueKind::AccountingAnomaly,
         );
         0
     } else {
@@ -503,7 +503,7 @@ fn row_to_event(
                 SourceKind::Zcode,
                 path_hash,
                 row.started_at.max(0) as u64,
-                ParseIssueKind::Malformed,
+                ParseIssueKind::AccountingAnomaly,
             );
         }
     }
@@ -880,7 +880,11 @@ mod tests {
             "input clamps below cache overlap"
         );
         assert_eq!(event.tokens.reasoning_output_tokens, 0);
-        assert!(issues.total() >= 1, "pathological row counts a parse issue");
+        assert!(
+            issues.accounting_anomaly_lines >= 1,
+            "pathological row counts an accounting anomaly"
+        );
+        assert_eq!(issues.total(), 0);
     }
 
     #[test]
@@ -931,7 +935,8 @@ mod tests {
         let event = row_to_event(row, "hash", &mut resolver, &mut issues).expect("event");
 
         assert_eq!(event.tokens.total_tokens, 999);
-        assert_eq!(issues.malformed_lines, 1);
+        assert_eq!(issues.accounting_anomaly_lines, 1);
+        assert_eq!(issues.total(), 0);
     }
 
     #[test]
@@ -1050,7 +1055,9 @@ mod tests {
 
         let mut issues = ParseIssues::default();
         count_skipped_rows(&conn, 0, "", None, "hash", &mut issues).expect("count");
-        assert_eq!(issues.malformed_lines, 3);
+        assert_eq!(issues.skipped_lines, 3);
+        assert_eq!(issues.malformed_lines, 0);
+        assert_eq!(issues.total(), 0);
     }
 
     #[test]

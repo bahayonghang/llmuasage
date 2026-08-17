@@ -1,0 +1,28 @@
+{
+  "id": "parse-issue-observability",
+  "name": "parse-issue-observability",
+  "title": "Parse issue 分类纠偏与可观测性",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-08-17",
+  "completedAt": "2026-08-17",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "description": "Classify sync parse issues honestly and surface reasons in CLI/doctor/diagnostics."
+  }
+}

@@ -4,7 +4,10 @@ use anyhow::Result;
 use serde::Serialize;
 use tracing::info;
 
-use crate::{app::AppContext, store::Store};
+use crate::{
+    app::AppContext,
+    store::{SourceSyncStatus, Store},
+};
 
 #[derive(Debug, Clone, Serialize)]
 struct DoctorCheck {
@@ -146,6 +149,9 @@ async fn diagnostics(app: &AppContext, json: bool) -> Result<()> {
         });
     }
 
+    let sync_statuses = store.sync_status().load_source_sync_statuses()?;
+    checks.push(parse_issues_doctor_check(&sync_statuses));
+
     if json {
         println!("{}", serde_json::to_string_pretty(&checks)?);
     } else {
@@ -157,4 +163,104 @@ async fn diagnostics(app: &AppContext, json: bool) -> Result<()> {
 
     info!("完成 doctor 健康检查");
     Ok(())
+}
+
+fn parse_issues_doctor_check(statuses: &[SourceSyncStatus]) -> DoctorCheck {
+    let mut faults = Vec::new();
+    for status in statuses {
+        if status.parse_issues.total() == 0 {
+            continue;
+        }
+        faults.push(format!(
+            "{} malformed={} oversized={}",
+            status.source, status.parse_issues.malformed_lines, status.parse_issues.oversized_lines
+        ));
+    }
+    if faults.is_empty() {
+        DoctorCheck {
+            id: "parse.issues",
+            status: "ok",
+            detail: "no malformed or oversized parse issues".to_string(),
+        }
+    } else {
+        DoctorCheck {
+            id: "parse.issues",
+            status: "warn",
+            detail: faults.join("; "),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_issues_doctor_check;
+    use crate::{
+        models::{ParseIssueKind, ParseIssueSample, ParseIssues, SourceKind},
+        store::SourceSyncStatus,
+    };
+
+    fn status_with_issues(source: &str, issues: ParseIssues) -> SourceSyncStatus {
+        SourceSyncStatus {
+            source: source.to_string(),
+            files_processed: 1,
+            changed_files: 1,
+            bytes_scanned: 0,
+            events_seen: 0,
+            events_replayed: 0,
+            events_inserted: 0,
+            stored_events: 0,
+            token_accounting_version: None,
+            legacy_token_accounting: false,
+            token_accounting_warning: None,
+            parse_ms: 0,
+            write_ms: 0,
+            lock_wait_ms: 0,
+            parse_issues: issues,
+            updated_at: "2026-08-17T00:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn doctor_warns_only_on_malformed_or_oversized() {
+        let skipped_only = status_with_issues(
+            "zcode",
+            ParseIssues {
+                skipped_lines: 17,
+                samples: vec![ParseIssueSample {
+                    source: SourceKind::Zcode,
+                    path_hash: "hash".to_string(),
+                    offset: 0,
+                    kind: ParseIssueKind::Skipped,
+                }],
+                ..ParseIssues::default()
+            },
+        );
+        let check = parse_issues_doctor_check(std::slice::from_ref(&skipped_only));
+        assert_eq!(check.status, "ok");
+
+        let anomaly_only = status_with_issues(
+            "antigravity",
+            ParseIssues {
+                accounting_anomaly_lines: 1,
+                ..ParseIssues::default()
+            },
+        );
+        let check = parse_issues_doctor_check(std::slice::from_ref(&anomaly_only));
+        assert_eq!(check.status, "ok");
+
+        let faults = status_with_issues(
+            "codex",
+            ParseIssues {
+                malformed_lines: 1,
+                oversized_lines: 2,
+                skipped_lines: 9,
+                ..ParseIssues::default()
+            },
+        );
+        let check = parse_issues_doctor_check(&[skipped_only, faults]);
+        assert_eq!(check.status, "warn");
+        assert!(check.detail.contains("codex malformed=1 oversized=2"));
+        assert!(!check.detail.contains("zcode"));
+        assert!(!check.detail.contains("skipped"));
+    }
 }

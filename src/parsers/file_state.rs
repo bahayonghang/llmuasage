@@ -149,6 +149,7 @@ pub struct JsonlRecord {
 pub enum JsonlRecordDisposition {
     Accepted,
     Ignored,
+    Skipped,
     Malformed,
     Stop,
 }
@@ -229,10 +230,42 @@ impl<R: Read> BoundedJsonlReader<R> {
         path_hash: &str,
         cancel: &CancellationToken,
         issues: &mut ParseIssues,
-        mut callback: F,
+        callback: F,
     ) -> Result<JsonlReadStatus>
     where
         F: FnMut(JsonlRecord) -> Result<JsonlRecordDisposition>,
+    {
+        self.read_json_records_with_oversized(
+            source,
+            path_hash,
+            cancel,
+            issues,
+            callback,
+            |_, _| Ok(JsonlRecordDisposition::Ignored),
+        )
+    }
+
+    /// Like [`Self::read_json_records`], but exposes the bounded oversized
+    /// prefix so a source parser can recover or reclassify the record.
+    ///
+    /// Oversized dispositions:
+    /// - `Accepted`: recovered usage, no issue
+    /// - `Skipped`: skipped counter
+    /// - `Malformed`: malformed counter
+    /// - `Ignored`: oversized (the default wrapper path)
+    /// - `Stop`: stop reading
+    pub fn read_json_records_with_oversized<F, O>(
+        &mut self,
+        source: SourceKind,
+        path_hash: &str,
+        cancel: &CancellationToken,
+        issues: &mut ParseIssues,
+        mut callback: F,
+        mut oversized_callback: O,
+    ) -> Result<JsonlReadStatus>
+    where
+        F: FnMut(JsonlRecord) -> Result<JsonlRecordDisposition>,
+        O: FnMut(&[u8], u64) -> Result<JsonlRecordDisposition>,
     {
         loop {
             match self.read_record(cancel)? {
@@ -258,6 +291,9 @@ impl<R: Read> BoundedJsonlReader<R> {
                         value,
                     })? {
                         JsonlRecordDisposition::Accepted | JsonlRecordDisposition::Ignored => {}
+                        JsonlRecordDisposition::Skipped => {
+                            issues.record(source, path_hash, start_offset, ParseIssueKind::Skipped)
+                        }
                         JsonlRecordDisposition::Malformed => issues.record(
                             source,
                             path_hash,
@@ -268,7 +304,25 @@ impl<R: Read> BoundedJsonlReader<R> {
                     }
                 }
                 RecordRead::Oversized { start_offset } => {
-                    issues.record(source, path_hash, start_offset, ParseIssueKind::Oversized)
+                    match oversized_callback(&self.record, start_offset)? {
+                        JsonlRecordDisposition::Accepted => {}
+                        JsonlRecordDisposition::Skipped => {
+                            issues.record(source, path_hash, start_offset, ParseIssueKind::Skipped)
+                        }
+                        JsonlRecordDisposition::Malformed => issues.record(
+                            source,
+                            path_hash,
+                            start_offset,
+                            ParseIssueKind::Malformed,
+                        ),
+                        JsonlRecordDisposition::Ignored => issues.record(
+                            source,
+                            path_hash,
+                            start_offset,
+                            ParseIssueKind::Oversized,
+                        ),
+                        JsonlRecordDisposition::Stop => return Ok(JsonlReadStatus::Stopped),
+                    }
                 }
                 RecordRead::PartialTail {
                     start_offset,
@@ -511,6 +565,71 @@ mod tests {
         assert_eq!(issues.oversized_lines, 1);
         assert_eq!(issues.malformed_lines, 0);
         assert_eq!(values, vec![serde_json::json!({"after": true})]);
+        assert!(r.max_buffered_bytes <= limit);
+        assert_eq!(r.complete_offset(), content.len() as u64);
+    }
+
+    #[test]
+    fn oversized_prefix_callback_can_reclassify_and_keeps_the_bound() {
+        let limit = 64usize;
+        let mut content = b"{\"type\":\"skip-me\",".to_vec();
+        content.extend(std::iter::repeat_n(b'x', limit));
+        content.extend_from_slice(b"}\n{\"after\":true}\n");
+        let mut r = BoundedJsonlReader::with_limit(Cursor::new(content.clone()), 0, limit)
+            .expect("new reader");
+        let mut values = Vec::new();
+        let mut issues = ParseIssues::default();
+        let mut prefixes = Vec::new();
+        let status = r
+            .read_json_records_with_oversized(
+                SourceKind::Codex,
+                "safe-path-hash",
+                &CancellationToken::new(),
+                &mut issues,
+                |record| {
+                    values.push(record.value);
+                    Ok(JsonlRecordDisposition::Accepted)
+                },
+                |prefix, start_offset| {
+                    prefixes.push((start_offset, prefix.len()));
+                    Ok(JsonlRecordDisposition::Skipped)
+                },
+            )
+            .expect("read json records");
+
+        assert_eq!(status, JsonlReadStatus::Complete);
+        assert_eq!(issues.skipped_lines, 1);
+        assert_eq!(issues.oversized_lines, 0);
+        assert_eq!(issues.malformed_lines, 0);
+        assert_eq!(values, vec![serde_json::json!({"after": true})]);
+        assert_eq!(prefixes, vec![(0, limit)]);
+        assert!(r.max_buffered_bytes <= limit);
+        assert_eq!(r.complete_offset(), content.len() as u64);
+    }
+
+    #[test]
+    fn oversized_prefix_accepted_does_not_count_an_issue() {
+        let limit = 64usize;
+        let mut content = b"{\"type\":\"token_count\",".to_vec();
+        content.extend(std::iter::repeat_n(b'x', limit));
+        content.extend_from_slice(b"}\n{\"after\":true}\n");
+        let mut r = BoundedJsonlReader::with_limit(Cursor::new(content.clone()), 0, limit)
+            .expect("new reader");
+        let mut issues = ParseIssues::default();
+        let status = r
+            .read_json_records_with_oversized(
+                SourceKind::Codex,
+                "safe-path-hash",
+                &CancellationToken::new(),
+                &mut issues,
+                |_| Ok(JsonlRecordDisposition::Accepted),
+                |_, _| Ok(JsonlRecordDisposition::Accepted),
+            )
+            .expect("read json records");
+
+        assert_eq!(status, JsonlReadStatus::Complete);
+        assert_eq!(issues.total(), 0);
+        assert_eq!(issues.informational_total(), 0);
         assert!(r.max_buffered_bytes <= limit);
         assert_eq!(r.complete_offset(), content.len() as u64);
     }

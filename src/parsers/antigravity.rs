@@ -409,7 +409,7 @@ fn parse_conversation_file(
                 SourceKind::Antigravity,
                 path_hash,
                 rowid.max(0) as u64,
-                ParseIssueKind::Malformed,
+                ParseIssueKind::AccountingAnomaly,
             );
         }
 
@@ -459,7 +459,7 @@ fn parse_conversation_file(
                     SourceKind::Antigravity,
                     path_hash,
                     rowid.max(0) as u64,
-                    ParseIssueKind::Malformed,
+                    ParseIssueKind::AccountingAnomaly,
                 );
                 format!("row-{rowid}")
             }
@@ -991,7 +991,9 @@ mod tests {
         let (_dir, path) = synthetic_conversation(&[(1, blob)]);
         let result =
             parse_conversation_file(&path, "hash", &CancellationToken::new()).expect("parse");
-        assert_eq!(result.parse_issues.malformed_lines, 1);
+        assert_eq!(result.parse_issues.accounting_anomaly_lines, 1);
+        assert_eq!(result.parse_issues.malformed_lines, 0);
+        assert_eq!(result.parse_issues.total(), 0);
         // 事件仍导入（不改数）。
         assert_eq!(result.events.len(), 1);
         assert_eq!(result.events[0].tokens.total_tokens, 1632 + 284);
@@ -1123,7 +1125,9 @@ mod tests {
         let result =
             parse_conversation_file(&path, "hash", &CancellationToken::new()).expect("parse");
         assert_eq!(result.events.len(), 1);
-        assert_eq!(result.parse_issues.malformed_lines, 1);
+        assert_eq!(result.parse_issues.accounting_anomaly_lines, 1);
+        assert_eq!(result.parse_issues.malformed_lines, 0);
+        assert_eq!(result.parse_issues.total(), 0);
         assert_eq!(
             result.events[0].event_key,
             format!("antigravity:hash::{}", hash_string("row-7"))

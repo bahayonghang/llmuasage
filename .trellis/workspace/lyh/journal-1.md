@@ -1485,7 +1485,43 @@ Public listener 改用最小读路由与脱敏聚合 DTO，并忽略 project sel
 - 按需把 dev 合入 main 并做 1.2.0 发布
 
 
-## Session 48: 优化用量概览布局与术语
+## Session 48: Parse issue 分类纠偏与可观测性
+
+**Date**: 2026-08-17
+**Task**: Parse issue 分类纠偏与可观测性
+**Branch**: `dev`
+
+### Summary
+
+把 sync parse issue 拆成 malformed/oversized/skipped/accounting_anomaly，Codex 超大行按前缀分类并可回收完整 token_count；CLI、doctor、source-status、看板与 TUI 共用同一套计数。
+
+### Main Changes
+
+- 四类互斥 parse issue 计数与样本 basename
+- Codex 4MiB 前缀 peek/回收 token_count
+- Zcode 未完成行改为 skipped，记账异常单独计数
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5d7435c` | (see git log) |
+
+### Testing
+
+- [OK] python scripts/ci-rust.py
+- [OK] node --check dashboard JS
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 按需推送 origin/dev；本地 Trellis 脚本改动未纳入本次提交
+
+
+## Session 49: 优化用量概览布局与术语
 
 **Date**: 2026-08-17
 **Task**: 优化用量概览布局与术语

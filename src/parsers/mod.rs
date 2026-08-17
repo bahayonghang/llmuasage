@@ -260,7 +260,7 @@ pub struct SourceSyncStats {
     pub absent: bool,
     /// Optional last parse error surfaced for diagnostics.
     pub last_error: Option<String>,
-    /// Privacy-safe malformed/oversized JSONL counters and bounded samples.
+    /// Privacy-safe parse-issue counters and bounded samples.
     #[serde(default)]
     pub parse_issues: ParseIssues,
 }

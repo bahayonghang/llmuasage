@@ -179,6 +179,7 @@ function sourceCards(center) {
             <span>${escapeHtml(copy.metrics.eventsSeen)} ${formatNumber(source.events_seen)}</span>
             <span>${escapeHtml(copy.metrics.insertedDelta)} ${formatNumber(source.events_inserted)}</span>
             <span>${escapeHtml(copy.metrics.storedEvents)} ${formatNumber(source.stored_events)}</span>
+            ${parseIssueCountSpans(source, copy)}
           </div>
           ${source.error_key ? `<div class="sync-command-center-source-error">${escapeHtml(displayKey(source.error_key))}</div>` : ''}
         </article>
@@ -187,6 +188,22 @@ function sourceCards(center) {
     .join('');
 }
 
+function parseIssueCountSpans(source, copy) {
+  const labels = copy.parseIssues || {};
+  const counts = [
+    ['malformed_lines', labels.malformed],
+    ['oversized_lines', labels.oversized],
+    ['skipped_lines', labels.skipped],
+    ['accounting_anomaly_lines', labels.accounting],
+  ];
+  return counts
+    .filter(([field]) => Number(source[field] || 0) > 0)
+    .map(
+      ([field, label]) =>
+        `<span>${escapeHtml(label || field)} ${formatNumber(source[field])}</span>`,
+    )
+    .join('');
+}
 
 function shortId(value) {
   const text = String(value || '');

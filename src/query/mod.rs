@@ -1,12 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use chrono::{Duration, SecondsFormat, Utc};
-use rusqlite::{Connection, OptionalExtension, params_from_iter};
+use rusqlite::{Connection, OptionalExtension, params_from_iter, types::Type};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     domain::source_descriptor::registered_source_descriptors,
     error::Result,
+    models::ParseIssues,
     store::{RunRecord, Store},
     util::now_utc,
 };
@@ -784,6 +785,14 @@ pub struct SyncSourcePayload {
     pub events_seen: i64,
     pub events_inserted: i64,
     pub stored_events: i64,
+    #[serde(default)]
+    pub malformed_lines: u64,
+    #[serde(default)]
+    pub oversized_lines: u64,
+    #[serde(default)]
+    pub skipped_lines: u64,
+    #[serde(default)]
+    pub accounting_anomaly_lines: u64,
     pub updated_at: Option<String>,
     pub share: f64,
     pub error_key: Option<String>,
@@ -3242,6 +3251,7 @@ impl Dashboard {
                     };
                     let tone = match status {
                         "error" | "rebuild_risk" => "warn",
+                        _ if row.parse_issues.total() > 0 => "warn",
                         "ok" => "good",
                         _ => "neutral",
                     };
@@ -3255,6 +3265,10 @@ impl Dashboard {
                         events_seen: row.events_seen,
                         events_inserted: row.events_inserted,
                         stored_events: row.stored_events,
+                        malformed_lines: row.parse_issues.malformed_lines,
+                        oversized_lines: row.parse_issues.oversized_lines,
+                        skipped_lines: row.parse_issues.skipped_lines,
+                        accounting_anomaly_lines: row.parse_issues.accounting_anomaly_lines,
                         updated_at: Some(row.updated_at),
                         share: (row.stored_events as f64 / max_stored as f64).clamp(0.0, 1.0),
                         error_key: row
@@ -3748,6 +3762,7 @@ struct SyncStatusRow {
     stored_events: i64,
     updated_at: String,
     last_error: Option<String>,
+    parse_issues: ParseIssues,
 }
 
 fn load_sync_statuses_with_conn(
@@ -3758,13 +3773,17 @@ fn load_sync_statuses_with_conn(
     let mut stmt = conn.prepare(
         r#"
         SELECT source, files_processed, changed_files, events_seen, events_inserted,
-               stored_events, updated_at
+               stored_events, updated_at, parse_issues_json
         FROM source_sync_status
         WHERE (?1 IS NULL OR source = ?1)
         ORDER BY stored_events DESC, source ASC
         "#,
     )?;
     let rows = stmt.query_map([source], |row| {
+        let parse_issues_raw = row.get::<_, String>(7)?;
+        let parse_issues = serde_json::from_str(&parse_issues_raw).map_err(|source| {
+            rusqlite::Error::FromSqlConversionFailure(7, Type::Text, Box::new(source))
+        })?;
         Ok(SyncStatusRow {
             source: row.get(0)?,
             files_processed: row.get(1)?,
@@ -3774,6 +3793,7 @@ fn load_sync_statuses_with_conn(
             stored_events: row.get(5)?,
             updated_at: row.get(6)?,
             last_error: None,
+            parse_issues,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -4027,6 +4047,55 @@ mod tests {
         assert_eq!(codex.missing_file_count, 1);
         assert_eq!(codex.protected_event_count, 2);
         assert!(codex.lossy_rebuild_risk);
+        Ok(())
+    }
+
+    #[test]
+    fn sync_command_center_projects_parse_issue_counters_without_samples() -> Result<()> {
+        let fixture = Fixture::new()?;
+        let conn = fixture.store().open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO source_sync_status(
+                source, files_processed, changed_files, bytes_scanned,
+                events_seen, events_replayed, events_inserted, stored_events,
+                parse_ms, write_ms, lock_wait_ms, updated_at, parse_issues_json
+            ) VALUES
+                ('codex', 1, 1, 10, 2, 0, 2, 2, 1, 1, 0, '2026-08-17T00:00:00Z', ?1),
+                ('zcode', 1, 1, 10, 1, 0, 1, 1, 1, 1, 0, '2026-08-17T00:00:00Z', ?2)
+            "#,
+            rusqlite::params![
+                r#"{"malformed_lines":2,"oversized_lines":1,"skipped_lines":0,"accounting_anomaly_lines":0,"samples":[{"source":"codex","path_hash":"abc","offset":9,"kind":"malformed"}]}"#,
+                r#"{"malformed_lines":0,"oversized_lines":0,"skipped_lines":5,"accounting_anomaly_lines":1,"samples":[]}"#,
+            ],
+        )?;
+        drop(conn);
+
+        let center = Dashboard::open(fixture.store())?.sync_command_center(&Default::default())?;
+        let encoded = serde_json::to_value(&center)?;
+        let sources = encoded["sources"].as_array().expect("sources");
+        let codex = sources
+            .iter()
+            .find(|row| row["source"] == "codex")
+            .expect("codex source");
+        let zcode = sources
+            .iter()
+            .find(|row| row["source"] == "zcode")
+            .expect("zcode source");
+
+        assert_eq!(codex["malformed_lines"], 2);
+        assert_eq!(codex["oversized_lines"], 1);
+        assert_eq!(codex["skipped_lines"], 0);
+        assert_eq!(codex["accounting_anomaly_lines"], 0);
+        assert_eq!(codex["tone"], "warn");
+        assert!(codex.get("samples").is_none());
+        assert!(!serde_json::to_string(codex)?.contains("path_hash"));
+
+        assert_eq!(zcode["malformed_lines"], 0);
+        assert_eq!(zcode["skipped_lines"], 5);
+        assert_eq!(zcode["accounting_anomaly_lines"], 1);
+        assert_eq!(zcode["tone"], "good");
+        assert!(zcode.get("samples").is_none());
         Ok(())
     }
 

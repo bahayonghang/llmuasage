@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     io::IsTerminal,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -17,6 +18,7 @@ use crate::{
     parsers::{SourceSyncStats, SyncEvent, SyncSummaryEvent, driver},
     registry,
     store::{BootstrapProgressEvent, HolderKind, SourceSyncStatus, Store},
+    util::hash_string,
 };
 
 // These types belong to the sync domain layer. Re-exported here so callers that
@@ -186,7 +188,7 @@ async fn run_with_human_events(
     let summary = summary_result?;
     drop(heartbeat);
     drop(lock);
-    print_summary(&summary, options);
+    print_summary(&summary, options, store);
 
     info!("完成全量本地真源同步");
     Ok(())
@@ -307,13 +309,42 @@ async fn run_with_json_events(
     result.map(|_| ())
 }
 
-fn print_summary(summary: &SyncSummary, options: &SyncRunOptions) {
+fn print_summary(summary: &SyncSummary, options: &SyncRunOptions, store: &Store) {
     let color = std::io::stdout().is_terminal();
-    for line in
-        sync_summary::format_summary_lines(summary, options.rebuild, color, terminal_width())
-    {
+    let basenames = sample_basenames(store, summary);
+    for line in sync_summary::format_summary_lines_with_basenames(
+        summary,
+        options.rebuild,
+        color,
+        terminal_width(),
+        &basenames,
+    ) {
         println!("{line}");
     }
+}
+
+fn sample_basenames(store: &Store, summary: &SyncSummary) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for stats in &summary.sources {
+        if stats.parse_issues.samples.is_empty() {
+            continue;
+        }
+        let Ok(cursors) = store.cursors().load_file_cursors(stats.source) else {
+            continue;
+        };
+        for cursor in cursors.into_values() {
+            let raw = if cursor.file_path.is_empty() {
+                cursor.cursor_key
+            } else {
+                cursor.file_path
+            };
+            let Some(name) = sync_summary::path_basename(&raw) else {
+                continue;
+            };
+            map.insert(hash_string(&raw), name.to_string());
+        }
+    }
+    map
 }
 
 /// Terminal column budget for the summary table: `COLUMNS` when set, otherwise
