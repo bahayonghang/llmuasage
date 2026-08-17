@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 47
-- **Last Active**: 2026-08-16
+- **Total Sessions**: 48
+- **Last Active**: 2026-08-17
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1485 | Active |
+| `journal-1.md` | ~1521 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 48 | 2026-08-17 | Parse issue 分类纠偏与可观测性 | `5d7435c` | `dev` |
 | 47 | 2026-08-16 | 新增三源被动解析器并升至 1.2.0 | `7843f6e` | `dev` |
 | 46 | 2026-08-03 | 完成 Dashboard AgentsView 对齐任务树 | `aa8ade9`, `b1f89b4`, `006959d`, `e63808b`, `961a368`, `6e7addb`, `6a4663c`, `70126b6`, `a341bdb`, `268d3ed` | `dev` |
 | 45 | 2026-07-31 | 完成 Activity 首次触库超时修复 | `8776d6d` | `dev` |
