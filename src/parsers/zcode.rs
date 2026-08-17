@@ -17,7 +17,9 @@
 //! Incremental sync uses an OpenCode-style high-water cursor anchored on
 //! `completed_at` (visibility semantics): anchoring on `started_at` would
 //! permanently miss requests that start before but complete after the
-//! watermark advances. Event timestamps still report `started_at`.
+//! watermark advances. Event timestamps still report `started_at`. Unfinished
+//! rows use a parallel skip watermark so the same error/cancelled row is
+//! reported only once.
 
 use std::{future::Future, path::PathBuf, pin::Pin, time::Instant};
 
@@ -140,6 +142,8 @@ async fn sync_zcode(
         );
         cursor.last_completed_at = 0;
         cursor.last_processed_ids.clear();
+        cursor.last_skipped_at = 0;
+        cursor.last_skipped_ids.clear();
     }
 
     let mut resolver = ProjectResolver::default();
@@ -167,11 +171,11 @@ async fn sync_zcode(
         String::new()
     };
 
-    // error/cancelled 行跳过计数：独立聚合查询（事件查询的 SQL 过滤看不到这些行）。
-    count_skipped_rows(
+    // error/cancelled 行跳过计数：相对 completed + skip 水位逐行选择。
+    // skip 水位只在全量且未取消的收尾写入；页中途 save 不得带上本批 skip 推进。
+    let skipped_rows = count_skipped_rows(
         &connection,
-        page_last_completed,
-        &page_last_id,
+        &cursor,
         recent_cutoff_ms,
         &path_hash,
         &mut parse_issues,
@@ -259,6 +263,7 @@ async fn sync_zcode(
     }
 
     if recent_cutoff.is_none() && !cancel.is_cancelled() {
+        advance_skip_watermark(&mut cursor, &skipped_rows);
         cursor.sqlite_status = "ok".to_string();
         cursor.updated_at = now_utc();
         store.cursors().save_zcode_cursor(&cursor)?;
@@ -336,35 +341,118 @@ fn zcode_cursor_anchor_exists(connection: &Connection, cursor: &ZcodeCursor) -> 
     Ok(true)
 }
 
+#[derive(Debug, Clone)]
+struct SkippedSighting {
+    id: String,
+    completed_at: i64,
+}
+
 fn count_skipped_rows(
     connection: &Connection,
-    watermark: i64,
-    last_id: &str,
+    cursor: &ZcodeCursor,
     recent_cutoff_ms: Option<i64>,
     path_hash: &str,
     issues: &mut ParseIssues,
-) -> Result<()> {
-    let mut statement = connection.prepare(
+) -> Result<Vec<SkippedSighting>> {
+    let completed_id = cursor
+        .last_processed_ids
+        .iter()
+        .max()
+        .cloned()
+        .unwrap_or_default();
+    let has_error_type = zcode_column_exists(connection, "error_type")?;
+    let error_type_projection = if has_error_type {
+        "error_type"
+    } else {
+        "CAST(NULL AS TEXT)"
+    };
+    let sql = format!(
         r#"
-        SELECT status, COUNT(*)
+        SELECT id, status, {error_type_projection} AS error_type, completed_at
         FROM model_usage
         WHERE status != 'completed'
           AND (completed_at > ?1 OR (completed_at = ?1 AND id > ?2))
           AND (?3 IS NULL OR completed_at >= ?3)
-        GROUP BY status
-        "#,
+        ORDER BY completed_at ASC, id ASC
+        "#
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(
+        params![cursor.last_completed_at, completed_id, recent_cutoff_ms],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        },
     )?;
-    let rows = statement.query_map(params![watermark, last_id, recent_cutoff_ms], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-    })?;
+    let mut sightings = Vec::new();
     for row in rows {
-        let (status, count) = row?;
-        for _ in 0..count {
-            issues.record(SourceKind::Zcode, path_hash, 0, ParseIssueKind::Skipped);
+        let (id, status, error_type, completed_at) = row?;
+        if !is_new_unfinished_row(completed_at, &id, cursor) {
+            continue;
         }
-        tracing::debug!(status, count, "ZCode 跳过未完成 model_usage 行");
+        issues.record(
+            SourceKind::Zcode,
+            path_hash,
+            completed_at.max(0) as u64,
+            ParseIssueKind::Skipped,
+            &zcode_unfinished_reason(&status, error_type.as_deref()),
+        );
+        sightings.push(SkippedSighting { id, completed_at });
     }
-    Ok(())
+    Ok(sightings)
+}
+
+fn is_new_unfinished_row(completed_at: i64, id: &str, cursor: &ZcodeCursor) -> bool {
+    completed_at > cursor.last_skipped_at
+        || (completed_at == cursor.last_skipped_at
+            && !cursor.last_skipped_ids.iter().any(|known| known == id))
+}
+
+fn zcode_unfinished_reason(status: &str, error_type: Option<&str>) -> String {
+    let status_code = match status {
+        "error" => "error",
+        "cancelled" => "cancelled",
+        _ => "other",
+    };
+    let error_code = error_type
+        .map(str::trim)
+        .filter(|value| is_reason_token(value))
+        .unwrap_or("unknown");
+    format!("zcode_unfinished:{status_code}:{error_code}")
+}
+
+fn is_reason_token(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
+}
+
+fn advance_skip_watermark(cursor: &mut ZcodeCursor, rows: &[SkippedSighting]) {
+    let Some(max_at) = rows.iter().map(|row| row.completed_at).max() else {
+        return;
+    };
+    let mut ids: Vec<String> = rows
+        .iter()
+        .filter(|row| row.completed_at == max_at)
+        .map(|row| row.id.clone())
+        .collect();
+    if max_at == cursor.last_skipped_at {
+        for id in &cursor.last_skipped_ids {
+            if !ids.iter().any(|known| known == id) {
+                ids.push(id.clone());
+            }
+        }
+    }
+    ids.sort();
+    ids.dedup();
+    cursor.last_skipped_at = max_at;
+    cursor.last_skipped_ids = ids;
 }
 
 fn load_zcode_page(
@@ -477,6 +565,7 @@ fn row_to_event(
             path_hash,
             row.started_at.max(0) as u64,
             ParseIssueKind::AccountingAnomaly,
+            "",
         );
         0
     } else {
@@ -504,6 +593,7 @@ fn row_to_event(
                 path_hash,
                 row.started_at.max(0) as u64,
                 ParseIssueKind::AccountingAnomaly,
+                "",
             );
         }
     }
@@ -1054,10 +1144,117 @@ mod tests {
         );
 
         let mut issues = ParseIssues::default();
-        count_skipped_rows(&conn, 0, "", None, "hash", &mut issues).expect("count");
+        let cursor = ZcodeCursor::default();
+        let sightings =
+            count_skipped_rows(&conn, &cursor, None, "hash", &mut issues).expect("count");
         assert_eq!(issues.skipped_lines, 3);
         assert_eq!(issues.malformed_lines, 0);
         assert_eq!(issues.total(), 0);
+        assert_eq!(sightings.len(), 3);
+        let reasons: Vec<_> = issues
+            .samples
+            .iter()
+            .map(|sample| sample.reason.as_str())
+            .collect();
+        assert_eq!(
+            reasons,
+            vec![
+                "zcode_unfinished:error:unknown",
+                "zcode_unfinished:error:unknown",
+                "zcode_unfinished:cancelled:unknown",
+            ]
+        );
+        assert!(
+            issues
+                .samples
+                .iter()
+                .all(|sample| sample.cli_line(None) != "skipped @0"
+                    && !sample.cli_line(None).contains("@0"))
+        );
+    }
+
+    #[test]
+    fn skipped_rows_use_error_type_when_column_exists() {
+        let conn = synthetic_db(true);
+        conn.execute_batch("ALTER TABLE model_usage ADD COLUMN error_type TEXT;")
+            .expect("error_type column");
+        insert_row(&conn, "e1", "error", 10, 100, 0, 0, 0, 0, 0, Some(0), None);
+        conn.execute(
+            "UPDATE model_usage SET error_type = 'invalid_request' WHERE id = 'e1'",
+            [],
+        )
+        .expect("set error_type");
+
+        let mut issues = ParseIssues::default();
+        count_skipped_rows(&conn, &ZcodeCursor::default(), None, "hash", &mut issues)
+            .expect("count");
+        assert_eq!(issues.skipped_lines, 1);
+        assert_eq!(
+            issues.samples[0].reason,
+            "zcode_unfinished:error:invalid_request"
+        );
+    }
+
+    #[test]
+    fn missing_error_type_column_falls_back_to_unknown() {
+        let conn = synthetic_db(true);
+        assert!(!zcode_column_exists(&conn, "error_type").unwrap());
+        insert_row(&conn, "e1", "error", 10, 200, 0, 0, 0, 0, 0, Some(0), None);
+
+        let mut issues = ParseIssues::default();
+        count_skipped_rows(&conn, &ZcodeCursor::default(), None, "hash", &mut issues)
+            .expect("count");
+        assert_eq!(issues.samples[0].reason, "zcode_unfinished:error:unknown");
+    }
+
+    #[test]
+    fn counting_skipped_rows_does_not_mutate_skip_watermark() {
+        let conn = synthetic_db(true);
+        insert_row(&conn, "e1", "error", 10, 200, 0, 0, 0, 0, 0, Some(0), None);
+
+        let mut issues = ParseIssues::default();
+        let cursor = ZcodeCursor::default();
+        let sightings =
+            count_skipped_rows(&conn, &cursor, None, "hash", &mut issues).expect("count");
+        assert_eq!(issues.skipped_lines, 1);
+        assert_eq!(cursor.last_skipped_at, 0);
+        assert!(cursor.last_skipped_ids.is_empty());
+        assert_eq!(sightings[0].completed_at, 200);
+    }
+
+    #[test]
+    fn skip_watermark_hides_already_counted_unfinished_rows() {
+        let conn = synthetic_db(true);
+        insert_row(&conn, "e1", "error", 10, 100, 0, 0, 0, 0, 0, Some(0), None);
+        insert_row(
+            &conn,
+            "x1",
+            "cancelled",
+            10,
+            102,
+            0,
+            0,
+            0,
+            0,
+            0,
+            Some(0),
+            None,
+        );
+
+        let mut first = ParseIssues::default();
+        let cursor = ZcodeCursor::default();
+        let sightings =
+            count_skipped_rows(&conn, &cursor, None, "hash", &mut first).expect("count");
+        let mut advanced = cursor;
+        advance_skip_watermark(&mut advanced, &sightings);
+        assert_eq!(first.skipped_lines, 2);
+        assert_eq!(advanced.last_skipped_at, 102);
+
+        let mut second = ParseIssues::default();
+        let again = count_skipped_rows(&conn, &advanced, None, "hash", &mut second).expect("count");
+        assert_eq!(second.skipped_lines, 0);
+        assert!(again.is_empty());
+        assert!(second.samples.is_empty());
     }
 
     #[test]

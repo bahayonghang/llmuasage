@@ -32,6 +32,14 @@ or diagnostics/doctor fields that describe structured runtime logging.
 - `diagnostics --json`, `logs --json`, and their human-facing doctor/logs
   consumers must preserve these counters. Public dashboard routes must not gain
   runtime-log access.
+- After each source parse, if `ParseIssues::summary_text()` is present, the
+  driver emits one `info!` event with `source`, the four class counts, and
+  comma-joined sample reasons. It must not include record text, prompts,
+  paths, or `error_message`.
+- Default `LLMUSAGE_LOG=warn` does not persist this info event. That is
+  intentional: skipped and other informational issues are not faults. Capture
+  the event in a unit test. `llmusage logs --level info` sees it only when
+  the file filter is info or finer. Do not raise the default file level.
 
 ## Tail Reads
 
@@ -54,3 +62,6 @@ or diagnostics/doctor fields that describe structured runtime logging.
   read from a much larger shard.
 - A simulated occupied-file deletion records a maintenance error, continues,
   and succeeds on a later retry.
+- A unit test captures the driver parse-issue info event and asserts source,
+  class counts, and sample reasons without depending on the default warn
+  file level.

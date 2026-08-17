@@ -12,7 +12,7 @@ use llmusage::{
     app::AppContext,
     commands,
     models::SourceKind,
-    parsers::{SourceSyncStats, SyncEvent},
+    parsers::{SourceParser, SourceSyncStats, SyncEvent, ZcodeParser},
     query::{Dashboard, QueryFilter},
     store::{HolderKind, Store, expected_token_accounting_version},
 };
@@ -2763,6 +2763,7 @@ struct ZcodeRowFixture {
     cache_read_tokens: i64,
     provider_total_tokens: Option<i64>,
     computed_total_tokens: Option<i64>,
+    error_type: Option<&'static str>,
 }
 
 impl Default for ZcodeRowFixture {
@@ -2781,6 +2782,7 @@ impl Default for ZcodeRowFixture {
             cache_read_tokens: 0,
             provider_total_tokens: None,
             computed_total_tokens: None,
+            error_type: None,
         }
     }
 }
@@ -3684,6 +3686,7 @@ fn zcode_skips_error_and_cancelled_rows_and_counts_them() -> Result<()> {
     fixture.insert_zcode_row(zcode_row("ok-1", 1_000, 100, 40))?;
     let mut error_row = zcode_row("err-1", 2_000, 0, 0);
     error_row.status = "error";
+    error_row.error_type = Some("invalid_request");
     fixture.insert_zcode_row(error_row)?;
     let mut cancelled_row = zcode_row("cancel-1", 3_000, 0, 0);
     cancelled_row.status = "cancelled";
@@ -3694,7 +3697,7 @@ fn zcode_skips_error_and_cancelled_rows_and_counts_them() -> Result<()> {
         let app = AppContext::discover()?;
         let store = Store::new(&app.paths)?;
         store.bootstrap()?;
-        let summary = commands::sync::run_once_with_options(
+        let first = commands::sync::run_once_with_options(
             &app,
             &store,
             0,
@@ -3705,13 +3708,119 @@ fn zcode_skips_error_and_cancelled_rows_and_counts_them() -> Result<()> {
             None,
         )
         .await?;
-        assert_eq!(summary.total_inserted, 1);
+        assert_eq!(first.total_inserted, 1);
         assert_eq!(
-            summary.sources[0].parse_issues.skipped_lines, 2,
+            first.sources[0].parse_issues.skipped_lines, 2,
             "error and cancelled rows are counted, not imported"
         );
-        assert_eq!(summary.sources[0].parse_issues.malformed_lines, 0);
+        assert_eq!(first.sources[0].parse_issues.malformed_lines, 0);
         assert_eq!(zcode_source_count(&app.paths.db_path)?, 1);
+        let reasons: Vec<_> = first.sources[0]
+            .parse_issues
+            .samples
+            .iter()
+            .map(|sample| sample.cli_line(None))
+            .collect();
+        assert!(
+            reasons
+                .iter()
+                .any(|line| line == "skipped zcode_unfinished:error:invalid_request"),
+            "{reasons:?}"
+        );
+        assert!(
+            reasons
+                .iter()
+                .any(|line| line == "skipped zcode_unfinished:cancelled:unknown"),
+            "{reasons:?}"
+        );
+        assert!(reasons.iter().all(|line| !line.contains("@0")));
+        assert!(reasons.iter().all(|line| !line.contains("err-1")));
+
+        let second = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Zcode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(
+            second.sources[0].parse_issues.skipped_lines, 0,
+            "the same unfinished rows must not reappear on an unchanged sync"
+        );
+        assert!(second.sources[0].parse_issues.samples.is_empty());
+        assert_eq!(zcode_source_count(&app.paths.db_path)?, 1);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn zcode_new_unfinished_row_after_skip_watermark_reports_once() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.insert_zcode_row(zcode_row("ok-1", 1_000, 100, 40))?;
+    let mut first_error = zcode_row("err-1", 2_000, 0, 0);
+    first_error.status = "error";
+    first_error.error_type = Some("invalid_request");
+    fixture.insert_zcode_row(first_error)?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let first = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Zcode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(first.sources[0].parse_issues.skipped_lines, 1);
+
+        let mut newer = zcode_row("err-2", 4_000, 0, 0);
+        newer.status = "error";
+        newer.error_type = Some("rate_limit");
+        fixture.insert_zcode_row(newer)?;
+        let second = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Zcode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(second.sources[0].parse_issues.skipped_lines, 1);
+        assert_eq!(
+            second.sources[0].parse_issues.samples[0].reason,
+            "zcode_unfinished:error:rate_limit"
+        );
+
+        let third = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Zcode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(third.sources[0].parse_issues.skipped_lines, 0);
+        assert!(third.sources[0].parse_issues.samples.is_empty());
         Ok::<_, anyhow::Error>(())
     })?;
 
@@ -3772,6 +3881,65 @@ fn zcode_db_rebuild_replays_from_zero() -> Result<()> {
         )?;
         assert_eq!(distinct_keys, total_rows);
         assert_eq!(total_rows, 2);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn zcode_rebuild_resets_skip_watermark() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.insert_zcode_row(zcode_row("row-a", 1_000, 100, 40))?;
+    let mut error_row = zcode_row("err-old", 2_000, 0, 0);
+    error_row.status = "error";
+    error_row.error_type = Some("invalid_request");
+    fixture.insert_zcode_row(error_row)?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let first = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Zcode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(first.sources[0].parse_issues.skipped_lines, 1);
+        let cursor = store.cursors().load_zcode_cursor()?;
+        assert!(cursor.last_skipped_at > 0);
+
+        let mut rebuilt_error = zcode_row("err-new", 2_000, 0, 0);
+        rebuilt_error.status = "error";
+        rebuilt_error.error_type = Some("invalid_request");
+        fixture.rebuild_zcode_db(&[zcode_row("row-new", 1_000, 300, 90), rebuilt_error])?;
+        let second = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Zcode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(
+            second.sources[0].parse_issues.skipped_lines, 1,
+            "missing completed anchors must reset the skip watermark"
+        );
+        assert_eq!(
+            second.sources[0].parse_issues.samples[0].reason,
+            "zcode_unfinished:error:invalid_request"
+        );
         Ok::<_, anyhow::Error>(())
     })?;
 
@@ -3955,6 +4123,144 @@ fn zcode_recent_days_run_filters_window_without_advancing_cursor() -> Result<()>
             "bounded run must not promote in-window rows to anchors"
         );
         assert_eq!(zcode_source_count(&app.paths.db_path)?, 2);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn zcode_recent_days_does_not_advance_skip_watermark() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.insert_zcode_row(zcode_row("row-old", 1_000_000_000, 100, 40))?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Zcode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let mut error_row = zcode_row("err-recent", now_ms, 0, 0);
+        error_row.status = "error";
+        error_row.error_type = Some("invalid_request");
+        fixture.insert_zcode_row(error_row)?;
+        let bounded = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Zcode),
+                recent_days: Some(1),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(bounded.sources[0].parse_issues.skipped_lines, 1);
+        let cursor = store.cursors().load_zcode_cursor()?;
+        assert_eq!(
+            cursor.last_skipped_at, 0,
+            "bounded run must not advance the skip watermark"
+        );
+        assert!(cursor.last_skipped_ids.is_empty());
+
+        let full = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Zcode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(
+            full.sources[0].parse_issues.skipped_lines, 1,
+            "a later full sync still reports the unfinished row once"
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn zcode_cancel_after_first_page_does_not_advance_skip_watermark() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.insert_zcode_row(zcode_row("ok-1", 1_000, 100, 40))?;
+    let mut error_row = zcode_row("err-1", 2_000, 0, 0);
+    error_row.status = "error";
+    error_row.error_type = Some("invalid_request");
+    fixture.insert_zcode_row(error_row)?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let mut writer = store.begin_sync_run()?;
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let mut progress = |event: SyncEvent| {
+            if matches!(
+                event,
+                SyncEvent::Progress {
+                    source: SourceKind::Zcode,
+                    ..
+                }
+            ) {
+                cancel.cancel();
+            }
+        };
+        ZcodeParser
+            .parse(&store, &mut writer, 1, None, &cancel, Some(&mut progress))
+            .await?;
+        writer.finish_sync_run()?;
+
+        let cursor = store.cursors().load_zcode_cursor()?;
+        assert_eq!(
+            cursor.last_skipped_at, 0,
+            "cancel after the first page save must not persist the skip watermark"
+        );
+        assert!(cursor.last_skipped_ids.is_empty());
+        assert!(
+            cursor.last_completed_at > 0,
+            "the completed page may still persist its completed watermark"
+        );
+
+        let full = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Zcode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(
+            full.sources[0].parse_issues.skipped_lines, 1,
+            "a later full sync still reports the unfinished row once"
+        );
+        assert_eq!(
+            full.sources[0].parse_issues.samples[0].reason,
+            "zcode_unfinished:error:invalid_request"
+        );
         Ok::<_, anyhow::Error>(())
     })?;
 
@@ -5156,7 +5462,8 @@ impl Fixture {
                 cache_creation_input_tokens INTEGER,
                 cache_read_input_tokens INTEGER,
                 provider_total_tokens INTEGER,
-                computed_total_tokens INTEGER
+                computed_total_tokens INTEGER,
+                error_type TEXT
             );
             INSERT OR IGNORE INTO session(id, directory, path)
             VALUES ('sess-1', '', '');
@@ -5173,8 +5480,8 @@ impl Fixture {
                 id, session_id, model_id, status, started_at, completed_at,
                 input_tokens, output_tokens, reasoning_tokens,
                 cache_creation_input_tokens, cache_read_input_tokens,
-                provider_total_tokens, computed_total_tokens
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                provider_total_tokens, computed_total_tokens, error_type
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             rusqlite::params![
                 row.id,
                 row.session_id,
@@ -5189,6 +5496,7 @@ impl Fixture {
                 row.cache_read_tokens,
                 row.provider_total_tokens,
                 row.computed_total_tokens,
+                row.error_type,
             ],
         )?;
         Ok(())

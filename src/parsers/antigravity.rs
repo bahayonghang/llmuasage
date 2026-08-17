@@ -347,6 +347,7 @@ fn parse_conversation_file(
                 path_hash,
                 0,
                 ParseIssueKind::Malformed,
+                "",
             );
             tracing::debug!(error = %error, "Antigravity conversation DB 打开失败");
             return Ok(AntigravityParseResult {
@@ -386,6 +387,7 @@ fn parse_conversation_file(
                 path_hash,
                 rowid.max(0) as u64,
                 ParseIssueKind::Malformed,
+                "",
             ),
         }
     }
@@ -410,6 +412,7 @@ fn parse_conversation_file(
                 path_hash,
                 rowid.max(0) as u64,
                 ParseIssueKind::AccountingAnomaly,
+                "",
             );
         }
 
@@ -437,6 +440,7 @@ fn parse_conversation_file(
                 path_hash,
                 rowid.max(0) as u64,
                 ParseIssueKind::Malformed,
+                "",
             );
             continue;
         };
@@ -460,6 +464,7 @@ fn parse_conversation_file(
                     path_hash,
                     rowid.max(0) as u64,
                     ParseIssueKind::AccountingAnomaly,
+                    "",
                 );
                 format!("row-{rowid}")
             }

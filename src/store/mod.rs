@@ -110,12 +110,19 @@ pub struct OpencodeCursor {
 /// would permanently miss requests that start before but finish after the
 /// watermark advances. `last_processed_ids` holds the ids of the rows sharing
 /// the high-water `completed_at` so pagination is idempotent.
+///
+/// Skip diagnostics use a parallel watermark so unfinished `error`/`cancelled`
+/// rows are reported once without being written into the completed anchor.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ZcodeCursor {
     /// Highest `completed_at` (epoch ms) fully processed so far.
     pub last_completed_at: i64,
     /// Row ids already consumed at the high-water `completed_at`.
     pub last_processed_ids: Vec<String>,
+    /// Highest unfinished `completed_at` already counted as skipped.
+    pub last_skipped_at: i64,
+    /// Unfinished row ids already counted at the high-water `last_skipped_at`.
+    pub last_skipped_ids: Vec<String>,
     /// Last observed SQLite status such as `ok` or `missing-db`.
     pub sqlite_status: String,
     /// Last cursor refresh time in RFC 3339 format.

@@ -281,6 +281,7 @@ impl<R: Read> BoundedJsonlReader<R> {
                                 path_hash,
                                 start_offset,
                                 ParseIssueKind::Malformed,
+                                "",
                             );
                             continue;
                         }
@@ -291,14 +292,19 @@ impl<R: Read> BoundedJsonlReader<R> {
                         value,
                     })? {
                         JsonlRecordDisposition::Accepted | JsonlRecordDisposition::Ignored => {}
-                        JsonlRecordDisposition::Skipped => {
-                            issues.record(source, path_hash, start_offset, ParseIssueKind::Skipped)
-                        }
+                        JsonlRecordDisposition::Skipped => issues.record(
+                            source,
+                            path_hash,
+                            start_offset,
+                            ParseIssueKind::Skipped,
+                            "",
+                        ),
                         JsonlRecordDisposition::Malformed => issues.record(
                             source,
                             path_hash,
                             start_offset,
                             ParseIssueKind::Malformed,
+                            "",
                         ),
                         JsonlRecordDisposition::Stop => return Ok(JsonlReadStatus::Stopped),
                     }
@@ -306,20 +312,26 @@ impl<R: Read> BoundedJsonlReader<R> {
                 RecordRead::Oversized { start_offset } => {
                     match oversized_callback(&self.record, start_offset)? {
                         JsonlRecordDisposition::Accepted => {}
-                        JsonlRecordDisposition::Skipped => {
-                            issues.record(source, path_hash, start_offset, ParseIssueKind::Skipped)
-                        }
+                        JsonlRecordDisposition::Skipped => issues.record(
+                            source,
+                            path_hash,
+                            start_offset,
+                            ParseIssueKind::Skipped,
+                            "",
+                        ),
                         JsonlRecordDisposition::Malformed => issues.record(
                             source,
                             path_hash,
                             start_offset,
                             ParseIssueKind::Malformed,
+                            "",
                         ),
                         JsonlRecordDisposition::Ignored => issues.record(
                             source,
                             path_hash,
                             start_offset,
                             ParseIssueKind::Oversized,
+                            "",
                         ),
                         JsonlRecordDisposition::Stop => return Ok(JsonlReadStatus::Stopped),
                     }

@@ -606,7 +606,13 @@ fn parse_updates_file(
 fn read_json_sidecar(path: &Path, path_hash: &str, issues: &mut ParseIssues) -> Option<Value> {
     let metadata = std::fs::metadata(path).ok()?;
     if metadata.len() > DEFAULT_MAX_JSONL_RECORD_BYTES as u64 {
-        issues.record(SourceKind::Grok, path_hash, 0, ParseIssueKind::Oversized);
+        issues.record(
+            SourceKind::Grok,
+            path_hash,
+            0,
+            ParseIssueKind::Oversized,
+            "",
+        );
         return None;
     }
     match std::fs::read(path)
@@ -615,7 +621,13 @@ fn read_json_sidecar(path: &Path, path_hash: &str, issues: &mut ParseIssues) -> 
     {
         Some(value) => Some(value),
         None => {
-            issues.record(SourceKind::Grok, path_hash, 0, ParseIssueKind::Malformed);
+            issues.record(
+                SourceKind::Grok,
+                path_hash,
+                0,
+                ParseIssueKind::Malformed,
+                "",
+            );
             None
         }
     }

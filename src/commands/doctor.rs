@@ -231,6 +231,7 @@ mod tests {
                     path_hash: "hash".to_string(),
                     offset: 0,
                     kind: ParseIssueKind::Skipped,
+                    reason: String::new(),
                 }],
                 ..ParseIssues::default()
             },

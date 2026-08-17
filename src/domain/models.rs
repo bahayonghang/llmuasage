@@ -65,6 +65,7 @@ impl Display for SourceKind {
 
 pub(crate) const MAX_PARSE_ISSUE_SAMPLES: usize = 8;
 pub(crate) const MAX_PATH_HASH_CHARS: usize = 128;
+pub(crate) const MAX_PARSE_ISSUE_REASON_CHARS: usize = 64;
 
 /// Classification for a bounded, privacy-safe parse issue.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -100,6 +101,38 @@ pub struct ParseIssueSample {
     pub path_hash: String,
     pub offset: u64,
     pub kind: ParseIssueKind,
+    /// Closed-set short code such as `zcode_unfinished:error:invalid_request`.
+    /// Empty when the sample is located only by kind and offset.
+    #[serde(default)]
+    pub reason: String,
+}
+
+impl ParseIssueSample {
+    /// Privacy-safe CLI sample line: kind, optional reason, optional JSONL
+    /// offset, optional basename. Never includes `path_hash` or record text.
+    pub fn cli_line(&self, basename: Option<&str>) -> String {
+        let mut line = self.kind.to_string();
+        if !self.reason.is_empty() {
+            line.push(' ');
+            line.push_str(&self.reason);
+        } else if self.offset > 0 {
+            line.push_str(" @");
+            line.push_str(&self.offset.to_string());
+        }
+        if let Some(name) = basename.filter(|name| !name.is_empty()) {
+            line.push(' ');
+            line.push_str(name);
+        }
+        line
+    }
+}
+
+fn sanitize_parse_issue_reason(reason: &str) -> String {
+    reason
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | ':' | '-'))
+        .take(MAX_PARSE_ISSUE_REASON_CHARS)
+        .collect()
 }
 
 /// Aggregate parse-issue diagnostics for one source sync.
@@ -166,6 +199,7 @@ impl ParseIssues {
         path_hash: &str,
         offset: u64,
         kind: ParseIssueKind,
+        reason: &str,
     ) {
         match kind {
             ParseIssueKind::Malformed => {
@@ -187,6 +221,7 @@ impl ParseIssues {
                 path_hash: path_hash.chars().take(MAX_PATH_HASH_CHARS).collect(),
                 offset,
                 kind,
+                reason: sanitize_parse_issue_reason(reason),
             });
         }
     }
@@ -537,6 +572,45 @@ mod tests {
     }
 
     #[test]
+    fn parse_issue_sample_reason_defaults_when_missing() {
+        let sample: ParseIssueSample = serde_json::from_str(
+            r#"{"source":"zcode","path_hash":"hash","offset":0,"kind":"skipped"}"#,
+        )
+        .expect("legacy sample JSON");
+        assert_eq!(sample.reason, "");
+        assert_eq!(sample.cli_line(None), "skipped");
+
+        let mut issues = ParseIssues::default();
+        issues.record(
+            SourceKind::Zcode,
+            "hash",
+            0,
+            ParseIssueKind::Skipped,
+            "zcode_unfinished:error:invalid_request!!!plus extra",
+        );
+        issues.record(
+            SourceKind::Zcode,
+            "hash",
+            0,
+            ParseIssueKind::Skipped,
+            &"a".repeat(80),
+        );
+        assert_eq!(
+            issues.samples[0].reason,
+            "zcode_unfinished:error:invalid_requestplusextra"
+        );
+        assert_eq!(issues.samples[1].reason.len(), MAX_PARSE_ISSUE_REASON_CHARS);
+        assert_eq!(
+            issues.samples[0].cli_line(None),
+            "skipped zcode_unfinished:error:invalid_requestplusextra"
+        );
+        assert!(
+            !issues.samples[0].cli_line(None).contains("@0"),
+            "reason samples must not print @0"
+        );
+    }
+
+    #[test]
     fn parse_issue_kinds_round_trip_including_new_classes() {
         for kind in [
             ParseIssueKind::Malformed,
@@ -558,12 +632,13 @@ mod tests {
         );
 
         let mut issues = ParseIssues::default();
-        issues.record(SourceKind::Zcode, "hash", 1, ParseIssueKind::Skipped);
+        issues.record(SourceKind::Zcode, "hash", 1, ParseIssueKind::Skipped, "");
         issues.record(
             SourceKind::Zcode,
             "hash",
             2,
             ParseIssueKind::AccountingAnomaly,
+            "",
         );
         let encoded = serde_json::to_string(&issues).expect("serialize issues");
         let decoded: ParseIssues = serde_json::from_str(&encoded).expect("deserialize issues");

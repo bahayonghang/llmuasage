@@ -230,6 +230,7 @@ mod tests {
                     path_hash: "safe-path-hash".to_string(),
                     offset: 7,
                     kind: ParseIssueKind::Malformed,
+                    reason: String::new(),
                 }],
                 ..ParseIssues::default()
             },

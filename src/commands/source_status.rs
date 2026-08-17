@@ -139,11 +139,10 @@ pub fn print_human_statuses(
         if let Some(warning) = &status.token_accounting_warning {
             println!("  warning: {warning}");
         }
-        if let Some(summary) = parse_issues_by_source
-            .get(status.source.as_str())
-            .and_then(ParseIssues::summary_text)
-        {
-            println!("  parse issues: {summary}");
+        if let Some(issues) = parse_issues_by_source.get(status.source.as_str()) {
+            for line in parse_issue_status_lines(issues) {
+                println!("{line}");
+            }
         }
     }
     for platform in platform_statuses {
@@ -160,6 +159,17 @@ pub fn print_human_statuses(
             platform.next_action
         );
     }
+}
+
+fn parse_issue_status_lines(issues: &ParseIssues) -> Vec<String> {
+    let Some(summary) = issues.summary_text() else {
+        return Vec::new();
+    };
+    let mut lines = vec![format!("  parse issues: {summary}")];
+    for sample in &issues.samples {
+        lines.push(format!("    {}", sample.cli_line(None)));
+    }
+    lines
 }
 
 fn platform_monitor_status_from_probe(probe: PlatformProbe) -> PlatformMonitorStatus {
@@ -236,11 +246,13 @@ mod tests {
         domain::source_descriptor::{
             PrivacyClass, SourceCapabilities, SourceDescriptor, UsageQuality,
         },
-        models::{ParseIssues, SourceKind},
+        models::{ParseIssueKind, ParseIssueSample, ParseIssues, SourceKind},
         query::SourceBreakdown,
     };
 
-    use super::{platform_monitor_status_from_probe, source_status_from_parts};
+    use super::{
+        parse_issue_status_lines, platform_monitor_status_from_probe, source_status_from_parts,
+    };
     use std::collections::BTreeMap;
 
     const TEST_DESCRIPTOR: SourceDescriptor = SourceDescriptor {
@@ -350,5 +362,28 @@ mod tests {
         }
         assert_eq!(output[0].as_deref(), Some("skipped=3 accounting=1"));
         assert!(ParseIssues::default().summary_text().is_none());
+    }
+
+    #[test]
+    fn parse_issue_status_prints_reason_without_at_zero() {
+        let issues = ParseIssues {
+            skipped_lines: 1,
+            samples: vec![ParseIssueSample {
+                source: SourceKind::Zcode,
+                path_hash: "zcode-hash".to_string(),
+                offset: 0,
+                kind: ParseIssueKind::Skipped,
+                reason: "zcode_unfinished:error:invalid_request".to_string(),
+            }],
+            ..ParseIssues::default()
+        };
+        let lines = parse_issue_status_lines(&issues);
+        assert_eq!(lines[0], "  parse issues: skipped=1");
+        assert_eq!(
+            lines[1],
+            "    skipped zcode_unfinished:error:invalid_request"
+        );
+        assert!(lines.iter().all(|line| !line.contains("@0")));
+        assert!(lines.iter().all(|line| !line.contains("zcode-hash")));
     }
 }

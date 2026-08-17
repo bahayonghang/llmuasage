@@ -101,6 +101,11 @@ pub const MIGRATIONS: &[(u32, &str, MigrationFn)] = &[
         "preset_antigravity_token_accounting",
         m_021_preset_antigravity_token_accounting,
     ),
+    (
+        22,
+        "add_zcode_skip_watermark",
+        m_022_add_zcode_skip_watermark,
+    ),
 ];
 
 /// Returns the newest schema version known to this binary.
@@ -919,6 +924,25 @@ fn m_020_optimize_home_overview_compact_projection(tx: &Transaction<'_>) -> Resu
             );
         "#,
     )?;
+    Ok(())
+}
+
+/// Migration v22 — persist ZCode unfinished-row skip watermark columns.
+///
+/// These columns are owned by `ZcodeCursor` only. File-backed sources and
+/// OpenCode continue to ignore them. They must not reuse
+/// `last_processed_ids_json` or `last_total_json`.
+fn m_022_add_zcode_skip_watermark(tx: &Transaction<'_>) -> Result<()> {
+    if !table_exists(tx, "source_cursor")? {
+        return Ok(());
+    }
+    ensure_column(
+        tx,
+        "source_cursor",
+        "last_skipped_at",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    ensure_column(tx, "source_cursor", "last_skipped_ids_json", "TEXT")?;
     Ok(())
 }
 
@@ -1795,6 +1819,45 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(marker_again, "2");
+        Ok(())
+    }
+
+    #[test]
+    fn migration_v22_adds_zcode_skip_watermark_columns() -> anyhow::Result<()> {
+        let mut upgraded = Connection::open_in_memory()?;
+        run_migrations_for_test(&mut upgraded, &MIGRATIONS[..21])?;
+        assert_eq!(read_schema_version(&upgraded)?, 21);
+        let before = pragma_columns(&upgraded, "source_cursor")?;
+        assert!(!before.contains(&"last_skipped_at".to_string()));
+        assert!(!before.contains(&"last_skipped_ids_json".to_string()));
+
+        run_migrations_for_test(&mut upgraded, &MIGRATIONS[..22])?;
+        assert_eq!(read_schema_version(&upgraded)?, 22);
+        let columns = pragma_columns(&upgraded, "source_cursor")?;
+        assert!(columns.contains(&"last_skipped_at".to_string()));
+        assert!(columns.contains(&"last_skipped_ids_json".to_string()));
+
+        upgraded.execute(
+            "INSERT INTO source_cursor(source, cursor_key, updated_at)
+             VALUES ('zcode', 'main', '2026-08-17T00:00:00Z')",
+            [],
+        )?;
+        let skipped_at: i64 = upgraded.query_row(
+            "SELECT last_skipped_at FROM source_cursor WHERE source = 'zcode' AND cursor_key = 'main'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(skipped_at, 0);
+
+        run_migrations_for_test(&mut upgraded, &MIGRATIONS[..22])?;
+        assert_eq!(read_schema_version(&upgraded)?, 22);
+
+        let mut fresh = Connection::open_in_memory()?;
+        run_migrations_with_events(&mut fresh, None)?;
+        assert_eq!(read_schema_version(&fresh)?, latest_schema_version());
+        let fresh_columns = pragma_columns(&fresh, "source_cursor")?;
+        assert!(fresh_columns.contains(&"last_skipped_at".to_string()));
+        assert!(fresh_columns.contains(&"last_skipped_ids_json".to_string()));
         Ok(())
     }
 

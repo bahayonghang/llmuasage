@@ -231,13 +231,10 @@ fn parse_issue_sample_line(
     sample: &ParseIssueSample,
     sample_basenames: &HashMap<String, String>,
 ) -> String {
-    match sample_basenames
+    let basename = sample_basenames
         .get(&sample.path_hash)
-        .and_then(|raw| path_basename(raw))
-    {
-        Some(name) => format!("    {} @{} {name}", sample.kind, sample.offset),
-        None => format!("    {} @{}", sample.kind, sample.offset),
-    }
+        .and_then(|raw| path_basename(raw));
+    format!("    {}", sample.cli_line(basename))
 }
 
 pub(crate) fn path_basename(raw: &str) -> Option<&str> {
@@ -513,6 +510,7 @@ mod tests {
                 path_hash: "safe-path-hash".to_string(),
                 offset: 42,
                 kind: crate::parsers::ParseIssueKind::Malformed,
+                reason: String::new(),
             }],
         };
 
@@ -543,6 +541,7 @@ mod tests {
                 path_hash: "safe-path-hash".to_string(),
                 offset: 42,
                 kind: crate::parsers::ParseIssueKind::Malformed,
+                reason: String::new(),
             }],
             ..crate::parsers::ParseIssues::default()
         };
@@ -563,6 +562,32 @@ mod tests {
         assert!(!lines.iter().any(|line| line.contains(r"C:\Users")));
         assert!(!lines.iter().any(|line| line.contains("alice")));
         assert!(!lines.iter().any(|line| line.contains("sessions")));
+    }
+
+    #[test]
+    fn parse_issue_samples_print_reason_without_at_zero() {
+        let mut summary = summary();
+        summary.sources[0].parse_issues = crate::parsers::ParseIssues {
+            skipped_lines: 1,
+            samples: vec![crate::parsers::ParseIssueSample {
+                source: SourceKind::Zcode,
+                path_hash: "zcode-hash".to_string(),
+                offset: 0,
+                kind: crate::parsers::ParseIssueKind::Skipped,
+                reason: "zcode_unfinished:error:invalid_request".to_string(),
+            }],
+            ..crate::parsers::ParseIssues::default()
+        };
+
+        let lines = format_summary_lines(&summary, false, false, WIDE);
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.trim() == "skipped zcode_unfinished:error:invalid_request"),
+            "reason samples should print kind + reason: {lines:?}"
+        );
+        assert!(!lines.iter().any(|line| line.contains("@0")));
+        assert!(!lines.iter().any(|line| line.contains("zcode-hash")));
     }
 
     #[test]
