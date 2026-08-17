@@ -18,7 +18,9 @@
 - Parser runtime stats: `SourceSyncStats { files_processed, changed_files,
   skipped_files, events_emitted, stored_events }`.
 - Query/TUI payload: `SyncSourcePayload { files_processed, changed_files,
-  skipped_files, stored_events, ... }`.
+  skipped_files, stored_events, malformed_lines, oversized_lines,
+  skipped_lines, accounting_anomaly_lines, ... }`. Counters only; parse-issue
+  samples never enter interactive dashboard JSON.
 - Store status rows persist existing source status columns. Do not add a schema
   migration for derived skipped counts unless a consumer needs historical
   skipped totals independent of the latest source sync status.
@@ -156,8 +158,9 @@
   bounded interval before restoring the terminal.
 - The human `Sync finished` block is an aligned table (files/changed/skipped/
   seen/committed/stored plus human-readable bytes and parse/write durations)
-  rendered by the pure `format_summary_lines`; coloring is stdout-TTY-only and
-  applied after width computation. It ends with a `TOTAL` row aggregated from
+  rendered by the pure `format_summary_lines_with_basenames` (tests may call
+  `format_summary_lines`, which is the same formatter with an empty path map);
+  coloring is stdout-TTY-only and applied after width computation. It ends with a `TOTAL` row aggregated from
   per-source stats. `SourceFinished` closes live stderr progress without
   emitting a second permanent success sentence; failures and cancellation
   remain diagnostic lines. Narrow rendering may truncate only the display
@@ -302,9 +305,16 @@ let source = request.source_kind();
   size; tests may use `with_limit` for smaller boundaries.
 - `read_json_records(source, path_hash, cancel, issues, callback)` passes
   `JsonlRecord { start_offset, end_offset, value }` to the source callback.
-- Domain-owned `ParseIssues { malformed_lines, oversized_lines, samples }` is
-  embedded in `SourceSyncStats` and `SourceSyncStatus` with serde defaults;
-  parser modules may re-export it but storage must not depend on parser modules.
+  `read_json_records_with_oversized` additionally exposes the bounded 4 MiB
+  prefix so a parser can recover or reclassify an oversized record.
+- Domain-owned `ParseIssues { malformed_lines, oversized_lines, skipped_lines,
+  accounting_anomaly_lines, samples }` is embedded in `SourceSyncStats` and
+  `SourceSyncStatus` with serde defaults for the two new counters. Parser
+  modules may re-export it but storage must not depend on parser modules.
+  `total()` is malformed + oversized (faults). `informational_total()` is
+  skipped + accounting_anomaly. Doctor warns only when `total() > 0`.
+- `ParseIssueKind` is `malformed`, `oversized`, `skipped`, or
+  `accounting_anomaly`. The four classes are mutually exclusive.
 - Schema v17 persists the latest bounded diagnostic payload in
   `source_sync_status.parse_issues_json TEXT NOT NULL`.
 
@@ -322,18 +332,41 @@ let source = request.source_kind();
   files. Async parser loops must await every spawned blocking handle in the
   current batch before returning; a cancelled batch is drained and not
   committed.
-- Malformed and oversized samples contain only source id, bounded path hash,
-  byte offset, and issue kind. Raw JSON, prompts, assistant content, and full
-  paths are forbidden in samples, human summaries, and logs.
+- Malformed, oversized, skipped, and accounting-anomaly samples contain only
+  source id, bounded path hash, byte offset, and issue kind. Raw JSON, prompts,
+  assistant content, and full paths are forbidden in samples, human summaries,
+  and logs. CLI sample lines print kind and offset (optional basename); they
+  never print `path_hash` or record text.
 - At most eight samples are retained per source run. Counters continue with
   saturating arithmetic after the sample budget is exhausted.
+- Codex classifies an oversized prefix from the first 8 KiB of payload/msg
+  type: other types are skipped; a complete `token_count` JSON prefix (trailing
+  whitespace allowed) is recovered with no issue; a `token_count` prefix that
+  cannot be parsed stays oversized. Peek-none (unclassified junk) stays
+  oversized, not skipped.
+- ZCode `error`/`cancelled` rows are skipped. Cache overlap and
+  `computed_total` mismatch are accounting anomalies; events still store.
+- Antigravity open/decode/missing timestamp stay malformed. Checksum mismatch
+  and missing `response_id` with a fallback key are accounting anomalies.
+- Grok sidecars over the size cap stay oversized; bad sidecar JSON stays
+  malformed. OpenCode does not invent parse issues.
+- Sync human summary prints every non-zero class (`malformed=`, `oversized=`,
+  `skipped=`, `accounting=`). Warning color is only for malformed/oversized.
+- Interactive dashboard `SyncSourcePayload` carries the four counters and
+  never parse-issue samples. Source cards and the TUI Usage wide table show
+  non-zero counts from those fields, not by parsing human summary strings.
 
 ### 4. Validation & Error Matrix
 
-- Record exceeds 4 MiB and reaches newline -> increment `oversized_lines`,
-  advance to that boundary, continue with the next record.
+- Record exceeds 4 MiB and reaches newline -> the wrapper path increments
+  `oversized_lines`; a source-specific oversized callback may instead recover
+  usage (`Accepted`), count `skipped_lines`, or count `malformed_lines`, then
+  advance to that boundary and continue with the next record.
 - Complete record is invalid JSON -> increment `malformed_lines`, skip it, and
   continue without failing the file.
+- Complete non-usage JSONL rows that a parser ignores are not parse issues.
+- ZCode unfinished rows -> `skipped_lines`; token-channel inconsistency with
+  a stored event -> `accounting_anomaly_lines`.
 - EOF contains invalid/incomplete JSON -> keep the prior durable offset and do
   not count malformed until a record boundary exists.
 - Cancellation during ordinary read or oversized discard -> stop without a
@@ -341,6 +374,10 @@ let source = request.source_kind();
   cancellation.
 - Persisted issue JSON is invalid -> diagnostics/status loading fails as a
   SQLite conversion error instead of silently inventing clean counters.
+- Old `parse_issues_json` without `skipped_lines` / `accounting_anomaly_lines`
+  deserializes those counters as `0`.
+- Doctor `parse.issues` is `ok` when every source `total() == 0`, even if
+  skipped or accounting-anomaly counts are non-zero.
 
 ### 5. Good/Base/Bad Cases
 
@@ -359,14 +396,25 @@ let source = request.source_kind();
 
 - Shared Codex/Claude/Kimi/Pi/Grok contract harness: 10 MiB oversized line,
   malformed line with secret content, UTF-8 record, EOF tail, identical issue
-  counters, safe samples, and durable offset.
+  counters, safe samples, and durable offset. The 10 MiB junk-line prefix
+  (`x` bytes) remains oversized, not skipped.
 - Reader unit tests: maximum buffered bytes, discard continuation, malformed
-  privacy, mid-discard cancellation, start offsets, and EOF stability.
+  privacy, mid-discard cancellation, start offsets, EOF stability, and
+  oversized-prefix reclassification (`Skipped` / recovered / oversized).
+- Codex tests: 10 MiB non-`token_count` -> skipped + later rows parse;
+  complete `token_count` prefix padded with whitespace -> event and zero
+  issues; unusable `token_count` prefix -> oversized + later rows parse.
 - Per-source partial-tail/append tests plus `tests/sync_regression.rs` for
   rewrite, retry, idempotency, and stored totals.
+- Sync-summary, doctor, and source-status tests covering four-class counters,
+  warning color only for faults, CLI samples without `path_hash`/record text,
+  and doctor skipping skipped-only sources.
+- Query/dashboard/TUI tests covering `SyncSourcePayload` four counters, no
+  samples in interactive JSON, source-card counts, and Usage Issues column.
 - JobRegistry test: status remains `cancelling` and `finished_at` stays absent
   until a blocking worker confirms drain.
-- Migration/status tests: v17 default payload and `ParseIssues` round trip.
+- Migration/status tests: v17 default payload and `ParseIssues` round trip,
+  including missing new fields deserializing as zero.
 
 ### 7. Wrong vs Correct
 

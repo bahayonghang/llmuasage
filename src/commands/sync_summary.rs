@@ -5,9 +5,15 @@
 //! terminal. Widths are computed on plain text first; ANSI styles are applied
 //! only after alignment so escape sequences never skew column widths.
 
+use std::{collections::HashMap, path::Path};
+
 use console::Style;
 
-use crate::{commands::sync::SyncSummary, models::SourceKind, parsers::SourceSyncStats};
+use crate::{
+    commands::sync::SyncSummary,
+    models::{ParseIssueSample, SourceKind},
+    parsers::SourceSyncStats,
+};
 
 const HEADERS: [&str; 10] = [
     "SOURCE",
@@ -31,11 +37,25 @@ const COMPACT_HEADERS: [&str; HEADERS.len()] = [
 /// `terminal_width` keeps the function pure and unit-testable: on a narrow
 /// terminal only the SOURCE label column is shrunk (numeric columns are never
 /// truncated), mirroring the convention in `src/tui/report_table.rs`.
+#[cfg(test)]
 pub(crate) fn format_summary_lines(
     summary: &SyncSummary,
     rebuild: bool,
     color: bool,
     terminal_width: usize,
+) -> Vec<String> {
+    format_summary_lines_with_basenames(summary, rebuild, color, terminal_width, &HashMap::new())
+}
+
+/// Like [`format_summary_lines`], with optional `path_hash → path` labels for
+/// CLI samples. Only the basename is printed; full paths and path hashes stay
+/// out of the summary.
+pub(crate) fn format_summary_lines_with_basenames(
+    summary: &SyncSummary,
+    rebuild: bool,
+    color: bool,
+    terminal_width: usize,
+    sample_basenames: &HashMap<String, String>,
 ) -> Vec<String> {
     let rows: Vec<Row> = summary.sources.iter().map(Row::from_stats).collect();
     let total = total_cells(summary);
@@ -66,16 +86,7 @@ pub(crate) fn format_summary_lines(
         if let Some(error) = &stats.last_error {
             lines.push(styled(Style::new().red(), &format!("  ↳ {error}"), color));
         }
-        if stats.parse_issues.total() > 0 {
-            lines.push(styled(
-                Style::new().yellow(),
-                &format!(
-                    "  parse issues: malformed={} oversized={}",
-                    stats.parse_issues.malformed_lines, stats.parse_issues.oversized_lines
-                ),
-                color,
-            ));
-        }
+        lines.extend(parse_issue_lines(stats, color, sample_basenames));
     }
 
     lines.push(render_total_row(&total, &widths, &separator, color));
@@ -172,6 +183,63 @@ fn styled(style: Style, text: &str, color: bool) -> String {
         style.force_styling(true).apply_to(text).to_string()
     } else {
         text.to_string()
+    }
+}
+
+fn parse_issue_lines(
+    stats: &SourceSyncStats,
+    color: bool,
+    sample_basenames: &HashMap<String, String>,
+) -> Vec<String> {
+    let issues = &stats.parse_issues;
+    if issues.summary_text().is_none() {
+        return Vec::new();
+    }
+    let mut class_parts = Vec::new();
+    for (label, count) in issues.class_counts() {
+        if count == 0 {
+            continue;
+        }
+        let style = if matches!(label, "malformed" | "oversized") {
+            Style::new().yellow()
+        } else {
+            Style::new().dim()
+        };
+        class_parts.push(styled(style, &format!("{label}={count}"), color));
+    }
+    let prefix_style = if issues.total() > 0 {
+        Style::new().yellow()
+    } else {
+        Style::new().dim()
+    };
+    let mut lines = vec![format!(
+        "{}{}",
+        styled(prefix_style, "  parse issues: ", color),
+        class_parts.join(" ")
+    )];
+    for sample in &issues.samples {
+        lines.push(styled(
+            Style::new().dim(),
+            &parse_issue_sample_line(sample, sample_basenames),
+            color,
+        ));
+    }
+    lines
+}
+
+fn parse_issue_sample_line(
+    sample: &ParseIssueSample,
+    sample_basenames: &HashMap<String, String>,
+) -> String {
+    match sample_basenames
+        .get(&sample.path_hash)
+        .and_then(|raw| Path::new(raw).file_name())
+        .and_then(|name| name.to_str())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
+        Some(name) => format!("    {} @{} {name}", sample.kind, sample.offset),
+        None => format!("    {} @{}", sample.kind, sample.offset),
     }
 }
 
@@ -435,6 +503,8 @@ mod tests {
         summary.sources[0].parse_issues = crate::parsers::ParseIssues {
             malformed_lines: 2,
             oversized_lines: 1,
+            skipped_lines: 3,
+            accounting_anomaly_lines: 4,
             samples: vec![crate::parsers::ParseIssueSample {
                 source: SourceKind::Codex,
                 path_hash: "safe-path-hash".to_string(),
@@ -448,8 +518,77 @@ mod tests {
             .iter()
             .find(|line| line.contains("parse issues:"))
             .expect("parse issue summary line");
-        assert_eq!(issue_line, "  parse issues: malformed=2 oversized=1");
+        assert_eq!(
+            issue_line,
+            "  parse issues: malformed=2 oversized=1 skipped=3 accounting=4"
+        );
+        assert!(
+            lines.iter().any(|line| line.trim() == "malformed @42"),
+            "samples should show kind and offset: {lines:?}"
+        );
         assert!(!lines.iter().any(|line| line.contains("safe-path-hash")));
+        assert!(!lines.iter().any(|line| line.contains("private")));
+    }
+
+    #[test]
+    fn parse_issue_samples_print_basename_never_full_path() {
+        let mut summary = summary();
+        summary.sources[0].parse_issues = crate::parsers::ParseIssues {
+            malformed_lines: 1,
+            samples: vec![crate::parsers::ParseIssueSample {
+                source: SourceKind::Codex,
+                path_hash: "safe-path-hash".to_string(),
+                offset: 42,
+                kind: crate::parsers::ParseIssueKind::Malformed,
+            }],
+            ..crate::parsers::ParseIssues::default()
+        };
+        let mut basenames = HashMap::new();
+        basenames.insert(
+            "safe-path-hash".to_string(),
+            r"C:\Users\alice\.codex\sessions\rollout-secret.jsonl".to_string(),
+        );
+
+        let lines = format_summary_lines_with_basenames(&summary, false, false, WIDE, &basenames);
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.trim() == "malformed @42 rollout-secret.jsonl"),
+            "basename should be appended when mapped: {lines:?}"
+        );
+        assert!(!lines.iter().any(|line| line.contains("safe-path-hash")));
+        assert!(!lines.iter().any(|line| line.contains(r"C:\Users")));
+        assert!(!lines.iter().any(|line| line.contains("alice")));
+        assert!(!lines.iter().any(|line| line.contains("sessions")));
+    }
+
+    #[test]
+    fn skipped_only_parse_issues_are_not_warning_colored() {
+        let mut summary = summary();
+        summary.sources[0].parse_issues = crate::parsers::ParseIssues {
+            skipped_lines: 17,
+            ..crate::parsers::ParseIssues::default()
+        };
+        let colored = format_summary_lines(&summary, false, true, WIDE);
+        let issue_line = colored
+            .iter()
+            .find(|line| strip_ansi(line).contains("parse issues:"))
+            .expect("parse issue summary line");
+        let skipped = styled(Style::new().dim(), "skipped=17", true);
+        let yellow_skipped = styled(Style::new().yellow(), "skipped=17", true);
+        assert!(
+            issue_line.contains(&skipped),
+            "skipped counts should use dim style: {issue_line}"
+        );
+        assert!(
+            !issue_line.contains(&yellow_skipped),
+            "skipped counts must not use warning yellow: {issue_line}"
+        );
+        let yellow_prefix = styled(Style::new().yellow(), "  parse issues: ", true);
+        assert!(
+            !issue_line.contains(&yellow_prefix),
+            "skipped-only prefix must not use warning yellow: {issue_line}"
+        );
     }
 
     #[test]

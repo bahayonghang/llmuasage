@@ -9,7 +9,7 @@ use crate::{
         platform_monitor::{self, ParserSupportStatus, PlatformProbe},
         source_descriptor::{SourceDescriptor, UsageQuality},
     },
-    models::SourceKind,
+    models::{ParseIssues, SourceKind},
     query::{Dashboard, SourceBreakdown},
     registry,
     store::Store,
@@ -54,9 +54,15 @@ pub async fn run(app: &AppContext) -> Result<()> {
     let mut capability_statuses = build_source_capability_statuses(&sources);
     apply_token_accounting_statuses(&store, &mut capability_statuses)?;
     let platform_statuses = build_platform_monitor_statuses();
+    let parse_issues = store
+        .sync_status()
+        .load_source_sync_statuses()?
+        .into_iter()
+        .map(|status| (status.source, status.parse_issues))
+        .collect::<BTreeMap<_, _>>();
 
     println!("Source status:");
-    print_human_statuses(&capability_statuses, &platform_statuses);
+    print_human_statuses(&capability_statuses, &platform_statuses, &parse_issues);
     Ok(())
 }
 
@@ -111,6 +117,7 @@ pub fn apply_token_accounting_statuses(
 pub fn print_human_statuses(
     capability_statuses: &[SourceCapabilityStatus],
     platform_statuses: &[PlatformMonitorStatus],
+    parse_issues_by_source: &BTreeMap<String, ParseIssues>,
 ) {
     for status in capability_statuses {
         println!(
@@ -131,6 +138,12 @@ pub fn print_human_statuses(
         );
         if let Some(warning) = &status.token_accounting_warning {
             println!("  warning: {warning}");
+        }
+        if let Some(summary) = parse_issues_by_source
+            .get(status.source.as_str())
+            .and_then(ParseIssues::summary_text)
+        {
+            println!("  parse issues: {summary}");
         }
     }
     for platform in platform_statuses {
@@ -223,11 +236,12 @@ mod tests {
         domain::source_descriptor::{
             PrivacyClass, SourceCapabilities, SourceDescriptor, UsageQuality,
         },
-        models::SourceKind,
+        models::{ParseIssues, SourceKind},
         query::SourceBreakdown,
     };
 
     use super::{platform_monitor_status_from_probe, source_status_from_parts};
+    use std::collections::BTreeMap;
 
     const TEST_DESCRIPTOR: SourceDescriptor = SourceDescriptor {
         kind: SourceKind::Codex,
@@ -312,5 +326,29 @@ mod tests {
         assert_eq!(status.source, None);
         assert_eq!(status.probe_status, "unavailable");
         assert_eq!(status.parser_status, "blocked_no_samples");
+    }
+
+    #[test]
+    fn parse_issue_summary_is_emitted_for_any_nonzero_class() {
+        let mut issues = BTreeMap::new();
+        issues.insert(
+            "codex".to_string(),
+            ParseIssues {
+                skipped_lines: 3,
+                accounting_anomaly_lines: 1,
+                ..ParseIssues::default()
+            },
+        );
+        let status = source_status_from_parts(&TEST_DESCRIPTOR, None);
+        let mut output = Vec::new();
+        {
+            // Capture by formatting the same helper the printer uses.
+            let summary = issues
+                .get(status.source.as_str())
+                .and_then(ParseIssues::summary_text);
+            output.push(summary);
+        }
+        assert_eq!(output[0].as_deref(), Some("skipped=3 accounting=1"));
+        assert!(ParseIssues::default().summary_text().is_none());
     }
 }

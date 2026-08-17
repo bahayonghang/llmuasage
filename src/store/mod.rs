@@ -203,7 +203,7 @@ pub struct SourceSyncStatus {
     pub write_ms: i64,
     /// Time spent waiting on the global worker lock in milliseconds.
     pub lock_wait_ms: i64,
-    /// Privacy-safe malformed/oversized JSONL diagnostics from the latest run.
+    /// Privacy-safe parse-issue diagnostics from the latest run.
     #[serde(default)]
     pub parse_issues: ParseIssues,
     /// Last update time in RFC 3339 format.

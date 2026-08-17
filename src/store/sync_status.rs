@@ -231,6 +231,7 @@ mod tests {
                     offset: 7,
                     kind: ParseIssueKind::Malformed,
                 }],
+                ..ParseIssues::default()
             },
             updated_at: crate::util::now_utc(),
         };

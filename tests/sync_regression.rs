@@ -1394,6 +1394,8 @@ fn source_sync_stats_absent_wire_contract_is_backward_compatible() -> Result<()>
     assert_eq!(default_value["skipped_files"], 0);
     assert_eq!(default_value["parse_issues"]["malformed_lines"], 0);
     assert_eq!(default_value["parse_issues"]["oversized_lines"], 0);
+    assert_eq!(default_value["parse_issues"]["skipped_lines"], 0);
+    assert_eq!(default_value["parse_issues"]["accounting_anomaly_lines"], 0);
 
     let absent_value = serde_json::to_value(SourceSyncStats {
         source: SourceKind::Opencode,
@@ -3705,9 +3707,10 @@ fn zcode_skips_error_and_cancelled_rows_and_counts_them() -> Result<()> {
         .await?;
         assert_eq!(summary.total_inserted, 1);
         assert_eq!(
-            summary.sources[0].parse_issues.malformed_lines, 2,
+            summary.sources[0].parse_issues.skipped_lines, 2,
             "error and cancelled rows are counted, not imported"
         );
+        assert_eq!(summary.sources[0].parse_issues.malformed_lines, 0);
         assert_eq!(zcode_source_count(&app.paths.db_path)?, 1);
         Ok::<_, anyhow::Error>(())
     })?;

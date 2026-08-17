@@ -208,6 +208,12 @@ const UI_COPY_ZH = Object.freeze({
         storedEvents: '已存事件',
         sourcesReady: '就绪来源',
       }),
+      parseIssues: Object.freeze({
+        malformed: '畸形行',
+        oversized: '超大行',
+        skipped: '跳过行',
+        accounting: '记账异常',
+      }),
       workerLockState: Object.freeze({
         available: '可用',
         busy: '占用中',
@@ -450,6 +456,12 @@ const UI_COPY_EN = Object.freeze({
         insertedDelta: 'Inserted delta',
         storedEvents: 'Stored events',
         sourcesReady: 'Ready sources',
+      }),
+      parseIssues: Object.freeze({
+        malformed: 'Malformed',
+        oversized: 'Oversized',
+        skipped: 'Skipped',
+        accounting: 'Accounting',
       }),
       workerLockState: Object.freeze({
         available: 'Available',
