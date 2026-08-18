@@ -96,6 +96,69 @@ export function formatUsd(value) {
   return `$${Number(value || 0).toFixed(2)}`;
 }
 
+const dateTimeFormatterCache = new Map();
+
+function dateTimeFormatter(timeZone) {
+  const key = timeZone || '';
+  let formatter = dateTimeFormatterCache.get(key);
+  if (!formatter) {
+    const options = {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    };
+    if (timeZone) {
+      options.timeZone = timeZone;
+    }
+    formatter = new Intl.DateTimeFormat('en-US', options);
+    dateTimeFormatterCache.set(key, formatter);
+  }
+  return formatter;
+}
+
+function timestampParts(value, timeZone) {
+  const raw = String(value ?? '').trim();
+  // Date-only / month-only keys are calendar labels, not UTC instants.
+  if (!raw || /^\d{4}-\d{2}(-\d{2})?$/.test(raw)) {
+    return null;
+  }
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  const parts = {};
+  for (const part of dateTimeFormatter(timeZone).formatToParts(date)) {
+    if (part.type !== 'literal') {
+      parts[part.type] = part.value;
+    }
+  }
+  if (!parts.year || !parts.month || !parts.day || !parts.hour || !parts.minute) {
+    return null;
+  }
+  return parts;
+}
+
+export function formatClock(value, timeZone) {
+  const parts = timestampParts(value, timeZone);
+  if (!parts) {
+    return String(value || '--');
+  }
+  return `${parts.hour}:${parts.minute}`;
+}
+
+export function formatDateTime(value, timeZone) {
+  const parts = timestampParts(value, timeZone);
+  if (!parts) {
+    return value ? String(value) : '--';
+  }
+  const base = `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
+  return parts.second && parts.second !== '00' ? `${base}:${parts.second}` : base;
+}
+
 export function formatMaybe(value, fallback = '尚未记录') {
   return value ? escapeHtml(value) : fallback;
 }

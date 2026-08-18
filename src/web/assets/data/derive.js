@@ -2,6 +2,7 @@ import { UI_COPY } from '../copy.js';
 import {
   formatCompact,
   formatCompactCurrency,
+  formatDateTime,
   formatNumber,
   formatPercent,
   formatTokenAmount,
@@ -534,7 +535,7 @@ export function buildTrendStats(context) {
     {
       label: '最高单段用量',
       value: formatTokenAmount(trend.peak?.total_tokens || 0),
-      foot: `最高时段 ${trend.peak?.label || '--'}`,
+      foot: `最高时段 ${formatDateTime(trend.peak?.label)}`,
     },
     {
       label: '平均每段用量',

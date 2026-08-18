@@ -265,6 +265,17 @@ test('locale switch does not recompute buildContext but invalidates fingerprints
   }
 });
 
+test('UTC instants render in the requested timezone', () => {
+  assert.equal(format.formatClock('2026-08-18T12:00:00Z', 'Asia/Shanghai'), '20:00');
+  assert.equal(format.formatClock('2026-08-18T12:26:54Z', 'Asia/Shanghai'), '20:26');
+  assert.equal(format.formatClock('2026-08-18T12:00:00Z', 'UTC'), '12:00');
+  assert.equal(format.formatDateTime('2026-08-18T12:00:00Z', 'Asia/Shanghai'), '2026-08-18 20:00');
+  assert.equal(format.formatDateTime('2026-08-18T12:26:54Z', 'Asia/Shanghai'), '2026-08-18 20:26:54');
+  assert.equal(format.formatClock('2026-08-18', 'Asia/Shanghai'), '2026-08-18');
+  assert.equal(format.formatDateTime('2026-08', 'UTC'), '2026-08');
+  assert.equal(format.formatDateTime('', 'UTC'), '--');
+});
+
 test('Intl.NumberFormat construction is bounded', () => {
   for (let i = 0; i < 500; i += 1) {
     format.formatNumber(i);

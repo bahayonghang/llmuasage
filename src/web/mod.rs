@@ -3055,10 +3055,14 @@ mod tests {
         assert!(format_js.contains("suffix: 'M'"));
         assert!(format_js.contains("suffix: 'B'"));
         assert!(format_js.contains("export function formatTokenAmount(value)"));
+        assert!(format_js.contains("export function formatClock(value, timeZone)"));
+        assert!(format_js.contains("export function formatDateTime(value, timeZone)"));
         assert!(format_js.contains("Number(scaled.toFixed(maximumFractionDigits)) >= 1000"));
 
         let data_js = asset("data.js");
         assert!(data_js.contains("formatTokenAmount,"));
+        assert!(data_js.contains("formatClock,"));
+        assert!(data_js.contains("formatDateTime,"));
 
         let models_js = asset("render/models.js");
         assert!(models_js.contains("formatTokenAmount(total_tokens)"));
@@ -3073,6 +3077,11 @@ mod tests {
         let trends_js = asset("render/trends.js");
         assert!(trends_js.contains("const valueLabel = formatTokenAmount(value);"));
         assert!(trends_js.contains("formatTokenAmount(row.total_tokens || 0)"));
+        assert!(trends_js.contains("return formatClock(raw);"));
+        assert!(
+            !trends_js.contains("raw.slice(11, 16)"),
+            "24h axis labels must use the browser timezone, not the UTC ISO clock"
+        );
     }
 
     #[test]

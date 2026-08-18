@@ -1,4 +1,4 @@
-import { escapeHtml, formatNumber, formatTokenAmount } from '../data.js';
+import { escapeHtml, formatClock, formatDateTime, formatNumber, formatTokenAmount } from '../data.js';
 import { buildTrendStats } from '../data/derive.js';
 
 const logger = window.console;
@@ -6,7 +6,7 @@ const logger = window.console;
 function compactTrendLabel(label) {
   const raw = String(label || '--');
   if (raw.includes('T')) {
-    return raw.slice(11, 16);
+    return formatClock(raw);
   }
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
     return raw.slice(5);
@@ -55,12 +55,13 @@ function layoutTrendChart(chart, spotlightRows) {
       const isMax = value === max;
       const valueLabel = formatTokenAmount(value);
       const timeLabel = compactTrendLabel(row.label);
+      const displayTime = formatDateTime(row.label);
 
       bars += `
-        <g class="trend-bar-group" aria-label="${escapeHtml(`${row.label || '--'} · ${valueLabel} Token`)}">
+        <g class="trend-bar-group" aria-label="${escapeHtml(`${displayTime} · ${valueLabel} Token`)}">
           <rect class="trend-bar-hit" x="${x - 4}" y="24" width="${barW + 8}" height="${baseline - 24}" rx="8"></rect>
           <rect class="trend-bar ${isMax ? 'is-peak' : ''}" x="${x}" y="${y}" width="${barW}" height="${h}" rx="5"></rect>
-          <title>${escapeHtml(`${row.label || '--'} · ${formatNumber(value)} Token`)}</title>
+          <title>${escapeHtml(`${displayTime} · ${formatNumber(value)} Token`)}</title>
         </g>
       `;
 
@@ -121,7 +122,7 @@ export function renderTrends(context) {
     .map(
       (row) => `
       <tr>
-        <td>${escapeHtml(row.label || '--')}</td>
+        <td title="${escapeHtml(row.label || '--')}">${escapeHtml(formatDateTime(row.label))}</td>
         <td class="r" title="${escapeHtml(`${formatNumber(row.total_tokens || 0)} Token`)}">${escapeHtml(formatTokenAmount(row.total_tokens || 0))}</td>
       </tr>
     `,
@@ -171,7 +172,7 @@ export function renderTrends(context) {
     </table>
     <div class="trend-observation">
       <div class="trend-observation-label">观察</div>
-      <div class="trend-observation-body">当前窗口峰值出现在 <span class="mono trend-observation-peak">${escapeHtml(context.trend.peak?.label || '--')}</span>，总用量约 <span class="mono trend-observation-peak">${escapeHtml(formatTokenAmount(context.trend.peak?.total_tokens || 0))}</span> Token；当前主来源为 <span class="mono trend-observation-peak">${escapeHtml(context.leaders.source?.source || '--')}</span>。</div>
+      <div class="trend-observation-body">当前窗口峰值出现在 <span class="mono trend-observation-peak">${escapeHtml(formatDateTime(context.trend.peak?.label))}</span>，总用量约 <span class="mono trend-observation-peak">${escapeHtml(formatTokenAmount(context.trend.peak?.total_tokens || 0))}</span> Token；当前主来源为 <span class="mono trend-observation-peak">${escapeHtml(context.leaders.source?.source || '--')}</span>。</div>
     </div>
   `;
 

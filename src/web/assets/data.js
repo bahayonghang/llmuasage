@@ -25,6 +25,8 @@ export {
   formatTokenAmount,
   formatCompactCurrency,
   formatUsd,
+  formatClock,
+  formatDateTime,
   formatMaybe,
   formatPercent,
   truncate,
