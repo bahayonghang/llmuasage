@@ -1332,7 +1332,10 @@ fn models_wide_paints_inferred_provider_and_joined_sources() {
     let mut item = sample_model("gpt-4o", 12_500, 12.59);
     item.sources = vec!["claude".to_string(), "codex".to_string()];
     let text = render_models_text(vec![item], 160, 12);
-    assert!(text.contains("OpenAI"), "provider display missing in {text}");
+    assert!(
+        text.contains("OpenAI"),
+        "provider display missing in {text}"
+    );
     assert!(
         text.contains("claude, codex"),
         "joined sources missing in {text}"
