@@ -1597,3 +1597,24 @@ Public listener 改用最小读路由与脱敏聚合 DTO，并忽略 project sel
 ### Status
 
 [OK] **Completed**
+
+
+## Session 52: Dash Overview 对齐 tokscale 图表首页
+
+**Date**: 2026-08-19
+**Task**: Dash Overview 对齐 tokscale 图表首页
+**Branch**: `dev`
+
+### Summary
+
+将 llmusage dash Overview 从 KPI 卡片墙换成 tokscale 风格的 Tokens per Day 堆叠柱、图例和 Models by Cost 双行名单。新增 trends_daily_by_model；页脚仍显示 lifetime 合计；web 与 Models 宽表未改。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b689646` | (see git log) |
+
+### Status
+
+[OK] **Completed**
