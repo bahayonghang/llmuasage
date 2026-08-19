@@ -1661,3 +1661,25 @@ Usage 页改为只读拉取 Grok/Kimi/Claude/Codex 订阅额度，Source Sync �
 ### Status
 
 [OK] **Completed**
+
+
+## Session 55: Dash Stats 对齐 tokscale 年历
+
+**Date**: 2026-08-19
+**Task**: Dash Stats 对齐 tokscale 年历
+**Branch**: `dev`
+
+### Summary
+
+将 llmusage dash Stats 改为 52 周贡献年历、两列摘要和选中日 Day Breakdown；去掉 Source Mix/Health Signals；更新 TUI 合同。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2c81be7` | (see git log) |
+| `4fd7818` | (see git log) |
+
+### Status
+
+[OK] **Completed**
