@@ -1,0 +1,6 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "Verify issue matrix, samples privacy, cursor and 4MiB cap"}
+{"file": ".trellis/spec/llmusage/backend/dashboard-performance-contracts.md", "reason": "Verify sync_command_center counters without samples"}
+{"file": ".trellis/spec/llmusage/backend/tui-presentation-contracts.md", "reason": "Verify TUI issue column uses semantic styles"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "Verify parsers did not change token math"}
+{"file": ".trellis/tasks/08-17-parse-issue-observability/research/payload-budget.md", "reason": "Check dashboard payload has counters only"}

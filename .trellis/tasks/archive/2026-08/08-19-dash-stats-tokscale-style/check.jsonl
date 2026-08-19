@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/llmusage/backend/tui-presentation-contracts.md", "reason": "NoColor, English copy, formatter, and theme-slot compliance"}
+{"file": ".trellis/spec/llmusage/backend/tui-runtime-contracts.md", "reason": "Redraw, visible-row scroll, Esc/detail, mouse hit-test"}
+{"file": ".trellis/spec/llmusage/backend/dashboard-performance-contracts.md", "reason": "Heatmap lifetime vs context window; /api/heatmap unchanged"}
+{"file": ".trellis/tasks/08-19-dash-stats-tokscale-style/research/tokscale-stats-gap.md", "reason": "Acceptance against tokscale Stats composition"}

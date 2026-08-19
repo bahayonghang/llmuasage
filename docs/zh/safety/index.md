@@ -58,7 +58,7 @@ reset legacy 子集，且每个所选来源只解析一次。
 llmusage sync --rebuild
 ```
 
-`--rebuild` 会按来源重置 parser-backed 用量状态，再重新解析本地来源。无 source 的 full rebuild 以 parser registry 作为删除边界，因此 parserless Antigravity 的 event、bucket、行为事实、cursor 和 source-file 诊断都会保留。即使带 `--allow-lossy-rebuild`，定向重建 Antigravity 也会被拒绝，因为没有被动 parser 能重建这部分历史。如果 parser 来源的已导入文件型历史依赖现在缺失的源文件，llmusage 会在任何 reset 发生前拒绝重建。
+`--rebuild` 会按来源重置 parser-backed 用量状态，再重新解析本地来源。若重建会删除未归属的 hook 时代 Antigravity 行，即使带 `--allow-lossy-rebuild` 也会拒绝。如果 parser 来源的已导入文件型历史依赖现在缺失的源文件，llmusage 会在任何 reset 发生前拒绝重建。
 
 显式覆盖参数是：
 
@@ -109,7 +109,7 @@ llmusage doctor --refresh-pricing .\litellm-prices.json
 
 ## 浏览器 Dashboard 边界
 
-`llmusage serve` 默认绑定 `127.0.0.1`。loopback router 保留完整本地 Dashboard，包括 projects、日志、diagnostics、cursor health、job reads、行为分析、Cost Explorer 和带真实 peer 检查的写路由。
+`llmusage serve` 默认绑定 `127.0.0.1`。回环地址路由保留完整本地看板，包括项目、日志、诊断、同步游标状态、任务读取、行为分析、用量分析和带真实来源地址检查的写路由。
 
 `llmusage serve --public` 会显式绑定 `0.0.0.0`，并选择独立的只读 router。只挂载页面 shell/静态资源、字段 allowlist 明确的聚合 `/api/dashboard` projection，以及固定的最小 `/api/health` 响应。原始日志、diagnostics、本地路径/project 字段、内部错误、job 状态和全部 mutation 路由都不存在，而不是依赖 `Host` 或 `Origin` header 保护。未来如需远程 diagnostics，必须另行提供显式 opt-in 和认证。
 

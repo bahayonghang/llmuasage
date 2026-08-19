@@ -1,0 +1,28 @@
+{
+  "id": "dash-overview-tokscale-style",
+  "name": "dash-overview-tokscale-style",
+  "title": "Dash Overview 对齐 tokscale 图表首页",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "看板",
+  "package": null,
+  "priority": "P2",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-08-19",
+  "completedAt": "2026-08-19",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "description": "Replace dash Overview KPI cards with tokscale-style stacked daily chart and Models-by-Cost list"
+  }
+}

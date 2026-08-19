@@ -19,6 +19,8 @@ pub struct AppPaths {
     pub logs_dir: PathBuf,
     /// Default structured runtime log file.
     pub log_file_path: PathBuf,
+    /// Local cache for subscription quota snapshots.
+    pub cache_dir: PathBuf,
     /// Windows hook wrapper path.
     pub hook_cmd_path: PathBuf,
     /// POSIX hook wrapper path.
@@ -35,6 +37,11 @@ impl AppPaths {
             return Self::with_root(root_dir);
         }
         Self::with_cli_home(None)
+    }
+
+    /// JSON cache for Usage-tab subscription snapshots.
+    pub fn subscription_cache_path(&self) -> PathBuf {
+        self.cache_dir.join("subscription-usage.json")
     }
 
     /// Builds the runtime layout for an explicit llmusage root directory.
@@ -72,6 +79,7 @@ impl AppPaths {
         let backups_dir = root_dir.join("backups");
         let exports_dir = root_dir.join("exports");
         let logs_dir = root_dir.join("logs");
+        let cache_dir = root_dir.join("cache");
 
         Self {
             db_path: root_dir.join("llmusage.db"),
@@ -84,6 +92,7 @@ impl AppPaths {
             backups_dir,
             exports_dir,
             logs_dir,
+            cache_dir,
         }
     }
 }

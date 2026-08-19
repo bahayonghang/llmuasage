@@ -101,6 +101,7 @@ pub async fn drive_with_events(mut ctx: DriveContext<'_, '_>) -> Result<Vec<Sour
             )
             .await?;
         stats.lock_wait_ms = ctx.lock_wait_ms;
+        emit_parse_issues_log(&stats);
         let source = parser.source();
         tracing::debug!(
             source = %source,
@@ -141,9 +142,88 @@ pub async fn drive_with_events(mut ctx: DriveContext<'_, '_>) -> Result<Vec<Sour
     Ok(all_stats)
 }
 
+fn emit_parse_issues_log(stats: &SourceSyncStats) {
+    if stats.parse_issues.summary_text().is_none() {
+        return;
+    }
+    let reasons = stats
+        .parse_issues
+        .samples
+        .iter()
+        .map(|sample| sample.reason.as_str())
+        .filter(|reason| !reason.is_empty())
+        .collect::<Vec<_>>()
+        .join(",");
+    info!(
+        source = %stats.source,
+        malformed = stats.parse_issues.malformed_lines,
+        oversized = stats.parse_issues.oversized_lines,
+        skipped = stats.parse_issues.skipped_lines,
+        accounting = stats.parse_issues.accounting_anomaly_lines,
+        reasons = reasons.as_str(),
+        "parse issues"
+    );
+}
+
 async fn emit(sender: Option<&mut mpsc::Sender<SyncEvent>>, event: SyncEvent) -> Result<()> {
     if let Some(sender) = sender {
         sender.send(event).await?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{ParseIssueKind, ParseIssues, SourceKind};
+    use std::io::{self, Write};
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone, Default)]
+    struct Buffer(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Buffer {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0.lock().expect("buffer").extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn parse_issue_info_event_includes_source_counts_and_reasons() {
+        let buf = Buffer::default();
+        let writer = buf.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::INFO)
+            .with_writer(move || writer.clone())
+            .with_ansi(false)
+            .finish();
+        let mut issues = ParseIssues::default();
+        issues.record(
+            SourceKind::Zcode,
+            "hash",
+            0,
+            ParseIssueKind::Skipped,
+            "zcode_unfinished:error:invalid_request",
+        );
+        let stats = SourceSyncStats {
+            source: SourceKind::Zcode,
+            parse_issues: issues,
+            ..SourceSyncStats::default()
+        };
+        tracing::subscriber::with_default(subscriber, || {
+            emit_parse_issues_log(&stats);
+        });
+        let text = String::from_utf8(buf.0.lock().expect("buffer").clone()).expect("utf8");
+        assert!(text.contains("zcode"), "{text}");
+        assert!(text.contains("skipped"), "{text}");
+        assert!(
+            text.contains("zcode_unfinished:error:invalid_request"),
+            "{text}"
+        );
+    }
 }

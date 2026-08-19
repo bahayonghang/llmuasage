@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/llmusage/backend/tui-presentation-contracts.md", "reason": "Verify NoColor, ANSI16, vendor_fg, and no Color::* in new render code"}
+{"file": ".trellis/spec/llmusage/backend/tui-runtime-contracts.md", "reason": "Verify Overview scroll/sort/TimeWindow and visible-row windowing"}
+{"file": ".trellis/tasks/08-19-dash-overview-tokscale-style/prd.md", "reason": "Verify AC1–AC7 and /api/overview field-set compatibility"}
+{"file": ".trellis/tasks/08-19-dash-overview-tokscale-style/research/tokscale-overview-gap.md", "reason": "Verify in-scope layout and out-of-scope web/hourly/workspace"}

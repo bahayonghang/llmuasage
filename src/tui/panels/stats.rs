@@ -1,24 +1,59 @@
+use std::collections::HashMap;
+
 use chrono::{Datelike, NaiveDate};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Style},
     text::{Line, Span},
-    widgets::{Cell, Paragraph, Row, Table},
+    widgets::Paragraph,
 };
 
-use crate::{
-    query::{HeatmapPoint, SourceBreakdown},
-    tui::{app::StatsPanelPayload, format::stat_compact, theme},
+use crate::query::{HeatmapPoint, PeriodDetailRow};
+use crate::tui::{
+    app::{
+        PeriodDetailKind, PeriodDetailPayload, PeriodDetailState, ScrollState, StatsPanelPayload,
+    },
+    format::{cost_compact, stat_compact},
+    model_vendor::vendor_from_model,
+    theme,
 };
 
-use super::super::app::ScrollState;
+const GRAPH_TITLE: &str = "Contribution Graph (52 weeks)";
+const BREAKDOWN_TITLE: &str = "Day Breakdown (ESC to close)";
+const CELL_WIDTH: u16 = 2;
+const MIN_GRAPH: u16 = 11;
+const STATS_FULL: u16 = 12;
+const STATS_COMPACT: u16 = 8;
+const MIN_BREAKDOWN: u16 = 6;
+const SHORT_BREAKDOWN: u16 = 12;
+const MONTH_LABELS: [&str; 12] = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+const WEEKDAY_LABELS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+pub(crate) struct StatsSplit {
+    pub graph: Rect,
+    pub stats: Option<Rect>,
+    pub breakdown: Option<Rect>,
+}
+
+/// Shared calendar geometry for paint and mouse hit-testing.
+#[derive(Debug, Clone, Copy)]
+struct GraphLayout {
+    start_x: u16,
+    start_y: u16,
+    label_width: u16,
+    first_weekday: usize,
+    start_week: usize,
+    visible_weeks: usize,
+}
 
 pub fn render(
     frame: &mut Frame,
     area: Rect,
     data: &Option<Result<StatsPanelPayload, String>>,
     scroll: &ScrollState,
+    detail: Option<&PeriodDetailState>,
 ) {
     match data {
         None => {
@@ -33,8 +68,68 @@ pub fn render(
                 .block(theme::panel_block("Stats"));
             frame.render_widget(widget, area);
         }
-        Some(Ok(payload)) => render_payload(frame, area, payload, scroll),
+        Some(Ok(payload)) => render_payload(frame, area, payload, scroll, detail),
     }
+}
+
+pub(crate) fn split_stats_area(area: Rect, selected: bool) -> StatsSplit {
+    if selected {
+        if area.height >= MIN_GRAPH + STATS_COMPACT + MIN_BREAKDOWN {
+            let chunks = Layout::vertical([
+                Constraint::Length(MIN_GRAPH),
+                Constraint::Length(STATS_COMPACT),
+                Constraint::Min(MIN_BREAKDOWN),
+            ])
+            .split(area);
+            StatsSplit {
+                graph: chunks[0],
+                stats: Some(chunks[1]),
+                breakdown: Some(chunks[2]),
+            }
+        } else {
+            let chunks = Layout::vertical([
+                Constraint::Min(MIN_GRAPH),
+                Constraint::Length(SHORT_BREAKDOWN),
+            ])
+            .split(area);
+            StatsSplit {
+                graph: chunks[0],
+                stats: None,
+                breakdown: Some(chunks[1]),
+            }
+        }
+    } else {
+        let chunks = Layout::vertical([
+            Constraint::Length(MIN_GRAPH),
+            Constraint::Length(STATS_FULL),
+            Constraint::Min(0),
+        ])
+        .split(area);
+        StatsSplit {
+            graph: chunks[0],
+            stats: Some(chunks[1]),
+            breakdown: None,
+        }
+    }
+}
+
+pub(crate) fn day_at(
+    graph_area: Rect,
+    heatmap: &[HeatmapPoint],
+    x: u16,
+    y: u16,
+) -> Option<NaiveDate> {
+    GraphLayout::from_area(graph_area, heatmap)?.hit(heatmap, x, y)
+}
+
+pub(crate) fn breakdown_scroll_total(rows: &[PeriodDetailRow]) -> usize {
+    if rows.is_empty() {
+        return 0;
+    }
+    2 + grouped_models(rows)
+        .into_iter()
+        .map(|group| 1 + 2 * group.models.len())
+        .sum::<usize>()
 }
 
 fn render_payload(
@@ -42,276 +137,633 @@ fn render_payload(
     area: Rect,
     payload: &StatsPanelPayload,
     scroll: &ScrollState,
+    detail: Option<&PeriodDetailState>,
 ) {
-    let block = theme::panel_block("Stats");
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    if inner.width == 0 || inner.height == 0 {
-        return;
-    }
-
-    let show_contribution = inner.height >= 13;
-    let show_health = inner.height >= 18;
-    // Grant the contribution card enough height for a 7-row calendar grid only
-    // on tall panels; smaller sizes keep the historical single-row strip.
-    let contribution_height = if inner.height >= 24 { 10 } else { 6 };
-    let constraints = if show_contribution && show_health {
-        vec![
-            Constraint::Length(5),
-            Constraint::Length(contribution_height),
-            Constraint::Min(5),
-            Constraint::Length(4),
-        ]
-    } else if show_contribution {
-        vec![
-            Constraint::Length(5),
-            Constraint::Length(contribution_height),
-            Constraint::Min(5),
-        ]
-    } else {
-        vec![Constraint::Length(5), Constraint::Min(5)]
-    };
-    let chunks = Layout::vertical(constraints).split(inner);
-
-    render_summary(frame, chunks[0], payload);
-    if show_contribution {
-        render_contribution(frame, chunks[1], &payload.heatmap);
-        render_sources(frame, chunks[2], &payload.sources, scroll);
-        if show_health {
-            render_health_summary(frame, chunks[3], payload);
-        }
-    } else {
-        render_sources(frame, chunks[1], &payload.sources, scroll);
-    }
-}
-
-fn render_summary(frame: &mut Frame, area: Rect, payload: &StatsPanelPayload) {
     if area.width == 0 || area.height == 0 {
         return;
     }
 
+    let selected_date = match detail.map(|item| &item.kind) {
+        Some(PeriodDetailKind::Daily { date }) => Some(date.as_str()),
+        _ => None,
+    };
+    let split = split_stats_area(area, selected_date.is_some());
+    render_graph(frame, split.graph, &payload.heatmap, selected_date);
+    if let Some(stats_area) = split.stats {
+        render_stats_card(frame, stats_area, payload, selected_date.is_some());
+    }
+    if let (Some(breakdown_area), Some(detail), Some(date)) =
+        (split.breakdown, detail, selected_date)
+    {
+        render_breakdown(
+            frame,
+            breakdown_area,
+            date,
+            &payload.heatmap,
+            detail,
+            scroll,
+        );
+    }
+}
+
+fn render_graph(
+    frame: &mut Frame,
+    area: Rect,
+    heatmap: &[HeatmapPoint],
+    selected_date: Option<&str>,
+) {
+    let block = theme::panel_block(GRAPH_TITLE);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    let Some(layout) = GraphLayout::from_area(area, heatmap) else {
+        let message = if heatmap.is_empty() {
+            "No heatmap data"
+        } else {
+            "Graph is too narrow"
+        };
+        frame.render_widget(Paragraph::new(message).style(theme::muted_style()), inner);
+        return;
+    };
+
+    render_month_labels(frame, inner, heatmap, &layout);
+    render_weekday_labels(frame, inner, &layout);
+
+    let thresholds = contribution_thresholds(heatmap);
+    for (idx, point) in heatmap.iter().enumerate() {
+        let Some((x, y)) = layout.cell_origin(idx) else {
+            continue;
+        };
+        if x + CELL_WIDTH > inner.right() || y >= inner.bottom() {
+            continue;
+        }
+        let bucket = contribution_bucket(point.total_tokens, &thresholds);
+        let selected = selected_date == Some(point.date.as_str());
+        let symbol = if selected {
+            "▓▓"
+        } else if bucket == 0 {
+            "· "
+        } else {
+            "██"
+        };
+        let heat_style = theme::fg_style(theme::heat(bucket));
+        let style = if selected {
+            theme::selection_fill_style().patch(heat_style)
+        } else if bucket == 0 {
+            theme::muted_style()
+        } else {
+            heat_style
+        };
+        frame.render_widget(
+            Paragraph::new(symbol).style(style),
+            Rect::new(x, y, CELL_WIDTH, 1),
+        );
+    }
+}
+
+fn render_month_labels(
+    frame: &mut Frame,
+    inner: Rect,
+    heatmap: &[HeatmapPoint],
+    layout: &GraphLayout,
+) {
+    let mut current_month = None;
+    for vis in 0..layout.visible_weeks {
+        let week = layout.start_week + vis;
+        let Some(month) = layout.week_month(heatmap, week) else {
+            continue;
+        };
+        if current_month == Some(month) {
+            continue;
+        }
+        current_month = Some(month);
+        let x = layout.start_x + vis as u16 * CELL_WIDTH;
+        if x + 3 > inner.right() {
+            continue;
+        }
+        let label = MONTH_LABELS[(month as usize).saturating_sub(1).min(11)];
+        frame.render_widget(
+            Paragraph::new(label).style(theme::muted_style()),
+            Rect::new(x, inner.y, 3, 1),
+        );
+    }
+}
+
+fn render_weekday_labels(frame: &mut Frame, inner: Rect, layout: &GraphLayout) {
+    if layout.label_width < 4 {
+        return;
+    }
+    for (weekday, label) in WEEKDAY_LABELS.iter().enumerate() {
+        if weekday % 2 == 0 {
+            continue;
+        }
+        let y = layout.start_y + weekday as u16;
+        if y >= inner.bottom() {
+            continue;
+        }
+        frame.render_widget(
+            Paragraph::new(*label).style(theme::muted_style()),
+            Rect::new(inner.x, y, layout.label_width, 1),
+        );
+    }
+}
+
+fn render_stats_card(frame: &mut Frame, area: Rect, payload: &StatsPanelPayload, compact: bool) {
+    let block = theme::panel_block("Stats");
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    let narrow = area.width < 80;
+    let favorite = payload.models.iter().max_by(|left, right| {
+        left.cost_with_cache_usd
+            .total_cmp(&right.cost_with_cache_usd)
+    });
     let active_days = payload
         .heatmap
         .iter()
         .filter(|point| point.event_count > 0)
         .count();
-    let current_streak = current_streak(&payload.heatmap);
-    let longest_streak = longest_streak(&payload.heatmap);
-    let best_day = payload
-        .heatmap
-        .iter()
-        .max_by_key(|point| point.total_tokens)
-        .filter(|point| point.total_tokens > 0);
-    let best_day_text = best_day
-        .map(|point| {
-            format!(
-                "{} {}",
-                compact_date(&point.date),
-                stat_compact(point.total_tokens)
-            )
-        })
-        .unwrap_or_else(|| "none".to_string());
+    let total_days = payload.heatmap.len();
+    let current = current_streak(&payload.heatmap);
+    let longest = longest_streak(&payload.heatmap);
+    let col1_width = (inner.width / 2).max(1);
+    let col2_width = inner.width.saturating_sub(col1_width).max(1);
+    let col2_x = inner.x + col1_width;
+    let mut y = inner.y;
+    let y_max = inner.bottom();
 
-    let lines = vec![
-        Line::from(vec![
-            Span::styled("total tokens ", theme::muted_style()),
+    let favorite_label = if narrow { "Model:" } else { "Favorite model:" };
+    let favorite_value = match favorite {
+        Some(model) => Span::styled(
+            model.model.clone(),
+            theme::fg_style(theme::vendor_fg(vendor_from_model(&model.model), 0)),
+        ),
+        None => Span::styled("N/A", theme::muted_style()),
+    };
+    put_line(
+        frame,
+        inner.x,
+        y,
+        col1_width,
+        labeled(favorite_label, favorite_value),
+    );
+    put_line(
+        frame,
+        col2_x,
+        y,
+        col2_width,
+        labeled(
+            if narrow { "Tokens:" } else { "Total tokens:" },
             Span::styled(
                 stat_compact(payload.overview.total.total_tokens),
-                metric_style(theme::metric_input()),
+                theme::bold_fg_style(theme::metric_input()),
             ),
-            Span::styled("  events ", theme::muted_style()),
-            Span::styled(
-                stat_compact(payload.overview.total_events),
-                metric_style(theme::metric_output()),
-            ),
-            Span::styled("  cost ", theme::muted_style()),
-            Span::styled(
-                format!("${:.2}", payload.overview.total_cost_usd),
-                metric_style(theme::metric_reasoning()),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled("active days ", theme::muted_style()),
-            Span::styled(active_days.to_string(), metric_style(theme::positive_fg())),
-            Span::styled("  current streak ", theme::muted_style()),
-            Span::styled(
-                format!("{current_streak}/{longest_streak}d"),
-                metric_style(theme::metric_cache_write()),
-            ),
-            Span::styled("  best day ", theme::muted_style()),
-            Span::styled(best_day_text, metric_style(theme::metric_input())),
-        ]),
-        Line::from(vec![
-            Span::styled("sources ", theme::muted_style()),
-            Span::styled(
-                payload.sources.len().to_string(),
-                metric_style(theme::metric_input()),
-            ),
-            Span::styled("  cache read ", theme::muted_style()),
-            Span::styled(
-                format!("{:.1}%", payload.overview.cache_efficiency * 100.0),
-                metric_style(theme::positive_fg()),
-            ),
-            Span::styled("  failures ", theme::muted_style()),
-            Span::styled(
-                payload.health.recent_failures.len().to_string(),
-                if payload.health.recent_failures.is_empty() {
-                    metric_style(theme::positive_fg())
-                } else {
-                    metric_style(theme::warning_fg())
-                },
-            ),
-        ]),
-        context_pressure_line(&payload.context_pressure),
-    ];
-    frame.render_widget(Paragraph::new(lines), area);
-}
+        ),
+    );
 
-/// Renders the context-window utilization row. Falls back to `n/a` when no
-/// filtered event has a known model context window.
-fn context_pressure_line(pressure: &crate::query::ContextPressurePayload) -> Line<'static> {
-    if pressure.priced_events == 0 {
-        return Line::from(vec![
-            Span::styled("context ", theme::muted_style()),
-            Span::styled("n/a", theme::muted_style()),
-        ]);
-    }
-    let peak_pct = pressure.peak_percent * 100.0;
-    let avg_pct = pressure.avg_percent * 100.0;
-    let peak_color = theme::bar_color(peak_pct);
-    Line::from(vec![
-        Span::styled("context peak ", theme::muted_style()),
-        Span::styled(format!("{peak_pct:.0}%"), metric_style(peak_color)),
-        Span::styled("  avg ", theme::muted_style()),
-        Span::styled(format!("{avg_pct:.0}%"), metric_style(theme::accent())),
-        Span::styled("  unknown ", theme::muted_style()),
-        Span::styled(pressure.unpriced_events.to_string(), theme::muted_style()),
-    ])
-}
-
-fn render_contribution(frame: &mut Frame, area: Rect, heatmap: &[HeatmapPoint]) {
-    if area.width == 0 || area.height == 0 {
+    y = y.saturating_add(1);
+    if y >= y_max {
         return;
     }
+    put_line(
+        frame,
+        inner.x,
+        y,
+        col1_width,
+        labeled(
+            "Events:",
+            Span::styled(
+                stat_compact(payload.overview.total_events),
+                theme::bold_fg_style(theme::metric_output()),
+            ),
+        ),
+    );
+    put_line(
+        frame,
+        col2_x,
+        y,
+        col2_width,
+        labeled(
+            if narrow { "Cost:" } else { "Total cost:" },
+            Span::styled(
+                cost_compact(payload.overview.total_cost_usd),
+                theme::bold_fg_style(theme::positive_fg()),
+            ),
+        ),
+    );
 
-    let block = theme::trend_card_block("Contribution", theme::accent());
+    y = y.saturating_add(1);
+    if y >= y_max {
+        return;
+    }
+    put_line(
+        frame,
+        inner.x,
+        y,
+        col1_width,
+        labeled(
+            if narrow { "Streak:" } else { "Current streak:" },
+            Span::styled(
+                format!("{current} days"),
+                theme::bold_fg_style(theme::metric_cache_write()),
+            ),
+        ),
+    );
+    put_line(
+        frame,
+        col2_x,
+        y,
+        col2_width,
+        labeled(
+            if narrow {
+                "Max streak:"
+            } else {
+                "Longest streak:"
+            },
+            Span::styled(
+                format!("{longest} days"),
+                theme::bold_fg_style(theme::metric_cache_write()),
+            ),
+        ),
+    );
+
+    y = y.saturating_add(1);
+    if y >= y_max {
+        return;
+    }
+    put_line(
+        frame,
+        inner.x,
+        y,
+        col1_width,
+        labeled(
+            if narrow { "Active:" } else { "Active days:" },
+            Span::styled(
+                format!("{active_days}/{total_days}"),
+                theme::bold_fg_style(theme::positive_fg()),
+            ),
+        ),
+    );
+
+    if !compact {
+        y = y.saturating_add(1);
+        if y < y_max {
+            put_line(
+                frame,
+                inner.x,
+                y,
+                inner.width,
+                context_pressure_line(&payload.context_pressure),
+            );
+        }
+    }
+
+    y = y.saturating_add(1);
+    if y < y_max {
+        put_line(frame, inner.x, y, inner.width, heat_legend_line());
+    }
+}
+
+fn render_breakdown(
+    frame: &mut Frame,
+    area: Rect,
+    date: &str,
+    heatmap: &[HeatmapPoint],
+    detail: &PeriodDetailState,
+    scroll: &ScrollState,
+) {
+    let block = theme::panel_block(BREAKDOWN_TITLE);
     let inner = block.inner(area);
     frame.render_widget(block, area);
-
     if inner.width == 0 || inner.height == 0 {
         return;
     }
 
-    if heatmap.is_empty() {
+    match &detail.payload {
+        None => {
+            frame.render_widget(
+                Paragraph::new("Loading...").style(theme::muted_style()),
+                inner,
+            );
+        }
+        Some(Err(error)) => {
+            frame.render_widget(
+                Paragraph::new(format!("Data load failed: {error}")).style(theme::error_style()),
+                inner,
+            );
+        }
+        Some(Ok(PeriodDetailPayload::Daily(rows))) => {
+            render_breakdown_rows(frame, inner, date, heatmap, rows, scroll, area.width < 80);
+        }
+        Some(Ok(PeriodDetailPayload::Monthly(_))) => {
+            frame.render_widget(
+                Paragraph::new("No data for this day").style(theme::muted_style()),
+                inner,
+            );
+        }
+    }
+}
+
+fn render_breakdown_rows(
+    frame: &mut Frame,
+    inner: Rect,
+    date: &str,
+    heatmap: &[HeatmapPoint],
+    rows: &[PeriodDetailRow],
+    scroll: &ScrollState,
+    narrow: bool,
+) {
+    if rows.is_empty() {
         frame.render_widget(
-            Paragraph::new("No heatmap data").style(theme::muted_style()),
+            Paragraph::new("No data for this day").style(theme::muted_style()),
             inner,
         );
         return;
     }
 
-    // A GitHub-style 7-row calendar grid needs room for the week rows plus a
-    // caption line; otherwise fall back to the compact single-row strip.
-    const GRID_ROWS: u16 = 7;
-    if inner.height < GRID_ROWS + 1 {
-        render_contribution_strip(frame, inner, heatmap);
-        return;
-    }
-    let Some(first_weekday) = weekday_index(&heatmap[0].date) else {
-        render_contribution_strip(frame, inner, heatmap);
-        return;
-    };
+    let day_tokens = heatmap
+        .iter()
+        .find(|point| point.date == date)
+        .map(|point| point.total_tokens)
+        .unwrap_or(0);
+    let day_cost: f64 = rows.iter().map(|row| row.cost_with_cache_usd).sum();
+    let lines = breakdown_lines(date, day_tokens, day_cost, rows, narrow);
+    let visible_height = inner.height.max(1) as usize;
+    let range = scroll.visible_range(lines.len(), visible_height);
+    let visible: Vec<Line> = range
+        .map(|absolute| {
+            let line = lines[absolute].clone();
+            if absolute == scroll.selected {
+                line.style(theme::selection_style())
+            } else {
+                line
+            }
+        })
+        .collect();
+    frame.render_widget(Paragraph::new(visible), inner);
+}
 
-    let thresholds = contribution_thresholds(heatmap);
-    let columns = (first_weekday + heatmap.len()).div_ceil(GRID_ROWS as usize);
-    let visible_cols = (inner.width as usize).min(columns).max(1);
-    let start_col = columns - visible_cols;
+fn breakdown_lines(
+    date: &str,
+    day_tokens: i64,
+    day_cost: f64,
+    rows: &[PeriodDetailRow],
+    narrow: bool,
+) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled(format_day_title(date), theme::bold_style()),
+            Span::raw("  "),
+            Span::styled(
+                stat_compact(day_tokens),
+                theme::bold_fg_style(theme::metric_input()),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                cost_compact(day_cost),
+                theme::bold_fg_style(theme::positive_fg()),
+            ),
+        ]),
+        Line::from(""),
+    ];
 
-    for (idx, point) in heatmap.iter().enumerate() {
-        let slot = first_weekday + idx;
-        let col = slot / GRID_ROWS as usize;
-        if col < start_col {
-            continue;
+    for group in grouped_models(rows) {
+        let model_count = group.models.len();
+        let plural = if model_count == 1 { "" } else { "s" };
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("● {}", group.source),
+                theme::bold_fg_style(theme::accent()),
+            ),
+            Span::styled(
+                format!(" ({model_count} model{plural})"),
+                theme::muted_style(),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                cost_compact(group.cost),
+                theme::bold_fg_style(theme::positive_fg()),
+            ),
+        ]));
+        for model in group.models {
+            let vendor = vendor_from_model(&model.model);
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled("●", theme::fg_style(theme::vendor_fg(vendor, 0))),
+                Span::styled(
+                    format!(" {}", model.model),
+                    theme::fg_style(theme::vendor_fg(vendor, 0)),
+                ),
+            ]));
+            lines.push(channel_line(model, narrow));
         }
-        let x = inner.x + (col - start_col) as u16;
-        let y = inner.y + (slot % GRID_ROWS as usize) as u16;
-        if x >= inner.x + inner.width || y >= inner.y + GRID_ROWS {
-            continue;
-        }
-        let bucket = contribution_bucket(point.total_tokens, &thresholds);
-        frame.buffer_mut()[(x, y)]
-            .set_symbol("\u{25A0}")
-            .set_style(theme::fg_style(theme::heat(bucket)));
     }
+    lines
+}
 
-    // Caption: date range on the left, a low→high legend on the right.
-    let first = heatmap.first().map(|point| compact_date(&point.date));
-    let last = heatmap.last().map(|point| compact_date(&point.date));
-    if let (Some(first), Some(last)) = (first, last) {
-        let caption = format!("{first} .. {last}");
-        frame.buffer_mut().set_stringn(
-            inner.x,
-            inner.y + GRID_ROWS,
-            &caption,
-            inner.width as usize,
-            theme::muted_style(),
-        );
-        render_heat_legend(frame, inner, GRID_ROWS, caption.chars().count());
+fn channel_line(row: &PeriodDetailRow, narrow: bool) -> Line<'static> {
+    let input = stat_compact(row.input_tokens);
+    let output = stat_compact(row.output_tokens);
+    let cache_read = stat_compact(row.cache_read_tokens);
+    let cache_write = stat_compact(row.cache_creation_tokens);
+    if narrow {
+        Line::from(vec![
+            Span::raw("    "),
+            Span::styled(
+                format!("{input}/{output}/{cache_read}/{cache_write}"),
+                theme::muted_style(),
+            ),
+        ])
+    } else {
+        Line::from(vec![
+            Span::raw("    "),
+            Span::styled("In · ", theme::muted_style()),
+            Span::styled(input, theme::fg_style(theme::metric_input())),
+            Span::styled(" · Out · ", theme::muted_style()),
+            Span::styled(output, theme::fg_style(theme::metric_output())),
+            Span::styled(" · CR · ", theme::muted_style()),
+            Span::styled(cache_read, theme::fg_style(theme::metric_cache_read())),
+            Span::styled(" · CW · ", theme::muted_style()),
+            Span::styled(cache_write, theme::fg_style(theme::metric_cache_write())),
+        ])
     }
 }
 
-/// Draws a `less ▁▂▃▄ more` legend at the right of the caption row.
-fn render_heat_legend(frame: &mut Frame, inner: Rect, row_offset: u16, caption_len: usize) {
-    let legend = "  less ";
-    let squares = 4usize;
-    let needed = caption_len + legend.chars().count() + squares + " more".len();
-    if needed > inner.width as usize {
-        return;
-    }
-    let y = inner.y + row_offset;
-    let mut x = inner.x + caption_len as u16;
-    frame
-        .buffer_mut()
-        .set_stringn(x, y, legend, legend.len(), theme::muted_style());
-    x += legend.chars().count() as u16;
-    for level in 0..squares {
-        frame.buffer_mut()[(x, y)]
-            .set_symbol("\u{25A0}")
-            .set_style(theme::fg_style(theme::heat(level + 1)));
-        x += 1;
-    }
-    frame
-        .buffer_mut()
-        .set_stringn(x, y, " more", 5, theme::muted_style());
+struct SourceGroup<'a> {
+    source: String,
+    cost: f64,
+    models: Vec<&'a PeriodDetailRow>,
 }
 
-/// Compact single-row heat strip used when the panel is too short for the grid.
-fn render_contribution_strip(frame: &mut Frame, inner: Rect, heatmap: &[HeatmapPoint]) {
-    let thresholds = contribution_thresholds(heatmap);
-    let days = heatmap.len().min(inner.width as usize);
-    let recent = &heatmap[heatmap.len().saturating_sub(days)..];
-    for (idx, point) in recent.iter().enumerate() {
-        let bucket = contribution_bucket(point.total_tokens, &thresholds);
-        let symbol = if bucket == 0 { "." } else { "\u{25A0}" };
-        frame.buffer_mut()[(inner.x + idx as u16, inner.y)]
-            .set_symbol(symbol)
-            .set_style(theme::fg_style(theme::heat(bucket)));
+fn grouped_models(rows: &[PeriodDetailRow]) -> Vec<SourceGroup<'_>> {
+    let mut by_source: HashMap<&str, Vec<&PeriodDetailRow>> = HashMap::new();
+    for row in rows {
+        by_source.entry(row.source.as_str()).or_default().push(row);
     }
-    if inner.height > 1 {
-        let first = recent.first().map(|point| compact_date(&point.date));
-        let last = recent.last().map(|point| compact_date(&point.date));
-        let label = match (first, last) {
-            (Some(first), Some(last)) => format!("{first} .. {last}"),
-            _ => "no dates".to_string(),
-        };
-        frame.buffer_mut().set_stringn(
-            inner.x,
-            inner.y + 1,
-            label,
-            inner.width as usize,
-            theme::muted_style(),
-        );
+    let mut groups: Vec<SourceGroup<'_>> = by_source
+        .into_iter()
+        .map(|(source, mut models)| {
+            let cost = models.iter().map(|model| model.cost_with_cache_usd).sum();
+            models.sort_by(|left, right| {
+                right
+                    .total_tokens
+                    .cmp(&left.total_tokens)
+                    .then_with(|| left.model.cmp(&right.model))
+            });
+            SourceGroup {
+                source: source.to_string(),
+                cost,
+                models,
+            }
+        })
+        .collect();
+    groups.sort_by(|left, right| {
+        right
+            .cost
+            .total_cmp(&left.cost)
+            .then_with(|| left.source.cmp(&right.source))
+    });
+    groups
+}
+
+fn format_day_title(date: &str) -> String {
+    NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .map(|parsed| parsed.format("%a, %b %d, %Y").to_string())
+        .unwrap_or_else(|_| date.to_string())
+}
+
+fn context_pressure_line(pressure: &crate::query::ContextPressurePayload) -> Line<'static> {
+    if pressure.priced_events == 0 {
+        return labeled("Context", Span::styled("n/a", theme::muted_style()));
+    }
+    let peak_pct = pressure.peak_percent * 100.0;
+    let avg_pct = pressure.avg_percent * 100.0;
+    Line::from(vec![
+        Span::styled("Context peak ", theme::muted_style()),
+        Span::styled(
+            format!("{peak_pct:.0}%"),
+            theme::bold_fg_style(theme::bar_color(peak_pct)),
+        ),
+        Span::styled("  avg ", theme::muted_style()),
+        Span::styled(
+            format!("{avg_pct:.0}%"),
+            theme::bold_fg_style(theme::accent()),
+        ),
+    ])
+}
+
+fn heat_legend_line() -> Line<'static> {
+    Line::from(vec![
+        Span::styled("Less ", theme::muted_style()),
+        Span::styled("██", theme::fg_style(theme::heat(1))),
+        Span::raw(" "),
+        Span::styled("██", theme::fg_style(theme::heat(2))),
+        Span::raw(" "),
+        Span::styled("██", theme::fg_style(theme::heat(3))),
+        Span::raw(" "),
+        Span::styled("██", theme::fg_style(theme::heat(4))),
+        Span::styled(" More", theme::muted_style()),
+    ])
+}
+
+fn labeled(label: &str, value: Span<'static>) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(format!("{label} "), theme::muted_style()),
+        value,
+    ])
+}
+
+fn put_line(frame: &mut Frame, x: u16, y: u16, width: u16, line: Line<'static>) {
+    if width == 0 {
+        return;
+    }
+    frame.render_widget(Paragraph::new(line), Rect::new(x, y, width, 1));
+}
+
+impl GraphLayout {
+    fn from_area(area: Rect, heatmap: &[HeatmapPoint]) -> Option<Self> {
+        let inner = theme::panel_block(GRAPH_TITLE).inner(area);
+        if inner.width == 0 || inner.height == 0 || heatmap.is_empty() {
+            return None;
+        }
+        let first_weekday = weekday_index(&heatmap[0].date)?;
+        let label_width = if area.width < 80 { 2 } else { 4 };
+        let visible_weeks = (inner.width.saturating_sub(label_width) / CELL_WIDTH) as usize;
+        if visible_weeks == 0 {
+            return None;
+        }
+        let total_weeks = first_weekday
+            .saturating_add(heatmap.len())
+            .div_ceil(7)
+            .max(1);
+        let visible_weeks = visible_weeks.min(total_weeks);
+        Some(Self {
+            start_x: inner.x.saturating_add(label_width),
+            start_y: inner.y.saturating_add(2),
+            label_width,
+            first_weekday,
+            start_week: total_weeks - visible_weeks,
+            visible_weeks,
+        })
+    }
+
+    fn hit(&self, heatmap: &[HeatmapPoint], x: u16, y: u16) -> Option<NaiveDate> {
+        if y < self.start_y || x < self.start_x {
+            return None;
+        }
+        let weekday = usize::from(y.saturating_sub(self.start_y));
+        if weekday >= 7 {
+            return None;
+        }
+        let week_vis = usize::from(x.saturating_sub(self.start_x) / CELL_WIDTH);
+        if week_vis >= self.visible_weeks {
+            return None;
+        }
+        let point = self.point_at(heatmap, self.start_week + week_vis, weekday)?;
+        NaiveDate::parse_from_str(&point.date, "%Y-%m-%d").ok()
+    }
+
+    fn point_at<'a>(
+        &self,
+        heatmap: &'a [HeatmapPoint],
+        week: usize,
+        weekday: usize,
+    ) -> Option<&'a HeatmapPoint> {
+        let slot = week.checked_mul(7)?.checked_add(weekday)?;
+        if slot < self.first_weekday {
+            return None;
+        }
+        heatmap.get(slot - self.first_weekday)
+    }
+
+    fn cell_origin(&self, idx: usize) -> Option<(u16, u16)> {
+        let slot = self.first_weekday.checked_add(idx)?;
+        let week = slot / 7;
+        if week < self.start_week {
+            return None;
+        }
+        let vis = week - self.start_week;
+        if vis >= self.visible_weeks {
+            return None;
+        }
+        Some((
+            self.start_x + vis as u16 * CELL_WIDTH,
+            self.start_y + (slot % 7) as u16,
+        ))
+    }
+
+    fn week_month(&self, heatmap: &[HeatmapPoint], week: usize) -> Option<u32> {
+        (0..7).find_map(|weekday| {
+            self.point_at(heatmap, week, weekday)
+                .and_then(|point| NaiveDate::parse_from_str(&point.date, "%Y-%m-%d").ok())
+                .map(|date| date.month())
+        })
     }
 }
 
@@ -320,166 +772,6 @@ fn weekday_index(date: &str) -> Option<usize> {
     NaiveDate::parse_from_str(date, "%Y-%m-%d")
         .ok()
         .map(|date| date.weekday().num_days_from_sunday() as usize)
-}
-
-fn render_sources(
-    frame: &mut Frame,
-    area: Rect,
-    sources: &[SourceBreakdown],
-    scroll: &ScrollState,
-) {
-    if area.width == 0 || area.height == 0 {
-        return;
-    }
-
-    if sources.is_empty() {
-        let empty = Paragraph::new("No source contribution data.")
-            .style(theme::muted_style())
-            .block(theme::trend_card_block("Source Mix", theme::metric_input()));
-        frame.render_widget(empty, area);
-        return;
-    }
-
-    let very_narrow = area.width < 54;
-    let narrow = area.width < 84;
-    let max_tokens = sources
-        .iter()
-        .map(|source| source.total_tokens.max(0))
-        .max()
-        .unwrap_or(0);
-    let visible_height = super::visible_table_rows(area);
-    let range = scroll.visible_range(sources.len(), visible_height);
-    let rows = range.clone().enumerate().map(|(visible_index, absolute)| {
-        source_row(
-            &sources[absolute],
-            max_tokens,
-            visible_index,
-            absolute == scroll.selected,
-            very_narrow,
-            narrow,
-        )
-    });
-
-    let header = Row::new(source_header(very_narrow, narrow))
-        .style(theme::header_style())
-        .bottom_margin(1);
-    let table = Table::new(rows, source_widths(very_narrow, narrow))
-        .header(header)
-        .block(theme::trend_card_block("Source Mix", theme::metric_input()));
-    frame.render_widget(table, area);
-}
-
-fn render_health_summary(frame: &mut Frame, area: Rect, payload: &StatsPanelPayload) {
-    if area.width == 0 || area.height == 0 {
-        return;
-    }
-
-    let lines = vec![
-        Line::from(vec![
-            Span::styled("cursors ", theme::muted_style()),
-            Span::styled(
-                payload.health.cursors.len().to_string(),
-                metric_style(theme::positive_fg()),
-            ),
-            Span::styled("  recent failures ", theme::muted_style()),
-            Span::styled(
-                payload.health.recent_failures.len().to_string(),
-                if payload.health.recent_failures.is_empty() {
-                    metric_style(theme::positive_fg())
-                } else {
-                    metric_style(theme::warning_fg())
-                },
-            ),
-        ]),
-        Line::styled(
-            "health is summarized here; source details stay backed by existing diagnostics",
-            theme::muted_style(),
-        ),
-    ];
-    frame.render_widget(
-        Paragraph::new(lines).block(theme::trend_card_block(
-            "Health Signals",
-            theme::metric_cache_write(),
-        )),
-        area,
-    );
-}
-
-fn source_row(
-    source: &SourceBreakdown,
-    max_tokens: i64,
-    index: usize,
-    selected: bool,
-    very_narrow: bool,
-    narrow: bool,
-) -> Row<'static> {
-    let mut row = if very_narrow {
-        Row::new(vec![
-            Cell::from(source.source.clone()),
-            Cell::from(stat_compact(source.total_tokens)),
-        ])
-    } else if narrow {
-        Row::new(vec![
-            Cell::from(source.source.clone()),
-            Cell::from(stat_compact(source.total_tokens)),
-            Cell::from(stat_compact(source.event_count)),
-        ])
-    } else {
-        Row::new(vec![
-            Cell::from(source.source.clone()).style(theme::bold_style()),
-            Cell::from(stat_compact(source.total_tokens)),
-            Cell::from(stat_compact(source.event_count)),
-            Cell::from(
-                source
-                    .last_event_at
-                    .clone()
-                    .unwrap_or_else(|| "-".to_string()),
-            ),
-            Cell::from(render_bar(source.total_tokens, max_tokens, 20))
-                .style(theme::fg_style(theme::positive_fg())),
-        ])
-    };
-
-    if selected {
-        row = row.style(theme::selection_style());
-    } else if index % 2 == 1 {
-        row = row.style(theme::row_alt_style());
-    }
-    row
-}
-
-fn source_header(very_narrow: bool, narrow: bool) -> Vec<Cell<'static>> {
-    let labels: &[&str] = if very_narrow {
-        &["Source", "Tokens"]
-    } else if narrow {
-        &["Source", "Tokens", "Events"]
-    } else {
-        &["Source", "Tokens", "Events", "Last Event", "Profile"]
-    };
-    labels
-        .iter()
-        .map(|label| Cell::from(Span::styled(*label, theme::header_style())))
-        .collect()
-}
-
-fn source_widths(very_narrow: bool, narrow: bool) -> Vec<Constraint> {
-    if very_narrow {
-        vec![Constraint::Percentage(46), Constraint::Percentage(54)]
-    } else if narrow {
-        vec![
-            Constraint::Percentage(34),
-            Constraint::Percentage(36),
-            Constraint::Percentage(30),
-        ]
-    } else {
-        vec![
-            Constraint::Length(14),
-            Constraint::Length(12),
-            Constraint::Length(10),
-            Constraint::Min(18),
-            Constraint::Length(22),
-        ]
-    }
 }
 
 fn current_streak(heatmap: &[HeatmapPoint]) -> usize {
@@ -546,37 +838,18 @@ fn contribution_bucket(value: i64, thresholds: &[i64; 4]) -> usize {
     }
 }
 
-fn render_bar(value: i64, max_value: i64, width: usize) -> String {
-    if width == 0 {
-        return String::new();
-    }
-    let filled = if value <= 0 || max_value <= 0 {
-        0
-    } else {
-        ((value as f64 / max_value as f64) * width as f64).round() as usize
-    }
-    .min(width);
-    format!("{}{}", "#".repeat(filled), "-".repeat(width - filled))
-}
-
-fn compact_date(date: &str) -> String {
-    if date.len() >= 10 && date.as_bytes().get(4) == Some(&b'-') {
-        date.chars().skip(5).take(5).collect()
-    } else {
-        date.chars().take(8).collect()
-    }
-}
-
-fn metric_style(color: Color) -> Style {
-    theme::bold_fg_style(color)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        contribution_bucket, contribution_thresholds, current_streak, longest_streak, weekday_index,
+        GraphLayout, breakdown_scroll_total, contribution_bucket, contribution_thresholds,
+        current_streak, day_at, longest_streak, split_stats_area, weekday_index,
     };
-    use crate::query::HeatmapPoint;
+    use crate::query::{ContextPressurePayload, HeatmapPoint, OverviewPayload, PeriodDetailRow};
+    use crate::tui::app::{
+        PeriodDetailKind, PeriodDetailPayload, PeriodDetailState, ScrollState, StatsPanelPayload,
+    };
+    use chrono::NaiveDate;
+    use ratatui::{Terminal, backend::TestBackend, layout::Rect};
 
     fn heat(counts: &[i64]) -> Vec<HeatmapPoint> {
         counts
@@ -588,6 +861,53 @@ mod tests {
                 total_tokens: count * 100,
             })
             .collect()
+    }
+
+    fn heatmap_from(start: NaiveDate, tokens: &[i64]) -> Vec<HeatmapPoint> {
+        tokens
+            .iter()
+            .enumerate()
+            .map(|(idx, &total_tokens)| HeatmapPoint {
+                date: start
+                    .checked_add_signed(chrono::Duration::days(idx as i64))
+                    .expect("date")
+                    .format("%Y-%m-%d")
+                    .to_string(),
+                event_count: i64::from(total_tokens > 0),
+                total_tokens,
+            })
+            .collect()
+    }
+
+    fn empty_overview() -> OverviewPayload {
+        OverviewPayload {
+            generated_at: String::new(),
+            total: crate::query::TokenSummary::default(),
+            last_24h: crate::query::TokenSummary::default(),
+            source_count: 0,
+            bucket_count: 0,
+            total_events: 0,
+            last_24h_events: 0,
+            total_cost_usd: 0.0,
+            cache_efficiency: 0.0,
+            last_sync_at: None,
+            last_export_at: None,
+        }
+    }
+
+    fn payload(heatmap: Vec<HeatmapPoint>) -> StatsPanelPayload {
+        StatsPanelPayload {
+            overview: empty_overview(),
+            heatmap,
+            models: Vec::new(),
+            context_pressure: ContextPressurePayload {
+                peak_percent: 0.0,
+                avg_percent: 0.0,
+                peak_model: None,
+                priced_events: 0,
+                unpriced_events: 0,
+            },
+        }
     }
 
     #[test]
@@ -645,5 +965,205 @@ mod tests {
         // 2026-01-04 is a Sunday → 0.
         assert_eq!(weekday_index("2026-01-04"), Some(0));
         assert_eq!(weekday_index("not-a-date"), None);
+    }
+
+    #[test]
+    fn graph_layout_aligns_thursday_start_to_sunday_week() {
+        let start = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let heatmap = heatmap_from(start, &[100, 0, 200]);
+        let area = Rect::new(0, 0, 40, 11);
+        let layout = GraphLayout::from_area(area, &heatmap).unwrap();
+        assert_eq!(layout.first_weekday, 4);
+        assert!(layout.point_at(&heatmap, 0, 0).is_none());
+        assert!(layout.point_at(&heatmap, 0, 3).is_none());
+        assert_eq!(
+            layout
+                .point_at(&heatmap, 0, 4)
+                .map(|point| point.date.as_str()),
+            Some("2026-01-01")
+        );
+        let (x, y) = layout.cell_origin(0).unwrap();
+        assert_eq!(day_at(area, &heatmap, x, y), Some(start));
+        assert_eq!(day_at(area, &heatmap, x + 1, y), Some(start));
+        assert_eq!(day_at(area, &heatmap, layout.start_x, layout.start_y), None);
+    }
+
+    #[test]
+    fn graph_layout_clips_left_and_keeps_recent_weeks() {
+        let start = NaiveDate::from_ymd_opt(2026, 1, 4).unwrap();
+        let tokens = vec![100; 56];
+        let heatmap = heatmap_from(start, &tokens);
+        // Inner width 8 with a 2-column label leaves three visible weeks.
+        let area = Rect::new(0, 0, 10, 11);
+        let layout = GraphLayout::from_area(area, &heatmap).unwrap();
+        assert_eq!(layout.visible_weeks, 3);
+        assert_eq!(layout.start_week, 5);
+        assert!(layout.cell_origin(0).is_none());
+        let first_visible = layout.start_week * 7;
+        let (x, y) = layout.cell_origin(first_visible).unwrap();
+        assert_eq!(
+            day_at(area, &heatmap, x, y),
+            Some(start + chrono::Duration::days(first_visible as i64))
+        );
+        assert!(day_at(area, &heatmap, layout.start_x.saturating_sub(1), y).is_none());
+    }
+
+    #[test]
+    fn day_at_matches_painted_cells() {
+        let start = NaiveDate::from_ymd_opt(2026, 1, 4).unwrap();
+        let heatmap = heatmap_from(start, &[0, 100, 200, 0, 400, 500, 0, 700]);
+        let panel = Rect::new(0, 0, 40, 24);
+        let graph = split_stats_area(panel, false).graph;
+        let data = Some(Ok(payload(heatmap.clone())));
+        let scroll = ScrollState {
+            offset: 0,
+            selected: 0,
+            total: 0,
+            visible: 8,
+        };
+        let mut terminal = Terminal::new(TestBackend::new(40, 24)).unwrap();
+        terminal
+            .draw(|frame| super::render(frame, panel, &data, &scroll, None))
+            .unwrap();
+
+        let layout = GraphLayout::from_area(graph, &heatmap).unwrap();
+        let buffer = terminal.backend().buffer();
+        for (idx, point) in heatmap.iter().enumerate() {
+            let Some((x, y)) = layout.cell_origin(idx) else {
+                continue;
+            };
+            let expected = NaiveDate::parse_from_str(&point.date, "%Y-%m-%d").ok();
+            assert_eq!(day_at(graph, &heatmap, x, y), expected);
+            assert_eq!(day_at(graph, &heatmap, x + 1, y), expected);
+            let symbol = buffer[(x, y)].symbol();
+            if point.total_tokens > 0 {
+                assert_eq!(symbol, "█", "active cell at {x},{y}");
+                assert_eq!(buffer[(x + 1, y)].symbol(), "█");
+            } else {
+                assert_eq!(symbol, "·", "empty cell at {x},{y}");
+                assert_eq!(buffer[(x + 1, y)].symbol(), " ");
+            }
+        }
+    }
+
+    #[test]
+    fn empty_heatmap_has_no_hit_target() {
+        let area = Rect::new(0, 0, 40, 11);
+        assert_eq!(day_at(area, &[], 8, 4), None);
+        assert!(GraphLayout::from_area(area, &[]).is_none());
+    }
+
+    #[test]
+    fn breakdown_scroll_total_counts_header_and_model_lines() {
+        let rows = vec![
+            PeriodDetailRow {
+                model: "gpt-5".to_string(),
+                source: "codex".to_string(),
+                event_count: 2,
+                input_tokens: 10,
+                cache_read_tokens: 1,
+                cache_creation_tokens: 2,
+                output_tokens: 4,
+                total_tokens: 17,
+                cost_with_cache_usd: 0.4,
+            },
+            PeriodDetailRow {
+                model: "opus".to_string(),
+                source: "claude".to_string(),
+                event_count: 1,
+                input_tokens: 3,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                output_tokens: 1,
+                total_tokens: 4,
+                cost_with_cache_usd: 0.1,
+            },
+        ];
+        // header + blank + 2 source headers + 2 model lines + 2 channel lines
+        assert_eq!(breakdown_scroll_total(&rows), 8);
+        assert_eq!(breakdown_scroll_total(&[]), 0);
+    }
+
+    #[test]
+    fn graph_layout_uses_wide_weekday_gutter_at_80() {
+        let start = NaiveDate::from_ymd_opt(2026, 1, 4).unwrap();
+        let heatmap = heatmap_from(start, &[100]);
+        let wide = GraphLayout::from_area(Rect::new(0, 0, 80, 11), &heatmap).unwrap();
+        assert_eq!(wide.label_width, 4);
+        let narrow = GraphLayout::from_area(Rect::new(0, 0, 79, 11), &heatmap).unwrap();
+        assert_eq!(narrow.label_width, 2);
+    }
+
+    #[test]
+    fn selected_short_layout_hides_stats_card() {
+        let split = split_stats_area(Rect::new(0, 0, 80, 20), true);
+        assert!(split.stats.is_none());
+        assert!(split.breakdown.is_some());
+        let tall = split_stats_area(Rect::new(0, 0, 80, 30), true);
+        assert!(tall.stats.is_some());
+        assert!(tall.breakdown.is_some());
+        assert_eq!(tall.graph.height, 11);
+    }
+
+    #[test]
+    fn empty_heatmap_render_keeps_graph_title() {
+        let data = Some(Ok(payload(Vec::new())));
+        let scroll = ScrollState {
+            offset: 0,
+            selected: 0,
+            total: 0,
+            visible: 8,
+        };
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| super::render(frame, frame.area(), &data, &scroll, None))
+            .unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(text.contains("Contribution Graph (52 weeks)"), "{text}");
+        assert!(text.contains("No heatmap data"), "{text}");
+        assert!(!text.contains("Source Mix"), "{text}");
+    }
+
+    #[test]
+    fn empty_day_breakdown_shows_no_data_copy() {
+        let heatmap = heatmap_from(NaiveDate::from_ymd_opt(2026, 1, 4).unwrap(), &[0]);
+        let data = Some(Ok(payload(heatmap)));
+        let detail = PeriodDetailState {
+            kind: PeriodDetailKind::Daily {
+                date: "2026-01-04".to_string(),
+            },
+            list_scroll: ScrollState {
+                offset: 0,
+                selected: 0,
+                total: 0,
+                visible: 8,
+            },
+            payload: Some(Ok(PeriodDetailPayload::Daily(Vec::new()))),
+        };
+        let scroll = ScrollState {
+            offset: 0,
+            selected: 0,
+            total: 0,
+            visible: 8,
+        };
+        let mut terminal = Terminal::new(TestBackend::new(80, 30)).unwrap();
+        terminal
+            .draw(|frame| super::render(frame, frame.area(), &data, &scroll, Some(&detail)))
+            .unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(text.contains("Day Breakdown"), "{text}");
+        assert!(text.contains("No data for this day"), "{text}");
     }
 }

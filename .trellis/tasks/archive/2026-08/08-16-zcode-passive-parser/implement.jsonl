@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "来源注册表/解析器边界/sync stats/source status 契约"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "token 归一化、去重、权威 total 与 legacy rebuild 契约"}
+{"file": ".trellis/spec/llmusage/backend/write-fencing-contracts.md", "reason": "新增 zcode cursor 写入需遵循的 sync writer/mutation 入口契约"}
+{"file": ".trellis/spec/llmusage/backend/pricing-catalog-contracts.md", "reason": "Unpriced 语义与后续加价目路径"}
+{"file": "docs/agents/passive-parser-onboarding.md", "reason": "onboarding 闸门：证据/测试/停止规则"}
+{"file": ".trellis/tasks/08-16-passive-sources-zcode-antigravity-deepseek/research/zcode-artifacts.md", "reason": "model_usage 42 列 schema、cache-inclusive 语义（20/20 验证）、设计取舍"}
+{"file": ".trellis/tasks/08-16-passive-sources-zcode-antigravity-deepseek/research/ccusage-tokscale-reference.md", "reason": "tokscale zcode 参考实现（normalize/探测列/dedup）"}

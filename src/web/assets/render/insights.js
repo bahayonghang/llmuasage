@@ -3,6 +3,23 @@ import { escapeHtml } from '../data.js';
 
 const logger = window.console;
 
+function fillTemplate(template, params = {}) {
+  return Object.entries(params).reduce(
+    (value, [key, replacement]) => value.split(`{${key}}`).join(String(replacement)),
+    String(template || ''),
+  );
+}
+
+function insightCopy(row, copy) {
+  const localized = copy.items?.[row?.id];
+  if (!localized) return row || {};
+  return {
+    ...localized,
+    evidence: fillTemplate(localized.evidence, row?.params),
+    action: fillTemplate(localized.action, row?.params),
+  };
+}
+
 /*
  * ========================================================================
  * 步骤1：渲染诊断型洞察
@@ -36,18 +53,19 @@ export function renderInsights(context) {
     <div class="insight-note">${escapeHtml(copy.disclaimer)}</div>
     <div class="insight-list">
       ${rows
-        .map(
-          (row) => `
+        .map((row) => {
+          const localized = insightCopy(row, copy);
+          return `
             <article class="insight-row" data-tone="${escapeHtml(row.tone || 'neutral')}">
               <div class="insight-row-head">
-                <span class="insight-label">${escapeHtml(row.label || copy.defaultLabel)}</span>
-                <strong>${escapeHtml(row.title || '--')}</strong>
+                <span class="insight-label">${escapeHtml(localized.label || copy.defaultLabel)}</span>
+                <strong>${escapeHtml(localized.title || '--')}</strong>
               </div>
-              <div class="insight-evidence">${escapeHtml(row.evidence || '--')}</div>
-              <div class="insight-action">${escapeHtml(row.action || copy.defaultAction)}</div>
+              <div class="insight-evidence">${escapeHtml(localized.evidence || '--')}</div>
+              <div class="insight-action">${escapeHtml(localized.action || copy.defaultAction)}</div>
             </article>
-          `,
-        )
+          `;
+        })
         .join('')}
     </div>
   `;

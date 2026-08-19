@@ -18,7 +18,7 @@ The export directory contains:
 - `snapshot.json`
 - `assets/*`
 
-The bundle reuses the same dashboard shell as `llmusage serve`, but it loads from `snapshot.json` instead of live HTTP endpoints. `snapshot.json` includes the fixed dashboard sections and the default Cost Explorer payload.
+The bundle reuses the same dashboard shell as `llmusage serve`, but it loads from `snapshot.json` instead of live HTTP endpoints. `snapshot.json` includes the fixed dashboard sections and the default Usage analysis payload.
 
 ## Snapshot behavior
 

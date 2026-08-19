@@ -1444,3 +1444,242 @@ Public listener 改用最小读路由与脱敏聚合 DTO，并忽略 project sel
 ### Status
 
 [OK] **Completed**
+
+
+## Session 47: 新增三源被动解析器并升至 1.2.0
+
+**Date**: 2026-08-16
+**Task**: 新增三源被动解析器并升至 1.2.0
+**Branch**: `dev`
+
+### Summary
+
+落地 zcode、antigravity CLI、deepseek-harness 被动解析器，版本升至 1.2.0。clipy 与全量 cargo test 通过，MSRV 1.95 isolated check 通过。
+
+### Main Changes
+
+- 新增 SourceKind::Zcode / DeepseekHarness，翻转 antigravity 为 parser-backed
+- zcode 读 model_usage completed 行，水位锚 completed_at
+- antigravity 解码 gen_metadata protobuf，rebuild 拒绝未归属 hook 行
+- deepseek_harness 流式 zstd 解码，会话家族重放，引入 zstd crate
+- 文档、候选表、ADR-0012/0013、token 契约同步；crate 1.2.0
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7843f6e` | (see git log) |
+
+### Testing
+
+- [OK] cargo clippy --all-targets --all-features -- -D warnings
+- [OK] cargo test --all-features -- --test-threads=1
+- [OK] cargo +1.95.0 check --locked --all-features（隔离 target）
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 按需把 dev 合入 main 并做 1.2.0 发布
+
+
+## Session 48: Parse issue 分类纠偏与可观测性
+
+**Date**: 2026-08-17
+**Task**: Parse issue 分类纠偏与可观测性
+**Branch**: `dev`
+
+### Summary
+
+把 sync parse issue 拆成 malformed/oversized/skipped/accounting_anomaly，Codex 超大行按前缀分类并可回收完整 token_count；CLI、doctor、source-status、看板与 TUI 共用同一套计数。
+
+### Main Changes
+
+- 四类互斥 parse issue 计数与样本 basename
+- Codex 4MiB 前缀 peek/回收 token_count
+- Zcode 未完成行改为 skipped，记账异常单独计数
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5d7435c` | (see git log) |
+
+### Testing
+
+- [OK] python scripts/ci-rust.py
+- [OK] node --check dashboard JS
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 按需推送 origin/dev；本地 Trellis 脚本改动未纳入本次提交
+
+
+## Session 49: 优化用量概览布局与术语
+
+**Date**: 2026-08-17
+**Task**: 优化用量概览布局与术语
+**Branch**: `dev`
+
+### Summary
+
+修复宽屏组合热力图空白与全年日历滚动，统一看板静态和动态中英文术语，补充响应式、i18n、CSV 与导出回归，并通过完整 just ci 和多视口浏览器验收。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `79b71f8` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 50: 完善 parse issue 诊断与日志
+
+**Date**: 2026-08-17
+**Task**: 完善 parse issue 诊断与日志
+**Branch**: `dev`
+
+### Summary
+
+为 parse issue 样本补上闭集 reason，并用独立 skip 水位让同一条 ZCode 未完成行只报告一次。
+
+### Main Changes
+
+- ParseIssueSample 增加 reason；CLI 有 reason 时不再打印 @0
+- ZCode schema v22 独立 skip 水位；取消与 --recent-days 不推进
+- driver 对非零 parse issue 打一条 info 事件，默认 warn 不落盘
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2df934a` | (see git log) |
+
+### Testing
+
+- [OK] python scripts/ci-rust.py
+- [OK] cargo test --test sync_regression zcode_ -- --test-threads=1
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 本机再跑一次 llmusage sync，确认首次出现 reason 后第二次 unchanged 不再出现
+
+
+## Session 51: Dash Models 对齐 tokscale 彩色表
+
+**Date**: 2026-08-19
+**Task**: Dash Models 对齐 tokscale 彩色表
+**Branch**: `dev`
+
+### Summary
+
+将 llmusage dash Models 改为 tokscale 风格：厂商着色、通道分色、取消长尾折叠、默认 Cost 降序，并补齐 Provider/Source/Cache×/Cost/1M 列。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `03b844f` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 52: Dash Overview 对齐 tokscale 图表首页
+
+**Date**: 2026-08-19
+**Task**: Dash Overview 对齐 tokscale 图表首页
+**Branch**: `dev`
+
+### Summary
+
+将 llmusage dash Overview 从 KPI 卡片墙换成 tokscale 风格的 Tokens per Day 堆叠柱、图例和 Models by Cost 双行名单。新增 trends_daily_by_model；页脚仍显示 lifetime 合计；web 与 Models 宽表未改。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b689646` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 53: Dash Usage 对齐 tokscale 额度页
+
+**Date**: 2026-08-19
+**Task**: Dash Usage 对齐 tokscale 额度页
+**Branch**: `dev`
+
+### Summary
+
+Usage 页改为只读拉取 Grok/Kimi/Claude/Codex 订阅额度，Source Sync 迁到 overlay。cargo fmt、clippy、lib 测试和 tui_panels_prop 已通过。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `77db0c9` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 54: Dash Daily Hourly Monthly 对齐 tokscale
+
+**Date**: 2026-08-19
+**Task**: Dash Daily Hourly Monthly 对齐 tokscale
+**Branch**: `dev`
+
+### Summary
+
+将 dash Daily/Hourly 换成 tokscale 周期表，新增 Monthly 为第 6 个 tab，删除 TUI Cost tab。Hourly 按本地整点小时聚合并加日期分组行。Daily/Monthly 支持 Enter 明细。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7d5a5bf` | (see git log) |
+| `f58e6c2` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 55: Dash Stats 对齐 tokscale 年历
+
+**Date**: 2026-08-19
+**Task**: Dash Stats 对齐 tokscale 年历
+**Branch**: `dev`
+
+### Summary
+
+将 llmusage dash Stats 改为 52 周贡献年历、两列摘要和选中日 Day Breakdown；去掉 Source Mix/Health Signals；更新 TUI 合同。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2c81be7` | (see git log) |
+| `4fd7818` | (see git log) |
+
+### Status
+
+[OK] **Completed**

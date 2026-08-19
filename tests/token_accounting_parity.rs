@@ -10,7 +10,7 @@ use llmusage::{
         Dashboard, ReportTimezone,
         reports::{ReportFilter, SortOrder, load_daily_report},
     },
-    store::Store,
+    store::{Store, expected_token_accounting_version},
 };
 use rusqlite::Connection;
 use tempfile::TempDir;
@@ -337,7 +337,7 @@ fn automatic_repair_handles_multiple_legacy_sources_in_registry_order() -> Resul
         }
         assert_eq!(
             store.token_accounting_version(SourceKind::Antigravity)?,
-            None
+            Some(expected_token_accounting_version(SourceKind::Antigravity))
         );
         Ok::<_, anyhow::Error>(())
     })?;
@@ -680,7 +680,7 @@ fn empty_and_parserless_selected_sources_do_not_enter_automatic_repair() -> Resu
         );
         assert_eq!(
             store.token_accounting_version(SourceKind::Antigravity)?,
-            None
+            Some(expected_token_accounting_version(SourceKind::Antigravity))
         );
         Ok::<_, anyhow::Error>(())
     })?;
@@ -867,7 +867,7 @@ fn serve_repair_rebuilds_multiple_legacy_sources_in_registry_order() -> Result<(
         );
         assert_eq!(
             store.token_accounting_version(SourceKind::Antigravity)?,
-            None
+            Some(expected_token_accounting_version(SourceKind::Antigravity))
         );
         Ok::<_, anyhow::Error>(())
     })?;
@@ -955,7 +955,7 @@ fn serve_repair_propagates_safe_rebuild_failures() -> Result<()> {
 }
 
 #[test]
-fn full_rebuild_preserves_parserless_antigravity_history_and_diagnostics() -> Result<()> {
+fn full_rebuild_refused_while_unattributed_antigravity_history_exists() -> Result<()> {
     let fixture = Fixture::new()?;
     fixture.seed_codex_copied_event()?;
 
@@ -977,17 +977,28 @@ fn full_rebuild_preserves_parserless_antigravity_history_and_diagnostics() -> Re
         .await?;
         seed_antigravity_history(&store)?;
 
-        commands::sync::run_once_with_options(
+        // Hook-era rows carry no file attribution and cannot be reconstructed
+        // from conversations/*.db, so any rebuild that would delete them is
+        // refused — even with --allow-lossy-rebuild and even for a full
+        // no-source rebuild.
+        let error = commands::sync::run_once_with_options(
             &app,
             &store,
             0,
             &commands::sync::SyncRunOptions {
                 rebuild: true,
+                allow_lossy_rebuild: true,
                 ..Default::default()
             },
             None,
         )
-        .await?;
+        .await
+        .expect_err("full rebuild must refuse while unattributed history exists");
+        assert!(
+            error
+                .to_string()
+                .contains("hook-era history without file attribution")
+        );
 
         for table in [
             "usage_event",
@@ -1000,7 +1011,7 @@ fn full_rebuild_preserves_parserless_antigravity_history_and_diagnostics() -> Re
             assert_eq!(
                 source_row_count(&store, table, SourceKind::Antigravity)?,
                 1,
-                "full rebuild must preserve Antigravity rows in {table}"
+                "refused rebuild must preserve Antigravity rows in {table}"
             );
         }
         let risk = store

@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/llmusage/backend/tui-presentation-contracts.md", "reason": "Verify NoColor, ANSI16, theme slots, and format helper contracts"}
+{"file": ".trellis/spec/llmusage/backend/tui-runtime-contracts.md", "reason": "Verify Models no longer folds, Cost still folds, visible-row windowing"}
+{"file": ".trellis/tasks/08-18-dash-models-tokscale-style/prd.md", "reason": "Verify AC1–AC8 and /api/models field-set compatibility"}
+{"file": ".trellis/tasks/08-18-dash-models-tokscale-style/research/tokscale-models-gap.md", "reason": "Verify in-scope columns and out-of-scope ms/1K and parsers"}

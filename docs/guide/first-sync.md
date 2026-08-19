@@ -63,7 +63,7 @@ llmusage sync --recent-days 1
 llmusage sync --rebuild
 ```
 
-`--rebuild` resets parser-backed usage state source by source before reparsing local sources. Parserless Antigravity events, buckets, behavior facts, cursors, and source-file diagnostics are preserved. The rebuild is refused by default when file-backed imported history for a parser source depends on files that are now missing.
+`--rebuild` resets parser-backed usage state source by source before reparsing local sources. A rebuild that would delete unattributed hook-era Antigravity rows is refused. The rebuild is refused by default when file-backed imported history for a parser source depends on files that are now missing.
 
 Token accounting is versioned per parser source. Databases containing rows
 from an older accounting contract remain readable. An unbounded normal

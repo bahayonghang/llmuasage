@@ -1,16 +1,41 @@
+use std::collections::BTreeMap;
+
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::Color,
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
 
-use crate::query::OverviewPayload;
-use crate::tui::{format::stat_compact, theme};
+use crate::query::DailyModelPoint;
+use crate::tui::{
+    app::{OverviewPanelPayload, ScrollState, SortState, TableSortKey, stable_sort_refs},
+    format::{cost_compact, stat_compact},
+    model_vendor::{build_shade_map, vendor_from_model},
+    stacked_bar::{StackedBarData, StackedBarSegment, render_stacked_bar_chart},
+    theme,
+};
 
-/// Render the overview panel with KPI cards and metadata.
-pub fn render(frame: &mut Frame, area: Rect, data: &Option<Result<OverviewPayload, String>>) {
+const ALL_WINDOW_CHART_DAYS: usize = 60;
+
+/// Render the overview panel as a stacked daily chart and model list.
+pub fn render(frame: &mut Frame, area: Rect, data: &Option<Result<OverviewPanelPayload, String>>) {
+    let scroll = ScrollState {
+        offset: 0,
+        selected: 0,
+        total: 0,
+        visible: 0,
+    };
+    render_with_plan(frame, area, data, &scroll, SortState::cost_desc());
+}
+
+pub(crate) fn render_with_plan(
+    frame: &mut Frame,
+    area: Rect,
+    data: &Option<Result<OverviewPanelPayload, String>>,
+    scroll: &ScrollState,
+    sort: SortState,
+) {
     match data {
         None => {
             let widget = Paragraph::new("Loading...")
@@ -24,289 +49,291 @@ pub fn render(frame: &mut Frame, area: Rect, data: &Option<Result<OverviewPayloa
                 .block(styled_block("Overview"));
             frame.render_widget(widget, area);
         }
-        Some(Ok(payload)) => render_payload(frame, area, payload),
+        Some(Ok(payload)) => render_payload(frame, area, payload, scroll, sort),
     }
 }
 
-fn render_payload(frame: &mut Frame, area: Rect, payload: &OverviewPayload) {
-    let block = styled_block("Overview");
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    if inner.height < 16 {
-        let [kpi_area, _gap, meta_area] = Layout::vertical([
-            Constraint::Length(5),
-            Constraint::Length(1),
-            Constraint::Min(0),
-        ])
-        .areas(inner);
-        render_kpi_row(frame, kpi_area, payload);
-        render_compact_metadata(frame, meta_area, payload);
+fn render_payload(
+    frame: &mut Frame,
+    area: Rect,
+    payload: &OverviewPanelPayload,
+    scroll: &ScrollState,
+    sort: SortState,
+) {
+    if area.height == 0 || area.width == 0 {
         return;
     }
 
-    let detail_height = if inner.width < 90 { 15 } else { 8 };
-    let [kpi_area, _gap, detail_area, _gap2, pulse_area] = Layout::vertical([
-        Constraint::Length(5),
-        Constraint::Length(1),
-        Constraint::Length(detail_height),
+    let chart_height = ((area.height as f64) * 0.35).floor().max(5.0) as u16;
+    let [chart_area, legend_area, list_area] = Layout::vertical([
+        Constraint::Length(chart_height.min(area.height)),
         Constraint::Length(1),
         Constraint::Min(0),
     ])
-    .areas(inner);
-
-    render_kpi_row(frame, kpi_area, payload);
-    render_detail_sections(frame, detail_area, payload);
-    render_24h_pulse(frame, pulse_area, payload);
-}
-
-fn render_kpi_row(frame: &mut Frame, area: Rect, payload: &OverviewPayload) {
-    let kpi_cols: [Rect; 4] = Layout::horizontal([
-        Constraint::Ratio(1, 4),
-        Constraint::Ratio(1, 4),
-        Constraint::Ratio(1, 4),
-        Constraint::Ratio(1, 4),
-    ])
     .areas(area);
 
-    render_kpi_card(
+    let shade_map = build_shade_map(&payload.models);
+    render_stacked_bar_chart(
         frame,
-        kpi_cols[0],
-        "Total Tokens",
-        &stat_compact(payload.total.total_tokens),
-        theme::kpi_colors()[0],
+        chart_area,
+        &chart_series(&payload.daily_models, &shade_map),
+        if area.width < 60 {
+            "Tokens"
+        } else {
+            "Tokens per Day"
+        },
     );
-    render_kpi_card(
-        frame,
-        kpi_cols[1],
-        "24h Tokens",
-        &stat_compact(payload.last_24h.total_tokens),
-        theme::kpi_colors()[1],
-    );
-    render_kpi_card(
-        frame,
-        kpi_cols[2],
-        "Total Cost",
-        &format!("${:.2}", payload.total_cost_usd),
-        theme::kpi_colors()[2],
-    );
-    render_kpi_card(
-        frame,
-        kpi_cols[3],
-        "Cache Hit Rate",
-        &format!("{:.1}%", payload.cache_efficiency * 100.0),
-        theme::kpi_colors()[3],
-    );
+    render_legend(frame, legend_area, &payload.models, sort, &shade_map);
+    render_model_list(frame, list_area, &payload.models, scroll, sort, &shade_map);
 }
 
-fn render_detail_sections(frame: &mut Frame, area: Rect, payload: &OverviewPayload) {
-    if area.width < 90 {
-        let [tokens, activity, freshness] = Layout::vertical([
-            Constraint::Length(5),
-            Constraint::Length(5),
-            Constraint::Min(0),
-        ])
-        .areas(area);
-        render_summary_block(frame, tokens, "Token Mix", token_mix_lines(&payload.total));
-        render_summary_block(frame, activity, "Recent Activity", activity_lines(payload));
-        render_summary_block(frame, freshness, "Freshness", freshness_lines(payload));
-        return;
+fn chart_series(
+    points: &[DailyModelPoint],
+    shade_map: &std::collections::HashMap<String, usize>,
+) -> Vec<StackedBarData> {
+    let mut by_date: BTreeMap<&str, Vec<(&str, i64)>> = BTreeMap::new();
+    for point in points {
+        by_date
+            .entry(point.date.as_str())
+            .or_default()
+            .push((point.model.as_str(), point.total_tokens));
     }
-
-    let [tokens, activity, freshness] = Layout::horizontal([
-        Constraint::Ratio(1, 3),
-        Constraint::Ratio(1, 3),
-        Constraint::Ratio(1, 3),
-    ])
-    .areas(area);
-    render_summary_block(frame, tokens, "Token Mix", token_mix_lines(&payload.total));
-    render_summary_block(frame, activity, "Recent Activity", activity_lines(payload));
-    render_summary_block(frame, freshness, "Freshness", freshness_lines(payload));
+    let start = by_date.len().saturating_sub(ALL_WINDOW_CHART_DAYS);
+    by_date
+        .into_iter()
+        .skip(start)
+        .map(|(date, mut models)| {
+            models.sort_by(|left, right| left.0.cmp(right.0));
+            let total = models.iter().map(|(_, tokens)| *tokens).sum::<i64>();
+            let segments = models
+                .into_iter()
+                .map(|(model, tokens)| {
+                    let vendor = vendor_from_model(model);
+                    let rank = shade_map.get(model).copied().unwrap_or(0);
+                    StackedBarSegment {
+                        tokens,
+                        color: theme::vendor_fg(vendor, rank),
+                    }
+                })
+                .collect();
+            StackedBarData {
+                date: date.to_string(),
+                total,
+                segments,
+            }
+        })
+        .collect()
 }
 
-fn render_24h_pulse(frame: &mut Frame, area: Rect, payload: &OverviewPayload) {
-    if area.height == 0 {
-        return;
-    }
-
-    let share = percentage(payload.last_24h.total_tokens, payload.total.total_tokens);
-    let avg = average_tokens(payload.last_24h.total_tokens, payload.last_24h_events);
-    let mut lines = vec![
-        metric_line(
-            "Tokens",
-            stat_compact(payload.last_24h.total_tokens),
-            theme::positive_fg(),
-        ),
-        metric_line(
-            "Events",
-            stat_compact(payload.last_24h_events),
-            theme::metric_input(),
-        ),
-        metric_line("Avg/event", avg, theme::metric_reasoning()),
-        metric_line("All-time share", share, theme::metric_cache_write()),
-    ];
-    lines.extend(token_mix_lines(&payload.last_24h));
-
-    render_summary_block(frame, area, "24h Pulse", lines);
-}
-
-fn render_compact_metadata(frame: &mut Frame, area: Rect, payload: &OverviewPayload) {
-    let meta_lines = vec![
-        metric_line(
-            "Sources",
-            stat_compact(payload.source_count),
-            theme::accent(),
-        ),
-        metric_line(
-            "Buckets",
-            stat_compact(payload.bucket_count),
-            theme::accent(),
-        ),
-        metric_line("Last sync", last_sync_text(payload), theme::accent()),
-    ];
-    frame.render_widget(Paragraph::new(meta_lines), area);
-}
-
-fn render_summary_block(frame: &mut Frame, area: Rect, title: &str, lines: Vec<Line<'static>>) {
-    let widget = Paragraph::new(lines).block(theme::panel_block(title));
-    frame.render_widget(widget, area);
-}
-
-fn token_mix_lines(summary: &crate::query::TokenSummary) -> Vec<Line<'static>> {
-    vec![
-        metric_line(
-            "Input",
-            stat_compact(summary.input_tokens),
-            theme::metric_input(),
-        ),
-        metric_line(
-            "Output",
-            stat_compact(summary.output_tokens),
-            theme::metric_output(),
-        ),
-        metric_line(
-            "Cache read",
-            stat_compact(summary.cache_read_tokens),
-            theme::metric_cache_read(),
-        ),
-        metric_line(
-            "Cache write",
-            stat_compact(summary.cache_creation_tokens),
-            theme::metric_cache_write(),
-        ),
-        metric_line(
-            "Reasoning",
-            stat_compact(summary.reasoning_output_tokens),
-            theme::metric_reasoning(),
-        ),
-    ]
-}
-
-fn activity_lines(payload: &OverviewPayload) -> Vec<Line<'static>> {
-    vec![
-        metric_line(
-            "Events",
-            stat_compact(payload.total_events),
-            theme::positive_fg(),
-        ),
-        metric_line(
-            "24h events",
-            stat_compact(payload.last_24h_events),
-            theme::metric_input(),
-        ),
-        metric_line(
-            "Avg/event",
-            average_tokens(payload.total.total_tokens, payload.total_events),
-            theme::metric_reasoning(),
-        ),
-        metric_line(
-            "Sources",
-            stat_compact(payload.source_count),
-            theme::metric_cache_write(),
-        ),
-        metric_line(
-            "Buckets",
-            stat_compact(payload.bucket_count),
-            theme::metric_cache_read(),
-        ),
-    ]
-}
-
-fn freshness_lines(payload: &OverviewPayload) -> Vec<Line<'static>> {
-    vec![
-        metric_line("Last sync", last_sync_text(payload), theme::positive_fg()),
-        metric_line(
-            "Last export",
-            payload
-                .last_export_at
-                .clone()
-                .unwrap_or_else(|| "never".to_string()),
-            theme::metric_input(),
-        ),
-        metric_line(
-            "Generated",
-            payload.generated_at.clone(),
-            theme::metric_cache_read(),
-        ),
-        metric_line(
-            "Cache hit",
-            format!("{:.1}%", payload.cache_efficiency * 100.0),
-            theme::metric_cache_write(),
-        ),
-    ]
-}
-
-fn metric_line(label: &'static str, value: String, color: Color) -> Line<'static> {
-    Line::from(vec![
-        Span::styled(format!("{label:<12}"), theme::muted_style()),
-        Span::styled(value, theme::bold_fg_style(color)),
-    ])
-}
-
-fn last_sync_text(payload: &OverviewPayload) -> String {
-    payload
-        .last_sync_at
-        .clone()
-        .unwrap_or_else(|| "Never synced".to_string())
-}
-
-fn average_tokens(tokens: i64, events: i64) -> String {
-    if events <= 0 {
-        "-".to_string()
-    } else {
-        stat_compact(tokens / events)
-    }
-}
-
-fn percentage(part: i64, total: i64) -> String {
-    if total <= 0 {
-        "-".to_string()
-    } else {
-        format!("{:.1}%", (part as f64 / total as f64) * 100.0)
-    }
-}
-
-fn render_kpi_card(
+fn render_legend(
     frame: &mut Frame,
     area: Rect,
-    title: &str,
-    value: &str,
-    color: ratatui::style::Color,
+    models: &[crate::query::ModelBreakdown],
+    sort: SortState,
+    shade_map: &std::collections::HashMap<String, usize>,
 ) {
-    let card = Paragraph::new(Line::from(vec![Span::styled(
-        value,
-        theme::bold_fg_style(color),
-    )]))
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(theme::fg_style(color))
-            .title(Span::styled(
-                format!(" {} ", title),
-                theme::bold_fg_style(color),
-            )),
-    );
-    frame.render_widget(card, area);
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+    let ordered = sorted_models(models, sort);
+    let limit = if area.width < 80 { 3 } else { 5 };
+    let name_width = if area.width < 80 { 12 } else { 18 };
+    let mut spans = Vec::new();
+    for (index, item) in ordered.into_iter().take(limit).enumerate() {
+        let vendor = vendor_from_model(&item.model);
+        let rank = shade_map.get(&item.model).copied().unwrap_or(0);
+        if index > 0 {
+            spans.push(Span::styled("  ·", theme::muted_style()));
+            spans.push(Span::raw(" "));
+        }
+        spans.push(Span::styled("●", theme::vendor_style(vendor, rank)));
+        spans.push(Span::styled(
+            format!(" {}", truncate_chars(&item.model, name_width)),
+            theme::vendor_style(vendor, rank),
+        ));
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+fn render_model_list(
+    frame: &mut Frame,
+    area: Rect,
+    models: &[crate::query::ModelBreakdown],
+    scroll: &ScrollState,
+    sort: SortState,
+    shade_map: &std::collections::HashMap<String, usize>,
+) {
+    let narrow = area.width < 80;
+    let very_narrow = area.width < 60;
+    let ordered = sorted_models(models, sort);
+    let window_cost = ordered
+        .iter()
+        .map(|item| finite_cost(item.cost_with_cache_usd))
+        .sum::<f64>();
+    let title = if very_narrow {
+        "Top Models".to_string()
+    } else if sort.key == Some(TableSortKey::Tokens) {
+        "Models by Tokens".to_string()
+    } else {
+        "Models by Cost".to_string()
+    };
+    let title_right = if very_narrow {
+        cost_compact(window_cost)
+    } else {
+        format!("Total: {}", cost_compact(window_cost))
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme::block_border_style())
+        .title(Span::styled(
+            format!(" {title} "),
+            theme::block_title_style(),
+        ))
+        .title_top(
+            ratatui::text::Line::from(Span::styled(
+                format!(" {title_right} "),
+                theme::bold_fg_style(theme::positive_fg()),
+            ))
+            .right_aligned(),
+        );
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+    if ordered.is_empty() {
+        frame.render_widget(
+            Paragraph::new("No model data found.").style(theme::muted_style()),
+            inner,
+        );
+        return;
+    }
+
+    let items_per_page = (inner.height / 2).max(1) as usize;
+    let range = scroll.visible_range(ordered.len(), items_per_page);
+    let percent_base = window_cost.max(0.01);
+    let max_name_width = inner.width.saturating_sub(12).max(8) as usize;
+    let mut y = inner.y;
+    for absolute in range {
+        if y + 1 >= inner.y + inner.height {
+            break;
+        }
+        let item = ordered[absolute];
+        let selected = absolute == scroll.selected;
+        let row_style = if selected {
+            theme::selection_fill_style()
+        } else {
+            theme::row_style()
+        };
+        let vendor = vendor_from_model(&item.model);
+        let rank = shade_map.get(&item.model).copied().unwrap_or(0);
+        let percent = finite_cost(item.cost_with_cache_usd) / percent_base * 100.0;
+        let name_style = theme::vendor_style(vendor, rank);
+
+        let line1_area = Rect::new(inner.x, y, inner.width, 1);
+        frame.render_widget(Paragraph::new("").style(row_style), line1_area);
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled("●", name_style),
+                Span::styled(
+                    format!(" {}", truncate_chars(&item.model, max_name_width)),
+                    name_style,
+                ),
+                Span::styled(format!(" ({percent:.1}%)"), theme::muted_style()),
+            ]))
+            .style(row_style),
+            line1_area,
+        );
+        y += 1;
+        if y >= inner.y + inner.height {
+            break;
+        }
+
+        let line2_area = Rect::new(inner.x, y, inner.width, 1);
+        frame.render_widget(Paragraph::new("").style(row_style), line2_area);
+        let line2 = if narrow {
+            Line::from(vec![
+                Span::raw("  "),
+                Span::styled(stat_compact(item.input_tokens), theme::muted_style()),
+                Span::styled("/", theme::muted_style()),
+                Span::styled(stat_compact(item.output_tokens), theme::muted_style()),
+                Span::styled("/", theme::muted_style()),
+                Span::styled(stat_compact(item.cache_read_tokens), theme::muted_style()),
+                Span::styled("/", theme::muted_style()),
+                Span::styled(
+                    stat_compact(item.cache_creation_tokens),
+                    theme::muted_style(),
+                ),
+            ])
+        } else {
+            Line::from(vec![
+                Span::styled("  In: ", theme::muted_style()),
+                Span::styled(
+                    stat_compact(item.input_tokens),
+                    theme::fg_style(theme::metric_input()),
+                ),
+                Span::styled(" · Out: ", theme::muted_style()),
+                Span::styled(
+                    stat_compact(item.output_tokens),
+                    theme::fg_style(theme::metric_output()),
+                ),
+                Span::styled(" · CR: ", theme::muted_style()),
+                Span::styled(
+                    stat_compact(item.cache_read_tokens),
+                    theme::fg_style(theme::metric_cache_read()),
+                ),
+                Span::styled(" · CW: ", theme::muted_style()),
+                Span::styled(
+                    stat_compact(item.cache_creation_tokens),
+                    theme::fg_style(theme::metric_cache_write()),
+                ),
+            ])
+        };
+        frame.render_widget(Paragraph::new(line2).style(row_style), line2_area);
+        y += 1;
+    }
+}
+
+fn sorted_models(
+    models: &[crate::query::ModelBreakdown],
+    sort: SortState,
+) -> Vec<&crate::query::ModelBreakdown> {
+    stable_sort_refs(
+        models.iter().collect(),
+        sort,
+        |left, right, key| match key {
+            TableSortKey::Tokens => left.total_tokens.cmp(&right.total_tokens),
+            TableSortKey::Cost => left
+                .cost_with_cache_usd
+                .total_cmp(&right.cost_with_cache_usd),
+            TableSortKey::Date => std::cmp::Ordering::Equal,
+        },
+    )
+}
+
+fn finite_cost(cost: f64) -> f64 {
+    if cost.is_finite() { cost.max(0.0) } else { 0.0 }
+}
+
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    let count = value.chars().count();
+    if count <= max_chars {
+        value.to_string()
+    } else if max_chars == 1 {
+        "…".to_string()
+    } else {
+        format!(
+            "{}…",
+            value
+                .chars()
+                .take(max_chars.saturating_sub(1))
+                .collect::<String>()
+        )
+    }
 }
 
 fn styled_block(title: &str) -> Block<'_> {
@@ -314,7 +341,103 @@ fn styled_block(title: &str) -> Block<'_> {
         .borders(Borders::ALL)
         .border_style(theme::block_border_style())
         .title(Span::styled(
-            format!(" {} ", title),
+            format!(" {title} "),
             theme::block_title_style(),
         ))
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::{Terminal, backend::TestBackend, layout::Rect};
+
+    use super::*;
+    use crate::query::{ModelBreakdown, OverviewPayload, TokenSummary};
+
+    fn model(name: &str, tokens: i64, cost: f64) -> ModelBreakdown {
+        ModelBreakdown {
+            model: name.to_string(),
+            input_tokens: tokens,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+            output_tokens: 0,
+            reasoning_output_tokens: 0,
+            total_tokens: tokens,
+            event_count: 1,
+            cost_with_cache_usd: cost,
+            cost_without_cache_usd: cost,
+            cache_savings_usd: 0.0,
+            pricing_status: "static".to_string(),
+            pricing_source: None,
+            pricing_rate: None,
+            sources: Vec::new(),
+        }
+    }
+
+    fn payload() -> OverviewPanelPayload {
+        OverviewPanelPayload {
+            totals: OverviewPayload {
+                generated_at: "2026-08-19T00:00:00Z".to_string(),
+                total: TokenSummary {
+                    input_tokens: 10,
+                    cache_creation_tokens: 0,
+                    cache_read_tokens: 0,
+                    output_tokens: 0,
+                    reasoning_output_tokens: 0,
+                    total_tokens: 10,
+                },
+                last_24h: TokenSummary::default(),
+                source_count: 1,
+                bucket_count: 1,
+                total_events: 1,
+                last_24h_events: 0,
+                total_cost_usd: 1.0,
+                cache_efficiency: 0.0,
+                last_sync_at: None,
+                last_export_at: None,
+            },
+            daily_models: Vec::new(),
+            models: vec![model("cheap", 9, 1.0), model("heavy", 1, 9.0)],
+        }
+    }
+
+    fn render_text(sort: SortState) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        let data = Some(Ok(payload()));
+        let scroll = ScrollState {
+            offset: 0,
+            selected: 0,
+            total: 2,
+            visible: 4,
+        };
+        terminal
+            .draw(|frame| {
+                render_with_plan(frame, Rect::new(0, 0, 100, 24), &data, &scroll, sort);
+            })
+            .unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect()
+    }
+
+    #[test]
+    fn tokens_sort_changes_list_title() {
+        let text = render_text(SortState {
+            key: Some(TableSortKey::Tokens),
+            descending: true,
+        });
+        assert!(text.contains("Models by Tokens"), "{text}");
+        assert!(!text.contains("Models by Cost"), "{text}");
+    }
+
+    #[test]
+    fn cost_sort_lists_expensive_model_first() {
+        let text = render_text(SortState::cost_desc());
+        let heavy = text.find("heavy").expect("heavy");
+        let cheap = text.find("cheap").expect("cheap");
+        assert!(heavy < cheap, "{text}");
+    }
 }

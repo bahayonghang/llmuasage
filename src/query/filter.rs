@@ -86,6 +86,11 @@ impl QueryFilter {
         self.timezone.resolved().local_week_expr(column)
     }
 
+    /// SQL expression for the local clock hour `YYYY-MM-DD HH:00` of `column`.
+    pub(crate) fn local_hour_expr(&self, column: &str) -> String {
+        self.timezone.resolved().local_hour_expr(column)
+    }
+
     fn sql_filter(&self, alias: Option<&str>, time_column: &str) -> SqlFilter {
         self.sql_filter_with_model_column(alias, time_column, "model")
     }

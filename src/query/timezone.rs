@@ -11,7 +11,9 @@
 //! plain SQLite time modifier so their generated SQL — and therefore their
 //! behavior — is byte-for-byte unchanged.
 
-use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Utc};
+use chrono::{
+    DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Timelike, Utc,
+};
 use chrono_tz::Tz;
 use rusqlite::{Connection, functions::FunctionFlags};
 
@@ -23,6 +25,8 @@ pub(crate) const FN_LOCAL_DATE: &str = "llmusage_local_date";
 pub(crate) const FN_LOCAL_MONTH: &str = "llmusage_local_month";
 /// SQL function name for DST-aware local `YYYY-WW` extraction.
 pub(crate) const FN_LOCAL_WEEK: &str = "llmusage_local_week";
+/// SQL function name for DST-aware local `YYYY-MM-DD HH:00` extraction.
+pub(crate) const FN_LOCAL_HOUR: &str = "llmusage_local_hour";
 
 /// A timezone resolved to something that can answer "what was the offset on
 /// this specific instant".
@@ -116,6 +120,19 @@ impl ResolvedZone {
             Self::Iana(tz) => format!("{FN_LOCAL_WEEK}({column}, '{}')", tz.name()),
         }
     }
+
+    /// SQL expression yielding the local clock hour `YYYY-MM-DD HH:00` for `column`.
+    pub(crate) fn local_hour_expr(&self, column: &str) -> String {
+        match self {
+            Self::Fixed(offset) => {
+                format!(
+                    "strftime('%Y-%m-%d %H:00', {column}, '{}')",
+                    seconds_modifier(*offset)
+                )
+            }
+            Self::Iana(tz) => format!("{FN_LOCAL_HOUR}({column}, '{}')", tz.name()),
+        }
+    }
 }
 
 fn local_offset_snapshot() -> FixedOffset {
@@ -167,6 +184,7 @@ pub(crate) fn register_functions(conn: &Connection) -> Result<()> {
     register_one(conn, FN_LOCAL_DATE, format_local_date)?;
     register_one(conn, FN_LOCAL_MONTH, format_local_month)?;
     register_one(conn, FN_LOCAL_WEEK, format_local_week)?;
+    register_hour(conn)?;
     Ok(())
 }
 
@@ -180,6 +198,16 @@ fn format_local_date(date: NaiveDate) -> String {
 
 fn format_local_month(date: NaiveDate) -> String {
     format!("{:04}-{:02}", date.year(), date.month())
+}
+
+fn format_local_hour(local: NaiveDateTime) -> String {
+    format!(
+        "{:04}-{:02}-{:02} {:02}:00",
+        local.year(),
+        local.month(),
+        local.day(),
+        local.hour()
+    )
 }
 
 /// `%Y-%W` matching C / SQLite `strftime` semantics.
@@ -223,6 +251,33 @@ where
             };
             Ok(Some(format(
                 instant.with_timezone(tz.as_ref()).date_naive(),
+            )))
+        },
+    )?;
+    Ok(())
+}
+
+fn register_hour(conn: &Connection) -> Result<()> {
+    conn.create_scalar_function(
+        FN_LOCAL_HOUR,
+        2,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+        move |ctx| {
+            let tz = ctx.get_or_create_aux(1, |raw| -> std::result::Result<Tz, String> {
+                raw.as_str()
+                    .map_err(|err| err.to_string())?
+                    .parse::<Tz>()
+                    .map_err(|_| "unknown IANA zone".to_string())
+            })?;
+            let raw = ctx.get_raw(0);
+            let Ok(text) = raw.as_str() else {
+                return Ok(None);
+            };
+            let Some(instant) = parse_stored_timestamp(text) else {
+                return Ok(None);
+            };
+            Ok(Some(format_local_hour(
+                instant.with_timezone(tz.as_ref()).naive_local(),
             )))
         },
     )?;
@@ -506,6 +561,10 @@ mod tests {
             utc_zone.local_week_expr("hour_start"),
             "strftime('%Y-%W', hour_start, '+0 seconds')"
         );
+        assert_eq!(
+            utc_zone.local_hour_expr("hour_start"),
+            "strftime('%Y-%m-%d %H:00', hour_start, '+0 seconds')"
+        );
 
         let plus8 = ResolvedZone::Fixed(FixedOffset::east_opt(8 * 3600).unwrap());
         assert_eq!(
@@ -527,6 +586,49 @@ mod tests {
             zone.local_date_expr("hour_start"),
             format!("{FN_LOCAL_DATE}(hour_start, 'America/New_York')")
         );
+        assert_eq!(
+            zone.local_hour_expr("hour_start"),
+            format!("{FN_LOCAL_HOUR}(hour_start, 'America/New_York')")
+        );
+    }
+
+    #[test]
+    fn local_hour_sql_matches_fixed_strftime_and_merges_half_hours() {
+        let conn = conn_with_functions();
+        let plus8 = ResolvedZone::Fixed(FixedOffset::east_opt(8 * 3600).unwrap());
+        let expr = plus8.local_hour_expr("?1");
+        let hour: String = conn
+            .query_row(&format!("SELECT {expr}"), ["2026-04-04T16:30:00Z"], |row| {
+                row.get(0)
+            })
+            .expect("query ok");
+        assert_eq!(hour, "2026-04-05 00:00");
+
+        let ny_six: Option<String> = conn
+            .query_row(
+                &format!("SELECT {FN_LOCAL_HOUR}(?1, ?2)"),
+                ("2026-03-08T06:00:00Z", "America/New_York"),
+                |row| row.get(0),
+            )
+            .expect("query ok");
+        let ny_six_thirty: Option<String> = conn
+            .query_row(
+                &format!("SELECT {FN_LOCAL_HOUR}(?1, ?2)"),
+                ("2026-03-08T06:30:00Z", "America/New_York"),
+                |row| row.get(0),
+            )
+            .expect("query ok");
+        assert_eq!(ny_six.as_deref(), Some("2026-03-08 01:00"));
+        assert_eq!(ny_six_thirty, ny_six);
+
+        let after_spring: Option<String> = conn
+            .query_row(
+                &format!("SELECT {FN_LOCAL_HOUR}(?1, ?2)"),
+                ("2026-03-08T07:00:00Z", "America/New_York"),
+                |row| row.get(0),
+            )
+            .expect("query ok");
+        assert_eq!(after_spring.as_deref(), Some("2026-03-08 03:00"));
     }
 
     /// The `%W` week number is computed in Rust for IANA zones but by SQLite

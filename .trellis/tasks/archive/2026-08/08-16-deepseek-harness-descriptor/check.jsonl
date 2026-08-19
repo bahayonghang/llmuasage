@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "检查 monitor 登记、parserless 无 SourceKind、status 输出"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "检查 DSH 通道归一化方向（input 本就不含 cache）"}
+{"file": "docs/agents/passive-parser-onboarding.md", "reason": "检查证据/测试闸门"}
+{"file": ".trellis/tasks/08-16-deepseek-harness-descriptor/prd.md", "reason": "两阶段验收标准清单"}

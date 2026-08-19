@@ -606,7 +606,13 @@ fn parse_updates_file(
 fn read_json_sidecar(path: &Path, path_hash: &str, issues: &mut ParseIssues) -> Option<Value> {
     let metadata = std::fs::metadata(path).ok()?;
     if metadata.len() > DEFAULT_MAX_JSONL_RECORD_BYTES as u64 {
-        issues.record(SourceKind::Grok, path_hash, 0, ParseIssueKind::Oversized);
+        issues.record(
+            SourceKind::Grok,
+            path_hash,
+            0,
+            ParseIssueKind::Oversized,
+            "",
+        );
         return None;
     }
     match std::fs::read(path)
@@ -615,7 +621,13 @@ fn read_json_sidecar(path: &Path, path_hash: &str, issues: &mut ParseIssues) -> 
     {
         Some(value) => Some(value),
         None => {
-            issues.record(SourceKind::Grok, path_hash, 0, ParseIssueKind::Malformed);
+            issues.record(
+                SourceKind::Grok,
+                path_hash,
+                0,
+                ParseIssueKind::Malformed,
+                "",
+            );
             None
         }
     }
@@ -1043,5 +1055,32 @@ mod tests {
         );
 
         assert!(parse_session(session_dir).events.is_empty());
+    }
+
+    #[test]
+    fn sidecar_over_size_cap_counts_oversized() {
+        let temp = TempDir::new().expect("temp dir");
+        let path = temp.path().join("signals.json");
+        let mut bytes = vec![b'{'; 1];
+        bytes.extend(std::iter::repeat_n(
+            b'x',
+            crate::parsers::file_state::DEFAULT_MAX_JSONL_RECORD_BYTES,
+        ));
+        fs::write(&path, bytes).expect("write oversized sidecar");
+        let mut issues = ParseIssues::default();
+        assert!(read_json_sidecar(&path, "hash", &mut issues).is_none());
+        assert_eq!(issues.oversized_lines, 1);
+        assert_eq!(issues.malformed_lines, 0);
+    }
+
+    #[test]
+    fn sidecar_bad_json_counts_malformed() {
+        let temp = TempDir::new().expect("temp dir");
+        let path = temp.path().join("signals.json");
+        fs::write(&path, "{not-json").expect("write bad sidecar");
+        let mut issues = ParseIssues::default();
+        assert!(read_json_sidecar(&path, "hash", &mut issues).is_none());
+        assert_eq!(issues.malformed_lines, 1);
+        assert_eq!(issues.oversized_lines, 0);
     }
 }

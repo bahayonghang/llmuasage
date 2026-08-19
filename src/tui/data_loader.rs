@@ -10,14 +10,17 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     domain::source_descriptor::registered_source_descriptors,
     query::{
-        ContextPressurePayload, CostLine, DailyTrendPoint, Dashboard, ModelBreakdown,
-        OverviewPayload, QueryFilter, SyncCommandCenterPayload, TrendPoint,
+        ContextPressurePayload, DailyTrendPoint, Dashboard, HourlyTrendPoint, ModelBreakdown,
+        MonthlyTrendPoint, PeriodDetailRow, QueryFilter, SyncCommandCenterPayload,
         reports::BlockReportRow,
     },
     store::Store,
 };
 
-use super::app::{BehaviorPanelPayload, Panel, StatsPanelPayload, TimeWindow};
+use super::app::{
+    BehaviorPanelPayload, OverviewPanelPayload, Panel, PeriodDetailKind, StatsPanelPayload,
+    TimeWindow,
+};
 
 const TUI_DASHBOARD_QUERY_PERMITS: usize = 5;
 const TUI_RESULT_CHANNEL_CAPACITY: usize = 32;
@@ -29,6 +32,7 @@ pub(super) struct PanelRequest {
     pub time_window: TimeWindow,
     pub generation: u64,
     pub refreshing: bool,
+    pub detail: Option<PeriodDetailKind>,
 }
 
 pub(super) struct PanelResult {
@@ -40,13 +44,16 @@ pub(super) struct PanelResult {
     pub payload: PanelPayload,
 }
 
+#[allow(clippy::large_enum_variant)]
 pub(super) enum PanelPayload {
-    Overview(Result<OverviewPayload, String>),
+    Overview(Result<OverviewPanelPayload, String>),
     SyncCenter(Result<SyncCommandCenterPayload, String>),
     Models(Result<Vec<ModelBreakdown>, String>),
     Daily(Result<Vec<DailyTrendPoint>, String>),
-    Hourly(Result<Vec<TrendPoint>, String>),
-    Costs(Result<Vec<CostLine>, String>),
+    Hourly(Result<Vec<HourlyTrendPoint>, String>),
+    Monthly(Result<Vec<MonthlyTrendPoint>, String>),
+    DailyDetail(Result<Vec<PeriodDetailRow>, String>),
+    MonthlyDetail(Result<Vec<DailyTrendPoint>, String>),
     Stats(Result<StatsPanelPayload, String>),
     Behavior(Box<Result<BehaviorPanelPayload, String>>),
     Blocks(Result<Vec<BlockReportRow>, String>),
@@ -113,14 +120,41 @@ async fn load_panel_request(
 ) -> PanelResult {
     let filter = request.filter.clone();
     let window_filter = request.time_window.query_filter(&filter);
-    let payload = match request.panel {
-        Panel::Overview => PanelPayload::Overview(
-            run_query(store, semaphore, cancel, move |dashboard| {
-                dashboard.overview(&filter).map_err(|err| err.to_string())
-            })
-            .await,
+    let payload = match (&request.detail, request.panel) {
+        (Some(PeriodDetailKind::Daily { date }), _) => {
+            let mut detail_filter = window_filter;
+            if let Ok(day) = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d") {
+                detail_filter.since = Some(day);
+                detail_filter.until = Some(day);
+            }
+            PanelPayload::DailyDetail(
+                run_query(store, semaphore, cancel, move |dashboard| {
+                    dashboard
+                        .period_model_breakdown(&detail_filter)
+                        .map_err(|err| err.to_string())
+                })
+                .await,
+            )
+        }
+        (Some(PeriodDetailKind::Monthly { month }), _) => {
+            let mut detail_filter = window_filter;
+            if let Some((start, end)) = crate::query::month_date_bounds(month) {
+                detail_filter.since = Some(start);
+                detail_filter.until = Some(end);
+            }
+            PanelPayload::MonthlyDetail(
+                run_query(store, semaphore, cancel, move |dashboard| {
+                    dashboard
+                        .trends_daily(&detail_filter)
+                        .map_err(|err| err.to_string())
+                })
+                .await,
+            )
+        }
+        (None, Panel::Overview) => PanelPayload::Overview(
+            load_overview_panel_data(store, semaphore, cancel, filter, window_filter).await,
         ),
-        Panel::Trends => PanelPayload::SyncCenter(
+        (None, Panel::Trends) => PanelPayload::SyncCenter(
             run_query(store, semaphore, cancel, move |dashboard| {
                 dashboard
                     .sync_command_center(&filter)
@@ -128,7 +162,7 @@ async fn load_panel_request(
             })
             .await,
         ),
-        Panel::Models => PanelPayload::Models(
+        (None, Panel::Models) => PanelPayload::Models(
             run_query(store, semaphore, cancel, move |dashboard| {
                 dashboard
                     .model_breakdown(&window_filter)
@@ -136,7 +170,7 @@ async fn load_panel_request(
             })
             .await,
         ),
-        Panel::Sources => PanelPayload::Daily(
+        (None, Panel::Sources) => PanelPayload::Daily(
             run_query(store, semaphore, cancel, move |dashboard| {
                 dashboard
                     .trends_daily(&window_filter)
@@ -144,29 +178,29 @@ async fn load_panel_request(
             })
             .await,
         ),
-        Panel::Projects => PanelPayload::Hourly(
+        (None, Panel::Projects) => PanelPayload::Hourly(
             run_query(store, semaphore, cancel, move |dashboard| {
                 dashboard
-                    .trends("hourly", &window_filter)
+                    .trends_hourly(&window_filter)
                     .map_err(|err| err.to_string())
             })
             .await,
         ),
-        Panel::Cost => PanelPayload::Costs(
+        (None, Panel::Monthly) => PanelPayload::Monthly(
             run_query(store, semaphore, cancel, move |dashboard| {
                 dashboard
-                    .cost_breakdown(&window_filter)
+                    .trends_monthly(&window_filter)
                     .map_err(|err| err.to_string())
             })
             .await,
         ),
-        Panel::Health => PanelPayload::Stats(
+        (None, Panel::Health) => PanelPayload::Stats(
             load_stats_panel_data(store, semaphore, cancel, filter, window_filter).await,
         ),
-        Panel::Behavior => PanelPayload::Behavior(Box::new(
+        (None, Panel::Behavior) => PanelPayload::Behavior(Box::new(
             load_behavior_panel_data(store, semaphore, cancel, window_filter).await,
         )),
-        Panel::Blocks => PanelPayload::Blocks(
+        (None, Panel::Blocks) => PanelPayload::Blocks(
             run_query(store, semaphore, cancel, |dashboard| {
                 dashboard.blocks_report().map_err(|err| err.to_string())
             })
@@ -184,6 +218,38 @@ async fn load_panel_request(
     }
 }
 
+async fn load_overview_panel_data(
+    store: Store,
+    semaphore: Arc<Semaphore>,
+    cancel: CancellationToken,
+    base_filter: QueryFilter,
+    window_filter: QueryFilter,
+) -> Result<OverviewPanelPayload, String> {
+    let totals = run_query(store.clone(), Arc::clone(&semaphore), cancel.clone(), {
+        let filter = base_filter;
+        move |dashboard| dashboard.overview(&filter).map_err(|err| err.to_string())
+    });
+    let daily_models = run_query(store.clone(), Arc::clone(&semaphore), cancel.clone(), {
+        let filter = window_filter.clone();
+        move |dashboard| {
+            dashboard
+                .trends_daily_by_model(&filter)
+                .map_err(|err| err.to_string())
+        }
+    });
+    let models = run_query(store, semaphore, cancel, move |dashboard| {
+        dashboard
+            .model_breakdown(&window_filter)
+            .map_err(|err| err.to_string())
+    });
+    let (totals, daily_models, models) = tokio::join!(totals, daily_models, models);
+    Ok(OverviewPanelPayload {
+        totals: totals?,
+        daily_models: daily_models?,
+        models: models?,
+    })
+}
+
 async fn load_stats_panel_data(
     store: Store,
     semaphore: Arc<Semaphore>,
@@ -196,36 +262,29 @@ async fn load_stats_panel_data(
         move |dashboard| dashboard.overview(&filter).map_err(|err| err.to_string())
     });
     let heatmap = run_query(store.clone(), Arc::clone(&semaphore), cancel.clone(), {
-        let filter = base_filter;
+        let filter = base_filter.clone();
         move |dashboard| {
             dashboard
                 .heatmap(&filter, 365)
                 .map_err(|err| err.to_string())
         }
     });
-    let sources = run_query(store.clone(), Arc::clone(&semaphore), cancel.clone(), {
-        let filter = window_filter.clone();
+    let models = run_query(store.clone(), Arc::clone(&semaphore), cancel.clone(), {
+        let filter = base_filter;
         move |dashboard| {
             dashboard
-                .source_breakdown(&filter)
+                .model_breakdown(&filter)
                 .map_err(|err| err.to_string())
         }
     });
-    let health = run_query(
-        store.clone(),
-        Arc::clone(&semaphore),
-        cancel.clone(),
-        |dashboard| dashboard.health().map_err(|err| err.to_string()),
-    );
     let context_pressure = load_context_pressure(store, semaphore, cancel, window_filter);
-    let (overview, heatmap, sources, health, context_pressure) =
-        tokio::join!(overview, heatmap, sources, health, context_pressure);
+    let (overview, heatmap, models, context_pressure) =
+        tokio::join!(overview, heatmap, models, context_pressure);
 
     Ok(StatsPanelPayload {
         overview: overview?,
         heatmap: heatmap?,
-        sources: sources?,
-        health: health?,
+        models: models?,
         context_pressure: context_pressure?,
     })
 }
@@ -492,8 +551,7 @@ mod tests {
         let serial_stats = StatsPanelPayload {
             overview: dashboard.overview(&filter)?,
             heatmap: dashboard.heatmap(&filter, 365)?,
-            sources: dashboard.source_breakdown(&filter)?,
-            health: dashboard.health()?,
+            models: dashboard.model_breakdown(&filter)?,
             context_pressure: dashboard.context_pressure(&filter)?,
         };
         let serial_behavior = BehaviorPanelPayload {
@@ -513,12 +571,8 @@ mod tests {
             serde_json::to_value(&serial_stats.heatmap)?
         );
         assert_eq!(
-            serde_json::to_value(&parallel_stats.sources)?,
-            serde_json::to_value(&serial_stats.sources)?
-        );
-        assert_eq!(
-            serde_json::to_value(&parallel_stats.health)?,
-            serde_json::to_value(&serial_stats.health)?
+            serde_json::to_value(&parallel_stats.models)?,
+            serde_json::to_value(&serial_stats.models)?
         );
         assert_eq!(
             serde_json::to_value(&parallel_stats.context_pressure)?,
@@ -606,11 +660,8 @@ mod tests {
         let _ = dashboard.heatmap(&base_filter, 365)?;
         let heatmap_ms = started.elapsed().as_secs_f64() * 1_000.0;
         let started = Instant::now();
-        let _ = dashboard.source_breakdown(&window_filter)?;
-        let sources_ms = started.elapsed().as_secs_f64() * 1_000.0;
-        let started = Instant::now();
-        let _ = dashboard.health()?;
-        let health_ms = started.elapsed().as_secs_f64() * 1_000.0;
+        let _ = dashboard.model_breakdown(&base_filter)?;
+        let models_ms = started.elapsed().as_secs_f64() * 1_000.0;
         let started = Instant::now();
         let _ = dashboard.context_pressure(&window_filter)?;
         let context_pressure_ms = started.elapsed().as_secs_f64() * 1_000.0;
@@ -652,7 +703,7 @@ mod tests {
         let behavior_serial = median(&mut serial_behavior_ms);
         let behavior_parallel = median(&mut parallel_behavior_ms);
         eprintln!(
-            "database_bytes={database_bytes} window=30d since={:?} until={:?} stats_parts_ms={{overview:{overview_ms:.1},heatmap:{heatmap_ms:.1},sources:{sources_ms:.1},health:{health_ms:.1},context_pressure:{context_pressure_ms:.1}}} stats_serial_ms={serial_stats_ms:?} stats_parallel_ms={parallel_stats_ms:?} stats_improvement_pct={:.1} behavior_serial_ms={serial_behavior_ms:?} behavior_parallel_ms={parallel_behavior_ms:?} behavior_improvement_pct={:.1}",
+            "database_bytes={database_bytes} window=30d since={:?} until={:?} stats_parts_ms={{overview:{overview_ms:.1},heatmap:{heatmap_ms:.1},models:{models_ms:.1},context_pressure:{context_pressure_ms:.1}}} stats_serial_ms={serial_stats_ms:?} stats_parallel_ms={parallel_stats_ms:?} stats_improvement_pct={:.1} behavior_serial_ms={serial_behavior_ms:?} behavior_parallel_ms={parallel_behavior_ms:?} behavior_improvement_pct={:.1}",
             window_filter.since,
             window_filter.until,
             improvement(stats_serial, stats_parallel),
@@ -670,8 +721,7 @@ mod tests {
         Ok(StatsPanelPayload {
             overview: dashboard.overview(base_filter)?,
             heatmap: dashboard.heatmap(base_filter, 365)?,
-            sources: dashboard.source_breakdown(window_filter)?,
-            health: dashboard.health()?,
+            models: dashboard.model_breakdown(base_filter)?,
             context_pressure: dashboard.context_pressure(window_filter)?,
         })
     }

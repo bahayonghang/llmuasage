@@ -6,21 +6,28 @@
 //! expected strings appear in the rendered output.
 
 use proptest::prelude::*;
-use ratatui::{Terminal, backend::TestBackend, layout::Rect};
+use ratatui::{
+    Terminal,
+    backend::TestBackend,
+    layout::Rect,
+    style::{Color, Modifier},
+};
 
 use llmusage::domain::platform_monitor::{ParserSupportStatus, PlatformProbe, PlatformProbeStatus};
 use llmusage::query::{
     ActivityBreakdown, ActivityPayload, BehaviorSupport, CategoryCompareRow, CompareMetric,
-    CompareModelCandidate, ContextPressurePayload, CostLine, CursorHealth, DailyTrendPoint,
-    HealthPayload, HeatmapPoint, ModelBreakdown, ModelComparePayload, ModelCompareStats,
-    OptimizeFinding, OptimizePayload, OverviewPayload, SourceBreakdown, SyncActionPayload,
+    CompareModelCandidate, ContextPressurePayload, DailyModelPoint, DailyTrendPoint, HeatmapPoint,
+    HourlyTrendPoint, ModelBreakdown, ModelComparePayload, ModelCompareStats, MonthlyTrendPoint,
+    OptimizeFinding, OptimizePayload, OverviewPayload, PeriodDetailRow, SyncActionPayload,
     SyncCommandCenterPayload, SyncMetricsPayload, SyncSafetyPayload, SyncSourcePayload,
-    TokenSummary, ToolBreakdown, ToolsPayload, TrendPoint, ZombieItem, ZombieReport,
+    TokenSummary, ToolBreakdown, ToolsPayload, ZombieItem, ZombieReport,
 };
 use llmusage::tui::app::{
-    ActiveDialog, AppState, BehaviorPanelPayload, Panel, ScrollState, StatsPanelPayload,
+    ActiveDialog, AppState, BehaviorPanelPayload, OverviewPanelPayload, Panel, PeriodDetailKind,
+    PeriodDetailPayload, PeriodDetailState, ScrollState, StatsPanelPayload,
 };
-use llmusage::tui::format::stat_compact;
+use llmusage::tui::format::{cost_compact, stat_compact};
+use llmusage::tui::theme;
 
 /// Extract all text content from a TestBackend buffer as a single string.
 /// Handles wide (CJK) characters correctly by skipping their continuation cells.
@@ -63,55 +70,6 @@ fn buffer_text(terminal: &Terminal<TestBackend>) -> String {
 
 // ─── Strategies ───────────────────────────────────────────────────────────────
 
-fn arb_token_summary() -> impl Strategy<Value = TokenSummary> {
-    (
-        0i64..5_000_000_000,
-        0i64..5_000_000_000,
-        0i64..5_000_000_000,
-        0i64..5_000_000_000,
-        0i64..5_000_000_000,
-    )
-        .prop_map(
-            |(input, cache_creation, cache, output, reasoning)| TokenSummary {
-                input_tokens: input,
-                cache_creation_tokens: cache_creation,
-                cache_read_tokens: cache,
-                output_tokens: output,
-                reasoning_output_tokens: reasoning,
-                total_tokens: input + cache_creation + cache + output + reasoning,
-            },
-        )
-}
-
-fn arb_overview_payload() -> impl Strategy<Value = OverviewPayload> {
-    (
-        arb_token_summary(),
-        arb_token_summary(),
-        0i64..2_000_000,
-        0i64..2_000_000,
-        0.0f64..10000.0,
-        0.0f64..1.0,
-        proptest::option::of("[a-z]{5,10}"),
-    )
-        .prop_map(
-            |(total, last_24h, source_count, bucket_count, cost, efficiency, last_sync)| {
-                OverviewPayload {
-                    generated_at: "2025-01-01T00:00:00Z".to_string(),
-                    total,
-                    last_24h,
-                    source_count,
-                    bucket_count,
-                    total_events: 0,
-                    last_24h_events: 0,
-                    total_cost_usd: cost,
-                    cache_efficiency: efficiency,
-                    last_sync_at: last_sync,
-                    last_export_at: None,
-                }
-            },
-        )
-}
-
 fn arb_model_breakdown() -> impl Strategy<Value = ModelBreakdown> {
     (
         "[a-z]{3,8}",
@@ -134,24 +92,37 @@ fn arb_model_breakdown() -> impl Strategy<Value = ModelBreakdown> {
             pricing_status: "static".to_string(),
             pricing_source: None,
             pricing_rate: None,
+            sources: Vec::new(),
         })
 }
 
-fn arb_cost_line() -> impl Strategy<Value = CostLine> {
-    (
-        "[a-z]{3,8}",
-        "[a-z]{3,8}",
-        1i64..20_000_000_000,
-        0.01f64..100.0,
-        1i64..2_000_000,
-    )
-        .prop_map(|(source, model, tokens, cost, events)| CostLine {
-            source,
-            model,
-            total_tokens: tokens,
-            estimated_cost_usd: cost,
-            event_count: events,
-        })
+fn sample_hourly(hour_start: &str, tokens: i64) -> HourlyTrendPoint {
+    HourlyTrendPoint {
+        hour_start: hour_start.to_string(),
+        input_tokens: tokens,
+        cache_read_tokens: 0,
+        cache_creation_tokens: 0,
+        output_tokens: 0,
+        total_tokens: tokens,
+        event_count: 1,
+        turn_count: 1,
+        cost_with_cache_usd: 1.25,
+        sources: vec!["codex".to_string()],
+    }
+}
+
+fn sample_monthly(month: &str, tokens: i64, cost: f64) -> MonthlyTrendPoint {
+    MonthlyTrendPoint {
+        month: month.to_string(),
+        input_tokens: tokens,
+        cache_read_tokens: 0,
+        cache_creation_tokens: 0,
+        output_tokens: 0,
+        total_tokens: tokens,
+        event_count: 1,
+        turn_count: 1,
+        cost_with_cache_usd: cost,
+    }
 }
 
 fn render_daily_text(points: Vec<DailyTrendPoint>, width: u16, height: u16) -> String {
@@ -174,7 +145,7 @@ fn render_daily_text(points: Vec<DailyTrendPoint>, width: u16, height: u16) -> S
     buffer_text(&terminal)
 }
 
-fn render_hourly_text(points: Vec<TrendPoint>, width: u16, height: u16) -> String {
+fn render_hourly_text(points: Vec<HourlyTrendPoint>, width: u16, height: u16) -> String {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     let area = Rect::new(0, 0, width, height);
     let scroll = ScrollState {
@@ -183,7 +154,7 @@ fn render_hourly_text(points: Vec<TrendPoint>, width: u16, height: u16) -> Strin
         total: points.len(),
         visible: height.saturating_sub(4) as usize,
     };
-    let data: Option<Result<Vec<TrendPoint>, String>> = Some(Ok(points));
+    let data: Option<Result<Vec<HourlyTrendPoint>, String>> = Some(Ok(points));
 
     terminal
         .draw(|frame| {
@@ -222,13 +193,17 @@ fn sample_sync_payload() -> SyncCommandCenterPayload {
             SyncSourcePayload {
                 source: "codex".to_string(),
                 status: "ok".to_string(),
-                tone: "good".to_string(),
+                tone: "warn".to_string(),
                 files_processed: 12,
                 changed_files: 2,
                 skipped_files: 10,
                 events_seen: 1_000,
                 events_inserted: 20,
                 stored_events: 8_000,
+                malformed_lines: 2,
+                oversized_lines: 1,
+                skipped_lines: 0,
+                accounting_anomaly_lines: 0,
                 updated_at: Some("2026-06-12T00:00:00Z".to_string()),
                 share: 1.0,
                 error_key: None,
@@ -244,6 +219,10 @@ fn sample_sync_payload() -> SyncCommandCenterPayload {
                 events_seen: 500,
                 events_inserted: 5,
                 stored_events: 4_000,
+                malformed_lines: 0,
+                oversized_lines: 0,
+                skipped_lines: 4,
+                accounting_anomaly_lines: 1,
                 updated_at: Some("2026-06-11T00:00:00Z".to_string()),
                 share: 0.5,
                 error_key: None,
@@ -293,7 +272,7 @@ fn sample_platform_probes() -> Vec<PlatformProbe> {
     ]
 }
 
-fn render_usage_text(
+fn render_sync_status_text(
     payload: SyncCommandCenterPayload,
     probes: Vec<PlatformProbe>,
     width: u16,
@@ -311,17 +290,74 @@ fn render_usage_text(
 
     terminal
         .draw(|frame| {
-            llmusage::tui::panels::usage::render(frame, area, &data, &probes, &scroll);
+            llmusage::tui::panels::sync_status::render(frame, area, &data, &probes, &scroll);
         })
         .unwrap();
 
     buffer_text(&terminal)
 }
 
-fn render_overview_text(payload: OverviewPayload, width: u16, height: u16) -> String {
+fn sample_quota_report() -> llmusage::subscription::UsageFetchReport {
+    use llmusage::subscription::{
+        UsageFetchDiagnostic, UsageFetchReport, UsageMetric, UsageOutput,
+    };
+    UsageFetchReport {
+        outputs: vec![UsageOutput {
+            provider: "Grok Build".into(),
+            account: None,
+            credential_source: None,
+            plan: Some("Unknown".into()),
+            email: Some("user@example.com".into()),
+            metrics: vec![UsageMetric {
+                label: "Weekly".into(),
+                used_percent: 30.0,
+                remaining_percent: 70.0,
+                remaining_label: Some("70% left".into()),
+                resets_at: Some("2026-08-24T00:18:00Z".into()),
+            }],
+        }],
+        diagnostics: vec![UsageFetchDiagnostic::error(
+            "Claude",
+            "Claude usage request failed (HTTP 429 Too Many Requests)",
+        )],
+    }
+}
+
+fn render_usage_quota_text(
+    report: llmusage::subscription::UsageFetchReport,
+    hide_emails: bool,
+    width: u16,
+    height: u16,
+) -> String {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     let area = Rect::new(0, 0, width, height);
-    let data: Option<Result<OverviewPayload, String>> = Some(Ok(payload));
+    let scroll = ScrollState {
+        offset: 0,
+        selected: 0,
+        total: report.outputs.len(),
+        visible: height.saturating_sub(8) as usize,
+    };
+
+    terminal
+        .draw(|frame| {
+            llmusage::tui::panels::usage::render(
+                frame,
+                area,
+                &Some(report),
+                false,
+                hide_emails,
+                &scroll,
+            );
+        })
+        .unwrap();
+
+    buffer_text(&terminal)
+}
+
+fn render_overview_text(payload: OverviewPanelPayload, width: u16, height: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    let area = Rect::new(0, 0, width, height);
+    let data: Option<Result<OverviewPanelPayload, String>> = Some(Ok(payload));
 
     terminal
         .draw(|frame| {
@@ -332,7 +368,7 @@ fn render_overview_text(payload: OverviewPayload, width: u16, height: u16) -> St
     buffer_text(&terminal)
 }
 
-fn sample_overview_payload() -> OverviewPayload {
+fn sample_overview_totals() -> OverviewPayload {
     OverviewPayload {
         generated_at: "2026-06-12T00:00:00Z".to_string(),
         total: TokenSummary {
@@ -355,93 +391,167 @@ fn sample_overview_payload() -> OverviewPayload {
     }
 }
 
-#[test]
-fn overview_panel_renders_summary_sections_and_24h_pulse() {
-    let mut payload = sample_overview_payload();
-    payload.last_24h = TokenSummary {
-        input_tokens: 1_000,
-        cache_creation_tokens: 500,
-        cache_read_tokens: 1_000,
-        output_tokens: 2_000,
-        reasoning_output_tokens: 1_000,
-        total_tokens: 5_500,
-    };
-    payload.last_24h_events = 2;
+fn sample_overview_model(
+    model: &str,
+    input: i64,
+    output: i64,
+    cache_read: i64,
+    cache_write: i64,
+    cost: f64,
+) -> ModelBreakdown {
+    ModelBreakdown {
+        model: model.to_string(),
+        input_tokens: input,
+        cache_creation_tokens: cache_write,
+        cache_read_tokens: cache_read,
+        output_tokens: output,
+        reasoning_output_tokens: 0,
+        total_tokens: input + output + cache_read + cache_write,
+        event_count: 1,
+        cost_with_cache_usd: cost,
+        cost_without_cache_usd: cost,
+        cache_savings_usd: 0.0,
+        pricing_status: "static".to_string(),
+        pricing_source: None,
+        pricing_rate: None,
+        sources: Vec::new(),
+    }
+}
 
+fn sample_overview_payload() -> OverviewPanelPayload {
+    OverviewPanelPayload {
+        totals: sample_overview_totals(),
+        daily_models: vec![
+            DailyModelPoint {
+                date: "2026-07-18".to_string(),
+                model: "gpt-5.5".to_string(),
+                total_tokens: 1_000,
+            },
+            DailyModelPoint {
+                date: "2026-07-19".to_string(),
+                model: "claude-opus-5".to_string(),
+                total_tokens: 2_000,
+            },
+        ],
+        models: vec![
+            sample_overview_model(
+                "gpt-5.5",
+                640_400_000,
+                41_700_000,
+                6_300_000_000,
+                0,
+                8_200.0,
+            ),
+            sample_overview_model(
+                "claude-opus-5",
+                11_500_000,
+                4_100_000,
+                874_000_000,
+                107_200_000,
+                1_260.0,
+            ),
+        ],
+    }
+}
+
+#[test]
+fn overview_panel_renders_chart_and_cost_list() {
+    let payload = sample_overview_payload();
     let text = render_overview_text(payload, 120, 30);
 
     for expected in [
-        "Token Mix",
-        "Recent Activity",
-        "Freshness",
-        "24h Pulse",
-        "Input",
-        "Cache read",
-        "Avg/event",
-        "Generated",
-        "All-time share",
-        "5.5K",
-        "2.8K",
-        "25.0%",
+        "Tokens per Day",
+        "Models by Cost",
+        "Total:",
+        "gpt-5.5",
+        "claude-opus-5",
+        "In:",
+        "Out:",
+        "CR:",
+        "CW:",
+        "640.4M",
+        "6.3B",
     ] {
         assert!(
             text.contains(expected),
             "overview panel should contain '{expected}', got: {text}"
         );
     }
+    for unexpected in ["Token Mix", "24h Pulse", "Freshness", "Total Tokens"] {
+        assert!(
+            !text.contains(unexpected),
+            "overview panel should not contain '{unexpected}', got: {text}"
+        );
+    }
 }
 
 #[test]
 fn overview_panel_compacts_screenshot_scale_statistics_in_wide_and_narrow_layouts() {
-    let mut payload = sample_overview_payload();
-    payload.total = TokenSummary {
-        input_tokens: 1_029_915_980,
-        cache_creation_tokens: 308_679_097,
-        cache_read_tokens: 16_727_462_769,
-        output_tokens: 102_129_668,
-        reasoning_output_tokens: 31_392_730,
-        total_tokens: 18_214_785_227,
-    };
-    payload.last_24h = TokenSummary {
-        input_tokens: 13_747_991,
-        cache_creation_tokens: 4_145_779,
-        cache_read_tokens: 269_193_939,
-        output_tokens: 1_317_422,
-        reasoning_output_tokens: 339_434,
-        total_tokens: 288_694_891,
-    };
-    payload.total_events = 137_075;
-    payload.last_24h_events = 2_155;
-    payload.bucket_count = 3_968;
+    let payload = sample_overview_payload();
 
-    for (width, height) in [(120, 30), (80, 30)] {
-        let text = render_overview_text(payload.clone(), width, height);
-        for expected in ["18.2B", "288.7M"] {
-            assert!(
-                text.contains(expected),
-                "{width}x{height} overview should contain '{expected}', got: {text}"
-            );
-        }
-        for exact in ["18,214,785,227", "288,694,891"] {
-            assert!(
-                !text.contains(exact),
-                "{width}x{height} overview should not contain '{exact}', got: {text}"
-            );
-        }
-    }
-
-    let wide = render_overview_text(payload, 120, 30);
-    for expected in ["1B", "16.7B", "137.1K", "2.2K", "4K"] {
+    let wide = render_overview_text(payload.clone(), 120, 30);
+    for expected in [
+        "640.4M", "6.3B", "874M", "107.2M", "Total:", "$9.5K", "86.7%",
+    ] {
         assert!(
             wide.contains(expected),
             "wide overview should contain '{expected}', got: {wide}"
         );
     }
+    assert!(
+        !wide.contains("640,400,000"),
+        "wide overview should not contain exact input, got: {wide}"
+    );
+
+    let narrow = render_overview_text(payload, 70, 30);
+    assert!(
+        narrow.contains("640.4M"),
+        "narrow overview should compact input, got: {narrow}"
+    );
+    assert!(
+        !narrow.contains("In:"),
+        "narrow overview should use slash token mix, got: {narrow}"
+    );
+}
+
+#[test]
+fn overview_panel_empty_models_and_no_long_tail() {
+    let mut payload = sample_overview_payload();
+    payload.models.clear();
+    payload.daily_models.clear();
+    let empty = render_overview_text(payload, 120, 30);
+    assert!(
+        empty.contains("No model data found."),
+        "empty overview should explain missing models, got: {empty}"
+    );
+    assert!(
+        !empty.contains("+N more") && !empty.contains("more ·"),
+        "overview must not fold a long tail, got: {empty}"
+    );
+}
+
+#[test]
+fn overview_panel_nocolor_has_no_styles() {
+    theme::set_color_mode(theme::TerminalColorMode::NoColor);
+    let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+    let data = Some(Ok(sample_overview_payload()));
+    terminal
+        .draw(|frame| {
+            llmusage::tui::panels::overview::render(frame, Rect::new(0, 0, 120, 30), &data);
+        })
+        .unwrap();
+    for cell in terminal.backend().buffer().content() {
+        assert_eq!(cell.fg, Color::Reset);
+        assert_eq!(cell.bg, Color::Reset);
+        assert_eq!(cell.modifier, Modifier::empty());
+    }
+    theme::set_color_mode(theme::TerminalColorMode::TrueColor);
+    theme::set_theme(theme::Theme::default_dark());
 }
 
 fn sample_stats_payload() -> StatsPanelPayload {
     StatsPanelPayload {
-        overview: sample_overview_payload(),
+        overview: sample_overview_totals(),
         heatmap: vec![
             HeatmapPoint {
                 date: "2026-06-09".to_string(),
@@ -464,29 +574,9 @@ fn sample_stats_payload() -> StatsPanelPayload {
                 total_tokens: 6_000,
             },
         ],
-        sources: vec![
-            SourceBreakdown {
-                source: "codex".to_string(),
-                total_tokens: 16_214_785_227,
-                last_event_at: Some("2026-06-12T00:00:00Z".to_string()),
-                event_count: 8,
-            },
-            SourceBreakdown {
-                source: "opencode".to_string(),
-                total_tokens: 6_000,
-                last_event_at: None,
-                event_count: 4,
-            },
-        ],
-        health: HealthPayload {
-            cursors: vec![CursorHealth {
-                source: "codex".to_string(),
-                cursor_key: "session".to_string(),
-                updated_at: Some("2026-06-12T00:00:00Z".to_string()),
-                sqlite_status: None,
-            }],
-            recent_failures: Vec::new(),
-        },
+        models: vec![sample_overview_model(
+            "gpt-5.5", 10_000, 8_000, 2_500, 500, 3.5,
+        )],
         context_pressure: ContextPressurePayload {
             peak_percent: 0.42,
             avg_percent: 0.18,
@@ -498,19 +588,28 @@ fn sample_stats_payload() -> StatsPanelPayload {
 }
 
 fn render_stats_text(payload: StatsPanelPayload, width: u16, height: u16) -> String {
+    render_stats_text_with_detail(payload, None, width, height)
+}
+
+fn render_stats_text_with_detail(
+    payload: StatsPanelPayload,
+    detail: Option<&PeriodDetailState>,
+    width: u16,
+    height: u16,
+) -> String {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     let area = Rect::new(0, 0, width, height);
     let scroll = ScrollState {
         offset: 0,
         selected: 0,
-        total: payload.sources.len(),
+        total: 0,
         visible: height.saturating_sub(10) as usize,
     };
     let data: Option<Result<StatsPanelPayload, String>> = Some(Ok(payload));
 
     terminal
         .draw(|frame| {
-            llmusage::tui::panels::stats::render(frame, area, &data, &scroll);
+            llmusage::tui::panels::stats::render(frame, area, &data, &scroll, detail);
         })
         .unwrap();
 
@@ -722,6 +821,7 @@ fn dashboard_shell_renders_tokscale_style_header_and_footer() {
         "Usage",
         "Daily",
         "Hourly",
+        "Monthly",
         "[s:source]",
         "[r:refresh]",
         "[x:sync]",
@@ -732,6 +832,7 @@ fn dashboard_shell_renders_tokscale_style_header_and_footer() {
             "dashboard shell should contain '{expected}', got: {text}"
         );
     }
+    assert!(!text.contains(" 6 Cost"), "Cost tab should be gone: {text}");
 }
 
 #[test]
@@ -774,6 +875,7 @@ fn daily_panel_renders_tokscale_style_token_channels() {
                 total_tokens: 18_214_785_227,
                 event_count: 7,
                 cost_with_cache_usd: 1.25,
+                turn_count: 0,
             },
             DailyTrendPoint {
                 date: "2026-05-29".to_string(),
@@ -784,6 +886,7 @@ fn daily_panel_renders_tokscale_style_token_channels() {
                 total_tokens: 6_000,
                 event_count: 3,
                 cost_with_cache_usd: 2.5,
+                turn_count: 0,
             },
         ],
         120,
@@ -797,7 +900,9 @@ fn daily_panel_renders_tokscale_style_token_channels() {
         "Output",
         "Cache R",
         "Cache W",
-        "detail",
+        "Cache×",
+        "Msgs",
+        "Cost/1M",
         "18.2B",
         "$2.50",
     ] {
@@ -820,6 +925,7 @@ fn daily_panel_uses_compact_columns_on_narrow_widths() {
             total_tokens: 3,
             event_count: 1,
             cost_with_cache_usd: 0.01,
+            turn_count: 0,
         }],
         50,
         10,
@@ -834,33 +940,39 @@ fn daily_panel_uses_compact_columns_on_narrow_widths() {
 }
 
 #[test]
-fn hourly_panel_renders_profile_bars_and_compact_hour_labels() {
+fn hourly_panel_renders_tokscale_table_and_day_separators() {
     let text = render_hourly_text(
         vec![
-            TrendPoint {
-                label: "2026-05-29T13:00:00Z".to_string(),
-                total_tokens: 1_000,
-            },
-            TrendPoint {
-                label: "2026-05-29T14:00:00Z".to_string(),
-                total_tokens: 18_214_785_227,
-            },
+            sample_hourly("2026-05-29 13:00", 1_000),
+            sample_hourly("2026-05-29 14:00", 18_214_785_227),
         ],
-        120,
-        12,
+        130,
+        14,
     );
 
-    for expected in ["Hourly Usage", "05-29 14:00", "18.2B", "Profile", "#"] {
+    for expected in [
+        "Hourly Usage",
+        "14:00",
+        "05/29",
+        "18.2B",
+        "Cache×",
+        "Source",
+    ] {
         assert!(
             text.contains(expected),
             "hourly panel should contain '{expected}', got: {text}"
         );
     }
+    assert!(!text.contains("Share"), "hourly should drop Share: {text}");
+    assert!(
+        !text.contains("Profile"),
+        "hourly should drop Profile: {text}"
+    );
 }
 
 #[test]
-fn usage_panel_renders_sync_status_and_platform_monitor_summary() {
-    let text = render_usage_text(sample_sync_payload(), sample_platform_probes(), 120, 18);
+fn usage_overlay_renders_sync_status_and_platform_monitor_summary() {
+    let text = render_sync_status_text(sample_sync_payload(), sample_platform_probes(), 120, 18);
 
     for expected in [
         "Usage / Sync",
@@ -869,68 +981,330 @@ fn usage_panel_renders_sync_status_and_platform_monitor_summary() {
         "Skipped",
         "codex",
         "8,000",
+        "Issues",
+        "malformed=2",
+        "skipped=4",
+        "accounting=1",
         "Platform Monitor",
         "Gemini CLI",
         "blocked-no-samples",
     ] {
         assert!(
             text.contains(expected),
-            "usage panel should contain '{expected}', got: {text}"
+            "sync overlay should contain '{expected}', got: {text}"
         );
     }
 }
 
 #[test]
-fn usage_panel_uses_compact_columns_on_narrow_widths() {
-    let text = render_usage_text(sample_sync_payload(), sample_platform_probes(), 52, 12);
+fn usage_overlay_uses_compact_columns_on_narrow_widths() {
+    let text = render_sync_status_text(sample_sync_payload(), sample_platform_probes(), 52, 12);
 
     for expected in ["Usage / Sync", "Stored", "codex", "8,000"] {
         assert!(
             text.contains(expected),
-            "narrow usage panel should contain '{expected}', got: {text}"
+            "narrow sync overlay should contain '{expected}', got: {text}"
         );
     }
     assert!(
         !text.contains("Inserted"),
-        "narrow usage panel should hide wide-only columns: {text}"
+        "narrow sync overlay should hide wide-only columns: {text}"
     );
 }
 
 #[test]
-fn stats_panel_renders_contribution_and_source_mix() {
-    let text = render_stats_text(sample_stats_payload(), 120, 20);
+fn usage_panel_renders_quota_accounts_and_hides_emails() {
+    let text = render_usage_quota_text(sample_quota_report(), true, 140, 32);
+    for expected in [
+        "Usage",
+        "Usage Summary",
+        "Accounts",
+        "Grok Build",
+        "Weekly",
+        "70% left",
+        "Diagnostics",
+        "HTTP 429",
+        "[hidden email]",
+        "Selected Account",
+    ] {
+        assert!(
+            text.contains(expected),
+            "usage quota panel should contain '{expected}', got: {text}"
+        );
+    }
+    assert!(
+        !text.contains("user@example.com"),
+        "hidden emails must not appear: {text}"
+    );
+    assert!(
+        !text.contains("Source Sync"),
+        "main usage area must not show Source Sync: {text}"
+    );
+}
+
+#[test]
+fn usage_panel_can_reveal_emails() {
+    let text = render_usage_quota_text(sample_quota_report(), false, 140, 32);
+    assert!(
+        text.contains("user@example.com"),
+        "revealed email missing: {text}"
+    );
+}
+
+#[test]
+fn usage_panel_empty_state() {
+    let text = render_usage_quota_text(
+        llmusage::subscription::UsageFetchReport::default(),
+        true,
+        80,
+        16,
+    );
+    assert!(
+        text.contains("No subscription data available"),
+        "empty quota panel missing empty-state copy: {text}"
+    );
+}
+
+#[test]
+fn stats_panel_renders_year_calendar_and_two_column_stats() {
+    let text = render_stats_text(sample_stats_payload(), 120, 30);
 
     for expected in [
-        "Stats",
-        "Contribution",
-        "Source Mix",
-        "current streak",
-        "3.50",
-        "codex",
-        "16.2B",
-        "Health Signals",
+        "Contribution Graph (52 weeks)",
+        "Jun",
+        "Mon",
+        "Favorite model",
+        "Events",
+        "Current streak",
+        "Longest streak",
+        "Active days",
+        "3/4",
+        "gpt-5.5",
+        "Context peak",
+        "42%",
+        "Less",
+        "More",
     ] {
         assert!(
             text.contains(expected),
             "stats panel should contain '{expected}', got: {text}"
         );
     }
+    assert!(
+        text.contains("█"),
+        "active days should use two-column cells: {text}"
+    );
+    for forbidden in [
+        "Sessions",
+        "Source Mix",
+        "Health Signals",
+        "#---",
+        "08-20 .. 08-19",
+        "06-09 .. 06-12",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "stats panel should not contain '{forbidden}', got: {text}"
+        );
+    }
 }
 
 #[test]
-fn stats_panel_uses_compact_source_columns_on_narrow_widths() {
-    let text = render_stats_text(sample_stats_payload(), 50, 12);
+fn stats_panel_uses_wide_labels_at_80() {
+    let text = render_stats_text(sample_stats_payload(), 80, 30);
 
-    for expected in ["Stats", "Source Mix", "codex", "16.2B"] {
+    for expected in [
+        "Favorite model",
+        "Current streak",
+        "Longest streak",
+        "Active days",
+        "Mon",
+    ] {
+        assert!(
+            text.contains(expected),
+            "80-col stats panel should contain '{expected}', got: {text}"
+        );
+    }
+}
+
+#[test]
+fn stats_panel_uses_narrow_labels() {
+    let text = render_stats_text(sample_stats_payload(), 50, 28);
+
+    for expected in [
+        "Model:",
+        "Events:",
+        "Streak:",
+        "Active:",
+        "Tokens:",
+        "Cost:",
+        "Max streak:",
+    ] {
         assert!(
             text.contains(expected),
             "narrow stats panel should contain '{expected}', got: {text}"
         );
     }
     assert!(
-        !text.contains("Last Event"),
-        "narrow stats panel should hide wide-only columns: {text}"
+        !text.contains("Favorite model"),
+        "narrow stats panel should hide wide labels: {text}"
     );
+}
+
+#[test]
+fn stats_panel_favorite_na_and_context_na() {
+    let mut payload = sample_stats_payload();
+    payload.models.clear();
+    payload.context_pressure.priced_events = 0;
+    let text = render_stats_text(payload, 120, 30);
+    assert!(text.contains("N/A"), "empty models should show N/A: {text}");
+    assert!(
+        text.contains("n/a"),
+        "unpriced context should show n/a: {text}"
+    );
+}
+
+#[test]
+fn stats_panel_day_breakdown_and_empty_day() {
+    let payload = sample_stats_payload();
+    let detail = PeriodDetailState {
+        kind: PeriodDetailKind::Daily {
+            date: "2026-06-11".to_string(),
+        },
+        list_scroll: ScrollState {
+            offset: 0,
+            selected: 0,
+            total: 0,
+            visible: 8,
+        },
+        payload: Some(Ok(PeriodDetailPayload::Daily(vec![PeriodDetailRow {
+            model: "gpt-5.5".to_string(),
+            source: "codex".to_string(),
+            event_count: 3,
+            input_tokens: 1_000,
+            cache_read_tokens: 100,
+            cache_creation_tokens: 50,
+            output_tokens: 400,
+            total_tokens: 1_550,
+            cost_with_cache_usd: 1.25,
+        }]))),
+    };
+    let text = render_stats_text_with_detail(payload, Some(&detail), 120, 30);
+    for expected in [
+        "Day Breakdown",
+        "Jun 11, 2026",
+        "codex",
+        "gpt-5.5",
+        "In ·",
+        "Out ·",
+        "CR ·",
+        "CW ·",
+    ] {
+        assert!(
+            text.contains(expected),
+            "day breakdown should contain '{expected}', got: {text}"
+        );
+    }
+
+    let empty = PeriodDetailState {
+        kind: PeriodDetailKind::Daily {
+            date: "2026-06-09".to_string(),
+        },
+        list_scroll: ScrollState {
+            offset: 0,
+            selected: 0,
+            total: 0,
+            visible: 8,
+        },
+        payload: Some(Ok(PeriodDetailPayload::Daily(Vec::new()))),
+    };
+    let empty_text = render_stats_text_with_detail(sample_stats_payload(), Some(&empty), 120, 30);
+    assert!(
+        empty_text.contains("No data for this day"),
+        "empty day should say so: {empty_text}"
+    );
+}
+
+#[test]
+fn stats_panel_enter_today_and_esc_close() {
+    let mut state = AppState::new();
+    state.handle_resize(120, 36);
+    state.active_panel = Panel::Health;
+    state.stats = Some(Ok(sample_stats_payload()));
+    state.open_period_detail(PeriodDetailKind::Daily {
+        date: "2026-06-12".to_string(),
+    });
+    state.period_detail.as_mut().unwrap().payload =
+        Some(Ok(PeriodDetailPayload::Daily(vec![PeriodDetailRow {
+            model: "gpt-5.5".to_string(),
+            source: "codex".to_string(),
+            event_count: 2,
+            input_tokens: 10,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            output_tokens: 4,
+            total_tokens: 14,
+            cost_with_cache_usd: 0.2,
+        }])));
+
+    let mut terminal = Terminal::new(TestBackend::new(120, 36)).unwrap();
+    terminal
+        .draw(|frame| llmusage::tui::draw::draw(frame, &state))
+        .unwrap();
+    let open = buffer_text(&terminal);
+    assert!(
+        open.contains("Day Breakdown"),
+        "enter today should open breakdown: {open}"
+    );
+    assert!(
+        open.contains("codex"),
+        "breakdown should list a source: {open}"
+    );
+
+    state.close_period_detail();
+    terminal
+        .draw(|frame| llmusage::tui::draw::draw(frame, &state))
+        .unwrap();
+    let closed = buffer_text(&terminal);
+    assert!(
+        !closed.contains("Day Breakdown"),
+        "esc should close breakdown: {closed}"
+    );
+    assert!(
+        closed.contains("Contribution Graph (52 weeks)"),
+        "closing breakdown must keep Stats open: {closed}"
+    );
+}
+
+#[test]
+fn stats_panel_nocolor_has_no_styles() {
+    theme::set_color_mode(theme::TerminalColorMode::NoColor);
+    let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+    let data = Some(Ok(sample_stats_payload()));
+    let scroll = ScrollState {
+        offset: 0,
+        selected: 0,
+        total: 0,
+        visible: 8,
+    };
+    terminal
+        .draw(|frame| {
+            llmusage::tui::panels::stats::render(
+                frame,
+                Rect::new(0, 0, 120, 30),
+                &data,
+                &scroll,
+                None,
+            );
+        })
+        .unwrap();
+    for cell in terminal.backend().buffer().content() {
+        assert_eq!(cell.fg, Color::Reset);
+        assert_eq!(cell.bg, Color::Reset);
+        assert_eq!(cell.modifier, Modifier::empty());
+    }
+    theme::set_color_mode(theme::TerminalColorMode::TrueColor);
+    theme::set_theme(theme::Theme::default_dark());
 }
 
 #[test]
@@ -1048,44 +1422,30 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(100))]
 
     #[test]
-    fn prop_overview_panel_renders_all_required_fields(payload in arb_overview_payload()) {
+    fn prop_overview_panel_renders_all_required_fields(model in arb_model_breakdown()) {
         let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
         let area = Rect::new(0, 0, 120, 30);
-        let data: Option<Result<OverviewPayload, String>> = Some(Ok(payload.clone()));
+        let payload = OverviewPanelPayload {
+            totals: sample_overview_totals(),
+            daily_models: vec![DailyModelPoint {
+                date: "2026-07-18".to_string(),
+                model: model.model.clone(),
+                total_tokens: model.total_tokens,
+            }],
+            models: vec![model.clone()],
+        };
+        let data: Option<Result<OverviewPanelPayload, String>> = Some(Ok(payload));
 
         terminal.draw(|frame| {
             llmusage::tui::panels::overview::render(frame, area, &data);
         }).unwrap();
 
         let text = buffer_text(&terminal);
-
-        // total_cost_usd with 2 decimal places
-        let cost_str = format!("{:.2}", payload.total_cost_usd);
-        prop_assert!(text.contains(&cost_str),
-            "Missing total_cost_usd '{}' in output", cost_str);
-
-        // cache_efficiency as percentage (1 decimal place)
-        let eff_str = format!("{:.1}%", payload.cache_efficiency * 100.0);
-        prop_assert!(text.contains(&eff_str),
-            "Missing cache_efficiency '{}' in output", eff_str);
-
-        // source_count
-        let sc_str = stat_compact(payload.source_count);
-        prop_assert!(text.contains(&sc_str),
-            "Missing source_count '{}' in output", sc_str);
-
-        // bucket_count
-        let bc_str = stat_compact(payload.bucket_count);
-        prop_assert!(text.contains(&bc_str),
-            "Missing bucket_count '{}' in output", bc_str);
-
-        // last_sync_at or "Never synced"
-        match &payload.last_sync_at {
-            Some(ts) => prop_assert!(text.contains(ts),
-                "Missing last_sync_at '{}' in output", ts),
-            None => prop_assert!(text.contains("Never synced"),
-                "Missing 'Never synced' placeholder in output"),
-        }
+        prop_assert!(text.contains("Tokens per Day"), "missing chart title: {text}");
+        prop_assert!(text.contains("Models by Cost"), "missing list title: {text}");
+        prop_assert!(text.contains(&model.model), "missing model name: {text}");
+        let input = stat_compact(model.input_tokens);
+        prop_assert!(text.contains(&input), "missing input '{input}': {text}");
     }
 }
 
@@ -1093,7 +1453,7 @@ proptest! {
 fn models_visible_window_matches_full_dataset_buffer() {
     let items: Vec<ModelBreakdown> = (0..40)
         .map(|index| ModelBreakdown {
-            model: format!("model-{index:02}"),
+            model: format!("modelx{index:02}"),
             input_tokens: 0,
             cache_creation_tokens: 0,
             cache_read_tokens: 0,
@@ -1107,6 +1467,7 @@ fn models_visible_window_matches_full_dataset_buffer() {
             pricing_status: "static".to_string(),
             pricing_source: None,
             pricing_rate: None,
+            sources: Vec::new(),
         })
         .collect();
     let visible = 7usize;
@@ -1131,15 +1492,9 @@ fn models_visible_window_matches_full_dataset_buffer() {
 }
 
 #[test]
-fn cost_visible_window_matches_full_dataset_buffer() {
-    let items: Vec<CostLine> = (0..40)
-        .map(|index| CostLine {
-            source: "codex".to_string(),
-            model: format!("model-{index:02}"),
-            total_tokens: 10_000,
-            estimated_cost_usd: 1.25,
-            event_count: 100,
-        })
+fn monthly_visible_window_matches_full_dataset_buffer() {
+    let items: Vec<MonthlyTrendPoint> = (0..40)
+        .map(|index| sample_monthly(&format!("{:04}", 2040 - index), 10_000, 1.25))
         .collect();
     let visible = 7usize;
     let scroll = ScrollState {
@@ -1148,13 +1503,13 @@ fn cost_visible_window_matches_full_dataset_buffer() {
         total: items.len(),
         visible,
     };
-    let area = Rect::new(0, 0, 120, (visible + 4) as u16);
+    let area = Rect::new(0, 0, 130, (visible + 4) as u16);
 
-    let render = |rows: Vec<CostLine>| {
+    let render = |rows: Vec<MonthlyTrendPoint>| {
         let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
         let data = Some(Ok(rows));
         terminal
-            .draw(|frame| llmusage::tui::panels::cost::render(frame, area, &data, &scroll))
+            .draw(|frame| llmusage::tui::panels::monthly::render(frame, area, &data, &scroll))
             .unwrap();
         terminal.backend().buffer().clone()
     };
@@ -1191,47 +1546,150 @@ proptest! {
             let events_str = stat_compact(item.event_count);
             prop_assert!(text.contains(&events_str),
                 "Missing event_count '{}' in output", events_str);
-            let cost_str = format!("{:.4}", item.cost_with_cache_usd);
+            let cost_str = cost_compact(item.cost_with_cache_usd);
             prop_assert!(text.contains(&cost_str),
                 "Missing cost_with_cache_usd '{}' in output", cost_str);
         }
     }
 }
 
-// Feature: terminal-dashboard, Property 8: Cost table renders all required columns
-// **Validates: Requirements 8.1**
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
-
-    #[test]
-    fn prop_cost_table_renders_all_required_columns(
-        items in proptest::collection::vec(arb_cost_line(), 1..4)
-    ) {
-        let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
-        let area = Rect::new(0, 0, 120, 30);
-        let scroll = ScrollState { offset: 0, selected: 0, total: items.len(), visible: 25 };
-        let data: Option<Result<Vec<CostLine>, String>> = Some(Ok(items.clone()));
-
-        terminal.draw(|frame| {
-            llmusage::tui::panels::cost::render(frame, area, &data, &scroll);
-        }).unwrap();
-
-        let text = buffer_text(&terminal);
-
-        for item in &items {
-            prop_assert!(text.contains(&item.source),
-                "Missing source '{}' in output", item.source);
-            prop_assert!(text.contains(&item.model),
-                "Missing model '{}' in output", item.model);
-            let events_str = stat_compact(item.event_count);
-            prop_assert!(text.contains(&events_str),
-                "Missing event_count '{}' in output", events_str);
-            let tokens_str = stat_compact(item.total_tokens);
-            prop_assert!(text.contains(&tokens_str),
-                "Missing total_tokens '{}' in output", tokens_str);
-            let cost_str = format!("${:.2}", item.estimated_cost_usd);
-            prop_assert!(text.contains(&cost_str),
-                "Missing estimated_cost_usd '{}' in output", cost_str);
-        }
+fn sample_model(model: &str, tokens: i64, cost: f64) -> ModelBreakdown {
+    ModelBreakdown {
+        model: model.to_string(),
+        input_tokens: tokens / 2,
+        cache_creation_tokens: 0,
+        cache_read_tokens: 0,
+        output_tokens: tokens / 2,
+        reasoning_output_tokens: 0,
+        total_tokens: tokens,
+        event_count: 1,
+        cost_with_cache_usd: cost,
+        cost_without_cache_usd: cost,
+        cache_savings_usd: 0.0,
+        pricing_status: "static".to_string(),
+        pricing_source: None,
+        pricing_rate: None,
+        sources: vec!["codex".to_string()],
     }
+}
+
+fn render_models_text(items: Vec<ModelBreakdown>, width: u16, height: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    let area = Rect::new(0, 0, width, height);
+    let scroll = ScrollState {
+        offset: 0,
+        selected: 0,
+        total: items.len(),
+        visible: height.saturating_sub(4) as usize,
+    };
+    let data: Option<Result<Vec<ModelBreakdown>, String>> = Some(Ok(items));
+    terminal
+        .draw(|frame| {
+            llmusage::tui::panels::models::render(frame, area, &data, &scroll);
+        })
+        .unwrap();
+    buffer_text(&terminal)
+}
+
+#[test]
+fn models_wide_headers_default_cost_sort_and_no_long_tail_fold() {
+    let items: Vec<ModelBreakdown> = (0..20)
+        .map(|index| {
+            sample_model(
+                &format!("tail-{index:02}"),
+                1_000 + i64::from(index),
+                f64::from(index),
+            )
+        })
+        .collect();
+    let text = render_models_text(items.clone(), 160, 30);
+    for header in [
+        "#", "Model", "Provider", "Source", "Input", "Output", "Cache R", "Cache W", "Cache×",
+        "Total", "Events", "Cost ▼", "Cost/1M",
+    ] {
+        assert!(text.contains(header), "missing header {header} in {text}");
+    }
+    assert!(!text.contains(" more ·"));
+    let high = text.find("tail-19").expect("highest-cost row");
+    let low = text.find("tail-00").expect("lowest-cost row");
+    assert!(
+        high < low,
+        "rows must follow cost_with_cache_usd descending"
+    );
+
+    let min_wide = render_models_text(items, 80, 16);
+    for header in [
+        "Provider", "Source", "Input", "Output", "Cache R", "Cache W", "Cache×", "Total", "Events",
+        "Cost", "Cost/1M",
+    ] {
+        assert!(
+            min_wide.contains(header),
+            "width 80 must keep header {header} in {min_wide}"
+        );
+    }
+}
+
+#[test]
+fn models_wide_paints_inferred_provider_and_joined_sources() {
+    let mut item = sample_model("gpt-4o", 12_500, 12.59);
+    item.sources = vec!["claude".to_string(), "codex".to_string()];
+    let text = render_models_text(vec![item], 160, 12);
+    assert!(
+        text.contains("OpenAI"),
+        "provider display missing in {text}"
+    );
+    assert!(
+        text.contains("claude, codex"),
+        "joined sources missing in {text}"
+    );
+}
+
+#[test]
+fn models_narrow_and_very_narrow_drop_identity_columns() {
+    let items = vec![sample_model("gpt-4o", 12_500, 12.59)];
+    let very_narrow = render_models_text(items.clone(), 59, 12);
+    assert!(very_narrow.contains("Model"));
+    assert!(very_narrow.contains("Cost"));
+    assert!(!very_narrow.contains("Provider"));
+    assert!(!very_narrow.contains("Cache×"));
+    assert!(!very_narrow.contains("Events"));
+    assert!(!very_narrow.contains("Total"));
+
+    let narrow = render_models_text(items, 79, 12);
+    assert!(narrow.contains("Model"));
+    assert!(narrow.contains("Total"));
+    assert!(narrow.contains("Cost"));
+    assert!(!narrow.contains("Provider"));
+    assert!(!narrow.contains("Cache×"));
+}
+
+#[test]
+fn models_nocolor_has_no_styles() {
+    theme::set_color_mode(theme::TerminalColorMode::NoColor);
+    theme::set_theme(theme::Theme::graphite());
+    let items = vec![
+        sample_model("claude-opus-4", 1000, 2.0),
+        sample_model("gpt-4o", 2000, 3.0),
+    ];
+    let mut terminal = Terminal::new(TestBackend::new(120, 20)).unwrap();
+    let area = Rect::new(0, 0, 120, 20);
+    let scroll = ScrollState {
+        offset: 0,
+        selected: 0,
+        total: items.len(),
+        visible: 16,
+    };
+    let data = Some(Ok(items));
+    terminal
+        .draw(|frame| {
+            llmusage::tui::panels::models::render(frame, area, &data, &scroll);
+        })
+        .unwrap();
+    for cell in terminal.backend().buffer().content() {
+        assert_eq!(cell.fg, ratatui::style::Color::Reset);
+        assert_eq!(cell.bg, ratatui::style::Color::Reset);
+        assert_eq!(cell.modifier, ratatui::style::Modifier::empty());
+    }
+    theme::set_color_mode(theme::TerminalColorMode::TrueColor);
+    theme::set_theme(theme::Theme::default_dark());
 }

@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "ParseIssues samples, ZCode skip semantics, CLI summary, and cursor contracts"}
+{"file": ".trellis/spec/llmusage/backend/runtime-log-contracts.md", "reason": "Info-level parse-issue event must stay privacy-safe and not change default warn file level"}
+{"file": ".trellis/spec/llmusage/backend/write-fencing-contracts.md", "reason": "Skip watermark columns and cursor writes go through fenced bootstrap/migrations"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Parser to cursor to CLI/status/logs one sample contract"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "Must not change ZCode token channel formulas while adding skip diagnostics"}

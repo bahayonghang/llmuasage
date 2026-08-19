@@ -70,7 +70,7 @@ fn load_dashboard(store: &Store) -> Result<()> {
 }
 ```
 
-`Dashboard::snapshot(&QueryFilter)` 是 Web Dashboard 和静态导出的稳定 seam。它包含固定 Dashboard 区块和默认 Explorer payload。自定义 Cost Explorer 查询使用 `Dashboard::explorer(&ExplorerQuery)`，用于切换 metric/group-by、Top N/Other、session 筛选、tool 筛选和 token component 筛选。
+`Dashboard::snapshot(&QueryFilter)` 是 Web 看板和静态导出的稳定接口。它包含固定看板区块和默认用量分析数据。自定义用量分析查询使用 `Dashboard::explorer(&ExplorerQuery)`，用于切换指标、分组维度、结果上限、会话筛选、工具筛选和 Token 类型筛选。
 
 行为查询和 Explorer 在所选指标或维度需要时会使用标准化 `usage_turn` 与 `usage_tool_call` facts。它们会返回显式 `normalized`、`no_data`、`degraded` 或 `unsupported` 支持状态，而不是把缺失事实伪装成 0。
 

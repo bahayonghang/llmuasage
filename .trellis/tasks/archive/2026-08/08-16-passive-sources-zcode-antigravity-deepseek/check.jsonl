@@ -1,0 +1,3 @@
+{"file": "docs/agents/passive-parser-onboarding.md", "reason": "检查所需证据/测试清单是否逐项满足"}
+{"file": ".trellis/spec/llmusage/backend/index.md", "reason": "父任务跨子任务质量检查入口（Pre-Development Checklist + Quality Check）"}
+{"file": ".trellis/tasks/08-16-passive-sources-zcode-antigravity-deepseek/prd.md", "reason": "跨子任务验收标准与隐私红线"}

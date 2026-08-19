@@ -1,0 +1,8 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "ParseIssues counters, JSONL bound, sync stats and consumer contract"}
+{"file": ".trellis/spec/llmusage/backend/dashboard-performance-contracts.md", "reason": "sync_command_center payload budget and interactive JSON shape"}
+{"file": ".trellis/spec/llmusage/backend/tui-presentation-contracts.md", "reason": "TUI copy and semantic styles for Usage/Sync issues"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "Must not change token channel formulas"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Parser to store to CLI/dashboard/TUI one taxonomy"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse ParseIssues.record and sync summary formatter"}
+{"file": ".trellis/tasks/08-17-parse-issue-observability/research/payload-budget.md", "reason": "Keep parse-issue samples out of interactive dashboard JSON"}

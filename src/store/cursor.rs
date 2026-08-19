@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::error::{LlmusageError, Result};
 use rusqlite::{OptionalExtension, params};
 
-use super::{FileCursor, OpencodeCursor, Store};
+use super::{FileCursor, OpencodeCursor, Store, ZcodeCursor};
 use crate::{
     models::{SourceKind, UsageTokens},
     util::now_utc,
@@ -129,6 +129,86 @@ impl<'a> CursorStore<'a> {
                     cursor.last_part_rowid,
                     cursor.sqlite_status,
                     cursor.updated_at,
+                ],
+            )?;
+            Ok(())
+        })?;
+        Ok(())
+    }
+
+    pub fn load_zcode_cursor(&self) -> Result<ZcodeCursor> {
+        let conn = self.store.open_connection()?;
+        let row = conn
+            .query_row(
+                r#"
+                SELECT last_time_created, last_processed_ids_json, sqlite_status, updated_at,
+                       last_skipped_at, last_skipped_ids_json
+                FROM source_cursor
+                WHERE source = 'zcode' AND cursor_key = 'main'
+                "#,
+                [],
+                |row| {
+                    let ids_json: Option<String> = row.get(1)?;
+                    let skipped_ids_json: Option<String> = row.get(5)?;
+                    Ok(ZcodeCursor {
+                        last_completed_at: row.get::<_, Option<i64>>(0)?.unwrap_or_default(),
+                        last_processed_ids: ids_json
+                            .as_deref()
+                            .and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok())
+                            .unwrap_or_default(),
+                        sqlite_status: row
+                            .get::<_, Option<String>>(2)?
+                            .unwrap_or_else(|| "never_checked".to_string()),
+                        updated_at: row.get::<_, Option<String>>(3)?.unwrap_or_else(now_utc),
+                        last_skipped_at: row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
+                        last_skipped_ids: skipped_ids_json
+                            .as_deref()
+                            .and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok())
+                            .unwrap_or_default(),
+                    })
+                },
+            )
+            .optional()?;
+
+        Ok(row.unwrap_or_default())
+    }
+
+    pub fn save_zcode_cursor(&self, cursor: &ZcodeCursor) -> Result<()> {
+        let processed_ids =
+            serde_json::to_string(&cursor.last_processed_ids).map_err(|source| {
+                LlmusageError::Parse {
+                    context: "zcode cursor",
+                    source,
+                }
+            })?;
+        let skipped_ids = serde_json::to_string(&cursor.last_skipped_ids).map_err(|source| {
+            LlmusageError::Parse {
+                context: "zcode skip cursor",
+                source,
+            }
+        })?;
+        self.store.write_transaction(|tx| {
+            tx.execute(
+                r#"
+            INSERT INTO source_cursor(
+                source, cursor_key, last_time_created, last_processed_ids_json,
+                sqlite_status, updated_at, last_skipped_at, last_skipped_ids_json
+            ) VALUES ('zcode', 'main', ?1, ?2, ?3, ?4, ?5, ?6)
+            ON CONFLICT(source, cursor_key) DO UPDATE SET
+                last_time_created = excluded.last_time_created,
+                last_processed_ids_json = excluded.last_processed_ids_json,
+                sqlite_status = excluded.sqlite_status,
+                updated_at = excluded.updated_at,
+                last_skipped_at = excluded.last_skipped_at,
+                last_skipped_ids_json = excluded.last_skipped_ids_json
+            "#,
+                params![
+                    cursor.last_completed_at,
+                    processed_ids,
+                    cursor.sqlite_status,
+                    cursor.updated_at,
+                    cursor.last_skipped_at,
+                    skipped_ids,
                 ],
             )?;
             Ok(())

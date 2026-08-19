@@ -83,6 +83,8 @@ const format = await import('../../src/web/assets/data/format.js');
 const derive = await import('../../src/web/assets/data/derive.js');
 const copy = await import('../../src/web/assets/copy.js');
 const behavior = await import('../../src/web/assets/render/behavior.js');
+const explorer = await import('../../src/web/assets/render/explorer.js');
+const insights = await import('../../src/web/assets/render/insights.js');
 const summaryCards = await import('../../src/web/assets/render/summary-cards.js');
 const calendarHeatmap = await import('../../src/web/assets/render/calendar-heatmap.js');
 const trendsDaily = await import('../../src/web/assets/render/trends-daily.js');
@@ -263,6 +265,17 @@ test('locale switch does not recompute buildContext but invalidates fingerprints
   }
 });
 
+test('UTC instants render in the requested timezone', () => {
+  assert.equal(format.formatClock('2026-08-18T12:00:00Z', 'Asia/Shanghai'), '20:00');
+  assert.equal(format.formatClock('2026-08-18T12:26:54Z', 'Asia/Shanghai'), '20:26');
+  assert.equal(format.formatClock('2026-08-18T12:00:00Z', 'UTC'), '12:00');
+  assert.equal(format.formatDateTime('2026-08-18T12:00:00Z', 'Asia/Shanghai'), '2026-08-18 20:00');
+  assert.equal(format.formatDateTime('2026-08-18T12:26:54Z', 'Asia/Shanghai'), '2026-08-18 20:26:54');
+  assert.equal(format.formatClock('2026-08-18', 'Asia/Shanghai'), '2026-08-18');
+  assert.equal(format.formatDateTime('2026-08', 'UTC'), '2026-08');
+  assert.equal(format.formatDateTime('', 'UTC'), '--');
+});
+
 test('Intl.NumberFormat construction is bounded', () => {
   for (let i = 0; i < 500; i += 1) {
     format.formatNumber(i);
@@ -292,14 +305,15 @@ test('behavior sections render only their own containers', () => {
   resetMutations();
   behavior.renderActivity(context);
   assert.deepEqual(mutatedIds().sort(), ['activity-bars', 'activity-support', 'activity-table']);
-  assert.equal(getElement('activity-support').textContent, 'normalized');
-  assert.ok(getElement('activity-table').innerHTML.includes('coding'));
+  assert.equal(getElement('activity-support').textContent, '数据完整');
+  assert.ok(getElement('activity-table').innerHTML.includes('编码'));
 
   resetMutations();
   behavior.renderTools(context);
   assert.deepEqual(mutatedIds().sort(), ['tools-bars', 'tools-support', 'tools-table']);
-  assert.equal(getElement('tools-support').textContent, 'no_data');
+  assert.equal(getElement('tools-support').textContent, '暂无数据');
   assert.ok(getElement('tools-table').innerHTML.includes('Read'));
+  assert.ok(getElement('tools-table').innerHTML.includes('读取'));
 
   resetMutations();
   behavior.renderOptimize(context);
@@ -317,7 +331,7 @@ test('stale refresh notice follows secondary_refreshing and locale', () => {
 
   resetMutations();
   behavior.renderActivity(refreshing);
-  assert.equal(getElement('activity-support').textContent, 'refreshing');
+  assert.equal(getElement('activity-support').textContent, '刷新中');
   assert.ok(getElement('activity-table').innerHTML.includes('stale-refresh-notice'));
   assert.ok(getElement('activity-table').innerHTML.includes('正在刷新当前时间范围'));
 
@@ -347,6 +361,49 @@ test('stale refresh notice follows secondary_refreshing and locale', () => {
   }
 });
 
+test('dynamic analysis terminology follows the selected locale', () => {
+  const explorerContext = {
+    panels: {
+      explorer: {
+        support: { supported: false, level: 'no_data', reason: 'No usage events match this filter.' },
+        metric: 'total_tokens',
+        group_by: 'model',
+        granularity: 'day',
+        totals: { value: 0 },
+        rows: [],
+        series: [],
+      },
+    },
+  };
+  const insightContext = {
+    insights: [
+      { id: 'top_model', tone: 'neutral', params: { model: 'gpt-5', tokens: '1.2K' } },
+      { id: 'sync_failure', tone: 'warn', params: { count: 1, command: 'sync' } },
+    ],
+  };
+
+  explorer.renderExplorer(explorerContext);
+  insights.renderInsights(insightContext);
+  assert.equal(getElement('explorer-support').textContent, '暂无数据');
+  assert.ok(getElement('explorer-summary').innerHTML.includes('分组维度'));
+  assert.ok(getElement('explorer-rows').innerHTML.includes('当前筛选范围没有用量事件'));
+  assert.ok(getElement('insights-card').innerHTML.includes('当前筛选范围的主要模型'));
+  assert.ok(getElement('insights-card').innerHTML.includes('1.2K Token'));
+
+  copy.setLocale('en');
+  try {
+    explorer.renderExplorer(explorerContext);
+    insights.renderInsights(insightContext);
+    assert.equal(getElement('explorer-support').textContent, 'No data');
+    assert.ok(getElement('explorer-summary').innerHTML.includes('Group by'));
+    assert.ok(getElement('insights-card').innerHTML.includes('Primary model in this filter range'));
+    assert.ok(getElement('insights-card').innerHTML.includes('1.2K tokens'));
+    assert.ok(getElement('insights-card').innerHTML.includes('Failure records: 1'));
+  } finally {
+    copy.setLocale('zh');
+  }
+});
+
 
 test('ready-widget pure derivations preserve approved mappings and boundaries', () => {
   const cards = derive.buildSummaryCards({
@@ -365,9 +422,14 @@ test('ready-widget pure derivations preserve approved mappings and boundaries', 
     },
   });
   assert.equal(cards.length, 6);
+  assert.equal(cards[0].label, '会话数');
+  assert.equal(cards[0].sub, '2 个来源');
   assert.equal(cards[1].sub, '2.5 次 / 会话');
   assert.equal(cards[2].featured, true);
+  assert.equal(cards[2].label, 'Token 用量');
+  assert.equal(cards[2].sub, '用量最高来源: codex');
   assert.match(cards[2].sub, /codex/);
+  assert.equal(cards[5].label, '缓存读取占比');
   assert.equal(cards[5].value, '75.0%');
 
   assert.deepEqual(derive.heatmapLevels([0, 0, 0]), [0, 0, 0]);
@@ -420,6 +482,13 @@ test('ready-widget renderers mutate only their section containers', () => {
   assert.ok(getElement('calendar-heatmap').innerHTML.includes('viewBox="0 0'));
   assert.ok(getElement('calendar-heatmap').innerHTML.includes('周一'));
   assert.ok(getElement('calendar-heatmap').innerHTML.includes('aria-label='));
+
+  context.panels.heatmap = Array.from({ length: 365 }, (_value, index) => {
+    const date = new Date(Date.UTC(2025, 0, index + 1)).toISOString().slice(0, 10);
+    return { date, event_count: 1, total_tokens: index + 1 };
+  });
+  calendarHeatmap.renderCalendarHeatmap(context, { rangePreset: 'all', filters: {} });
+  assert.ok(getElement('calendar-heatmap').innerHTML.includes('calendar-heatmap-svg is-long-range'));
 
   resetMutations();
   trendsDaily.renderTrendsDaily(context, state);

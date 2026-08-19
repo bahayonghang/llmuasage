@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/llmusage/backend/tui-presentation-contracts.md", "reason": "Theme slots, NoColor/ANSI16, format helpers, no Color::* in panels"}
+{"file": ".trellis/spec/llmusage/backend/tui-runtime-contracts.md", "reason": "Visible-row windowing, Models collapse removal, sort state"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Query DTO to TUI to PublicModelBreakdown field boundary"}
+{"file": ".trellis/tasks/08-18-dash-models-tokscale-style/research/tokscale-models-gap.md", "reason": "tokscale column/color/format reference and gap classes"}
+{"file": ".trellis/tasks/08-18-dash-models-tokscale-style/prd.md", "reason": "Locked MVP requirements and acceptance"}
+{"file": ".trellis/tasks/08-18-dash-models-tokscale-style/design.md", "reason": "Vendor map, format rules, query/TUI split"}

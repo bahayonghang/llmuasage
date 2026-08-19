@@ -70,7 +70,7 @@ fn load_dashboard(store: &Store) -> Result<()> {
 }
 ```
 
-`Dashboard::snapshot(&QueryFilter)` is the stable seam used by the web dashboard and static export. It includes the fixed dashboard sections plus the default Explorer payload. Use `Dashboard::explorer(&ExplorerQuery)` for custom Cost Explorer queries such as metric/group-by changes, Top N/Other, session filters, tool filters, and token component filters.
+`Dashboard::snapshot(&QueryFilter)` is the stable seam used by the web dashboard and static export. It includes the fixed dashboard sections plus the default Usage analysis payload. Use `Dashboard::explorer(&ExplorerQuery)` for custom usage-analysis queries such as metric/group-by changes, result limits/Other, session filters, tool filters, and token component filters.
 
 Behavior and Explorer queries use normalized `usage_turn` and `usage_tool_call` facts when a chosen metric or dimension needs them. They may report explicit `normalized`, `no_data`, `degraded`, or `unsupported` support states instead of pretending missing facts are zero.
 

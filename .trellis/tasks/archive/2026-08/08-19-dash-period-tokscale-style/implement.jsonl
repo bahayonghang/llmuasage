@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/llmusage/backend/tui-presentation-contracts.md", "reason": "Theme slots, NoColor/ANSI16, cache_multiplier/cost_per_million, no Color::* in panels, nine-panel shell"}
+{"file": ".trellis/spec/llmusage/backend/tui-runtime-contracts.md", "reason": "Visible-row windowing, SortState, panel load cancellation"}
+{"file": ".trellis/spec/llmusage/backend/dashboard-performance-contracts.md", "reason": "TUI query permit/cancel boundary; do not change /api/trends JSON"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "DailyTrendPoint public JSON vs TUI-only turn_count; TrendPoint stays web-only"}
+{"file": ".trellis/tasks/08-19-dash-period-tokscale-style/research/tokscale-period-gap.md", "reason": "tokscale Daily/Hourly/Monthly columns, hour separators, Turn hide rule"}
+{"file": ".trellis/tasks/08-19-dash-period-tokscale-style/prd.md", "reason": "Locked MVP requirements and acceptance"}
+{"file": ".trellis/tasks/08-19-dash-period-tokscale-style/design.md", "reason": "Query split, Panel::Monthly, Enter detail, hour timezone key"}

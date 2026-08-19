@@ -1,15 +1,15 @@
 use crate::query::reports::BlockReportRow;
 use crate::query::{
-    ActivityPayload, ContextPressurePayload, CostLine, DailyTrendPoint, HealthPayload,
-    HeatmapPoint, ModelBreakdown, ModelComparePayload, OptimizePayload, OverviewPayload,
-    QueryFilter, SourceBreakdown, SyncCommandCenterPayload, ToolsPayload, TrendPoint, ZombieReport,
+    ActivityPayload, ContextPressurePayload, DailyModelPoint, DailyTrendPoint, HeatmapPoint,
+    HourlyTrendPoint, ModelBreakdown, ModelComparePayload, MonthlyTrendPoint, OptimizePayload,
+    OverviewPayload, PeriodDetailRow, QueryFilter, SyncCommandCenterPayload, ToolsPayload,
+    ZombieReport,
 };
+use crate::subscription::UsageFetchReport;
 use crate::{domain::platform_monitor::PlatformProbe, models::SourceKind};
 
 use chrono::{Duration as ChronoDuration, NaiveDate, Utc};
 use std::time::{Duration, Instant};
-
-use super::panels::longtail::Collapsed;
 
 /// The nine dashboard panels in fixed display order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,7 +20,7 @@ pub enum Panel {
     Models = 2,
     Sources = 3,
     Projects = 4,
-    Cost = 5,
+    Monthly = 5,
     Health = 6,
     Behavior = 7,
     Blocks = 8,
@@ -36,7 +36,7 @@ impl Panel {
             Self::Models,
             Self::Sources,
             Self::Projects,
-            Self::Cost,
+            Self::Monthly,
             Self::Health,
             Self::Behavior,
             Self::Blocks,
@@ -50,7 +50,7 @@ impl Panel {
             2 => Some(Self::Models),
             3 => Some(Self::Sources),
             4 => Some(Self::Projects),
-            5 => Some(Self::Cost),
+            5 => Some(Self::Monthly),
             6 => Some(Self::Health),
             7 => Some(Self::Behavior),
             8 => Some(Self::Blocks),
@@ -82,7 +82,7 @@ impl Panel {
             Self::Models => "Models",
             Self::Sources => "Daily",
             Self::Projects => "Hourly",
-            Self::Cost => "Cost",
+            Self::Monthly => "Monthly",
             Self::Health => "Stats",
             Self::Behavior => "Agents",
             Self::Blocks => "Blocks",
@@ -96,12 +96,34 @@ impl Panel {
             Self::Models => "Mod",
             Self::Sources => "Day",
             Self::Projects => "Hr",
-            Self::Cost => "Cost",
+            Self::Monthly => "Mon",
             Self::Health => "Sta",
             Self::Behavior => "Agt",
             Self::Blocks => "Blk",
         }
     }
+}
+
+/// Which period-table drill-down is open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PeriodDetailKind {
+    Daily { date: String },
+    Monthly { month: String },
+}
+
+/// Loaded rows for a period-table drill-down.
+#[derive(Debug, Clone)]
+pub enum PeriodDetailPayload {
+    Daily(Vec<PeriodDetailRow>),
+    Monthly(Vec<DailyTrendPoint>),
+}
+
+/// Daily/Monthly Enter state. `payload` is `None` while the detail query runs.
+#[derive(Debug, Clone)]
+pub struct PeriodDetailState {
+    pub kind: PeriodDetailKind,
+    pub list_scroll: ScrollState,
+    pub payload: Option<Result<PeriodDetailPayload, String>>,
 }
 
 /// Combined behavior analytics payload for the terminal dashboard.
@@ -114,13 +136,20 @@ pub struct BehaviorPanelPayload {
     pub compare: ModelComparePayload,
 }
 
+/// TUI Overview facts: lifetime totals plus windowed chart and list rows.
+#[derive(Debug, Clone)]
+pub struct OverviewPanelPayload {
+    pub totals: OverviewPayload,
+    pub daily_models: Vec<DailyModelPoint>,
+    pub models: Vec<ModelBreakdown>,
+}
+
 /// Combined read-only facts for the tokscale-style stats panel.
 #[derive(Debug, Clone)]
 pub struct StatsPanelPayload {
     pub overview: OverviewPayload,
     pub heatmap: Vec<HeatmapPoint>,
-    pub sources: Vec<SourceBreakdown>,
-    pub health: HealthPayload,
+    pub models: Vec<ModelBreakdown>,
     pub context_pressure: ContextPressurePayload,
 }
 
@@ -303,6 +332,20 @@ pub struct SortState {
 }
 
 impl SortState {
+    pub fn cost_desc() -> Self {
+        Self {
+            key: Some(TableSortKey::Cost),
+            descending: true,
+        }
+    }
+
+    pub fn date_desc() -> Self {
+        Self {
+            key: Some(TableSortKey::Date),
+            descending: true,
+        }
+    }
+
     pub fn header(self, label: &str, key: TableSortKey) -> String {
         if self.key != Some(key) {
             return label.to_string();
@@ -334,6 +377,7 @@ pub(crate) fn stable_sort_refs<T>(
 pub enum ActiveDialog {
     SourcePicker,
     Help,
+    SyncStatus,
 }
 
 #[derive(Debug, Clone)]
@@ -369,16 +413,22 @@ pub struct AppState {
     pub sort: [SortState; Panel::COUNT],
     pub filter: QueryFilter,
     // Cached data (loaded on panel switch)
-    pub overview: Option<Result<OverviewPayload, String>>,
+    pub overview: Option<Result<OverviewPanelPayload, String>>,
     pub sync_center: Option<Result<SyncCommandCenterPayload, String>>,
     pub models: Option<Result<Vec<ModelBreakdown>, String>>,
     pub daily: Option<Result<Vec<DailyTrendPoint>, String>>,
-    pub hourly: Option<Result<Vec<TrendPoint>, String>>,
-    pub costs: Option<Result<Vec<CostLine>, String>>,
+    pub hourly: Option<Result<Vec<HourlyTrendPoint>, String>>,
+    pub monthly: Option<Result<Vec<MonthlyTrendPoint>, String>>,
+    pub period_detail: Option<PeriodDetailState>,
     pub stats: Option<Result<StatsPanelPayload, String>>,
     pub behavior: Option<Result<BehaviorPanelPayload, String>>,
     pub blocks: Option<Result<Vec<BlockReportRow>, String>>,
     pub platform_probes: Vec<PlatformProbe>,
+    pub quota_report: Option<UsageFetchReport>,
+    pub hide_usage_emails: bool,
+    pub quota_fetch_attempted: bool,
+    pub quota_fetching: bool,
+    pub sync_overlay_scroll: ScrollState,
     pub active_dialog: Option<ActiveDialog>,
     pub source_picker: SourcePickerState,
     pub status_message: Option<String>,
@@ -392,8 +442,6 @@ pub struct AppState {
     pub data_generation: u64,
     pub panel_loading: [bool; Panel::COUNT],
     pub sync_active: bool,
-    pub model_collapse: Option<Collapsed>,
-    pub cost_collapse: Option<Collapsed>,
 }
 
 impl Default for AppState {
@@ -413,18 +461,37 @@ impl AppState {
                 total: 0,
                 visible: 0,
             }),
-            sort: [SortState::default(); Panel::COUNT],
+            sort: {
+                let mut sort = [SortState::default(); Panel::COUNT];
+                sort[Panel::Models as usize] = SortState::cost_desc();
+                sort[Panel::Overview as usize] = SortState::cost_desc();
+                sort[Panel::Sources as usize] = SortState::date_desc();
+                sort[Panel::Projects as usize] = SortState::date_desc();
+                sort[Panel::Monthly as usize] = SortState::date_desc();
+                sort
+            },
             filter: QueryFilter::default(),
             overview: None,
             sync_center: None,
             models: None,
             daily: None,
             hourly: None,
-            costs: None,
+            monthly: None,
+            period_detail: None,
             stats: None,
             behavior: None,
             blocks: None,
             platform_probes: crate::domain::platform_monitor::probe_registered_platforms(),
+            quota_report: None,
+            hide_usage_emails: true,
+            quota_fetch_attempted: false,
+            quota_fetching: false,
+            sync_overlay_scroll: ScrollState {
+                offset: 0,
+                selected: 0,
+                total: 0,
+                visible: 0,
+            },
             active_dialog: None,
             source_picker: SourcePickerState { selected: 0 },
             status_message: None,
@@ -438,8 +505,6 @@ impl AppState {
             data_generation: 0,
             panel_loading: [false; Panel::COUNT],
             sync_active: false,
-            model_collapse: None,
-            cost_collapse: None,
         }
     }
 
@@ -462,6 +527,19 @@ impl AppState {
 
     pub fn open_help(&mut self) {
         self.active_dialog = Some(ActiveDialog::Help);
+    }
+
+    pub fn open_sync_status(&mut self) {
+        self.active_dialog = Some(ActiveDialog::SyncStatus);
+    }
+
+    pub fn toggle_usage_emails(&mut self) {
+        self.hide_usage_emails = !self.hide_usage_emails;
+        if self.hide_usage_emails {
+            self.set_status("Emails hidden");
+        } else {
+            self.set_status("Emails visible");
+        }
     }
 
     pub fn close_dialog(&mut self) {
@@ -515,7 +593,8 @@ impl AppState {
         self.models = None;
         self.daily = None;
         self.hourly = None;
-        self.costs = None;
+        self.monthly = None;
+        self.period_detail = None;
         self.stats = None;
         self.behavior = None;
         self.blocks = None;
@@ -524,8 +603,6 @@ impl AppState {
             scroll.selected = 0;
         }
         self.panel_loading = [false; Panel::COUNT];
-        self.model_collapse = None;
-        self.cost_collapse = None;
         self.needs_refresh = true;
     }
 
@@ -555,7 +632,7 @@ impl AppState {
     }
 
     pub fn background_active(&self) -> bool {
-        self.sync_active || self.panel_loading.iter().any(|loading| *loading)
+        self.sync_active || self.quota_fetching || self.panel_loading.iter().any(|loading| *loading)
     }
 
     pub fn cycle_sort(&mut self) -> Option<(TableSortKey, bool)> {
@@ -615,14 +692,78 @@ impl AppState {
     pub fn set_status(&mut self, message: &str) {
         self.status_message = Some(message.to_string());
     }
+
+    pub fn is_period_detail_active(&self) -> bool {
+        self.period_detail.is_some()
+    }
+
+    pub fn open_period_detail(&mut self, kind: PeriodDetailKind) {
+        let panel = self.active_panel;
+        if let Some(existing) = self.period_detail.as_mut() {
+            existing.kind = kind;
+            existing.payload = None;
+            let scroll = &mut self.scroll[panel as usize];
+            scroll.selected = 0;
+            scroll.offset = 0;
+            scroll.total = 0;
+            return;
+        }
+        self.period_detail = Some(PeriodDetailState {
+            kind,
+            list_scroll: self.scroll[panel as usize].clone(),
+            payload: None,
+        });
+        let scroll = &mut self.scroll[panel as usize];
+        scroll.selected = 0;
+        scroll.offset = 0;
+        scroll.total = 0;
+    }
+
+    pub fn close_period_detail(&mut self) {
+        let Some(detail) = self.period_detail.take() else {
+            return;
+        };
+        self.scroll[self.active_panel as usize] = detail.list_scroll;
+    }
+}
+
+#[cfg(test)]
+mod period_detail_tests {
+    use super::*;
+
+    #[test]
+    fn reopening_period_detail_keeps_list_scroll_backup() {
+        let mut state = AppState::new();
+        state.active_panel = Panel::Health;
+        state.scroll[Panel::Health as usize].selected = 5;
+        state.open_period_detail(PeriodDetailKind::Daily {
+            date: "2026-01-01".to_string(),
+        });
+        state.scroll[Panel::Health as usize].selected = 2;
+        state.period_detail.as_mut().unwrap().payload =
+            Some(Ok(PeriodDetailPayload::Daily(Vec::new())));
+        state.open_period_detail(PeriodDetailKind::Daily {
+            date: "2026-01-02".to_string(),
+        });
+        let detail = state.period_detail.as_ref().unwrap();
+        assert_eq!(
+            detail.kind,
+            PeriodDetailKind::Daily {
+                date: "2026-01-02".to_string()
+            }
+        );
+        assert!(detail.payload.is_none());
+        assert_eq!(detail.list_scroll.selected, 5);
+        assert_eq!(state.scroll[Panel::Health as usize].selected, 0);
+    }
 }
 
 fn sort_keys(panel: Panel) -> &'static [TableSortKey] {
     match panel {
-        Panel::Models => &[TableSortKey::Tokens, TableSortKey::Cost],
-        Panel::Sources => &[TableSortKey::Date, TableSortKey::Tokens, TableSortKey::Cost],
-        Panel::Cost => &[TableSortKey::Cost, TableSortKey::Tokens],
-        Panel::Blocks => &[TableSortKey::Date, TableSortKey::Tokens, TableSortKey::Cost],
+        Panel::Overview | Panel::Models => &[TableSortKey::Tokens, TableSortKey::Cost],
+        Panel::Sources | Panel::Projects | Panel::Monthly | Panel::Blocks => {
+            &[TableSortKey::Date, TableSortKey::Tokens, TableSortKey::Cost]
+        }
         _ => &[],
     }
 }
@@ -871,15 +1012,16 @@ mod tests {
     #[test]
     fn sort_state_is_remembered_per_panel() {
         let mut state = AppState::new();
+        assert_eq!(state.sort[Panel::Models as usize], SortState::cost_desc());
         state.active_panel = Panel::Models;
         assert_eq!(state.cycle_sort(), Some((TableSortKey::Tokens, true)));
-        state.active_panel = Panel::Cost;
-        assert_eq!(state.cycle_sort(), Some((TableSortKey::Cost, true)));
+        state.active_panel = Panel::Monthly;
+        assert_eq!(state.cycle_sort(), Some((TableSortKey::Tokens, true)));
         state.active_panel = Panel::Models;
         assert_eq!(state.reverse_sort(), Some((TableSortKey::Tokens, false)));
         assert_eq!(
-            state.sort[Panel::Cost as usize].key,
-            Some(TableSortKey::Cost)
+            state.sort[Panel::Monthly as usize].key,
+            Some(TableSortKey::Tokens)
         );
     }
 }

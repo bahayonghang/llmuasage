@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     io::IsTerminal,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -17,6 +18,7 @@ use crate::{
     parsers::{SourceSyncStats, SyncEvent, SyncSummaryEvent, driver},
     registry,
     store::{BootstrapProgressEvent, HolderKind, SourceSyncStatus, Store},
+    util::hash_string,
 };
 
 // These types belong to the sync domain layer. Re-exported here so callers that
@@ -186,7 +188,7 @@ async fn run_with_human_events(
     let summary = summary_result?;
     drop(heartbeat);
     drop(lock);
-    print_summary(&summary, options);
+    print_summary(&summary, options, store);
 
     info!("完成全量本地真源同步");
     Ok(())
@@ -307,13 +309,42 @@ async fn run_with_json_events(
     result.map(|_| ())
 }
 
-fn print_summary(summary: &SyncSummary, options: &SyncRunOptions) {
+fn print_summary(summary: &SyncSummary, options: &SyncRunOptions, store: &Store) {
     let color = std::io::stdout().is_terminal();
-    for line in
-        sync_summary::format_summary_lines(summary, options.rebuild, color, terminal_width())
-    {
+    let basenames = sample_basenames(store, summary);
+    for line in sync_summary::format_summary_lines_with_basenames(
+        summary,
+        options.rebuild,
+        color,
+        terminal_width(),
+        &basenames,
+    ) {
         println!("{line}");
     }
+}
+
+fn sample_basenames(store: &Store, summary: &SyncSummary) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for stats in &summary.sources {
+        if stats.parse_issues.samples.is_empty() {
+            continue;
+        }
+        let Ok(cursors) = store.cursors().load_file_cursors(stats.source) else {
+            continue;
+        };
+        for cursor in cursors.into_values() {
+            let raw = if cursor.file_path.is_empty() {
+                cursor.cursor_key
+            } else {
+                cursor.file_path
+            };
+            let Some(name) = sync_summary::path_basename(&raw) else {
+                continue;
+            };
+            map.insert(hash_string(&raw), name.to_string());
+        }
+    }
+    map
 }
 
 /// Terminal column budget for the summary table: `COLUMNS` when set, otherwise
@@ -708,8 +739,33 @@ fn reset_for_rebuild(
     parser_sources: &[SourceKind],
 ) -> Result<()> {
     let rebuild_sources = rebuild_sources(options.source, parser_sources)?;
+    assert_no_unattributed_antigravity_history(store, &rebuild_sources)?;
     assert_lossless_rebuild(store, options, &rebuild_sources)?;
     reset_sources_for_rebuild(store, &rebuild_sources)
+}
+
+/// Refuses any rebuild that would delete hook-era Antigravity history.
+///
+/// Those rows predate the passive parser, carry no `source_path_hash`
+/// attribution, and do not exist in `conversations/*.db`, so once deleted they
+/// are gone forever. The guard is absolute (not bypassed by
+/// `--allow-lossy-rebuild`): export a backup first if you truly need to clear
+/// them. Once no unattributed rows remain, rebuild behaves like any other
+/// parser-backed source.
+fn assert_no_unattributed_antigravity_history(
+    store: &Store,
+    rebuild_sources: &[SourceKind],
+) -> Result<()> {
+    if !rebuild_sources.contains(&SourceKind::Antigravity) {
+        return Ok(());
+    }
+    let unattributed = store.unattributed_event_count(SourceKind::Antigravity)?;
+    if unattributed == 0 {
+        return Ok(());
+    }
+    bail!(
+        "Refusing `sync --rebuild` for antigravity because {unattributed} stored event(s) are hook-era history without file attribution; they cannot be reconstructed from local artifacts and are not covered by --allow-lossy-rebuild. Export a backup first (e.g. `llmusage export`) if you intentionally want to drop them."
+    )
 }
 
 fn reset_sources_for_rebuild(store: &Store, sources: &[SourceKind]) -> Result<()> {

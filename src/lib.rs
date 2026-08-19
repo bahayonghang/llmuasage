@@ -28,6 +28,7 @@ pub mod registry;
 #[doc = "Compatibility module for runtime internals. Prefer `app`, `paths`, and `logging`."]
 pub mod runtime;
 pub mod store;
+pub mod subscription;
 pub mod sync;
 #[cfg(any(feature = "testing", test))]
 pub mod testing;

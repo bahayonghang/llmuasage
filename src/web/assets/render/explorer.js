@@ -1,4 +1,4 @@
-import { getShellCopy } from '../copy.js';
+import { getLocale, getShellCopy, UI_COPY } from '../copy.js';
 import { escapeHtml, formatNumber, formatTokenAmount, formatUsd, ratio } from '../data.js';
 
 const logger = window.console;
@@ -20,10 +20,20 @@ function finiteNumber(value) {
 }
 
 function supportLabel(support) {
-  if (support?.supported && support?.level === 'normalized') {
-    return 'normalized';
-  }
-  return support?.level || 'no_data';
+  const level = support?.level || (support?.supported ? 'normalized' : 'no_data');
+  return UI_COPY.explorer.support[level] || level;
+}
+
+function localizedReason(reason, fallback = UI_COPY.explorer.empty) {
+  const raw = String(reason || '');
+  if (!raw) return fallback;
+  const reasons = UI_COPY.explorer.reasons;
+  if (raw === 'No usage events match this filter.') return reasons.noUsage;
+  if (raw.startsWith('Current source scope has usage data')) return reasons.noFacts;
+  if (raw.startsWith('Omitted source(s) without normalized')) return reasons.omittedFacts;
+  if (raw.startsWith('token_type filters only support')) return reasons.tokenFilter;
+  if (raw.startsWith('token_type groupings only support')) return reasons.tokenGroup;
+  return getLocale() === 'zh' ? fallback : raw;
 }
 
 function metricLabel(metric) {
@@ -61,6 +71,18 @@ function granularityLabel(granularity) {
   return key ? getShellCopy(key) : granularity || '--';
 }
 
+function dimensionValue(explorer, value) {
+  const raw = String(value || '--');
+  const values = UI_COPY.explorer.values;
+  if (explorer?.group_by === 'tool_kind') return values.toolKinds[raw] || raw;
+  if (explorer?.group_by === 'token_type') return values.tokenTypes[raw] || raw;
+  if (explorer?.group_by === 'is_tool') {
+    if (raw === 'tool') return values.tool;
+    if (raw === 'non-tool' || raw === 'non_tool' || raw === '(non-tool)') return values.non_tool;
+  }
+  return raw;
+}
+
 function formatMetric(metric, value) {
   if (metric === 'attributed_cost_usd') {
     return formatUsd(value);
@@ -82,30 +104,31 @@ function refreshNotice(refreshing) {
 }
 
 function renderSummary(explorer) {
+  const copy = UI_COPY.explorer.summary;
   const rows = Array.isArray(explorer?.rows) ? explorer.rows : [];
   const series = Array.isArray(explorer?.series) ? explorer.series : [];
   const total = Number(explorer?.totals?.value || 0);
   const metric = explorer?.metric || 'attributed_cost_usd';
   return `
     <div class="mini-stat">
-      <span>Metric</span>
+      <span>${escapeHtml(copy.metric)}</span>
       <strong>${escapeHtml(formatMetric(metric, total))}</strong>
       <small>${escapeHtml(metricLabel(metric))}</small>
     </div>
     <div class="mini-stat">
-      <span>Group by</span>
+      <span>${escapeHtml(copy.groupBy)}</span>
       <strong>${escapeHtml(groupLabel(explorer?.group_by))}</strong>
       <small>${escapeHtml(granularityLabel(explorer?.granularity))}</small>
     </div>
     <div class="mini-stat">
-      <span>Rows</span>
+      <span>${escapeHtml(copy.rows)}</span>
       <strong>${formatNumber(rows.length)}</strong>
-      <small>${formatNumber(series.length)} series points</small>
+      <small>${formatNumber(series.length)} ${escapeHtml(copy.seriesPoints)}</small>
     </div>
   `;
 }
 
-function renderBars(rows, metric) {
+function renderBars(rows, explorer) {
   if (!rows.length) {
     return '';
   }
@@ -114,12 +137,12 @@ function renderBars(rows, metric) {
     .slice(0, 10)
     .map((row) => {
       const value = Number(row?.value || 0);
-      const label = row?.label || row?.key || '--';
+      const label = dimensionValue(explorer, row?.label || row?.key);
       return `
         <div class="bar-row ${row?.is_other ? 'is-other' : ''}">
           <div class="name" title="${escapeHtml(label)}">${escapeHtml(label)}</div>
           <div class="bar-track"><div class="bar-fill" style="width: ${ratio(value, max)}%"></div></div>
-          <div class="num">${escapeHtml(formatMetric(metric, value))}</div>
+          <div class="num">${escapeHtml(formatMetric(explorer?.metric, value))}</div>
         </div>
       `;
     })
@@ -128,14 +151,14 @@ function renderBars(rows, metric) {
 
 function renderRowsTable(rows, explorer) {
   if (!rows.length) {
-    return emptyState(explorer?.support?.reason || '暂无 Explorer 维度结果。');
+    return emptyState(localizedReason(explorer?.support?.reason));
   }
   const metric = explorer?.metric || 'attributed_cost_usd';
   const rowsHtml = rows
     .slice(0, 50)
     .map((row) => `
       <tr>
-        <td class="name-cell">${escapeHtml(row?.label || row?.key || '--')}</td>
+        <td class="name-cell">${escapeHtml(dimensionValue(explorer, row?.label || row?.key))}</td>
         <td>${escapeHtml(row?.key || '--')}</td>
         <td class="r">${escapeHtml(formatMetric(metric, row?.value))}</td>
         <td class="r">${formatNumber(Number(row?.share || 0) * 100)}%</td>
@@ -146,10 +169,10 @@ function renderRowsTable(rows, explorer) {
     <table class="panel-table">
       <thead>
         <tr>
-          <th>维度</th>
-          <th>Key</th>
+          <th>${escapeHtml(UI_COPY.explorer.table.dimension)}</th>
+          <th>${escapeHtml(UI_COPY.explorer.table.key)}</th>
           <th class="r">${escapeHtml(metricLabel(metric))}</th>
-          <th class="r">占比</th>
+          <th class="r">${escapeHtml(UI_COPY.explorer.table.share)}</th>
         </tr>
       </thead>
       <tbody>${rowsHtml}</tbody>
@@ -164,7 +187,7 @@ function renderSeriesTable(series, explorer) {
     .map((point) => `
       <tr>
         <td class="name-cell">${escapeHtml(point?.bucket || '--')}</td>
-        <td title="${escapeHtml(point?.label || point?.key || '--')}">${escapeHtml(point?.label || point?.key || '--')}</td>
+        <td title="${escapeHtml(dimensionValue(explorer, point?.label || point?.key))}">${escapeHtml(dimensionValue(explorer, point?.label || point?.key))}</td>
         <td class="r">${escapeHtml(formatMetric(metric, finiteNumber(point?.value)))}</td>
       </tr>
     `)
@@ -284,7 +307,7 @@ function renderSeriesChart(rows, series, explorer) {
     return emptyState(getShellCopy('shell.explorer.seriesTotalEmpty'));
   }
   if (!series.length) {
-    return emptyState(explorer?.support?.reason || getShellCopy('shell.explorer.seriesEmpty'));
+    return emptyState(localizedReason(explorer?.support?.reason, getShellCopy('shell.explorer.seriesEmpty')));
   }
 
   const metric = explorer?.metric || 'attributed_cost_usd';
@@ -293,20 +316,21 @@ function renderSeriesChart(rows, series, explorer) {
   const chartSeries = buildChartSeries(rows, series, buckets);
   const availableSeriesCount = new Set(series.map((point) => String(point?.key ?? ''))).size;
   if (!buckets.length || !chartSeries.length) {
-    return emptyState(explorer?.support?.reason || getShellCopy('shell.explorer.seriesEmpty'));
+    return emptyState(localizedReason(explorer?.support?.reason, getShellCopy('shell.explorer.seriesEmpty')));
   }
 
   const seriesRows = chartSeries.map((entry) => {
     const geometry = miniChartGeometry(entry.values);
     const peakValue = formatMetric(metric, geometry.peak);
+    const displayLabel = dimensionValue(explorer, entry.label);
     const aria = shellCopy('shell.explorer.seriesAria', {
-      label: entry.label,
+      label: displayLabel,
       range,
       value: peakValue,
     });
     return `
       <div class="explorer-series-row">
-        <div class="explorer-series-name" title="${escapeHtml(entry.label)}">${escapeHtml(entry.label)}</div>
+        <div class="explorer-series-name" title="${escapeHtml(displayLabel)}">${escapeHtml(displayLabel)}</div>
         <svg class="explorer-series-plot" viewBox="0 0 ${MINI_CHART_WIDTH} ${MINI_CHART_HEIGHT}" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(aria)}">
           <line class="explorer-series-baseline" x1="4" y1="${geometry.baseline}" x2="${MINI_CHART_WIDTH - 4}" y2="${geometry.baseline}"></line>
           <polyline class="explorer-series-line" points="${geometry.polyline}"></polyline>
@@ -364,7 +388,7 @@ function renderSeriesDetails(series, explorer, open) {
 
 /*
  * ========================================================================
- * 步骤1：渲染 Cost Explorer 工作台
+ * 步骤1：渲染用量分析工作台
  * ========================================================================
  * 目标：
  * 1) 展示后端 Explorer payload，而不是在前端透视原始行
@@ -372,20 +396,20 @@ function renderSeriesDetails(series, explorer, open) {
  * 3) 在 live 和 snapshot/export 模式下复用同一渲染路径
  */
 export function renderExplorer(context, _state = {}) {
-  logger.info('开始渲染 Cost Explorer 工作台');
+  logger.info('开始渲染用量分析工作台');
 
   const explorer = context?.panels?.explorer || {};
   const rows = Array.isArray(explorer.rows) ? explorer.rows : [];
   const series = Array.isArray(explorer.series) ? explorer.series : [];
   const support = explorer.support || { supported: false, level: 'no_data' };
-  const warning = explorer.warning || support.reason || '';
+  const warning = localizedReason(explorer.warning || support.reason, '');
   const refreshing = Boolean(context?.panels?.secondary_refreshing);
 
   const supportEl = document.getElementById('explorer-support');
   if (supportEl) {
-    supportEl.textContent = refreshing ? 'refreshing' : supportLabel(support);
+    supportEl.textContent = refreshing ? UI_COPY.explorer.support.refreshing : supportLabel(support);
     supportEl.dataset.level = refreshing ? 'refreshing' : support.level || 'no_data';
-    supportEl.title = support.reason || support.strategy || '';
+    supportEl.title = localizedReason(support.reason, support.strategy || '');
   }
 
   const summary = document.getElementById('explorer-summary');
@@ -402,7 +426,7 @@ export function renderExplorer(context, _state = {}) {
 
   const bars = document.getElementById('explorer-bars');
   if (bars) {
-    bars.innerHTML = renderBars(rows, explorer.metric);
+    bars.innerHTML = renderBars(rows, explorer);
   }
 
   const rowsHost = document.getElementById('explorer-rows');
@@ -421,5 +445,5 @@ export function renderExplorer(context, _state = {}) {
     detailsHost.innerHTML = renderSeriesDetails(series, explorer, wasOpen);
   }
 
-  logger.info('完成 Cost Explorer 工作台渲染');
+  logger.info('完成用量分析工作台渲染');
 }

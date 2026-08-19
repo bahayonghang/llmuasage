@@ -18,7 +18,7 @@ llmusage export html --out .\llmusage-report
 - `snapshot.json`
 - `assets/*`
 
-该 bundle 复用 `llmusage serve` 的 Dashboard shell，但从 `snapshot.json` 加载数据，而不是访问 live HTTP endpoints。`snapshot.json` 包含固定 Dashboard 区块和默认 Cost Explorer payload。
+该导出包复用 `llmusage serve` 的看板外壳，但从 `snapshot.json` 加载数据，而不是访问实时 HTTP 接口。`snapshot.json` 包含固定看板区块和默认用量分析数据。
 
 ## 快照行为
 

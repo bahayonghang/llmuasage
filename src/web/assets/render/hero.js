@@ -1,5 +1,5 @@
 import { UI_COPY } from '../copy.js';
-import { escapeHtml, formatNumber } from '../data.js';
+import { escapeHtml, formatDateTime, formatNumber } from '../data.js';
 
 const logger = window.console;
 const STATUS_PANEL_MOBILE_QUERY = '(max-width: 720px)';
@@ -52,8 +52,8 @@ export function renderHero(context) {
   const { ledgerSummary } = context;
   const heroCopy = UI_COPY.hero;
   const metaItems = [
-    { label: heroCopy.rows.generated_at, value: ledgerSummary.generated_at || '--' },
-    { label: heroCopy.rows.last_sync_at, value: ledgerSummary.last_sync_at || '--' },
+    { label: heroCopy.rows.generated_at, value: formatDateTime(ledgerSummary.generated_at) },
+    { label: heroCopy.rows.last_sync_at, value: formatDateTime(ledgerSummary.last_sync_at) },
     {
       label: heroCopy.rows.sourceCount,
       value: `${ledgerSummary.active_sources} · ${supportedSourcesLabel()}`,
@@ -108,7 +108,7 @@ export function renderHero(context) {
 
   const endpointSync = document.getElementById('endpoint-sync');
   if (endpointSync) {
-    endpointSync.textContent = ledgerSummary.last_sync_at || '--';
+    endpointSync.textContent = formatDateTime(ledgerSummary.last_sync_at);
   }
 
   logger.info('完成首屏 hero 区渲染');

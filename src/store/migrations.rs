@@ -96,6 +96,16 @@ pub const MIGRATIONS: &[(u32, &str, MigrationFn)] = &[
         "optimize_home_overview_compact_projection",
         m_020_optimize_home_overview_compact_projection,
     ),
+    (
+        21,
+        "preset_antigravity_token_accounting",
+        m_021_preset_antigravity_token_accounting,
+    ),
+    (
+        22,
+        "add_zcode_skip_watermark",
+        m_022_add_zcode_skip_watermark,
+    ),
 ];
 
 /// Returns the newest schema version known to this binary.
@@ -917,6 +927,50 @@ fn m_020_optimize_home_overview_compact_projection(tx: &Transaction<'_>) -> Resu
     Ok(())
 }
 
+/// Migration v22 — persist ZCode unfinished-row skip watermark columns.
+///
+/// These columns are owned by `ZcodeCursor` only. File-backed sources and
+/// OpenCode continue to ignore them. They must not reuse
+/// `last_processed_ids_json` or `last_total_json`.
+fn m_022_add_zcode_skip_watermark(tx: &Transaction<'_>) -> Result<()> {
+    if !table_exists(tx, "source_cursor")? {
+        return Ok(());
+    }
+    ensure_column(
+        tx,
+        "source_cursor",
+        "last_skipped_at",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    ensure_column(tx, "source_cursor", "last_skipped_ids_json", "TEXT")?;
+    Ok(())
+}
+
+/// Migration v21 — preset the Antigravity token-accounting marker.
+///
+/// Antigravity is being flipped from a parserless `historical_only` source to
+/// a parser-backed passive source. Its hook-era rows predate the current
+/// contract but carry no `source_path_hash` attribution, so the automatic
+/// legacy-repair paths (unbounded sync, serve startup) would reset the source
+/// and delete unreconstructable history the moment a parser registers. This
+/// migration presets the current marker so both repair paths treat existing
+/// rows as current from day one. Explicit `--rebuild --source antigravity`
+/// is separately guarded against unattributed history.
+fn m_021_preset_antigravity_token_accounting(tx: &Transaction<'_>) -> Result<()> {
+    tx.execute(
+        r#"
+        INSERT INTO meta(key, value)
+        VALUES ('token_accounting_version.antigravity', ?1)
+        ON CONFLICT(key) DO NOTHING
+        "#,
+        [
+            super::expected_token_accounting_version(crate::models::SourceKind::Antigravity)
+                .to_string(),
+        ],
+    )?;
+    Ok(())
+}
+
 fn ensure_column(tx: &Transaction<'_>, table: &str, column: &str, definition: &str) -> Result<()> {
     if table_has_column(tx, table, column)? {
         return Ok(());
@@ -1728,8 +1782,82 @@ mod tests {
 
         let mut fresh = Connection::open_in_memory()?;
         run_migrations_with_events(&mut fresh, None)?;
-        assert_eq!(read_schema_version(&fresh)?, 20);
+        assert_eq!(read_schema_version(&fresh)?, latest_schema_version());
         assert_home_compact_covering_index(&fresh)?;
+        Ok(())
+    }
+
+    #[test]
+    fn migration_v21_presets_antigravity_token_accounting_marker() -> anyhow::Result<()> {
+        let mut upgraded = Connection::open_in_memory()?;
+        run_migrations_for_test(&mut upgraded, &MIGRATIONS[..20])?;
+        assert_eq!(read_schema_version(&upgraded)?, 20);
+
+        run_migrations_for_test(&mut upgraded, &MIGRATIONS[..21])?;
+        let marker: Option<String> = upgraded
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'token_accounting_version.antigravity'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        assert_eq!(
+            marker
+                .as_deref()
+                .and_then(|value| value.parse::<u32>().ok()),
+            Some(crate::store::expected_token_accounting_version(
+                crate::models::SourceKind::Antigravity
+            )),
+            "v21 must preset the marker so legacy auto-repair never resets antigravity"
+        );
+
+        // 幂等：重复应用不覆盖既有值。
+        run_migrations_for_test(&mut upgraded, &MIGRATIONS[..21])?;
+        let marker_again: String = upgraded.query_row(
+            "SELECT value FROM meta WHERE key = 'token_accounting_version.antigravity'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(marker_again, "2");
+        Ok(())
+    }
+
+    #[test]
+    fn migration_v22_adds_zcode_skip_watermark_columns() -> anyhow::Result<()> {
+        let mut upgraded = Connection::open_in_memory()?;
+        run_migrations_for_test(&mut upgraded, &MIGRATIONS[..21])?;
+        assert_eq!(read_schema_version(&upgraded)?, 21);
+        let before = pragma_columns(&upgraded, "source_cursor")?;
+        assert!(!before.contains(&"last_skipped_at".to_string()));
+        assert!(!before.contains(&"last_skipped_ids_json".to_string()));
+
+        run_migrations_for_test(&mut upgraded, &MIGRATIONS[..22])?;
+        assert_eq!(read_schema_version(&upgraded)?, 22);
+        let columns = pragma_columns(&upgraded, "source_cursor")?;
+        assert!(columns.contains(&"last_skipped_at".to_string()));
+        assert!(columns.contains(&"last_skipped_ids_json".to_string()));
+
+        upgraded.execute(
+            "INSERT INTO source_cursor(source, cursor_key, updated_at)
+             VALUES ('zcode', 'main', '2026-08-17T00:00:00Z')",
+            [],
+        )?;
+        let skipped_at: i64 = upgraded.query_row(
+            "SELECT last_skipped_at FROM source_cursor WHERE source = 'zcode' AND cursor_key = 'main'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(skipped_at, 0);
+
+        run_migrations_for_test(&mut upgraded, &MIGRATIONS[..22])?;
+        assert_eq!(read_schema_version(&upgraded)?, 22);
+
+        let mut fresh = Connection::open_in_memory()?;
+        run_migrations_with_events(&mut fresh, None)?;
+        assert_eq!(read_schema_version(&fresh)?, latest_schema_version());
+        let fresh_columns = pragma_columns(&fresh, "source_cursor")?;
+        assert!(fresh_columns.contains(&"last_skipped_at".to_string()));
+        assert!(fresh_columns.contains(&"last_skipped_ids_json".to_string()));
         Ok(())
     }
 

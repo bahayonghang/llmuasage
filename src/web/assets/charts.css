@@ -125,6 +125,19 @@
   max-width: none;
 }
 
+.calendar-heatmap-svg.is-long-range {
+  width: 100%;
+  min-width: 640px;
+  height: auto;
+}
+
+.hour-week-svg {
+  display: block;
+  width: 100%;
+  min-width: 489px;
+  height: auto;
+}
+
 .heatmap-axis,
 .daily-axis {
   fill: var(--muted);

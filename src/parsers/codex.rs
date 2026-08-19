@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     fs::File,
     future::Future,
     io::Read,
@@ -16,11 +17,14 @@ use tracing::info;
 
 use crate::{
     models::{
-        ParseIssues, SessionInfo, SourceKind, UsageEvent, UsageTokens, UsageToolCall, UsageTurn,
+        ParseIssues, ProjectInfo, SessionInfo, SourceKind, UsageEvent, UsageTokens, UsageToolCall,
+        UsageTurn,
     },
     parsers::{
         ProgressSink, SourceParser, SourceSyncStats, SyncEvent,
-        behavior::{extract_codex_tools, tool_calls_from_evidence, turn_from_tools},
+        behavior::{
+            BehaviorToolEvidence, extract_codex_tools, tool_calls_from_evidence, turn_from_tools,
+        },
         file_progress::{FileProgress, FileProgressCounter},
         file_state::{
             BoundedJsonlReader, CandidateFile, FileReplayMode, JsonlReadStatus,
@@ -34,6 +38,7 @@ use crate::{
 };
 
 const REPLAY_MARKER_SCAN_BYTES: usize = 16 * 1024;
+const OVERSIZED_TYPE_PEEK_BYTES: usize = 8 * 1024;
 
 #[derive(Debug, Clone)]
 struct CodexShardPlan {
@@ -64,6 +69,149 @@ struct RolloutParseResult {
     tool_calls: Vec<UsageToolCall>,
     parse_issues: ParseIssues,
     cancelled: bool,
+}
+
+struct CodexLiveParse<'a> {
+    path_hash: &'a str,
+    resolver: &'a mut ProjectResolver,
+    model: Option<String>,
+    totals: Option<UsageTokens>,
+    session_label: Option<String>,
+    current_session: Option<SessionInfo>,
+    current_project: Option<ProjectInfo>,
+    current_cwd: Option<String>,
+    events: Vec<UsageEvent>,
+    turns: Vec<UsageTurn>,
+    tool_calls: Vec<UsageToolCall>,
+    pending_tools: Vec<BehaviorToolEvidence>,
+    skip_replay: bool,
+    replay_second: Option<[u8; 19]>,
+}
+
+enum CodexOversizedClass {
+    Recovered(Value),
+    Skipped,
+    Oversized,
+}
+
+impl CodexLiveParse<'_> {
+    fn ingest_oversized(&mut self, prefix: &[u8]) -> Result<JsonlRecordDisposition> {
+        match classify_oversized_codex_prefix(prefix) {
+            CodexOversizedClass::Recovered(value) => self.ingest(value),
+            CodexOversizedClass::Skipped => Ok(JsonlRecordDisposition::Skipped),
+            CodexOversizedClass::Oversized => Ok(JsonlRecordDisposition::Ignored),
+        }
+    }
+
+    fn ingest(&mut self, value: Value) -> Result<JsonlRecordDisposition> {
+        if let Some(payload) = value.get("payload").and_then(|value| value.as_object())
+            && matches!(
+                value.get("type").and_then(Value::as_str),
+                Some("turn_context" | "session_meta")
+            )
+        {
+            if let Some(next_model) = payload.get("model").and_then(Value::as_str) {
+                self.model = Some(next_model.trim().to_string());
+            }
+            if matches!(
+                value.get("type").and_then(Value::as_str),
+                Some("session_meta")
+            ) && let Some(session_id) = payload.get("id").and_then(Value::as_str)
+            {
+                let trimmed = session_id.trim();
+                if !trimmed.is_empty() {
+                    self.current_session = Some(SessionInfo {
+                        session_id: trimmed.to_string(),
+                        session_label: self.session_label.clone(),
+                        source_path_hash: Some(self.path_hash.to_string()),
+                    });
+                }
+            }
+            if let Some(cwd) = payload.get("cwd").and_then(Value::as_str) {
+                let trimmed = cwd.trim().to_string();
+                if !trimmed.is_empty() && self.current_cwd.as_deref() != Some(trimmed.as_str()) {
+                    self.current_project = self.resolver.resolve(Path::new(&trimmed))?;
+                    self.current_cwd = Some(trimmed);
+                }
+            }
+            return Ok(JsonlRecordDisposition::Accepted);
+        }
+
+        let extracted_tools = extract_codex_tools(&value);
+        if !extracted_tools.is_empty() {
+            self.pending_tools.extend(extracted_tools);
+        }
+
+        let Some((timestamp, info)) = extract_token_count(&value) else {
+            return Ok(if self.pending_tools.is_empty() {
+                JsonlRecordDisposition::Ignored
+            } else {
+                JsonlRecordDisposition::Accepted
+            });
+        };
+        if let Some(replay_second) = self.replay_second.as_ref()
+            && self.skip_replay
+        {
+            if timestamp_second(&timestamp).as_ref() == Some(replay_second) {
+                if let Some(next_total) = info.get("total_token_usage").and_then(parse_usage_tokens)
+                {
+                    self.totals = Some(next_total);
+                }
+                self.pending_tools.clear();
+                return Ok(JsonlRecordDisposition::Accepted);
+            }
+            self.skip_replay = false;
+        }
+        let Some(hour_start) = bucket_start_from_rfc3339(&timestamp) else {
+            return Ok(JsonlRecordDisposition::Malformed);
+        };
+
+        let last_usage = info.get("last_token_usage");
+        let total_usage = info.get("total_token_usage");
+        let delta = pick_delta(last_usage, total_usage, self.totals.as_ref());
+        if delta.total_tokens == 0
+            && delta.input_tokens == 0
+            && delta.cache_read_tokens == 0
+            && delta.output_tokens == 0
+            && delta.reasoning_output_tokens == 0
+        {
+            if let Some(next_total) = total_usage.and_then(parse_usage_tokens) {
+                self.totals = Some(next_total);
+            }
+            return Ok(JsonlRecordDisposition::Accepted);
+        }
+
+        if let Some(next_total) = total_usage.and_then(parse_usage_tokens) {
+            self.totals = Some(next_total);
+        }
+
+        let normalized_model = normalize_model(self.model.as_deref());
+        let logical_identity = format!(
+            "{timestamp}\0{normalized_model}\0{}\0{}\0{}\0{}\0{}",
+            delta.input_tokens,
+            delta.cache_read_tokens,
+            delta.output_tokens,
+            delta.reasoning_output_tokens,
+            delta.total_tokens,
+        );
+        let event = UsageEvent {
+            event_key: format!("codex:logical:{}", hash_string(&logical_identity)),
+            source: SourceKind::Codex,
+            provider_label: String::new(),
+            model: normalized_model,
+            event_at: timestamp,
+            hour_start,
+            tokens: delta,
+            project: self.current_project.clone(),
+            session: self.current_session.clone(),
+        };
+        let tools = std::mem::take(&mut self.pending_tools);
+        self.turns.push(turn_from_tools(&event, &tools));
+        self.tool_calls
+            .extend(tool_calls_from_evidence(&event, tools));
+        self.events.push(event);
+        Ok(JsonlRecordDisposition::Accepted)
+    }
 }
 
 /// Codex rollout parser. Owns the per-file scan + per-shard commit pipeline
@@ -406,8 +554,6 @@ fn parse_rollout_file(
 
     let mut reader = BoundedJsonlReader::new(file, start_offset)?;
 
-    let mut model = last_model;
-    let mut totals = last_total;
     let session_label = file_path
         .file_stem()
         .and_then(|value| value.to_str())
@@ -415,143 +561,44 @@ fn parse_rollout_file(
     let fallback_session_id = session_label
         .clone()
         .unwrap_or_else(|| path_hash.to_string());
-    let mut current_session = Some(SessionInfo {
-        session_id: fallback_session_id,
+    let live = RefCell::new(CodexLiveParse {
+        path_hash,
+        resolver,
+        model: last_model,
+        totals: last_total,
         session_label: session_label.clone(),
-        source_path_hash: Some(path_hash.to_string()),
+        current_session: Some(SessionInfo {
+            session_id: fallback_session_id,
+            session_label,
+            source_path_hash: Some(path_hash.to_string()),
+        }),
+        current_project: None,
+        current_cwd: None,
+        events: Vec::new(),
+        turns: Vec::new(),
+        tool_calls: Vec::new(),
+        pending_tools: Vec::new(),
+        skip_replay: replay_second.is_some(),
+        replay_second,
     });
-    let mut current_project = None;
-    let mut current_cwd: Option<String> = None;
-    let mut events = Vec::new();
-    let mut turns = Vec::new();
-    let mut tool_calls = Vec::new();
-    let mut pending_tools = Vec::new();
-    let mut skip_replay = replay_second.is_some();
     let mut parse_issues = ParseIssues::default();
-    let status = reader.read_json_records(
+    let status = reader.read_json_records_with_oversized(
         SourceKind::Codex,
         path_hash,
         cancel,
         &mut parse_issues,
-        |record| {
-            let value = record.value;
-            if let Some(payload) = value.get("payload").and_then(|value| value.as_object())
-                && matches!(
-                    value.get("type").and_then(Value::as_str),
-                    Some("turn_context" | "session_meta")
-                )
-            {
-                if let Some(next_model) = payload.get("model").and_then(Value::as_str) {
-                    model = Some(next_model.trim().to_string());
-                }
-                if matches!(
-                    value.get("type").and_then(Value::as_str),
-                    Some("session_meta")
-                ) && let Some(session_id) = payload.get("id").and_then(Value::as_str)
-                {
-                    let trimmed = session_id.trim();
-                    if !trimmed.is_empty() {
-                        current_session = Some(SessionInfo {
-                            session_id: trimmed.to_string(),
-                            session_label: session_label.clone(),
-                            source_path_hash: Some(path_hash.to_string()),
-                        });
-                    }
-                }
-                if let Some(cwd) = payload.get("cwd").and_then(Value::as_str) {
-                    let trimmed = cwd.trim().to_string();
-                    if !trimmed.is_empty() && current_cwd.as_deref() != Some(trimmed.as_str()) {
-                        current_project = resolver.resolve(Path::new(&trimmed))?;
-                        current_cwd = Some(trimmed);
-                    }
-                }
-                return Ok(JsonlRecordDisposition::Accepted);
-            }
-
-            let extracted_tools = extract_codex_tools(&value);
-            if !extracted_tools.is_empty() {
-                pending_tools.extend(extracted_tools);
-            }
-
-            let Some((timestamp, info)) = extract_token_count(&value) else {
-                return Ok(if pending_tools.is_empty() {
-                    JsonlRecordDisposition::Ignored
-                } else {
-                    JsonlRecordDisposition::Accepted
-                });
-            };
-            if let Some(replay_second) = replay_second.as_ref()
-                && skip_replay
-            {
-                if timestamp_second(&timestamp).as_ref() == Some(replay_second) {
-                    if let Some(next_total) =
-                        info.get("total_token_usage").and_then(parse_usage_tokens)
-                    {
-                        totals = Some(next_total);
-                    }
-                    pending_tools.clear();
-                    return Ok(JsonlRecordDisposition::Accepted);
-                }
-                skip_replay = false;
-            }
-            let Some(hour_start) = bucket_start_from_rfc3339(&timestamp) else {
-                return Ok(JsonlRecordDisposition::Malformed);
-            };
-
-            let last_usage = info.get("last_token_usage");
-            let total_usage = info.get("total_token_usage");
-            let delta = pick_delta(last_usage, total_usage, totals.as_ref());
-            if delta.total_tokens == 0
-                && delta.input_tokens == 0
-                && delta.cache_read_tokens == 0
-                && delta.output_tokens == 0
-                && delta.reasoning_output_tokens == 0
-            {
-                if let Some(next_total) = total_usage.and_then(parse_usage_tokens) {
-                    totals = Some(next_total);
-                }
-                return Ok(JsonlRecordDisposition::Accepted);
-            }
-
-            if let Some(next_total) = total_usage.and_then(parse_usage_tokens) {
-                totals = Some(next_total);
-            }
-
-            let normalized_model = normalize_model(model.as_deref());
-            let logical_identity = format!(
-                "{timestamp}\0{normalized_model}\0{}\0{}\0{}\0{}\0{}",
-                delta.input_tokens,
-                delta.cache_read_tokens,
-                delta.output_tokens,
-                delta.reasoning_output_tokens,
-                delta.total_tokens,
-            );
-            let event = UsageEvent {
-                event_key: format!("codex:logical:{}", hash_string(&logical_identity)),
-                source: SourceKind::Codex,
-                provider_label: String::new(),
-                model: normalized_model,
-                event_at: timestamp,
-                hour_start,
-                tokens: delta,
-                project: current_project.clone(),
-                session: current_session.clone(),
-            };
-            let tools = std::mem::take(&mut pending_tools);
-            turns.push(turn_from_tools(&event, &tools));
-            tool_calls.extend(tool_calls_from_evidence(&event, tools));
-            events.push(event);
-            Ok(JsonlRecordDisposition::Accepted)
-        },
+        |record| live.borrow_mut().ingest(record.value),
+        |prefix, _offset| live.borrow_mut().ingest_oversized(prefix),
     )?;
+    let live = live.into_inner();
 
     Ok(RolloutParseResult {
         end_offset: reader.complete_offset(),
-        last_total: totals,
-        last_model: model,
-        events,
-        turns,
-        tool_calls,
+        last_total: live.totals,
+        last_model: live.model,
+        events: live.events,
+        turns: live.turns,
+        tool_calls: live.tool_calls,
         parse_issues,
         cancelled: status == JsonlReadStatus::Cancelled,
     })
@@ -647,6 +694,149 @@ fn extract_token_count(value: &Value) -> Option<(String, &Value)> {
     }
 
     None
+}
+
+fn classify_oversized_codex_prefix(prefix: &[u8]) -> CodexOversizedClass {
+    if let Ok(value) = serde_json::from_slice::<Value>(prefix) {
+        if extract_token_count(&value).is_some() {
+            return CodexOversizedClass::Recovered(value);
+        }
+        return match payload_or_msg_type_from_value(&value) {
+            Some("token_count") => CodexOversizedClass::Oversized,
+            Some(_) => CodexOversizedClass::Skipped,
+            None => CodexOversizedClass::Oversized,
+        };
+    }
+
+    match peek_codex_payload_or_msg_type(prefix) {
+        Some(kind) if kind == "token_count" => CodexOversizedClass::Oversized,
+        Some(_) => CodexOversizedClass::Skipped,
+        None => CodexOversizedClass::Oversized,
+    }
+}
+
+fn payload_or_msg_type_from_value(value: &Value) -> Option<&str> {
+    let payload = value.get("payload")?;
+    payload.get("type").and_then(Value::as_str).or_else(|| {
+        payload
+            .get("msg")
+            .and_then(|msg| msg.get("type"))
+            .and_then(Value::as_str)
+    })
+}
+
+fn peek_codex_payload_or_msg_type(prefix: &[u8]) -> Option<String> {
+    let peek = &prefix[..prefix.len().min(OVERSIZED_TYPE_PEEK_BYTES)];
+    if let Ok(value) = serde_json::from_slice::<Value>(peek) {
+        return payload_or_msg_type_from_value(&value).map(str::to_owned);
+    }
+    object_after_key(peek, br#""payload""#)
+        .and_then(|payload| {
+            json_type_at_object_depth1(payload).or_else(|| {
+                object_after_key(payload, br#""msg""#).and_then(json_type_at_object_depth1)
+            })
+        })
+        .or_else(|| object_after_key(peek, br#""msg""#).and_then(json_type_at_object_depth1))
+}
+
+fn object_after_key<'a>(haystack: &'a [u8], key: &[u8]) -> Option<&'a [u8]> {
+    let key_pos = haystack
+        .windows(key.len())
+        .position(|window| window == key)?;
+    let after = skip_ws(&haystack[key_pos + key.len()..]);
+    if after.first() != Some(&b':') {
+        return None;
+    }
+    let value = skip_ws(&after[1..]);
+    if value.first() != Some(&b'{') {
+        return None;
+    }
+    Some(&value[1..])
+}
+
+fn json_type_at_object_depth1(object_body: &[u8]) -> Option<String> {
+    let type_key = br#""type""#;
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut index = 0usize;
+    while index < object_body.len() {
+        let byte = object_body[index];
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+        match byte {
+            b'"' => {
+                if depth == 0
+                    && object_body[index..].starts_with(type_key)
+                    && let Some(value) =
+                        json_string_value_after_key(&object_body[index..], type_key)
+                {
+                    return Some(value);
+                }
+                in_string = true;
+            }
+            b'{' | b'[' => depth += 1,
+            b'}' | b']' => {
+                if depth == 0 {
+                    return None;
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    None
+}
+
+fn json_string_value_after_key(haystack: &[u8], key: &[u8]) -> Option<String> {
+    if !haystack.starts_with(key) {
+        return None;
+    }
+    let after = skip_ws(&haystack[key.len()..]);
+    if after.first() != Some(&b':') {
+        return None;
+    }
+    let value = skip_ws(&after[1..]);
+    parse_json_string(value)
+}
+
+fn parse_json_string(bytes: &[u8]) -> Option<String> {
+    if bytes.first() != Some(&b'"') {
+        return None;
+    }
+    let mut escaped = false;
+    for (index, byte) in bytes.iter().enumerate().skip(1) {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if *byte == b'\\' {
+            escaped = true;
+            continue;
+        }
+        if *byte == b'"' {
+            return serde_json::from_slice::<String>(&bytes[..=index]).ok();
+        }
+    }
+    None
+}
+
+fn skip_ws(bytes: &[u8]) -> &[u8] {
+    let start = bytes
+        .iter()
+        .position(|byte| !byte.is_ascii_whitespace())
+        .unwrap_or(bytes.len());
+    &bytes[start..]
 }
 
 fn pick_delta(
@@ -783,7 +973,10 @@ fn read_nested_i64(value: &Value, path: &[&str]) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_codex_replay_session, parse_rollout_file, parse_usage_tokens, pick_delta};
+    use super::{
+        CodexOversizedClass, classify_oversized_codex_prefix, is_codex_replay_session,
+        parse_rollout_file, parse_usage_tokens, peek_codex_payload_or_msg_type, pick_delta,
+    };
     use crate::models::UsageTokens;
     use anyhow::Result;
     use serde_json::json;
@@ -1321,6 +1514,131 @@ mod tests {
             "incremental sync picks up completed line"
         );
         assert_eq!(incremental.events[0].event_key, partial_event_key);
+        Ok(())
+    }
+
+    fn token_count_line(input_tokens: i64, output_tokens: i64) -> String {
+        json!({
+            "timestamp": "2026-05-12T08:03:00.000Z",
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "info": {
+                    "last_token_usage": {
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "total_tokens": input_tokens + output_tokens
+                    },
+                    "total_token_usage": {
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "total_tokens": input_tokens + output_tokens
+                    }
+                }
+            }
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn peek_none_on_junk_prefix_stays_oversized() {
+        assert!(peek_codex_payload_or_msg_type(&[b'x'; 256]).is_none());
+        assert!(matches!(
+            classify_oversized_codex_prefix(&[b'x'; 256]),
+            CodexOversizedClass::Oversized
+        ));
+    }
+
+    #[test]
+    fn oversized_non_token_count_line_is_skipped_and_later_rows_parse() -> Result<()> {
+        let dir = TempDir::new()?;
+        let path = dir.path().join("session.jsonl");
+        let mut content = br#"{"timestamp":"2026-05-12T08:03:00.000Z","type":"event_msg","payload":{"type":"function_call","arguments":""#.to_vec();
+        content.extend(std::iter::repeat_n(b'x', 10 * 1024 * 1024));
+        content.extend_from_slice(b"\"}}\n");
+        let follow = token_count_line(100, 50);
+        content.extend_from_slice(follow.as_bytes());
+        content.push(b'\n');
+        fs::write(&path, &content)?;
+
+        let result = parse_rollout_file(
+            &path,
+            "path-hash",
+            0,
+            None,
+            None,
+            &mut Default::default(),
+            &CancellationToken::new(),
+        )?;
+        assert_eq!(result.parse_issues.skipped_lines, 1);
+        assert_eq!(result.parse_issues.oversized_lines, 0);
+        assert_eq!(result.parse_issues.malformed_lines, 0);
+        assert_eq!(result.parse_issues.accounting_anomaly_lines, 0);
+        assert_eq!(result.events.len(), 1);
+        assert_eq!(result.events[0].tokens.total_tokens, 150);
+        assert_eq!(result.end_offset, content.len() as u64);
+        Ok(())
+    }
+
+    #[test]
+    fn complete_token_count_prefix_padded_with_whitespace_is_recovered() -> Result<()> {
+        let dir = TempDir::new()?;
+        let path = dir.path().join("session.jsonl");
+        let token = token_count_line(80, 20);
+        let mut content = token.as_bytes().to_vec();
+        content.resize(
+            crate::parsers::file_state::DEFAULT_MAX_JSONL_RECORD_BYTES + 32,
+            b' ',
+        );
+        content.push(b'\n');
+        fs::write(&path, &content)?;
+
+        let result = parse_rollout_file(
+            &path,
+            "path-hash",
+            0,
+            None,
+            None,
+            &mut Default::default(),
+            &CancellationToken::new(),
+        )?;
+        assert_eq!(result.parse_issues.total(), 0);
+        assert_eq!(result.parse_issues.informational_total(), 0);
+        assert_eq!(result.events.len(), 1);
+        assert_eq!(result.events[0].tokens.input_tokens, 80);
+        assert_eq!(result.events[0].tokens.output_tokens, 20);
+        Ok(())
+    }
+
+    #[test]
+    fn unusable_token_count_prefix_stays_oversized_and_later_rows_parse() -> Result<()> {
+        let dir = TempDir::new()?;
+        let path = dir.path().join("session.jsonl");
+        let mut content = br#"{"timestamp":"2026-05-12T08:03:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":"#.to_vec();
+        content.extend(std::iter::repeat_n(
+            b'1',
+            crate::parsers::file_state::DEFAULT_MAX_JSONL_RECORD_BYTES,
+        ));
+        content.extend_from_slice(b"\n");
+        let follow = token_count_line(12, 8);
+        content.extend_from_slice(follow.as_bytes());
+        content.push(b'\n');
+        fs::write(&path, &content)?;
+
+        let result = parse_rollout_file(
+            &path,
+            "path-hash",
+            0,
+            None,
+            None,
+            &mut Default::default(),
+            &CancellationToken::new(),
+        )?;
+        assert_eq!(result.parse_issues.oversized_lines, 1);
+        assert_eq!(result.parse_issues.skipped_lines, 0);
+        assert_eq!(result.parse_issues.malformed_lines, 0);
+        assert_eq!(result.events.len(), 1);
+        assert_eq!(result.events[0].tokens.total_tokens, 20);
         Ok(())
     }
 }

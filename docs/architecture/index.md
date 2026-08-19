@@ -20,9 +20,9 @@ The runtime state lives under `~/.llmusage/` unless overridden by `--home <PATH>
 - `registered_parsers()` powers `llmusage sync`.
 - `registered_source_descriptors()` powers capability/status semantics and guards parser drift.
 
-Adding a source means adding a `SourceKind` variant plus a descriptor. A parser is added only when the descriptor's capability declaration and tests justify it. Passive readers also require real local samples, fixture coverage, sync-twice idempotency, cursor/rebuild behavior, token-quality declaration, and privacy review before they can write usage rows. Antigravity keeps a descriptor so historical rows can still be parsed and queried; because it has no parser or passive probe, `source-status` derives `historical_only`.
+Adding a source means adding a `SourceKind` variant plus a descriptor. A parser is added only when the descriptor's capability declaration and tests justify it. Passive readers also require real local samples, fixture coverage, sync-twice idempotency, cursor/rebuild behavior, token-quality declaration, and privacy review before they can write usage rows. Antigravity is parser-backed for CLI `conversations/*.db`; hook-era rows remain queryable and a rebuild is refused while they have no file attribution.
 
-`PlatformMonitorDescriptor` is the wider monitoring catalog. It describes registered passive sources such as Kimi Code, Pi, and Grok Build alongside parserless candidates such as Reasonix, Gemini CLI, Cursor, Copilot, Zed, Kiro, Goose, Kimi shell/Qwen, Roo/Kilo/Cline, Codebuff, Crush, Warp/Oz, Amp, Hermes, and Trae. Monitor descriptors may surface detected/unavailable roots, parser support, privacy class, token quality, and next action in `source-status` and `dash`; only descriptors backed by a registered `SourceKind` and parser can write usage rows.
+`PlatformMonitorDescriptor` is the wider monitoring catalog. It describes registered passive sources such as Kimi Code, Pi, Grok Build, ZCode, Antigravity CLI, and DeepSeek Harness alongside parserless candidates such as Reasonix, Gemini CLI, Cursor, Copilot, Zed, Kiro, Goose, Kimi shell/Qwen, Roo/Kilo/Cline, Codebuff, Crush, Warp/Oz, Amp, Hermes, and Trae. Monitor descriptors may surface detected/unavailable roots, parser support, privacy class, token quality, and next action in `source-status` and `dash`; only descriptors backed by a registered `SourceKind` and parser can write usage rows.
 
 ## Sync flow
 
@@ -41,9 +41,9 @@ Repeated sync work is avoided through per-source cursors. Codex, Claude, Kimi Co
 
 Report commands, TUI, web dashboard, and HTML export all read local SQLite through the query layer.
 
-`Dashboard::snapshot(&QueryFilter)` is the primary dashboard seam. `llmusage serve` prefers `/api/dashboard` so overview, trend series, model/source/project/cost rankings, health, diagnostics, and the default Explorer payload are loaded from one core snapshot. Activity, Tools, Optimize, Explorer, and Compare are behavior/query sections that may degrade independently when source facts are unavailable or queries time out.
+`Dashboard::snapshot(&QueryFilter)` is the primary dashboard seam. `llmusage serve` prefers `/api/dashboard` so overview, trend series, model/source/project/cost rankings, health, diagnostics, and the default Usage analysis payload are loaded from one core snapshot. Activity categories (`activity`), Tool usage (`tools`), Optimization hints (`optimize`), Usage analysis (`explorer`), and Model comparison (`compare`) may degrade independently when source facts are unavailable or queries time out.
 
-Custom Cost Explorer queries use `Dashboard::explorer(&ExplorerQuery)` and the `/api/explorer` endpoint. Explorer is additive to the fixed dashboard snapshot: it supports time granularity, metric, group-by, Top N/Other, and session/tool/token filters, but it still returns backend-aggregated rows and series rather than asking the browser to pivot raw events. Query execution chooses an event, turn, or tool-attribution strategy based on the selected metric and dimension, and every payload carries support metadata such as `normalized`, `no_data`, `degraded`, or `unsupported`.
+Custom Usage analysis queries use `Dashboard::explorer(&ExplorerQuery)` and the `/api/explorer` endpoint. Usage analysis is additive to the fixed dashboard snapshot: it supports time granularity, metric, group-by, result limits/Other, and session/tool/token filters, but it still returns backend-aggregated rows and series rather than asking the browser to pivot raw events. Query execution chooses an event, turn, or tool-attribution strategy based on the selected metric and dimension, and every payload carries support metadata such as `normalized`, `no_data`, `degraded`, or `unsupported`.
 
 ## Pricing catalog flow
 
@@ -65,8 +65,8 @@ Threshold rates are selected per event from input + cache-read + cache-creation 
 
 The current version adds normalized behavior tables:
 
-- `usage_turn`: turn-level facts for Activity, Optimize, Compare, and turn-backed Explorer queries.
-- `usage_tool_call`: bounded tool/action facts for Tools, Optimize, Compare, and tool-attribution Explorer queries.
+- `usage_turn`: turn-level facts for Activity categories, Optimization hints, Model comparison, and turn-backed Usage analysis queries.
+- `usage_tool_call`: bounded tool/action facts for Tool usage, Optimization hints, Model comparison, and tool-attribution Usage analysis queries.
 
 Privacy boundary: behavior facts must not store full prompts, full assistant text, or file contents. `safe_preview` is bounded display text only.
 

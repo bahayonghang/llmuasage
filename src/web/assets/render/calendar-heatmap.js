@@ -78,6 +78,7 @@ export function renderCalendarHeatmap(context, state = {}) {
   const firstDow = new Date(`${rows[0].date}T00:00:00Z`).getUTCDay();
   const weekCount = Math.floor((rows.length - 1 + firstDow) / 7) + 1;
   const width = LABEL_WIDTH + weekCount * STEP;
+  const rangeClass = weekCount >= 40 ? ' is-long-range' : '';
   const selectedDate = state?.filters?.since === state?.filters?.until ? state.filters.since : null;
   const weekdays = copy.weekdays;
   const weekdayLabels = weekdays.map((label, index) => label
@@ -107,7 +108,7 @@ export function renderCalendarHeatmap(context, state = {}) {
         <button type="button" data-heatmap-metric="events" class="${metric === 'events' ? 'active' : ''}" aria-pressed="${metric === 'events'}">${escapeHtml(copy.events)}</button>
       </div>
     </div>
-    <div class="heatmap-scroll"><svg class="calendar-heatmap-svg" viewBox="0 0 ${width} 146" width="${width}" height="146" role="img" aria-label="${escapeHtml(copy.title)}">${monthLabels}${weekdayLabels}${cells}</svg></div>
+    <div class="heatmap-scroll"><svg class="calendar-heatmap-svg${rangeClass}" viewBox="0 0 ${width} 146" width="${width}" height="146" role="img" aria-label="${escapeHtml(copy.title)}">${monthLabels}${weekdayLabels}${cells}</svg></div>
     <div class="heatmap-scale"><span>${escapeHtml(copy.less)}</span>${[0, 1, 2, 3, 4].map((level) => `<span class="hm-key hm-l${level}"></span>`).join('')}<span>${escapeHtml(copy.more)}</span></div>
     <div class="chart-tooltip" hidden></div>
   `;

@@ -29,7 +29,7 @@ For a remote server, opt in explicitly and suppress browser launching:
 llmusage serve --public --no-open --port 37421
 ```
 
-`--public` binds `0.0.0.0`; open `http://<server-host-or-ip>:37421` from a machine that can reach the server. Its compile-time route allowlist contains only the browser shell/assets, `/api/dashboard`, and `/api/health`. The dashboard projection includes aggregate overview, trend, model, source, and cost values; project labels, raw logs, diagnostics, cursor details, job state, behavior detail, Cost Explorer, and write routes remain unavailable. Public dashboard requests also ignore `project` and `project_hash` filters so project-specific totals cannot be probed indirectly.
+`--public` binds `0.0.0.0`; open `http://<server-host-or-ip>:37421` from a machine that can reach the server. Its compile-time route allowlist contains only the browser shell/assets, `/api/dashboard`, and `/api/health`. The dashboard projection includes aggregate overview, trend, model, source, and cost values; project labels, raw logs, diagnostics, cursor details, job state, behavior detail, Usage analysis, and write routes remain unavailable. Public dashboard requests also ignore `project` and `project_hash` filters so project-specific totals cannot be probed indirectly.
 
 The public aggregate surface still has no authentication or TLS and still reveals usage totals and model/source names. Use a firewall or authenticated reverse proxy even for this reduced view. To use every local dashboard feature remotely, keep the default loopback listener and use the SSH tunnel below instead of `--public`.
 
@@ -50,14 +50,14 @@ SSH sessions automatically skip browser launching.
 The first screen is task-oriented:
 
 1. Confirm the active time/source/model filter.
-2. Read the six summary cards for sessions, requests, tokens, cost, active days, and cache efficiency.
-3. Check the contribution calendar, day/hour heatmap, and daily token mix, then use the short-window trend for 24-hour detail.
-4. Compare Top Sessions with project, model, source, and cost rankings.
-5. Review behavior panels for activity, tool usage, optimization hints, and model comparison.
-6. Use Cost Explorer for ad hoc local slice-and-dice questions.
+2. Read the six summary cards for sessions, requests, token usage, estimated cost, active days, and cache-read share.
+3. Check Daily activity, Weekly activity, and the daily token usage mix, then use the short-window trend for 24-hour detail.
+4. Compare Highest-usage sessions with project, model, source, and cost rankings.
+5. Review behavior panels for interaction activity, tool usage, optimization hints, and model comparison.
+6. Use Usage analysis for ad hoc multidimensional questions about local data.
 7. Open Event Logs for cursor-paginated event detail, or use sync/CSV export and diagnostics when data looks stale.
 
-On screens up to `720px` wide, System Health becomes a compact disclosure in the first screen. Expand it to inspect cursor count and recent failures; the full card remains visible on wider screens. Integration installation health is no longer part of the dashboard.
+On screens up to `720px` wide, Data status becomes a compact disclosure in the first screen. Expand it to inspect sync cursors and recent failures; the full card remains visible on wider screens. Integration installation health is no longer part of the dashboard.
 
 ## Filters
 
@@ -73,26 +73,26 @@ Dashboard filters map to the shared `QueryFilter` used by the Rust query layer.
 
 The URL preserves filters so a refreshed page or shared local URL keeps the same view.
 
-Antigravity history remains selectable in reports and dashboard filters, but it no longer receives new events. `source-status` exposes this as `historical_only`; its separate platform monitor remains monitor-only and `blocked_no_samples`.
+Antigravity CLI conversations are imported by the registered parser. Hook-era Antigravity rows remain selectable in reports and dashboard filters. A rebuild is refused while those rows have no file attribution. The IDE-side `conversations/*.pb` family stays planned.
 
-Cost Explorer adds its own query controls on top of the shared filters:
+Usage analysis adds its own query controls on top of the shared filters:
 
 | Control | Accepted values |
 | --- | --- |
 | `granularity` | `total`, `day`, `week`, or `month` |
 | `metric` | `attributed_cost_usd`, `calls`, `turns`, `sessions`, or `total_tokens` |
 | `group_by` | `source`, `model`, `project`, `session`, `tool`, `tool_kind`, `is_tool`, or `token_type` |
-| `limit` / `include_other` | Top N rows, optionally merging the rest into `Other` |
+| `limit` / `include_other` | Maximum result count, optionally merging the rest into `Other` |
 | `session_id`, `tool_name`, `tool_kind`, `is_tool`, `token_type` | Explorer-specific filters |
 
 ## Sections
 
-### Summary, contribution calendar, and trends
+### Summary, daily activity, and trends
 
-The six summary cards use the current filter to show sessions, requests, tokens,
-estimated cost, active days, and cache efficiency. The highlighted Tokens card
-also names the highest-token platform. The contribution calendar switches
-between token and event intensity, supports keyboard focus and tooltips, and
+The six summary cards use the current filter to show sessions, requests, token
+usage, estimated cost, active days, and cache-read share. The highlighted Token
+usage card also names the top source. Daily activity switches between token usage
+and request intensity, supports keyboard focus and tooltips, and
 clicks a date to drill the global filter into that day; clicking it again
 restores the previous range.
 
@@ -100,8 +100,9 @@ The daily stacked chart separates input, cache read, cache creation, and output
 tokens and includes daily cost in its tooltip. It intentionally shows an empty
 state for the 24-hour range, where the existing short-window chart provides the
 finer view. Live data for these panels is loaded as secondary work through the
-same latest-request-wins lifecycle as Activity, Tools, Optimize, Explorer, and
-Compare, so stale responses cannot overwrite a newer filter.
+same latest-request-wins lifecycle as Activity categories, Tool usage,
+Optimization hints, Usage analysis, and Model comparison, so stale responses
+cannot overwrite a newer filter.
 
 Static HTML export stores compact summary data, up to 366 heatmap days, and the
 daily series in `snapshot.json`. Older snapshots without these keys load the
@@ -110,9 +111,10 @@ panels as empty states instead of failing. The live dashboard initially loads
 `scope=interactive` plus independent secondary requests. A slow or degraded
 secondary query does not block the first screen.
 
-The day/hour heatmap folds 30-minute buckets into a Monday-first `7 x 24`
-grid using the browser's IANA timezone. Top Sessions supports server-side token,
-active-duration, and cost ordering. Selecting a session opens Event Logs with a
+Weekly activity folds 30-minute buckets into a Monday-first `7 x 24` grid using
+the browser's IANA timezone. It sits beside Daily activity on wide screens and
+stacks below it on narrower screens. Highest-usage sessions supports server-side
+token usage, active-duration, and estimated-cost ordering. Selecting a session opens Event Logs with a
 server-side session filter; expanding an event fetches its retained raw JSON on
 demand. Event Logs are live-only and keep the existing 50-row cursor pagination.
 
@@ -131,16 +133,16 @@ Behavior panels read normalized `usage_turn` and `usage_tool_call` rows produced
 
 | Panel | Purpose |
 | --- | --- |
-| Activity | Turn categories such as coding, debugging, exploration, testing, and planning |
-| Tools | Tool/action mix such as read, edit, search, bash, MCP, and agent actions |
-| Optimize | Read-only findings such as repeated reads or low Read/Edit ratio |
-| Compare | Directional comparison between two models with sample-size warnings |
+| Activity categories | Categories such as coding, debugging, exploration, testing, and planning |
+| Tool usage | Tool/action mix such as read, edit, search, shell, MCP, and sub-agent actions |
+| Optimization hints | Read-only findings such as repeated reads or low Read/Edit ratio |
+| Model comparison | Directional comparison between two models with sample-size warnings |
 
-Optimize is advisory only. It never deletes, moves, archives, rewrites, or cleans files.
+Optimization hints are advisory only. They never delete, move, archive, rewrite, or clean files.
 
-### Cost Explorer
+### Usage analysis
 
-The Cost Explorer workbench is an additive panel, not a replacement for the fixed dashboard sections. It asks questions such as:
+The Usage analysis workbench is an additive panel, not a replacement for the fixed dashboard sections. It asks questions such as:
 
 - "How much did tool calls cost by session today?"
 - "Which tool kinds dominate attributed cost?"
@@ -158,22 +160,22 @@ Common states:
 - `degraded`: a behavior query timed out or failed, while core dashboard data still loaded.
 - `insufficient_models`: model comparison needs at least two model candidates.
 - `low_sample`: comparison exists but the sample is too small for a strong claim.
-- `unsupported`: the selected Explorer metric/dimension/filter combination is not meaningful.
+- `unsupported`: the selected Usage analysis metric/dimension/filter combination is not meaningful.
 - source-limited facts: historical Antigravity rows and OpenCode rows can degrade to conservative turn facts when source logs do not expose tool-level evidence.
 
-Core `/api/dashboard` data should remain responsive even when Activity, Tools, Optimize, Explorer, or Compare is degraded.
+Core `/api/dashboard` data should remain responsive even when Activity categories, Tool usage, Optimization hints, Usage analysis, or Model comparison is degraded.
 
 ## CSV export and static export
 
 The live dashboard exports the currently loaded summary, daily trends, projects,
-models, sources, and Top Sessions as a UTF-8 BOM CSV. Untrusted labels are
+models, sources, and Highest-usage sessions as a UTF-8 BOM CSV. Untrusted labels are
 formula-neutralized before RFC-style quoting. For an offline HTML bundle, use:
 
 ```powershell
 llmusage export html --out .\llmusage-report
 ```
 
-The static bundle includes `snapshot.json` with the summary cards, contribution calendar, day/hour grid, Top Sessions, daily token series, default Explorer payload, and their renderer assets. Older snapshots omit the new keys safely. Snapshot mode disables live Explorer controls and shows Event Logs as live-only.
+The static bundle includes `snapshot.json` with the summary cards, Daily activity, Weekly activity, Highest-usage sessions, the daily token series, default Usage analysis payload, and their renderer assets. Older snapshots omit the new keys safely. Snapshot mode disables live Usage analysis controls and shows Event Logs as live-only.
 
 ## Sync jobs
 

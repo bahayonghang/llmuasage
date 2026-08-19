@@ -8,8 +8,8 @@ use crate::{
         source_descriptor::{self, SourceDescriptor},
     },
     parsers::{
-        ClaudeParser, CodexParser, GrokParser, KimiCodeParser, OpencodeParser, PiParser,
-        SourceParser,
+        AntigravityParser, ClaudeParser, CodexParser, DeepseekHarnessParser, GrokParser,
+        KimiCodeParser, OpencodeParser, PiParser, SourceParser, ZcodeParser,
     },
 };
 
@@ -19,9 +19,12 @@ pub fn registered_parsers() -> Vec<Box<dyn SourceParser>> {
         Box::new(CodexParser),
         Box::new(ClaudeParser),
         Box::new(OpencodeParser),
+        Box::new(AntigravityParser),
         Box::new(KimiCodeParser),
         Box::new(PiParser),
         Box::new(GrokParser),
+        Box::new(ZcodeParser),
+        Box::new(DeepseekHarnessParser),
     ]
 }
 
@@ -110,6 +113,11 @@ mod tests {
         assert_eq!(parse_source_id("kimi_code"), Some(SourceKind::KimiCode));
         assert_eq!(parse_source_id("pi"), Some(SourceKind::Pi));
         assert_eq!(parse_source_id("grok"), Some(SourceKind::Grok));
+        assert_eq!(parse_source_id("zcode"), Some(SourceKind::Zcode));
+        assert_eq!(
+            parse_source_id("deepseek_harness"),
+            Some(SourceKind::DeepseekHarness)
+        );
         assert_eq!(parse_source_id("gemini"), None);
         assert_eq!(parse_source_id("missing"), None);
     }

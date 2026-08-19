@@ -5,10 +5,12 @@ use crate::{
     store::{BootstrapProgressEvent, MigrationProgress, MigrationProgressEvent},
 };
 
+pub mod antigravity;
 pub(crate) mod behavior;
 pub mod claude;
 pub mod codex;
 pub mod driver;
+pub mod dsh;
 mod file_progress;
 pub mod file_state;
 pub mod grok;
@@ -17,15 +19,19 @@ pub mod opencode;
 pub mod pi;
 pub(crate) mod source_files;
 pub mod source_parser;
+pub mod zcode;
 
 pub use crate::models::{ParseIssueKind, ParseIssueSample, ParseIssues};
+pub use antigravity::AntigravityParser;
 pub use claude::ClaudeParser;
 pub use codex::CodexParser;
+pub use dsh::DeepseekHarnessParser;
 pub use grok::GrokParser;
 pub use kimi_code::KimiCodeParser;
 pub use opencode::OpencodeParser;
 pub use pi::PiParser;
 pub use source_parser::{ProgressSink, SourceParser};
+pub use zcode::ZcodeParser;
 
 pub(crate) fn timestamp_in_recent_window(
     timestamp: &str,
@@ -254,7 +260,7 @@ pub struct SourceSyncStats {
     pub absent: bool,
     /// Optional last parse error surfaced for diagnostics.
     pub last_error: Option<String>,
-    /// Privacy-safe malformed/oversized JSONL counters and bounded samples.
+    /// Privacy-safe parse-issue counters and bounded samples.
     #[serde(default)]
     pub parse_issues: ParseIssues,
 }

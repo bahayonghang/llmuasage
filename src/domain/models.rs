@@ -15,7 +15,8 @@ pub enum SourceKind {
     Claude,
     /// OpenCode local SQLite usage database.
     Opencode,
-    /// Historical Google Antigravity usage source (no passive parser).
+    /// Google Antigravity usage source: hook-era history plus the CLI
+    /// `conversations/*.db` passive parser.
     Antigravity,
     /// Kimi Code local `wire.jsonl` session artifacts.
     #[value(name = "kimi_code")]
@@ -26,6 +27,12 @@ pub enum SourceKind {
     /// Grok Build local session sidecars.
     #[value(name = "grok")]
     Grok,
+    /// Z.ai ZCode CLI local SQLite `model_usage` database.
+    #[value(name = "zcode")]
+    Zcode,
+    /// DeepSeek Harness (dsh) local `session.jsonl.zstd` artifacts.
+    #[value(name = "deepseek_harness")]
+    DeepseekHarness,
 }
 
 impl SourceKind {
@@ -39,6 +46,8 @@ impl SourceKind {
             Self::KimiCode => "kimi_code",
             Self::Pi => "pi",
             Self::Grok => "grok",
+            Self::Zcode => "zcode",
+            Self::DeepseekHarness => "deepseek_harness",
         }
     }
 
@@ -56,13 +65,33 @@ impl Display for SourceKind {
 
 pub(crate) const MAX_PARSE_ISSUE_SAMPLES: usize = 8;
 pub(crate) const MAX_PATH_HASH_CHARS: usize = 128;
+pub(crate) const MAX_PARSE_ISSUE_REASON_CHARS: usize = 64;
 
-/// Classification for a bounded, privacy-safe passive JSONL parse issue.
+/// Classification for a bounded, privacy-safe parse issue.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ParseIssueKind {
     Malformed,
     Oversized,
+    Skipped,
+    AccountingAnomaly,
+}
+
+impl ParseIssueKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Malformed => "malformed",
+            Self::Oversized => "oversized",
+            Self::Skipped => "skipped",
+            Self::AccountingAnomaly => "accounting_anomaly",
+        }
+    }
+}
+
+impl Display for ParseIssueKind {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// Bounded diagnostic sample that never contains raw source content or paths.
@@ -72,13 +101,53 @@ pub struct ParseIssueSample {
     pub path_hash: String,
     pub offset: u64,
     pub kind: ParseIssueKind,
+    /// Closed-set short code such as `zcode_unfinished:error:invalid_request`.
+    /// Empty when the sample is located only by kind and offset.
+    #[serde(default)]
+    pub reason: String,
 }
 
-/// Aggregate malformed/oversized record diagnostics for one source sync.
+impl ParseIssueSample {
+    /// Privacy-safe CLI sample line: kind, optional reason, optional JSONL
+    /// offset, optional basename. Never includes `path_hash` or record text.
+    pub fn cli_line(&self, basename: Option<&str>) -> String {
+        let mut line = self.kind.to_string();
+        if !self.reason.is_empty() {
+            line.push(' ');
+            line.push_str(&self.reason);
+        } else if self.offset > 0 {
+            line.push_str(" @");
+            line.push_str(&self.offset.to_string());
+        }
+        if let Some(name) = basename.filter(|name| !name.is_empty()) {
+            line.push(' ');
+            line.push_str(name);
+        }
+        line
+    }
+}
+
+fn sanitize_parse_issue_reason(reason: &str) -> String {
+    reason
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | ':' | '-'))
+        .take(MAX_PARSE_ISSUE_REASON_CHARS)
+        .collect()
+}
+
+/// Aggregate parse-issue diagnostics for one source sync.
+///
+/// `total()` is the fault count (malformed + oversized). Skipped rows and
+/// accounting anomalies are informational and must not be treated as parse
+/// failures.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ParseIssues {
     pub malformed_lines: u64,
     pub oversized_lines: u64,
+    #[serde(default)]
+    pub skipped_lines: u64,
+    #[serde(default)]
+    pub accounting_anomaly_lines: u64,
     pub samples: Vec<ParseIssueSample>,
 }
 
@@ -87,9 +156,38 @@ impl ParseIssues {
         self.malformed_lines.saturating_add(self.oversized_lines)
     }
 
+    pub fn informational_total(&self) -> u64 {
+        self.skipped_lines
+            .saturating_add(self.accounting_anomaly_lines)
+    }
+
+    pub fn class_counts(&self) -> [(&'static str, u64); 4] {
+        [
+            ("malformed", self.malformed_lines),
+            ("oversized", self.oversized_lines),
+            ("skipped", self.skipped_lines),
+            ("accounting", self.accounting_anomaly_lines),
+        ]
+    }
+
+    pub fn summary_text(&self) -> Option<String> {
+        let text = self
+            .class_counts()
+            .into_iter()
+            .filter(|(_, count)| *count > 0)
+            .map(|(label, count)| format!("{label}={count}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        (!text.is_empty()).then_some(text)
+    }
+
     pub fn merge(&mut self, other: Self) {
         self.malformed_lines = self.malformed_lines.saturating_add(other.malformed_lines);
         self.oversized_lines = self.oversized_lines.saturating_add(other.oversized_lines);
+        self.skipped_lines = self.skipped_lines.saturating_add(other.skipped_lines);
+        self.accounting_anomaly_lines = self
+            .accounting_anomaly_lines
+            .saturating_add(other.accounting_anomaly_lines);
         let remaining = MAX_PARSE_ISSUE_SAMPLES.saturating_sub(self.samples.len());
         self.samples
             .extend(other.samples.into_iter().take(remaining));
@@ -101,6 +199,7 @@ impl ParseIssues {
         path_hash: &str,
         offset: u64,
         kind: ParseIssueKind,
+        reason: &str,
     ) {
         match kind {
             ParseIssueKind::Malformed => {
@@ -109,6 +208,12 @@ impl ParseIssues {
             ParseIssueKind::Oversized => {
                 self.oversized_lines = self.oversized_lines.saturating_add(1);
             }
+            ParseIssueKind::Skipped => {
+                self.skipped_lines = self.skipped_lines.saturating_add(1);
+            }
+            ParseIssueKind::AccountingAnomaly => {
+                self.accounting_anomaly_lines = self.accounting_anomaly_lines.saturating_add(1);
+            }
         }
         if self.samples.len() < MAX_PARSE_ISSUE_SAMPLES {
             self.samples.push(ParseIssueSample {
@@ -116,6 +221,7 @@ impl ParseIssues {
                 path_hash: path_hash.chars().take(MAX_PATH_HASH_CHARS).collect(),
                 offset,
                 kind,
+                reason: sanitize_parse_issue_reason(reason),
             });
         }
     }
@@ -450,5 +556,101 @@ mod tests {
         assert_eq!(source, SourceKind::Antigravity);
         assert_eq!(source.as_str(), "antigravity");
         assert!(SourceKind::parse_id("gemini").is_none());
+    }
+
+    #[test]
+    fn parse_issues_old_json_deserializes_new_counters_as_zero() {
+        let issues: ParseIssues =
+            serde_json::from_str(r#"{"malformed_lines":2,"oversized_lines":1,"samples":[]}"#)
+                .expect("legacy parse issues JSON");
+        assert_eq!(issues.malformed_lines, 2);
+        assert_eq!(issues.oversized_lines, 1);
+        assert_eq!(issues.skipped_lines, 0);
+        assert_eq!(issues.accounting_anomaly_lines, 0);
+        assert_eq!(issues.total(), 3);
+        assert_eq!(issues.informational_total(), 0);
+    }
+
+    #[test]
+    fn parse_issue_sample_reason_defaults_when_missing() {
+        let sample: ParseIssueSample = serde_json::from_str(
+            r#"{"source":"zcode","path_hash":"hash","offset":0,"kind":"skipped"}"#,
+        )
+        .expect("legacy sample JSON");
+        assert_eq!(sample.reason, "");
+        assert_eq!(sample.cli_line(None), "skipped");
+
+        let mut issues = ParseIssues::default();
+        issues.record(
+            SourceKind::Zcode,
+            "hash",
+            0,
+            ParseIssueKind::Skipped,
+            "zcode_unfinished:error:invalid_request!!!plus extra",
+        );
+        issues.record(
+            SourceKind::Zcode,
+            "hash",
+            0,
+            ParseIssueKind::Skipped,
+            &"a".repeat(80),
+        );
+        assert_eq!(
+            issues.samples[0].reason,
+            "zcode_unfinished:error:invalid_requestplusextra"
+        );
+        assert_eq!(issues.samples[1].reason.len(), MAX_PARSE_ISSUE_REASON_CHARS);
+        assert_eq!(
+            issues.samples[0].cli_line(None),
+            "skipped zcode_unfinished:error:invalid_requestplusextra"
+        );
+        assert!(
+            !issues.samples[0].cli_line(None).contains("@0"),
+            "reason samples must not print @0"
+        );
+    }
+
+    #[test]
+    fn parse_issue_kinds_round_trip_including_new_classes() {
+        for kind in [
+            ParseIssueKind::Malformed,
+            ParseIssueKind::Oversized,
+            ParseIssueKind::Skipped,
+            ParseIssueKind::AccountingAnomaly,
+        ] {
+            let encoded = serde_json::to_string(&kind).expect("serialize kind");
+            let decoded: ParseIssueKind = serde_json::from_str(&encoded).expect("deserialize kind");
+            assert_eq!(decoded, kind);
+        }
+        assert_eq!(
+            serde_json::to_string(&ParseIssueKind::Skipped).expect("skipped"),
+            "\"skipped\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ParseIssueKind::AccountingAnomaly).expect("anomaly"),
+            "\"accounting_anomaly\""
+        );
+
+        let mut issues = ParseIssues::default();
+        issues.record(SourceKind::Zcode, "hash", 1, ParseIssueKind::Skipped, "");
+        issues.record(
+            SourceKind::Zcode,
+            "hash",
+            2,
+            ParseIssueKind::AccountingAnomaly,
+            "",
+        );
+        let encoded = serde_json::to_string(&issues).expect("serialize issues");
+        let decoded: ParseIssues = serde_json::from_str(&encoded).expect("deserialize issues");
+        assert_eq!(decoded.skipped_lines, 1);
+        assert_eq!(decoded.accounting_anomaly_lines, 1);
+        assert_eq!(decoded.total(), 0);
+        assert_eq!(decoded.informational_total(), 2);
+        assert_eq!(decoded.samples.len(), 2);
+        assert_eq!(
+            decoded.summary_text().as_deref(),
+            Some("skipped=1 accounting=1")
+        );
+        assert!(serde_json::from_str::<ParseIssueKind>("\"mystery\"").is_err());
     }
 }

@@ -17,6 +17,8 @@ ADRs are engineering records, not end-user tutorials. Start with [Architecture](
 - [0009 — Antigravity source cutover](./0009-antigravity-source-cutover)
 - [0010 — Provider label dimension for usage attribution](./0010-provider-label-dimension)
 - [0011 — Passive-only synchronization](./0011-passive-only-synchronization)
+- [0012 — Antigravity CLI passive parser](./0012-antigravity-cli-passive-parser)
+- [0013 — DeepSeek Harness passive source and zstd dependency](./0013-deepseek-harness-passive-source)
 
 ## Companion docs
 

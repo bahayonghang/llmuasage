@@ -1,12 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use chrono::{Duration, SecondsFormat, Utc};
-use rusqlite::{Connection, OptionalExtension, params_from_iter};
+use chrono::{Datelike, Duration, NaiveDate, SecondsFormat, Utc};
+use rusqlite::{Connection, OptionalExtension, params_from_iter, types::Type};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     domain::source_descriptor::registered_source_descriptors,
     error::Result,
+    models::ParseIssues,
     store::{RunRecord, Store},
     util::now_utc,
 };
@@ -153,6 +154,102 @@ pub struct DailyTrendPoint {
     pub event_count: i64,
     /// Estimated cost for the day using cache-aware pricing.
     pub cost_with_cache_usd: f64,
+    /// Distinct `usage_turn` rows starting on this local date. TUI-only.
+    #[serde(default, skip_serializing)]
+    pub turn_count: i64,
+}
+
+/// One local clock-hour row for the TUI Hourly panel.
+#[derive(Debug, Clone)]
+pub struct HourlyTrendPoint {
+    /// Local clock hour as `YYYY-MM-DD HH:00`.
+    pub hour_start: String,
+    /// Summed non-cache prompt tokens.
+    pub input_tokens: i64,
+    /// Summed cache-read prompt tokens.
+    pub cache_read_tokens: i64,
+    /// Summed cache-creation prompt tokens.
+    pub cache_creation_tokens: i64,
+    /// Output tokens with reasoning already folded in.
+    pub output_tokens: i64,
+    /// Total normalized tokens for the hour.
+    pub total_tokens: i64,
+    /// Number of underlying usage events for the hour.
+    pub event_count: i64,
+    /// Distinct turns that started in this local hour.
+    pub turn_count: i64,
+    /// Estimated cost using cache-aware pricing.
+    pub cost_with_cache_usd: f64,
+    /// Distinct source ids, sorted.
+    pub sources: Vec<String>,
+}
+
+/// One local calendar-month row for the TUI Monthly panel.
+#[derive(Debug, Clone)]
+pub struct MonthlyTrendPoint {
+    /// Local month as `YYYY-MM`.
+    pub month: String,
+    /// Summed non-cache prompt tokens.
+    pub input_tokens: i64,
+    /// Summed cache-read prompt tokens.
+    pub cache_read_tokens: i64,
+    /// Summed cache-creation prompt tokens.
+    pub cache_creation_tokens: i64,
+    /// Output tokens with reasoning already folded in.
+    pub output_tokens: i64,
+    /// Total normalized tokens for the month.
+    pub total_tokens: i64,
+    /// Number of underlying usage events for the month.
+    pub event_count: i64,
+    /// Distinct turns that started in this local month.
+    pub turn_count: i64,
+    /// Estimated cost using cache-aware pricing.
+    pub cost_with_cache_usd: f64,
+}
+
+/// One model × source row for Daily Enter detail.
+#[derive(Debug, Clone)]
+pub struct PeriodDetailRow {
+    /// Normalized model name.
+    pub model: String,
+    /// Source identifier.
+    pub source: String,
+    /// Number of underlying usage events.
+    pub event_count: i64,
+    /// Summed non-cache prompt tokens.
+    pub input_tokens: i64,
+    /// Summed cache-read prompt tokens.
+    pub cache_read_tokens: i64,
+    /// Summed cache-creation prompt tokens.
+    pub cache_creation_tokens: i64,
+    /// Output tokens with reasoning already folded in.
+    pub output_tokens: i64,
+    /// Total normalized tokens.
+    pub total_tokens: i64,
+    /// Estimated cost using cache-aware pricing.
+    pub cost_with_cache_usd: f64,
+}
+
+/// Inclusive local-date bounds for a `YYYY-MM` month key.
+pub fn month_date_bounds(month: &str) -> Option<(NaiveDate, NaiveDate)> {
+    let start = NaiveDate::parse_from_str(&format!("{month}-01"), "%Y-%m-%d").ok()?;
+    let end = if start.month() == 12 {
+        NaiveDate::from_ymd_opt(start.year() + 1, 1, 1)?.pred_opt()?
+    } else {
+        NaiveDate::from_ymd_opt(start.year(), start.month() + 1, 1)?.pred_opt()?
+    };
+    Some((start, end))
+}
+
+/// One local-date × model total used by the TUI Overview stacked chart.
+#[derive(Debug, Clone, Serialize)]
+pub struct DailyModelPoint {
+    /// Local calendar date in `YYYY-MM-DD`, computed in [`QueryFilter::timezone`].
+    pub date: String,
+    /// Normalized model name.
+    pub model: String,
+    /// Total normalized tokens for that model on that date.
+    pub total_tokens: i64,
 }
 
 /// Per-model aggregate shown in dashboard breakdowns.
@@ -186,6 +283,9 @@ pub struct ModelBreakdown {
     pub pricing_source: Option<String>,
     /// Aggregated pricing rate JSON, or `mixed` when multiple rates contributed.
     pub pricing_rate: Option<String>,
+    /// Distinct source ids for this model, sorted. TUI-only; omitted from JSON.
+    #[serde(skip_serializing)]
+    pub sources: Vec<String>,
 }
 
 /// Per-source aggregate plus freshest observed event time.
@@ -784,6 +884,14 @@ pub struct SyncSourcePayload {
     pub events_seen: i64,
     pub events_inserted: i64,
     pub stored_events: i64,
+    #[serde(default)]
+    pub malformed_lines: u64,
+    #[serde(default)]
+    pub oversized_lines: u64,
+    #[serde(default)]
+    pub skipped_lines: u64,
+    #[serde(default)]
+    pub accounting_anomaly_lines: u64,
     pub updated_at: Option<String>,
     pub share: f64,
     pub error_key: Option<String>,
@@ -834,7 +942,7 @@ pub struct DashboardSnapshot {
     /// Default model comparison payload. If fewer than two models are present
     /// it carries candidates plus an explicit warning.
     pub compare: ModelComparePayload,
-    /// Default Cost Explorer slice captured for live dashboard bootstrap and
+    /// Default Usage analysis slice captured for live dashboard bootstrap and
     /// static HTML exports.
     pub explorer: ExplorerPayload,
     /// Integration/cursor/run health payload.
@@ -1090,6 +1198,173 @@ impl Dashboard {
                 total_tokens: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
                 event_count: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
                 cost_with_cache_usd: row.get::<_, Option<f64>>(7)?.unwrap_or_default(),
+                turn_count: 0,
+            })
+        })?;
+        let mut points = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        let turns = period_turn_counts(&self.conn, filter, &filter.local_date_expr("t.started_at"))
+            .unwrap_or_default();
+        for point in &mut points {
+            point.turn_count = turns.get(&point.date).copied().unwrap_or(0);
+        }
+        Ok(points)
+    }
+
+    /// Loads daily token totals grouped by local date and model.
+    pub fn trends_daily_by_model(&self, filter: &QueryFilter) -> Result<Vec<DailyModelPoint>> {
+        let sql_filter = filter.bucket_filter(None);
+        let local_date = filter.local_date_expr("hour_start");
+        let sql = format!(
+            r#"
+            SELECT
+                {local_date} AS local_date,
+                model,
+                COALESCE(SUM(total_tokens), 0)
+            FROM usage_bucket_30m
+            {}
+            GROUP BY local_date, model
+            ORDER BY local_date ASC, model ASC
+            "#,
+            sql_filter.where_sql()
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(sql_filter.params().iter()), |row| {
+            Ok(DailyModelPoint {
+                date: row.get(0)?,
+                model: row.get(1)?,
+                total_tokens: row.get::<_, Option<i64>>(2)?.unwrap_or_default(),
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Loads a per-clock-hour series with token channels, cost, and sources.
+    pub fn trends_hourly(&self, filter: &QueryFilter) -> Result<Vec<HourlyTrendPoint>> {
+        let sql_filter = filter.bucket_filter(None);
+        let local_hour = filter.local_hour_expr("hour_start");
+        let sql = format!(
+            r#"
+            SELECT
+                {local_hour} AS local_hour,
+                COALESCE(SUM(input_tokens), 0),
+                COALESCE(SUM(cache_read_tokens), 0),
+                COALESCE(SUM(cache_creation_tokens), 0),
+                COALESCE(SUM(output_tokens), 0),
+                COALESCE(SUM(total_tokens), 0),
+                COALESCE(SUM(event_count), 0),
+                COALESCE(SUM(cost_with_cache_usd), 0.0),
+                GROUP_CONCAT(DISTINCT source)
+            FROM usage_bucket_30m
+            {}
+            GROUP BY local_hour
+            ORDER BY local_hour ASC
+            "#,
+            sql_filter.where_sql()
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(sql_filter.params().iter()), |row| {
+            Ok(HourlyTrendPoint {
+                hour_start: row.get(0)?,
+                input_tokens: row.get::<_, Option<i64>>(1)?.unwrap_or_default(),
+                cache_read_tokens: row.get::<_, Option<i64>>(2)?.unwrap_or_default(),
+                cache_creation_tokens: row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
+                output_tokens: row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
+                total_tokens: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
+                event_count: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
+                cost_with_cache_usd: row.get::<_, Option<f64>>(7)?.unwrap_or_default(),
+                sources: sorted_unique_sources(row.get(8)?),
+                turn_count: 0,
+            })
+        })?;
+        let mut points = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        let turns = period_turn_counts(&self.conn, filter, &filter.local_hour_expr("t.started_at"))
+            .unwrap_or_default();
+        for point in &mut points {
+            point.turn_count = turns.get(&point.hour_start).copied().unwrap_or(0);
+        }
+        Ok(points)
+    }
+
+    /// Loads a per-local-month series with token channels and cost.
+    pub fn trends_monthly(&self, filter: &QueryFilter) -> Result<Vec<MonthlyTrendPoint>> {
+        let sql_filter = filter.bucket_filter(None);
+        let local_month = filter.local_month_expr("hour_start");
+        let sql = format!(
+            r#"
+            SELECT
+                {local_month} AS local_month,
+                COALESCE(SUM(input_tokens), 0),
+                COALESCE(SUM(cache_read_tokens), 0),
+                COALESCE(SUM(cache_creation_tokens), 0),
+                COALESCE(SUM(output_tokens), 0),
+                COALESCE(SUM(total_tokens), 0),
+                COALESCE(SUM(event_count), 0),
+                COALESCE(SUM(cost_with_cache_usd), 0.0)
+            FROM usage_bucket_30m
+            {}
+            GROUP BY local_month
+            ORDER BY local_month ASC
+            "#,
+            sql_filter.where_sql()
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(sql_filter.params().iter()), |row| {
+            Ok(MonthlyTrendPoint {
+                month: row.get(0)?,
+                input_tokens: row.get::<_, Option<i64>>(1)?.unwrap_or_default(),
+                cache_read_tokens: row.get::<_, Option<i64>>(2)?.unwrap_or_default(),
+                cache_creation_tokens: row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
+                output_tokens: row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
+                total_tokens: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
+                event_count: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
+                cost_with_cache_usd: row.get::<_, Option<f64>>(7)?.unwrap_or_default(),
+                turn_count: 0,
+            })
+        })?;
+        let mut points = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        let turns =
+            period_turn_counts(&self.conn, filter, &filter.local_month_expr("t.started_at"))
+                .unwrap_or_default();
+        for point in &mut points {
+            point.turn_count = turns.get(&point.month).copied().unwrap_or(0);
+        }
+        Ok(points)
+    }
+
+    /// Loads model × source totals for the current filter (Daily Enter detail).
+    pub fn period_model_breakdown(&self, filter: &QueryFilter) -> Result<Vec<PeriodDetailRow>> {
+        let sql_filter = filter.bucket_filter(None);
+        let sql = format!(
+            r#"
+            SELECT
+                model,
+                source,
+                COALESCE(SUM(event_count), 0),
+                COALESCE(SUM(input_tokens), 0),
+                COALESCE(SUM(cache_read_tokens), 0),
+                COALESCE(SUM(cache_creation_tokens), 0),
+                COALESCE(SUM(output_tokens), 0),
+                COALESCE(SUM(total_tokens), 0),
+                COALESCE(SUM(cost_with_cache_usd), 0.0)
+            FROM usage_bucket_30m
+            {}
+            GROUP BY model, source
+            ORDER BY SUM(cost_with_cache_usd) DESC, model ASC, source ASC
+            "#,
+            sql_filter.where_sql()
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(sql_filter.params().iter()), |row| {
+            Ok(PeriodDetailRow {
+                model: row.get(0)?,
+                source: row.get(1)?,
+                event_count: row.get::<_, Option<i64>>(2)?.unwrap_or_default(),
+                input_tokens: row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
+                cache_read_tokens: row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
+                cache_creation_tokens: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
+                output_tokens: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
+                total_tokens: row.get::<_, Option<i64>>(7)?.unwrap_or_default(),
+                cost_with_cache_usd: row.get::<_, Option<f64>>(8)?.unwrap_or_default(),
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -1122,7 +1397,8 @@ impl Dashboard {
                 CASE
                     WHEN COUNT(DISTINCT COALESCE(pricing_rate, '__llmusage_null__')) = 1 THEN MAX(pricing_rate)
                     ELSE '{PRICING_MIXED}'
-                END
+                END,
+                GROUP_CONCAT(DISTINCT source)
             FROM usage_bucket_30m
             {}
             GROUP BY model
@@ -1153,6 +1429,7 @@ impl Dashboard {
                     .unwrap_or_else(|| PRICING_UNPRICED.to_string()),
                 pricing_source: row.get(11)?,
                 pricing_rate: row.get(12)?,
+                sources: sorted_unique_sources(row.get(13)?),
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -3045,7 +3322,7 @@ impl Dashboard {
         heatmap::load(self, filter, days)
     }
 
-    /// Loads the flexible Cost Explorer-style aggregate for the requested slice.
+    /// Loads the flexible Usage analysis aggregate for the requested slice.
     pub fn explorer(&self, query: &ExplorerQuery) -> Result<ExplorerPayload> {
         explorer::load(self, query)
     }
@@ -3242,6 +3519,7 @@ impl Dashboard {
                     };
                     let tone = match status {
                         "error" | "rebuild_risk" => "warn",
+                        _ if row.parse_issues.total() > 0 => "warn",
                         "ok" => "good",
                         _ => "neutral",
                     };
@@ -3255,6 +3533,10 @@ impl Dashboard {
                         events_seen: row.events_seen,
                         events_inserted: row.events_inserted,
                         stored_events: row.stored_events,
+                        malformed_lines: row.parse_issues.malformed_lines,
+                        oversized_lines: row.parse_issues.oversized_lines,
+                        skipped_lines: row.parse_issues.skipped_lines,
+                        accounting_anomaly_lines: row.parse_issues.accounting_anomaly_lines,
                         updated_at: Some(row.updated_at),
                         share: (row.stored_events as f64 / max_stored as f64).clamp(0.0, 1.0),
                         error_key: row
@@ -3387,6 +3669,41 @@ impl Dashboard {
             diagnostics: diagnostics.clone(),
         })
     }
+}
+
+fn period_turn_counts(
+    conn: &Connection,
+    filter: &QueryFilter,
+    period_expr: &str,
+) -> Result<HashMap<String, i64>> {
+    let sql_filter = filter.turn_filter(Some("t"));
+    let sql = format!(
+        "SELECT {period_expr} AS period_key, COUNT(*) FROM usage_turn t {} GROUP BY period_key",
+        sql_filter.where_sql()
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params_from_iter(sql_filter.params().iter()), |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    })?;
+    let mut counts = HashMap::new();
+    for row in rows {
+        let (key, count) = row?;
+        counts.insert(key, count);
+    }
+    Ok(counts)
+}
+
+fn sorted_unique_sources(raw: Option<String>) -> Vec<String> {
+    let mut sources: Vec<String> = raw
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(str::to_string)
+        .collect();
+    sources.sort_unstable();
+    sources.dedup();
+    sources
 }
 
 fn context_pressure_event_filter(filter: &QueryFilter) -> filter::SqlFilter {
@@ -3748,6 +4065,7 @@ struct SyncStatusRow {
     stored_events: i64,
     updated_at: String,
     last_error: Option<String>,
+    parse_issues: ParseIssues,
 }
 
 fn load_sync_statuses_with_conn(
@@ -3758,13 +4076,17 @@ fn load_sync_statuses_with_conn(
     let mut stmt = conn.prepare(
         r#"
         SELECT source, files_processed, changed_files, events_seen, events_inserted,
-               stored_events, updated_at
+               stored_events, updated_at, parse_issues_json
         FROM source_sync_status
         WHERE (?1 IS NULL OR source = ?1)
         ORDER BY stored_events DESC, source ASC
         "#,
     )?;
     let rows = stmt.query_map([source], |row| {
+        let parse_issues_raw = row.get::<_, String>(7)?;
+        let parse_issues = serde_json::from_str(&parse_issues_raw).map_err(|source| {
+            rusqlite::Error::FromSqlConversionFailure(7, Type::Text, Box::new(source))
+        })?;
         Ok(SyncStatusRow {
             source: row.get(0)?,
             files_processed: row.get(1)?,
@@ -3774,6 +4096,7 @@ fn load_sync_statuses_with_conn(
             stored_events: row.get(5)?,
             updated_at: row.get(6)?,
             last_error: None,
+            parse_issues,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -4027,6 +4350,55 @@ mod tests {
         assert_eq!(codex.missing_file_count, 1);
         assert_eq!(codex.protected_event_count, 2);
         assert!(codex.lossy_rebuild_risk);
+        Ok(())
+    }
+
+    #[test]
+    fn sync_command_center_projects_parse_issue_counters_without_samples() -> Result<()> {
+        let fixture = Fixture::new()?;
+        let conn = fixture.store().open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO source_sync_status(
+                source, files_processed, changed_files, bytes_scanned,
+                events_seen, events_replayed, events_inserted, stored_events,
+                parse_ms, write_ms, lock_wait_ms, updated_at, parse_issues_json
+            ) VALUES
+                ('codex', 1, 1, 10, 2, 0, 2, 2, 1, 1, 0, '2026-08-17T00:00:00Z', ?1),
+                ('zcode', 1, 1, 10, 1, 0, 1, 1, 1, 1, 0, '2026-08-17T00:00:00Z', ?2)
+            "#,
+            rusqlite::params![
+                r#"{"malformed_lines":2,"oversized_lines":1,"skipped_lines":0,"accounting_anomaly_lines":0,"samples":[{"source":"codex","path_hash":"abc","offset":9,"kind":"malformed"}]}"#,
+                r#"{"malformed_lines":0,"oversized_lines":0,"skipped_lines":5,"accounting_anomaly_lines":1,"samples":[]}"#,
+            ],
+        )?;
+        drop(conn);
+
+        let center = Dashboard::open(fixture.store())?.sync_command_center(&Default::default())?;
+        let encoded = serde_json::to_value(&center)?;
+        let sources = encoded["sources"].as_array().expect("sources");
+        let codex = sources
+            .iter()
+            .find(|row| row["source"] == "codex")
+            .expect("codex source");
+        let zcode = sources
+            .iter()
+            .find(|row| row["source"] == "zcode")
+            .expect("zcode source");
+
+        assert_eq!(codex["malformed_lines"], 2);
+        assert_eq!(codex["oversized_lines"], 1);
+        assert_eq!(codex["skipped_lines"], 0);
+        assert_eq!(codex["accounting_anomaly_lines"], 0);
+        assert_eq!(codex["tone"], "warn");
+        assert!(codex.get("samples").is_none());
+        assert!(!serde_json::to_string(codex)?.contains("path_hash"));
+
+        assert_eq!(zcode["malformed_lines"], 0);
+        assert_eq!(zcode["skipped_lines"], 5);
+        assert_eq!(zcode["accounting_anomaly_lines"], 1);
+        assert_eq!(zcode["tone"], "good");
+        assert!(zcode.get("samples").is_none());
         Ok(())
     }
 
@@ -4452,6 +4824,50 @@ mod tests {
     #[test]
     fn cache_efficiency_zero_when_no_input() {
         assert_eq!(super::TokenSummary::default().cache_efficiency(), 0.0);
+    }
+
+    #[test]
+    fn sorted_unique_sources_trims_sorts_and_dedups() {
+        assert_eq!(
+            super::sorted_unique_sources(Some("codex, claude,codex,".to_string())),
+            vec!["claude".to_string(), "codex".to_string()]
+        );
+        assert_eq!(super::sorted_unique_sources(None), Vec::<String>::new());
+    }
+
+    #[test]
+    fn model_breakdown_keeps_one_row_and_sorted_sources() -> Result<()> {
+        let fixture = Fixture::new()?;
+        fixture.seed_event(SeedEvent {
+            event_key: "codex:shared-model:1",
+            source: "codex",
+            model: "gpt-5",
+            event_at: "2026-04-01T00:00:00Z",
+            hour_start: Some("2026-04-01T00:00:00Z"),
+            input_tokens: 10,
+            total_tokens: 10,
+            ..Default::default()
+        })?;
+        fixture.seed_event(SeedEvent {
+            event_key: "claude:shared-model:1",
+            source: "claude",
+            model: "gpt-5",
+            event_at: "2026-04-01T01:00:00Z",
+            hour_start: Some("2026-04-01T01:00:00Z"),
+            input_tokens: 5,
+            total_tokens: 5,
+            ..Default::default()
+        })?;
+
+        let models = Dashboard::open(fixture.store())?.model_breakdown(&Default::default())?;
+        let matches: Vec<_> = models.iter().filter(|row| row.model == "gpt-5").collect();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(
+            matches[0].sources,
+            vec!["claude".to_string(), "codex".to_string()]
+        );
+        assert_eq!(matches[0].total_tokens, 15);
+        Ok(())
     }
 
     /// Validates the 0.5.1 ccr-ui field contract: overview, daily trends,
@@ -5810,6 +6226,142 @@ mod tests {
         let utc_series = dashboard.trends_daily(&utc_filter)?;
         assert_eq!(utc_series.len(), 1);
         assert_eq!(utc_series[0].date, "2026-04-04");
+        Ok(())
+    }
+
+    #[test]
+    fn trends_daily_by_model_groups_date_and_model() -> Result<()> {
+        let fixture = Fixture::new()?;
+        let conn = fixture.store().open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_bucket_30m(
+                source, model, hour_start, project_hash, project_label, project_ref,
+                input_tokens, cache_read_tokens, cache_creation_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens, event_count, updated_at
+            )
+            VALUES
+                ('codex', 'gpt-5', '2026-04-04T16:00:00Z', '', NULL, NULL,
+                 100, 10, 5, 50, 7, 172, 2, '2026-04-05T00:00:00Z'),
+                ('claude', 'claude-opus-5', '2026-04-04T16:00:00Z', '', NULL, NULL,
+                 20, 0, 0, 10, 0, 30, 1, '2026-04-05T00:00:00Z'),
+                ('codex', 'gpt-5', '2026-04-05T01:00:00Z', '', NULL, NULL,
+                 8, 0, 0, 2, 0, 10, 1, '2026-04-05T01:00:00Z')
+            "#,
+            [],
+        )?;
+        let dashboard = Dashboard::open(fixture.store())?;
+
+        let utc = dashboard.trends_daily_by_model(&QueryFilter {
+            timezone: ReportTimezone::Utc,
+            ..Default::default()
+        })?;
+        assert_eq!(utc.len(), 3);
+        assert_eq!(utc[0].date, "2026-04-04");
+        assert_eq!(utc[0].model, "claude-opus-5");
+        assert_eq!(utc[0].total_tokens, 30);
+        assert_eq!(utc[1].date, "2026-04-04");
+        assert_eq!(utc[1].model, "gpt-5");
+        assert_eq!(utc[1].total_tokens, 172);
+        assert_eq!(utc[2].date, "2026-04-05");
+        assert_eq!(utc[2].model, "gpt-5");
+        assert_eq!(utc[2].total_tokens, 10);
+
+        let cn = dashboard.trends_daily_by_model(&QueryFilter {
+            timezone: ReportTimezone::Fixed(
+                chrono::FixedOffset::east_opt(8 * 3600).expect("valid offset"),
+            ),
+            ..Default::default()
+        })?;
+        assert_eq!(cn.len(), 2);
+        assert_eq!(cn[0].date, "2026-04-05");
+        assert_eq!(cn[0].model, "claude-opus-5");
+        assert_eq!(cn[1].date, "2026-04-05");
+        assert_eq!(cn[1].model, "gpt-5");
+        assert_eq!(cn[1].total_tokens, 182);
+
+        let empty_fixture = Fixture::new()?;
+        let empty = Dashboard::open(empty_fixture.store())?;
+        assert!(
+            empty
+                .trends_daily_by_model(&QueryFilter::default())?
+                .is_empty()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn trends_hourly_merges_half_hour_buckets_and_sources() -> Result<()> {
+        let fixture = Fixture::new()?;
+        let conn = fixture.store().open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_bucket_30m(
+                source, model, hour_start, project_hash, project_label, project_ref,
+                input_tokens, cache_read_tokens, cache_creation_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens, event_count,
+                cost_with_cache_usd, updated_at
+            )
+            VALUES
+                ('codex', 'gpt-5', '2026-04-04T16:00:00Z', '', NULL, NULL,
+                 100, 10, 5, 50, 0, 165, 2, 1.5, '2026-04-05T00:00:00Z'),
+                ('claude', 'claude-opus-5', '2026-04-04T16:30:00Z', '', NULL, NULL,
+                 20, 0, 0, 10, 0, 30, 1, 0.5, '2026-04-05T00:30:00Z'),
+                ('codex', 'gpt-5', '2026-04-04T17:00:00Z', '', NULL, NULL,
+                 8, 0, 0, 2, 0, 10, 1, 0.1, '2026-04-05T01:00:00Z')
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_turn(
+                turn_key, source, session_id, source_path_hash, project_hash,
+                primary_model, started_at, category, has_edits, retries,
+                one_shot, call_count, input_tokens, cache_read_tokens,
+                cache_creation_tokens, output_tokens, reasoning_output_tokens,
+                total_tokens, created_at
+            ) VALUES ('turn:codex:hour', 'codex', 's', 'p', '', 'gpt-5',
+                '2026-04-04T16:10:00Z', 'coding', 0, 0, 0, 1, 1, 0, 0, 1, 0, 2,
+                '2026-04-04T16:10:00Z')
+            "#,
+            [],
+        )?;
+        let dashboard = Dashboard::open(fixture.store())?;
+        let cn = QueryFilter {
+            timezone: ReportTimezone::Fixed(
+                chrono::FixedOffset::east_opt(8 * 3600).expect("valid offset"),
+            ),
+            ..Default::default()
+        };
+        let hourly = dashboard.trends_hourly(&cn)?;
+        assert_eq!(hourly.len(), 2);
+        assert_eq!(hourly[0].hour_start, "2026-04-05 00:00");
+        assert_eq!(hourly[0].total_tokens, 195);
+        assert_eq!(hourly[0].event_count, 3);
+        assert_eq!(hourly[0].turn_count, 1);
+        assert_eq!(
+            hourly[0].sources,
+            vec!["claude".to_string(), "codex".to_string()]
+        );
+        assert_eq!(hourly[1].hour_start, "2026-04-05 01:00");
+        assert_eq!(hourly[1].turn_count, 0);
+
+        let monthly = dashboard.trends_monthly(&cn)?;
+        assert_eq!(monthly.len(), 1);
+        assert_eq!(monthly[0].month, "2026-04");
+        assert_eq!(monthly[0].total_tokens, 205);
+        assert_eq!(monthly[0].turn_count, 1);
+
+        let mut day_filter = cn.clone();
+        day_filter.since = Some(NaiveDate::from_ymd_opt(2026, 4, 5).unwrap());
+        day_filter.until = Some(NaiveDate::from_ymd_opt(2026, 4, 5).unwrap());
+        let detail = dashboard.period_model_breakdown(&day_filter)?;
+        assert_eq!(detail.len(), 2);
+        assert_eq!(detail[0].model, "gpt-5");
+        assert_eq!(detail[0].source, "codex");
+
+        let json = serde_json::to_value(dashboard.trends_daily(&cn)?)?;
+        assert!(json[0].get("turn_count").is_none());
         Ok(())
     }
 

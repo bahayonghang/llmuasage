@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 46
-- **Last Active**: 2026-08-03
+- **Total Sessions**: 55
+- **Last Active**: 2026-08-19
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1446 | Active |
+| `journal-1.md` | ~1685 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,15 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 55 | 2026-08-19 | Dash Stats 对齐 tokscale 年历 | `2c81be7`, `4fd7818` | `dev` |
+| 54 | 2026-08-19 | Dash Daily Hourly Monthly 对齐 tokscale | `7d5a5bf`, `f58e6c2` | `dev` |
+| 53 | 2026-08-19 | Dash Usage 对齐 tokscale 额度页 | `77db0c9` | `dev` |
+| 52 | 2026-08-19 | Dash Overview 对齐 tokscale 图表首页 | `b689646` | `dev` |
+| 51 | 2026-08-19 | Dash Models 对齐 tokscale 彩色表 | `03b844f` | `dev` |
+| 50 | 2026-08-17 | 完善 parse issue 诊断与日志 | `2df934a` | `dev` |
+| 49 | 2026-08-17 | 优化用量概览布局与术语 | `79b71f8` | `dev` |
+| 48 | 2026-08-17 | Parse issue 分类纠偏与可观测性 | `5d7435c` | `dev` |
+| 47 | 2026-08-16 | 新增三源被动解析器并升至 1.2.0 | `7843f6e` | `dev` |
 | 46 | 2026-08-03 | 完成 Dashboard AgentsView 对齐任务树 | `aa8ade9`, `b1f89b4`, `006959d`, `e63808b`, `961a368`, `6e7addb`, `6a4663c`, `70126b6`, `a341bdb`, `268d3ed` | `dev` |
 | 45 | 2026-07-31 | 完成 Activity 首次触库超时修复 | `8776d6d` | `dev` |
 | 44 | 2026-07-29 | 修复 serve 行为分析查询超时 | `d8fb8d41f438dbcfc8da8c12e63a0b89b8acb8e5` | `dev` |

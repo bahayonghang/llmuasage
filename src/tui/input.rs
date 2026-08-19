@@ -23,7 +23,11 @@ pub enum Action {
     StartSync,
     OpenSourcePicker,
     OpenHelp,
+    OpenSyncStatus,
+    ToggleUsageEmails,
     CycleTheme,
+    OpenDetail,
+    Esc,
     None,
 }
 
@@ -39,7 +43,9 @@ pub enum DialogAction {
 
 pub fn handle_key_event(key: KeyEvent, _active_panel: Panel) -> Action {
     match key.code {
-        KeyCode::Char('q') | KeyCode::Esc => Action::Quit,
+        KeyCode::Char('q') => Action::Quit,
+        KeyCode::Esc => Action::Esc,
+        KeyCode::Enter => Action::OpenDetail,
         KeyCode::Tab => Action::NextPanel,
         KeyCode::BackTab => Action::PrevPanel,
         KeyCode::Char('j') | KeyCode::Down => Action::ScrollDown,
@@ -56,6 +62,8 @@ pub fn handle_key_event(key: KeyEvent, _active_panel: Panel) -> Action {
         KeyCode::Char('R') => Action::ToggleAutoRefresh,
         KeyCode::Char('x') => Action::StartSync,
         KeyCode::Char('s') => Action::OpenSourcePicker,
+        KeyCode::Char('y') => Action::OpenSyncStatus,
+        KeyCode::Char('m') => Action::ToggleUsageEmails,
         KeyCode::Char('?') => Action::OpenHelp,
         KeyCode::Char('t') => Action::CycleTheme,
         KeyCode::Char(c) => Panel::from_digit_char(c)
@@ -100,6 +108,28 @@ mod tests {
     }
 
     #[test]
+    fn enter_opens_detail_and_esc_is_not_quit() {
+        assert_eq!(
+            handle_key_event(
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+                Panel::Sources
+            ),
+            Action::OpenDetail
+        );
+        assert_eq!(
+            handle_key_event(
+                KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+                Panel::Sources
+            ),
+            Action::Esc
+        );
+        assert_eq!(
+            handle_key_event(char_key('q'), Panel::Sources),
+            Action::Quit
+        );
+    }
+
+    #[test]
     fn digits_outside_panel_count_do_not_switch_panels() {
         // With COUNT == 9, only '0' is outside the 1..=9 panel range.
         assert_eq!(
@@ -121,6 +151,14 @@ mod tests {
         assert_eq!(
             handle_key_event(char_key('?'), Panel::Overview),
             Action::OpenHelp
+        );
+        assert_eq!(
+            handle_key_event(char_key('y'), Panel::Overview),
+            Action::OpenSyncStatus
+        );
+        assert_eq!(
+            handle_key_event(char_key('m'), Panel::Overview),
+            Action::ToggleUsageEmails
         );
     }
 

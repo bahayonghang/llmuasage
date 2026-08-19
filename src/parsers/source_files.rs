@@ -205,6 +205,44 @@ pub(crate) fn list_pi_session_files() -> SourceFileListing {
     merged
 }
 
+/// Enumerates Antigravity CLI conversation SQLite files.
+///
+/// Root: `$GEMINI_CLI_HOME/antigravity-cli/conversations` (default
+/// `~/.gemini/...`). `GEMINI_CLI_HOME` carries the same meaning as the gemini
+/// platform monitor (the Gemini root, not the conversations directory).
+pub(crate) fn list_antigravity_conversation_files() -> SourceFileListing {
+    let home_dir = resolve_home_dir();
+    let conversations = std::env::var_os("GEMINI_CLI_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home_dir.join(".gemini"))
+        .join("antigravity-cli")
+        .join("conversations");
+    list_matching_files(conversations, |name, _path| name.ends_with(".db"))
+}
+
+/// Enumerates DeepSeek Harness session logs under `$DSH_HOME/sessions`
+/// (default `~/.dsh/sessions`) at any depth.
+///
+/// Only files whose name is exactly `session.jsonl` or `session.jsonl.zstd`
+/// match (tokscale `dsh-session-log`). Other jsonl/zstd files in the same
+/// tree are excluded.
+pub(crate) fn list_dsh_session_files() -> SourceFileListing {
+    let home_dir = resolve_home_dir();
+    let sessions_root = std::env::var_os("DSH_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home_dir.join(".dsh"))
+        .join("sessions");
+    list_dsh_session_files_under(sessions_root)
+}
+
+fn list_dsh_session_files_under(root: PathBuf) -> SourceFileListing {
+    list_matching_files(root, |name, _path| {
+        name == "session.jsonl" || name == "session.jsonl.zstd"
+    })
+}
+
 fn list_matching_files(
     root: PathBuf,
     predicate: impl Fn(&str, &Path) -> bool,
@@ -249,7 +287,7 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use super::list_grok_session_files_under;
+    use super::{list_dsh_session_files_under, list_grok_session_files_under};
 
     #[test]
     fn grok_listing_only_returns_root_sidecars_from_two_directory_levels() {
@@ -299,5 +337,60 @@ mod tests {
                 .iter()
                 .all(|path| path.parent() == Some(session.as_path()))
         );
+    }
+
+    #[test]
+    fn dsh_listing_matches_exact_session_log_names_at_any_depth() {
+        let temp = TempDir::new().expect("temp dir");
+        let sessions = temp.path().join("sessions");
+        let nested = sessions
+            .join("--D-work--")
+            .join("session-abc")
+            .join("deeper");
+        fs::create_dir_all(&nested).expect("create fixture layout");
+        fs::write(sessions.join("session.jsonl"), "{}").expect("write uncompressed root log");
+        fs::write(
+            sessions
+                .join("--D-work--")
+                .join("session-abc")
+                .join("session.jsonl.zstd"),
+            b"zstd",
+        )
+        .expect("write compressed nested log");
+        fs::write(nested.join("session.jsonl"), "{}").expect("write deep uncompressed log");
+        fs::write(sessions.join("other.jsonl"), "skip").expect("write excluded jsonl");
+        fs::write(sessions.join("--D-work--").join("notes.zstd"), "skip")
+            .expect("write excluded zstd");
+        fs::write(sessions.join("session.jsonl.bak"), "skip").expect("write excluded bak");
+
+        let listing = list_dsh_session_files_under(sessions);
+        let relative = listing
+            .paths
+            .iter()
+            .map(|path| {
+                path.strip_prefix(&listing.root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect::<Vec<_>>();
+
+        assert!(listing.errors.is_empty());
+        assert_eq!(
+            relative,
+            vec![
+                "--D-work--/session-abc/deeper/session.jsonl",
+                "--D-work--/session-abc/session.jsonl.zstd",
+                "session.jsonl",
+            ]
+        );
+    }
+
+    #[test]
+    fn dsh_listing_returns_empty_when_root_is_missing() {
+        let temp = TempDir::new().expect("temp dir");
+        let listing = list_dsh_session_files_under(temp.path().join("missing-sessions"));
+        assert!(listing.paths.is_empty());
+        assert!(listing.errors.is_empty());
     }
 }

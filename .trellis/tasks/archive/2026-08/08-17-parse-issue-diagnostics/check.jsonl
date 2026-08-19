@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "Verify skip watermark, sample privacy, four-class counters, and CLI format"}
+{"file": ".trellis/spec/llmusage/backend/runtime-log-contracts.md", "reason": "Verify one info event, default warn file level, no raw content"}
+{"file": ".trellis/spec/llmusage/backend/write-fencing-contracts.md", "reason": "Verify skip cursor persistence uses fenced writes only"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "Verify parsers did not change token math"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Verify CLI, status, logs, and dashboard stay on one taxonomy"}

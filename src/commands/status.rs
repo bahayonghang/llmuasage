@@ -25,6 +25,12 @@ pub async fn run(app: &AppContext) -> Result<()> {
     let mut capability_statuses = source_status::build_source_capability_statuses(&sources);
     source_status::apply_token_accounting_statuses(&store, &mut capability_statuses)?;
     let platform_statuses = source_status::build_platform_monitor_statuses();
+    let parse_issues = store
+        .sync_status()
+        .load_source_sync_statuses()?
+        .into_iter()
+        .map(|status| (status.source, status.parse_issues))
+        .collect::<std::collections::BTreeMap<_, _>>();
     let lock = store.current_worker_lock()?;
 
     // 1.2 打印人读摘要
@@ -47,7 +53,7 @@ pub async fn run(app: &AppContext) -> Result<()> {
             source.last_event_at.as_deref().unwrap_or("never")
         );
     }
-    source_status::print_human_statuses(&capability_statuses, &platform_statuses);
+    source_status::print_human_statuses(&capability_statuses, &platform_statuses, &parse_issues);
     if let Some(lock) = lock {
         println!(
             "- Worker lock: holder={} expires={}",

@@ -43,7 +43,7 @@ llmusage sync
 
 `sync` 会增量解析本地真源，写入标准化 usage 行、30 分钟 bucket、source-file 诊断和行为事实。
 
-sync 只被动读取。Antigravity 尚无经过验证的被动 parser，因此已有历史仍可查询但不再增长；`source-status` 会显示 `historical_only`。
+sync 只被动读取。Antigravity CLI conversations 由已注册 parser 导入。hook 时代的 Antigravity 行仍可查询；这些行没有文件归属时，rebuild 会被拒绝。
 
 如果这台机器曾使用会安装 hook 的旧版 llmusage，请执行一次 `llmusage uninstall`，清理 llmusage 自有的遗留 hook、plugin 和 wrapper；已有用量数据不会被删除。
 

@@ -85,6 +85,8 @@ pub struct Theme {
     pub metric_cache_read: Color,
     pub metric_cache_write: Color,
     pub metric_reasoning: Color,
+    pub metric_cache_hit: Color,
+    pub metric_cost_per_million: Color,
     pub kpi_colors: [Color; 4],
     pub trend_bar_fg: Color,
     pub trend_peak_fg: Color,
@@ -121,6 +123,8 @@ impl Theme {
             metric_cache_read: Color::Blue,
             metric_cache_write: Color::Magenta,
             metric_reasoning: Color::Yellow,
+            metric_cache_hit: Color::Cyan,
+            metric_cost_per_million: Color::Rgb(150, 200, 150),
             kpi_colors: [Color::Cyan, Color::Green, Color::Yellow, Color::Magenta],
             trend_bar_fg: Color::Blue,
             trend_peak_fg: Color::Yellow,
@@ -160,6 +164,8 @@ impl Theme {
             metric_cache_read: Color::Rgb(137, 180, 250),  // blue
             metric_cache_write: Color::Rgb(203, 166, 247), // mauve
             metric_reasoning: Color::Rgb(249, 226, 175),   // yellow
+            metric_cache_hit: Color::Rgb(148, 226, 213),   // teal
+            metric_cost_per_million: Color::Rgb(166, 227, 161), // green
             kpi_colors: [
                 Color::Rgb(137, 180, 250), // blue
                 Color::Rgb(166, 227, 161), // green
@@ -203,6 +209,8 @@ impl Theme {
             metric_cache_read: Color::Rgb(105, 169, 231),
             metric_cache_write: Color::Rgb(232, 184, 87),
             metric_reasoning: Color::Rgb(193, 145, 214),
+            metric_cache_hit: Color::Rgb(94, 196, 196),
+            metric_cost_per_million: Color::Rgb(150, 200, 150),
             kpi_colors: [
                 Color::Rgb(232, 184, 87),
                 Color::Rgb(112, 194, 159),
@@ -246,6 +254,8 @@ impl Theme {
             metric_cache_read: Color::Rgb(92, 164, 232),
             metric_cache_write: Color::Rgb(244, 166, 96),
             metric_reasoning: Color::Rgb(210, 145, 230),
+            metric_cache_hit: Color::Rgb(105, 213, 208),
+            metric_cost_per_million: Color::Rgb(150, 200, 150),
             kpi_colors: [
                 Color::Rgb(65, 195, 190),
                 Color::Rgb(111, 207, 151),
@@ -290,6 +300,8 @@ impl Theme {
             metric_cache_read: adapt(self.metric_cache_read),
             metric_cache_write: adapt(self.metric_cache_write),
             metric_reasoning: adapt(self.metric_reasoning),
+            metric_cache_hit: adapt(self.metric_cache_hit),
+            metric_cost_per_million: adapt(self.metric_cost_per_million),
             kpi_colors: self.kpi_colors.map(adapt),
             trend_bar_fg: adapt(self.trend_bar_fg),
             trend_peak_fg: adapt(self.trend_peak_fg),
@@ -506,6 +518,26 @@ pub fn metric_reasoning() -> Color {
     active_theme().metric_reasoning
 }
 
+pub fn metric_cache_hit() -> Color {
+    active_theme().metric_cache_hit
+}
+
+pub fn metric_cost_per_million() -> Color {
+    active_theme().metric_cost_per_million
+}
+
+/// Adapted vendor-family color for chart cells. `NoColor` returns `Color::Reset`.
+pub fn vendor_fg(vendor: &str, rank: usize) -> Color {
+    let ramp = vendor_ramp(vendor);
+    let (red, green, blue) = ramp[rank.min(ramp.len() - 1)];
+    adapt_color(Color::Rgb(red, green, blue), color_mode())
+}
+
+/// Vendor-family shade. Ramps are cross-theme constants; ANSI16/NoColor still adapt.
+pub fn vendor_style(vendor: &str, rank: usize) -> Style {
+    bold_fg_style(vendor_fg(vendor, rank))
+}
+
 /// Primary bar color for the trends cockpit.
 pub fn trend_bar_fg() -> Color {
     active_theme().trend_bar_fg
@@ -606,6 +638,15 @@ pub fn selection_style() -> Style {
         .add_modifier(Modifier::BOLD)
 }
 
+/// Selection background only so per-cell foreground colors stay visible.
+pub fn selection_fill_style() -> Style {
+    if color_mode() == TerminalColorMode::NoColor {
+        Style::default()
+    } else {
+        Style::default().bg(active_theme().selection_bg)
+    }
+}
+
 /// Style for block borders (active panel).
 pub fn block_border_style() -> Style {
     fg_style(border_active())
@@ -655,6 +696,102 @@ pub fn trend_peak_style() -> Style {
 /// Style for trend axes, labels, and secondary hints.
 pub fn trend_aux_style() -> Style {
     fg_style(trend_aux_fg())
+}
+
+const ANTHROPIC_SHADES: [(u8, u8, u8); 7] = [
+    (218, 119, 86),
+    (223, 136, 107),
+    (227, 153, 128),
+    (232, 170, 149),
+    (236, 184, 166),
+    (239, 197, 183),
+    (243, 210, 199),
+];
+const OPENAI_SHADES: [(u8, u8, u8); 7] = [
+    (16, 185, 129),
+    (18, 208, 145),
+    (20, 232, 162),
+    (41, 236, 172),
+    (61, 238, 179),
+    (97, 241, 193),
+    (133, 244, 208),
+];
+const GOOGLE_SHADES: [(u8, u8, u8); 7] = [
+    (59, 130, 246),
+    (83, 146, 247),
+    (108, 161, 248),
+    (132, 177, 249),
+    (153, 190, 250),
+    (172, 202, 251),
+    (190, 214, 252),
+];
+const DEEPSEEK_SHADES: [(u8, u8, u8); 7] = [
+    (6, 182, 212),
+    (7, 203, 237),
+    (21, 215, 248),
+    (45, 219, 249),
+    (66, 223, 250),
+    (85, 226, 250),
+    (105, 229, 251),
+];
+const XAI_SHADES: [(u8, u8, u8); 7] = [
+    (234, 179, 8),
+    (247, 192, 21),
+    (248, 199, 45),
+    (249, 205, 70),
+    (249, 211, 91),
+    (250, 216, 110),
+    (251, 221, 129),
+];
+const ZAI_SHADES: [(u8, u8, u8); 7] = [
+    (168, 85, 247),
+    (181, 110, 249),
+    (193, 132, 250),
+    (204, 153, 251),
+    (214, 172, 252),
+    (224, 192, 253),
+    (235, 213, 254),
+];
+const MOONSHOT_SHADES: [(u8, u8, u8); 7] = [
+    (20, 184, 166),
+    (35, 197, 178),
+    (58, 207, 190),
+    (85, 216, 202),
+    (112, 224, 212),
+    (143, 232, 222),
+    (174, 240, 232),
+];
+const META_SHADES: [(u8, u8, u8); 7] = [
+    (99, 102, 241),
+    (122, 125, 243),
+    (146, 148, 245),
+    (169, 171, 247),
+    (189, 190, 249),
+    (207, 208, 251),
+    (225, 226, 252),
+];
+const UNKNOWN_SHADES: [(u8, u8, u8); 7] = [
+    (136, 136, 136),
+    (156, 156, 156),
+    (176, 176, 176),
+    (196, 196, 196),
+    (212, 212, 212),
+    (228, 228, 228),
+    (244, 244, 244),
+];
+
+fn vendor_ramp(vendor: &str) -> &'static [(u8, u8, u8); 7] {
+    match vendor {
+        "anthropic" => &ANTHROPIC_SHADES,
+        "openai" => &OPENAI_SHADES,
+        "google" => &GOOGLE_SHADES,
+        "xai" => &XAI_SHADES,
+        "zai" => &ZAI_SHADES,
+        "moonshot" => &MOONSHOT_SHADES,
+        "deepseek" => &DEEPSEEK_SHADES,
+        "meta" => &META_SHADES,
+        _ => &UNKNOWN_SHADES,
+    }
 }
 
 fn adapt_color(color: Color, mode: TerminalColorMode) -> Color {
@@ -717,6 +854,8 @@ mod tests {
         assert_eq!(theme.metric_cache_read, Color::Blue);
         assert_eq!(theme.metric_cache_write, Color::Magenta);
         assert_eq!(theme.metric_reasoning, Color::Yellow);
+        assert_eq!(theme.metric_cache_hit, Color::Cyan);
+        assert_eq!(theme.metric_cost_per_million, Color::Rgb(150, 200, 150));
         assert_eq!(
             theme.kpi_colors,
             [Color::Cyan, Color::Green, Color::Yellow, Color::Magenta]
@@ -754,13 +893,15 @@ mod tests {
         let sources = [
             ("behavior", include_str!("panels/behavior.rs")),
             ("blocks", include_str!("panels/blocks.rs")),
-            ("cost", include_str!("panels/cost.rs")),
             ("daily", include_str!("panels/daily.rs")),
             ("hourly", include_str!("panels/hourly.rs")),
             ("models", include_str!("panels/models.rs")),
+            ("monthly", include_str!("panels/monthly.rs")),
+            ("period", include_str!("panels/period.rs")),
             ("overview", include_str!("panels/overview.rs")),
             ("stats", include_str!("panels/stats.rs")),
             ("usage", include_str!("panels/usage.rs")),
+            ("sync_status", include_str!("panels/sync_status.rs")),
             ("source_picker", include_str!("source_picker.rs")),
         ];
 
@@ -782,13 +923,15 @@ mod tests {
             include_str!("source_picker.rs"),
             include_str!("panels/behavior.rs"),
             include_str!("panels/blocks.rs"),
-            include_str!("panels/cost.rs"),
             include_str!("panels/daily.rs"),
             include_str!("panels/hourly.rs"),
             include_str!("panels/models.rs"),
+            include_str!("panels/monthly.rs"),
+            include_str!("panels/period.rs"),
             include_str!("panels/overview.rs"),
             include_str!("panels/stats.rs"),
             include_str!("panels/usage.rs"),
+            include_str!("panels/sync_status.rs"),
             include_str!("../../tests/tui_panels_prop.rs"),
         ];
 
@@ -842,6 +985,8 @@ mod tests {
             ansi.metric_cache_read,
             ansi.metric_cache_write,
             ansi.metric_reasoning,
+            ansi.metric_cache_hit,
+            ansi.metric_cost_per_million,
             ansi.heat[4],
         ];
         assert!(
@@ -856,6 +1001,8 @@ mod tests {
             plain.surface_fg,
             plain.selection_bg,
             plain.metric_input,
+            plain.metric_cache_hit,
+            plain.metric_cost_per_million,
             plain.kpi_colors[3],
             plain.heat[4],
             plain.bar_danger,
@@ -896,6 +1043,24 @@ mod tests {
             assert_eq!(active_theme().accent, before.accent);
         });
         assert_eq!(active_theme().name, "mocha");
+        set_theme(Theme::default_dark());
+    }
+
+    #[test]
+    fn vendor_style_adapts_and_respects_no_color() {
+        set_color_mode(TerminalColorMode::TrueColor);
+        set_theme(Theme::default_dark());
+        assert_eq!(vendor_fg("anthropic", 0), Color::Rgb(218, 119, 86));
+        assert_eq!(
+            vendor_style("anthropic", 0),
+            Style::default()
+                .fg(Color::Rgb(218, 119, 86))
+                .add_modifier(Modifier::BOLD)
+        );
+        set_color_mode(TerminalColorMode::NoColor);
+        assert_eq!(vendor_fg("anthropic", 0), Color::Reset);
+        assert_eq!(vendor_style("anthropic", 0), Style::default());
+        set_color_mode(TerminalColorMode::TrueColor);
         set_theme(Theme::default_dark());
     }
 }
