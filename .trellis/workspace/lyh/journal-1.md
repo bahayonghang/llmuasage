@@ -1716,3 +1716,24 @@ Usage 页改为只读拉取 Grok/Kimi/Claude/Codex 订阅额度，Source Sync �
 ### Next Steps
 
 - 重启 llmusage serve 后核对横幅；Codex/Antigravity stale missing 与 insights 中的 serve aborted 未改。
+
+
+## Session 57: 完成看板同步反馈与重建风险闭环
+
+**Date**: 2026-08-19
+**Task**: 完成看板同步反馈与重建风险闭环
+**Branch**: `dev`
+
+### Summary
+
+完成 JobRegistry/CLI run_log 统一记账、取消与锁丢失终态；将重建保护降为 Web/TUI 中性安全事实；修复 completed overlay 刷新闪回并补齐回归测试、规范与文档。python scripts/ci-rust.py、just ci、前端生命周期测试和文档构建均通过。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7136a03` | (see git log) |
+
+### Status
+
+[OK] **Completed**
