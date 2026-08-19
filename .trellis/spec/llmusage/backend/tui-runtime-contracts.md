@@ -48,9 +48,10 @@ monthly::render_sorted(..., sort: SortState, detail)
 - Windowing and memoization are internal only: the same payload, scroll offset,
   terminal size, and theme must produce the same `TestBackend` cells.
 - Models, Daily, Hourly, Monthly, Blocks, Overview, Usage accounts, and the Stats
-  source table use one `ScrollState` for selection and windowing. Single-row
+  Day Breakdown use one `ScrollState` for selection and windowing. Unselected
+  Stats does not scroll. Single-row
   movement wraps; paging and Home/End clamp. Selected rows use
-  `theme::selection_style()`, except Models and Overview which use
+  `theme::selection_style()`, except Models, Overview, and Stats graph cells which use
   `theme::selection_fill_style()` so cell foreground colors stay visible.
 - Usage loads subscription quota on panel entry or `r`. `R` auto-refresh does
   not poll quota APIs. Source Sync / Platform Monitor open through the `y`
@@ -63,6 +64,11 @@ monthly::render_sorted(..., sort: SortState, detail)
   always use the raw payload length. Overview chart and list follow
   `TimeWindow`; `All` paints at most the last 60 local dates. Daily and Monthly
   Enter open a detail table; Esc returns to the list without quitting.
+  Stats Enter selects the last heatmap day. A left click on a graph cell opens
+  that day's breakdown. Esc closes the Stats selection before quit.
+  Draw and Stats cell hit-testing share `draw::dashboard_shell_areas` so nav,
+  content, and footer bounds match. After each frame, `AppState` terminal
+  width/height must equal the backend size used to paint that frame.
 - Mouse wheel events map to the same row movement actions as the keyboard.
   Footer spinner frames are fixed-width ASCII and render only while a panel load
   or sync is active.

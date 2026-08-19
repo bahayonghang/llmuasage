@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/llmusage/backend/tui-presentation-contracts.md", "reason": "Stats copy, theme slots, stat_compact/cost_compact, no Color::* in panels"}
+{"file": ".trellis/spec/llmusage/backend/tui-runtime-contracts.md", "reason": "ScrollState, Esc vs quit, mouse, period detail reuse"}
+{"file": ".trellis/spec/llmusage/backend/dashboard-performance-contracts.md", "reason": "365-day heatmap stays unwindowed; Stats context stays windowed"}
+{"file": ".trellis/tasks/08-19-dash-stats-tokscale-style/research/tokscale-stats-gap.md", "reason": "tokscale vs current Stats layout, interaction, and metric evidence"}

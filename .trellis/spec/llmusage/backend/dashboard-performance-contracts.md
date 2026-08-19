@@ -79,7 +79,7 @@ TimeWindow::query_filter(&QueryFilter)
   the current payload and marks it stale until the matching result arrives.
 - TUI windows are `Today`, `7d`, `30d`, and `All`; bounded windows are inclusive
   local calendar days in `QueryFilter.timezone`, and `All` is the startup
-  default. Windows govern Models, Daily, Hourly, Cost, Stats source mix/context
+  default. Windows govern Models, Daily, Hourly, Cost, Stats context
   pressure, and Behavior activity/tools/optimize/compare. Overview, the 365-day
   heatmap, sync center, zombie inventory, and Blocks keep their fixed semantics.
 - Bounded all-source context pressure executes one `(source, event_at)` indexed

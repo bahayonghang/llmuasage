@@ -65,6 +65,15 @@ theme::{vendor_style, vendor_fg, metric_cache_hit, metric_cost_per_million,
   Models-by-Cost list. It does not render KPI cards, Token Mix, Freshness, or
   24h Pulse. Chart axis labels and list token counts use `stat_compact`. List
   totals use `cost_compact`.
+- Stats is a 52-week contribution graph, a two-column key/value card, and an
+  optional Day Breakdown. Favorite model, Events, streaks, Active days `N/M`,
+  Total tokens, and Total cost are lifetime; Context peak/avg stays windowed.
+  Graph cells are two columns wide (`██` / muted `· `). Heat uses token-quantile
+  buckets and `theme::heat`. A selected cell uses `selection_fill_style`.
+  Stats cost uses `cost_compact`. The `<80` narrow break uses the card or
+  graph *outer* width, not the inner width after borders. Stats does not
+  render Source Mix, Health Signals, profile bars, or a year-stripped
+  `MM-DD .. MM-DD` caption.
 - Overview, footer, Models, Daily, Hourly, Monthly, Stats, Behavior, and Blocks use
   `stat_compact` for token and analytical count values. Daily / Hourly / Monthly
   wide tables use Cache× (`cache_multiplier`) and Cost/1M (`cost_per_million`). Usage main area shows
