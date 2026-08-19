@@ -145,6 +145,17 @@
   additive. No-op or pinned catalog bootstrap emits no pricing variants.
 - Bootstrap callback delivery must not persist progress or alter migration,
   pricing activation, lock acquisition, failure, or cancellation semantics.
+- `Dashboard::sync_command_center` headline and reason describe one signal.
+  Busy lock wins, then the newest usage-import `run_log` row with
+  `status == "failed"`, then lossy rebuild risk, then ready. Recovered
+  `aborted` usage-import rows do not select the failed headline after a later
+  successful usage-import run. Live job overlay may still replace keys for a
+  running, failed, or cancelled foreground job.
+- Command-center `last_run` and `safety.recent_failures` read the last N
+  usage-import commands (`sync`, `sync --rebuild`, `hook-run`). They must not
+  use a mixed `serve`/other-command window. `safety.recent_failures` counts
+  `status == "failed"` rows in that window. `RunRecord::counts_as_failure`
+  remains the doctor/health predicate and still includes aborted recovery.
 - Human progress rendering lives in `src/commands/sync_progress.rs` behind one
   event entry and one copy source (`human_progress_line`). TTY stderr renders
   indicatif bars (OpenCode is a spinner because its `files_scanned` counts
@@ -261,6 +272,10 @@
   NDJSON variants, stdout purity, and structured log phase fields.
 - A multi-thread `#[tokio::test]` covering the TUI sync action, duplicate-start
   cancellation, progress text projection, and bounded shutdown behavior.
+- Command-center regressions covering recovered abort plus later successful
+  sync with rebuild risk (rebuildRisk headline, success last_run), usage-import
+  last-run surviving serve-row noise, and failed last-run pairing the failed
+  headline with `lastRunFailed` even when rebuild risk is also present.
 
 ### 7. Wrong vs Correct
 

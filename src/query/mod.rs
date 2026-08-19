@@ -3404,13 +3404,16 @@ impl Dashboard {
         diagnostics: &DiagnosticsPayload,
     ) -> Result<SyncCommandCenterPayload> {
         let statuses = load_sync_statuses_with_conn(&self.conn, filter)?;
-        let recent_runs = self.store.run_log().recent_runs_with_conn(&self.conn, 10)?;
+        let recent_runs = self
+            .store
+            .run_log()
+            .recent_usage_import_runs_with_conn(&self.conn, 10)?;
         let current_lock = Store::current_worker_lock_with_conn(&self.conn)?;
-        // `hook-run` remains readable as a historical run_log command label.
+        // Failed headlines follow the newest usage-import row. Recovered
+        // `aborted` rows stay visible in details but do not count here.
         let recent_failures = recent_runs
             .iter()
-            .filter(|run| matches!(run.command.as_str(), "sync" | "sync --rebuild" | "hook-run"))
-            .filter(|run| RunRecord::counts_as_failure(run))
+            .filter(|run| run.status == "failed")
             .count();
         let selected_source = filter.source.map(|source| source.as_str().to_string());
         let risk_sources = diagnostics
@@ -3439,18 +3442,16 @@ impl Dashboard {
             .max()
             .unwrap_or_default()
             .max(1);
-        // `hook-run` remains eligible as the last historical usage-import run.
-        let last_run = recent_runs
-            .iter()
-            .find(|run| matches!(run.command.as_str(), "sync" | "sync --rebuild" | "hook-run"))
-            .map(|run| SyncLastRunPayload {
-                status: run.status.clone(),
-                command: run.command.clone(),
-                started_at: run.started_at.clone(),
-                finished_at: run.finished_at.clone(),
-                error_key: RunRecord::counts_as_failure(run)
-                    .then(|| "syncCenter.reason.lastRunFailed".to_string()),
-            });
+        // Newest usage-import row, including historical `hook-run` labels.
+        let last_run = recent_runs.first().map(|run| SyncLastRunPayload {
+            status: run.status.clone(),
+            command: run.command.clone(),
+            started_at: run.started_at.clone(),
+            finished_at: run.finished_at.clone(),
+            error_key: (run.status == "failed")
+                .then(|| "syncCenter.reason.lastRunFailed".to_string()),
+        });
+        let last_run_failed = last_run.as_ref().is_some_and(|run| run.status == "failed");
         let worker_lock = if current_lock.is_some() {
             "busy"
         } else {
@@ -3459,21 +3460,23 @@ impl Dashboard {
         .to_string();
         let worker_lock_holder = current_lock.as_ref().map(|lock| lock.holder_identity());
         let lossy_rebuild_risk = !risk_sources.is_empty();
-        let tone = if worker_lock == "busy" || recent_failures > 0 || lossy_rebuild_risk {
+        let tone = if worker_lock == "busy" || last_run_failed || lossy_rebuild_risk {
             "warn"
         } else {
             "good"
         };
         let headline_key = if worker_lock == "busy" {
             "syncCenter.headline.busy"
-        } else if recent_failures > 0 {
+        } else if last_run_failed {
             "syncCenter.headline.failed"
         } else if lossy_rebuild_risk {
             "syncCenter.headline.rebuildRisk"
         } else {
             "syncCenter.headline.ready"
         };
-        let reason_key = if lossy_rebuild_risk {
+        let reason_key = if last_run_failed && worker_lock != "busy" {
+            "syncCenter.reason.lastRunFailed"
+        } else if lossy_rebuild_risk {
             "syncCenter.reason.rebuildRisk"
         } else if statuses.is_empty() {
             "syncCenter.reason.empty"
@@ -4399,6 +4402,172 @@ mod tests {
         assert_eq!(zcode["accounting_anomaly_lines"], 1);
         assert_eq!(zcode["tone"], "good");
         assert!(zcode.get("samples").is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn sync_command_center_ignores_recovered_abort_after_successful_sync() -> Result<()> {
+        let fixture = Fixture::new()?;
+        fixture.seed_event(SeedEvent {
+            event_key: "claude:center:1",
+            source: "claude",
+            model: "claude-sonnet-4",
+            event_at: "2026-08-19T00:00:00Z",
+            input_tokens: 10,
+            total_tokens: 10,
+            ..Default::default()
+        })?;
+        let conn = fixture.store().open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO source_sync_status(
+                source, files_processed, changed_files, bytes_scanned,
+                events_seen, events_replayed, events_inserted, stored_events,
+                parse_ms, write_ms, lock_wait_ms, updated_at
+            ) VALUES ('claude', 3, 1, 10, 5, 0, 2, 2, 1, 1, 0, '2026-08-19T08:58:21Z')
+            "#,
+            [],
+        )?;
+        conn.execute(
+            "INSERT INTO source_file(source, file_path, state, last_state_change_at) VALUES ('claude', ?1, 'missing', '2026-08-19T08:58:21Z')",
+            [fixture
+                .paths()
+                .root_dir
+                .join("gone-claude.jsonl")
+                .display()
+                .to_string()],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO run_log(command, status, error, started_at, finished_at)
+            VALUES
+                ('sync', 'aborted', 'recovered stale running record', '2026-08-18T12:40:45Z', '2026-08-19T05:12:30Z'),
+                ('sync', 'success', NULL, '2026-08-19T08:58:20Z', '2026-08-19T08:58:21Z'),
+                ('serve', 'aborted', 'recovered stale running record', '2026-08-19T09:00:00Z', '2026-08-19T09:01:00Z'),
+                ('serve', 'aborted', 'recovered stale running record', '2026-08-19T09:02:00Z', '2026-08-19T09:03:00Z'),
+                ('serve', 'aborted', 'recovered stale running record', '2026-08-19T09:04:00Z', '2026-08-19T09:05:00Z'),
+                ('serve', 'aborted', 'recovered stale running record', '2026-08-19T09:06:00Z', '2026-08-19T09:07:00Z'),
+                ('serve', 'aborted', 'recovered stale running record', '2026-08-19T09:08:00Z', '2026-08-19T09:09:00Z'),
+                ('serve', 'aborted', 'recovered stale running record', '2026-08-19T09:10:00Z', '2026-08-19T09:11:00Z'),
+                ('serve', 'aborted', 'recovered stale running record', '2026-08-19T09:12:00Z', '2026-08-19T09:13:00Z'),
+                ('serve', 'aborted', 'recovered stale running record', '2026-08-19T09:14:00Z', '2026-08-19T09:15:00Z'),
+                ('serve', 'running', NULL, '2026-08-19T11:04:41Z', NULL)
+            "#,
+            [],
+        )?;
+        drop(conn);
+
+        let center = Dashboard::open(fixture.store())?.sync_command_center(&Default::default())?;
+        assert_eq!(center.headline_key, "syncCenter.headline.rebuildRisk");
+        assert_eq!(center.reason_key, "syncCenter.reason.rebuildRisk");
+        let last_run = center.last_run.as_ref().expect("last run");
+        assert_eq!(last_run.status, "success");
+        assert!(last_run.error_key.is_none());
+        assert_eq!(center.safety.recent_failures, 0);
+        let claude = center
+            .sources
+            .iter()
+            .find(|row| row.source == "claude")
+            .expect("claude source");
+        assert!(claude.lossy_rebuild_risk);
+        assert_eq!(claude.status, "rebuild_risk");
+        Ok(())
+    }
+
+    #[test]
+    fn sync_command_center_keeps_failed_last_run_past_serve_noise() -> Result<()> {
+        let fixture = Fixture::new()?;
+        let conn = fixture.store().open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO source_sync_status(
+                source, files_processed, changed_files, bytes_scanned,
+                events_seen, events_replayed, events_inserted, stored_events,
+                parse_ms, write_ms, lock_wait_ms, updated_at
+            ) VALUES ('codex', 1, 1, 10, 2, 0, 2, 2, 1, 1, 0, '2026-08-19T00:00:00Z')
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO run_log(command, status, error, started_at, finished_at)
+            VALUES ('sync', 'failed', 'parser exploded', '2026-08-19T00:00:00Z', '2026-08-19T00:00:01Z')
+            "#,
+            [],
+        )?;
+        for idx in 0..12 {
+            conn.execute(
+                r#"
+                INSERT INTO run_log(command, status, error, started_at, finished_at)
+                VALUES ('serve', 'aborted', 'recovered stale running record', ?1, ?2)
+                "#,
+                rusqlite::params![
+                    format!("2026-08-19T01:{idx:02}:00Z"),
+                    format!("2026-08-19T01:{idx:02}:30Z"),
+                ],
+            )?;
+        }
+        drop(conn);
+
+        let center = Dashboard::open(fixture.store())?.sync_command_center(&Default::default())?;
+        assert_eq!(center.headline_key, "syncCenter.headline.failed");
+        assert_eq!(center.reason_key, "syncCenter.reason.lastRunFailed");
+        let last_run = center.last_run.as_ref().expect("last run");
+        assert_eq!(last_run.status, "failed");
+        assert_eq!(
+            last_run.error_key.as_deref(),
+            Some("syncCenter.reason.lastRunFailed")
+        );
+        assert_eq!(center.safety.recent_failures, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn sync_command_center_pairs_failed_headline_ahead_of_rebuild_risk() -> Result<()> {
+        let fixture = Fixture::new()?;
+        fixture.seed_event(SeedEvent {
+            event_key: "codex:center-failed:1",
+            source: "codex",
+            model: "gpt-5",
+            event_at: "2026-08-19T00:00:00Z",
+            input_tokens: 10,
+            total_tokens: 10,
+            ..Default::default()
+        })?;
+        let conn = fixture.store().open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO source_sync_status(
+                source, files_processed, changed_files, bytes_scanned,
+                events_seen, events_replayed, events_inserted, stored_events,
+                parse_ms, write_ms, lock_wait_ms, updated_at
+            ) VALUES ('codex', 1, 1, 10, 2, 0, 2, 2, 1, 1, 0, '2026-08-19T00:00:00Z')
+            "#,
+            [],
+        )?;
+        conn.execute(
+            "INSERT INTO source_file(source, file_path, state, last_state_change_at) VALUES ('codex', ?1, 'missing', '2026-08-19T00:00:00Z')",
+            [fixture
+                .paths()
+                .root_dir
+                .join("gone-codex.jsonl")
+                .display()
+                .to_string()],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO run_log(command, status, error, started_at, finished_at)
+            VALUES ('sync', 'failed', 'parser exploded', '2026-08-19T00:00:00Z', '2026-08-19T00:00:01Z')
+            "#,
+            [],
+        )?;
+        drop(conn);
+
+        let center = Dashboard::open(fixture.store())?.sync_command_center(&Default::default())?;
+        assert_eq!(center.headline_key, "syncCenter.headline.failed");
+        assert_eq!(center.reason_key, "syncCenter.reason.lastRunFailed");
+        assert!(center.safety.lossy_rebuild_risk);
+        assert_eq!(center.last_run.as_ref().unwrap().status, "failed");
         Ok(())
     }
 

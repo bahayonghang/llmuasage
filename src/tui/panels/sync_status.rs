@@ -420,6 +420,7 @@ fn reason_text(key: &str) -> &'static str {
     match key {
         "syncCenter.reason.ready" => "local status looks usable",
         "syncCenter.reason.empty" => "no sync status has been recorded",
+        "syncCenter.reason.lastRunFailed" => "the latest usage import failed",
         "syncCenter.reason.rebuildRisk" => "missing source files protect stored history",
         _ => "check sync details below",
     }
