@@ -52,20 +52,22 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                 &state.daily,
                 &state.scroll[Panel::Sources as usize],
                 state.sort[Panel::Sources as usize],
+                state.period_detail.as_ref(),
             ),
-            Panel::Projects => panels::hourly::render(
+            Panel::Projects => panels::hourly::render_sorted(
                 frame,
                 content_area,
                 &state.hourly,
                 &state.scroll[Panel::Projects as usize],
+                state.sort[Panel::Projects as usize],
             ),
-            Panel::Cost => panels::cost::render_with_plan(
+            Panel::Monthly => panels::monthly::render_sorted(
                 frame,
                 content_area,
-                &state.costs,
-                &state.scroll[Panel::Cost as usize],
-                state.cost_collapse,
-                state.sort[Panel::Cost as usize],
+                &state.monthly,
+                &state.scroll[Panel::Monthly as usize],
+                state.sort[Panel::Monthly as usize],
+                state.period_detail.as_ref(),
             ),
             Panel::Health => panels::stats::render(
                 frame,

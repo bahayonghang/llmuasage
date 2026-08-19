@@ -29,7 +29,7 @@ pub mod stacked_bar;
 mod sync_control;
 pub mod theme;
 
-use app::{AppState, Panel};
+use app::{AppState, Panel, PeriodDetailKind, PeriodDetailPayload, TableSortKey, stable_sort_refs};
 use data_loader::{PanelDataLoader, PanelPayload, PanelRequest, PanelResult};
 use event::{EventHandler, TuiEvent};
 use input::{Action, DialogAction, handle_dialog_key_event, handle_key_event};
@@ -170,18 +170,36 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
                 loader.cancel_active();
                 break;
             }
+            Action::Esc => {
+                if state.is_period_detail_active() {
+                    state.close_period_detail();
+                } else {
+                    sync.shutdown(Duration::from_millis(500));
+                    quota.shutdown(Duration::from_millis(500));
+                    loader.cancel_active();
+                    break;
+                }
+            }
+            Action::OpenDetail => {
+                if let Some(kind) = period_detail_kind(&state) {
+                    request_period_detail(&mut loader, &mut state, kind);
+                }
+            }
             Action::SwitchPanel(p) => {
+                state.close_period_detail();
                 state.active_panel = p;
                 request_panel_data(&mut loader, &mut state, p, false);
                 maybe_fetch_quota(&mut quota, store, &mut state, false);
             }
             Action::NextPanel => {
+                state.close_period_detail();
                 let p = state.active_panel.next();
                 state.active_panel = p;
                 request_panel_data(&mut loader, &mut state, p, false);
                 maybe_fetch_quota(&mut quota, store, &mut state, false);
             }
             Action::PrevPanel => {
+                state.close_period_detail();
                 let p = state.active_panel.prev();
                 state.active_panel = p;
                 request_panel_data(&mut loader, &mut state, p, false);
@@ -236,6 +254,7 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
                 }
             }
             Action::NextWindow => {
+                state.close_period_detail();
                 state.time_window = state.time_window.next();
                 let panel = state.active_panel;
                 invalidate_windowed_panel_data(&mut state);
@@ -244,6 +263,7 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
                 }
             }
             Action::PrevWindow => {
+                state.close_period_detail();
                 state.time_window = state.time_window.prev();
                 let panel = state.active_panel;
                 invalidate_windowed_panel_data(&mut state);
@@ -307,6 +327,7 @@ fn apply_sync_updates(
 
 fn refresh_panel_data(loader: &mut PanelDataLoader, state: &mut AppState) {
     let panel = state.active_panel;
+    state.close_period_detail();
     invalidate_inactive_panel_data(state);
     state.needs_refresh = false;
     request_panel_data(loader, state, panel, true);
@@ -433,6 +454,70 @@ fn action_from_mouse(state: &AppState, mouse: &crossterm::event::MouseEvent) -> 
     }
 }
 
+fn period_detail_kind(state: &AppState) -> Option<PeriodDetailKind> {
+    if state.is_period_detail_active() {
+        return None;
+    }
+    match state.active_panel {
+        Panel::Sources => {
+            let days = state.daily.as_ref()?.as_ref().ok()?;
+            let sort = state.sort[Panel::Sources as usize];
+            let ordered =
+                stable_sort_refs(days.iter().collect(), sort, |left, right, key| match key {
+                    TableSortKey::Date => left.date.cmp(&right.date),
+                    TableSortKey::Tokens => left.total_tokens.cmp(&right.total_tokens),
+                    TableSortKey::Cost => left
+                        .cost_with_cache_usd
+                        .total_cmp(&right.cost_with_cache_usd),
+                });
+            let day = ordered.get(state.scroll[Panel::Sources as usize].selected)?;
+            Some(PeriodDetailKind::Daily {
+                date: day.date.clone(),
+            })
+        }
+        Panel::Monthly => {
+            let months = state.monthly.as_ref()?.as_ref().ok()?;
+            let sort = state.sort[Panel::Monthly as usize];
+            let ordered =
+                stable_sort_refs(
+                    months.iter().collect(),
+                    sort,
+                    |left, right, key| match key {
+                        TableSortKey::Date => left.month.cmp(&right.month),
+                        TableSortKey::Tokens => left.total_tokens.cmp(&right.total_tokens),
+                        TableSortKey::Cost => left
+                            .cost_with_cache_usd
+                            .total_cmp(&right.cost_with_cache_usd),
+                    },
+                );
+            let month = ordered.get(state.scroll[Panel::Monthly as usize].selected)?;
+            Some(PeriodDetailKind::Monthly {
+                month: month.month.clone(),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn request_period_detail(
+    loader: &mut PanelDataLoader,
+    state: &mut AppState,
+    kind: PeriodDetailKind,
+) {
+    state.open_period_detail(kind.clone());
+    state.data_generation = state.data_generation.wrapping_add(1);
+    state.panel_loading = [false; Panel::COUNT];
+    state.panel_loading[state.active_panel as usize] = true;
+    loader.request(PanelRequest {
+        panel: state.active_panel,
+        filter: state.filter.clone(),
+        time_window: state.time_window,
+        generation: state.data_generation,
+        refreshing: false,
+        detail: Some(kind),
+    });
+}
+
 fn request_panel_data(
     loader: &mut PanelDataLoader,
     state: &mut AppState,
@@ -451,6 +536,7 @@ fn request_panel_data(
         time_window: state.time_window,
         generation: state.data_generation,
         refreshing: panel_has_data(state, panel),
+        detail: None,
     });
 }
 
@@ -477,12 +563,20 @@ fn apply_panel_result(state: &mut AppState, result: PanelResult) -> bool {
         PanelPayload::Models(payload) => state.models = Some(payload),
         PanelPayload::Daily(payload) => state.daily = Some(payload),
         PanelPayload::Hourly(payload) => state.hourly = Some(payload),
-        PanelPayload::Costs(payload) => {
-            state.cost_collapse = payload
-                .as_ref()
-                .ok()
-                .and_then(|items| panels::cost::collapse_plan(items));
-            state.costs = Some(payload);
+        PanelPayload::Monthly(payload) => state.monthly = Some(payload),
+        PanelPayload::DailyDetail(payload) => {
+            if let Some(detail) = state.period_detail.as_mut()
+                && matches!(detail.kind, PeriodDetailKind::Daily { .. })
+            {
+                detail.payload = Some(payload.map(PeriodDetailPayload::Daily));
+            }
+        }
+        PanelPayload::MonthlyDetail(payload) => {
+            if let Some(detail) = state.period_detail.as_mut()
+                && matches!(detail.kind, PeriodDetailKind::Monthly { .. })
+            {
+                detail.payload = Some(payload.map(PeriodDetailPayload::Monthly));
+            }
         }
         PanelPayload::Stats(payload) => state.stats = Some(payload),
         PanelPayload::Behavior(payload) => state.behavior = Some(*payload),
@@ -520,7 +614,7 @@ fn panel_has_data(state: &AppState, panel: Panel) -> bool {
         Panel::Models => state.models.is_some(),
         Panel::Sources => state.daily.is_some(),
         Panel::Projects => state.hourly.is_some(),
-        Panel::Cost => state.costs.is_some(),
+        Panel::Monthly => state.monthly.is_some(),
         Panel::Health => state.stats.is_some(),
         Panel::Behavior => state.behavior.is_some(),
         Panel::Blocks => state.blocks.is_some(),
@@ -534,7 +628,7 @@ fn panel_uses_time_window(panel: Panel) -> bool {
             | Panel::Models
             | Panel::Sources
             | Panel::Projects
-            | Panel::Cost
+            | Panel::Monthly
             | Panel::Health
             | Panel::Behavior
     )
@@ -545,8 +639,8 @@ fn invalidate_windowed_panel_data(state: &mut AppState) {
     state.models = None;
     state.daily = None;
     state.hourly = None;
-    state.costs = None;
-    state.cost_collapse = None;
+    state.monthly = None;
+    state.period_detail = None;
     state.stats = None;
     state.behavior = None;
     for panel in [
@@ -554,7 +648,7 @@ fn invalidate_windowed_panel_data(state: &mut AppState) {
         Panel::Models,
         Panel::Sources,
         Panel::Projects,
-        Panel::Cost,
+        Panel::Monthly,
         Panel::Health,
         Panel::Behavior,
     ] {
@@ -581,9 +675,8 @@ fn invalidate_inactive_panel_data(state: &mut AppState) {
     if active != Panel::Projects {
         state.hourly = None;
     }
-    if active != Panel::Cost {
-        state.costs = None;
-        state.cost_collapse = None;
+    if active != Panel::Monthly {
+        state.monthly = None;
     }
     if active != Panel::Health {
         state.stats = None;
@@ -608,15 +701,29 @@ fn update_scroll_total(state: &mut AppState, panel: Panel) {
             .as_ref()
             .map(|report| report.outputs.len()),
         Panel::Models => state.models.as_ref().and_then(ok_len),
-        Panel::Sources => state.daily.as_ref().and_then(ok_len),
-        Panel::Projects => state.hourly.as_ref().and_then(ok_len),
-        Panel::Cost => state.costs.as_ref().and_then(ok_len).map(|raw| {
-            if state.sort[Panel::Cost as usize].key.is_some() {
-                raw
+        Panel::Sources => {
+            if let Some(detail) = &state.period_detail {
+                match &detail.payload {
+                    Some(Ok(PeriodDetailPayload::Daily(rows))) => Some(rows.len()),
+                    Some(Ok(PeriodDetailPayload::Monthly(rows))) => Some(rows.len()),
+                    _ => Some(0),
+                }
             } else {
-                state.cost_collapse.map_or(raw, |plan| plan.keep + 1)
+                state.daily.as_ref().and_then(ok_len)
             }
-        }),
+        }
+        Panel::Projects => state.hourly.as_ref().and_then(ok_len),
+        Panel::Monthly => {
+            if let Some(detail) = &state.period_detail {
+                match &detail.payload {
+                    Some(Ok(PeriodDetailPayload::Daily(rows))) => Some(rows.len()),
+                    Some(Ok(PeriodDetailPayload::Monthly(rows))) => Some(rows.len()),
+                    _ => Some(0),
+                }
+            } else {
+                state.monthly.as_ref().and_then(ok_len)
+            }
+        }
         Panel::Blocks => state.blocks.as_ref().and_then(ok_len),
         Panel::Health => state
             .stats
@@ -696,10 +803,10 @@ mod tests {
     fn every_scrolled_table_bounds_row_construction_to_the_viewport() {
         let selected_tables = [
             ("blocks", include_str!("panels/blocks.rs")),
-            ("cost", include_str!("panels/cost.rs")),
             ("daily", include_str!("panels/daily.rs")),
             ("hourly", include_str!("panels/hourly.rs")),
             ("models", include_str!("panels/models.rs")),
+            ("monthly", include_str!("panels/monthly.rs")),
             ("stats", include_str!("panels/stats.rs")),
         ];
         for (name, source) in selected_tables {

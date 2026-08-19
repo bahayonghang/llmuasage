@@ -16,11 +16,11 @@ use ratatui::{
 use llmusage::domain::platform_monitor::{ParserSupportStatus, PlatformProbe, PlatformProbeStatus};
 use llmusage::query::{
     ActivityBreakdown, ActivityPayload, BehaviorSupport, CategoryCompareRow, CompareMetric,
-    CompareModelCandidate, ContextPressurePayload, CostLine, CursorHealth, DailyModelPoint,
-    DailyTrendPoint, HealthPayload, HeatmapPoint, ModelBreakdown, ModelComparePayload,
-    ModelCompareStats, OptimizeFinding, OptimizePayload, OverviewPayload, SourceBreakdown,
-    SyncActionPayload, SyncCommandCenterPayload, SyncMetricsPayload, SyncSafetyPayload,
-    SyncSourcePayload, TokenSummary, ToolBreakdown, ToolsPayload, TrendPoint, ZombieItem,
+    CompareModelCandidate, ContextPressurePayload, CursorHealth, DailyModelPoint, DailyTrendPoint,
+    HealthPayload, HeatmapPoint, HourlyTrendPoint, ModelBreakdown, ModelComparePayload,
+    ModelCompareStats, MonthlyTrendPoint, OptimizeFinding, OptimizePayload, OverviewPayload,
+    SourceBreakdown, SyncActionPayload, SyncCommandCenterPayload, SyncMetricsPayload,
+    SyncSafetyPayload, SyncSourcePayload, TokenSummary, ToolBreakdown, ToolsPayload, ZombieItem,
     ZombieReport,
 };
 use llmusage::tui::app::{
@@ -97,21 +97,33 @@ fn arb_model_breakdown() -> impl Strategy<Value = ModelBreakdown> {
         })
 }
 
-fn arb_cost_line() -> impl Strategy<Value = CostLine> {
-    (
-        "[a-z]{3,8}",
-        "[a-z]{3,8}",
-        1i64..20_000_000_000,
-        0.01f64..100.0,
-        1i64..2_000_000,
-    )
-        .prop_map(|(source, model, tokens, cost, events)| CostLine {
-            source,
-            model,
-            total_tokens: tokens,
-            estimated_cost_usd: cost,
-            event_count: events,
-        })
+fn sample_hourly(hour_start: &str, tokens: i64) -> HourlyTrendPoint {
+    HourlyTrendPoint {
+        hour_start: hour_start.to_string(),
+        input_tokens: tokens,
+        cache_read_tokens: 0,
+        cache_creation_tokens: 0,
+        output_tokens: 0,
+        total_tokens: tokens,
+        event_count: 1,
+        turn_count: 1,
+        cost_with_cache_usd: 1.25,
+        sources: vec!["codex".to_string()],
+    }
+}
+
+fn sample_monthly(month: &str, tokens: i64, cost: f64) -> MonthlyTrendPoint {
+    MonthlyTrendPoint {
+        month: month.to_string(),
+        input_tokens: tokens,
+        cache_read_tokens: 0,
+        cache_creation_tokens: 0,
+        output_tokens: 0,
+        total_tokens: tokens,
+        event_count: 1,
+        turn_count: 1,
+        cost_with_cache_usd: cost,
+    }
 }
 
 fn render_daily_text(points: Vec<DailyTrendPoint>, width: u16, height: u16) -> String {
@@ -134,7 +146,7 @@ fn render_daily_text(points: Vec<DailyTrendPoint>, width: u16, height: u16) -> S
     buffer_text(&terminal)
 }
 
-fn render_hourly_text(points: Vec<TrendPoint>, width: u16, height: u16) -> String {
+fn render_hourly_text(points: Vec<HourlyTrendPoint>, width: u16, height: u16) -> String {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     let area = Rect::new(0, 0, width, height);
     let scroll = ScrollState {
@@ -143,7 +155,7 @@ fn render_hourly_text(points: Vec<TrendPoint>, width: u16, height: u16) -> Strin
         total: points.len(),
         visible: height.saturating_sub(4) as usize,
     };
-    let data: Option<Result<Vec<TrendPoint>, String>> = Some(Ok(points));
+    let data: Option<Result<Vec<HourlyTrendPoint>, String>> = Some(Ok(points));
 
     terminal
         .draw(|frame| {
@@ -821,6 +833,7 @@ fn dashboard_shell_renders_tokscale_style_header_and_footer() {
         "Usage",
         "Daily",
         "Hourly",
+        "Monthly",
         "[s:source]",
         "[r:refresh]",
         "[x:sync]",
@@ -831,6 +844,7 @@ fn dashboard_shell_renders_tokscale_style_header_and_footer() {
             "dashboard shell should contain '{expected}', got: {text}"
         );
     }
+    assert!(!text.contains(" 6 Cost"), "Cost tab should be gone: {text}");
 }
 
 #[test]
@@ -873,6 +887,7 @@ fn daily_panel_renders_tokscale_style_token_channels() {
                 total_tokens: 18_214_785_227,
                 event_count: 7,
                 cost_with_cache_usd: 1.25,
+                turn_count: 0,
             },
             DailyTrendPoint {
                 date: "2026-05-29".to_string(),
@@ -883,6 +898,7 @@ fn daily_panel_renders_tokscale_style_token_channels() {
                 total_tokens: 6_000,
                 event_count: 3,
                 cost_with_cache_usd: 2.5,
+                turn_count: 0,
             },
         ],
         120,
@@ -896,7 +912,9 @@ fn daily_panel_renders_tokscale_style_token_channels() {
         "Output",
         "Cache R",
         "Cache W",
-        "detail",
+        "Cache×",
+        "Msgs",
+        "Cost/1M",
         "18.2B",
         "$2.50",
     ] {
@@ -919,6 +937,7 @@ fn daily_panel_uses_compact_columns_on_narrow_widths() {
             total_tokens: 3,
             event_count: 1,
             cost_with_cache_usd: 0.01,
+            turn_count: 0,
         }],
         50,
         10,
@@ -933,28 +952,34 @@ fn daily_panel_uses_compact_columns_on_narrow_widths() {
 }
 
 #[test]
-fn hourly_panel_renders_profile_bars_and_compact_hour_labels() {
+fn hourly_panel_renders_tokscale_table_and_day_separators() {
     let text = render_hourly_text(
         vec![
-            TrendPoint {
-                label: "2026-05-29T13:00:00Z".to_string(),
-                total_tokens: 1_000,
-            },
-            TrendPoint {
-                label: "2026-05-29T14:00:00Z".to_string(),
-                total_tokens: 18_214_785_227,
-            },
+            sample_hourly("2026-05-29 13:00", 1_000),
+            sample_hourly("2026-05-29 14:00", 18_214_785_227),
         ],
-        120,
-        12,
+        130,
+        14,
     );
 
-    for expected in ["Hourly Usage", "05-29 14:00", "18.2B", "Profile", "#"] {
+    for expected in [
+        "Hourly Usage",
+        "14:00",
+        "05/29",
+        "18.2B",
+        "Cache×",
+        "Source",
+    ] {
         assert!(
             text.contains(expected),
             "hourly panel should contain '{expected}', got: {text}"
         );
     }
+    assert!(!text.contains("Share"), "hourly should drop Share: {text}");
+    assert!(
+        !text.contains("Profile"),
+        "hourly should drop Profile: {text}"
+    );
 }
 
 #[test]
@@ -1274,15 +1299,9 @@ fn models_visible_window_matches_full_dataset_buffer() {
 }
 
 #[test]
-fn cost_visible_window_matches_full_dataset_buffer() {
-    let items: Vec<CostLine> = (0..40)
-        .map(|index| CostLine {
-            source: "codex".to_string(),
-            model: format!("model-{index:02}"),
-            total_tokens: 10_000,
-            estimated_cost_usd: 1.25,
-            event_count: 100,
-        })
+fn monthly_visible_window_matches_full_dataset_buffer() {
+    let items: Vec<MonthlyTrendPoint> = (0..40)
+        .map(|index| sample_monthly(&format!("{:04}", 2040 - index), 10_000, 1.25))
         .collect();
     let visible = 7usize;
     let scroll = ScrollState {
@@ -1291,13 +1310,13 @@ fn cost_visible_window_matches_full_dataset_buffer() {
         total: items.len(),
         visible,
     };
-    let area = Rect::new(0, 0, 120, (visible + 4) as u16);
+    let area = Rect::new(0, 0, 130, (visible + 4) as u16);
 
-    let render = |rows: Vec<CostLine>| {
+    let render = |rows: Vec<MonthlyTrendPoint>| {
         let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
         let data = Some(Ok(rows));
         terminal
-            .draw(|frame| llmusage::tui::panels::cost::render(frame, area, &data, &scroll))
+            .draw(|frame| llmusage::tui::panels::monthly::render(frame, area, &data, &scroll))
             .unwrap();
         terminal.backend().buffer().clone()
     };
@@ -1337,44 +1356,6 @@ proptest! {
             let cost_str = cost_compact(item.cost_with_cache_usd);
             prop_assert!(text.contains(&cost_str),
                 "Missing cost_with_cache_usd '{}' in output", cost_str);
-        }
-    }
-}
-
-// Feature: terminal-dashboard, Property 8: Cost table renders all required columns
-// **Validates: Requirements 8.1**
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
-
-    #[test]
-    fn prop_cost_table_renders_all_required_columns(
-        items in proptest::collection::vec(arb_cost_line(), 1..4)
-    ) {
-        let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
-        let area = Rect::new(0, 0, 120, 30);
-        let scroll = ScrollState { offset: 0, selected: 0, total: items.len(), visible: 25 };
-        let data: Option<Result<Vec<CostLine>, String>> = Some(Ok(items.clone()));
-
-        terminal.draw(|frame| {
-            llmusage::tui::panels::cost::render(frame, area, &data, &scroll);
-        }).unwrap();
-
-        let text = buffer_text(&terminal);
-
-        for item in &items {
-            prop_assert!(text.contains(&item.source),
-                "Missing source '{}' in output", item.source);
-            prop_assert!(text.contains(&item.model),
-                "Missing model '{}' in output", item.model);
-            let events_str = stat_compact(item.event_count);
-            prop_assert!(text.contains(&events_str),
-                "Missing event_count '{}' in output", events_str);
-            let tokens_str = stat_compact(item.total_tokens);
-            prop_assert!(text.contains(&tokens_str),
-                "Missing total_tokens '{}' in output", tokens_str);
-            let cost_str = format!("${:.2}", item.estimated_cost_usd);
-            prop_assert!(text.contains(&cost_str),
-                "Missing estimated_cost_usd '{}' in output", cost_str);
         }
     }
 }

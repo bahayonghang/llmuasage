@@ -26,6 +26,8 @@ pub enum Action {
     OpenSyncStatus,
     ToggleUsageEmails,
     CycleTheme,
+    OpenDetail,
+    Esc,
     None,
 }
 
@@ -41,7 +43,9 @@ pub enum DialogAction {
 
 pub fn handle_key_event(key: KeyEvent, _active_panel: Panel) -> Action {
     match key.code {
-        KeyCode::Char('q') | KeyCode::Esc => Action::Quit,
+        KeyCode::Char('q') => Action::Quit,
+        KeyCode::Esc => Action::Esc,
+        KeyCode::Enter => Action::OpenDetail,
         KeyCode::Tab => Action::NextPanel,
         KeyCode::BackTab => Action::PrevPanel,
         KeyCode::Char('j') | KeyCode::Down => Action::ScrollDown,
@@ -101,6 +105,28 @@ mod tests {
                 Action::SwitchPanel(expected)
             );
         }
+    }
+
+    #[test]
+    fn enter_opens_detail_and_esc_is_not_quit() {
+        assert_eq!(
+            handle_key_event(
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+                Panel::Sources
+            ),
+            Action::OpenDetail
+        );
+        assert_eq!(
+            handle_key_event(
+                KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+                Panel::Sources
+            ),
+            Action::Esc
+        );
+        assert_eq!(
+            handle_key_event(char_key('q'), Panel::Sources),
+            Action::Quit
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use chrono::{Duration, SecondsFormat, Utc};
+use chrono::{Datelike, Duration, NaiveDate, SecondsFormat, Utc};
 use rusqlite::{Connection, OptionalExtension, params_from_iter, types::Type};
 use serde::{Deserialize, Serialize};
 
@@ -154,6 +154,91 @@ pub struct DailyTrendPoint {
     pub event_count: i64,
     /// Estimated cost for the day using cache-aware pricing.
     pub cost_with_cache_usd: f64,
+    /// Distinct `usage_turn` rows starting on this local date. TUI-only.
+    #[serde(default, skip_serializing)]
+    pub turn_count: i64,
+}
+
+/// One local clock-hour row for the TUI Hourly panel.
+#[derive(Debug, Clone)]
+pub struct HourlyTrendPoint {
+    /// Local clock hour as `YYYY-MM-DD HH:00`.
+    pub hour_start: String,
+    /// Summed non-cache prompt tokens.
+    pub input_tokens: i64,
+    /// Summed cache-read prompt tokens.
+    pub cache_read_tokens: i64,
+    /// Summed cache-creation prompt tokens.
+    pub cache_creation_tokens: i64,
+    /// Output tokens with reasoning already folded in.
+    pub output_tokens: i64,
+    /// Total normalized tokens for the hour.
+    pub total_tokens: i64,
+    /// Number of underlying usage events for the hour.
+    pub event_count: i64,
+    /// Distinct turns that started in this local hour.
+    pub turn_count: i64,
+    /// Estimated cost using cache-aware pricing.
+    pub cost_with_cache_usd: f64,
+    /// Distinct source ids, sorted.
+    pub sources: Vec<String>,
+}
+
+/// One local calendar-month row for the TUI Monthly panel.
+#[derive(Debug, Clone)]
+pub struct MonthlyTrendPoint {
+    /// Local month as `YYYY-MM`.
+    pub month: String,
+    /// Summed non-cache prompt tokens.
+    pub input_tokens: i64,
+    /// Summed cache-read prompt tokens.
+    pub cache_read_tokens: i64,
+    /// Summed cache-creation prompt tokens.
+    pub cache_creation_tokens: i64,
+    /// Output tokens with reasoning already folded in.
+    pub output_tokens: i64,
+    /// Total normalized tokens for the month.
+    pub total_tokens: i64,
+    /// Number of underlying usage events for the month.
+    pub event_count: i64,
+    /// Distinct turns that started in this local month.
+    pub turn_count: i64,
+    /// Estimated cost using cache-aware pricing.
+    pub cost_with_cache_usd: f64,
+}
+
+/// One model × source row for Daily Enter detail.
+#[derive(Debug, Clone)]
+pub struct PeriodDetailRow {
+    /// Normalized model name.
+    pub model: String,
+    /// Source identifier.
+    pub source: String,
+    /// Number of underlying usage events.
+    pub event_count: i64,
+    /// Summed non-cache prompt tokens.
+    pub input_tokens: i64,
+    /// Summed cache-read prompt tokens.
+    pub cache_read_tokens: i64,
+    /// Summed cache-creation prompt tokens.
+    pub cache_creation_tokens: i64,
+    /// Output tokens with reasoning already folded in.
+    pub output_tokens: i64,
+    /// Total normalized tokens.
+    pub total_tokens: i64,
+    /// Estimated cost using cache-aware pricing.
+    pub cost_with_cache_usd: f64,
+}
+
+/// Inclusive local-date bounds for a `YYYY-MM` month key.
+pub fn month_date_bounds(month: &str) -> Option<(NaiveDate, NaiveDate)> {
+    let start = NaiveDate::parse_from_str(&format!("{month}-01"), "%Y-%m-%d").ok()?;
+    let end = if start.month() == 12 {
+        NaiveDate::from_ymd_opt(start.year() + 1, 1, 1)?.pred_opt()?
+    } else {
+        NaiveDate::from_ymd_opt(start.year(), start.month() + 1, 1)?.pred_opt()?
+    };
+    Some((start, end))
 }
 
 /// One local-date × model total used by the TUI Overview stacked chart.
@@ -1113,9 +1198,16 @@ impl Dashboard {
                 total_tokens: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
                 event_count: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
                 cost_with_cache_usd: row.get::<_, Option<f64>>(7)?.unwrap_or_default(),
+                turn_count: 0,
             })
         })?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        let mut points = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        let turns = period_turn_counts(&self.conn, filter, &filter.local_date_expr("t.started_at"))
+            .unwrap_or_default();
+        for point in &mut points {
+            point.turn_count = turns.get(&point.date).copied().unwrap_or(0);
+        }
+        Ok(points)
     }
 
     /// Loads daily token totals grouped by local date and model.
@@ -1141,6 +1233,138 @@ impl Dashboard {
                 date: row.get(0)?,
                 model: row.get(1)?,
                 total_tokens: row.get::<_, Option<i64>>(2)?.unwrap_or_default(),
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Loads a per-clock-hour series with token channels, cost, and sources.
+    pub fn trends_hourly(&self, filter: &QueryFilter) -> Result<Vec<HourlyTrendPoint>> {
+        let sql_filter = filter.bucket_filter(None);
+        let local_hour = filter.local_hour_expr("hour_start");
+        let sql = format!(
+            r#"
+            SELECT
+                {local_hour} AS local_hour,
+                COALESCE(SUM(input_tokens), 0),
+                COALESCE(SUM(cache_read_tokens), 0),
+                COALESCE(SUM(cache_creation_tokens), 0),
+                COALESCE(SUM(output_tokens), 0),
+                COALESCE(SUM(total_tokens), 0),
+                COALESCE(SUM(event_count), 0),
+                COALESCE(SUM(cost_with_cache_usd), 0.0),
+                GROUP_CONCAT(DISTINCT source)
+            FROM usage_bucket_30m
+            {}
+            GROUP BY local_hour
+            ORDER BY local_hour ASC
+            "#,
+            sql_filter.where_sql()
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(sql_filter.params().iter()), |row| {
+            Ok(HourlyTrendPoint {
+                hour_start: row.get(0)?,
+                input_tokens: row.get::<_, Option<i64>>(1)?.unwrap_or_default(),
+                cache_read_tokens: row.get::<_, Option<i64>>(2)?.unwrap_or_default(),
+                cache_creation_tokens: row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
+                output_tokens: row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
+                total_tokens: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
+                event_count: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
+                cost_with_cache_usd: row.get::<_, Option<f64>>(7)?.unwrap_or_default(),
+                sources: sorted_unique_sources(row.get(8)?),
+                turn_count: 0,
+            })
+        })?;
+        let mut points = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        let turns = period_turn_counts(&self.conn, filter, &filter.local_hour_expr("t.started_at"))
+            .unwrap_or_default();
+        for point in &mut points {
+            point.turn_count = turns.get(&point.hour_start).copied().unwrap_or(0);
+        }
+        Ok(points)
+    }
+
+    /// Loads a per-local-month series with token channels and cost.
+    pub fn trends_monthly(&self, filter: &QueryFilter) -> Result<Vec<MonthlyTrendPoint>> {
+        let sql_filter = filter.bucket_filter(None);
+        let local_month = filter.local_month_expr("hour_start");
+        let sql = format!(
+            r#"
+            SELECT
+                {local_month} AS local_month,
+                COALESCE(SUM(input_tokens), 0),
+                COALESCE(SUM(cache_read_tokens), 0),
+                COALESCE(SUM(cache_creation_tokens), 0),
+                COALESCE(SUM(output_tokens), 0),
+                COALESCE(SUM(total_tokens), 0),
+                COALESCE(SUM(event_count), 0),
+                COALESCE(SUM(cost_with_cache_usd), 0.0)
+            FROM usage_bucket_30m
+            {}
+            GROUP BY local_month
+            ORDER BY local_month ASC
+            "#,
+            sql_filter.where_sql()
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(sql_filter.params().iter()), |row| {
+            Ok(MonthlyTrendPoint {
+                month: row.get(0)?,
+                input_tokens: row.get::<_, Option<i64>>(1)?.unwrap_or_default(),
+                cache_read_tokens: row.get::<_, Option<i64>>(2)?.unwrap_or_default(),
+                cache_creation_tokens: row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
+                output_tokens: row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
+                total_tokens: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
+                event_count: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
+                cost_with_cache_usd: row.get::<_, Option<f64>>(7)?.unwrap_or_default(),
+                turn_count: 0,
+            })
+        })?;
+        let mut points = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        let turns =
+            period_turn_counts(&self.conn, filter, &filter.local_month_expr("t.started_at"))
+                .unwrap_or_default();
+        for point in &mut points {
+            point.turn_count = turns.get(&point.month).copied().unwrap_or(0);
+        }
+        Ok(points)
+    }
+
+    /// Loads model × source totals for the current filter (Daily Enter detail).
+    pub fn period_model_breakdown(&self, filter: &QueryFilter) -> Result<Vec<PeriodDetailRow>> {
+        let sql_filter = filter.bucket_filter(None);
+        let sql = format!(
+            r#"
+            SELECT
+                model,
+                source,
+                COALESCE(SUM(event_count), 0),
+                COALESCE(SUM(input_tokens), 0),
+                COALESCE(SUM(cache_read_tokens), 0),
+                COALESCE(SUM(cache_creation_tokens), 0),
+                COALESCE(SUM(output_tokens), 0),
+                COALESCE(SUM(total_tokens), 0),
+                COALESCE(SUM(cost_with_cache_usd), 0.0)
+            FROM usage_bucket_30m
+            {}
+            GROUP BY model, source
+            ORDER BY SUM(cost_with_cache_usd) DESC, model ASC, source ASC
+            "#,
+            sql_filter.where_sql()
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(sql_filter.params().iter()), |row| {
+            Ok(PeriodDetailRow {
+                model: row.get(0)?,
+                source: row.get(1)?,
+                event_count: row.get::<_, Option<i64>>(2)?.unwrap_or_default(),
+                input_tokens: row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
+                cache_read_tokens: row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
+                cache_creation_tokens: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
+                output_tokens: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
+                total_tokens: row.get::<_, Option<i64>>(7)?.unwrap_or_default(),
+                cost_with_cache_usd: row.get::<_, Option<f64>>(8)?.unwrap_or_default(),
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -3445,6 +3669,28 @@ impl Dashboard {
             diagnostics: diagnostics.clone(),
         })
     }
+}
+
+fn period_turn_counts(
+    conn: &Connection,
+    filter: &QueryFilter,
+    period_expr: &str,
+) -> Result<HashMap<String, i64>> {
+    let sql_filter = filter.turn_filter(Some("t"));
+    let sql = format!(
+        "SELECT {period_expr} AS period_key, COUNT(*) FROM usage_turn t {} GROUP BY period_key",
+        sql_filter.where_sql()
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params_from_iter(sql_filter.params().iter()), |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    })?;
+    let mut counts = HashMap::new();
+    for row in rows {
+        let (key, count) = row?;
+        counts.insert(key, count);
+    }
+    Ok(counts)
 }
 
 fn sorted_unique_sources(raw: Option<String>) -> Vec<String> {
@@ -6041,6 +6287,81 @@ mod tests {
                 .trends_daily_by_model(&QueryFilter::default())?
                 .is_empty()
         );
+        Ok(())
+    }
+
+    #[test]
+    fn trends_hourly_merges_half_hour_buckets_and_sources() -> Result<()> {
+        let fixture = Fixture::new()?;
+        let conn = fixture.store().open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_bucket_30m(
+                source, model, hour_start, project_hash, project_label, project_ref,
+                input_tokens, cache_read_tokens, cache_creation_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens, event_count,
+                cost_with_cache_usd, updated_at
+            )
+            VALUES
+                ('codex', 'gpt-5', '2026-04-04T16:00:00Z', '', NULL, NULL,
+                 100, 10, 5, 50, 0, 165, 2, 1.5, '2026-04-05T00:00:00Z'),
+                ('claude', 'claude-opus-5', '2026-04-04T16:30:00Z', '', NULL, NULL,
+                 20, 0, 0, 10, 0, 30, 1, 0.5, '2026-04-05T00:30:00Z'),
+                ('codex', 'gpt-5', '2026-04-04T17:00:00Z', '', NULL, NULL,
+                 8, 0, 0, 2, 0, 10, 1, 0.1, '2026-04-05T01:00:00Z')
+            "#,
+            [],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_turn(
+                turn_key, source, session_id, source_path_hash, project_hash,
+                primary_model, started_at, category, has_edits, retries,
+                one_shot, call_count, input_tokens, cache_read_tokens,
+                cache_creation_tokens, output_tokens, reasoning_output_tokens,
+                total_tokens, created_at
+            ) VALUES ('turn:codex:hour', 'codex', 's', 'p', '', 'gpt-5',
+                '2026-04-04T16:10:00Z', 'coding', 0, 0, 0, 1, 1, 0, 0, 1, 0, 2,
+                '2026-04-04T16:10:00Z')
+            "#,
+            [],
+        )?;
+        let dashboard = Dashboard::open(fixture.store())?;
+        let cn = QueryFilter {
+            timezone: ReportTimezone::Fixed(
+                chrono::FixedOffset::east_opt(8 * 3600).expect("valid offset"),
+            ),
+            ..Default::default()
+        };
+        let hourly = dashboard.trends_hourly(&cn)?;
+        assert_eq!(hourly.len(), 2);
+        assert_eq!(hourly[0].hour_start, "2026-04-05 00:00");
+        assert_eq!(hourly[0].total_tokens, 195);
+        assert_eq!(hourly[0].event_count, 3);
+        assert_eq!(hourly[0].turn_count, 1);
+        assert_eq!(
+            hourly[0].sources,
+            vec!["claude".to_string(), "codex".to_string()]
+        );
+        assert_eq!(hourly[1].hour_start, "2026-04-05 01:00");
+        assert_eq!(hourly[1].turn_count, 0);
+
+        let monthly = dashboard.trends_monthly(&cn)?;
+        assert_eq!(monthly.len(), 1);
+        assert_eq!(monthly[0].month, "2026-04");
+        assert_eq!(monthly[0].total_tokens, 205);
+        assert_eq!(monthly[0].turn_count, 1);
+
+        let mut day_filter = cn.clone();
+        day_filter.since = Some(NaiveDate::from_ymd_opt(2026, 4, 5).unwrap());
+        day_filter.until = Some(NaiveDate::from_ymd_opt(2026, 4, 5).unwrap());
+        let detail = dashboard.period_model_breakdown(&day_filter)?;
+        assert_eq!(detail.len(), 2);
+        assert_eq!(detail[0].model, "gpt-5");
+        assert_eq!(detail[0].source, "codex");
+
+        let json = serde_json::to_value(dashboard.trends_daily(&cn)?)?;
+        assert!(json[0].get("turn_count").is_none());
         Ok(())
     }
 

@@ -235,9 +235,7 @@ mod tests {
         for (name, source) in [
             ("overview", include_str!("panels/overview.rs")),
             ("models", include_str!("panels/models.rs")),
-            ("daily", include_str!("panels/daily.rs")),
-            ("hourly", include_str!("panels/hourly.rs")),
-            ("cost", include_str!("panels/cost.rs")),
+            ("period", include_str!("panels/period.rs")),
             ("stats", include_str!("panels/stats.rs")),
             ("behavior", include_str!("panels/behavior.rs")),
             ("blocks", include_str!("panels/blocks.rs")),

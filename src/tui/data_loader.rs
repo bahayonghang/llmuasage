@@ -10,14 +10,16 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     domain::source_descriptor::registered_source_descriptors,
     query::{
-        ContextPressurePayload, CostLine, DailyTrendPoint, Dashboard, ModelBreakdown, QueryFilter,
-        SyncCommandCenterPayload, TrendPoint, reports::BlockReportRow,
+        ContextPressurePayload, DailyTrendPoint, Dashboard, HourlyTrendPoint, ModelBreakdown,
+        MonthlyTrendPoint, PeriodDetailRow, QueryFilter, SyncCommandCenterPayload,
+        reports::BlockReportRow,
     },
     store::Store,
 };
 
 use super::app::{
-    BehaviorPanelPayload, OverviewPanelPayload, Panel, StatsPanelPayload, TimeWindow,
+    BehaviorPanelPayload, OverviewPanelPayload, Panel, PeriodDetailKind, StatsPanelPayload,
+    TimeWindow,
 };
 
 const TUI_DASHBOARD_QUERY_PERMITS: usize = 5;
@@ -30,6 +32,7 @@ pub(super) struct PanelRequest {
     pub time_window: TimeWindow,
     pub generation: u64,
     pub refreshing: bool,
+    pub detail: Option<PeriodDetailKind>,
 }
 
 pub(super) struct PanelResult {
@@ -46,8 +49,10 @@ pub(super) enum PanelPayload {
     SyncCenter(Result<SyncCommandCenterPayload, String>),
     Models(Result<Vec<ModelBreakdown>, String>),
     Daily(Result<Vec<DailyTrendPoint>, String>),
-    Hourly(Result<Vec<TrendPoint>, String>),
-    Costs(Result<Vec<CostLine>, String>),
+    Hourly(Result<Vec<HourlyTrendPoint>, String>),
+    Monthly(Result<Vec<MonthlyTrendPoint>, String>),
+    DailyDetail(Result<Vec<PeriodDetailRow>, String>),
+    MonthlyDetail(Result<Vec<DailyTrendPoint>, String>),
     Stats(Result<StatsPanelPayload, String>),
     Behavior(Box<Result<BehaviorPanelPayload, String>>),
     Blocks(Result<Vec<BlockReportRow>, String>),
@@ -114,11 +119,41 @@ async fn load_panel_request(
 ) -> PanelResult {
     let filter = request.filter.clone();
     let window_filter = request.time_window.query_filter(&filter);
-    let payload = match request.panel {
-        Panel::Overview => PanelPayload::Overview(
+    let payload = match (&request.detail, request.panel) {
+        (Some(PeriodDetailKind::Daily { date }), _) => {
+            let mut detail_filter = window_filter;
+            if let Ok(day) = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d") {
+                detail_filter.since = Some(day);
+                detail_filter.until = Some(day);
+            }
+            PanelPayload::DailyDetail(
+                run_query(store, semaphore, cancel, move |dashboard| {
+                    dashboard
+                        .period_model_breakdown(&detail_filter)
+                        .map_err(|err| err.to_string())
+                })
+                .await,
+            )
+        }
+        (Some(PeriodDetailKind::Monthly { month }), _) => {
+            let mut detail_filter = window_filter;
+            if let Some((start, end)) = crate::query::month_date_bounds(month) {
+                detail_filter.since = Some(start);
+                detail_filter.until = Some(end);
+            }
+            PanelPayload::MonthlyDetail(
+                run_query(store, semaphore, cancel, move |dashboard| {
+                    dashboard
+                        .trends_daily(&detail_filter)
+                        .map_err(|err| err.to_string())
+                })
+                .await,
+            )
+        }
+        (None, Panel::Overview) => PanelPayload::Overview(
             load_overview_panel_data(store, semaphore, cancel, filter, window_filter).await,
         ),
-        Panel::Trends => PanelPayload::SyncCenter(
+        (None, Panel::Trends) => PanelPayload::SyncCenter(
             run_query(store, semaphore, cancel, move |dashboard| {
                 dashboard
                     .sync_command_center(&filter)
@@ -126,7 +161,7 @@ async fn load_panel_request(
             })
             .await,
         ),
-        Panel::Models => PanelPayload::Models(
+        (None, Panel::Models) => PanelPayload::Models(
             run_query(store, semaphore, cancel, move |dashboard| {
                 dashboard
                     .model_breakdown(&window_filter)
@@ -134,7 +169,7 @@ async fn load_panel_request(
             })
             .await,
         ),
-        Panel::Sources => PanelPayload::Daily(
+        (None, Panel::Sources) => PanelPayload::Daily(
             run_query(store, semaphore, cancel, move |dashboard| {
                 dashboard
                     .trends_daily(&window_filter)
@@ -142,29 +177,29 @@ async fn load_panel_request(
             })
             .await,
         ),
-        Panel::Projects => PanelPayload::Hourly(
+        (None, Panel::Projects) => PanelPayload::Hourly(
             run_query(store, semaphore, cancel, move |dashboard| {
                 dashboard
-                    .trends("hourly", &window_filter)
+                    .trends_hourly(&window_filter)
                     .map_err(|err| err.to_string())
             })
             .await,
         ),
-        Panel::Cost => PanelPayload::Costs(
+        (None, Panel::Monthly) => PanelPayload::Monthly(
             run_query(store, semaphore, cancel, move |dashboard| {
                 dashboard
-                    .cost_breakdown(&window_filter)
+                    .trends_monthly(&window_filter)
                     .map_err(|err| err.to_string())
             })
             .await,
         ),
-        Panel::Health => PanelPayload::Stats(
+        (None, Panel::Health) => PanelPayload::Stats(
             load_stats_panel_data(store, semaphore, cancel, filter, window_filter).await,
         ),
-        Panel::Behavior => PanelPayload::Behavior(Box::new(
+        (None, Panel::Behavior) => PanelPayload::Behavior(Box::new(
             load_behavior_panel_data(store, semaphore, cancel, window_filter).await,
         )),
-        Panel::Blocks => PanelPayload::Blocks(
+        (None, Panel::Blocks) => PanelPayload::Blocks(
             run_query(store, semaphore, cancel, |dashboard| {
                 dashboard.blocks_report().map_err(|err| err.to_string())
             })

@@ -75,13 +75,28 @@ fn wide_control_spans(state: &AppState) -> Vec<Span<'static>> {
         Span::styled(" • ", theme::muted_style()),
         Span::styled("[o/O:sort]", theme::fg_style(theme::accent())),
         Span::styled(" • ", theme::muted_style()),
+    ];
+    if matches!(state.active_panel, Panel::Sources | Panel::Monthly) {
+        spans.extend([
+            Span::styled(
+                if state.is_period_detail_active() {
+                    "[esc:back]"
+                } else {
+                    "[enter:detail]"
+                },
+                theme::fg_style(theme::accent()),
+            ),
+            Span::styled(" • ", theme::muted_style()),
+        ]);
+    }
+    spans.extend([
         Span::styled("[s:source]", theme::fg_style(theme::accent())),
         Span::styled(" • ", theme::muted_style()),
         Span::styled("[r:refresh]", theme::fg_style(theme::trend_peak_fg())),
         Span::styled(" ", theme::muted_style()),
         Span::styled("[x:sync]", theme::fg_style(theme::positive_fg())),
         Span::styled(" ", theme::muted_style()),
-    ];
+    ]);
     if state.active_panel == Panel::Trends {
         spans.extend([
             Span::styled("[y:status]", theme::fg_style(theme::positive_fg())),
