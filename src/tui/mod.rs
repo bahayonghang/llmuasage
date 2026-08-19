@@ -119,6 +119,14 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
     loop {
         if redraw.take() {
             terminal.draw(|frame| draw::draw(frame, &state))?;
+            // Draw reads the backend size. Sync hit-test geometry to that frame
+            // if a physical resize landed before the Resize event.
+            if let Ok(size) = terminal.size()
+                && (size.width != state.terminal_width || size.height != state.terminal_height)
+            {
+                state.handle_resize(size.width, size.height);
+                redraw.request();
+            }
         }
 
         let ev = events.recv()?;
@@ -144,7 +152,20 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
                 redraw.request();
                 continue;
             }
-            TuiEvent::Mouse(mouse) => action_from_mouse(&state, &mouse),
+            TuiEvent::Mouse(mouse) => {
+                if let Some(date) = stats_graph_click(&state, &mouse) {
+                    request_period_detail(
+                        &mut loader,
+                        &mut state,
+                        PeriodDetailKind::Daily {
+                            date: date.to_string(),
+                        },
+                    );
+                    redraw.request();
+                    continue;
+                }
+                action_from_mouse(&state, &mouse)
+            }
             TuiEvent::Key(key) => {
                 if matches!(state.active_dialog, Some(app::ActiveDialog::SyncStatus)) {
                     if let Some(action) = sync_overlay_action(key, &mut state) {
@@ -444,7 +465,7 @@ fn action_from_mouse(state: &AppState, mouse: &crossterm::event::MouseEvent) -> 
         MouseEventKind::ScrollDown => Action::ScrollDown,
         MouseEventKind::ScrollUp => Action::ScrollUp,
         MouseEventKind::Down(MouseButton::Left) => nav_bar::panel_at_position(
-            ratatui::layout::Rect::new(0, 0, state.terminal_width, 3),
+            dashboard_shell(state.terminal_width, state.terminal_height)[0],
             mouse.column,
             mouse.row,
         )
@@ -452,6 +473,33 @@ fn action_from_mouse(state: &AppState, mouse: &crossterm::event::MouseEvent) -> 
         .unwrap_or(Action::None),
         _ => Action::None,
     }
+}
+
+fn stats_graph_click(
+    state: &AppState,
+    mouse: &crossterm::event::MouseEvent,
+) -> Option<chrono::NaiveDate> {
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        return None;
+    }
+    if state.active_dialog.is_some() || state.active_panel != Panel::Health {
+        return None;
+    }
+    let [nav, content, _] = dashboard_shell(state.terminal_width, state.terminal_height);
+    if nav_bar::panel_at_position(nav, mouse.column, mouse.row).is_some() {
+        return None;
+    }
+    let payload = state.stats.as_ref()?.as_ref().ok()?;
+    let selected = matches!(
+        state.period_detail.as_ref().map(|detail| &detail.kind),
+        Some(PeriodDetailKind::Daily { .. })
+    );
+    let graph = panels::stats::split_stats_area(content, selected).graph;
+    panels::stats::day_at(graph, &payload.heatmap, mouse.column, mouse.row)
+}
+
+fn dashboard_shell(width: u16, height: u16) -> [ratatui::layout::Rect; 3] {
+    draw::dashboard_shell_areas(ratatui::layout::Rect::new(0, 0, width, height))
 }
 
 fn period_detail_kind(state: &AppState) -> Option<PeriodDetailKind> {
@@ -493,6 +541,13 @@ fn period_detail_kind(state: &AppState) -> Option<PeriodDetailKind> {
             let month = ordered.get(state.scroll[Panel::Monthly as usize].selected)?;
             Some(PeriodDetailKind::Monthly {
                 month: month.month.clone(),
+            })
+        }
+        Panel::Health => {
+            let payload = state.stats.as_ref()?.as_ref().ok()?;
+            let last = payload.heatmap.last()?;
+            Some(PeriodDetailKind::Daily {
+                date: last.date.clone(),
             })
         }
         _ => None,
@@ -725,11 +780,18 @@ fn update_scroll_total(state: &mut AppState, panel: Panel) {
             }
         }
         Panel::Blocks => state.blocks.as_ref().and_then(ok_len),
-        Panel::Health => state
-            .stats
-            .as_ref()
-            .and_then(|result| result.as_ref().ok())
-            .map(|payload| payload.sources.len()),
+        Panel::Health => {
+            if let Some(detail) = &state.period_detail {
+                match &detail.payload {
+                    Some(Ok(PeriodDetailPayload::Daily(rows))) => {
+                        Some(panels::stats::breakdown_scroll_total(rows))
+                    }
+                    _ => Some(0),
+                }
+            } else {
+                Some(0)
+            }
+        }
         _ => None,
     };
     if let Some(total) = total {
@@ -747,8 +809,9 @@ fn ok_len<T>(result: &Result<Vec<T>, String>) -> Option<usize> {
 mod tests {
     use super::*;
     use crate::paths::AppPaths;
-    use crate::tui::app::TimeWindow;
-    use crossterm::event::{KeyModifiers, MouseEvent};
+    use crate::query::{ContextPressurePayload, HeatmapPoint, OverviewPayload, TokenSummary};
+    use crate::tui::app::{StatsPanelPayload, TimeWindow};
+    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
     use ratatui::{
         Terminal,
         backend::TestBackend,
@@ -778,6 +841,119 @@ mod tests {
             redraw.request();
             assert!(redraw.take(), "active animation ticks request frames");
         }
+    }
+
+    fn dashboard_content_area(width: u16, height: u16) -> ratatui::layout::Rect {
+        dashboard_shell(width, height)[1]
+    }
+
+    fn dummy_stats(heatmap: Vec<HeatmapPoint>) -> StatsPanelPayload {
+        StatsPanelPayload {
+            overview: OverviewPayload {
+                generated_at: String::new(),
+                total: TokenSummary::default(),
+                last_24h: TokenSummary::default(),
+                source_count: 0,
+                bucket_count: 0,
+                total_events: 0,
+                last_24h_events: 0,
+                total_cost_usd: 0.0,
+                cache_efficiency: 0.0,
+                last_sync_at: None,
+                last_export_at: None,
+            },
+            heatmap,
+            models: Vec::new(),
+            context_pressure: ContextPressurePayload {
+                peak_percent: 0.0,
+                avg_percent: 0.0,
+                peak_model: None,
+                priced_events: 0,
+                unpriced_events: 0,
+            },
+        }
+    }
+
+    #[test]
+    fn stats_enter_selects_last_heatmap_date() {
+        let mut state = AppState::new();
+        state.active_panel = Panel::Health;
+        assert!(period_detail_kind(&state).is_none());
+        state.stats = Some(Ok(dummy_stats(vec![
+            HeatmapPoint {
+                date: "2026-08-18".to_string(),
+                event_count: 1,
+                total_tokens: 10,
+            },
+            HeatmapPoint {
+                date: "2026-08-19".to_string(),
+                event_count: 0,
+                total_tokens: 0,
+            },
+        ])));
+        assert_eq!(
+            period_detail_kind(&state),
+            Some(PeriodDetailKind::Daily {
+                date: "2026-08-19".to_string()
+            })
+        );
+        state.open_period_detail(PeriodDetailKind::Daily {
+            date: "2026-08-19".to_string(),
+        });
+        assert!(period_detail_kind(&state).is_none());
+    }
+
+    #[test]
+    fn stats_click_maps_graph_cell_to_heatmap_date() {
+        let mut state = AppState::new();
+        state.active_panel = Panel::Health;
+        state.terminal_width = 80;
+        state.terminal_height = 40;
+        // 2026-01-04 is Sunday, so the first cell is clickable with no padding.
+        state.stats = Some(Ok(dummy_stats(vec![HeatmapPoint {
+            date: "2026-01-04".to_string(),
+            event_count: 1,
+            total_tokens: 100,
+        }])));
+        let content = dashboard_content_area(state.terminal_width, state.terminal_height);
+        let graph = panels::stats::split_stats_area(content, false).graph;
+        // 80-col graph uses a 4-col weekday gutter; first Sunday cell is at +5,+3.
+        let cell_x = graph.x + 5;
+        let cell_y = graph.y + 3;
+        {
+            let heatmap = &state.stats.as_ref().unwrap().as_ref().unwrap().heatmap;
+            let date =
+                panels::stats::day_at(graph, heatmap, cell_x, cell_y).expect("first Sunday cell");
+            assert_eq!(date.to_string(), "2026-01-04");
+        }
+
+        let mouse = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: cell_x,
+            row: cell_y,
+            modifiers: KeyModifiers::NONE,
+        };
+        assert_eq!(
+            stats_graph_click(&state, &mouse).map(|value| value.to_string()),
+            Some("2026-01-04".to_string())
+        );
+        let nav_mouse = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 2,
+            row: 1,
+            modifiers: KeyModifiers::NONE,
+        };
+        assert!(stats_graph_click(&state, &nav_mouse).is_none());
+    }
+
+    #[test]
+    fn dashboard_shell_matches_draw_split() {
+        let area = ratatui::layout::Rect::new(0, 0, 80, 40);
+        let [nav, content, footer] = draw::dashboard_shell_areas(area);
+        assert_eq!(nav, ratatui::layout::Rect::new(0, 0, 80, 3));
+        assert_eq!(content, dashboard_content_area(80, 40));
+        assert_eq!(footer.y, 36);
+        assert_eq!(footer.height, 4);
     }
 
     #[test]

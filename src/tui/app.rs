@@ -1,9 +1,9 @@
 use crate::query::reports::BlockReportRow;
 use crate::query::{
-    ActivityPayload, ContextPressurePayload, DailyModelPoint, DailyTrendPoint, HealthPayload,
-    HeatmapPoint, HourlyTrendPoint, ModelBreakdown, ModelComparePayload, MonthlyTrendPoint,
-    OptimizePayload, OverviewPayload, PeriodDetailRow, QueryFilter, SourceBreakdown,
-    SyncCommandCenterPayload, ToolsPayload, ZombieReport,
+    ActivityPayload, ContextPressurePayload, DailyModelPoint, DailyTrendPoint, HeatmapPoint,
+    HourlyTrendPoint, ModelBreakdown, ModelComparePayload, MonthlyTrendPoint, OptimizePayload,
+    OverviewPayload, PeriodDetailRow, QueryFilter, SyncCommandCenterPayload, ToolsPayload,
+    ZombieReport,
 };
 use crate::subscription::UsageFetchReport;
 use crate::{domain::platform_monitor::PlatformProbe, models::SourceKind};
@@ -149,8 +149,7 @@ pub struct OverviewPanelPayload {
 pub struct StatsPanelPayload {
     pub overview: OverviewPayload,
     pub heatmap: Vec<HeatmapPoint>,
-    pub sources: Vec<SourceBreakdown>,
-    pub health: HealthPayload,
+    pub models: Vec<ModelBreakdown>,
     pub context_pressure: ContextPressurePayload,
 }
 
@@ -700,6 +699,15 @@ impl AppState {
 
     pub fn open_period_detail(&mut self, kind: PeriodDetailKind) {
         let panel = self.active_panel;
+        if let Some(existing) = self.period_detail.as_mut() {
+            existing.kind = kind;
+            existing.payload = None;
+            let scroll = &mut self.scroll[panel as usize];
+            scroll.selected = 0;
+            scroll.offset = 0;
+            scroll.total = 0;
+            return;
+        }
         self.period_detail = Some(PeriodDetailState {
             kind,
             list_scroll: self.scroll[panel as usize].clone(),
@@ -716,6 +724,37 @@ impl AppState {
             return;
         };
         self.scroll[self.active_panel as usize] = detail.list_scroll;
+    }
+}
+
+#[cfg(test)]
+mod period_detail_tests {
+    use super::*;
+
+    #[test]
+    fn reopening_period_detail_keeps_list_scroll_backup() {
+        let mut state = AppState::new();
+        state.active_panel = Panel::Health;
+        state.scroll[Panel::Health as usize].selected = 5;
+        state.open_period_detail(PeriodDetailKind::Daily {
+            date: "2026-01-01".to_string(),
+        });
+        state.scroll[Panel::Health as usize].selected = 2;
+        state.period_detail.as_mut().unwrap().payload =
+            Some(Ok(PeriodDetailPayload::Daily(Vec::new())));
+        state.open_period_detail(PeriodDetailKind::Daily {
+            date: "2026-01-02".to_string(),
+        });
+        let detail = state.period_detail.as_ref().unwrap();
+        assert_eq!(
+            detail.kind,
+            PeriodDetailKind::Daily {
+                date: "2026-01-02".to_string()
+            }
+        );
+        assert!(detail.payload.is_none());
+        assert_eq!(detail.list_scroll.selected, 5);
+        assert_eq!(state.scroll[Panel::Health as usize].selected, 0);
     }
 }
 

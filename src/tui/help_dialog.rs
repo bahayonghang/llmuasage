@@ -8,7 +8,7 @@ use ratatui::{
 use super::{app::AppState, theme};
 
 pub fn render(frame: &mut Frame, viewport: Rect, state: &AppState) {
-    let area = centered_rect(viewport, 72, 16);
+    let area = centered_rect(viewport, 72, 18);
     frame.render_widget(Clear, area);
 
     let block = Block::default()
@@ -59,6 +59,7 @@ pub fn render(frame: &mut Frame, viewport: Rect, state: &AppState) {
         Line::from("mouse wheel: select row           h/l: Today/7d/30d/All"),
         Line::from("window: Models/Daily/Hourly/Monthly/Stats/Behavior"),
         Line::from("enter: day/month detail           Esc: back / quit"),
+        Line::from("Stats: click day / Enter today / Esc close"),
         Line::from("s: source picker                 a: all sources in picker"),
         Line::from("r: refresh dashboard cache       R: toggle auto refresh"),
         Line::from("x: run sync for current source   y: sync status overlay"),

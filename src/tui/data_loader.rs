@@ -44,6 +44,7 @@ pub(super) struct PanelResult {
     pub payload: PanelPayload,
 }
 
+#[allow(clippy::large_enum_variant)]
 pub(super) enum PanelPayload {
     Overview(Result<OverviewPanelPayload, String>),
     SyncCenter(Result<SyncCommandCenterPayload, String>),
@@ -261,36 +262,29 @@ async fn load_stats_panel_data(
         move |dashboard| dashboard.overview(&filter).map_err(|err| err.to_string())
     });
     let heatmap = run_query(store.clone(), Arc::clone(&semaphore), cancel.clone(), {
-        let filter = base_filter;
+        let filter = base_filter.clone();
         move |dashboard| {
             dashboard
                 .heatmap(&filter, 365)
                 .map_err(|err| err.to_string())
         }
     });
-    let sources = run_query(store.clone(), Arc::clone(&semaphore), cancel.clone(), {
-        let filter = window_filter.clone();
+    let models = run_query(store.clone(), Arc::clone(&semaphore), cancel.clone(), {
+        let filter = base_filter;
         move |dashboard| {
             dashboard
-                .source_breakdown(&filter)
+                .model_breakdown(&filter)
                 .map_err(|err| err.to_string())
         }
     });
-    let health = run_query(
-        store.clone(),
-        Arc::clone(&semaphore),
-        cancel.clone(),
-        |dashboard| dashboard.health().map_err(|err| err.to_string()),
-    );
     let context_pressure = load_context_pressure(store, semaphore, cancel, window_filter);
-    let (overview, heatmap, sources, health, context_pressure) =
-        tokio::join!(overview, heatmap, sources, health, context_pressure);
+    let (overview, heatmap, models, context_pressure) =
+        tokio::join!(overview, heatmap, models, context_pressure);
 
     Ok(StatsPanelPayload {
         overview: overview?,
         heatmap: heatmap?,
-        sources: sources?,
-        health: health?,
+        models: models?,
         context_pressure: context_pressure?,
     })
 }
@@ -557,8 +551,7 @@ mod tests {
         let serial_stats = StatsPanelPayload {
             overview: dashboard.overview(&filter)?,
             heatmap: dashboard.heatmap(&filter, 365)?,
-            sources: dashboard.source_breakdown(&filter)?,
-            health: dashboard.health()?,
+            models: dashboard.model_breakdown(&filter)?,
             context_pressure: dashboard.context_pressure(&filter)?,
         };
         let serial_behavior = BehaviorPanelPayload {
@@ -578,12 +571,8 @@ mod tests {
             serde_json::to_value(&serial_stats.heatmap)?
         );
         assert_eq!(
-            serde_json::to_value(&parallel_stats.sources)?,
-            serde_json::to_value(&serial_stats.sources)?
-        );
-        assert_eq!(
-            serde_json::to_value(&parallel_stats.health)?,
-            serde_json::to_value(&serial_stats.health)?
+            serde_json::to_value(&parallel_stats.models)?,
+            serde_json::to_value(&serial_stats.models)?
         );
         assert_eq!(
             serde_json::to_value(&parallel_stats.context_pressure)?,
@@ -671,11 +660,8 @@ mod tests {
         let _ = dashboard.heatmap(&base_filter, 365)?;
         let heatmap_ms = started.elapsed().as_secs_f64() * 1_000.0;
         let started = Instant::now();
-        let _ = dashboard.source_breakdown(&window_filter)?;
-        let sources_ms = started.elapsed().as_secs_f64() * 1_000.0;
-        let started = Instant::now();
-        let _ = dashboard.health()?;
-        let health_ms = started.elapsed().as_secs_f64() * 1_000.0;
+        let _ = dashboard.model_breakdown(&base_filter)?;
+        let models_ms = started.elapsed().as_secs_f64() * 1_000.0;
         let started = Instant::now();
         let _ = dashboard.context_pressure(&window_filter)?;
         let context_pressure_ms = started.elapsed().as_secs_f64() * 1_000.0;
@@ -717,7 +703,7 @@ mod tests {
         let behavior_serial = median(&mut serial_behavior_ms);
         let behavior_parallel = median(&mut parallel_behavior_ms);
         eprintln!(
-            "database_bytes={database_bytes} window=30d since={:?} until={:?} stats_parts_ms={{overview:{overview_ms:.1},heatmap:{heatmap_ms:.1},sources:{sources_ms:.1},health:{health_ms:.1},context_pressure:{context_pressure_ms:.1}}} stats_serial_ms={serial_stats_ms:?} stats_parallel_ms={parallel_stats_ms:?} stats_improvement_pct={:.1} behavior_serial_ms={serial_behavior_ms:?} behavior_parallel_ms={parallel_behavior_ms:?} behavior_improvement_pct={:.1}",
+            "database_bytes={database_bytes} window=30d since={:?} until={:?} stats_parts_ms={{overview:{overview_ms:.1},heatmap:{heatmap_ms:.1},models:{models_ms:.1},context_pressure:{context_pressure_ms:.1}}} stats_serial_ms={serial_stats_ms:?} stats_parallel_ms={parallel_stats_ms:?} stats_improvement_pct={:.1} behavior_serial_ms={serial_behavior_ms:?} behavior_parallel_ms={parallel_behavior_ms:?} behavior_improvement_pct={:.1}",
             window_filter.since,
             window_filter.until,
             improvement(stats_serial, stats_parallel),
@@ -735,8 +721,7 @@ mod tests {
         Ok(StatsPanelPayload {
             overview: dashboard.overview(base_filter)?,
             heatmap: dashboard.heatmap(base_filter, 365)?,
-            sources: dashboard.source_breakdown(window_filter)?,
-            health: dashboard.health()?,
+            models: dashboard.model_breakdown(base_filter)?,
             context_pressure: dashboard.context_pressure(window_filter)?,
         })
     }

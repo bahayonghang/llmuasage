@@ -1,6 +1,6 @@
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout},
+    layout::{Constraint, Layout, Rect},
 };
 
 use super::app::{ActiveDialog, AppState, Panel};
@@ -10,16 +10,21 @@ use super::nav_bar;
 use super::panels;
 use super::source_picker;
 
+/// Shared nav / content / footer split used by draw and mouse hit-testing.
+pub(super) fn dashboard_shell_areas(area: Rect) -> [Rect; 3] {
+    Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Min(0),
+        Constraint::Length(4),
+    ])
+    .areas(area)
+}
+
 /// Top-level draw orchestrator: splits layout into nav bar and content area,
 /// then dispatches to panel-specific rendering.
 pub fn draw(frame: &mut Frame, state: &AppState) {
     super::theme::with_render_snapshot(|| {
-        let [nav_area, content_area, footer_area] = Layout::vertical([
-            Constraint::Length(3),
-            Constraint::Min(0),
-            Constraint::Length(4),
-        ])
-        .areas(frame.area());
+        let [nav_area, content_area, footer_area] = dashboard_shell_areas(frame.area());
 
         nav_bar::render(frame, nav_area, state.active_panel);
 
@@ -74,6 +79,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                 content_area,
                 &state.stats,
                 &state.scroll[Panel::Health as usize],
+                state.period_detail.as_ref(),
             ),
             Panel::Behavior => panels::behavior::render(frame, content_area, &state.behavior),
             Panel::Blocks => panels::blocks::render_sorted(
