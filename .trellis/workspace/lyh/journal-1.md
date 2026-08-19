@@ -1576,3 +1576,24 @@ Public listener 改用最小读路由与脱敏聚合 DTO，并忽略 project sel
 ### Next Steps
 
 - 本机再跑一次 llmusage sync，确认首次出现 reason 后第二次 unchanged 不再出现
+
+
+## Session 51: Dash Models 对齐 tokscale 彩色表
+
+**Date**: 2026-08-19
+**Task**: Dash Models 对齐 tokscale 彩色表
+**Branch**: `dev`
+
+### Summary
+
+将 llmusage dash Models 改为 tokscale 风格：厂商着色、通道分色、取消长尾折叠、默认 Cost 降序，并补齐 Provider/Source/Cache×/Cost/1M 列。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `03b844f` | (see git log) |
+
+### Status
+
+[OK] **Completed**

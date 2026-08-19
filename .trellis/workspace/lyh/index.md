@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 50
-- **Last Active**: 2026-08-17
+- **Total Sessions**: 51
+- **Last Active**: 2026-08-19
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1578 | Active |
+| `journal-1.md` | ~1599 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 51 | 2026-08-19 | Dash Models 对齐 tokscale 彩色表 | `03b844f` | `dev` |
 | 50 | 2026-08-17 | 完善 parse issue 诊断与日志 | `2df934a` | `dev` |
 | 49 | 2026-08-17 | 优化用量概览布局与术语 | `79b71f8` | `dev` |
 | 48 | 2026-08-17 | Parse issue 分类纠偏与可观测性 | `5d7435c` | `dev` |
