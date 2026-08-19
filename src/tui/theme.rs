@@ -900,6 +900,7 @@ mod tests {
             ("overview", include_str!("panels/overview.rs")),
             ("stats", include_str!("panels/stats.rs")),
             ("usage", include_str!("panels/usage.rs")),
+            ("sync_status", include_str!("panels/sync_status.rs")),
             ("source_picker", include_str!("source_picker.rs")),
         ];
 
@@ -928,6 +929,7 @@ mod tests {
             include_str!("panels/overview.rs"),
             include_str!("panels/stats.rs"),
             include_str!("panels/usage.rs"),
+            include_str!("panels/sync_status.rs"),
             include_str!("../../tests/tui_panels_prop.rs"),
         ];
 

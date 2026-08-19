@@ -7,6 +7,7 @@ pub mod longtail;
 pub mod models;
 pub mod overview;
 pub mod stats;
+pub mod sync_status;
 pub mod usage;
 
 pub(crate) fn visible_table_rows(area: ratatui::layout::Rect) -> usize {

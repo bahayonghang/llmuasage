@@ -34,8 +34,9 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
             Panel::Trends => panels::usage::render(
                 frame,
                 content_area,
-                &state.sync_center,
-                &state.platform_probes,
+                &state.quota_report,
+                state.quota_fetching,
+                state.hide_usage_emails,
                 &state.scroll[Panel::Trends as usize],
             ),
             Panel::Models => panels::models::render_with_plan(
@@ -87,6 +88,15 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         match state.active_dialog {
             Some(ActiveDialog::SourcePicker) => source_picker::render(frame, frame.area(), state),
             Some(ActiveDialog::Help) => help_dialog::render(frame, frame.area(), state),
+            Some(ActiveDialog::SyncStatus) => {
+                panels::sync_status::render(
+                    frame,
+                    content_area,
+                    &state.sync_center,
+                    &state.platform_probes,
+                    &state.sync_overlay_scroll,
+                );
+            }
             None => {}
         }
     });

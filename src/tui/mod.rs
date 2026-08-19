@@ -22,6 +22,7 @@ pub mod input;
 pub mod model_vendor;
 pub mod nav_bar;
 pub mod panels;
+mod quota;
 pub mod report_table;
 pub mod source_picker;
 pub mod stacked_bar;
@@ -32,6 +33,7 @@ use app::{AppState, Panel};
 use data_loader::{PanelDataLoader, PanelPayload, PanelRequest, PanelResult};
 use event::{EventHandler, TuiEvent};
 use input::{Action, DialogAction, handle_dialog_key_event, handle_key_event};
+use quota::QuotaController;
 use sync_control::{SyncController, SyncUpdate};
 
 #[derive(Debug)]
@@ -104,6 +106,7 @@ pub fn run_terminal(store: &Store) -> Result<()> {
 fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Store) -> Result<()> {
     let mut state = AppState::new();
     let mut sync = SyncController::new()?;
+    let mut quota = QuotaController::new()?;
     let mut loader = PanelDataLoader::new(store)?;
     let size = terminal.size()?;
     state.handle_resize(size.width, size.height);
@@ -123,6 +126,7 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
             TuiEvent::Tick => {
                 let mut tick_dirty = apply_panel_results(&mut loader, &mut state);
                 tick_dirty |= apply_sync_updates(&mut sync, &mut loader, &mut state);
+                tick_dirty |= apply_quota_updates(&mut quota, &mut state);
                 state.sync_active = sync.is_active();
                 let animation_active = state.background_active();
                 tick_dirty |= state.on_tick(animation_active);
@@ -142,34 +146,46 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
             }
             TuiEvent::Mouse(mouse) => action_from_mouse(&state, &mouse),
             TuiEvent::Key(key) => {
-                if state.active_dialog.is_some() {
+                if matches!(state.active_dialog, Some(app::ActiveDialog::SyncStatus)) {
+                    if let Some(action) = sync_overlay_action(key, &mut state) {
+                        action
+                    } else {
+                        redraw.request();
+                        continue;
+                    }
+                } else if state.active_dialog.is_some() {
                     handle_dialog_action(handle_dialog_key_event(key), &mut state);
                     redraw.request();
                     continue;
+                } else {
+                    handle_key_event(key, state.active_panel)
                 }
-                handle_key_event(key, state.active_panel)
             }
         };
 
         match action {
             Action::Quit => {
                 sync.shutdown(Duration::from_millis(500));
+                quota.shutdown(Duration::from_millis(500));
                 loader.cancel_active();
                 break;
             }
             Action::SwitchPanel(p) => {
                 state.active_panel = p;
                 request_panel_data(&mut loader, &mut state, p, false);
+                maybe_fetch_quota(&mut quota, store, &mut state, false);
             }
             Action::NextPanel => {
                 let p = state.active_panel.next();
                 state.active_panel = p;
                 request_panel_data(&mut loader, &mut state, p, false);
+                maybe_fetch_quota(&mut quota, store, &mut state, false);
             }
             Action::PrevPanel => {
                 let p = state.active_panel.prev();
                 state.active_panel = p;
                 request_panel_data(&mut loader, &mut state, p, false);
+                maybe_fetch_quota(&mut quota, store, &mut state, false);
             }
             Action::ScrollDown => {
                 state.scroll[state.active_panel as usize].scroll_down();
@@ -235,7 +251,16 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
                     request_panel_data(&mut loader, &mut state, panel, false);
                 }
             }
-            Action::Refresh => refresh_panel_data(&mut loader, &mut state),
+            Action::Refresh => {
+                refresh_panel_data(&mut loader, &mut state);
+                maybe_fetch_quota(&mut quota, store, &mut state, true);
+            }
+            Action::OpenSyncStatus => {
+                request_panel_data(&mut loader, &mut state, Panel::Trends, false);
+                update_overlay_scroll(&mut state);
+                state.open_sync_status();
+            }
+            Action::ToggleUsageEmails => state.toggle_usage_emails(),
             Action::ToggleAutoRefresh => state.toggle_auto_refresh(),
             Action::StartSync => {
                 let message = sync.start_or_cancel(store, state.filter.source);
@@ -286,6 +311,93 @@ fn refresh_panel_data(loader: &mut PanelDataLoader, state: &mut AppState) {
     state.needs_refresh = false;
     request_panel_data(loader, state, panel, true);
     state.set_status("Refreshing local dashboard cache");
+}
+
+fn maybe_fetch_quota(
+    quota: &mut QuotaController,
+    store: &Store,
+    state: &mut AppState,
+    force: bool,
+) {
+    if state.active_panel != Panel::Trends {
+        return;
+    }
+    let ctx = quota::production_context(store.paths.subscription_cache_path());
+    state.quota_fetch_attempted = true;
+    state.quota_fetching = true;
+    if force {
+        quota.force_fetch(ctx);
+    } else {
+        quota.fetch_if_needed(ctx);
+    }
+}
+
+fn apply_quota_updates(quota: &mut QuotaController, state: &mut AppState) -> bool {
+    let Some(report) = quota.try_recv() else {
+        let fetching = quota.is_fetching();
+        if state.quota_fetching != fetching {
+            state.quota_fetching = fetching;
+            return true;
+        }
+        return false;
+    };
+    state.quota_fetching = false;
+    state.quota_fetch_attempted = true;
+    let message = if report.outputs.is_empty() && report.diagnostics.is_empty() {
+        "No subscription credentials found".to_string()
+    } else if report.diagnostics.is_empty() {
+        format!("Loaded {} quota account(s)", report.outputs.len())
+    } else {
+        format!(
+            "Loaded {} quota account(s), {} issue(s)",
+            report.outputs.len(),
+            report.diagnostics.len()
+        )
+    };
+    state.quota_report = Some(report);
+    update_scroll_total(state, Panel::Trends);
+    state.set_status(&message);
+    true
+}
+
+fn update_overlay_scroll(state: &mut AppState) {
+    let total = state
+        .sync_center
+        .as_ref()
+        .and_then(|result| result.as_ref().ok())
+        .map(|payload| payload.sources.len())
+        .unwrap_or(0);
+    state.sync_overlay_scroll.visible = state.sync_overlay_scroll.visible.max(1);
+    state.sync_overlay_scroll.set_total(total);
+}
+
+fn sync_overlay_action(key: crossterm::event::KeyEvent, state: &mut AppState) -> Option<Action> {
+    match key.code {
+        crossterm::event::KeyCode::Esc | crossterm::event::KeyCode::Char('q') => {
+            state.close_dialog();
+            None
+        }
+        crossterm::event::KeyCode::Char('j') | crossterm::event::KeyCode::Down => {
+            state.sync_overlay_scroll.scroll_down();
+            None
+        }
+        crossterm::event::KeyCode::Char('k') | crossterm::event::KeyCode::Up => {
+            state.sync_overlay_scroll.scroll_up();
+            None
+        }
+        crossterm::event::KeyCode::PageDown => {
+            state.sync_overlay_scroll.page_down();
+            None
+        }
+        crossterm::event::KeyCode::PageUp => {
+            state.sync_overlay_scroll.page_up();
+            None
+        }
+        crossterm::event::KeyCode::Char('x') => Some(Action::StartSync),
+        crossterm::event::KeyCode::Char('r') => Some(Action::Refresh),
+        crossterm::event::KeyCode::Char('m') => Some(Action::ToggleUsageEmails),
+        _ => None,
+    }
 }
 
 fn handle_dialog_action(action: DialogAction, state: &mut AppState) {
@@ -358,7 +470,10 @@ fn apply_panel_result(state: &mut AppState, result: PanelResult) -> bool {
     let refreshing = result.refreshing;
     match result.payload {
         PanelPayload::Overview(payload) => state.overview = Some(payload),
-        PanelPayload::SyncCenter(payload) => state.sync_center = Some(payload),
+        PanelPayload::SyncCenter(payload) => {
+            state.sync_center = Some(payload);
+            update_overlay_scroll(state);
+        }
         PanelPayload::Models(payload) => state.models = Some(payload),
         PanelPayload::Daily(payload) => state.daily = Some(payload),
         PanelPayload::Hourly(payload) => state.hourly = Some(payload),
@@ -489,10 +604,9 @@ fn update_scroll_total(state: &mut AppState, panel: Panel) {
             .and_then(|result| result.as_ref().ok())
             .map(|payload| payload.models.len()),
         Panel::Trends => state
-            .sync_center
+            .quota_report
             .as_ref()
-            .and_then(|result| result.as_ref().ok())
-            .map(|payload| payload.sources.len() + state.platform_probes.len()),
+            .map(|report| report.outputs.len()),
         Panel::Models => state.models.as_ref().and_then(ok_len),
         Panel::Sources => state.daily.as_ref().and_then(ok_len),
         Panel::Projects => state.hourly.as_ref().and_then(ok_len),
@@ -599,11 +713,13 @@ mod tests {
             );
         }
 
-        let usage = include_str!("panels/usage.rs");
-        for tail in usage.split(".skip(scroll.offset)").skip(1) {
+        for (name, source) in [
+            ("usage", include_str!("panels/usage.rs")),
+            ("sync_status", include_str!("panels/sync_status.rs")),
+        ] {
             assert!(
-                tail.trim_start().starts_with(".take("),
-                "usage must bound each scrolled iterator before formatting rows"
+                source.contains(".skip(") && source.contains(".take("),
+                "{name} must bound each scrolled iterator before formatting rows"
             );
         }
     }
@@ -882,7 +998,11 @@ mod tests {
             assert_unstyled(&terminal, panel.label());
         }
 
-        for dialog in [app::ActiveDialog::SourcePicker, app::ActiveDialog::Help] {
+        for dialog in [
+            app::ActiveDialog::SourcePicker,
+            app::ActiveDialog::Help,
+            app::ActiveDialog::SyncStatus,
+        ] {
             let mut terminal = Terminal::new(TestBackend::new(120, 30))?;
             let mut state = AppState::new();
             state.active_dialog = Some(dialog);
@@ -920,7 +1040,11 @@ mod tests {
                 );
             }
 
-            for dialog in [app::ActiveDialog::SourcePicker, app::ActiveDialog::Help] {
+            for dialog in [
+                app::ActiveDialog::SourcePicker,
+                app::ActiveDialog::Help,
+                app::ActiveDialog::SyncStatus,
+            ] {
                 let mut terminal = Terminal::new(TestBackend::new(120, 30))?;
                 let mut state = AppState::new();
                 state.active_dialog = Some(dialog);

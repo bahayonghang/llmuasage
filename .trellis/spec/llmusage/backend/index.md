@@ -22,6 +22,8 @@ output, and dashboard/TUI consumers.
   commands, or CLI report-table output.
 - Read [TUI Runtime Contracts](./tui-runtime-contracts.md) before changing the
   event loop, redraw policy, render snapshots, or scrollable table construction.
+- Read [TUI Subscription Contracts](./tui-subscription-contracts.md) before
+  changing dash Usage quota fetchers, cache, or the sync overlay.
 - Read [Web Server Contracts](./web-server-contracts.md) before changing the
   `serve` listener, browser-launch policy, or dashboard network exposure.
 - Read [Self-Update Contracts](./self-update-contracts.md) before changing the
@@ -49,6 +51,7 @@ output, and dashboard/TUI consumers.
 | [Token Accounting Contracts](./token-accounting-contracts.md) | Parser normalization, logical dedupe, authoritative totals, and guarded legacy rebuild | Documented |
 | [TUI Presentation Contracts](./tui-presentation-contracts.md) | Interactive theme slots, English copy, shared formatters, and terminal color fallback | Documented |
 | [TUI Runtime Contracts](./tui-runtime-contracts.md) | Dirty redraws, tick coalescing, frame snapshots, and visible-row caches | Documented |
+| [TUI Subscription Contracts](./tui-subscription-contracts.md) | Read-only quota fetchers, cache TTL, and Usage overlay | Documented |
 | [Report CLI Contracts](./report-cli-contracts.md) | Unified/focused report command surface, DTO projections, and output invariants | Documented |
 | [Web Server Contracts](./web-server-contracts.md) | Dashboard listener, browser-launch, SSH, and network-exposure contracts | Documented |
 | [Self-Update Contracts](./self-update-contracts.md) | Official channels, Cargo invocation, confirmation, and no-network test boundaries | Documented |

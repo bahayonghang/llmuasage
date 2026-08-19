@@ -66,10 +66,11 @@ theme::{vendor_style, vendor_fg, metric_cache_hit, metric_cost_per_million,
   24h Pulse. Chart axis labels and list token counts use `stat_compact`. List
   totals use `cost_compact`.
 - Overview, footer, Models, Daily, Hourly, Cost, Stats, Behavior, and Blocks use
-  `stat_compact` for token and analytical count values. Usage sync counters stay
-  exact and grouped because scans, inserts, stored events, and skipped files are
-  reconciliation evidence. Cost, percentage, timestamp, JSON, web, statusline,
-  and CLI report-table formats remain independent. `format::cost` stays `$x.xx`.
+  `stat_compact` for token and analytical count values. Usage main area shows
+  subscription quota. Source Sync counters stay exact and grouped and only
+  appear in the Usage overlay. Quota remaining labels keep provider units or
+  `{n}% left`. Cost, percentage, timestamp, JSON, web, statusline, and CLI
+  report-table formats remain independent. `format::cost` stays `$x.xx`.
 
 ### 4. Validation & Error Matrix
 

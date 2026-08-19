@@ -5,7 +5,11 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 
-use super::{app::AppState, format::stat_compact, theme};
+use super::{
+    app::{AppState, Panel},
+    format::stat_compact,
+    theme,
+};
 
 pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
     let block = Block::default()
@@ -58,35 +62,50 @@ fn render_controls(frame: &mut Frame, area: Rect, state: &AppState) {
             theme::muted_style(),
         )]
     } else {
-        vec![
-            Span::styled("tab/shift-tab or 1-9 view", theme::muted_style()),
-            Span::styled(" • ", theme::muted_style()),
-            Span::styled("[j/k/Pg:select]", theme::fg_style(theme::accent())),
-            Span::styled(" • ", theme::muted_style()),
-            Span::styled("[o/O:sort]", theme::fg_style(theme::accent())),
-            Span::styled(" • ", theme::muted_style()),
-            Span::styled("[s:source]", theme::fg_style(theme::accent())),
-            Span::styled(" • ", theme::muted_style()),
-            Span::styled("[r:refresh]", theme::fg_style(theme::trend_peak_fg())),
-            Span::styled(" ", theme::muted_style()),
-            Span::styled("[x:sync]", theme::fg_style(theme::positive_fg())),
-            Span::styled(" ", theme::muted_style()),
-            Span::styled(
-                if state.auto_refresh {
-                    "[R:auto on]"
-                } else {
-                    "[R:auto off]"
-                },
-                theme::fg_style(if state.auto_refresh {
-                    theme::positive_fg()
-                } else {
-                    theme::muted_fg()
-                }),
-            ),
-            Span::styled(" • [?] q", theme::muted_style()),
-        ]
+        wide_control_spans(state)
     };
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+fn wide_control_spans(state: &AppState) -> Vec<Span<'static>> {
+    let mut spans = vec![
+        Span::styled("tab/shift-tab or 1-9 view", theme::muted_style()),
+        Span::styled(" • ", theme::muted_style()),
+        Span::styled("[j/k/Pg:select]", theme::fg_style(theme::accent())),
+        Span::styled(" • ", theme::muted_style()),
+        Span::styled("[o/O:sort]", theme::fg_style(theme::accent())),
+        Span::styled(" • ", theme::muted_style()),
+        Span::styled("[s:source]", theme::fg_style(theme::accent())),
+        Span::styled(" • ", theme::muted_style()),
+        Span::styled("[r:refresh]", theme::fg_style(theme::trend_peak_fg())),
+        Span::styled(" ", theme::muted_style()),
+        Span::styled("[x:sync]", theme::fg_style(theme::positive_fg())),
+        Span::styled(" ", theme::muted_style()),
+    ];
+    if state.active_panel == Panel::Trends {
+        spans.extend([
+            Span::styled("[y:status]", theme::fg_style(theme::positive_fg())),
+            Span::styled(" ", theme::muted_style()),
+            Span::styled("[m:mail]", theme::fg_style(theme::accent())),
+            Span::styled(" ", theme::muted_style()),
+        ]);
+    }
+    spans.extend([
+        Span::styled(
+            if state.auto_refresh {
+                "[R:auto on]"
+            } else {
+                "[R:auto off]"
+            },
+            theme::fg_style(if state.auto_refresh {
+                theme::positive_fg()
+            } else {
+                theme::muted_fg()
+            }),
+        ),
+        Span::styled(" • [?] q", theme::muted_style()),
+    ]);
+    spans
 }
 
 fn render_status(frame: &mut Frame, area: Rect, state: &AppState) {

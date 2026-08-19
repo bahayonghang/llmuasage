@@ -46,11 +46,14 @@ overview::render_with_plan(..., sort: SortState)
   length and does not fold a long tail.
 - Windowing and memoization are internal only: the same payload, scroll offset,
   terminal size, and theme must produce the same `TestBackend` cells.
-- Models, Daily, Hourly, Cost, Blocks, Overview, and the Stats source table use
-  one `ScrollState` for selection and windowing. Single-row movement wraps;
-  paging and Home/End clamp. Selected rows use `theme::selection_style()`,
-  except Models and Overview which use `theme::selection_fill_style()` so cell
-  foreground colors stay visible.
+- Models, Daily, Hourly, Cost, Blocks, Overview, Usage accounts, and the Stats
+  source table use one `ScrollState` for selection and windowing. Single-row
+  movement wraps; paging and Home/End clamp. Selected rows use
+  `theme::selection_style()`, except Models and Overview which use
+  `theme::selection_fill_style()` so cell foreground colors stay visible.
+- Usage loads subscription quota on panel entry or `r`. `R` auto-refresh does
+  not poll quota APIs. Source Sync / Platform Monitor open through the `y`
+  overlay (`ActiveDialog::SyncStatus`) and keep `x` as local sync.
 - Overview, Models, Daily, Cost, and Blocks keep independent `SortState`
   values. `o` cycles the panel's supported columns, `O` reverses direction,
   stable in-memory sorting preserves ties and the row collection, and the

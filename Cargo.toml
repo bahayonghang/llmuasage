@@ -59,6 +59,11 @@ tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "json"] }
 unicode-width = "0.2.2"
 walkdir = "2.5.0"
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls",
+    "json",
+    "http2",
+] }
 tempfile = { version = "3.27.0", optional = true }
 chrono-tz = { version = "0.10.4", features = ["case-insensitive"] }
 iana-time-zone = "0.1.65"

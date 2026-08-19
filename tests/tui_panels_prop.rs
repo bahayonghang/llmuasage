@@ -261,7 +261,7 @@ fn sample_platform_probes() -> Vec<PlatformProbe> {
     ]
 }
 
-fn render_usage_text(
+fn render_sync_status_text(
     payload: SyncCommandCenterPayload,
     probes: Vec<PlatformProbe>,
     width: u16,
@@ -279,7 +279,64 @@ fn render_usage_text(
 
     terminal
         .draw(|frame| {
-            llmusage::tui::panels::usage::render(frame, area, &data, &probes, &scroll);
+            llmusage::tui::panels::sync_status::render(frame, area, &data, &probes, &scroll);
+        })
+        .unwrap();
+
+    buffer_text(&terminal)
+}
+
+fn sample_quota_report() -> llmusage::subscription::UsageFetchReport {
+    use llmusage::subscription::{
+        UsageFetchDiagnostic, UsageFetchReport, UsageMetric, UsageOutput,
+    };
+    UsageFetchReport {
+        outputs: vec![UsageOutput {
+            provider: "Grok Build".into(),
+            account: None,
+            credential_source: None,
+            plan: Some("Unknown".into()),
+            email: Some("user@example.com".into()),
+            metrics: vec![UsageMetric {
+                label: "Weekly".into(),
+                used_percent: 30.0,
+                remaining_percent: 70.0,
+                remaining_label: Some("70% left".into()),
+                resets_at: Some("2026-08-24T00:18:00Z".into()),
+            }],
+        }],
+        diagnostics: vec![UsageFetchDiagnostic::error(
+            "Claude",
+            "Claude usage request failed (HTTP 429 Too Many Requests)",
+        )],
+    }
+}
+
+fn render_usage_quota_text(
+    report: llmusage::subscription::UsageFetchReport,
+    hide_emails: bool,
+    width: u16,
+    height: u16,
+) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    let area = Rect::new(0, 0, width, height);
+    let scroll = ScrollState {
+        offset: 0,
+        selected: 0,
+        total: report.outputs.len(),
+        visible: height.saturating_sub(8) as usize,
+    };
+
+    terminal
+        .draw(|frame| {
+            llmusage::tui::panels::usage::render(
+                frame,
+                area,
+                &Some(report),
+                false,
+                hide_emails,
+                &scroll,
+            );
         })
         .unwrap();
 
@@ -901,8 +958,8 @@ fn hourly_panel_renders_profile_bars_and_compact_hour_labels() {
 }
 
 #[test]
-fn usage_panel_renders_sync_status_and_platform_monitor_summary() {
-    let text = render_usage_text(sample_sync_payload(), sample_platform_probes(), 120, 18);
+fn usage_overlay_renders_sync_status_and_platform_monitor_summary() {
+    let text = render_sync_status_text(sample_sync_payload(), sample_platform_probes(), 120, 18);
 
     for expected in [
         "Usage / Sync",
@@ -921,24 +978,77 @@ fn usage_panel_renders_sync_status_and_platform_monitor_summary() {
     ] {
         assert!(
             text.contains(expected),
-            "usage panel should contain '{expected}', got: {text}"
+            "sync overlay should contain '{expected}', got: {text}"
         );
     }
 }
 
 #[test]
-fn usage_panel_uses_compact_columns_on_narrow_widths() {
-    let text = render_usage_text(sample_sync_payload(), sample_platform_probes(), 52, 12);
+fn usage_overlay_uses_compact_columns_on_narrow_widths() {
+    let text = render_sync_status_text(sample_sync_payload(), sample_platform_probes(), 52, 12);
 
     for expected in ["Usage / Sync", "Stored", "codex", "8,000"] {
         assert!(
             text.contains(expected),
-            "narrow usage panel should contain '{expected}', got: {text}"
+            "narrow sync overlay should contain '{expected}', got: {text}"
         );
     }
     assert!(
         !text.contains("Inserted"),
-        "narrow usage panel should hide wide-only columns: {text}"
+        "narrow sync overlay should hide wide-only columns: {text}"
+    );
+}
+
+#[test]
+fn usage_panel_renders_quota_accounts_and_hides_emails() {
+    let text = render_usage_quota_text(sample_quota_report(), true, 140, 32);
+    for expected in [
+        "Usage",
+        "Usage Summary",
+        "Accounts",
+        "Grok Build",
+        "Weekly",
+        "70% left",
+        "Diagnostics",
+        "HTTP 429",
+        "[hidden email]",
+        "Selected Account",
+    ] {
+        assert!(
+            text.contains(expected),
+            "usage quota panel should contain '{expected}', got: {text}"
+        );
+    }
+    assert!(
+        !text.contains("user@example.com"),
+        "hidden emails must not appear: {text}"
+    );
+    assert!(
+        !text.contains("Source Sync"),
+        "main usage area must not show Source Sync: {text}"
+    );
+}
+
+#[test]
+fn usage_panel_can_reveal_emails() {
+    let text = render_usage_quota_text(sample_quota_report(), false, 140, 32);
+    assert!(
+        text.contains("user@example.com"),
+        "revealed email missing: {text}"
+    );
+}
+
+#[test]
+fn usage_panel_empty_state() {
+    let text = render_usage_quota_text(
+        llmusage::subscription::UsageFetchReport::default(),
+        true,
+        80,
+        16,
+    );
+    assert!(
+        text.contains("No subscription data available"),
+        "empty quota panel missing empty-state copy: {text}"
     );
 }
 

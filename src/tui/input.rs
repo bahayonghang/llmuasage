@@ -23,6 +23,8 @@ pub enum Action {
     StartSync,
     OpenSourcePicker,
     OpenHelp,
+    OpenSyncStatus,
+    ToggleUsageEmails,
     CycleTheme,
     None,
 }
@@ -56,6 +58,8 @@ pub fn handle_key_event(key: KeyEvent, _active_panel: Panel) -> Action {
         KeyCode::Char('R') => Action::ToggleAutoRefresh,
         KeyCode::Char('x') => Action::StartSync,
         KeyCode::Char('s') => Action::OpenSourcePicker,
+        KeyCode::Char('y') => Action::OpenSyncStatus,
+        KeyCode::Char('m') => Action::ToggleUsageEmails,
         KeyCode::Char('?') => Action::OpenHelp,
         KeyCode::Char('t') => Action::CycleTheme,
         KeyCode::Char(c) => Panel::from_digit_char(c)
@@ -121,6 +125,14 @@ mod tests {
         assert_eq!(
             handle_key_event(char_key('?'), Panel::Overview),
             Action::OpenHelp
+        );
+        assert_eq!(
+            handle_key_event(char_key('y'), Panel::Overview),
+            Action::OpenSyncStatus
+        );
+        assert_eq!(
+            handle_key_event(char_key('m'), Panel::Overview),
+            Action::ToggleUsageEmails
         );
     }
 

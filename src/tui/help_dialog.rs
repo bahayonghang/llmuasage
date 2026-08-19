@@ -60,7 +60,8 @@ pub fn render(frame: &mut Frame, viewport: Rect, state: &AppState) {
         Line::from("window: Models/Daily/Hourly/Cost/Stats/Behavior"),
         Line::from("s: source picker                 a: all sources in picker"),
         Line::from("r: refresh dashboard cache       R: toggle auto refresh"),
-        Line::from("x: run sync for current source   t: cycle theme"),
+        Line::from("x: run sync for current source   y: sync status overlay"),
+        Line::from("m: show/hide Usage emails        t: cycle theme"),
         Line::from("?: this dialog                    q or Esc: close / quit"),
     ];
     frame.render_widget(Paragraph::new(lines).style(theme::muted_style()), rows[2]);

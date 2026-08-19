@@ -5,6 +5,7 @@ use crate::query::{
     OverviewPayload, QueryFilter, SourceBreakdown, SyncCommandCenterPayload, ToolsPayload,
     TrendPoint, ZombieReport,
 };
+use crate::subscription::UsageFetchReport;
 use crate::{domain::platform_monitor::PlatformProbe, models::SourceKind};
 
 use chrono::{Duration as ChronoDuration, NaiveDate, Utc};
@@ -350,6 +351,7 @@ pub(crate) fn stable_sort_refs<T>(
 pub enum ActiveDialog {
     SourcePicker,
     Help,
+    SyncStatus,
 }
 
 #[derive(Debug, Clone)]
@@ -395,6 +397,11 @@ pub struct AppState {
     pub behavior: Option<Result<BehaviorPanelPayload, String>>,
     pub blocks: Option<Result<Vec<BlockReportRow>, String>>,
     pub platform_probes: Vec<PlatformProbe>,
+    pub quota_report: Option<UsageFetchReport>,
+    pub hide_usage_emails: bool,
+    pub quota_fetch_attempted: bool,
+    pub quota_fetching: bool,
+    pub sync_overlay_scroll: ScrollState,
     pub active_dialog: Option<ActiveDialog>,
     pub source_picker: SourcePickerState,
     pub status_message: Option<String>,
@@ -445,6 +452,16 @@ impl AppState {
             behavior: None,
             blocks: None,
             platform_probes: crate::domain::platform_monitor::probe_registered_platforms(),
+            quota_report: None,
+            hide_usage_emails: true,
+            quota_fetch_attempted: false,
+            quota_fetching: false,
+            sync_overlay_scroll: ScrollState {
+                offset: 0,
+                selected: 0,
+                total: 0,
+                visible: 0,
+            },
             active_dialog: None,
             source_picker: SourcePickerState { selected: 0 },
             status_message: None,
@@ -481,6 +498,19 @@ impl AppState {
 
     pub fn open_help(&mut self) {
         self.active_dialog = Some(ActiveDialog::Help);
+    }
+
+    pub fn open_sync_status(&mut self) {
+        self.active_dialog = Some(ActiveDialog::SyncStatus);
+    }
+
+    pub fn toggle_usage_emails(&mut self) {
+        self.hide_usage_emails = !self.hide_usage_emails;
+        if self.hide_usage_emails {
+            self.set_status("Emails hidden");
+        } else {
+            self.set_status("Emails visible");
+        }
     }
 
     pub fn close_dialog(&mut self) {
@@ -573,7 +603,7 @@ impl AppState {
     }
 
     pub fn background_active(&self) -> bool {
-        self.sync_active || self.panel_loading.iter().any(|loading| *loading)
+        self.sync_active || self.quota_fetching || self.panel_loading.iter().any(|loading| *loading)
     }
 
     pub fn cycle_sort(&mut self) -> Option<(TableSortKey, bool)> {
