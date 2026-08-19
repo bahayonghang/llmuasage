@@ -1683,3 +1683,36 @@ Usage 页改为只读拉取 Grok/Kimi/Claude/Codex 订阅额度，Source Sync �
 ### Status
 
 [OK] **Completed**
+
+
+## Session 56: 修复同步命令中心失败横幅误报
+
+**Date**: 2026-08-19
+**Task**: 修复同步命令中心失败横幅误报
+**Branch**: `dev`
+
+### Summary
+
+命令中心按最近一次 sync 族记录判定失败标题；Claude 重建风险单独展示。
+
+### Main Changes
+
+- 命令中心改读最近 10 条 usage-import 记录，失败标题只认 status=failed，并与正文配对。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b139a04` | (see git log) |
+
+### Testing
+
+- [OK] cargo test command-center + doctor aborted warn; cargo fmt --check; cargo clippy -D warnings
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 重启 llmusage serve 后核对横幅；Codex/Antigravity stale missing 与 insights 中的 serve aborted 未改。
