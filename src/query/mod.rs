@@ -861,7 +861,15 @@ pub struct SyncSafetyPayload {
     pub worker_lock_holder: Option<String>,
     pub lossy_rebuild_risk: bool,
     pub risk_sources: Vec<String>,
+    pub risk_details: Vec<SyncRiskSourcePayload>,
     pub recent_failures: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncRiskSourcePayload {
+    pub source: String,
+    pub missing_file_count: u64,
+    pub protected_event_count: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -3416,7 +3424,7 @@ impl Dashboard {
             .filter(|run| run.status == "failed")
             .count();
         let selected_source = filter.source.map(|source| source.as_str().to_string());
-        let risk_sources = diagnostics
+        let risk_details = diagnostics
             .by_source
             .iter()
             .filter(|source| {
@@ -3425,7 +3433,15 @@ impl Dashboard {
                     .is_none_or(|selected| source.source == selected)
             })
             .filter(|source| source.lossy_rebuild_risk)
-            .map(|source| source.source.clone())
+            .map(|source| SyncRiskSourcePayload {
+                source: source.source.clone(),
+                missing_file_count: source.missing_file_count,
+                protected_event_count: source.protected_event_count,
+            })
+            .collect::<Vec<_>>();
+        let risk_sources = risk_details
+            .iter()
+            .map(|detail| detail.source.clone())
             .collect::<Vec<_>>();
         let risk_set = risk_sources.iter().cloned().collect::<BTreeSet<_>>();
         let inserted_total = statuses.iter().map(|row| row.events_inserted).sum::<i64>();
@@ -3460,7 +3476,7 @@ impl Dashboard {
         .to_string();
         let worker_lock_holder = current_lock.as_ref().map(|lock| lock.holder_identity());
         let lossy_rebuild_risk = !risk_sources.is_empty();
-        let tone = if worker_lock == "busy" || last_run_failed || lossy_rebuild_risk {
+        let tone = if worker_lock == "busy" || last_run_failed {
             "warn"
         } else {
             "good"
@@ -3469,15 +3485,13 @@ impl Dashboard {
             "syncCenter.headline.busy"
         } else if last_run_failed {
             "syncCenter.headline.failed"
-        } else if lossy_rebuild_risk {
-            "syncCenter.headline.rebuildRisk"
+        } else if statuses.is_empty() {
+            "syncCenter.headline.empty"
         } else {
             "syncCenter.headline.ready"
         };
         let reason_key = if last_run_failed && worker_lock != "busy" {
             "syncCenter.reason.lastRunFailed"
-        } else if lossy_rebuild_risk {
-            "syncCenter.reason.rebuildRisk"
         } else if statuses.is_empty() {
             "syncCenter.reason.empty"
         } else {
@@ -3498,6 +3512,7 @@ impl Dashboard {
                 worker_lock_holder,
                 lossy_rebuild_risk,
                 risk_sources,
+                risk_details,
                 recent_failures,
             },
             metrics: SyncMetricsPayload {
@@ -3513,15 +3528,13 @@ impl Dashboard {
                     let source_risk = risk_set.contains(&row.source);
                     let status = if row.last_error.is_some() {
                         "error"
-                    } else if source_risk {
-                        "rebuild_risk"
                     } else if row.stored_events > 0 || row.events_seen > 0 {
                         "ok"
                     } else {
                         "idle"
                     };
                     let tone = match status {
-                        "error" | "rebuild_risk" => "warn",
+                        "error" => "warn",
                         _ if row.parse_issues.total() > 0 => "warn",
                         "ok" => "good",
                         _ => "neutral",
@@ -4458,8 +4471,9 @@ mod tests {
         drop(conn);
 
         let center = Dashboard::open(fixture.store())?.sync_command_center(&Default::default())?;
-        assert_eq!(center.headline_key, "syncCenter.headline.rebuildRisk");
-        assert_eq!(center.reason_key, "syncCenter.reason.rebuildRisk");
+        assert_eq!(center.tone, "good");
+        assert_eq!(center.headline_key, "syncCenter.headline.ready");
+        assert_eq!(center.reason_key, "syncCenter.reason.ready");
         let last_run = center.last_run.as_ref().expect("last run");
         assert_eq!(last_run.status, "success");
         assert!(last_run.error_key.is_none());
@@ -4470,7 +4484,13 @@ mod tests {
             .find(|row| row.source == "claude")
             .expect("claude source");
         assert!(claude.lossy_rebuild_risk);
-        assert_eq!(claude.status, "rebuild_risk");
+        assert_eq!(claude.status, "ok");
+        assert_eq!(claude.tone, "good");
+        assert_eq!(center.safety.risk_sources, vec!["claude".to_string()]);
+        assert_eq!(center.safety.risk_details.len(), 1);
+        assert_eq!(center.safety.risk_details[0].source, "claude");
+        assert_eq!(center.safety.risk_details[0].missing_file_count, 1);
+        assert_eq!(center.safety.risk_details[0].protected_event_count, 1);
         Ok(())
     }
 

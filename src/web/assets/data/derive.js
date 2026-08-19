@@ -81,6 +81,11 @@ function normalizeSyncCommandCenter(payload) {
       worker_lock_holder: safety?.worker_lock_holder || null,
       lossy_rebuild_risk: Boolean(safety?.lossy_rebuild_risk),
       risk_sources: normalizeRows(safety?.risk_sources),
+      risk_details: normalizeRows(safety?.risk_details).map((detail) => ({
+        source: detail?.source || '--',
+        missing_file_count: Number(detail?.missing_file_count || 0),
+        protected_event_count: Number(detail?.protected_event_count || 0),
+      })),
       recent_failures: Number(safety?.recent_failures || 0),
     },
     metrics: {
@@ -179,7 +184,7 @@ function buildInsights({ overview, modelRows, projectRows, costRows, sourceRows,
     const row = lossyRows[0];
     insights.push({
       id: 'lossy_rebuild',
-      tone: 'warn',
+      tone: 'neutral',
       params: { source: row.source || '--', missingCount: formatNumber(row.missing_file_count), protectedCount: formatNumber(row.protected_event_count) },
     });
   } else if (missingRows.length > 0) {

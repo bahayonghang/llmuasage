@@ -82,6 +82,13 @@ theme::{vendor_style, vendor_fg, metric_cache_hit, metric_cost_per_million,
   `{n}% left`. Cost, percentage, timestamp, JSON, web, statusline, and CLI
   report-table formats remain independent. `format::cost` stays `$x.xx`.
 
+- The Usage / Sync panel consumes the shared command-center payload. A source's
+  `lossy_rebuild_risk` and the corresponding `safety.risk_details[]` are
+  neutral facts: they must not turn the headline, source row, or source tone
+  into a warning. Worker-lock contention, failed imports, source errors, and
+  parse faults remain warnings. A persisted `cancelled` last run is neutral
+  and is excluded from doctor/health failure counts.
+
 ### 4. Validation & Error Matrix
 
 | Condition                                  | Required result                               |

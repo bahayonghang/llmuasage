@@ -45,6 +45,7 @@ function getElement(id) {
       hidden: false,
       dataset: {},
       mutations: [],
+      addEventListener() {},
       insertAdjacentHTML(position, html) {
         this.mutations.push(['insertAdjacentHTML', position]);
         this._innerHTML = position === 'afterbegin' ? html + this._innerHTML : this._innerHTML + html;
@@ -87,6 +88,7 @@ const copy = await import('../../src/web/assets/copy.js');
 const behavior = await import('../../src/web/assets/render/behavior.js');
 const explorer = await import('../../src/web/assets/render/explorer.js');
 const insights = await import('../../src/web/assets/render/insights.js');
+const syncCommandCenter = await import('../../src/web/assets/render/sync-command-center.js');
 const summaryCards = await import('../../src/web/assets/render/summary-cards.js');
 const calendarHeatmap = await import('../../src/web/assets/render/calendar-heatmap.js');
 const trendsDaily = await import('../../src/web/assets/render/trends-daily.js');
@@ -141,6 +143,54 @@ function behaviorContext(secondaryRefreshing = false) {
       },
       secondary_refreshing: secondaryRefreshing,
     },
+  };
+}
+
+function syncCenterPayload(overrides = {}) {
+  return {
+    mode: 'live',
+    tone: 'warn',
+    headline_key: 'syncCenter.headline.rebuildRisk',
+    reason_key: 'syncCenter.reason.rebuildRisk',
+    generated_at: '2026-08-19T12:39:53Z',
+    current_job: null,
+    last_run: {
+      status: 'success',
+      command: 'sync',
+      started_at: '2026-08-19T08:58:20Z',
+      finished_at: '2026-08-19T08:58:21Z',
+    },
+    safety: {
+      ordinary_sync_safe: true,
+      worker_lock: 'available',
+      lossy_rebuild_risk: true,
+      risk_sources: ['claude'],
+      risk_details: [{ source: 'claude', missing_file_count: 728, protected_event_count: 36495 }],
+      recent_failures: 0,
+    },
+    metrics: { events_seen: 127, inserted_delta: 84, stored_events: 249020, sources_ready: 9, sources_total: 9 },
+    sources: [{
+      source: 'claude',
+      status: 'ok',
+      tone: 'good',
+      events_seen: 67,
+      events_inserted: 31,
+      stored_events: 36495,
+      share: 0.5,
+      lossy_rebuild_risk: true,
+    }],
+    actions: [{ id: 'sync', label_key: 'syncCenter.action.sync', primary: true, disabled: false }],
+    ...overrides,
+  };
+}
+
+function completedSnapshot(finishedAt = '2026-08-19T13:00:01Z') {
+  return {
+    job_id: 'job-1',
+    status: 'completed',
+    last_event: { type: 'Finished' },
+    started_at: '2026-08-19T12:59:00Z',
+    finished_at: finishedAt,
   };
 }
 
@@ -404,6 +454,70 @@ test('dynamic analysis terminology follows the selected locale', () => {
   } finally {
     copy.setLocale('zh');
   }
+});
+
+test('sync completed overlay stays ready across payload reload and clear', () => {
+  const oldPayload = syncCenterPayload();
+  const finishedAt = '2026-08-19T13:00:01Z';
+  const refreshedPayload = syncCenterPayload({
+    tone: 'good',
+    headline_key: 'syncCenter.headline.ready',
+    reason_key: 'syncCenter.reason.ready',
+    generated_at: '2026-08-19T13:00:02Z',
+    last_run: {
+      status: 'success',
+      command: 'sync',
+      started_at: '2026-08-19T12:59:00Z',
+      finished_at: finishedAt,
+    },
+  });
+  const render = (payload, activeJobSnapshot) => {
+    resetMutations();
+    syncCommandCenter.renderSyncCommandCenter(
+      { syncCommandCenter: payload },
+      { activeJobSnapshot },
+    );
+    return getElement('sync-command-center').innerHTML;
+  };
+
+  const overlayHtml = render(oldPayload, completedSnapshot(finishedAt));
+  assert.match(overlayHtml, /data-tone="good"/);
+  assert.match(overlayHtml, /同步状态就绪/);
+  assert.match(overlayHtml, new RegExp(finishedAt));
+  assert.doesNotMatch(overlayHtml, /检测到重建风险/);
+  assert.match(overlayHtml, /missing=728/);
+
+  const reloadedHtml = render(refreshedPayload, completedSnapshot(finishedAt));
+  assert.match(reloadedHtml, /data-tone="good"/);
+  assert.match(reloadedHtml, new RegExp(finishedAt));
+  assert.doesNotMatch(reloadedHtml, /2026-08-19T08:58:21Z/);
+
+  const clearedHtml = render(refreshedPayload, null);
+  assert.match(clearedHtml, /data-tone="good"/);
+  assert.match(clearedHtml, new RegExp(finishedAt));
+  assert.doesNotMatch(clearedHtml, /检测到重建风险/);
+});
+
+test('rebuild protection insight is neutral and keeps its counts', () => {
+  const raw = minimalRaw();
+  raw.diagnostics = {
+    by_source: [{
+      source: 'claude',
+      missing_file_count: 728,
+      protected_event_count: 36495,
+      lossy_rebuild_risk: true,
+    }],
+    recent_failures: [],
+  };
+  const context = derive.buildContext(raw);
+  const insight = context.insights.find((row) => row.id === 'lossy_rebuild');
+  assert.ok(insight);
+  assert.equal(insight.tone, 'neutral');
+  assert.deepEqual(insight.params, {
+    source: 'claude',
+    missingCount: '728',
+    protectedCount: '36,495',
+  });
 });
 
 

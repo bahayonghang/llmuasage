@@ -444,6 +444,14 @@ GET /api/dashboard?scope=interactive&since=<date>&until=<date>
   inflight/orphan state. Dashboard archive fields do not gain these Web-only
   counters.
 - Completed, failed, and cancelled sync jobs invalidate diagnostics through a cheap `JobRegistry` terminal hook. `/api/diagnostics/forget` also invalidates. TTL expiry detects external file deletion that bypasses both paths.
+- A completed foreground sync renders a good/ready overlay first, then the
+  post-sync interactive reload, then clears the active snapshot. All three
+  states must retain the current run's `finished_at`; the old warning headline
+  or old run time must not flash back between those transitions.
+- `sync_command_center.safety.risk_details[]` is an additive structured
+  projection of source, missing-file count, and protected-event count. Old
+  payloads without this array normalize to an empty list; rebuild protection is
+  factual and neutral in the ordinary sync command center.
 - Web/API `Dashboard` connections use a 1500 ms `busy_timeout`; default Store connections retain 30 seconds for sync writers and migrations.
 - Automatic refresh and post-sync refresh always use `scope=interactive`, including explicit `since`/`until`, then refresh secondary sections with concurrency 2. They never fall back to full scope in live mode.
 - Embedded assets return `Cache-Control: no-cache` and a stable content ETag. Matching strong or weak `If-None-Match` returns `304` with an empty body. gzip/Brotli compression applies to eligible assets and JSON responses; JSON endpoints do not gain cache headers.

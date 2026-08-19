@@ -106,6 +106,12 @@ impl<'a> RunLog<'a> {
             .write_transaction(|tx| Ok(tx.execute(&sql, params_from_iter(params))?))
     }
 
+    /// Recover every stale usage-import run using the single command family
+    /// consumed by command-center and health projections.
+    pub fn recover_running_usage_import_runs(&self) -> Result<usize> {
+        self.recover_running_runs(&USAGE_IMPORT_COMMANDS)
+    }
+
     pub fn recent_runs(&self, limit: usize) -> Result<Vec<RunRecord>> {
         let conn = self.store.open_connection()?;
         self.recent_runs_with_conn(&conn, limit)
@@ -155,5 +161,33 @@ impl<'a> RunLog<'a> {
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params_from_iter(params), map_run_record)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tempfile::TempDir;
+
+    use super::*;
+    use crate::paths::AppPaths;
+
+    #[test]
+    fn usage_import_recovery_covers_all_commands_without_touching_serve() -> Result<()> {
+        let temp = TempDir::new().map_err(crate::error::LlmusageError::from)?;
+        let paths = AppPaths::with_root(temp.path().to_path_buf())?;
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+
+        for command in ["sync", "sync --rebuild", "hook-run", "serve"] {
+            store.run_log().record_run_start(command)?;
+        }
+
+        assert_eq!(store.run_log().recover_running_usage_import_runs()?, 3);
+        let runs = store.run_log().recent_runs(10)?;
+        assert_eq!(runs.iter().filter(|run| run.status == "aborted").count(), 3);
+        assert!(runs.iter().any(|run| {
+            run.command == "serve" && run.status == "running" && run.finished_at.is_none()
+        }));
+        Ok(())
     }
 }
