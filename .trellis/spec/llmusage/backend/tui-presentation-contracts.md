@@ -65,8 +65,9 @@ theme::{vendor_style, vendor_fg, metric_cache_hit, metric_cost_per_million,
   Models-by-Cost list. It does not render KPI cards, Token Mix, Freshness, or
   24h Pulse. Chart axis labels and list token counts use `stat_compact`. List
   totals use `cost_compact`.
-- Overview, footer, Models, Daily, Hourly, Cost, Stats, Behavior, and Blocks use
-  `stat_compact` for token and analytical count values. Usage main area shows
+- Overview, footer, Models, Daily, Hourly, Monthly, Stats, Behavior, and Blocks use
+  `stat_compact` for token and analytical count values. Daily / Hourly / Monthly
+  wide tables use Cache× (`cache_multiplier`) and Cost/1M (`cost_per_million`). Usage main area shows
   subscription quota. Source Sync counters stay exact and grouped and only
   appear in the Usage overlay. Quota remaining labels keep provider units or
   `{n}% left`. Cost, percentage, timestamp, JSON, web, statusline, and CLI

@@ -19,9 +19,11 @@ ScrollState::{scroll_up, scroll_down, page_up, page_down,
 SortState::{header, apply}(...)
 EventHandler::recv() -> Result<TuiEvent>
 theme::with_render_snapshot(|| render_frame())
-cost::render_with_plan(..., collapse: Option<Collapsed>)
 models::render_with_plan(..., sort: SortState)
 overview::render_with_plan(..., sort: SortState)
+daily::render_sorted(..., sort: SortState, detail)
+hourly::render_sorted(..., sort: SortState)
+monthly::render_sorted(..., sort: SortState, detail)
 ```
 
 ### 3. Contracts
@@ -40,13 +42,12 @@ overview::render_with_plan(..., sort: SortState)
   accessors use that thread-local snapshot during the frame, so the global
   `RwLock` is read once per frame and a mid-frame theme change applies next frame.
 - Scrollable bordered tables build only `area.height - 4` visible rows after the current
-  offset. Cost computes its long-tail collapse plan when a matching data
-  generation is accepted, reuses the plan while scrolling, and invalidates
-  it whenever the payload is invalidated. Models always uses the raw payload
-  length and does not fold a long tail.
+  offset. Models, Daily, Hourly, and Monthly always use the raw payload
+  length and do not fold a long tail. Hourly date separators are visual only
+  and do not change `ScrollState.total`.
 - Windowing and memoization are internal only: the same payload, scroll offset,
   terminal size, and theme must produce the same `TestBackend` cells.
-- Models, Daily, Hourly, Cost, Blocks, Overview, Usage accounts, and the Stats
+- Models, Daily, Hourly, Monthly, Blocks, Overview, Usage accounts, and the Stats
   source table use one `ScrollState` for selection and windowing. Single-row
   movement wraps; paging and Home/End clamp. Selected rows use
   `theme::selection_style()`, except Models and Overview which use
@@ -54,14 +55,14 @@ overview::render_with_plan(..., sort: SortState)
 - Usage loads subscription quota on panel entry or `r`. `R` auto-refresh does
   not poll quota APIs. Source Sync / Platform Monitor open through the `y`
   overlay (`ActiveDialog::SyncStatus`) and keep `x` as local sync.
-- Overview, Models, Daily, Cost, and Blocks keep independent `SortState`
+- Overview, Models, Daily, Hourly, Monthly, and Blocks keep independent `SortState`
   values. `o` cycles the panel's supported columns, `O` reverses direction,
   stable in-memory sorting preserves ties and the row collection, and the
   active header shows an arrow. Overview and Models start as Cost descending.
-  An unsorted Cost view uses its collapsed row count; a sorted Cost view uses
-  the raw payload length and disables long-tail collapse. Overview and Models
+  Daily, Hourly, and Monthly start as Date descending. Overview and Models
   always use the raw payload length. Overview chart and list follow
-  `TimeWindow`; `All` paints at most the last 60 local dates.
+  `TimeWindow`; `All` paints at most the last 60 local dates. Daily and Monthly
+  Enter open a detail table; Esc returns to the list without quitting.
 - Mouse wheel events map to the same row movement actions as the keyboard.
   Footer spinner frames are fixed-width ASCII and render only while a panel load
   or sync is active.
@@ -75,14 +76,12 @@ overview::render_with_plan(..., sort: SortState)
 | panel/sync result received        | Mutate state and request a frame                                   |
 | three ticks followed by a key     | Return one tick, then the key                                      |
 | theme changes inside a frame      | Current frame stays on its snapshot                                |
-| Cost generation changes           | Recompute Cost collapse plan once on acceptance                    |
 | Models generation changes         | Use the raw model count; do not fold                               |
-| scroll offset changes             | Reuse Cost collapse plan and format visible rows only              |
-| payload/filter/window invalidated | Clear payload and its derived Cost plan                            |
+| scroll offset changes             | Format visible rows only                                           |
+| payload/filter/window invalidated | Clear payload and close period detail                              |
 | row movement at first/last item   | Wrap for single-row movement; never leave bounds                   |
 | page movement past either edge    | Clamp at first/last item and keep it visible                       |
 | sort direction changes            | Reorder the loaded references only; do not query or mutate payload |
-| Cost sort becomes active          | Use raw length and suppress the ranked-order collapse plan         |
 | no panel load or sync active      | Render no spinner and keep idle ticks clean                        |
 
 ### 5. Good/Base/Bad Cases
@@ -91,8 +90,8 @@ overview::render_with_plan(..., sort: SortState)
   seconds while auto-refresh timing remains active.
 - Good: a 40-row Models table in a 7-row viewport formats seven rows and renders
   the same buffer as the equivalent visible prefix.
-- Good: sorting Daily by tokens updates the arrow and detail strip to follow the
-  selected row while leaving the loaded `Vec<DailyTrendPoint>` unchanged.
+- Good: sorting Daily by tokens updates the arrow and selected row while leaving
+  the loaded `Vec<DailyTrendPoint>` unchanged.
 - Base: loading/sync progress continues to animate at the existing 250 ms tick.
 - Bad: drawing at the top of every loop iteration, which restores permanent 4
   fps work even when no state changed.
@@ -109,7 +108,7 @@ overview::render_with_plan(..., sort: SortState)
 - Assert tick bursts coalesce while preserving following input order.
 - Assert a frame snapshot stays stable across a global theme change and existing
   all-theme/no-color buffer tests remain green.
-- Assert Models and Cost full-dataset buffers equal their visible-prefix buffers;
+- Assert Models and Monthly full-dataset buffers equal their visible-prefix buffers;
   keep Blocks rendering tests and source scans proving every scroll iterator has
   a visible `take` bound. Assert Models never renders `+N more`.
 - Property-test selection bounds, wrap, paging, and selected-row visibility.
