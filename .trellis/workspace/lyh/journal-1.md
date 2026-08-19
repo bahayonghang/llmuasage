@@ -1639,3 +1639,25 @@ Usage 页改为只读拉取 Grok/Kimi/Claude/Codex 订阅额度，Source Sync �
 ### Status
 
 [OK] **Completed**
+
+
+## Session 54: Dash Daily Hourly Monthly 对齐 tokscale
+
+**Date**: 2026-08-19
+**Task**: Dash Daily Hourly Monthly 对齐 tokscale
+**Branch**: `dev`
+
+### Summary
+
+将 dash Daily/Hourly 换成 tokscale 周期表，新增 Monthly 为第 6 个 tab，删除 TUI Cost tab。Hourly 按本地整点小时聚合并加日期分组行。Daily/Monthly 支持 Enter 明细。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7d5a5bf` | (see git log) |
+| `f58e6c2` | (see git log) |
+
+### Status
+
+[OK] **Completed**
