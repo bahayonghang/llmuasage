@@ -3222,7 +3222,11 @@ mod tests {
         assert!(charts_css.contains("width: 100%"));
         assert!(charts_css.contains(".calendar-heatmap-svg.is-long-range"));
         assert!(charts_css.contains("min-width: 640px"));
+        assert!(charts_css.contains(".heatmap-day-strip"));
+        assert!(components_css.contains(":has(#calendar-heatmap[hidden])"));
         assert!(calendar_js.contains("weekCount >= 40 ? ' is-long-range' : ''"));
+        assert!(calendar_js.contains("STRIP_MAX_DAYS"));
+        assert!(calendar_js.contains("isSingleDayRange"));
     }
 
     #[test]

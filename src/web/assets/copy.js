@@ -85,6 +85,7 @@ const UI_COPY_ZH = Object.freeze({
       less: '少', more: '多', empty: '当前筛选范围暂无每日用量。', loading: '正在加载每日活跃度…',
       recentYear: '全部范围仅展示最近一年', eventCount: '请求', tokenCount: 'Token',
       metricAria: '每日活跃度指标', weekdays: Object.freeze(['', '周一', '', '周三', '', '周五', '']),
+      weekdaysFull: Object.freeze(['周日', '周一', '周二', '周三', '周四', '周五', '周六']),
     }),
     trendsDaily: Object.freeze({
       title: '每日 Token 用量构成', sub: '按日查看输入、缓存读取、缓存写入与输出 Token。',
@@ -361,6 +362,7 @@ const UI_COPY_EN = Object.freeze({
       less: 'Less', more: 'More', empty: 'No daily usage in this filter range.', loading: 'Loading daily activity…',
       recentYear: 'All-time range shows only the most recent year', eventCount: 'requests', tokenCount: 'tokens',
       metricAria: 'Daily activity metric', weekdays: Object.freeze(['', 'Mon', '', 'Wed', '', 'Fri', '']),
+      weekdaysFull: Object.freeze(['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']),
     }),
     trendsDaily: Object.freeze({
       title: 'Daily token usage mix', sub: 'Daily input, cache read, cache creation, and output tokens.',

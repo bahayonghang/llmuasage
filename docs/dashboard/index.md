@@ -94,7 +94,10 @@ usage, estimated cost, active days, and cache-read share. The highlighted Token
 usage card also names the top source. Daily activity switches between token usage
 and request intensity, supports keyboard focus and tooltips, and
 clicks a date to drill the global filter into that day; clicking it again
-restores the previous range.
+restores the previous range. The last-1-day preset hides this calendar so Weekly
+activity uses the full row. Ranges of about a month or less render a labeled
+day strip. The all-time range keeps the week-column calendar and stretches it
+to the panel width.
 
 The daily stacked chart separates input, cache read, cache creation, and output
 tokens and includes daily cost in its tooltip. It intentionally shows an empty
@@ -112,7 +115,8 @@ panels as empty states instead of failing. The live dashboard initially loads
 secondary query does not block the first screen.
 
 Weekly activity folds 30-minute buckets into a Monday-first `7 x 24` grid using
-the browser's IANA timezone. It sits beside Daily activity on wide screens and
+the browser's IANA timezone. It sits beside Daily activity on wide screens,
+uses the full row when Daily activity is hidden for the last-1-day preset, and
 stacks below it on narrower screens. Highest-usage sessions supports server-side
 token usage, active-duration, and estimated-cost ordering. Selecting a session opens Event Logs with a
 server-side session filter; expanding an event fetches its retained raw JSON on

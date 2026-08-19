@@ -42,6 +42,7 @@ function getElement(id) {
   if (!elementRegistry.has(id)) {
     const el = {
       id,
+      hidden: false,
       dataset: {},
       mutations: [],
       insertAdjacentHTML(position, html) {
@@ -67,6 +68,7 @@ function getElement(id) {
 function resetMutations() {
   for (const el of elementRegistry.values()) {
     el.mutations = [];
+    el.hidden = false;
   }
 }
 
@@ -477,11 +479,38 @@ test('ready-widget renderers mutate only their section containers', () => {
   assert.ok(getElement('summary-cards').innerHTML.includes('summary-card featured'));
 
   resetMutations();
+  calendarHeatmap.renderCalendarHeatmap(context, { rangePreset: '1d', filters: {} });
+  assert.deepEqual(mutatedIds(), ['calendar-heatmap']);
+  assert.equal(getElement('calendar-heatmap').hidden, true);
+  assert.equal(getElement('calendar-heatmap').innerHTML, '');
+
+  resetMutations();
   calendarHeatmap.renderCalendarHeatmap(context, state);
   assert.deepEqual(mutatedIds(), ['calendar-heatmap']);
-  assert.ok(getElement('calendar-heatmap').innerHTML.includes('viewBox="0 0'));
+  assert.equal(getElement('calendar-heatmap').hidden, false);
+  assert.ok(getElement('calendar-heatmap').innerHTML.includes('heatmap-day-strip'));
   assert.ok(getElement('calendar-heatmap').innerHTML.includes('周一'));
   assert.ok(getElement('calendar-heatmap').innerHTML.includes('aria-label='));
+  assert.ok(!getElement('calendar-heatmap').innerHTML.includes('calendar-heatmap-svg'));
+
+  context.panels.heatmap = Array.from({ length: 30 }, (_value, index) => {
+    const date = new Date(Date.UTC(2026, 0, index + 1)).toISOString().slice(0, 10);
+    return { date, event_count: 1, total_tokens: index + 1 };
+  });
+  calendarHeatmap.renderCalendarHeatmap(context, { rangePreset: '30d', filters: {} });
+  assert.ok(getElement('calendar-heatmap').innerHTML.includes('heatmap-day-strip'));
+  assert.ok(!getElement('calendar-heatmap').innerHTML.includes('calendar-heatmap-svg'));
+
+  context.panels.heatmap = Array.from({ length: 32 }, (_value, index) => {
+    const date = new Date(Date.UTC(2026, 0, index + 1)).toISOString().slice(0, 10);
+    return { date, event_count: 1, total_tokens: index + 1 };
+  });
+  calendarHeatmap.renderCalendarHeatmap(context, {
+    rangePreset: 'custom',
+    filters: { since: '2026-01-01', until: '2026-02-01' },
+  });
+  assert.ok(getElement('calendar-heatmap').innerHTML.includes('calendar-heatmap-svg'));
+  assert.ok(!getElement('calendar-heatmap').innerHTML.includes('heatmap-day-strip'));
 
   context.panels.heatmap = Array.from({ length: 365 }, (_value, index) => {
     const date = new Date(Date.UTC(2025, 0, index + 1)).toISOString().slice(0, 10);
