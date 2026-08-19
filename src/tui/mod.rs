@@ -19,6 +19,7 @@ pub mod footer;
 pub mod format;
 pub mod help_dialog;
 pub mod input;
+pub mod model_vendor;
 pub mod nav_bar;
 pub mod panels;
 pub mod report_table;
@@ -357,13 +358,7 @@ fn apply_panel_result(state: &mut AppState, result: PanelResult) -> bool {
     match result.payload {
         PanelPayload::Overview(payload) => state.overview = Some(payload),
         PanelPayload::SyncCenter(payload) => state.sync_center = Some(payload),
-        PanelPayload::Models(payload) => {
-            state.model_collapse = payload
-                .as_ref()
-                .ok()
-                .and_then(|items| panels::models::collapse_plan(items));
-            state.models = Some(payload);
-        }
+        PanelPayload::Models(payload) => state.models = Some(payload),
         PanelPayload::Daily(payload) => state.daily = Some(payload),
         PanelPayload::Hourly(payload) => state.hourly = Some(payload),
         PanelPayload::Costs(payload) => {
@@ -430,7 +425,6 @@ fn panel_uses_time_window(panel: Panel) -> bool {
 
 fn invalidate_windowed_panel_data(state: &mut AppState) {
     state.models = None;
-    state.model_collapse = None;
     state.daily = None;
     state.hourly = None;
     state.costs = None;
@@ -461,7 +455,6 @@ fn invalidate_inactive_panel_data(state: &mut AppState) {
     }
     if active != Panel::Models {
         state.models = None;
-        state.model_collapse = None;
     }
     if active != Panel::Sources {
         state.daily = None;
@@ -491,13 +484,7 @@ fn update_scroll_total(state: &mut AppState, panel: Panel) {
             .as_ref()
             .and_then(|result| result.as_ref().ok())
             .map(|payload| payload.sources.len() + state.platform_probes.len()),
-        Panel::Models => state.models.as_ref().and_then(ok_len).map(|raw| {
-            if state.sort[Panel::Models as usize].key.is_some() {
-                raw
-            } else {
-                state.model_collapse.map_or(raw, |plan| plan.keep + 1)
-            }
-        }),
+        Panel::Models => state.models.as_ref().and_then(ok_len),
         Panel::Sources => state.daily.as_ref().and_then(ok_len),
         Panel::Projects => state.hourly.as_ref().and_then(ok_len),
         Panel::Cost => state.costs.as_ref().and_then(ok_len).map(|raw| {
@@ -598,7 +585,7 @@ mod tests {
                 "{name} must construct only the selected visible window"
             );
             assert!(
-                source.contains("selection_style()"),
+                source.contains("selection_style()") || source.contains("selection_fill_style()"),
                 "{name} must visibly style the selected row"
             );
         }

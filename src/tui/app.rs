@@ -303,6 +303,13 @@ pub struct SortState {
 }
 
 impl SortState {
+    pub fn cost_desc() -> Self {
+        Self {
+            key: Some(TableSortKey::Cost),
+            descending: true,
+        }
+    }
+
     pub fn header(self, label: &str, key: TableSortKey) -> String {
         if self.key != Some(key) {
             return label.to_string();
@@ -392,7 +399,6 @@ pub struct AppState {
     pub data_generation: u64,
     pub panel_loading: [bool; Panel::COUNT],
     pub sync_active: bool,
-    pub model_collapse: Option<Collapsed>,
     pub cost_collapse: Option<Collapsed>,
 }
 
@@ -413,7 +419,11 @@ impl AppState {
                 total: 0,
                 visible: 0,
             }),
-            sort: [SortState::default(); Panel::COUNT],
+            sort: {
+                let mut sort = [SortState::default(); Panel::COUNT];
+                sort[Panel::Models as usize] = SortState::cost_desc();
+                sort
+            },
             filter: QueryFilter::default(),
             overview: None,
             sync_center: None,
@@ -438,7 +448,6 @@ impl AppState {
             data_generation: 0,
             panel_loading: [false; Panel::COUNT],
             sync_active: false,
-            model_collapse: None,
             cost_collapse: None,
         }
     }
@@ -524,7 +533,6 @@ impl AppState {
             scroll.selected = 0;
         }
         self.panel_loading = [false; Panel::COUNT];
-        self.model_collapse = None;
         self.cost_collapse = None;
         self.needs_refresh = true;
     }
@@ -871,6 +879,7 @@ mod tests {
     #[test]
     fn sort_state_is_remembered_per_panel() {
         let mut state = AppState::new();
+        assert_eq!(state.sort[Panel::Models as usize], SortState::cost_desc());
         state.active_panel = Panel::Models;
         assert_eq!(state.cycle_sort(), Some((TableSortKey::Tokens, true)));
         state.active_panel = Panel::Cost;

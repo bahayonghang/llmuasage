@@ -37,7 +37,6 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                 content_area,
                 &state.models,
                 &state.scroll[Panel::Models as usize],
-                state.model_collapse,
                 state.sort[Panel::Models as usize],
             ),
             Panel::Sources => panels::daily::render_sorted(

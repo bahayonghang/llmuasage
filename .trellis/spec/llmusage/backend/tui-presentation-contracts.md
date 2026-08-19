@@ -17,7 +17,10 @@ TerminalColorMode::from_env() -> TrueColor | Ansi16 | NoColor
 theme::configure_from_env()
 theme::{fg_style, bold_style, bold_fg_style, selection_style}(...) -> Style
 tui::format::{grouped, tokens, footer_compact, axis_compact, stat_compact,
-              token_compact, cost, percent_ratio, metric_value}(...)
+              token_compact, cost, cost_compact, cache_multiplier,
+              cost_per_million, percent_ratio, metric_value}(...)
+theme::{vendor_style, metric_cache_hit, metric_cost_per_million,
+        selection_fill_style}(...)
 ```
 
 ### 3. Contracts
@@ -48,11 +51,21 @@ tui::format::{grouped, tokens, footer_compact, axis_compact, stat_compact,
   1,000 stay exact; larger values use decimal `K/M/B/T`, at most one fractional
   digit, no trailing `.0`, and promote when rounding would produce `1000` of a
   lower unit. It handles signed `i64` values including `i64::MIN`.
+- `cost_compact` formats Models Cost: non-finite or negative values become
+  `$0.00`; values `>= 1000` use one decimal `K`; otherwise `$x.xx`.
+- `cache_multiplier(read, input, write)` formats Cache× as `{:.1}x`. A zero
+  paid denominator (`input + write`) with `read > 0` is `∞`; both zero is `—`.
+- `cost_per_million(cost, total)` formats Cost/1M as `$` plus two decimals.
+  A zero total or a non-finite cost is `—`.
+- `metric_cache_hit` and `metric_cost_per_million` are theme slots for Cache×
+  and Cost/1M. `vendor_style(vendor, rank)` maps a cross-theme RGB ramp through
+  `adapt_color` and `bold_fg_style`. Models selection uses
+  `selection_fill_style` so cell foreground colors stay visible.
 - Overview, footer, Models, Daily, Hourly, Cost, Stats, Behavior, and Blocks use
   `stat_compact` for token and analytical count values. Usage sync counters stay
   exact and grouped because scans, inserts, stored events, and skipped files are
   reconciliation evidence. Cost, percentage, timestamp, JSON, web, statusline,
-  and CLI report-table formats remain independent.
+  and CLI report-table formats remain independent. `format::cost` stays `$x.xx`.
 
 ### 4. Validation & Error Matrix
 
@@ -102,6 +115,9 @@ tui::format::{grouped, tokens, footer_compact, axis_compact, stat_compact,
   extremes. Render screenshot-scale Overview data through wide and narrow
   `TestBackend` layouts, and keep representative panel plus Usage exact-count
   regression coverage.
+- Unit-test `cost_compact`, `cache_multiplier`, and `cost_per_million`.
+  Assert Models wide/narrow headers, no `+N more` fold, default Cost
+  descending, and NoColor cells without foreground, background, or modifiers.
 - Run strict clippy and `cargo test -- --test-threads=1`.
 
 ### 7. Wrong vs Correct

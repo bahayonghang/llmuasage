@@ -102,6 +102,40 @@ pub fn cost(value: f64) -> String {
     format!("${value:.2}")
 }
 
+/// Compact dollar amount for the Models Cost column.
+pub fn cost_compact(value: f64) -> String {
+    if !value.is_finite() || value < 0.0 {
+        return "$0.00".to_string();
+    }
+    if value >= 1000.0 {
+        format!("${:.1}K", value / 1000.0)
+    } else {
+        format!("${value:.2}")
+    }
+}
+
+/// Cache reuse multiplier: `cache_read / (input + cache_write)`.
+pub fn cache_multiplier(cache_read: i64, input: i64, cache_write: i64) -> String {
+    let read = cache_read.max(0) as u64;
+    let paid = input.max(0).saturating_add(cache_write.max(0)) as u64;
+    if paid == 0 {
+        return if read > 0 {
+            "∞".to_string()
+        } else {
+            "—".to_string()
+        };
+    }
+    format!("{:.1}x", read as f64 / paid as f64)
+}
+
+/// Cost per million tokens for the Models Cost/1M column.
+pub fn cost_per_million(cost: f64, total_tokens: i64) -> String {
+    if total_tokens == 0 || !cost.is_finite() {
+        return "—".to_string();
+    }
+    format!("${:.2}", cost / total_tokens as f64 * 1_000_000.0)
+}
+
 pub fn percent_ratio(value: f64) -> String {
     format!("{:.1}%", value * 100.0)
 }
@@ -132,6 +166,33 @@ mod tests {
         assert_eq!(cost(12.345), "$12.35");
         assert_eq!(percent_ratio(0.125), "12.5%");
         assert_eq!(metric_value(42.0), "42.00");
+    }
+
+    #[test]
+    fn cost_compact_uses_dollar_and_thousands_suffix() {
+        assert_eq!(cost_compact(12.59), "$12.59");
+        assert_eq!(cost_compact(12.345), "$12.35");
+        assert_eq!(cost_compact(1000.0), "$1.0K");
+        assert_eq!(cost_compact(12_345.6), "$12.3K");
+        assert_eq!(cost_compact(-1.0), "$0.00");
+        assert_eq!(cost_compact(f64::NAN), "$0.00");
+        assert_eq!(cost_compact(f64::INFINITY), "$0.00");
+    }
+
+    #[test]
+    fn cache_multiplier_handles_zero_and_ratio() {
+        assert_eq!(cache_multiplier(20, 5, 5), "2.0x");
+        assert_eq!(cache_multiplier(1, 0, 0), "∞");
+        assert_eq!(cache_multiplier(0, 0, 0), "—");
+        assert_eq!(cache_multiplier(3, 2, 0), "1.5x");
+    }
+
+    #[test]
+    fn cost_per_million_handles_zero_total() {
+        assert_eq!(cost_per_million(12.0, 1_000_000), "$12.00");
+        assert_eq!(cost_per_million(1.5, 500_000), "$3.00");
+        assert_eq!(cost_per_million(1.0, 0), "—");
+        assert_eq!(cost_per_million(f64::NAN, 100), "—");
     }
 
     #[test]

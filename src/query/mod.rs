@@ -187,6 +187,9 @@ pub struct ModelBreakdown {
     pub pricing_source: Option<String>,
     /// Aggregated pricing rate JSON, or `mixed` when multiple rates contributed.
     pub pricing_rate: Option<String>,
+    /// Distinct source ids for this model, sorted. TUI-only; omitted from JSON.
+    #[serde(skip_serializing)]
+    pub sources: Vec<String>,
 }
 
 /// Per-source aggregate plus freshest observed event time.
@@ -1131,7 +1134,8 @@ impl Dashboard {
                 CASE
                     WHEN COUNT(DISTINCT COALESCE(pricing_rate, '__llmusage_null__')) = 1 THEN MAX(pricing_rate)
                     ELSE '{PRICING_MIXED}'
-                END
+                END,
+                GROUP_CONCAT(DISTINCT source)
             FROM usage_bucket_30m
             {}
             GROUP BY model
@@ -1162,6 +1166,7 @@ impl Dashboard {
                     .unwrap_or_else(|| PRICING_UNPRICED.to_string()),
                 pricing_source: row.get(11)?,
                 pricing_rate: row.get(12)?,
+                sources: sorted_unique_sources(row.get(13)?),
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -3403,6 +3408,19 @@ impl Dashboard {
     }
 }
 
+fn sorted_unique_sources(raw: Option<String>) -> Vec<String> {
+    let mut sources: Vec<String> = raw
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(str::to_string)
+        .collect();
+    sources.sort_unstable();
+    sources.dedup();
+    sources
+}
+
 fn context_pressure_event_filter(filter: &QueryFilter) -> filter::SqlFilter {
     let mut event_filter = filter.event_filter(None);
     if filter.source.is_none() && (filter.since.is_some() || filter.until.is_some()) {
@@ -4521,6 +4539,50 @@ mod tests {
     #[test]
     fn cache_efficiency_zero_when_no_input() {
         assert_eq!(super::TokenSummary::default().cache_efficiency(), 0.0);
+    }
+
+    #[test]
+    fn sorted_unique_sources_trims_sorts_and_dedups() {
+        assert_eq!(
+            super::sorted_unique_sources(Some("codex, claude,codex,".to_string())),
+            vec!["claude".to_string(), "codex".to_string()]
+        );
+        assert_eq!(super::sorted_unique_sources(None), Vec::<String>::new());
+    }
+
+    #[test]
+    fn model_breakdown_keeps_one_row_and_sorted_sources() -> Result<()> {
+        let fixture = Fixture::new()?;
+        fixture.seed_event(SeedEvent {
+            event_key: "codex:shared-model:1",
+            source: "codex",
+            model: "gpt-5",
+            event_at: "2026-04-01T00:00:00Z",
+            hour_start: Some("2026-04-01T00:00:00Z"),
+            input_tokens: 10,
+            total_tokens: 10,
+            ..Default::default()
+        })?;
+        fixture.seed_event(SeedEvent {
+            event_key: "claude:shared-model:1",
+            source: "claude",
+            model: "gpt-5",
+            event_at: "2026-04-01T01:00:00Z",
+            hour_start: Some("2026-04-01T01:00:00Z"),
+            input_tokens: 5,
+            total_tokens: 5,
+            ..Default::default()
+        })?;
+
+        let models = Dashboard::open(fixture.store())?.model_breakdown(&Default::default())?;
+        let matches: Vec<_> = models.iter().filter(|row| row.model == "gpt-5").collect();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(
+            matches[0].sources,
+            vec!["claude".to_string(), "codex".to_string()]
+        );
+        assert_eq!(matches[0].total_tokens, 15);
+        Ok(())
     }
 
     /// Validates the 0.5.1 ccr-ui field contract: overview, daily trends,
