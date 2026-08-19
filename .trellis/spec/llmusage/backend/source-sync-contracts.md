@@ -145,6 +145,22 @@
   additive. No-op or pinned catalog bootstrap emits no pricing variants.
 - Bootstrap callback delivery must not persist progress or alter migration,
   pricing activation, lock acquisition, failure, or cancellation semantics.
+- `Dashboard::sync_command_center` headline and reason describe one ordinary
+  sync signal. Busy lock wins, then the newest usage-import `run_log` row with
+  `status == "failed"`, then an empty-status state, then ready. Lossy rebuild
+  risk is retained only as structured `safety` facts and never selects the
+  ordinary-sync warning tone or headline. Recovered `aborted` usage-import
+  rows do not select the failed headline after a later successful
+  usage-import run. Live job overlay may replace keys for a running, failed,
+  cancelled, or completed foreground job; completed overlays use the ready/good
+  keys until the refreshed payload is rendered.
+- Command-center `last_run` and `safety.recent_failures` read the last N
+  usage-import commands (`sync`, `sync --rebuild`, `hook-run`). They must not
+  use a mixed `serve`/other-command window. `safety.recent_failures` counts
+  `status == "failed"` rows in that window. `RunRecord::counts_as_failure`
+  remains the doctor/health predicate, includes aborted recovery, and excludes
+  user-cancelled (`cancelled`) runs. The store owns one stale-recovery entry
+  point for all three usage-import commands; CLI and JobRegistry must use it.
 - Human progress rendering lives in `src/commands/sync_progress.rs` behind one
   event entry and one copy source (`human_progress_line`). TTY stderr renders
   indicatif bars (OpenCode is a spinner because its `files_scanned` counts
@@ -261,6 +277,11 @@
   NDJSON variants, stdout purity, and structured log phase fields.
 - A multi-thread `#[tokio::test]` covering the TUI sync action, duplicate-start
   cancellation, progress text projection, and bounded shutdown behavior.
+- Command-center regressions covering recovered abort plus later successful
+  sync with rebuild risk (ready/good headline, success last_run, preserved
+  risk facts), usage-import last-run surviving serve-row noise, and failed
+  last-run pairing the failed headline with `lastRunFailed` even when rebuild
+  risk is also present.
 
 ### 7. Wrong vs Correct
 

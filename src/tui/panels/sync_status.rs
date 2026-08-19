@@ -134,11 +134,7 @@ fn render_summary(
             Span::styled("  rebuild-risk ", theme::muted_style()),
             Span::styled(
                 yes_no(payload.safety.lossy_rebuild_risk),
-                if payload.safety.lossy_rebuild_risk {
-                    metric_style(theme::warning_fg())
-                } else {
-                    metric_style(theme::positive_fg())
-                },
+                theme::muted_style(),
             ),
             Span::styled("  monitored ", theme::muted_style()),
             Span::styled(
@@ -157,6 +153,24 @@ fn render_summary(
             "last run: none recorded",
             theme::muted_style(),
         ));
+    }
+    if !payload.safety.risk_details.is_empty() {
+        let details = payload
+            .safety
+            .risk_details
+            .iter()
+            .map(|detail| {
+                format!(
+                    "{} missing={} protected={}",
+                    detail.source, detail.missing_file_count, detail.protected_event_count
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        lines.push(Line::from(vec![
+            Span::styled("rebuild-risk facts ", theme::muted_style()),
+            Span::styled(details, theme::muted_style()),
+        ]));
     }
 
     frame.render_widget(Paragraph::new(lines), area);
@@ -293,9 +307,7 @@ fn source_row(
         ])
     };
 
-    if source.lossy_rebuild_risk {
-        row = row.style(metric_style(theme::warning_fg()));
-    } else if index % 2 == 1 {
+    if index % 2 == 1 {
         row = row.style(theme::row_alt_style());
     }
     row
@@ -388,10 +400,10 @@ fn issue_spans(source: &SyncSourcePayload) -> Vec<Span<'static>> {
 }
 
 fn last_run_spans(last_run: &SyncLastRunPayload) -> Vec<Span<'static>> {
-    let status_style = if last_run.status == "success" {
-        metric_style(theme::positive_fg())
-    } else {
-        metric_style(theme::warning_fg())
+    let status_style = match last_run.status.as_str() {
+        "success" => metric_style(theme::positive_fg()),
+        "cancelled" => theme::muted_style(),
+        _ => metric_style(theme::warning_fg()),
     };
     vec![
         Span::styled("last run ", theme::muted_style()),
@@ -420,6 +432,7 @@ fn reason_text(key: &str) -> &'static str {
     match key {
         "syncCenter.reason.ready" => "local status looks usable",
         "syncCenter.reason.empty" => "no sync status has been recorded",
+        "syncCenter.reason.lastRunFailed" => "the latest usage import failed",
         "syncCenter.reason.rebuildRisk" => "missing source files protect stored history",
         _ => "check sync details below",
     }

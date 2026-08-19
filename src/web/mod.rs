@@ -3222,7 +3222,11 @@ mod tests {
         assert!(charts_css.contains("width: 100%"));
         assert!(charts_css.contains(".calendar-heatmap-svg.is-long-range"));
         assert!(charts_css.contains("min-width: 640px"));
+        assert!(charts_css.contains(".heatmap-day-strip"));
+        assert!(components_css.contains(":has(#calendar-heatmap[hidden])"));
         assert!(calendar_js.contains("weekCount >= 40 ? ' is-long-range' : ''"));
+        assert!(calendar_js.contains("STRIP_MAX_DAYS"));
+        assert!(calendar_js.contains("isSingleDayRange"));
     }
 
     #[test]
@@ -5617,6 +5621,14 @@ mod tests {
         assert_eq!(center["safety"]["ordinary_sync_safe"], true);
         assert_eq!(center["safety"]["lossy_rebuild_risk"], true);
         assert_eq!(center["safety"]["risk_sources"][0], "codex");
+        assert_eq!(center["safety"]["risk_details"][0]["source"], "codex");
+        assert_eq!(center["safety"]["risk_details"][0]["missing_file_count"], 1);
+        assert_eq!(
+            center["safety"]["risk_details"][0]["protected_event_count"],
+            1
+        );
+        assert_eq!(center["headline_key"], "syncCenter.headline.failed");
+        assert_eq!(center["reason_key"], "syncCenter.reason.lastRunFailed");
         assert_eq!(center["last_run"]["status"], "failed");
         assert_eq!(center["last_run"]["finished_at"], "2026-05-29T00:05:00Z");
         assert_eq!(

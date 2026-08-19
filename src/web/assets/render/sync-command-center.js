@@ -74,6 +74,16 @@ function centerWithJobOverlay(center, snapshot) {
     };
   }
 
+  if (snapshot.status === 'completed') {
+    return {
+      ...(center || {}),
+      tone: 'good',
+      headline_key: 'syncCenter.headline.ready',
+      reason_key: 'syncCenter.reason.ready',
+      current_job,
+    };
+  }
+
   return center;
 }
 
@@ -111,11 +121,6 @@ function metricCards(center, running) {
 
 function safetyLine(center) {
   const copy = UI_COPY.sections.syncCenter;
-  const safety = center?.safety || {};
-  const risks = safety.risk_sources || [];
-  if (risks.length > 0 || safety.lossy_rebuild_risk) {
-    return `${copy.riskPrefix}${risks.length ? ` ${risks.map((item) => escapeHtml(item)).join(', ')}` : ''}`;
-  }
   if (!hasUsableCenter(center)) {
     return copy.sourcesEmpty;
   }
@@ -140,7 +145,7 @@ function sourceSegmentedBar(center) {
     <div class="sync-command-center-segmented-bar" role="list" aria-label="${escapeHtml(copy.sourceShareAria)}">
       ${segments
         .map(({ source, share }) => {
-          const tone = source.lossy_rebuild_risk ? 'warn' : source.tone || 'neutral';
+          const tone = source.tone || 'neutral';
           const percent = Math.max(1, share * 100);
           return `
             <span
@@ -168,7 +173,7 @@ function sourceCards(center) {
   return sources
     .map((source) => {
       const status = copy.sourceStatus[source.status] || source.status || '--';
-      const tone = source.lossy_rebuild_risk ? 'warn' : source.tone || 'neutral';
+      const tone = source.tone || 'neutral';
       return `
         <article class="sync-command-center-source" data-tone="${escapeHtml(tone)}">
           <div class="sync-command-center-source-head">
@@ -230,6 +235,9 @@ function summaryRows(center, activeJobSnapshot, running) {
     rows.push({ label: labels.jobId, value: shortId(current.job_id || current.id) });
     rows.push({ label: labels.lastEvent, value: eventLabel(currentLastEvent) });
     rows.push({ label: labels.started, value: current.started_at || '--' });
+    if (current.status === 'completed' && current.finished_at) {
+      rows.push({ label: labels.finished, value: current.finished_at });
+    }
     if (current['error_key']) rows.push({ label: labels.error, value: displayKey(current['error_key']) });
   }
 
@@ -254,6 +262,20 @@ function summaryRows(center, activeJobSnapshot, running) {
           `,
         )
         .join('')}
+    </div>
+  `;
+}
+
+function riskDetails(center) {
+  const details = center?.safety?.risk_details || [];
+  if (details.length === 0) return '';
+  const copy = UI_COPY.sections.syncCenter;
+  return `
+    <div class="sync-command-center-status" data-state="neutral">
+      <div class="sync-command-center-status-row">
+        <span>${escapeHtml(copy.riskFacts)}</span>
+        <strong>${escapeHtml(details.map((detail) => `${detail.source}: missing=${formatNumber(detail.missing_file_count)}, protected=${formatNumber(detail.protected_event_count)}`).join(' · '))}</strong>
+      </div>
     </div>
   `;
 }
@@ -286,6 +308,18 @@ function secondaryStatus(center, activeJobSnapshot, running) {
           <strong>${escapeHtml(current.status)}</strong>
           <span>${escapeHtml(event)} · ${escapeHtml(current.finished_at || current.started_at || '--')}</span>
           ${current['error_key'] ? `<span>${escapeHtml(displayKey(current['error_key']))}</span>` : ''}
+        </div>
+      </div>
+    `;
+  }
+
+  if (current?.status === 'completed') {
+    const event = eventLabel(current?.last_event || activeJobSnapshot?.last_event || current_job?.last_event);
+    return `
+      <div class="sync-command-center-secondary" data-state="completed">
+        <div class="sync-command-center-secondary-copy">
+          <strong>${escapeHtml(getShellCopy('shell.sync.completed'))}</strong>
+          <span>${escapeHtml(event)} · ${escapeHtml(current.finished_at || current.started_at || '--')}</span>
         </div>
       </div>
     `;
@@ -426,7 +460,11 @@ export function renderSyncCommandCenter(context, state) {
   const copy = UI_COPY.sections.syncCenter;
   const workerLock = copy.workerLockState[center?.safety?.worker_lock] || center?.safety?.worker_lock || '--';
   const detailsOpen = Boolean(running || center?.safety?.lossy_rebuild_risk || center?.safety?.worker_lock === 'busy');
-  const detailBlocks = [secondaryStatus(center, activeJobSnapshot, running), summaryRows(center, activeJobSnapshot, running)]
+  const detailBlocks = [
+    secondaryStatus(center, activeJobSnapshot, running),
+    summaryRows(center, activeJobSnapshot, running),
+    riskDetails(center),
+  ]
     .filter(Boolean)
     .join('');
   const sourceSegments = sourceSegmentedBar(center);

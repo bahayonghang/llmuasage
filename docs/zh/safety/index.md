@@ -42,6 +42,11 @@ llmusage sync
 
 普通 sync 导入新增/变化的本地源记录。如果之前导入过的文件型来源现在缺失，sync 会保留已导入 usage history，并把源文件标为 missing 供 diagnostics 使用。
 
+Web 与 TUI 的同步命令中心会把缺失文件/重建保护显示为中性事实，不会把它当成普通
+sync 失败。标题只反映锁占用、最近一次 usage-import 失败、空状态或就绪；缺失文件数和
+本地库保留事件数仍在同步详情中可追溯。前台同步会在释放 worker lock 前写入 `run_log`，
+因此看板中的最近命令与 `finished_at` 会跟随本次运行一起更新。
+
 ## 普通 sync 自动修复安全的旧版 accounting
 
 普通无界 `llmusage sync` 会检测本次所选 parser 来源是否仍使用旧版 token-accounting

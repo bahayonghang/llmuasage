@@ -171,7 +171,7 @@ pub struct RunRecord {
 impl RunRecord {
     /// Returns whether this run should surface as a recent failure in health/doctor views.
     pub fn counts_as_failure(&self) -> bool {
-        self.status != "success" && self.status != "running"
+        self.status != "success" && self.status != "running" && self.status != "cancelled"
     }
 }
 

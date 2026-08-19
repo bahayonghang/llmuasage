@@ -1,0 +1,6 @@
+{"file":".trellis/spec/llmusage/backend/index.md","reason":"Load the llmusage backend pre-development checklist and focused validation order."}
+{"file":".trellis/spec/llmusage/backend/source-sync-contracts.md","reason":"Preserve sync summaries, command-center payloads, cancellation drain semantics, and required regression coverage."}
+{"file":".trellis/spec/llmusage/backend/write-fencing-contracts.md","reason":"Keep run-log recovery/start/finish mutations inside the generation-fenced worker-lock lifetime."}
+{"file":".trellis/tasks/08-19-dash-sync-feedback-rebuild-risk/research/review-corrections.md","reason":"Load verified field evidence, corrected code boundaries, and the focused dashboard lifecycle contract without truncating the oversized full spec."}
+{"file":".trellis/spec/llmusage/backend/tui-presentation-contracts.md","reason":"Apply neutral versus warning presentation consistently to the shared TUI command-center payload."}
+{"file":".trellis/spec/llmusage/backend/ci-toolchain-contracts.md","reason":"Respect ARCH-002 layer boundaries and run the repository's canonical Rust and full CI gates."}

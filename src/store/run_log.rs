@@ -1,8 +1,24 @@
 use crate::error::Result;
-use rusqlite::{Connection, params, params_from_iter, types::Value as SqlValue};
+use rusqlite::{Connection, Row, params, params_from_iter, types::Value as SqlValue};
 
 use super::{RunRecord, Store};
 use crate::util::now_utc;
+
+/// Commands that import usage into SQLite. Command-center last-run and
+/// failure headlines read this family, not mixed `serve` rows.
+pub(crate) const USAGE_IMPORT_COMMANDS: [&str; 3] = ["sync", "sync --rebuild", "hook-run"];
+
+fn map_run_record(row: &Row<'_>) -> rusqlite::Result<RunRecord> {
+    Ok(RunRecord {
+        id: row.get(0)?,
+        command: row.get(1)?,
+        status: row.get(2)?,
+        summary: row.get(3)?,
+        error: row.get(4)?,
+        started_at: row.get(5)?,
+        finished_at: row.get(6)?,
+    })
+}
 
 /// Borrowed view onto the `run_log` surface of [`Store`].
 ///
@@ -90,6 +106,12 @@ impl<'a> RunLog<'a> {
             .write_transaction(|tx| Ok(tx.execute(&sql, params_from_iter(params))?))
     }
 
+    /// Recover every stale usage-import run using the single command family
+    /// consumed by command-center and health projections.
+    pub fn recover_running_usage_import_runs(&self) -> Result<usize> {
+        self.recover_running_runs(&USAGE_IMPORT_COMMANDS)
+    }
+
     pub fn recent_runs(&self, limit: usize) -> Result<Vec<RunRecord>> {
         let conn = self.store.open_connection()?;
         self.recent_runs_with_conn(&conn, limit)
@@ -108,17 +130,64 @@ impl<'a> RunLog<'a> {
             LIMIT ?1
             "#,
         )?;
-        let rows = stmt.query_map(params![limit as i64], |row| {
-            Ok(RunRecord {
-                id: row.get(0)?,
-                command: row.get(1)?,
-                status: row.get(2)?,
-                summary: row.get(3)?,
-                error: row.get(4)?,
-                started_at: row.get(5)?,
-                finished_at: row.get(6)?,
-            })
-        })?;
+        let rows = stmt.query_map(params![limit as i64], map_run_record)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub(crate) fn recent_usage_import_runs_with_conn(
+        &self,
+        conn: &Connection,
+        limit: usize,
+    ) -> Result<Vec<RunRecord>> {
+        let placeholders = USAGE_IMPORT_COMMANDS
+            .iter()
+            .enumerate()
+            .map(|(idx, _)| format!("?{}", idx + 2))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            r#"
+            SELECT id, command, status, summary, error, started_at, finished_at
+            FROM run_log
+            WHERE command IN ({placeholders})
+            ORDER BY id DESC
+            LIMIT ?1
+            "#
+        );
+        let mut params = vec![SqlValue::Integer(limit as i64)];
+        for command in USAGE_IMPORT_COMMANDS {
+            params.push(SqlValue::Text(command.to_string()));
+        }
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(params), map_run_record)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tempfile::TempDir;
+
+    use super::*;
+    use crate::paths::AppPaths;
+
+    #[test]
+    fn usage_import_recovery_covers_all_commands_without_touching_serve() -> Result<()> {
+        let temp = TempDir::new().map_err(crate::error::LlmusageError::from)?;
+        let paths = AppPaths::with_root(temp.path().to_path_buf())?;
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+
+        for command in ["sync", "sync --rebuild", "hook-run", "serve"] {
+            store.run_log().record_run_start(command)?;
+        }
+
+        assert_eq!(store.run_log().recover_running_usage_import_runs()?, 3);
+        let runs = store.run_log().recent_runs(10)?;
+        assert_eq!(runs.iter().filter(|run| run.status == "aborted").count(), 3);
+        assert!(runs.iter().any(|run| {
+            run.command == "serve" && run.status == "running" && run.finished_at.is_none()
+        }));
+        Ok(())
     }
 }

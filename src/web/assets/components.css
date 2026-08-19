@@ -2557,6 +2557,14 @@ svg.i {
   align-items: start;
 }
 
+.analytics-heatmaps:has(#calendar-heatmap[hidden]) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.analytics-heatmaps:has(#calendar-heatmap[hidden]) > .analytics-divider {
+  display: none;
+}
+
 .analytics-heatmaps > * {
   min-width: 0;
 }

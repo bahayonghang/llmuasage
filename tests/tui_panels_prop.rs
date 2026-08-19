@@ -180,6 +180,7 @@ fn sample_sync_payload() -> SyncCommandCenterPayload {
             worker_lock_holder: None,
             lossy_rebuild_risk: false,
             risk_sources: Vec::new(),
+            risk_details: Vec::new(),
             recent_failures: 0,
         },
         metrics: SyncMetricsPayload {
@@ -1010,6 +1011,26 @@ fn usage_overlay_uses_compact_columns_on_narrow_widths() {
         !text.contains("Inserted"),
         "narrow sync overlay should hide wide-only columns: {text}"
     );
+}
+
+#[test]
+fn usage_overlay_keeps_rebuild_protection_facts_neutral() {
+    let mut payload = sample_sync_payload();
+    payload.safety.lossy_rebuild_risk = true;
+    payload.safety.risk_sources = vec!["claude".to_string()];
+    payload.safety.risk_details = vec![llmusage::query::SyncRiskSourcePayload {
+        source: "claude".to_string(),
+        missing_file_count: 728,
+        protected_event_count: 36_495,
+    }];
+    payload.sources[0].lossy_rebuild_risk = true;
+    let text = render_sync_status_text(payload, sample_platform_probes(), 120, 18);
+
+    assert!(text.contains("Ready to sync"));
+    assert!(text.contains("rebuild-risk facts"));
+    assert!(text.contains("missing=728"));
+    assert!(text.contains("protected=36495"));
+    assert!(!text.contains("Rebuild risk"));
 }
 
 #[test]

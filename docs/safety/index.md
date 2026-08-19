@@ -42,6 +42,13 @@ llmusage sync
 
 Normal sync imports new/changed local source artifacts. If a file-backed source that was previously imported is now missing, sync keeps imported usage history and marks the source file as missing for diagnostics.
 
+The Web and TUI sync command center treats this missing-file/rebuild protection
+as a neutral fact, not as an ordinary sync failure. Its headline reflects lock
+contention, the latest failed usage import, an empty state, or readiness; the
+source and protected-event counts remain visible in sync details. A completed
+foreground sync writes a `run_log` row before releasing the worker lock, so the
+latest command and `finished_at` update with the same run shown by the panel.
+
 ## Normal sync repairs safe legacy accounting
 
 An unbounded normal `llmusage sync` detects selected parser sources that still

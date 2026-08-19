@@ -6,6 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use anyhow::anyhow;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
@@ -351,6 +352,13 @@ struct JobContext {
     executor: Arc<dyn crate::sync::executor::SyncExecutor>,
 }
 
+enum JobRunOutcome {
+    CancelledBeforeStart,
+    Cancelled(SyncSummary),
+    Completed(SyncSummary),
+    Failed(anyhow::Error),
+}
+
 impl JobContext {
     /// Fires terminal hooks, then evicts the oldest terminal jobs beyond
     /// [`MAX_TERMINAL_JOBS`].
@@ -401,7 +409,8 @@ async fn run_job(
         .send(SyncEvent::LockWaiting { timeout_ms: 30_000 })
         .await;
     let lock_started = Instant::now();
-    let result = match acquire_worker_lock_for_job(&store, Duration::from_secs(30), &cancel).await {
+    let outcome = match acquire_worker_lock_for_job(&store, Duration::from_secs(30), &cancel).await
+    {
         Ok(Some(lock)) => {
             let fenced_store = lock.fenced_store();
             let heartbeat = lock.start_default_heartbeat();
@@ -411,26 +420,93 @@ async fn run_job(
                     wait_ms: lock_wait_ms,
                 })
                 .await;
-            let result = match fenced_store.bootstrap() {
+            let outcome = match fenced_store.bootstrap() {
+                Err(err) => JobRunOutcome::Failed(anyhow::Error::new(err)),
+                Ok(()) if cancel.is_cancelled() => JobRunOutcome::CancelledBeforeStart,
                 Ok(()) => {
-                    ctx.executor
-                        .run_once(
-                            &app,
-                            &fenced_store,
-                            lock_wait_ms,
-                            &sync_options,
-                            Some(&mut internal_tx),
-                            &cancel,
-                        )
-                        .await
+                    let command_name = if request.rebuild() {
+                        "sync --rebuild"
+                    } else {
+                        "sync"
+                    };
+                    let run_log = fenced_store.run_log();
+                    match run_log.recover_running_usage_import_runs() {
+                        Ok(_) if cancel.is_cancelled() => JobRunOutcome::CancelledBeforeStart,
+                        Ok(_) => match run_log.record_run_start(command_name) {
+                            Ok(run_id) => {
+                                let execution = ctx
+                                    .executor
+                                    .run_once(
+                                        &app,
+                                        &fenced_store,
+                                        lock_wait_ms,
+                                        &sync_options,
+                                        Some(&mut internal_tx),
+                                        &cancel,
+                                    )
+                                    .await;
+                                let (status, summary, error, outcome) = match execution {
+                                    Ok(summary) if cancel.is_cancelled() => (
+                                        "cancelled",
+                                        Some(summary.summary_text()),
+                                        Some("cancelled by user".to_string()),
+                                        JobRunOutcome::Cancelled(summary),
+                                    ),
+                                    Ok(summary) => (
+                                        "success",
+                                        Some(summary.summary_text()),
+                                        None,
+                                        JobRunOutcome::Completed(summary),
+                                    ),
+                                    Err(err) => {
+                                        let message = format!("{err:#}");
+                                        (
+                                            "failed",
+                                            None,
+                                            Some(message.clone()),
+                                            JobRunOutcome::Failed(anyhow::Error::msg(message)),
+                                        )
+                                    }
+                                };
+                                match run_log.finish_run(
+                                    run_id,
+                                    status,
+                                    summary.as_deref(),
+                                    error.as_deref(),
+                                ) {
+                                    Ok(()) => outcome,
+                                    Err(finish_err) => JobRunOutcome::Failed(anyhow!(
+                                        "记录 {command_name} 的 run_log 收尾失败: {finish_err}; 原始终态={status}; 原始错误={}",
+                                        error.as_deref().unwrap_or("none")
+                                    )),
+                                }
+                            }
+                            Err(err) => JobRunOutcome::Failed(anyhow::Error::new(err)),
+                        },
+                        Err(err) => JobRunOutcome::Failed(anyhow::Error::new(err)),
+                    }
                 }
-                Err(err) => Err(anyhow::Error::new(err)),
             };
             drop(heartbeat);
             drop(lock);
-            result
+            outcome
         }
-        Ok(None) => {
+        Ok(None) => JobRunOutcome::CancelledBeforeStart,
+        Err(err) => JobRunOutcome::Failed(anyhow::Error::new(err)),
+    };
+    finish_job(job_id, internal_tx, event_forwarder, state, ctx, outcome).await;
+}
+
+async fn finish_job(
+    job_id: JobId,
+    internal_tx: mpsc::Sender<JobEvent>,
+    event_forwarder: tokio::task::JoinHandle<()>,
+    state: Arc<Mutex<JobState>>,
+    ctx: JobContext,
+    outcome: JobRunOutcome,
+) {
+    match outcome {
+        JobRunOutcome::CancelledBeforeStart => {
             let _ = internal_tx.send(SyncEvent::Cancelled).await;
             finish_state(
                 &state,
@@ -438,24 +514,17 @@ async fn run_job(
                 Some("cancellation requested".to_string()),
                 None,
             );
-            ctx.retire(&job_id);
-            drop(internal_tx);
-            let _ = event_forwarder.await;
-            return;
         }
-        Err(err) => Err(anyhow::Error::new(err)),
-    };
-    match result {
-        Ok(summary) if cancel.is_cancelled() => {
+        JobRunOutcome::Cancelled(summary) => {
             let _ = internal_tx.send(SyncEvent::Cancelled).await;
             finish_state(
                 &state,
                 JobStatus::Cancelled,
-                Some(summary_text(&summary)),
+                Some(summary.summary_text()),
                 None,
             );
         }
-        Ok(summary) => {
+        JobRunOutcome::Completed(summary) => {
             let event = SyncEvent::Finished {
                 summary: SyncSummaryEvent {
                     sources: summary.sources.len(),
@@ -468,12 +537,12 @@ async fn run_job(
             finish_state(
                 &state,
                 JobStatus::Completed,
-                Some(summary_text(&summary)),
+                Some(summary.summary_text()),
                 None,
             );
         }
-        Err(err) => {
-            let message = err.to_string();
+        JobRunOutcome::Failed(err) => {
+            let message = format!("{err:#}");
             let _ = internal_tx
                 .send(SyncEvent::Failed {
                     error: message.clone(),
@@ -531,16 +600,6 @@ fn finish_state(
     }
 }
 
-fn summary_text(summary: &SyncSummary) -> String {
-    format!(
-        "sources={} seen={} inserted_delta={} stored_events={}",
-        summary.sources.len(),
-        summary.total_seen,
-        summary.total_inserted,
-        summary.stored_events
-    )
-}
-
 /// Records a terminal job in the bounded deque and evicts the oldest entries
 /// that exceed `MAX_TERMINAL_JOBS`. O(1) amortized — one push, at most one pop
 /// and one DashMap remove per call.
@@ -586,6 +645,8 @@ mod tests {
         worker_started: Arc<AtomicBool>,
         worker_drained: Arc<AtomicBool>,
     }
+
+    struct LockStealingExecutor;
 
     impl crate::sync::executor::SyncExecutor for IdleExecutor {
         fn run_once<'a>(
@@ -671,6 +732,36 @@ mod tests {
         }
     }
 
+    impl crate::sync::executor::SyncExecutor for LockStealingExecutor {
+        fn run_once<'a>(
+            &'a self,
+            _app: &'a AppContext,
+            store: &'a Store,
+            _lock_wait_ms: u64,
+            _options: &'a SyncRunOptions,
+            _sender: Option<&'a mut mpsc::Sender<SyncEvent>>,
+            _cancel: &'a CancellationToken,
+        ) -> crate::sync::executor::BoxFuture<'a, anyhow::Result<SyncSummary>> {
+            Box::pin(async move {
+                let conn = store.open_connection()?;
+                conn.execute(
+                    "UPDATE worker_lock SET lease_expires_at = '2000-01-01T00:00:00Z' WHERE lock_name = 'sync-worker'",
+                    [],
+                )?;
+                drop(conn);
+                let stolen =
+                    store.acquire_worker_lock_with(Duration::from_secs(1), HolderKind::Library)?;
+                drop(stolen);
+                Ok(SyncSummary {
+                    sources: Vec::new(),
+                    total_seen: 0,
+                    total_inserted: 0,
+                    stored_events: 0,
+                })
+            })
+        }
+    }
+
     #[tokio::test]
     async fn executor_receives_store_fenced_by_acquired_generation() -> anyhow::Result<()> {
         let temp = TempDir::new()?;
@@ -687,6 +778,17 @@ mod tests {
         )
         .await?;
         assert!(completed.error.is_none());
+        let run = store
+            .run_log()
+            .recent_runs(10)?
+            .into_iter()
+            .find(|run| run.command == "sync")
+            .expect("JobRegistry run_log row");
+        assert_eq!(run.status, "success");
+        assert_eq!(
+            run.summary.as_deref(),
+            Some("sources=0 seen=0 inserted_delta=0 stored_events=0")
+        );
         Ok(())
     }
 
@@ -725,6 +827,78 @@ mod tests {
         .await?;
         assert!(worker_drained.load(Ordering::Acquire));
         assert!(cancelled.finished_at.is_some());
+        let run = store
+            .run_log()
+            .recent_runs(10)?
+            .into_iter()
+            .find(|run| run.command == "sync")
+            .expect("cancelled JobRegistry run_log row");
+        assert_eq!(run.status, "cancelled");
+        assert!(!run.counts_as_failure());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cancellation_while_waiting_for_lock_does_not_create_run_log_row() -> anyhow::Result<()>
+    {
+        let temp = TempDir::new()?;
+        let paths = AppPaths::with_root(temp.path().to_path_buf())?;
+        let store = Store::new(&paths)?;
+        let setup_lock = store.acquire_worker_lock_with(Duration::from_secs(1), HolderKind::Cli)?;
+        setup_lock.fenced_store().bootstrap()?;
+        drop(setup_lock);
+        let held_lock = store.acquire_worker_lock_with(Duration::from_secs(1), HolderKind::Cli)?;
+        let registry = idle_registry();
+        let (job_id, _rx) = registry.start(&store, SyncOptions::default());
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(
+            registry.snapshot(&job_id).map(|snapshot| snapshot.status),
+            Some(JobStatus::Running)
+        );
+        assert!(registry.cancel(&job_id));
+        let cancelled = wait_for_status(
+            &registry,
+            &job_id,
+            JobStatus::Cancelled,
+            Duration::from_secs(2),
+        )
+        .await?;
+        assert!(cancelled.finished_at.is_some());
+        assert!(store.run_log().recent_runs(10)?.is_empty());
+        drop(held_lock);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn finish_run_lock_loss_reports_failed_instead_of_completed() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = AppPaths::with_root(temp.path().to_path_buf())?;
+        let store = Store::new(&paths)?;
+        let registry = JobRegistry::new(Arc::new(LockStealingExecutor));
+
+        let (job_id, _rx) = registry.start(&store, SyncOptions::default());
+        let failed = wait_for_status(
+            &registry,
+            &job_id,
+            JobStatus::Failed,
+            Duration::from_secs(2),
+        )
+        .await?;
+        assert!(
+            failed.error.as_deref().is_some_and(|error| {
+                error.contains("run_log") && error.contains("收尾失败")
+            })
+        );
+        let run = store
+            .run_log()
+            .recent_runs(10)?
+            .into_iter()
+            .find(|run| run.command == "sync")
+            .expect("stale running row");
+        assert_eq!(run.status, "running");
+        assert_eq!(store.run_log().recover_running_usage_import_runs()?, 1);
+        assert_eq!(store.run_log().recent_runs(1)?[0].status, "aborted");
         Ok(())
     }
 

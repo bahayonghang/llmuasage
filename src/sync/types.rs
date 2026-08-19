@@ -152,6 +152,19 @@ pub struct SyncSummary {
     pub stored_events: usize,
 }
 
+impl SyncSummary {
+    /// Stable run-log summary shared by CLI and in-process JobRegistry syncs.
+    pub fn summary_text(&self) -> String {
+        format!(
+            "sources={} seen={} inserted_delta={} stored_events={}",
+            self.sources.len(),
+            self.total_seen,
+            self.total_inserted,
+            self.stored_events
+        )
+    }
+}
+
 /// Options accepted by a sync run.
 #[derive(Debug, Clone, Default)]
 pub struct SyncRunOptions {

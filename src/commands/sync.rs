@@ -112,10 +112,7 @@ async fn run_with_human_events(
         bootstrap_ms = bootstrap_started.elapsed().as_millis() as u64,
         "bootstrap finished"
     );
-    // Keep the historical hook-run label so stale rows from older releases recover.
-    fenced_store
-        .run_log()
-        .recover_running_runs(&["sync", "hook-run"])?;
+    fenced_store.run_log().recover_running_usage_import_runs()?;
     let (mut tx, mut rx) = mpsc::channel(128);
     let cancel = CancellationToken::new();
     let ctrl_c_tx = tx.clone();
@@ -153,15 +150,7 @@ async fn run_with_human_events(
             )
             .await
         },
-        |item| {
-            Some(format!(
-                "sources={} seen={} inserted_delta={} stored_events={}",
-                item.sources.len(),
-                item.total_seen,
-                item.total_inserted,
-                item.stored_events
-            ))
-        },
+        |item| Some(item.summary_text()),
     )
     .await;
     if let Err(err) = &summary_result {
@@ -241,10 +230,7 @@ async fn run_with_json_events(
             };
             fenced_store.bootstrap_with_progress(Some(&mut bootstrap_sink))?;
         }
-        // Keep the historical hook-run label so stale rows from older releases recover.
-        fenced_store
-            .run_log()
-            .recover_running_runs(&["sync", "hook-run"])?;
+        fenced_store.run_log().recover_running_usage_import_runs()?;
         let command_name = if options.rebuild {
             "sync --rebuild"
         } else {
@@ -264,15 +250,7 @@ async fn run_with_json_events(
                 )
                 .await
             },
-            |item| {
-                Some(format!(
-                    "sources={} seen={} inserted_delta={} stored_events={}",
-                    item.sources.len(),
-                    item.total_seen,
-                    item.total_inserted,
-                    item.stored_events
-                ))
-            },
+            |item| Some(item.summary_text()),
         )
         .await?;
         drop(heartbeat);
@@ -377,10 +355,7 @@ pub async fn run_store_once_with_options(
     let heartbeat = lock.start_default_heartbeat();
     let lock_wait_ms = lock_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
     fenced_store.bootstrap()?;
-    // Keep the historical hook-run label so stale rows from older releases recover.
-    fenced_store
-        .run_log()
-        .recover_running_runs(&["sync", "hook-run"])?;
+    fenced_store.run_log().recover_running_usage_import_runs()?;
     let command_name = if options.rebuild {
         "sync --rebuild"
     } else {
@@ -391,15 +366,7 @@ pub async fn run_store_once_with_options(
         &fenced_store,
         command_name,
         async { run_once_locked(&fenced_store, lock_wait_ms, options, None, &cancel).await },
-        |item| {
-            Some(format!(
-                "sources={} seen={} inserted_delta={} stored_events={}",
-                item.sources.len(),
-                item.total_seen,
-                item.total_inserted,
-                item.stored_events
-            ))
-        },
+        |item| Some(item.summary_text()),
     )
     .await?;
     drop(heartbeat);

@@ -1,0 +1,6 @@
+{"file":".trellis/spec/llmusage/backend/index.md","reason":"Verify the complete llmusage backend quality gate and required focused checks."}
+{"file":".trellis/spec/llmusage/backend/source-sync-contracts.md","reason":"Check run-log terminal states, shared Web/TUI payload semantics, cancellation boundaries, and regressions."}
+{"file":".trellis/spec/llmusage/backend/write-fencing-contracts.md","reason":"Audit that every run-log mutation uses the fenced Store before heartbeat and lock release."}
+{"file":".trellis/tasks/08-19-dash-sync-feedback-rebuild-risk/research/review-corrections.md","reason":"Check implementation against verified root-cause evidence and the completed-overlay to reloaded-payload transition contract."}
+{"file":".trellis/spec/llmusage/backend/tui-presentation-contracts.md","reason":"Check that rebuild protection is neutral while real lock, import, source, and parse failures remain warnings."}
+{"file":".trellis/spec/llmusage/backend/ci-toolchain-contracts.md","reason":"Run architecture dependency enforcement, all-feature Rust checks, and the final just ci gate."}
