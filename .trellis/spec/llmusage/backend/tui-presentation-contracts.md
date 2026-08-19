@@ -19,7 +19,7 @@ theme::{fg_style, bold_style, bold_fg_style, selection_style}(...) -> Style
 tui::format::{grouped, tokens, footer_compact, axis_compact, stat_compact,
               token_compact, cost, cost_compact, cache_multiplier,
               cost_per_million, percent_ratio, metric_value}(...)
-theme::{vendor_style, metric_cache_hit, metric_cost_per_million,
+theme::{vendor_style, vendor_fg, metric_cache_hit, metric_cost_per_million,
         selection_fill_style}(...)
 ```
 
@@ -58,9 +58,13 @@ theme::{vendor_style, metric_cache_hit, metric_cost_per_million,
 - `cost_per_million(cost, total)` formats Cost/1M as `$` plus two decimals.
   A zero total or a non-finite cost is `—`.
 - `metric_cache_hit` and `metric_cost_per_million` are theme slots for Cache×
-  and Cost/1M. `vendor_style(vendor, rank)` maps a cross-theme RGB ramp through
-  `adapt_color` and `bold_fg_style`. Models selection uses
+  and Cost/1M. `vendor_fg(vendor, rank)` and `vendor_style(vendor, rank)` map a
+  cross-theme RGB ramp through `adapt_color`. Models and Overview selection use
   `selection_fill_style` so cell foreground colors stay visible.
+- Overview is a stacked daily chart, a top-model legend, and a two-line
+  Models-by-Cost list. It does not render KPI cards, Token Mix, Freshness, or
+  24h Pulse. Chart axis labels and list token counts use `stat_compact`. List
+  totals use `cost_compact`.
 - Overview, footer, Models, Daily, Hourly, Cost, Stats, Behavior, and Blocks use
   `stat_compact` for token and analytical count values. Usage sync counters stay
   exact and grouped because scans, inserts, stored events, and skipped files are
@@ -69,20 +73,20 @@ theme::{vendor_style, metric_cache_hit, metric_cost_per_million,
 
 ### 4. Validation & Error Matrix
 
-| Condition | Required result |
-| --- | --- |
-| `NO_COLOR` exists | `NoColor`, regardless of `TERM`/`COLORTERM` |
-| truthy `LLMUSAGE_NO_COLOR` | `NoColor` |
-| `LLMUSAGE_NO_COLOR=0|false|no|off` | Continue capability detection |
-| `COLORTERM=truecolor` | Preserve RGB theme slots |
-| `TERM=xterm-256color`, no truecolor marker | Map RGB slots to ANSI16 |
-| no capability variables | Preserve default truecolor behavior |
-| unknown `LLMUSAGE_THEME` | Use `dark` without failing startup |
-| panel-local `Color::*` added | Source guard test fails |
-| Chinese interactive copy added | TUI language guard fails |
-| `999`, `1_000`, `12_500` | `999`, `1K`, `12.5K` |
-| `999_950`, `999_950_000` | Promote to `1M`, `1B`; never render `1000K/M` |
-| Usage sync count `8_000` | Keep exact grouped output `8,000` |
+| Condition                                  | Required result                               |
+| ------------------------------------------ | --------------------------------------------- |
+| `NO_COLOR` exists                          | `NoColor`, regardless of `TERM`/`COLORTERM`   |
+| truthy `LLMUSAGE_NO_COLOR`                 | `NoColor`                                     |
+| `LLMUSAGE_NO_COLOR=0                       | false                                         | no  | off` | Continue capability detection |
+| `COLORTERM=truecolor`                      | Preserve RGB theme slots                      |
+| `TERM=xterm-256color`, no truecolor marker | Map RGB slots to ANSI16                       |
+| no capability variables                    | Preserve default truecolor behavior           |
+| unknown `LLMUSAGE_THEME`                   | Use `dark` without failing startup            |
+| panel-local `Color::*` added               | Source guard test fails                       |
+| Chinese interactive copy added             | TUI language guard fails                      |
+| `999`, `1_000`, `12_500`                   | `999`, `1K`, `12.5K`                          |
+| `999_950`, `999_950_000`                   | Promote to `1M`, `1B`; never render `1000K/M` |
+| Usage sync count `8_000`                   | Keep exact grouped output `8,000`             |
 
 ### 5. Good/Base/Bad Cases
 
@@ -91,7 +95,7 @@ theme::{vendor_style, metric_cache_hit, metric_cost_per_million,
 - Good: `TERM=xterm-256color LLMUSAGE_THEME=lagoon llmusage dash` renders the
   Lagoon semantic palette using ANSI16 colors only.
 - Base: `llmusage dash` with no color variables renders historical dark colors.
-- Good: Overview renders `18_214_785_227` as `18.2B` in both wide and narrow
+- Good: Overview list renders `640_400_000` as `640.4M` in both wide and narrow
   layouts while sorting and calculations still use the original integer.
 - Bad: returning `Color::Reset` while retaining `Modifier::BOLD`; that is still
   styling and violates `NoColor`.
@@ -112,9 +116,9 @@ theme::{vendor_style, metric_cache_hit, metric_cost_per_million,
 - Scan panel/source-picker source for `Color::*` and interactive TUI source/tests
   for Chinese UI strings.
 - Unit-test compact thresholds, rounding promotion, negatives, and signed
-  extremes. Render screenshot-scale Overview data through wide and narrow
-  `TestBackend` layouts, and keep representative panel plus Usage exact-count
-  regression coverage.
+  extremes. Render screenshot-scale Overview chart/list data through wide and
+  narrow `TestBackend` layouts, including NoColor cells, and keep representative
+  panel plus Usage exact-count regression coverage.
 - Unit-test `cost_compact`, `cache_multiplier`, and `cost_per_million`.
   Assert Models wide/narrow headers, no `+N more` fold, default Cost
   descending, and NoColor cells without foreground, background, or modifiers.

@@ -24,6 +24,7 @@ pub mod nav_bar;
 pub mod panels;
 pub mod report_table;
 pub mod source_picker;
+pub mod stacked_bar;
 mod sync_control;
 pub mod theme;
 
@@ -414,7 +415,8 @@ fn panel_has_data(state: &AppState, panel: Panel) -> bool {
 fn panel_uses_time_window(panel: Panel) -> bool {
     matches!(
         panel,
-        Panel::Models
+        Panel::Overview
+            | Panel::Models
             | Panel::Sources
             | Panel::Projects
             | Panel::Cost
@@ -424,6 +426,7 @@ fn panel_uses_time_window(panel: Panel) -> bool {
 }
 
 fn invalidate_windowed_panel_data(state: &mut AppState) {
+    state.overview = None;
     state.models = None;
     state.daily = None;
     state.hourly = None;
@@ -432,6 +435,7 @@ fn invalidate_windowed_panel_data(state: &mut AppState) {
     state.stats = None;
     state.behavior = None;
     for panel in [
+        Panel::Overview,
         Panel::Models,
         Panel::Sources,
         Panel::Projects,
@@ -479,6 +483,11 @@ fn invalidate_inactive_panel_data(state: &mut AppState) {
 
 fn update_scroll_total(state: &mut AppState, panel: Panel) {
     let total = match panel {
+        Panel::Overview => state
+            .overview
+            .as_ref()
+            .and_then(|result| result.as_ref().ok())
+            .map(|payload| payload.models.len()),
         Panel::Trends => state
             .sync_center
             .as_ref()
@@ -633,22 +642,29 @@ mod tests {
         state.data_generation = 4;
         state.time_window = TimeWindow::All;
 
-        state.active_panel = Panel::Models;
-        let managed = PanelResult {
-            panel: Panel::Models,
-            filter: state.filter.clone(),
-            time_window: TimeWindow::Week7d,
-            generation: 4,
-            refreshing: false,
-            payload: PanelPayload::Models(Err("unused".to_string())),
-        };
-        assert!(!panel_result_matches(&state, &managed));
-
         for (panel, payload) in [
+            (
+                Panel::Models,
+                PanelPayload::Models(Err("unused".to_string())),
+            ),
             (
                 Panel::Overview,
                 PanelPayload::Overview(Err("unused".to_string())),
             ),
+        ] {
+            state.active_panel = panel;
+            let managed = PanelResult {
+                panel,
+                filter: state.filter.clone(),
+                time_window: TimeWindow::Week7d,
+                generation: 4,
+                refreshing: false,
+                payload,
+            };
+            assert!(!panel_result_matches(&state, &managed), "{panel:?}");
+        }
+
+        for (panel, payload) in [
             (
                 Panel::Trends,
                 PanelPayload::SyncCenter(Err("unused".to_string())),

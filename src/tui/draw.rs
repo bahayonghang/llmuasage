@@ -24,7 +24,13 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         nav_bar::render(frame, nav_area, state.active_panel);
 
         match state.active_panel {
-            Panel::Overview => panels::overview::render(frame, content_area, &state.overview),
+            Panel::Overview => panels::overview::render_with_plan(
+                frame,
+                content_area,
+                &state.overview,
+                &state.scroll[Panel::Overview as usize],
+                state.sort[Panel::Overview as usize],
+            ),
             Panel::Trends => panels::usage::render(
                 frame,
                 content_area,

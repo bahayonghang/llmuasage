@@ -115,8 +115,8 @@ fn render_status(frame: &mut Frame, area: Rect, state: &AppState) {
         spans.push(Span::styled(
             format!(
                 "{} tokens • ${:.2}",
-                stat_compact(overview.total.total_tokens),
-                overview.total_cost_usd
+                stat_compact(overview.totals.total.total_tokens),
+                overview.totals.total_cost_usd
             ),
             theme::muted_style(),
         ));

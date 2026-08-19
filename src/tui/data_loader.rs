@@ -10,14 +10,15 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     domain::source_descriptor::registered_source_descriptors,
     query::{
-        ContextPressurePayload, CostLine, DailyTrendPoint, Dashboard, ModelBreakdown,
-        OverviewPayload, QueryFilter, SyncCommandCenterPayload, TrendPoint,
-        reports::BlockReportRow,
+        ContextPressurePayload, CostLine, DailyTrendPoint, Dashboard, ModelBreakdown, QueryFilter,
+        SyncCommandCenterPayload, TrendPoint, reports::BlockReportRow,
     },
     store::Store,
 };
 
-use super::app::{BehaviorPanelPayload, Panel, StatsPanelPayload, TimeWindow};
+use super::app::{
+    BehaviorPanelPayload, OverviewPanelPayload, Panel, StatsPanelPayload, TimeWindow,
+};
 
 const TUI_DASHBOARD_QUERY_PERMITS: usize = 5;
 const TUI_RESULT_CHANNEL_CAPACITY: usize = 32;
@@ -41,7 +42,7 @@ pub(super) struct PanelResult {
 }
 
 pub(super) enum PanelPayload {
-    Overview(Result<OverviewPayload, String>),
+    Overview(Result<OverviewPanelPayload, String>),
     SyncCenter(Result<SyncCommandCenterPayload, String>),
     Models(Result<Vec<ModelBreakdown>, String>),
     Daily(Result<Vec<DailyTrendPoint>, String>),
@@ -115,10 +116,7 @@ async fn load_panel_request(
     let window_filter = request.time_window.query_filter(&filter);
     let payload = match request.panel {
         Panel::Overview => PanelPayload::Overview(
-            run_query(store, semaphore, cancel, move |dashboard| {
-                dashboard.overview(&filter).map_err(|err| err.to_string())
-            })
-            .await,
+            load_overview_panel_data(store, semaphore, cancel, filter, window_filter).await,
         ),
         Panel::Trends => PanelPayload::SyncCenter(
             run_query(store, semaphore, cancel, move |dashboard| {
@@ -182,6 +180,38 @@ async fn load_panel_request(
         refreshing: request.refreshing,
         payload,
     }
+}
+
+async fn load_overview_panel_data(
+    store: Store,
+    semaphore: Arc<Semaphore>,
+    cancel: CancellationToken,
+    base_filter: QueryFilter,
+    window_filter: QueryFilter,
+) -> Result<OverviewPanelPayload, String> {
+    let totals = run_query(store.clone(), Arc::clone(&semaphore), cancel.clone(), {
+        let filter = base_filter;
+        move |dashboard| dashboard.overview(&filter).map_err(|err| err.to_string())
+    });
+    let daily_models = run_query(store.clone(), Arc::clone(&semaphore), cancel.clone(), {
+        let filter = window_filter.clone();
+        move |dashboard| {
+            dashboard
+                .trends_daily_by_model(&filter)
+                .map_err(|err| err.to_string())
+        }
+    });
+    let models = run_query(store, semaphore, cancel, move |dashboard| {
+        dashboard
+            .model_breakdown(&window_filter)
+            .map_err(|err| err.to_string())
+    });
+    let (totals, daily_models, models) = tokio::join!(totals, daily_models, models);
+    Ok(OverviewPanelPayload {
+        totals: totals?,
+        daily_models: daily_models?,
+        models: models?,
+    })
 }
 
 async fn load_stats_panel_data(

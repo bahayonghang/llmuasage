@@ -21,6 +21,7 @@ EventHandler::recv() -> Result<TuiEvent>
 theme::with_render_snapshot(|| render_frame())
 cost::render_with_plan(..., collapse: Option<Collapsed>)
 models::render_with_plan(..., sort: SortState)
+overview::render_with_plan(..., sort: SortState)
 ```
 
 ### 3. Contracts
@@ -45,39 +46,41 @@ models::render_with_plan(..., sort: SortState)
   length and does not fold a long tail.
 - Windowing and memoization are internal only: the same payload, scroll offset,
   terminal size, and theme must produce the same `TestBackend` cells.
-- Models, Daily, Hourly, Cost, Blocks, and the Stats source table use one
-  `ScrollState` for selection and windowing. Single-row movement wraps; paging
-  and Home/End clamp. Selected rows use `theme::selection_style()`, except
-  Models which uses `theme::selection_fill_style()` so cell foreground colors
-  stay visible.
-- Models, Daily, Cost, and Blocks keep independent `SortState` values. `o`
-  cycles the panel's supported columns, `O` reverses direction, stable in-memory
-  sorting preserves ties and the row collection, and the active header shows an
-  arrow. Models starts as Cost descending. An unsorted Cost view uses its
-  collapsed row count; a sorted Cost view uses the raw payload length and
-  disables long-tail collapse. Models always uses the raw payload length.
+- Models, Daily, Hourly, Cost, Blocks, Overview, and the Stats source table use
+  one `ScrollState` for selection and windowing. Single-row movement wraps;
+  paging and Home/End clamp. Selected rows use `theme::selection_style()`,
+  except Models and Overview which use `theme::selection_fill_style()` so cell
+  foreground colors stay visible.
+- Overview, Models, Daily, Cost, and Blocks keep independent `SortState`
+  values. `o` cycles the panel's supported columns, `O` reverses direction,
+  stable in-memory sorting preserves ties and the row collection, and the
+  active header shows an arrow. Overview and Models start as Cost descending.
+  An unsorted Cost view uses its collapsed row count; a sorted Cost view uses
+  the raw payload length and disables long-tail collapse. Overview and Models
+  always use the raw payload length. Overview chart and list follow
+  `TimeWindow`; `All` paints at most the last 60 local dates.
 - Mouse wheel events map to the same row movement actions as the keyboard.
   Footer spinner frames are fixed-width ASCII and render only while a panel load
   or sync is active.
 
 ### 4. Validation & Error Matrix
 
-| Condition | Required result |
-| --- | --- |
-| 40 idle ticks after initial frame | 0 draw requests |
-| loading or sync active on tick | Advance animation and request a frame |
-| panel/sync result received | Mutate state and request a frame |
-| three ticks followed by a key | Return one tick, then the key |
-| theme changes inside a frame | Current frame stays on its snapshot |
-| Cost generation changes | Recompute Cost collapse plan once on acceptance |
-| Models generation changes | Use the raw model count; do not fold |
-| scroll offset changes | Reuse Cost collapse plan and format visible rows only |
-| payload/filter/window invalidated | Clear payload and its derived Cost plan |
-| row movement at first/last item | Wrap for single-row movement; never leave bounds |
-| page movement past either edge | Clamp at first/last item and keep it visible |
-| sort direction changes | Reorder the loaded references only; do not query or mutate payload |
-| Cost sort becomes active | Use raw length and suppress the ranked-order collapse plan |
-| no panel load or sync active | Render no spinner and keep idle ticks clean |
+| Condition                         | Required result                                                    |
+| --------------------------------- | ------------------------------------------------------------------ |
+| 40 idle ticks after initial frame | 0 draw requests                                                    |
+| loading or sync active on tick    | Advance animation and request a frame                              |
+| panel/sync result received        | Mutate state and request a frame                                   |
+| three ticks followed by a key     | Return one tick, then the key                                      |
+| theme changes inside a frame      | Current frame stays on its snapshot                                |
+| Cost generation changes           | Recompute Cost collapse plan once on acceptance                    |
+| Models generation changes         | Use the raw model count; do not fold                               |
+| scroll offset changes             | Reuse Cost collapse plan and format visible rows only              |
+| payload/filter/window invalidated | Clear payload and its derived Cost plan                            |
+| row movement at first/last item   | Wrap for single-row movement; never leave bounds                   |
+| page movement past either edge    | Clamp at first/last item and keep it visible                       |
+| sort direction changes            | Reorder the loaded references only; do not query or mutate payload |
+| Cost sort becomes active          | Use raw length and suppress the ranked-order collapse plan         |
+| no panel load or sync active      | Render no spinner and keep idle ticks clean                        |
 
 ### 5. Good/Base/Bad Cases
 

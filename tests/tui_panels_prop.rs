@@ -6,19 +6,26 @@
 //! expected strings appear in the rendered output.
 
 use proptest::prelude::*;
-use ratatui::{Terminal, backend::TestBackend, layout::Rect};
+use ratatui::{
+    Terminal,
+    backend::TestBackend,
+    layout::Rect,
+    style::{Color, Modifier},
+};
 
 use llmusage::domain::platform_monitor::{ParserSupportStatus, PlatformProbe, PlatformProbeStatus};
 use llmusage::query::{
     ActivityBreakdown, ActivityPayload, BehaviorSupport, CategoryCompareRow, CompareMetric,
-    CompareModelCandidate, ContextPressurePayload, CostLine, CursorHealth, DailyTrendPoint,
-    HealthPayload, HeatmapPoint, ModelBreakdown, ModelComparePayload, ModelCompareStats,
-    OptimizeFinding, OptimizePayload, OverviewPayload, SourceBreakdown, SyncActionPayload,
-    SyncCommandCenterPayload, SyncMetricsPayload, SyncSafetyPayload, SyncSourcePayload,
-    TokenSummary, ToolBreakdown, ToolsPayload, TrendPoint, ZombieItem, ZombieReport,
+    CompareModelCandidate, ContextPressurePayload, CostLine, CursorHealth, DailyModelPoint,
+    DailyTrendPoint, HealthPayload, HeatmapPoint, ModelBreakdown, ModelComparePayload,
+    ModelCompareStats, OptimizeFinding, OptimizePayload, OverviewPayload, SourceBreakdown,
+    SyncActionPayload, SyncCommandCenterPayload, SyncMetricsPayload, SyncSafetyPayload,
+    SyncSourcePayload, TokenSummary, ToolBreakdown, ToolsPayload, TrendPoint, ZombieItem,
+    ZombieReport,
 };
 use llmusage::tui::app::{
-    ActiveDialog, AppState, BehaviorPanelPayload, Panel, ScrollState, StatsPanelPayload,
+    ActiveDialog, AppState, BehaviorPanelPayload, OverviewPanelPayload, Panel, ScrollState,
+    StatsPanelPayload,
 };
 use llmusage::tui::format::{cost_compact, stat_compact};
 use llmusage::tui::theme;
@@ -63,55 +70,6 @@ fn buffer_text(terminal: &Terminal<TestBackend>) -> String {
 }
 
 // ─── Strategies ───────────────────────────────────────────────────────────────
-
-fn arb_token_summary() -> impl Strategy<Value = TokenSummary> {
-    (
-        0i64..5_000_000_000,
-        0i64..5_000_000_000,
-        0i64..5_000_000_000,
-        0i64..5_000_000_000,
-        0i64..5_000_000_000,
-    )
-        .prop_map(
-            |(input, cache_creation, cache, output, reasoning)| TokenSummary {
-                input_tokens: input,
-                cache_creation_tokens: cache_creation,
-                cache_read_tokens: cache,
-                output_tokens: output,
-                reasoning_output_tokens: reasoning,
-                total_tokens: input + cache_creation + cache + output + reasoning,
-            },
-        )
-}
-
-fn arb_overview_payload() -> impl Strategy<Value = OverviewPayload> {
-    (
-        arb_token_summary(),
-        arb_token_summary(),
-        0i64..2_000_000,
-        0i64..2_000_000,
-        0.0f64..10000.0,
-        0.0f64..1.0,
-        proptest::option::of("[a-z]{5,10}"),
-    )
-        .prop_map(
-            |(total, last_24h, source_count, bucket_count, cost, efficiency, last_sync)| {
-                OverviewPayload {
-                    generated_at: "2025-01-01T00:00:00Z".to_string(),
-                    total,
-                    last_24h,
-                    source_count,
-                    bucket_count,
-                    total_events: 0,
-                    last_24h_events: 0,
-                    total_cost_usd: cost,
-                    cache_efficiency: efficiency,
-                    last_sync_at: last_sync,
-                    last_export_at: None,
-                }
-            },
-        )
-}
 
 fn arb_model_breakdown() -> impl Strategy<Value = ModelBreakdown> {
     (
@@ -328,10 +286,10 @@ fn render_usage_text(
     buffer_text(&terminal)
 }
 
-fn render_overview_text(payload: OverviewPayload, width: u16, height: u16) -> String {
+fn render_overview_text(payload: OverviewPanelPayload, width: u16, height: u16) -> String {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     let area = Rect::new(0, 0, width, height);
-    let data: Option<Result<OverviewPayload, String>> = Some(Ok(payload));
+    let data: Option<Result<OverviewPanelPayload, String>> = Some(Ok(payload));
 
     terminal
         .draw(|frame| {
@@ -342,7 +300,7 @@ fn render_overview_text(payload: OverviewPayload, width: u16, height: u16) -> St
     buffer_text(&terminal)
 }
 
-fn sample_overview_payload() -> OverviewPayload {
+fn sample_overview_totals() -> OverviewPayload {
     OverviewPayload {
         generated_at: "2026-06-12T00:00:00Z".to_string(),
         total: TokenSummary {
@@ -365,93 +323,167 @@ fn sample_overview_payload() -> OverviewPayload {
     }
 }
 
-#[test]
-fn overview_panel_renders_summary_sections_and_24h_pulse() {
-    let mut payload = sample_overview_payload();
-    payload.last_24h = TokenSummary {
-        input_tokens: 1_000,
-        cache_creation_tokens: 500,
-        cache_read_tokens: 1_000,
-        output_tokens: 2_000,
-        reasoning_output_tokens: 1_000,
-        total_tokens: 5_500,
-    };
-    payload.last_24h_events = 2;
+fn sample_overview_model(
+    model: &str,
+    input: i64,
+    output: i64,
+    cache_read: i64,
+    cache_write: i64,
+    cost: f64,
+) -> ModelBreakdown {
+    ModelBreakdown {
+        model: model.to_string(),
+        input_tokens: input,
+        cache_creation_tokens: cache_write,
+        cache_read_tokens: cache_read,
+        output_tokens: output,
+        reasoning_output_tokens: 0,
+        total_tokens: input + output + cache_read + cache_write,
+        event_count: 1,
+        cost_with_cache_usd: cost,
+        cost_without_cache_usd: cost,
+        cache_savings_usd: 0.0,
+        pricing_status: "static".to_string(),
+        pricing_source: None,
+        pricing_rate: None,
+        sources: Vec::new(),
+    }
+}
 
+fn sample_overview_payload() -> OverviewPanelPayload {
+    OverviewPanelPayload {
+        totals: sample_overview_totals(),
+        daily_models: vec![
+            DailyModelPoint {
+                date: "2026-07-18".to_string(),
+                model: "gpt-5.5".to_string(),
+                total_tokens: 1_000,
+            },
+            DailyModelPoint {
+                date: "2026-07-19".to_string(),
+                model: "claude-opus-5".to_string(),
+                total_tokens: 2_000,
+            },
+        ],
+        models: vec![
+            sample_overview_model(
+                "gpt-5.5",
+                640_400_000,
+                41_700_000,
+                6_300_000_000,
+                0,
+                8_200.0,
+            ),
+            sample_overview_model(
+                "claude-opus-5",
+                11_500_000,
+                4_100_000,
+                874_000_000,
+                107_200_000,
+                1_260.0,
+            ),
+        ],
+    }
+}
+
+#[test]
+fn overview_panel_renders_chart_and_cost_list() {
+    let payload = sample_overview_payload();
     let text = render_overview_text(payload, 120, 30);
 
     for expected in [
-        "Token Mix",
-        "Recent Activity",
-        "Freshness",
-        "24h Pulse",
-        "Input",
-        "Cache read",
-        "Avg/event",
-        "Generated",
-        "All-time share",
-        "5.5K",
-        "2.8K",
-        "25.0%",
+        "Tokens per Day",
+        "Models by Cost",
+        "Total:",
+        "gpt-5.5",
+        "claude-opus-5",
+        "In:",
+        "Out:",
+        "CR:",
+        "CW:",
+        "640.4M",
+        "6.3B",
     ] {
         assert!(
             text.contains(expected),
             "overview panel should contain '{expected}', got: {text}"
         );
     }
+    for unexpected in ["Token Mix", "24h Pulse", "Freshness", "Total Tokens"] {
+        assert!(
+            !text.contains(unexpected),
+            "overview panel should not contain '{unexpected}', got: {text}"
+        );
+    }
 }
 
 #[test]
 fn overview_panel_compacts_screenshot_scale_statistics_in_wide_and_narrow_layouts() {
-    let mut payload = sample_overview_payload();
-    payload.total = TokenSummary {
-        input_tokens: 1_029_915_980,
-        cache_creation_tokens: 308_679_097,
-        cache_read_tokens: 16_727_462_769,
-        output_tokens: 102_129_668,
-        reasoning_output_tokens: 31_392_730,
-        total_tokens: 18_214_785_227,
-    };
-    payload.last_24h = TokenSummary {
-        input_tokens: 13_747_991,
-        cache_creation_tokens: 4_145_779,
-        cache_read_tokens: 269_193_939,
-        output_tokens: 1_317_422,
-        reasoning_output_tokens: 339_434,
-        total_tokens: 288_694_891,
-    };
-    payload.total_events = 137_075;
-    payload.last_24h_events = 2_155;
-    payload.bucket_count = 3_968;
+    let payload = sample_overview_payload();
 
-    for (width, height) in [(120, 30), (80, 30)] {
-        let text = render_overview_text(payload.clone(), width, height);
-        for expected in ["18.2B", "288.7M"] {
-            assert!(
-                text.contains(expected),
-                "{width}x{height} overview should contain '{expected}', got: {text}"
-            );
-        }
-        for exact in ["18,214,785,227", "288,694,891"] {
-            assert!(
-                !text.contains(exact),
-                "{width}x{height} overview should not contain '{exact}', got: {text}"
-            );
-        }
-    }
-
-    let wide = render_overview_text(payload, 120, 30);
-    for expected in ["1B", "16.7B", "137.1K", "2.2K", "4K"] {
+    let wide = render_overview_text(payload.clone(), 120, 30);
+    for expected in [
+        "640.4M", "6.3B", "874M", "107.2M", "Total:", "$9.5K", "86.7%",
+    ] {
         assert!(
             wide.contains(expected),
             "wide overview should contain '{expected}', got: {wide}"
         );
     }
+    assert!(
+        !wide.contains("640,400,000"),
+        "wide overview should not contain exact input, got: {wide}"
+    );
+
+    let narrow = render_overview_text(payload, 70, 30);
+    assert!(
+        narrow.contains("640.4M"),
+        "narrow overview should compact input, got: {narrow}"
+    );
+    assert!(
+        !narrow.contains("In:"),
+        "narrow overview should use slash token mix, got: {narrow}"
+    );
+}
+
+#[test]
+fn overview_panel_empty_models_and_no_long_tail() {
+    let mut payload = sample_overview_payload();
+    payload.models.clear();
+    payload.daily_models.clear();
+    let empty = render_overview_text(payload, 120, 30);
+    assert!(
+        empty.contains("No model data found."),
+        "empty overview should explain missing models, got: {empty}"
+    );
+    assert!(
+        !empty.contains("+N more") && !empty.contains("more ·"),
+        "overview must not fold a long tail, got: {empty}"
+    );
+}
+
+#[test]
+fn overview_panel_nocolor_has_no_styles() {
+    theme::set_color_mode(theme::TerminalColorMode::NoColor);
+    let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+    let data = Some(Ok(sample_overview_payload()));
+    terminal
+        .draw(|frame| {
+            llmusage::tui::panels::overview::render(frame, Rect::new(0, 0, 120, 30), &data);
+        })
+        .unwrap();
+    for cell in terminal.backend().buffer().content() {
+        assert_eq!(cell.fg, Color::Reset);
+        assert_eq!(cell.bg, Color::Reset);
+        assert_eq!(cell.modifier, Modifier::empty());
+    }
+    theme::set_color_mode(theme::TerminalColorMode::TrueColor);
+    theme::set_theme(theme::Theme::default_dark());
 }
 
 fn sample_stats_payload() -> StatsPanelPayload {
     StatsPanelPayload {
-        overview: sample_overview_payload(),
+        overview: sample_overview_totals(),
         heatmap: vec![
             HeatmapPoint {
                 date: "2026-06-09".to_string(),
@@ -1062,44 +1094,30 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(100))]
 
     #[test]
-    fn prop_overview_panel_renders_all_required_fields(payload in arb_overview_payload()) {
+    fn prop_overview_panel_renders_all_required_fields(model in arb_model_breakdown()) {
         let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
         let area = Rect::new(0, 0, 120, 30);
-        let data: Option<Result<OverviewPayload, String>> = Some(Ok(payload.clone()));
+        let payload = OverviewPanelPayload {
+            totals: sample_overview_totals(),
+            daily_models: vec![DailyModelPoint {
+                date: "2026-07-18".to_string(),
+                model: model.model.clone(),
+                total_tokens: model.total_tokens,
+            }],
+            models: vec![model.clone()],
+        };
+        let data: Option<Result<OverviewPanelPayload, String>> = Some(Ok(payload));
 
         terminal.draw(|frame| {
             llmusage::tui::panels::overview::render(frame, area, &data);
         }).unwrap();
 
         let text = buffer_text(&terminal);
-
-        // total_cost_usd with 2 decimal places
-        let cost_str = format!("{:.2}", payload.total_cost_usd);
-        prop_assert!(text.contains(&cost_str),
-            "Missing total_cost_usd '{}' in output", cost_str);
-
-        // cache_efficiency as percentage (1 decimal place)
-        let eff_str = format!("{:.1}%", payload.cache_efficiency * 100.0);
-        prop_assert!(text.contains(&eff_str),
-            "Missing cache_efficiency '{}' in output", eff_str);
-
-        // source_count
-        let sc_str = stat_compact(payload.source_count);
-        prop_assert!(text.contains(&sc_str),
-            "Missing source_count '{}' in output", sc_str);
-
-        // bucket_count
-        let bc_str = stat_compact(payload.bucket_count);
-        prop_assert!(text.contains(&bc_str),
-            "Missing bucket_count '{}' in output", bc_str);
-
-        // last_sync_at or "Never synced"
-        match &payload.last_sync_at {
-            Some(ts) => prop_assert!(text.contains(ts),
-                "Missing last_sync_at '{}' in output", ts),
-            None => prop_assert!(text.contains("Never synced"),
-                "Missing 'Never synced' placeholder in output"),
-        }
+        prop_assert!(text.contains("Tokens per Day"), "missing chart title: {text}");
+        prop_assert!(text.contains("Models by Cost"), "missing list title: {text}");
+        prop_assert!(text.contains(&model.model), "missing model name: {text}");
+        let input = stat_compact(model.input_tokens);
+        prop_assert!(text.contains(&input), "missing input '{input}': {text}");
     }
 }
 

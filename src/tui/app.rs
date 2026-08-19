@@ -1,8 +1,9 @@
 use crate::query::reports::BlockReportRow;
 use crate::query::{
-    ActivityPayload, ContextPressurePayload, CostLine, DailyTrendPoint, HealthPayload,
-    HeatmapPoint, ModelBreakdown, ModelComparePayload, OptimizePayload, OverviewPayload,
-    QueryFilter, SourceBreakdown, SyncCommandCenterPayload, ToolsPayload, TrendPoint, ZombieReport,
+    ActivityPayload, ContextPressurePayload, CostLine, DailyModelPoint, DailyTrendPoint,
+    HealthPayload, HeatmapPoint, ModelBreakdown, ModelComparePayload, OptimizePayload,
+    OverviewPayload, QueryFilter, SourceBreakdown, SyncCommandCenterPayload, ToolsPayload,
+    TrendPoint, ZombieReport,
 };
 use crate::{domain::platform_monitor::PlatformProbe, models::SourceKind};
 
@@ -112,6 +113,14 @@ pub struct BehaviorPanelPayload {
     pub optimize: OptimizePayload,
     pub zombie: ZombieReport,
     pub compare: ModelComparePayload,
+}
+
+/// TUI Overview facts: lifetime totals plus windowed chart and list rows.
+#[derive(Debug, Clone)]
+pub struct OverviewPanelPayload {
+    pub totals: OverviewPayload,
+    pub daily_models: Vec<DailyModelPoint>,
+    pub models: Vec<ModelBreakdown>,
 }
 
 /// Combined read-only facts for the tokscale-style stats panel.
@@ -376,7 +385,7 @@ pub struct AppState {
     pub sort: [SortState; Panel::COUNT],
     pub filter: QueryFilter,
     // Cached data (loaded on panel switch)
-    pub overview: Option<Result<OverviewPayload, String>>,
+    pub overview: Option<Result<OverviewPanelPayload, String>>,
     pub sync_center: Option<Result<SyncCommandCenterPayload, String>>,
     pub models: Option<Result<Vec<ModelBreakdown>, String>>,
     pub daily: Option<Result<Vec<DailyTrendPoint>, String>>,
@@ -422,6 +431,7 @@ impl AppState {
             sort: {
                 let mut sort = [SortState::default(); Panel::COUNT];
                 sort[Panel::Models as usize] = SortState::cost_desc();
+                sort[Panel::Overview as usize] = SortState::cost_desc();
                 sort
             },
             filter: QueryFilter::default(),
@@ -627,7 +637,7 @@ impl AppState {
 
 fn sort_keys(panel: Panel) -> &'static [TableSortKey] {
     match panel {
-        Panel::Models => &[TableSortKey::Tokens, TableSortKey::Cost],
+        Panel::Overview | Panel::Models => &[TableSortKey::Tokens, TableSortKey::Cost],
         Panel::Sources => &[TableSortKey::Date, TableSortKey::Tokens, TableSortKey::Cost],
         Panel::Cost => &[TableSortKey::Cost, TableSortKey::Tokens],
         Panel::Blocks => &[TableSortKey::Date, TableSortKey::Tokens, TableSortKey::Cost],

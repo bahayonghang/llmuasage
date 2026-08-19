@@ -526,11 +526,16 @@ pub fn metric_cost_per_million() -> Color {
     active_theme().metric_cost_per_million
 }
 
-/// Vendor-family shade. Ramps are cross-theme constants; ANSI16/NoColor still adapt.
-pub fn vendor_style(vendor: &str, rank: usize) -> Style {
+/// Adapted vendor-family color for chart cells. `NoColor` returns `Color::Reset`.
+pub fn vendor_fg(vendor: &str, rank: usize) -> Color {
     let ramp = vendor_ramp(vendor);
     let (red, green, blue) = ramp[rank.min(ramp.len() - 1)];
-    bold_fg_style(adapt_color(Color::Rgb(red, green, blue), color_mode()))
+    adapt_color(Color::Rgb(red, green, blue), color_mode())
+}
+
+/// Vendor-family shade. Ramps are cross-theme constants; ANSI16/NoColor still adapt.
+pub fn vendor_style(vendor: &str, rank: usize) -> Style {
+    bold_fg_style(vendor_fg(vendor, rank))
 }
 
 /// Primary bar color for the trends cockpit.
@@ -1041,6 +1046,7 @@ mod tests {
     fn vendor_style_adapts_and_respects_no_color() {
         set_color_mode(TerminalColorMode::TrueColor);
         set_theme(Theme::default_dark());
+        assert_eq!(vendor_fg("anthropic", 0), Color::Rgb(218, 119, 86));
         assert_eq!(
             vendor_style("anthropic", 0),
             Style::default()
@@ -1048,6 +1054,7 @@ mod tests {
                 .add_modifier(Modifier::BOLD)
         );
         set_color_mode(TerminalColorMode::NoColor);
+        assert_eq!(vendor_fg("anthropic", 0), Color::Reset);
         assert_eq!(vendor_style("anthropic", 0), Style::default());
         set_color_mode(TerminalColorMode::TrueColor);
         set_theme(Theme::default_dark());

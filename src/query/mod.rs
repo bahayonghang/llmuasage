@@ -156,6 +156,17 @@ pub struct DailyTrendPoint {
     pub cost_with_cache_usd: f64,
 }
 
+/// One local-date × model total used by the TUI Overview stacked chart.
+#[derive(Debug, Clone, Serialize)]
+pub struct DailyModelPoint {
+    /// Local calendar date in `YYYY-MM-DD`, computed in [`QueryFilter::timezone`].
+    pub date: String,
+    /// Normalized model name.
+    pub model: String,
+    /// Total normalized tokens for that model on that date.
+    pub total_tokens: i64,
+}
+
 /// Per-model aggregate shown in dashboard breakdowns.
 #[derive(Debug, Clone, Serialize)]
 pub struct ModelBreakdown {
@@ -1102,6 +1113,34 @@ impl Dashboard {
                 total_tokens: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
                 event_count: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
                 cost_with_cache_usd: row.get::<_, Option<f64>>(7)?.unwrap_or_default(),
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Loads daily token totals grouped by local date and model.
+    pub fn trends_daily_by_model(&self, filter: &QueryFilter) -> Result<Vec<DailyModelPoint>> {
+        let sql_filter = filter.bucket_filter(None);
+        let local_date = filter.local_date_expr("hour_start");
+        let sql = format!(
+            r#"
+            SELECT
+                {local_date} AS local_date,
+                model,
+                COALESCE(SUM(total_tokens), 0)
+            FROM usage_bucket_30m
+            {}
+            GROUP BY local_date, model
+            ORDER BY local_date ASC, model ASC
+            "#,
+            sql_filter.where_sql()
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(sql_filter.params().iter()), |row| {
+            Ok(DailyModelPoint {
+                date: row.get(0)?,
+                model: row.get(1)?,
+                total_tokens: row.get::<_, Option<i64>>(2)?.unwrap_or_default(),
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -5941,6 +5980,67 @@ mod tests {
         let utc_series = dashboard.trends_daily(&utc_filter)?;
         assert_eq!(utc_series.len(), 1);
         assert_eq!(utc_series[0].date, "2026-04-04");
+        Ok(())
+    }
+
+    #[test]
+    fn trends_daily_by_model_groups_date_and_model() -> Result<()> {
+        let fixture = Fixture::new()?;
+        let conn = fixture.store().open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_bucket_30m(
+                source, model, hour_start, project_hash, project_label, project_ref,
+                input_tokens, cache_read_tokens, cache_creation_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens, event_count, updated_at
+            )
+            VALUES
+                ('codex', 'gpt-5', '2026-04-04T16:00:00Z', '', NULL, NULL,
+                 100, 10, 5, 50, 7, 172, 2, '2026-04-05T00:00:00Z'),
+                ('claude', 'claude-opus-5', '2026-04-04T16:00:00Z', '', NULL, NULL,
+                 20, 0, 0, 10, 0, 30, 1, '2026-04-05T00:00:00Z'),
+                ('codex', 'gpt-5', '2026-04-05T01:00:00Z', '', NULL, NULL,
+                 8, 0, 0, 2, 0, 10, 1, '2026-04-05T01:00:00Z')
+            "#,
+            [],
+        )?;
+        let dashboard = Dashboard::open(fixture.store())?;
+
+        let utc = dashboard.trends_daily_by_model(&QueryFilter {
+            timezone: ReportTimezone::Utc,
+            ..Default::default()
+        })?;
+        assert_eq!(utc.len(), 3);
+        assert_eq!(utc[0].date, "2026-04-04");
+        assert_eq!(utc[0].model, "claude-opus-5");
+        assert_eq!(utc[0].total_tokens, 30);
+        assert_eq!(utc[1].date, "2026-04-04");
+        assert_eq!(utc[1].model, "gpt-5");
+        assert_eq!(utc[1].total_tokens, 172);
+        assert_eq!(utc[2].date, "2026-04-05");
+        assert_eq!(utc[2].model, "gpt-5");
+        assert_eq!(utc[2].total_tokens, 10);
+
+        let cn = dashboard.trends_daily_by_model(&QueryFilter {
+            timezone: ReportTimezone::Fixed(
+                chrono::FixedOffset::east_opt(8 * 3600).expect("valid offset"),
+            ),
+            ..Default::default()
+        })?;
+        assert_eq!(cn.len(), 2);
+        assert_eq!(cn[0].date, "2026-04-05");
+        assert_eq!(cn[0].model, "claude-opus-5");
+        assert_eq!(cn[1].date, "2026-04-05");
+        assert_eq!(cn[1].model, "gpt-5");
+        assert_eq!(cn[1].total_tokens, 182);
+
+        let empty_fixture = Fixture::new()?;
+        let empty = Dashboard::open(empty_fixture.store())?;
+        assert!(
+            empty
+                .trends_daily_by_model(&QueryFilter::default())?
+                .is_empty()
+        );
         Ok(())
     }
 
