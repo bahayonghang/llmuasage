@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/llmusage/backend/tui-presentation-contracts.md", "reason": "Theme slots, NoColor/ANSI16, format helpers, no Color::* in panels"}
+{"file": ".trellis/spec/llmusage/backend/tui-runtime-contracts.md", "reason": "Scroll, sort, TimeWindow invalidation, visible-row windowing"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Keep OverviewPayload/public API separate from TUI panel payload"}
+{"file": ".trellis/tasks/08-19-dash-overview-tokscale-style/research/tokscale-overview-gap.md", "reason": "tokscale Overview layout and current data gaps"}
+{"file": ".trellis/tasks/08-19-dash-overview-tokscale-style/prd.md", "reason": "Locked MVP requirements and acceptance"}
+{"file": ".trellis/tasks/08-19-dash-overview-tokscale-style/design.md", "reason": "Query split, TimeWindow, chart and list contracts"}
