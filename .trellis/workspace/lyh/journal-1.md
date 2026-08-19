@@ -1618,3 +1618,24 @@ Public listener 改用最小读路由与脱敏聚合 DTO，并忽略 project sel
 ### Status
 
 [OK] **Completed**
+
+
+## Session 53: Dash Usage 对齐 tokscale 额度页
+
+**Date**: 2026-08-19
+**Task**: Dash Usage 对齐 tokscale 额度页
+**Branch**: `dev`
+
+### Summary
+
+Usage 页改为只读拉取 Grok/Kimi/Claude/Codex 订阅额度，Source Sync 迁到 overlay。cargo fmt、clippy、lib 测试和 tui_panels_prop 已通过。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `77db0c9` | (see git log) |
+
+### Status
+
+[OK] **Completed**
