@@ -31,6 +31,8 @@ llmusage serve --public --no-open --port 37421
 
 这个精简 public surface 仍不提供认证或 TLS，并仍会显示用量总量和模型/来源名称，因此仍需防火墙或带认证的反向代理。远程使用全部本地 Dashboard 功能时，不要使用 `--public`，应保留默认 loopback 监听并使用下面的 SSH 隧道。
 
+SSH 也可以作为用量导入的数据通道。见 [CLI 参考](../reference/cli.md#llmusage-remote) 中的 `llmusage remote add` / `llmusage sync`。这条拉取路径与 Dashboard 隧道是分开的。
+
 私有 SSH 场景不要传入 `--public`，再从客户端转发本地监听端口：
 
 ```powershell

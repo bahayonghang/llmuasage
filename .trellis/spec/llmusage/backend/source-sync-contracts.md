@@ -136,6 +136,23 @@
   status success. These are additive lifecycle events shared by human stderr,
   NDJSON, TUI, and Web jobs; failure/cancellation remains terminal through the
   existing events.
+- After the local parser driver, `llmusage sync` serially imports each
+  `transport='ssh'` host through `RemoteImporter` and `commit_shard` on the
+  same fenced Store. One host failure records `last_error`, emits
+  `RemoteHostSkipped`, and continues. Process exit stays success when local
+  sync succeeded. `remote sync [--host <label>]` uses the same importer and
+  does not run the local driver.
+- Additive sync events `remote_host_started`, `remote_host_finished`, and
+  `remote_host_skipped` are public `--json-events` / job tags. Dashboard job
+  UI must tolerate unknown event tags.
+- Missing sweep runs only for hosts in this run's in-memory `contacted` set,
+  plus local always. Do not compare `host.last_contacted_at` to wall clock.
+  `stats.last_error.is_some()` still skips the sweep for that source.
+- `source-status` is read-only (`require_initialized()`). Host lifecycle is
+  derived from persisted fields only: `never_contacted` when
+  `last_contacted_at` is NULL, `unreachable` when `last_error` is non-empty,
+  otherwise `idle`. `live` appears only in sync events, never in
+  `source-status`. `source_sync_status` rows are keyed by `(host_id, source)`.
 - Pricing started/progress events carry source/target catalog versions and
   processed/total event counts. Reconcile/finished events carry bucket counts;
   finished also carries deleted orphan count and elapsed milliseconds.

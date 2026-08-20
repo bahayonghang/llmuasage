@@ -28,6 +28,8 @@ Current releases do not install hooks or plugins. After upgrading a machine that
 
 `llmusage` does not create an account session, device token, upload queue, or remote usage API call. Report, dashboard, and export surfaces read local SQLite.
 
+Optional SSH remote import is a user-triggered pull from a host you register with `llmusage remote add`. The local process runs `ssh` and reads normalized shard fields from stdout. Prompt text and raw session JSON are not sent. The remote binary parses artifacts on that machine; the local database is the only write target.
+
 Project labels are derived locally. Sensitive path dimensions are stored as hashes where the schema needs stable grouping.
 
 Runtime diagnostics stay local. `LLMUSAGE_LOG` controls the NDJSON log files (`off`, `error`, `warn`, `info`, `debug`, or `trace`; default `warn`), while `RUST_LOG` controls console stderr. Files rotate at 10 MiB during a running process and retain at most 30 MiB, seven files, and seven days. The local `logs`/`diagnostics` status reports retained bytes and files, queue-dropped events, and rotation/retention failures. Runtime log events include command labels, run ids, sources, module targets, and error summaries; they do not intentionally record prompts, responses, or raw source JSON. Paths may appear in human error summaries, so treat diagnostics bundles as local troubleshooting artifacts.

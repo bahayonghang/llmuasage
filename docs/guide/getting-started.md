@@ -53,6 +53,15 @@ Use a source filter when you only want one source:
 llmusage sync --source codex
 ```
 
+To import usage from another machine you already control:
+
+```powershell
+llmusage remote add devbox user@devbox
+llmusage sync
+```
+
+The remote host must have a compatible `llmusage` binary. Parsing stays on that host. `llmusage sync` pulls normalized shards over SSH. One unreachable host is skipped and does not fail the local sync.
+
 ## 4. Read the default report
 
 ```powershell

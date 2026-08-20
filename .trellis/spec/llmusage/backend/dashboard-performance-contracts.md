@@ -32,13 +32,16 @@ TimeWindow::query_filter(&QueryFilter)
 ```
 
 `QueryFilter` fields shared by bucket and fact queries are `source`, `model`,
-`project_hash`, `since`, `until`, and `timezone`.
+`project_hash`, `since`, `until`, `timezone`, and `host_id`.
 
 ### 3. Contracts
 
 - The interactive response contains exactly one selected `trends` series plus
-  `overview`, `models`, `sources`, `projects`, `costs`,
+  `overview`, `models`, `sources`, `hosts`, `projects`, `costs`,
   `sync_command_center`, `diagnostics`, and `health`.
+- `hosts` is an additive per-host breakdown (`host_id`, `label`,
+  `total_tokens`, `last_event_at`, `event_count`). It does not replace
+  `sources`. Full and core snapshots include the same field.
 - `sync_command_center` source rows may include four parse-issue counters
   (`malformed_lines`, `oversized_lines`, `skipped_lines`,
   `accounting_anomaly_lines`) with serde defaults. Parse-issue samples stay

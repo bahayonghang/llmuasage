@@ -18,7 +18,7 @@ hero:
 
 features:
   - title: 全本地数据链路
-    details: sync 只被动读取本地产物；不安装 hook/plugin，解析、聚合、展示都在本机完成。
+    details: sync 只被动读取本地产物；不安装 hook/plugin，也没有登录、同步服务或远端用量 API。SSH 远端导入是你已有主机之间的直连拉取，只传输规范化字段。
   - title: SQLite 单一真源
     details: cursor、usage event、30 分钟 bucket、行为事实、source-file 诊断和 run log 都放在本地数据库里。
   - title: 一套查询层复用四种界面

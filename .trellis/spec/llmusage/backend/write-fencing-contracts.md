@@ -35,6 +35,11 @@
   next heartbeat or mutation returns `LlmusageError::LockLost`.
 - Sync CLI and JobRegistry acquire first, derive a fenced Store, bootstrap, and
   pass that Store through run-log, parser driver, shard writer, and status writes.
+- Remote SSH import is not a new control-plane exception. `RemoteImporter`
+  commits each shard with `SyncRunWriter::commit_shard` on the fenced Store
+  that already holds the sync worker permit. `remote add` / `remote sync` /
+  `remote remove` acquire the same worker lock, derive a fenced Store, then
+  bootstrap before they mutate host or usage rows.
 - Catalog apply/reset/snapshot and standalone Store mutation APIs own one
   operation guard or reuse an existing fenced Store.
 - Historical note: hook-enabled releases allowed `trigger_state` signal upsert

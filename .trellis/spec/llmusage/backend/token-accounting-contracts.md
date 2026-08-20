@@ -51,8 +51,10 @@ is the compatibility baseline when reference implementations disagree.
 - Claude dedupes by `message.id + requestId`; sidechain replay can match by
   message id, prefers non-sidechain metadata, and merges streaming channel
   maxima.
-- Codex copied events use a source-scoped logical identity derived from
-  timestamp, normalized model, and the normalized token tuple.
+- Codex copied events use a host-plus-source logical identity derived from
+  timestamp, normalized model, and the normalized token tuple. Schema v23
+  prefixes persisted keys with `{host_id}:` (existing rows use `local:`).
+  The same artifact imported from two registered hosts is two events.
 - OpenCode uses `max(valid tokens.total, input + cache write + cache read + output)`.
 - Kimi Code maps `inputOther`, `inputCacheRead`, `inputCacheCreation`, and
   `output` once each; it has no upstream total or reasoning channel, so its

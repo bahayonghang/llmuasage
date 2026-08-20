@@ -32,6 +32,7 @@ Usage: llmusage [OPTIONS] [COMMAND]
 | `--compact` | Use a narrower table layout |
 | `--no-cost` | Hide cost columns and cost fields from report output |
 | `--source codex\|claude\|opencode\|antigravity\|kimi_code\|pi\|grok` | Restrict a top-level report or sync command to one source |
+| `--host <LABEL>` | Restrict a report to one registered host label |
 | `-A, --by-agent` | Add nested source rows to unified report JSON |
 | `--sections daily\|weekly\|monthly\|session` | Add report periods to one combined output |
 | `--all` | Show full daily history instead of the default last 7 days |
@@ -153,13 +154,27 @@ llmusage sync --rebuild --allow-lossy-rebuild
 
 `--source`, `--recent-days`, and `--parallelism` use the same validation contract as `POST /api/jobs` and the public `JobRegistry` API. Invalid values fail with stable codes: `unknown_source`, `invalid_recent_days`, or `invalid_parallelism`.
 
-Imports local sources. Before source scanning, bootstrap may upgrade an unpinned embedded pricing catalog and reprice historical events. An unbounded normal sync also detects selected legacy token-accounting sources, warns, and automatically rebuilds them only when every target passes the lossless preflight. A risky target blocks all automatic resets. A bounded `--recent-days` request must first be preceded by an unbounded sync when legacy accounting exists.
+Imports local sources, then pulls registered SSH remotes. One unreachable remote is skipped with a warning; the process exit code stays success if local sync succeeded. Uncontacted remotes are not swept to `missing` and do not block `--rebuild` or automatic token-accounting repair. `--json-events` also emits `remote_host_started`, `remote_host_finished`, and `remote_host_skipped`.
 
-Human stderr reports catalog versions, processed/total events, bucket reconciliation, automatic token-accounting repair boundaries, and elapsed completion time. `--json-events` writes the same lifecycle to NDJSON-only stdout, including additive `token_accounting_repair_started` / `token_accounting_repair_finished` events and the existing pricing events. A current catalog or pinned snapshot/overlay emits no pricing events; a current accounting set emits no repair events. `--allow-lossy-rebuild` requires explicit `--rebuild` and is never inferred by normal sync.
+Before source scanning, bootstrap may upgrade an unpinned embedded pricing catalog and reprice historical events. An unbounded normal sync also detects selected legacy token-accounting sources, warns, and automatically rebuilds them only when every target passes the lossless preflight. A risky target blocks all automatic resets. A bounded `--recent-days` request must first be preceded by an unbounded sync when legacy accounting exists.
+
+Human stderr reports catalog versions, processed/total events, bucket reconciliation, automatic token-accounting repair boundaries, remote-host skip warnings, and elapsed completion time. `--json-events` writes the same lifecycle to NDJSON-only stdout, including additive `token_accounting_repair_started` / `token_accounting_repair_finished` events, remote-host events, and the existing pricing events. A current catalog or pinned snapshot/overlay emits no pricing events; a current accounting set emits no repair events. `--allow-lossy-rebuild` requires explicit `--rebuild` and is never inferred by normal sync.
 
 Set `LLMUSAGE_LOG=info` for structured pricing start/reconcile/finish file records, or `debug` for throttled page progress. The default `warn` file level records one liveness warning if repricing continues beyond 30 seconds; terminal progress remains visible at every file-log level.
 
 The human stdout summary is one aligned table with one row per source plus `TOTAL`; completed progress remains on stderr and is not repeated as permanent success lines. It includes `files`, `changed`, `skipped`, `seen`, `committed`, `stored_events`, bytes, and parse/write duration. `skipped` is derived from existing cursor/fingerprint evidence for file-backed sources and from the OpenCode SQLite high-water cursor for DB-backed sync. `committed` is the newly inserted event delta after SQLite dedupe. Redirected output has no ANSI escapes, and narrow terminals use compact headers without truncating numeric values.
+
+### `llmusage remote`
+
+```powershell
+llmusage remote add <label> <ssh-target> [--command <path>]
+llmusage remote list
+llmusage remote remove <label>
+llmusage remote sync
+llmusage remote sync --host <label>
+```
+
+Registers, lists, removes, or imports SSH remote hosts. `add` probes `ssh <target> <command> --version` and `remote handshake` before it writes a host row. `remote sync` imports shards only; it does not run local parsers. `llmusage sync` already includes every registered SSH host after the local driver.
 
 ## Status and diagnostics
 
@@ -177,7 +192,7 @@ Prints a human-readable database, source, and recent-run summary.
 llmusage source-status
 ```
 
-Prints parser-backed source and monitor-only platform status.
+Prints parser-backed source and monitor-only platform status, grouped by host. Each host has one read-only lifecycle state: `never_contacted`, `unreachable`, or `idle`. `live` is a sync-event signal only.
 
 ### `llmusage diagnostics`
 
@@ -286,6 +301,8 @@ llmusage serve --public --no-open --port 37421
 ```
 
 Starts the full web dashboard and local JSON API on `127.0.0.1` by default. `--public` binds `0.0.0.0` but exposes only the read-only aggregate dashboard allowlist (`/`, assets, `/api/dashboard`, and `/api/health`); projects, logs, diagnostics, jobs, behavior/Explorer detail, and writes remain loopback-only. The public aggregate view has no authentication or TLS. `--no-open` suppresses browser launching, and SSH sessions skip the automatic browser launch automatically. Use loopback through an SSH tunnel when remote access needs the full local API.
+
+SSH is also a data channel: `llmusage remote add` / `llmusage sync` pull normalized shards from a user-owned host. That path is separate from dashboard tunneling.
 
 ### `llmusage codex-tracer`
 

@@ -59,7 +59,7 @@ llmusage serve
 What this does:
 
 1. `init` creates `~/.llmusage/` and bootstraps `llmusage.db`; it does not modify third-party tool configuration.
-2. `sync` passively parses local sources incrementally and writes usage rows, 30-minute buckets, source-file diagnostics, and behavior facts. An unbounded sync also warns and automatically rebuilds safe legacy token-accounting sources before writing new rows.
+2. `sync` passively parses local sources incrementally and writes usage rows, 30-minute buckets, source-file diagnostics, and behavior facts. After the local driver it also pulls registered SSH remotes. An unbounded sync also warns and automatically rebuilds safe legacy token-accounting sources before writing new rows.
 3. `llmusage` shows the default daily report for the last 7 calendar days.
 4. `serve` safely rebuilds legacy parser-backed token accounting when needed, then starts the dashboard on `127.0.0.1` by default. Use `serve --public` only when you intentionally need remote access: it exposes an unauthenticated, non-TLS aggregate dashboard, but keeps project labels, logs, diagnostics, job state, and all write routes local-only.
 
@@ -93,6 +93,7 @@ llmusage monthly --breakdown
 llmusage session --project my-repo
 llmusage blocks --active
 llmusage source-status
+llmusage remote add devbox user@devbox
 llmusage help --zh
 llmusage dash
 llmusage codex-tracer
@@ -145,7 +146,7 @@ llmusage codex-tracer --rebuild
 
 ## Safety defaults
 
-- No account login, device token, upload queue, or remote usage API call.
+- No account login, device token, upload queue, or remote usage API call. SSH remote import is a user-triggered pull of normalized fields from a host you register; it does not upload usage.
 - Normal unbounded `llmusage sync` automatically rebuilds selected legacy token-accounting sources only after every target passes the lossless-rebuild preflight. If any target is unsafe, no automatic target is reset.
 - Normal `llmusage sync` keeps imported usage when original source files are missing.
 - `llmusage sync --recent-days N` imports only the latest UTC event window (`1..=3650`) without advancing full-history cursors; `--parallelism` accepts `1..=32`.

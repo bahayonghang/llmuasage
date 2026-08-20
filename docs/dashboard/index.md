@@ -33,6 +33,8 @@ llmusage serve --public --no-open --port 37421
 
 The public aggregate surface still has no authentication or TLS and still reveals usage totals and model/source names. Use a firewall or authenticated reverse proxy even for this reduced view. To use every local dashboard feature remotely, keep the default loopback listener and use the SSH tunnel below instead of `--public`.
 
+SSH is also a data channel for usage import. See [CLI reference](../reference/cli.md#llmusage-remote) for `llmusage remote add` / `llmusage sync`. That pull is separate from dashboard tunneling.
+
 For a private SSH session, leave out `--public`, then forward the local listener from your client:
 
 ```powershell

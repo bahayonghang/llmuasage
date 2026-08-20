@@ -18,7 +18,7 @@ hero:
 
 features:
   - title: Local-only data path
-    details: Sync passively reads local artifacts. No hooks, plugins, login, sync service, or remote usage API.
+    details: Sync passively reads local artifacts. No hooks, plugins, login, sync service, or remote usage API. SSH remote import is a user-owned pull of normalized fields between machines you already control.
   - title: SQLite as the source of truth
     details: Cursors, usage events, 30-minute buckets, behavior facts, source-file diagnostics, and run logs live in one local database.
   - title: One query model, four surfaces

@@ -20,6 +20,7 @@ llmusage <claude|codex|opencode|antigravity> <daily|weekly|monthly|session> [REP
 ReportCommonArgs:
   --since/--until <YYYY-MM-DD|YYYYMMDD>
   --source <SOURCE>
+  --host <LABEL>
   --json --breakdown --compact --no-cost
 
 UnifiedReportArgs:
@@ -46,6 +47,12 @@ unified_report::{report_json, focused_report_json}(..., no_cost) -> JSON
 - `--no-cost` is an output projection. It removes text cost columns and every
   JSON key containing `cost`, but never changes query filtering or token
   totals.
+- `--host <LABEL>` resolves to the registered `host_id`. An unknown label
+  fails and lists registered labels. Daily / weekly / monthly / session /
+  blocks / focused reports all pass through `ReportCommonArgs::to_filter`.
+  Unified JSON adds a `hosts` array of per-host period rows
+  (`host`, `host_id`, token totals). `--host` filters those rows; it does
+  not replace source grouping.
 - Unified and focused human tables are an auditable visible-channel
   projection. Every displayed `Total Tokens` cell is calculated as
   `input + output + cache creation + cache read`, including period, Agent,

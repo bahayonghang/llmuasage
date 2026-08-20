@@ -53,6 +53,15 @@ sync 只被动读取。Antigravity CLI conversations 由已注册 parser 导入�
 llmusage sync --source codex
 ```
 
+从你已控制的另一台机器导入用量：
+
+```powershell
+llmusage remote add devbox user@devbox
+llmusage sync
+```
+
+远端需要安装兼容的 `llmusage` 二进制。解析仍发生在那台机器上。`llmusage sync` 通过 SSH 拉取规范化 shard。单台不可达主机会被跳过，不导致本地 sync 失败。
+
 ## 4. 查看默认报表
 
 ```powershell

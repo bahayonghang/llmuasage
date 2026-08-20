@@ -28,6 +28,8 @@
 
 `llmusage` 不创建账号会话、device token、上传队列或远端用量 API 调用。报表、Dashboard 和导出都读取本地 SQLite。
 
+可选的 SSH 远端导入由你触发：用 `llmusage remote add` 注册主机后，本机执行 `ssh` 并从 stdout 拉取规范化 shard 字段。不会传输 prompt 正文或原始会话 JSON。解析发生在拥有产物的那台机器上；只有本地数据库被写入。
+
 项目 label 在本地推导。需要稳定分组的敏感路径维度会存为 hash。
 
 运行诊断也只保存在本地。`LLMUSAGE_LOG` 控制 NDJSON 日志文件（`off`、`error`、`warn`、`info`、`debug`、`trace`，默认 `warn`），`RUST_LOG` 控制控制台 stderr。日志在单进程运行期间按 10 MiB 分片轮转，总量最多保留 30 MiB、7 个文件和 7 天；本地 `logs`/`diagnostics` 状态会报告保留文件与字节数、队列丢弃事件数以及轮转/保留失败数。运行日志会记录命令标签、run id、source、模块 target 和错误摘要；不会主动记录 prompt、response 或原始 source JSON。路径可能出现在人读错误摘要中，因此 diagnostics bundle 仍应当作本地排障材料处理。

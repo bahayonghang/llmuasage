@@ -15,3 +15,8 @@ ADR 目前以英文工程记录为主，并复用仓库根目录 `CONTEXT.md` �
 - [0007 — Public LlmusageError surface](../../adr/0007-llmusage-error-surface)
 - [0008 — Source Capability Registry and passive-reader gate](../../adr/0008-source-capability-registry)
 - [0009 — Antigravity source cutover](../../adr/0009-antigravity-source-cutover)
+- [0010 — Provider label dimension](../../adr/0010-provider-label-dimension)
+- [0011 — Passive-only synchronization](../../adr/0011-passive-only-synchronization)
+- [0012 — Antigravity CLI passive parser](../../adr/0012-antigravity-cli-passive-parser)
+- [0013 — DeepSeek Harness passive source](../../adr/0013-deepseek-harness-passive-source)
+- [0014 — SSH remote-host import](../../adr/0014-ssh-remote-host-import)

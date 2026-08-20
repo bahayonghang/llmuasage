@@ -57,7 +57,7 @@ llmusage serve
 含义：
 
 1. `init` 创建 `~/.llmusage/` 并初始化 `llmusage.db`，不会修改第三方工具配置。
-2. `sync` 被动、增量解析本地真源，写入 usage 行、30 分钟 bucket、source-file 诊断和行为事实。无界 sync 还会先告警，并在写入新数据前自动重建可无损修复的旧版 token accounting 来源。
+2. `sync` 被动、增量解析本地真源，写入 usage 行、30 分钟 bucket、source-file 诊断和行为事实；本地 driver 之后还会拉取已注册的 SSH 远端。无界 sync 还会先告警，并在写入新数据前自动重建可无损修复的旧版 token accounting 来源。
 3. `llmusage` 显示默认 daily 报表：所选时区下最近 7 个自然日。
 4. `serve` 会按需安全重建旧版 parser token 统计口径，然后默认在 `127.0.0.1` 启动浏览器 Dashboard。只有明确需要远程访问时才使用 `serve --public`：它会暴露不带认证和 TLS 的聚合 Dashboard，但 project label、日志、诊断、job 状态和所有写路由仍只允许本地访问。
 
@@ -91,6 +91,7 @@ llmusage monthly --breakdown
 llmusage session --project my-repo
 llmusage blocks --active
 llmusage source-status
+llmusage remote add devbox user@devbox
 llmusage help --zh
 llmusage dash
 llmusage codex-tracer
@@ -143,7 +144,7 @@ llmusage codex-tracer --rebuild
 
 ## 安全默认值
 
-- 不需要账号登录、device token、上传队列或远端用量 API。
+- 不需要账号登录、device token、上传队列或远端用量 API。SSH 远端导入是你触发的、从已注册主机拉取规范化字段，不会上传用量。
 - 普通无界 `llmusage sync` 只会在全部目标都通过无损预检后，自动重建所选的旧版 token accounting 来源；任一目标不安全时，不会 reset 任何自动修复目标。
 - 普通 `llmusage sync` 遇到原始源文件缺失时会保留已导入 usage。
 - `llmusage sync --recent-days N` 只导入最近的 UTC 事件窗口（`1..=3650`），且不推进全历史 cursor；`--parallelism` 合法范围为 `1..=32`。
