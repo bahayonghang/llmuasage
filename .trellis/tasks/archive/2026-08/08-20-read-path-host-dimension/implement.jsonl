@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/llmusage/backend/report-cli-contracts.md", "reason": "报表命令面、DTO projection 与输出不变量；本子任务新增 --host 与每主机行"}
+{"file": ".trellis/spec/llmusage/backend/dashboard-performance-contracts.md", "reason": "dashboard payload、查询路由与刷新预算；本子任务新增 hosts 字段"}
+{"file": ".trellis/spec/llmusage/backend/web-server-contracts.md", "reason": "public allowlist 与网络暴露边界；hosts 字段不得进入 public surface"}
+{"file": ".trellis/spec/llmusage/backend/tui-presentation-contracts.md", "reason": "共享 formatter 与展示约定；查询层改动会影响 dash"}
