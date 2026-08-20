@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "验证主机状态取值与 SyncEvent 追加向后兼容"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "验证 lossy 守卫两处调用点都排除不可达主机"}
+{"file": ".trellis/spec/llmusage/backend/ci-toolchain-contracts.md", "reason": "验证 just ci 全门通过"}

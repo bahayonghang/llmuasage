@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "source status、sync summary 与 dashboard/TUI sync payload 契约；本子任务新增主机状态与三个 SyncEvent"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "guarded rebuild 与自动修复守卫；本子任务改动 lossy 风险判定并需更新 event_key 作用域记载"}
+{"file": "docs/adr/0006-source-file-state-machine.md", "reason": "missing 扫描语义；不可达主机不得被扫为 missing"}
+{"file": "docs/adr/0011-passive-only-synchronization.md", "reason": "新 ADR 需说明与该决策的关系"}
+{"file": "docs/agents/domain.md", "reason": "ADR 冲突必须显式指出，不得静默覆盖"}
