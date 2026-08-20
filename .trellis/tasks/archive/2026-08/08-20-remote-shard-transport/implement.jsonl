@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/llmusage/backend/write-fencing-contracts.md", "reason": "commit_shard 是唯一写入协议；collect-only 模式必须证明零 SQLite 写入"}
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "parser 与 source monitor 边界、sync stats payload 契约；远端阶段写 source_sync_status"}
+{"file": ".trellis/spec/llmusage/backend/ci-toolchain-contracts.md", "reason": "依赖变更与子进程测试证据规则；本子任务调用系统 ssh 且不新增依赖"}
+{"file": "docs/adr/0002-sync-shard-as-commit-protocol.md", "reason": "SyncShard 提交协议是传输的线格式基础"}
+{"file": "docs/adr/0011-passive-only-synchronization.md", "reason": "passive-only 决策边界；远端导入不得引入 hook 或第三方写入"}

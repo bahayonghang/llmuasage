@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/llmusage/backend/write-fencing-contracts.md", "reason": "验证 collect-only 模式与远端导入未绕过 fenced Store"}
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "验证 sync stats 与 source_sync_status 的 host 维度写入"}
+{"file": ".trellis/spec/llmusage/backend/ci-toolchain-contracts.md", "reason": "验证子进程测试不依赖真实 SSH"}
