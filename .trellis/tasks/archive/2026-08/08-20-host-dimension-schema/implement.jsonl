@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/llmusage/backend/write-fencing-contracts.md", "reason": "迁移、bootstrap 与 sync writer 的写围栏契约；本子任务改动 commit_shard 与全部 Store mutation 入口"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "event_key 身份、dedupe 与 guarded rebuild 契约；本子任务把 Codex 逻辑身份从 source-scoped 改为 host 加 source 作用域"}
+{"file": "docs/adr/0006-source-file-state-machine.md", "reason": "source_file 三态状态机与三入口；本子任务给全部状态机函数追加 host 参数"}
+{"file": "docs/adr/0002-sync-shard-as-commit-protocol.md", "reason": "SyncShard 提交协议；host 前缀在 commit_shard 集中施加"}
