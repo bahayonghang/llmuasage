@@ -817,6 +817,7 @@ mod tests {
             timezone: crate::query::ReportTimezone::Fixed(
                 FixedOffset::east_opt(8 * 3_600).unwrap(),
             ),
+            ..Default::default()
         };
 
         let today_filter = TimeWindow::Day24h.query_filter_on(&base, today);

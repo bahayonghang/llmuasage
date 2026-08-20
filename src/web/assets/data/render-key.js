@@ -30,6 +30,7 @@ const PANEL_DATA_KEYS = Object.freeze({
   trends: Object.freeze(['trends', 'sources', 'overview']),
   models: Object.freeze(['models']),
   sources: Object.freeze(['sources', 'overview']),
+  hosts: Object.freeze(['hosts', 'overview']),
   projects: Object.freeze(['projects']),
   costs: Object.freeze(['costs', 'models', 'health']),
   insights: Object.freeze(['overview', 'models', 'projects', 'costs', 'sources', 'diagnostics', 'health']),

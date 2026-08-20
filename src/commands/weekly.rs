@@ -9,7 +9,7 @@ pub async fn run(app: &AppContext, args: WeeklyArgs) -> Result<()> {
     debug!("starting weekly report output");
     let store = Store::new(&app.paths)?;
     store.require_initialized()?;
-    let filter = args.common.to_filter(None)?;
+    let filter = args.common.to_filter(&store, None)?;
     if !args.unified.sections.is_empty() {
         let reports = unified_report::load_sections(
             &store,
@@ -19,6 +19,8 @@ pub async fn run(app: &AppContext, args: WeeklyArgs) -> Result<()> {
             false,
         )?;
         unified_report::print_sections(
+            &store,
+            &filter,
             &reports,
             reports::PeriodKind::Weekly,
             args.common.json,
@@ -34,7 +36,8 @@ pub async fn run(app: &AppContext, args: WeeklyArgs) -> Result<()> {
     if args.common.json {
         println!(
             "{}",
-            serde_json::to_string_pretty(&unified_report::report_json(
+            serde_json::to_string_pretty(&unified_report::report_json_with_hosts(
+                Some((&store, &filter)),
                 &report,
                 args.unified.by_agent,
                 args.common.no_cost
@@ -50,6 +53,13 @@ pub async fn run(app: &AppContext, args: WeeklyArgs) -> Result<()> {
                 report_table::ColorMode::from_env()
             )
         );
+        unified_report::print_host_section(
+            &store,
+            &filter,
+            reports::PeriodKind::Weekly,
+            args.common.compact,
+            args.common.no_cost,
+        )?;
     }
 
     debug!("finished weekly report output");

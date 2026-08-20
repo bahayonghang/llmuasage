@@ -268,13 +268,16 @@ async fn sync_codex(
     let inventory_paths = listing.file_paths();
     store.source_files().mark_inventory_seen(
         SourceKind::Codex,
+        "local",
         &inventory_paths,
         writer.run_started_at(),
     )?;
     let inventory_error = listing.error_summary();
     let files = listing.paths;
     let total_files = files.len();
-    let cursor_map = store.cursors().load_file_cursors(SourceKind::Codex)?;
+    let cursor_map = store
+        .cursors()
+        .load_file_cursors(SourceKind::Codex, "local")?;
 
     let mut shards = std::collections::HashMap::<PathBuf, Vec<CandidateFile>>::new();
     let mut changed_files = 0usize;
@@ -394,6 +397,7 @@ async fn sync_codex(
                 raw_records: Vec::new(),
                 turns: shard.turns,
                 tool_calls: shard.tool_calls,
+                ..SyncShard::new(SourceKind::Codex)
             })?;
             inserted += commit.events_inserted;
             write_ms += commit.write_ms;

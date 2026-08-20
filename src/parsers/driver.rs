@@ -5,7 +5,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use super::{SourceParser, SourceSyncStats, SyncEvent};
-use crate::store::{Store, SyncRunWriter};
+use crate::store::{LOCAL_HOST_ID, Store, SyncRunWriter};
 
 /// Drives a fixed list of [`SourceParser`] implementations against the shared
 /// writer in registration order.
@@ -38,6 +38,7 @@ pub async fn drive(
         recent_cutoff: None,
         sender: None,
         cancel: &CancellationToken::new(),
+        sweep_host_ids: vec![LOCAL_HOST_ID.to_string()],
     })
     .await
 }
@@ -53,6 +54,10 @@ pub struct DriveContext<'a, 'b> {
     pub recent_cutoff: Option<DateTime<Utc>>,
     pub sender: Option<&'b mut mpsc::Sender<SyncEvent>>,
     pub cancel: &'a CancellationToken,
+    /// Hosts whose live `source_file` rows may be swept after each parser.
+    /// Local is always included by [`drive`]; callers of [`drive_with_events`]
+    /// must pass the hosts that were actually parsed this run.
+    pub sweep_host_ids: Vec<String>,
 }
 
 /// Same as [`drive`], but emits sync lifecycle events for JobRegistry and
@@ -118,12 +123,14 @@ pub async fn drive_with_events(mut ctx: DriveContext<'_, '_>) -> Result<Vec<Sour
         if stats.last_error.is_some() {
             info!(source = %source, "source inventory incomplete; skipping missing sweep");
         } else {
-            let swept = ctx
-                .store
-                .source_files()
-                .sweep_missing(source, &run_started_at)?;
-            if swept > 0 {
-                info!(source = %source, swept, "标记 missing 文件完成");
+            for host_id in &ctx.sweep_host_ids {
+                let swept =
+                    ctx.store
+                        .source_files()
+                        .sweep_missing(source, host_id, &run_started_at)?;
+                if swept > 0 {
+                    info!(source = %source, host_id = %host_id, swept, "标记 missing 文件完成");
+                }
             }
         }
 

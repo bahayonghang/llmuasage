@@ -19,6 +19,8 @@ use crate::{
 
 mod connection;
 mod cursor;
+mod emit;
+mod host;
 mod integration;
 mod lock;
 mod migrations;
@@ -30,6 +32,7 @@ mod sync_status;
 mod sync_writer;
 
 pub use cursor::CursorStore;
+pub use host::{Host, HostStore, LOCAL_HOST_ID};
 pub use integration::IntegrationStateStore;
 pub use migrations::{
     MigrationProgress, MigrationProgressEvent, latest_schema_version, read_schema_version,
@@ -330,6 +333,9 @@ pub struct Store {
     /// Runtime paths that locate the DB, wrappers, backups, and exports.
     pub paths: AppPaths,
     write_permit: Option<WritePermit>,
+    /// When true, parser inventory/cursor reads return empty and writes no-op
+    /// without opening SQLite or taking the worker lock (`sync --emit-shards`).
+    emit_only: bool,
 }
 
 impl Store {
@@ -342,9 +348,18 @@ impl Store {
         Ok(permit)
     }
 
+    pub(crate) fn emit_only(&self) -> bool {
+        self.emit_only
+    }
+
     /// Borrowed view onto the `source_cursor` surface.
     pub fn cursors(&self) -> CursorStore<'_> {
         CursorStore::new(self)
+    }
+
+    /// Borrowed view onto the `host` surface.
+    pub fn hosts(&self) -> HostStore<'_> {
+        HostStore::new(self)
     }
 
     /// Borrowed view onto the `integration_install` surface.
@@ -477,7 +492,7 @@ impl Store {
                     let mut stmt = tx.prepare(
                         r#"
                     SELECT event_key, source, COALESCE(provider_label, ''), model, hour_start,
-                           COALESCE(project_hash, ''),
+                           COALESCE(project_hash, ''), host_id,
                            COALESCE(input_tokens, 0),
                            COALESCE(cache_read_tokens, 0),
                            COALESCE(cache_creation_tokens, 0),
@@ -498,11 +513,12 @@ impl Store {
                                 model: row.get(3)?,
                                 hour_start: row.get(4)?,
                                 project_hash: row.get(5)?,
-                                input_tokens: row.get(6)?,
-                                cache_read_tokens: row.get(7)?,
-                                cache_creation_tokens: row.get(8)?,
-                                output_tokens: row.get(9)?,
-                                reasoning_output_tokens: row.get(10)?,
+                                host_id: row.get(6)?,
+                                input_tokens: row.get(7)?,
+                                cache_read_tokens: row.get(8)?,
+                                cache_creation_tokens: row.get(9)?,
+                                output_tokens: row.get(10)?,
+                                reasoning_output_tokens: row.get(11)?,
                             })
                         })?;
                     mapped.collect::<rusqlite::Result<Vec<_>>>()?
@@ -548,6 +564,7 @@ impl Store {
                         ])?;
                         buckets
                             .entry(BucketKey {
+                                host_id: row.host_id.clone(),
                                 source: row.source.clone(),
                                 provider_label: row.provider_label.clone(),
                                 model: row.model.clone(),
@@ -628,17 +645,18 @@ fn reconcile_pricing_buckets(
     let persisted_keys = {
         let mut stmt = tx.prepare(
             r#"
-            SELECT source, provider_label, model, hour_start, project_hash
+            SELECT host_id, source, provider_label, model, hour_start, project_hash
             FROM usage_bucket_30m
             "#,
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(BucketKey {
-                source: row.get(0)?,
-                provider_label: row.get(1)?,
-                model: row.get(2)?,
-                hour_start: row.get(3)?,
-                project_hash: row.get(4)?,
+                host_id: row.get(0)?,
+                source: row.get(1)?,
+                provider_label: row.get(2)?,
+                model: row.get(3)?,
+                hour_start: row.get(4)?,
+                project_hash: row.get(5)?,
             })
         })?;
         rows.collect::<rusqlite::Result<Vec<_>>>()?
@@ -647,20 +665,22 @@ fn reconcile_pricing_buckets(
     let mut update_bucket = tx.prepare(
         r#"
         UPDATE usage_bucket_30m
-        SET cost_with_cache_usd = ?6,
-            cost_without_cache_usd = ?7,
-            pricing_status = ?8,
-            pricing_source = ?9,
-            pricing_rate = ?10
-        WHERE source = ?1
-          AND provider_label = ?2
-          AND model = ?3
-          AND hour_start = ?4
-          AND project_hash = ?5
+        SET cost_with_cache_usd = ?7,
+            cost_without_cache_usd = ?8,
+            pricing_status = ?9,
+            pricing_source = ?10,
+            pricing_rate = ?11
+        WHERE host_id = ?1
+          AND source = ?2
+          AND provider_label = ?3
+          AND model = ?4
+          AND hour_start = ?5
+          AND project_hash = ?6
         "#,
     )?;
     for (key, pricing) in buckets {
         update_bucket.execute(params![
+            &key.host_id,
             &key.source,
             &key.provider_label,
             &key.model,
@@ -677,17 +697,19 @@ fn reconcile_pricing_buckets(
     let mut delete_bucket = tx.prepare(
         r#"
         DELETE FROM usage_bucket_30m
-        WHERE source = ?1
-          AND provider_label = ?2
-          AND model = ?3
-          AND hour_start = ?4
-          AND project_hash = ?5
+        WHERE host_id = ?1
+          AND source = ?2
+          AND provider_label = ?3
+          AND model = ?4
+          AND hour_start = ?5
+          AND project_hash = ?6
         "#,
     )?;
     let mut deleted = 0usize;
     for key in persisted_keys {
         if !buckets.contains_key(&key) {
             deleted += delete_bucket.execute(params![
+                &key.host_id,
                 &key.source,
                 &key.provider_label,
                 &key.model,
@@ -702,12 +724,13 @@ fn reconcile_pricing_buckets(
 /// Single-connection writer used by sync to batch event/cursor updates transactionally.
 pub struct SyncRunWriter {
     store: Store,
-    conn: Connection,
+    conn: Option<Connection>,
     permit: Option<WritePermit>,
     run_started_at: String,
     raw_archive_enabled: bool,
     pricing_catalog: crate::query::PricingCatalog,
     provider_index: Option<crate::domain::provider_map::ProviderIndex>,
+    collect_sink: Option<Box<dyn FnMut(SyncShard) -> crate::error::Result<()> + Send>>,
 }
 
 impl SyncRunWriter {
@@ -738,39 +761,67 @@ impl SyncRunWriter {
 /// candidate files; the writer enforces ordering and chunking. Streaming
 /// sources (e.g. OpenCode) submit shards with empty `reset_path_hashes` and
 /// `cursors`, retaining their own custom cursor persistence.
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncShard {
     /// Source the shard belongs to. Used by reset/cursor SQL keys.
     pub source: SourceKind,
+    /// Host that owns this shard. Parser output uses [`SyncShard::new`] which
+    /// fills `"local"`. Remote import constructs shards with
+    /// [`SyncShard::new_for_host`].
+    #[serde(default = "default_sync_shard_host_id")]
+    pub host_id: String,
+    /// When true, `commit_shard` must not rewrite keys again. Remote import
+    /// sets this after applying the host prefix itself.
+    #[serde(default)]
+    pub host_prefix_applied: bool,
     /// Path hashes whose existing events must be cleared before re-inserting.
+    #[serde(default)]
     pub reset_path_hashes: Vec<String>,
     /// Normalized usage events to upsert in chunked transactions.
+    #[serde(default)]
     pub events: Vec<UsageEvent>,
     /// File cursors to persist after events land. Empty for streaming sources.
+    #[serde(default)]
     pub cursors: Vec<FileCursor>,
     /// File paths observed during the parser pass, regardless of whether they
     /// produced new events. The writer marks each one `state='live'` in the
     /// `source_file` table so the driver can later flip unseen files to
     /// `missing`. Empty for streaming sources without per-file identity.
+    #[serde(default)]
     pub seen_file_paths: Vec<String>,
     /// Optional raw payloads keyed by `event_key`. Only consumed when
     /// `Store::raw_archive_enabled` is true; otherwise dropped silently
     /// (D11 / F1.5). Parsers that never serialize raw rows leave this empty.
+    /// Skipped on the wire so prompt text never leaves the machine that parsed it.
+    #[serde(skip)]
     pub raw_records: Vec<RawRecord>,
     /// Normalized turn-level behavior facts. Parsers can leave this empty until
     /// they support behavior extraction; the writer keeps this independent from
     /// `usage_event`/`usage_bucket_30m` so existing cost dashboards stay stable.
+    #[serde(default)]
     pub turns: Vec<UsageTurn>,
     /// Normalized tool/action facts. These power Activity/Tools/Optimize/Compare
     /// views without requiring raw archive to be enabled.
+    #[serde(default)]
     pub tool_calls: Vec<UsageToolCall>,
 }
 
+fn default_sync_shard_host_id() -> String {
+    LOCAL_HOST_ID.to_string()
+}
+
 impl SyncShard {
-    /// Builds an empty shard scoped to one source. Caller fills the vecs.
+    /// Builds an empty shard scoped to the local host. Caller fills the vecs.
     pub fn new(source: SourceKind) -> Self {
+        Self::new_for_host(source, LOCAL_HOST_ID)
+    }
+
+    /// Builds an empty shard scoped to one source on one host.
+    pub fn new_for_host(source: SourceKind, host_id: impl Into<String>) -> Self {
         Self {
             source,
+            host_id: host_id.into(),
+            host_prefix_applied: false,
             reset_path_hashes: Vec::new(),
             events: Vec::new(),
             cursors: Vec::new(),
@@ -801,7 +852,7 @@ pub struct SourceFileInventory {
 /// `event_key` matches `usage_event.event_key` 1:1 so consumers can join back
 /// to the normalized row. `raw_json` is the parser-specific serialization of
 /// the upstream record (e.g. an OpenCode SQLite row rendered as JSON).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RawRecord {
     /// Same `event_key` value as the corresponding `usage_event` row.
     pub event_key: String,
@@ -1081,6 +1132,7 @@ pub struct ShardCommitStats {
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 struct BucketKey {
+    host_id: String,
     source: String,
     provider_label: String,
     model: String,
@@ -1096,6 +1148,7 @@ struct PricingRecomputeRow {
     model: String,
     hour_start: String,
     project_hash: String,
+    host_id: String,
     input_tokens: i64,
     cache_read_tokens: i64,
     cache_creation_tokens: i64,

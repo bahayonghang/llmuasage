@@ -107,6 +107,7 @@ function minimalRaw() {
     trends: [{ label: '2026-07-21', total_tokens: 50 }],
     models: [{ model: 'm1', total_tokens: 100, input_tokens: 40, output_tokens: 60, cache_read_tokens: 0, cost_with_cache_usd: 0.1, cache_savings_usd: 0 }],
     sources: [{ source: 'codex', total_tokens: 100, last_event_at: '2026-07-21T00:00:00Z' }],
+    hosts: [{ host_id: 'local', label: 'local', total_tokens: 100, last_event_at: '2026-07-21T00:00:00Z' }],
     projects: [{ project_hash: 'p1', project_label: 'proj', total_tokens: 100 }],
     costs: [{ source: 'codex', model: 'm1', estimated_cost_usd: 0.1, event_count: 2, total_tokens: 100 }],
     activity: { support: { supported: true, level: 'normalized' }, breakdown: [] },
@@ -193,6 +194,28 @@ function completedSnapshot(finishedAt = '2026-08-19T13:00:01Z') {
     finished_at: finishedAt,
   };
 }
+
+test('hosts panel hides unless more than one host is present', async () => {
+  const hosts = await import('../../src/web/assets/render/hosts.js');
+  resetMutations();
+  hosts.renderHosts({
+    totals: { total_tokens: 100 },
+    panels: { hosts: [{ host_id: 'local', label: 'local', total_tokens: 100, last_event_at: '2026-07-21T00:00:00Z' }] },
+  });
+  assert.equal(getElement('hosts').hidden, true);
+
+  hosts.renderHosts({
+    totals: { total_tokens: 150 },
+    panels: {
+      hosts: [
+        { host_id: 'local', label: 'local', total_tokens: 100, last_event_at: '2026-07-21T00:00:00Z' },
+        { host_id: 'devbox', label: 'devbox', total_tokens: 50, last_event_at: '2026-07-21T01:00:00Z' },
+      ],
+    },
+  });
+  assert.equal(getElement('hosts').hidden, false);
+  assert.match(getElement('hosts-rows').innerHTML, /devbox/);
+});
 
 test('live module graph avoids filter-sensitive asset URLs', () => {
   assert.ok(liveModuleAssetUrls.includes('/assets/data/render-key.js'));

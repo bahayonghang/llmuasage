@@ -168,6 +168,17 @@ const UI_COPY_ZH = Object.freeze({
         last_event_at: '最近记录',
       }),
     }),
+    hosts: Object.freeze({
+      kicker: '主机',
+      title: '主机分布',
+      chartCaption: '用量最高的主机',
+      countLabel: '{count} 台主机',
+      emptyChart: '暂无主机统计。',
+      headers: Object.freeze({
+        host: '主机',
+        last_event_at: '最近记录',
+      }),
+    }),
     projects: Object.freeze({
       kicker: '项目',
       title: '项目排行',
@@ -447,6 +458,17 @@ const UI_COPY_EN = Object.freeze({
         last_event_at: 'Last seen',
       }),
     }),
+    hosts: Object.freeze({
+      kicker: 'Hosts',
+      title: 'Hosts',
+      chartCaption: 'Top hosts by tokens',
+      countLabel: '{count} hosts',
+      emptyChart: 'No host data.',
+      headers: Object.freeze({
+        host: 'Host',
+        last_event_at: 'Last seen',
+      }),
+    }),
     projects: Object.freeze({
       kicker: 'Projects',
       title: 'Projects',
@@ -687,6 +709,8 @@ const SHELL_COPY_ZH = Object.freeze({
   'shell.sources.eyebrow': '来源',
   'shell.sources.title': '来源分布',
   'shell.sources.sub': '用量最高的 4 个来源',
+  'shell.hosts.title': '主机分布',
+  'shell.hosts.sub': '用量最高的主机',
   'shell.projects.eyebrow': '项目',
   'shell.projects.title': '项目排行',
   'shell.projects.sub': '按累计 Token 排序',
@@ -909,6 +933,8 @@ const SHELL_COPY_EN = Object.freeze({
   'shell.sources.eyebrow': 'SOURCES',
   'shell.sources.title': 'Sources',
   'shell.sources.sub': 'Top 4 sources by tokens',
+  'shell.hosts.title': 'Hosts',
+  'shell.hosts.sub': 'Top hosts by tokens',
   'shell.projects.eyebrow': 'PROJECTS',
   'shell.projects.title': 'Projects',
   'shell.projects.sub': 'Sorted by cumulative tokens',

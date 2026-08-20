@@ -21,7 +21,14 @@ impl<'a> CursorStore<'a> {
         Self { store }
     }
 
-    pub fn load_file_cursors(&self, source: SourceKind) -> Result<HashMap<String, FileCursor>> {
+    pub fn load_file_cursors(
+        &self,
+        source: SourceKind,
+        host_id: &str,
+    ) -> Result<HashMap<String, FileCursor>> {
+        if self.store.emit_only() {
+            return Ok(HashMap::new());
+        }
         let conn = self.store.open_connection()?;
         let mut stmt = conn.prepare(
             r#"
@@ -37,10 +44,10 @@ impl<'a> CursorStore<'a> {
                 last_model,
                 updated_at
             FROM source_cursor
-            WHERE source = ?1
+            WHERE source = ?1 AND host_id = ?2
             "#,
         )?;
-        let rows = stmt.query_map(params![source.as_str()], |row| {
+        let rows = stmt.query_map(params![source.as_str(), host_id], |row| {
             let last_total_json: Option<String> = row.get(7)?;
             Ok(FileCursor {
                 cursor_key: row.get(0)?,
@@ -66,7 +73,10 @@ impl<'a> CursorStore<'a> {
         Ok(output)
     }
 
-    pub fn load_opencode_cursor(&self) -> Result<OpencodeCursor> {
+    pub fn load_opencode_cursor(&self, host_id: &str) -> Result<OpencodeCursor> {
+        if self.store.emit_only() {
+            return Ok(OpencodeCursor::default());
+        }
         let conn = self.store.open_connection()?;
         let row = conn
             .query_row(
@@ -74,9 +84,9 @@ impl<'a> CursorStore<'a> {
                 SELECT inode, last_time_created, last_processed_ids_json,
                        last_part_rowid, sqlite_status, updated_at
                 FROM source_cursor
-                WHERE source = 'opencode' AND cursor_key = 'main'
+                WHERE host_id = ?1 AND source = 'opencode' AND cursor_key = 'main'
                 "#,
-                [],
+                [host_id],
                 |row| {
                     let ids_json: Option<String> = row.get(2)?;
                     Ok(OpencodeCursor {
@@ -99,7 +109,10 @@ impl<'a> CursorStore<'a> {
         Ok(row.unwrap_or_default())
     }
 
-    pub fn save_opencode_cursor(&self, cursor: &OpencodeCursor) -> Result<()> {
+    pub fn save_opencode_cursor(&self, host_id: &str, cursor: &OpencodeCursor) -> Result<()> {
+        if self.store.emit_only() {
+            return Ok(());
+        }
         let processed_ids =
             serde_json::to_string(&cursor.last_processed_ids).map_err(|source| {
                 LlmusageError::Parse {
@@ -111,10 +124,10 @@ impl<'a> CursorStore<'a> {
             tx.execute(
                 r#"
             INSERT INTO source_cursor(
-                source, cursor_key, inode, last_time_created, last_processed_ids_json,
+                host_id, source, cursor_key, inode, last_time_created, last_processed_ids_json,
                 last_part_rowid, sqlite_status, updated_at
-            ) VALUES ('opencode', 'main', ?1, ?2, ?3, ?4, ?5, ?6)
-            ON CONFLICT(source, cursor_key) DO UPDATE SET
+            ) VALUES (?1, 'opencode', 'main', ?2, ?3, ?4, ?5, ?6, ?7)
+            ON CONFLICT(host_id, source, cursor_key) DO UPDATE SET
                 inode = excluded.inode,
                 last_time_created = excluded.last_time_created,
                 last_processed_ids_json = excluded.last_processed_ids_json,
@@ -123,6 +136,7 @@ impl<'a> CursorStore<'a> {
                 updated_at = excluded.updated_at
             "#,
                 params![
+                    host_id,
                     cursor.inode as i64,
                     cursor.last_time_created,
                     processed_ids,
@@ -136,7 +150,10 @@ impl<'a> CursorStore<'a> {
         Ok(())
     }
 
-    pub fn load_zcode_cursor(&self) -> Result<ZcodeCursor> {
+    pub fn load_zcode_cursor(&self, host_id: &str) -> Result<ZcodeCursor> {
+        if self.store.emit_only() {
+            return Ok(ZcodeCursor::default());
+        }
         let conn = self.store.open_connection()?;
         let row = conn
             .query_row(
@@ -144,9 +161,9 @@ impl<'a> CursorStore<'a> {
                 SELECT last_time_created, last_processed_ids_json, sqlite_status, updated_at,
                        last_skipped_at, last_skipped_ids_json
                 FROM source_cursor
-                WHERE source = 'zcode' AND cursor_key = 'main'
+                WHERE host_id = ?1 AND source = 'zcode' AND cursor_key = 'main'
                 "#,
-                [],
+                [host_id],
                 |row| {
                     let ids_json: Option<String> = row.get(1)?;
                     let skipped_ids_json: Option<String> = row.get(5)?;
@@ -173,7 +190,10 @@ impl<'a> CursorStore<'a> {
         Ok(row.unwrap_or_default())
     }
 
-    pub fn save_zcode_cursor(&self, cursor: &ZcodeCursor) -> Result<()> {
+    pub fn save_zcode_cursor(&self, host_id: &str, cursor: &ZcodeCursor) -> Result<()> {
+        if self.store.emit_only() {
+            return Ok(());
+        }
         let processed_ids =
             serde_json::to_string(&cursor.last_processed_ids).map_err(|source| {
                 LlmusageError::Parse {
@@ -191,10 +211,10 @@ impl<'a> CursorStore<'a> {
             tx.execute(
                 r#"
             INSERT INTO source_cursor(
-                source, cursor_key, last_time_created, last_processed_ids_json,
+                host_id, source, cursor_key, last_time_created, last_processed_ids_json,
                 sqlite_status, updated_at, last_skipped_at, last_skipped_ids_json
-            ) VALUES ('zcode', 'main', ?1, ?2, ?3, ?4, ?5, ?6)
-            ON CONFLICT(source, cursor_key) DO UPDATE SET
+            ) VALUES (?1, 'zcode', 'main', ?2, ?3, ?4, ?5, ?6, ?7)
+            ON CONFLICT(host_id, source, cursor_key) DO UPDATE SET
                 last_time_created = excluded.last_time_created,
                 last_processed_ids_json = excluded.last_processed_ids_json,
                 sqlite_status = excluded.sqlite_status,
@@ -203,6 +223,7 @@ impl<'a> CursorStore<'a> {
                 last_skipped_ids_json = excluded.last_skipped_ids_json
             "#,
                 params![
+                    host_id,
                     cursor.last_completed_at,
                     processed_ids,
                     cursor.sqlite_status,

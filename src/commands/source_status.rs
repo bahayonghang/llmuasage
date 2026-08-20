@@ -10,9 +10,9 @@ use crate::{
         source_descriptor::{SourceDescriptor, UsageQuality},
     },
     models::{ParseIssues, SourceKind},
-    query::{Dashboard, SourceBreakdown},
+    query::{Dashboard, QueryFilter, SourceBreakdown},
     registry,
-    store::Store,
+    store::{Host, Store},
 };
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -50,19 +50,31 @@ pub async fn run(app: &AppContext) -> Result<()> {
     let store = Store::new(&app.paths)?;
     store.require_initialized()?;
     let dashboard = Dashboard::open(&store)?;
-    let sources = dashboard.source_breakdown(&Default::default())?;
-    let mut capability_statuses = build_source_capability_statuses(&sources);
-    apply_token_accounting_statuses(&store, &mut capability_statuses)?;
     let platform_statuses = build_platform_monitor_statuses();
-    let parse_issues = store
-        .sync_status()
-        .load_source_sync_statuses()?
-        .into_iter()
-        .map(|status| (status.source, status.parse_issues))
-        .collect::<BTreeMap<_, _>>();
+    let hosts = store.hosts().list()?;
 
     println!("Source status:");
-    print_human_statuses(&capability_statuses, &platform_statuses, &parse_issues);
+    for host in &hosts {
+        println!(
+            "Host {}: status={}",
+            host.label,
+            host_lifecycle_status(host)
+        );
+        let sources = dashboard.source_breakdown(&QueryFilter {
+            host_id: Some(host.host_id.clone()),
+            ..Default::default()
+        })?;
+        let mut capability_statuses = build_source_capability_statuses(&sources);
+        apply_token_accounting_statuses(&store, &mut capability_statuses)?;
+        let parse_issues = store
+            .sync_status()
+            .load_source_sync_statuses(&host.host_id)?
+            .into_iter()
+            .map(|status| (status.source, status.parse_issues))
+            .collect::<BTreeMap<_, _>>();
+        print_human_statuses(&capability_statuses, &[], &parse_issues);
+    }
+    print_human_statuses(&[], &platform_statuses, &BTreeMap::new());
     Ok(())
 }
 
@@ -161,6 +173,19 @@ pub fn print_human_statuses(
     }
 }
 
+/// Read-only host lifecycle for `source-status`. `live` is a sync-event
+/// signal only and is never returned here.
+pub fn host_lifecycle_status(host: &Host) -> &'static str {
+    match (
+        host.last_contacted_at.as_deref(),
+        host.last_error.as_deref(),
+    ) {
+        (None, _) => "never_contacted",
+        (_, Some(error)) if !error.is_empty() => "unreachable",
+        _ => "idle",
+    }
+}
+
 fn parse_issue_status_lines(issues: &ParseIssues) -> Vec<String> {
     let Some(summary) = issues.summary_text() else {
         return Vec::new();
@@ -251,8 +276,10 @@ mod tests {
     };
 
     use super::{
-        parse_issue_status_lines, platform_monitor_status_from_probe, source_status_from_parts,
+        host_lifecycle_status, parse_issue_status_lines, platform_monitor_status_from_probe,
+        source_status_from_parts,
     };
+    use crate::store::Host;
     use std::collections::BTreeMap;
 
     const TEST_DESCRIPTOR: SourceDescriptor = SourceDescriptor {
@@ -267,6 +294,46 @@ mod tests {
         quality: UsageQuality::Precise,
         privacy: PrivacyClass::LocalArtifacts,
     };
+
+    fn sample_host(last_contacted_at: Option<&str>, last_error: Option<&str>) -> Host {
+        Host {
+            host_id: "devbox".to_string(),
+            label: "devbox".to_string(),
+            transport: "ssh".to_string(),
+            ssh_target: Some("me@devbox".to_string()),
+            command: "llmusage".to_string(),
+            added_at: "2026-08-20T00:00:00Z".to_string(),
+            last_contacted_at: last_contacted_at.map(str::to_string),
+            last_error: last_error.map(str::to_string),
+            import_watermark: None,
+        }
+    }
+
+    #[test]
+    fn host_lifecycle_status_is_idle_unreachable_or_never_contacted() {
+        assert_eq!(
+            host_lifecycle_status(&sample_host(None, None)),
+            "never_contacted"
+        );
+        assert_eq!(
+            host_lifecycle_status(&sample_host(
+                Some("2026-08-20T01:00:00Z"),
+                Some("ssh timed out")
+            )),
+            "unreachable"
+        );
+        assert_eq!(
+            host_lifecycle_status(&sample_host(Some("2026-08-20T01:00:00Z"), None)),
+            "idle"
+        );
+        for host in [
+            sample_host(None, None),
+            sample_host(Some("2026-08-20T01:00:00Z"), Some("ssh timed out")),
+            sample_host(Some("2026-08-20T01:00:00Z"), None),
+        ] {
+            assert_ne!(host_lifecycle_status(&host), "live");
+        }
+    }
 
     #[test]
     fn status_reports_passive_no_data_without_history() {

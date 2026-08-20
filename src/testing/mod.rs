@@ -133,7 +133,7 @@ impl Fixture {
                 cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source, pricing_rate,
                 event_count, updated_at
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, 1, ?19)
-            ON CONFLICT(source, provider_label, model, hour_start, project_hash) DO UPDATE SET
+            ON CONFLICT(host_id, source, provider_label, model, hour_start, project_hash) DO UPDATE SET
                 input_tokens = input_tokens + excluded.input_tokens,
                 cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens,
                 cache_creation_tokens = cache_creation_tokens + excluded.cache_creation_tokens,

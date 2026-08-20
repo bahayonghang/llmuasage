@@ -149,7 +149,7 @@ async fn diagnostics(app: &AppContext, json: bool) -> Result<()> {
         });
     }
 
-    let sync_statuses = store.sync_status().load_source_sync_statuses()?;
+    let sync_statuses = store.sync_status().load_source_sync_statuses("local")?;
     checks.push(parse_issues_doctor_check(&sync_statuses));
 
     if json {

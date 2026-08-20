@@ -15,7 +15,7 @@ impl<'a> SyncStatusStore<'a> {
         Self { store }
     }
 
-    pub fn load_source_sync_statuses(&self) -> Result<Vec<SourceSyncStatus>> {
+    pub fn load_source_sync_statuses(&self, host_id: &str) -> Result<Vec<SourceSyncStatus>> {
         let conn = self.store.open_connection()?;
         let mut stmt = conn.prepare(
             r#"
@@ -34,10 +34,11 @@ impl<'a> SyncStatusStore<'a> {
                 parse_issues_json,
                 updated_at
             FROM source_sync_status
+            WHERE host_id = ?1
             ORDER BY source ASC
             "#,
         )?;
-        let rows = stmt.query_map([], |row| {
+        let rows = stmt.query_map([host_id], |row| {
             let parse_issues_raw = row.get::<_, String>(11)?;
             let parse_issues = serde_json::from_str(&parse_issues_raw).map_err(|source| {
                 rusqlite::Error::FromSqlConversionFailure(11, Type::Text, Box::new(source))
@@ -84,7 +85,11 @@ impl<'a> SyncStatusStore<'a> {
         Ok(statuses)
     }
 
-    pub fn save_source_sync_statuses(&self, statuses: &[SourceSyncStatus]) -> Result<()> {
+    pub fn save_source_sync_statuses(
+        &self,
+        host_id: &str,
+        statuses: &[SourceSyncStatus],
+    ) -> Result<()> {
         if statuses.is_empty() {
             return Ok(());
         }
@@ -93,6 +98,7 @@ impl<'a> SyncStatusStore<'a> {
             let mut stmt = tx.prepare_cached(
                 r#"
                 INSERT INTO source_sync_status(
+                    host_id,
                     source,
                     files_processed,
                     changed_files,
@@ -106,8 +112,8 @@ impl<'a> SyncStatusStore<'a> {
                     lock_wait_ms,
                     parse_issues_json,
                     updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
-                ON CONFLICT(source) DO UPDATE SET
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                ON CONFLICT(host_id, source) DO UPDATE SET
                     files_processed = excluded.files_processed,
                     changed_files = excluded.changed_files,
                     bytes_scanned = excluded.bytes_scanned,
@@ -131,6 +137,7 @@ impl<'a> SyncStatusStore<'a> {
                         }
                     })?;
                 stmt.execute(params![
+                    host_id,
                     status.source,
                     status.files_processed,
                     status.changed_files,
@@ -159,12 +166,14 @@ impl<'a> SyncStatusStore<'a> {
     pub fn mark_recent_completed(
         &self,
         source: crate::models::SourceKind,
+        host_id: &str,
         at: String,
     ) -> Result<()> {
         self.store.write_transaction(|tx| {
             tx.execute(
                 r#"
             INSERT INTO source_sync_status(
+                host_id,
                 source,
                 files_processed,
                 changed_files,
@@ -178,12 +187,12 @@ impl<'a> SyncStatusStore<'a> {
                 lock_wait_ms,
                 updated_at,
                 recent_completed_at
-            ) VALUES (?1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ?2, ?2)
-            ON CONFLICT(source) DO UPDATE SET
+            ) VALUES (?1, ?2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ?3, ?3)
+            ON CONFLICT(host_id, source) DO UPDATE SET
                 recent_completed_at = excluded.recent_completed_at,
                 updated_at = excluded.updated_at
             "#,
-                params![source.as_str(), at],
+                params![host_id, source.as_str(), at],
             )?;
             Ok(())
         })?;
@@ -239,8 +248,8 @@ mod tests {
 
         store
             .sync_status()
-            .save_source_sync_statuses(std::slice::from_ref(&status))?;
-        let loaded = store.sync_status().load_source_sync_statuses()?;
+            .save_source_sync_statuses("local", std::slice::from_ref(&status))?;
+        let loaded = store.sync_status().load_source_sync_statuses("local")?;
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].parse_issues, status.parse_issues);
         let encoded = serde_json::to_string(&loaded)?;
@@ -254,7 +263,7 @@ mod tests {
         )?;
         let error = store
             .sync_status()
-            .load_source_sync_statuses()
+            .load_source_sync_statuses("local")
             .expect_err("invalid issue JSON must not be treated as clean counters");
         assert!(matches!(
             error,

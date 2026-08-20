@@ -155,11 +155,16 @@ async fn sync_grok(
     info!("starting Grok Build passive session sync");
     let parse_started = Instant::now();
     let listing = source_files::list_grok_session_files();
-    let cursor_map = store.cursors().load_file_cursors(SourceKind::Grok)?;
-    let tracked_paths = store.source_files().tracked_paths(SourceKind::Grok)?;
+    let cursor_map = store
+        .cursors()
+        .load_file_cursors(SourceKind::Grok, "local")?;
+    let tracked_paths = store
+        .source_files()
+        .tracked_paths(SourceKind::Grok, "local")?;
     let inventory_paths = listing.file_paths();
     store.source_files().mark_inventory_seen(
         SourceKind::Grok,
+        "local",
         &inventory_paths,
         writer.run_started_at(),
     )?;
@@ -291,6 +296,7 @@ async fn sync_grok(
                 raw_records: Vec::new(),
                 turns: Vec::new(),
                 tool_calls: Vec::new(),
+                ..SyncShard::new(SourceKind::Grok)
             })?;
             inserted = inserted.saturating_add(commit.events_inserted);
             write_ms = write_ms.saturating_add(commit.write_ms);

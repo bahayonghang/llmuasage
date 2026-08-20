@@ -66,11 +66,12 @@ async fn three_entries_lead_to_consistent_state() -> Result<()> {
             raw_records: Vec::new(),
             turns: Vec::new(),
             tool_calls: Vec::new(),
+            ..SyncShard::new(SourceKind::Codex)
         })?;
         writer.finish_sync_run()?;
     }
 
-    let counts = store.source_files().counts(SourceKind::Codex)?;
+    let counts = store.source_files().counts(SourceKind::Codex, "local")?;
     assert_eq!(counts.live, 3);
     assert_eq!(counts.missing, 0);
     assert_eq!(counts.deleted, 0);
@@ -88,24 +89,26 @@ async fn three_entries_lead_to_consistent_state() -> Result<()> {
             raw_records: Vec::new(),
             turns: Vec::new(),
             tool_calls: Vec::new(),
+            ..SyncShard::new(SourceKind::Codex)
         })?;
         writer.finish_sync_run()?;
 
-        let swept = store
-            .source_files()
-            .sweep_missing(SourceKind::Codex, &run_started_at)?;
+        let swept =
+            store
+                .source_files()
+                .sweep_missing(SourceKind::Codex, "local", &run_started_at)?;
         assert_eq!(swept, 1, "/codex/c.jsonl should flip to missing");
     }
 
-    let counts = store.source_files().counts(SourceKind::Codex)?;
+    let counts = store.source_files().counts(SourceKind::Codex, "local")?;
     assert_eq!(counts.live, 2);
     assert_eq!(counts.missing, 1);
     assert_eq!(counts.deleted, 0);
 
     // Third entry: the user forgets one of the live files explicitly.
-    store.mark_source_file_deleted(SourceKind::Codex, "/codex/a.jsonl")?;
+    store.mark_source_file_deleted(SourceKind::Codex, "local", "/codex/a.jsonl")?;
 
-    let counts = store.source_files().counts(SourceKind::Codex)?;
+    let counts = store.source_files().counts(SourceKind::Codex, "local")?;
     assert_eq!(counts.live, 1);
     assert_eq!(counts.missing, 1);
     assert_eq!(counts.deleted, 1);
@@ -149,14 +152,21 @@ async fn deleted_then_seen_again_resurrects_to_live() -> Result<()> {
             raw_records: Vec::new(),
             turns: Vec::new(),
             tool_calls: Vec::new(),
+            ..SyncShard::new(SourceKind::Codex)
         })?;
         writer.finish_sync_run()?;
     }
-    assert_eq!(store.source_files().counts(SourceKind::Claude)?.live, 1);
+    assert_eq!(
+        store
+            .source_files()
+            .counts(SourceKind::Claude, "local")?
+            .live,
+        1
+    );
 
     // User forgets the file via the diagnostics entry.
-    store.mark_source_file_deleted(SourceKind::Claude, "/claude/proj/log.jsonl")?;
-    let counts = store.source_files().counts(SourceKind::Claude)?;
+    store.mark_source_file_deleted(SourceKind::Claude, "local", "/claude/proj/log.jsonl")?;
+    let counts = store.source_files().counts(SourceKind::Claude, "local")?;
     assert_eq!(counts.live, 0);
     assert_eq!(counts.deleted, 1);
 
@@ -172,11 +182,12 @@ async fn deleted_then_seen_again_resurrects_to_live() -> Result<()> {
             raw_records: Vec::new(),
             turns: Vec::new(),
             tool_calls: Vec::new(),
+            ..SyncShard::new(SourceKind::Codex)
         })?;
         writer.finish_sync_run()?;
     }
 
-    let counts = store.source_files().counts(SourceKind::Claude)?;
+    let counts = store.source_files().counts(SourceKind::Claude, "local")?;
     assert_eq!(counts.live, 1);
     assert_eq!(counts.deleted, 0, "deleted_by_user must resurrect to live");
     Ok(())

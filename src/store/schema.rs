@@ -121,8 +121,12 @@ impl Store {
         fs::create_dir_all(&self.paths.logs_dir)?;
 
         let mut conn = self.open_connection()?;
-        if migrations::read_schema_version(&conn)? == 0 && self.paths.db_path.is_file() {
+        let schema_version = migrations::read_schema_version(&conn)?;
+        if schema_version == 0 && self.paths.db_path.is_file() {
             self.backup_pre_0_5_0_db()?;
+        }
+        if schema_version == 22 && self.paths.db_path.is_file() {
+            self.backup_pre_0_23_host_db()?;
         }
         if let Some(sink) = progress_sink.as_deref_mut() {
             let mut migration_sink = |event| sink(BootstrapProgressEvent::Migration(event));
@@ -158,6 +162,9 @@ impl Store {
     /// migration v7 seeds `'0'` so a freshly bootstrapped database always
     /// reports `false` here.
     pub fn raw_archive_enabled(&self) -> Result<bool> {
+        if self.emit_only() {
+            return Ok(false);
+        }
         let conn = self.open_connection()?;
         read_meta_flag(&conn, META_RAW_ARCHIVE_KEY)
     }
@@ -242,35 +249,54 @@ impl Store {
         Ok(count)
     }
 
-    /// Deletes rebuildable usage state for exactly one source (D20 / F3.3).
+    /// Deletes rebuildable usage state for exactly one source on one host (D20 / F3.3).
     ///
     /// `project_dim` is intentionally preserved because projects can be shared
     /// by multiple sources and are cheap stale metadata until the next full GC.
-    pub fn reset_for_source(&self, source: crate::models::SourceKind) -> Result<()> {
-        info!(source = %source, "开始按源清空可重建用量数据");
+    pub fn reset_for_source(&self, source: crate::models::SourceKind, host_id: &str) -> Result<()> {
+        info!(source = %source, host_id, "开始按源清空可重建用量数据");
         self.write_transaction(|tx| {
             let source = source.as_str();
-            tx.execute("DELETE FROM usage_tool_call WHERE source = ?1", [source])?;
-            tx.execute("DELETE FROM usage_turn WHERE source = ?1", [source])?;
-            tx.execute("DELETE FROM usage_event WHERE source = ?1", [source])?;
-            tx.execute("DELETE FROM usage_bucket_30m WHERE source = ?1", [source])?;
-            tx.execute("DELETE FROM source_cursor WHERE source = ?1", [source])?;
-            tx.execute("DELETE FROM source_sync_status WHERE source = ?1", [source])?;
-            tx.execute("DELETE FROM source_file WHERE source = ?1", [source])?;
+            tx.execute(
+                "DELETE FROM usage_tool_call WHERE source = ?1 AND host_id = ?2",
+                rusqlite::params![source, host_id],
+            )?;
+            tx.execute(
+                "DELETE FROM usage_turn WHERE source = ?1 AND host_id = ?2",
+                rusqlite::params![source, host_id],
+            )?;
             tx.execute(
                 r#"
                 DELETE FROM usage_event_raw
                 WHERE event_key IN (
-                    SELECT raw.event_key
-                    FROM usage_event_raw raw
-                    WHERE raw.event_key LIKE ?1
+                    SELECT event_key FROM usage_event WHERE source = ?1 AND host_id = ?2
                 )
                 "#,
-                [format!("{source}:%")],
+                rusqlite::params![source, host_id],
+            )?;
+            tx.execute(
+                "DELETE FROM usage_event WHERE source = ?1 AND host_id = ?2",
+                rusqlite::params![source, host_id],
+            )?;
+            tx.execute(
+                "DELETE FROM usage_bucket_30m WHERE source = ?1 AND host_id = ?2",
+                rusqlite::params![source, host_id],
+            )?;
+            tx.execute(
+                "DELETE FROM source_cursor WHERE source = ?1 AND host_id = ?2",
+                rusqlite::params![source, host_id],
+            )?;
+            tx.execute(
+                "DELETE FROM source_sync_status WHERE source = ?1 AND host_id = ?2",
+                rusqlite::params![source, host_id],
+            )?;
+            tx.execute(
+                "DELETE FROM source_file WHERE source = ?1 AND host_id = ?2",
+                rusqlite::params![source, host_id],
             )?;
             Ok(())
         })?;
-        info!(source = %source, "完成按源清空可重建用量数据");
+        info!(source = %source, host_id, "完成按源清空可重建用量数据");
         Ok(())
     }
 
@@ -308,11 +334,19 @@ impl Store {
     }
 
     fn backup_pre_0_5_0_db(&self) -> Result<()> {
+        self.checkpoint_and_copy_db("llmusage.db.pre-0.5.0")
+    }
+
+    fn backup_pre_0_23_host_db(&self) -> Result<()> {
+        self.checkpoint_and_copy_db("llmusage.db.pre-0.23-host")
+    }
+
+    fn checkpoint_and_copy_db(&self, file_name: &str) -> Result<()> {
         fs::create_dir_all(&self.paths.backups_dir)?;
-        let backup_path = self.paths.backups_dir.join("llmusage.db.pre-0.5.0");
+        let backup_path = self.paths.backups_dir.join(file_name);
         if !backup_path.exists() {
-            // Checkpoint to flush WAL pages into the main database file before
-            // copying, so the backup is self-contained (DATA-005).
+            // Checkpoint with a separate connection so the backup is a
+            // self-contained copy of the main database file (DATA-005).
             let conn = self.open_connection()?;
             conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
             drop(conn);

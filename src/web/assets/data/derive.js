@@ -19,6 +19,7 @@ export const PANEL_LIMITS = Object.freeze({
   modelTable: 8,
   sources: 4,
   sourceTable: 4,
+  hosts: 4,
   projects: 5,
   costs: 5,
   costTable: 5,
@@ -275,7 +276,7 @@ export function buildContextStats() {
   };
 }
 
-function deriveContext({ overview, trends, models, sources, projects, costs, activity, tools, optimize, compare, explorer, home_overview, heatmap, trends_daily, top_sessions, hour_of_week, health, diagnostics, sync_command_center, _meta }) {
+function deriveContext({ overview, trends, models, sources, hosts, projects, costs, activity, tools, optimize, compare, explorer, home_overview, heatmap, trends_daily, top_sessions, hour_of_week, health, diagnostics, sync_command_center, _meta }) {
   logger.info('开始构建页面上下文');
 
   // 1.1 规范化并排序趋势、排行和健康数据
@@ -287,6 +288,7 @@ function deriveContext({ overview, trends, models, sources, projects, costs, act
   const tableRows = recentRowsDesc.slice(0, PANEL_LIMITS.trendTable);
   const modelRows = sortDesc(models, (row) => row?.total_tokens);
   const sourceRows = sortDesc(sources, (row) => row?.total_tokens);
+  const hostRows = sortDesc(hosts, (row) => row?.total_tokens);
   const projectRows = sortDesc(projects, (row) => row?.total_tokens);
   const costRows = sortDesc(costs, (row) => row?.estimated_cost_usd);
   const activityRows = sortDesc(activity?.breakdown, (row) => row?.turns);
@@ -384,6 +386,7 @@ function deriveContext({ overview, trends, models, sources, projects, costs, act
       model_table_rows,
       sources: sourceRows,
       source_table_rows,
+      hosts: hostRows,
       projects: projectRows,
       costs: costRows,
       cost_table_rows,

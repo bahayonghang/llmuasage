@@ -8,7 +8,7 @@ use tempfile::TempDir;
 use llmusage::{
     logging::{read_recent_log_entries, runtime_status},
     paths::AppPaths,
-    query::Dashboard,
+    query::{Dashboard, QueryFilter, ReportTimezone},
     store::Store,
 };
 
@@ -1505,8 +1505,238 @@ fn source_status_command_executes_against_fresh_runtime() -> Result<()> {
 
     let stdout = String::from_utf8(output.stdout)?;
     assert!(stdout.contains("Source status:"), "{stdout}");
+    assert!(stdout.contains("Host local:"), "{stdout}");
     assert!(stdout.contains("- Source status codex:"), "{stdout}");
     assert!(stdout.contains("- Platform monitor"), "{stdout}");
+    Ok(())
+}
+
+#[test]
+fn host_filter_keeps_totals_consistent_and_lists_unknown_labels() -> Result<()> {
+    let fixture = ReportCliFixture::new()?;
+    fixture.upsert_host("devbox", "devbox")?;
+    fixture.seed_event(SeedEvent {
+        event_key: "local:codex:host-filter:1",
+        host_id: "local",
+        source: "codex",
+        model: "gpt-5",
+        event_at: "2026-08-20T10:00:00Z",
+        input_tokens: 100,
+        total_tokens: 100,
+        project_hash: "project-local",
+        project_label: "Local",
+        session_id: Some("session-local"),
+        source_path_hash: Some("path-local"),
+        ..SeedEvent::default()
+    })?;
+    fixture.seed_event(SeedEvent {
+        event_key: "devbox:codex:host-filter:1",
+        host_id: "devbox",
+        source: "codex",
+        model: "gpt-5",
+        event_at: "2026-08-20T11:00:00Z",
+        input_tokens: 40,
+        total_tokens: 40,
+        project_hash: "project-devbox",
+        project_label: "Devbox",
+        session_id: Some("session-devbox"),
+        source_path_hash: Some("path-devbox"),
+        ..SeedEvent::default()
+    })?;
+
+    let all = fixture.json(&[
+        "daily",
+        "--json",
+        "--by-agent",
+        "--since",
+        "20260820",
+        "--until",
+        "20260820",
+        "--timezone",
+        "UTC",
+    ])?;
+    assert_eq!(all["totals"]["totalTokens"].as_i64(), Some(140));
+    let hosts = all["hosts"].as_array().expect("hosts rows");
+    assert_eq!(hosts.len(), 2);
+    assert!(all["daily"][0]["agents"].as_array().is_some());
+    let host_sum = hosts
+        .iter()
+        .map(|row| row["totalTokens"].as_i64().unwrap())
+        .sum::<i64>();
+    assert_eq!(host_sum, 140);
+    assert!(
+        hosts
+            .iter()
+            .any(|row| row["host"] == "local" && row["totalTokens"] == 100)
+    );
+    assert!(
+        hosts
+            .iter()
+            .any(|row| row["host"] == "devbox" && row["totalTokens"] == 40)
+    );
+
+    let local = fixture.json(&[
+        "daily",
+        "--json",
+        "--host",
+        "local",
+        "--since",
+        "20260820",
+        "--until",
+        "20260820",
+        "--timezone",
+        "UTC",
+    ])?;
+    assert_eq!(local["totals"]["totalTokens"].as_i64(), Some(100));
+    assert_eq!(local["hosts"].as_array().map(Vec::len), Some(1));
+    assert_eq!(local["hosts"][0]["host"], "local");
+
+    let remote = fixture.json(&[
+        "daily",
+        "--json",
+        "--host",
+        "devbox",
+        "--since",
+        "20260820",
+        "--until",
+        "20260820",
+        "--timezone",
+        "UTC",
+    ])?;
+    assert_eq!(remote["totals"]["totalTokens"].as_i64(), Some(40));
+
+    let unknown = fixture.output(&[
+        "daily",
+        "--json",
+        "--host",
+        "missing-host",
+        "--timezone",
+        "UTC",
+    ])?;
+    assert!(!unknown.status.success());
+    let stderr = String::from_utf8(unknown.stderr)?;
+    assert!(
+        stderr.contains("unknown host label 'missing-host'"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("registered labels:"), "{stderr}");
+    assert!(stderr.contains("local"), "{stderr}");
+    assert!(stderr.contains("devbox"), "{stderr}");
+
+    let store = Store::new(&fixture.paths)?;
+    let dashboard = Dashboard::open(&store)?;
+    let filter = QueryFilter {
+        since: Some(chrono::NaiveDate::from_ymd_opt(2026, 8, 20).unwrap()),
+        until: Some(chrono::NaiveDate::from_ymd_opt(2026, 8, 20).unwrap()),
+        timezone: ReportTimezone::Utc,
+        ..Default::default()
+    };
+    let host_rows = dashboard.host_breakdown(&filter)?;
+    assert_eq!(host_rows.len(), 2);
+    let dashboard_sum = host_rows.iter().map(|row| row.total_tokens).sum::<i64>();
+    assert_eq!(dashboard_sum, 140);
+    let local_dash = host_rows.iter().find(|row| row.label == "local").unwrap();
+    assert_eq!(local_dash.total_tokens, 100);
+    assert_eq!(
+        local_dash.total_tokens,
+        local["totals"]["totalTokens"].as_i64().unwrap()
+    );
+    Ok(())
+}
+
+#[test]
+fn host_filter_applies_to_activity_and_tools() -> Result<()> {
+    let fixture = ReportCliFixture::new()?;
+    fixture.upsert_host("devbox", "devbox")?;
+    fixture.seed_event(SeedEvent {
+        event_key: "local:codex:behavior:1",
+        host_id: "local",
+        source: "codex",
+        model: "gpt-5",
+        event_at: "2026-08-20T10:00:00Z",
+        input_tokens: 10,
+        total_tokens: 10,
+        project_hash: "project-a",
+        project_label: "Project A",
+        session_id: Some("session-a"),
+        source_path_hash: Some("path-a"),
+        ..SeedEvent::default()
+    })?;
+    fixture.seed_event(SeedEvent {
+        event_key: "devbox:codex:behavior:1",
+        host_id: "devbox",
+        source: "codex",
+        model: "gpt-5",
+        event_at: "2026-08-20T11:00:00Z",
+        input_tokens: 20,
+        total_tokens: 20,
+        project_hash: "project-b",
+        project_label: "Project B",
+        session_id: Some("session-b"),
+        source_path_hash: Some("path-b"),
+        ..SeedEvent::default()
+    })?;
+
+    let conn = Connection::open(&fixture.paths.db_path)?;
+    conn.execute(
+        r#"
+        INSERT INTO usage_turn(
+            turn_key, host_id, source, session_id, source_path_hash, project_hash,
+            primary_model, started_at, category, has_edits, retries,
+            one_shot, call_count, input_tokens, cache_read_tokens,
+            cache_creation_tokens, output_tokens, reasoning_output_tokens,
+            total_tokens, created_at
+        ) VALUES
+            ('turn:local:codex:behavior:1', 'local', 'codex', 'session-a', 'path-a', 'project-a',
+             'gpt-5', '2026-08-20T10:00:00Z', 'coding', 1, 0, 1, 1, 10, 0, 0, 0, 0, 10,
+             '2026-08-20T10:00:00Z'),
+            ('turn:devbox:codex:behavior:1', 'devbox', 'codex', 'session-b', 'path-b', 'project-b',
+             'gpt-5', '2026-08-20T11:00:00Z', 'debugging', 0, 0, 0, 1, 20, 0, 0, 0, 0, 20,
+             '2026-08-20T11:00:00Z')
+        "#,
+        [],
+    )?;
+    conn.execute(
+        r#"
+        INSERT INTO usage_tool_call(
+            tool_call_key, host_id, turn_key, event_key, source, session_id,
+            source_path_hash, project_hash, model, occurred_at, tool_name,
+            tool_kind, created_at
+        ) VALUES
+            ('tool:local:1', 'local', 'turn:local:codex:behavior:1', 'local:codex:behavior:1',
+             'codex', 'session-a', 'path-a', 'project-a', 'gpt-5', '2026-08-20T10:00:00Z',
+             'Read', 'read', '2026-08-20T10:00:00Z'),
+            ('tool:devbox:1', 'devbox', 'turn:devbox:codex:behavior:1', 'devbox:codex:behavior:1',
+             'codex', 'session-b', 'path-b', 'project-b', 'gpt-5', '2026-08-20T11:00:00Z',
+             'Edit', 'edit', '2026-08-20T11:00:00Z')
+        "#,
+        [],
+    )?;
+    drop(conn);
+
+    let store = Store::new(&fixture.paths)?;
+    let dashboard = Dashboard::open(&store)?;
+    let local = QueryFilter {
+        host_id: Some("local".to_string()),
+        timezone: ReportTimezone::Utc,
+        ..Default::default()
+    };
+    let activity = dashboard.activity_breakdown(&local)?;
+    assert!(activity.support.supported);
+    assert_eq!(activity.breakdown.len(), 1);
+    assert_eq!(activity.breakdown[0].category, "coding");
+    assert_eq!(activity.breakdown[0].turns, 1);
+
+    let tools = dashboard.tool_breakdown(&local)?;
+    assert!(tools.support.supported);
+    assert!(
+        tools.breakdown.iter().any(|row| row.tool_name == "Read"),
+        "{tools:?}"
+    );
+    assert!(
+        tools.breakdown.iter().all(|row| row.tool_name != "Edit"),
+        "{tools:?}"
+    );
     Ok(())
 }
 
@@ -1679,14 +1909,14 @@ impl ReportCliFixture {
         conn.execute(
             r#"
             INSERT INTO usage_event(
-                event_key, source, provider_label, model, event_at, hour_start,
+                event_key, host_id, source, provider_label, model, event_at, hour_start,
                 input_tokens, cache_read_tokens, cache_creation_tokens,
                 output_tokens, reasoning_output_tokens, total_tokens,
                 cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source,
                 project_hash, project_label, project_ref, path_hash,
                 session_id, session_label, source_path_hash, created_at
             ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?5,
+                ?1, ?22, ?2, ?3, ?4, ?5, ?5,
                 ?6, ?7, ?8,
                 ?9, ?10, ?11,
                 ?12, ?13, ?14, ?15,
@@ -1716,18 +1946,19 @@ impl ReportCliFixture {
                 event.source_path_hash.unwrap_or(event.event_key),
                 event.session_id,
                 event.source_path_hash,
+                event.host_id,
             ],
         )?;
         conn.execute(
             r#"
             INSERT INTO usage_bucket_30m(
-                source, provider_label, model, hour_start, project_hash, project_label, project_ref,
+                host_id, source, provider_label, model, hour_start, project_hash, project_label, project_ref,
                 input_tokens, cache_read_tokens, cache_creation_tokens,
                 output_tokens, reasoning_output_tokens, total_tokens,
                 cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source,
                 event_count, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, 1, ?4)
-            ON CONFLICT(source, provider_label, model, hour_start, project_hash) DO UPDATE SET
+            ) VALUES (?18, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, 1, ?4)
+            ON CONFLICT(host_id, source, provider_label, model, hour_start, project_hash) DO UPDATE SET
                 input_tokens = input_tokens + excluded.input_tokens,
                 cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens,
                 cache_creation_tokens = cache_creation_tokens + excluded.cache_creation_tokens,
@@ -1765,8 +1996,26 @@ impl ReportCliFixture {
                 event.cost_without_cache_usd,
                 event.pricing_status,
                 event.pricing_source,
+                event.host_id,
             ],
         )?;
+        Ok(())
+    }
+
+    fn upsert_host(&self, host_id: &str, label: &str) -> Result<()> {
+        Store::new(&self.paths)?
+            .hosts()
+            .upsert(&llmusage::store::Host {
+                host_id: host_id.to_string(),
+                label: label.to_string(),
+                transport: "ssh".to_string(),
+                ssh_target: Some(format!("{label}@example")),
+                command: "llmusage".to_string(),
+                added_at: "2026-08-20T00:00:00Z".to_string(),
+                last_contacted_at: None,
+                last_error: None,
+                import_watermark: None,
+            })?;
         Ok(())
     }
 
@@ -1808,6 +2057,7 @@ impl ReportCliFixture {
 
 struct SeedEvent<'a> {
     event_key: &'a str,
+    host_id: &'a str,
     source: &'a str,
     provider_label: &'a str,
     model: &'a str,
@@ -1833,6 +2083,7 @@ impl Default for SeedEvent<'_> {
     fn default() -> Self {
         Self {
             event_key: "codex:test:1",
+            host_id: "local",
             source: "codex",
             provider_label: "",
             model: "gpt-5",

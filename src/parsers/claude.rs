@@ -126,6 +126,7 @@ async fn sync_claude(
     let inventory_paths = listing.file_paths();
     store.source_files().mark_inventory_seen(
         SourceKind::Claude,
+        "local",
         &inventory_paths,
         writer.run_started_at(),
     )?;
@@ -133,7 +134,9 @@ async fn sync_claude(
     let inventory_root = listing.root;
     let files = listing.paths;
     let total_files = files.len();
-    let cursor_map = store.cursors().load_file_cursors(SourceKind::Claude)?;
+    let cursor_map = store
+        .cursors()
+        .load_file_cursors(SourceKind::Claude, "local")?;
 
     let mut projects =
         HashMap::<PathBuf, Vec<(PathBuf, Option<crate::store::FileCursor>, bool)>>::new();

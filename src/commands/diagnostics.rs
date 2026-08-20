@@ -38,7 +38,18 @@ pub async fn run(
     let sources = dashboard.source_breakdown(&Default::default())?;
     let archive = dashboard.diagnostics()?;
     let recent_runs = store.run_log().recent_runs(20)?;
-    let sync_status = store.sync_status().load_source_sync_statuses()?;
+    let hosts = store.hosts().list()?;
+    let sync_status = store.sync_status().load_source_sync_statuses("local")?;
+    let host_status = hosts
+        .iter()
+        .map(|host| {
+            Ok(json!({
+                "host_id": host.host_id,
+                "label": host.label,
+                "sync_status": store.sync_status().load_source_sync_statuses(&host.host_id)?,
+            }))
+        })
+        .collect::<Result<Vec<_>>>()?;
     let logs = crate::logging::runtime_status(&app.paths)?;
     let diagnostics = json!({
         "env": {
@@ -59,6 +70,7 @@ pub async fn run(
         "cursors": health.cursors,
         "sources": sources,
         "sync_status": sync_status,
+        "hosts": host_status,
         "archive": archive,
         "logs": logs,
         "health_checks": {
@@ -97,7 +109,7 @@ fn run_forget_file(store: &Store, file_path: PathBuf, source: Option<SourceKind>
         None => resolve_unique_source(store, &raw_path)?,
     };
 
-    store.mark_source_file_deleted(target_source, &raw_path)?;
+    store.mark_source_file_deleted(target_source, "local", &raw_path)?;
     println!(
         "已将 {raw_path} 标记为 {} 源的 deleted_by_user",
         target_source.as_str()

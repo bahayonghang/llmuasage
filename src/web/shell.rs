@@ -330,6 +330,16 @@ fn html_shell(mode: &str) -> String {
           <div class="source-rows" id="sources-rows"></div>
         </div>
 
+        <div class="panel distribution-sources" id="hosts" hidden>
+          <div class="panel-head">
+            <h3 class="panel-title" data-i18n="shell.hosts.title">主机分布</h3>
+            <span class="tag" id="hosts-count">--</span>
+          </div>
+          <div class="panel-sub" data-i18n="shell.hosts.sub">用量最高的主机</div>
+
+          <div class="source-rows" id="hosts-rows"></div>
+        </div>
+
         <div class="panel distribution-projects wide" id="projects">
           <div class="panel-head">
             <h3 class="panel-title" data-i18n="shell.projects.title">项目排行</h3>

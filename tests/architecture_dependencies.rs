@@ -320,6 +320,21 @@ fn sync_layer_does_not_depend_on_commands() {
 }
 
 #[test]
+fn remote_layer_does_not_depend_on_commands() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/remote");
+    let violations = violations_in(&root, &["crate", "remote"]).expect("parse remote layer");
+    assert!(
+        violations.is_empty(),
+        "ARCH-002 remote violations:\n{}",
+        violations
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+#[test]
 fn fixtures_cover_supported_rust_path_forms() {
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/architecture");
     let cases = [

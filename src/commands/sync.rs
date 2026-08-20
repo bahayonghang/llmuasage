@@ -1,6 +1,6 @@
 use std::{
-    collections::HashMap,
-    io::IsTerminal,
+    collections::{BTreeMap, BTreeSet, HashMap},
+    io::{self, IsTerminal, Write},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -14,11 +14,18 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     app::AppContext,
     commands::{sync_progress, sync_summary},
-    models::SourceKind,
+    models::{ParseIssues, SourceKind},
     parsers::{SourceSyncStats, SyncEvent, SyncSummaryEvent, driver},
     registry,
-    store::{BootstrapProgressEvent, HolderKind, SourceSyncStatus, Store},
-    util::hash_string,
+    remote::{
+        RemoteImporter, ShardSource, SshShardSource,
+        protocol::{SHARD_PROTOCOL_VERSION, ShardRecord, encode_record},
+    },
+    store::{
+        BootstrapProgressEvent, HolderKind, LOCAL_HOST_ID, SourceSyncStatus, Store,
+        latest_schema_version,
+    },
+    util::{hash_string, now_utc},
 };
 
 // These types belong to the sync domain layer. Re-exported here so callers that
@@ -48,8 +55,104 @@ pub fn normalize_parallelism(requested: Option<usize>) -> Result<usize> {
     .map_err(anyhow::Error::from)
 }
 
+/// Options for `llmusage sync --emit-shards`.
+#[derive(Debug, Clone, Default)]
+pub struct EmitShardOptions {
+    pub source: Option<String>,
+    pub parallelism: Option<usize>,
+    pub since: Option<String>,
+}
+
 pub async fn run(app: &AppContext) -> Result<()> {
     run_with_options(app, SyncRunOptions::default()).await
+}
+
+/// Parse local sources and write NDJSON shards to stdout without opening the user DB.
+pub async fn emit_shards(app: &AppContext, options: EmitShardOptions) -> Result<()> {
+    emit_shards_to(app, options, io::stdout()).await
+}
+
+pub async fn emit_shards_to(
+    _app: &AppContext,
+    options: EmitShardOptions,
+    out: impl Write + Send + 'static,
+) -> Result<()> {
+    let request = crate::sync::ValidatedSyncRequest::new(crate::sync::SyncRequestInput {
+        source: options.source,
+        parallelism: options.parallelism,
+        ..Default::default()
+    })?;
+    let recent_cutoff = match options.since.as_deref() {
+        None => None,
+        Some(raw) => Some(
+            chrono::DateTime::parse_from_rfc3339(raw)
+                .map_err(|err| anyhow::anyhow!("invalid --since RFC3339 timestamp: {err}"))?
+                .with_timezone(&chrono::Utc),
+        ),
+    };
+    let store = Store::new_emit_only()?;
+    let out = Arc::new(Mutex::new(out));
+    write_record(
+        &out,
+        &ShardRecord::Header {
+            shard_protocol: SHARD_PROTOCOL_VERSION,
+            llmusage_version: env!("CARGO_PKG_VERSION").to_string(),
+            schema_version: latest_schema_version(),
+            emitted_at: now_utc(),
+        },
+    )?;
+    let sink = Arc::clone(&out);
+    let mut writer = store.begin_collect_run(move |shard| {
+        write_record(&sink, &ShardRecord::Shard { shard }).map_err(|err| {
+            crate::error::LlmusageError::ConfigInvalid {
+                detail: err.to_string(),
+            }
+        })
+    })?;
+    let parsers = registry::registered_parsers()
+        .into_iter()
+        .filter(|parser| {
+            request
+                .source_kind()
+                .is_none_or(|source| parser.source() == source)
+        })
+        .collect::<Vec<_>>();
+    let cancel = CancellationToken::new();
+    let sources = driver::drive_with_events(driver::DriveContext {
+        parsers: &parsers,
+        store: &store,
+        writer: &mut writer,
+        parallelism: request.parallelism(),
+        lock_wait_ms: 0,
+        recent_cutoff,
+        sender: None,
+        cancel: &cancel,
+        sweep_host_ids: vec![crate::store::LOCAL_HOST_ID.to_string()],
+    })
+    .await?;
+    writer.finish_sync_run()?;
+    let mut parse_issues = ParseIssues::default();
+    for stats in &sources {
+        parse_issues.merge(stats.parse_issues.clone());
+    }
+    write_record(
+        &out,
+        &ShardRecord::Trailer {
+            sources,
+            parse_issues,
+        },
+    )?;
+    Ok(())
+}
+
+fn write_record<W: Write>(out: &Arc<Mutex<W>>, record: &ShardRecord) -> Result<()> {
+    let encoded = encode_record(record)?;
+    let mut guard = out
+        .lock()
+        .map_err(|_| anyhow::anyhow!("emit-shards stdout lock was poisoned"))?;
+    writeln!(guard, "{encoded}")?;
+    guard.flush()?;
+    Ok(())
 }
 
 pub async fn run_with_options(app: &AppContext, options: SyncRunOptions) -> Result<()> {
@@ -307,7 +410,7 @@ fn sample_basenames(store: &Store, summary: &SyncSummary) -> HashMap<String, Str
         if stats.parse_issues.samples.is_empty() {
             continue;
         }
-        let Ok(cursors) = store.cursors().load_file_cursors(stats.source) else {
+        let Ok(cursors) = store.cursors().load_file_cursors(stats.source, "local") else {
             continue;
         };
         for cursor in cursors.into_values() {
@@ -348,6 +451,16 @@ pub async fn run_store_once_with_options(
     store: &Store,
     options: &SyncRunOptions,
 ) -> Result<SyncSummary> {
+    run_store_once_with_remote_source(store, options, &SshShardSource::default(), None).await
+}
+
+/// Like [`run_store_once_with_options`], with an injected shard source for tests.
+pub async fn run_store_once_with_remote_source(
+    store: &Store,
+    options: &SyncRunOptions,
+    remote_source: &dyn ShardSource,
+    sender: Option<&mut mpsc::Sender<SyncEvent>>,
+) -> Result<SyncSummary> {
     options.validate()?;
     let lock_started = Instant::now();
     let lock = store.acquire_worker_lock_with(Duration::from_secs(30), HolderKind::Cli)?;
@@ -365,7 +478,17 @@ pub async fn run_store_once_with_options(
     let summary = super::run_tracked(
         &fenced_store,
         command_name,
-        async { run_once_locked(&fenced_store, lock_wait_ms, options, None, &cancel).await },
+        async {
+            run_once_locked_with_remote_source(
+                &fenced_store,
+                lock_wait_ms,
+                options,
+                sender,
+                &cancel,
+                remote_source,
+            )
+            .await
+        },
         |item| Some(item.summary_text()),
     )
     .await?;
@@ -440,12 +563,42 @@ impl crate::sync::executor::SyncExecutor for CommandSyncExecutor {
     }
 }
 
+/// Hosts that this `llmusage sync` run actually reached.
+///
+/// `contacted` is an in-memory set for this run. Do not compare
+/// `host.last_contacted_at` to wall clock for missing-sweep or lossy-rebuild
+/// control flow: same-second consecutive syncs lose that comparison
+/// (`common/util.rs`).
+struct RemoteRunOutcome {
+    contacted: BTreeSet<String>,
+    skipped: BTreeMap<String, String>,
+}
+
 async fn run_once_locked(
+    store: &Store,
+    lock_wait_ms: u64,
+    options: &SyncRunOptions,
+    sender: Option<&mut mpsc::Sender<SyncEvent>>,
+    cancel: &CancellationToken,
+) -> Result<SyncSummary> {
+    run_once_locked_with_remote_source(
+        store,
+        lock_wait_ms,
+        options,
+        sender,
+        cancel,
+        &SshShardSource::default(),
+    )
+    .await
+}
+
+async fn run_once_locked_with_remote_source(
     store: &Store,
     lock_wait_ms: u64,
     options: &SyncRunOptions,
     mut sender: Option<&mut mpsc::Sender<SyncEvent>>,
     cancel: &CancellationToken,
+    remote_source: &dyn ShardSource,
 ) -> Result<SyncSummary> {
     let request = options.validate()?;
     /*
@@ -474,11 +627,21 @@ async fn run_once_locked(
         .map(|parser| parser.source())
         .collect::<Vec<_>>();
 
+    let mut remote_outcome = RemoteRunOutcome {
+        contacted: BTreeSet::from([LOCAL_HOST_ID.to_string()]),
+        skipped: BTreeMap::new(),
+    };
+
     let automatic_repair_sources = if options.rebuild {
-        reset_for_rebuild(store, options, &parser_sources)?;
+        reset_for_rebuild(store, options, &parser_sources, &remote_outcome.contacted)?;
         Vec::new()
     } else {
-        let sources = automatic_token_accounting_repair_sources(store, options, &parser_sources)?;
+        let sources = automatic_token_accounting_repair_sources(
+            store,
+            options,
+            &parser_sources,
+            &remote_outcome.contacted,
+        )?;
         if cancel.is_cancelled() {
             Vec::new()
         } else {
@@ -539,6 +702,7 @@ async fn run_once_locked(
         recent_cutoff,
         sender: sender.as_deref_mut(),
         cancel,
+        sweep_host_ids: vec![LOCAL_HOST_ID.to_string()],
     })
     .await;
     let sources = match drive_result {
@@ -620,6 +784,21 @@ async fn run_once_locked(
             ..SourceSyncStats::default()
         });
     }
+    import_registered_remotes(
+        store,
+        &mut writer,
+        sender.as_deref_mut(),
+        cancel,
+        remote_source,
+        &mut remote_outcome,
+    )
+    .await?;
+    if !remote_outcome.skipped.is_empty() {
+        tracing::warn!(
+            skipped = remote_outcome.skipped.len(),
+            "skipped unreachable remote hosts"
+        );
+    }
     writer.finish_sync_run()?;
     tracing::debug!(
         stored_query_ms = stored_query_started.elapsed().as_millis() as u64,
@@ -637,7 +816,7 @@ async fn run_once_locked(
     }
     store
         .sync_status()
-        .save_source_sync_statuses(&sync_statuses)?;
+        .save_source_sync_statuses("local", &sync_statuses)?;
     if !automatic_repair_sources.is_empty() && !cancel.is_cancelled() {
         let source_names = source_names(&automatic_repair_sources);
         tracing::info!(
@@ -654,9 +833,11 @@ async fn run_once_locked(
     }
     if recent_cutoff.is_some() && !cancel.is_cancelled() {
         for source in &source_stats {
-            store
-                .sync_status()
-                .mark_recent_completed(source.source, crate::util::now_utc())?;
+            store.sync_status().mark_recent_completed(
+                source.source,
+                "local",
+                crate::util::now_utc(),
+            )?;
             if let Some(sender) = sender.as_deref_mut() {
                 sender
                     .send(SyncEvent::RecentReady {
@@ -704,10 +885,11 @@ fn reset_for_rebuild(
     store: &Store,
     options: &SyncRunOptions,
     parser_sources: &[SourceKind],
+    contacted: &BTreeSet<String>,
 ) -> Result<()> {
     let rebuild_sources = rebuild_sources(options.source, parser_sources)?;
     assert_no_unattributed_antigravity_history(store, &rebuild_sources)?;
-    assert_lossless_rebuild(store, options, &rebuild_sources)?;
+    assert_lossless_rebuild(store, options, &rebuild_sources, contacted)?;
     reset_sources_for_rebuild(store, &rebuild_sources)
 }
 
@@ -738,7 +920,7 @@ fn assert_no_unattributed_antigravity_history(
 fn reset_sources_for_rebuild(store: &Store, sources: &[SourceKind]) -> Result<()> {
     for source in sources {
         let source = *source;
-        store.reset_for_source(source)?;
+        store.reset_for_source(source, "local")?;
         store.clear_token_accounting_version(source)?;
     }
     Ok(())
@@ -748,6 +930,7 @@ fn automatic_token_accounting_repair_sources(
     store: &Store,
     options: &SyncRunOptions,
     parser_sources: &[SourceKind],
+    contacted: &BTreeSet<String>,
 ) -> Result<Vec<SourceKind>> {
     let legacy = legacy_token_accounting_sources_for(store, parser_sources)?;
     if legacy.is_empty() {
@@ -765,7 +948,7 @@ fn automatic_token_accounting_repair_sources(
         );
     }
 
-    let risks = lossy_rebuild_risks(store, &legacy)?;
+    let risks = lossy_rebuild_risks(store, &legacy, contacted)?;
     if risks.is_empty() {
         return Ok(legacy);
     }
@@ -785,12 +968,13 @@ fn assert_lossless_rebuild(
     store: &Store,
     options: &SyncRunOptions,
     rebuild_sources: &[SourceKind],
+    contacted: &BTreeSet<String>,
 ) -> Result<()> {
     if options.allow_lossy_rebuild {
         return Ok(());
     }
 
-    let risks = lossy_rebuild_risks(store, rebuild_sources)?;
+    let risks = lossy_rebuild_risks(store, rebuild_sources, contacted)?;
     if risks.is_empty() {
         return Ok(());
     }
@@ -807,15 +991,131 @@ Restore the source files or pass --allow-lossy-rebuild to explicitly accept clea
 fn lossy_rebuild_risks(
     store: &Store,
     sources: &[SourceKind],
+    contacted: &BTreeSet<String>,
 ) -> Result<Vec<crate::store::LossyRebuildRisk>> {
+    let wanted = sources.iter().copied().collect::<BTreeSet<_>>();
     let mut risks = Vec::new();
-    for source in sources {
-        let risk = store.source_files().lossy_rebuild_risk(*source)?;
+    for risk in store.source_files().lossy_rebuild_risks()? {
+        if !wanted.contains(&risk.source) {
+            continue;
+        }
+        if risk.host_id != LOCAL_HOST_ID && !contacted.contains(&risk.host_id) {
+            continue;
+        }
         if risk.has_risk() {
             risks.push(risk);
         }
     }
     Ok(risks)
+}
+
+async fn import_registered_remotes(
+    store: &Store,
+    writer: &mut crate::store::SyncRunWriter,
+    mut sender: Option<&mut mpsc::Sender<SyncEvent>>,
+    cancel: &CancellationToken,
+    remote_source: &dyn ShardSource,
+    outcome: &mut RemoteRunOutcome,
+) -> Result<()> {
+    if cancel.is_cancelled() {
+        return Ok(());
+    }
+    let hosts = store
+        .hosts()
+        .list()?
+        .into_iter()
+        .filter(|host| host.transport == "ssh")
+        .collect::<Vec<_>>();
+    if hosts.is_empty() {
+        return Ok(());
+    }
+    let run_started_at = writer.run_started_at().to_string();
+    for host in hosts {
+        if cancel.is_cancelled() {
+            break;
+        }
+        emit_sync_event(
+            sender.as_deref_mut(),
+            SyncEvent::RemoteHostStarted {
+                host_id: host.host_id.clone(),
+                label: host.label.clone(),
+            },
+        )
+        .await?;
+        match RemoteImporter::import(&host, store, writer, remote_source) {
+            Ok(imported) => {
+                for warning in &imported.warnings {
+                    tracing::warn!(host_id = %host.host_id, "{warning}");
+                }
+                sweep_imported_host(store, &host.host_id, &imported.sources, &run_started_at)?;
+                outcome.contacted.insert(host.host_id.clone());
+                emit_sync_event(
+                    sender.as_deref_mut(),
+                    SyncEvent::RemoteHostFinished {
+                        host_id: host.host_id.clone(),
+                        label: host.label.clone(),
+                        stats: imported.sources,
+                    },
+                )
+                .await?;
+            }
+            Err(err) => {
+                let reason = err.to_string();
+                let _ = store.hosts().record_contact(&host.host_id, Some(&reason));
+                outcome.skipped.insert(host.host_id.clone(), reason.clone());
+                emit_sync_event(
+                    sender.as_deref_mut(),
+                    SyncEvent::RemoteHostSkipped {
+                        host_id: host.host_id.clone(),
+                        label: host.label.clone(),
+                        reason,
+                    },
+                )
+                .await?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn sweep_imported_host(
+    store: &Store,
+    host_id: &str,
+    sources: &[SourceSyncStats],
+    run_started_at: &str,
+) -> Result<()> {
+    for stats in sources {
+        if stats.last_error.is_some() {
+            info!(
+                source = %stats.source,
+                host_id,
+                "source inventory incomplete; skipping missing sweep"
+            );
+            continue;
+        }
+        let swept = store
+            .source_files()
+            .sweep_missing(stats.source, host_id, run_started_at)?;
+        if swept > 0 {
+            info!(
+                source = %stats.source,
+                host_id,
+                swept,
+                "标记 missing 文件完成"
+            );
+        }
+    }
+    Ok(())
+}
+
+async fn emit_sync_event(
+    sender: Option<&mut mpsc::Sender<SyncEvent>>,
+    event: SyncEvent,
+) -> Result<()> {
+    if let Some(sender) = sender {
+        sender.send(event).await?;
+    }
+    Ok(())
 }
 
 fn format_lossy_rebuild_risks(risks: &[crate::store::LossyRebuildRisk]) -> String {
@@ -935,5 +1235,112 @@ mod tests {
         .expect_err("parserless history must never be selected for rebuild");
 
         assert!(error.to_string().contains("no passive parser"));
+    }
+
+    #[tokio::test]
+    async fn emit_shards_does_not_open_or_lock_the_user_database() -> anyhow::Result<()> {
+        let temp = tempfile::TempDir::new()?;
+        let paths = crate::paths::AppPaths::with_root(temp.path().join(".llmusage"))?;
+        let store = Store::new(&paths)?;
+        let lock = store.acquire_worker_lock_with(Duration::from_secs(5), HolderKind::Cli)?;
+        let fenced = lock.fenced_store();
+        fenced.bootstrap()?;
+        let mut writer = fenced.begin_sync_run()?;
+        let mut shard = crate::store::SyncShard::new(SourceKind::Codex);
+        shard.events.push(crate::models::UsageEvent {
+            event_key: "codex:path:seed".to_string(),
+            source: SourceKind::Codex,
+            provider_label: String::new(),
+            model: "gpt-5".to_string(),
+            event_at: "2026-08-20T00:00:00Z".to_string(),
+            hour_start: "2026-08-20T00:00:00Z".to_string(),
+            tokens: crate::models::UsageTokens {
+                input_tokens: 1,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                output_tokens: 1,
+                reasoning_output_tokens: 0,
+                total_tokens: 2,
+            },
+            project: None,
+            session: None,
+        });
+        shard.seen_file_paths.push("/tmp/seed.jsonl".to_string());
+        shard.cursors.push(crate::store::FileCursor {
+            cursor_key: "/tmp/seed.jsonl".to_string(),
+            file_path: "/tmp/seed.jsonl".to_string(),
+            file_fingerprint: "fp".to_string(),
+            file_size: 4,
+            file_mtime_ns: 0,
+            tail_signature: "tail".to_string(),
+            offset: 4,
+            last_total: None,
+            last_model: None,
+            updated_at: "2026-08-20T00:00:00Z".to_string(),
+        });
+        writer.commit_shard(shard)?;
+        writer.finish_sync_run()?;
+        drop(lock);
+
+        let conn = store.open_connection()?;
+        let schema_before = crate::store::read_schema_version(&conn)?;
+        let events_before: i64 =
+            conn.query_row("SELECT COUNT(*) FROM usage_event", [], |row| row.get(0))?;
+        let files_before: i64 =
+            conn.query_row("SELECT COUNT(*) FROM source_file", [], |row| row.get(0))?;
+        let cursors_before: i64 =
+            conn.query_row("SELECT COUNT(*) FROM source_cursor", [], |row| row.get(0))?;
+        drop(conn);
+
+        Store::reset_open_connection_counter();
+        let app = AppContext {
+            paths: paths.clone(),
+            current_exe: std::env::current_exe()?,
+        };
+        let zcode_home = temp.path().join("zcode-empty");
+        std::fs::create_dir_all(&zcode_home)?;
+        let previous_zcode = std::env::var_os("ZCODE_HOME");
+        unsafe {
+            std::env::set_var("ZCODE_HOME", &zcode_home);
+        }
+        let emit_result = emit_shards_to(
+            &app,
+            EmitShardOptions {
+                source: Some("zcode".to_string()),
+                ..EmitShardOptions::default()
+            },
+            std::io::sink(),
+        )
+        .await;
+        unsafe {
+            match previous_zcode {
+                Some(value) => std::env::set_var("ZCODE_HOME", value),
+                None => std::env::remove_var("ZCODE_HOME"),
+            }
+        }
+        emit_result?;
+        assert_eq!(
+            Store::open_connection_count(),
+            0,
+            "emit-shards must not open the user database"
+        );
+
+        let conn = store.open_connection()?;
+        let schema_after = crate::store::read_schema_version(&conn)?;
+        let events_after: i64 =
+            conn.query_row("SELECT COUNT(*) FROM usage_event", [], |row| row.get(0))?;
+        let files_after: i64 =
+            conn.query_row("SELECT COUNT(*) FROM source_file", [], |row| row.get(0))?;
+        let cursors_after: i64 =
+            conn.query_row("SELECT COUNT(*) FROM source_cursor", [], |row| row.get(0))?;
+        assert_eq!(schema_before, schema_after);
+        assert_eq!(events_before, events_after);
+        assert_eq!(files_before, files_after);
+        assert_eq!(cursors_before, cursors_after);
+        assert!(events_before > 0);
+        assert!(files_before > 0);
+        assert!(cursors_before > 0);
+        assert!(store.current_worker_lock()?.is_none());
+        Ok(())
     }
 }

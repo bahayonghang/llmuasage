@@ -19,6 +19,7 @@ pub mod help;
 pub mod init;
 pub mod logs;
 pub mod monthly;
+pub mod remote;
 pub mod report_args;
 pub mod serve;
 pub mod session;
@@ -99,6 +100,26 @@ pub enum Commands {
         /// Emit sync lifecycle events as NDJSON on stdout.
         #[arg(long)]
         json_events: bool,
+        /// Emit normalized shards as NDJSON on stdout without opening the user database.
+        #[arg(
+            long,
+            conflicts_with_all = [
+                "rebuild",
+                "json_events",
+                "recent_days",
+                "allow_lossy_rebuild",
+                "provider_map"
+            ]
+        )]
+        emit_shards: bool,
+        /// RFC 3339 lower bound for `--emit-shards`.
+        #[arg(long, value_name = "RFC3339", requires = "emit_shards")]
+        since: Option<String>,
+    },
+    /// Register, list, remove, or import SSH remote hosts.
+    Remote {
+        #[command(subcommand)]
+        command: remote::RemoteCommand,
     },
     Status,
     /// Show parser-backed source and monitor-only platform status.
@@ -294,7 +315,20 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
             parallelism,
             provider_map,
             json_events,
+            emit_shards,
+            since,
         }) => {
+            if emit_shards {
+                return sync::emit_shards(
+                    &app,
+                    sync::EmitShardOptions {
+                        source,
+                        parallelism,
+                        since,
+                    },
+                )
+                .await;
+            }
             let request = crate::sync::ValidatedSyncRequest::new(crate::sync::SyncRequestInput {
                 rebuild,
                 source,
@@ -315,6 +349,7 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
             )
             .await
         }
+        Some(Commands::Remote { command }) => remote::run(&app, command).await,
         Some(Commands::Status) => status::run(&app).await,
         Some(Commands::SourceStatus) => source_status::run(&app).await,
         Some(Commands::Diagnostics {
@@ -490,6 +525,57 @@ mod tests {
         let error = Cli::try_parse_from(["llmusage", "update", "feature-branch"])
             .expect_err("arbitrary branches must be rejected");
         assert!(error.to_string().contains("possible values: main, dev"));
+    }
+
+    #[test]
+    fn remote_subcommands_parse() {
+        let add = Cli::try_parse_from([
+            "llmusage",
+            "remote",
+            "add",
+            "devbox",
+            "me@devbox",
+            "--command",
+            "docker exec c1 llmusage",
+        ])
+        .expect("remote add should parse");
+        assert!(matches!(
+            add.command,
+            Some(Commands::Remote {
+                command: super::remote::RemoteCommand::Add { .. }
+            })
+        ));
+
+        let handshake = Cli::try_parse_from(["llmusage", "remote", "handshake"])
+            .expect("hidden handshake should parse");
+        assert!(matches!(
+            handshake.command,
+            Some(Commands::Remote {
+                command: super::remote::RemoteCommand::Handshake
+            })
+        ));
+    }
+
+    #[test]
+    fn sync_emit_shards_parses_and_conflicts_with_rebuild() {
+        let emit = Cli::try_parse_from([
+            "llmusage",
+            "sync",
+            "--emit-shards",
+            "--since",
+            "2026-08-20T00:00:00Z",
+        ])
+        .expect("emit-shards should parse");
+        match emit.command {
+            Some(Commands::Sync {
+                emit_shards: true,
+                since: Some(since),
+                ..
+            }) => assert_eq!(since, "2026-08-20T00:00:00Z"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+        Cli::try_parse_from(["llmusage", "sync", "--emit-shards", "--rebuild"])
+            .expect_err("emit-shards conflicts with rebuild");
     }
 
     #[test]

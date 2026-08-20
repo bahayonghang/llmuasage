@@ -25,6 +25,7 @@ import { renderDashboardLoadInstrument, renderSyncCommandCenter } from './render
 import { renderTrends } from './render/trends.js';
 import { renderModels } from './render/models.js';
 import { renderSources } from './render/sources.js';
+import { renderHosts } from './render/hosts.js';
 import { renderProjects } from './render/projects.js';
 import { renderCosts } from './render/costs.js';
 import { renderInsights } from './render/insights.js';
@@ -218,6 +219,7 @@ function mergeCoreSnapshot(previous, core, options = {}) {
     trends: core?.trends,
     models: core?.models,
     sources: core?.sources,
+    hosts: core?.hosts,
     projects: core?.projects,
     costs: core?.costs,
     health: core?.health,
@@ -284,6 +286,7 @@ function renderPrimaryDashboard(rawData) {
     () => renderModels(context, dashboardState),
   );
   renderPanel('sources', panelFingerprint('sources', rawData, { locale }), () => renderSources(context));
+  renderPanel('hosts', panelFingerprint('hosts', rawData, { locale }), () => renderHosts(context));
   renderPanel(
     'projects',
     panelFingerprint('projects', rawData, { locale, extra: { expanded: Boolean(expanded.projects) } }),

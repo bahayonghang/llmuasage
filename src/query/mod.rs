@@ -301,6 +301,21 @@ pub struct SourceBreakdown {
     pub event_count: i64,
 }
 
+/// Per-host aggregate plus freshest observed event time.
+#[derive(Debug, Clone, Serialize)]
+pub struct HostBreakdown {
+    /// Internal host identifier.
+    pub host_id: String,
+    /// User-visible host label.
+    pub label: String,
+    /// Summed total tokens for the host.
+    pub total_tokens: i64,
+    /// Latest raw event timestamp observed for the host.
+    pub last_event_at: Option<String>,
+    /// Number of underlying usage events for the host.
+    pub event_count: i64,
+}
+
 /// Per-project aggregate shown in rankings.
 #[derive(Debug, Clone, Serialize)]
 pub struct ProjectBreakdown {
@@ -934,6 +949,8 @@ pub struct DashboardSnapshot {
     pub models: Vec<ModelBreakdown>,
     /// Per-source breakdown table.
     pub sources: Vec<SourceBreakdown>,
+    /// Per-host breakdown table.
+    pub hosts: Vec<HostBreakdown>,
     /// Per-project ranking table.
     pub projects: Vec<ProjectBreakdown>,
     /// Per-source/model cost estimate table.
@@ -996,6 +1013,8 @@ pub struct DashboardCoreSnapshot {
     pub models: Vec<ModelBreakdown>,
     /// Per-source cost/token table.
     pub sources: Vec<SourceBreakdown>,
+    /// Per-host cost/token table.
+    pub hosts: Vec<HostBreakdown>,
     /// Per-project cost/token table.
     pub projects: Vec<ProjectBreakdown>,
     /// Per-source/model cost estimate table.
@@ -1014,6 +1033,7 @@ pub struct DashboardInteractiveSnapshot {
     pub trends: Vec<TrendPoint>,
     pub models: Vec<ModelBreakdown>,
     pub sources: Vec<SourceBreakdown>,
+    pub hosts: Vec<HostBreakdown>,
     pub projects: Vec<ProjectBreakdown>,
     pub costs: Vec<CostLine>,
     pub health: HealthSummaryPayload,
@@ -1526,6 +1546,7 @@ impl Dashboard {
             source: None,
             project: None,
             breakdown: false,
+            host_id: None,
         };
         let options = reports::BlockReportOptions {
             active_only: false,
@@ -1579,6 +1600,54 @@ impl Dashboard {
         }
 
         Ok(sources)
+    }
+
+    /// Loads total token usage grouped by host plus each host's freshest event time.
+    pub fn host_breakdown(&self, filter: &QueryFilter) -> Result<Vec<HostBreakdown>> {
+        let bucket_filter = filter.bucket_filter(Some("b"));
+        let sql = format!(
+            r#"
+            SELECT
+                b.host_id,
+                COALESCE(NULLIF(h.label, ''), b.host_id) AS label,
+                SUM(b.total_tokens) AS total_tokens,
+                SUM(b.event_count) AS event_count
+            FROM usage_bucket_30m b
+            LEFT JOIN host h ON h.host_id = b.host_id
+            {}
+            GROUP BY b.host_id
+            ORDER BY total_tokens DESC, label ASC, b.host_id ASC
+            "#,
+            bucket_filter.where_sql()
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(bucket_filter.params().iter()), |row| {
+            Ok(HostBreakdown {
+                host_id: row.get(0)?,
+                label: row.get(1)?,
+                total_tokens: row.get::<_, Option<i64>>(2)?.unwrap_or_default(),
+                last_event_at: None,
+                event_count: row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
+            })
+        })?;
+        let mut hosts = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(stmt);
+
+        for host in &mut hosts {
+            let mut event_filter = filter.event_filter(None);
+            event_filter.push("host_id = ?", host.host_id.clone());
+            let last_event_sql = format!(
+                "SELECT MAX(event_at) FROM usage_event {}",
+                event_filter.where_sql()
+            );
+            host.last_event_at = self.conn.query_row(
+                &last_event_sql,
+                params_from_iter(event_filter.params().iter()),
+                |row| row.get(0),
+            )?;
+        }
+
+        Ok(hosts)
     }
 
     /// Loads ranked project totals derived from aggregated buckets.
@@ -3595,6 +3664,7 @@ impl Dashboard {
             all_trends: core.all_trends,
             models: core.models,
             sources: core.sources,
+            hosts: core.hosts,
             projects: core.projects,
             costs: core.costs,
             activity: self.activity_breakdown(filter)?,
@@ -3647,6 +3717,7 @@ impl Dashboard {
             all_trends: self.trends("all", filter)?,
             models: self.model_breakdown(filter)?,
             sources: self.source_breakdown(filter)?,
+            hosts: self.host_breakdown(filter)?,
             projects: self.project_breakdown(filter)?,
             costs: self.cost_breakdown(filter)?,
             health: self.health()?,
@@ -3679,6 +3750,7 @@ impl Dashboard {
             trends: self.trends(window, filter)?,
             models: self.model_breakdown(filter)?,
             sources: self.source_breakdown(filter)?,
+            hosts: self.host_breakdown(filter)?,
             projects: self.project_breakdown(filter)?,
             costs: self.cost_breakdown(filter)?,
             health: self.health_summary()?,
@@ -4745,6 +4817,7 @@ mod tests {
             until: Some(NaiveDate::from_ymd_opt(2026, 5, 2).unwrap()),
             project_hash: Some("project-a".to_string()),
             timezone: ReportTimezone::Utc,
+            ..Default::default()
         })?;
 
         assert_eq!(filtered.len(), 1);
@@ -7023,6 +7096,7 @@ mod tests {
             since: Some(NaiveDate::from_ymd_opt(2026, 4, 2).expect("valid date")),
             until: Some(NaiveDate::from_ymd_opt(2026, 4, 2).expect("valid date")),
             timezone: ReportTimezone::Iana(chrono_tz::Asia::Shanghai),
+            ..Default::default()
         };
         let filtered = dashboard.home_overview(&filtered_filter)?;
         let filtered_compact = dashboard.home_overview_compact(&filtered_filter)?;

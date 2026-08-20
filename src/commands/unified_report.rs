@@ -10,8 +10,8 @@ use crate::{
     commands::report_args::ReportSectionArg,
     models::SourceKind,
     query::reports::{
-        ModelCostBreakdown, PeriodKind, ReportFilter, TokenTotals, UnifiedReport, UnifiedRow,
-        today_for_timezone,
+        HostIdentity, ModelCostBreakdown, PeriodKind, ReportFilter, TokenTotals, UnifiedReport,
+        UnifiedRow, today_for_timezone,
     },
     store::Store,
     tui::report_table,
@@ -64,7 +64,10 @@ pub(crate) fn load_sections(
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn print_sections(
+    store: &Store,
+    filter: &ReportFilter,
     reports: &[UnifiedReport],
     command_kind: PeriodKind,
     json: bool,
@@ -73,15 +76,9 @@ pub(crate) fn print_sections(
     no_cost: bool,
 ) -> Result<()> {
     if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&sections_json(
-                reports,
-                command_kind,
-                include_agents,
-                no_cost
-            )?)?
-        );
+        let mut payload = sections_json(reports, command_kind, include_agents, no_cost)?;
+        attach_hosts_ordered(store, filter, command_kind, &mut payload, no_cost)?;
+        println!("{}", serde_json::to_string_pretty(&payload)?);
     } else {
         let color_mode = report_table::ColorMode::from_env();
         for (index, report) in reports.iter().enumerate() {
@@ -93,6 +90,7 @@ pub(crate) fn print_sections(
                 report_table::render_unified_table(report, compact, no_cost, color_mode)
             );
         }
+        print_host_section(store, filter, command_kind, compact, no_cost)?;
     }
     Ok(())
 }
@@ -100,7 +98,8 @@ pub(crate) fn print_sections(
 /// Serializes the CLI-only all-agent view. The DTOs here intentionally avoid
 /// deriving from the query payload structs, whose snake_case serialization is
 /// still consumed by the dashboard, export, and interactive TUI surfaces.
-pub(crate) fn report_json(
+pub(crate) fn report_json_with_hosts(
+    hosts: Option<(&Store, &ReportFilter)>,
     report: &UnifiedReport,
     include_agents: bool,
     no_cost: bool,
@@ -117,6 +116,9 @@ pub(crate) fn report_json(
     let mut value = Value::Object(value);
     if no_cost {
         strip_cost_json(&mut value);
+    }
+    if let Some((store, filter)) = hosts {
+        attach_hosts_json(store, filter, report.kind, &mut value, no_cost)?;
     }
     Ok(value)
 }
@@ -260,6 +262,12 @@ pub(crate) struct OrderedJson {
     fields: Vec<(String, Value)>,
 }
 
+impl OrderedJson {
+    fn push_field(&mut self, key: impl Into<String>, value: Value) {
+        self.fields.push((key.into(), value));
+    }
+}
+
 impl Serialize for OrderedJson {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
@@ -290,6 +298,171 @@ pub(crate) fn strip_cost_json(value: &mut Value) {
             }
         }
         Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
+pub(crate) fn print_host_section(
+    store: &Store,
+    filter: &ReportFilter,
+    kind: PeriodKind,
+    _compact: bool,
+    no_cost: bool,
+) -> Result<()> {
+    let rows = host_period_rows(store, filter, kind)?;
+    if rows.is_empty() {
+        return Ok(());
+    }
+    println!();
+    println!("By host");
+    for row in rows {
+        if no_cost {
+            println!("  {}  {}  {}", row.period, row.host, row.total_tokens);
+        } else {
+            println!(
+                "  {}  {}  {}  {:.4}",
+                row.period, row.host, row.total_tokens, row.total_cost
+            );
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn attach_hosts_json(
+    store: &Store,
+    filter: &ReportFilter,
+    kind: PeriodKind,
+    value: &mut Value,
+    no_cost: bool,
+) -> Result<()> {
+    let hosts = hosts_json(store, filter, kind, no_cost)?;
+    if let Value::Object(map) = value {
+        map.insert("hosts".to_string(), hosts);
+    }
+    Ok(())
+}
+
+pub(crate) fn attach_hosts_ordered(
+    store: &Store,
+    filter: &ReportFilter,
+    kind: PeriodKind,
+    payload: &mut OrderedJson,
+    no_cost: bool,
+) -> Result<()> {
+    payload.push_field("hosts", hosts_json(store, filter, kind, no_cost)?);
+    Ok(())
+}
+
+fn hosts_json(
+    store: &Store,
+    filter: &ReportFilter,
+    kind: PeriodKind,
+    no_cost: bool,
+) -> Result<Value> {
+    let mut hosts = serde_json::to_value(host_period_rows(store, filter, kind)?)?;
+    if no_cost {
+        strip_cost_json(&mut hosts);
+    }
+    Ok(hosts)
+}
+
+fn host_period_rows(
+    store: &Store,
+    filter: &ReportFilter,
+    kind: PeriodKind,
+) -> Result<Vec<HostPeriodJson>> {
+    match kind {
+        PeriodKind::Daily => Ok(
+            crate::query::reports::load_daily_reports_by_host(store, filter)?
+                .into_iter()
+                .flat_map(|(host, report)| {
+                    report.daily.into_iter().map(move |row| {
+                        HostPeriodJson::from_daily(
+                            &host,
+                            row.date,
+                            &row.totals,
+                            row.models_used,
+                            row.model_breakdowns,
+                        )
+                    })
+                })
+                .collect(),
+        ),
+        PeriodKind::Weekly => Ok(crate::query::reports::load_weekly_reports_by_host(
+            store, filter,
+        )?
+        .into_iter()
+        .flat_map(|(host, report)| {
+            report.weekly.into_iter().map(move |row| {
+                HostPeriodJson::from_daily(
+                    &host,
+                    row.week,
+                    &row.totals,
+                    row.models_used,
+                    row.model_breakdowns,
+                )
+            })
+        })
+        .collect()),
+        PeriodKind::Monthly => Ok(crate::query::reports::load_monthly_reports_by_host(
+            store, filter,
+        )?
+        .into_iter()
+        .flat_map(|(host, report)| {
+            report.monthly.into_iter().map(move |row| {
+                HostPeriodJson::from_daily(
+                    &host,
+                    row.month,
+                    &row.totals,
+                    row.models_used,
+                    row.model_breakdowns,
+                )
+            })
+        })
+        .collect()),
+        PeriodKind::Session => Ok(Vec::new()),
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HostPeriodJson {
+    period: String,
+    host: String,
+    host_id: String,
+    models_used: Vec<String>,
+    input_tokens: i64,
+    output_tokens: i64,
+    cache_creation_tokens: i64,
+    cache_read_tokens: i64,
+    total_tokens: i64,
+    total_cost: f64,
+    model_breakdowns: Vec<ModelBreakdownJson>,
+}
+
+impl HostPeriodJson {
+    fn from_daily(
+        host: &HostIdentity,
+        period: String,
+        totals: &TokenTotals,
+        models_used: Vec<String>,
+        model_breakdowns: Vec<ModelCostBreakdown>,
+    ) -> Self {
+        Self {
+            period,
+            host: host.label.clone(),
+            host_id: host.host_id.clone(),
+            models_used,
+            input_tokens: totals.input_tokens,
+            output_tokens: totals.output_tokens,
+            cache_creation_tokens: totals.cache_creation_tokens,
+            cache_read_tokens: totals.cache_read_tokens,
+            total_tokens: totals.total_tokens,
+            total_cost: totals.estimated_cost_usd,
+            model_breakdowns: model_breakdowns
+                .iter()
+                .map(ModelBreakdownJson::from)
+                .collect(),
+        }
     }
 }
 

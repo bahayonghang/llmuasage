@@ -53,8 +53,10 @@ pub struct SourceFileStateCounts {
 /// least one source file previously tracked by `source_file.file_path` is no
 /// longer present on disk. In that case a source-level rebuild would delete
 /// rows before the parser can re-read every historical input.
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct LossyRebuildRisk {
+    /// Host this risk row belongs to.
+    pub host_id: String,
     /// Source this risk row belongs to.
     pub source: SourceKind,
     /// Number of `source_file` paths for this source that are missing on disk
@@ -86,19 +88,24 @@ impl<'a> SourceFileStore<'a> {
         Self { store }
     }
 
-    /// Returns the count of rows in each state for one source.
-    pub fn counts(&self, source: SourceKind) -> Result<SourceFileStateCounts> {
+    /// Returns the count of rows in each state for one source on one host.
+    pub fn counts(&self, source: SourceKind, host_id: &str) -> Result<SourceFileStateCounts> {
         let conn = self.store.open_connection()?;
-        counts_with_conn(&conn, source.as_str())
+        counts_with_conn(&conn, source.as_str(), host_id)
     }
 
-    /// Returns every sidecar path previously observed for one source.
-    pub fn tracked_paths(&self, source: SourceKind) -> Result<Vec<String>> {
+    /// Returns every sidecar path previously observed for one source on one host.
+    pub fn tracked_paths(&self, source: SourceKind, host_id: &str) -> Result<Vec<String>> {
+        if self.store.emit_only() {
+            return Ok(Vec::new());
+        }
         let conn = self.store.open_connection()?;
         let mut stmt = conn.prepare(
-            "SELECT file_path FROM source_file WHERE source = ?1 ORDER BY file_path ASC",
+            "SELECT file_path FROM source_file WHERE source = ?1 AND host_id = ?2 ORDER BY file_path ASC",
         )?;
-        let rows = stmt.query_map([source.as_str()], |row| row.get::<_, String>(0))?;
+        let rows = stmt.query_map(params![source.as_str(), host_id], |row| {
+            row.get::<_, String>(0)
+        })?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(Into::into)
     }
@@ -108,9 +115,18 @@ impl<'a> SourceFileStore<'a> {
     ///
     /// Called once per parser by the sync driver after the parser's last
     /// `commit_shard` returns. Returns the number of rows transitioned.
-    pub fn sweep_missing(&self, source: SourceKind, run_started_at: &str) -> Result<usize> {
-        self.store
-            .write_transaction(|tx| update_missing_with_conn(tx, source.as_str(), run_started_at))
+    pub fn sweep_missing(
+        &self,
+        source: SourceKind,
+        host_id: &str,
+        run_started_at: &str,
+    ) -> Result<usize> {
+        if self.store.emit_only() {
+            return Ok(0);
+        }
+        self.store.write_transaction(|tx| {
+            update_missing_with_conn(tx, source.as_str(), host_id, run_started_at)
+        })
     }
 
     /// Marks all candidate files enumerated for this source as observed before
@@ -123,42 +139,50 @@ impl<'a> SourceFileStore<'a> {
     pub fn mark_inventory_seen(
         &self,
         source: SourceKind,
+        host_id: &str,
         file_paths: &[String],
         seen_at: &str,
     ) -> Result<()> {
-        if file_paths.is_empty() {
+        if self.store.emit_only() || file_paths.is_empty() {
             return Ok(());
         }
-        self.store
-            .write_transaction(|tx| upsert_live_in_tx(tx, source.as_str(), file_paths, seen_at))?;
+        self.store.write_transaction(|tx| {
+            upsert_live_in_tx(tx, source.as_str(), host_id, file_paths, seen_at)
+        })?;
         Ok(())
     }
 
-    /// Computes whether rebuilding one source would discard imported usage
-    /// that cannot be reconstructed from the current filesystem.
-    pub fn lossy_rebuild_risk(&self, source: SourceKind) -> Result<LossyRebuildRisk> {
+    /// Computes whether rebuilding one source on one host would discard imported
+    /// usage that cannot be reconstructed from the current filesystem.
+    pub fn lossy_rebuild_risk(
+        &self,
+        source: SourceKind,
+        host_id: &str,
+    ) -> Result<LossyRebuildRisk> {
         let conn = self.store.open_connection()?;
-        lossy_rebuild_risk_with_conn(&conn, source)
+        lossy_rebuild_risk_with_conn(&conn, source, host_id)
     }
 
-    /// Computes rebuild risk rows for every source currently tracked in
-    /// `source_file`, ordered by source id. Unknown legacy source ids are
-    /// ignored so diagnostics stays forward-compatible with old data.
+    /// Computes rebuild risk rows for every host/source currently tracked in
+    /// `source_file`, ordered by host then source id. Unknown legacy source ids
+    /// are ignored so diagnostics stays forward-compatible with old data.
     pub fn lossy_rebuild_risks(&self) -> Result<Vec<LossyRebuildRisk>> {
         let conn = self.store.open_connection()?;
         let mut stmt = conn.prepare(
             r#"
-            SELECT DISTINCT source
+            SELECT DISTINCT host_id, source
             FROM source_file
-            ORDER BY source ASC
+            ORDER BY host_id ASC, source ASC
             "#,
         )?;
-        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
         let mut risks = Vec::new();
         for row in rows {
-            let raw = row?;
+            let (host_id, raw) = row?;
             if let Some(source) = SourceKind::parse_id(&raw) {
-                risks.push(lossy_rebuild_risk_with_conn(&conn, source)?);
+                risks.push(lossy_rebuild_risk_with_conn(&conn, source, &host_id)?);
             }
         }
         Ok(risks)
@@ -169,17 +193,21 @@ impl<'a> SourceFileStore<'a> {
 ///
 /// Lets `Dashboard::diagnostics` read live/missing/deleted totals on the same
 /// connection that already holds the WAL read lock.
-pub(crate) fn counts_with_conn(conn: &Connection, source: &str) -> Result<SourceFileStateCounts> {
+pub(crate) fn counts_with_conn(
+    conn: &Connection,
+    source: &str,
+    host_id: &str,
+) -> Result<SourceFileStateCounts> {
     let mut stmt = conn.prepare(
         r#"
         SELECT state, COUNT(*)
         FROM source_file
-        WHERE source = ?1
+        WHERE source = ?1 AND host_id = ?2
         GROUP BY state
         "#,
     )?;
     let mut counts = SourceFileStateCounts::default();
-    let mapped = stmt.query_map([source], |row| {
+    let mapped = stmt.query_map(params![source, host_id], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
     })?;
     for row in mapped {
@@ -195,12 +223,16 @@ pub(crate) fn counts_with_conn(conn: &Connection, source: &str) -> Result<Source
     Ok(counts)
 }
 
-fn lossy_rebuild_risk_with_conn(conn: &Connection, source: SourceKind) -> Result<LossyRebuildRisk> {
+fn lossy_rebuild_risk_with_conn(
+    conn: &Connection,
+    source: SourceKind,
+    host_id: &str,
+) -> Result<LossyRebuildRisk> {
     let source_id = source.as_str();
     let total_events = conn
         .query_row(
-            "SELECT COUNT(*) FROM usage_event WHERE source = ?1",
-            [source_id],
+            "SELECT COUNT(*) FROM usage_event WHERE source = ?1 AND host_id = ?2",
+            params![source_id, host_id],
             |row| row.get::<_, i64>(0),
         )?
         .max(0) as u64;
@@ -209,10 +241,10 @@ fn lossy_rebuild_risk_with_conn(conn: &Connection, source: SourceKind) -> Result
         r#"
         SELECT file_path
         FROM source_file
-        WHERE source = ?1
+        WHERE source = ?1 AND host_id = ?2
         "#,
     )?;
-    let rows = stmt.query_map([source_id], |row| row.get::<_, String>(0))?;
+    let rows = stmt.query_map(params![source_id, host_id], |row| row.get::<_, String>(0))?;
 
     let mut seen_paths = HashSet::<String>::new();
     let mut missing_file_count = 0u64;
@@ -227,6 +259,7 @@ fn lossy_rebuild_risk_with_conn(conn: &Connection, source: SourceKind) -> Result
     }
 
     Ok(LossyRebuildRisk {
+        host_id: host_id.to_string(),
         source,
         missing_file_count,
         protected_event_count: if missing_file_count > 0 {
@@ -248,6 +281,7 @@ fn lossy_rebuild_risk_with_conn(conn: &Connection, source: SourceKind) -> Result
 pub(crate) fn upsert_live_in_tx(
     tx: &Transaction<'_>,
     source: &str,
+    host_id: &str,
     file_paths: &[String],
     seen_at: &str,
 ) -> Result<()> {
@@ -257,10 +291,10 @@ pub(crate) fn upsert_live_in_tx(
     let mut stmt = tx.prepare_cached(
         r#"
         INSERT INTO source_file(
-            source, file_path, state, last_seen_at, last_state_change_at
+            host_id, source, file_path, state, last_seen_at, last_state_change_at
         )
-        VALUES (?1, ?2, 'live', ?3, ?3)
-        ON CONFLICT(source, file_path) DO UPDATE SET
+        VALUES (?1, ?2, ?3, 'live', ?4, ?4)
+        ON CONFLICT(host_id, source, file_path) DO UPDATE SET
             state = 'live',
             last_seen_at = excluded.last_seen_at,
             last_state_change_at = CASE
@@ -271,7 +305,7 @@ pub(crate) fn upsert_live_in_tx(
         "#,
     )?;
     for path in file_paths {
-        stmt.execute(params![source, path, seen_at])?;
+        stmt.execute(params![host_id, source, path, seen_at])?;
     }
     Ok(())
 }
@@ -284,18 +318,20 @@ pub(crate) fn upsert_live_in_tx(
 pub(crate) fn update_missing_with_conn(
     conn: &Connection,
     source: &str,
+    host_id: &str,
     run_started_at: &str,
 ) -> Result<usize> {
     let updated = conn.execute(
         r#"
         UPDATE source_file
         SET state = 'missing',
-            last_state_change_at = ?3
+            last_state_change_at = ?4
         WHERE source = ?1
+          AND host_id = ?2
           AND state = 'live'
-          AND (last_seen_at IS NULL OR last_seen_at < ?2)
+          AND (last_seen_at IS NULL OR last_seen_at < ?3)
         "#,
-        params![source, run_started_at, now_utc()],
+        params![source, host_id, run_started_at, now_utc()],
     )?;
     Ok(updated)
 }
@@ -303,8 +339,15 @@ pub(crate) fn update_missing_with_conn(
 /// Removes all `source_file` rows belonging to one source. Used by
 /// `Store::reset_for_source` (Phase 4.5) and not for general cleanup.
 #[allow(dead_code)]
-pub(crate) fn delete_for_source_in_tx(tx: &Transaction<'_>, source: &str) -> Result<()> {
-    tx.execute("DELETE FROM source_file WHERE source = ?1", [source])?;
+pub(crate) fn delete_for_source_in_tx(
+    tx: &Transaction<'_>,
+    source: &str,
+    host_id: &str,
+) -> Result<()> {
+    tx.execute(
+        "DELETE FROM source_file WHERE source = ?1 AND host_id = ?2",
+        params![source, host_id],
+    )?;
     Ok(())
 }
 
@@ -319,24 +362,29 @@ impl Store {
     ///
     /// The next sync run will resurrect it back to `live` if the file is
     /// still present on disk; that's intentional — "forget" is not "ban".
-    pub fn mark_source_file_deleted(&self, source: SourceKind, file_path: &str) -> Result<()> {
+    pub fn mark_source_file_deleted(
+        &self,
+        source: SourceKind,
+        host_id: &str,
+        file_path: &str,
+    ) -> Result<()> {
         self.write_transaction(|tx| {
             let now = now_utc();
             tx.execute(
                 r#"
             INSERT INTO source_file(
-                source, file_path, state, last_seen_at, last_state_change_at
+                host_id, source, file_path, state, last_seen_at, last_state_change_at
             )
-            VALUES (?1, ?2, 'deleted_by_user', NULL, ?3)
-            ON CONFLICT(source, file_path) DO UPDATE SET
+            VALUES (?1, ?2, ?3, 'deleted_by_user', NULL, ?4)
+            ON CONFLICT(host_id, source, file_path) DO UPDATE SET
                 state = 'deleted_by_user',
                 last_state_change_at = excluded.last_state_change_at
             "#,
-                params![source.as_str(), file_path, now],
+                params![host_id, source.as_str(), file_path, now],
             )?;
             tx.execute(
-                "DELETE FROM source_cursor WHERE source = ?1 AND file_path = ?2",
-                params![source.as_str(), file_path],
+                "DELETE FROM source_cursor WHERE host_id = ?1 AND source = ?2 AND file_path = ?3",
+                params![host_id, source.as_str(), file_path],
             )?;
             Ok(())
         })?;
@@ -358,11 +406,17 @@ mod tests {
         Ok((temp, store))
     }
 
-    fn upsert_live(store: &Store, source: &str, paths: &[&str], seen_at: &str) -> Result<()> {
+    fn upsert_live(
+        store: &Store,
+        source: &str,
+        host_id: &str,
+        paths: &[&str],
+        seen_at: &str,
+    ) -> Result<()> {
         let mut conn = store.open_connection()?;
         let tx = conn.transaction()?;
         let owned: Vec<String> = paths.iter().map(|p| (*p).to_string()).collect();
-        upsert_live_in_tx(&tx, source, &owned, seen_at)?;
+        upsert_live_in_tx(&tx, source, host_id, &owned, seen_at)?;
         tx.commit()?;
         Ok(())
     }
@@ -371,8 +425,14 @@ mod tests {
     #[test]
     fn unseen_to_live_on_first_observation() -> anyhow::Result<()> {
         let (_tmp, store) = make_store()?;
-        upsert_live(&store, "codex", &["/x.jsonl"], "2026-05-08T00:00:00Z")?;
-        let counts = store.source_files().counts(SourceKind::Codex)?;
+        upsert_live(
+            &store,
+            "codex",
+            "local",
+            &["/x.jsonl"],
+            "2026-05-08T00:00:00Z",
+        )?;
+        let counts = store.source_files().counts(SourceKind::Codex, "local")?;
         assert_eq!(
             counts,
             SourceFileStateCounts {
@@ -388,13 +448,19 @@ mod tests {
     #[test]
     fn live_becomes_missing_when_not_seen() -> anyhow::Result<()> {
         let (_tmp, store) = make_store()?;
-        upsert_live(&store, "codex", &["/a.jsonl"], "2026-05-08T00:00:00Z")?;
+        upsert_live(
+            &store,
+            "codex",
+            "local",
+            &["/a.jsonl"],
+            "2026-05-08T00:00:00Z",
+        )?;
 
         let conn = store.open_connection()?;
-        let updated = update_missing_with_conn(&conn, "codex", "2026-05-08T01:00:00Z")?;
+        let updated = update_missing_with_conn(&conn, "codex", "local", "2026-05-08T01:00:00Z")?;
         assert_eq!(updated, 1, "the stale live row should transition");
 
-        let counts = store.source_files().counts(SourceKind::Codex)?;
+        let counts = store.source_files().counts(SourceKind::Codex, "local")?;
         assert_eq!(counts.live, 0);
         assert_eq!(counts.missing, 1);
         Ok(())
@@ -404,16 +470,28 @@ mod tests {
     #[test]
     fn missing_resurrects_when_seen_again() -> anyhow::Result<()> {
         let (_tmp, store) = make_store()?;
-        upsert_live(&store, "codex", &["/a.jsonl"], "2026-05-08T00:00:00Z")?;
+        upsert_live(
+            &store,
+            "codex",
+            "local",
+            &["/a.jsonl"],
+            "2026-05-08T00:00:00Z",
+        )?;
         {
             let conn = store.open_connection()?;
-            update_missing_with_conn(&conn, "codex", "2026-05-08T01:00:00Z")?;
+            update_missing_with_conn(&conn, "codex", "local", "2026-05-08T01:00:00Z")?;
         }
-        let counts = store.source_files().counts(SourceKind::Codex)?;
+        let counts = store.source_files().counts(SourceKind::Codex, "local")?;
         assert_eq!(counts.missing, 1);
 
-        upsert_live(&store, "codex", &["/a.jsonl"], "2026-05-08T02:00:00Z")?;
-        let counts = store.source_files().counts(SourceKind::Codex)?;
+        upsert_live(
+            &store,
+            "codex",
+            "local",
+            &["/a.jsonl"],
+            "2026-05-08T02:00:00Z",
+        )?;
+        let counts = store.source_files().counts(SourceKind::Codex, "local")?;
         assert_eq!(counts.live, 1);
         assert_eq!(counts.missing, 0);
         Ok(())
@@ -423,7 +501,13 @@ mod tests {
     #[test]
     fn live_becomes_deleted_when_user_marks_it() -> anyhow::Result<()> {
         let (_tmp, store) = make_store()?;
-        upsert_live(&store, "codex", &["/a.jsonl"], "2026-05-08T00:00:00Z")?;
+        upsert_live(
+            &store,
+            "codex",
+            "local",
+            &["/a.jsonl"],
+            "2026-05-08T00:00:00Z",
+        )?;
 
         // Seed a matching cursor row to validate the join-deletion behavior.
         {
@@ -431,15 +515,15 @@ mod tests {
             conn.execute(
                 r#"
                 INSERT INTO source_cursor(
-                    source, cursor_key, file_path, updated_at
-                ) VALUES ('codex', 'cursor:/a.jsonl', '/a.jsonl', '2026-05-08T00:00:00Z')
+                    host_id, source, cursor_key, file_path, updated_at
+                ) VALUES ('local', 'codex', 'cursor:/a.jsonl', '/a.jsonl', '2026-05-08T00:00:00Z')
                 "#,
                 [],
             )?;
         }
 
-        store.mark_source_file_deleted(SourceKind::Codex, "/a.jsonl")?;
-        let counts = store.source_files().counts(SourceKind::Codex)?;
+        store.mark_source_file_deleted(SourceKind::Codex, "local", "/a.jsonl")?;
+        let counts = store.source_files().counts(SourceKind::Codex, "local")?;
         assert_eq!(counts.live, 0);
         assert_eq!(counts.deleted, 1);
 
@@ -458,14 +542,83 @@ mod tests {
     #[test]
     fn deleted_resurrects_when_seen_again() -> anyhow::Result<()> {
         let (_tmp, store) = make_store()?;
-        store.mark_source_file_deleted(SourceKind::Codex, "/a.jsonl")?;
-        let counts = store.source_files().counts(SourceKind::Codex)?;
+        store.mark_source_file_deleted(SourceKind::Codex, "local", "/a.jsonl")?;
+        let counts = store.source_files().counts(SourceKind::Codex, "local")?;
         assert_eq!(counts.deleted, 1);
 
-        upsert_live(&store, "codex", &["/a.jsonl"], "2026-05-08T00:00:00Z")?;
-        let counts = store.source_files().counts(SourceKind::Codex)?;
+        upsert_live(
+            &store,
+            "codex",
+            "local",
+            &["/a.jsonl"],
+            "2026-05-08T00:00:00Z",
+        )?;
+        let counts = store.source_files().counts(SourceKind::Codex, "local")?;
         assert_eq!(counts.live, 1);
         assert_eq!(counts.deleted, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn same_file_path_can_exist_under_two_hosts() -> anyhow::Result<()> {
+        let (_tmp, store) = make_store()?;
+        store.hosts().upsert(&crate::store::Host {
+            host_id: "devbox".to_string(),
+            label: "devbox".to_string(),
+            transport: "ssh".to_string(),
+            ssh_target: Some("me@devbox".to_string()),
+            command: "llmusage".to_string(),
+            added_at: "2026-08-20T00:00:00Z".to_string(),
+            last_contacted_at: None,
+            last_error: None,
+            import_watermark: None,
+        })?;
+        upsert_live(
+            &store,
+            "codex",
+            "local",
+            &["/shared.jsonl"],
+            "2026-05-08T00:00:00Z",
+        )?;
+        upsert_live(
+            &store,
+            "codex",
+            "devbox",
+            &["/shared.jsonl"],
+            "2026-05-08T00:00:00Z",
+        )?;
+        {
+            let conn = store.open_connection()?;
+            conn.execute(
+                r#"
+                INSERT INTO source_cursor(host_id, source, cursor_key, file_path, updated_at)
+                VALUES ('local', 'codex', '/shared.jsonl', '/shared.jsonl', '2026-05-08T00:00:00Z'),
+                       ('devbox', 'codex', '/shared.jsonl', '/shared.jsonl', '2026-05-08T00:00:00Z')
+                "#,
+                [],
+            )?;
+        }
+        assert_eq!(
+            store
+                .source_files()
+                .counts(SourceKind::Codex, "local")?
+                .live,
+            1
+        );
+        assert_eq!(
+            store
+                .source_files()
+                .counts(SourceKind::Codex, "devbox")?
+                .live,
+            1
+        );
+        let conn = store.open_connection()?;
+        let cursor_hosts: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM source_cursor WHERE source = 'codex' AND file_path = '/shared.jsonl'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(cursor_hosts, 2);
         Ok(())
     }
 }

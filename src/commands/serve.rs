@@ -211,7 +211,7 @@ pub async fn repair_legacy_token_accounting(
     let mut report = TokenAccountingRepairReport::default();
 
     for source in legacy_sources {
-        let risk = store.source_files().lossy_rebuild_risk(source)?;
+        let risk = store.source_files().lossy_rebuild_risk(source, "local")?;
         if risk.has_risk() {
             warn!(
                 source = %source,

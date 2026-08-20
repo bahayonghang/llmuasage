@@ -189,6 +189,7 @@ export async function loadDashboardSnapshot(state, options = {}) {
       trends: snapshotTrendRows(snapshot, state.trendWindow),
       models: snapshot?.models,
       sources: snapshot?.sources,
+      hosts: snapshot?.hosts ?? [],
       projects: snapshot?.projects,
       costs: snapshot?.costs,
       activity: snapshot?.activity,
@@ -229,13 +230,14 @@ export async function loadDashboardSnapshot(state, options = {}) {
       loadSection(state, 'health', '/api/health'),
       loadSection(state, 'diagnostics', '/api/diagnostics'),
     ]);
-    return { overview, trends, models, sources, projects, costs, activity, tools, optimize, explorer, compare, health, diagnostics, sync_command_center: null };
+    return { overview, trends, models, sources, hosts: [], projects, costs, activity, tools, optimize, explorer, compare, health, diagnostics, sync_command_center: null };
   }
   return {
     overview: snapshot?.overview,
     trends: snapshotTrendRows(snapshot, state.trendWindow),
     models: snapshot?.models,
     sources: snapshot?.sources,
+    hosts: snapshot?.hosts ?? [],
     projects: snapshot?.projects,
     costs: snapshot?.costs,
     activity: snapshot?.activity,

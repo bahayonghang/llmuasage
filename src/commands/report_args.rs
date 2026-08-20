@@ -2,7 +2,7 @@ use anyhow::{Result, anyhow};
 use chrono::{FixedOffset, NaiveDate};
 use clap::{Args, ValueEnum};
 
-use crate::{models::SourceKind, query::reports};
+use crate::{models::SourceKind, query::reports, store::Store};
 
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
 pub enum ReportOrderArg {
@@ -62,10 +62,18 @@ pub struct ReportCommonArgs {
     /// Restrict reports to one local source.
     #[arg(long, value_enum)]
     pub source: Option<SourceKind>,
+
+    /// Restrict reports to one registered host label.
+    #[arg(long, value_name = "LABEL")]
+    pub host: Option<String>,
 }
 
 impl ReportCommonArgs {
-    pub fn to_filter(&self, project: Option<String>) -> Result<reports::ReportFilter> {
+    pub fn to_filter(
+        &self,
+        store: &Store,
+        project: Option<String>,
+    ) -> Result<reports::ReportFilter> {
         Ok(reports::ReportFilter {
             since: self.since.as_deref().map(parse_date_value).transpose()?,
             until: self.until.as_deref().map(parse_date_value).transpose()?,
@@ -78,6 +86,7 @@ impl ReportCommonArgs {
             source: self.source,
             project,
             breakdown: self.breakdown,
+            host_id: resolve_host_id(store, self.host.as_deref())?,
         })
     }
 }
@@ -253,6 +262,29 @@ impl StatuslineArgs {
     pub fn use_cache(&self) -> bool {
         self.cache && !self.no_cache
     }
+}
+
+fn resolve_host_id(store: &Store, label: Option<&str>) -> Result<Option<String>> {
+    let Some(label) = label.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    if let Some(host) = store.hosts().get_by_label(label)? {
+        return Ok(Some(host.host_id));
+    }
+    let labels = store
+        .hosts()
+        .list()?
+        .into_iter()
+        .map(|host| host.label)
+        .collect::<Vec<_>>();
+    let listed = if labels.is_empty() {
+        "(none)".to_string()
+    } else {
+        labels.join(", ")
+    };
+    Err(anyhow!(
+        "unknown host label '{label}'; registered labels: {listed}"
+    ))
 }
 
 fn parse_report_date(value: &str) -> std::result::Result<String, String> {

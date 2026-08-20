@@ -32,6 +32,7 @@ pub struct ReportFilter {
     pub source: Option<SourceKind>,
     pub project: Option<String>,
     pub breakdown: bool,
+    pub host_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -341,6 +342,7 @@ pub struct StatuslineSummary {
 #[derive(Debug, Clone)]
 struct EventRow {
     event_key: String,
+    host_id: String,
     source: String,
     model: String,
     event_utc: DateTime<Utc>,
@@ -362,6 +364,7 @@ struct EventRow {
 
 #[derive(Debug, Clone)]
 struct BucketRow {
+    host_id: String,
     source: String,
     model: String,
     local_date: NaiveDate,
@@ -444,6 +447,15 @@ type SessionGroup = (
 
 type SourcePeriodGroups = BTreeMap<SourceKind, BTreeMap<String, Aggregate>>;
 type SourcePeriodTotals = BTreeMap<SourceKind, TokenTotals>;
+type HostPeriodGroups = BTreeMap<String, BTreeMap<String, Aggregate>>;
+type HostPeriodTotals = BTreeMap<String, TokenTotals>;
+
+/// Stable host identity used by per-host report rows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostIdentity {
+    pub host_id: String,
+    pub label: String,
+}
 
 impl Aggregate {
     fn add_event(&mut self, event: &EventRow) {
@@ -661,6 +673,85 @@ fn load_source_period_aggregates(
     }
 
     Ok((source_groups, source_totals))
+}
+
+fn load_host_period_aggregates(
+    store: &Store,
+    filter: &ReportFilter,
+    period_key: fn(NaiveDate) -> String,
+) -> Result<(HostPeriodGroups, HostPeriodTotals)> {
+    let mut host_groups = HostPeriodGroups::new();
+    let mut host_totals = HostPeriodTotals::new();
+
+    if filter.project.is_some() {
+        visit_filtered_events(store, filter, |event| {
+            if event.host_id.trim().is_empty() {
+                return Ok(());
+            }
+            host_groups
+                .entry(event.host_id.clone())
+                .or_default()
+                .entry(period_key(event.local_date))
+                .or_default()
+                .add_event(&event);
+            add_totals_from_event(
+                host_totals.entry(event.host_id.clone()).or_default(),
+                &event,
+            );
+            Ok(())
+        })?;
+    } else {
+        for bucket in load_filtered_buckets(store, filter)? {
+            if bucket.host_id.trim().is_empty() {
+                continue;
+            }
+            host_groups
+                .entry(bucket.host_id.clone())
+                .or_default()
+                .entry(period_key(bucket.local_date))
+                .or_default()
+                .add_bucket(&bucket);
+            add_totals_from_bucket(
+                host_totals.entry(bucket.host_id.clone()).or_default(),
+                &bucket,
+            );
+        }
+    }
+
+    Ok((host_groups, host_totals))
+}
+
+fn host_identities(store: &Store) -> Result<BTreeMap<String, String>> {
+    Ok(store
+        .hosts()
+        .list()?
+        .into_iter()
+        .map(|host| (host.host_id, host.label))
+        .collect())
+}
+
+fn host_identity(labels: &BTreeMap<String, String>, host_id: &str) -> HostIdentity {
+    HostIdentity {
+        host_id: host_id.to_string(),
+        label: labels
+            .get(host_id)
+            .cloned()
+            .filter(|label| !label.trim().is_empty())
+            .unwrap_or_else(|| host_id.to_string()),
+    }
+}
+
+fn ordered_host_ids(
+    labels: &BTreeMap<String, String>,
+    host_ids: impl IntoIterator<Item = String>,
+) -> Vec<String> {
+    let mut ids = host_ids.into_iter().collect::<Vec<_>>();
+    ids.sort_by(|left, right| {
+        let left_label = labels.get(left).map(String::as_str).unwrap_or(left);
+        let right_label = labels.get(right).map(String::as_str).unwrap_or(right);
+        left_label.cmp(right_label).then_with(|| left.cmp(right))
+    });
+    ids
 }
 
 fn build_daily_reports_by_source(
@@ -939,6 +1030,114 @@ pub fn load_weekly_reports_by_source(
             WeeklyReport {
                 weekly,
                 totals: source_totals.remove(&source).unwrap_or_default(),
+            },
+        ));
+    }
+    Ok(reports)
+}
+
+pub fn load_daily_reports_by_host(
+    store: &Store,
+    filter: &ReportFilter,
+) -> Result<Vec<(HostIdentity, DailyReport)>> {
+    let (mut host_groups, mut host_totals) =
+        load_host_period_aggregates(store, filter, daily_period_key)?;
+    let labels = host_identities(store)?;
+    let mut reports = Vec::new();
+    for host_id in ordered_host_ids(&labels, host_groups.keys().cloned()) {
+        let Some(groups) = host_groups.remove(&host_id) else {
+            continue;
+        };
+        let host = host_identity(&labels, &host_id);
+        let mut daily = groups
+            .into_iter()
+            .map(|(date, aggregate)| DailyReportRow {
+                date,
+                source: Some(host.label.clone()),
+                project: None,
+                totals: aggregate.totals.clone(),
+                models_used: aggregate.model_names(),
+                model_breakdowns: aggregate.model_breakdowns(filter.breakdown),
+                conversation_count: aggregate.conversation_count(),
+                notes: aggregate.notes(),
+            })
+            .collect::<Vec<_>>();
+        sort_by_key(&mut daily, filter.order, |row| row.date.clone());
+        reports.push((
+            host,
+            DailyReport {
+                daily,
+                totals: host_totals.remove(&host_id).unwrap_or_default(),
+            },
+        ));
+    }
+    Ok(reports)
+}
+
+pub fn load_monthly_reports_by_host(
+    store: &Store,
+    filter: &ReportFilter,
+) -> Result<Vec<(HostIdentity, MonthlyReport)>> {
+    let (mut host_groups, mut host_totals) =
+        load_host_period_aggregates(store, filter, monthly_period_key)?;
+    let labels = host_identities(store)?;
+    let mut reports = Vec::new();
+    for host_id in ordered_host_ids(&labels, host_groups.keys().cloned()) {
+        let Some(groups) = host_groups.remove(&host_id) else {
+            continue;
+        };
+        let host = host_identity(&labels, &host_id);
+        let mut monthly = groups
+            .into_iter()
+            .map(|(month, aggregate)| MonthlyReportRow {
+                month,
+                source: Some(host.label.clone()),
+                totals: aggregate.totals.clone(),
+                models_used: aggregate.model_names(),
+                model_breakdowns: aggregate.model_breakdowns(filter.breakdown),
+            })
+            .collect::<Vec<_>>();
+        sort_by_key(&mut monthly, filter.order, |row| row.month.clone());
+        reports.push((
+            host,
+            MonthlyReport {
+                monthly,
+                totals: host_totals.remove(&host_id).unwrap_or_default(),
+            },
+        ));
+    }
+    Ok(reports)
+}
+
+pub fn load_weekly_reports_by_host(
+    store: &Store,
+    filter: &ReportFilter,
+) -> Result<Vec<(HostIdentity, WeeklyReport)>> {
+    let (mut host_groups, mut host_totals) =
+        load_host_period_aggregates(store, filter, weekly_period_key)?;
+    let labels = host_identities(store)?;
+    let mut reports = Vec::new();
+    for host_id in ordered_host_ids(&labels, host_groups.keys().cloned()) {
+        let Some(groups) = host_groups.remove(&host_id) else {
+            continue;
+        };
+        let host = host_identity(&labels, &host_id);
+        let mut weekly = groups
+            .into_iter()
+            .map(|(week, aggregate)| WeeklyReportRow {
+                week,
+                source: Some(host.label.clone()),
+                totals: aggregate.totals.clone(),
+                models_used: aggregate.model_names(),
+                model_breakdowns: aggregate.model_breakdowns(filter.breakdown),
+            })
+            .collect::<Vec<_>>();
+        sort_by_key(&mut weekly, filter.order, |row| row.week.clone());
+        reports.push((
+            host,
+            WeeklyReport {
+                weekly,
+                totals: host_totals.remove(&host_id).unwrap_or_default(),
             },
         ));
     }
@@ -1565,6 +1764,7 @@ pub fn load_statusline_summary(
         source: None,
         project: None,
         breakdown: false,
+        host_id: None,
     };
     let daily = load_daily_report(store, &filter)?;
     let blocks = load_blocks_report(
@@ -1642,6 +1842,7 @@ fn load_buckets_filtered(conn: &Connection, filter: &ReportFilter) -> Result<Vec
     let sql = format!(
         r#"
         SELECT
+            host_id,
             source,
             model,
             {local_date_expr} AS local_date,
@@ -1655,8 +1856,8 @@ fn load_buckets_filtered(conn: &Connection, filter: &ReportFilter) -> Result<Vec
             COALESCE(pricing_status, 'unpriced') AS pricing_status
         FROM usage_bucket_30m
         {where_clause}
-        GROUP BY source, model, local_date, COALESCE(pricing_status, 'unpriced')
-        ORDER BY local_date ASC, source ASC, model ASC, pricing_status ASC
+        GROUP BY host_id, source, model, local_date, COALESCE(pricing_status, 'unpriced')
+        ORDER BY local_date ASC, host_id ASC, source ASC, model ASC, pricing_status ASC
         "#
     );
     let mut stmt = conn.prepare(&sql)?;
@@ -1666,18 +1867,19 @@ fn load_buckets_filtered(conn: &Connection, filter: &ReportFilter) -> Result<Vec
         .collect::<Vec<&dyn rusqlite::ToSql>>();
     let rows = stmt.query_map(param_refs.as_slice(), |row| {
         Ok(BucketRow {
-            source: row.get(0)?,
-            model: row.get(1)?,
-            local_date: parse_sql_local_date(row.get(2)?, 2)?,
-            input_tokens: row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
-            cache_creation_tokens: row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
-            cache_read_tokens: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
-            output_tokens: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
-            reasoning_output_tokens: row.get::<_, Option<i64>>(7)?.unwrap_or_default(),
-            total_tokens: row.get::<_, Option<i64>>(8)?.unwrap_or_default(),
-            cost_with_cache_usd: row.get::<_, Option<f64>>(9)?.unwrap_or_default(),
+            host_id: row.get(0)?,
+            source: row.get(1)?,
+            model: row.get(2)?,
+            local_date: parse_sql_local_date(row.get(3)?, 3)?,
+            input_tokens: row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
+            cache_creation_tokens: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
+            cache_read_tokens: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
+            output_tokens: row.get::<_, Option<i64>>(7)?.unwrap_or_default(),
+            reasoning_output_tokens: row.get::<_, Option<i64>>(8)?.unwrap_or_default(),
+            total_tokens: row.get::<_, Option<i64>>(9)?.unwrap_or_default(),
+            cost_with_cache_usd: row.get::<_, Option<f64>>(10)?.unwrap_or_default(),
             pricing_status: row
-                .get::<_, Option<String>>(10)?
+                .get::<_, Option<String>>(11)?
                 .unwrap_or_else(|| crate::query::pricing::PRICING_UNPRICED.to_string()),
         })
     })?;
@@ -1702,6 +1904,7 @@ fn load_project_buckets_filtered(
     let sql = format!(
         r#"
         SELECT
+            host_id,
             source,
             model,
             {local_date_expr} AS local_date,
@@ -1719,6 +1922,7 @@ fn load_project_buckets_filtered(
         FROM usage_bucket_30m
         {where_clause}
         GROUP BY
+            host_id,
             source,
             model,
             local_date,
@@ -1726,7 +1930,7 @@ fn load_project_buckets_filtered(
             project_label,
             project_ref,
             COALESCE(pricing_status, 'unpriced')
-        ORDER BY local_date ASC, project_hash ASC, source ASC, model ASC, pricing_status ASC
+        ORDER BY local_date ASC, host_id ASC, project_hash ASC, source ASC, model ASC, pricing_status ASC
         "#
     );
     let mut stmt = conn.prepare(&sql)?;
@@ -1737,21 +1941,22 @@ fn load_project_buckets_filtered(
     let rows = stmt.query_map(param_refs.as_slice(), |row| {
         Ok(ProjectBucketRow {
             bucket: BucketRow {
-                source: row.get(0)?,
-                model: row.get(1)?,
-                local_date: parse_sql_local_date(row.get(2)?, 2)?,
-                input_tokens: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
-                cache_creation_tokens: row.get::<_, Option<i64>>(7)?.unwrap_or_default(),
-                cache_read_tokens: row.get::<_, Option<i64>>(8)?.unwrap_or_default(),
-                output_tokens: row.get::<_, Option<i64>>(9)?.unwrap_or_default(),
-                reasoning_output_tokens: row.get::<_, Option<i64>>(10)?.unwrap_or_default(),
-                total_tokens: row.get::<_, Option<i64>>(11)?.unwrap_or_default(),
-                cost_with_cache_usd: row.get::<_, Option<f64>>(12)?.unwrap_or_default(),
+                host_id: row.get(0)?,
+                source: row.get(1)?,
+                model: row.get(2)?,
+                local_date: parse_sql_local_date(row.get(3)?, 3)?,
+                input_tokens: row.get::<_, Option<i64>>(7)?.unwrap_or_default(),
+                cache_creation_tokens: row.get::<_, Option<i64>>(8)?.unwrap_or_default(),
+                cache_read_tokens: row.get::<_, Option<i64>>(9)?.unwrap_or_default(),
+                output_tokens: row.get::<_, Option<i64>>(10)?.unwrap_or_default(),
+                reasoning_output_tokens: row.get::<_, Option<i64>>(11)?.unwrap_or_default(),
+                total_tokens: row.get::<_, Option<i64>>(12)?.unwrap_or_default(),
+                cost_with_cache_usd: row.get::<_, Option<f64>>(13)?.unwrap_or_default(),
                 pricing_status: row
-                    .get::<_, Option<String>>(13)?
+                    .get::<_, Option<String>>(14)?
                     .unwrap_or_else(|| crate::query::pricing::PRICING_UNPRICED.to_string()),
             },
-            project: normalize_project(row.get(3)?, row.get(4)?, row.get(5)?),
+            project: normalize_project(row.get(4)?, row.get(5)?, row.get(6)?),
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -1765,6 +1970,15 @@ fn push_bucket_filter(
     if let Some(source) = filter.source {
         clauses.push("source = ?".to_string());
         params.push(Box::new(source.as_str().to_string()));
+    }
+    if let Some(host_id) = filter
+        .host_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        clauses.push("host_id = ?".to_string());
+        params.push(Box::new(host_id.to_string()));
     }
     if let Some(since) = filter.since {
         let utc_start = local_date_to_utc_start(since, &filter.timezone);
@@ -1858,6 +2072,15 @@ where
             Box::new(descriptor.stable_id.to_string()) as Box<dyn rusqlite::ToSql>
         }));
     }
+    if let Some(host_id) = filter
+        .host_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        clauses.push("host_id = ?".to_string());
+        params.push(Box::new(host_id.to_string()));
+    }
     if let Some(since) = filter.since {
         // Convert local date start to UTC for SQL comparison
         let utc_start = local_date_to_utc_start(since, &filter.timezone);
@@ -1903,7 +2126,8 @@ where
             project_ref,
             session_id,
             session_label,
-            source_path_hash
+            source_path_hash,
+            host_id
         FROM usage_event
         {where_clause}
         ORDER BY event_at ASC, event_key ASC
@@ -1945,6 +2169,7 @@ where
             session_id: row.get(15)?,
             session_label: row.get(16)?,
             source_path_hash: row.get(17)?,
+            host_id: row.get(18)?,
         };
         visitor(raw.with_timezone(&filter.timezone))?;
     }
@@ -1993,6 +2218,7 @@ fn filter_event_post_sql(event: &EventRow, filter: &ReportFilter) -> bool {
 #[derive(Debug, Clone)]
 struct RawEventRow {
     event_key: String,
+    host_id: String,
     source: String,
     model: String,
     event_utc: DateTime<Utc>,
@@ -2017,6 +2243,7 @@ impl RawEventRow {
         let local_at = apply_timezone(self.event_utc, timezone);
         EventRow {
             event_key: self.event_key,
+            host_id: self.host_id,
             source: self.source,
             model: self.model,
             event_utc: self.event_utc,
@@ -2195,6 +2422,7 @@ mod tests {
             source: None,
             project: None,
             breakdown: false,
+            host_id: None,
         }
     }
 
@@ -2439,6 +2667,7 @@ mod tests {
                 source: Some(SourceKind::Codex),
                 project: Some("Demo".to_string()),
                 breakdown: true,
+                host_id: None,
             },
         )?;
         assert_eq!(report.daily.len(), 1);
@@ -2486,6 +2715,7 @@ mod tests {
             source: Some(SourceKind::Antigravity),
             project: None,
             breakdown: true,
+            host_id: None,
         };
 
         let report = load_daily_report(&fixture.store, &filter)?;
@@ -2532,6 +2762,7 @@ mod tests {
             source: None,
             project: None,
             breakdown: true,
+            host_id: None,
         };
         let daily = load_daily_report(&fixture.store, &filter)?;
         assert_eq!(daily.daily.len(), 1);
@@ -2590,6 +2821,7 @@ mod tests {
             source: None,
             project: None,
             breakdown: false,
+            host_id: None,
         };
 
         let daily = load_daily_report(&fixture.store, &filter)?;
@@ -2647,6 +2879,7 @@ mod tests {
                 source: None,
                 project: None,
                 breakdown: false,
+                host_id: None,
             },
         )?;
 
@@ -2692,6 +2925,7 @@ mod tests {
                 source: None,
                 project: None,
                 breakdown: false,
+                host_id: None,
             },
         )?;
 
@@ -2767,6 +3001,7 @@ mod tests {
             source: None,
             project: None,
             breakdown: true,
+            host_id: None,
         };
 
         let report = load_unified_report(&fixture.store, &filter, PeriodKind::Daily)?;
@@ -2844,6 +3079,7 @@ mod tests {
             source: None,
             project: None,
             breakdown: true,
+            host_id: None,
         };
 
         let weekly = load_weekly_report(&fixture.store, &filter)?;
@@ -2901,6 +3137,7 @@ mod tests {
             source: None,
             project: None,
             breakdown: false,
+            host_id: None,
         };
         let local_filter = ReportFilter {
             since: Some(NaiveDate::from_ymd_opt(2026, 1, 5).unwrap()),
@@ -2944,6 +3181,7 @@ mod tests {
                 source: None,
                 project: None,
                 breakdown: false,
+                host_id: None,
             },
             Some("pathhash"),
         )?;

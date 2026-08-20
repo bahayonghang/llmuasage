@@ -235,6 +235,15 @@ fn sync_progress_message(event: &SyncEvent) -> String {
             stats.skipped_files,
             stats.stored_events
         ),
+        SyncEvent::RemoteHostStarted { label, .. } => {
+            format!("Importing remote host {label}")
+        }
+        SyncEvent::RemoteHostFinished { label, stats, .. } => {
+            format!("Remote host {label} imported ({} sources)", stats.len())
+        }
+        SyncEvent::RemoteHostSkipped { label, reason, .. } => {
+            format!("Skipped remote host {label}: {reason}")
+        }
         SyncEvent::Finished { summary } => format!(
             "Sync complete: {} inserted, {} stored",
             summary.total_inserted, summary.stored_events

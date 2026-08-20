@@ -131,13 +131,16 @@ async fn sync_antigravity(
     let inventory_paths = listing.file_paths();
     store.source_files().mark_inventory_seen(
         SourceKind::Antigravity,
+        "local",
         &inventory_paths,
         writer.run_started_at(),
     )?;
     let inventory_error = listing.error_summary();
     let files = listing.paths;
     let total_files = files.len();
-    let cursor_map = store.cursors().load_file_cursors(SourceKind::Antigravity)?;
+    let cursor_map = store
+        .cursors()
+        .load_file_cursors(SourceKind::Antigravity, "local")?;
 
     let mut candidates = Vec::new();
     let mut changed_files = 0usize;
@@ -231,6 +234,7 @@ async fn sync_antigravity(
                 raw_records: Vec::new(),
                 turns: Vec::new(),
                 tool_calls: Vec::new(),
+                ..SyncShard::new(SourceKind::Antigravity)
             })?;
             inserted += commit.events_inserted;
             write_ms += commit.write_ms;

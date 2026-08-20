@@ -1240,7 +1240,7 @@ async fn api_diagnostics_forget(
 
     match state
         .store
-        .mark_source_file_deleted(source, &payload.file_path)
+        .mark_source_file_deleted(source, "local", &payload.file_path)
     {
         Ok(()) => {
             state.diagnostics_cache.invalidate();
@@ -1773,6 +1773,7 @@ fn dashboard_core_json(core: crate::query::DashboardCoreSnapshot) -> serde_json:
         "all_trends": core.all_trends,
         "models": core.models,
         "sources": core.sources,
+        "hosts": core.hosts,
         "projects": core.projects,
         "costs": core.costs,
         "health": core.health,
@@ -1851,6 +1852,7 @@ fn dashboard_filter_from_params(params: &HashMap<String, String>) -> QueryFilter
 fn public_dashboard_filter_from_params(params: &HashMap<String, String>) -> QueryFilter {
     let mut filter = dashboard_filter_from_params(params);
     filter.project_hash = None;
+    filter.host_id = None;
     filter
 }
 
@@ -1864,6 +1866,7 @@ fn dashboard_filter_from_params_without_window(params: &HashMap<String, String>)
         until: query_date(params, "until"),
         project_hash: query_string(params, "project_hash")
             .or_else(|| query_string(params, "project")),
+        host_id: query_string(params, "host").or_else(|| query_string(params, "host_id")),
         timezone: query_timezone(params.get("timezone").or_else(|| params.get("tz"))),
     }
 }
@@ -2374,6 +2377,7 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "public dashboard failed: {payload}");
         assert_eq!(payload["access"]["mode"], "public_read_only");
         assert_eq!(payload["projects"], json!([]));
+        assert!(payload.get("hosts").is_none());
         assert_eq!(payload["diagnostics"], json!({"available": false}));
         assert_eq!(payload["health"], json!({"available": false}));
 
@@ -2796,6 +2800,7 @@ mod tests {
         assert!(html.contains("id=\"trends\""));
         assert!(html.contains("id=\"models\""));
         assert!(html.contains("id=\"sources\""));
+        assert!(html.contains("id=\"hosts\""));
         assert!(html.contains("id=\"projects\""));
         assert!(html.contains("id=\"behavior\""));
         assert!(html.contains("id=\"activity-table\""));
@@ -3028,6 +3033,7 @@ mod tests {
                 "render/trends.js",
                 "render/models.js",
                 "render/sources.js",
+                "render/hosts.js",
                 "render/projects.js",
                 "render/behavior.js",
                 "render/explorer.js",
@@ -3073,6 +3079,10 @@ mod tests {
         let sources_js = asset("render/sources.js");
         assert!(sources_js.contains("const compactTokens = formatTokenAmount(total_tokens);"));
         assert!(sources_js.contains("const exactTokens = `${formatNumber(total_tokens)} Token`;"));
+
+        let hosts_js = asset("render/hosts.js");
+        assert!(hosts_js.contains("const compactTokens = formatTokenAmount(total_tokens);"));
+        assert!(hosts_js.contains("const exactTokens = `${formatNumber(total_tokens)} Token`;"));
 
         let trends_js = asset("render/trends.js");
         assert!(trends_js.contains("const valueLabel = formatTokenAmount(value);"));
@@ -5162,7 +5172,7 @@ mod tests {
                 VALUES ('codex', '', ?1, '2026-05-01T00:00:00Z', 'project-a', 'Project A', NULL,
                         100, 10, 0, 50, 0, 160, 0.2, 0.2, 'static', 'static-v1',
                         1, '2026-05-01T00:00:00Z')
-                ON CONFLICT(source, provider_label, model, hour_start, project_hash) DO UPDATE SET
+                ON CONFLICT(host_id, source, provider_label, model, hour_start, project_hash) DO UPDATE SET
                     input_tokens = input_tokens + excluded.input_tokens,
                     cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens,
                     output_tokens = output_tokens + excluded.output_tokens,

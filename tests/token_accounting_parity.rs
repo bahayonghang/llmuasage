@@ -100,6 +100,7 @@ fn ccusage_token_semantics_are_consistent_across_sources_and_queries() -> Result
                 source: None,
                 project: None,
                 breakdown: true,
+                host_id: None,
             },
         )?;
         assert_eq!(daily.totals.total_tokens, event_total);
@@ -149,7 +150,7 @@ fn ordinary_sync_automatically_repairs_safe_legacy_source() -> Result<()> {
         assert!(store.has_legacy_token_accounting(SourceKind::Codex)?);
         let status = store
             .sync_status()
-            .load_source_sync_statuses()?
+            .load_source_sync_statuses("local")?
             .into_iter()
             .find(|status| status.source == "codex")
             .expect("codex sync status");
@@ -1016,7 +1017,7 @@ fn full_rebuild_refused_while_unattributed_antigravity_history_exists() -> Resul
         }
         let risk = store
             .source_files()
-            .lossy_rebuild_risk(SourceKind::Antigravity)?;
+            .lossy_rebuild_risk(SourceKind::Antigravity, "local")?;
         assert_eq!(risk.missing_file_count, 1);
         assert_eq!(risk.protected_event_count, 1);
         Ok::<_, anyhow::Error>(())

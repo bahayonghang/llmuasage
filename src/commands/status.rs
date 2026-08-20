@@ -27,7 +27,7 @@ pub async fn run(app: &AppContext) -> Result<()> {
     let platform_statuses = source_status::build_platform_monitor_statuses();
     let parse_issues = store
         .sync_status()
-        .load_source_sync_statuses()?
+        .load_source_sync_statuses("local")?
         .into_iter()
         .map(|status| (status.source, status.parse_issues))
         .collect::<std::collections::BTreeMap<_, _>>();

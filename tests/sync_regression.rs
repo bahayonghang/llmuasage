@@ -42,7 +42,7 @@ fn sync_hot_run_and_append_remain_incremental() -> Result<()> {
         commands::sync::run(&app).await?;
         let store = Store::new(&app.paths)?;
         let first_overview = Dashboard::open(&store)?.overview(&Default::default())?;
-        let first_sync_status = store.sync_status().load_source_sync_statuses()?;
+        let first_sync_status = store.sync_status().load_source_sync_statuses("local")?;
         // One status per registered source: codex, claude, opencode,
         // antigravity, kimi_code, pi, grok, zcode, and deepseek_harness.
         assert_eq!(first_sync_status.len(), 9);
@@ -54,7 +54,7 @@ fn sync_hot_run_and_append_remain_incremental() -> Result<()> {
             second_overview.total.total_tokens
         );
 
-        let hot_status = store.sync_status().load_source_sync_statuses()?;
+        let hot_status = store.sync_status().load_source_sync_statuses("local")?;
         let claude_status = hot_status
             .iter()
             .find(|item| item.source == "claude")
@@ -109,7 +109,7 @@ fn hot_sync_keeps_unchanged_source_files_live_and_reports_stored_events() -> Res
         assert_eq!(first.stored_events, 2);
         assert_eq!(first.sources[0].stored_events, 2);
 
-        let counts = store.source_files().counts(SourceKind::Codex)?;
+        let counts = store.source_files().counts(SourceKind::Codex, "local")?;
         assert_eq!(counts.live, 2);
         assert_eq!(counts.missing, 0);
 
@@ -130,7 +130,7 @@ fn hot_sync_keeps_unchanged_source_files_live_and_reports_stored_events() -> Res
         assert_eq!(second.sources[0].skipped_files, 2);
         assert_eq!(second.sources[0].stored_events, 2);
 
-        let counts = store.source_files().counts(SourceKind::Codex)?;
+        let counts = store.source_files().counts(SourceKind::Codex, "local")?;
         assert_eq!(counts.live, 2);
         assert_eq!(counts.missing, 0, "unchanged-but-present files stay live");
         Ok::<_, anyhow::Error>(())
@@ -514,7 +514,7 @@ fn codex_missing_history_survives_regular_sync_and_blocks_rebuild_by_default() -
         let after_regular = Dashboard::open(&store)?.overview(&Default::default())?;
         assert_eq!(after_regular.total.total_tokens, first_total);
         assert_eq!(usage_event_count(&app.paths.db_path)?, first_count);
-        let source_counts = store.source_files().counts(SourceKind::Codex)?;
+        let source_counts = store.source_files().counts(SourceKind::Codex, "local")?;
         assert_eq!(source_counts.missing, 1);
         let diagnostics = Dashboard::open(&store)?.diagnostics()?;
         let codex = diagnostics
@@ -598,7 +598,13 @@ fn codex_lossy_rebuild_can_be_explicitly_allowed() -> Result<()> {
                 .total_tokens,
             0
         );
-        assert_eq!(store.source_files().counts(SourceKind::Codex)?.missing, 0);
+        assert_eq!(
+            store
+                .source_files()
+                .counts(SourceKind::Codex, "local")?
+                .missing,
+            0
+        );
         Ok::<_, anyhow::Error>(())
     })?;
 
@@ -1180,7 +1186,10 @@ fn opencode_part_scan_uses_persisted_high_water() -> Result<()> {
             opencode_mcp_servers(&app.paths.db_path)?,
             vec!["context7".to_string()]
         );
-        let first_part_rowid = store.cursors().load_opencode_cursor()?.last_part_rowid;
+        let first_part_rowid = store
+            .cursors()
+            .load_opencode_cursor("local")?
+            .last_part_rowid;
         assert!(first_part_rowid > 0);
 
         let hot = commands::sync::run_once_with_options(
@@ -1227,7 +1236,13 @@ fn opencode_part_scan_uses_persisted_high_water() -> Result<()> {
         assert_eq!(appended.sources[0].changed_files, 1);
         assert!(appended.sources[0].bytes_scanned > 0);
         assert_eq!(usage_tool_call_count(&app.paths.db_path)?, 3);
-        assert!(store.cursors().load_opencode_cursor()?.last_part_rowid > first_part_rowid);
+        assert!(
+            store
+                .cursors()
+                .load_opencode_cursor("local")?
+                .last_part_rowid
+                > first_part_rowid
+        );
         Ok::<_, anyhow::Error>(())
     })?;
 
@@ -1246,14 +1261,14 @@ fn opencode_replaced_db_resets_high_water() -> Result<()> {
         commands::sync::run(&app).await?;
 
         let store = Store::new(&app.paths)?;
-        let first_cursor = store.cursors().load_opencode_cursor()?;
+        let first_cursor = store.cursors().load_opencode_cursor("local")?;
         assert_eq!(first_cursor.last_time_created, 1776823200000);
         assert_eq!(usage_event_count(&app.paths.db_path)?, 1);
 
         fixture.replace_opencode_db("msg-replaced", 1776823100000, 48)?;
         commands::sync::run(&app).await?;
 
-        let second_cursor = store.cursors().load_opencode_cursor()?;
+        let second_cursor = store.cursors().load_opencode_cursor("local")?;
         assert_eq!(second_cursor.last_time_created, 1776823100000);
         assert_eq!(usage_event_count(&app.paths.db_path)?, 2);
         Ok::<_, anyhow::Error>(())
@@ -1295,7 +1310,7 @@ fn opencode_missing_db_reports_absent_without_failing_sync() -> Result<()> {
         assert_eq!(stats.events_seen, 0);
         assert_eq!(stats.events_inserted, 0);
 
-        let cursor = store.cursors().load_opencode_cursor()?;
+        let cursor = store.cursors().load_opencode_cursor("local")?;
         assert_eq!(cursor.sqlite_status, "missing-db");
         Ok::<_, anyhow::Error>(())
     })?;
@@ -1840,12 +1855,15 @@ fn kimi_deleted_history_survives_regular_sync_and_blocks_rebuild() -> Result<()>
 
         assert_eq!(kimi_event_count(&app.paths.db_path)?, 1);
         assert_eq!(
-            store.source_files().counts(SourceKind::KimiCode)?.missing,
+            store
+                .source_files()
+                .counts(SourceKind::KimiCode, "local")?
+                .missing,
             1
         );
         let risk = store
             .source_files()
-            .lossy_rebuild_risk(SourceKind::KimiCode)?;
+            .lossy_rebuild_risk(SourceKind::KimiCode, "local")?;
         assert_eq!(risk.missing_file_count, 1);
         assert_eq!(risk.protected_event_count, 1);
 
@@ -1890,7 +1908,13 @@ fn kimi_missing_root_sync_succeeds_and_status_tracks_passive_data() -> Result<()
         // kimi events without marking other sources missing.
         commands::sync::run(&app).await?;
         assert_eq!(kimi_event_count(&app.paths.db_path)?, 0);
-        assert_eq!(store.source_files().counts(SourceKind::Codex)?.missing, 0);
+        assert_eq!(
+            store
+                .source_files()
+                .counts(SourceKind::Codex, "local")?
+                .missing,
+            0
+        );
         assert_eq!(kimi_capability_status(&app, &store)?, "passive_no_data");
 
         // Seed one wire.jsonl: passive status flips to ready after import.
@@ -2485,7 +2509,7 @@ fn grok_session_replay_converges_and_protects_missing_sidecars() -> Result<()> {
             commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
         assert_eq!(missing.sources[0].changed_files, 0);
         assert_grok_totals(&app.paths.db_path, 1, 700)?;
-        assert_eq!(store.source_files().counts(SourceKind::Grok)?.missing, 1);
+        assert_eq!(store.source_files().counts(SourceKind::Grok, "local")?.missing, 1);
 
         let blocked = commands::sync::run_with_options(
             &app,
@@ -2510,7 +2534,7 @@ fn grok_session_replay_converges_and_protects_missing_sidecars() -> Result<()> {
         )?;
         commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
         assert_grok_totals(&app.paths.db_path, 2, 800)?;
-        assert_eq!(store.source_files().counts(SourceKind::Grok)?.missing, 0);
+        assert_eq!(store.source_files().counts(SourceKind::Grok, "local")?.missing, 0);
         Ok::<_, anyhow::Error>(())
     })?;
 
@@ -3221,7 +3245,9 @@ fn antigravity_deleted_conversation_preserves_history() -> Result<()> {
             1,
             "deleted conversation history is preserved"
         );
-        let counts = store.source_files().counts(SourceKind::Antigravity)?;
+        let counts = store
+            .source_files()
+            .counts(SourceKind::Antigravity, "local")?;
         assert_eq!(counts.missing, 1);
         Ok::<_, anyhow::Error>(())
     })?;
@@ -3914,7 +3940,7 @@ fn zcode_rebuild_resets_skip_watermark() -> Result<()> {
         )
         .await?;
         assert_eq!(first.sources[0].parse_issues.skipped_lines, 1);
-        let cursor = store.cursors().load_zcode_cursor()?;
+        let cursor = store.cursors().load_zcode_cursor("local")?;
         assert!(cursor.last_skipped_at > 0);
 
         let mut rebuilt_error = zcode_row("err-new", 2_000, 0, 0);
@@ -4113,7 +4139,7 @@ fn zcode_recent_days_run_filters_window_without_advancing_cursor() -> Result<()>
             "bounded run imports only the in-window append"
         );
 
-        let cursor = store.cursors().load_zcode_cursor()?;
+        let cursor = store.cursors().load_zcode_cursor("local")?;
         assert_eq!(
             cursor.last_completed_at, 1_000_000_000,
             "bounded run must not advance the watermark"
@@ -4170,7 +4196,7 @@ fn zcode_recent_days_does_not_advance_skip_watermark() -> Result<()> {
         )
         .await?;
         assert_eq!(bounded.sources[0].parse_issues.skipped_lines, 1);
-        let cursor = store.cursors().load_zcode_cursor()?;
+        let cursor = store.cursors().load_zcode_cursor("local")?;
         assert_eq!(
             cursor.last_skipped_at, 0,
             "bounded run must not advance the skip watermark"
@@ -4231,7 +4257,7 @@ fn zcode_cancel_after_first_page_does_not_advance_skip_watermark() -> Result<()>
             .await?;
         writer.finish_sync_run()?;
 
-        let cursor = store.cursors().load_zcode_cursor()?;
+        let cursor = store.cursors().load_zcode_cursor("local")?;
         assert_eq!(
             cursor.last_skipped_at, 0,
             "cancel after the first page save must not persist the skip watermark"
@@ -4826,7 +4852,7 @@ fn dsh_recent_days_run_skips_reset_and_does_not_advance_cursor() -> Result<()> {
         .await?;
         let cursors = store
             .cursors()
-            .load_file_cursors(SourceKind::DeepseekHarness)?;
+            .load_file_cursors(SourceKind::DeepseekHarness, "local")?;
         let before = cursors
             .get(&path.to_string_lossy().to_string())
             .cloned()
@@ -4855,7 +4881,7 @@ fn dsh_recent_days_run_skips_reset_and_does_not_advance_cursor() -> Result<()> {
         assert_eq!(bounded.total_inserted, 1);
         let cursors = store
             .cursors()
-            .load_file_cursors(SourceKind::DeepseekHarness)?;
+            .load_file_cursors(SourceKind::DeepseekHarness, "local")?;
         let after = cursors
             .get(&path.to_string_lossy().to_string())
             .cloned()

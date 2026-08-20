@@ -37,6 +37,8 @@ pub struct QueryFilter {
     pub until: Option<NaiveDate>,
     /// Optional exact project hash filter.
     pub project_hash: Option<String>,
+    /// Optional host filter. Values are internal `host_id`s, not labels.
+    pub host_id: Option<String>,
     /// Timezone used to interpret `since`/`until` and date groupings.
     pub timezone: ReportTimezone,
 }
@@ -49,6 +51,7 @@ impl Default for QueryFilter {
             since: None,
             until: None,
             project_hash: None,
+            host_id: None,
             timezone: ReportTimezone::Local,
         }
     }
@@ -107,6 +110,17 @@ impl QueryFilter {
             filter.push(
                 format!("{} = ?", column(alias, "source")),
                 source.as_str().to_string(),
+            );
+        }
+        if let Some(host_id) = self
+            .host_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            filter.push(
+                format!("{} = ?", column(alias, "host_id")),
+                host_id.to_string(),
             );
         }
         if let Some(model) = self
@@ -303,5 +317,21 @@ mod tests {
             LocalResult::None => offset.from_utc_datetime(&local_start).with_timezone(&Utc),
         };
         utc.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    }
+
+    #[test]
+    fn sql_filter_with_model_column_applies_host_id_to_turns() {
+        let filter = QueryFilter {
+            host_id: Some("devbox".to_string()),
+            ..QueryFilter::default()
+        };
+
+        let turn_filter = filter.turn_filter(Some("t"));
+        assert_eq!(turn_filter.where_sql(), " WHERE t.host_id = ?");
+        assert_eq!(turn_filter.params(), &[Value::Text("devbox".to_string())]);
+
+        let tool_filter = filter.tool_filter(None);
+        assert_eq!(tool_filter.where_sql(), " WHERE host_id = ?");
+        assert_eq!(tool_filter.params(), &[Value::Text("devbox".to_string())]);
     }
 }

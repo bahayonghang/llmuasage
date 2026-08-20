@@ -122,13 +122,16 @@ async fn sync_kimi_code(
     let inventory_paths = listing.file_paths();
     store.source_files().mark_inventory_seen(
         SourceKind::KimiCode,
+        "local",
         &inventory_paths,
         writer.run_started_at(),
     )?;
     let inventory_error = listing.error_summary();
     let files = listing.paths;
     let total_files = files.len();
-    let cursor_map = store.cursors().load_file_cursors(SourceKind::KimiCode)?;
+    let cursor_map = store
+        .cursors()
+        .load_file_cursors(SourceKind::KimiCode, "local")?;
 
     let mut shards = HashMap::<PathBuf, Vec<CandidateFile>>::new();
     let mut changed_files = 0usize;
@@ -242,6 +245,7 @@ async fn sync_kimi_code(
                 raw_records: Vec::new(),
                 turns: Vec::new(),
                 tool_calls: Vec::new(),
+                ..SyncShard::new(SourceKind::KimiCode)
             })?;
             inserted += commit.events_inserted;
             write_ms += commit.write_ms;

@@ -121,6 +121,20 @@ pub enum SyncEvent {
         source: SourceKind,
         stats: SourceSyncStats,
     },
+    /// A registered SSH host is about to be imported.
+    RemoteHostStarted { host_id: String, label: String },
+    /// A registered SSH host finished import and returned a trailer.
+    RemoteHostFinished {
+        host_id: String,
+        label: String,
+        stats: Vec<SourceSyncStats>,
+    },
+    /// A registered SSH host was skipped after a probe or import failure.
+    RemoteHostSkipped {
+        host_id: String,
+        label: String,
+        reason: String,
+    },
     /// Full sync completed.
     Finished { summary: SyncSummaryEvent },
     /// Sync failed.

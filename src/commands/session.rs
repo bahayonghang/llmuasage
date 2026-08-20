@@ -9,7 +9,7 @@ pub async fn run(app: &AppContext, args: SessionArgs) -> Result<()> {
     debug!("starting session report output");
     let store = Store::new(&app.paths)?;
     store.require_initialized()?;
-    let filter = args.common.to_filter(args.project.clone())?;
+    let filter = args.common.to_filter(&store, args.project.clone())?;
 
     if args.id.is_some() && !args.unified.sections.is_empty() {
         anyhow::bail!("--sections cannot be combined with --id");
@@ -23,6 +23,8 @@ pub async fn run(app: &AppContext, args: SessionArgs) -> Result<()> {
             false,
         )?;
         unified_report::print_sections(
+            &store,
+            &filter,
             &reports,
             reports::PeriodKind::Session,
             args.common.json,
@@ -39,7 +41,8 @@ pub async fn run(app: &AppContext, args: SessionArgs) -> Result<()> {
         // Session rows are already source-specific, so --by-agent is deliberately a no-op.
         println!(
             "{}",
-            serde_json::to_string_pretty(&unified_report::report_json(
+            serde_json::to_string_pretty(&unified_report::report_json_with_hosts(
+                Some((&store, &filter)),
                 &report,
                 false,
                 args.common.no_cost

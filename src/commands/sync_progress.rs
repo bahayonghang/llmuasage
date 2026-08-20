@@ -187,6 +187,8 @@ impl LineRenderer {
                     | SyncEvent::LockAcquired { .. }
                     | SyncEvent::TokenAccountingRepairStarted { .. }
                     | SyncEvent::TokenAccountingRepairFinished { .. }
+                    | SyncEvent::RemoteHostFinished { .. }
+                    | SyncEvent::RemoteHostSkipped { .. }
             ) {
                 let _ = writeln!(self.stderr);
                 self.last_line_len = 0;
@@ -309,6 +311,12 @@ impl BarRenderer {
                     active.bar.abandon_with_message(line.clone());
                 }
                 self.permanent_text(line);
+            }
+            SyncEvent::RemoteHostStarted { .. } => {
+                self.start_spinner(human_progress_line(event).unwrap_or_default());
+            }
+            SyncEvent::RemoteHostFinished { .. } | SyncEvent::RemoteHostSkipped { .. } => {
+                self.permanent_line(event);
             }
             SyncEvent::Started { .. }
             | SyncEvent::Finished { .. }
@@ -568,6 +576,14 @@ pub(crate) fn human_progress_line(event: &SyncEvent) -> Option<String> {
         // longer prints a permanent success line; the final summary table owns
         // the per-source success surface.
         SyncEvent::SourceFinished { .. } => None,
+        SyncEvent::RemoteHostStarted { label, .. } => Some(format!("正在导入远端主机 {label}...")),
+        SyncEvent::RemoteHostFinished { label, stats, .. } => Some(format!(
+            "远端主机 {label} 导入完成（{} 个来源）",
+            stats.len()
+        )),
+        SyncEvent::RemoteHostSkipped { label, reason, .. } => {
+            Some(format!("警告：跳过远端主机 {label}：{reason}"))
+        }
         SyncEvent::Failed { error } => Some(format!("同步失败：{error}")),
         SyncEvent::Cancelled => Some("同步已取消".to_string()),
         SyncEvent::Started { .. } | SyncEvent::Finished { .. } | SyncEvent::RecentReady { .. } => {
@@ -611,6 +627,27 @@ mod tests {
         // summary table owns the per-source success surface.
         assert!(human_progress_line(&source_finished(SourceKind::Codex)).is_none());
         assert!(human_progress_line(&source_finished(SourceKind::Opencode)).is_none());
+    }
+
+    #[test]
+    fn remote_host_events_render_skip_warnings() {
+        assert_eq!(
+            human_progress_line(&SyncEvent::RemoteHostStarted {
+                host_id: "devbox".to_string(),
+                label: "devbox".to_string(),
+            })
+            .as_deref(),
+            Some("正在导入远端主机 devbox...")
+        );
+        assert_eq!(
+            human_progress_line(&SyncEvent::RemoteHostSkipped {
+                host_id: "devbox".to_string(),
+                label: "devbox".to_string(),
+                reason: "ssh timed out".to_string(),
+            })
+            .as_deref(),
+            Some("警告：跳过远端主机 devbox：ssh timed out")
+        );
     }
 
     #[test]

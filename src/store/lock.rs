@@ -37,6 +37,7 @@ impl WorkerLock {
         Store {
             paths: self.store.paths.clone(),
             write_permit: Some(self.permit.clone()),
+            emit_only: self.store.emit_only,
         }
     }
 
@@ -155,6 +156,11 @@ impl Store {
     /// fenced clones reuse their permit; compatibility callers acquire and own
     /// a short-lived lock automatically.
     pub(crate) fn write_operation(&self, kind: HolderKind) -> Result<WriteOperation> {
+        if self.emit_only {
+            return Err(LlmusageError::ConfigInvalid {
+                detail: "emit-only store does not acquire the worker lock".to_string(),
+            });
+        }
         if let Some(permit) = self.write_permit.as_ref() {
             permit.ensure_not_lost()?;
             return Ok(WriteOperation {
@@ -202,6 +208,11 @@ impl Store {
         timeout: Duration,
         kind: HolderKind,
     ) -> Result<WorkerLock> {
+        if self.emit_only {
+            return Err(LlmusageError::ConfigInvalid {
+                detail: "emit-only store does not acquire the worker lock".to_string(),
+            });
+        }
         info!(holder_kind = %kind, timeout_ms = timeout.as_millis(), "开始等待 SQLite worker 锁");
         let started = Instant::now();
         loop {

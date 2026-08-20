@@ -124,6 +124,7 @@ fn seed_source_file(store: &Store, source: SourceKind, path: &str) -> Result<()>
         raw_records: Vec::new(),
         turns: Vec::new(),
         tool_calls: Vec::new(),
+        ..SyncShard::new(source)
     })?;
     writer.finish_sync_run()?;
     Ok(())
@@ -194,6 +195,7 @@ fn seed_resettable_row(store: &Store, source: SourceKind, key_suffix: &str) -> R
         }],
         turns: vec![turn],
         tool_calls: vec![tool_call],
+        ..SyncShard::new(source)
     })?;
     writer.finish_sync_run()?;
     Ok(())
@@ -226,6 +228,7 @@ fn raw_archive_off_by_default() -> Result<()> {
         }],
         turns: Vec::new(),
         tool_calls: Vec::new(),
+        ..SyncShard::new(SourceKind::Codex)
     })?;
     writer.finish_sync_run()?;
 
@@ -260,6 +263,7 @@ fn raw_archive_opt_in_is_returned_by_logs() -> Result<()> {
         }],
         turns: Vec::new(),
         tool_calls: Vec::new(),
+        ..SyncShard::new(SourceKind::Codex)
     })?;
     writer.finish_sync_run()?;
 
@@ -295,6 +299,7 @@ fn logs_cursor_round_trip() -> Result<()> {
         raw_records: Vec::new(),
         turns: Vec::new(),
         tool_calls: Vec::new(),
+        ..SyncShard::new(SourceKind::Codex)
     })?;
     writer.finish_sync_run()?;
 
@@ -315,12 +320,12 @@ fn logs_cursor_round_trip() -> Result<()> {
             .iter()
             .map(|record| record.event_key.as_str())
             .collect::<Vec<_>>(),
-        vec!["codex:new", "codex:middle"]
+        vec!["local:codex:new", "local:codex:middle"]
     );
     let cursor = first.next_cursor.expect("first page should have cursor");
     let decoded: serde_json::Value = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(&cursor)?)?;
     assert_eq!(decoded["event_at"], "2026-05-08T01:00:00Z");
-    assert_eq!(decoded["event_key"], "codex:middle");
+    assert_eq!(decoded["event_key"], "local:codex:middle");
 
     let second = dashboard.logs(&llmusage::LogsQuery {
         filter: QueryFilter {
@@ -333,7 +338,7 @@ fn logs_cursor_round_trip() -> Result<()> {
     })?;
     assert_eq!(second.next_cursor, None);
     assert_eq!(second.records.len(), 1);
-    assert_eq!(second.records[0].event_key, "codex:old");
+    assert_eq!(second.records[0].event_key, "local:codex:old");
     Ok(())
 }
 
@@ -355,7 +360,7 @@ async fn opencode_row_serialized_as_json_in_raw_table() -> Result<()> {
 
     let conn = store.open_connection()?;
     let raw_json: String = conn.query_row(
-        "SELECT raw_json FROM usage_event_raw WHERE event_key = 'opencode:msg-raw'",
+        "SELECT raw_json FROM usage_event_raw WHERE event_key = 'local:opencode:msg-raw'",
         [],
         |row| row.get(0),
     )?;
@@ -489,7 +494,7 @@ async fn recent_window_filters_old_events_without_advancing_full_history_cursor(
     assert!(
         store
             .cursors()
-            .load_file_cursors(SourceKind::Codex)?
+            .load_file_cursors(SourceKind::Codex, "local")?
             .is_empty(),
         "bounded scan must not advance the sole full-history cursor"
     );
@@ -507,7 +512,7 @@ async fn recent_window_filters_old_events_without_advancing_full_history_cursor(
     assert!(
         store
             .cursors()
-            .load_file_cursors(SourceKind::Codex)?
+            .load_file_cursors(SourceKind::Codex, "local")?
             .is_empty()
     );
 
@@ -522,7 +527,10 @@ async fn recent_window_filters_old_events_without_advancing_full_history_cursor(
         "later full sync must recover the older event"
     );
     assert_eq!(
-        store.cursors().load_file_cursors(SourceKind::Codex)?.len(),
+        store
+            .cursors()
+            .load_file_cursors(SourceKind::Codex, "local")?
+            .len(),
         1
     );
     Ok(())
@@ -536,8 +544,20 @@ async fn source_filtered_sync_keeps_other_sources_intact() -> Result<()> {
     let (_tmp, store) = make_store()?;
     seed_source_file(&store, SourceKind::Codex, "/codex/stale.jsonl")?;
     seed_source_file(&store, SourceKind::Claude, "/claude/keep.jsonl")?;
-    assert_eq!(store.source_files().counts(SourceKind::Codex)?.live, 1);
-    assert_eq!(store.source_files().counts(SourceKind::Claude)?.live, 1);
+    assert_eq!(
+        store
+            .source_files()
+            .counts(SourceKind::Codex, "local")?
+            .live,
+        1
+    );
+    assert_eq!(
+        store
+            .source_files()
+            .counts(SourceKind::Claude, "local")?
+            .live,
+        1
+    );
 
     let app = llmusage::app::AppContext {
         paths: store.paths.clone(),
@@ -556,8 +576,8 @@ async fn source_filtered_sync_keeps_other_sources_intact() -> Result<()> {
     .await?;
     assert_eq!(summary.sources.len(), 1);
 
-    let codex = store.source_files().counts(SourceKind::Codex)?;
-    let claude = store.source_files().counts(SourceKind::Claude)?;
+    let codex = store.source_files().counts(SourceKind::Codex, "local")?;
+    let claude = store.source_files().counts(SourceKind::Claude, "local")?;
     assert_eq!(codex.missing, 1);
     assert_eq!(claude.live, 1);
     assert_eq!(claude.missing, 0);
@@ -575,7 +595,7 @@ fn reset_for_source_codex_keeps_claude_intact() -> Result<()> {
     seed_resettable_row(&store, SourceKind::Codex, "reset-me")?;
     seed_resettable_row(&store, SourceKind::Claude, "keep-me")?;
 
-    store.reset_for_source(SourceKind::Codex)?;
+    store.reset_for_source(SourceKind::Codex, "local")?;
     let conn = store.open_connection()?;
     let codex_events: i64 = conn.query_row(
         "SELECT COUNT(*) FROM usage_event WHERE source = 'codex'",
@@ -588,12 +608,12 @@ fn reset_for_source_codex_keeps_claude_intact() -> Result<()> {
         |row| row.get(0),
     )?;
     let codex_raw: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM usage_event_raw WHERE event_key LIKE 'codex:%'",
+        "SELECT COUNT(*) FROM usage_event_raw WHERE event_key LIKE 'local:codex:%'",
         [],
         |row| row.get(0),
     )?;
     let claude_raw: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM usage_event_raw WHERE event_key LIKE 'claude:%'",
+        "SELECT COUNT(*) FROM usage_event_raw WHERE event_key LIKE 'local:claude:%'",
         [],
         |row| row.get(0),
     )?;
@@ -617,8 +637,20 @@ fn reset_for_source_codex_keeps_claude_intact() -> Result<()> {
         count_rows(&store, "usage_tool_call", "WHERE source = 'claude'")?,
         1
     );
-    assert_eq!(store.source_files().counts(SourceKind::Codex)?.live, 0);
-    assert_eq!(store.source_files().counts(SourceKind::Claude)?.live, 1);
+    assert_eq!(
+        store
+            .source_files()
+            .counts(SourceKind::Codex, "local")?
+            .live,
+        0
+    );
+    assert_eq!(
+        store
+            .source_files()
+            .counts(SourceKind::Claude, "local")?
+            .live,
+        1
+    );
     Ok(())
 }
 
@@ -745,6 +777,7 @@ async fn file_boundary_cancel_preserves_written_events() -> Result<()> {
         recent_cutoff: None,
         sender: Some(&mut tx),
         cancel: &cancel,
+        sweep_host_ids: vec!["local".to_string()],
     })
     .await?;
     writer.finish_sync_run()?;
@@ -779,13 +812,19 @@ async fn file_boundary_cancel_preserves_written_events() -> Result<()> {
     )?;
     assert_eq!(event_count, 3);
     assert_eq!(cursor_count, 3);
-    assert!(store.source_files().counts(SourceKind::Codex)?.live >= 3);
+    assert!(
+        store
+            .source_files()
+            .counts(SourceKind::Codex, "local")?
+            .live
+            >= 3
+    );
 
     let imported_keys = (0..10)
         .filter_map(|index| {
             conn.query_row(
                 "SELECT event_key FROM usage_event WHERE event_key = ?1",
-                [format!("codex:cancel-file-{index}")],
+                [format!("local:codex:cancel-file-{index}")],
                 |row| row.get::<_, String>(0),
             )
             .ok()
@@ -794,9 +833,9 @@ async fn file_boundary_cancel_preserves_written_events() -> Result<()> {
     assert_eq!(
         imported_keys,
         vec![
-            "codex:cancel-file-0".to_string(),
-            "codex:cancel-file-1".to_string(),
-            "codex:cancel-file-2".to_string()
+            "local:codex:cancel-file-0".to_string(),
+            "local:codex:cancel-file-1".to_string(),
+            "local:codex:cancel-file-2".to_string()
         ]
     );
     Ok(())
@@ -888,6 +927,7 @@ impl SourceParser for CancelAfterFilesParser {
                     raw_records: Vec::new(),
                     turns: Vec::new(),
                     tool_calls: Vec::new(),
+                    ..SyncShard::new(SourceKind::Codex)
                 })?;
                 stats.files_processed += 1;
                 stats.changed_files += 1;

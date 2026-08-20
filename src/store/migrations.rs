@@ -106,6 +106,7 @@ pub const MIGRATIONS: &[(u32, &str, MigrationFn)] = &[
         "add_zcode_skip_watermark",
         m_022_add_zcode_skip_watermark,
     ),
+    (23, "add_host_dimension", m_023_add_host_dimension),
 ];
 
 /// Returns the newest schema version known to this binary.
@@ -943,6 +944,253 @@ fn m_022_add_zcode_skip_watermark(tx: &Transaction<'_>) -> Result<()> {
         "INTEGER NOT NULL DEFAULT 0",
     )?;
     ensure_column(tx, "source_cursor", "last_skipped_ids_json", "TEXT")?;
+    Ok(())
+}
+
+fn m_023_add_host_dimension(tx: &Transaction<'_>) -> Result<()> {
+    tx.execute_batch(
+        r#"
+        CREATE TABLE host (
+            host_id           TEXT PRIMARY KEY,
+            label             TEXT NOT NULL UNIQUE,
+            transport         TEXT NOT NULL CHECK(transport IN ('local','ssh')),
+            ssh_target        TEXT,
+            command           TEXT NOT NULL DEFAULT 'llmusage',
+            added_at          TEXT NOT NULL,
+            last_contacted_at TEXT,
+            last_error        TEXT,
+            import_watermark  TEXT
+        );
+        "#,
+    )?;
+    tx.execute(
+        r#"
+        INSERT INTO host(host_id, label, transport, command, added_at)
+        VALUES ('local', 'local', 'local', 'llmusage', ?1)
+        "#,
+        [crate::util::now_utc()],
+    )?;
+
+    const HOST_ID_COLUMN: &str = "TEXT NOT NULL DEFAULT 'local'";
+    for table in [
+        "usage_event",
+        "usage_turn",
+        "usage_tool_call",
+        "usage_bucket_30m",
+        "source_file",
+        "source_cursor",
+        "source_sync_status",
+    ] {
+        if table_exists(tx, table)? {
+            ensure_column(tx, table, "host_id", HOST_ID_COLUMN)?;
+        }
+    }
+
+    if table_exists(tx, "usage_event_raw")? {
+        tx.execute(
+            "UPDATE usage_event_raw SET event_key = 'local:' || event_key",
+            [],
+        )?;
+    }
+    if table_exists(tx, "usage_event")? {
+        tx.execute(
+            "UPDATE usage_event SET event_key = 'local:' || event_key",
+            [],
+        )?;
+    }
+    if table_exists(tx, "usage_turn")? {
+        tx.execute(
+            "UPDATE usage_turn SET turn_key = 'turn:local:' || substr(turn_key, 6)",
+            [],
+        )?;
+    }
+    if table_exists(tx, "usage_tool_call")? {
+        tx.execute(
+            r#"
+            UPDATE usage_tool_call SET
+                event_key = 'local:' || event_key,
+                turn_key  = 'turn:local:' || substr(turn_key, 6)
+            WHERE event_key IS NOT NULL OR turn_key IS NOT NULL
+            "#,
+            [],
+        )?;
+        tx.execute(
+            r#"
+            UPDATE usage_tool_call SET
+                tool_call_key = 'tool:' || source || ':local:'
+                             || substr(tool_call_key, length('tool:' || source || ':') + 1)
+            "#,
+            [],
+        )?;
+    }
+
+    if table_exists(tx, "usage_bucket_30m")? {
+        tx.execute_batch(&format!(
+            r#"
+            CREATE TABLE usage_bucket_30m__v23 (
+                host_id TEXT NOT NULL DEFAULT 'local',
+                source TEXT NOT NULL,
+                provider_label TEXT NOT NULL DEFAULT '',
+                model TEXT NOT NULL,
+                hour_start TEXT NOT NULL,
+                project_hash TEXT NOT NULL DEFAULT '',
+                project_label TEXT,
+                project_ref TEXT,
+                input_tokens INTEGER NOT NULL,
+                cache_read_tokens INTEGER NOT NULL,
+                output_tokens INTEGER NOT NULL,
+                reasoning_output_tokens INTEGER NOT NULL,
+                total_tokens INTEGER NOT NULL,
+                updated_at TEXT NOT NULL,
+                cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+                cost_with_cache_usd REAL NOT NULL DEFAULT 0.0,
+                cost_without_cache_usd REAL NOT NULL DEFAULT 0.0,
+                pricing_status TEXT NOT NULL DEFAULT '{PRICING_UNPRICED}',
+                pricing_source TEXT,
+                pricing_rate TEXT,
+                event_count INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (host_id, source, provider_label, model, hour_start, project_hash)
+            );
+            INSERT INTO usage_bucket_30m__v23 (
+                host_id, source, provider_label, model, hour_start, project_hash,
+                project_label, project_ref, input_tokens, cache_read_tokens, output_tokens,
+                reasoning_output_tokens, total_tokens, updated_at, cache_creation_tokens,
+                cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source,
+                pricing_rate, event_count
+            )
+            SELECT
+                host_id, source, provider_label, model, hour_start, project_hash,
+                project_label, project_ref, input_tokens, cache_read_tokens, output_tokens,
+                reasoning_output_tokens, total_tokens, updated_at, cache_creation_tokens,
+                cost_with_cache_usd, cost_without_cache_usd, pricing_status, pricing_source,
+                pricing_rate, event_count
+            FROM usage_bucket_30m;
+            DROP TABLE usage_bucket_30m;
+            ALTER TABLE usage_bucket_30m__v23 RENAME TO usage_bucket_30m;
+            CREATE INDEX IF NOT EXISTS idx_usage_bucket_30m_hour_start
+                ON usage_bucket_30m(hour_start);
+            "#
+        ))?;
+    }
+
+    if table_exists(tx, "source_file")? {
+        tx.execute_batch(
+            r#"
+            CREATE TABLE source_file__v23 (
+                host_id TEXT NOT NULL DEFAULT 'local',
+                source TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                state TEXT NOT NULL,
+                last_seen_at TEXT,
+                last_state_change_at TEXT NOT NULL,
+                PRIMARY KEY (host_id, source, file_path)
+            );
+            INSERT INTO source_file__v23 (
+                host_id, source, file_path, state, last_seen_at, last_state_change_at
+            )
+            SELECT host_id, source, file_path, state, last_seen_at, last_state_change_at
+            FROM source_file;
+            DROP TABLE source_file;
+            ALTER TABLE source_file__v23 RENAME TO source_file;
+            CREATE INDEX IF NOT EXISTS idx_source_file_source_state
+                ON source_file(source, state);
+            CREATE INDEX IF NOT EXISTS idx_source_file_host_source_state
+                ON source_file(host_id, source, state);
+            "#,
+        )?;
+    }
+
+    if table_exists(tx, "source_cursor")? {
+        tx.execute_batch(
+            r#"
+            CREATE TABLE source_cursor__v23 (
+                host_id TEXT NOT NULL DEFAULT 'local',
+                source TEXT NOT NULL,
+                cursor_key TEXT NOT NULL,
+                file_path TEXT,
+                file_fingerprint TEXT,
+                file_size INTEGER,
+                file_mtime_ns INTEGER,
+                tail_signature TEXT,
+                inode INTEGER,
+                offset INTEGER,
+                last_total_json TEXT,
+                last_model TEXT,
+                last_time_created INTEGER,
+                last_processed_ids_json TEXT,
+                sqlite_status TEXT,
+                updated_at TEXT NOT NULL,
+                last_part_rowid INTEGER NOT NULL DEFAULT 0,
+                last_skipped_at INTEGER NOT NULL DEFAULT 0,
+                last_skipped_ids_json TEXT,
+                PRIMARY KEY (host_id, source, cursor_key)
+            );
+            INSERT INTO source_cursor__v23 (
+                host_id, source, cursor_key, file_path, file_fingerprint, file_size,
+                file_mtime_ns, tail_signature, inode, offset, last_total_json, last_model,
+                last_time_created, last_processed_ids_json, sqlite_status, updated_at,
+                last_part_rowid, last_skipped_at, last_skipped_ids_json
+            )
+            SELECT
+                host_id, source, cursor_key, file_path, file_fingerprint, file_size,
+                file_mtime_ns, tail_signature, inode, offset, last_total_json, last_model,
+                last_time_created, last_processed_ids_json, sqlite_status, updated_at,
+                last_part_rowid, last_skipped_at, last_skipped_ids_json
+            FROM source_cursor;
+            DROP TABLE source_cursor;
+            ALTER TABLE source_cursor__v23 RENAME TO source_cursor;
+            "#,
+        )?;
+    }
+
+    if table_exists(tx, "source_sync_status")? {
+        tx.execute_batch(
+            r#"
+            CREATE TABLE source_sync_status__v23 (
+                host_id TEXT NOT NULL DEFAULT 'local',
+                source TEXT NOT NULL,
+                files_processed INTEGER NOT NULL,
+                changed_files INTEGER NOT NULL,
+                bytes_scanned INTEGER NOT NULL,
+                events_seen INTEGER NOT NULL,
+                events_replayed INTEGER NOT NULL,
+                events_inserted INTEGER NOT NULL,
+                stored_events INTEGER NOT NULL DEFAULT 0,
+                parse_ms INTEGER NOT NULL,
+                write_ms INTEGER NOT NULL,
+                lock_wait_ms INTEGER NOT NULL,
+                updated_at TEXT NOT NULL,
+                recent_completed_at TEXT,
+                history_completed_at TEXT,
+                parse_issues_json TEXT NOT NULL DEFAULT '{"malformed_lines":0,"oversized_lines":0,"samples":[]}',
+                PRIMARY KEY (host_id, source)
+            );
+            INSERT INTO source_sync_status__v23 (
+                host_id, source, files_processed, changed_files, bytes_scanned,
+                events_seen, events_replayed, events_inserted, stored_events,
+                parse_ms, write_ms, lock_wait_ms, updated_at, recent_completed_at,
+                history_completed_at, parse_issues_json
+            )
+            SELECT
+                host_id, source, files_processed, changed_files, bytes_scanned,
+                events_seen, events_replayed, events_inserted, stored_events,
+                parse_ms, write_ms, lock_wait_ms, updated_at, recent_completed_at,
+                history_completed_at, parse_issues_json
+            FROM source_sync_status;
+            DROP TABLE source_sync_status;
+            ALTER TABLE source_sync_status__v23 RENAME TO source_sync_status;
+            "#,
+        )?;
+    }
+
+    if table_exists(tx, "usage_event")? {
+        tx.execute_batch(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_usage_event_host_source_event_at
+                ON usage_event(host_id, source, event_at);
+            "#,
+        )?;
+    }
     Ok(())
 }
 
@@ -1858,6 +2106,349 @@ mod tests {
         let fresh_columns = pragma_columns(&fresh, "source_cursor")?;
         assert!(fresh_columns.contains(&"last_skipped_at".to_string()));
         assert!(fresh_columns.contains(&"last_skipped_ids_json".to_string()));
+        Ok(())
+    }
+
+    fn host_dimension_table_snapshot(
+        conn: &Connection,
+        table: &str,
+    ) -> anyhow::Result<Vec<(String, String, bool, i64)>> {
+        let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, bool>(3)?,
+                row.get::<_, i64>(5)?,
+            ))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    fn host_dimension_indexes(conn: &Connection) -> anyhow::Result<Vec<String>> {
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT name FROM sqlite_master
+            WHERE type = 'index'
+              AND name IN (
+                'idx_usage_event_host_source_event_at',
+                'idx_source_file_host_source_state',
+                'idx_source_file_source_state',
+                'idx_usage_bucket_30m_hour_start'
+              )
+            ORDER BY name
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    fn assert_host_dimension_schema(conn: &Connection) -> anyhow::Result<()> {
+        assert!(pragma_columns(conn, "host")?.contains(&"host_id".to_string()));
+        for table in [
+            "usage_event",
+            "usage_turn",
+            "usage_tool_call",
+            "usage_bucket_30m",
+            "source_file",
+            "source_cursor",
+            "source_sync_status",
+        ] {
+            assert!(
+                pragma_columns(conn, table)?.contains(&"host_id".to_string()),
+                "{table} must have host_id"
+            );
+        }
+        let bucket_pk: Vec<String> = host_dimension_table_snapshot(conn, "usage_bucket_30m")?
+            .into_iter()
+            .filter(|(_, _, _, pk)| *pk > 0)
+            .map(|(name, _, _, _)| name)
+            .collect();
+        assert_eq!(
+            bucket_pk,
+            vec![
+                "host_id".to_string(),
+                "source".to_string(),
+                "provider_label".to_string(),
+                "model".to_string(),
+                "hour_start".to_string(),
+                "project_hash".to_string(),
+            ]
+        );
+        let source_file_pk: Vec<String> = host_dimension_table_snapshot(conn, "source_file")?
+            .into_iter()
+            .filter(|(_, _, _, pk)| *pk > 0)
+            .map(|(name, _, _, _)| name)
+            .collect();
+        assert_eq!(
+            source_file_pk,
+            vec![
+                "host_id".to_string(),
+                "source".to_string(),
+                "file_path".to_string(),
+            ]
+        );
+        let indexes = host_dimension_indexes(conn)?;
+        assert!(indexes.contains(&"idx_usage_event_host_source_event_at".to_string()));
+        assert!(indexes.contains(&"idx_source_file_host_source_state".to_string()));
+        Ok(())
+    }
+
+    fn seed_v22_host_dimension_rows(conn: &Connection) -> anyhow::Result<()> {
+        conn.execute_batch(
+            r#"
+            INSERT INTO usage_event(
+                event_key, source, provider_label, model, event_at, hour_start,
+                input_tokens, cache_read_tokens, cache_creation_tokens, output_tokens,
+                reasoning_output_tokens, total_tokens, cost_with_cache_usd,
+                cost_without_cache_usd, created_at
+            ) VALUES
+                ('codex:e1', 'codex', '', 'gpt-5', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z',
+                 10, 0, 0, 5, 0, 15, 1.25, 1.25, '2026-08-01T00:00:00Z'),
+                ('claude:e1', 'claude', '', 'claude-sonnet-4-5', '2026-08-01T00:00:00Z',
+                 '2026-08-01T00:00:00Z', 20, 0, 0, 5, 0, 25, 2.50, 2.50, '2026-08-01T00:00:00Z');
+            INSERT INTO usage_event_raw(event_key, raw_json, created_at) VALUES
+                ('codex:e1', '{"source":"codex"}', '2026-08-01T00:00:00Z'),
+                ('claude:e1', '{"source":"claude"}', '2026-08-01T00:00:00Z');
+            INSERT INTO usage_turn(
+                turn_key, source, primary_model, started_at, category, created_at
+            ) VALUES
+                ('turn:codex:e1', 'codex', 'gpt-5', '2026-08-01T00:00:00Z', 'general',
+                 '2026-08-01T00:00:00Z');
+            INSERT INTO usage_tool_call(
+                tool_call_key, turn_key, event_key, source, occurred_at, tool_name, tool_kind,
+                created_at
+            ) VALUES
+                ('tool:codex:codex:e1:0', 'turn:codex:e1', 'codex:e1', 'codex',
+                 '2026-08-01T00:00:00Z', 'Read', 'read', '2026-08-01T00:00:00Z'),
+                ('tool:codex:orphan', NULL, 'codex:e1', 'codex',
+                 '2026-08-01T00:00:00Z', 'Read', 'read', '2026-08-01T00:00:00Z');
+            INSERT INTO usage_bucket_30m(
+                source, provider_label, model, hour_start, project_hash,
+                input_tokens, cache_read_tokens, output_tokens, reasoning_output_tokens,
+                total_tokens, updated_at, event_count
+            ) VALUES
+                ('codex', '', 'gpt-5', '2026-08-01T00:00:00Z', '', 10, 0, 5, 0, 15,
+                 '2026-08-01T00:00:00Z', 1);
+            INSERT INTO source_file(source, file_path, state, last_state_change_at)
+                VALUES ('codex', '/tmp/codex.jsonl', 'live', '2026-08-01T00:00:00Z');
+            INSERT INTO source_cursor(source, cursor_key, file_path, updated_at)
+                VALUES ('codex', '/tmp/codex.jsonl', '/tmp/codex.jsonl', '2026-08-01T00:00:00Z');
+            "#,
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn migration_v23_upgrades_v22_and_matches_fresh_schema() -> anyhow::Result<()> {
+        let mut upgraded = Connection::open_in_memory()?;
+        run_migrations_for_test(&mut upgraded, &MIGRATIONS[..22])?;
+        assert_eq!(read_schema_version(&upgraded)?, 22);
+        seed_v22_host_dimension_rows(&upgraded)?;
+
+        let event_count_before: i64 =
+            upgraded.query_row("SELECT COUNT(*) FROM usage_event", [], |row| row.get(0))?;
+        let token_totals_before: Vec<(String, i64, f64)> = {
+            let mut stmt = upgraded.prepare(
+                "SELECT source, SUM(total_tokens), SUM(cost_with_cache_usd) FROM usage_event GROUP BY source ORDER BY source",
+            )?;
+            stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let turn_join_before: i64 = upgraded.query_row(
+            "SELECT COUNT(*) FROM usage_turn t JOIN usage_event e ON substr(t.turn_key, 6) = e.event_key",
+            [],
+            |row| row.get(0),
+        )?;
+        let tool_join_before: i64 = upgraded.query_row(
+            "SELECT COUNT(*) FROM usage_tool_call c JOIN usage_event e ON c.event_key = e.event_key",
+            [],
+            |row| row.get(0),
+        )?;
+        let null_turn_before: i64 = upgraded.query_row(
+            "SELECT COUNT(*) FROM usage_tool_call WHERE turn_key IS NULL",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(null_turn_before, 1);
+
+        run_migrations_for_test(&mut upgraded, &MIGRATIONS[..23])?;
+        assert_eq!(read_schema_version(&upgraded)?, 23);
+        assert_host_dimension_schema(&upgraded)?;
+
+        let event_count_after: i64 =
+            upgraded.query_row("SELECT COUNT(*) FROM usage_event", [], |row| row.get(0))?;
+        assert_eq!(event_count_after, event_count_before);
+        let token_totals_after: Vec<(String, i64, f64)> = {
+            let mut stmt = upgraded.prepare(
+                "SELECT source, SUM(total_tokens), SUM(cost_with_cache_usd) FROM usage_event GROUP BY source ORDER BY source",
+            )?;
+            stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        assert_eq!(token_totals_after, token_totals_before);
+        let turn_join_after: i64 = upgraded.query_row(
+            "SELECT COUNT(*) FROM usage_turn t JOIN usage_event e ON substr(t.turn_key, 6) = e.event_key",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(turn_join_after, turn_join_before);
+        let tool_join_after: i64 = upgraded.query_row(
+            "SELECT COUNT(*) FROM usage_tool_call c JOIN usage_event e ON c.event_key = e.event_key",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(tool_join_after, tool_join_before);
+        let null_turn_after: i64 = upgraded.query_row(
+            "SELECT COUNT(*) FROM usage_tool_call WHERE turn_key IS NULL",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(null_turn_after, 1);
+
+        let local_host: String = upgraded.query_row(
+            "SELECT host_id FROM host WHERE label = 'local'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(local_host, "local");
+        let prefixed: String = upgraded.query_row(
+            "SELECT event_key FROM usage_event WHERE source = 'codex'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(prefixed, "local:codex:e1");
+        let prefixed_turn: String =
+            upgraded.query_row("SELECT turn_key FROM usage_turn", [], |row| row.get(0))?;
+        assert_eq!(prefixed_turn, "turn:local:codex:e1");
+        let prefixed_tool: String = upgraded.query_row(
+            "SELECT tool_call_key FROM usage_tool_call WHERE tool_call_key LIKE 'tool:codex:local:%' LIMIT 1",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(prefixed_tool, "tool:codex:local:codex:e1:0");
+
+        let mut fresh = Connection::open_in_memory()?;
+        run_migrations_for_test(&mut fresh, &MIGRATIONS[..23])?;
+        assert_eq!(read_schema_version(&fresh)?, 23);
+        assert_host_dimension_schema(&fresh)?;
+        for table in [
+            "host",
+            "usage_event",
+            "usage_turn",
+            "usage_tool_call",
+            "usage_bucket_30m",
+            "source_file",
+            "source_cursor",
+            "source_sync_status",
+        ] {
+            assert_eq!(
+                host_dimension_table_snapshot(&upgraded, table)?,
+                host_dimension_table_snapshot(&fresh, table)?,
+                "{table} schema must match between upgrade and fresh bootstrap"
+            );
+        }
+        assert_eq!(
+            host_dimension_indexes(&upgraded)?,
+            host_dimension_indexes(&fresh)?
+        );
+
+        run_migrations_for_test(&mut upgraded, &MIGRATIONS[..23])?;
+        assert_eq!(read_schema_version(&upgraded)?, 23);
+        Ok(())
+    }
+
+    #[test]
+    fn migration_v23_in_memory_does_not_require_backup_file() -> anyhow::Result<()> {
+        let mut conn = Connection::open_in_memory()?;
+        run_migrations_for_test(&mut conn, &MIGRATIONS[..22])?;
+        run_migrations_for_test(&mut conn, &MIGRATIONS[..23])?;
+        assert_eq!(read_schema_version(&conn)?, 23);
+        assert_host_dimension_schema(&conn)?;
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_backs_up_v22_disk_db_before_v23() -> anyhow::Result<()> {
+        use crate::paths::AppPaths;
+        use crate::store::Store;
+
+        let temp = tempfile::TempDir::new()?;
+        let paths = AppPaths::with_root(temp.path().join("runtime"))?;
+        std::fs::create_dir_all(&paths.root_dir)?;
+        {
+            let mut conn = Connection::open(&paths.db_path)?;
+            run_migrations_for_test(&mut conn, &MIGRATIONS[..22])?;
+            assert_eq!(read_schema_version(&conn)?, 22);
+        }
+
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+        let live = store.open_connection()?;
+        assert_eq!(read_schema_version(&live)?, 23);
+
+        let backup_path = paths.backups_dir.join("llmusage.db.pre-0.23-host");
+        assert!(
+            backup_path.is_file(),
+            "disk upgrade from v22 must write backups/llmusage.db.pre-0.23-host"
+        );
+        let backup = Connection::open(&backup_path)?;
+        assert_eq!(read_schema_version(&backup)?, 22);
+        Ok(())
+    }
+
+    #[test]
+    fn migration_v23_then_commit_same_local_keys_is_idempotent() -> anyhow::Result<()> {
+        use crate::models::{SourceKind, UsageEvent, UsageTokens};
+        use crate::paths::AppPaths;
+        use crate::store::{Store, SyncShard};
+
+        let temp = tempfile::TempDir::new()?;
+        let paths = AppPaths::with_root(temp.path().join("runtime"))?;
+        std::fs::create_dir_all(&paths.root_dir)?;
+        {
+            let mut conn = Connection::open(&paths.db_path)?;
+            run_migrations_for_test(&mut conn, &MIGRATIONS[..22])?;
+            conn.execute(
+                r#"
+                INSERT INTO usage_event(
+                    event_key, source, provider_label, model, event_at, hour_start,
+                    input_tokens, cache_read_tokens, cache_creation_tokens, output_tokens,
+                    reasoning_output_tokens, total_tokens, created_at
+                ) VALUES (
+                    'codex:pathA:seed', 'codex', '', 'gpt-5', '2026-05-01T10:00:00Z',
+                    '2026-05-01T10:00:00Z', 10, 0, 0, 10, 0, 20, '2026-05-01T10:00:00Z'
+                )
+                "#,
+                [],
+            )?;
+        }
+
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+        let mut writer = store.begin_sync_run()?;
+        let stats = writer.commit_shard(SyncShard {
+            events: vec![UsageEvent {
+                event_key: "codex:pathA:seed".to_string(),
+                source: SourceKind::Codex,
+                provider_label: String::new(),
+                model: "gpt-5".to_string(),
+                event_at: "2026-05-01T10:00:00Z".to_string(),
+                hour_start: "2026-05-01T10:00:00Z".to_string(),
+                tokens: UsageTokens {
+                    input_tokens: 10,
+                    cache_read_tokens: 0,
+                    cache_creation_tokens: 0,
+                    output_tokens: 10,
+                    reasoning_output_tokens: 0,
+                    total_tokens: 20,
+                },
+                project: None,
+                session: None,
+            }],
+            ..SyncShard::new(SourceKind::Codex)
+        })?;
+        assert_eq!(stats.events_inserted, 0);
         Ok(())
     }
 

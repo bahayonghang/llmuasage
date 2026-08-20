@@ -92,7 +92,7 @@ async fn sync_opencode(
     // 1.1 定位本地 DB 并读取当前 cursor
     let parse_started = Instant::now();
     let db_path = integrations::opencode::resolve_db_path();
-    let mut cursor = store.cursors().load_opencode_cursor()?;
+    let mut cursor = store.cursors().load_opencode_cursor("local")?;
     let mut stats = SourceSyncStats {
         source: SourceKind::Opencode,
         ..SourceSyncStats::default()
@@ -111,7 +111,7 @@ async fn sync_opencode(
         stats.absent = true;
         stats.last_error = Some("OpenCode SQLite DB 缺失".to_string());
         if recent_cutoff.is_none() {
-            store.cursors().save_opencode_cursor(&cursor)?;
+            store.cursors().save_opencode_cursor("local", &cursor)?;
         }
         return Ok(stats);
     }
@@ -225,6 +225,7 @@ async fn sync_opencode(
                 raw_records: page_raw,
                 turns: page_turns,
                 tool_calls: Vec::new(),
+                ..SyncShard::new(SourceKind::Opencode)
             })?;
             inserted += commit.events_inserted;
             write_ms += commit.write_ms;
@@ -279,6 +280,7 @@ async fn sync_opencode(
                     raw_records: Vec::new(),
                     turns: Vec::new(),
                     tool_calls,
+                    ..SyncShard::new(SourceKind::Opencode)
                 })?;
                 write_ms += commit.write_ms;
             }
@@ -302,7 +304,7 @@ async fn sync_opencode(
         cursor.last_processed_ids = latest_ids;
         cursor.sqlite_status = "ok".to_string();
         cursor.updated_at = now_utc();
-        store.cursors().save_opencode_cursor(&cursor)?;
+        store.cursors().save_opencode_cursor("local", &cursor)?;
     }
 
     stats.files_processed = 1;

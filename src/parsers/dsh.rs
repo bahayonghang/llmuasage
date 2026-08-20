@@ -155,6 +155,7 @@ async fn sync_dsh(
     let inventory_paths = listing.file_paths();
     store.source_files().mark_inventory_seen(
         SourceKind::DeepseekHarness,
+        "local",
         &inventory_paths,
         writer.run_started_at(),
     )?;
@@ -163,7 +164,7 @@ async fn sync_dsh(
     let total_files = files.len();
     let cursor_map = store
         .cursors()
-        .load_file_cursors(SourceKind::DeepseekHarness)?;
+        .load_file_cursors(SourceKind::DeepseekHarness, "local")?;
 
     let mut changed = HashSet::new();
     let mut existing_by_path = HashMap::new();
@@ -272,6 +273,7 @@ async fn sync_dsh(
                 raw_records: Vec::new(),
                 turns: Vec::new(),
                 tool_calls: Vec::new(),
+                ..SyncShard::new(SourceKind::DeepseekHarness)
             })?;
             inserted += commit.events_inserted;
             write_ms += commit.write_ms;

@@ -9,7 +9,7 @@ pub async fn run(app: &AppContext, args: DailyArgs) -> Result<()> {
     debug!("starting daily report output");
     let store = Store::new(&app.paths)?;
     store.require_initialized()?;
-    let mut filter = args.common.to_filter(args.project.clone())?;
+    let mut filter = args.common.to_filter(&store, args.project.clone())?;
     if args.all && (filter.since.is_some() || filter.until.is_some()) {
         bail!("--all cannot be combined with --since or --until");
     }
@@ -26,6 +26,8 @@ pub async fn run(app: &AppContext, args: DailyArgs) -> Result<()> {
             args.all,
         )?;
         unified_report::print_sections(
+            &store,
+            &filter,
             &reports,
             reports::PeriodKind::Daily,
             args.common.json,
@@ -81,7 +83,8 @@ pub async fn run(app: &AppContext, args: DailyArgs) -> Result<()> {
             let report = reports::load_unified_report(&store, &filter, reports::PeriodKind::Daily)?;
             println!(
                 "{}",
-                serde_json::to_string_pretty(&unified_report::report_json(
+                serde_json::to_string_pretty(&unified_report::report_json_with_hosts(
+                    Some((&store, &filter)),
                     &report,
                     args.unified.by_agent,
                     args.common.no_cost
@@ -99,6 +102,13 @@ pub async fn run(app: &AppContext, args: DailyArgs) -> Result<()> {
                     color_mode
                 )
             );
+            unified_report::print_host_section(
+                &store,
+                &filter,
+                reports::PeriodKind::Daily,
+                args.common.compact,
+                args.common.no_cost,
+            )?;
         }
     }
 

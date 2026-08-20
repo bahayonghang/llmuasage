@@ -323,7 +323,11 @@ const ENGLISH_COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "sync",
-        "Passively import local Codex, Claude, OpenCode, Kimi Code, Pi, and Grok Build usage artifacts.",
+        "Passively import local usage artifacts, then pull registered SSH remotes.",
+    ),
+    (
+        "remote",
+        "Register, list, remove, or import SSH remote hosts.",
     ),
     ("status", "Print database, source, and recent-run status."),
     (
@@ -410,6 +414,10 @@ const ENGLISH_REPORT_OPTIONS: &[(&str, &str)] = &[
         "Restrict reports or sync to codex, claude, opencode, antigravity, kimi_code, pi, or grok.",
     ),
     (
+        "--host <LABEL>",
+        "Restrict reports to one registered host label.",
+    ),
+    (
         "-A, --by-agent",
         "Add per-source rows to unified report JSON; text already includes Agent rows.",
     ),
@@ -472,8 +480,9 @@ const CHINESE_COMMANDS: &[(&str, &str)] = &[
     ("init", "创建本地运行时并引导用量数据库。"),
     (
         "sync",
-        "被动导入本地 Codex、Claude、OpenCode、Kimi Code、Pi 与 Grok Build 用量记录。",
+        "被动导入本地用量记录，然后拉取已注册的 SSH 远端主机。",
     ),
+    ("remote", "注册、列出、移除或导入 SSH 远端主机。"),
     ("status", "输出数据库、来源与最近运行状态。"),
     ("source-status", "输出解析器支持的来源与仅监控平台状态。"),
     ("diagnostics", "输出诊断 JSON，或显式忽略某个来源文件。"),
@@ -534,6 +543,7 @@ const CHINESE_REPORT_OPTIONS: &[(&str, &str)] = &[
         "--source <SOURCE>",
         "报表或同步限制到 codex、claude、opencode、antigravity、kimi_code、pi 或 grok。",
     ),
+    ("--host <LABEL>", "报表限制到一个已注册主机 label。"),
     (
         "-A, --by-agent",
         "统一报表 JSON 增加按来源行；文本已默认包含 Agent 行。",
@@ -602,6 +612,7 @@ mod tests {
         assert!(help.contains("┌"));
         assert!(help.contains("│ Command"));
         assert!(help.contains("source-status"));
+        assert!(help.contains("remote"));
         assert!(help.contains("catalog"));
         assert!(help.contains("claude"));
         assert!(help.contains("antigravity"));
@@ -616,6 +627,7 @@ mod tests {
         let zh = top_level_help_with_width(HelpLanguage::Chinese, 70);
         assert!(zh.contains("│ 命令"));
         assert!(zh.contains("source-status"));
+        assert!(zh.contains("remote"));
         assert!(zh.contains("catalog"));
         assert!(zh.contains("claude"));
         assert!(zh.contains("antigravity"));

@@ -3,7 +3,10 @@ use std::time::Duration;
 use rusqlite::Connection;
 
 use super::Store;
-use crate::{error::Result, paths::AppPaths};
+use crate::{
+    error::{LlmusageError, Result},
+    paths::AppPaths,
+};
 
 #[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -16,6 +19,7 @@ impl Store {
         Ok(Self {
             paths: paths.clone(),
             write_permit: None,
+            emit_only: false,
         })
     }
 
@@ -31,6 +35,12 @@ impl Store {
     /// degraded-section flow instead of blocking far beyond the request
     /// budget.
     pub fn open_connection_with_busy_timeout(&self, busy_timeout: Duration) -> Result<Connection> {
+        if self.emit_only {
+            return Err(LlmusageError::ConfigInvalid {
+                detail: "emit-only store must not open a SQLite database".to_string(),
+            });
+        }
+
         #[cfg(test)]
         OPEN_CONNECTION_CALLS.fetch_add(1, Ordering::Relaxed);
 

@@ -25,6 +25,7 @@ pub mod parsers;
 pub mod query;
 #[doc = "Compatibility module for source registry internals. Prefer `llmusage::sources`."]
 pub mod registry;
+pub mod remote;
 #[doc = "Compatibility module for runtime internals. Prefer `app`, `paths`, and `logging`."]
 pub mod runtime;
 pub mod store;

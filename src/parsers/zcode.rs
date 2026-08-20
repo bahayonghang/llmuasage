@@ -103,7 +103,7 @@ async fn sync_zcode(
 
     let parse_started = Instant::now();
     let db_path = integrations::zcode::resolve_db_path();
-    let mut cursor = store.cursors().load_zcode_cursor()?;
+    let mut cursor = store.cursors().load_zcode_cursor("local")?;
     let mut stats = SourceSyncStats {
         source: SourceKind::Zcode,
         ..SourceSyncStats::default()
@@ -123,7 +123,7 @@ async fn sync_zcode(
         stats.absent = true;
         stats.last_error = Some("ZCode SQLite DB 缺失".to_string());
         if recent_cutoff.is_none() {
-            store.cursors().save_zcode_cursor(&cursor)?;
+            store.cursors().save_zcode_cursor("local", &cursor)?;
         }
         return Ok(stats);
     }
@@ -239,6 +239,7 @@ async fn sync_zcode(
                 raw_records: Vec::new(),
                 turns: Vec::new(),
                 tool_calls: Vec::new(),
+                ..SyncShard::new(SourceKind::Zcode)
             })?;
             inserted += commit.events_inserted;
             write_ms += commit.write_ms;
@@ -249,7 +250,7 @@ async fn sync_zcode(
             cursor.last_processed_ids = latest_ids.clone();
             cursor.sqlite_status = "ok".to_string();
             cursor.updated_at = now_utc();
-            store.cursors().save_zcode_cursor(&cursor)?;
+            store.cursors().save_zcode_cursor("local", &cursor)?;
         }
         emit_progress(
             &mut progress,
@@ -266,7 +267,7 @@ async fn sync_zcode(
         advance_skip_watermark(&mut cursor, &skipped_rows);
         cursor.sqlite_status = "ok".to_string();
         cursor.updated_at = now_utc();
-        store.cursors().save_zcode_cursor(&cursor)?;
+        store.cursors().save_zcode_cursor("local", &cursor)?;
     }
 
     stats.files_processed = 1;
