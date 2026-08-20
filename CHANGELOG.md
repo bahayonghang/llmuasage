@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 1.3.0 - 2026-08-21
+
+### Added
+
+- Add SSH remote-host import: remote `llmusage` parses local artifacts, returns normalized shards over SSH, and the operator machine commits them with a `host` dimension.
+
+### Changed
+
+- Raise the crate version from `1.2.0` to `1.3.0`.
+- Schema v23 prefixes `event_key` with `host_id` (local rows use `local:`). Old binaries hit `SchemaTooNew`.
+- Reports, CLI `--host`, and the dashboard host panel treat host as a dimension parallel to source.
+
 ### Added
 
 - Add passive parsers for ZCode (`zcode`), Antigravity CLI (`antigravity`), and DeepSeek Harness (`deepseek_harness`).
