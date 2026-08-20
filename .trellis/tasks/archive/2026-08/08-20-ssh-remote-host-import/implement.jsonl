@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/llmusage/backend/index.md", "reason": "后端开发前置清单与契约索引；父任务负责跨子任务集成审查"}
+{"file": "docs/agents/domain.md", "reason": "领域文档消费方式与 ADR 冲突显式化要求"}
