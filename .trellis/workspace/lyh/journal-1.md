@@ -1737,3 +1737,25 @@ Usage 页改为只读拉取 Grok/Kimi/Claude/Codex 订阅额度，Source Sync �
 ### Status
 
 [OK] **Completed**
+
+
+## Session 58: SSH 远端主机导入
+
+**Date**: 2026-08-21
+**Task**: SSH 远端主机导入
+**Branch**: `ssh`
+
+### Summary
+
+在 ssh 分支落地 host 维度 schema、SSH shard 导入、按主机报表与 dashboard，以及远端生命周期语义与文档。规划按审阅修订后由子代理实现 C1–C4。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e23d62a` | (see git log) |
+| `17b7e3a` | (see git log) |
+
+### Status
+
+[OK] **Completed**
