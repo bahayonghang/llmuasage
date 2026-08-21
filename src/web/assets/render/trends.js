@@ -1,4 +1,5 @@
-import { escapeHtml, formatClock, formatDateTime, formatNumber, formatTokenAmount } from '../data.js';
+import { UI_COPY } from '../copy.js';
+import { escapeHtml, formatClock, formatDateTime, formatNumber, formatTokenAmount, PANEL_LIMITS } from '../data.js';
 import { buildTrendStats } from '../data/derive.js';
 
 const logger = window.console;
@@ -143,12 +144,27 @@ export function renderTrends(context) {
     </table>
   `;
 
-  const sourceRows = (context.panels.sources || [])
-    .slice(0, 2)
+  const sourceCopy = (UI_COPY.sections && UI_COPY.sections.trend) || {};
+  const sources = context.panels.sources || [];
+  const windowTotal = Number(context.totals.total_tokens || 0);
+  const visible = sources.slice(0, PANEL_LIMITS.sources);
+  const visibleTotal = visible.reduce(
+    (sum, row) => sum + Number(row.total_tokens || 0),
+    0,
+  );
+  const rest = windowTotal - visibleTotal;
+  const sourceTableRows =
+    rest > 0 && sources.length > visible.length
+      ? visible.concat({
+          source: sourceCopy.otherSources || '其他',
+          total_tokens: rest,
+        })
+      : visible;
+  const sourceRows = sourceTableRows
     .map((row) => {
       const total_tokens = Number(row.total_tokens || 0);
-      const sharePct = context.totals.total_tokens
-        ? ((total_tokens / context.totals.total_tokens) * 100).toFixed(1)
+      const sharePct = windowTotal
+        ? ((total_tokens / windowTotal) * 100).toFixed(1)
         : '0.0';
 
       return `

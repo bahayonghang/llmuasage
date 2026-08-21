@@ -3851,6 +3851,29 @@ mod tests {
     }
 
     #[test]
+    fn trend_source_table_uses_panel_limit_and_other_row() {
+        let trends_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "render/trends.js")
+            .expect("render/trends.js asset")
+            .body;
+        let copy_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "copy.js")
+            .expect("copy.js asset")
+            .body;
+        assert!(
+            !trends_js.contains(".slice(0, 2)"),
+            "trends source table must not hard-slice to two rows"
+        );
+        assert!(trends_js.contains("PANEL_LIMITS.sources"));
+        assert!(trends_js.contains("rest > 0 && sources.length > visible.length"));
+        assert!(trends_js.contains("otherSources"));
+        assert!(copy_js.contains("otherSources: '其他'"));
+        assert!(copy_js.contains("otherSources: 'Other'"));
+    }
+
+    #[test]
     fn trend_chart_assets_expose_peak_and_empty_styles() {
         let charts_css = asset_manifest()
             .iter()
