@@ -35,7 +35,7 @@ Adding a source means adding a `SourceKind` variant plus a descriptor. A parser 
 
 `SyncShard` is the parser/writer boundary. Parsers do not write SQLite directly.
 
-Repeated sync work is avoided through per-source cursors. Codex, Claude, Kimi Code, Pi, and Grok Build compare file size, mtime, head fingerprint, tail signature, and offset before reparsing; OpenCode compares DB identity and message high-water cursors. Kimi imports only turn-scoped `usage.record` rows. Pi merges the Pi and Oh My Pi roots under one source and keeps upstream totals authoritative, with reasoning as a separate diagnostic channel. Grok scans only direct session sidecars, replays the full session when any sidecar changes, and stores authoritative total-only tokens with unpriced cost. Sync stats expose unchanged work as skipped, changed artifacts as parsed, newly inserted rows as committed, and durable totals as stored events.
+Repeated sync work is avoided through per-source cursors. Codex, Claude, Kimi Code, Pi, and Grok Build compare file size, mtime, head fingerprint, tail signature, and offset before reparsing; OpenCode compares DB identity and message high-water cursors. Kimi imports only turn-scoped `usage.record` rows. Pi merges the Pi and Oh My Pi roots under one source and keeps upstream totals authoritative, with reasoning as a separate diagnostic channel. Grok scans only direct session sidecars, replays the full session when any sidecar changes, maps `turn_completed.usage` as precise events (total-only fallback when usage is absent), and keeps cost unpriced. Sync stats expose unchanged work as skipped, changed artifacts as parsed, newly inserted rows as committed, and durable totals as stored events.
 
 ## Query and dashboard flow
 

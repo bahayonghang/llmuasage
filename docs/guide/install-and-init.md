@@ -58,7 +58,7 @@ llmusage init
 | OpenCode | OpenCode local SQLite usage database | Passive parser |
 | Kimi Code | Turn-scoped `usage.record` rows | Passive parser |
 | Pi / Oh My Pi | Session JSONL from both supported roots | Passive parser |
-| Grok Build | Direct session sidecars | Passive parser (`total_only`) |
+| Grok Build | Direct session sidecars | Passive parser (`precise`, `unpriced`) |
 | Antigravity | CLI `conversations/*.db` plus retained hook-era rows | Passive parser; rebuild refused while unattributed history exists |
 | ZCode | `cli/db/db.sqlite` `model_usage` completed rows | Passive parser |
 | DeepSeek Harness | `sessions/**/session.jsonl(.zstd)` | Passive parser |

@@ -35,7 +35,7 @@
 
 `SyncShard` 是 parser/writer 边界。Parser 不直接写 SQLite。
 
-重复 sync 工作通过每个来源自己的 cursor 避免。Codex、Claude、Kimi Code、Pi 和 Grok Build 会在重解析前比较文件大小、mtime、头部 fingerprint、尾部签名和 offset；OpenCode 会比较 DB 身份和 message 高水位 cursor。Kimi 只导入 turn-scoped `usage.record`；Pi 把 Pi/Oh My Pi 两根合并为一个来源，以上游 total 为权威，并把 reasoning 保持为独立诊断通道。Grok 只扫描会话根 sidecar，任一 sidecar 变化时整体重放会话，并把权威 total-only token 以 unpriced 成本写入。Sync stats 会把未变化工作显示为 skipped，把变化 artifact 显示为 parsed，把本次新增写入显示为 committed，把数据库持久总量显示为 stored events。
+重复 sync 工作通过每个来源自己的 cursor 避免。Codex、Claude、Kimi Code、Pi 和 Grok Build 会在重解析前比较文件大小、mtime、头部 fingerprint、尾部签名和 offset；OpenCode 会比较 DB 身份和 message 高水位 cursor。Kimi 只导入 turn-scoped `usage.record`；Pi 把 Pi/Oh My Pi 两根合并为一个来源，以上游 total 为权威，并把 reasoning 保持为独立诊断通道。Grok 只扫描会话根 sidecar，任一 sidecar 变化时整体重放会话，把 `turn_completed.usage` 写成 precise 事件（无 usage 时回退 total-only），成本保持 unpriced。Sync stats 会把未变化工作显示为 skipped，把变化 artifact 显示为 parsed，把本次新增写入显示为 committed，把数据库持久总量显示为 stored events。
 
 ## 查询与 Dashboard 流程
 

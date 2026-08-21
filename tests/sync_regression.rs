@@ -2436,8 +2436,10 @@ fn grok_session_replay_converges_and_protects_missing_sidecars() -> Result<()> {
             llmusage::registry::source_descriptor(SourceKind::Grok)
                 .expect("grok descriptor")
                 .quality,
-            llmusage::domain::source_descriptor::UsageQuality::TotalOnly
+            llmusage::domain::source_descriptor::UsageQuality::Precise
         );
+        assert_eq!(expected_token_accounting_version(SourceKind::Grok), 3);
+        assert_eq!(expected_token_accounting_version(SourceKind::Codex), 3);
         assert_eq!(
             source_capability_status(&app, &store, SourceKind::Grok)?,
             "passive_ready"
@@ -2446,6 +2448,10 @@ fn grok_session_replay_converges_and_protects_missing_sidecars() -> Result<()> {
             .iter()
             .find(|monitor| monitor.platform_id == "grok")
             .expect("grok monitor");
+        assert_eq!(
+            grok_monitor.quality,
+            Some(llmusage::domain::source_descriptor::UsageQuality::Precise)
+        );
         let probe = llmusage::domain::platform_monitor::probe_platform_descriptor(
             grok_monitor,
             &fixture.home,
@@ -2614,14 +2620,153 @@ fn grok_home_override_is_honored() -> Result<()> {
     Ok(())
 }
 
+fn grok_turn_usage_line(prompt_id: &str, timestamp_ms: i64, usage: &str) -> String {
+    let usage: serde_json::Value = serde_json::from_str(usage).expect("usage json");
+    let mut line = serde_json::json!({
+        "params": {
+            "update": {
+                "sessionUpdate": "turn_completed",
+                "prompt_id": prompt_id,
+                "usage": usage
+            },
+            "_meta": { "agentTimestampMs": timestamp_ms }
+        }
+    })
+    .to_string();
+    line.push('\n');
+    line
+}
+
+#[test]
+fn grok_turn_usage_is_precise_idempotent_and_replays() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let usage_a = r#"{"inputTokens":1000,"cachedReadTokens":400,"cacheCreationTokens":0,"outputTokens":50,"reasoningTokens":20,"totalTokens":1050,"modelUsage":{"grok-4.6-build":{}}}"#;
+    let usage_b = r#"{"inputTokens":20,"cachedReadTokens":0,"cacheCreationTokens":0,"outputTokens":5,"reasoningTokens":0,"totalTokens":100,"modelUsage":{"grok-4.6-build":{}}}"#;
+    fixture.seed_grok(
+        "session-usage",
+        &format!(
+            "{}{}",
+            grok_turn_usage_line("p1", 1_700_000_001_000, usage_a),
+            grok_turn_usage_line("p2", 1_700_000_002_000, usage_b),
+        ),
+        Some("{\"current_model_id\":\"custom\",\"updated_at\":\"2023-11-14T22:13:20Z\"}"),
+        Some("{\"primaryModelId\":\"grok-4.6\",\"contextTokensUsed\":50000}"),
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let options = commands::sync::SyncRunOptions {
+            source: Some(SourceKind::Grok),
+            ..Default::default()
+        };
+
+        let first = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(first.sources[0].events_inserted, 2);
+        assert_grok_totals(&app.paths.db_path, 2, 1150)?;
+        let rows = grok_event_rows(&app.paths.db_path)?;
+        assert_eq!(rows[0].event_key, "local:grok:session-usage:usage:p1");
+        assert_eq!(rows[0].model, "grok-4.6-build");
+        assert_eq!(rows[0].input_tokens, 600);
+        assert_eq!(rows[0].cache_read_tokens, 400);
+        assert_eq!(rows[0].cache_creation_tokens, 0);
+        assert_eq!(rows[0].output_tokens, 50);
+        assert_eq!(rows[0].reasoning_tokens, 20);
+        assert_eq!(rows[0].total_tokens, 1050);
+        assert_eq!(rows[0].pricing_status, "unpriced");
+        assert!(rows[0].provider_label.is_empty());
+        assert_eq!(rows[1].event_key, "local:grok:session-usage:usage:p2");
+        assert_eq!(rows[1].total_tokens, 100);
+        assert!(rows.iter().all(|row| !row.event_key.ends_with(":signals")));
+        assert_eq!(
+            store.token_accounting_version(SourceKind::Grok)?,
+            Some(3)
+        );
+
+        let second = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(second.sources[0].changed_files, 0);
+        assert_eq!(second.sources[0].events_inserted, 0);
+        assert_grok_totals(&app.paths.db_path, 2, 1150)?;
+
+        let usage_c = r#"{"inputTokens":30,"cachedReadTokens":0,"cacheCreationTokens":0,"outputTokens":10,"reasoningTokens":0,"totalTokens":200,"modelUsage":{"grok-4.6-build":{}}}"#;
+        fixture.append_grok_updates(
+            "session-usage",
+            &grok_turn_usage_line("p3", 1_700_000_003_000, usage_c),
+        )?;
+        let appended =
+            commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert!(appended.sources[0].events_replayed >= 3);
+        assert_grok_totals(&app.paths.db_path, 3, 1350)?;
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn grok_legacy_marker_2_replays_on_unbounded_sync() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let usage = r#"{"inputTokens":1000,"cachedReadTokens":400,"cacheCreationTokens":0,"outputTokens":50,"reasoningTokens":20,"totalTokens":1050,"modelUsage":{"grok-4.6-build":{}}}"#;
+    fixture.seed_grok(
+        "session-legacy",
+        &grok_turn_usage_line("p1", 1_700_000_001_000, usage),
+        Some("{\"current_model_id\":\"grok-4.6\",\"updated_at\":\"2023-11-14T22:13:20Z\"}"),
+        None,
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let options = commands::sync::SyncRunOptions {
+            source: Some(SourceKind::Grok),
+            ..Default::default()
+        };
+        commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(store.token_accounting_version(SourceKind::Grok)?, Some(3));
+        store.set_meta_value("token_accounting_version.grok", "2")?;
+        assert!(store.has_legacy_token_accounting(SourceKind::Grok)?);
+
+        let (mut tx, mut rx) = tokio::sync::mpsc::channel(256);
+        commands::sync::run_once_with_options(&app, &store, 0, &options, Some(&mut tx)).await?;
+        let mut events = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            events.push(event);
+        }
+        assert_eq!(store.token_accounting_version(SourceKind::Grok)?, Some(3));
+        assert!(!store.has_legacy_token_accounting(SourceKind::Grok)?);
+        assert_grok_totals(&app.paths.db_path, 1, 1050)?;
+        assert!(
+            events.iter().any(|event| {
+                matches!(
+                    event,
+                    SyncEvent::TokenAccountingRepairStarted { sources }
+                        if sources.as_slice() == [SourceKind::Grok]
+                )
+            }),
+            "legacy grok marker 2 must start token-accounting repair"
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
 #[derive(Debug)]
 struct GrokEventRow {
+    event_key: String,
     model: String,
     input_tokens: i64,
     cache_read_tokens: i64,
     cache_creation_tokens: i64,
     output_tokens: i64,
     reasoning_tokens: i64,
+    total_tokens: i64,
     pricing_status: String,
     provider_label: String,
     project_label: Option<String>,
@@ -2631,8 +2776,8 @@ fn grok_event_rows(db_path: &Path) -> Result<Vec<GrokEventRow>> {
     let conn = Connection::open(db_path)?;
     let mut stmt = conn.prepare(
         r#"
-        SELECT model, input_tokens, cache_read_tokens, cache_creation_tokens,
-               output_tokens, reasoning_output_tokens, pricing_status,
+        SELECT event_key, model, input_tokens, cache_read_tokens, cache_creation_tokens,
+               output_tokens, reasoning_output_tokens, total_tokens, pricing_status,
                provider_label, project_label
         FROM usage_event
         WHERE source = 'grok'
@@ -2641,15 +2786,17 @@ fn grok_event_rows(db_path: &Path) -> Result<Vec<GrokEventRow>> {
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(GrokEventRow {
-            model: row.get(0)?,
-            input_tokens: row.get(1)?,
-            cache_read_tokens: row.get(2)?,
-            cache_creation_tokens: row.get(3)?,
-            output_tokens: row.get(4)?,
-            reasoning_tokens: row.get(5)?,
-            pricing_status: row.get(6)?,
-            provider_label: row.get(7)?,
-            project_label: row.get(8)?,
+            event_key: row.get(0)?,
+            model: row.get(1)?,
+            input_tokens: row.get(2)?,
+            cache_read_tokens: row.get(3)?,
+            cache_creation_tokens: row.get(4)?,
+            output_tokens: row.get(5)?,
+            reasoning_tokens: row.get(6)?,
+            total_tokens: row.get(7)?,
+            pricing_status: row.get(8)?,
+            provider_label: row.get(9)?,
+            project_label: row.get(10)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)

@@ -285,7 +285,7 @@ pub const PLATFORM_MONITORS: &[PlatformMonitorDescriptor] = &[
             "*/*/events.jsonl",
         ],
         parser_status: ParserSupportStatus::Registered,
-        quality: Some(UsageQuality::TotalOnly),
+        quality: Some(UsageQuality::Precise),
         privacy: PrivacyClass::LocalArtifacts,
         next_action: "parsed by the registered Grok Build source parser",
     },

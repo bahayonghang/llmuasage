@@ -54,7 +54,7 @@ llmusage init
 | OpenCode | OpenCode 本地 SQLite 用量库 | 被动 parser |
 | Kimi Code | turn-scoped `usage.record` 行 | 被动 parser |
 | Pi / Oh My Pi | 两个支持目录中的 session JSONL | 被动 parser |
-| Grok Build | 会话根目录 sidecar | 被动 parser（`total_only`） |
+| Grok Build | 会话根目录 sidecar | 被动 parser（`precise`，`unpriced`） |
 | Antigravity | CLI `conversations/*.db`，并保留 hook 时代历史行 | 被动 parser；存在未归属历史时拒绝 rebuild |
 | ZCode | `cli/db/db.sqlite` 的 `model_usage` completed 行 | 被动 parser |
 | DeepSeek Harness | `sessions/**/session.jsonl(.zstd)` | 被动 parser |

@@ -69,6 +69,10 @@
   change reparses the complete session and resets one shared session path hash.
   A tracked missing sidecar preserves prior events and lets the ordinary
   source-file sweep plus lossy-rebuild guard own recovery until it returns.
+  The primary token path is each `sessionUpdate == "turn_completed"` record
+  with a usable `params.update.usage` object (one event per record). Sessions
+  with no usage keep the cumulative `_meta.totalTokens` plus signals
+  reconciliation fallback. Do not mix the two paths in one session.
 - OpenCode database replacement detection uses persisted message anchors
   `(last_time_created, last_processed_ids)`. Preserve all cursors when every
   anchor exists; if any anchor disappeared, reset message and part cursors.

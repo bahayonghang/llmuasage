@@ -67,6 +67,7 @@ struct UpdatesParseResult {
     last_activity_ms: Option<i64>,
     last_model: Option<String>,
     cancelled: bool,
+    from_turn_usage: bool,
 }
 
 #[derive(Debug)]
@@ -110,7 +111,10 @@ impl ActiveTurn {
             format!("grok:{session_id}:{}", self.turn_index),
             non_empty_model(&self.model).unwrap_or_else(|| UNKNOWN_MODEL.to_string()),
             self.timestamp_ms,
-            total_tokens,
+            UsageTokens {
+                total_tokens,
+                ..UsageTokens::default()
+            },
             session,
             project,
         )
@@ -401,16 +405,14 @@ fn parse_grok_session(
         .and_then(parse_timestamp_value)
         .unwrap_or(0);
     let signals_model = signals.as_ref().and_then(model_from_signals);
-    let summary_model = summary.as_ref().and_then(|value| {
-        string_at(value, &["current_model_id"]).or_else(|| string_at(value, &["model_id"]))
-    });
+    let summary_model = summary.as_ref().and_then(model_from_summary);
     let fallback_model = signals_model
         .clone()
         .or(summary_model)
         .unwrap_or_else(|| UNKNOWN_MODEL.to_string());
 
     let updates = if let Some(decision) = decisions.get("updates.jsonl") {
-        parse_updates_file(
+        let usage = parse_turn_usage(
             &decision.snapshot.path,
             &session_hash,
             &session_id,
@@ -418,8 +420,28 @@ fn parse_grok_session(
             project.as_ref(),
             &fallback_model,
             summary_timestamp_ms,
+            summary.as_ref(),
+            signals.as_ref(),
             &cancel,
-        )?
+        )?;
+        if usage.cancelled {
+            output.cancelled = true;
+            return Ok(output);
+        }
+        if usage.events.is_empty() {
+            parse_updates_file(
+                &decision.snapshot.path,
+                &session_hash,
+                &session_id,
+                &session,
+                project.as_ref(),
+                &fallback_model,
+                summary_timestamp_ms,
+                &cancel,
+            )?
+        } else {
+            usage
+        }
     } else {
         UpdatesParseResult::default()
     };
@@ -431,7 +453,9 @@ fn parse_grok_session(
     output.parse_issues.merge(updates.parse_issues);
     output.events = updates.events;
 
-    if let Some(signals) = signals.as_ref() {
+    if !updates.from_turn_usage
+        && let Some(signals) = signals.as_ref()
+    {
         let updates_total = output.events.iter().fold(0i64, |total, event| {
             total.saturating_add(event.tokens.total_tokens)
         });
@@ -450,7 +474,10 @@ fn parse_grok_session(
                 format!("grok:{session_id}:signals"),
                 model,
                 timestamp_ms,
-                extra,
+                UsageTokens {
+                    total_tokens: extra,
+                    ..UsageTokens::default()
+                },
                 &session,
                 project.as_ref(),
             ) {
@@ -609,6 +636,229 @@ fn parse_updates_file(
     Ok(result)
 }
 
+#[allow(clippy::too_many_arguments)]
+fn parse_turn_usage(
+    path: &Path,
+    path_hash: &str,
+    session_id: &str,
+    session: &SessionInfo,
+    project: Option<&ProjectInfo>,
+    fallback_model: &str,
+    fallback_timestamp_ms: i64,
+    summary: Option<&Value>,
+    signals: Option<&Value>,
+    cancel: &CancellationToken,
+) -> Result<UpdatesParseResult> {
+    let file = File::open(path)?;
+    let mut reader = BoundedJsonlReader::new(file, 0)?;
+    let mut result = UpdatesParseResult::default();
+    let mut usage_issues = ParseIssues::default();
+    let mut used_keys = HashSet::new();
+    let mut usage_index = 0usize;
+
+    let status = reader.read_json_records(
+        SourceKind::Grok,
+        path_hash,
+        cancel,
+        &mut result.parse_issues,
+        |record| {
+            let value = record.value;
+            let timestamp_ms = extract_timestamp_ms(&value).unwrap_or(fallback_timestamp_ms);
+            if timestamp_ms > 0 {
+                result.last_activity_ms = Some(
+                    result
+                        .last_activity_ms
+                        .unwrap_or_default()
+                        .max(timestamp_ms),
+                );
+            }
+            if !is_turn_completed(&value) {
+                return Ok(JsonlRecordDisposition::Ignored);
+            }
+            let Some(usage) =
+                get_path(&value, &["params", "update", "usage"]).filter(|value| value.is_object())
+            else {
+                return Ok(JsonlRecordDisposition::Ignored);
+            };
+            let Some(parsed) = parse_turn_usage_object(usage) else {
+                return Ok(JsonlRecordDisposition::Ignored);
+            };
+            if parsed.input_below_cache {
+                usage_issues.record(
+                    SourceKind::Grok,
+                    path_hash,
+                    record.start_offset,
+                    ParseIssueKind::AccountingAnomaly,
+                    "input_below_cache",
+                );
+            }
+            if parsed.incomplete {
+                usage_issues.record(
+                    SourceKind::Grok,
+                    path_hash,
+                    record.start_offset,
+                    ParseIssueKind::AccountingAnomaly,
+                    "usage_incomplete",
+                );
+            }
+            let model = resolve_usage_model(parsed.model, &value, summary, signals, fallback_model);
+            let prompt_id = prompt_id_from_update(get_path(&value, &["params", "update"]));
+            let mut event_key = match prompt_id.as_deref() {
+                Some(id) => format!("grok:{session_id}:usage:{id}"),
+                None => format!("grok:{session_id}:usage:-:{usage_index}"),
+            };
+            while used_keys.contains(&event_key) {
+                event_key = format!("{event_key}-:{usage_index}");
+            }
+            let Some(event) = build_event(
+                event_key,
+                model,
+                timestamp_ms,
+                parsed.tokens,
+                session,
+                project,
+            ) else {
+                return Ok(JsonlRecordDisposition::Ignored);
+            };
+            used_keys.insert(event.event_key.clone());
+            result.last_model = Some(event.model.clone());
+            result.events.push(event);
+            usage_index = usage_index.saturating_add(1);
+            Ok(JsonlRecordDisposition::Accepted)
+        },
+    )?;
+
+    result.end_offset = reader.complete_offset();
+    result.cancelled = status == JsonlReadStatus::Cancelled;
+    result.parse_issues.merge(usage_issues);
+    result.from_turn_usage = !result.events.is_empty();
+    Ok(result)
+}
+
+struct ParsedTurnUsage {
+    tokens: UsageTokens,
+    model: Option<String>,
+    incomplete: bool,
+    input_below_cache: bool,
+}
+
+fn parse_turn_usage_object(usage: &Value) -> Option<ParsedTurnUsage> {
+    let total_raw = usage
+        .get("totalTokens")
+        .and_then(parse_i64)
+        .filter(|value| *value >= 0);
+    let input_raw = usage
+        .get("inputTokens")
+        .and_then(parse_i64)
+        .filter(|value| *value >= 0);
+    let output_raw = usage
+        .get("outputTokens")
+        .and_then(parse_i64)
+        .filter(|value| *value >= 0);
+    if total_raw.is_none() && input_raw.is_none() && output_raw.is_none() {
+        return None;
+    }
+
+    let cache_read = usage
+        .get("cachedReadTokens")
+        .and_then(parse_i64)
+        .unwrap_or(0)
+        .max(0);
+    let cache_creation = usage
+        .get("cacheCreationTokens")
+        .and_then(parse_i64)
+        .unwrap_or(0)
+        .max(0);
+    let reasoning = usage
+        .get("reasoningTokens")
+        .and_then(parse_i64)
+        .unwrap_or(0)
+        .max(0);
+    let input_inclusive = input_raw.unwrap_or(0);
+    let output = output_raw.unwrap_or(0);
+    let cache_overlap = cache_read.saturating_add(cache_creation);
+    let input_below_cache = input_inclusive < cache_overlap;
+    let input = if input_below_cache {
+        0
+    } else {
+        input_inclusive - cache_overlap
+    };
+    let total = total_raw.unwrap_or_else(|| input_inclusive.saturating_add(output));
+    if total == 0
+        && input == 0
+        && cache_read == 0
+        && cache_creation == 0
+        && output == 0
+        && reasoning == 0
+    {
+        return None;
+    }
+
+    let model = usage
+        .get("modelUsage")
+        .and_then(Value::as_object)
+        .and_then(|map| map.keys().next())
+        .and_then(|key| usable_model(key));
+    Some(ParsedTurnUsage {
+        tokens: UsageTokens {
+            input_tokens: input,
+            cache_read_tokens: cache_read,
+            cache_creation_tokens: cache_creation,
+            output_tokens: output,
+            reasoning_output_tokens: reasoning,
+            total_tokens: total,
+        },
+        model,
+        incomplete: usage
+            .get("usageIsIncomplete")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        input_below_cache,
+    })
+}
+
+fn resolve_usage_model(
+    usage_model: Option<String>,
+    record: &Value,
+    summary: Option<&Value>,
+    signals: Option<&Value>,
+    fallback_model: &str,
+) -> String {
+    if let Some(model) = usage_model {
+        return model;
+    }
+    if let Some(model) = extract_model_id(record).and_then(|model| usable_model(&model)) {
+        return model;
+    }
+    if let Some(model) = summary.and_then(model_from_summary) {
+        return model;
+    }
+    if let Some(model) = signals.and_then(model_from_signals) {
+        return model;
+    }
+    usable_model(fallback_model).unwrap_or_else(|| UNKNOWN_MODEL.to_string())
+}
+
+fn prompt_id_from_update(update: Option<&Value>) -> Option<String> {
+    let value = update?.get("prompt_id")?;
+    if let Some(id) = value.as_str().and_then(non_empty_model) {
+        return Some(id);
+    }
+    value
+        .as_i64()
+        .map(|id| id.to_string())
+        .or_else(|| value.as_u64().map(|id| id.to_string()))
+}
+
+fn is_turn_completed(value: &Value) -> bool {
+    get_path(value, &["params", "update", "sessionUpdate"]).and_then(Value::as_str)
+        == Some("turn_completed")
+}
+
+fn model_from_summary(value: &Value) -> Option<String> {
+    string_at(value, &["current_model_id"]).or_else(|| string_at(value, &["model_id"]))
+}
+
 fn read_json_sidecar(path: &Path, path_hash: &str, issues: &mut ParseIssues) -> Option<Value> {
     let metadata = std::fs::metadata(path).ok()?;
     if metadata.len() > DEFAULT_MAX_JSONL_RECORD_BYTES as u64 {
@@ -653,7 +903,7 @@ fn model_from_signals(value: &Value) -> Option<String> {
             .and_then(Value::as_array)
             .and_then(|models| models.first())
             .and_then(Value::as_str)
-            .and_then(non_empty_model)
+            .and_then(usable_model)
     })
 }
 
@@ -734,7 +984,7 @@ fn non_negative_i64(value: Option<&Value>) -> i64 {
 fn string_at(value: &Value, path: &[&str]) -> Option<String> {
     get_path(value, path)
         .and_then(Value::as_str)
-        .and_then(non_empty_model)
+        .and_then(usable_model)
 }
 
 fn get_path<'a>(value: &'a Value, path: &[&str]) -> Option<&'a Value> {
@@ -747,11 +997,15 @@ fn non_empty_model(value: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_string())
 }
 
+fn usable_model(value: &str) -> Option<String> {
+    non_empty_model(value).filter(|model| model != "custom")
+}
+
 fn build_event(
     event_key: String,
     model: String,
     timestamp_ms: i64,
-    total_tokens: i64,
+    tokens: UsageTokens,
     session: &SessionInfo,
     project: Option<&ProjectInfo>,
 ) -> Option<UsageEvent> {
@@ -766,10 +1020,7 @@ fn build_event(
         model: non_empty_model(&model).unwrap_or_else(|| UNKNOWN_MODEL.to_string()),
         event_at,
         hour_start,
-        tokens: UsageTokens {
-            total_tokens,
-            ..UsageTokens::default()
-        },
+        tokens,
         project: project.cloned(),
         session: Some(session.clone()),
     })
@@ -1088,5 +1339,222 @@ mod tests {
         assert!(read_json_sidecar(&path, "hash", &mut issues).is_none());
         assert_eq!(issues.malformed_lines, 1);
         assert_eq!(issues.oversized_lines, 0);
+    }
+
+    fn turn_usage_line(prompt_id: &str, timestamp_ms: i64, usage: &str) -> String {
+        let usage: serde_json::Value = serde_json::from_str(usage).expect("usage json");
+        let mut line = serde_json::json!({
+            "params": {
+                "update": {
+                    "sessionUpdate": "turn_completed",
+                    "prompt_id": prompt_id,
+                    "usage": usage
+                },
+                "_meta": { "agentTimestampMs": timestamp_ms }
+            }
+        })
+        .to_string();
+        line.push('\n');
+        line
+    }
+
+    #[test]
+    fn maps_turn_usage_channels() {
+        let parsed = parse_turn_usage_object(&serde_json::json!({
+            "inputTokens": 1000,
+            "cachedReadTokens": 400,
+            "cacheCreationTokens": 0,
+            "outputTokens": 50,
+            "reasoningTokens": 20,
+            "totalTokens": 1050,
+            "modelUsage": { "grok-4.6-build": {} }
+        }))
+        .expect("usage");
+        assert_eq!(parsed.tokens.input_tokens, 600);
+        assert_eq!(parsed.tokens.cache_read_tokens, 400);
+        assert_eq!(parsed.tokens.cache_creation_tokens, 0);
+        assert_eq!(parsed.tokens.output_tokens, 50);
+        assert_eq!(parsed.tokens.reasoning_output_tokens, 20);
+        assert_eq!(parsed.tokens.total_tokens, 1050);
+        assert_eq!(parsed.model.as_deref(), Some("grok-4.6-build"));
+    }
+
+    #[test]
+    fn clamps_input_when_cache_exceeds_input() {
+        let parsed = parse_turn_usage_object(&serde_json::json!({
+            "inputTokens": 10,
+            "cachedReadTokens": 40,
+            "cacheCreationTokens": 5,
+            "outputTokens": 2,
+            "reasoningTokens": 1,
+            "totalTokens": 12
+        }))
+        .expect("usage");
+        assert_eq!(parsed.tokens.input_tokens, 0);
+        assert_eq!(parsed.tokens.cache_read_tokens, 40);
+        assert_eq!(parsed.tokens.cache_creation_tokens, 5);
+        assert_eq!(parsed.tokens.output_tokens, 2);
+        assert_eq!(parsed.tokens.reasoning_output_tokens, 1);
+        assert_eq!(parsed.tokens.total_tokens, 12);
+        assert!(parsed.input_below_cache);
+    }
+
+    #[test]
+    fn missing_total_tokens_falls_back_to_input_plus_output() {
+        let parsed = parse_turn_usage_object(&serde_json::json!({
+            "inputTokens": 100,
+            "cachedReadTokens": 40,
+            "outputTokens": 20
+        }))
+        .expect("usage");
+        assert_eq!(parsed.tokens.input_tokens, 60);
+        assert_eq!(parsed.tokens.cache_read_tokens, 40);
+        assert_eq!(parsed.tokens.output_tokens, 20);
+        assert_eq!(parsed.tokens.total_tokens, 120);
+    }
+
+    #[test]
+    fn cost_usd_ticks_does_not_change_token_channels() {
+        let parsed = parse_turn_usage_object(&serde_json::json!({
+            "inputTokens": 10,
+            "outputTokens": 2,
+            "totalTokens": 12,
+            "costUsdTicks": 2_657_920_000i64,
+            "modelUsage": { "grok-4.6-build": {} }
+        }))
+        .expect("usage");
+        assert_eq!(parsed.tokens.input_tokens, 10);
+        assert_eq!(parsed.tokens.output_tokens, 2);
+        assert_eq!(parsed.tokens.total_tokens, 12);
+        assert_eq!(parsed.model.as_deref(), Some("grok-4.6-build"));
+    }
+
+    #[tokio::test]
+    async fn sums_non_monotonic_turn_usage_records() {
+        let usage_a = r#"{"inputTokens":100,"outputTokens":10,"totalTokens":1000,"cachedReadTokens":0,"cacheCreationTokens":0,"reasoningTokens":0,"modelUsage":{"grok-4.6-build":{}}}"#;
+        let usage_b = r#"{"inputTokens":20,"outputTokens":5,"totalTokens":100,"cachedReadTokens":0,"cacheCreationTokens":0,"reasoningTokens":0,"modelUsage":{"grok-4.6-build":{}}}"#;
+        let (_temp, session_dir) = write_session(
+            &format!(
+                "{}{}",
+                turn_usage_line("p1", 1_700_000_001_000, usage_a),
+                turn_usage_line("p2", 1_700_000_002_000, usage_b),
+            ),
+            Some("{\"current_model_id\":\"grok-4.6\",\"updated_at\":\"2023-11-14T22:13:20Z\"}"),
+            Some("{\"primaryModelId\":\"grok-4.6\",\"contextTokensUsed\":500}"),
+        );
+        let output = parse_session(session_dir);
+        assert_eq!(output.events.len(), 2);
+        assert_eq!(output.events[0].tokens.total_tokens, 1000);
+        assert_eq!(output.events[1].tokens.total_tokens, 100);
+        assert_eq!(
+            output
+                .events
+                .iter()
+                .map(|event| event.tokens.total_tokens)
+                .sum::<i64>(),
+            1100
+        );
+        assert_eq!(output.events[0].event_key, "grok:session-1:usage:p1");
+        assert_eq!(output.events[1].event_key, "grok:session-1:usage:p2");
+        assert!(
+            output
+                .events
+                .iter()
+                .all(|event| event.event_key != "grok:session-1:signals")
+        );
+    }
+
+    #[tokio::test]
+    async fn turn_usage_suppresses_signals_reconciliation() {
+        let usage = r#"{"inputTokens":1000,"cachedReadTokens":400,"cacheCreationTokens":0,"outputTokens":50,"reasoningTokens":20,"totalTokens":1050,"modelUsage":{"grok-4.6-build":{}}}"#;
+        let (_temp, session_dir) = write_session(
+            &turn_usage_line("p1", 1_700_000_001_000, usage),
+            Some("{\"current_model_id\":\"custom\",\"updated_at\":\"2023-11-14T22:13:20Z\"}"),
+            Some("{\"primaryModelId\":\"grok-4.6\",\"contextTokensUsed\":50000}"),
+        );
+        let output = parse_session(session_dir);
+        assert_eq!(output.events.len(), 1);
+        assert_eq!(output.events[0].tokens.total_tokens, 1050);
+        assert_eq!(output.events[0].tokens.input_tokens, 600);
+        assert_eq!(output.events[0].model, "grok-4.6-build");
+        assert_eq!(output.events[0].provider_label, "");
+        assert!(
+            output
+                .events
+                .iter()
+                .all(|event| !event.event_key.ends_with(":signals"))
+        );
+    }
+
+    #[tokio::test]
+    async fn custom_summary_does_not_override_model_usage() {
+        let usage = r#"{"inputTokens":10,"outputTokens":2,"totalTokens":12,"modelUsage":{"grok-4.6-build":{}}}"#;
+        let (_temp, session_dir) = write_session(
+            &turn_usage_line("p1", 1_700_000_001_000, usage),
+            Some("{\"current_model_id\":\"custom\",\"model_id\":\"custom\"}"),
+            Some("{\"primaryModelId\":\"custom\"}"),
+        );
+        let output = parse_session(session_dir);
+        assert_eq!(output.events.len(), 1);
+        assert_eq!(output.events[0].model, "grok-4.6-build");
+    }
+
+    #[tokio::test]
+    async fn incomplete_usage_still_emits_event() {
+        let usage = r#"{"inputTokens":10,"outputTokens":2,"totalTokens":12,"usageIsIncomplete":true,"modelUsage":{"grok-4.6-build":{}}}"#;
+        let (_temp, session_dir) =
+            write_session(&turn_usage_line("p1", 1_700_000_001_000, usage), None, None);
+        let output = parse_session(session_dir);
+        assert_eq!(output.events.len(), 1);
+        assert_eq!(output.events[0].tokens.total_tokens, 12);
+        assert_eq!(output.parse_issues.accounting_anomaly_lines, 1);
+    }
+
+    #[tokio::test]
+    async fn all_zero_usage_is_skipped() {
+        let usage = r#"{"inputTokens":0,"outputTokens":0,"totalTokens":0,"cachedReadTokens":0,"cacheCreationTokens":0,"reasoningTokens":0}"#;
+        let (_temp, session_dir) = write_session(
+            &format!(
+                "{}{}",
+                turn_usage_line("p0", 1_700_000_001_000, usage),
+                "{\"params\":{\"update\":{\"sessionUpdate\":\"user_message_chunk\",\"_meta\":{\"modelId\":\"grok-4.5\"}},\"_meta\":{\"agentTimestampMs\":1700000001000}}}\n{\"params\":{\"update\":{\"sessionUpdate\":\"agent_message_chunk\"},\"_meta\":{\"totalTokens\":300,\"agentTimestampMs\":1700000003000}}}\n"
+            ),
+            None,
+            None,
+        );
+        let output = parse_session(session_dir);
+        assert_eq!(output.events.len(), 1);
+        assert_eq!(output.events[0].tokens.total_tokens, 300);
+        assert_eq!(output.events[0].tokens.input_tokens, 0);
+        assert!(output.events[0].event_key.starts_with("grok:session-1:"));
+        assert!(!output.events[0].event_key.contains(":usage:"));
+    }
+
+    #[tokio::test]
+    async fn duplicate_prompt_ids_keep_unique_event_keys() {
+        let usage = r#"{"inputTokens":10,"outputTokens":2,"totalTokens":12,"modelUsage":{"grok-4.6-build":{}}}"#;
+        let (_temp, session_dir) = write_session(
+            &format!(
+                "{}{}",
+                turn_usage_line("p1", 1_700_000_001_000, usage),
+                turn_usage_line("p1", 1_700_000_002_000, usage),
+            ),
+            None,
+            None,
+        );
+        let output = parse_session(session_dir);
+        assert_eq!(output.events.len(), 2);
+        assert_eq!(output.events[0].event_key, "grok:session-1:usage:p1");
+        assert_eq!(output.events[1].event_key, "grok:session-1:usage:p1-:1");
+    }
+
+    #[tokio::test]
+    async fn turn_completed_without_usage_is_ignored() {
+        let (_temp, session_dir) = write_session(
+            "{\"params\":{\"update\":{\"sessionUpdate\":\"turn_completed\"},\"_meta\":{\"agentTimestampMs\":1700000001000}}}\n",
+            None,
+            None,
+        );
+        assert!(parse_session(session_dir).events.is_empty());
     }
 }

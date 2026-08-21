@@ -13,8 +13,9 @@ is the compatibility baseline when reference implementations disagree.
 - Persisted contract: `usage_event.total_tokens` ->
   `usage_bucket_30m.total_tokens` -> query/UI `total_tokens`.
 - Version metadata:
-  `meta('token_accounting_version.codex') = '3'`; Claude, OpenCode, Antigravity,
-  Kimi Code, Pi, Grok, ZCode, and DeepSeek Harness remain `2`.
+  `meta('token_accounting_version.codex') = '3'`;
+  `meta('token_accounting_version.grok') = '3'`; Claude, OpenCode, Antigravity,
+  Kimi Code, Pi, ZCode, and DeepSeek Harness remain `2`.
   `expected_token_accounting_version(SourceKind) -> u32` owns this source-aware
   contract.
 - Legacy repair: `llmusage sync --rebuild --source <source>`.
@@ -63,11 +64,16 @@ is the compatibility baseline when reference implementations disagree.
   `totalTokens` is authoritative; otherwise the four visible channels form the
   fallback total. `reasoningTokens` is persisted separately and never added to
   output or total by default.
-- Grok maps cumulative update deltas plus the remaining signals reconciliation
-  into authoritative `total_tokens`. Input, cache read, cache creation, output,
-  and reasoning stay zero because the local artifacts expose no trustworthy
-  split. Grok has no pricing row: a total-only event with zero chargeable
-  subchannels must remain `unpriced`, never falsely matched at zero cost.
+- Grok maps each `turn_completed` `params.update.usage` object to one event.
+  `totalTokens` is authoritative; if it is missing, fall back to
+  `inputTokens + outputTokens`. `inputTokens` is cache-inclusive: subtract
+  `cachedReadTokens` and `cacheCreationTokens` with saturating clamp to 0.
+  Keep `outputTokens` verbatim (reasoning is already inside it). Persist
+  `reasoningTokens` as the diagnostic channel and do not add it to total.
+  If a session emits any usage event, do not add `_meta.totalTokens` deltas or
+  `signals.json` reconciliation. Sessions with no usage keep the total-only
+  fallback (subchannels stay zero). Grok has no pricing row: events remain
+  `unpriced`. Do not read or convert `costUsdTicks`.
 - ZCode `input_tokens` is cache-inclusive. Subtract cache read and cache
   creation from input. Keep `output_tokens` verbatim (reasoning is already
   inside it). Persist `reasoning_tokens` as the diagnostic channel. Trust
@@ -123,8 +129,9 @@ is the compatibility baseline when reference implementations disagree.
 | Rebuild parser/store commit fails | Leave marker absent; do not claim parity |
 | Parserless source | Do not invent a marker or token normalization |
 | Persisted Codex marker is `2` | Treat only Codex as legacy and automatically repair it during safe unbounded normal sync |
+| Persisted Grok marker is `2` | Treat Grok as legacy and automatically repair it during safe unbounded normal sync |
 | Persisted Claude/OpenCode marker is `2` | Treat it as current |
-| Persisted Kimi Code/Pi/Grok/ZCode/Antigravity/DeepSeek Harness marker is `2` | Treat it as current |
+| Persisted Kimi Code/Pi/ZCode/Antigravity/DeepSeek Harness marker is `2` | Treat it as current |
 | Replay marker exists and first two token snapshots share a second | Skip that second's prefix while retaining the latest cumulative baseline |
 | Two ordinary Codex requests share a second without a replay marker | Keep both events |
 | A malformed line contains `token_count` before valid replay snapshots | Ignore the malformed line and continue detection |
@@ -163,6 +170,12 @@ Never enable `--allow-lossy-rebuild` automatically.
 - Base: an already-current or empty parser source makes serve repair a no-op.
 - Bad: a full rebuild calls `reset_usage_data`, deleting parserless history
   that no registered parser can reconstruct.
+- Good: a Grok `turn_completed.usage` row with input `1000`, cache read `400`,
+  output `50`, reasoning `20`, total `1050` persists as input `600`, cache
+  read `400`, output `50`, reasoning `20`, total `1050`.
+- Bad: treating `params._meta.totalTokens` or `signals.contextTokensUsed` as
+  request usage when the session also has `turn_completed.usage`. Those fields
+  are context-window occupancy and must not be added to the session total.
 
 ## 6. Tests Required
 
@@ -173,8 +186,9 @@ Never enable `--allow-lossy-rebuild` automatically.
 - Codex parser tests cover both replay markers, cumulative baseline retention,
   pending-tool clearing, malformed-line tolerance, and ordinary same-second
   events that must remain.
-- Accounting marker tests assert Codex `3`, Claude/OpenCode `2`, old Codex `2`
-  automatic repair to `3`, and successful explicit guarded rebuild.
+- Accounting marker tests assert Codex `3`, Grok `3`, Claude/OpenCode `2`, old
+  Codex `2` automatic repair to `3`, old Grok `2` automatic repair to `3`, and
+  successful explicit guarded rebuild.
 - `tests/token_accounting_parity.rs` covers all three sources, copied/streaming
   duplicates, event/bucket/query equality, cost tolerance `1e-9`, marker
   advancement, automatic repair lifecycle, mixed current/legacy behavior,
@@ -247,3 +261,25 @@ for source in parser_sources {
 
 The correct form cannot delete a parserless source that the subsequent parser
 fan-out is unable to reconstruct.
+
+For Grok Build request usage:
+
+### Wrong
+
+```rust
+let total = meta_total_tokens.max(signals.context_tokens_used);
+```
+
+### Correct
+
+```rust
+if session_has_turn_completed_usage {
+    emit_one_event_per_usage_object();
+} else {
+    fallback_total_only_meta_and_signals();
+}
+```
+
+`params.update.usage` on `turn_completed` is request usage. `_meta.totalTokens`
+and `signals.contextTokensUsed` are context occupancy. Do not mix the two
+paths in one session.

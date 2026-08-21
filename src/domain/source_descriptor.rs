@@ -122,7 +122,7 @@ pub const SOURCE_DESCRIPTORS: &[SourceDescriptor] = &[
             parser: true,
             passive_probe: true,
         },
-        quality: UsageQuality::TotalOnly,
+        quality: UsageQuality::Precise,
         privacy: PrivacyClass::LocalArtifacts,
     },
     SourceDescriptor {

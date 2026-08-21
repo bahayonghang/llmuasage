@@ -33,7 +33,7 @@ Kimi Code reads `~/.kimi-code/sessions/**/wire.jsonl` (or `KIMI_CODE_HOME/sessio
 
 Pi combines `~/.pi/agent/sessions` (or `PI_AGENT_DIR`) and `~/.omp/agent/sessions` under one `pi` source. Assistant usage rows preserve input, output, cache read/write, authoritative total, and diagnostic reasoning tokens. The local admission evidence includes real Oh My Pi samples and sanitized Pi-compatible fixtures; this machine had no Pi-only sample, so Pi-specific format changes remain an explicit evidence gap.
 
-Grok Build reads only direct sidecars under `~/.grok/sessions/*/*/` (or `GROK_HOME/sessions`). It derives turn deltas from cumulative `updates.jsonl` counters and reconciles the session total from `signals.json`. Grok is `total_only`: subchannels stay zero, the total is authoritative, and cost remains `unpriced`. Any sidecar change replays the full session; a tracked missing sidecar preserves prior rows and blocks lossy rebuild until the file returns.
+Grok Build reads only direct sidecars under `~/.grok/sessions/*/*/` (or `GROK_HOME/sessions`). The primary path maps each `turn_completed` `params.update.usage` record to one precise event. Sessions without usage keep the older `_meta.totalTokens` plus `signals.json` total-only fallback. Cost remains `unpriced`. Any sidecar change replays the full session; a tracked missing sidecar preserves prior rows and blocks lossy rebuild until the file returns.
 
 Other platforms can appear in `llmusage source-status` or the `dash` source picker as monitor-only candidates. They stay parserless until sanitized fixtures, token semantics, sync-twice tests, cursor/fingerprint regression tests, and privacy review exist.
 

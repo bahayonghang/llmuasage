@@ -49,7 +49,7 @@ features:
 ## Current product surface
 
 - Version `1.3.0`.
-- Sources: passive Codex, Claude Code, OpenCode, Kimi Code (`kimi_code`), Pi / Oh My Pi (`pi`), total-only Grok Build (`grok`), ZCode (`zcode`), Antigravity CLI (`antigravity`), and DeepSeek Harness (`deepseek_harness`).
+- Sources: passive Codex, Claude Code, OpenCode, Kimi Code (`kimi_code`), Pi / Oh My Pi (`pi`), Grok Build (`grok`), ZCode (`zcode`), Antigravity CLI (`antigravity`), and DeepSeek Harness (`deepseek_harness`).
 - Report commands: `daily`, `monthly`, `session`, `blocks`, `statusline`.
 - Local UI commands: `dash`, `serve`, `export html`.
 - Safety commands: `status`, `diagnostics`, `doctor`, `uninstall`.
