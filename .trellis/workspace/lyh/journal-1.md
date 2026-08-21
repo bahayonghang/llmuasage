@@ -1759,3 +1759,42 @@ Usage 页改为只读拉取 Grok/Kimi/Claude/Codex 订阅额度，Source Sync �
 ### Status
 
 [OK] **Completed**
+
+
+## Session 59: 修正 Grok Build 用量少计
+
+**Date**: 2026-08-21
+**Task**: 修正 Grok Build 用量少计
+**Branch**: `dev`
+
+### Summary
+
+Grok 解析器改为读取 turn_completed.usage，趋势来源表展示完整占比。
+
+### Main Changes
+
+- Grok 主路径按 turn_completed.usage 逐条记账，无 usage 会话保留 total_only 回退。
+- token-accounting 版本 grok 升到 3，便于无损重放存量行。
+- 趋势来源表最多 4 行，超出归入其他。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `660663f` | (see git log) |
+| `18337f2` | (see git log) |
+
+### Testing
+
+- [OK] cargo test --lib parsers::grok
+- [OK] cargo test --test sync_regression grok
+- [OK] cargo test --lib -- trend
+- [OK] cargo fmt --check; clippy -D warnings
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 重启 serve 或 unbounded sync，让默认库 grok 从 marker 2 重放到 3。
