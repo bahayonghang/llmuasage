@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "Grok 通道、权威 total、unpriced、legacy rebuild 版本契约"}
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "grok 两级发现、会话原子重放、parser stats 边界"}
+{"file": ".trellis/spec/llmusage/backend/write-fencing-contracts.md", "reason": "会话 reset_path_hashes 与 sync writer 写入入口"}
+{"file": ".trellis/spec/llmusage/backend/pricing-catalog-contracts.md", "reason": "未知模型保持 unpriced；禁止用 costUsdTicks 猜费率"}
+{"file": "docs/agents/passive-parser-onboarding.md", "reason": "被动源 token 语义变更仍需证据、fixture、隐私边界"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "parser → sqlite → /api/sources → trends.js 跨层口径必须一致"}
+{"file": ".trellis/tasks/08-21-grok-turn-usage/research/grok-turn-usage-evidence.md", "reason": "本机 turn_completed.usage 语义、54 倍少计、来源表 slice(0,2)"}
+{"file": ".trellis/tasks/archive/2026-07/07-27-grok-build-passive-source/prd.md", "reason": "原 total_only 接入范围；本任务是口径升级不是新源"}

@@ -1,0 +1,28 @@
+{
+  "id": "grok-turn-usage",
+  "name": "grok-turn-usage",
+  "title": "修正 Grok Build 用量少计并补全趋势来源占比",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "同步",
+  "package": null,
+  "priority": "P2",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-08-21",
+  "completedAt": "2026-08-21",
+  "branch": null,
+  "base_branch": "dev",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "description": "Grok parser currently records context occupancy instead of turn_completed.usage; 7d grok is undercounted ~54x. Also trend source table hard-slices to 2 rows."
+  }
+}
