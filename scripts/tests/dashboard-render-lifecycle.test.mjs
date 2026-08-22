@@ -270,6 +270,14 @@ test('fingerprint strips volatile per-query fields', async (t) => {
 test('panel fingerprints isolate subsets, locale, and extra state', () => {
   const rawA = minimalRaw();
   const rawB = { ...minimalRaw(), trends: [] };
+  const rawStatus = {
+    ...minimalRaw(),
+    sync_command_center: {
+      ...rawA.sync_command_center,
+      tone: 'warn',
+      headline_key: 'syncCenter.headline.failed',
+    },
+  };
 
   // activity 面板不消费 trends：trends 变化不影响 activity 指纹（section 独立性）
   assert.equal(
@@ -279,6 +287,10 @@ test('panel fingerprints isolate subsets, locale, and extra state', () => {
   assert.notEqual(
     fingerprint.panelFingerprint('trends', rawA, { locale: 'zh' }),
     fingerprint.panelFingerprint('trends', rawB, { locale: 'zh' }),
+  );
+  assert.notEqual(
+    fingerprint.panelFingerprint('hero', rawA, { locale: 'zh' }),
+    fingerprint.panelFingerprint('hero', rawStatus, { locale: 'zh' }),
   );
 
   // locale 是指纹 key 的一部分：locale 变化指纹自然失效（locale 切换重渲文案）

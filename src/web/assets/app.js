@@ -1221,8 +1221,6 @@ async function refreshDashboardInPlace(state) {
     await reloadDashboardAfterDataChange(state, { silent: true });
   } catch (error) {
     logger.error('自动刷新失败', error);
-    const endpointSync = document.getElementById('endpoint-sync');
-    if (endpointSync) endpointSync.textContent = error?.message || getShellCopy('shell.refresh.failed');
   }
 }
 
@@ -1662,27 +1660,6 @@ async function getJson(path) {
   return response.json();
 }
 
-function jobStatusLabel(snapshot) {
-  if (!snapshot) return getShellCopy('shell.sync.idle');
-  const status = snapshot.status || 'running';
-  if (status === 'running') {
-    return getShellCopy('shell.sync.running');
-  }
-  if (status === 'cancelling') {
-    return getShellCopy('shell.sync.cancelling');
-  }
-  if (status === 'completed') {
-    return getShellCopy('shell.sync.completed');
-  }
-  if (status === 'cancelled') {
-    return getShellCopy('shell.sync.cancelled');
-  }
-  if (status === 'failed') {
-    return getShellCopy('shell.sync.failed');
-  }
-  return status;
-}
-
 // 幂等写保护：自动刷新 tick / 轮询都会调这里，内容未变时不触碰 DOM。
 let lastSyncButtonHtml = null;
 
@@ -1705,14 +1682,6 @@ function updateSyncButton(state, snapshot = state.activeJobSnapshot) {
   if (lastSyncButtonHtml !== buttonHtml) {
     lastSyncButtonHtml = buttonHtml;
     btn.innerHTML = buttonHtml;
-  }
-
-  const endpointSync = document.getElementById('endpoint-sync');
-  if (endpointSync && snapshot) {
-    const endpointText = `${jobStatusLabel(snapshot)} · ${snapshot.summary || snapshot.job_id}`;
-    if (endpointSync.textContent !== endpointText) {
-      endpointSync.textContent = endpointText;
-    }
   }
 }
 
@@ -1779,8 +1748,6 @@ function setupSyncJob(state) {
       }
     } catch (error) {
       logger.error('同步任务失败', error);
-      const endpointSync = document.getElementById('endpoint-sync');
-      if (endpointSync) endpointSync.textContent = error?.message || getShellCopy('shell.sync.failed');
     } finally {
       if (!['failed', 'cancelled'].includes(state.activeJobSnapshot?.status)) {
         state.activeJobId = null;

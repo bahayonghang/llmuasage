@@ -1,4 +1,4 @@
-import { UI_COPY } from '../copy.js';
+import { UI_COPY, getShellCopy, translateStatusLabel } from '../copy.js';
 import { escapeHtml, formatDateTime, formatNumber } from '../data.js';
 
 const logger = window.console;
@@ -71,10 +71,23 @@ export function renderHero(context) {
     .join('');
 
   // 1.2 填充 status-panel
-  const { health } = context;
-  const panelTone = ledgerSummary.failure_count > 0 ? 'warn' : 'good';
-  const statusLabel = ledgerSummary.failure_count > 0 ? heroCopy.statusWarn : heroCopy.statusOk;
-  const statusPanelSummary = `${heroCopy.statusTitle} · ${statusLabel}`;
+  const syncCenter = context.syncCommandCenter;
+  const panelTone = ['good', 'warn'].includes(syncCenter?.tone) ? syncCenter.tone : 'neutral';
+  const statusLabel = panelTone === 'good'
+    ? heroCopy.statusOk
+    : panelTone === 'warn'
+      ? heroCopy.statusWarn
+      : heroCopy.statusUnknown;
+  const statusHeadline = getShellCopy(syncCenter?.headline_key || 'syncCenter.headline.empty');
+  const statusPanelSummary = `${heroCopy.statusTitle} · ${statusHeadline}`;
+  const sourcesReady = Number(syncCenter?.metrics?.sources_ready || 0);
+  const sourcesTotal = Number(syncCenter?.metrics?.sources_total || 0);
+  const sourcesReadyLabel = sourcesTotal > 0
+    ? `${formatNumber(sourcesReady)} / ${formatNumber(sourcesTotal)}`
+    : '--';
+  const latestSyncLabel = syncCenter?.last_run?.status
+    ? translateStatusLabel(syncCenter.last_run.status)
+    : '--';
   const statusPanelOpen = !window.matchMedia?.(STATUS_PANEL_MOBILE_QUERY).matches;
 
   document.getElementById('status-panel').innerHTML = `
@@ -89,12 +102,12 @@ export function renderHero(context) {
       </div>
       <div class="status-grid">
         <div class="status-cell">
-          <div class="status-cell-label">${escapeHtml(heroCopy.cell.cursors)}</div>
-          <div class="status-cell-value">${formatNumber(health.cursor_count ?? health.cursors?.length ?? 0)}</div>
+          <div class="status-cell-label">${escapeHtml(heroCopy.cell.sourcesReady)}</div>
+          <div class="status-cell-value">${escapeHtml(sourcesReadyLabel)}</div>
         </div>
         <div class="status-cell">
-          <div class="status-cell-label">${escapeHtml(heroCopy.cell.failures)}</div>
-          <div class="status-cell-value">${ledgerSummary.failure_count}</div>
+          <div class="status-cell-label">${escapeHtml(heroCopy.cell.latestSync)}</div>
+          <div class="status-cell-value small">${escapeHtml(latestSyncLabel)}</div>
         </div>
       </div>
     </details>
@@ -103,7 +116,7 @@ export function renderHero(context) {
 
   const endpointHost = document.getElementById('endpoint-host');
   if (endpointHost) {
-    endpointHost.textContent = window.location.host;
+    endpointHost.textContent = window.location.host || getShellCopy('shell.endpoint.localFile');
   }
 
   const endpointSync = document.getElementById('endpoint-sync');

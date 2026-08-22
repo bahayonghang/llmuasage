@@ -3181,6 +3181,42 @@ mod tests {
     }
 
     #[test]
+    fn hero_data_status_uses_sync_command_center_and_keeps_endpoint_compact() {
+        let html = live_index_html();
+        let snapshot_html = snapshot_index_html();
+        let hero_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "render/hero.js")
+            .expect("hero.js asset")
+            .body;
+        let render_key_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "data/render-key.js")
+            .expect("render key asset")
+            .body;
+        let app_js = asset_manifest()
+            .iter()
+            .find(|asset| asset.path == "app.js")
+            .expect("app.js asset")
+            .body;
+
+        assert!(hero_js.contains("const syncCenter = context.syncCommandCenter"));
+        assert!(hero_js.contains("['good', 'warn'].includes(syncCenter?.tone)"));
+        assert!(!hero_js.contains("ledgerSummary.failure_count > 0"));
+        assert!(hero_js.contains("heroCopy.cell.sourcesReady"));
+        assert!(hero_js.contains("heroCopy.cell.latestSync"));
+        assert!(hero_js.contains("getShellCopy('shell.endpoint.localFile')"));
+        assert!(render_key_js.contains("'diagnostics', 'sync_command_center', 'models'"));
+        assert!(!app_js.contains("snapshot.summary || snapshot.job_id"));
+        assert!(!app_js.contains("endpointSync.textContent = error?.message"));
+        assert!(html.contains("data-i18n=\"shell.endpoint.localService\""));
+        assert!(html.contains("data-i18n=\"shell.endpoint.online\""));
+        assert!(html.contains("class=\"endpoint-meta\" aria-live=\"polite\""));
+        assert!(snapshot_html.contains("data-i18n=\"shell.endpoint.snapshot\""));
+        assert!(snapshot_html.contains("data-i18n=\"shell.endpoint.available\""));
+    }
+
+    #[test]
     fn overview_wide_layout_avoids_orphan_blank_columns() {
         let html = live_index_html();
         let layout_css = asset_manifest()

@@ -26,7 +26,7 @@ const VOLATILE_FIELD_PATHS = Object.freeze([
  */
 const PANEL_DATA_KEYS = Object.freeze({
   syncCommandCenter: Object.freeze(['sync_command_center']),
-  hero: Object.freeze(['overview', 'health', 'diagnostics', 'models', 'sources', 'costs']),
+  hero: Object.freeze(['overview', 'health', 'diagnostics', 'sync_command_center', 'models', 'sources', 'costs']),
   trends: Object.freeze(['trends', 'sources', 'overview']),
   models: Object.freeze(['models']),
   sources: Object.freeze(['sources', 'overview']),

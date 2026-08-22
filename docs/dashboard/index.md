@@ -59,7 +59,7 @@ The first screen is task-oriented:
 6. Use Usage analysis for ad hoc multidimensional questions about local data.
 7. Open Event Logs for cursor-paginated event detail, or use sync/CSV export and diagnostics when data looks stale.
 
-On screens up to `720px` wide, Data status becomes a compact disclosure in the first screen. Expand it to inspect sync cursors and recent failures; the full card remains visible on wider screens. Integration installation health is no longer part of the dashboard.
+On screens up to `720px` wide, Data status becomes a compact disclosure in the first screen. Its headline follows the current worker lock and latest usage-import result, while recovered `serve` interruptions and other historical command failures remain available in runtime diagnostics without turning the current data status into a warning. The full card remains visible on wider screens. Integration installation health is no longer part of the dashboard.
 
 ## Filters
 

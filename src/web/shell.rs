@@ -25,6 +25,22 @@ fn html_shell(mode: &str) -> String {
     } else {
         ("仅本地", "shell.tag.local")
     };
+    let (endpoint_label, endpoint_label_key, endpoint_state, endpoint_state_key) =
+        if mode == "snapshot" {
+            (
+                "离线快照",
+                "shell.endpoint.snapshot",
+                "可浏览",
+                "shell.endpoint.available",
+            )
+        } else {
+            (
+                "本地服务",
+                "shell.endpoint.localService",
+                "在线",
+                "shell.endpoint.online",
+            )
+        };
     let app_version = env!("CARGO_PKG_VERSION");
     let supported_sources = crate::registry::registered_source_descriptors()
         .iter()
@@ -141,11 +157,18 @@ fn html_shell(mode: &str) -> String {
         </button>
       </div>
       <div class="endpoint">
+        <div class="endpoint-head">
+          <span class="endpoint-label" data-i18n="{endpoint_label_key}">{endpoint_label}</span>
+          <span class="endpoint-state">
+            <span class="pulse"></span>
+            <span data-i18n="{endpoint_state_key}">{endpoint_state}</span>
+          </span>
+        </div>
         <div class="endpoint-row">
-          <span class="pulse"></span>
+          <svg aria-hidden="true" class="i endpoint-icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01M11 7h6M11 17h6"/></svg>
           <span class="endpoint-host" id="endpoint-host">127.0.0.1:37421</span>
         </div>
-        <div class="endpoint-meta">
+        <div class="endpoint-meta" aria-live="polite">
           <span data-i18n="shell.endpoint.lastSync">最近同步</span>
           <span class="mono" id="endpoint-sync">--</span>
         </div>

@@ -20,8 +20,8 @@ const UI_COPY_ZH = Object.freeze({
     statusTitle: '数据状态',
     statusStable: '正常',
     statusOk: '正常',
-    statusWarn: '存在失败',
-    statusUnknown: '未知',
+    statusWarn: '需要关注',
+    statusUnknown: '等待状态',
     rows: Object.freeze({
       generated_at: '生成时间',
       last_sync_at: '最近同步',
@@ -33,6 +33,8 @@ const UI_COPY_ZH = Object.freeze({
     cell: Object.freeze({
       cursors: '同步游标',
       failures: '最近失败',
+      sourcesReady: '就绪来源',
+      latestSync: '最新同步',
     }),
     metrics: Object.freeze({
       total: Object.freeze({
@@ -311,8 +313,8 @@ const UI_COPY_EN = Object.freeze({
     statusTitle: 'Data status',
     statusStable: 'Healthy',
     statusOk: 'Healthy',
-    statusWarn: 'Failures found',
-    statusUnknown: 'Unknown',
+    statusWarn: 'Attention needed',
+    statusUnknown: 'Pending',
     rows: Object.freeze({
       generated_at: 'Generated',
       last_sync_at: 'Last sync',
@@ -324,6 +326,8 @@ const UI_COPY_EN = Object.freeze({
     cell: Object.freeze({
       cursors: 'Sync cursors',
       failures: 'Recent failures',
+      sourcesReady: 'Ready sources',
+      latestSync: 'Latest sync',
     }),
     metrics: Object.freeze({
       total: Object.freeze({
@@ -673,6 +677,11 @@ const SHELL_COPY_ZH = Object.freeze({
   'shell.nav.item.logs': '事件日志',
   'shell.logs.title': '事件日志',
   'shell.logs.sub': '分页查看本地用量事件；展开后可按需读取原始记录。',
+  'shell.endpoint.localService': '本地服务',
+  'shell.endpoint.online': '在线',
+  'shell.endpoint.snapshot': '离线快照',
+  'shell.endpoint.available': '可浏览',
+  'shell.endpoint.localFile': '本地文件',
   'shell.endpoint.lastSync': '最近同步',
   'shell.filters.source': '来源',
   'shell.filters.aria': '看板筛选条件',
@@ -897,6 +906,11 @@ const SHELL_COPY_EN = Object.freeze({
   'shell.nav.item.logs': 'Event logs',
   'shell.logs.title': 'Event logs',
   'shell.logs.sub': 'Browse local usage events page by page, with raw records loaded on demand.',
+  'shell.endpoint.localService': 'Local service',
+  'shell.endpoint.online': 'Online',
+  'shell.endpoint.snapshot': 'Offline snapshot',
+  'shell.endpoint.available': 'Available',
+  'shell.endpoint.localFile': 'Local file',
   'shell.endpoint.lastSync': 'Last sync',
   'shell.filters.source': 'Source',
   'shell.filters.aria': 'Dashboard filters',
