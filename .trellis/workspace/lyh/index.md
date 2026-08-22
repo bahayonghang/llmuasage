@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 59
-- **Last Active**: 2026-08-21
+- **Total Sessions**: 60
+- **Last Active**: 2026-08-22
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1800 | Active |
+| `journal-1.md` | ~1821 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 60 | 2026-08-22 | 优化看板侧栏状态与同步告警 | `e16669e` | `dev` |
 | 59 | 2026-08-21 | 修正 Grok Build 用量少计 | `660663f`, `18337f2` | `dev` |
 | 58 | 2026-08-21 | SSH 远端主机导入 | `e23d62a`, `17b7e3a` | `ssh` |
 | 57 | 2026-08-19 | 完成看板同步反馈与重建风险闭环 | `7136a03` | `dev` |

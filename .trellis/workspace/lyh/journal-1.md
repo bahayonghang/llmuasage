@@ -1798,3 +1798,24 @@ Grok 解析器改为读取 turn_completed.usage，趋势来源表展示完整占
 ### Next Steps
 
 - 重启 serve 或 unbounded sync，让默认库 grok 从 marker 2 重放到 3。
+
+
+## Session 60: 优化看板侧栏状态与同步告警
+
+**Date**: 2026-08-22
+**Task**: 优化看板侧栏状态与同步告警
+**Branch**: `dev`
+
+### Summary
+
+右上角数据状态改用 sync_command_center 权威语义，避免历史 serve 中断误报警；左下角收敛为紧凑的本地服务状态卡，并补齐中英文文档、回归测试与桌面/窄屏浏览器验收。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e16669e` | (see git log) |
+
+### Status
+
+[OK] **Completed**
