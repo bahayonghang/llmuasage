@@ -31,7 +31,7 @@ Usage: llmusage [OPTIONS] [COMMAND]
 | `--locale <LOCALE>` | Lightweight locale selector for titles and number formatting |
 | `--compact` | Use a narrower table layout |
 | `--no-cost` | Hide cost columns and cost fields from report output |
-| `--source codex\|claude\|opencode\|antigravity\|kimi_code\|pi\|grok` | Restrict a top-level report or sync command to one source |
+| `--source codex\|claude\|opencode\|antigravity\|kimi_code\|pi\|omp\|grok` | Restrict a top-level report or sync command to one source |
 | `--host <LABEL>` | Restrict a report to one registered host label |
 | `-A, --by-agent` | Add nested source rows to unified report JSON |
 | `--sections daily\|weekly\|monthly\|session` | Add report periods to one combined output |

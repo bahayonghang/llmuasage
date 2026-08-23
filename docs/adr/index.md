@@ -20,6 +20,8 @@ ADRs are engineering records, not end-user tutorials. Start with [Architecture](
 - [0012 — Antigravity CLI passive parser](./0012-antigravity-cli-passive-parser)
 - [0013 — DeepSeek Harness passive source and zstd dependency](./0013-deepseek-harness-passive-source)
 - [0014 — SSH remote-host import](./0014-ssh-remote-host-import)
+- [0015 — Oh My Pi source split](./0015-omp-source-split)
+- [0016 — Source-reported cost for Pi / Oh My Pi](./0016-source-reported-cost)
 
 ## Companion docs
 

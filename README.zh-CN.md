@@ -4,7 +4,7 @@
 
 > **命名说明：** crate 与二进制文件名为 `llmusage`；GitHub 仓库名为 `llmuasage`（多一个 `a`）。托管文档的链接使用仓库拼写。
 
-本地优先的 AI CLI 用量分析工具。`llmusage` 会被动读取本机 Codex、Claude Code、OpenCode、Kimi Code、Pi / Oh My Pi、Grok Build、ZCode、Antigravity CLI 和 DeepSeek Harness 的本地记录，并写入本地 SQLite；随后提供命令行报表、终端 Dashboard、浏览器 Dashboard 和离线 HTML 导出，默认不上传本地用量。`dash` 的 Usage 页会用本机已有 CLI 凭证读取订阅额度。
+本地优先的 AI CLI 用量分析工具。`llmusage` 会被动读取本机 Codex、Claude Code、OpenCode、Kimi Code、Pi、Oh My Pi、Grok Build、ZCode、Antigravity CLI 和 DeepSeek Harness 的本地记录，并写入本地 SQLite；随后提供命令行报表、终端 Dashboard、浏览器 Dashboard 和离线 HTML 导出，默认不上传本地用量。`dash` 的 Usage 页会用本机已有 CLI 凭证读取订阅额度。
 
 > 当前 crate 版本：`1.3.0`。
 
@@ -72,12 +72,13 @@ llmusage serve
 | OpenCode | OpenCode 本地 SQLite 用量库 |
 | Antigravity | `~/.gemini/antigravity-cli/conversations/*.db`（或 `GEMINI_CLI_HOME`）；hook 时代的历史行继续可查，存在未归属历史时拒绝 rebuild |
 | Kimi Code | `~/.kimi-code/sessions/**/wire.jsonl`（或 `KIMI_CODE_HOME`），只读取 turn-scoped `usage.record` |
-| Pi / Oh My Pi | 把 `~/.pi/agent/sessions/**/*.jsonl` 与 `~/.omp/agent/sessions/**/*.jsonl` 合并为一个稳定的 `pi` 来源 |
+| Pi | `~/.pi/agent/sessions/**/*.jsonl`（或 `PI_AGENT_DIR`），来源 id 为 `pi` |
+| Oh My Pi | `~/.omp/agent/sessions/**/*.jsonl`，来源 id 为 `omp`。路径重叠时归 `pi`。升级后第一次不带 `--source` 的 `sync` 会重建存量 `pi` 行。后续 provider/project/成本/行为回填使用 `sync --rebuild --source omp`。 |
 | Grok Build | `~/.grok/sessions/*/*/`（或 `GROK_HOME`），只读取会话根目录的 `updates.jsonl`、`signals.json`、`summary.json` 和可选 `events.jsonl` sidecar |
 | ZCode | `~/.zcode/cli/db/db.sqlite`（或 `ZCODE_HOME`）中 `model_usage` 的 completed 行 |
 | DeepSeek Harness | `~/.dsh/sessions/**/session.jsonl.zstd` 或 `session.jsonl`（或 `DSH_HOME`）；按帧魔数分派压缩与否 |
 
-Kimi Code、Pi、ZCode、Antigravity CLI、DeepSeek Harness 和 Grok Build 都是 passive、`precise` 来源：保留原始模型名，通过来源级 cursor 保证增量与幂等重放，且不持久化 transcript 正文。Pi 支持由本机 Oh My Pi 样本和脱敏 Pi-compatible fixture 共同验证；Pi-only 的本机证据仍有限。Grok Build 把每条 `turn_completed` 的 `params.update.usage` 映射为一条事件（input、cache read、cache creation、output、诊断 reasoning、权威 total）。没有 usage 的会话仍走旧的 total-only 回退。任一 sidecar 变化时按会话整体重放。定价目录没有 grok 行，且不使用 `costUsdTicks`，成本保持 `unpriced`。`source-status` 和 `dash` 还会显示 Reasonix、Gemini CLI、Cursor、Copilot、Zed、Kiro、Goose、Kimi shell/Qwen、Roo/Kilo/Cline、Codebuff、Crush、Warp/Oz、Amp、Hermes、Trae 等仅监控平台。仅监控表示 llmusage 可以探测候选本地路径并说明为什么阻塞解析；不会写入 0 用量行，也不会写入未验证 token 行。
+Kimi Code、Pi、Oh My Pi、ZCode、Antigravity CLI、DeepSeek Harness 和 Grok Build 都是 passive、`precise` 来源：保留原始模型名，通过来源级 cursor 保证增量与幂等重放，且不持久化 transcript 正文。Pi 与 Oh My Pi 共用一份解析实现，游标分开。Pi 支持由本机 Oh My Pi 样本和脱敏 Pi-compatible fixture 共同验证；Pi-only 的本机证据仍有限。Grok Build 把每条 `turn_completed` 的 `params.update.usage` 映射为一条事件（input、cache read、cache creation、output、诊断 reasoning、权威 total）。没有 usage 的会话仍走旧的 total-only 回退。任一 sidecar 变化时按会话整体重放。定价目录没有 grok 行，且不使用 `costUsdTicks`，成本保持 `unpriced`。`source-status` 和 `dash` 还会显示 Reasonix、Gemini CLI、Cursor、Copilot、Zed、Kiro、Goose、Kimi shell/Qwen、Roo/Kilo/Cline、Codebuff、Crush、Warp/Oz、Amp、Hermes、Trae 等仅监控平台。仅监控表示 llmusage 可以探测候选本地路径并说明为什么阻塞解析；不会写入 0 用量行，也不会写入未验证 token 行。
 
 从曾安装 hook/plugin 的旧版本升级后，应执行一次 `llmusage uninstall`。该命令只清理 llmusage 自有的遗留条目和 wrapper，保留历史备份与用量数据；`--purge` 才会额外删除整个运行时根目录。
 

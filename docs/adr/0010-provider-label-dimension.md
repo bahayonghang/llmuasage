@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-07-02
-- Related code: `src/store/migrations.rs`, `src/store/sync_writer.rs`, `src/domain/models.rs`, `src/domain/provider_map.rs`, `src/commands/sync.rs`
+- Related code: `src/store/migrations.rs`, `src/store/sync_writer.rs`, `src/domain/models.rs`, `src/domain/provider_map.rs`, `src/commands/sync.rs`, `src/parsers/pi.rs`, `src/parsers/dsh.rs`
 - Related terms: Source, Provider Label, Usage Event, Usage Bucket, SyncShard
 
 ## Context
@@ -35,9 +35,27 @@ Sync loads provider activation data once per run:
 - otherwise llmusage attempts `${CCR_ROOT:-~/.ccr}/analytics/provider_activation.jsonl`;
 - missing or unreadable default map is non-fatal and leaves labels empty.
 
-The provider label is stamped inside `SyncRunWriter::commit_shard` before event
+The CCR timeline is applied inside `SyncRunWriter::commit_shard` before event
 chunks are inserted. That keeps `usage_event` and `usage_bucket_30m` consistent
-without making parsers know about CCR.
+without making parsers know about CCR. The writer fills `provider_label` only
+when the parser left the empty unattributed sentinel. A non-empty parser label
+is kept.
+
+## Amendment (2026-08-23) — Source-stamped provider wins
+
+The original rejection of parser-level stamping applies to *external* CCR
+activation state. Source logs that already carry a provider field stamp it on
+the event:
+
+- Pi / Oh My Pi: `message.provider` (routing ids such as `openai-codex`,
+  `xai-oauth`, `openrouter`, `deepseek`)
+- DeepSeek Harness: `data.message.source.provider`
+
+`ProviderIndex::label_for` still returns `''` for a source with no timeline.
+Before this amendment, `commit_shard` overwrote every label whenever a CCR
+file was loaded, so DeepSeek Harness rows were stored as unattributed even
+though the parser had stamped `deepseek-official`. Fill-empty restores those
+parser labels. Codex and Claude still write `''` and still receive CCR labels.
 
 ## Rejected Alternatives
 
@@ -46,9 +64,10 @@ without making parsers know about CCR.
   restamp already-imported events.
 - Nullable provider: rejected because SQLite NULL conflict behavior would split
   unattributed bucket rows instead of deduplicating them.
-- Parser-level stamping: rejected because parsers do not own external provider
-  activation state, and ADR 0002 keeps write protocol decisions in
-  `SyncRunWriter`.
+- Parser-level stamping of CCR activation: rejected because parsers do not own
+  external provider activation state, and ADR 0002 keeps write protocol
+  decisions in `SyncRunWriter`. Source-owned provider fields are stamped by
+  the parser; CCR still fills only the empty sentinel.
 
 ## Consequences
 

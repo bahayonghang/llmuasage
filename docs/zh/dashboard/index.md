@@ -65,7 +65,7 @@ SSH 会话会自动跳过浏览器启动。
 
 | 筛选 | 含义 |
 | --- | --- |
-| `source` | `codex`、`claude`、`opencode`、`antigravity`、`kimi_code`、`pi` 或 `grok` |
+| `source` | `codex`、`claude`、`opencode`、`antigravity`、`kimi_code`、`pi`、`omp` 或 `grok` |
 | `model` | 标准化事件中的精确模型名 |
 | `since` / `until` | 看板查询日期范围 |
 | `window` | day/week/month/all 等快速窗口 |

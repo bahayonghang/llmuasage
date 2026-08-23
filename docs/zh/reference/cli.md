@@ -31,7 +31,7 @@ Usage: llmusage [OPTIONS] [COMMAND]
 | `--locale <LOCALE>` | 标题和数字格式的轻量 locale 选择 |
 | `--compact` | 使用更窄的表格布局 |
 | `--no-cost` | 从报表输出隐藏成本列与成本字段 |
-| `--source codex\|claude\|opencode\|antigravity\|kimi_code\|pi\|grok` | 将顶层报表或同步命令限制到一个来源 |
+| `--source codex\|claude\|opencode\|antigravity\|kimi_code\|pi\|omp\|grok` | 将顶层报表或同步命令限制到一个来源 |
 | `--host <LABEL>` | 将报表限制到一个已注册主机 label |
 | `-A, --by-agent` | 在统一报表 JSON 中加入嵌套来源行 |
 | `--sections daily\|weekly\|monthly\|session` | 在一次组合输出中加入报表周期 |

@@ -49,7 +49,7 @@ features:
 ## 当前产品表面
 
 - 版本：`1.3.0`。
-- 来源：被动读取 Codex、Claude Code、OpenCode、Kimi Code（`kimi_code`）、Pi / Oh My Pi（`pi`）、Grok Build（`grok`）、ZCode（`zcode`）、Antigravity CLI（`antigravity`）和 DeepSeek Harness（`deepseek_harness`）。
+- 来源：被动读取 Codex、Claude Code、OpenCode、Kimi Code（`kimi_code`）、Pi（`pi`）、Oh My Pi（`omp`）、Grok Build（`grok`）、ZCode（`zcode`）、Antigravity CLI（`antigravity`）和 DeepSeek Harness（`deepseek_harness`）。
 - 报表命令：`daily`、`monthly`、`session`、`blocks`、`statusline`。
 - 本地界面命令：`dash`、`serve`、`export html`。
 - 安全/运维命令：`status`、`diagnostics`、`doctor`、`uninstall`。

@@ -23,15 +23,16 @@ llmusage sync --source opencode
 llmusage sync --source antigravity
 llmusage sync --source kimi_code
 llmusage sync --source pi
+llmusage sync --source omp
 llmusage sync --source grok
 # gemini is no longer accepted as a source id; gemini-* model names are unchanged
 ```
 
-The accepted source values match `cargo run -- --help`: `codex`, `claude`, `opencode`, `antigravity`, `kimi_code`, `pi`, and `grok`. `gemini` is intentionally not accepted as a source id; `gemini-*` remains a model-name prefix only.
+The accepted source values match `cargo run -- --help`: `codex`, `claude`, `opencode`, `antigravity`, `kimi_code`, `pi`, `omp`, and `grok`. `gemini` is intentionally not accepted as a source id; `gemini-*` remains a model-name prefix only.
 
 Kimi Code reads `~/.kimi-code/sessions/**/wire.jsonl` (or `KIMI_CODE_HOME/sessions`) and imports only explicit turn-scoped `usage.record` rows. It maps non-cached input, output, cache read, and cache creation independently, preserves raw models such as `kimi-code/k3`, and ignores aggregate, zero-token, non-turn, and malformed records.
 
-Pi combines `~/.pi/agent/sessions` (or `PI_AGENT_DIR`) and `~/.omp/agent/sessions` under one `pi` source. Assistant usage rows preserve input, output, cache read/write, authoritative total, and diagnostic reasoning tokens. The local admission evidence includes real Oh My Pi samples and sanitized Pi-compatible fixtures; this machine had no Pi-only sample, so Pi-specific format changes remain an explicit evidence gap.
+Pi reads `~/.pi/agent/sessions` (or `PI_AGENT_DIR`) as source `pi`. Oh My Pi reads `~/.omp/agent/sessions` as source `omp`. The two sources share one parse implementation. If a path overlaps, `pi` wins and `omp` skips only the conflicting files. Assistant usage rows preserve input, output, cache read/write, authoritative total, and diagnostic reasoning tokens. After upgrade, run one unbounded `llmusage sync` with no `--source` so legacy `pi` rows rebuild and `.omp` files land as `omp`. Later provider, project, cost, and behavior backfill uses `llmusage sync --rebuild --source omp`. The local admission evidence includes real Oh My Pi samples and sanitized Pi-compatible fixtures; this machine had no Pi-only sample, so Pi-specific format changes remain an explicit evidence gap.
 
 Grok Build reads only direct sidecars under `~/.grok/sessions/*/*/` (or `GROK_HOME/sessions`). The primary path maps each `turn_completed` `params.update.usage` record to one precise event. Sessions without usage keep the older `_meta.totalTokens` plus `signals.json` total-only fallback. Cost remains `unpriced`. Any sidecar change replays the full session; a tracked missing sidecar preserves prior rows and blocks lossy rebuild until the file returns.
 

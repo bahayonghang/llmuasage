@@ -13,7 +13,7 @@ The runtime state lives under `~/.llmusage/` unless overridden by `--home <PATH>
 
 ## Source registry
 
-`SourceKind` currently includes Codex, Claude, OpenCode, Antigravity, Kimi Code, Pi, and Grok Build. `antigravity`, `kimi_code`, `pi`, and `grok` are stable CLI/API/SQLite source ids; Pi and Oh My Pi intentionally share `pi`, while `gemini-*` strings remain model ids only.
+`SourceKind` currently includes Codex, Claude, OpenCode, Antigravity, Kimi Code, Pi, Oh My Pi, and Grok Build. `antigravity`, `kimi_code`, `pi`, `omp`, and `grok` are stable CLI/API/SQLite source ids; `gemini-*` strings remain model ids only.
 
 `SourceDescriptor` is the source capability registry. It declares each source's stable id, aliases, parser/passive-probe capabilities, token-quality label, and local privacy boundary. The registry is the single fan-out point for parsers and source descriptors:
 
@@ -22,20 +22,20 @@ The runtime state lives under `~/.llmusage/` unless overridden by `--home <PATH>
 
 Adding a source means adding a `SourceKind` variant plus a descriptor. A parser is added only when the descriptor's capability declaration and tests justify it. Passive readers also require real local samples, fixture coverage, sync-twice idempotency, cursor/rebuild behavior, token-quality declaration, and privacy review before they can write usage rows. Antigravity is parser-backed for CLI `conversations/*.db`; hook-era rows remain queryable and a rebuild is refused while they have no file attribution.
 
-`PlatformMonitorDescriptor` is the wider monitoring catalog. It describes registered passive sources such as Kimi Code, Pi, Grok Build, ZCode, Antigravity CLI, and DeepSeek Harness alongside parserless candidates such as Reasonix, Gemini CLI, Cursor, Copilot, Zed, Kiro, Goose, Kimi shell/Qwen, Roo/Kilo/Cline, Codebuff, Crush, Warp/Oz, Amp, Hermes, and Trae. Monitor descriptors may surface detected/unavailable roots, parser support, privacy class, token quality, and next action in `source-status` and `dash`; only descriptors backed by a registered `SourceKind` and parser can write usage rows.
+`PlatformMonitorDescriptor` is the wider monitoring catalog. It describes registered passive sources such as Kimi Code, Pi, Oh My Pi, Grok Build, ZCode, Antigravity CLI, and DeepSeek Harness alongside parserless candidates such as Reasonix, Gemini CLI, Cursor, Copilot, Zed, Kiro, Goose, Kimi shell/Qwen, Roo/Kilo/Cline, Codebuff, Crush, Warp/Oz, Amp, Hermes, and Trae. Monitor descriptors may surface detected/unavailable roots, parser support, privacy class, token quality, and next action in `source-status` and `dash`; only descriptors backed by a registered `SourceKind` and parser can write usage rows.
 
 ## Sync flow
 
 1. The user or an in-process dashboard job runs `llmusage sync`.
 2. The command bootstraps/migrates SQLite and acquires the local `worker_lock`.
-3. Sync walks registered passive parsers in source order: Codex, Claude, OpenCode, Kimi Code, Pi, and Grok Build. Antigravity has no verified passive parser, so its historical rows remain visible but no new events are imported.
+3. Sync walks registered passive parsers in source order: Codex, Claude, OpenCode, Kimi Code, Pi, Oh My Pi, and Grok Build. Antigravity is parser-backed for CLI `conversations/*.db`; hook-era rows remain visible.
 4. Each parser emits `SyncShard` values.
 5. `SyncRunWriter::commit_shard` performs reset, event write, cursor write, raw archive write, behavior fact write, and source-file stamping as the commit protocol.
 6. The store saves per-source sync status and run-log records.
 
 `SyncShard` is the parser/writer boundary. Parsers do not write SQLite directly.
 
-Repeated sync work is avoided through per-source cursors. Codex, Claude, Kimi Code, Pi, and Grok Build compare file size, mtime, head fingerprint, tail signature, and offset before reparsing; OpenCode compares DB identity and message high-water cursors. Kimi imports only turn-scoped `usage.record` rows. Pi merges the Pi and Oh My Pi roots under one source and keeps upstream totals authoritative, with reasoning as a separate diagnostic channel. Grok scans only direct session sidecars, replays the full session when any sidecar changes, maps `turn_completed.usage` as precise events (total-only fallback when usage is absent), and keeps cost unpriced. Sync stats expose unchanged work as skipped, changed artifacts as parsed, newly inserted rows as committed, and durable totals as stored events.
+Repeated sync work is avoided through per-source cursors. Codex, Claude, Kimi Code, Pi, Oh My Pi, and Grok Build compare file size, mtime, head fingerprint, tail signature, and offset before reparsing; OpenCode compares DB identity and message high-water cursors. Kimi imports only turn-scoped `usage.record` rows. Pi reads `~/.pi/agent/sessions` (or `PI_AGENT_DIR`) as `pi`; Oh My Pi reads `~/.omp/agent/sessions` as `omp`. They share one parse implementation. Overlapping paths belong to `pi`. Both keep upstream totals authoritative, with reasoning as a separate diagnostic channel. Grok scans only direct session sidecars, replays the full session when any sidecar changes, maps `turn_completed.usage` as precise events (total-only fallback when usage is absent), and keeps cost unpriced. Sync stats expose unchanged work as skipped, changed artifacts as parsed, newly inserted rows as committed, and durable totals as stored events.
 
 ## Query and dashboard flow
 

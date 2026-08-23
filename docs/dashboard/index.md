@@ -67,7 +67,7 @@ Dashboard filters map to the shared `QueryFilter` used by the Rust query layer.
 
 | Filter | Meaning |
 | --- | --- |
-| `source` | `codex`, `claude`, `opencode`, `antigravity`, `kimi_code`, `pi`, or `grok` |
+| `source` | `codex`, `claude`, `opencode`, `antigravity`, `kimi_code`, `pi`, `omp`, or `grok` |
 | `model` | Exact model string from normalized events |
 | `since` / `until` | Date range for dashboard queries |
 | `window` | Quick window such as day/week/month/all |

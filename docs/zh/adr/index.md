@@ -20,3 +20,5 @@ ADR 目前以英文工程记录为主，并复用仓库根目录 `CONTEXT.md` �
 - [0012 — Antigravity CLI passive parser](../../adr/0012-antigravity-cli-passive-parser)
 - [0013 — DeepSeek Harness passive source](../../adr/0013-deepseek-harness-passive-source)
 - [0014 — SSH remote-host import](../../adr/0014-ssh-remote-host-import)
+- [0015 — Oh My Pi source split](../../adr/0015-omp-source-split)
+- [0016 — Source-reported cost for Pi / Oh My Pi](../../adr/0016-source-reported-cost)
