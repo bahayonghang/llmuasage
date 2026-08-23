@@ -1877,3 +1877,24 @@ Grok 解析器改为读取 turn_completed.usage，趋势来源表展示完整占
 ### Status
 
 [OK] **Completed**
+
+
+## Session 63: 重设计会话排行与 Token 构成
+
+**Date**: 2026-08-23
+**Task**: 重设计会话排行与 Token 构成
+**Branch**: `dev`
+
+### Summary
+
+将技术 ID 会话列表重设计为可比较、可下钻的消耗条形图；修复默认 1 天 Token 构成空态并加入权威总量、其他未细分和数据质量状态；完成全量 CI、20 张视觉矩阵、可访问性检查和默认范围性能验证。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7a4b4dcf5dd74cd33f1fab72a984334d85483efb` | (see git log) |
+
+### Status
+
+[OK] **Completed**
