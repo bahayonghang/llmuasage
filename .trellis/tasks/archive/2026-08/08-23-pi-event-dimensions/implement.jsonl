@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "provider 与项目维度写入的既有契约"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "provider 与项目维度写入的既有契约"}
+{"file": ".trellis/spec/llmusage/backend/write-fencing-contracts.md", "reason": "provider 与项目维度写入的既有契约"}
+{"file": "docs/adr/0010-provider-label-dimension.md", "reason": "provider_label 的既有决定与哨兵语义"}
