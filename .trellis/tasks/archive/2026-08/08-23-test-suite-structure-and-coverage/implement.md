@@ -79,7 +79,7 @@ restore it with an exact patch, and rerun green. Do not retain mutation code.
   and over-broad production fixes.
 - [x] Update project code-spec only for durable test-layout commands/contracts learned during implementation; do not
   turn temporary file names into permanent rules.
-- [ ] Commit/archive/journal only after all gates pass, following repository scope and Chinese/emoji commit policy;
+- [x] Commit/archive/journal only after all gates pass, following repository scope and Chinese/emoji commit policy;
   do not push or create a PR unless separately requested.
 
 ## Risky files and rollback points
