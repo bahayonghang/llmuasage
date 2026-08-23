@@ -54,7 +54,7 @@ pub trait Integration: Send + Sync {
 }
 ```
 
-trait 签名为同步 `&self`。Codex/Claude/Opencode 各用 ZST + impl 委托给原模块级 `pub fn probe / install / uninstall`（保留 pub fn 是因为 `tests/local_flow.rs:177` 已直接调；trait 这层是新增的入口）。
+trait 签名为同步 `&self`。Codex/Claude/Opencode 各用 ZST + impl 委托给原模块级 `pub fn probe / install / uninstall`（保留 pub fn 是因为 `tests/cli/local_flow.rs` 已直接调；trait 这层是新增的入口）。
 
 ### 3. 单点工厂 `src/registry.rs`（阶段 4）
 
@@ -127,12 +127,12 @@ match source {
 - "新增第四个源"现在只改两处：`SourceKind` 枚举 + `registry.rs` 工厂的两个 vec。Driver / fan-out / 平台分支自动跟随。
 - `Box<dyn SourceParser>` / `Box<dyn Integration>` 引入 vtable 间接 + 一次堆分配（ZST 不分配数据，只分配 vtable 指针），单次 sync 可忽略；driver 串行迭代不构成热点。
 - `parse` 用 `Pin<Box<dyn Future>>` 写起来比 `async fn` in trait 略繁琐，但 `Box::pin(sync_xxx(...))` 一行包装可读性可接受，且不引依赖。
-- `tests/local_flow.rs` 现在依赖 `integrations::HookTarget::current(...).shell_command(...)` 入口；后续若要 mock 平台，可以扩 `HookKind` 不破坏调用方。
+- `tests/cli/local_flow.rs` 现在依赖 `integrations::HookTarget::current(...).shell_command(...)` 入口；后续若要 mock 平台，可以扩 `HookKind` 不破坏调用方。
 
 ## 验证
 
 - 阶段 3 完成时：`rtk cargo build` / `cargo fmt --check` / `clippy -D warnings` / `cargo test --test-threads=1` 全绿（35/35 测试）。
-- 阶段 4 完成时：同上（35/35 测试）；`tests/local_flow.rs::init_writes_quoted_windows_string_commands_for_spaced_paths` 走新 `HookTarget` 路径无回归。
+- 阶段 4 完成时：同上（35/35 测试）；`tests/cli/local_flow.rs` 的 Windows 空格路径覆盖走新 `HookTarget` 路径无回归。
 
 ## 0.5.0 更新：取消令牌例外
 

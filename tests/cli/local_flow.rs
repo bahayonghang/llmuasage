@@ -624,7 +624,7 @@ struct Fixture {
     codex_home: PathBuf,
     opencode_home: PathBuf,
     opencode_config: PathBuf,
-    saved: Vec<(String, Option<String>)>,
+    env: crate::test_env::ScopedEnv,
 }
 
 impl Fixture {
@@ -647,16 +647,13 @@ impl Fixture {
         fs::create_dir_all(&opencode_home)?;
         fs::create_dir_all(&opencode_config)?;
 
-        let mut saved = Vec::new();
-        for key in [
+        let env = crate::test_env::ScopedEnv::capture(&[
             "HOME",
             "USERPROFILE",
             "CODEX_HOME",
             "OPENCODE_HOME",
             "OPENCODE_CONFIG_DIR",
-        ] {
-            saved.push((key.to_string(), std::env::var(key).ok()));
-        }
+        ]);
         unsafe {
             std::env::set_var("HOME", &home);
             std::env::set_var("USERPROFILE", &home);
@@ -678,20 +675,12 @@ impl Fixture {
             codex_home,
             opencode_home,
             opencode_config,
-            saved,
+            env,
         })
     }
 
     fn restore_env(&self) {
-        for (key, value) in &self.saved {
-            unsafe {
-                if let Some(value) = value {
-                    std::env::set_var(key, value);
-                } else {
-                    std::env::remove_var(key);
-                }
-            }
-        }
+        self.env.restore();
     }
 
     fn seed_codex(&self) -> Result<()> {
@@ -891,6 +880,12 @@ impl Fixture {
             )?;
         }
         Ok(())
+    }
+}
+
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        self.restore_env();
     }
 }
 

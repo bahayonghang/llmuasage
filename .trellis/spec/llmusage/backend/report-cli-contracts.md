@@ -6,7 +6,7 @@
 
 - Apply this contract before changing `src/commands/report_args.rs`,
   `src/commands/{daily,weekly,monthly,session,focused,unified_report}.rs`,
-  `src/tui/report_table.rs`, or `tests/report_commands.rs`.
+  `src/tui/report_table.rs`, or `tests/cli/reports.rs`.
 - These commands have two consumers: human tables and CLI JSON. They are
   presentation projections over the shared query report types; dashboard,
   export, and interactive-TUI serialization must remain unchanged.

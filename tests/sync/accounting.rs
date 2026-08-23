@@ -1027,6 +1027,128 @@ fn full_rebuild_refused_while_unattributed_antigravity_history_exists() -> Resul
 }
 
 #[test]
+fn full_rebuild_preserves_parserless_rows_across_all_owned_tables() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_codex_copied_event()?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Codex),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        seed_parserless_history(&store)?;
+
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                rebuild: true,
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+        let conn = store.open_connection()?;
+        assert_eq!(
+            conn.query_row(
+                "SELECT event_key FROM usage_event WHERE source = 'parserless_fixture'",
+                [],
+                |row| row.get::<_, String>(0),
+            )?,
+            "parserless:event"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT model, hour_start, project_hash, total_tokens, event_count \
+                 FROM usage_bucket_30m WHERE source = 'parserless_fixture'",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
+                    ))
+                },
+            )?,
+            (
+                "parserless-model".to_string(),
+                "2026-01-02T03:00:00Z".to_string(),
+                "parserless-project".to_string(),
+                29,
+                1,
+            )
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT turn_key FROM usage_turn WHERE source = 'parserless_fixture'",
+                [],
+                |row| row.get::<_, String>(0),
+            )?,
+            "parserless:turn"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT tool_call_key FROM usage_tool_call WHERE source = 'parserless_fixture'",
+                [],
+                |row| row.get::<_, String>(0),
+            )?,
+            "parserless:tool"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT cursor_key, file_path FROM source_cursor \
+                 WHERE source = 'parserless_fixture'",
+                [],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )?,
+            (
+                "parserless:cursor".to_string(),
+                "/virtual/parserless/history.jsonl".to_string(),
+            )
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT file_path, state FROM source_file \
+                 WHERE source = 'parserless_fixture'",
+                [],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )?,
+            (
+                "/virtual/parserless/history.jsonl".to_string(),
+                "missing".to_string(),
+            )
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM usage_event WHERE source = 'codex'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )?,
+            1,
+            "successful full rebuild must replay the parser-backed fixture"
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    Ok(())
+}
+
+#[test]
 fn full_rebuild_checks_all_parser_risks_before_resetting_any_source() -> Result<()> {
     let fixture = Fixture::new()?;
     fixture.seed_codex_copied_event()?;
@@ -1124,6 +1246,47 @@ fn seed_antigravity_history(store: &Store) -> Result<()> {
     Ok(())
 }
 
+fn seed_parserless_history(store: &Store) -> Result<()> {
+    let conn = store.open_connection()?;
+    let timestamp = "2026-01-02T03:00:00Z";
+    conn.execute_batch(&format!(
+        r#"
+        INSERT INTO usage_event(
+            event_key, source, source_path_hash, model, event_at, hour_start,
+            project_hash, input_tokens, cache_read_tokens, cache_creation_tokens,
+            output_tokens, reasoning_output_tokens, total_tokens, created_at
+        ) VALUES ('parserless:event', 'parserless_fixture', 'parserless:path',
+                  'parserless-model', '{timestamp}', '{timestamp}', 'parserless-project',
+                  23, 0, 0, 6, 0, 29, '{timestamp}');
+        INSERT INTO usage_bucket_30m(
+            source, provider_label, model, hour_start, project_hash,
+            input_tokens, cache_read_tokens, cache_creation_tokens,
+            output_tokens, reasoning_output_tokens, total_tokens,
+            event_count, updated_at
+        ) VALUES ('parserless_fixture', '', 'parserless-model', '{timestamp}',
+                  'parserless-project', 23, 0, 0, 6, 0, 29, 1, '{timestamp}');
+        INSERT INTO usage_turn(
+            turn_key, source, project_hash, primary_model, started_at, category,
+            input_tokens, output_tokens, total_tokens, created_at
+        ) VALUES ('parserless:turn', 'parserless_fixture', 'parserless-project',
+                  'parserless-model', '{timestamp}', 'tooling', 23, 6, 29, '{timestamp}');
+        INSERT INTO usage_tool_call(
+            tool_call_key, turn_key, event_key, source, project_hash, occurred_at,
+            tool_name, tool_kind, created_at
+        ) VALUES ('parserless:tool', 'parserless:turn', 'parserless:event',
+                  'parserless_fixture', 'parserless-project', '{timestamp}',
+                  'read_file', 'builtin', '{timestamp}');
+        INSERT INTO source_cursor(source, cursor_key, file_path, updated_at)
+        VALUES ('parserless_fixture', 'parserless:cursor',
+                '/virtual/parserless/history.jsonl', '{timestamp}');
+        INSERT INTO source_file(source, file_path, state, last_state_change_at)
+        VALUES ('parserless_fixture', '/virtual/parserless/history.jsonl',
+                'missing', '{timestamp}');
+        "#
+    ))?;
+    Ok(())
+}
+
 fn source_row_count(store: &Store, table: &str, source: SourceKind) -> Result<i64> {
     let conn = store.open_connection()?;
     Ok(conn.query_row(
@@ -1138,7 +1301,7 @@ struct Fixture {
     home: PathBuf,
     codex_home: PathBuf,
     opencode_home: PathBuf,
-    saved_env: Vec<(String, Option<String>)>,
+    _env: crate::test_env::ScopedEnv,
 }
 
 impl Fixture {
@@ -1151,10 +1314,12 @@ impl Fixture {
         fs::create_dir_all(&codex_home)?;
         fs::create_dir_all(&opencode_home)?;
 
-        let mut saved_env = Vec::new();
-        for key in ["HOME", "USERPROFILE", "CODEX_HOME", "OPENCODE_HOME"] {
-            saved_env.push((key.to_string(), std::env::var(key).ok()));
-        }
+        let env = crate::test_env::ScopedEnv::capture(&[
+            "HOME",
+            "USERPROFILE",
+            "CODEX_HOME",
+            "OPENCODE_HOME",
+        ]);
         unsafe {
             std::env::set_var("HOME", &home);
             std::env::set_var("USERPROFILE", &home);
@@ -1167,7 +1332,7 @@ impl Fixture {
             home,
             codex_home,
             opencode_home,
-            saved_env,
+            _env: env,
         })
     }
 
@@ -1266,20 +1431,6 @@ impl Fixture {
         let conn = Connection::open(self.opencode_home.join("opencode.db"))?;
         conn.execute("DROP TABLE message", [])?;
         Ok(())
-    }
-}
-
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        for (key, value) in &self.saved_env {
-            unsafe {
-                if let Some(value) = value {
-                    std::env::set_var(key, value);
-                } else {
-                    std::env::remove_var(key);
-                }
-            }
-        }
     }
 }
 

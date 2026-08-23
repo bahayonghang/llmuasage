@@ -21,6 +21,7 @@ pub(crate) struct BehaviorToolEvidence {
     pub(crate) mcp_tool: Option<String>,
     pub(crate) input_fingerprint: Option<String>,
     pub(crate) safe_preview: Option<String>,
+    is_testing_command: bool,
 }
 
 /// Builds a turn from an event and the tools observed around that event.
@@ -282,6 +283,7 @@ pub(crate) fn opencode_tool_evidence(part: &Value) -> Option<BehaviorToolEvidenc
         mcp_tool,
         input_fingerprint: input.map(input_fingerprint),
         safe_preview: safe_tool_preview(tool, input),
+        is_testing_command: testing_command_hint(tool, input),
     })
 }
 
@@ -326,6 +328,7 @@ fn skill_evidence(skill_name: &str, input: Option<&Value>) -> BehaviorToolEviden
         mcp_tool: None,
         input_fingerprint: input.map(input_fingerprint),
         safe_preview: safe_tool_preview("skill", input),
+        is_testing_command: false,
     }
 }
 
@@ -346,6 +349,7 @@ fn tool_evidence(
         mcp_tool,
         input_fingerprint: fingerprint,
         safe_preview: preview,
+        is_testing_command: testing_command_hint(tool_name, input),
     }
 }
 
@@ -364,20 +368,10 @@ fn classify_tools(tools: &[BehaviorToolEvidence]) -> ActivityCategory {
     }) {
         return ActivityCategory::Coding;
     }
-    if tools.iter().any(|tool| {
-        tool.tool_kind == ToolKind::Bash
-            && matches_tool_name(
-                &tool.safe_preview.clone().unwrap_or_default(),
-                &[
-                    "test",
-                    "cargo test",
-                    "pytest",
-                    "npm test",
-                    "pnpm test",
-                    "bun test",
-                ],
-            )
-    }) {
+    if tools
+        .iter()
+        .any(|tool| tool.tool_kind == ToolKind::Bash && tool.is_testing_command)
+    {
         return ActivityCategory::Testing;
     }
     if tools
@@ -458,6 +452,24 @@ fn safe_tool_preview(tool_name: &str, input: Option<&Value>) -> Option<String> {
     let input = input?;
     let mut parts = Vec::new();
     let normalized = tool_name.to_ascii_lowercase();
+    if normalized != "bash" {
+        for key in ["pattern", "query", "description"] {
+            push_string_field(&mut parts, key, input, key);
+        }
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(truncate_preview(&parts.join(" · ")))
+    }
+}
+
+fn testing_command_hint(tool_name: &str, input: Option<&Value>) -> bool {
+    let Some(input) = input else {
+        return false;
+    };
+    let mut parts = Vec::new();
+    let normalized = tool_name.to_ascii_lowercase();
     if normalized == "bash" {
         push_string_field(&mut parts, "cmd", input, "command");
     } else {
@@ -473,11 +485,18 @@ fn safe_tool_preview(tool_name: &str, input: Option<&Value>) -> Option<String> {
             push_string_field(&mut parts, key, input, key);
         }
     }
-    if parts.is_empty() {
-        None
-    } else {
-        Some(truncate_preview(&parts.join(" · ")))
-    }
+    let preview = truncate_preview(&parts.join(" · "));
+    matches_tool_name(
+        &preview,
+        &[
+            "test",
+            "cargo test",
+            "pytest",
+            "npm test",
+            "pnpm test",
+            "bun test",
+        ],
+    )
 }
 
 fn push_string_field(parts: &mut Vec<String>, label: &str, input: &Value, key: &str) {
@@ -577,23 +596,11 @@ mod tests {
         assert_eq!(tools.len(), 3);
         assert_eq!(tools[0].tool_name, "read");
         assert_eq!(tools[0].sequence, 0);
-        assert!(
-            tools[0]
-                .safe_preview
-                .as_deref()
-                .unwrap()
-                .contains("src/lib.rs")
-        );
+        assert!(tools[0].safe_preview.is_none());
         assert!(tools[0].input_fingerprint.is_some());
         assert_eq!(tools[1].tool_name, "bash");
         assert_eq!(tools[1].sequence, 1);
-        assert!(
-            tools[1]
-                .safe_preview
-                .as_deref()
-                .unwrap()
-                .contains("cargo test")
-        );
+        assert!(tools[1].safe_preview.is_none());
         assert!(tools[1].input_fingerprint.is_some());
         assert_eq!(tools[2].tool_name, "hub");
         assert_eq!(tools[2].sequence, 2);
@@ -626,10 +633,69 @@ mod tests {
                 "preview must not contain toolResult content: {preview:?}"
             );
         }
-        assert_eq!(
-            tools[0].safe_preview.as_deref().unwrap().chars().count(),
-            SAFE_PREVIEW_CHARS
-        );
+        assert!(tools.iter().all(|tool| tool.safe_preview.is_none()));
+        assert!(tools.iter().all(|tool| tool.input_fingerprint.is_some()));
+    }
+
+    #[test]
+    fn tool_preview_omits_sensitive_paths_and_commands_but_keeps_stable_fingerprint() {
+        let cases = [
+            ("read", "file_path", "/private/unix/secret.rs"),
+            ("read", "path", r"C:\Users\secret\private.rs"),
+            ("shell", "cmd", "powershell Get-Secret"),
+            ("bash", "command", "curl https://secret.invalid/token"),
+        ];
+
+        for (tool_name, key, sentinel) in cases {
+            let arguments = json!({(key): sentinel});
+            let value = json!({
+                "message": { "content": [
+                    {"type": "toolCall", "name": tool_name, "arguments": arguments}
+                ]}
+            });
+            let first = extract_pi_tools(&value).pop().expect("tool evidence");
+            let second = extract_pi_tools(&value)
+                .pop()
+                .expect("stable tool evidence");
+            assert!(
+                first.safe_preview.is_none(),
+                "{key} must not produce a partial sensitive preview"
+            );
+            assert!(
+                !first
+                    .safe_preview
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains(sentinel),
+                "{key} raw value must not enter safe_preview"
+            );
+            assert!(
+                first
+                    .input_fingerprint
+                    .as_deref()
+                    .is_some_and(|value| !value.is_empty())
+            );
+            assert_eq!(first.input_fingerprint, second.input_fingerprint);
+        }
+
+        let non_sensitive = json!({
+            "message": { "content": [
+                {"type": "toolCall", "name": "grep", "arguments": {
+                    "pattern": "needle-pattern",
+                    "query": "needle-query",
+                    "description": "bounded description"
+                }}
+            ]}
+        });
+        let non_sensitive_tools = extract_pi_tools(&non_sensitive);
+        let preview = non_sensitive_tools[0]
+            .safe_preview
+            .as_deref()
+            .expect("non-sensitive preview");
+        assert!(preview.contains("needle-pattern"));
+        assert!(preview.contains("needle-query"));
+        assert!(preview.contains("bounded description"));
+        assert!(preview.chars().count() <= SAFE_PREVIEW_CHARS);
     }
 
     #[test]
@@ -650,14 +716,9 @@ mod tests {
         assert_eq!(tools.len(), 3);
         assert_eq!(tools[0].tool_name, "Read");
         assert_eq!(tools[0].tool_kind, ToolKind::Read);
-        assert!(
-            tools[0]
-                .safe_preview
-                .as_deref()
-                .unwrap()
-                .contains("src/lib.rs")
-        );
+        assert!(tools[0].safe_preview.is_none());
         assert_eq!(tools[1].tool_kind, ToolKind::Bash);
+        assert!(tools[1].safe_preview.is_none());
         assert_eq!(tools[2].tool_kind, ToolKind::Mcp);
         assert_eq!(tools[2].mcp_server.as_deref(), Some("context7"));
         assert_eq!(tools[2].mcp_tool.as_deref(), Some("resolve-library-id"));
@@ -695,13 +756,7 @@ mod tests {
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0].tool_name, "functions.shell_command");
         assert_eq!(tools[0].tool_kind, ToolKind::Bash);
-        assert!(
-            tools[0]
-                .safe_preview
-                .as_deref()
-                .unwrap()
-                .contains("cargo check")
-        );
+        assert!(tools[0].safe_preview.is_none());
     }
 
     #[test]
@@ -723,6 +778,24 @@ mod tests {
     }
 
     #[test]
+    fn redacted_test_command_still_classifies_turn_as_testing() {
+        let tools = extract_claude_tools(&json!({
+            "message": {
+                "content": [
+                    {"type":"tool_use","name":"Bash","input":{"command":"cargo test"}}
+                ]
+            }
+        }));
+
+        assert_eq!(tools.len(), 1);
+        assert!(tools[0].safe_preview.is_none());
+        assert_eq!(
+            turn_from_tools(&event(), &tools).category,
+            ActivityCategory::Testing
+        );
+    }
+
+    #[test]
     fn opencode_tool_evidence_classifies_builtin_skill_and_mcp() {
         let read = opencode_tool_evidence(&json!({
             "type": "tool",
@@ -732,7 +805,7 @@ mod tests {
         .expect("read evidence");
         assert_eq!(read.tool_name, "read");
         assert_eq!(read.tool_kind, ToolKind::Read);
-        assert!(read.safe_preview.as_deref().unwrap().contains("src/lib.rs"));
+        assert!(read.safe_preview.is_none());
 
         let skill = opencode_tool_evidence(&json!({
             "type": "tool",

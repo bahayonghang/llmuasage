@@ -116,6 +116,6 @@ impl Store {
 ## 验证
 
 - 阶段 5 完成时：`rtk cargo build` / `cargo fmt --check` / `clippy -D warnings` / `cargo test --test-threads=1` 全绿（35/35 测试）。
-- `tests/sync_regression.rs` 6 个测试通过——三源 append / replace / inode-rotate 路径未回归。
-- `tests/local_flow.rs::local_flow_installs_syncs_exports_and_uninstalls` 通过——init/sync/export html/uninstall 端到端流程不变。
+- `tests/sync/sources/codex_claude.rs` 与 `tests/sync/sources/opencode.rs` 的三源 append / replace / inode-rotate 覆盖通过。
+- `tests/cli/local_flow.rs` 的本地 init/sync/export/uninstall 覆盖通过，端到端流程不变。
 - `dashboard_snapshot_uses_single_connection_and_matches_individual_methods` 继续通过——Dashboard 单连接断言未受 view 切换影响。

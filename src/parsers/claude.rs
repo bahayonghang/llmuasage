@@ -894,19 +894,13 @@ mod tests {
         assert_eq!(parsed.tool_calls.len(), 2);
         assert_eq!(parsed.tool_calls[0].tool_name, "Edit");
         assert_eq!(parsed.tool_calls[0].tool_kind.as_str(), "edit");
+        assert!(parsed.tool_calls[0].safe_preview.is_none());
+        assert!(parsed.tool_calls[1].safe_preview.is_none());
         assert!(
-            parsed.tool_calls[0]
-                .safe_preview
-                .as_deref()
-                .unwrap()
-                .contains("src/lib.rs")
-        );
-        assert!(
-            !parsed.tool_calls[0]
-                .safe_preview
-                .as_deref()
-                .unwrap()
-                .contains("private text")
+            parsed
+                .tool_calls
+                .iter()
+                .all(|call| call.input_fingerprint.is_some())
         );
         Ok(())
     }

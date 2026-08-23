@@ -61,5 +61,5 @@ only if the C binding is later rejected by the CI toolchain contract.
 
 - Unit tests cover magic-byte dispatch, torn-frame prefix recovery, oversized
   records, seedLength, placeholder ids, and official/local token numbers.
-- `tests/sync_regression.rs` covers sync-twice, append, rewrite, delete,
+- `tests/sync/sources/deepseek_harness.rs` covers sync-twice, append, rewrite, delete,
   missing root, `DSH_HOME`, fork folding, family replay, and bounded runs.

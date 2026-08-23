@@ -1242,13 +1242,8 @@ mod tests {
         assert_eq!(parsed.tool_calls.len(), 1);
         assert_eq!(parsed.tool_calls[0].tool_name, "functions.shell_command");
         assert_eq!(parsed.tool_calls[0].tool_kind.as_str(), "bash");
-        assert!(
-            parsed.tool_calls[0]
-                .safe_preview
-                .as_deref()
-                .unwrap()
-                .contains("cargo test")
-        );
+        assert!(parsed.tool_calls[0].safe_preview.is_none());
+        assert!(parsed.tool_calls[0].input_fingerprint.is_some());
         Ok(())
     }
 

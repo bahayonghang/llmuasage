@@ -3,6 +3,7 @@ name = "llmusage"
 version = "1.3.0"
 edition = "2024"
 rust-version = "1.95"
+autotests = false
 description = "Local-first AI CLI usage analytics with Rust, SQLite, hooks, and zero upload."
 repository = "https://github.com/bahayonghang/llmuasage"
 homepage = "https://github.com/bahayonghang/llmuasage"
@@ -17,6 +18,38 @@ path = "src/lib.rs"
 [[bin]]
 name = "llmusage"
 path = "src/main.rs"
+
+[[test]]
+name = "api"
+path = "tests/api/main.rs"
+
+[[test]]
+name = "architecture_dependencies"
+path = "tests/architecture/main.rs"
+
+[[test]]
+name = "cli"
+path = "tests/cli/main.rs"
+
+[[test]]
+name = "query"
+path = "tests/query/main.rs"
+
+[[test]]
+name = "remote"
+path = "tests/remote/main.rs"
+
+[[test]]
+name = "store"
+path = "tests/store/main.rs"
+
+[[test]]
+name = "sync"
+path = "tests/sync/main.rs"
+
+[[test]]
+name = "tui"
+path = "tests/tui/main.rs"
 
 [[example]]
 name = "docs_dashboard_serve"

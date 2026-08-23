@@ -112,14 +112,14 @@ OpenCode 是流式（page-by-page）：每页 events 一次 `commit_shard`，`re
 
 - 三个 parser 都从"读 fixture → 转 events → 自己写入"压到"读 fixture → 转 events → push 到 SyncShard → commit_shard"。新增第四个 parser 时实现者只需要构造 `SyncShard`，不接触 SQLite。
 - writer 内部以后改 batch size / 写入顺序 / cursor SQL 不会触动任何 parser。
-- `tests/sync_regression.rs`（23.8K 行，覆盖三源 append / replace / inode-rotate）继续作为安全网；新增 `commit_shard_runs_reset_then_events_then_cursor` 单测在内存 store 上验证 reset 顺序、bucket 一致性、cursor 落库。
+- `tests/sync/sources/codex_claude.rs` 与 `tests/sync/sources/opencode.rs` 的 append / replace / inode-rotate 覆盖继续作为安全网；`commit_shard_runs_reset_then_events_then_cursor` 单测在内存 store 上验证 reset 顺序、bucket 一致性、cursor 落库。
 - 阶段 3 的 `SourceParser` trait 统一签名 `(store, writer, parallelism) -> SourceSyncStats` 是这条决策的直接收益：流式 vs 批式差异已在 writer 内部抹平。
 
 ## 验证
 
 - 阶段 2 完成时：`rtk cargo build` / `cargo fmt --check` / `clippy -D warnings` / `cargo test --test-threads=1` 全绿（35/35 测试）。
 - 新单测：`store::sync_writer::tests::commit_shard_runs_reset_then_events_then_cursor` 在 `TempDir` 内 store 上 seed 1 个 event → reset 同 path_hash → 写 5 个新 events + 1 个 cursor，断言 reset 在前（`event_count == 5`）、bucket 总 tokens=150、cursor 落库。
-- 安全网：`tests/sync_regression.rs` 6 个测试通过——三源 append / replace / inode-rotate 路径未回归。
+- 安全网：`tests/sync/sources/codex_claude.rs` 与 `tests/sync/sources/opencode.rs` 的三源 append / replace / inode-rotate 路径未回归。
 
 ## 0.6.x 更新：行为事实作为 shard 附属事实
 

@@ -932,7 +932,14 @@ mod tests {
             include_str!("panels/stats.rs"),
             include_str!("panels/usage.rs"),
             include_str!("panels/sync_status.rs"),
-            include_str!("../../tests/tui_panels_prop.rs"),
+            include_str!("../../tests/tui/main.rs"),
+            include_str!("../../tests/tui/shell.rs"),
+            include_str!("../../tests/tui/panels/behavior.rs"),
+            include_str!("../../tests/tui/panels/models.rs"),
+            include_str!("../../tests/tui/panels/overview.rs"),
+            include_str!("../../tests/tui/panels/period.rs"),
+            include_str!("../../tests/tui/panels/stats.rs"),
+            include_str!("../../tests/tui/panels/usage.rs"),
         ];
 
         assert!(sources.iter().all(|source| !source.chars().any(is_han)));

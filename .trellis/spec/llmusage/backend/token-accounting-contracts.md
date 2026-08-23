@@ -206,14 +206,15 @@ Never enable `--allow-lossy-rebuild` automatically.
 - Accounting marker tests assert Codex `3`, Grok `3`, Pi `3`, Claude/OpenCode/Omp `2`, old
   Codex `2` automatic repair to `3`, old Grok `2` automatic repair to `3`, old
   Pi `2` automatic repair to `3`, and successful explicit guarded rebuild.
-- `tests/token_accounting_parity.rs` covers all three sources, copied/streaming
+- `tests/sync/accounting.rs` covers all three sources, copied/streaming
   duplicates, event/bucket/query equality, cost tolerance `1e-9`, marker
   advancement, automatic repair lifecycle, mixed current/legacy behavior,
   bounded refusal, warning payload, and guarded rebuild.
 - Automatic normal-sync tests cover multi-source registry order, exactly-once
   parsing, all-target preflight, lossy opt-in isolation, parserless
   preservation, and no completion marker/event after failure.
-- `tests/sync_regression.rs` keeps hot sync, append, replacement, and rebuild
+- `tests/sync/lifecycle.rs` plus `tests/sync/sources/` keep hot sync, append,
+  replacement, and rebuild
   behavior idempotent.
 - Serve repair tests assert safe marker advancement, normal-sync unblocking,
   registry order, lossy blocked counts, preserved history, and propagated

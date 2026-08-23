@@ -13,6 +13,9 @@ tests.
 - MSRV proof: `cargo +<rust-version> check --locked --all-features`
 - Required-check contract: `python scripts/check-ci-gate.py`
 - Live protection probe: `python scripts/check-ci-gate.py --github-protection`
+- Integration-test graph: `[package] autotests = false` plus explicit targets
+  `api`, `architecture_dependencies`, `cli`, `query`, `remote`, `store`,
+  `sync`, and `tui`.
 
 ## 3. Contracts
 
@@ -35,6 +38,11 @@ tests.
 - Do not put matrix cell names such as `Rust (windows-latest)` or versioned
   names such as `MSRV (1.95)` in branch protection. Those names move when
   the matrix or MSRV changes.
+- Integration tests live under domain directories and are discovered only
+  through the eight explicit Cargo targets. Keep `architecture_dependencies`
+  stable because CI addresses it by name. Before adding coverage during a
+  layout migration, compare the old and new integration-test leaf-name
+  multisets so newly added tests cannot hide a silently lost old test.
 
 ## 4. Validation & Error Matrix
 
@@ -47,16 +55,22 @@ tests.
 | A new CI job is omitted from `ci-gate.needs` | `python scripts/check-ci-gate.py` fails |
 | `ci-gate` is skipped after a leaf job fails | Block; keep `if: always()` so the required check still reports |
 | Subprocess test reports an OS error | Locate the exact failing operation; do not label it an environment failure without context |
+| A test-layout change drops or duplicates an existing leaf name | Block before adding new tests; repair target/module wiring |
 
 ## 5. Good / Base / Bad Cases
 
 - Good: the declared version passes from a clean target and the immediately
   lower candidate has a recorded dependency/compiler failure.
+- Good: a move-only checkpoint preserves every existing integration leaf
+  exactly once before new coverage increases the count.
 - Base: the pinned development toolchain passes the same shared Rust gate.
 - Bad: `Cargo.toml` claims an old MSRV while CI silently tests a newer version,
   or local and CI gates use different argument sets.
 - Bad: branch protection still requires `Rust and docs` after that job name
   is removed, so pull requests stay `BLOCKED` while every current job is green.
+- Bad: move `tests/foo.rs` into `tests/sync/foo.rs` while relying on Cargo's
+  root auto-discovery, then treat newly added tests as proof that no old test
+  disappeared.
 
 ## 6. Tests Required
 
@@ -69,6 +83,9 @@ tests.
 - Subprocess regression tests must assert the executable exists and attach
   spawn context; they must consume current public runtime paths/readers rather
   than stale compatibility fields.
+- Test-graph changes must run `cargo metadata --no-deps --format-version 1`,
+  list all eight explicit targets, reconcile the pre-move leaf-name multiset,
+  then run every target locked/all-features/single-threaded.
 
 ## 7. Wrong vs Correct
 
@@ -88,6 +105,28 @@ run: cargo check --locked --all-features
 
 `Cargo.toml` must declare the same `1.95`, and `1.95` must be established by
 running the command rather than inferred from direct dependency metadata.
+
+For the integration-test graph:
+
+### Wrong
+
+```toml
+# Files moved below tests/sync/, but Cargo still relies on auto-discovery.
+```
+
+### Correct
+
+```toml
+[package]
+autotests = false
+
+[[test]]
+name = "sync"
+path = "tests/sync/main.rs"
+```
+
+Every other domain target follows the same explicit pattern, and the move-only
+leaf-name reconciliation runs before additive coverage.
 
 ### Wrong
 

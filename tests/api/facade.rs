@@ -2,8 +2,6 @@ use llmusage::{
     AppPaths, Dashboard, JobRegistry, JobStatus, QueryFilter, ReportTimezone, Result, SourceKind,
     Store, SyncOptions,
 };
-use std::process::Command;
-
 use tempfile::TempDir;
 
 #[test]
@@ -46,7 +44,7 @@ fn cli_sync_uses_shared_stable_validation_codes() {
         (&["sync", "--parallelism", "0"], "invalid_parallelism"),
     ];
     for (args, code) in cases {
-        let output = Command::new(env!("CARGO_BIN_EXE_llmusage"))
+        let output = crate::test_process::llmusage_command()
             .args(args)
             .output()
             .expect("run llmusage");

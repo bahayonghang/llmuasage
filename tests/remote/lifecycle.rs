@@ -1,14 +1,9 @@
 //! C4 remote lifecycle: unreachable hosts must not break local sync, missing
 //! sweep, or lossy rebuild guards. No real SSH; shard streams are injected.
 
-use std::{
-    collections::BTreeMap,
-    fs,
-    path::PathBuf,
-    process::{Command, Stdio},
-};
+use std::{collections::BTreeMap, fs, path::PathBuf, process::Stdio};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use llmusage::{
     app::AppContext,
     commands::{self, source_status::host_lifecycle_status},
@@ -26,7 +21,7 @@ use tokio::sync::mpsc;
 struct Fixture {
     _root: TempDir,
     home: PathBuf,
-    saved: Vec<(String, Option<String>)>,
+    env: crate::test_env::ScopedEnv,
 }
 
 impl Fixture {
@@ -34,8 +29,7 @@ impl Fixture {
         let root = TempDir::new()?;
         let home = root.path().join("home");
         fs::create_dir_all(&home)?;
-        let mut saved = Vec::new();
-        for key in [
+        let env = crate::test_env::ScopedEnv::capture(&[
             "HOME",
             "USERPROFILE",
             "CODEX_HOME",
@@ -48,9 +42,7 @@ impl Fixture {
             "ZCODE_HOME",
             "GEMINI_CLI_HOME",
             "DSH_HOME",
-        ] {
-            saved.push((key.to_string(), std::env::var(key).ok()));
-        }
+        ]);
         unsafe {
             std::env::set_var("HOME", &home);
             std::env::set_var("USERPROFILE", &home);
@@ -69,20 +61,12 @@ impl Fixture {
         Ok(Self {
             _root: root,
             home,
-            saved,
+            env,
         })
     }
 
     fn restore_env(&self) {
-        for (key, value) in &self.saved {
-            unsafe {
-                if let Some(value) = value {
-                    std::env::set_var(key, value);
-                } else {
-                    std::env::remove_var(key);
-                }
-            }
-        }
+        self.env.restore();
     }
 
     fn app(&self) -> Result<AppContext> {
@@ -427,7 +411,7 @@ fn source_status_reports_three_host_states_and_omits_live() -> Result<()> {
         "idle"
     );
 
-    let output = Command::new(env!("CARGO_BIN_EXE_llmusage"))
+    let output = crate::test_process::llmusage_command()
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .args([
             "--home",
@@ -438,7 +422,8 @@ fn source_status_reports_three_host_states_and_omits_live() -> Result<()> {
         .env("LLMUSAGE_LOG", "off")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .output()?;
+        .output()
+        .context("spawn llmusage sync for remote lifecycle events")?;
     assert!(
         output.status.success(),
         "stderr={}",

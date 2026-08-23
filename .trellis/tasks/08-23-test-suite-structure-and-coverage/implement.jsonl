@@ -1,0 +1,6 @@
+{"file":".trellis/spec/llmusage/backend/index.md","reason":"Routes implementation to the current llmusage backend contracts and validation gate."}
+{"file":".trellis/spec/llmusage/backend/source-sync-contracts.md","reason":"Defines per-source lifecycle, recent-window, cursor, cancellation, privacy and shared validation requirements."}
+{"file":".trellis/spec/llmusage/backend/token-accounting-contracts.md","reason":"Defines parserless preservation, rebuild safety, accounting parity and required integration coverage."}
+{"file":".trellis/spec/llmusage/backend/report-cli-contracts.md","reason":"Defines report CLI seams and active test-path contracts affected by the folder split."}
+{"file":".trellis/spec/llmusage/backend/ci-toolchain-contracts.md","reason":"Defines locked all-features tests, architecture target and shared CI command requirements."}
+{"file":".trellis/tasks/08-23-test-suite-structure-and-coverage/research/coverage-matrix.md","reason":"Records the 999-test baseline, agreed seams, proven gaps, non-duplication decisions and active path references."}

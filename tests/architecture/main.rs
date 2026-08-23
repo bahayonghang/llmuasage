@@ -336,7 +336,7 @@ fn remote_layer_does_not_depend_on_commands() {
 
 #[test]
 fn fixtures_cover_supported_rust_path_forms() {
-    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/architecture");
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/architecture/fixtures");
     let cases = [
         ("use_dependency.rs", "crate::commands::sync"),
         ("fully_qualified.rs", "crate::commands::sync::run_once"),

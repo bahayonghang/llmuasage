@@ -478,7 +478,7 @@ let source = request.source_kind();
 - Codex tests: 10 MiB non-`token_count` -> skipped + later rows parse;
   complete `token_count` prefix padded with whitespace -> event and zero
   issues; unusable `token_count` prefix -> oversized + later rows parse.
-- Per-source partial-tail/append tests plus `tests/sync_regression.rs` for
+- Per-source partial-tail/append tests plus `tests/sync/sources/` for
   rewrite, retry, idempotency, and stored totals.
 - Sync-summary, doctor, and source-status tests covering four-class counters,
   warning color only for faults, CLI samples without `path_hash`/record text

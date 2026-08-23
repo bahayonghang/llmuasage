@@ -1,0 +1,5 @@
+{"file":".trellis/spec/llmusage/backend/source-sync-contracts.md","reason":"Verify real-source recent windows, cursor/high-water immutability, privacy and lifecycle coverage."}
+{"file":".trellis/spec/llmusage/backend/token-accounting-contracts.md","reason":"Verify successful rebuild preserves parserless rows and accounting boundaries remain unchanged."}
+{"file":".trellis/spec/llmusage/backend/report-cli-contracts.md","reason":"Verify CLI test seams and focused commands remain valid after reorganization."}
+{"file":".trellis/spec/llmusage/backend/ci-toolchain-contracts.md","reason":"Verify target discovery, architecture target compatibility and the full locked CI ladder."}
+{"file":".trellis/tasks/08-23-test-suite-structure-and-coverage/research/coverage-matrix.md","reason":"Audit old-test conservation, gap traceability, seam discipline and explicitly deferred coverage claims."}

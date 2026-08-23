@@ -1,6 +1,6 @@
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use llmusage::{
     app::AppContext,
     commands::sync::{EmitShardOptions, emit_shards_to},
@@ -76,7 +76,7 @@ async fn emit_shards_cli_leaves_user_db_counts_and_lock_unchanged() -> Result<()
 
     let zcode_home = temp.path().join("zcode-empty");
     std::fs::create_dir_all(&zcode_home)?;
-    let output = Command::new(env!("CARGO_BIN_EXE_llmusage"))
+    let output = crate::test_process::llmusage_command()
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .args([
             "--home",
@@ -90,7 +90,8 @@ async fn emit_shards_cli_leaves_user_db_counts_and_lock_unchanged() -> Result<()
         .env("ZCODE_HOME", &zcode_home)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .output()?;
+        .output()
+        .context("spawn llmusage emit-shards subprocess")?;
     assert!(
         output.status.success(),
         "stderr={} stdout={}",
