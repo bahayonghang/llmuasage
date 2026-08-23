@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "行为事实提交与重放的既有契约"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "行为事实提交与重放的既有契约"}
+{"file": ".trellis/spec/llmusage/backend/dashboard-performance-contracts.md", "reason": "行为面板的查询与载荷约束"}
