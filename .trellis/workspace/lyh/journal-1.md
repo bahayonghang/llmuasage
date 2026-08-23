@@ -1856,3 +1856,24 @@ Grok 解析器改为读取 turn_completed.usage，趋势来源表展示完整占
 ### Next Steps
 
 - 如需发布，从 dev 开 PR 到 main。
+
+
+## Session 62: 重设计 Agent 徽章与侧栏标题
+
+**Date**: 2026-08-23
+**Task**: 重设计 Agent 徽章与侧栏标题
+**Branch**: `dev`
+
+### Summary
+
+引入十项官方 Agent SVG 与本地 fallback，建立注册表驱动的 live/snapshot 徽章目录和 SVG 安全归因契约，优化 Hero 来源统计及侧栏分组标题；完整 just ci、15 张视觉矩阵与独立 Trellis 检查通过。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8ee7670` | (see git log) |
+
+### Status
+
+[OK] **Completed**
