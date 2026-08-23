@@ -1,0 +1,44 @@
+=== pi: C:\Users\lyh/.pi/agent/sessions ===
+  files: 0
+  files_nested: 0
+  usage_records: 0
+  cost_present: 0
+  cost_positive: 0
+  cost_total: 0.0
+  reasoning_records: 0
+  reasoning_gt_output: 0
+  total_matches_channel_sum: 0
+  total_mismatch: 0
+  tool_call_blocks: 0
+  tool_args_object: 0
+  tool_args_string: 0
+  tool_args_other: 0
+  retry_records: 0
+  session_headers: 0
+  session_headers_with_cwd: 0
+  child_usage_records: 0
+  providers: {}
+  models: {}
+  tools: {}
+=== omp: C:\Users\lyh/.omp/agent/sessions ===
+  files: 28
+  files_nested: 9
+  usage_records: 1198
+  cost_present: 1198
+  cost_positive: 118
+  cost_total: 0.441788
+  reasoning_records: 182
+  reasoning_gt_output: 0
+  total_matches_channel_sum: 1198
+  total_mismatch: 0
+  tool_call_blocks: 1449
+  tool_args_object: 1449
+  tool_args_string: 0
+  tool_args_other: 0
+  retry_records: 3
+  session_headers: 28
+  session_headers_with_cwd: 28
+  child_usage_records: 0
+  providers: {'openai-codex': 8, 'deepseek': 115, 'xai-oauth': 86, 'openrouter': 989}
+  models: {'codex-auto-review': 1, 'deepseek-v4-flash': 115, 'gpt-5.5': 7, 'grok-4.6': 86, 'stealth/ox-alpha': 989}
+  tools: {'bash': 617, 'read': 309, 'edit': 146, 'write': 120, 'hub': 66, 'grep': 59, 'eval': 40, 'todo': 37, 'glob': 25, 'task': 10, 'yield': 9, 'web_search': 5, 'todo_write': 2, 'find': 2, 'goal': 1, 'ask': 1}

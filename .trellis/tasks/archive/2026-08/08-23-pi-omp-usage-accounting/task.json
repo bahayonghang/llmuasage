@@ -1,0 +1,31 @@
+{
+  "id": "pi-omp-usage-accounting",
+  "name": "pi-omp-usage-accounting",
+  "title": "补全 Pi 与 Oh My Pi 用量统计",
+  "description": "把 Pi/Oh My Pi 从单一合并源升级为可分辨、可定价、带项目与行为维度的统计源",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-08-23",
+  "completedAt": "2026-08-23",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-23-omp-source-split",
+    "08-23-pi-event-dimensions",
+    "08-23-pi-source-cost",
+    "08-23-pi-behavior-signals"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
