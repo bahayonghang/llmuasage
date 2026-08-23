@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "新增源与重建触发的既有契约"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "新增源与重建触发的既有契约"}
+{"file": ".trellis/spec/llmusage/backend/write-fencing-contracts.md", "reason": "新增源与重建触发的既有契约"}
+{"file": "docs/agents/passive-parser-onboarding.md", "reason": "新增被动源的接入流程"}
+{"file": "docs/agents/domain.md", "reason": "源与事件的领域术语"}
