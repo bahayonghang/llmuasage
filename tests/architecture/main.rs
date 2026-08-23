@@ -6,8 +6,8 @@ use std::{
 
 use proc_macro2::Span;
 use syn::{
-    ItemExternCrate, ItemImpl, ItemMod, ItemUse, Path as SynPath, Type, UseTree, spanned::Spanned,
-    visit::Visit,
+    ImplItem, Item, ItemExternCrate, ItemImpl, ItemMod, ItemUse, Path as SynPath, Type, UseTree,
+    spanned::Spanned, visit::Visit,
 };
 use walkdir::WalkDir;
 
@@ -244,6 +244,125 @@ fn resolve_path(
 
 fn is_commands_dependency(segments: &[String]) -> bool {
     matches!(segments, [root, layer, ..] if root == "crate" && layer == "commands")
+}
+
+fn is_query_forbidden_dependency(segments: &[String]) -> bool {
+    matches!(segments, [root, layer, ..]
+        if root == "crate" && matches!(layer.as_str(), "commands" | "web" | "tui"))
+}
+
+fn expected_query_type_owner(name: &str) -> Option<&'static str> {
+    match name {
+        "Dashboard" => Some("mod.rs"),
+        "OverviewPayload" | "TokenSummary" => Some("overview.rs"),
+        "ModelBreakdown" | "SourceBreakdown" | "HostBreakdown" | "ProjectBreakdown" => {
+            Some("breakdowns.rs")
+        }
+        "ActivityPayload" => Some("activity.rs"),
+        "ToolsPayload" => Some("tools.rs"),
+        "OptimizePayload" => Some("optimize.rs"),
+        "ModelComparePayload" => Some("comparison.rs"),
+        "DiagnosticsPayload" | "SyncCommandCenterPayload" => Some("diagnostics.rs"),
+        "DashboardSnapshot" | "DashboardCoreSnapshot" | "DashboardInteractiveSnapshot" => {
+            Some("snapshot.rs")
+        }
+        _ => None,
+    }
+}
+
+fn expected_query_method_owner(name: &str) -> Option<&'static str> {
+    match name {
+        "open" | "open_with_busy_timeout" => Some("mod.rs"),
+        "overview" | "trends" | "trends_daily" | "trends_hourly" | "trends_monthly" => {
+            Some("overview.rs")
+        }
+        "model_breakdown" | "source_breakdown" | "host_breakdown" | "project_breakdown"
+        | "cost_breakdown" | "context_pressure" => Some("breakdowns.rs"),
+        "activity_breakdown" => Some("activity.rs"),
+        "tool_breakdown" => Some("tools.rs"),
+        "optimize" | "zombie_report" => Some("optimize.rs"),
+        "compare_models" | "model_compare" => Some("comparison.rs"),
+        "diagnostics" | "health" | "health_summary" | "sync_command_center" => {
+            Some("diagnostics.rs")
+        }
+        "snapshot" | "core_snapshot" | "interactive_snapshot" => Some("snapshot.rs"),
+        _ => None,
+    }
+}
+
+fn query_ownership_violations_in(root: &Path) -> Result<Vec<String>, String> {
+    let mut seen = std::collections::HashMap::<String, Vec<String>>::new();
+    let mut violations = Vec::new();
+    for entry in WalkDir::new(root) {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if !entry.file_type().is_file()
+            || entry.path().extension().and_then(|value| value.to_str()) != Some("rs")
+        {
+            continue;
+        }
+        let file_name = entry
+            .path()
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| format!("non-UTF8 query path: {}", entry.path().display()))?;
+        let source = std::fs::read_to_string(entry.path())
+            .map_err(|error| format!("read {}: {error}", entry.path().display()))?;
+        let syntax = syn::parse_file(&source)
+            .map_err(|error| format!("parse {}: {error}", entry.path().display()))?;
+        for item in syntax.items {
+            if let Item::Struct(item) = &item
+                && let Some(expected) = expected_query_type_owner(&item.ident.to_string())
+            {
+                let key = format!("type {}", item.ident);
+                seen.entry(key.clone())
+                    .or_default()
+                    .push(file_name.to_string());
+                if file_name != expected {
+                    violations.push(format!("{key} belongs in {expected}, found in {file_name}"));
+                }
+            }
+            let Item::Impl(item) = item else {
+                continue;
+            };
+            let Type::Path(self_ty) = item.self_ty.as_ref() else {
+                continue;
+            };
+            if self_ty
+                .path
+                .segments
+                .last()
+                .map(|segment| segment.ident.to_string())
+                != Some("Dashboard".to_string())
+            {
+                continue;
+            }
+            for impl_item in item.items {
+                let ImplItem::Fn(method) = impl_item else {
+                    continue;
+                };
+                let Some(expected) = expected_query_method_owner(&method.sig.ident.to_string())
+                else {
+                    continue;
+                };
+                let key = format!("method {}", method.sig.ident);
+                seen.entry(key.clone())
+                    .or_default()
+                    .push(file_name.to_string());
+                if file_name != expected {
+                    violations.push(format!("{key} belongs in {expected}, found in {file_name}"));
+                }
+            }
+        }
+    }
+    for (symbol, owners) in seen {
+        if owners.len() != 1 {
+            violations.push(format!(
+                "{symbol} has {} implementations: {owners:?}",
+                owners.len()
+            ));
+        }
+    }
+    Ok(violations)
 }
 
 fn is_command_sync_dependency(segments: &[String]) -> bool {
@@ -554,6 +673,57 @@ fn remote_layer_does_not_depend_on_commands() {
 }
 
 #[test]
+fn query_layer_does_not_depend_on_commands_web_or_tui() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/query");
+    let violations = violations_in(&root, &["crate", "query"], is_query_forbidden_dependency)
+        .expect("parse query layer");
+    assert!(
+        violations.is_empty(),
+        "ARCH-005 query dependency violations:\n{}",
+        violations
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+#[test]
+fn query_vertical_module_ownership_is_canonical() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/query");
+    let violations = query_ownership_violations_in(&root).expect("scan query ownership");
+    assert!(
+        violations.is_empty(),
+        "ARCH-006 query ownership violations:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
+fn query_vertical_modules_stay_within_navigation_budgets() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/query");
+    for (file, limit) in [
+        ("mod.rs", 1_200_usize),
+        ("overview.rs", 1_000),
+        ("breakdowns.rs", 1_000),
+        ("activity.rs", 1_000),
+        ("tools.rs", 1_000),
+        ("optimize.rs", 1_000),
+        ("comparison.rs", 1_000),
+        ("diagnostics.rs", 1_000),
+        ("snapshot.rs", 1_000),
+    ] {
+        let source = std::fs::read_to_string(root.join(file))
+            .unwrap_or_else(|error| panic!("read query module {file}: {error}"));
+        let lines = source.lines().count();
+        assert!(
+            lines <= limit,
+            "query module {file} has {lines} production lines; limit is {limit}"
+        );
+    }
+}
+
+#[test]
 fn non_command_layers_do_not_depend_on_command_sync() {
     let violations = command_sync_violations_outside_commands().expect("scan non-command layers");
     assert!(
@@ -654,4 +824,42 @@ fn ownership_fixtures_cover_non_adapter_dependencies_and_sync_impls() {
             "fixture {name}: {violations:?}"
         );
     }
+}
+
+#[test]
+fn query_architecture_fixtures_cover_edges_and_canonical_ownership() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/architecture/fixtures");
+    for (name, expected) in [
+        ("query_forbidden_commands.rs", "crate::commands"),
+        ("query_forbidden_web.rs", "crate::web"),
+        ("query_forbidden_tui.rs", "crate::tui"),
+    ] {
+        let violations = violations_in(
+            &fixtures.join(name),
+            &["crate", "query"],
+            is_query_forbidden_dependency,
+        )
+        .expect("parse query edge fixture");
+        assert!(
+            violations
+                .iter()
+                .any(|violation| violation.target == expected),
+            "fixture {name}: {violations:?}"
+        );
+    }
+
+    let valid = query_ownership_violations_in(&fixtures.join("query_valid"))
+        .expect("parse valid query ownership fixture");
+    assert!(valid.is_empty(), "valid query ownership fixture: {valid:?}");
+    let invalid = query_ownership_violations_in(&fixtures.join("query_invalid"))
+        .expect("parse invalid query ownership fixture");
+    assert!(
+        invalid
+            .iter()
+            .any(|violation| violation.contains("type OverviewPayload"))
+            && invalid
+                .iter()
+                .any(|violation| violation.contains("method snapshot")),
+        "invalid query ownership fixture: {invalid:?}"
+    );
 }

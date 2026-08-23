@@ -801,3 +801,39 @@ one filtered event projection -> canonical accumulator
 Also wrong: force the all-range covering index on a bounded date query, accept
 an index from plan evidence alone, or treat deleting a v24 index as a schema
 rollback.
+
+## Query Vertical Module Ownership
+
+### Scenario: Keep the Dashboard facade shallow and feature ownership canonical
+
+- `query/mod.rs` owns module declarations, compatibility re-exports,
+  `Dashboard` construction, and only genuinely cross-feature scalar/filter
+  helpers. Its production section must remain at or below 1,200 lines.
+- Overview/time-series, ranked breakdowns/context, activity, tools, optimize,
+  model comparison, diagnostics/sync center, and snapshot composition each own
+  their DTOs, SQL, feature-local helpers, and implementation methods in the
+  correspondingly named module. Each extracted feature module must remain at or
+  below 1,000 production lines.
+- Public paths remain compatibility re-exports from `query/mod.rs`; a re-export
+  never duplicates an implementation or creates a second DTO definition.
+- Only `snapshot.rs` owns full/core/interactive composition. Feature modules may
+  share the single `Dashboard` connection through the facade, but must not own
+  another connection, clone the store into a query service, or depend on
+  `commands`, `web`, or `tui`.
+- Cross-feature helpers stay at the narrowest common ancestor. Feature-local
+  helpers must move with their owner instead of accumulating in `query/mod.rs`
+  or a generic `common`/`service` module.
+- Compatibility and cross-feature regression tests may remain in the logical
+  `query::tests` module, but their source is partitioned by feature with
+  `include!` so test leaf names and discovery remain stable.
+
+Required checks:
+
+- The architecture target rejects query-to-commands/web/tui dependencies,
+  wrong DTO/method ownership, and duplicate canonical definitions with positive
+  and negative fixtures.
+- Before/after test leaf count and sorted-name hash are identical except for
+  explicitly added architecture or measurement fixtures.
+- A fixed dashboard fixture records full/core/interactive statement counts and
+  normalized payload hashes before and after a mechanical move; both must be
+  byte-identical. Structural moves do not authorize SQL or payload changes.
