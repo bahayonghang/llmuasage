@@ -1,7 +1,8 @@
 use anyhow::Result;
+use chrono::NaiveDate;
 use llmusage::{
-    AppPaths, Dashboard, QueryFilter, TopSessionsQuery, TopSessionsSort, models::SourceKind,
-    store::Store,
+    AppPaths, Dashboard, QueryFilter, ReportTimezone, TopSessionsQuery, TopSessionsSort,
+    models::SourceKind, store::Store,
 };
 use tempfile::TempDir;
 
@@ -112,6 +113,56 @@ fn seed(store: &Store) -> Result<()> {
             ],
         )?;
     }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_edge_event(
+    store: &Store,
+    event_key: &str,
+    source: &str,
+    model: &str,
+    event_at: &str,
+    session_id: Option<&str>,
+    source_path_hash: Option<&str>,
+    session_label: Option<&str>,
+    project_hash: Option<&str>,
+    project_label: Option<&str>,
+    host_id: &str,
+    total_tokens: i64,
+    output_tokens: i64,
+    reasoning_output_tokens: i64,
+    cost_usd: f64,
+) -> Result<()> {
+    store.open_connection()?.execute(
+        r#"
+        INSERT INTO usage_event(
+            event_key, source, model, event_at, hour_start,
+            input_tokens, cache_creation_tokens, cache_read_tokens,
+            output_tokens, reasoning_output_tokens, total_tokens,
+            project_hash, project_label, path_hash, session_id, session_label,
+            source_path_hash, host_id, created_at, cost_with_cache_usd,
+            cost_without_cache_usd, pricing_status
+        ) VALUES (?1, ?2, ?3, ?4, ?4, 0, 0, 0, ?12, ?13, ?11,
+                  ?8, ?9, ?1, ?5, ?7, ?6, ?10, ?4, ?14, ?14, 'static')
+        "#,
+        rusqlite::params![
+            event_key,
+            source,
+            model,
+            event_at,
+            session_id,
+            source_path_hash,
+            session_label,
+            project_hash,
+            project_label,
+            host_id,
+            total_tokens,
+            output_tokens,
+            reasoning_output_tokens,
+            cost_usd,
+        ],
+    )?;
     Ok(())
 }
 
@@ -226,5 +277,160 @@ fn duration_sort_does_not_drop_active_sessions_outside_a_span_prefilter() -> Res
     })?;
     assert_eq!(rows[0].session_id, "codex:active");
     assert_eq!(rows[0].active_minutes, 30);
+    Ok(())
+}
+
+#[test]
+fn top_sessions_keeps_complete_serialized_row_and_identity_fallbacks() -> Result<()> {
+    let (_temp, store) = fixture()?;
+    for event in [
+        (
+            "explicit-2",
+            "codex",
+            "gpt-a",
+            "2026-05-02T00:30:00Z",
+            Some("  explicit  "),
+            Some("ignored-path"),
+            Some("Zulu"),
+            Some("project-a"),
+            Some("Project Z"),
+            "host-a",
+            7,
+            2,
+            3,
+            1.0,
+        ),
+        (
+            "explicit-1",
+            "codex",
+            "gpt-a",
+            "2026-05-02T00:00:00Z",
+            Some("explicit"),
+            None,
+            Some("Alpha"),
+            Some("project-a"),
+            Some("Project A"),
+            "host-a",
+            5,
+            1,
+            1,
+            1.0e16,
+        ),
+        (
+            "explicit-3",
+            "codex",
+            "gpt-a",
+            "2026-05-02T01:31:00Z",
+            Some("explicit"),
+            None,
+            None,
+            Some("project-a"),
+            None,
+            "host-a",
+            9,
+            4,
+            0,
+            -1.0e16,
+        ),
+        (
+            "path-event",
+            "claude",
+            "gpt-b",
+            "2026-05-03T00:00:00Z",
+            Some("  "),
+            Some("path-fallback"),
+            Some("Path label"),
+            None,
+            None,
+            "host-b",
+            2,
+            1,
+            0,
+            0.0,
+        ),
+        (
+            "codex:thread-x:turn-y:event-1",
+            "codex",
+            "gpt-c",
+            "2026-05-04T00:00:00Z",
+            None,
+            None,
+            None,
+            None,
+            None,
+            "host-c",
+            3,
+            1,
+            0,
+            0.0,
+        ),
+        (
+            "opencode:event:fallback",
+            "opencode",
+            "gpt-d",
+            "2026-05-05T00:00:00Z",
+            None,
+            None,
+            None,
+            None,
+            None,
+            "host-d",
+            4,
+            1,
+            0,
+            0.0,
+        ),
+    ] {
+        insert_edge_event(
+            &store, event.0, event.1, event.2, event.3, event.4, event.5, event.6, event.7,
+            event.8, event.9, event.10, event.11, event.12, event.13,
+        )?;
+    }
+
+    let dashboard = Dashboard::open(&store)?;
+    let filter = QueryFilter {
+        source: Some(SourceKind::Codex),
+        model: Some("gpt-a".to_string()),
+        project_hash: Some("project-a".to_string()),
+        host_id: Some("host-a".to_string()),
+        since: Some(NaiveDate::from_ymd_opt(2026, 5, 2).unwrap()),
+        until: Some(NaiveDate::from_ymd_opt(2026, 5, 2).unwrap()),
+        timezone: ReportTimezone::Utc,
+    };
+    for sort in [
+        TopSessionsSort::Tokens,
+        TopSessionsSort::Duration,
+        TopSessionsSort::Cost,
+    ] {
+        let rows = dashboard.top_sessions(&TopSessionsQuery {
+            filter: filter.clone(),
+            sort,
+            limit: 50,
+        })?;
+        assert_eq!(
+            serde_json::to_string(&rows)?,
+            concat!(
+                "[{\"session_id\":\"codex:explicit\",\"session_label\":\"Alpha\",",
+                "\"project_label\":\"Project A\",\"source\":\"codex\",",
+                "\"first_event_at\":\"2026-05-02T00:00:00Z\",",
+                "\"last_event_at\":\"2026-05-02T01:31:00Z\",",
+                "\"total_tokens\":21,\"output_tokens\":11,\"cost_usd\":1.0,",
+                "\"span_minutes\":91,\"active_minutes\":30,\"event_count\":3}]"
+            ),
+            "complete serialized row changed for sort={sort:?}"
+        );
+    }
+
+    let ids = dashboard
+        .top_sessions(&TopSessionsQuery {
+            limit: 50,
+            ..TopSessionsQuery::default()
+        })?
+        .into_iter()
+        .map(|row| row.session_id)
+        .collect::<Vec<_>>();
+    assert!(ids.contains(&"claude:path-fallback".to_string()));
+    assert!(ids.contains(&"codex:thread-x:turn-y".to_string()));
+    assert!(ids.contains(&"opencode:event:fallback".to_string()));
     Ok(())
 }

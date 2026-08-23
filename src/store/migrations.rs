@@ -107,6 +107,11 @@ pub const MIGRATIONS: &[(u32, &str, MigrationFn)] = &[
         m_022_add_zcode_skip_watermark,
     ),
     (23, "add_host_dimension", m_023_add_host_dimension),
+    (
+        24,
+        "optimize_top_sessions_identity_order",
+        m_024_optimize_top_sessions_identity_order,
+    ),
 ];
 
 /// Returns the newest schema version known to this binary.
@@ -1191,6 +1196,67 @@ fn m_023_add_host_dimension(tx: &Transaction<'_>) -> Result<()> {
             "#,
         )?;
     }
+    Ok(())
+}
+
+const TOP_SESSIONS_COVER_INDEX: &str = "idx_usage_event_top_sessions_cover";
+const TOP_SESSIONS_COVER_INDEX_SQL: &str = r#"
+    CREATE INDEX idx_usage_event_top_sessions_cover ON usage_event(
+        (CASE
+            WHEN trim(COALESCE(session_id, '')) <> ''
+                THEN source || ':' || trim(session_id)
+            WHEN source_path_hash IS NOT NULL
+                THEN source || ':' || source_path_hash
+            WHEN source IN ('codex', 'claude')
+                AND instr(substr(event_key, instr(event_key, ':') + 1), ':') > 0
+                AND instr(
+                    substr(
+                        substr(event_key, instr(event_key, ':') + 1),
+                        instr(substr(event_key, instr(event_key, ':') + 1), ':') + 1
+                    ),
+                    ':'
+                ) > 0
+                THEN source || ':' || substr(
+                    substr(event_key, instr(event_key, ':') + 1),
+                    1,
+                    instr(substr(event_key, instr(event_key, ':') + 1), ':')
+                        + instr(
+                            substr(
+                                substr(event_key, instr(event_key, ':') + 1),
+                                instr(substr(event_key, instr(event_key, ':') + 1), ':') + 1
+                            ),
+                            ':'
+                        ) - 1
+                )
+            ELSE event_key
+        END),
+        event_at,
+        session_label,
+        project_label,
+        source,
+        total_tokens,
+        output_tokens,
+        reasoning_output_tokens,
+        cost_with_cache_usd,
+        model,
+        project_hash,
+        host_id
+    );
+"#;
+
+/// Migration v24 — cover the exact event projection used by Top Sessions.
+///
+/// Replacing an existing same-name index is intentional: some v23 databases
+/// may contain an experimental or drifted definition. SQLite DDL is
+/// transactional, so the previous index is restored if creating the canonical
+/// definition fails.
+fn m_024_optimize_top_sessions_identity_order(tx: &Transaction<'_>) -> Result<()> {
+    if !table_exists(tx, "usage_event")? {
+        return Ok(());
+    }
+    tx.execute_batch(&format!(
+        "DROP INDEX IF EXISTS {TOP_SESSIONS_COVER_INDEX};\n{TOP_SESSIONS_COVER_INDEX_SQL}"
+    ))?;
     Ok(())
 }
 
@@ -2358,6 +2424,151 @@ mod tests {
         Ok(())
     }
 
+    fn normalize_index_sql(sql: &str) -> String {
+        sql.split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .trim_end_matches(';')
+            .to_string()
+    }
+
+    fn top_sessions_cover_index_sql(conn: &Connection) -> anyhow::Result<String> {
+        Ok(conn.query_row(
+            "SELECT sql FROM sqlite_schema WHERE type = 'index' AND name = ?1",
+            [TOP_SESSIONS_COVER_INDEX],
+            |row| row.get(0),
+        )?)
+    }
+
+    fn assert_top_sessions_cover_index(conn: &Connection) -> anyhow::Result<()> {
+        assert_eq!(
+            normalize_index_sql(&top_sessions_cover_index_sql(conn)?),
+            normalize_index_sql(TOP_SESSIONS_COVER_INDEX_SQL),
+        );
+
+        let key_columns = conn
+            .prepare(&format!("PRAGMA index_xinfo({TOP_SESSIONS_COVER_INDEX})"))?
+            .query_map([], |row| {
+                Ok((row.get::<_, Option<String>>(2)?, row.get::<_, bool>(5)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .filter_map(|(name, key)| key.then_some(name))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            key_columns,
+            vec![
+                None,
+                Some("event_at".to_string()),
+                Some("session_label".to_string()),
+                Some("project_label".to_string()),
+                Some("source".to_string()),
+                Some("total_tokens".to_string()),
+                Some("output_tokens".to_string()),
+                Some("reasoning_output_tokens".to_string()),
+                Some("cost_with_cache_usd".to_string()),
+                Some("model".to_string()),
+                Some("project_hash".to_string()),
+                Some("host_id".to_string()),
+            ]
+        );
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'index' AND name GLOB 'idx_usage_event_top_sessions*'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(count, 1, "v24 must add exactly one Top Sessions index");
+        Ok(())
+    }
+
+    fn fail_after_top_sessions_cover_index(tx: &Transaction<'_>) -> Result<()> {
+        m_024_optimize_top_sessions_identity_order(tx)?;
+        Err(std::io::Error::other("forced v24 migration failure").into())
+    }
+
+    #[test]
+    fn migration_v24_fresh_bootstrap_has_exact_top_sessions_index() -> anyhow::Result<()> {
+        let mut fresh = Connection::open_in_memory()?;
+        run_migrations_for_test(&mut fresh, MIGRATIONS)?;
+        assert_eq!(read_schema_version(&fresh)?, 24);
+        assert_top_sessions_cover_index(&fresh)?;
+        Ok(())
+    }
+
+    #[test]
+    fn migration_v24_upgrades_v23_with_exact_top_sessions_index() -> anyhow::Result<()> {
+        let mut upgraded = Connection::open_in_memory()?;
+        run_migrations_for_test(&mut upgraded, &MIGRATIONS[..23])?;
+        assert_eq!(read_schema_version(&upgraded)?, 23);
+        assert!(top_sessions_cover_index_sql(&upgraded).is_err());
+
+        run_migrations_for_test(&mut upgraded, &MIGRATIONS[..24])?;
+        assert_eq!(read_schema_version(&upgraded)?, 24);
+        assert_top_sessions_cover_index(&upgraded)?;
+        Ok(())
+    }
+
+    #[test]
+    fn migration_v24_repairs_drifted_v23_same_name_index() -> anyhow::Result<()> {
+        let mut drifted = Connection::open_in_memory()?;
+        run_migrations_for_test(&mut drifted, &MIGRATIONS[..23])?;
+        drifted.execute_batch(
+            "CREATE INDEX idx_usage_event_top_sessions_cover ON usage_event(event_at, source);",
+        )?;
+        assert_ne!(
+            normalize_index_sql(&top_sessions_cover_index_sql(&drifted)?),
+            normalize_index_sql(TOP_SESSIONS_COVER_INDEX_SQL),
+        );
+
+        run_migrations_for_test(&mut drifted, &MIGRATIONS[..24])?;
+        assert_eq!(read_schema_version(&drifted)?, 24);
+        assert_top_sessions_cover_index(&drifted)?;
+        Ok(())
+    }
+
+    #[test]
+    fn migration_v24_replaces_already_existing_exact_v23_index() -> anyhow::Result<()> {
+        let mut upgraded = Connection::open_in_memory()?;
+        run_migrations_for_test(&mut upgraded, &MIGRATIONS[..23])?;
+        upgraded.execute_batch(TOP_SESSIONS_COVER_INDEX_SQL)?;
+        assert_top_sessions_cover_index(&upgraded)?;
+
+        run_migrations_for_test(&mut upgraded, &MIGRATIONS[..24])?;
+        assert_eq!(read_schema_version(&upgraded)?, 24);
+        assert_top_sessions_cover_index(&upgraded)?;
+        Ok(())
+    }
+
+    #[test]
+    fn migration_v24_failure_rolls_back_schema_and_previous_index() -> anyhow::Result<()> {
+        let mut conn = Connection::open_in_memory()?;
+        run_migrations_for_test(&mut conn, &MIGRATIONS[..23])?;
+        const DRIFTED_SQL: &str =
+            "CREATE INDEX idx_usage_event_top_sessions_cover ON usage_event(event_at, source);";
+        conn.execute_batch(DRIFTED_SQL)?;
+
+        let err = run_migrations_for_test(
+            &mut conn,
+            &[(
+                24,
+                "forced_top_sessions_failure",
+                fail_after_top_sessions_cover_index,
+            )],
+        )
+        .expect_err("forced v24 migration must fail");
+        assert!(matches!(
+            err,
+            LlmusageError::MigrationFailed { version: 24, .. }
+        ));
+        assert_eq!(read_schema_version(&conn)?, 23);
+        assert_eq!(
+            normalize_index_sql(&top_sessions_cover_index_sql(&conn)?),
+            normalize_index_sql(DRIFTED_SQL),
+            "failed transactional DDL must restore the previous index"
+        );
+        Ok(())
+    }
+
     #[test]
     fn migration_v23_in_memory_does_not_require_backup_file() -> anyhow::Result<()> {
         let mut conn = Connection::open_in_memory()?;
@@ -2385,7 +2596,7 @@ mod tests {
         let store = Store::new(&paths)?;
         store.bootstrap()?;
         let live = store.open_connection()?;
-        assert_eq!(read_schema_version(&live)?, 23);
+        assert_eq!(read_schema_version(&live)?, latest_schema_version());
 
         let backup_path = paths.backups_dir.join("llmusage.db.pre-0.23-host");
         assert!(

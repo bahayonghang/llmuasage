@@ -111,12 +111,15 @@ jobs:
             }
           }
 
-      - name: Check dashboard benchmark script
-        run: node --check scripts/benchmark-dashboard-range.mjs
+      - name: Check dashboard benchmark scripts
+        run: |
+          node --check scripts/benchmark-dashboard-range.mjs
+          node --check scripts/benchmark-top-sessions.mjs
 
-      - name: Dashboard JS tests (all 4 suites)
+      - name: Dashboard JS tests
         run: |
           node --test `
+            scripts/tests/benchmark-top-sessions.test.mjs `
             scripts/tests/dashboard-fetch.test.mjs `
             scripts/tests/dashboard-bootstrap-watchdog.test.mjs `
             scripts/tests/dashboard-load-state.test.mjs `

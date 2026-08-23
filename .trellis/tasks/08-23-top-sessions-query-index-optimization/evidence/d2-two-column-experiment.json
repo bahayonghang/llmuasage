@@ -1,0 +1,20 @@
+{
+  "backup_seconds": 2.684,
+  "source_metadata_unchanged": true,
+  "pre_bytes": 1160073216,
+  "post_bytes": 1160073216,
+  "file_bytes_delta": 0,
+  "index_allocated_pages": 4946,
+  "index_allocated_bytes": 20258816,
+  "index_ratio": 0.017463,
+  "page_size": 4096,
+  "pre_pages": 283221,
+  "post_pages": 283221,
+  "build_seconds": 0.599,
+  "integrity_check": "ok",
+  "index_name": "idx_usage_event_top_sessions_identity_event",
+  "index_sql": "CREATE INDEX idx_usage_event_top_sessions_identity_event ON usage_event((CASE WHEN trim(COALESCE(session_id, '')) <> '' THEN source || ':' || trim(session_id) WHEN source_path_hash IS NOT NULL THEN source || ':' || source_path_hash WHEN source IN ('codex', 'claude') AND instr(substr(event_key, instr(event_key, ':') + 1), ':') > 0 AND instr(substr(substr(event_key, instr(event_key, ':') + 1), instr(substr(event_key, instr(event_key, ':') + 1), ':') + 1), ':') > 0 THEN source || ':' || substr(substr(event_key, instr(event_key, ':') + 1), 1, instr(substr(event_key, instr(event_key, ':') + 1), ':') + instr(substr(substr(event_key, instr(event_key, ':') + 1), instr(substr(event_key, instr(event_key, ':') + 1), ':') + 1), ':') - 1) ELSE event_key END), event_at)",
+  "projection_plan": [
+    "SCAN e"
+  ]
+}

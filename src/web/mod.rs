@@ -13,7 +13,7 @@ use anyhow::{Context, Result, bail};
 use axum::{
     Json, Router,
     extract::{ConnectInfo, Path, Query, State},
-    http::{HeaderMap, StatusCode, header},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
@@ -1093,24 +1093,28 @@ async fn api_sessions(
             .and_then(|raw| raw.parse::<u32>().ok())
             .unwrap_or(10),
     };
-    api_json_async(
-        "/api/sessions",
-        load_behavior_api(
-            state,
-            "sessions",
-            move |dashboard| {
-                Ok(TopSessionsPayload {
-                    support: supported_section(),
-                    rows: dashboard.top_sessions(&query)?,
-                })
-            },
-            |reason| TopSessionsPayload {
-                support: degraded_support(reason),
-                rows: Vec::new(),
-            },
-        ),
+    let query_started = Instant::now();
+    let result = load_behavior_api(
+        state,
+        "sessions",
+        move |dashboard| {
+            Ok(TopSessionsPayload {
+                support: supported_section(),
+                rows: dashboard.top_sessions(&query)?,
+            })
+        },
+        |reason| TopSessionsPayload {
+            support: degraded_support(reason),
+            rows: Vec::new(),
+        },
     )
-    .await
+    .await;
+    let query_ms = query_started.elapsed().as_secs_f64() * 1_000.0;
+    let mut response = api_json("/api/sessions", result);
+    if let Ok(value) = HeaderValue::from_str(&format!("sessions-query;dur={query_ms:.2}")) {
+        response.headers_mut().insert("server-timing", value);
+    }
+    response
 }
 
 async fn api_hour_of_week(
@@ -2082,6 +2086,7 @@ fn parse_bool_query(value: Option<&String>) -> bool {
 #[cfg(test)]
 mod tests {
     use std::{
+        collections::HashMap,
         fs,
         io::{Read, Write},
         net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -2093,8 +2098,10 @@ mod tests {
         time::{Duration, Instant},
     };
 
+    use anyhow::Context;
     use axum::{
         body::to_bytes,
+        extract::{Query, State},
         http::{HeaderMap, HeaderValue, StatusCode, header},
     };
     use chrono::{Duration as ChronoDuration, FixedOffset, SecondsFormat, Utc};
@@ -2117,7 +2124,7 @@ mod tests {
     use super::{
         DiagnosticsCache, LOOPBACK_ONLY_READ_ROUTE_INVENTORY, PUBLIC_READ_ROUTE_INVENTORY,
         WEB_API_TIMEOUT, WEB_BEHAVIOR_API_TIMEOUT, WEB_READ_BUSY_TIMEOUT, WebState, WriteExposure,
-        api_json, asset_manifest, bind_server, live_index_html, load_behavior_api,
+        api_json, api_sessions, asset_manifest, bind_server, live_index_html, load_behavior_api,
         load_diagnostics_cached, load_via_dashboard, load_via_dashboard_with_timeout,
         public_dashboard_filter_from_params, query_timezone, serve, serve_on, server_task_result,
         snapshot_index_html,
@@ -2129,6 +2136,25 @@ mod tests {
         let store = Store::new(&paths)?;
         store.bootstrap()?;
         Ok((temp, store))
+    }
+
+    #[tokio::test]
+    async fn sessions_response_exposes_server_query_timing() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let response = api_sessions(State(WebState::new(store)), Query(HashMap::new())).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let timing = response
+            .headers()
+            .get("server-timing")
+            .and_then(|value| value.to_str().ok())
+            .context("/api/sessions must expose Server-Timing")?;
+        let query_ms = timing
+            .strip_prefix("sessions-query;dur=")
+            .context("unexpected Server-Timing metric")?
+            .parse::<f64>()?;
+        assert!(query_ms.is_finite() && query_ms >= 0.0);
+        Ok(())
     }
 
     #[test]

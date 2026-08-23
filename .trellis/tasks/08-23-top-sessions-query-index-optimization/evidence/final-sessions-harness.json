@@ -1,0 +1,1452 @@
+{
+  "schema_version": "24",
+  "index_name": "idx_usage_event_top_sessions_cover",
+  "commit": "1bee90787dfd-dirty",
+  "binary_sha256": "1C13EE218B67153C3C1C8A0D9ED2D99595E8A6DD13B493B867504DFF81EF0C24",
+  "warmups_per_case": 1,
+  "iterations": 5,
+  "samples": [
+    {
+      "shape": "1d",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 11.15,
+      "query_ms": 8.84,
+      "payload_bytes": 19269
+    },
+    {
+      "shape": "1d",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 11.17,
+      "query_ms": 8.81,
+      "payload_bytes": 19269
+    },
+    {
+      "shape": "1d",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 10.14,
+      "query_ms": 8.39,
+      "payload_bytes": 19269
+    },
+    {
+      "shape": "1d",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 11,
+      "query_ms": 9.19,
+      "payload_bytes": 19269
+    },
+    {
+      "shape": "1d",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 10.79,
+      "query_ms": 9.05,
+      "payload_bytes": 19269
+    },
+    {
+      "shape": "1d",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 10.82,
+      "query_ms": 8.89,
+      "payload_bytes": 19187
+    },
+    {
+      "shape": "1d",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 11.8,
+      "query_ms": 9.81,
+      "payload_bytes": 19187
+    },
+    {
+      "shape": "1d",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 12.16,
+      "query_ms": 9.35,
+      "payload_bytes": 19187
+    },
+    {
+      "shape": "1d",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 13.27,
+      "query_ms": 11.39,
+      "payload_bytes": 19187
+    },
+    {
+      "shape": "1d",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 10.47,
+      "query_ms": 9.01,
+      "payload_bytes": 19187
+    },
+    {
+      "shape": "1d",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 10.92,
+      "query_ms": 9.48,
+      "payload_bytes": 18788
+    },
+    {
+      "shape": "1d",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 10.01,
+      "query_ms": 8.62,
+      "payload_bytes": 18788
+    },
+    {
+      "shape": "1d",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 9.03,
+      "query_ms": 7.87,
+      "payload_bytes": 18788
+    },
+    {
+      "shape": "1d",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 9.26,
+      "query_ms": 8.01,
+      "payload_bytes": 18788
+    },
+    {
+      "shape": "1d",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 9.09,
+      "query_ms": 7.79,
+      "payload_bytes": 18788
+    },
+    {
+      "shape": "7d",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 21.15,
+      "query_ms": 19.73,
+      "payload_bytes": 19489
+    },
+    {
+      "shape": "7d",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 21.47,
+      "query_ms": 20.06,
+      "payload_bytes": 19489
+    },
+    {
+      "shape": "7d",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 20.68,
+      "query_ms": 19.32,
+      "payload_bytes": 19489
+    },
+    {
+      "shape": "7d",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 20.47,
+      "query_ms": 19.06,
+      "payload_bytes": 19489
+    },
+    {
+      "shape": "7d",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 20.48,
+      "query_ms": 19.1,
+      "payload_bytes": 19489
+    },
+    {
+      "shape": "7d",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 20.89,
+      "query_ms": 19.44,
+      "payload_bytes": 19336
+    },
+    {
+      "shape": "7d",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 21.73,
+      "query_ms": 20.37,
+      "payload_bytes": 19336
+    },
+    {
+      "shape": "7d",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 21.39,
+      "query_ms": 20.02,
+      "payload_bytes": 19336
+    },
+    {
+      "shape": "7d",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 21.37,
+      "query_ms": 19.98,
+      "payload_bytes": 19336
+    },
+    {
+      "shape": "7d",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 21.24,
+      "query_ms": 19.78,
+      "payload_bytes": 19336
+    },
+    {
+      "shape": "7d",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 21.38,
+      "query_ms": 19.62,
+      "payload_bytes": 20264
+    },
+    {
+      "shape": "7d",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 22.65,
+      "query_ms": 21.13,
+      "payload_bytes": 20264
+    },
+    {
+      "shape": "7d",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 23.3,
+      "query_ms": 21.69,
+      "payload_bytes": 20264
+    },
+    {
+      "shape": "7d",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 23.09,
+      "query_ms": 21.59,
+      "payload_bytes": 20264
+    },
+    {
+      "shape": "7d",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 21.6,
+      "query_ms": 20.2,
+      "payload_bytes": 20264
+    },
+    {
+      "shape": "30d",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 232.16,
+      "query_ms": 230.23,
+      "payload_bytes": 20571
+    },
+    {
+      "shape": "30d",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 226.09,
+      "query_ms": 224.26,
+      "payload_bytes": 20571
+    },
+    {
+      "shape": "30d",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 222.65,
+      "query_ms": 220.89,
+      "payload_bytes": 20571
+    },
+    {
+      "shape": "30d",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 233.91,
+      "query_ms": 232.14,
+      "payload_bytes": 20571
+    },
+    {
+      "shape": "30d",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 225.14,
+      "query_ms": 223.27,
+      "payload_bytes": 20571
+    },
+    {
+      "shape": "30d",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 225.94,
+      "query_ms": 223.95,
+      "payload_bytes": 19886
+    },
+    {
+      "shape": "30d",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 225.35,
+      "query_ms": 223.49,
+      "payload_bytes": 19886
+    },
+    {
+      "shape": "30d",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 244.11,
+      "query_ms": 242.43,
+      "payload_bytes": 19886
+    },
+    {
+      "shape": "30d",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 235.41,
+      "query_ms": 233.46,
+      "payload_bytes": 19886
+    },
+    {
+      "shape": "30d",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 232.42,
+      "query_ms": 230.52,
+      "payload_bytes": 19886
+    },
+    {
+      "shape": "30d",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 222.3,
+      "query_ms": 220.42,
+      "payload_bytes": 19756
+    },
+    {
+      "shape": "30d",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 233.99,
+      "query_ms": 232.06,
+      "payload_bytes": 19756
+    },
+    {
+      "shape": "30d",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 225.45,
+      "query_ms": 223.35,
+      "payload_bytes": 19756
+    },
+    {
+      "shape": "30d",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 222.35,
+      "query_ms": 220.48,
+      "payload_bytes": 19756
+    },
+    {
+      "shape": "30d",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 225.42,
+      "query_ms": 223.61,
+      "payload_bytes": 19756
+    },
+    {
+      "shape": "all",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 205.87,
+      "query_ms": 203.57,
+      "payload_bytes": 20554
+    },
+    {
+      "shape": "all",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 199.24,
+      "query_ms": 197,
+      "payload_bytes": 20554
+    },
+    {
+      "shape": "all",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 199.24,
+      "query_ms": 197.13,
+      "payload_bytes": 20554
+    },
+    {
+      "shape": "all",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 196.48,
+      "query_ms": 194.04,
+      "payload_bytes": 20554
+    },
+    {
+      "shape": "all",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 210.99,
+      "query_ms": 208.81,
+      "payload_bytes": 20554
+    },
+    {
+      "shape": "all",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 207.93,
+      "query_ms": 205.72,
+      "payload_bytes": 19287
+    },
+    {
+      "shape": "all",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 206.11,
+      "query_ms": 203.89,
+      "payload_bytes": 19287
+    },
+    {
+      "shape": "all",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 203.6,
+      "query_ms": 201.56,
+      "payload_bytes": 19287
+    },
+    {
+      "shape": "all",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 205.09,
+      "query_ms": 203.19,
+      "payload_bytes": 19287
+    },
+    {
+      "shape": "all",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 206.63,
+      "query_ms": 204.8,
+      "payload_bytes": 19287
+    },
+    {
+      "shape": "all",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 199.32,
+      "query_ms": 197.37,
+      "payload_bytes": 19304
+    },
+    {
+      "shape": "all",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 200.87,
+      "query_ms": 198.31,
+      "payload_bytes": 19304
+    },
+    {
+      "shape": "all",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 202.8,
+      "query_ms": 200.85,
+      "payload_bytes": 19304
+    },
+    {
+      "shape": "all",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 198.28,
+      "query_ms": 196.52,
+      "payload_bytes": 19304
+    },
+    {
+      "shape": "all",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 207.74,
+      "query_ms": 205.92,
+      "payload_bytes": 19304
+    },
+    {
+      "shape": "source",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 180.4,
+      "query_ms": 178.45,
+      "payload_bytes": 21054
+    },
+    {
+      "shape": "source",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 181.03,
+      "query_ms": 178.92,
+      "payload_bytes": 21054
+    },
+    {
+      "shape": "source",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 178.96,
+      "query_ms": 176.48,
+      "payload_bytes": 21054
+    },
+    {
+      "shape": "source",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 181.2,
+      "query_ms": 179.15,
+      "payload_bytes": 21054
+    },
+    {
+      "shape": "source",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 192.57,
+      "query_ms": 190.49,
+      "payload_bytes": 21054
+    },
+    {
+      "shape": "source",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 182.55,
+      "query_ms": 180.36,
+      "payload_bytes": 21044
+    },
+    {
+      "shape": "source",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 184.58,
+      "query_ms": 182.25,
+      "payload_bytes": 21044
+    },
+    {
+      "shape": "source",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 184.12,
+      "query_ms": 182.18,
+      "payload_bytes": 21044
+    },
+    {
+      "shape": "source",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 183.4,
+      "query_ms": 181.32,
+      "payload_bytes": 21044
+    },
+    {
+      "shape": "source",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 191.52,
+      "query_ms": 189.42,
+      "payload_bytes": 21044
+    },
+    {
+      "shape": "source",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 194.05,
+      "query_ms": 192,
+      "payload_bytes": 21087
+    },
+    {
+      "shape": "source",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 184.52,
+      "query_ms": 181.97,
+      "payload_bytes": 21087
+    },
+    {
+      "shape": "source",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 186.08,
+      "query_ms": 184.1,
+      "payload_bytes": 21087
+    },
+    {
+      "shape": "source",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 183.54,
+      "query_ms": 181.76,
+      "payload_bytes": 21087
+    },
+    {
+      "shape": "source",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 188.24,
+      "query_ms": 186.32,
+      "payload_bytes": 21087
+    },
+    {
+      "shape": "model",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 143.31,
+      "query_ms": 141.34,
+      "payload_bytes": 21082
+    },
+    {
+      "shape": "model",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 141.93,
+      "query_ms": 140.1,
+      "payload_bytes": 21082
+    },
+    {
+      "shape": "model",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 142.95,
+      "query_ms": 140.99,
+      "payload_bytes": 21082
+    },
+    {
+      "shape": "model",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 141.08,
+      "query_ms": 138.95,
+      "payload_bytes": 21082
+    },
+    {
+      "shape": "model",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 142.61,
+      "query_ms": 140.78,
+      "payload_bytes": 21082
+    },
+    {
+      "shape": "model",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 145.72,
+      "query_ms": 143.97,
+      "payload_bytes": 21124
+    },
+    {
+      "shape": "model",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 147.19,
+      "query_ms": 145.41,
+      "payload_bytes": 21124
+    },
+    {
+      "shape": "model",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 144.37,
+      "query_ms": 142.41,
+      "payload_bytes": 21124
+    },
+    {
+      "shape": "model",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 144.66,
+      "query_ms": 142.58,
+      "payload_bytes": 21124
+    },
+    {
+      "shape": "model",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 144,
+      "query_ms": 142.17,
+      "payload_bytes": 21124
+    },
+    {
+      "shape": "model",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 143.56,
+      "query_ms": 141.8,
+      "payload_bytes": 21072
+    },
+    {
+      "shape": "model",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 149.01,
+      "query_ms": 147.04,
+      "payload_bytes": 21072
+    },
+    {
+      "shape": "model",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 143.79,
+      "query_ms": 141.97,
+      "payload_bytes": 21072
+    },
+    {
+      "shape": "model",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 141.78,
+      "query_ms": 139.95,
+      "payload_bytes": 21072
+    },
+    {
+      "shape": "model",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 141.88,
+      "query_ms": 140.15,
+      "payload_bytes": 21072
+    },
+    {
+      "shape": "project",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 111.02,
+      "query_ms": 109.09,
+      "payload_bytes": 21084
+    },
+    {
+      "shape": "project",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 113.1,
+      "query_ms": 111.5,
+      "payload_bytes": 21084
+    },
+    {
+      "shape": "project",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 110.61,
+      "query_ms": 109.24,
+      "payload_bytes": 21084
+    },
+    {
+      "shape": "project",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 126.72,
+      "query_ms": 125.23,
+      "payload_bytes": 21084
+    },
+    {
+      "shape": "project",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 124.05,
+      "query_ms": 122.31,
+      "payload_bytes": 21084
+    },
+    {
+      "shape": "project",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 113.49,
+      "query_ms": 111.66,
+      "payload_bytes": 21091
+    },
+    {
+      "shape": "project",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 114.89,
+      "query_ms": 112.78,
+      "payload_bytes": 21091
+    },
+    {
+      "shape": "project",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 121.21,
+      "query_ms": 119.67,
+      "payload_bytes": 21091
+    },
+    {
+      "shape": "project",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 119.97,
+      "query_ms": 118.27,
+      "payload_bytes": 21091
+    },
+    {
+      "shape": "project",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 112.82,
+      "query_ms": 111,
+      "payload_bytes": 21091
+    },
+    {
+      "shape": "project",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 113.32,
+      "query_ms": 111.66,
+      "payload_bytes": 21202
+    },
+    {
+      "shape": "project",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 125.89,
+      "query_ms": 124.43,
+      "payload_bytes": 21202
+    },
+    {
+      "shape": "project",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 111.67,
+      "query_ms": 110,
+      "payload_bytes": 21202
+    },
+    {
+      "shape": "project",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 111.95,
+      "query_ms": 110.27,
+      "payload_bytes": 21202
+    },
+    {
+      "shape": "project",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 112.39,
+      "query_ms": 110.63,
+      "payload_bytes": 21202
+    },
+    {
+      "shape": "host",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 205.21,
+      "query_ms": 202.86,
+      "payload_bytes": 20554
+    },
+    {
+      "shape": "host",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 212.85,
+      "query_ms": 210.51,
+      "payload_bytes": 20554
+    },
+    {
+      "shape": "host",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 209.25,
+      "query_ms": 206.97,
+      "payload_bytes": 20554
+    },
+    {
+      "shape": "host",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 202.64,
+      "query_ms": 200.38,
+      "payload_bytes": 20554
+    },
+    {
+      "shape": "host",
+      "sort": "tokens",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 202.33,
+      "query_ms": 200.16,
+      "payload_bytes": 20554
+    },
+    {
+      "shape": "host",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 208.14,
+      "query_ms": 206.17,
+      "payload_bytes": 19287
+    },
+    {
+      "shape": "host",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 219.08,
+      "query_ms": 217.17,
+      "payload_bytes": 19287
+    },
+    {
+      "shape": "host",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 214.79,
+      "query_ms": 211.52,
+      "payload_bytes": 19287
+    },
+    {
+      "shape": "host",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 211.28,
+      "query_ms": 208.35,
+      "payload_bytes": 19287
+    },
+    {
+      "shape": "host",
+      "sort": "duration",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 206.04,
+      "query_ms": 204.46,
+      "payload_bytes": 19287
+    },
+    {
+      "shape": "host",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 208.89,
+      "query_ms": 206.95,
+      "payload_bytes": 19304
+    },
+    {
+      "shape": "host",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 204.01,
+      "query_ms": 201.9,
+      "payload_bytes": 19304
+    },
+    {
+      "shape": "host",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 208.47,
+      "query_ms": 206.42,
+      "payload_bytes": 19304
+    },
+    {
+      "shape": "host",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 209.11,
+      "query_ms": 207.19,
+      "payload_bytes": 19304
+    },
+    {
+      "shape": "host",
+      "sort": "cost",
+      "status": 200,
+      "supported": true,
+      "support_level": "supported",
+      "wall_ms": 207.47,
+      "query_ms": 204.51,
+      "payload_bytes": 19304
+    }
+  ],
+  "summaries": [
+    {
+      "shape": "1d",
+      "sort": "tokens",
+      "sample_count": 5,
+      "successful_samples": 5,
+      "supported_samples": 5,
+      "p95_wall_ms": 11.17,
+      "p95_query_ms": 9.19,
+      "max_payload_bytes": 19269
+    },
+    {
+      "shape": "1d",
+      "sort": "duration",
+      "sample_count": 5,
+      "successful_samples": 5,
+      "supported_samples": 5,
+      "p95_wall_ms": 13.27,
+      "p95_query_ms": 11.39,
+      "max_payload_bytes": 19187
+    },
+    {
+      "shape": "1d",
+      "sort": "cost",
+      "sample_count": 5,
+      "successful_samples": 5,
+      "supported_samples": 5,
+      "p95_wall_ms": 10.92,
+      "p95_query_ms": 9.48,
+      "max_payload_bytes": 18788
+    },
+    {
+      "shape": "7d",
+      "sort": "tokens",
+      "sample_count": 5,
+      "successful_samples": 5,
+      "supported_samples": 5,
+      "p95_wall_ms": 21.47,
+      "p95_query_ms": 20.06,
+      "max_payload_bytes": 19489
+    },
+    {
+      "shape": "7d",
+      "sort": "duration",
+      "sample_count": 5,
+      "successful_samples": 5,
+      "supported_samples": 5,
+      "p95_wall_ms": 21.73,
+      "p95_query_ms": 20.37,
+      "max_payload_bytes": 19336
+    },
+    {
+      "shape": "7d",
+      "sort": "cost",
+      "sample_count": 5,
+      "successful_samples": 5,
+      "supported_samples": 5,
+      "p95_wall_ms": 23.3,
+      "p95_query_ms": 21.69,
+      "max_payload_bytes": 20264
+    },
+    {
+      "shape": "30d",
+      "sort": "tokens",
+      "sample_count": 5,
+      "successful_samples": 5,
+      "supported_samples": 5,
+      "p95_wall_ms": 233.91,
+      "p95_query_ms": 232.14,
+      "max_payload_bytes": 20571
+    },
+    {
+      "shape": "30d",
+      "sort": "duration",
+      "sample_count": 5,
+      "successful_samples": 5,
+      "supported_samples": 5,
+      "p95_wall_ms": 244.11,
+      "p95_query_ms": 242.43,
+      "max_payload_bytes": 19886
+    },
+    {
+      "shape": "30d",
+      "sort": "cost",
+      "sample_count": 5,
+      "successful_samples": 5,
+      "supported_samples": 5,
+      "p95_wall_ms": 233.99,
+      "p95_query_ms": 232.06,
+      "max_payload_bytes": 19756
+    },
+    {
+      "shape": "all",
+      "sort": "tokens",
+      "sample_count": 5,
+      "successful_samples": 5,
+      "supported_samples": 5,
+      "p95_wall_ms": 210.99,
+      "p95_query_ms": 208.81,
+      "max_payload_bytes": 20554
+    },
+    {
+      "shape": "all",
+      "sort": "duration",
+      "sample_count": 5,
+      "successful_samples": 5,
+      "supported_samples": 5,
+      "p95_wall_ms": 207.93,
+      "p95_query_ms": 205.72,
+      "max_payload_bytes": 19287
+    },
+    {
+      "shape": "all",
+      "sort": "cost",
+      "sample_count": 5,
+      "successful_samples": 5,
+      "supported_samples": 5,
+      "p95_wall_ms": 207.74,
+      "p95_query_ms": 205.92,
+      "max_payload_bytes": 19304
+    },
+    {
+      "shape": "source",
+      "sort": "tokens",
+      "sample_count": 5,
+      "successful_samples": 5,
+      "supported_samples": 5,
+      "p95_wall_ms": 192.57,
+      "p95_query_ms": 190.49,
+      "max_payload_bytes": 21054
+    },
+    {
+      "shape": "source",
+      "sort": "duration",
+      "sample_count": 5,
+      "successful_samples": 5,
+      "supported_samples": 5,
+      "p95_wall_ms": 191.52,
+      "p95_query_ms": 189.42,
+      "max_payload_bytes": 21044
+    },
+    {
+      "shape": "source",
+      "sort": "cost",
+      "sample_count": 5,
+      "successful_samples": 5,
+      "supported_samples": 5,
+      "p95_wall_ms": 194.05,
+      "p95_query_ms": 192,
+      "max_payload_bytes": 21087
+    },
+    {
+      "shape": "model",
+      "sort": "tokens",
+      "sample_count": 5,
+      "successful_samples": 5,
+      "supported_samples": 5,
+      "p95_wall_ms": 143.31,
+      "p95_query_ms": 141.34,
+      "max_payload_bytes": 21082
+    },
+    {
+      "shape": "model",
+      "sort": "duration",
+      "sample_count": 5,
+      "successful_samples": 5,
+      "supported_samples": 5,
+      "p95_wall_ms": 147.19,
+      "p95_query_ms": 145.41,
+      "max_payload_bytes": 21124
+    },
+    {
+      "shape": "model",
+      "sort": "cost",
+      "sample_count": 5,
+      "successful_samples": 5,
+      "supported_samples": 5,
+      "p95_wall_ms": 149.01,
+      "p95_query_ms": 147.04,
+      "max_payload_bytes": 21072
+    },
+    {
+      "shape": "project",
+      "sort": "tokens",
+      "sample_count": 5,
+      "successful_samples": 5,
+      "supported_samples": 5,
+      "p95_wall_ms": 126.72,
+      "p95_query_ms": 125.23,
+      "max_payload_bytes": 21084
+    },
+    {
+      "shape": "project",
+      "sort": "duration",
+      "sample_count": 5,
+      "successful_samples": 5,
+      "supported_samples": 5,
+      "p95_wall_ms": 121.21,
+      "p95_query_ms": 119.67,
+      "max_payload_bytes": 21091
+    },
+    {
+      "shape": "project",
+      "sort": "cost",
+      "sample_count": 5,
+      "successful_samples": 5,
+      "supported_samples": 5,
+      "p95_wall_ms": 125.89,
+      "p95_query_ms": 124.43,
+      "max_payload_bytes": 21202
+    },
+    {
+      "shape": "host",
+      "sort": "tokens",
+      "sample_count": 5,
+      "successful_samples": 5,
+      "supported_samples": 5,
+      "p95_wall_ms": 212.85,
+      "p95_query_ms": 210.51,
+      "max_payload_bytes": 20554
+    },
+    {
+      "shape": "host",
+      "sort": "duration",
+      "sample_count": 5,
+      "successful_samples": 5,
+      "supported_samples": 5,
+      "p95_wall_ms": 219.08,
+      "p95_query_ms": 217.17,
+      "max_payload_bytes": 19287
+    },
+    {
+      "shape": "host",
+      "sort": "cost",
+      "sample_count": 5,
+      "successful_samples": 5,
+      "supported_samples": 5,
+      "p95_wall_ms": 209.11,
+      "p95_query_ms": 207.19,
+      "max_payload_bytes": 19304
+    }
+  ]
+}

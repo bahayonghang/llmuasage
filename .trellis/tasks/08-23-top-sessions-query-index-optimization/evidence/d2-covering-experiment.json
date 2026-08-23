@@ -1,0 +1,30 @@
+{
+  "backup_seconds": 2.65,
+  "source_metadata_unchanged": true,
+  "pre_bytes": 1160073216,
+  "post_bytes": 1160073216,
+  "index_allocated_pages": 16521,
+  "index_allocated_bytes": 67670016,
+  "index_ratio": 0.058333,
+  "build_seconds": 1.293,
+  "integrity_check": "ok",
+  "index_name": "idx_usage_event_top_sessions_cover",
+  "index_sql": "CREATE INDEX idx_usage_event_top_sessions_cover on usage_event((CASE WHEN trim(COALESCE(session_id, '')) <> '' THEN source || ':' || trim(session_id) WHEN source_path_hash IS NOT NULL THEN source || ':' || source_path_hash WHEN source IN ('codex', 'claude') AND instr(substr(event_key, instr(event_key, ':') + 1), ':') > 0 AND instr(substr(substr(event_key, instr(event_key, ':') + 1), instr(substr(event_key, instr(event_key, ':') + 1), ':') + 1), ':') > 0 THEN source || ':' || substr(substr(event_key, instr(event_key, ':') + 1), 1, instr(substr(event_key, instr(event_key, ':') + 1), ':') + instr(substr(substr(event_key, instr(event_key, ':') + 1), instr(substr(event_key, instr(event_key, ':') + 1), ':') + 1), ':') - 1) ELSE event_key END), event_at, session_label, project_label, source, total_tokens, output_tokens, reasoning_output_tokens, cost_with_cache_usd, model, project_hash, host_id)",
+  "projection_plans": {
+    "all": [
+      "SCAN e USING COVERING INDEX idx_usage_event_top_sessions_cover"
+    ],
+    "source": [
+      "SEARCH e USING INDEX idx_usage_event_source_path_hash (source=?)"
+    ],
+    "model": [
+      "SCAN e USING COVERING INDEX idx_usage_event_top_sessions_cover"
+    ],
+    "project": [
+      "SCAN e USING COVERING INDEX idx_usage_event_top_sessions_cover"
+    ],
+    "host": [
+      "SEARCH e USING INDEX idx_usage_event_host_source_event_at (host_id=?)"
+    ]
+  }
+}

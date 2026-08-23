@@ -691,8 +691,26 @@ Dashboard::hour_of_week(&QueryFilter) -> HourOfWeekPayload
 - Duration means active minutes: sum only positive adjacent-event gaps of at
   most 30 minutes. Duration ranking must compute every filtered candidate
   before truncation; a span-ranked `3 * limit` preselection is not exact.
-- Event times for duration ranking are loaded in one ordered batch and reduced
-  by canonical session id. Do not add one query per candidate.
+- Top Sessions executes exactly one filtered `usage_event` projection and
+  reduces every row through one canonical-session accumulator. It must not add
+  one query per candidate or a second all-event time scan. Token/cost selection
+  may delay time parsing until after a bounded Top K, while duration computes
+  exact active minutes for every session; each selected timestamp is parsed at
+  most once.
+- Canonical identity remains the exact `session_identity_sql` fallback chain.
+  The Rust cost reducer mirrors SQLite's compensated `SUM()` step, and a
+  pre-v24 legacy oracle must match the complete serialized row bytes rather
+  than a numeric tolerance.
+- Schema v24 owns exactly one Top Sessions index:
+  `idx_usage_event_top_sessions_cover(<canonical identity expression>,
+  event_at, session_label, project_label, source, total_tokens, output_tokens,
+  reasoning_output_tokens, cost_with_cache_usd, model, project_hash, host_id)`.
+  A normalized parity test binds its first expression to
+  `session_identity_sql("")`.
+- An unbounded projection forces that exact covering index, including
+  source/model/project/host-filtered shapes. If either date boundary exists,
+  the query must not add an index hint and the planner remains free to use the
+  event-time range index.
 - `hour_of_week` returns a zero-filled 7x24 grid. Each source bucket is
   converted through `ResolvedZone` before folding, so DST fallback instants may
   contribute to the same local cell.
@@ -703,6 +721,10 @@ Dashboard::hour_of_week(&QueryFilter) -> HourOfWeekPayload
 - Top Sessions and hour grid participate in the shared generation-guarded
   secondary lifecycle. Logs additionally fences responses by filter signature;
   reset clears loading state before the replacement request starts.
+- `/api/sessions` exposes the complete semaphore-plus-query pipeline as the
+  standard `Server-Timing: sessions-query;dur=<milliseconds>` response header.
+  The JSON payload remains unchanged, including on a section-local degraded
+  result.
 - CSV export uses the six visible summary metrics, localized labels, UTF-8 BOM,
   and prefixes cells matching `^[=+\\-@\\t\\r\\n]` with a single quote before
   standard CSV quoting.
@@ -713,6 +735,10 @@ Dashboard::hour_of_week(&QueryFilter) -> HourOfWeekPayload
 | --- | --- |
 | Equal primary sort values | Canonical session id ascending decides order |
 | Long idle spans outrank active span in rough order | Exact active-duration order still wins |
+| Pre-v24 scan and v24 covering scan visit costs in different order | Complete serialized rows remain byte-identical |
+| Unbounded source/host filter prefers an older non-covering index | Force the exact v24 covering index |
+| `since` or `until` is present | Do not force the unbounded covering index; retain event-time planner freedom |
+| v24 index creation fails after replacing a drifted same-name index | Transaction restores schema v23 and the previous index definition |
 | DST fallback repeats a local hour | Both UTC buckets fold into the same local cell |
 | Logs detail URL retains pagination parameters | Return at most one record and no next cursor/total |
 | Global filters change while Logs is loading | Stale response is discarded and replacement load proceeds |
@@ -739,8 +765,23 @@ Dashboard::hour_of_week(&QueryFilter) -> HourOfWeekPayload
 - Node tests cover generation/filter-signature stale rejection, sorting reload,
   old snapshots, the six localized CSV metrics, BOM, quoting, and formula
   injection protection.
-- Representative warm timings remain within 400 ms per interactive endpoint,
-  128 KiB per response, and 30 ms per Logs page. Run `just ci` before archive.
+- Tests also cover one event statement per sort/limit, pre-v24 serialized oracle
+  parity, bounded-heap/full-sort equivalence, v24 fresh/v23/drift/already-exists/
+  rollback paths, and exact unbounded/bounded query plans.
+- Accepting a Top Sessions index requires a representative size delta at most
+  15% and a fixed alternating seven-round, 4,000-event `SyncRunWriter` median
+  regression at most 10%.
+- Representative warm timings use one warm-up plus five sequential samples and
+  remain within 400 ms per interactive endpoint, 128 KiB per response, and
+  30 ms per Logs page. Cold/first-touch stays `UNVERIFIED` without a real reboot
+  protocol.
+- Run `node scripts/benchmark-top-sessions.mjs` against a loopback server with
+  explicit schema version, binary SHA-256, commit, and representative source,
+  model, project-hash, and host-id arguments. The harness must emit exactly the
+  24 range/filter/sort cases after one warm-up, retain five per-sample
+  status/support/wall/query/payload records, and reject output keys that could
+  expose the URL, response rows, or private filter values. Run its Node tests
+  and `just ci` before archive.
 
 ### 7. Wrong vs Correct
 
@@ -753,6 +794,10 @@ ORDER BY wall_clock_span DESC LIMIT 3 * N -> calculate active minutes -> LIMIT N
 #### Correct
 
 ```text
-aggregate all filtered sessions -> batch-load ordered event times
--> calculate active minutes for every candidate -> stable sort -> LIMIT N
+one filtered event projection -> canonical accumulator
+-> exact metrics -> bounded stable Top K -> finish selected rows
 ```
+
+Also wrong: force the all-range covering index on a bounded date query, accept
+an index from plan evidence alone, or treat deleting a v24 index as a schema
+rollback.

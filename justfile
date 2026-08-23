@@ -61,6 +61,8 @@ ci:
     python scripts/check-ci-gate.py
     python scripts/ci-rust.py
     node --check scripts/benchmark-dashboard-range.mjs
+    node --check scripts/benchmark-top-sessions.mjs
+    node --test scripts/tests/benchmark-top-sessions.test.mjs
     node --test scripts/tests/dashboard-fetch.test.mjs
     node --test scripts/tests/dashboard-bootstrap-watchdog.test.mjs
     node --test scripts/tests/dashboard-load-state.test.mjs

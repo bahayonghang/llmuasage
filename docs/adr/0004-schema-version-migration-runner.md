@@ -221,3 +221,50 @@ newer-schema 约束拒绝 v19；回滚方式是恢复该备份，而不是仅删
 `activity_serialization_is_identical_before_and_after_v19_index`、显式单线程
 `activity_cost_index_sync_throughput_regression_stays_within_ten_percent` 及重启后首次触库
 矩阵覆盖。
+
+## 2026-08-23 更新：v24 Top Sessions covering expression index
+
+v24 `optimize_top_sessions_identity_order` 只创建一个真实索引，不新增列、表或 backfill：
+
+```text
+idx_usage_event_top_sessions_cover(
+  <session_identity_sql("") 的完整 CASE 表达式>, event_at,
+  session_label, project_label, source,
+  total_tokens, output_tokens, reasoning_output_tokens,
+  cost_with_cache_usd, model, project_hash, host_id
+)
+```
+
+完整 CASE 仍按非空 `session_id`、`source_path_hash`、Codex/Claude event-key session、
+完整 event key 的顺序回退，并保留 source 前缀。migration 内先
+`DROP INDEX IF EXISTS idx_usage_event_top_sessions_cover`，再以 canonical SQL 创建；两步与
+schema version 写入位于同一 immediate transaction。因此 v23 没有索引、同名 drifted
+索引和同名 exact 索引都会收敛到同一定义；创建失败则恢复 transaction 前的索引与 v23
+version。query-side normalized parity test 将 index expression 与 `session_identity_sql("")`
+绑定，避免两份表达式静默漂移。
+
+无界 Top Sessions 投影显式使用该 covering index，避免 source/host filter 被 planner 送到
+旧非覆盖索引；出现任一日期边界时不加 hint，继续让 `event_at` 范围索引参与选择。采用 v24
+前必须同时通过：pre-v24 legacy 完整 JSON 逐字节等价、目标 query plan、代表库索引分配
+不超过 15%、固定七轮交替 4,000-event `SyncRunWriter` 中位数回归不超过 10%，以及一次
+warm-up + 五次顺序样本的完整 HTTP 矩阵。
+
+错误与回滚矩阵：
+
+| 输入状态 | 结果 |
+| --- | --- |
+| fresh / v23 无同名索引 | 创建 canonical index，version=24 |
+| v23 有 drifted 或 exact 同名索引 | transaction 内替换为 canonical index，version=24 |
+| index 创建失败 | 回滚旧索引与 schema v23 |
+| v23 binary 打开 v24 DB | newer-schema 拒绝 |
+
+真实数据库首次升级前必须创建并验证独立 SQLite online backup。旧二进制不能作为已迁移库
+的原地回滚；回滚只能恢复 verified pre-v24 backup，或继续使用支持 v24 的 binary。不得只
+删除索引或手工下调 `schema_version`。本任务的 migration/performance 验收仅在 task-owned
+副本执行，活动数据库未迁移；未跨真实系统重启，cold/first-touch 保持 `UNVERIFIED`。
+
+验证由五类 v24 migration tests、Top Sessions pre-v24 serialized oracle、query-plan/parity
+tests、显式 ignored 写入门禁和代表性 HTTP matrix 覆盖。专用
+`scripts/benchmark-top-sessions.mjs` 固定 24-case / 120-sample 协议；`/api/sessions` 通过
+`Server-Timing: sessions-query;dur=<ms>` 提供逐样本服务端 query pipeline timing，输出
+allowlist 禁止保留 URL、响应 rows 与实际 filter 值。

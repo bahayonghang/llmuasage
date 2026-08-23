@@ -1,0 +1,4 @@
+{"file":".trellis/spec/llmusage/backend/dashboard-performance-contracts.md","reason":"Defines secondary-query budgets, exactness, cancellation, query permits, supervisor settlement, and benchmark evidence."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Covers query, API, migration, benchmark, and cleanup boundaries across layers."}
+{"file":"docs/adr/0004-schema-version-migration-runner.md","reason":"Defines versioned migration, backup, rollback, index-plan, and write-regression requirements."}
+{"file":".trellis/tasks/08-23-top-sessions-query-index-optimization/research/diagnosis.md","reason":"Records the measured timeout, current multi-scan flow, live v23 query plans, and D1/D2 decision gate."}
