@@ -104,6 +104,11 @@ main {
   font-weight: 500;
 }
 
+.hero-meta-sources {
+  flex: 1 0 100%;
+  width: 100%;
+}
+
 .kpi-grid {
   display: flex;
   flex-wrap: wrap;

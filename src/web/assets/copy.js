@@ -22,6 +22,7 @@ const UI_COPY_ZH = Object.freeze({
     statusOk: '正常',
     statusWarn: '需要关注',
     statusUnknown: '等待状态',
+    sourceSummary: '当前筛选有数据 {active} / 已支持 {supported}',
     rows: Object.freeze({
       generated_at: '生成时间',
       last_sync_at: '最近同步',
@@ -315,6 +316,7 @@ const UI_COPY_EN = Object.freeze({
     statusOk: 'Healthy',
     statusWarn: 'Attention needed',
     statusUnknown: 'Pending',
+    sourceSummary: 'Data in current filter {active} / {supported} supported',
     rows: Object.freeze({
       generated_at: 'Generated',
       last_sync_at: 'Last sync',

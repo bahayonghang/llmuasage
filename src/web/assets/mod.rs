@@ -67,7 +67,7 @@ pub(crate) fn find_asset(path: &str) -> Option<&'static WebAsset> {
     ASSET_MANIFEST.iter().find(|asset| asset.path == path)
 }
 
-static ASSET_MANIFEST: [WebAsset; 34] = [
+static ASSET_MANIFEST: [WebAsset; 45] = [
     WebAsset {
         path: "base.css",
         content_type: "text/css; charset=utf-8",
@@ -264,6 +264,72 @@ static ASSET_MANIFEST: [WebAsset; 34] = [
         path: "render/insights.js",
         content_type: "application/javascript; charset=utf-8",
         body: include_str!("render/insights.js"),
+        etag: OnceLock::new(),
+    },
+    WebAsset {
+        path: "agent-logos/codex.svg",
+        content_type: "image/svg+xml",
+        body: include_str!("agent-logos/codex.svg"),
+        etag: OnceLock::new(),
+    },
+    WebAsset {
+        path: "agent-logos/claude.svg",
+        content_type: "image/svg+xml",
+        body: include_str!("agent-logos/claude.svg"),
+        etag: OnceLock::new(),
+    },
+    WebAsset {
+        path: "agent-logos/opencode.svg",
+        content_type: "image/svg+xml",
+        body: include_str!("agent-logos/opencode.svg"),
+        etag: OnceLock::new(),
+    },
+    WebAsset {
+        path: "agent-logos/antigravity.svg",
+        content_type: "image/svg+xml",
+        body: include_str!("agent-logos/antigravity.svg"),
+        etag: OnceLock::new(),
+    },
+    WebAsset {
+        path: "agent-logos/kimi_code.svg",
+        content_type: "image/svg+xml",
+        body: include_str!("agent-logos/kimi_code.svg"),
+        etag: OnceLock::new(),
+    },
+    WebAsset {
+        path: "agent-logos/pi.svg",
+        content_type: "image/svg+xml",
+        body: include_str!("agent-logos/pi.svg"),
+        etag: OnceLock::new(),
+    },
+    WebAsset {
+        path: "agent-logos/omp.svg",
+        content_type: "image/svg+xml",
+        body: include_str!("agent-logos/omp.svg"),
+        etag: OnceLock::new(),
+    },
+    WebAsset {
+        path: "agent-logos/grok.svg",
+        content_type: "image/svg+xml",
+        body: include_str!("agent-logos/grok.svg"),
+        etag: OnceLock::new(),
+    },
+    WebAsset {
+        path: "agent-logos/zcode.svg",
+        content_type: "image/svg+xml",
+        body: include_str!("agent-logos/zcode.svg"),
+        etag: OnceLock::new(),
+    },
+    WebAsset {
+        path: "agent-logos/deepseek_harness.svg",
+        content_type: "image/svg+xml",
+        body: include_str!("agent-logos/deepseek_harness.svg"),
+        etag: OnceLock::new(),
+    },
+    WebAsset {
+        path: "agent-logos/fallback.svg",
+        content_type: "image/svg+xml",
+        body: include_str!("agent-logos/fallback.svg"),
         etag: OnceLock::new(),
     },
     WebAsset {

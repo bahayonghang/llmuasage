@@ -1,0 +1,4 @@
+{"file":".trellis/spec/llmusage/backend/index.md","reason":"从 llmusage 契约索引确认检查范围和相关规范。"}
+{"file":".trellis/spec/llmusage/backend/web-server-contracts.md","reason":"复核 SVG 资产路由、缓存、压缩、public/live 与静态导出兼容。"}
+{"file":".trellis/tasks/08-23-agent-badges-sidebar-headings/research/web-asset-contracts.md","reason":"复核 asset manifest、ETag、压缩、导出和浏览器可见命名契约。"}
+{"file":".trellis/tasks/08-23-agent-badges-sidebar-headings/research/official-agent-logo-assets.md","reason":"独立核验 Logo 是否来自一手官方来源并满足许可与安全准入。"}

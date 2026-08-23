@@ -354,3 +354,99 @@ create assets/render/new-panel.js -> import it from app.js -> forget ASSET_MANIF
 create module -> register path/body/MIME -> update exact N and inventory test
 -> verify live route + export tree + Node import
 ```
+
+## Scenario: Registry-driven Agent badge catalog
+
+### 1. Scope / Trigger
+
+- Apply this contract when registering, renaming, or removing an Agent source; adding or replacing
+  its dashboard logo; or changing how the live/snapshot shell exposes source metadata to the Hero.
+- The catalog crosses the Rust registry, embedded asset manifest, HTML shell, and JavaScript
+  renderer, so all four layers must remain aligned.
+
+### 2. Signatures
+
+```text
+registry::registered_source_descriptors() -> &[SourceDescriptor]
+shell::source_logo_url(stable_id: &str) -> String
+
+<script type="application/json" id="source-badge-catalog">
+  [{ "id": string, "display_name": string, "logo_url": string }]
+</script>
+
+hero::parseSourceBadgeCatalog(rawCatalog, supportedSources) -> SourceBadge[]
+```
+
+### 3. Contracts
+
+- Catalog order and supported count come from `registered_source_descriptors()` in both live and
+  snapshot shells. Do not duplicate the production source list in JavaScript.
+- A source-specific URL is admitted only when the stable id matches lowercase ASCII letters,
+  digits, `_`, or `-` and the corresponding `agent-logos/<stable_id>.svg` exists in
+  `ASSET_MANIFEST`; otherwise use `assets/agent-logos/fallback.svg`.
+- Serialize the catalog as JSON and escape `&`, `<`, `>`, U+2028, and U+2029 before embedding it in
+  the inert `application/json` script node. The renderer revalidates ids and local logo URLs,
+  deduplicates ids, and escapes all rendered text and attributes.
+- Agent logos are local, static SVG files served/exported through the common manifest. Each file
+  has a `viewBox`, uses no script, event handler, animation, `foreignObject`, or external/data URL,
+  and is at most 20 KiB; the complete logo set is at most 160 KiB. Their path-specific
+  `.gitattributes` rule pins LF so byte hashes survive Windows checkouts.
+- Every admitted official asset records its source, retrieval date, upstream/local SHA-256, and
+  any publisher-mark limitation in `assets/agent-logos/ATTRIBUTION.md`. The project-authored
+  fallback is reserved for future or malformed sources, not as a substitute for a known official
+  mark.
+- Badge markup is a non-interactive semantic list. Decorative logo images use empty alt text and
+  `aria-hidden`; the adjacent source name supplies the accessible text.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Registered source has a manifested logo | Emit its local `assets/agent-logos/<id>.svg` URL |
+| Registered source has no admitted logo | Emit the neutral local fallback |
+| Stable id contains a path separator or invalid character | Reject it for asset lookup and use fallback |
+| Catalog JSON contains an HTML/script delimiter | Escape it before insertion; never terminate the inert script node |
+| Client catalog is malformed or incomplete | Recover supported ids from `data-supported-sources` with fallback logos |
+| Duplicate catalog id | Keep the first validated entry only |
+| SVG violates size or static-safety rules | Fail the asset contract test; do not embed it |
+| Live/export inventory diverges | Fail manifest or export integration coverage |
+
+### 5. Good/Base/Bad Cases
+
+- Good: register `future_agent`, add and attribute `future_agent.svg`, register it in the common
+  manifest, and let both shell modes expose the new badge automatically.
+- Base: register a source before official artwork is admitted; it appears once with a readable
+  derived name and `fallback.svg`.
+- Bad: fetch a remote logo at runtime, paste an unofficial glyph, inject SVG markup directly into
+  the shell, or maintain a separate JavaScript array of current sources.
+
+### 6. Tests Required
+
+- Rust shell tests zip the emitted live/snapshot catalog with the registry descriptors, exercise
+  invalid and missing ids, and assert HTML-script-safe JSON escaping.
+- Manifest tests pin every logo path and `image/svg+xml` MIME type, enforce per-file/total size,
+  static-safety markers, SHA-256 values, and attribution entries.
+- Live route tests assert SVG MIME, ETag, and conditional 304 behavior; export integration tests
+  assert the same files are written into the snapshot tree.
+- Node tests cover malformed, partial, duplicate, and hostile catalog entries, fallback recovery,
+  non-interactive semantic markup, and escaped output.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```js
+const sources = ['codex', 'claude'];
+badge.innerHTML = `<img src="https://vendor.example/${source}.svg">${source}`;
+```
+
+#### Correct
+
+```rust
+let catalog = registered_source_descriptors()
+    .iter()
+    .map(|source| (source.stable_id, source.display_name, source_logo_url(source.stable_id)));
+```
+
+The registry remains the source of truth, while the manifest and validation rules make every
+browser-visible logo local, exportable, attributable, and safe to render.

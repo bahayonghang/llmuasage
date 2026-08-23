@@ -95,8 +95,31 @@ fn local_flow_bootstraps_and_syncs_without_installing_integrations() -> Result<(
                 .join("explorer.js")
                 .is_file()
         );
+        for logo in [
+            "codex.svg",
+            "claude.svg",
+            "opencode.svg",
+            "antigravity.svg",
+            "kimi_code.svg",
+            "pi.svg",
+            "omp.svg",
+            "grok.svg",
+            "zcode.svg",
+            "deepseek_harness.svg",
+            "fallback.svg",
+        ] {
+            assert!(
+                html_out
+                    .join("assets")
+                    .join("agent-logos")
+                    .join(logo)
+                    .is_file(),
+                "missing exported Agent logo: {logo}"
+            );
+        }
         let exported_index = fs::read_to_string(html_out.join("index.html"))?;
         assert!(exported_index.contains("data-mode=\"snapshot\""));
+        assert!(exported_index.contains("id=\"source-badge-catalog\""));
         assert!(exported_index.contains("type=\"module\""));
         assert!(exported_index.contains("assets/app.js"));
         assert!(exported_index.contains("assets/base.css"));

@@ -1,0 +1,4 @@
+{"file":".trellis/spec/llmusage/backend/index.md","reason":"定位 llmusage 的 Web 服务、资产与性能契约入口。"}
+{"file":".trellis/spec/llmusage/backend/web-server-contracts.md","reason":"保持嵌入式资产路由、public/live 边界、ETag 和响应契约。"}
+{"file":".trellis/tasks/08-23-agent-badges-sidebar-headings/research/web-asset-contracts.md","reason":"提供未截断的 asset manifest、ETag、压缩、导出和命名契约摘录。"}
+{"file":".trellis/tasks/08-23-agent-badges-sidebar-headings/research/official-agent-logo-assets.md","reason":"提供十个官方 Logo 的一手出处、SVG 可用性、许可和准入规则。"}

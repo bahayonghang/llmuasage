@@ -18,6 +18,49 @@ pub fn snapshot_index_html() -> String {
 }
 
 const BOOTSTRAP_WATCHDOG_JS: &str = include_str!("assets/bootstrap-watchdog.js");
+const FALLBACK_AGENT_LOGO_URL: &str = "assets/agent-logos/fallback.svg";
+
+#[derive(serde::Serialize)]
+struct SourceBadgeCatalogEntry<'a> {
+    id: &'a str,
+    display_name: &'a str,
+    logo_url: String,
+}
+
+pub(crate) fn source_logo_url(stable_id: &str) -> String {
+    let safe_id = !stable_id.is_empty()
+        && stable_id.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-')
+        });
+    if safe_id {
+        let asset_path = format!("agent-logos/{stable_id}.svg");
+        if super::assets::find_asset(&asset_path).is_some() {
+            return format!("assets/{asset_path}");
+        }
+    }
+    FALLBACK_AGENT_LOGO_URL.to_owned()
+}
+
+pub(crate) fn escape_json_for_html_script(json: &str) -> String {
+    json.replace('&', "\\u0026")
+        .replace('<', "\\u003c")
+        .replace('>', "\\u003e")
+        .replace('\u{2028}', "\\u2028")
+        .replace('\u{2029}', "\\u2029")
+}
+
+fn source_badge_catalog_json() -> String {
+    let catalog = crate::registry::registered_source_descriptors()
+        .iter()
+        .map(|descriptor| SourceBadgeCatalogEntry {
+            id: descriptor.stable_id,
+            display_name: descriptor.display_name,
+            logo_url: source_logo_url(descriptor.stable_id),
+        })
+        .collect::<Vec<_>>();
+    let json = serde_json::to_string(&catalog).unwrap_or_else(|_| "[]".to_owned());
+    escape_json_for_html_script(&json)
+}
 
 fn html_shell(mode: &str) -> String {
     let (environment_chip, environment_chip_key) = if mode == "snapshot" {
@@ -47,6 +90,7 @@ fn html_shell(mode: &str) -> String {
         .map(|descriptor| descriptor.stable_id)
         .collect::<Vec<_>>()
         .join(", ");
+    let source_badge_catalog = source_badge_catalog_json();
 
     format!(
         r##"<!DOCTYPE html>
@@ -77,6 +121,7 @@ fn html_shell(mode: &str) -> String {
 <link rel="stylesheet" href="assets/charts.css" />
 </head>
 <body data-mode="{mode}" data-app-version="{app_version}" data-supported-sources="{supported_sources}">
+<script type="application/json" id="source-badge-catalog">{source_badge_catalog}</script>
 
 <div class="app">
   <!-- Sidebar -->

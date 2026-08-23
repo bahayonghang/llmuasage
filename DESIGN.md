@@ -246,6 +246,14 @@ The character across the board is **precise and tool-like**: tight radii, hairli
 
 - 248px fixed sidebar on Surface-Raised with a hairline right border; collapses to static at ≤720px.
 - Nav items: 13.5px sans, Ink-2, 8px radius. Hover is a 6% Ink tint. **Active = Ink fill, paper text, Terracotta icon** (the accent only appears on the active item's icon).
+- Group labels (`.nav-label`) are non-interactive rail headings: a 1px accent lead, the existing localized title, and a neutral hairline extension. They keep the current `aria-labelledby` relationships and disappear with the existing labels at ≤720px.
+
+### Agent identity badges
+
+- The Hero source row is registry-driven and distinguishes “data in the current filter” from the supported-source total. It renders one non-interactive semantic list item per registered source; source IDs, order, and display names are not duplicated in JavaScript.
+- Every current source uses a locally embedded, attributed first-party SVG from `assets/agent-logos/`; runtime remote images are forbidden. Future sources without an admitted mark use the neutral `fallback.svg` rather than an unofficial substitute.
+- Badges share a 28px minimum height, 8px radius, neutral hairline, restrained surface fill, and a neutral logo carrier. Official paths, proportions, and colors remain unchanged; Pi and Oh My Pi use a dark carrier for their supplied light artwork, while the only available Antigravity product wordmark receives a wider carrier without cropping.
+- Badge identity always combines the official mark with a visible registry display name, never color alone. The list wraps without horizontal page overflow in light/dark and ZH/EN, and has no hover lift, click cursor, button role, or keyboard stop.
 
 ### Data Bars (signature)
 

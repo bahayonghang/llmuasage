@@ -38,12 +38,34 @@
 
 /* Nav */
 .nav-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   font-size: 10.5px;
-  color: var(--muted);
-  letter-spacing: 0.14em;
+  color: color-mix(in srgb, var(--ink-2) 78%, var(--muted));
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  padding: 14px 8px 6px;
+  padding: 15px 8px 7px;
   font-weight: 600;
+  line-height: 1;
+}
+
+.nav-label::before,
+.nav-label::after {
+  content: '';
+  display: block;
+  height: 1px;
+}
+
+.nav-label::before {
+  flex: 0 0 12px;
+  background: var(--accent);
+}
+
+.nav-label::after {
+  flex: 1 1 auto;
+  min-width: 8px;
+  background: var(--line);
 }
 
 nav a {
@@ -98,6 +120,85 @@ nav a .nav-icon {
 
 nav a:hover .nav-icon {
   color: var(--accent);
+}
+
+/* Agent identity badges */
+.hero-source-heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.hero-source-label {
+  color: var(--ink-2);
+}
+
+.hero-source-summary {
+  margin-left: 0;
+  color: var(--ink-2);
+}
+
+.agent-badge-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 100%;
+  margin-top: 8px;
+  list-style: none;
+}
+
+.agent-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 28px;
+  max-width: 100%;
+  padding: 4px 8px 4px 5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 82%, var(--surface-2));
+  color: var(--ink-2);
+}
+
+.agent-badge-logo-frame {
+  display: inline-flex;
+  flex: 0 0 18px;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 2px;
+  overflow: hidden;
+  border-radius: 5px;
+  background: #fff;
+}
+
+.agent-badge-logo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.agent-badge[data-source='antigravity'] .agent-badge-logo-frame {
+  flex-basis: 52px;
+  width: 52px;
+  padding-inline: 3px;
+}
+
+.agent-badge:is([data-source='pi'], [data-source='omp']) .agent-badge-logo-frame {
+  background: #14151a;
+}
+
+.agent-badge-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1.25;
 }
 
 /* Sidebar footer */

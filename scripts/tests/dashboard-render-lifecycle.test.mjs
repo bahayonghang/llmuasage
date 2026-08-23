@@ -85,6 +85,7 @@ const fingerprint = await import('../../src/web/assets/data/render-key.js');
 const format = await import('../../src/web/assets/data/format.js');
 const derive = await import('../../src/web/assets/data/derive.js');
 const copy = await import('../../src/web/assets/copy.js');
+const hero = await import('../../src/web/assets/render/hero.js');
 const behavior = await import('../../src/web/assets/render/behavior.js');
 const explorer = await import('../../src/web/assets/render/explorer.js');
 const insights = await import('../../src/web/assets/render/insights.js');
@@ -223,6 +224,89 @@ test('live module graph avoids filter-sensitive asset URLs', () => {
     liveModuleAssetUrls.filter((url) => url.toLowerCase().includes('fingerprint')),
     [],
   );
+});
+
+test('agent badge catalog preserves registry order and renders non-interactive identity badges', () => {
+  const rawCatalog = JSON.stringify([
+    { id: 'codex', display_name: 'Codex', logo_url: 'assets/agent-logos/codex.svg' },
+    { id: 'claude', display_name: 'Claude', logo_url: 'assets/agent-logos/claude.svg' },
+    { id: 'opencode', display_name: 'OpenCode', logo_url: 'assets/agent-logos/opencode.svg' },
+    { id: 'antigravity', display_name: 'Antigravity', logo_url: 'assets/agent-logos/antigravity.svg' },
+    { id: 'kimi_code', display_name: 'Kimi Code', logo_url: 'assets/agent-logos/kimi_code.svg' },
+    { id: 'pi', display_name: 'Pi', logo_url: 'assets/agent-logos/pi.svg' },
+    { id: 'omp', display_name: 'OMP', logo_url: 'assets/agent-logos/omp.svg' },
+    { id: 'grok', display_name: 'Grok', logo_url: 'assets/agent-logos/grok.svg' },
+    { id: 'zcode', display_name: 'ZCode', logo_url: 'assets/agent-logos/zcode.svg' },
+    { id: 'deepseek_harness', display_name: 'DeepSeek Harness', logo_url: 'assets/agent-logos/deepseek_harness.svg' },
+  ]);
+  const catalog = hero.parseSourceBadgeCatalog(rawCatalog, 'codex,claude,opencode');
+
+  assert.deepEqual(catalog.map((entry) => entry.id), [
+    'codex',
+    'claude',
+    'opencode',
+    'antigravity',
+    'kimi_code',
+    'pi',
+    'omp',
+    'grok',
+    'zcode',
+    'deepseek_harness',
+  ]);
+
+  const markup = hero.renderSourceBadgeList(catalog);
+  assert.match(markup, /<ul class="agent-badge-list" role="list">/);
+  assert.equal((markup.match(/<li class="agent-badge"/g) || []).length, 10);
+  assert.match(markup, /data-source="antigravity"/);
+  assert.match(markup, /<img[^>]+alt="" aria-hidden="true"/);
+  assert.doesNotMatch(markup, /<(?:button|a)\b|tabindex=|role="button"|onclick=/i);
+});
+
+test('agent badge catalog recovers safely from malformed, partial, and hostile input', () => {
+  assert.deepEqual(
+    hero.parseSourceBadgeCatalog('{bad json', 'codex,deepseek_harness').map((entry) => entry),
+    [
+      { id: 'codex', display_name: 'Codex', logo_url: 'assets/agent-logos/fallback.svg' },
+      { id: 'deepseek_harness', display_name: 'Deepseek Harness', logo_url: 'assets/agent-logos/fallback.svg' },
+    ],
+  );
+
+  const partial = hero.parseSourceBadgeCatalog([
+    {
+      id: 'future_agent',
+      display_name: '<b>Future & "Very Long" Agent</b>',
+      logo_url: 'https://example.com/remote.svg',
+    },
+    {
+      id: 'future_agent',
+      display_name: 'Duplicate must not replace the first entry',
+      logo_url: 'assets/agent-logos/codex.svg',
+    },
+    { id: 'INVALID ID', display_name: 'Ignored', logo_url: 'assets/agent-logos/codex.svg' },
+  ], ['future_agent', 'zcode']);
+  assert.deepEqual(partial.map((entry) => entry.id), ['future_agent', 'zcode']);
+  assert.equal(partial[0].display_name, '<b>Future & "Very Long" Agent</b>');
+  assert.equal(partial[0].logo_url, 'assets/agent-logos/fallback.svg');
+  assert.equal(partial[1].display_name, 'Zcode');
+
+  const markup = hero.renderSourceBadgeList(partial);
+  assert.match(markup, /&lt;b&gt;Future &amp; &quot;Very Long&quot; Agent&lt;\/b&gt;/);
+  assert.doesNotMatch(markup, /https:\/\/example\.com|<b>/);
+  assert.equal(hero.renderSourceBadgeList([]), '<ul class="agent-badge-list" role="list"></ul>');
+});
+
+test('agent badge source summaries use locale copy and stable counts', () => {
+  copy.setLocale('zh');
+  assert.equal(
+    hero.formatSourceSummary(copy.UI_COPY.hero.sourceSummary, 8, 10),
+    '当前筛选有数据 8 / 已支持 10',
+  );
+  copy.setLocale('en');
+  assert.equal(
+    hero.formatSourceSummary(copy.UI_COPY.hero.sourceSummary, 8, 10),
+    'Data in current filter 8 / 10 supported',
+  );
+  copy.setLocale('zh');
 });
 
 test('fingerprint strips volatile per-query fields', async (t) => {

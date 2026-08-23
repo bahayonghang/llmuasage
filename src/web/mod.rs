@@ -2825,6 +2825,85 @@ mod tests {
     }
 
     #[test]
+    fn source_badge_catalog_tracks_the_registry_in_live_and_snapshot_shells() {
+        fn parse_catalog(html: &str) -> Vec<serde_json::Value> {
+            const OPEN: &str = "<script type=\"application/json\" id=\"source-badge-catalog\">";
+            let start = html.find(OPEN).expect("source badge catalog") + OPEN.len();
+            let end = html[start..]
+                .find("</script>")
+                .map(|offset| start + offset)
+                .expect("source badge catalog close");
+            serde_json::from_str(&html[start..end]).expect("valid source badge catalog JSON")
+        }
+
+        let descriptors = crate::registry::registered_source_descriptors();
+        for html in [live_index_html(), snapshot_index_html()] {
+            let catalog = parse_catalog(&html);
+            assert_eq!(catalog.len(), descriptors.len());
+            for (entry, descriptor) in catalog.iter().zip(descriptors) {
+                assert_eq!(entry["id"], descriptor.stable_id);
+                assert_eq!(entry["display_name"], descriptor.display_name);
+                assert_eq!(
+                    entry["logo_url"],
+                    format!("assets/agent-logos/{}.svg", descriptor.stable_id)
+                );
+            }
+            assert!(html.contains("data-supported-sources="));
+        }
+
+        assert_eq!(
+            super::shell::source_logo_url("future_source"),
+            "assets/agent-logos/fallback.svg"
+        );
+        assert_eq!(
+            super::shell::source_logo_url("../unsafe"),
+            "assets/agent-logos/fallback.svg"
+        );
+        let escaped = super::shell::escape_json_for_html_script(
+            r#"[{"display_name":"</script><script>alert(1)</script>"}]"#,
+        );
+        assert!(!escaped.contains('<'));
+        assert!(!escaped.contains('>'));
+        assert!(escaped.contains("\\u003c/script\\u003e"));
+    }
+
+    #[test]
+    fn agent_badges_and_sidebar_headings_keep_the_visual_and_accessibility_contract() {
+        let asset = |path| {
+            asset_manifest()
+                .iter()
+                .find(|asset| asset.path == path)
+                .unwrap_or_else(|| panic!("missing dashboard asset: {path}"))
+                .body
+        };
+        let hero_js = asset("render/hero.js");
+        let components_css = asset("components.css");
+        let layout_css = asset("layout.css");
+        let copy_js = asset("copy.js");
+
+        assert!(hero_js.contains("class=\"agent-badge-list\" role=\"list\""));
+        assert!(hero_js.contains("class=\"agent-badge\" data-source="));
+        assert!(hero_js.contains("alt=\"\" aria-hidden=\"true\""));
+        assert!(hero_js.contains("FALLBACK_AGENT_LOGO_URL"));
+        assert!(!hero_js.contains("role=\"button\""));
+        assert!(!hero_js.contains("tabindex="));
+        assert!(!hero_js.contains("onclick="));
+
+        assert!(components_css.contains(".nav-label::before"));
+        assert!(components_css.contains(".nav-label::after"));
+        assert!(components_css.contains(".agent-badge-list"));
+        assert!(components_css.contains(".agent-badge[data-source='antigravity']"));
+        assert!(components_css.contains("[data-source='pi'], [data-source='omp']"));
+        assert!(components_css.contains("overflow-wrap: anywhere"));
+        assert!(layout_css.contains(".hero-meta-sources"));
+        assert!(layout_css.contains(".nav-label,"));
+        assert!(layout_css.contains("display: none"));
+
+        assert!(copy_js.contains("当前筛选有数据 {active} / 已支持 {supported}"));
+        assert!(copy_js.contains("Data in current filter {active} / {supported} supported"));
+    }
+
+    #[test]
     fn dashboard_shell_uses_runtime_metadata_and_real_toggle_controls() {
         let html = live_index_html();
         assert!(html.contains(&format!("v{} · local", env!("CARGO_PKG_VERSION"))));
@@ -3039,10 +3118,141 @@ mod tests {
                 "render/explorer.js",
                 "render/costs.js",
                 "render/insights.js",
+                "agent-logos/codex.svg",
+                "agent-logos/claude.svg",
+                "agent-logos/opencode.svg",
+                "agent-logos/antigravity.svg",
+                "agent-logos/kimi_code.svg",
+                "agent-logos/pi.svg",
+                "agent-logos/omp.svg",
+                "agent-logos/grok.svg",
+                "agent-logos/zcode.svg",
+                "agent-logos/deepseek_harness.svg",
+                "agent-logos/fallback.svg",
                 "favicon.svg",
             ]
         );
         assert!(paths.iter().all(|path| !path.contains("fingerprint")));
+    }
+
+    #[test]
+    fn agent_logo_assets_are_static_safe_and_attributed() {
+        use sha2::{Digest, Sha256};
+
+        fn contains_event_handler(svg: &str) -> bool {
+            let bytes = svg.as_bytes();
+            let mut index = 0;
+            while index + 3 < bytes.len() {
+                if bytes[index].is_ascii_whitespace()
+                    && bytes[index + 1].eq_ignore_ascii_case(&b'o')
+                    && bytes[index + 2].eq_ignore_ascii_case(&b'n')
+                {
+                    let mut cursor = index + 3;
+                    while cursor < bytes.len()
+                        && (bytes[cursor].is_ascii_alphanumeric()
+                            || matches!(bytes[cursor], b'_' | b'-'))
+                    {
+                        cursor += 1;
+                    }
+                    let has_event_name = cursor > index + 3;
+                    while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+                        cursor += 1;
+                    }
+                    if has_event_name && bytes.get(cursor) == Some(&b'=') {
+                        return true;
+                    }
+                }
+                index += 1;
+            }
+            false
+        }
+
+        let expected_hashes = [
+            (
+                "agent-logos/codex.svg",
+                "45be1f0757eb18889eefb1e7db79668ef46a275dc4e0e78e8df5ebd7f6cdeadc",
+            ),
+            (
+                "agent-logos/claude.svg",
+                "b150888bc7257af83e3b85d3c2be4294f88986026f8168f6c12fc1fde6697350",
+            ),
+            (
+                "agent-logos/opencode.svg",
+                "14fba64b47167d4b47d25712a8471e850dff72f3a63621e6049d208a019d8ed1",
+            ),
+            (
+                "agent-logos/antigravity.svg",
+                "602ee69befdd1aa33902d5471a26d6b41c6da6ce7bd68994057cee23e3a35c19",
+            ),
+            (
+                "agent-logos/kimi_code.svg",
+                "60685e25b2db869030290485a35eed8ca77e535d2c6b7731374df49edbfa98c8",
+            ),
+            (
+                "agent-logos/pi.svg",
+                "2d43cb4f6a239ac70416214ac05842be34175339f761001fab3e8d01459bec69",
+            ),
+            (
+                "agent-logos/omp.svg",
+                "727019727006f26fe3d1f187d3fe9830f26213733a51721096a2044ab059cf61",
+            ),
+            (
+                "agent-logos/grok.svg",
+                "a127a7cd42b0450f7d3827a331b0730aab49fd99c3fe920d172475b9ffc83992",
+            ),
+            (
+                "agent-logos/zcode.svg",
+                "07a45e8e35b0b631ed2c68cd1cb041f9721b1ceeb0bd0e34f1459b0304a741c7",
+            ),
+            (
+                "agent-logos/deepseek_harness.svg",
+                "035b68e57ac4490f6880e25f4e7f534d7b50b249308ccea77af34cc5d9e840c3",
+            ),
+            (
+                "agent-logos/fallback.svg",
+                "d71f886b7082a2872e27857afa14a9afdf0a57beb16344c001248211ae9030a9",
+            ),
+        ];
+        let attribution = include_str!("assets/agent-logos/ATTRIBUTION.md");
+        let mut total_bytes = 0;
+
+        for (path, expected_hash) in expected_hashes {
+            let asset = asset_manifest()
+                .iter()
+                .find(|asset| asset.path == path)
+                .unwrap_or_else(|| panic!("missing {path}"));
+            assert_eq!(asset.content_type, "image/svg+xml", "{path}");
+            assert!(asset.body.contains("viewBox="), "{path}");
+            assert!(asset.body.len() <= 20 * 1024, "{path}");
+            total_bytes += asset.body.len();
+
+            let lower = asset.body.to_ascii_lowercase();
+            assert!(!contains_event_handler(asset.body), "{path}: event handler");
+            for forbidden in [
+                "<script",
+                "<foreignobject",
+                "href=\"http",
+                "href='http",
+                "href=\"//",
+                "href='//",
+                "href=\"data:",
+                "href='data:",
+                "<animate",
+                "<set",
+            ] {
+                assert!(!lower.contains(forbidden), "{path}: {forbidden}");
+            }
+
+            let actual_hash = Sha256::digest(asset.body.as_bytes())
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>();
+            assert_eq!(actual_hash, expected_hash, "{path}");
+            let file_name = path.rsplit('/').next().expect("logo filename");
+            assert!(attribution.contains(file_name), "{file_name}");
+            assert!(attribution.contains(expected_hash), "{file_name}");
+        }
+        assert!(total_bytes <= 160 * 1024);
     }
 
     #[test]
@@ -5951,6 +6161,45 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let body = to_bytes(response.into_body(), usize::MAX).await?;
         assert_eq!(body.as_ref(), asset.body.as_bytes());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn agent_logo_assets_are_served_with_svg_mime_and_etag() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let addr = serve(store, Some(0)).await?;
+        let paths = [
+            "codex.svg",
+            "claude.svg",
+            "opencode.svg",
+            "antigravity.svg",
+            "kimi_code.svg",
+            "pi.svg",
+            "omp.svg",
+            "grok.svg",
+            "zcode.svg",
+            "deepseek_harness.svg",
+            "fallback.svg",
+        ];
+
+        for file_name in paths {
+            let route = format!("/assets/agent-logos/{file_name}");
+            let (status, head, body) = route_bytes(addr, &route, &[]).await?;
+            assert_eq!(status, StatusCode::OK, "{route}");
+            assert_eq!(
+                response_header(&head, "content-type"),
+                Some("image/svg+xml")
+            );
+            assert_eq!(response_header(&head, "cache-control"), Some("no-cache"));
+            let etag = response_header(&head, "etag").expect("logo ETag");
+            assert!(!body.is_empty(), "{route}");
+
+            let (status, head, body) =
+                route_bytes(addr, &route, &[("If-None-Match", etag)]).await?;
+            assert_eq!(status, StatusCode::NOT_MODIFIED, "{route}");
+            assert_eq!(response_header(&head, "etag"), Some(etag));
+            assert!(body.is_empty(), "{route}");
+        }
         Ok(())
     }
 

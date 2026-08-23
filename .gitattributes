@@ -7,3 +7,6 @@
 # picking either side (task state lives in task.json, not index.md). See
 # .trellis/spec/cli/backend/directory-structure.md for details.
 .trellis/workspace/*/journal-*.md merge=union
+
+# Official Agent artwork is byte-pinned in tests and attribution records.
+src/web/assets/agent-logos/*.svg text eol=lf
