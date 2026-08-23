@@ -1819,3 +1819,40 @@ Grok 解析器改为读取 turn_completed.usage，趋势来源表展示完整占
 ### Status
 
 [OK] **Completed**
+
+
+## Session 61: 补全 Pi 与 Oh My Pi 用量统计
+
+**Date**: 2026-08-23
+**Task**: 补全 Pi 与 Oh My Pi 用量统计
+**Branch**: `dev`
+
+### Summary
+
+把 Pi/Oh My Pi 拆成独立源 omp，并补齐 provider、项目、源上报成本与行为事实。
+
+### Main Changes
+
+- 拆出 SourceKind::Omp，默认 sync 迁移存量 pi 行，限定源在拆分完成前拒绝，远端 host 一次性迁移。
+- 事件写入 provider_label 与项目维度；源上报成本走 source_reported；产出 turn 与 tool_call。
+- 本机 unbounded sync：423 条身份基线差集为空，omp 1186 事件，tool_call 1449，成本差小于 1e-6。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d4e3154` | (see git log) |
+| `b97dd61` | (see git log) |
+
+### Testing
+
+- [OK] just ci
+- [OK] 本机 llmusage sync 与 dashboard /api/activity?source=omp、/api/tools?source=omp
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 如需发布，从 dev 开 PR 到 main。

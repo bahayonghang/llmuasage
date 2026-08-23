@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 60
-- **Last Active**: 2026-08-22
+- **Total Sessions**: 61
+- **Last Active**: 2026-08-23
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1821 | Active |
+| `journal-1.md` | ~1858 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 61 | 2026-08-23 | 补全 Pi 与 Oh My Pi 用量统计 | `d4e3154`, `b97dd61` | `dev` |
 | 60 | 2026-08-22 | 优化看板侧栏状态与同步告警 | `e16669e` | `dev` |
 | 59 | 2026-08-21 | 修正 Grok Build 用量少计 | `660663f`, `18337f2` | `dev` |
 | 58 | 2026-08-21 | SSH 远端主机导入 | `e23d62a`, `17b7e3a` | `ssh` |
