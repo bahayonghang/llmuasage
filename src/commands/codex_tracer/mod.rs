@@ -6,11 +6,15 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::app::AppContext;
 
+use self::ingest::{CodexTracerIngestOptions, ingest_rollout_dir};
+
 pub mod dashboard;
+pub(crate) mod ingest;
 pub mod models;
 pub mod parser;
 pub mod server;
@@ -64,42 +68,24 @@ pub async fn run(app: &AppContext, port: u16, open_browser: bool, rebuild: bool)
             );
         }
 
-        // Parse all JSONL files
-        let mut all_events = Vec::new();
-        let mut file_count = 0;
-        let mut error_count = 0;
-
-        for entry in walkdir::WalkDir::new(&rollout_dir)
-            .follow_links(false)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
-            let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
-                continue;
-            }
-
-            file_count += 1;
-            match parse_codex_jsonl_for_tracer(path) {
-                Ok(events) => {
-                    info!(file = %path.display(), events = events.len(), "Parsed JSONL file");
-                    all_events.extend(events);
-                }
-                Err(err) => {
-                    tracing::warn!(file = %path.display(), error = %err, "Failed to parse JSONL file");
-                    error_count += 1;
-                }
-            }
-        }
+        let stats = ingest_rollout_dir(
+            &mut store,
+            &rollout_dir,
+            &CancellationToken::new(),
+            CodexTracerIngestOptions::default(),
+        )?;
 
         info!(
-            files = file_count,
-            events = all_events.len(),
-            errors = error_count,
+            files = stats.files_seen,
+            records = stats.records_read,
+            events = stats.events_found,
+            rows_written = stats.rows_written,
+            batch_peak = stats.batch_peak,
+            errors = stats.errors,
             "Finished parsing JSONL files"
         );
 
-        if all_events.is_empty() {
+        if store.count_events()? == 0 {
             anyhow::bail!(
                 "No events found in {}\n\
                  Please ensure you have used Codex at least once.",
@@ -107,17 +93,12 @@ pub async fn run(app: &AppContext, port: u16, open_browser: bool, rebuild: bool)
             );
         }
 
-        // Insert events into database
-        let inserted = store.upsert_events(&all_events)?;
-        info!(inserted = inserted, "Inserted events into database");
-
         println!(
             "Parsed {} files, found {} events",
-            file_count,
-            all_events.len()
+            stats.files_seen, stats.events_found
         );
-        if error_count > 0 {
-            println!("Warning: {} files failed to parse", error_count);
+        if stats.errors > 0 {
+            println!("Warning: {} files failed to parse", stats.errors);
         }
     } else {
         info!(events = event_count, "Database already contains events");

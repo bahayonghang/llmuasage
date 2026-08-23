@@ -25,6 +25,7 @@ use crate::{
         behavior::{
             BehaviorToolEvidence, extract_codex_tools, tool_calls_from_evidence, turn_from_tools,
         },
+        codex_envelope::CodexEnvelopeRecord,
         file_progress::{FileProgress, FileProgressCounter},
         file_state::{
             BoundedJsonlReader, CandidateFile, FileReplayMode, JsonlReadStatus,
@@ -104,19 +105,15 @@ impl CodexLiveParse<'_> {
     }
 
     fn ingest(&mut self, value: Value) -> Result<JsonlRecordDisposition> {
-        if let Some(payload) = value.get("payload").and_then(|value| value.as_object())
-            && matches!(
-                value.get("type").and_then(Value::as_str),
-                Some("turn_context" | "session_meta")
-            )
+        let envelope = CodexEnvelopeRecord::new(value);
+        if let Some(payload) = envelope.payload()
+            && matches!(envelope.kind(), Some("turn_context" | "session_meta"))
         {
             if let Some(next_model) = payload.get("model").and_then(Value::as_str) {
                 self.model = Some(next_model.trim().to_string());
             }
-            if matches!(
-                value.get("type").and_then(Value::as_str),
-                Some("session_meta")
-            ) && let Some(session_id) = payload.get("id").and_then(Value::as_str)
+            if matches!(envelope.kind(), Some("session_meta"))
+                && let Some(session_id) = payload.get("id").and_then(Value::as_str)
             {
                 let trimmed = session_id.trim();
                 if !trimmed.is_empty() {
@@ -137,12 +134,12 @@ impl CodexLiveParse<'_> {
             return Ok(JsonlRecordDisposition::Accepted);
         }
 
-        let extracted_tools = extract_codex_tools(&value);
+        let extracted_tools = extract_codex_tools(envelope.value());
         if !extracted_tools.is_empty() {
             self.pending_tools.extend(extracted_tools);
         }
 
-        let Some((timestamp, info)) = extract_token_count(&value) else {
+        let Some((timestamp, info)) = extract_token_count(envelope.value()) else {
             return Ok(if self.pending_tools.is_empty() {
                 JsonlRecordDisposition::Ignored
             } else {

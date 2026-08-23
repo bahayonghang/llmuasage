@@ -93,11 +93,26 @@ CREATE TABLE IF NOT EXISTS source_files (
     file_mtime TEXT
 );
 
+-- Durable, privacy-bounded incremental parser state. The canonical path is
+-- represented only by its hash; full paths remain confined to the existing
+-- event schema for backwards compatibility.
+CREATE TABLE IF NOT EXISTS tracer_file_state (
+    path_hash TEXT PRIMARY KEY,
+    file_fingerprint TEXT NOT NULL,
+    file_size INTEGER NOT NULL,
+    file_mtime_ns INTEGER NOT NULL,
+    tail_signature TEXT NOT NULL,
+    durable_offset INTEGER NOT NULL,
+    line_number INTEGER NOT NULL,
+    parser_state_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 -- Schema metadata
 CREATE TABLE IF NOT EXISTS schema_metadata (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
 
-INSERT OR REPLACE INTO schema_metadata (key, value) VALUES ('version', '1.0.0');
-INSERT OR REPLACE INTO schema_metadata (key, value) VALUES ('created_at', datetime('now'));
+INSERT OR REPLACE INTO schema_metadata (key, value) VALUES ('version', '1.1.0');
+INSERT OR IGNORE INTO schema_metadata (key, value) VALUES ('created_at', datetime('now'));

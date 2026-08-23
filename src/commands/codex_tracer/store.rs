@@ -1,11 +1,25 @@
 //! SQLite store for codex-tracer events.
 
-use std::path::Path;
+use std::{path::Path, time::Duration};
 
 use anyhow::{Context, Result};
 use rusqlite::{Connection, params};
 
 use super::models::{CodexTracerEvent, ThreadSummary};
+
+/// Durable per-file state for bounded tracer ingestion.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TracerFileState {
+    pub path_hash: String,
+    pub file_fingerprint: String,
+    pub file_size: u64,
+    pub file_mtime_ns: i64,
+    pub tail_signature: String,
+    pub durable_offset: u64,
+    pub line_number: u64,
+    pub parser_state_json: String,
+    pub updated_at: String,
+}
 
 /// Store for codex-tracer events.
 pub struct CodexTracerStore {
@@ -17,6 +31,10 @@ impl CodexTracerStore {
     pub fn open(db_path: &Path) -> Result<Self> {
         let conn = Connection::open(db_path)
             .with_context(|| format!("Failed to open database at {}", db_path.display()))?;
+        conn.busy_timeout(Duration::from_secs(5))?;
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
+        conn.pragma_update(None, "wal_autocheckpoint", 32_768)?;
 
         let mut store = Self { conn };
         store.init_schema()?;
@@ -35,10 +53,40 @@ impl CodexTracerStore {
 
     /// Insert or update events in bulk.
     pub fn upsert_events(&mut self, events: &[CodexTracerEvent]) -> Result<usize> {
+        self.commit_events(events, None)
+    }
+
+    /// Commit one bounded event batch and its matching durable parser state.
+    pub(crate) fn commit_ingest_batch(
+        &mut self,
+        source_file: &str,
+        state: &TracerFileState,
+        events: &[CodexTracerEvent],
+        reset_file: bool,
+    ) -> Result<usize> {
+        self.commit_events(events, Some((source_file, state, reset_file)))
+    }
+
+    fn commit_events(
+        &mut self,
+        events: &[CodexTracerEvent],
+        file_state: Option<(&str, &TracerFileState, bool)>,
+    ) -> Result<usize> {
         let tx = self
             .conn
             .transaction()
             .context("Failed to start transaction")?;
+
+        if let Some((source_file, state, true)) = file_state {
+            tx.execute(
+                "DELETE FROM codex_tracer_events WHERE source_file = ?1",
+                [source_file],
+            )?;
+            tx.execute(
+                "DELETE FROM tracer_file_state WHERE path_hash = ?1",
+                [&state.path_hash],
+            )?;
+        }
 
         let mut inserted = 0;
 
@@ -118,9 +166,129 @@ impl CodexTracerStore {
             inserted += 1;
         }
 
+        if let Some((_source_file, state, _reset_file)) = file_state {
+            tx.execute(
+                r#"
+                INSERT INTO tracer_file_state (
+                    path_hash, file_fingerprint, file_size, file_mtime_ns,
+                    tail_signature, durable_offset, line_number,
+                    parser_state_json, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                ON CONFLICT(path_hash) DO UPDATE SET
+                    file_fingerprint = excluded.file_fingerprint,
+                    file_size = excluded.file_size,
+                    file_mtime_ns = excluded.file_mtime_ns,
+                    tail_signature = excluded.tail_signature,
+                    durable_offset = excluded.durable_offset,
+                    line_number = excluded.line_number,
+                    parser_state_json = excluded.parser_state_json,
+                    updated_at = excluded.updated_at
+                "#,
+                params![
+                    state.path_hash,
+                    state.file_fingerprint,
+                    i64::try_from(state.file_size).unwrap_or(i64::MAX),
+                    state.file_mtime_ns,
+                    state.tail_signature,
+                    i64::try_from(state.durable_offset).unwrap_or(i64::MAX),
+                    i64::try_from(state.line_number).unwrap_or(i64::MAX),
+                    state.parser_state_json,
+                    state.updated_at,
+                ],
+            )?;
+        }
+
         tx.commit().context("Failed to commit transaction")?;
 
         Ok(inserted)
+    }
+
+    pub(crate) fn file_state(&self, path_hash: &str) -> Result<Option<TracerFileState>> {
+        let mut statement = self.conn.prepare(
+            r#"
+            SELECT path_hash, file_fingerprint, file_size, file_mtime_ns,
+                   tail_signature, durable_offset, line_number,
+                   parser_state_json, updated_at
+            FROM tracer_file_state
+            WHERE path_hash = ?1
+            "#,
+        )?;
+        let mut rows = statement.query([path_hash])?;
+        let Some(row) = rows.next()? else {
+            return Ok(None);
+        };
+        let file_size = row.get::<_, i64>(2)?;
+        let durable_offset = row.get::<_, i64>(5)?;
+        let line_number = row.get::<_, i64>(6)?;
+        Ok(Some(TracerFileState {
+            path_hash: row.get(0)?,
+            file_fingerprint: row.get(1)?,
+            file_size: u64::try_from(file_size).unwrap_or_default(),
+            file_mtime_ns: row.get(3)?,
+            tail_signature: row.get(4)?,
+            durable_offset: u64::try_from(durable_offset).unwrap_or_default(),
+            line_number: u64::try_from(line_number).unwrap_or_default(),
+            parser_state_json: row.get(7)?,
+            updated_at: row.get(8)?,
+        }))
+    }
+
+    /// Rebuild call indices and previous/next links across all files without
+    /// retaining the historical event set in process memory.
+    pub(crate) fn relink_threads(&mut self) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        tx.execute_batch(
+            r#"
+            WITH ranked AS (
+                SELECT
+                    record_id,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY thread_key
+                        ORDER BY event_timestamp, record_id
+                    ) - 1 AS call_index,
+                    LAG(record_id) OVER (
+                        PARTITION BY thread_key
+                        ORDER BY event_timestamp, record_id
+                    ) AS previous_record_id,
+                    LEAD(record_id) OVER (
+                        PARTITION BY thread_key
+                        ORDER BY event_timestamp, record_id
+                    ) AS next_record_id
+                FROM codex_tracer_events
+                WHERE thread_key IS NOT NULL
+            )
+            UPDATE codex_tracer_events AS events
+            SET
+                thread_call_index = ranked.call_index,
+                previous_record_id = ranked.previous_record_id,
+                next_record_id = ranked.next_record_id
+            FROM ranked
+            WHERE events.record_id = ranked.record_id
+              AND (
+                  events.thread_call_index IS NOT ranked.call_index
+                  OR events.previous_record_id IS NOT ranked.previous_record_id
+                  OR events.next_record_id IS NOT ranked.next_record_id
+              );
+
+            DELETE FROM thread_summaries;
+            INSERT INTO thread_summaries (
+                thread_key, first_record_id, last_record_id,
+                call_count, total_tokens_sum, estimated_cost_sum
+            )
+            SELECT
+                thread_key,
+                MIN(CASE WHEN thread_call_index = 0 THEN record_id END),
+                MAX(CASE WHEN next_record_id IS NULL THEN record_id END),
+                COUNT(*),
+                SUM(total_tokens),
+                NULL
+            FROM codex_tracer_events
+            WHERE thread_key IS NOT NULL
+            GROUP BY thread_key;
+            "#,
+        )?;
+        tx.commit()?;
+        Ok(())
     }
 
     /// Query events with optional filters.
@@ -438,5 +606,108 @@ mod tests {
 
         let count = store.count_events().unwrap();
         assert_eq!(count, 1); // Should still be 1 (not 2)
+    }
+
+    #[test]
+    fn tracer_file_state_upgrade_is_additive_and_idempotent() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("legacy.db");
+        let event = CodexTracerEvent::new(
+            "legacy-record".to_string(),
+            "legacy-session".to_string(),
+            "2026-06-16T10:00:00Z".to_string(),
+            "/path/to/legacy.jsonl".to_string(),
+            1,
+            1000,
+            600,
+            200,
+            50,
+        );
+        let mut store = CodexTracerStore::open(&db_path).unwrap();
+        store.upsert_events(&[event]).unwrap();
+        store
+            .conn
+            .execute("DROP TABLE tracer_file_state", [])
+            .unwrap();
+        drop(store);
+
+        let store = CodexTracerStore::open(&db_path).unwrap();
+        assert_eq!(store.count_events().unwrap(), 1);
+        assert!(store.file_state("missing").unwrap().is_none());
+        drop(store);
+        let store = CodexTracerStore::open(&db_path).unwrap();
+        assert_eq!(store.count_events().unwrap(), 1);
+    }
+
+    #[test]
+    fn failed_batch_rolls_back_file_reset_events_and_checkpoint() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("rollback.db");
+        let source_file = "/path/to/file.jsonl";
+        let old = CodexTracerEvent::new(
+            "old-record".to_string(),
+            "session-1".to_string(),
+            "2026-06-16T10:00:00Z".to_string(),
+            source_file.to_string(),
+            1,
+            1000,
+            600,
+            200,
+            50,
+        );
+        let mut store = CodexTracerStore::open(&db_path).unwrap();
+        store.upsert_events(&[old]).unwrap();
+        store
+            .conn
+            .execute_batch(
+                r#"
+                CREATE TRIGGER fail_new_tracer_event
+                BEFORE INSERT ON codex_tracer_events
+                WHEN NEW.record_id = 'new-record'
+                BEGIN
+                    SELECT RAISE(ABORT, 'injected batch failure');
+                END;
+                "#,
+            )
+            .unwrap();
+        let new = CodexTracerEvent::new(
+            "new-record".to_string(),
+            "session-1".to_string(),
+            "2026-06-16T11:00:00Z".to_string(),
+            source_file.to_string(),
+            2,
+            2000,
+            1200,
+            300,
+            100,
+        );
+        let state = TracerFileState {
+            path_hash: "path-hash".to_string(),
+            file_fingerprint: "head".to_string(),
+            file_size: 42,
+            file_mtime_ns: 7,
+            tail_signature: "tail".to_string(),
+            durable_offset: 42,
+            line_number: 2,
+            parser_state_json: "{}".to_string(),
+            updated_at: "2026-08-24T00:00:00Z".to_string(),
+        };
+        assert!(
+            store
+                .commit_ingest_batch(source_file, &state, &[new], true)
+                .is_err()
+        );
+        assert_eq!(store.count_events().unwrap(), 1);
+        assert_eq!(
+            store
+                .query_calls(&CallFilters {
+                    include_archived: true,
+                    ..CallFilters::default()
+                })
+                .unwrap()[0]
+                .record_id,
+            "old-record"
+        );
+        assert!(store.file_state("path-hash").unwrap().is_none());
     }
 }

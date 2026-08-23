@@ -16,9 +16,10 @@ use serde::Deserialize;
 use serde_json::json;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
-use super::parser::parse_codex_jsonl_for_tracer;
+use super::ingest::{CodexTracerIngestOptions, ingest_rollout_dir};
 use super::store::{CallFilters, CodexTracerStore};
 
 #[derive(Clone)]
@@ -265,45 +266,22 @@ async fn handle_refresh(State(state): State<ServerState>) -> Response {
             .into_response();
     }
 
-    // Parse all JSONL files
-    let mut all_events = Vec::new();
-    let mut file_count = 0;
-    let mut error_count = 0;
-
-    for entry in walkdir::WalkDir::new(&rollout_dir)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
-            continue;
-        }
-
-        file_count += 1;
-        match parse_codex_jsonl_for_tracer(path) {
-            Ok(events) => {
-                all_events.extend(events);
-            }
-            Err(err) => {
-                error!(file = %path.display(), error = %err, "Failed to parse JSONL file");
-                error_count += 1;
-            }
-        }
-    }
-
-    // Insert events into database
     let mut store = state.store.lock().await;
-    let inserted = match store.upsert_events(&all_events) {
-        Ok(count) => count,
+    let stats = match ingest_rollout_dir(
+        &mut store,
+        &rollout_dir,
+        &CancellationToken::new(),
+        CodexTracerIngestOptions::default(),
+    ) {
+        Ok(stats) => stats,
         Err(err) => {
-            error!(error = %err, "Failed to insert events");
+            error!(error = %err, "Failed to refresh Codex tracer events");
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({
                     "error": {
                         "code": "internal_error",
-                        "message": "Failed to insert events",
+                        "message": "Failed to refresh events",
                         "detail": err.to_string(),
                     }
                 })),
@@ -313,19 +291,21 @@ async fn handle_refresh(State(state): State<ServerState>) -> Response {
     };
 
     info!(
-        files = file_count,
-        events = all_events.len(),
-        inserted = inserted,
-        errors = error_count,
+        files = stats.files_seen,
+        records = stats.records_read,
+        events = stats.events_found,
+        inserted = stats.rows_written,
+        batch_peak = stats.batch_peak,
+        errors = stats.errors,
         "Refresh completed"
     );
 
     Json(json!({
         "ok": true,
-        "files_parsed": file_count,
-        "events_found": all_events.len(),
-        "events_inserted": inserted,
-        "errors": error_count,
+        "files_parsed": stats.files_seen,
+        "events_found": stats.events_found,
+        "events_inserted": stats.rows_written,
+        "errors": stats.errors,
     }))
     .into_response()
 }

@@ -9,6 +9,7 @@ pub mod antigravity;
 pub(crate) mod behavior;
 pub mod claude;
 pub mod codex;
+pub(crate) mod codex_envelope;
 pub mod driver;
 pub mod dsh;
 mod file_progress;

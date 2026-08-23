@@ -17,6 +17,7 @@ Codex Tracer is a detailed Codex usage tracking and analysis module integrated i
 ```
 src/commands/codex_tracer/
 ├── mod.rs              # CLI entry point, JSONL orchestration
+├── ingest.rs           # bounded incremental ingestion and durable checkpoints
 ├── models.rs           # CodexTracerEvent (44 fields), ThreadSummary
 ├── parser.rs           # JSONL parser with state tracking
 ├── store.rs            # SQLite storage layer
@@ -47,10 +48,14 @@ conn.execute_batch(schema)?;
 
 ```
 Codex JSONL files ($CODEX_HOME/rollout/*.jsonl)
-  ↓ parse_codex_jsonl_for_tracer()
-CodexTracerEvent[] (44 fields)
-  ↓ CodexTracerStore::upsert_events()
+  ↓ BoundedJsonlReader (4 MiB record ceiling)
+Codex envelope record
+  ↓ TracerRecordParser
+CodexTracerEvent batches (default ceiling: 2,048)
+  ↓ CodexTracerStore::commit_ingest_batch()
 SQLite (codex_tracer_events table, 44 columns)
+  ↕ tracer_file_state (durable byte boundary + parser state)
+  ↓ CodexTracerStore::relink_threads()
   ↓ query_calls(&CallFilters)
   ↓ axum server (localhost:8765)
 Web Dashboard (browser)
@@ -282,6 +287,101 @@ assert_eq!(count, 1); // Still 1 event
 
 ---
 
+## Scenario: Bounded incremental rollout ingestion
+
+### 1. Scope / Trigger
+
+Use this contract for CLI startup and `/api/refresh` whenever Codex rollout JSONL is imported into the dedicated Tracer database. The public collector functions remain compatibility wrappers; production orchestration must use the bounded engine.
+
+### 2. Signatures
+
+```rust
+pub(crate) fn ingest_rollout_dir(
+    store: &mut CodexTracerStore,
+    rollout_dir: &Path,
+    cancellation: &CancellationToken,
+    options: CodexTracerIngestOptions,
+) -> Result<CodexTracerIngestStats>
+
+pub(crate) fn commit_ingest_batch(
+    &mut self,
+    source_file: &str,
+    state: &TracerFileState,
+    events: &[CodexTracerEvent],
+    reset_file: bool,
+) -> Result<usize>
+```
+
+The additive `tracer_file_state` table is keyed by a normalized-path SHA-256 hash and stores fingerprint, observed size/mtime, durable byte offset, durable line number, serialized parser state, and update time. It must be created idempotently when any pre-existing Tracer database opens.
+
+### 3. Contracts
+
+- `BoundedJsonlReader` owns framing, the 4 MiB maximum record size, byte offsets, durable newline classification, malformed JSON classification, and cancellation checks.
+- `CodexEnvelopeRecord` exposes only structural `type`/`timestamp`/`payload`/`value` access. Main usage accounting and Tracer event/thread mapping remain consumer-owned.
+- The default retained batch ceiling is 2,048 events. Tests may inject a smaller positive ceiling.
+- File replay uses durable byte boundary plus fingerprint/size/mtime identity: unchanged reads zero records, append seeks directly to the prior durable offset, and replace resets only that file.
+- Events and their matching file checkpoint commit in one SQLite transaction. A failed transaction cannot advance the checkpoint.
+- Partial non-newline EOF is never durable. It must be retried from the prior complete record after append.
+- Per-batch links may be provisional. After ingestion, `relink_threads()` uses the database-wide ordering to converge `previous_record_id`, `next_record_id`, and `thread_call_index` across batches and files.
+- CLI options and successful `/api/refresh` keys remain stable: `ok`, `files_parsed`, `events_found`, `events_inserted`, and `errors`.
+- Logs and benchmark evidence may include counts, durations, path hashes, and byte sizes, but must not print raw source paths or record content.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required behavior |
+| --- | --- |
+| unchanged fingerprint and size | skip file; `records_read=0`, no checkpoint write |
+| same identity with larger file | seek to durable offset and parse only the appended bytes |
+| truncate/replace | delete rows for that source and reset its state in the same transaction as the first replacement batch |
+| malformed JSON | classify/skip consistently with the main parser; advance only at a complete durable record |
+| record over 4 MiB | discard the bounded oversized record without growing an unbounded buffer |
+| partial EOF | keep the preceding durable offset and retry the tail later |
+| cancellation before commit | return without marking the pending batch successful |
+| SQLite batch failure | roll back events, file reset, and checkpoint together |
+| one file fails | count the error and continue other files; retain the failed file's prior durable state |
+
+### 5. Good/Base/Bad Cases
+
+- Good: a 100k-event first import retains at most 2,048 events, commits durable batches, globally relinks threads, and a warm refresh reads zero records.
+- Base: a one-line append resumes at the saved byte offset and writes only the new event.
+- Bad: a truncated file deletes every Tracer row or advances its checkpoint before replacement events commit.
+
+### 6. Tests Required
+
+- Shared reader/envelope corpus: valid, non-usage, malformed, UTF-8, 10 MiB oversized, and partial EOF; assert byte/line durability and unchanged main-parser accounting fixtures.
+- Ingestion integration: fresh, unchanged, append, replace, multi-file links, idempotent refresh, cancellation/resume, and clean-rebuild equality.
+- Storage: old-schema open twice and injected batch failure; assert state/event/reset atomicity.
+- Compatibility: compile legacy parser/store entry points, retain CLI help and API keys, generate the dedicated dashboard.
+- Performance: separate-process release baseline/streaming harnesses; assert/record event high-water, rows, wall time, peak RSS, warm-read count, and live versus checkpointed SQLite sizes.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+let all_events = files
+    .flat_map(parse_codex_jsonl_for_tracer)
+    .collect::<Vec<_>>();
+store.upsert_events(&all_events)?;
+```
+
+This retains the entire history, cannot durably resume append work, and cannot make event rows and cursor advancement atomic.
+
+#### Correct
+
+```rust
+let stats = ingest_rollout_dir(
+    &mut store,
+    &rollout_dir,
+    &cancellation,
+    CodexTracerIngestOptions::default(),
+)?;
+```
+
+The engine bounds retained events, commits the matching checkpoint with each batch, and performs database-wide thread convergence after import.
+
+---
+
 ## 4. API Contracts
 
 ### Web Server
@@ -455,11 +555,7 @@ for entry in walkdir::WalkDir::new(&rollout_dir) {
 
 ### Integration Tests
 
-**Not Yet Implemented** (requires real Codex data):
-
-- End-to-end JSONL parsing
-- Web server endpoint tests
-- Browser automation tests
+Implemented synthetic integration coverage includes bounded JSONL parsing, incremental file-state replay, rollback/cancellation, and static dashboard generation. Native browser automation with representative user data remains `UNVERIFIED` unless separately authorized.
 
 ---
 
@@ -550,48 +646,39 @@ event.recompute_derived_fields(); // Must call this!
 assert_eq!(event.cache_ratio, Some(0.6));
 ```
 
-### Mistake 2: Thread Linking Before All Events Parsed
+### Mistake 2: Treating Per-Batch Thread Links as Final
 
 **Symptom**: `previous_record_id` and `next_record_id` are None.
 
-**Cause**: Calling `link_previous_next_records()` before parsing all files.
+**Cause**: Persisting batch-local links without database-wide convergence.
 
 **Fix**:
 
 ```rust
-// Wrong
-for file in files {
-    let mut events = parse_file(file)?;
-    link_previous_next_records(&mut events); // Links only within this file!
-}
+// Wrong: links only the retained batch.
+link_previous_next_records(&mut batch);
+store.upsert_events(&batch)?;
 
-// Correct
-let mut all_events = Vec::new();
-for file in files {
-    let events = parse_file(file)?;
-    all_events.extend(events);
-}
-link_previous_next_records(&mut all_events); // Links across all files
+// Correct: batch-local work is followed by database-wide convergence.
+store.commit_ingest_batch(source_file, &state, &batch, reset_file)?;
+store.relink_threads()?;
 ```
 
-### Mistake 3: Ignoring Parser State for Large Files
+### Mistake 3: Using the Collector Wrapper in Production
 
 **Symptom**: Out of memory when parsing large JSONL files.
 
-**Cause**: Using `parse_codex_jsonl_for_tracer()` which loads everything into memory.
+**Cause**: `parse_codex_jsonl_for_tracer()` and `parse_codex_jsonl_with_state()` intentionally return a compatibility `Vec`; parser state alone does not impose a batch ceiling.
 
-**Fix**: Use `parse_codex_jsonl_with_state()` with chunking:
+**Fix**: Route CLI and refresh imports through `ingest_rollout_dir()`:
 
 ```rust
-let mut state = FileParseState::new();
-loop {
-    let (events, new_state) = parse_codex_jsonl_with_state(path, Some(state))?;
-    if events.is_empty() {
-        break; // Done
-    }
-    store.upsert_events(&events)?;
-    state = new_state;
-}
+ingest_rollout_dir(
+    &mut store,
+    &rollout_dir,
+    &cancellation,
+    CodexTracerIngestOptions::default(),
+)?;
 ```
 
 ---
@@ -607,7 +694,7 @@ loop {
 ### Phase 7: Optimization
 
 - [ ] Parallel parsing with rayon
-- [ ] Benchmark with 10k+ events
+- [x] Benchmark with 100k synthetic events (see the bounded-ingestion task evidence)
 - [ ] SQLite query optimization (EXPLAIN QUERY PLAN)
 - [ ] README.md documentation
 - [ ] User guide (docs/guide/codex-tracer.md)

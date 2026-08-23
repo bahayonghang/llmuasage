@@ -142,6 +142,10 @@ fn capture_file_snapshot(path: &Path) -> Result<FileSnapshot> {
 pub struct JsonlRecord {
     pub start_offset: u64,
     pub end_offset: u64,
+    /// One-based physical line number for this record.
+    pub line_number: u64,
+    /// Whether `end_offset` is a newline-terminated durable boundary.
+    pub durable: bool,
     pub value: Value,
 }
 
@@ -182,7 +186,9 @@ enum RecordRead {
 pub struct BoundedJsonlReader<R: Read> {
     inner: BufReader<R>,
     complete_offset: u64,
+    complete_line_number: u64,
     current_offset: u64,
+    records_read: u64,
     max_record_bytes: usize,
     record: Vec<u8>,
     max_buffered_bytes: usize,
@@ -201,7 +207,9 @@ impl<R: Read> BoundedJsonlReader<R> {
         Self {
             inner: BufReader::new(reader),
             complete_offset: 0,
+            complete_line_number: 0,
             current_offset: 0,
+            records_read: 0,
             max_record_bytes,
             record: Vec::new(),
             max_buffered_bytes: 0,
@@ -222,6 +230,16 @@ impl<R: Read> BoundedJsonlReader<R> {
     /// included, so it will be re-read on the next sync.
     pub fn complete_offset(&self) -> u64 {
         self.complete_offset
+    }
+
+    /// The physical line number at the last durable newline boundary.
+    pub fn complete_line_number(&self) -> u64 {
+        self.complete_line_number
+    }
+
+    /// Number of complete, oversized, or partial records inspected by this reader.
+    pub fn records_read(&self) -> u64 {
+        self.records_read
     }
 
     pub fn read_json_records<F>(
@@ -289,6 +307,8 @@ impl<R: Read> BoundedJsonlReader<R> {
                     match callback(JsonlRecord {
                         start_offset,
                         end_offset,
+                        line_number: self.complete_line_number,
+                        durable: true,
                         value,
                     })? {
                         JsonlRecordDisposition::Accepted | JsonlRecordDisposition::Ignored => {}
@@ -344,6 +364,8 @@ impl<R: Read> BoundedJsonlReader<R> {
                         let disposition = callback(JsonlRecord {
                             start_offset,
                             end_offset: self.current_offset,
+                            line_number: self.complete_line_number.saturating_add(1),
+                            durable: false,
                             value,
                         })?;
                         if disposition == JsonlRecordDisposition::Stop {
@@ -376,6 +398,7 @@ impl<R: Read> BoundedJsonlReader<R> {
                 return Ok(if self.current_offset == start_offset {
                     RecordRead::Eof
                 } else {
+                    self.records_read = self.records_read.saturating_add(1);
                     RecordRead::PartialTail {
                         start_offset,
                         oversized,
@@ -398,6 +421,8 @@ impl<R: Read> BoundedJsonlReader<R> {
             self.current_offset = self.current_offset.saturating_add(consumed as u64);
             if newline.is_some() {
                 self.complete_offset = self.current_offset;
+                self.complete_line_number = self.complete_line_number.saturating_add(1);
+                self.records_read = self.records_read.saturating_add(1);
                 return Ok(if oversized {
                     RecordRead::Oversized { start_offset }
                 } else {
@@ -414,16 +439,37 @@ impl<R: Read> BoundedJsonlReader<R> {
 impl<R: Read + Seek> BoundedJsonlReader<R> {
     /// Creates a new reader, seeking to `start_offset` before the first read.
     pub fn new(reader: R, start_offset: u64) -> Result<Self> {
-        Self::with_limit(reader, start_offset, DEFAULT_MAX_JSONL_RECORD_BYTES)
+        Self::with_state(reader, start_offset, 0)
+    }
+
+    /// Creates a reader at a durable byte and physical-line checkpoint.
+    pub fn with_state(reader: R, start_offset: u64, line_number: u64) -> Result<Self> {
+        Self::with_limit_and_state(
+            reader,
+            start_offset,
+            line_number,
+            DEFAULT_MAX_JSONL_RECORD_BYTES,
+        )
     }
 
     pub fn with_limit(reader: R, start_offset: u64, max_record_bytes: usize) -> Result<Self> {
+        Self::with_limit_and_state(reader, start_offset, 0, max_record_bytes)
+    }
+
+    fn with_limit_and_state(
+        reader: R,
+        start_offset: u64,
+        line_number: u64,
+        max_record_bytes: usize,
+    ) -> Result<Self> {
         let mut inner = BufReader::new(reader);
         inner.seek(SeekFrom::Start(start_offset))?;
         Ok(Self {
             inner,
             complete_offset: start_offset,
+            complete_line_number: line_number,
             current_offset: start_offset,
+            records_read: 0,
             max_record_bytes,
             record: Vec::new(),
             max_buffered_bytes: 0,

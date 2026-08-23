@@ -2,12 +2,22 @@
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use tokio_util::sync::CancellationToken;
+
+use crate::{
+    models::{ParseIssues, SourceKind},
+    parsers::{
+        codex_envelope::CodexEnvelopeRecord,
+        file_state::{BoundedJsonlReader, JsonlReadStatus, JsonlRecord, JsonlRecordDisposition},
+    },
+    util::hash_string,
+};
 
 use super::models::CodexTracerEvent;
 
@@ -56,67 +66,114 @@ pub fn parse_codex_jsonl_with_state(
 ) -> Result<(Vec<CodexTracerEvent>, FileParseState)> {
     let file =
         File::open(file_path).with_context(|| format!("Failed to open {}", file_path.display()))?;
-    let reader = BufReader::new(file);
-
+    let initial_state = initial_state.unwrap_or_default();
+    let mut reader = BoundedJsonlReader::with_state(
+        file,
+        initial_state.byte_offset,
+        initial_state.line_number.max(0) as u64,
+    )?;
     let mut events = Vec::new();
-    let mut parser_state = ParserState::new();
-    let source_file = file_path.to_string_lossy().to_string();
-
-    // Load initial state if resuming
-    let skip_lines = if let Some(ref state) = initial_state {
-        parser_state.session_id = state.session_id.clone();
-        parser_state.last_cumulative_total = state.last_cumulative_total;
-        state.line_number as usize
-    } else {
-        0
-    };
-
-    let mut current_byte_offset = 0u64;
-
-    for (line_number, line) in reader.lines().enumerate() {
-        let line = line.context("Failed to read line")?;
-
-        // Skip lines we've already processed
-        if line_number < skip_lines {
-            current_byte_offset += line.len() as u64 + 1; // +1 for newline
-            continue;
-        }
-
-        let line_num = (line_number + 1) as i32;
-        current_byte_offset += line.len() as u64 + 1; // +1 for newline
-
-        let envelope: Value = match serde_json::from_str(&line) {
-            Ok(v) => v,
-            Err(_) => continue, // Skip invalid JSON
-        };
-
-        if let Some(event) = parse_envelope(
-            &envelope,
-            &mut parser_state,
-            &source_file,
-            line_num,
-            file_path,
-        )? {
-            events.push(event);
-        }
-    }
+    let mut parser = TracerRecordParser::from_legacy(file_path, &initial_state);
+    let mut durable_checkpoint = parser.checkpoint();
+    let cancel = CancellationToken::new();
+    let mut issues = ParseIssues::default();
+    let path_hash = hash_string(&file_path.to_string_lossy());
+    let status = reader.read_json_records(
+        SourceKind::Codex,
+        &path_hash,
+        &cancel,
+        &mut issues,
+        |record| {
+            let durable = record.durable;
+            if let Some(event) = parser.ingest(record)? {
+                events.push(event);
+            }
+            if durable {
+                durable_checkpoint = parser.checkpoint();
+            }
+            Ok(JsonlRecordDisposition::Accepted)
+        },
+    )?;
+    debug_assert_ne!(status, JsonlReadStatus::Cancelled);
 
     // Post-process: link previous/next and compute call indices
     link_previous_next_records(&mut events);
 
-    // Create final parse state
-    let final_state = FileParseState {
-        byte_offset: current_byte_offset,
-        line_number: events.last().map(|e| e.line_number).unwrap_or(0),
-        session_id: parser_state.session_id.clone(),
-        last_cumulative_total: parser_state.last_cumulative_total,
-    };
+    let final_state =
+        durable_checkpoint.legacy_state(reader.complete_offset(), reader.complete_line_number());
 
     Ok((events, final_state))
 }
 
+/// Stateful adapter used by the bounded tracer ingestion engine.
+pub(crate) struct TracerRecordParser {
+    state: ParserState,
+    source_file: String,
+    file_path: PathBuf,
+}
+
+impl TracerRecordParser {
+    pub(crate) fn from_checkpoint_json(file_path: &Path, state_json: Option<&str>) -> Result<Self> {
+        let state = match state_json {
+            Some(value) if !value.is_empty() => serde_json::from_str(value)
+                .context("Failed to decode Codex tracer parser checkpoint")?,
+            _ => ParserState::new(),
+        };
+        Ok(Self::with_state(file_path, state))
+    }
+
+    fn from_legacy(file_path: &Path, state: &FileParseState) -> Self {
+        let mut parser_state = ParserState::new();
+        parser_state.session_id = state.session_id.clone();
+        parser_state.last_cumulative_total = state.last_cumulative_total;
+        Self::with_state(file_path, parser_state)
+    }
+
+    fn with_state(file_path: &Path, state: ParserState) -> Self {
+        Self {
+            state,
+            source_file: file_path.to_string_lossy().to_string(),
+            file_path: file_path.to_path_buf(),
+        }
+    }
+
+    pub(crate) fn ingest(&mut self, record: JsonlRecord) -> Result<Option<CodexTracerEvent>> {
+        let line_number = i32::try_from(record.line_number).unwrap_or(i32::MAX);
+        let envelope = CodexEnvelopeRecord::new(record.value);
+        parse_envelope(
+            &envelope,
+            &mut self.state,
+            &self.source_file,
+            line_number,
+            &self.file_path,
+        )
+    }
+
+    pub(crate) fn checkpoint(&self) -> TracerParserCheckpoint {
+        TracerParserCheckpoint(self.state.clone())
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct TracerParserCheckpoint(ParserState);
+
+impl TracerParserCheckpoint {
+    pub(crate) fn to_json(&self) -> Result<String> {
+        serde_json::to_string(&self.0).context("Failed to encode Codex tracer parser checkpoint")
+    }
+
+    fn legacy_state(&self, byte_offset: u64, line_number: u64) -> FileParseState {
+        FileParseState {
+            byte_offset,
+            line_number: i32::try_from(line_number).unwrap_or(i32::MAX),
+            session_id: self.0.session_id.clone(),
+            last_cumulative_total: self.0.last_cumulative_total,
+        }
+    }
+}
+
 /// Link previous/next records and compute thread call indices.
-fn link_previous_next_records(events: &mut [CodexTracerEvent]) {
+pub(crate) fn link_previous_next_records(events: &mut [CodexTracerEvent]) {
     // Group by thread_key
     let mut thread_groups: HashMap<String, Vec<usize>> = HashMap::new();
 
@@ -155,6 +212,8 @@ fn link_previous_next_records(events: &mut [CodexTracerEvent]) {
 }
 
 /// Parser state that persists across JSONL lines.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(default)]
 struct ParserState {
     session_id: Option<String>,
     session_meta: SessionMeta,
@@ -173,7 +232,14 @@ impl ParserState {
     }
 }
 
-#[derive(Default)]
+impl Default for ParserState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 struct SessionMeta {
     thread_source: Option<String>,
     subagent_type: Option<String>,
@@ -184,7 +250,8 @@ struct SessionMeta {
     parent_session_updated_at: Option<String>,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 struct TurnContext {
     turn_id: Option<String>,
     turn_timestamp: Option<String>,
@@ -197,19 +264,16 @@ struct TurnContext {
 
 /// Parse a single JSONL envelope.
 fn parse_envelope(
-    envelope: &Value,
+    envelope: &CodexEnvelopeRecord,
     state: &mut ParserState,
     source_file: &str,
     line_number: i32,
     file_path: &Path,
 ) -> Result<Option<CodexTracerEvent>> {
-    let entry_type = envelope.get("type").and_then(|v| v.as_str());
-    let timestamp = envelope
-        .get("timestamp")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let payload = match envelope.get("payload") {
-        Some(p) if p.is_object() => p,
+    let entry_type = envelope.kind();
+    let timestamp = envelope.timestamp().unwrap_or("");
+    let payload = match envelope.payload() {
+        Some(payload) => payload,
         _ => return Ok(None),
     };
 
@@ -245,7 +309,7 @@ fn parse_envelope(
 }
 
 /// Update session metadata from a session_meta event.
-fn update_session_meta(payload: &Value, state: &mut ParserState) {
+fn update_session_meta(payload: &serde_json::Map<String, Value>, state: &mut ParserState) {
     state.session_meta.thread_source = payload
         .get("thread_source")
         .and_then(|v| v.as_str())
@@ -282,7 +346,11 @@ fn update_session_meta(payload: &Value, state: &mut ParserState) {
 }
 
 /// Update turn context from a turn_context event.
-fn update_turn_context(payload: &Value, state: &mut ParserState, timestamp: &str) {
+fn update_turn_context(
+    payload: &serde_json::Map<String, Value>,
+    state: &mut ParserState,
+    timestamp: &str,
+) {
     state.current_turn.turn_id = payload
         .get("turn_id")
         .and_then(|v| v.as_str())
@@ -312,17 +380,14 @@ fn update_turn_context(payload: &Value, state: &mut ParserState, timestamp: &str
 
 /// Parse a token_count event into a CodexTracerEvent.
 fn parse_token_count(
-    envelope: &Value,
-    payload: &Value,
+    envelope: &CodexEnvelopeRecord,
+    payload: &serde_json::Map<String, Value>,
     state: &mut ParserState,
     source_file: &str,
     line_number: i32,
     file_path: &Path,
 ) -> Result<Option<CodexTracerEvent>> {
-    let timestamp = envelope
-        .get("timestamp")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let timestamp = envelope.timestamp().unwrap_or("");
 
     let info = match payload.get("info").and_then(|v| v.as_object()) {
         Some(i) => i,
@@ -515,6 +580,10 @@ fn is_archived_path(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+
+    use tempfile::TempDir;
+
     use super::*;
 
     #[test]
@@ -620,5 +689,50 @@ mod tests {
         assert_eq!(state.line_number, 0);
         assert_eq!(state.session_id, None);
         assert_eq!(state.last_cumulative_total, -1);
+    }
+
+    #[test]
+    fn partial_eof_event_retries_from_the_prior_durable_boundary() -> Result<()> {
+        let temp = TempDir::new()?;
+        let path = temp.path().join("rollout-session.jsonl");
+        let event = serde_json::json!({
+            "timestamp": "2026-08-24T00:00:00Z",
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "info": {
+                    "last_token_usage": {
+                        "input_tokens": 10,
+                        "cached_input_tokens": 2,
+                        "output_tokens": 5,
+                        "reasoning_output_tokens": 1,
+                        "total_tokens": 15
+                    },
+                    "total_token_usage": {
+                        "input_tokens": 10,
+                        "cached_input_tokens": 2,
+                        "output_tokens": 5,
+                        "reasoning_output_tokens": 1,
+                        "total_tokens": 15
+                    }
+                }
+            }
+        })
+        .to_string();
+        std::fs::write(&path, &event)?;
+
+        let (first, state) = parse_codex_jsonl_with_state(&path, None)?;
+        assert_eq!(first.len(), 1);
+        assert_eq!(state.byte_offset, 0);
+        assert_eq!(state.line_number, 0);
+
+        let mut file = std::fs::OpenOptions::new().append(true).open(&path)?;
+        writeln!(file)?;
+        drop(file);
+        let (retry, state) = parse_codex_jsonl_with_state(&path, Some(state))?;
+        assert_eq!(retry.len(), 1);
+        assert_eq!(state.byte_offset, event.len() as u64 + 1);
+        assert_eq!(state.line_number, 1);
+        Ok(())
     }
 }
