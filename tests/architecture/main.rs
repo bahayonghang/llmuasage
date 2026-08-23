@@ -6,7 +6,8 @@ use std::{
 
 use proc_macro2::Span;
 use syn::{
-    ItemExternCrate, ItemMod, ItemUse, Path as SynPath, UseTree, spanned::Spanned, visit::Visit,
+    ItemExternCrate, ItemImpl, ItemMod, ItemUse, Path as SynPath, Type, UseTree, spanned::Spanned,
+    visit::Visit,
 };
 use walkdir::WalkDir;
 
@@ -34,13 +35,14 @@ struct DependencyVisitor<'a> {
     file: &'a Path,
     module_path: ModulePath,
     root_aliases: &'a RootAliases,
+    forbidden: fn(&[String]) -> bool,
     violations: Vec<Violation>,
 }
 
 impl DependencyVisitor<'_> {
     fn record(&mut self, span: Span, segments: &[String]) {
         let target = resolve_path(segments, &self.module_path, self.root_aliases);
-        if is_commands_dependency(&target) {
+        if (self.forbidden)(&target) {
             self.violations.push(Violation {
                 file: self.file.display().to_string(),
                 line: span.start().line,
@@ -244,6 +246,11 @@ fn is_commands_dependency(segments: &[String]) -> bool {
     matches!(segments, [root, layer, ..] if root == "crate" && layer == "commands")
 }
 
+fn is_command_sync_dependency(segments: &[String]) -> bool {
+    matches!(segments, [root, commands, sync, ..]
+        if root == "crate" && commands == "commands" && sync == "sync")
+}
+
 fn module_path_for_file(root: &Path, file: &Path, module_root: &[&str]) -> ModulePath {
     let mut module_path = module_root
         .iter()
@@ -271,7 +278,11 @@ fn module_path_for_file(root: &Path, file: &Path, module_root: &[&str]) -> Modul
     module_path
 }
 
-fn violations_in(root: &Path, module_root: &[&str]) -> Result<Vec<Violation>, String> {
+fn violations_in(
+    root: &Path,
+    module_root: &[&str],
+    forbidden: fn(&[String]) -> bool,
+) -> Result<Vec<Violation>, String> {
     let mut violations = Vec::new();
     for entry in WalkDir::new(root) {
         let entry = entry.map_err(|error| error.to_string())?;
@@ -296,6 +307,212 @@ fn violations_in(root: &Path, module_root: &[&str]) -> Result<Vec<Violation>, St
             file: entry.path(),
             module_path,
             root_aliases: &root_aliases,
+            forbidden,
+            violations: Vec::new(),
+        };
+        visitor.visit_file(&syntax);
+        violations.extend(visitor.violations);
+    }
+    Ok(violations)
+}
+
+fn command_sync_violations_outside_commands() -> Result<Vec<Violation>, String> {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut violations = Vec::new();
+    for entry in std::fs::read_dir(&src).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        if path.file_name().and_then(|name| name.to_str()) == Some("commands") {
+            continue;
+        }
+        if path.is_dir() {
+            let module = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| format!("non-UTF8 module path: {}", path.display()))?;
+            violations.extend(violations_in(
+                &path,
+                &["crate", module],
+                is_command_sync_dependency,
+            )?);
+        } else if path.extension().and_then(|value| value.to_str()) == Some("rs") {
+            violations.extend(violations_in(
+                &path,
+                &["crate"],
+                is_command_sync_dependency,
+            )?);
+        }
+    }
+    Ok(violations)
+}
+
+#[derive(Debug)]
+struct ImportBinding {
+    module_path: ModulePath,
+    local: String,
+    target: Vec<String>,
+}
+
+struct ImportBindingCollector {
+    module_path: ModulePath,
+    bindings: Vec<ImportBinding>,
+}
+
+impl<'ast> Visit<'ast> for ImportBindingCollector {
+    fn visit_item_use(&mut self, item: &'ast ItemUse) {
+        collect_import_bindings(
+            &item.tree,
+            &mut Vec::new(),
+            &self.module_path,
+            &mut self.bindings,
+        );
+    }
+
+    fn visit_item_mod(&mut self, item: &'ast ItemMod) {
+        if item.content.is_some() {
+            self.module_path.push(item.ident.to_string());
+            syn::visit::visit_item_mod(self, item);
+            self.module_path.pop();
+        }
+    }
+}
+
+fn collect_import_bindings(
+    tree: &UseTree,
+    prefix: &mut Vec<String>,
+    module_path: &[String],
+    bindings: &mut Vec<ImportBinding>,
+) {
+    match tree {
+        UseTree::Path(path) => {
+            prefix.push(path.ident.to_string());
+            collect_import_bindings(&path.tree, prefix, module_path, bindings);
+            prefix.pop();
+        }
+        UseTree::Name(name) => {
+            let mut target = prefix.clone();
+            target.push(name.ident.to_string());
+            bindings.push(ImportBinding {
+                module_path: module_path.to_vec(),
+                local: name.ident.to_string(),
+                target,
+            });
+        }
+        UseTree::Rename(rename) => {
+            let mut target = prefix.clone();
+            if rename.ident != "self" {
+                target.push(rename.ident.to_string());
+            }
+            bindings.push(ImportBinding {
+                module_path: module_path.to_vec(),
+                local: rename.rename.to_string(),
+                target,
+            });
+        }
+        UseTree::Group(group) => {
+            for item in &group.items {
+                collect_import_bindings(item, prefix, module_path, bindings);
+            }
+        }
+        UseTree::Glob(_) => {}
+    }
+}
+
+struct SyncImplVisitor<'a> {
+    file: &'a Path,
+    module_path: ModulePath,
+    root_aliases: &'a RootAliases,
+    bindings: &'a [ImportBinding],
+    violations: Vec<Violation>,
+}
+
+impl SyncImplVisitor<'_> {
+    fn resolve_impl_path(&self, path: &SynPath) -> Vec<String> {
+        let segments = path
+            .segments
+            .iter()
+            .map(|segment| segment.ident.to_string())
+            .collect::<Vec<_>>();
+        let resolved = resolve_path(&segments, &self.module_path, self.root_aliases);
+        if matches!(resolved.as_slice(), [root, sync, ..] if root == "crate" && sync == "sync") {
+            return resolved;
+        }
+        let Some(first) = segments.first() else {
+            return resolved;
+        };
+        let Some(binding) = self
+            .bindings
+            .iter()
+            .find(|binding| binding.module_path == self.module_path && binding.local == *first)
+        else {
+            return resolved;
+        };
+        let mut target = resolve_path(&binding.target, &self.module_path, self.root_aliases);
+        target.extend(segments.into_iter().skip(1));
+        target
+    }
+
+    fn record_path(&mut self, path: &SynPath) {
+        let target = self.resolve_impl_path(path);
+        if matches!(target.as_slice(), [root, sync, ..] if root == "crate" && sync == "sync") {
+            self.violations.push(Violation {
+                file: self.file.display().to_string(),
+                line: path.span().start().line,
+                target: target.join("::"),
+            });
+        }
+    }
+}
+
+impl<'ast> Visit<'ast> for SyncImplVisitor<'_> {
+    fn visit_item_impl(&mut self, item: &'ast ItemImpl) {
+        if let Some((_, trait_path, _)) = &item.trait_ {
+            self.record_path(trait_path);
+        }
+        if let Type::Path(type_path) = item.self_ty.as_ref() {
+            self.record_path(&type_path.path);
+        }
+    }
+
+    fn visit_item_mod(&mut self, item: &'ast ItemMod) {
+        if item.content.is_some() {
+            self.module_path.push(item.ident.to_string());
+            syn::visit::visit_item_mod(self, item);
+            self.module_path.pop();
+        }
+    }
+}
+
+fn sync_impl_violations_in(root: &Path, module_root: &[&str]) -> Result<Vec<Violation>, String> {
+    let mut violations = Vec::new();
+    for entry in WalkDir::new(root) {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if !entry.file_type().is_file()
+            || entry.path().extension().and_then(|value| value.to_str()) != Some("rs")
+        {
+            continue;
+        }
+        let source = std::fs::read_to_string(entry.path())
+            .map_err(|error| format!("read {}: {error}", entry.path().display()))?;
+        let syntax = syn::parse_file(&source)
+            .map_err(|error| format!("parse {}: {error}", entry.path().display()))?;
+        let module_path = module_path_for_file(root, entry.path(), module_root);
+        let mut alias_collector = RootAliasCollector {
+            module_path: module_path.clone(),
+            candidates: Vec::new(),
+        };
+        alias_collector.visit_file(&syntax);
+        let root_aliases = root_aliases(&alias_collector.candidates);
+        let mut binding_collector = ImportBindingCollector {
+            module_path: module_path.clone(),
+            bindings: Vec::new(),
+        };
+        binding_collector.visit_file(&syntax);
+        let mut visitor = SyncImplVisitor {
+            file: entry.path(),
+            module_path,
+            root_aliases: &root_aliases,
+            bindings: &binding_collector.bindings,
             violations: Vec::new(),
         };
         visitor.visit_file(&syntax);
@@ -307,7 +524,8 @@ fn violations_in(root: &Path, module_root: &[&str]) -> Result<Vec<Violation>, St
 #[test]
 fn sync_layer_does_not_depend_on_commands() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/sync");
-    let violations = violations_in(&root, &["crate", "sync"]).expect("parse sync layer");
+    let violations =
+        violations_in(&root, &["crate", "sync"], is_commands_dependency).expect("parse sync layer");
     assert!(
         violations.is_empty(),
         "ARCH-002 violations:\n{}",
@@ -322,10 +540,41 @@ fn sync_layer_does_not_depend_on_commands() {
 #[test]
 fn remote_layer_does_not_depend_on_commands() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/remote");
-    let violations = violations_in(&root, &["crate", "remote"]).expect("parse remote layer");
+    let violations = violations_in(&root, &["crate", "remote"], is_commands_dependency)
+        .expect("parse remote layer");
     assert!(
         violations.is_empty(),
         "ARCH-002 remote violations:\n{}",
+        violations
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+#[test]
+fn non_command_layers_do_not_depend_on_command_sync() {
+    let violations = command_sync_violations_outside_commands().expect("scan non-command layers");
+    assert!(
+        violations.is_empty(),
+        "ARCH-003 violations:\n{}",
+        violations
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+#[test]
+fn command_layer_does_not_implement_sync_owned_types_or_traits() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/commands");
+    let violations = sync_impl_violations_in(&root, &["crate", "commands"])
+        .expect("scan command impl ownership");
+    assert!(
+        violations.is_empty(),
+        "ARCH-004 violations:\n{}",
         violations
             .iter()
             .map(ToString::to_string)
@@ -347,8 +596,12 @@ fn fixtures_cover_supported_rust_path_forms() {
     ];
 
     for (name, expected_target) in cases {
-        let violations = violations_in(&fixtures.join(name), &["crate", "sync"])
-            .expect("parse violation fixture");
+        let violations = violations_in(
+            &fixtures.join(name),
+            &["crate", "sync"],
+            is_commands_dependency,
+        )
+        .expect("parse violation fixture");
         let violation = violations
             .iter()
             .find(|violation| violation.target == expected_target)
@@ -360,7 +613,45 @@ fn fixtures_cover_supported_rust_path_forms() {
         );
     }
 
-    let valid =
-        violations_in(&fixtures.join("valid.rs"), &["crate", "sync"]).expect("parse valid fixture");
+    let valid = violations_in(
+        &fixtures.join("valid.rs"),
+        &["crate", "sync"],
+        is_commands_dependency,
+    )
+    .expect("parse valid fixture");
     assert!(valid.is_empty(), "valid fixture: {valid:?}");
+}
+
+#[test]
+fn ownership_fixtures_cover_non_adapter_dependencies_and_sync_impls() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/architecture/fixtures");
+    let adapter = violations_in(
+        &fixtures.join("non_adapter_command_sync.rs"),
+        &["crate", "web"],
+        is_command_sync_dependency,
+    )
+    .expect("parse non-adapter fixture");
+    assert!(
+        adapter
+            .iter()
+            .any(|violation| violation.target == "crate::commands::sync")
+    );
+
+    for (name, expected) in [
+        ("commands_impl_sync_trait.rs", "crate::sync::SyncExecutor"),
+        ("commands_impl_sync_type.rs", "crate::sync::JobRegistry"),
+        (
+            "commands_impl_sync_alias.rs",
+            "crate::sync::executor::SyncExecutor",
+        ),
+    ] {
+        let violations = sync_impl_violations_in(&fixtures.join(name), &["crate", "commands"])
+            .expect("parse impl ownership fixture");
+        assert!(
+            violations
+                .iter()
+                .any(|violation| violation.target == expected && violation.line > 0),
+            "fixture {name}: {violations:?}"
+        );
+    }
 }

@@ -3,7 +3,7 @@
 - 状态：拟稿（0.5.0 sprint M0- 雏形 / M2 完整）
 - 落地阶段：M0- 雏形 / M2 完整
 - 落地日期：TBD
-- 相关代码：`src/sync/job_registry.rs`（新）、`src/sync/mod.rs::run_with_progress`、`src/web/mod.rs::api_jobs`
+- 相关代码：`src/sync/{job_registry,default,engine}.rs`、`src/web/mod.rs::api_jobs`、`src/tui/sync_control.rs`
 - 相关术语：Job / JobRegistry / JobSnapshot（见仓库根目录 CONTEXT.md）
 - 关联 PRD：llmusage-integration-prd-v1.1.md §F0.2（D4，仓库根目录）
 
@@ -117,3 +117,16 @@ JobRegistry 不解释 transport 字符串。CLI、Web 与 public `try_start` 都
 - 单测：`registry_cancel_propagates_to_run_with_progress`
 - 单测：`list_recent_evicts_oldest_finished`
 - 集测：`tauri_command_poll_loop_observes_full_lifecycle`
+
+## 1.3 更新：默认执行器归属 sync 应用层
+
+`SyncExecutor` 的默认 concrete implementation 已从 CLI 命令模块迁移为
+`src/sync/default.rs::DefaultSyncExecutor`，三阶段流水线位于
+`src/sync/engine.rs`。`JobRegistry::default()` 与该实现同层组合；Web/TUI
+直接使用默认 registry，测试仍可通过 `JobRegistry::new(Arc<dyn
+SyncExecutor>)` 注入 executor。
+
+`commands::sync::CommandSyncExecutor` 仅作为兼容 re-export 保留，旧的
+`run_once*`/`run_store_once*` 路径也只委托给 sync engine。这样删除 CLI
+adapter 不会再删除同步策略、重建/修复、remote 生命周期或 registry 的默认
+运行能力。

@@ -96,6 +96,17 @@
 - Sync request validation has one owner: `ValidatedSyncRequest`. CLI, Web, and
   public `JobRegistry::try_start` must return `unknown_source`,
   `invalid_recent_days`, or `invalid_parallelism` before creating work.
+- Sync execution has one application owner: `src/sync/engine.rs` selects
+  parsers and owns rebuild/repair, remote import/sweep, status persistence,
+  and `SyncSummary` assembly. `src/sync/default.rs` owns
+  `DefaultSyncExecutor` and `JobRegistry::default()` composition.
+- `commands::sync` owns transport-only behavior: CLI bootstrap/lease timing,
+  Ctrl-C, human/NDJSON rendering, summary formatting, emit-shards, and public
+  compatibility delegates. The historical `CommandSyncExecutor` name is a
+  re-export of `sync::DefaultSyncExecutor`; it must not regain an impl body.
+- Web, TUI, and other non-command consumers construct `JobRegistry::default()`
+  or inject a `SyncExecutor` from `crate::sync`; they never depend on
+  `crate::commands::sync`.
 - A `recent_days` run uses one UTC cutoff. File-backed sources must filter by
   normalized event time when metadata cannot safely exclude a file. OpenCode
   must apply the cutoff in its SQLite page queries. Bounded runs may reuse an
@@ -242,6 +253,9 @@
 - A bounded run succeeds -> mark `recent_completed_at` and emit
   `RecentReady` only after every requested parser stage and status write
   completes; cancellation/failure emits neither completion signal.
+- A command compatibility entry is called -> delegate to the matching
+  `sync::engine` public function with the same arguments and output; do not
+  duplicate validation, locking, parser selection, or run-log state.
 
 ### 5. Good/Base/Bad Cases
 
@@ -253,6 +267,8 @@
   emitted, and stored counts in CLI JSON/human output and TUI payloads.
 - Base: an omitted source selects all registered parsers through the validated
   request; no transport adapter interprets `None` independently.
+- Good: `JobRegistry::default()` composes `DefaultSyncExecutor` inside
+  `src/sync/`, while CLI/Web/TUI remain replaceable adapters.
 - Good: a recent event appended to an old JSONL file is imported by a bounded
   run, while the old event remains recoverable by a later full sync.
 - Bad: treating a growing OpenCode DB as replaced because its mtime/length
@@ -261,6 +277,8 @@
 - Bad: converting an unknown source to `None`, advancing the full-history
   cursor during a bounded run, or emitting `RecentReady` after only one parser
   when the request selected all sources.
+- Bad: implementing `SyncExecutor` or `Default for JobRegistry` in
+  `commands`, or making Web/TUI import `CommandSyncExecutor`.
 - Bad: adding a Gemini/Cursor/etc. parser ID only because a root directory was
   detected, without token fixtures and cursor/fingerprint tests.
 
@@ -295,6 +313,9 @@
   one-row append, closed upper bounds, and idempotent replacement replay.
 - Table-driven CLI, Web, and public `JobRegistry::try_start` tests asserting
   the same validation codes and no job creation for invalid input.
+- Architecture tests scan `sync`/`remote -> commands`, every non-command
+  layer's dependency on `commands::sync`, and sync-owned trait/type impls
+  placed in `commands`; each policy has a negative fixture.
 - Recent-window regressions asserting event-time filtering, an old file with a
   recent append, no bounded cursor/reset writes, later full-history recovery,
   OpenCode SQL lower-bound pruning, and `RecentReady` ordering.
@@ -347,6 +368,14 @@ let source = input.source.as_deref().and_then(SourceKind::parse_id);
 // Correct: validate transport input once, then pass only typed selection.
 let request = ValidatedSyncRequest::new(input)?;
 let source = request.source_kind();
+```
+
+```rust
+// Wrong: an adapter owns the application implementation.
+impl crate::sync::SyncExecutor for CommandSyncExecutor { /* core flow */ }
+
+// Correct: commands preserves only the old import path.
+pub use crate::sync::DefaultSyncExecutor as CommandSyncExecutor;
 ```
 
 ## Scenario: Bounded Passive JSONL Records And Cooperative Cancellation

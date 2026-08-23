@@ -1,5 +1,5 @@
 //! `SyncExecutor` trait — the boundary between the sync application layer and
-//! CLI/web adapter code (ARCH-002).
+//! transport adapters and the sync-owned default engine (ARCH-002).
 
 use std::{future::Future, pin::Pin};
 
@@ -18,8 +18,8 @@ pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// Executes one sync run with cancellation support.
 ///
-/// The application layer depends on this trait; the CLI adapter
-/// (`commands::sync`) provides the implementation. Tests can supply a stub.
+/// [`crate::sync::DefaultSyncExecutor`] provides the canonical implementation;
+/// composition roots and tests may inject another implementation.
 pub trait SyncExecutor: Send + Sync + 'static {
     fn run_once<'a>(
         &'a self,

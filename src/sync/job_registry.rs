@@ -86,8 +86,8 @@ pub struct JobRegistry {
     terminal_hooks: TerminalHooks,
     /// Insertion-ordered deque of terminal job ids, capped at `MAX_TERMINAL_JOBS`.
     terminal_order: Arc<Mutex<VecDeque<JobId>>>,
-    /// Executes the actual sync work. Injected by the adapter layer (CLI/web)
-    /// so this module does not import `commands::sync` (ARCH-002).
+    /// Executes the actual sync work. The default is sync-owned; adapters and
+    /// tests may inject another implementation through [`JobRegistry::new`].
     executor: Arc<dyn crate::sync::executor::SyncExecutor>,
 }
 

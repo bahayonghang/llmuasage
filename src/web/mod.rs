@@ -289,11 +289,7 @@ pub struct WebState {
 
 impl WebState {
     pub fn new(store: Store) -> Self {
-        Self::with_jobs_and_query_limit(
-            store,
-            JobRegistry::new(Arc::new(crate::commands::sync::CommandSyncExecutor)),
-            WEB_DASHBOARD_QUERY_PERMITS,
-        )
+        Self::with_jobs_and_query_limit(store, JobRegistry::default(), WEB_DASHBOARD_QUERY_PERMITS)
     }
 
     fn with_jobs_and_query_limit(store: Store, jobs: JobRegistry, permits: usize) -> Self {

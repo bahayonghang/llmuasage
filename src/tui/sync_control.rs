@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 use anyhow::Result;
 
@@ -29,7 +29,7 @@ impl SyncController {
         Ok(Self {
             runtime: tokio::runtime::Handle::try_current()
                 .map_err(|err| anyhow::anyhow!("TUI requires a Tokio runtime: {err}"))?,
-            registry: JobRegistry::new(Arc::new(crate::commands::sync::CommandSyncExecutor)),
+            registry: JobRegistry::default(),
             active_job_id: None,
             events: None,
         })

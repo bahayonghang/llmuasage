@@ -156,14 +156,20 @@ ci-gate:
 
 - Trigger: adding or changing a forbidden Rust dependency direction between
   application/domain layers and outer adapters.
-- ARCH-002 currently forbids every `src/sync/** -> crate::commands/**`
-  dependency, including aliases and relative paths.
+- ARCH-002 forbids every `src/sync/**` and `src/remote/**` dependency on
+  `crate::commands/**`, including aliases and relative paths.
+- ARCH-003 forbids every non-command production layer from depending on
+  `crate::commands::sync/**`.
+- ARCH-004 forbids `src/commands/**` from implementing traits or concrete
+  types owned by `crate::sync/**`.
 
 ### 2. Signatures
 
 - Local and Actions gate:
   `cargo test --locked --all-features --test architecture_dependencies`
 - Violation output: `<source-file>:<line> depends on forbidden target <path>`.
+- Canonical default: `sync::DefaultSyncExecutor`; compatibility alias:
+  `commands::sync::CommandSyncExecutor`.
 
 ### 3. Contracts
 
@@ -171,8 +177,14 @@ ci-gate:
   boundary with a grep for one spelling.
 - Resolve `crate`, `self`, `super`, `use crate as <alias>`, and
   `extern crate self as <alias>` paths before comparing the dependency target.
-- Concrete executors belong to outer adapters or composition roots. The sync
-  layer owns only the stable executor trait and typed request/result contracts.
+- The sync application layer owns the executor trait, `DefaultSyncExecutor`,
+  the engine, and `JobRegistry::default()`. Outer adapters may inject test or
+  product-specific executors but cannot own the canonical implementation.
+- `commands::sync` may re-export sync-owned types and delegate public wrappers;
+  it cannot provide impl blocks for sync-owned traits/types.
+- Web/TUI and other non-command consumers use `crate::sync` directly. A
+  compatibility import through `commands::sync` is allowed only to external
+  callers and compile fixtures, not production layering.
 - Parser dependencies used only by the architecture test remain
   `dev-dependencies`.
 
@@ -184,14 +196,19 @@ ci-gate:
 | Protected file cannot be parsed or read | Fail the architecture test; never silently skip it |
 | Alias or relative path resolves to the forbidden layer | Fail exactly like a fully qualified path |
 | Dependency resolves outside the forbidden layer | Pass without a violation |
+| Web/TUI imports `commands::sync` | Fail ARCH-003 even if the sync layer itself stays clean |
+| `commands` implements `SyncExecutor` or `Default for JobRegistry` | Fail ARCH-004 with the owned trait/type path |
+| `commands` delegates to `crate::sync` or re-exports the compatibility name | Pass |
 
 ### 5. Good / Base / Bad Cases
 
-- Good: Web/TUI composition roots inject `CommandSyncExecutor` into
-  `JobRegistry::new`, while `src/sync` imports only the executor port.
+- Good: Web/TUI call `JobRegistry::default()` or inject a sync-owned/test
+  executor without importing commands.
 - Base: a legitimate `crate::sync/**` dependency passes the fixture gate.
 - Bad: `grep -r "use crate::commands" src/sync` passes while a fully qualified,
   aliased, or `super` path still reaches `commands`.
+- Bad: moving the engine into `sync` but leaving `impl SyncExecutor for
+  CommandSyncExecutor` or `impl Default for JobRegistry` in commands.
 
 ### 6. Tests Required
 
@@ -199,6 +216,11 @@ ci-gate:
   nested modules, crate-root aliases, and relative `self`/`super` paths.
 - One valid dependency-graph fixture that produces no violation.
 - A live scan of `src/sync` asserting the violation list is empty.
+- Negative fixtures for a non-command `commands::sync` dependency, a
+  sync-owned trait impl in commands, a sync-owned type impl in commands, and
+  an imported trait alias used by an impl.
+- Live scans asserting non-command production code has no command-sync edge
+  and commands has no sync-owned impl target.
 - Every violation fixture must assert the resolved target and a nonzero source
   line; the live gate must print all violations, not only the first.
 
@@ -214,4 +236,23 @@ run: grep -r "use crate::commands" src/sync/
 
 ```yaml
 run: cargo test --locked --all-features --test architecture_dependencies
+```
+
+For default composition:
+
+#### Wrong
+
+```rust
+impl Default for crate::sync::JobRegistry {
+    fn default() -> Self { Self::new(Arc::new(CommandSyncExecutor)) }
+}
+```
+
+#### Correct
+
+```rust
+// src/sync/default.rs
+impl Default for JobRegistry {
+    fn default() -> Self { Self::new(Arc::new(DefaultSyncExecutor)) }
+}
 ```
