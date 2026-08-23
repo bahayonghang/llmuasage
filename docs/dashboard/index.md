@@ -53,8 +53,8 @@ The first screen is task-oriented:
 
 1. Confirm the active time/source/model filter.
 2. Read the six summary cards for sessions, requests, token usage, estimated cost, active days, and cache-read share.
-3. Check Daily activity, Weekly activity, and the daily token usage mix, then use the short-window trend for 24-hour detail.
-4. Compare Highest-usage sessions with project, model, source, and cost rankings.
+3. Check Daily activity, Weekly activity, and the range-aware token usage mix, then use the short-window trend for 24-hour timing detail.
+4. Compare the Session consumption ranking with project, model, source, and cost rankings.
 5. Review behavior panels for interaction activity, tool usage, optimization hints, and model comparison.
 6. Use Usage analysis for ad hoc multidimensional questions about local data.
 7. Open Event Logs for cursor-paginated event detail, or use sync/CSV export and diagnostics when data looks stale.
@@ -101,10 +101,15 @@ activity uses the full row. Ranges of about a month or less render a labeled
 day strip. The all-time range keeps the week-column calendar and stretches it
 to the panel width.
 
-The daily stacked chart separates input, cache read, cache creation, and output
-tokens and includes daily cost in its tooltip. It intentionally shows an empty
-state for the 24-hour range, where the existing short-window chart provides the
-finer view. Live data for these panels is loaded as secondary work through the
+Token usage mix treats persisted `total_tokens` as the authoritative total. It
+separates input, cache read, cache creation, and output tokens, then shows any
+remaining total as **Other / unclassified** instead of folding it into output.
+The 1-day or same-day range aggregates the returned local-day rows into one
+composition strip with exact values and percentages. Longer ranges show the
+same five channels as daily stacked bars, with daily totals and estimated cost
+available to keyboard and pointer users. An impossible row whose known channels
+exceed its authoritative total is reported as a data-quality problem rather
+than drawn as a negative segment. Live data for these panels is loaded as secondary work through the
 same latest-request-wins lifecycle as Activity categories, Tool usage,
 Optimization hints, Usage analysis, and Model comparison, so stale responses
 cannot overwrite a newer filter.
@@ -119,10 +124,13 @@ secondary query does not block the first screen.
 Weekly activity folds 30-minute buckets into a Monday-first `7 x 24` grid using
 the browser's IANA timezone. It sits beside Daily activity on wide screens,
 uses the full row when Daily activity is hidden for the last-1-day preset, and
-stacks below it on narrower screens. Highest-usage sessions supports server-side
-token usage, active-duration, and estimated-cost ordering. Selecting a session opens Event Logs with a
-server-side session filter; expanding an event fetches its retained raw JSON on
-demand. Event Logs are live-only and keep the existing 50-row cursor pagination.
+stacks below it on narrower screens. Session consumption ranking uses horizontal
+bars and supports server-side token usage, active-duration, and estimated-cost
+ordering. Rows are labeled with project, registered agent name, and the first/
+last event time in the current filter range; technical session identifiers are
+kept out of visible and accessible labels. Selecting a row still opens Event Logs
+with its exact canonical session filter. Expanding an event fetches its retained
+raw JSON on demand. Event Logs are live-only and keep the existing 50-row cursor pagination.
 
 ### Rankings
 
@@ -174,14 +182,16 @@ Core `/api/dashboard` data should remain responsive even when Activity categorie
 ## CSV export and static export
 
 The live dashboard exports the currently loaded summary, daily trends, projects,
-models, sources, and Highest-usage sessions as a UTF-8 BOM CSV. Untrusted labels are
+models, sources, and sessions as a UTF-8 BOM CSV. The visual removal of technical
+session IDs does not change the existing machine-readable session field in CSV.
+Untrusted labels are
 formula-neutralized before RFC-style quoting. For an offline HTML bundle, use:
 
 ```powershell
 llmusage export html --out .\llmusage-report
 ```
 
-The static bundle includes `snapshot.json` with the summary cards, Daily activity, Weekly activity, Highest-usage sessions, the daily token series, default Usage analysis payload, and their renderer assets. Older snapshots omit the new keys safely. Snapshot mode disables live Usage analysis controls and shows Event Logs as live-only.
+The static bundle includes `snapshot.json` with the summary cards, Daily activity, Weekly activity, session consumption ranking, the daily token series, default Usage analysis payload, and their renderer assets. Older snapshots omit the new session time keys safely and use an agent/event-count fallback. Snapshot mode disables live Usage analysis controls and shows Event Logs as live-only.
 
 ## Sync jobs
 

@@ -243,6 +243,7 @@
 .daily-series-1 { fill: var(--chart-cat-2); background: var(--chart-cat-2); }
 .daily-series-2 { fill: var(--chart-cat-3); background: var(--chart-cat-3); }
 .daily-series-3 { fill: var(--chart-cat-4); background: var(--chart-cat-4); }
+.daily-series-4 { fill: var(--chart-cat-other); background: var(--chart-cat-other); }
 
 .daily-legend-row {
   display: flex;
@@ -264,4 +265,115 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
+}
+
+.daily-chart [data-daily-tooltip]:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.daily-composition-summary {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.daily-composition-summary > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.daily-composition-summary span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.daily-composition-summary strong {
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.daily-composition-total-label {
+  padding-bottom: 2px;
+  text-align: right;
+}
+
+.daily-composition-strip {
+  display: flex;
+  width: 100%;
+  height: 14px;
+  margin-top: 10px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.daily-composition-segment {
+  display: block;
+  min-width: 0;
+  height: 100%;
+}
+
+.daily-composition-stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.daily-composition-stat {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 8px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+}
+
+.daily-composition-key {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.daily-composition-stat strong,
+.daily-composition-stat small {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.daily-composition-stat strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.daily-composition-stat small {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.composition-error {
+  color: var(--warn);
+}
+
+@media (max-width: 720px) {
+  .daily-composition-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }

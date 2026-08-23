@@ -152,6 +152,8 @@ fn top_sessions_filters_and_sorts_stably() -> Result<()> {
     })?;
     assert_eq!(duration[0].session_id, "codex:gamma");
     assert_eq!(duration[0].active_minutes, 30);
+    assert_eq!(duration[0].first_event_at, "2026-05-01T01:00:00Z");
+    assert_eq!(duration[0].last_event_at, "2026-05-01T01:30:00Z");
     assert_eq!(duration[1].session_id, "claude:beta");
     assert_eq!(duration[2].session_id, "codex:alpha");
     assert_eq!(duration[1].active_minutes, duration[2].active_minutes);
@@ -178,6 +180,8 @@ fn top_sessions_filters_and_sorts_stably() -> Result<()> {
     })?;
     assert_eq!(filtered.len(), 1);
     assert_eq!(filtered[0].session_id, "codex:alpha");
+    assert_eq!(filtered[0].first_event_at, "2026-05-01T00:00:00Z");
+    assert_eq!(filtered[0].last_event_at, "2026-05-01T00:10:00Z");
 
     let clamped = dashboard.top_sessions(&TopSessionsQuery {
         limit: 500,

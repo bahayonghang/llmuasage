@@ -2877,6 +2877,7 @@ mod tests {
                 .body
         };
         let hero_js = asset("render/hero.js");
+        let source_catalog_js = asset("data/source-catalog.js");
         let components_css = asset("components.css");
         let layout_css = asset("layout.css");
         let copy_js = asset("copy.js");
@@ -2884,7 +2885,7 @@ mod tests {
         assert!(hero_js.contains("class=\"agent-badge-list\" role=\"list\""));
         assert!(hero_js.contains("class=\"agent-badge\" data-source="));
         assert!(hero_js.contains("alt=\"\" aria-hidden=\"true\""));
-        assert!(hero_js.contains("FALLBACK_AGENT_LOGO_URL"));
+        assert!(source_catalog_js.contains("FALLBACK_AGENT_LOGO_URL"));
         assert!(!hero_js.contains("role=\"button\""));
         assert!(!hero_js.contains("tabindex="));
         assert!(!hero_js.contains("onclick="));
@@ -3100,6 +3101,7 @@ mod tests {
                 "data/format.js",
                 "data/derive.js",
                 "data/render-key.js",
+                "data/source-catalog.js",
                 "render/hero.js",
                 "render/summary-cards.js",
                 "render/calendar-heatmap.js",
@@ -3499,7 +3501,7 @@ mod tests {
             "'缓存读取占比'",
             "'每日活跃度'",
             "'每周活跃时段'",
-            "'高用量会话'",
+            "'会话消耗排行'",
             "'shell.filters.modelPlaceholder': '全部模型'",
         ] {
             assert!(
@@ -3514,6 +3516,7 @@ mod tests {
             "'缓存效率'",
             "'活动日历'",
             "'星期与小时'",
+            "'高用量会话'",
             "'热门会话'",
             "'all models'",
         ] {
@@ -4834,6 +4837,11 @@ mod tests {
             .and_then(|rows| rows.first())
             .expect("trend row");
         assert_eq!(first["date"], "2026-05-01");
+        assert_eq!(first["input_tokens"], 10);
+        assert_eq!(first["cache_read_tokens"], 2);
+        assert_eq!(first["cache_creation_tokens"], 0);
+        assert_eq!(first["output_tokens"], 5);
+        assert_eq!(first["total_tokens"], 18);
         assert_eq!(first["event_count"], 1);
         assert_eq!(first["cost_with_cache_usd"], 0.25);
         Ok(())

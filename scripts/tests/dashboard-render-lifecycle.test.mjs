@@ -93,6 +93,7 @@ const syncCommandCenter = await import('../../src/web/assets/render/sync-command
 const summaryCards = await import('../../src/web/assets/render/summary-cards.js');
 const calendarHeatmap = await import('../../src/web/assets/render/calendar-heatmap.js');
 const trendsDaily = await import('../../src/web/assets/render/trends-daily.js');
+const topSessions = await import('../../src/web/assets/render/top-sessions.js');
 const loadState = await import('../../src/web/assets/load-state.js');
 
 function minimalRaw() {
@@ -697,9 +698,9 @@ test('ready-widget renderers mutate only their section containers', () => {
       ],
       heatmap_support: null,
       trends_daily: [
-        { date: '2026-02-01', input_tokens: 10, cache_read_tokens: 20, cache_creation_tokens: 30, output_tokens: 40, cost_with_cache_usd: 1 },
-        { date: '2026-02-02', input_tokens: 20, cache_read_tokens: 30, cache_creation_tokens: 40, output_tokens: 50, cost_with_cache_usd: 2 },
-        { date: '2026-02-03', input_tokens: 30, cache_read_tokens: 40, cache_creation_tokens: 50, output_tokens: 60, cost_with_cache_usd: 3 },
+        { date: '2026-02-01', input_tokens: 10, cache_read_tokens: 20, cache_creation_tokens: 30, output_tokens: 40, total_tokens: 110, cost_with_cache_usd: 1 },
+        { date: '2026-02-02', input_tokens: 20, cache_read_tokens: 30, cache_creation_tokens: 40, output_tokens: 50, total_tokens: 150, cost_with_cache_usd: 2 },
+        { date: '2026-02-03', input_tokens: 30, cache_read_tokens: 40, cache_creation_tokens: 50, output_tokens: 60, total_tokens: 190, cost_with_cache_usd: 3 },
       ],
       trends_daily_support: null,
     },
@@ -756,7 +757,309 @@ test('ready-widget renderers mutate only their section containers', () => {
   trendsDaily.renderTrendsDaily(context, state);
   assert.deepEqual(mutatedIds(), ['trends-daily']);
   assert.ok(getElement('trends-daily').innerHTML.includes('daily-series-3'));
+  assert.ok(getElement('trends-daily').innerHTML.includes('daily-series-4'));
   assert.ok(getElement('trends-daily').innerHTML.includes('2026-02-03'));
+});
+
+test('token composition derives authoritative totals, residuals, and invalid states', () => {
+  const exact = trendsDaily.deriveDailyComposition({
+    date: '2026-08-23',
+    input_tokens: 40,
+    cache_read_tokens: 20,
+    cache_creation_tokens: 10,
+    output_tokens: 30,
+    total_tokens: 100,
+  });
+  assert.equal(exact.status, 'ok');
+  assert.equal(exact.segments[4].value, 0);
+
+  const totalOnly = trendsDaily.deriveDailyComposition({ date: '2026-08-23', total_tokens: 120 });
+  assert.equal(totalOnly.segments[4].value, 120);
+  assert.equal(totalOnly.total, 120);
+
+  const residual = trendsDaily.deriveDailyComposition({
+    date: '2026-08-23', input_tokens: 40, cache_read_tokens: 20,
+    cache_creation_tokens: 10, output_tokens: 30, total_tokens: 135,
+    reasoning_output_tokens: 35,
+  });
+  assert.equal(residual.segments[4].value, 35);
+  assert.equal(residual.total, 135);
+
+  const aggregate = trendsDaily.aggregateDailyComposition([
+    { date: '2026-08-22', input_tokens: 10, output_tokens: 20, total_tokens: 40 },
+    { date: '2026-08-23', input_tokens: 15, output_tokens: 25, total_tokens: 60 },
+  ]);
+  assert.equal(aggregate.total, 100);
+  assert.equal(aggregate.segments[0].value, 25);
+  assert.equal(aggregate.segments[4].value, 30);
+
+  assert.equal(trendsDaily.deriveDailyComposition({ total_tokens: 0 }).status, 'no_data');
+  assert.equal(trendsDaily.deriveDailyComposition({ input_tokens: 2, total_tokens: 1 }).reason, 'known_exceeds_total');
+  assert.equal(trendsDaily.deriveDailyComposition({ input_tokens: -1, total_tokens: 1 }).reason, 'invalid_channel');
+  assert.equal(trendsDaily.deriveDailyComposition({ input_tokens: Number.NaN, total_tokens: 1 }).reason, 'invalid_channel');
+  assert.equal(trendsDaily.deriveDailyComposition({ total_tokens: Number.POSITIVE_INFINITY }).reason, 'invalid_total');
+});
+
+test('one-day and multi-day token composition render data, bilingual copy, and quality states', () => {
+  const context = {
+    panels: {
+      trends_daily: [
+        { date: '2026-08-22', input_tokens: 10, cache_read_tokens: 20, cache_creation_tokens: 0, output_tokens: 30, total_tokens: 70, cost_with_cache_usd: 0.4 },
+        { date: '2026-08-23', input_tokens: 20, cache_read_tokens: 10, cache_creation_tokens: 5, output_tokens: 35, total_tokens: 90, cost_with_cache_usd: 0.6 },
+      ],
+      trends_daily_support: null,
+    },
+  };
+
+  copy.setLocale('zh');
+  trendsDaily.renderTrendsDaily(context, { rangePreset: '1d', filters: {} });
+  let html = getElement('trends-daily').innerHTML;
+  assert.match(html, /daily-composition-strip/);
+  assert.match(html, /其他 \/ 未细分/);
+  assert.match(html, /160/);
+  assert.doesNotMatch(html, /近 7 天开始显示/);
+
+  trendsDaily.renderTrendsDaily(context, { rangePreset: '7d', filters: {} });
+  html = getElement('trends-daily').innerHTML;
+  assert.match(html, /daily-series-4/);
+  assert.match(html, /权威总量 90/);
+  assert.match(html, /tabindex="0"/);
+  assert.match(html, /<svg[^>]+role="group"/);
+
+  trendsDaily.renderTrendsDaily({
+    panels: {
+      trends_daily: [{ date: '2026-08-23', input_tokens: 11, total_tokens: 10 }],
+      trends_daily_support: null,
+    },
+  }, { rangePreset: '1d', filters: {} });
+  assert.match(getElement('trends-daily').innerHTML, /已知通道合计 11 大于权威总量 10/);
+
+  trendsDaily.renderTrendsDaily({
+    panels: { trends_daily: [], trends_daily_support: { level: 'degraded', reason: 'query timeout' } },
+  }, { rangePreset: '1d', filters: {} });
+  assert.match(getElement('trends-daily').innerHTML, /query timeout/);
+
+  trendsDaily.renderTrendsDaily({
+    panels: { trends_daily: [], trends_daily_support: { level: 'loading' } },
+  }, { rangePreset: '1d', filters: {} });
+  assert.match(getElement('trends-daily').innerHTML, /正在加载 Token 用量构成/);
+
+  trendsDaily.renderTrendsDaily({
+    panels: { trends_daily: [{ date: '2026-08-23', total_tokens: 0 }], trends_daily_support: null },
+  }, { rangePreset: '1d', filters: {} });
+  assert.match(getElement('trends-daily').innerHTML, /当前筛选范围暂无 Token 用量/);
+  assert.doesNotMatch(getElement('trends-daily').innerHTML, /daily-composition-strip/);
+
+  copy.setLocale('en');
+  trendsDaily.renderTrendsDaily(context, { rangePreset: '1d', filters: {} });
+  assert.match(getElement('trends-daily').innerHTML, /Other \/ unclassified/);
+  assert.match(getElement('trends-daily').innerHTML, /Authoritative total/);
+  copy.setLocale('zh');
+});
+
+test('session ranking uses project, agent, and time without exposing technical labels', () => {
+  copy.setLocale('zh');
+  const rows = [
+    {
+      session_id: 'codex:sess_01234567-89ab-cdef',
+      session_label: 'sess_01234567-89ab-cdef',
+      project_label: '很长的中文项目名称'.repeat(12),
+      source: 'codex',
+      first_event_at: '2026-08-23T00:00:00Z',
+      last_event_at: '2026-08-23T00:30:00Z',
+      total_tokens: 1_000_000_000,
+      active_minutes: 30,
+      cost_usd: 12.5,
+      event_count: 4,
+    },
+    {
+      session_id: 'kimi_code:01a02a4b-6901',
+      session_label: '01a02a4b-6901',
+      project_label: '',
+      source: 'kimi_code',
+      total_tokens: 250_000_000,
+      active_minutes: 0,
+      cost_usd: 0,
+      event_count: 1,
+    },
+    {
+      session_id: 'unknown:hash',
+      session_label: 'hash',
+      project_label: '重复项目',
+      source: 'future_agent',
+      total_tokens: 0,
+      active_minutes: 0,
+      cost_usd: 0,
+      event_count: 0,
+    },
+  ];
+
+  const prepared = topSessions.prepareSessionRows(rows, 'tokens', {
+    copy: copy.UI_COPY.sessionAnalytics.topSessions,
+    timeZone: 'UTC',
+  });
+  assert.deepEqual(prepared.map((row) => row.ratio), [1, 0.25, 0]);
+  assert.match(prepared[0].subtitle, /Codex · 2026-08-23 00:00–2026-08-23 00:30/);
+  assert.equal(prepared[1].title, 'Kimi Code 会话');
+  assert.match(prepared[1].subtitle, /1 个事件/);
+  for (const row of prepared) {
+    assert.doesNotMatch(`${row.title}${row.subtitle}${row.accessibleName}`, /sess_|01a02a4b|unknown:hash/);
+  }
+  assert.equal(topSessions.sessionMetricRatio(0, 0), 0);
+  assert.equal(topSessions.sessionMetricRatio(Number.MAX_SAFE_INTEGER, 1), 1);
+  assert.deepEqual(
+    topSessions.prepareSessionRows(rows, 'duration', {
+      copy: copy.UI_COPY.sessionAnalytics.topSessions,
+      timeZone: 'UTC',
+    }).map((row) => row.ratio),
+    [1, 0, 0],
+  );
+  assert.deepEqual(
+    topSessions.prepareSessionRows(rows, 'cost', {
+      copy: copy.UI_COPY.sessionAnalytics.topSessions,
+      timeZone: 'UTC',
+    }).map((row) => row.ratio),
+    [1, 0, 0],
+  );
+  assert.equal(topSessions.formatSessionMetric(rows[0], 'duration'), '30m');
+  assert.equal(topSessions.formatSessionMetric(rows[0], 'cost'), '$12.50');
+});
+
+test('session ranking keeps canonical ids internal and fences sort refreshes', async () => {
+  class InteractiveButton {
+    constructor(dataset) {
+      this.dataset = dataset;
+      this.listeners = new Map();
+    }
+    addEventListener(type, listener) { this.listeners.set(type, listener); }
+    click() { this.listeners.get('click')?.(); }
+  }
+  const root = {
+    _innerHTML: '',
+    sortButtons: [],
+    sessionButtons: [],
+    get innerHTML() { return this._innerHTML; },
+    set innerHTML(value) {
+      this._innerHTML = String(value);
+      this.sortButtons = [...this._innerHTML.matchAll(/data-session-sort="([^"]+)"/g)]
+        .map((match) => new InteractiveButton({ sessionSort: match[1] }));
+      this.sessionButtons = [...this._innerHTML.matchAll(/data-session-id="([^"]*)"/g)]
+        .map((match) => new InteractiveButton({ sessionId: match[1] }));
+    },
+    querySelectorAll(selector) {
+      if (selector === '[data-session-sort]') return this.sortButtons;
+      if (selector === '[data-session-id]') return this.sessionButtons;
+      return [];
+    },
+  };
+  elementRegistry.set('top-sessions', root);
+  const selected = [];
+  window.dispatchEvent = (event) => selected.push(event.detail.session);
+  globalThis.CustomEvent ||= class CustomEvent {
+    constructor(type, init) { this.type = type; this.detail = init?.detail; }
+  };
+
+  const technicalId = 'codex:sess_private-technical-id';
+  const row = {
+    session_id: technicalId,
+    session_label: 'sess_private-technical-id',
+    project_label: '项目 Alpha',
+    source: 'codex',
+    first_event_at: '2026-08-23T00:00:00Z',
+    last_event_at: '2026-08-23T00:05:00Z',
+    total_tokens: 100,
+    active_minutes: 5,
+    cost_usd: 1,
+    event_count: 2,
+  };
+  const rangeReloadController = new AbortController();
+  const state = {
+    topSessionsSort: 'tokens',
+    reloadGeneration: 7,
+    rangeReloadController,
+    filters: { timezone: 'UTC' },
+    rawData: { top_sessions: [row] },
+  };
+  topSessions.renderTopSessions({ panels: { top_sessions: [row] } }, state);
+  assert.match(root.innerHTML, /data-session-id="codex:sess_private-technical-id"/);
+  const visibleAndAccessible = [
+    ...root.innerHTML.matchAll(/<(?:strong|small)>(.*?)<\/(?:strong|small)>/g),
+    ...root.innerHTML.matchAll(/aria-label="([^"]*)"/g),
+  ].map((match) => match[1]).join(' ');
+  assert.doesNotMatch(visibleAndAccessible, /sess_private-technical-id/);
+  assert.doesNotMatch(root.innerHTML, /title="[^"]*sess_private-technical-id/);
+  root.sessionButtons[0].click();
+  assert.deepEqual(selected, [technicalId]);
+  assert.equal(window.location.hash, '#logs');
+
+  let resolveDuration;
+  const durationPayload = [{ ...row, total_tokens: 90, active_minutes: 20 }];
+  let durationOptions;
+  const durationLoad = (_state, options) => new Promise((resolve) => {
+    durationOptions = options;
+    resolveDuration = resolve;
+  });
+  const durationRequest = topSessions.changeTopSessionsSort('duration', state, durationLoad);
+  assert.equal(state.topSessionsLoading, true);
+  assert.equal(state.topSessionsSort, 'duration');
+  assert.match(root.innerHTML, /aria-busy="true"/);
+  assert.match(root.innerHTML, /data-session-sort="duration"[^>]+aria-disabled="true" disabled/);
+  assert.match(root.innerHTML, /正在按“活跃时长”刷新/);
+  assert.match(root.innerHTML, /top-session-value">100</);
+  assert.doesNotMatch(root.innerHTML, /top-session-value">5m</);
+  assert.equal(durationOptions.signal, rangeReloadController.signal);
+  resolveDuration(durationPayload);
+  await durationRequest;
+  assert.equal(state.topSessionsLoading, false);
+  assert.equal(state.topSessionsAppliedSort, 'duration');
+  assert.equal(state.rawData.top_sessions, durationPayload);
+  assert.match(root.innerHTML, /top-session-value">20m</);
+
+  await topSessions.changeTopSessionsSort('cost', state, async () => { throw new Error('offline'); });
+  assert.equal(state.topSessionsSort, 'duration');
+  assert.equal(state.topSessionsAppliedSort, 'duration');
+  assert.equal(state.rawData.top_sessions, durationPayload);
+  assert.match(root.innerHTML, /已保留上一次结果/);
+
+  let resolveStale;
+  let resolveLatest;
+  state.topSessionsError = null;
+  state.topSessionsSort = 'tokens';
+  const staleRequest = topSessions.changeTopSessionsSort(
+    'duration',
+    state,
+    () => new Promise((resolve) => { resolveStale = resolve; }),
+  );
+  const latestPayload = [{ ...row, cost_usd: 99 }];
+  const latestRequest = topSessions.changeTopSessionsSort(
+    'cost',
+    state,
+    () => new Promise((resolve) => { resolveLatest = resolve; }),
+  );
+  resolveLatest(latestPayload);
+  await latestRequest;
+  resolveStale([{ ...row, active_minutes: 999 }]);
+  await staleRequest;
+  assert.equal(state.topSessionsSort, 'cost');
+  assert.equal(state.rawData.top_sessions, latestPayload);
+
+  let resolveSuperseded;
+  const supersededRequest = topSessions.changeTopSessionsSort(
+    'tokens',
+    state,
+    () => new Promise((resolve) => { resolveSuperseded = resolve; }),
+  );
+  assert.equal(state.topSessionsLoading, true);
+  state.reloadGeneration += 1;
+  resolveSuperseded([{ ...row, total_tokens: 999 }]);
+  await supersededRequest;
+  assert.equal(state.topSessionsLoading, false);
+  assert.equal(state.rawData.top_sessions, latestPayload);
+
+  state.secondaryRefreshing = true;
+  topSessions.renderTopSessions({ panels: { top_sessions: latestPayload } }, state);
+  assert.equal((root.innerHTML.match(/aria-disabled="true" disabled/g) || []).length, 3);
+  state.secondaryRefreshing = false;
 });
 
 test('ready-widget render lifecycle rejects stale results and waits for every section', () => {

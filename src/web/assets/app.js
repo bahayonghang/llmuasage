@@ -521,6 +521,15 @@ function renderSecondarySection(section, rawData) {
     renderExplorerPanel(rawData);
     return;
   }
+  if (section === 'top_sessions') {
+    const payload = rawData?.top_sessions;
+    const support = Array.isArray(payload) ? null : payload?.support;
+    if (support?.level !== 'loading' && support?.level !== 'degraded') {
+      dashboardState.topSessionsAppliedSort = dashboardState.topSessionsSort || 'tokens';
+      dashboardState.topSessionsLoading = false;
+      dashboardState.topSessionsError = null;
+    }
+  }
   const renderer = SECONDARY_SECTION_RENDERERS[section];
   if (!renderer) return;
   renderPanel(section, panelFingerprint(section, rawData, secondaryPanelOptions(rawData)), () => renderer(buildContext(rawData), dashboardState));

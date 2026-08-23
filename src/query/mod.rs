@@ -136,8 +136,8 @@ pub struct ContextPressurePayload {
 
 /// One daily trend row produced by [`Dashboard::trends_daily`].
 ///
-/// Output tokens include reasoning tokens (D9): the API surface ccr-ui
-/// consumes intentionally collapses output + reasoning into one number.
+/// Persisted `total_tokens` is authoritative. Reasoning remains a separate
+/// diagnostic channel and is not added to output or total by this projection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DailyTrendPoint {
     /// Local calendar date in `YYYY-MM-DD`, computed in [`QueryFilter::timezone`].
@@ -148,7 +148,7 @@ pub struct DailyTrendPoint {
     pub cache_read_tokens: i64,
     /// Summed cache-creation prompt tokens.
     pub cache_creation_tokens: i64,
-    /// Output tokens with reasoning tokens already added in (D9).
+    /// Summed persisted output tokens, without adding diagnostic reasoning.
     pub output_tokens: i64,
     /// Total normalized tokens for the day.
     pub total_tokens: i64,

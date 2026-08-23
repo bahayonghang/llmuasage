@@ -67,7 +67,7 @@ pub(crate) fn find_asset(path: &str) -> Option<&'static WebAsset> {
     ASSET_MANIFEST.iter().find(|asset| asset.path == path)
 }
 
-static ASSET_MANIFEST: [WebAsset; 45] = [
+static ASSET_MANIFEST: [WebAsset; 46] = [
     WebAsset {
         path: "base.css",
         content_type: "text/css; charset=utf-8",
@@ -156,6 +156,12 @@ static ASSET_MANIFEST: [WebAsset; 45] = [
         path: "data/render-key.js",
         content_type: "application/javascript; charset=utf-8",
         body: include_str!("data/render-key.js"),
+        etag: OnceLock::new(),
+    },
+    WebAsset {
+        path: "data/source-catalog.js",
+        content_type: "application/javascript; charset=utf-8",
+        body: include_str!("data/source-catalog.js"),
         etag: OnceLock::new(),
     },
     WebAsset {

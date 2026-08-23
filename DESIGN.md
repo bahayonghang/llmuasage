@@ -346,6 +346,14 @@ The character across the board is **precise and tool-like**: tight radii, hairli
 - Variants and states: light/dark, ZH/EN, live/snapshot, default/expanded ranking lists, degraded/no-data/insufficient-model states, narrow/mobile collapse.
 - Token/component ownership: CSS stays in `base.css`, `layout.css`, and `components.css`; render modules should only add semantic classes and content.
 
+#### Ready-widget data bars and token composition
+
+- Session consumption ranking extends the Data Bars signature: one shared linear scale per selected metric, an exact right-aligned value, and a project/Agent/time label. The canonical session ID remains an internal drilldown key and must not enter visible copy, tooltips, or accessible names.
+- During a sort refresh, controls expose the requested/busy state while rows retain the last successfully applied ordering, metric, and bars. A stale or failed response cannot relabel old server-ordered rows as a different metric.
+- Token usage mix is range-aware. A 1-day or same-day range uses one five-part horizontal composition strip; longer ranges use five-part daily stacked bars. Both modes define channels as input, cache read, cache creation, output, and Other / unclassified.
+- Persisted `total_tokens` is the authoritative height and percentage denominator. Other / unclassified is the non-negative residual after the four named channels. Known channels exceeding the authoritative total render a section-local data-quality state instead of a chart.
+- Composition values, labels, and percentages remain available as text or accessible names. Color reinforces the fixed channel order but is never the only identifier. At `<=720px`, session labels/values stay on the first row and the comparison track moves below without page-level overflow.
+
 ### Accessibility
 
 - Target standard: preserve keyboard navigation and WCAG AA text contrast already documented in this design system.

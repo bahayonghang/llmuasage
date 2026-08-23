@@ -65,18 +65,16 @@ pub struct TopSessionRow {
     pub session_label: Option<String>,
     pub project_label: Option<String>,
     pub source: Option<String>,
+    /// First event in the current filtered range, serialized as RFC3339 UTC.
+    pub first_event_at: String,
+    /// Last event in the current filtered range, serialized as RFC3339 UTC.
+    pub last_event_at: String,
     pub total_tokens: i64,
     pub output_tokens: i64,
     pub cost_usd: f64,
     pub span_minutes: i64,
     pub active_minutes: i64,
     pub event_count: i64,
-}
-
-struct Candidate {
-    row: TopSessionRow,
-    first_at: String,
-    last_at: String,
 }
 
 pub(crate) fn load(dashboard: &Dashboard, query: &TopSessionsQuery) -> Result<Vec<TopSessionRow>> {
@@ -122,21 +120,19 @@ pub(crate) fn load(dashboard: &Dashboard, query: &TopSessionsQuery) -> Result<Ve
     let mut stmt = dashboard.conn.prepare(&sql)?;
     let candidates = stmt
         .query_map(params_from_iter(params.iter()), |row| {
-            Ok(Candidate {
-                row: TopSessionRow {
-                    session_id: row.get(0)?,
-                    session_label: row.get(1)?,
-                    project_label: row.get(2)?,
-                    source: row.get(3)?,
-                    total_tokens: row.get(4)?,
-                    output_tokens: row.get(5)?,
-                    cost_usd: row.get(6)?,
-                    span_minutes: 0,
-                    active_minutes: 0,
-                    event_count: row.get(7)?,
-                },
-                first_at: row.get(8)?,
-                last_at: row.get(9)?,
+            Ok(TopSessionRow {
+                session_id: row.get(0)?,
+                session_label: row.get(1)?,
+                project_label: row.get(2)?,
+                source: row.get(3)?,
+                total_tokens: row.get(4)?,
+                output_tokens: row.get(5)?,
+                cost_usd: row.get(6)?,
+                span_minutes: 0,
+                active_minutes: 0,
+                event_count: row.get(7)?,
+                first_event_at: row.get(8)?,
+                last_event_at: row.get(9)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -147,21 +143,21 @@ pub(crate) fn load(dashboard: &Dashboard, query: &TopSessionsQuery) -> Result<Ve
         None
     };
     let mut rows = Vec::with_capacity(candidates.len());
-    for mut candidate in candidates {
+    for mut row in candidates {
         let owned_times;
         let times: &[String] = if let Some(all_times) = &all_times {
             all_times
-                .get(&candidate.row.session_id)
+                .get(&row.session_id)
                 .map(Vec::as_slice)
                 .unwrap_or_default()
         } else {
-            owned_times = session_event_times(dashboard, &query.filter, &candidate.row.session_id)?;
+            owned_times = session_event_times(dashboard, &query.filter, &row.session_id)?;
             &owned_times
         };
-        let (span, active) = session_time_span(times, &candidate.first_at, &candidate.last_at);
-        candidate.row.span_minutes = span;
-        candidate.row.active_minutes = active;
-        rows.push(candidate.row);
+        let (span, active) = session_time_span(times, &row.first_event_at, &row.last_event_at);
+        row.span_minutes = span;
+        row.active_minutes = active;
+        rows.push(row);
     }
 
     rows.sort_by(|a, b| compare_rows(a, b, query.sort));
