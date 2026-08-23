@@ -1,0 +1,5 @@
+{"file":".trellis/spec/llmusage/backend/report-cli-contracts.md","reason":"Check exact CLI/report behavior, ordering, JSON, and text projection parity."}
+{"file":".trellis/spec/llmusage/backend/token-accounting-contracts.md","reason":"Check totals, cache/reasoning, pricing, and rebuild invariants."}
+{"file":".trellis/spec/llmusage/backend/ci-toolchain-contracts.md","reason":"Apply Rust, integration, docs, and full CI gates."}
+{"file":".trellis/spec/llmusage/backend/dashboard-performance-contracts.md","reason":"Check query-plan evidence, representative budgets, and no synthetic overclaim."}
+{"file":".trellis/tasks/08-24-project-architecture-performance-optimization/research/baseline.md","reason":"Compare query and statement evidence against the review baseline."}

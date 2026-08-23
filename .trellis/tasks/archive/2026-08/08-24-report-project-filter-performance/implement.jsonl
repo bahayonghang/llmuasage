@@ -1,0 +1,6 @@
+{"file":".trellis/spec/llmusage/backend/report-cli-contracts.md","reason":"Preserve period, focused/unified, host/source, JSON, text, and visible-total contracts."}
+{"file":".trellis/spec/llmusage/backend/dashboard-performance-contracts.md","reason":"Reuse exact read-model, query-plan, representative-data, and no-approximation performance discipline."}
+{"file":".trellis/spec/llmusage/backend/token-accounting-contracts.md","reason":"Protect authoritative token/cost totals while changing report read models."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Create one period aggregate owner instead of parallel daily/weekly/monthly branches."}
+{"file":".trellis/tasks/08-24-project-architecture-performance-optimization/research/code-quality-review.md","reason":"Carry CQ-004 evidence and the 4.23-second measurement limitation."}
+{"file":".trellis/tasks/08-24-project-architecture-performance-optimization/research/baseline.md","reason":"Use current synthetic and historical performance evidence with correct labels."}
