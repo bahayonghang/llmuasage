@@ -1,0 +1,5 @@
+{"file":".trellis/spec/llmusage/backend/source-sync-contracts.md","reason":"Check end-to-end sync and transport-visible behavior equivalence."}
+{"file":".trellis/spec/llmusage/backend/write-fencing-contracts.md","reason":"Check no lock, permit, transaction, or cancellation boundary drift."}
+{"file":".trellis/spec/llmusage/backend/ci-toolchain-contracts.md","reason":"Apply architecture, Rust, docs, and full project gates."}
+{"file":"docs/adr/0002-sync-shard-as-commit-protocol.md","reason":"Verify engine extraction does not expose or reorder the shard protocol."}
+{"file":"docs/adr/0005-job-registry-in-memory.md","reason":"Verify default executor ownership still satisfies JobRegistry decisions."}

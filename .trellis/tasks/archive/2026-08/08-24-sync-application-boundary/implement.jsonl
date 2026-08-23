@@ -1,0 +1,6 @@
+{"file":".trellis/spec/llmusage/backend/source-sync-contracts.md","reason":"Preserve parser ordering, progress, rebuild, recent-window, remote, and cancellation semantics."}
+{"file":".trellis/spec/llmusage/backend/write-fencing-contracts.md","reason":"Keep lock generation and transaction fencing unchanged while moving orchestration ownership."}
+{"file":".trellis/spec/llmusage/backend/token-accounting-contracts.md","reason":"Protect repair, rebuild, bucket, and source accounting invariants."}
+{"file":"docs/adr/0002-sync-shard-as-commit-protocol.md","reason":"Keep SyncShard and single-writer commit ownership intact."}
+{"file":"docs/adr/0005-job-registry-in-memory.md","reason":"Retain the in-memory JobRegistry application contract and adapter injection rationale."}
+{"file":".trellis/tasks/08-24-project-architecture-performance-optimization/research/code-quality-review.md","reason":"Carry CQ-002/CQ-005 evidence and scope limits."}
