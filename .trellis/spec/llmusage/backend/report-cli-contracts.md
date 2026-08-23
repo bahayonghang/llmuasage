@@ -193,3 +193,80 @@ cells.push(format_token_compact(table_total_tokens(
 
 This makes the human table auditable while JSON continues to serialize the
 authoritative `total_tokens` field.
+
+## Scenario: Canonical period aggregation and fuzzy project filters
+
+### 1. Scope / Trigger
+
+- Apply this contract when changing daily, weekly, or monthly query loaders,
+  per-source/per-host period projections, unified period loading, project
+  selector semantics, or report query indexes.
+- Session and Blocks reports keep their event-owned algorithms. Period token,
+  model, pricing, and cost totals use `usage_bucket_30m`.
+
+### 2. Signatures
+
+```text
+PeriodSpec::{Daily, Weekly, Monthly}
+PeriodAggregateBundle::{overall, by_source, by_host, by_project}
+project selector -> deduplicated exact project_hash set
+project-filtered daily conversation count -> one narrow SQL aggregate
+```
+
+### 3. Contracts
+
+- One bucket aggregate builds overall, source, and host projections together.
+  `load_unified_report` must not call separate overall and source loaders.
+- A fuzzy project selector trims its needle and keeps the existing ASCII
+  case-insensitive `contains` behavior across hash, label, and ref. Candidate
+  metadata is the union of `project_dim` and project fields in buckets matching
+  the current source/host/date filters.
+- `project_dim` is discovery metadata, not report truth. A matched stale hash
+  returns no totals unless current filtered buckets contain that exact hash.
+  Buckets missing from `project_dim`, including historical or remote rows,
+  remain selectable through their own project fields.
+- Project-filtered period totals, model breakdowns, pricing notes, and costs
+  read buckets with an exact project-hash predicate. They never construct
+  `EventRow` values.
+- Daily conversation counts remain exact. The requesting projection executes
+  at most one SQLite-side `COUNT(DISTINCT canonical_session_identity)` grouped
+  only for the required overall, source, host, or project dimension. The query
+  does not select token, cost, model, prompt, or raw-record fields.
+- Monthly and weekly DTOs do not expose conversation counts and therefore run
+  no event query. Unified daily also runs no conversation query because its
+  public payload has no conversation-count field.
+- The canonical session identity preserves the report fallback order:
+  non-empty `session_id`, `source_path_hash`, the historical Codex/Claude
+  event-key prefix, then the full event key.
+- Public report types, loaders, period keys, timezone/DST grouping, ordering,
+  registered-source order, host labels, authoritative totals, visible totals,
+  notes, human tables, and CLI JSON remain unchanged.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Selector is empty after trim | Match every current project hash, including the empty unknown-project hash |
+| Selector matches multiple hashes sharing one label | Include every matching hash exactly once |
+| Only `project_dim` contains the matched hash | Return no rows unless current filtered buckets contain it |
+| Only current historical/remote buckets contain the metadata | Resolve and report those buckets |
+| Project selector resolves no hashes | Return the ordinary empty report without running totals or event scans |
+| Unified daily/weekly/monthly load | At most one project-resolution statement and one bucket aggregate; no conversation query |
+| Project-filtered daily/source/host/project load | Add exactly one narrow conversation aggregate for that requested dimension |
+| Candidate index misses any read/size/migration/write gate | Remove it; do not advance schema version |
+
+### 5. Tests Required
+
+- Table-driven selector coverage for hash/label/ref, empty/unknown, shared
+  labels, Unicode text, remote/history buckets, missing dimensions, and stale
+  dimensions. Compare bucket output to a test-only event oracle where both
+  read models contain equivalent facts.
+- SQL trace coverage proving one totals query for every unified period and one
+  narrow conversation query only when required.
+- An ignored release harness seeds 100k and 500k events before timing, performs
+  five warm-ups plus five samples, records rows, statements, query plans,
+  p50/p95, and compares the project-filtered unified path with the event oracle.
+- An index may be retained only after recording query-plan benefit, migration
+  time, database-size delta, and `SyncRunWriter` p95 at no more than 10%
+  regression. A candidate that fails an earlier gate need not proceed to the
+  write gate and must be removed.
