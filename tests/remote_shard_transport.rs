@@ -40,6 +40,7 @@ async fn emit_shards_cli_leaves_user_db_counts_and_lock_unchanged() -> Result<()
         },
         project: None,
         session: None,
+        source_cost: None,
     });
     shard.seen_file_paths.push("/tmp/seed.jsonl".to_string());
     shard.cursors.push(FileCursor {

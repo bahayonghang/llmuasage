@@ -14,7 +14,7 @@ use tracing::{debug, error, info, warn};
 use crate::{
     models::{ParseIssues, SourceKind, UsageEvent, UsageTokens, UsageToolCall, UsageTurn},
     paths::AppPaths,
-    query::pricing::{PRICING_MIXED, PRICING_UNPRICED},
+    query::pricing::{self, CostBreakdown, PRICING_MIXED, PRICING_UNPRICED, PricingStatus},
 };
 
 mod connection;
@@ -480,6 +480,7 @@ impl Store {
         // Pass 1: page through usage_event rows and update cost columns.
         // We use event_key as a cursor for keyset pagination (it's the PK).
         let mut updated = 0usize;
+        let mut processed = 0usize;
         let mut last_event_key = String::new();
         let mut buckets: HashMap<BucketKey, PricingRollup> = HashMap::new();
 
@@ -497,7 +498,12 @@ impl Store {
                            COALESCE(cache_read_tokens, 0),
                            COALESCE(cache_creation_tokens, 0),
                            COALESCE(output_tokens, 0),
-                           COALESCE(reasoning_output_tokens, 0)
+                           COALESCE(reasoning_output_tokens, 0),
+                           COALESCE(pricing_status, 'unpriced'),
+                           COALESCE(cost_with_cache_usd, 0),
+                           COALESCE(cost_without_cache_usd, 0),
+                           pricing_source,
+                           pricing_rate
                     FROM usage_event
                     WHERE event_key > ?1
                     ORDER BY event_key ASC
@@ -519,6 +525,11 @@ impl Store {
                                 cache_creation_tokens: row.get(9)?,
                                 output_tokens: row.get(10)?,
                                 reasoning_output_tokens: row.get(11)?,
+                                pricing_status: row.get(12)?,
+                                cost_with_cache_usd: row.get(13)?,
+                                cost_without_cache_usd: row.get(14)?,
+                                pricing_source: row.get(15)?,
+                                pricing_rate: row.get(16)?,
                             })
                         })?;
                     mapped.collect::<rusqlite::Result<Vec<_>>>()?
@@ -542,26 +553,39 @@ impl Store {
                     "#,
                     )?;
                     for row in &page {
-                        let breakdown = crate::query::pricing::compute_cost_with(
-                            catalog,
-                            &row.source,
-                            &row.model,
-                            crate::query::pricing::CostTokens {
-                                input: row.input_tokens,
-                                cache_read: row.cache_read_tokens,
-                                cache_creation: row.cache_creation_tokens,
-                                output: row.output_tokens,
-                                reasoning_output: row.reasoning_output_tokens,
-                            },
-                        );
-                        update_stmt.execute(params![
-                            row.event_key,
-                            breakdown.cost_with_cache_usd,
-                            breakdown.cost_without_cache_usd,
-                            breakdown.pricing_status.as_str(),
-                            breakdown.pricing_source,
-                            breakdown.pricing_rate,
-                        ])?;
+                        let persisted_status = PricingStatus::from_stored(&row.pricing_status);
+                        let breakdown = if persisted_status == PricingStatus::SourceReported {
+                            CostBreakdown {
+                                cost_with_cache_usd: row.cost_with_cache_usd,
+                                cost_without_cache_usd: row.cost_without_cache_usd,
+                                pricing_status: persisted_status,
+                                pricing_source: row.pricing_source.clone(),
+                                pricing_rate: row.pricing_rate.clone(),
+                            }
+                        } else {
+                            let breakdown = pricing::compute_cost_with(
+                                catalog,
+                                &row.source,
+                                &row.model,
+                                pricing::CostTokens {
+                                    input: row.input_tokens,
+                                    cache_read: row.cache_read_tokens,
+                                    cache_creation: row.cache_creation_tokens,
+                                    output: row.output_tokens,
+                                    reasoning_output: row.reasoning_output_tokens,
+                                },
+                            );
+                            update_stmt.execute(params![
+                                row.event_key,
+                                breakdown.cost_with_cache_usd,
+                                breakdown.cost_without_cache_usd,
+                                breakdown.pricing_status.as_str(),
+                                breakdown.pricing_source,
+                                breakdown.pricing_rate,
+                            ])?;
+                            updated += 1;
+                            breakdown
+                        };
                         buckets
                             .entry(BucketKey {
                                 host_id: row.host_id.clone(),
@@ -573,14 +597,14 @@ impl Store {
                             })
                             .or_default()
                             .add(&breakdown);
-                        updated += 1;
+                        processed += 1;
                     }
                 }
 
                 last_event_key = page.last().unwrap().event_key.clone();
                 self.validate_write_transaction(&tx)?;
                 tx.commit()?;
-                progress.page_committed(updated);
+                progress.page_committed(processed);
             }
             Ok(())
         })();
@@ -1154,6 +1178,11 @@ struct PricingRecomputeRow {
     cache_creation_tokens: i64,
     output_tokens: i64,
     reasoning_output_tokens: i64,
+    pricing_status: String,
+    cost_with_cache_usd: f64,
+    cost_without_cache_usd: f64,
+    pricing_source: Option<String>,
+    pricing_rate: Option<String>,
 }
 
 #[derive(Debug, Clone)]

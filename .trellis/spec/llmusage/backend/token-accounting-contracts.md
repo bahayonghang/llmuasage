@@ -14,8 +14,9 @@ is the compatibility baseline when reference implementations disagree.
   `usage_bucket_30m.total_tokens` -> query/UI `total_tokens`.
 - Version metadata:
   `meta('token_accounting_version.codex') = '3'`;
-  `meta('token_accounting_version.grok') = '3'`; Claude, OpenCode, Antigravity,
-  Kimi Code, Pi, ZCode, and DeepSeek Harness remain `2`.
+  `meta('token_accounting_version.grok') = '3'`;
+  `meta('token_accounting_version.pi') = '3'`; Claude, OpenCode, Antigravity,
+  Kimi Code, Oh My Pi (`omp`), ZCode, and DeepSeek Harness remain `2`.
   `expected_token_accounting_version(SourceKind) -> u32` owns this source-aware
   contract.
 - Legacy repair: `llmusage sync --rebuild --source <source>`.
@@ -60,10 +61,22 @@ is the compatibility baseline when reference implementations disagree.
 - Kimi Code maps `inputOther`, `inputCacheRead`, `inputCacheCreation`, and
   `output` once each; it has no upstream total or reasoning channel, so its
   total is their saturating sum. Only explicit turn-scoped usage records count.
-- Pi maps `input`, `cacheRead`, `cacheWrite`, and `output` once each. A positive
-  `totalTokens` is authoritative; otherwise the four visible channels form the
-  fallback total. `reasoningTokens` is persisted separately and never added to
-  output or total by default.
+- Pi and Oh My Pi map `input`, `cacheRead`, `cacheWrite`, and `output` once
+  each. A positive `totalTokens` is authoritative; otherwise the four visible
+  channels form the fallback total. `reasoningTokens` is persisted separately
+  and never added to output or total by default. After the Oh My Pi split, an
+  unbounded normal sync treats persisted Pi marker `2` as legacy: it resets
+  local `pi` rows and replays `.pi` as `pi` and `.omp` as `omp`.
+  `sync --source omp` must refuse while Pi is still legacy. The first remote
+  `Omp` shard for a host resets that host's `pi` rows and writes
+  `omp_split_migrated.<host_id>` in the same write transaction.
+  When `message.usage.cost.total > 0`, persist that USD as
+  `source_reported`. `total == 0`, a missing `cost`, and a non-object `cost`
+  use the catalog path and are not treated as free. Do not add `pi`/`omp`
+  rows to the embedded catalog. Recompute skips `UPDATE` for
+  `source_reported` rows and still folds persisted costs into buckets.
+  Historical cost backfill is `sync --rebuild --source omp`; do not bump the
+  token-accounting version for this cost path.
 - Grok maps each `turn_completed` `params.update.usage` object to one event.
   `totalTokens` is authoritative; if it is missing, fall back to
   `inputTokens + outputTokens`. `inputTokens` is cache-inclusive: subtract
@@ -131,7 +144,9 @@ is the compatibility baseline when reference implementations disagree.
 | Persisted Codex marker is `2` | Treat only Codex as legacy and automatically repair it during safe unbounded normal sync |
 | Persisted Grok marker is `2` | Treat Grok as legacy and automatically repair it during safe unbounded normal sync |
 | Persisted Claude/OpenCode marker is `2` | Treat it as current |
-| Persisted Kimi Code/Pi/ZCode/Antigravity/DeepSeek Harness marker is `2` | Treat it as current |
+| Persisted Pi marker is `2` | Treat Pi as legacy and automatically repair it during safe unbounded normal sync |
+| Persisted Kimi Code/Omp/ZCode/Antigravity/DeepSeek Harness marker is `2` | Treat it as current |
+| `sync --source omp` while Pi is legacy | Refuse before any omp writes; direct the caller to unbounded `llmusage sync` |
 | Replay marker exists and first two token snapshots share a second | Skip that second's prefix while retaining the latest cumulative baseline |
 | Two ordinary Codex requests share a second without a replay marker | Keep both events |
 | A malformed line contains `token_count` before valid replay snapshots | Ignore the malformed line and continue detection |
@@ -180,15 +195,17 @@ Never enable `--allow-lossy-rebuild` automatically.
 ## 6. Tests Required
 
 - Parser unit tests assert exact integer channel values and total fallbacks.
-- Kimi, Pi, and Grok parser tests assert raw/future model preservation, authoritative
+- Kimi, Pi, Oh My Pi, and Grok parser tests assert raw/future model preservation, authoritative
   versus fallback totals, reasoning isolation, malformed-row tolerance, and
-  saturating channel sums.
+  saturating channel sums. Pi and Oh My Pi `event_key` prefixes (`pi:` / `omp:`)
+  must differ and stay idempotent. Pi / Oh My Pi parser tests also cover
+  `usage.cost` mapping, missing/non-object cost, and `total == 0` fallthrough.
 - Codex parser tests cover both replay markers, cumulative baseline retention,
   pending-tool clearing, malformed-line tolerance, and ordinary same-second
   events that must remain.
-- Accounting marker tests assert Codex `3`, Grok `3`, Claude/OpenCode `2`, old
-  Codex `2` automatic repair to `3`, old Grok `2` automatic repair to `3`, and
-  successful explicit guarded rebuild.
+- Accounting marker tests assert Codex `3`, Grok `3`, Pi `3`, Claude/OpenCode/Omp `2`, old
+  Codex `2` automatic repair to `3`, old Grok `2` automatic repair to `3`, old
+  Pi `2` automatic repair to `3`, and successful explicit guarded rebuild.
 - `tests/token_accounting_parity.rs` covers all three sources, copied/streaming
   duplicates, event/bucket/query equality, cost tolerance `1e-9`, marker
   advancement, automatic repair lifecycle, mixed current/legacy behavior,

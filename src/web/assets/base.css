@@ -31,6 +31,7 @@
   --source-opencode: var(--accent-purple);
   --source-kimi-code: #ec4899;
   --source-pi: #4f46e5;
+  --source-omp: #0f766e;
   --source-antigravity: #7c3aed;
   --source-grok: var(--text-muted);
 
@@ -113,6 +114,7 @@
   --source-opencode: var(--accent-purple);
   --source-kimi-code: #f472b6;
   --source-pi: #818cf8;
+  --source-omp: #2dd4bf;
   --source-antigravity: #a78bfa;
   --source-grok: var(--text-muted);
 

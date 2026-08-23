@@ -506,6 +506,7 @@ fn parse_conversation_file(
                 ),
                 source_path_hash: Some(path_hash.to_string()),
             }),
+            source_cost: None,
         });
     }
 

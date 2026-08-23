@@ -1381,6 +1381,7 @@ fn source_color(source: SourceKind) -> Color {
         SourceKind::Antigravity => Color::Blue,
         SourceKind::KimiCode => Color::Yellow,
         SourceKind::Pi => Color::Red,
+        SourceKind::Omp => Color::DarkMagenta,
         SourceKind::Grok => Color::DarkCyan,
         SourceKind::Zcode => Color::DarkYellow,
         SourceKind::DeepseekHarness => Color::DarkBlue,

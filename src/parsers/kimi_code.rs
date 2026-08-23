@@ -433,6 +433,7 @@ fn parse_wire_file(
                 tokens,
                 project: None,
                 session: session.clone(),
+                source_cost: None,
             });
             Ok(JsonlRecordDisposition::Accepted)
         },

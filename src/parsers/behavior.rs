@@ -26,12 +26,21 @@ pub(crate) struct BehaviorToolEvidence {
 /// Builds a turn from an event and the tools observed around that event.
 pub(crate) fn turn_from_tools(event: &UsageEvent, tools: &[BehaviorToolEvidence]) -> UsageTurn {
     let has_edits = tools.iter().any(|tool| tool.tool_kind == ToolKind::Edit);
-    UsageTurn {
+    let mut turn = UsageTurn {
         category: classify_tools(tools),
         has_edits,
-        one_shot: has_edits,
         ..UsageTurn::from_event(event, ActivityCategory::General)
-    }
+    };
+    apply_turn_retries(&mut turn, 0);
+    turn
+}
+
+/// Overlays a retry count and recomputes `one_shot`.
+///
+/// Shared rule: an edit turn with zero retries.
+pub(crate) fn apply_turn_retries(turn: &mut UsageTurn, retries: i64) {
+    turn.retries = retries;
+    turn.one_shot = turn.has_edits && turn.retries == 0;
 }
 
 /// Converts provider-local behavior evidence into persisted `usage_tool_call`
@@ -115,6 +124,49 @@ pub(crate) fn extract_claude_tools(value: &Value) -> Vec<BehaviorToolEvidence> {
             tool
         })
         .collect()
+}
+
+/// Extracts Pi / Oh My Pi `message.content[].type == "toolCall"` blocks.
+///
+/// `arguments` is an object (true-source shape) or a JSON string from other Pi
+/// clients. Parse failure or a non-object/non-string value still emits a row
+/// with empty preview and fingerprint.
+pub(crate) fn extract_pi_tools(value: &Value) -> Vec<BehaviorToolEvidence> {
+    let Some(items) = value
+        .get("message")
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+
+    let mut tools = Vec::new();
+    for item in items {
+        if item.get("type").and_then(Value::as_str) != Some("toolCall") {
+            continue;
+        }
+        let Some(tool_name) = item
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+        else {
+            continue;
+        };
+        let parsed_string = match item.get("arguments") {
+            Some(Value::String(raw)) => serde_json::from_str(raw).ok(),
+            _ => None,
+        };
+        let input = match item.get("arguments") {
+            Some(arguments) if arguments.is_object() => Some(arguments),
+            Some(Value::String(_)) => parsed_string.as_ref(),
+            _ => None,
+        };
+        let mut tool = tool_evidence(tool_name, input, None);
+        tool.sequence = tools.len();
+        tools.push(tool);
+    }
+    tools
 }
 
 /// Extracts OpenAI Codex response-item function calls from rollout JSONL rows.
@@ -454,7 +506,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        extract_claude_tools, extract_codex_tools, opencode_tool_evidence, turn_from_tools,
+        SAFE_PREVIEW_CHARS, classify_tool, extract_claude_tools, extract_codex_tools,
+        extract_pi_tools, opencode_tool_evidence, turn_from_tools,
     };
     use crate::models::{ActivityCategory, SourceKind, ToolKind, UsageEvent, UsageTokens};
 
@@ -472,7 +525,111 @@ mod tests {
             },
             project: None,
             session: None,
+            source_cost: None,
         }
+    }
+
+    #[test]
+    fn pi_tool_names_map_to_shared_classify_tool_kinds() {
+        let cases = [
+            ("bash", ToolKind::Bash),
+            ("read", ToolKind::Read),
+            ("write", ToolKind::Edit),
+            ("edit", ToolKind::Edit),
+            ("grep", ToolKind::Search),
+            ("glob", ToolKind::Search),
+            ("find", ToolKind::Search),
+            ("web_search", ToolKind::Search),
+            ("todo", ToolKind::Planning),
+            ("todo_write", ToolKind::Edit),
+            ("task", ToolKind::Agent),
+            ("hub", ToolKind::Core),
+            ("eval", ToolKind::Core),
+            ("yield", ToolKind::Core),
+            ("goal", ToolKind::Core),
+            ("ask", ToolKind::Core),
+        ];
+        for (name, expected) in cases {
+            assert_eq!(
+                classify_tool(name, None, None),
+                expected,
+                "{name} must map to {expected:?} under the shared classifier"
+            );
+        }
+    }
+
+    #[test]
+    fn extract_pi_tools_handles_object_string_and_invalid_arguments() {
+        let value = json!({
+            "message": {
+                "content": [
+                    {"type": "text", "text": "ignored"},
+                    {"type": "toolCall", "name": "read", "arguments": {"file_path": "src/lib.rs"}},
+                    {"type": "toolCall", "name": "bash", "arguments": "{\"command\":\"cargo test\"}"},
+                    {"type": "toolCall", "name": "hub", "arguments": 123},
+                    {"type": "toolResult", "content": "SECRET_TOOL_RESULT_CONTENT"}
+                ]
+            }
+        });
+
+        let tools = extract_pi_tools(&value);
+
+        assert_eq!(tools.len(), 3);
+        assert_eq!(tools[0].tool_name, "read");
+        assert_eq!(tools[0].sequence, 0);
+        assert!(
+            tools[0]
+                .safe_preview
+                .as_deref()
+                .unwrap()
+                .contains("src/lib.rs")
+        );
+        assert!(tools[0].input_fingerprint.is_some());
+        assert_eq!(tools[1].tool_name, "bash");
+        assert_eq!(tools[1].sequence, 1);
+        assert!(
+            tools[1]
+                .safe_preview
+                .as_deref()
+                .unwrap()
+                .contains("cargo test")
+        );
+        assert!(tools[1].input_fingerprint.is_some());
+        assert_eq!(tools[2].tool_name, "hub");
+        assert_eq!(tools[2].sequence, 2);
+        assert!(tools[2].safe_preview.is_none());
+        assert!(tools[2].input_fingerprint.is_none());
+    }
+
+    #[test]
+    fn extract_pi_tools_preview_is_bounded_and_omits_tool_result_content() {
+        let secret = "SECRET_TOOL_RESULT_CONTENT";
+        let long_command = "x".repeat(200);
+        let value = json!({
+            "message": {
+                "content": [
+                    {"type": "toolCall", "name": "bash", "arguments": {"command": long_command}},
+                    {"type": "toolCall", "name": "read", "arguments": {"file_path": "src/lib.rs"}},
+                    {"type": "toolResult", "toolCallId": "call-bash", "content": secret}
+                ]
+            }
+        });
+
+        let tools = extract_pi_tools(&value);
+
+        assert_eq!(tools.len(), 2);
+        for tool in &tools {
+            let preview = tool.safe_preview.as_deref().unwrap_or("");
+            assert!(preview.chars().count() <= SAFE_PREVIEW_CHARS);
+            assert!(
+                !preview.contains(secret),
+                "preview must not contain toolResult content: {preview:?}"
+            );
+        }
+        assert_eq!(
+            tools[0].safe_preview.as_deref().unwrap().chars().count(),
+            SAFE_PREVIEW_CHARS
+        );
     }
 
     #[test]

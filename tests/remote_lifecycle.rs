@@ -114,6 +114,7 @@ fn usage_event(key: &str, at: &str) -> UsageEvent {
         },
         project: None,
         session: None,
+        source_cost: None,
     }
 }
 

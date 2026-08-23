@@ -105,7 +105,19 @@ pub const SOURCE_DESCRIPTORS: &[SourceDescriptor] = &[
         kind: SourceKind::Pi,
         stable_id: "pi",
         aliases: &[],
-        display_name: "Pi / Oh My Pi",
+        display_name: "Pi",
+        capabilities: SourceCapabilities {
+            parser: true,
+            passive_probe: true,
+        },
+        quality: UsageQuality::Precise,
+        privacy: PrivacyClass::LocalArtifacts,
+    },
+    SourceDescriptor {
+        kind: SourceKind::Omp,
+        stable_id: "omp",
+        aliases: &[],
+        display_name: "Oh My Pi",
         capabilities: SourceCapabilities {
             parser: true,
             passive_probe: true,

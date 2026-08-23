@@ -411,7 +411,7 @@ const ENGLISH_REPORT_OPTIONS: &[(&str, &str)] = &[
     ),
     (
         "--source <SOURCE>",
-        "Restrict reports or sync to codex, claude, opencode, antigravity, kimi_code, pi, or grok.",
+        "Restrict reports or sync to codex, claude, opencode, antigravity, kimi_code, pi, omp, or grok.",
     ),
     (
         "--host <LABEL>",
@@ -541,7 +541,7 @@ const CHINESE_REPORT_OPTIONS: &[(&str, &str)] = &[
     ("--no-cost", "从报表输出隐藏成本列和成本字段。"),
     (
         "--source <SOURCE>",
-        "报表或同步限制到 codex、claude、opencode、antigravity、kimi_code、pi 或 grok。",
+        "报表或同步限制到 codex、claude、opencode、antigravity、kimi_code、pi、omp 或 grok。",
     ),
     ("--host <LABEL>", "报表限制到一个已注册主机 label。"),
     (

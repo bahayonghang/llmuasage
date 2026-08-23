@@ -540,6 +540,7 @@ fn parse_project_file(
                     session_label: fallback_session_label.clone(),
                     source_path_hash: Some(path_hash.to_string()),
                 }),
+                source_cost: None,
             };
             let tools = extract_claude_tools(&value);
             turns.push(turn_from_tools(&event, &tools));

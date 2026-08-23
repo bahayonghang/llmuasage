@@ -626,6 +626,7 @@ async fn run_once_locked_with_remote_source(
         .iter()
         .map(|parser| parser.source())
         .collect::<Vec<_>>();
+    refuse_omp_before_pi_split_migration(store, &parser_sources)?;
 
     let mut remote_outcome = RemoteRunOutcome {
         contacted: BTreeSet::from([LOCAL_HOST_ID.to_string()]),
@@ -959,9 +960,15 @@ fn automatic_token_accounting_repair_sources(
         risk_count = risks.len(),
         "普通 sync 的 legacy token accounting 自动重建存在数据丢失风险，已拒绝"
     );
-    bail!(
+    let mut message = format!(
         "Refusing automatic token-accounting repair because imported usage has missing source files ({details}). No source was reset and --allow-lossy-rebuild was not enabled automatically. Restore the source files and rerun `llmusage sync`, or explicitly run `llmusage sync --rebuild --source <source> --allow-lossy-rebuild` for each source whose unrebuildable history you intentionally accept clearing."
-    )
+    );
+    if legacy.contains(&SourceKind::Pi) {
+        message.push_str(
+            " If this includes pi after the Oh My Pi split, restore the original `.pi` session files or run a full `llmusage sync` once `.omp` files are present so those rows can land as `omp`.",
+        );
+    }
+    bail!(message)
 }
 
 fn assert_lossless_rebuild(
@@ -1160,6 +1167,20 @@ fn legacy_token_accounting_sources_for(
     Ok(legacy_sources)
 }
 
+fn refuse_omp_before_pi_split_migration(
+    store: &Store,
+    parser_sources: &[SourceKind],
+) -> Result<()> {
+    let selecting_omp_without_pi =
+        parser_sources.contains(&SourceKind::Omp) && !parser_sources.contains(&SourceKind::Pi);
+    if selecting_omp_without_pi && store.has_legacy_token_accounting(SourceKind::Pi)? {
+        bail!(
+            "Refusing `--source omp` because stored pi rows still use the pre-split token-accounting contract. Run `llmusage sync` with no `--source` and no `--recent-days` first so those rows can migrate to `omp`."
+        );
+    }
+    Ok(())
+}
+
 fn rebuild_sources(
     selected_source: Option<SourceKind>,
     parser_sources: &[SourceKind],
@@ -1264,6 +1285,7 @@ mod tests {
             },
             project: None,
             session: None,
+            source_cost: None,
         });
         shard.seen_file_paths.push("/tmp/seed.jsonl".to_string());
         shard.cursors.push(crate::store::FileCursor {

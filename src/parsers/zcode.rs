@@ -653,6 +653,7 @@ fn row_to_event(
             session_id,
             source_path_hash: None,
         }),
+        source_cost: None,
     })
 }
 

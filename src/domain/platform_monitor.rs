@@ -254,20 +254,28 @@ pub const PLATFORM_MONITORS: &[PlatformMonitorDescriptor] = &[
     },
     PlatformMonitorDescriptor {
         platform_id: "pi",
-        display_name: "Pi / Oh My Pi",
+        display_name: "Pi",
         source_kind: Some(SourceKind::Pi),
-        roots: &[
-            MonitorRoot::EnvListOrHome {
-                env: "PI_AGENT_DIR",
-                home_relative: ".pi/agent/sessions",
-            },
-            MonitorRoot::Home(".omp/agent/sessions"),
-        ],
+        roots: &[MonitorRoot::EnvListOrHome {
+            env: "PI_AGENT_DIR",
+            home_relative: ".pi/agent/sessions",
+        }],
         artifact_patterns: &["*.jsonl"],
         parser_status: ParserSupportStatus::Registered,
         quality: Some(UsageQuality::Precise),
         privacy: PrivacyClass::LocalArtifacts,
         next_action: "parsed by the registered Pi source parser",
+    },
+    PlatformMonitorDescriptor {
+        platform_id: "omp",
+        display_name: "Oh My Pi",
+        source_kind: Some(SourceKind::Omp),
+        roots: &[MonitorRoot::Home(".omp/agent/sessions")],
+        artifact_patterns: &["*.jsonl"],
+        parser_status: ParserSupportStatus::Registered,
+        quality: Some(UsageQuality::Precise),
+        privacy: PrivacyClass::LocalArtifacts,
+        next_action: "parsed by the registered Oh My Pi source parser",
     },
     PlatformMonitorDescriptor {
         platform_id: "grok",

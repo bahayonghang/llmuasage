@@ -21,9 +21,12 @@ pub enum SourceKind {
     /// Kimi Code local `wire.jsonl` session artifacts.
     #[value(name = "kimi_code")]
     KimiCode,
-    /// Pi / Oh My Pi local agent session JSONL artifacts.
+    /// Pi local agent session JSONL artifacts.
     #[value(name = "pi")]
     Pi,
+    /// Oh My Pi local agent session JSONL artifacts.
+    #[value(name = "omp")]
+    Omp,
     /// Grok Build local session sidecars.
     #[value(name = "grok")]
     Grok,
@@ -45,6 +48,7 @@ impl SourceKind {
             Self::Antigravity => "antigravity",
             Self::KimiCode => "kimi_code",
             Self::Pi => "pi",
+            Self::Omp => "omp",
             Self::Grok => "grok",
             Self::Zcode => "zcode",
             Self::DeepseekHarness => "deepseek_harness",
@@ -276,6 +280,28 @@ pub struct ProjectInfo {
     pub path_hash: String,
 }
 
+/// Cost reported by the source itself, in USD, when the source records one.
+///
+/// This lives on the in-memory event and remote shard JSON only. Persist
+/// converts it into the existing cost and `pricing_status` columns.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SourceCost {
+    /// Source-reported total USD. Writer uses this only when `total > 0`.
+    pub total: f64,
+    /// Optional input-channel USD used to derive `cost_without_cache_usd`.
+    #[serde(default)]
+    pub input: Option<f64>,
+    /// Optional output-channel USD used to derive `cost_without_cache_usd`.
+    #[serde(default)]
+    pub output: Option<f64>,
+    /// Optional cache-read USD retained for audit JSON.
+    #[serde(default)]
+    pub cache_read: Option<f64>,
+    /// Optional cache-write USD retained for audit JSON.
+    #[serde(default)]
+    pub cache_write: Option<f64>,
+}
+
 /// Canonical normalized usage event written to `usage_event`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageEvent {
@@ -298,6 +324,10 @@ pub struct UsageEvent {
     pub project: Option<ProjectInfo>,
     /// Optional session metadata used by report-first commands.
     pub session: Option<SessionInfo>,
+    /// Cost reported by the source itself, in USD, when the source records one.
+    /// `None` for sources that do not report cost.
+    #[serde(default)]
+    pub source_cost: Option<SourceCost>,
 }
 
 /// Deterministic activity bucket used by behavior-oriented dashboard views.
@@ -556,6 +586,24 @@ mod tests {
         assert_eq!(source, SourceKind::Antigravity);
         assert_eq!(source.as_str(), "antigravity");
         assert!(SourceKind::parse_id("gemini").is_none());
+    }
+
+    #[test]
+    fn usage_event_old_shard_json_defaults_source_cost() {
+        let event: UsageEvent = serde_json::from_str(
+            r#"{
+                "event_key": "omp:abc",
+                "source": "omp",
+                "model": "gpt-5.5",
+                "event_at": "2026-01-02T00:00:00Z",
+                "hour_start": "2026-01-02T00:00:00Z",
+                "tokens": { "input_tokens": 1, "output_tokens": 1, "total_tokens": 2 }
+            }"#,
+        )
+        .expect("legacy shard JSON without source_cost");
+        assert!(event.source_cost.is_none());
+        assert_eq!(event.provider_label, "");
+        assert_eq!(event.source, SourceKind::Omp);
     }
 
     #[test]

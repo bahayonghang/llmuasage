@@ -1876,6 +1876,7 @@ nav a:hover .nav-icon {
 .source-row .src-name[data-source='opencode'] { color: var(--source-opencode); }
 .source-row .src-name[data-source='kimi_code'] { color: var(--source-kimi-code); }
 .source-row .src-name[data-source='pi'] { color: var(--source-pi); }
+.source-row .src-name[data-source='omp'] { color: var(--source-omp); }
 .source-row .src-name[data-source='antigravity'] { color: var(--source-antigravity); }
 .source-row .src-name[data-source='grok'] { color: var(--source-grok); }
 

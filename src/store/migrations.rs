@@ -2445,6 +2445,7 @@ mod tests {
                 },
                 project: None,
                 session: None,
+                source_cost: None,
             }],
             ..SyncShard::new(SourceKind::Codex)
         })?;

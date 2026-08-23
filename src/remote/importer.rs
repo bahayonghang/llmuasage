@@ -2,6 +2,7 @@ use chrono::{DateTime, Duration, SecondsFormat, Utc};
 
 use crate::{
     error::{LlmusageError, Result},
+    models::SourceKind,
     parsers::SourceSyncStats,
     store::{Host, SourceSyncStatus, Store, SyncRunWriter, SyncShard},
     util::now_utc,
@@ -40,6 +41,10 @@ impl RemoteImporter {
         let saw_trailer;
         {
             let mut decoder = ShardDecoder::new(session.reader());
+            let mut deferred_pi = Vec::new();
+            let mut omp_split_migrated = store
+                .meta_value(&format!("omp_split_migrated.{}", host.host_id))?
+                .is_some();
             while let Some(record) = decoder.next_record()? {
                 match record {
                     ShardRecord::Header { .. } => {}
@@ -52,13 +57,32 @@ impl RemoteImporter {
                                     Some(max_event_at.map_or(utc, |current| current.max(utc)));
                             }
                         }
+                        // First Omp commit resets pre-split Pi for this host.
+                        // Defer Pi shards until that reset runs, otherwise a
+                        // Pi-then-Omp stream would delete the post-split Pi rows.
+                        if !omp_split_migrated && shard.source == SourceKind::Pi {
+                            deferred_pi.push(shard);
+                            continue;
+                        }
+                        let shard_source = shard.source;
                         writer.commit_shard(shard)?;
                         shards_committed += 1;
+                        if shard_source == SourceKind::Omp {
+                            omp_split_migrated = true;
+                            for pi_shard in deferred_pi.drain(..) {
+                                writer.commit_shard(pi_shard)?;
+                                shards_committed += 1;
+                            }
+                        }
                     }
                     ShardRecord::Trailer { sources, .. } => {
                         trailer_sources = Some(sources);
                     }
                 }
+            }
+            for pi_shard in deferred_pi {
+                writer.commit_shard(pi_shard)?;
+                shards_committed += 1;
             }
             skipped_lines = decoder.skipped_lines();
             saw_header = decoder.saw_header();
@@ -185,9 +209,13 @@ mod tests {
     use tempfile::TempDir;
 
     fn event(key: &str, at: &str) -> UsageEvent {
+        event_for(SourceKind::Codex, key, at)
+    }
+
+    fn event_for(source: SourceKind, key: &str, at: &str) -> UsageEvent {
         UsageEvent {
             event_key: key.to_string(),
-            source: SourceKind::Codex,
+            source,
             provider_label: String::new(),
             model: "gpt-5".to_string(),
             event_at: at.to_string(),
@@ -202,6 +230,7 @@ mod tests {
             },
             project: None,
             session: None,
+            source_cost: None,
         }
     }
 
@@ -482,6 +511,188 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(events, 0);
+        Ok(())
+    }
+
+    fn count_source(store: &Store, source: SourceKind, host_id: &str) -> anyhow::Result<i64> {
+        let conn = store.open_connection()?;
+        Ok(conn.query_row(
+            "SELECT COUNT(*) FROM usage_event WHERE source = ?1 AND host_id = ?2",
+            [source.as_str(), host_id],
+            |row| row.get(0),
+        )?)
+    }
+
+    #[test]
+    fn first_omp_shard_resets_host_pi_rows_once() -> anyhow::Result<()> {
+        let (_temp, store, _lock) = fenced_store()?;
+        store.hosts().upsert(&ssh_host(None))?;
+        let host = store.hosts().get_by_label("devbox")?.expect("host");
+        let mut pi_shard = SyncShard::new_for_host(SourceKind::Pi, "devbox");
+        pi_shard
+            .events
+            .push(event_for(SourceKind::Pi, "pi:old", "2026-08-20T00:00:00Z"));
+        let mut writer = store.begin_sync_run()?;
+        writer.commit_shard(pi_shard)?;
+        assert_eq!(count_source(&store, SourceKind::Pi, "devbox")?, 1);
+
+        let mut omp_shard = SyncShard::new(SourceKind::Omp);
+        omp_shard.events.push(event_for(
+            SourceKind::Omp,
+            "omp:new",
+            "2026-08-20T01:00:00Z",
+        ));
+        let stdout = stream(
+            &[
+                ShardRecord::Header {
+                    shard_protocol: SHARD_PROTOCOL_VERSION,
+                    llmusage_version: "1.2.0".to_string(),
+                    schema_version: 23,
+                    emitted_at: "2026-08-20T02:00:00Z".to_string(),
+                },
+                ShardRecord::Shard { shard: omp_shard },
+                ShardRecord::Trailer {
+                    sources: vec![SourceSyncStats {
+                        source: SourceKind::Omp,
+                        events_seen: 1,
+                        events_inserted: 1,
+                        ..SourceSyncStats::default()
+                    }],
+                    parse_issues: ParseIssues::default(),
+                },
+            ],
+            "",
+        );
+        let source = MemoryShardSource {
+            stdout,
+            stderr: String::new(),
+            status: 0,
+        };
+        RemoteImporter::import(&host, &store, &mut writer, &source)?;
+        assert_eq!(count_source(&store, SourceKind::Pi, "devbox")?, 0);
+        assert_eq!(count_source(&store, SourceKind::Omp, "devbox")?, 1);
+        let flag = store.meta_value(&format!("omp_split_migrated.{}", host.host_id))?;
+        assert!(flag.is_some(), "migration flag should be set");
+
+        let mut extra_pi = SyncShard::new_for_host(SourceKind::Pi, "devbox");
+        extra_pi.events.push(event_for(
+            SourceKind::Pi,
+            "pi:after-flag",
+            "2026-08-20T03:00:00Z",
+        ));
+        writer.commit_shard(extra_pi)?;
+        assert_eq!(count_source(&store, SourceKind::Pi, "devbox")?, 1);
+
+        let mut second_omp = SyncShard::new(SourceKind::Omp);
+        second_omp.events.push(event_for(
+            SourceKind::Omp,
+            "omp:second",
+            "2026-08-20T04:00:00Z",
+        ));
+        let stdout = stream(
+            &[
+                ShardRecord::Header {
+                    shard_protocol: SHARD_PROTOCOL_VERSION,
+                    llmusage_version: "1.2.0".to_string(),
+                    schema_version: 23,
+                    emitted_at: "2026-08-20T05:00:00Z".to_string(),
+                },
+                ShardRecord::Shard { shard: second_omp },
+                ShardRecord::Trailer {
+                    sources: vec![SourceSyncStats::default()],
+                    parse_issues: ParseIssues::default(),
+                },
+            ],
+            "",
+        );
+        let source = MemoryShardSource {
+            stdout,
+            stderr: String::new(),
+            status: 0,
+        };
+        RemoteImporter::import(&host, &store, &mut writer, &source)?;
+        assert_eq!(
+            count_source(&store, SourceKind::Pi, "devbox")?,
+            1,
+            "second omp shard must not reset pi again"
+        );
+        assert_eq!(count_source(&store, SourceKind::Omp, "devbox")?, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn mixed_pi_omp_stream_keeps_post_split_pi_rows() -> anyhow::Result<()> {
+        let (_temp, store, _lock) = fenced_store()?;
+        store.hosts().upsert(&ssh_host(None))?;
+        let host = store.hosts().get_by_label("devbox")?.expect("host");
+        let mut old_pi = SyncShard::new_for_host(SourceKind::Pi, "devbox");
+        old_pi
+            .events
+            .push(event_for(SourceKind::Pi, "pi:old", "2026-08-20T00:00:00Z"));
+        let mut writer = store.begin_sync_run()?;
+        writer.commit_shard(old_pi)?;
+        assert_eq!(count_source(&store, SourceKind::Pi, "devbox")?, 1);
+
+        let mut live_pi = SyncShard::new(SourceKind::Pi);
+        live_pi
+            .events
+            .push(event_for(SourceKind::Pi, "pi:true", "2026-08-20T01:00:00Z"));
+        let mut omp_shard = SyncShard::new(SourceKind::Omp);
+        omp_shard.events.push(event_for(
+            SourceKind::Omp,
+            "omp:new",
+            "2026-08-20T02:00:00Z",
+        ));
+        let stdout = stream(
+            &[
+                ShardRecord::Header {
+                    shard_protocol: SHARD_PROTOCOL_VERSION,
+                    llmusage_version: "1.2.0".to_string(),
+                    schema_version: 23,
+                    emitted_at: "2026-08-20T03:00:00Z".to_string(),
+                },
+                ShardRecord::Shard { shard: live_pi },
+                ShardRecord::Shard { shard: omp_shard },
+                ShardRecord::Trailer {
+                    sources: vec![
+                        SourceSyncStats {
+                            source: SourceKind::Pi,
+                            events_seen: 1,
+                            events_inserted: 1,
+                            ..SourceSyncStats::default()
+                        },
+                        SourceSyncStats {
+                            source: SourceKind::Omp,
+                            events_seen: 1,
+                            events_inserted: 1,
+                            ..SourceSyncStats::default()
+                        },
+                    ],
+                    parse_issues: ParseIssues::default(),
+                },
+            ],
+            "",
+        );
+        let source = MemoryShardSource {
+            stdout,
+            stderr: String::new(),
+            status: 0,
+        };
+        RemoteImporter::import(&host, &store, &mut writer, &source)?;
+        assert_eq!(count_source(&store, SourceKind::Pi, "devbox")?, 1);
+        assert_eq!(count_source(&store, SourceKind::Omp, "devbox")?, 1);
+        let conn = store.open_connection()?;
+        let pi_at: String = conn.query_row(
+            "SELECT event_at FROM usage_event WHERE source = 'pi' AND host_id = 'devbox'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(pi_at, "2026-08-20T01:00:00Z");
+        assert!(
+            store
+                .meta_value(&format!("omp_split_migrated.{}", host.host_id))?
+                .is_some()
+        );
         Ok(())
     }
 }

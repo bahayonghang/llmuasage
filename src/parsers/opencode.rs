@@ -479,6 +479,7 @@ fn row_to_event(row: &OpencodeRow, resolver: &mut ProjectResolver) -> Result<Opt
             session_id,
             source_path_hash: None,
         }),
+        source_cost: None,
     }))
 }
 

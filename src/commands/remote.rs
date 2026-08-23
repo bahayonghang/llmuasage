@@ -138,6 +138,7 @@ fn remove(app: &AppContext, label: &str, delete_usage: bool, yes: bool) -> Resul
             SourceKind::Antigravity,
             SourceKind::KimiCode,
             SourceKind::Pi,
+            SourceKind::Omp,
             SourceKind::Grok,
             SourceKind::Zcode,
             SourceKind::DeepseekHarness,
@@ -285,6 +286,7 @@ mod tests {
             },
             project: None,
             session: None,
+            source_cost: None,
         });
         let mut writer = fenced.begin_sync_run()?;
         writer.commit_shard(shard)?;
@@ -320,6 +322,7 @@ mod tests {
             },
             project: None,
             session: None,
+            source_cost: None,
         }
     }
 

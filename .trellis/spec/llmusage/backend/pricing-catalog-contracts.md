@@ -57,6 +57,22 @@
   threshold to aggregate tokens.
 - `pricing_rate` records the stable model id, selected tier, prompt-token count,
   threshold, actual channel rates, and reasoning policy.
+- Source-reported cost is a fourth `pricing_status` beside `static`,
+  `snapshot`, and `unpriced`. `PricingStatus::SourceReported.as_str()` is
+  `source_reported`. Persist `pricing_source` as `source-reported`.
+- Writer selection: if `UsageEvent.source_cost` exists and `total > 0`, use
+  that USD and stamp `source_reported`. Otherwise call `compute_cost_with`.
+  `total == 0`, a missing `cost`, and a non-object `cost` take the catalog
+  path. They are not free. Do not add `pi`/`omp` rows to
+  `pricing/static-v2.json`.
+- `cost_without_cache_usd` for source-reported cost uses
+  `input_rate = cost.input / input_tokens` when `input_tokens > 0` and
+  `cost.input > 0`. Otherwise it equals `cost.total` and `pricing_rate`
+  records `without_cache: fallback_equals_total`.
+- Recompute must skip `UPDATE` for `source_reported` rows and still fold the
+  persisted costs into the in-memory bucket rollup. Path-reset decoding must
+  recognize `source_reported`. Older binaries decode that status as
+  `unpriced`; numeric cost columns remain readable.
 
 ### 5. Overlay And Activation Contracts
 
@@ -127,6 +143,9 @@
   strict unknown removal.
 - Internal-v1 and native LiteLLM compatibility.
 - Short/272K/long exact costs, cache creation, audit JSON, and mixed-tier bucket.
+- Source-reported conversion (derivation and fallback), writer priority
+  including overlay `total==0`, recompute skip-and-fold, path-reset decode,
+  and old shard JSON without `source_cost`.
 - Overlay add/replace/remove, repeated apply, process restart, reset, digest
   corruption, old-path compatibility, embedded upgrade, and snapshot pinning.
 - Active-catalog recompute preserves overlay metadata; direct custom-catalog

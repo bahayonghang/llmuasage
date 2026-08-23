@@ -204,6 +204,7 @@ impl CodexLiveParse<'_> {
             tokens: delta,
             project: self.current_project.clone(),
             session: self.current_session.clone(),
+            source_cost: None,
         };
         let tools = std::mem::take(&mut self.pending_tools);
         self.turns.push(turn_from_tools(&event, &tools));

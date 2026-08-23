@@ -11,10 +11,11 @@ use anyhow::Result;
 use llmusage::{
     app::AppContext,
     commands,
-    models::SourceKind,
+    models::{SessionInfo, SourceKind, UsageEvent, UsageTokens},
     parsers::{SourceParser, SourceSyncStats, SyncEvent, ZcodeParser},
     query::{Dashboard, QueryFilter},
-    store::{HolderKind, Store, expected_token_accounting_version},
+    store::{HolderKind, Store, SyncShard, expected_token_accounting_version},
+    util::hash_string,
 };
 use rusqlite::Connection;
 use tempfile::TempDir;
@@ -44,8 +45,8 @@ fn sync_hot_run_and_append_remain_incremental() -> Result<()> {
         let first_overview = Dashboard::open(&store)?.overview(&Default::default())?;
         let first_sync_status = store.sync_status().load_source_sync_statuses("local")?;
         // One status per registered source: codex, claude, opencode,
-        // antigravity, kimi_code, pi, grok, zcode, and deepseek_harness.
-        assert_eq!(first_sync_status.len(), 9);
+        // antigravity, kimi_code, pi, omp, grok, zcode, and deepseek_harness.
+        assert_eq!(first_sync_status.len(), 10);
 
         commands::sync::run(&app).await?;
         let second_overview = Dashboard::open(&store)?.overview(&Default::default())?;
@@ -2087,27 +2088,6 @@ fn pi_combines_default_roots_and_preserves_usage_across_query() -> Result<()> {
             .to_string(),
         ],
     )?;
-    fixture.seed_omp(
-        "project-omp",
-        "omp-first",
-        &[
-            pi_message_line(
-                "2026-06-01T00:05:00Z",
-                "gpt-5.5",
-                100,
-                50,
-                40,
-                8,
-                333,
-                10,
-            ),
-            // Structurally usage-shaped but malformed token fields are ignored.
-            r#"{"type":"message","timestamp":"2026-06-01T00:06:00Z","message":{"role":"assistant","model":"broken","usage":{"input":"bad","totalTokens":"bad"}}}"#.to_string(),
-            r#"{"type":"message","timestamp":"2026-06-01T00:07:00Z","message":{"role":"user","model":"ignored","usage":{"input":100}}}"#.to_string(),
-            "not json but mentions message and usage".to_string(),
-        ],
-    )?;
-
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let app = AppContext::discover()?;
@@ -2128,17 +2108,14 @@ fn pi_combines_default_roots_and_preserves_usage_across_query() -> Result<()> {
         assert_eq!(summary.sources.len(), 1);
         let stats = &summary.sources[0];
         assert_eq!(stats.source, SourceKind::Pi);
-        assert_eq!(stats.files_processed, 2);
-        assert_eq!(stats.changed_files, 2);
-        assert_eq!(stats.events_seen, 2);
-        assert_eq!(stats.events_inserted, 2);
-        assert_eq!(stats.stored_events, 2);
+        assert_eq!(stats.files_processed, 1);
+        assert_eq!(stats.changed_files, 1);
+        assert_eq!(stats.events_seen, 1);
+        assert_eq!(stats.events_inserted, 1);
+        assert_eq!(stats.stored_events, 1);
         assert_eq!(
             pi_event_rows(&app.paths.db_path)?,
-            vec![
-                ("pi-future-model".to_string(), 11, 3, 2, 7, 5, 23),
-                ("gpt-5.5".to_string(), 100, 40, 8, 50, 10, 333),
-            ]
+            vec![("pi-future-model".to_string(), 11, 3, 2, 7, 5, 23)]
         );
 
         let mut models = Dashboard::open(&store)?
@@ -2150,18 +2127,25 @@ fn pi_combines_default_roots_and_preserves_usage_across_query() -> Result<()> {
             .map(|row| row.model)
             .collect::<Vec<_>>();
         models.sort();
-        assert_eq!(models, vec!["gpt-5.5", "pi-future-model"]);
+        assert_eq!(models, vec!["pi-future-model"]);
         assert_eq!(
             store.token_accounting_version(SourceKind::Pi)?,
             Some(expected_token_accounting_version(SourceKind::Pi))
         );
-        assert_eq!(expected_token_accounting_version(SourceKind::Pi), 2);
+        assert_eq!(expected_token_accounting_version(SourceKind::Pi), 3);
+        assert_eq!(expected_token_accounting_version(SourceKind::Omp), 2);
         assert!(!store.has_legacy_token_accounting(SourceKind::Pi)?);
         assert_eq!(
             llmusage::registry::source_descriptor(SourceKind::Pi)
                 .expect("pi source descriptor")
                 .display_name,
-            "Pi / Oh My Pi"
+            "Pi"
+        );
+        assert_eq!(
+            llmusage::registry::source_descriptor(SourceKind::Omp)
+                .expect("omp source descriptor")
+                .display_name,
+            "Oh My Pi"
         );
         Ok::<_, anyhow::Error>(())
     })?;
@@ -2171,7 +2155,7 @@ fn pi_combines_default_roots_and_preserves_usage_across_query() -> Result<()> {
 }
 
 #[test]
-fn pi_missing_default_root_still_syncs_omp_and_projects_status() -> Result<()> {
+fn omp_syncs_default_root_and_projects_status() -> Result<()> {
     let fixture = Fixture::new()?;
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
@@ -2179,13 +2163,16 @@ fn pi_missing_default_root_still_syncs_omp_and_projects_status() -> Result<()> {
         let store = Store::new(&app.paths)?;
         store.bootstrap()?;
         let options = commands::sync::SyncRunOptions {
-            source: Some(SourceKind::Pi),
+            source: Some(SourceKind::Omp),
             ..Default::default()
         };
 
         let empty = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
         assert_eq!(empty.sources[0].files_processed, 0);
-        assert_eq!(pi_capability_status(&app, &store)?, "passive_no_data");
+        assert_eq!(
+            source_capability_status(&app, &store, SourceKind::Omp)?,
+            "passive_no_data"
+        );
 
         fixture.seed_omp(
             "project-omp",
@@ -2203,18 +2190,305 @@ fn pi_missing_default_root_still_syncs_omp_and_projects_status() -> Result<()> {
         )?;
         let imported =
             commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(imported.sources[0].source, SourceKind::Omp);
         assert_eq!(imported.sources[0].files_processed, 1);
         assert_eq!(imported.sources[0].events_inserted, 1);
-        assert_eq!(pi_capability_status(&app, &store)?, "passive_ready");
+        assert_eq!(
+            source_capability_status(&app, &store, SourceKind::Omp)?,
+            "passive_ready"
+        );
 
         let monitor = commands::source_status::build_platform_monitor_statuses()
             .into_iter()
-            .find(|status| status.platform_id == "pi")
-            .expect("pi platform monitor");
-        assert_eq!(monitor.source, Some(SourceKind::Pi));
+            .find(|status| status.platform_id == "omp")
+            .expect("omp platform monitor");
+        assert_eq!(monitor.source, Some(SourceKind::Omp));
         assert_eq!(monitor.parser_status, "registered");
-        assert_eq!(monitor.roots_checked, 2);
+        assert_eq!(monitor.roots_checked, 1);
         assert_eq!(monitor.roots_detected, 1);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn omp_stamps_provider_and_project_dimensions() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let encoded = "--D--Documents-Code-CLI-llmusage--";
+    let run_dir = "2026-08-22T16-26-20-289Z_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    let git_repo = fixture.home.join("workspace").join("llmusage");
+    write_git_repo_with_url(&git_repo, "https://github.com/example/llmusage.git")?;
+    let non_git = fixture
+        .home
+        .join(".omp")
+        .join("agent")
+        .join("sessions")
+        .join("cwd-trap");
+    fs::create_dir_all(&non_git)?;
+
+    fixture.seed_omp_relative(
+        Path::new(encoded).join("agent_git.jsonl"),
+        &[
+            pi_title_line(),
+            pi_session_line("header-git-id", Some(&git_repo.to_string_lossy())),
+            pi_assistant_line(
+                "2026-06-10T00:00:00Z",
+                "gpt-5.5",
+                Some("openai-codex"),
+                10,
+                4,
+            ),
+        ],
+    )?;
+    fixture.seed_omp_relative(
+        Path::new(encoded).join("agent_nongit.jsonl"),
+        &[
+            pi_session_line("header-nongit-id", Some(&non_git.to_string_lossy())),
+            pi_assistant_line(
+                "2026-06-10T00:01:00Z",
+                "deepseek-v4-flash",
+                Some("deepseek"),
+                8,
+                2,
+            ),
+        ],
+    )?;
+    fixture.seed_omp_relative(
+        Path::new(encoded).join("agent_noheader.jsonl"),
+        &[
+            pi_title_line(),
+            pi_assistant_line(
+                "2026-06-10T00:02:00Z",
+                "stealth/ox-alpha",
+                Some("openrouter"),
+                6,
+                1,
+            ),
+        ],
+    )?;
+    fixture.seed_omp_relative(
+        Path::new(encoded).join(run_dir).join("DiffJudge.jsonl"),
+        &[
+            pi_title_line(),
+            pi_session_line("header-nested-id", None),
+            pi_assistant_line("2026-06-10T00:03:00Z", "grok-4.6", Some("xai-oauth"), 5, 3),
+        ],
+    )?;
+    fixture.seed_omp_relative(
+        Path::new("agent_orphan.jsonl"),
+        &[pi_assistant_line(
+            "2026-06-10T00:04:00Z",
+            "gpt-5.5",
+            Some("openrouter"),
+            3,
+            1,
+        )],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let imported = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Omp),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(imported.sources[0].events_inserted, 5);
+
+        let rows = omp_dimension_rows(&app.paths.db_path)?;
+        assert_eq!(rows.len(), 5);
+
+        let git = row_by_session(&rows, "header-git-id");
+        assert_eq!(git.provider_label, "openai-codex");
+        assert_eq!(git.project_label.as_deref(), Some("example/llmusage"));
+        assert_eq!(
+            git.project_ref.as_deref(),
+            Some("https://github.com/example/llmusage")
+        );
+        assert!(
+            git.project_hash
+                .as_ref()
+                .is_some_and(|value| !value.is_empty())
+        );
+
+        let nongit = row_by_session(&rows, "header-nongit-id");
+        assert_eq!(nongit.provider_label, "deepseek");
+        assert_eq!(nongit.project_label.as_deref(), Some("llmusage"));
+        assert!(nongit.project_ref.is_none());
+
+        let noheader = row_by_session(&rows, "noheader");
+        assert_eq!(noheader.provider_label, "openrouter");
+        assert_eq!(noheader.project_label.as_deref(), Some("llmusage"));
+        assert_eq!(noheader.session_label.as_deref(), Some("noheader"));
+
+        let nested = row_by_session(&rows, "header-nested-id");
+        assert_eq!(nested.provider_label, "xai-oauth");
+        assert_eq!(nested.project_label.as_deref(), Some("llmusage"));
+        assert_eq!(nested.session_label.as_deref(), Some("DiffJudge"));
+        assert_eq!(nested.project_hash, noheader.project_hash);
+        assert_ne!(
+            nested.project_hash.as_deref().unwrap_or(""),
+            llmusage::util::hash_string(run_dir)
+        );
+
+        let orphan = row_by_session(&rows, "orphan");
+        assert_eq!(orphan.provider_label, "openrouter");
+        assert!(orphan.project_hash.is_none());
+        assert!(orphan.project_label.is_none());
+
+        for row in &rows {
+            for value in [
+                row.session_id.as_str(),
+                row.session_label.as_deref().unwrap_or(""),
+                row.project_label.as_deref().unwrap_or(""),
+                row.project_ref.as_deref().unwrap_or(""),
+                row.project_hash.as_deref().unwrap_or(""),
+            ] {
+                assert!(
+                    !value.contains("agent/sessions"),
+                    "privacy: {value:?} must not store agent/sessions"
+                );
+            }
+        }
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn omp_source_reported_cost_survives_recompute() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_omp(
+        "project-cost",
+        "costed",
+        &[
+            pi_message_line_with_cost(
+                "2026-06-10T00:00:00Z",
+                "deepseek-v4-flash",
+                1_000,
+                200,
+                2_000,
+                0,
+                3_200,
+                0,
+                serde_json::json!({
+                    "input": 0.01,
+                    "output": 0.02,
+                    "cacheRead": 0.002,
+                    "cacheWrite": 0.0,
+                    "total": 0.032
+                }),
+            ),
+            pi_message_line_with_cost(
+                "2026-06-10T00:01:00Z",
+                "grok-4.6",
+                10,
+                5,
+                0,
+                0,
+                15,
+                0,
+                serde_json::json!({
+                    "input": 0.0,
+                    "output": 0.0,
+                    "cacheRead": 0.0,
+                    "cacheWrite": 0.0,
+                    "total": 0.0
+                }),
+            ),
+        ],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let imported = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Omp),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(imported.sources[0].events_inserted, 2);
+
+        let rows = omp_pricing_rows(&app.paths.db_path)?;
+        assert_eq!(rows.len(), 2);
+        let paid = rows
+            .iter()
+            .find(|row| row.model == "deepseek-v4-flash")
+            .expect("paid omp event");
+        assert_eq!(paid.pricing_status, "source_reported");
+        assert_eq!(paid.pricing_source.as_deref(), Some("source-reported"));
+        assert!((paid.cost_with_cache_usd - 0.032).abs() < 1e-12);
+        assert!((paid.cost_without_cache_usd - 0.05).abs() < 1e-12);
+
+        let free = rows
+            .iter()
+            .find(|row| row.model == "grok-4.6")
+            .expect("zero-total omp event");
+        assert_eq!(free.pricing_status, "unpriced");
+        assert_eq!(free.cost_with_cache_usd, 0.0);
+
+        let (bucket_cost, bucket_status): (f64, String) = {
+            let conn = Connection::open(&app.paths.db_path)?;
+            conn.query_row(
+                r#"
+                SELECT cost_with_cache_usd, pricing_status
+                FROM usage_bucket_30m
+                WHERE source = 'omp' AND model = 'deepseek-v4-flash'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?
+        };
+        assert_eq!(bucket_status, "source_reported");
+        assert!((bucket_cost - paid.cost_with_cache_usd).abs() < 1e-12);
+
+        let updated = store.recompute_costs()?;
+        assert_eq!(updated, 1, "only the unpriced event is catalog-repriced");
+
+        let after = omp_pricing_rows(&app.paths.db_path)?;
+        let paid_after = after
+            .iter()
+            .find(|row| row.model == "deepseek-v4-flash")
+            .expect("paid omp event after recompute");
+        assert_eq!(paid_after.pricing_status, paid.pricing_status);
+        assert_eq!(paid_after.pricing_source, paid.pricing_source);
+        assert!((paid_after.cost_with_cache_usd - paid.cost_with_cache_usd).abs() < 1e-12);
+        assert!((paid_after.cost_without_cache_usd - paid.cost_without_cache_usd).abs() < 1e-12);
+
+        let (bucket_cost_after, bucket_status_after): (f64, String) = {
+            let conn = Connection::open(&app.paths.db_path)?;
+            conn.query_row(
+                r#"
+                SELECT cost_with_cache_usd, pricing_status
+                FROM usage_bucket_30m
+                WHERE source = 'omp' AND model = 'deepseek-v4-flash'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?
+        };
+        assert_eq!(bucket_status_after, "source_reported");
+        assert!((bucket_cost_after - bucket_cost).abs() < 1e-12);
         Ok::<_, anyhow::Error>(())
     })?;
 
@@ -2240,13 +2514,13 @@ fn pi_repeat_append_and_rewrite_follow_file_cursor_contract() -> Result<()> {
         let store = Store::new(&app.paths)?;
         store.bootstrap()?;
         let options = commands::sync::SyncRunOptions {
-            source: Some(SourceKind::Pi),
+            source: Some(SourceKind::Omp),
             ..Default::default()
         };
 
         let first = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
         assert_eq!(first.sources[0].events_inserted, 2);
-        assert_eq!(pi_event_count(&app.paths.db_path)?, 2);
+        assert_eq!(omp_event_count(&app.paths.db_path)?, 2);
 
         let repeat = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
         assert_eq!(repeat.sources[0].changed_files, 0);
@@ -2265,7 +2539,7 @@ fn pi_repeat_append_and_rewrite_follow_file_cursor_contract() -> Result<()> {
         assert_eq!(appended.sources[0].changed_files, 1);
         assert_eq!(appended.sources[0].events_seen, 1);
         assert_eq!(appended.sources[0].events_inserted, 1);
-        assert_eq!(pi_event_count(&app.paths.db_path)?, 3);
+        assert_eq!(omp_event_count(&app.paths.db_path)?, 3);
 
         fixture.seed_omp(
             "project-cursor",
@@ -2285,10 +2559,232 @@ fn pi_repeat_append_and_rewrite_follow_file_cursor_contract() -> Result<()> {
             commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
         assert_eq!(rewritten.sources[0].changed_files, 1);
         assert_eq!(rewritten.sources[0].events_replayed, 1);
-        assert_eq!(pi_event_count(&app.paths.db_path)?, 1);
+        assert_eq!(omp_event_count(&app.paths.db_path)?, 1);
         assert_eq!(
-            pi_event_rows(&app.paths.db_path)?,
+            omp_event_rows(&app.paths.db_path)?,
             vec![("gpt-6-rewrite".to_string(), 42, 0, 0, 8, 6, 50)]
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn omp_behavior_facts_persist_turns_and_tool_calls() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let secret = "SECRET_TOOL_RESULT_CONTENT";
+    let long_command = "x".repeat(200);
+    fixture.seed_omp(
+        "project-behavior",
+        "behavior",
+        &[
+            pi_session_line("behavior-id", None),
+            pi_assistant_behavior_line(
+                "2026-08-20T00:00:00Z",
+                "gpt-5.5",
+                Some("openrouter"),
+                vec![
+                    pi_tool_call("bash", serde_json::json!({ "command": long_command })),
+                    pi_tool_call("read", serde_json::json!({ "file_path": "src/lib.rs" })),
+                    pi_tool_call("write", serde_json::json!({ "file_path": "src/main.rs" })),
+                ],
+                None,
+            ),
+            pi_tool_result_line(secret),
+            pi_assistant_behavior_line(
+                "2026-08-20T00:01:00Z",
+                "gpt-5.5",
+                Some("openrouter"),
+                vec![pi_tool_call(
+                    "edit",
+                    serde_json::json!({ "file_path": "src/lib.rs" }),
+                )],
+                Some(1),
+            ),
+        ],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let imported = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Omp),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(imported.sources[0].events_inserted, 2);
+        assert_eq!(omp_event_count(&app.paths.db_path)?, 2);
+        assert_eq!(omp_turn_count(&app.paths.db_path)?, 2);
+        assert_eq!(omp_tool_call_count(&app.paths.db_path)?, 4);
+        assert_eq!(omp_orphan_turns(&app.paths.db_path)?, 0);
+        assert_eq!(omp_orphan_tool_calls(&app.paths.db_path)?, 0);
+        assert_eq!(
+            omp_tool_kind_counts(&app.paths.db_path)?,
+            vec![
+                ("bash".to_string(), 1),
+                ("edit".to_string(), 2),
+                ("read".to_string(), 1),
+            ]
+        );
+        assert_eq!(
+            omp_turn_retry_rows(&app.paths.db_path)?,
+            vec![(0, 1), (1, 0)]
+        );
+        assert_eq!(omp_empty_turn_project_hash_count(&app.paths.db_path)?, 0);
+        assert_eq!(
+            omp_empty_tool_call_project_hash_count(&app.paths.db_path)?,
+            0
+        );
+        assert_eq!(omp_overlong_preview_count(&app.paths.db_path)?, 0);
+        assert_eq!(omp_preview_secret_count(&app.paths.db_path, secret)?, 0);
+
+        let dashboard = Dashboard::open(&store)?;
+        let filter = QueryFilter {
+            source: Some(SourceKind::Omp),
+            ..Default::default()
+        };
+        let activity = dashboard.activity_breakdown(&filter)?;
+        assert!(activity.support.supported);
+        assert!(!activity.breakdown.is_empty());
+        let tools = dashboard.tool_breakdown(&filter)?;
+        assert!(tools.support.supported);
+        assert!(!tools.breakdown.is_empty());
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn omp_rewrite_clears_old_path_hash_behavior_facts() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_omp(
+        "project-replay",
+        "replay",
+        &[pi_assistant_behavior_line(
+            "2026-08-20T00:00:00Z",
+            "gpt-5.5",
+            Some("openrouter"),
+            vec![
+                pi_tool_call("bash", serde_json::json!({ "command": "echo one" })),
+                pi_tool_call("read", serde_json::json!({ "file_path": "old.rs" })),
+            ],
+            None,
+        )],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let options = commands::sync::SyncRunOptions {
+            source: Some(SourceKind::Omp),
+            ..Default::default()
+        };
+        commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(omp_turn_count(&app.paths.db_path)?, 1);
+        assert_eq!(omp_tool_call_count(&app.paths.db_path)?, 2);
+
+        fixture.seed_omp(
+            "project-replay",
+            "replay",
+            &[pi_assistant_behavior_line(
+                "2026-08-20T01:00:00Z",
+                "gpt-5.5",
+                Some("openrouter"),
+                vec![pi_tool_call(
+                    "grep",
+                    serde_json::json!({ "pattern": "fn main" }),
+                )],
+                None,
+            )],
+        )?;
+        commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(omp_event_count(&app.paths.db_path)?, 1);
+        assert_eq!(omp_turn_count(&app.paths.db_path)?, 1);
+        assert_eq!(omp_tool_call_count(&app.paths.db_path)?, 1);
+        assert_eq!(
+            omp_tool_kind_counts(&app.paths.db_path)?,
+            vec![("search".to_string(), 1)]
+        );
+        assert_eq!(omp_orphan_turns(&app.paths.db_path)?, 0);
+        assert_eq!(omp_orphan_tool_calls(&app.paths.db_path)?, 0);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn omp_recent_cutoff_does_not_write_orphan_behavior_facts() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let now = chrono::Utc::now().to_rfc3339();
+    fixture.seed_omp(
+        "project-recent",
+        "recent",
+        &[
+            pi_assistant_behavior_line(
+                "2020-01-01T00:00:00Z",
+                "gpt-5.5",
+                Some("openrouter"),
+                vec![pi_tool_call(
+                    "read",
+                    serde_json::json!({ "file_path": "old.rs" }),
+                )],
+                None,
+            ),
+            pi_assistant_behavior_line(
+                &now,
+                "gpt-5.5",
+                Some("openrouter"),
+                vec![pi_tool_call(
+                    "write",
+                    serde_json::json!({ "file_path": "new.rs" }),
+                )],
+                None,
+            ),
+        ],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let bounded = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Omp),
+                recent_days: Some(1),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(bounded.sources[0].events_inserted, 1);
+        assert_eq!(omp_event_count(&app.paths.db_path)?, 1);
+        assert_eq!(omp_turn_count(&app.paths.db_path)?, 1);
+        assert_eq!(omp_tool_call_count(&app.paths.db_path)?, 1);
+        assert_eq!(omp_orphan_turns(&app.paths.db_path)?, 0);
+        assert_eq!(omp_orphan_tool_calls(&app.paths.db_path)?, 0);
+        assert_eq!(
+            omp_tool_kind_counts(&app.paths.db_path)?,
+            vec![("edit".to_string(), 1)]
         );
         Ok::<_, anyhow::Error>(())
     })?;
@@ -2383,6 +2879,216 @@ fn pi_agent_dir_lists_multiple_roots_and_dedupes_canonical_files() -> Result<()>
             .map(|row| row.0)
             .collect::<Vec<_>>();
         assert_eq!(models, vec!["custom-pi", "omp-model"]);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn pi_token_accounting_bump_replays_omp_identity_set() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let path = fixture.seed_omp(
+        "project-omp",
+        "omp-first",
+        &[pi_message_line(
+            "2026-06-01T00:05:00Z",
+            "gpt-5.5",
+            100,
+            50,
+            40,
+            8,
+            333,
+            10,
+        )],
+    )?;
+    let canonical = fs::canonicalize(&path)?;
+    let path_hash = hash_string(&canonical.to_string_lossy());
+    let event_at = chrono::DateTime::parse_from_rfc3339("2026-06-01T00:05:00Z")?
+        .with_timezone(&chrono::Utc)
+        .to_rfc3339();
+    let hour_start =
+        llmusage::util::bucket_start_from_rfc3339(&event_at).unwrap_or_else(|| event_at.clone());
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        {
+            let lock = store.acquire_worker_lock_with(Duration::from_secs(5), HolderKind::Cli)?;
+            let fenced = lock.fenced_store();
+            fenced.bootstrap()?;
+            let mut shard = SyncShard::new(SourceKind::Pi);
+            shard.events.push(UsageEvent {
+                event_key: "pi:legacy-split".to_string(),
+                source: SourceKind::Pi,
+                provider_label: String::new(),
+                model: "gpt-5.5".to_string(),
+                event_at: event_at.clone(),
+                hour_start,
+                tokens: UsageTokens {
+                    input_tokens: 100,
+                    cache_read_tokens: 40,
+                    cache_creation_tokens: 8,
+                    output_tokens: 50,
+                    reasoning_output_tokens: 10,
+                    total_tokens: 333,
+                },
+                project: None,
+                session: Some(SessionInfo {
+                    session_id: "omp-first".to_string(),
+                    session_label: Some("omp-first".to_string()),
+                    source_path_hash: Some(path_hash.clone()),
+                }),
+                source_cost: None,
+            });
+            shard
+                .seen_file_paths
+                .push(canonical.to_string_lossy().to_string());
+            let mut writer = fenced.begin_sync_run()?;
+            writer.commit_shard(shard)?;
+            writer.finish_sync_run()?;
+            fenced.set_meta_value("token_accounting_version.pi", "2")?;
+        }
+
+        let baseline = identity_rows(&app.paths.db_path, "pi")?;
+        assert_eq!(baseline.len(), 1);
+        assert!(store.has_legacy_token_accounting(SourceKind::Pi)?);
+
+        let summary = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions::default(),
+            None,
+        )
+        .await?;
+        assert!(
+            summary
+                .sources
+                .iter()
+                .any(|stats| stats.source == SourceKind::Omp && stats.events_inserted == 1),
+            "{:?}",
+            summary.sources
+        );
+        assert_eq!(pi_event_count(&app.paths.db_path)?, 0);
+        let migrated = identity_rows(&app.paths.db_path, "omp")?;
+        assert_eq!(migrated, baseline);
+        assert_eq!(store.token_accounting_version(SourceKind::Pi)?, Some(3));
+        assert!(!store.has_legacy_token_accounting(SourceKind::Pi)?);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn omp_source_sync_refuses_until_pi_split_migration() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let path = fixture.seed_omp(
+        "project-omp",
+        "omp-gate",
+        &[pi_message_line(
+            "2026-06-01T00:05:00Z",
+            "gpt-5.5",
+            100,
+            50,
+            40,
+            8,
+            333,
+            10,
+        )],
+    )?;
+    let canonical = fs::canonicalize(&path)?;
+    let event_at = chrono::DateTime::parse_from_rfc3339("2026-06-01T00:05:00Z")?
+        .with_timezone(&chrono::Utc)
+        .to_rfc3339();
+    let hour_start =
+        llmusage::util::bucket_start_from_rfc3339(&event_at).unwrap_or_else(|| event_at.clone());
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        {
+            let lock = store.acquire_worker_lock_with(Duration::from_secs(5), HolderKind::Cli)?;
+            let fenced = lock.fenced_store();
+            fenced.bootstrap()?;
+            let mut shard = SyncShard::new(SourceKind::Pi);
+            shard.events.push(UsageEvent {
+                event_key: "pi:legacy-gate".to_string(),
+                source: SourceKind::Pi,
+                provider_label: String::new(),
+                model: "gpt-5.5".to_string(),
+                event_at,
+                hour_start,
+                tokens: UsageTokens {
+                    input_tokens: 100,
+                    cache_read_tokens: 40,
+                    cache_creation_tokens: 8,
+                    output_tokens: 50,
+                    reasoning_output_tokens: 10,
+                    total_tokens: 333,
+                },
+                project: None,
+                session: Some(SessionInfo {
+                    session_id: "omp-gate".to_string(),
+                    session_label: Some("omp-gate".to_string()),
+                    source_path_hash: Some(hash_string(&canonical.to_string_lossy())),
+                }),
+                source_cost: None,
+            });
+            let mut writer = fenced.begin_sync_run()?;
+            writer.commit_shard(shard)?;
+            writer.finish_sync_run()?;
+            fenced.set_meta_value("token_accounting_version.pi", "2")?;
+        }
+
+        let err = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Omp),
+                ..Default::default()
+            },
+            None,
+        )
+        .await
+        .expect_err("omp-only sync must refuse pre-split pi rows");
+        assert!(
+            err.to_string().contains("pre-split token-accounting"),
+            "{err}"
+        );
+        assert_eq!(omp_event_count(&app.paths.db_path)?, 0);
+        assert_eq!(pi_event_count(&app.paths.db_path)?, 1);
+
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions::default(),
+            None,
+        )
+        .await?;
+        assert_eq!(pi_event_count(&app.paths.db_path)?, 0);
+        assert_eq!(omp_event_count(&app.paths.db_path)?, 1);
+
+        let retry = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Omp),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(retry.sources[0].source, SourceKind::Omp);
+        assert_eq!(omp_event_count(&app.paths.db_path)?, 1);
         Ok::<_, anyhow::Error>(())
     })?;
 
@@ -2833,18 +3539,208 @@ fn pi_event_count(db_path: &Path) -> Result<i64> {
 type PiEventRow = (String, i64, i64, i64, i64, i64, i64);
 
 fn pi_event_rows(db_path: &Path) -> Result<Vec<PiEventRow>> {
+    source_event_rows(db_path, "pi")
+}
+
+fn omp_event_count(db_path: &Path) -> Result<i64> {
+    let conn = Connection::open(db_path)?;
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM usage_event WHERE source = 'omp'",
+        [],
+        |row| row.get(0),
+    )?)
+}
+
+fn omp_turn_count(db_path: &Path) -> Result<i64> {
+    let conn = Connection::open(db_path)?;
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM usage_turn WHERE source = 'omp'",
+        [],
+        |row| row.get(0),
+    )?)
+}
+
+fn omp_tool_call_count(db_path: &Path) -> Result<i64> {
+    let conn = Connection::open(db_path)?;
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM usage_tool_call WHERE source = 'omp'",
+        [],
+        |row| row.get(0),
+    )?)
+}
+
+fn omp_tool_kind_counts(db_path: &Path) -> Result<Vec<(String, i64)>> {
+    let conn = Connection::open(db_path)?;
+    let mut stmt = conn.prepare(
+        "SELECT tool_kind, COUNT(*) FROM usage_tool_call WHERE source = 'omp' GROUP BY 1 ORDER BY 1",
+    )?;
+    let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn omp_turn_retry_rows(db_path: &Path) -> Result<Vec<(i64, i64)>> {
+    let conn = Connection::open(db_path)?;
+    let mut stmt = conn.prepare(
+        "SELECT retries, one_shot FROM usage_turn WHERE source = 'omp' ORDER BY started_at",
+    )?;
+    let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn omp_empty_turn_project_hash_count(db_path: &Path) -> Result<i64> {
+    let conn = Connection::open(db_path)?;
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM usage_turn WHERE source = 'omp' AND (project_hash IS NULL OR project_hash = '')",
+        [],
+        |row| row.get(0),
+    )?)
+}
+
+fn omp_empty_tool_call_project_hash_count(db_path: &Path) -> Result<i64> {
+    let conn = Connection::open(db_path)?;
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM usage_tool_call WHERE source = 'omp' AND (project_hash IS NULL OR project_hash = '')",
+        [],
+        |row| row.get(0),
+    )?)
+}
+
+fn omp_overlong_preview_count(db_path: &Path) -> Result<i64> {
+    let conn = Connection::open(db_path)?;
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM usage_tool_call WHERE source = 'omp' AND LENGTH(safe_preview) > 120",
+        [],
+        |row| row.get(0),
+    )?)
+}
+
+fn omp_preview_secret_count(db_path: &Path, secret: &str) -> Result<i64> {
+    let conn = Connection::open(db_path)?;
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM usage_tool_call WHERE source = 'omp' AND instr(COALESCE(safe_preview, ''), ?1) > 0",
+        [secret],
+        |row| row.get(0),
+    )?)
+}
+
+fn omp_orphan_turns(db_path: &Path) -> Result<i64> {
+    let conn = Connection::open(db_path)?;
+    Ok(conn.query_row(
+        r#"
+        SELECT COUNT(*)
+        FROM usage_turn t
+        LEFT JOIN usage_event e ON e.event_key = substr(t.turn_key, 6)
+        WHERE t.source = 'omp' AND e.event_key IS NULL
+        "#,
+        [],
+        |row| row.get(0),
+    )?)
+}
+
+fn omp_orphan_tool_calls(db_path: &Path) -> Result<i64> {
+    let conn = Connection::open(db_path)?;
+    Ok(conn.query_row(
+        r#"
+        SELECT COUNT(*)
+        FROM usage_tool_call tc
+        LEFT JOIN usage_event e ON e.event_key = tc.event_key
+        WHERE tc.source = 'omp' AND e.event_key IS NULL
+        "#,
+        [],
+        |row| row.get(0),
+    )?)
+}
+
+fn omp_event_rows(db_path: &Path) -> Result<Vec<PiEventRow>> {
+    source_event_rows(db_path, "omp")
+}
+
+struct OmpPricingRow {
+    model: String,
+    cost_with_cache_usd: f64,
+    cost_without_cache_usd: f64,
+    pricing_status: String,
+    pricing_source: Option<String>,
+}
+
+fn omp_pricing_rows(db_path: &Path) -> Result<Vec<OmpPricingRow>> {
+    let conn = Connection::open(db_path)?;
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT model, cost_with_cache_usd, cost_without_cache_usd,
+               pricing_status, pricing_source
+        FROM usage_event
+        WHERE source = 'omp'
+        ORDER BY event_at, model
+        "#,
+    )?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(OmpPricingRow {
+                model: row.get(0)?,
+                cost_with_cache_usd: row.get(1)?,
+                cost_without_cache_usd: row.get(2)?,
+                pricing_status: row.get(3)?,
+                pricing_source: row.get(4)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+struct OmpDimensionRow {
+    provider_label: String,
+    project_label: Option<String>,
+    project_hash: Option<String>,
+    project_ref: Option<String>,
+    session_id: String,
+    session_label: Option<String>,
+}
+
+fn omp_dimension_rows(db_path: &Path) -> Result<Vec<OmpDimensionRow>> {
+    let conn = Connection::open(db_path)?;
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT provider_label, project_label, project_hash, project_ref, session_id, session_label
+        FROM usage_event
+        WHERE source = 'omp'
+        ORDER BY event_at
+        "#,
+    )?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(OmpDimensionRow {
+                provider_label: row.get(0)?,
+                project_label: row.get(1)?,
+                project_hash: row.get(2)?,
+                project_ref: row.get(3)?,
+                session_id: row.get(4)?,
+                session_label: row.get(5)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+fn row_by_session<'a>(rows: &'a [OmpDimensionRow], session_id: &str) -> &'a OmpDimensionRow {
+    rows.iter()
+        .find(|row| row.session_id == session_id)
+        .unwrap_or_else(|| panic!("missing session {session_id}"))
+}
+
+fn source_event_rows(db_path: &Path, source: &str) -> Result<Vec<PiEventRow>> {
     let conn = Connection::open(db_path)?;
     let mut stmt = conn.prepare(
         r#"
         SELECT model, input_tokens, cache_read_tokens, cache_creation_tokens,
                output_tokens, reasoning_output_tokens, total_tokens
         FROM usage_event
-        WHERE source = 'pi'
+        WHERE source = ?1
         ORDER BY event_at, model
         "#,
     )?;
     let rows = stmt
-        .query_map([], |row| {
+        .query_map([source], |row| {
             Ok((
                 row.get(0)?,
                 row.get(1)?,
@@ -2854,6 +3750,24 @@ fn pi_event_rows(db_path: &Path) -> Result<Vec<PiEventRow>> {
                 row.get(5)?,
                 row.get(6)?,
             ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+fn identity_rows(db_path: &Path, source: &str) -> Result<Vec<(String, String, String, i64)>> {
+    let conn = Connection::open(db_path)?;
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT source_path_hash, event_at, model, total_tokens
+        FROM usage_event
+        WHERE source = ?1
+        ORDER BY 1, 2, 3, 4
+        "#,
+    )?;
+    let rows = stmt
+        .query_map([source], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
@@ -2902,10 +3816,6 @@ fn kimi_event_rows(db_path: &Path) -> Result<Vec<KimiEventRow>> {
 /// `source-status` command uses (`passive_no_data` vs `passive_ready`).
 fn kimi_capability_status(app: &AppContext, store: &Store) -> Result<String> {
     source_capability_status(app, store, SourceKind::KimiCode)
-}
-
-fn pi_capability_status(app: &AppContext, store: &Store) -> Result<String> {
-    source_capability_status(app, store, SourceKind::Pi)
 }
 
 fn source_capability_status(app: &AppContext, store: &Store, source: SourceKind) -> Result<String> {
@@ -4849,6 +5759,103 @@ fn dsh_first_sync_marks_current_token_accounting() -> Result<()> {
 }
 
 #[test]
+fn dsh_parser_provider_survives_loaded_ccr_timeline() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.write_provider_map(
+        r#"
+{"platform":"codex","provider":"anyrouter","activated_at":"2026-04-22T01:00:00Z","event":"activate"}
+{"platform":"claude","provider":"glm","activated_at":"2026-04-22T01:00:00Z","event":"activate"}
+"#,
+    )?;
+    fixture.seed_dsh(
+        "sess-a",
+        &[
+            dsh_session_line("sess-a", None, None),
+            dsh_usage_line(1, 1_700_000_000_000, "msg-1", 10, 4),
+        ],
+    )?;
+    fixture.seed_codex("rollout-dsh-ccr.jsonl", 120, "2026-04-22T01:12:00Z")?;
+    fixture.seed_claude("session-dsh-ccr.jsonl", 90, "2026-04-22T02:00:00Z")?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::DeepseekHarness),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Codex),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Claude),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+        let conn = Connection::open(&app.paths.db_path)?;
+        let dsh_empty: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_event WHERE source='deepseek_harness' AND provider_label=''",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(dsh_empty, 0);
+        let dsh_labels: Vec<String> = {
+            let mut stmt = conn.prepare(
+                "SELECT DISTINCT provider_label FROM usage_event WHERE source='deepseek_harness'",
+            )?;
+            stmt.query_map([], |row| row.get(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        assert_eq!(dsh_labels, vec!["deepseek-official".to_string()]);
+
+        let codex_labels: Vec<String> = {
+            let mut stmt = conn
+                .prepare("SELECT DISTINCT provider_label FROM usage_event WHERE source='codex'")?;
+            stmt.query_map([], |row| row.get(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        assert_eq!(codex_labels, vec!["anyrouter".to_string()]);
+
+        let claude_labels: Vec<String> = {
+            let mut stmt = conn
+                .prepare("SELECT DISTINCT provider_label FROM usage_event WHERE source='claude'")?;
+            stmt.query_map([], |row| row.get(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        assert_eq!(claude_labels, vec!["glm".to_string()]);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
 fn dsh_fork_parent_and_child_do_not_double_count() -> Result<()> {
     let fixture = Fixture::new()?;
     let shared = dsh_usage_line(1, 1_700_000_000_000, "shared-msg", 10, 4);
@@ -5436,6 +6443,18 @@ impl Fixture {
         )
     }
 
+    fn seed_omp_relative(&self, relative: impl AsRef<Path>, lines: &[String]) -> Result<PathBuf> {
+        let path = self
+            .home
+            .join(".omp")
+            .join("agent")
+            .join("sessions")
+            .join(relative);
+        fs::create_dir_all(path.parent().unwrap())?;
+        fs::write(&path, format!("{}\n", lines.join("\n")))?;
+        Ok(path)
+    }
+
     fn seed_pi_under(
         &self,
         root: &Path,
@@ -5754,10 +6773,14 @@ impl Fixture {
 }
 
 fn write_git_repo(repo_root: &Path) -> Result<()> {
+    write_git_repo_with_url(repo_root, "https://github.com/example/demo-repo.git")
+}
+
+fn write_git_repo_with_url(repo_root: &Path, url: &str) -> Result<()> {
     fs::create_dir_all(repo_root.join(".git"))?;
     fs::write(
         repo_root.join(".git").join("config"),
-        "[remote \"origin\"]\n    url = https://github.com/example/demo-repo.git\n",
+        format!("[remote \"origin\"]\n    url = {url}\n"),
     )?;
     Ok(())
 }
@@ -5813,6 +6836,114 @@ fn kimi_turn_line(
     .to_string()
 }
 
+fn pi_title_line() -> String {
+    r#"{"type":"title","title":"Demo"}"#.to_string()
+}
+
+fn pi_session_line(id: &str, cwd: Option<&str>) -> String {
+    let mut value = serde_json::json!({
+        "type": "session",
+        "id": id,
+    });
+    if let Some(cwd) = cwd {
+        value["cwd"] = serde_json::json!(cwd);
+    }
+    value.to_string()
+}
+
+fn pi_tool_call(name: &str, arguments: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "type": "toolCall",
+        "id": format!("call-{name}"),
+        "name": name,
+        "arguments": arguments,
+    })
+}
+
+fn pi_tool_result_line(content: &str) -> String {
+    serde_json::json!({
+        "type": "message",
+        "timestamp": "2026-08-20T00:00:30Z",
+        "message": {
+            "role": "toolResult",
+            "toolCallId": "call-bash",
+            "toolName": "bash",
+            "content": content,
+            "isError": false,
+        }
+    })
+    .to_string()
+}
+
+fn pi_assistant_behavior_line(
+    timestamp: &str,
+    model: &str,
+    provider: Option<&str>,
+    content: Vec<serde_json::Value>,
+    retry_attempt: Option<i64>,
+) -> String {
+    let mut message = serde_json::json!({
+        "role": "assistant",
+        "model": model,
+        "usage": {
+            "input": 10,
+            "output": 5,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 15,
+            "reasoningTokens": 0,
+        },
+        "content": content,
+    });
+    if let Some(provider) = provider {
+        message["provider"] = serde_json::json!(provider);
+    }
+    if let Some(attempt) = retry_attempt {
+        message["retryRecovery"] = serde_json::json!({
+            "kind": "auto-retry",
+            "status": "recovered",
+            "attempt": attempt,
+            "recovery": "plain",
+        });
+    }
+    serde_json::json!({
+        "type": "message",
+        "timestamp": timestamp,
+        "message": message,
+    })
+    .to_string()
+}
+
+fn pi_assistant_line(
+    timestamp: &str,
+    model: &str,
+    provider: Option<&str>,
+    input: i64,
+    output: i64,
+) -> String {
+    let mut message = serde_json::json!({
+        "role": "assistant",
+        "model": model,
+        "usage": {
+            "input": input,
+            "output": output,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": input + output,
+            "reasoningTokens": 0,
+        }
+    });
+    if let Some(provider) = provider {
+        message["provider"] = serde_json::json!(provider);
+    }
+    serde_json::json!({
+        "type": "message",
+        "timestamp": timestamp,
+        "message": message,
+    })
+    .to_string()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn pi_message_line(
     timestamp: &str,
@@ -5824,20 +6955,49 @@ fn pi_message_line(
     total: i64,
     reasoning: i64,
 ) -> String {
+    pi_message_line_with_cost(
+        timestamp,
+        model,
+        input,
+        output,
+        cache_read,
+        cache_write,
+        total,
+        reasoning,
+        serde_json::Value::Null,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn pi_message_line_with_cost(
+    timestamp: &str,
+    model: &str,
+    input: i64,
+    output: i64,
+    cache_read: i64,
+    cache_write: i64,
+    total: i64,
+    reasoning: i64,
+    cost: serde_json::Value,
+) -> String {
+    let mut usage = serde_json::json!({
+        "input": input,
+        "output": output,
+        "cacheRead": cache_read,
+        "cacheWrite": cache_write,
+        "totalTokens": total,
+        "reasoningTokens": reasoning,
+    });
+    if !cost.is_null() {
+        usage["cost"] = cost;
+    }
     serde_json::json!({
         "type": "message",
         "timestamp": timestamp,
         "message": {
             "role": "assistant",
             "model": model,
-            "usage": {
-                "input": input,
-                "output": output,
-                "cacheRead": cache_read,
-                "cacheWrite": cache_write,
-                "totalTokens": total,
-                "reasoningTokens": reasoning,
-            }
+            "usage": usage,
         }
     })
     .to_string()

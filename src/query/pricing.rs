@@ -1,20 +1,24 @@
 use serde::{Deserialize, Serialize};
 
 use super::pricing_catalog::{PricingCatalog, ReasoningPolicy};
+use crate::models::SourceCost;
 
 pub const PRICING_MIXED: &str = "mixed";
 pub const PRICING_UNPRICED: &str = "unpriced";
+pub const PRICING_SOURCE_REPORTED: &str = "source_reported";
 
 /// Pricing status reported alongside a [`CostBreakdown`] (D6/F1.3).
 ///
 /// `Static` matches succeed against the embedded catalog; `Snapshot`
 /// is stamped when [`PricingCatalog::load_snapshot`] supplied the rates;
-/// `Unpriced` means no catalog entry fired so the cost columns stay at 0.
+/// `SourceReported` is stamped when the source itself supplied a positive
+/// total; `Unpriced` means no catalog entry fired so the cost columns stay at 0.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PricingStatus {
     Static,
     Snapshot,
+    SourceReported,
     #[default]
     Unpriced,
 }
@@ -24,7 +28,19 @@ impl PricingStatus {
         match self {
             Self::Static => "static",
             Self::Snapshot => "snapshot",
+            Self::SourceReported => PRICING_SOURCE_REPORTED,
             Self::Unpriced => PRICING_UNPRICED,
+        }
+    }
+
+    /// Decodes a persisted `pricing_status` text. Unknown values become
+    /// [`Self::Unpriced`] so older binaries stay readable.
+    pub fn from_stored(value: &str) -> Self {
+        match value {
+            "static" => Self::Static,
+            "snapshot" => Self::Snapshot,
+            PRICING_SOURCE_REPORTED => Self::SourceReported,
+            _ => Self::Unpriced,
         }
     }
 }
@@ -129,6 +145,60 @@ pub fn compute_cost_with(
     }
 }
 
+/// Converts a source-reported USD cost into the persisted cost columns.
+///
+/// `cost_with_cache_usd` is `cost.total`. `cost_without_cache_usd` uses the
+/// input unit price when `input_tokens > 0` and `cost.input > 0`; otherwise
+/// it equals `total` and the audit JSON records the fallback.
+pub fn compute_source_reported_cost(cost: &SourceCost, tokens: CostTokens) -> CostBreakdown {
+    let output_cost = cost.output.filter(|value| value.is_finite()).unwrap_or(0.0);
+    let (cost_without_cache_usd, without_cache_fallback) = match (tokens.input > 0, cost.input) {
+        (true, Some(input_cost)) if input_cost > 0.0 && input_cost.is_finite() => {
+            let input_rate = input_cost / tokens.input as f64;
+            let prompt_tokens =
+                tokens.input as f64 + tokens.cache_read as f64 + tokens.cache_creation as f64;
+            (prompt_tokens * input_rate + output_cost, false)
+        }
+        _ => (cost.total, true),
+    };
+
+    let mut rate = serde_json::json!({
+        "source": "pi_usage_cost",
+        "total": cost.total,
+        "input": cost.input,
+        "output": cost.output,
+        "cache_read": cost.cache_read,
+        "cache_write": cost.cache_write,
+    });
+    if without_cache_fallback {
+        rate["without_cache"] = serde_json::json!("fallback_equals_total");
+    }
+
+    CostBreakdown {
+        cost_with_cache_usd: cost.total,
+        cost_without_cache_usd,
+        pricing_status: PricingStatus::SourceReported,
+        pricing_source: Some("source-reported".to_string()),
+        pricing_rate: serde_json::to_string(&rate).ok(),
+    }
+}
+
+/// Selects source-reported cost when `total > 0`; otherwise uses the catalog.
+pub fn cost_for_event(
+    catalog: &PricingCatalog,
+    source: &str,
+    model: &str,
+    tokens: CostTokens,
+    source_cost: Option<&SourceCost>,
+) -> CostBreakdown {
+    match source_cost {
+        Some(cost) if cost.total.is_finite() && cost.total > 0.0 => {
+            compute_source_reported_cost(cost, tokens)
+        }
+        _ => compute_cost_with(catalog, source, model, tokens),
+    }
+}
+
 /// Backwards-compatible scalar API used by the legacy report aggregates
 /// in `query/reports.rs` and `query/mod.rs::cost_breakdown`. New surfaces
 /// should call [`compute_cost`] / [`compute_cost_with`] for the full
@@ -139,7 +209,11 @@ pub fn estimate_cost_usd(source: &str, model: &str, tokens: CostTokens) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{CostTokens, PricingStatus, compute_cost, compute_cost_with};
+    use super::{
+        CostTokens, PricingStatus, compute_cost, compute_cost_with, compute_source_reported_cost,
+        cost_for_event,
+    };
+    use crate::models::SourceCost;
     use crate::query::pricing_catalog::{
         PricingCatalog, PricingEntry, PricingMatcher, PricingRate, ReasoningPolicy,
     };
@@ -374,5 +448,122 @@ mod tests {
         assert!(cost.pricing_source.is_none());
         assert_eq!(cost.cost_with_cache_usd, 0.0);
         assert_eq!(cost.cost_without_cache_usd, 0.0);
+    }
+
+    #[test]
+    fn pricing_status_source_reported_as_str() {
+        assert_eq!(PricingStatus::SourceReported.as_str(), "source_reported");
+        assert_eq!(
+            PricingStatus::from_stored("source_reported"),
+            PricingStatus::SourceReported
+        );
+        assert_eq!(PricingStatus::from_stored("static"), PricingStatus::Static);
+        assert_eq!(
+            PricingStatus::from_stored("snapshot"),
+            PricingStatus::Snapshot
+        );
+        assert_eq!(
+            PricingStatus::from_stored("unknown"),
+            PricingStatus::Unpriced
+        );
+    }
+
+    #[test]
+    fn source_reported_derives_without_cache_from_input_rate() {
+        let cost = compute_source_reported_cost(
+            &SourceCost {
+                total: 0.032,
+                input: Some(0.01),
+                output: Some(0.02),
+                cache_read: Some(0.002),
+                cache_write: Some(0.0),
+            },
+            tokens(1_000, 2_000, 0, 200, 0),
+        );
+        assert_eq!(cost.pricing_status, PricingStatus::SourceReported);
+        assert_eq!(cost.pricing_source.as_deref(), Some("source-reported"));
+        assert!((cost.cost_with_cache_usd - 0.032).abs() < 1e-12);
+        // input_rate = 0.01/1000; without_cache = (1000+2000)*rate + 0.02 = 0.05
+        assert!((cost.cost_without_cache_usd - 0.05).abs() < 1e-12);
+        let rate = cost.pricing_rate.expect("audit JSON");
+        assert!(rate.contains("\"source\":\"pi_usage_cost\""), "{rate}");
+        assert!(rate.contains("\"total\":0.032"), "{rate}");
+        assert!(
+            !rate.contains("fallback_equals_total"),
+            "derivation path must not stamp the fallback marker: {rate}"
+        );
+    }
+
+    #[test]
+    fn source_reported_without_cache_falls_back_to_total() {
+        let cost = compute_source_reported_cost(
+            &SourceCost {
+                total: 0.3756,
+                input: None,
+                output: Some(0.2),
+                cache_read: None,
+                cache_write: None,
+            },
+            tokens(1_000, 0, 0, 200, 0),
+        );
+        assert_eq!(cost.pricing_status, PricingStatus::SourceReported);
+        assert_eq!(cost.pricing_source.as_deref(), Some("source-reported"));
+        assert!((cost.cost_with_cache_usd - 0.3756).abs() < 1e-12);
+        assert!((cost.cost_without_cache_usd - 0.3756).abs() < 1e-12);
+        let rate = cost.pricing_rate.expect("audit JSON");
+        assert!(
+            rate.contains("\"without_cache\":\"fallback_equals_total\""),
+            "{rate}"
+        );
+        assert!(rate.contains("\"source\":\"pi_usage_cost\""), "{rate}");
+    }
+
+    #[test]
+    fn source_reported_cost_wins_over_catalog_when_total_positive() {
+        let source_cost = SourceCost {
+            total: 0.125,
+            input: Some(0.05),
+            output: Some(0.075),
+            cache_read: None,
+            cache_write: None,
+        };
+        let cost = cost_for_event(
+            PricingCatalog::embedded(),
+            "omp",
+            "deepseek-v4-flash",
+            tokens(1_000, 0, 0, 200, 0),
+            Some(&source_cost),
+        );
+        assert_eq!(cost.pricing_status, PricingStatus::SourceReported);
+        assert!((cost.cost_with_cache_usd - 0.125).abs() < 1e-12);
+    }
+
+    #[test]
+    fn zero_or_missing_source_cost_uses_catalog() {
+        let zero = SourceCost {
+            total: 0.0,
+            input: Some(0.0),
+            output: Some(0.0),
+            cache_read: Some(0.0),
+            cache_write: Some(0.0),
+        };
+        let unpriced = cost_for_event(
+            PricingCatalog::embedded(),
+            "omp",
+            "deepseek-v4-flash",
+            tokens(1_000, 0, 0, 200, 0),
+            Some(&zero),
+        );
+        assert_eq!(unpriced.pricing_status, PricingStatus::Unpriced);
+        assert_eq!(unpriced.cost_with_cache_usd, 0.0);
+
+        let missing = cost_for_event(
+            PricingCatalog::embedded(),
+            "omp",
+            "deepseek-v4-flash",
+            tokens(1_000, 0, 0, 200, 0),
+            None,
+        );
+        assert_eq!(missing.pricing_status, PricingStatus::Unpriced);
     }
 }

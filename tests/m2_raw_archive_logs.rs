@@ -95,6 +95,7 @@ fn build_event(key: &str, event_at: &str, total_tokens: i64) -> UsageEvent {
         },
         project: None,
         session: None,
+        source_cost: None,
     }
 }
 
@@ -150,6 +151,7 @@ fn seed_resettable_row(store: &Store, source: SourceKind, key_suffix: &str) -> R
         },
         project: None,
         session: None,
+        source_cost: None,
     };
     let turn = UsageTurn {
         turn_key: format!("turn:{event_key}"),

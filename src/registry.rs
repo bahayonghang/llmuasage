@@ -9,7 +9,7 @@ use crate::{
     },
     parsers::{
         AntigravityParser, ClaudeParser, CodexParser, DeepseekHarnessParser, GrokParser,
-        KimiCodeParser, OpencodeParser, PiParser, SourceParser, ZcodeParser,
+        KimiCodeParser, OpencodeParser, PiFormatParser, SourceParser, ZcodeParser,
     },
 };
 
@@ -21,7 +21,8 @@ pub fn registered_parsers() -> Vec<Box<dyn SourceParser>> {
         Box::new(OpencodeParser),
         Box::new(AntigravityParser),
         Box::new(KimiCodeParser),
-        Box::new(PiParser),
+        Box::new(PiFormatParser::pi()),
+        Box::new(PiFormatParser::omp()),
         Box::new(GrokParser),
         Box::new(ZcodeParser),
         Box::new(DeepseekHarnessParser),
@@ -112,6 +113,8 @@ mod tests {
         );
         assert_eq!(parse_source_id("kimi_code"), Some(SourceKind::KimiCode));
         assert_eq!(parse_source_id("pi"), Some(SourceKind::Pi));
+        assert_eq!(parse_source_id("omp"), Some(SourceKind::Omp));
+        assert_eq!(SourceKind::parse_id("omp"), Some(SourceKind::Omp));
         assert_eq!(parse_source_id("grok"), Some(SourceKind::Grok));
         assert_eq!(parse_source_id("zcode"), Some(SourceKind::Zcode));
         assert_eq!(
@@ -120,6 +123,20 @@ mod tests {
         );
         assert_eq!(parse_source_id("gemini"), None);
         assert_eq!(parse_source_id("missing"), None);
+    }
+
+    #[test]
+    fn pi_format_parser_is_registered_for_pi_and_omp() {
+        let sources = parser_sources();
+        assert!(sources.contains(&SourceKind::Pi));
+        assert!(sources.contains(&SourceKind::Omp));
+        assert_eq!(
+            sources
+                .iter()
+                .filter(|source| **source == SourceKind::Pi || **source == SourceKind::Omp)
+                .count(),
+            2
+        );
     }
 
     #[test]

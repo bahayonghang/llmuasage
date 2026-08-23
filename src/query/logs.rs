@@ -84,7 +84,7 @@ pub struct LogRecord {
     pub cost_with_cache_usd: f64,
     /// Event cost if cache reads were billed as regular input.
     pub cost_without_cache_usd: f64,
-    /// Pricing status (`static`, `snapshot`, or `unpriced`).
+    /// Pricing status (`static`, `snapshot`, `source_reported`, or `unpriced`).
     pub pricing_status: String,
     /// Pricing catalog/source label when matched.
     pub pricing_source: Option<String>,

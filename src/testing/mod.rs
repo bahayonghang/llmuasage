@@ -343,12 +343,7 @@ impl Fixture {
 }
 
 fn parse_seed_pricing_status(raw: &str) -> pricing::PricingStatus {
-    match raw {
-        "static" => pricing::PricingStatus::Static,
-        "snapshot" => pricing::PricingStatus::Snapshot,
-        PRICING_UNPRICED => pricing::PricingStatus::Unpriced,
-        _ => pricing::PricingStatus::Unpriced,
-    }
+    pricing::PricingStatus::from_stored(raw)
 }
 
 /// Direct seed row accepted by [`Fixture::seed_event`].

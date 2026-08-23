@@ -39,7 +39,9 @@ pub use home_overview::{
 pub use hour_of_week::HourOfWeekCell;
 pub use inventory::{InstalledItem, InventoryKind, InventoryRoots, InventorySource};
 pub use logs::{LogRecord, LogsPage, LogsQuery};
-pub use pricing::{CostBreakdown, PRICING_MIXED, PRICING_UNPRICED, PricingStatus};
+pub use pricing::{
+    CostBreakdown, PRICING_MIXED, PRICING_SOURCE_REPORTED, PRICING_UNPRICED, PricingStatus,
+};
 pub use pricing_catalog::PricingCatalog;
 pub use top_sessions::{TopSessionRow, TopSessionsQuery, TopSessionsSort};
 
@@ -277,7 +279,7 @@ pub struct ModelBreakdown {
     pub cost_without_cache_usd: f64,
     /// Estimated cache savings compared with no-cache pricing.
     pub cache_savings_usd: f64,
-    /// Aggregated pricing status for this model (`static`, `snapshot`, `unpriced`, or `mixed`).
+    /// Aggregated pricing status for this model (`static`, `snapshot`, `source_reported`, `unpriced`, or `mixed`).
     pub pricing_status: String,
     /// Aggregated pricing catalog/source label, or `mixed` when multiple values contributed.
     pub pricing_source: Option<String>,
@@ -6966,6 +6968,202 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(orphan_count, 0);
+        Ok(())
+    }
+
+    fn seed_source_reported(
+        fixture: &Fixture,
+        event_key: &str,
+        model: &str,
+        hour_start: &str,
+        cost_with: f64,
+        cost_without: f64,
+    ) -> Result<()> {
+        fixture.seed_event(SeedEvent {
+            event_key,
+            source: "omp",
+            model,
+            event_at: hour_start,
+            hour_start: Some(hour_start),
+            input_tokens: 1_000,
+            output_tokens: 200,
+            total_tokens: 1_200,
+            cost_with_cache_usd: cost_with,
+            cost_without_cache_usd: cost_without,
+            pricing_status: "source_reported",
+            pricing_source: Some("source-reported"),
+            pricing_rate: Some(r#"{"source":"pi_usage_cost"}"#),
+            created_at: Some(hour_start),
+            ..SeedEvent::default()
+        })?;
+        Ok(())
+    }
+
+    #[test]
+    fn recompute_costs_leaves_source_reported_event_amounts_unchanged() -> Result<()> {
+        let fixture = Fixture::new()?;
+        seed_source_reported(
+            &fixture,
+            "omp:reported",
+            "deepseek-v4-flash",
+            "2026-05-01T00:00:00Z",
+            0.0661,
+            0.07,
+        )?;
+        let conn = fixture.store().open_connection()?;
+        let before: (f64, f64, String, String, Option<String>) = conn.query_row(
+            r#"
+            SELECT cost_with_cache_usd, cost_without_cache_usd,
+                   pricing_status, COALESCE(pricing_source, ''), pricing_rate
+            FROM usage_event WHERE event_key = 'omp:reported'
+            "#,
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )?;
+
+        let updated = fixture.store().recompute_costs()?;
+        assert_eq!(updated, 0);
+
+        let after: (f64, f64, String, String, Option<String>) = conn.query_row(
+            r#"
+            SELECT cost_with_cache_usd, cost_without_cache_usd,
+                   pricing_status, COALESCE(pricing_source, ''), pricing_rate
+            FROM usage_event WHERE event_key = 'omp:reported'
+            "#,
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )?;
+        assert_eq!(before, after);
+        assert_eq!(after.2, "source_reported");
+        assert_eq!(after.3, "source-reported");
+        Ok(())
+    }
+
+    #[test]
+    fn recompute_keeps_source_reported_buckets_and_mixes_with_unpriced() -> Result<()> {
+        let fixture = Fixture::new()?;
+        seed_source_reported(
+            &fixture,
+            "omp:pure",
+            "deepseek-v4-flash",
+            "2026-05-01T00:00:00Z",
+            0.125,
+            0.125,
+        )?;
+        seed_source_reported(
+            &fixture,
+            "omp:mixed-paid",
+            "stealth/ox-alpha",
+            "2026-05-01T00:30:00Z",
+            0.3756,
+            0.4,
+        )?;
+        fixture.seed_event(SeedEvent {
+            event_key: "omp:mixed-free",
+            source: "omp",
+            model: "stealth/ox-alpha",
+            event_at: "2026-05-01T00:30:00Z",
+            hour_start: Some("2026-05-01T00:30:00Z"),
+            input_tokens: 10,
+            output_tokens: 5,
+            total_tokens: 15,
+            cost_with_cache_usd: 0.0,
+            cost_without_cache_usd: 0.0,
+            pricing_status: "unpriced",
+            created_at: Some("2026-05-01T00:30:00Z"),
+            ..SeedEvent::default()
+        })?;
+
+        let updated = fixture.store().recompute_costs()?;
+        assert_eq!(updated, 1, "only the unpriced event is catalog-repriced");
+
+        let conn = fixture.store().open_connection()?;
+        let (pure_cost, pure_status, pure_count): (f64, String, i64) = conn.query_row(
+            r#"
+            SELECT cost_with_cache_usd, pricing_status, COUNT(*)
+            FROM usage_bucket_30m
+            WHERE source = 'omp' AND model = 'deepseek-v4-flash'
+            "#,
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        assert_eq!(pure_count, 1);
+        assert_eq!(pure_status, "source_reported");
+        assert!((pure_cost - 0.125).abs() < EPSILON);
+
+        let (mixed_cost, mixed_status, mixed_count): (f64, String, i64) = conn.query_row(
+            r#"
+            SELECT cost_with_cache_usd, pricing_status, COUNT(*)
+            FROM usage_bucket_30m
+            WHERE source = 'omp' AND model = 'stealth/ox-alpha'
+            "#,
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        assert_eq!(mixed_count, 1);
+        assert_eq!(mixed_status, "mixed");
+        assert!((mixed_cost - 0.3756).abs() < EPSILON);
+
+        let paid: (f64, String) = conn.query_row(
+            r#"
+            SELECT cost_with_cache_usd, pricing_status
+            FROM usage_event WHERE event_key = 'omp:mixed-paid'
+            "#,
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert!((paid.0 - 0.3756).abs() < EPSILON);
+        assert_eq!(paid.1, "source_reported");
+        Ok(())
+    }
+
+    #[test]
+    fn source_reported_events_are_not_counted_as_unpriced() -> Result<()> {
+        let fixture = Fixture::new()?;
+        seed_source_reported(
+            &fixture,
+            "omp:priced",
+            "deepseek-v4-flash",
+            "2026-05-01T00:00:00Z",
+            0.0125,
+            0.0125,
+        )?;
+
+        let models = Dashboard::open(fixture.store())?.model_breakdown(&QueryFilter::default())?;
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].pricing_status, "source_reported");
+
+        let filter = super::reports::ReportFilter {
+            since: Some(NaiveDate::from_ymd_opt(2026, 5, 1).unwrap()),
+            until: Some(NaiveDate::from_ymd_opt(2026, 5, 1).unwrap()),
+            order: super::reports::SortOrder::Asc,
+            timezone: ReportTimezone::Utc,
+            locale: "en-US".to_string(),
+            source: Some(SourceKind::Omp),
+            project: None,
+            breakdown: false,
+            host_id: None,
+        };
+        let report = super::reports::load_daily_report(fixture.store(), &filter)?;
+        assert_eq!(report.daily.len(), 1);
+        assert!(!report.daily[0].notes.unpriced);
+        assert!((report.daily[0].totals.estimated_cost_usd - 0.0125).abs() < EPSILON);
         Ok(())
     }
 

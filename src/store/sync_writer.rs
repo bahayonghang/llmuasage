@@ -8,8 +8,9 @@ use rusqlite::{Transaction, TransactionBehavior};
 use tracing::info;
 
 use super::{
-    BucketKey, BucketRollup, FileCursor, HolderKind, PricingRollup, ShardCommitStats, Store,
-    SyncRunWriter, SyncShard,
+    BucketKey, BucketRollup, FileCursor, HolderKind, LOCAL_HOST_ID, PricingRollup,
+    ShardCommitStats, Store, SyncRunWriter, SyncShard,
+    schema::{omp_split_migrated_key, read_meta_value, reset_for_source_tx, write_meta_value},
 };
 use crate::{
     domain::provider_map::ProviderIndex,
@@ -361,7 +362,7 @@ impl SyncRunWriter {
             let mut inserted = 0usize;
 
             for event in events {
-                let cost = pricing::compute_cost_with(
+                let cost = pricing::cost_for_event(
                     pricing_catalog,
                     event.source.as_str(),
                     &event.model,
@@ -372,6 +373,7 @@ impl SyncRunWriter {
                         output: event.tokens.output_tokens,
                         reasoning_output: event.tokens.reasoning_output_tokens,
                     },
+                    event.source_cost.as_ref(),
                 );
                 let changed = event_stmt.execute(rusqlite::params![
                     event.event_key,
@@ -584,7 +586,9 @@ impl SyncRunWriter {
         let mut stats = ShardCommitStats::default();
         if let Some(index) = self.provider_index.as_ref() {
             for event in &mut shard.events {
-                event.provider_label = index.label_for(event.source, &event.event_at);
+                if event.provider_label.is_empty() {
+                    event.provider_label = index.label_for(event.source, &event.event_at);
+                }
             }
         }
         let pricing_catalog = &self.pricing_catalog;
@@ -611,6 +615,7 @@ impl SyncRunWriter {
             .expect("persist writer keeps a SQLite connection");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         permit.validate_in_transaction(&tx)?;
+        Self::migrate_omp_split_if_needed_tx(&tx, shard.source, &host_id, &run_started_at)?;
 
         // 7.2 先清旧 event，再批写 event，最后落 cursor —— 顺序由协议保证
         if !shard.reset_path_hashes.is_empty() {
@@ -685,6 +690,28 @@ impl SyncRunWriter {
             "完成 shard 提交"
         );
         Ok(stats)
+    }
+
+    fn migrate_omp_split_if_needed_tx(
+        tx: &Transaction<'_>,
+        source: SourceKind,
+        host_id: &str,
+        run_started_at: &str,
+    ) -> Result<()> {
+        if source != SourceKind::Omp || host_id == LOCAL_HOST_ID {
+            return Ok(());
+        }
+        let key = omp_split_migrated_key(host_id);
+        if read_meta_value(tx, &key)?.is_some() {
+            return Ok(());
+        }
+        info!(
+            host_id,
+            "resetting pre-split pi rows before first omp shard"
+        );
+        reset_for_source_tx(tx, SourceKind::Pi, host_id)?;
+        write_meta_value(tx, &key, run_started_at)?;
+        Ok(())
     }
 
     fn reset_behavior_facts_batch_tx(
@@ -1143,15 +1170,11 @@ fn refresh_bucket_pricing_after_reset_tx(
                 CostBreakdown {
                     cost_with_cache_usd: row.get::<_, Option<f64>>(4)?.unwrap_or_default(),
                     cost_without_cache_usd: row.get::<_, Option<f64>>(5)?.unwrap_or_default(),
-                    pricing_status: match row
-                        .get::<_, Option<String>>(6)?
-                        .unwrap_or_else(|| PRICING_UNPRICED.to_string())
-                        .as_str()
-                    {
-                        "static" => pricing::PricingStatus::Static,
-                        "snapshot" => pricing::PricingStatus::Snapshot,
-                        _ => pricing::PricingStatus::Unpriced,
-                    },
+                    pricing_status: pricing::PricingStatus::from_stored(
+                        row.get::<_, Option<String>>(6)?
+                            .unwrap_or_else(|| PRICING_UNPRICED.to_string())
+                            .as_str(),
+                    ),
                     pricing_source: row.get(7)?,
                     pricing_rate: row.get(8)?,
                 },
@@ -1204,8 +1227,8 @@ mod tests {
     use super::*;
     use crate::{
         models::{
-            ActivityCategory, SessionInfo, SourceKind, ToolKind, UsageEvent, UsageTokens,
-            UsageToolCall, UsageTurn,
+            ActivityCategory, SessionInfo, SourceCost, SourceKind, ToolKind, UsageEvent,
+            UsageTokens, UsageToolCall, UsageTurn,
         },
         paths::AppPaths,
         store::{BootstrapOptions, FileCursor},
@@ -1238,6 +1261,7 @@ mod tests {
                 session_label: None,
                 source_path_hash: Some(path_hash.to_string()),
             }),
+            source_cost: None,
         }
     }
 
@@ -2094,6 +2118,86 @@ mod tests {
     }
 
     #[test]
+    fn commit_shard_fills_empty_provider_label_without_overwriting() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = build_paths(temp.path());
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+
+        let map_path = temp.path().join("provider_activation.jsonl");
+        std::fs::write(
+            &map_path,
+            r#"{"platform":"codex","provider":"anyrouter","activated_at":"2026-05-01T10:00:00Z","event":"activate"}"#,
+        )?;
+        let provider_index = ProviderIndex::load(&map_path)?;
+
+        let mut stamped_codex = build_event("stamped-codex", "provider-path", 10);
+        stamped_codex.provider_label = "keep-me".to_string();
+        stamped_codex.event_at = "2026-05-01T10:05:00Z".to_string();
+        stamped_codex.hour_start = "2026-05-01T10:00:00Z".to_string();
+
+        let mut empty_codex = build_event("empty-codex", "provider-path", 20);
+        empty_codex.event_at = "2026-05-01T10:05:00Z".to_string();
+        empty_codex.hour_start = "2026-05-01T10:00:00Z".to_string();
+
+        let mut stamped_dsh = build_event("stamped-dsh", "provider-path", 30);
+        stamped_dsh.source = SourceKind::DeepseekHarness;
+        stamped_dsh.event_key = "deepseek_harness:stamped-dsh".to_string();
+        stamped_dsh.provider_label = "deepseek-official".to_string();
+        stamped_dsh.event_at = "2026-05-01T10:05:00Z".to_string();
+        stamped_dsh.hour_start = "2026-05-01T10:00:00Z".to_string();
+
+        let mut writer = store.begin_sync_run_with_provider_index(Some(provider_index))?;
+        let stats = writer.commit_shard(SyncShard {
+            source: SourceKind::Codex,
+            host_id: "local".to_string(),
+            host_prefix_applied: false,
+            reset_path_hashes: Vec::new(),
+            events: vec![stamped_codex, empty_codex, stamped_dsh],
+            cursors: Vec::new(),
+            seen_file_paths: Vec::new(),
+            raw_records: Vec::new(),
+            turns: Vec::new(),
+            tool_calls: Vec::new(),
+        })?;
+        assert_eq!(stats.events_inserted, 3);
+
+        let conn = store.open_connection()?;
+        let labels = {
+            let mut stmt = conn.prepare(
+                r#"
+                SELECT event_key, provider_label
+                FROM usage_event
+                ORDER BY event_key
+                "#,
+            )?;
+            stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        assert_eq!(
+            labels,
+            vec![
+                (
+                    "local:codex:provider-path:empty-codex".to_string(),
+                    "anyrouter".to_string()
+                ),
+                (
+                    "local:codex:provider-path:stamped-codex".to_string(),
+                    "keep-me".to_string()
+                ),
+                (
+                    "local:deepseek_harness:stamped-dsh".to_string(),
+                    "deepseek-official".to_string()
+                ),
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn commit_shard_uses_active_local_pricing_snapshot() -> anyhow::Result<()> {
         let temp = TempDir::new()?;
         let paths = build_paths(temp.path());
@@ -2194,6 +2298,7 @@ mod tests {
                     session_label: None,
                     source_path_hash: Some("pathCache".to_string()),
                 }),
+                source_cost: None,
             }],
             cursors: Vec::new(),
             seen_file_paths: Vec::new(),
@@ -2389,6 +2494,252 @@ mod tests {
         assert!(!json.contains(secret), "{json}");
         let decoded: SyncShard = serde_json::from_str(&json)?;
         assert!(decoded.raw_records.is_empty());
+        Ok(())
+    }
+
+    fn empty_shard(source: SourceKind, events: Vec<UsageEvent>) -> SyncShard {
+        SyncShard {
+            events,
+            ..SyncShard::new(source)
+        }
+    }
+
+    fn omp_event(
+        suffix: &str,
+        path_hash: &str,
+        model: &str,
+        source_cost: Option<SourceCost>,
+        input: i64,
+        output: i64,
+    ) -> UsageEvent {
+        UsageEvent {
+            event_key: format!("omp:{path_hash}:{suffix}"),
+            source: SourceKind::Omp,
+            provider_label: String::new(),
+            model: model.to_string(),
+            event_at: "2026-05-01T10:00:00Z".to_string(),
+            hour_start: "2026-05-01T10:00:00Z".to_string(),
+            tokens: UsageTokens {
+                input_tokens: input,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                output_tokens: output,
+                reasoning_output_tokens: 0,
+                total_tokens: input + output,
+            },
+            project: None,
+            session: Some(SessionInfo {
+                session_id: format!("session:{path_hash}"),
+                session_label: None,
+                source_path_hash: Some(path_hash.to_string()),
+            }),
+            source_cost,
+        }
+    }
+
+    fn query_event_pricing(
+        store: &Store,
+        event_key: &str,
+    ) -> anyhow::Result<(f64, f64, String, String)> {
+        let conn = store.open_connection()?;
+        Ok(conn.query_row(
+            r#"
+            SELECT cost_with_cache_usd, cost_without_cache_usd,
+                   pricing_status, COALESCE(pricing_source, '')
+            FROM usage_event
+            WHERE event_key = ?1
+            "#,
+            [event_key],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )?)
+    }
+
+    #[test]
+    fn source_reported_cost_wins_when_total_positive() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = build_paths(temp.path());
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+        let mut writer = store.begin_sync_run()?;
+        writer.commit_shard(empty_shard(
+            SourceKind::Omp,
+            vec![omp_event(
+                "paid",
+                "pathOmp",
+                "deepseek-v4-flash",
+                Some(SourceCost {
+                    total: 0.032,
+                    input: Some(0.01),
+                    output: Some(0.02),
+                    cache_read: Some(0.002),
+                    cache_write: Some(0.0),
+                }),
+                1_000,
+                200,
+            )],
+        ))?;
+
+        let (with_cache, without_cache, status, source) =
+            query_event_pricing(&store, "local:omp:pathOmp:paid")?;
+        assert_eq!(status, "source_reported");
+        assert_eq!(source, "source-reported");
+        assert!((with_cache - 0.032).abs() < 1e-12);
+        assert!((without_cache - 0.03).abs() < 1e-12);
+        Ok(())
+    }
+
+    #[test]
+    fn missing_zero_and_non_object_source_cost_use_catalog_and_keep_event() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = build_paths(temp.path());
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+        let mut writer = store.begin_sync_run()?;
+        writer.commit_shard(empty_shard(
+            SourceKind::Omp,
+            vec![
+                omp_event("missing", "pathOmp", "deepseek-v4-flash", None, 10, 5),
+                omp_event(
+                    "zero",
+                    "pathOmp",
+                    "grok-4.6",
+                    Some(SourceCost {
+                        total: 0.0,
+                        input: Some(0.0),
+                        output: Some(0.0),
+                        cache_read: Some(0.0),
+                        cache_write: Some(0.0),
+                    }),
+                    10,
+                    5,
+                ),
+            ],
+        ))?;
+
+        let count: i64 = store.open_connection()?.query_row(
+            "SELECT COUNT(*) FROM usage_event WHERE source = 'omp'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(count, 2, "catalog fallthrough must not drop events");
+
+        let (_, _, missing_status, _) = query_event_pricing(&store, "local:omp:pathOmp:missing")?;
+        let (_, _, zero_status, _) = query_event_pricing(&store, "local:omp:pathOmp:zero")?;
+        assert_eq!(missing_status, "unpriced");
+        assert_eq!(zero_status, "unpriced");
+        Ok(())
+    }
+
+    #[test]
+    fn overlay_omp_row_prices_zero_total_as_snapshot() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = build_paths(temp.path());
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+        let overlay_path = temp.path().join("omp-overlay.json");
+        std::fs::write(
+            &overlay_path,
+            r#"{
+                "schema_version": 2,
+                "kind": "overlay",
+                "version": "omp-overlay-test",
+                "models": [{
+                    "id": "omp-flash",
+                    "sources": ["omp"],
+                    "matches": [{ "value": "deepseek-v4-flash", "mode": "exact" }],
+                    "rates": {
+                        "default": {
+                            "input_per_mtok": 1.0,
+                            "cached_per_mtok": 0.1,
+                            "output_per_mtok": 2.0
+                        }
+                    }
+                }]
+            }"#,
+        )?;
+        store.apply_pricing_overlay(&overlay_path)?;
+
+        let mut writer = store.begin_sync_run()?;
+        writer.commit_shard(empty_shard(
+            SourceKind::Omp,
+            vec![omp_event(
+                "zero-overlay",
+                "pathOmp",
+                "deepseek-v4-flash",
+                Some(SourceCost {
+                    total: 0.0,
+                    input: Some(0.0),
+                    output: Some(0.0),
+                    cache_read: None,
+                    cache_write: None,
+                }),
+                1_000_000,
+                1_000_000,
+            )],
+        ))?;
+
+        let (with_cache, _, status, _) =
+            query_event_pricing(&store, "local:omp:pathOmp:zero-overlay")?;
+        assert_eq!(status, "snapshot");
+        assert!((with_cache - 3.0).abs() < 1e-9);
+        Ok(())
+    }
+
+    #[test]
+    fn path_reset_keeps_source_reported_bucket_status() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = build_paths(temp.path());
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+        let cost = SourceCost {
+            total: 0.125,
+            input: Some(0.05),
+            output: Some(0.075),
+            cache_read: None,
+            cache_write: None,
+        };
+        let mut writer = store.begin_sync_run()?;
+        writer.commit_shard(empty_shard(
+            SourceKind::Omp,
+            vec![omp_event(
+                "seed",
+                "pathOmp",
+                "deepseek-v4-flash",
+                Some(cost.clone()),
+                1_000,
+                200,
+            )],
+        ))?;
+        writer.commit_shard(SyncShard {
+            source: SourceKind::Omp,
+            host_id: "local".to_string(),
+            host_prefix_applied: false,
+            reset_path_hashes: vec!["pathOmp".to_string()],
+            events: vec![omp_event(
+                "replay",
+                "pathOmp",
+                "deepseek-v4-flash",
+                Some(cost),
+                1_000,
+                200,
+            )],
+            cursors: Vec::new(),
+            seen_file_paths: Vec::new(),
+            raw_records: Vec::new(),
+            turns: Vec::new(),
+            tool_calls: Vec::new(),
+        })?;
+
+        let conn = store.open_connection()?;
+        let bucket_status: String = conn.query_row(
+            r#"
+            SELECT pricing_status FROM usage_bucket_30m
+            WHERE source = 'omp' AND model = 'deepseek-v4-flash'
+            "#,
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(bucket_status, "source_reported");
         Ok(())
     }
 }

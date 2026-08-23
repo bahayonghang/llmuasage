@@ -35,14 +35,20 @@ impl SourceFileListing {
     }
 
     pub(crate) fn error_summary(&self) -> Option<String> {
-        if self.errors.is_empty() {
+        let errors = self
+            .errors
+            .iter()
+            .filter(|error| !is_ownership_skip_note(error))
+            .cloned()
+            .collect::<Vec<_>>();
+        if errors.is_empty() {
             return None;
         }
-        let mut summary = self.errors.iter().take(3).cloned().collect::<Vec<_>>();
-        if self.errors.len() > summary.len() {
+        let mut summary = errors.iter().take(3).cloned().collect::<Vec<_>>();
+        if errors.len() > summary.len() {
             summary.push(format!(
                 "... and {} more source inventory errors",
-                self.errors.len() - summary.len()
+                errors.len() - summary.len()
             ));
         }
         Some(summary.join("; "))
@@ -157,17 +163,28 @@ fn list_grok_session_files_under(root: PathBuf) -> SourceFileListing {
     listing
 }
 
-/// Enumerates Pi / Oh My Pi session JSONL files across both default roots.
+/// Enumerates Pi session JSONL files.
 ///
-/// Pi and Oh My Pi share one stable `pi` source. Discovery merges the Pi root
-/// (`PI_AGENT_DIR` when set, else `~/.pi/agent/sessions`) with the Oh My Pi root
-/// (`~/.omp/agent/sessions`) and dedupes by canonical path, so a file reachable
-/// under both roots is only counted once. The root only affects discovery and
-/// the per-file path hash; every parsed event still carries `source = pi`.
+/// Roots are `PI_AGENT_DIR` (comma-separated) or `~/.pi/agent/sessions`.
+/// The Oh My Pi root is not included; overlapping `.omp` files stay on the
+/// Pi source only when `PI_AGENT_DIR` itself points at them.
 pub(crate) fn list_pi_session_files() -> SourceFileListing {
+    list_jsonl_session_files_from_roots(pi_session_roots())
+}
+
+/// Enumerates Oh My Pi session JSONL files under `~/.omp/agent/sessions`.
+///
+/// A candidate is skipped when its canonical path overlaps any Pi root
+/// (`equal` / ancestor / descendant). Pi wins; unconflicted `.omp` files
+/// remain. The skip count is recorded in `errors`.
+pub(crate) fn list_omp_session_files() -> SourceFileListing {
+    list_omp_session_files_from(omp_session_root(), &pi_session_roots())
+}
+
+pub(crate) fn pi_session_roots() -> Vec<PathBuf> {
     let home_dir = resolve_home_dir();
     let default_pi_root = home_dir.join(".pi").join("agent").join("sessions");
-    let mut pi_roots = std::env::var_os("PI_AGENT_DIR")
+    std::env::var_os("PI_AGENT_DIR")
         .filter(|value| !value.is_empty())
         .map(|value| {
             value
@@ -179,23 +196,27 @@ pub(crate) fn list_pi_session_files() -> SourceFileListing {
                 .collect::<Vec<_>>()
         })
         .filter(|roots| !roots.is_empty())
-        .unwrap_or_else(|| vec![default_pi_root.clone()]);
-    let omp_root = home_dir.join(".omp").join("agent").join("sessions");
+        .unwrap_or_else(|| vec![default_pi_root])
+}
 
+pub(crate) fn omp_session_root() -> PathBuf {
+    resolve_home_dir()
+        .join(".omp")
+        .join("agent")
+        .join("sessions")
+}
+
+fn list_jsonl_session_files_from_roots(roots: Vec<PathBuf>) -> SourceFileListing {
     let mut merged = SourceFileListing {
-        root: pi_roots
-            .first()
-            .cloned()
-            .unwrap_or_else(|| default_pi_root.clone()),
+        root: roots.first().cloned().unwrap_or_default(),
         ..SourceFileListing::default()
     };
-    pi_roots.push(omp_root);
     let mut seen = HashSet::new();
-    for root in pi_roots {
+    for root in roots {
         let listing = list_matching_files(root, |name, _path| name.ends_with(".jsonl"));
         merged.errors.extend(listing.errors);
         for path in listing.paths {
-            let canonical = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+            let canonical = canonical_path(&path);
             if seen.insert(canonical.clone()) {
                 merged.paths.push(canonical);
             }
@@ -203,6 +224,47 @@ pub(crate) fn list_pi_session_files() -> SourceFileListing {
     }
     merged.paths.sort();
     merged
+}
+
+fn list_omp_session_files_from(root: PathBuf, pi_roots: &[PathBuf]) -> SourceFileListing {
+    let canonical_pi_roots = pi_roots
+        .iter()
+        .map(|path| canonical_path(path))
+        .collect::<Vec<_>>();
+    let mut listing = list_matching_files(root, |name, _path| name.ends_with(".jsonl"));
+    let mut kept = Vec::new();
+    let mut skipped = 0usize;
+    for path in listing.paths {
+        let canonical = canonical_path(&path);
+        if canonical_pi_roots
+            .iter()
+            .any(|pi_root| paths_overlap(&canonical, pi_root))
+        {
+            skipped += 1;
+            continue;
+        }
+        kept.push(canonical);
+    }
+    if skipped > 0 {
+        listing.errors.push(format!(
+            "skipped {skipped} omp session file(s) already owned by pi"
+        ));
+    }
+    kept.sort();
+    listing.paths = kept;
+    listing
+}
+
+fn canonical_path(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn paths_overlap(left: &Path, right: &Path) -> bool {
+    left == right || left.starts_with(right) || right.starts_with(left)
+}
+
+fn is_ownership_skip_note(error: &str) -> bool {
+    error.starts_with("skipped ") && error.contains("already owned by")
 }
 
 /// Enumerates Antigravity CLI conversation SQLite files.
@@ -283,11 +345,29 @@ fn list_matching_files(
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{fs, path::PathBuf};
 
     use tempfile::TempDir;
 
-    use super::{list_dsh_session_files_under, list_grok_session_files_under};
+    use super::{
+        list_dsh_session_files_under, list_grok_session_files_under,
+        list_jsonl_session_files_from_roots, list_omp_session_files_from,
+    };
+
+    fn write_session(root: &std::path::Path, project: &str, name: &str) -> PathBuf {
+        let path = root.join(project).join(name);
+        fs::create_dir_all(path.parent().unwrap()).expect("create session dir");
+        fs::write(&path, "{}\n").expect("write session file");
+        path
+    }
+
+    fn listing_names(listing: &super::SourceFileListing) -> Vec<String> {
+        listing
+            .paths
+            .iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().to_string())
+            .collect()
+    }
 
     #[test]
     fn grok_listing_only_returns_root_sidecars_from_two_directory_levels() {
@@ -392,5 +472,87 @@ mod tests {
         let listing = list_dsh_session_files_under(temp.path().join("missing-sessions"));
         assert!(listing.paths.is_empty());
         assert!(listing.errors.is_empty());
+    }
+
+    #[test]
+    fn pi_and_omp_listings_are_disjoint_when_roots_do_not_overlap() {
+        let temp = TempDir::new().expect("temp dir");
+        let pi_root = temp.path().join(".pi").join("agent").join("sessions");
+        let omp_root = temp.path().join(".omp").join("agent").join("sessions");
+        write_session(&pi_root, "project-pi", "agent_pi.jsonl");
+        write_session(&omp_root, "project-omp", "agent_omp.jsonl");
+
+        let pi = list_jsonl_session_files_from_roots(vec![pi_root.clone()]);
+        let omp = list_omp_session_files_from(omp_root, &[pi_root]);
+
+        assert_eq!(listing_names(&pi), vec!["agent_pi.jsonl"]);
+        assert_eq!(listing_names(&omp), vec!["agent_omp.jsonl"]);
+        assert!(pi.errors.is_empty());
+        assert!(omp.errors.is_empty());
+        let pi_set = pi
+            .paths
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
+        assert!(omp.paths.iter().all(|path| !pi_set.contains(path)));
+    }
+
+    #[test]
+    fn omp_skips_files_when_roots_are_equal() {
+        let temp = TempDir::new().expect("temp dir");
+        let shared = temp.path().join("sessions");
+        write_session(&shared, "project-a", "agent_shared.jsonl");
+
+        let pi = list_jsonl_session_files_from_roots(vec![shared.clone()]);
+        let omp = list_omp_session_files_from(shared, std::slice::from_ref(&pi.root));
+
+        assert_eq!(listing_names(&pi), vec!["agent_shared.jsonl"]);
+        assert!(omp.paths.is_empty());
+        assert_eq!(
+            omp.errors,
+            vec!["skipped 1 omp session file(s) already owned by pi"]
+        );
+        assert!(
+            omp.error_summary().is_none(),
+            "ownership skips must not skip the missing-file sweep"
+        );
+    }
+
+    #[test]
+    fn omp_skips_files_when_pi_root_contains_omp_root() {
+        let temp = TempDir::new().expect("temp dir");
+        let pi_root = temp.path().join("agent");
+        let omp_root = pi_root.join("sessions");
+        write_session(&omp_root, "project-a", "agent_nested.jsonl");
+
+        let pi = list_jsonl_session_files_from_roots(vec![pi_root.clone()]);
+        let omp = list_omp_session_files_from(omp_root, &[pi_root]);
+
+        assert_eq!(listing_names(&pi), vec!["agent_nested.jsonl"]);
+        assert!(omp.paths.is_empty());
+        assert_eq!(
+            omp.errors,
+            vec!["skipped 1 omp session file(s) already owned by pi"]
+        );
+        assert!(omp.error_summary().is_none());
+    }
+
+    #[test]
+    fn omp_keeps_unconflicted_files_when_omp_root_contains_pi_root() {
+        let temp = TempDir::new().expect("temp dir");
+        let omp_root = temp.path().join(".omp").join("agent").join("sessions");
+        let pi_root = omp_root.join("project-owned");
+        write_session(&omp_root, "project-owned", "agent_owned.jsonl");
+        write_session(&omp_root, "project-free", "agent_free.jsonl");
+
+        let pi = list_jsonl_session_files_from_roots(vec![pi_root.clone()]);
+        let omp = list_omp_session_files_from(omp_root, &[pi_root]);
+
+        assert_eq!(listing_names(&pi), vec!["agent_owned.jsonl"]);
+        assert_eq!(listing_names(&omp), vec!["agent_free.jsonl"]);
+        assert_eq!(
+            omp.errors,
+            vec!["skipped 1 omp session file(s) already owned by pi"]
+        );
+        assert!(omp.error_summary().is_none());
     }
 }

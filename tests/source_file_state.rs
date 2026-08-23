@@ -40,6 +40,7 @@ fn build_event(suffix: &str, path_hash: &str) -> UsageEvent {
         },
         project: None,
         session: None,
+        source_cost: None,
     }
 }
 

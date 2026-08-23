@@ -32,11 +32,12 @@
   file-backed sources and OpenCode do not read or write these columns. Do not
   reuse `last_processed_ids_json` or `last_total_json` for skip diagnostics.
 - Stable passive parser ids include `kimi_code` for
-  `~/.kimi-code/sessions/**/wire.jsonl` and one `pi` id for both
-  `~/.pi/agent/sessions` and `~/.omp/agent/sessions`. Grok Build uses `grok`
+  `~/.kimi-code/sessions/**/wire.jsonl`, `pi` for `~/.pi/agent/sessions` (or
+  comma-separated `PI_AGENT_DIR`), and `omp` for `~/.omp/agent/sessions`.
+  Overlapping canonical paths belong to `pi`. Grok Build uses `grok`
   for direct sidecars under `~/.grok/sessions/*/*/` or `GROK_HOME/sessions`.
 - Registered passive parsers are Codex, Claude, OpenCode, Antigravity, Kimi
-  Code, Pi, Grok Build, ZCode, and DeepSeek Harness.
+  Code, Pi, Oh My Pi, Grok Build, ZCode, and DeepSeek Harness.
 - Monitor descriptors live outside parser promotion and report detection status,
   candidate roots, and parser availability.
 
@@ -57,11 +58,15 @@
 - Kimi Code imports only explicit `type=usage.record` plus
   `usageScope=turn` rows. It preserves the raw model id and maps non-cached
   input, cache read, cache creation, and output as separate channels.
-- Pi and Oh My Pi share one source id and one source-status row. Discovery
-  merges canonical files across both roots (and comma-separated
-  `PI_AGENT_DIR` roots), then uses the ordinary append/reparse `FileCursor`
-  state machine. Assistant usage keeps the upstream total authoritative and
-  reasoning diagnostic-only.
+- Pi and Oh My Pi share one parse implementation and register two sources.
+  `pi` lists `PI_AGENT_DIR` or `~/.pi/agent/sessions`. `omp` lists
+  `~/.omp/agent/sessions` and skips a candidate when its canonical path
+  overlaps a Pi root (equal / ancestor / descendant). Pi wins; unconflicted
+  `.omp` files remain. Skip notes stay on the listing for diagnostics and
+  must not set `SourceSyncStats.last_error`, so the missing-file sweep still
+  runs. Both sources use the ordinary append/reparse `FileCursor` state
+  machine. Assistant usage keeps the upstream total authoritative and
+  reasoning diagnostic-only. `event_key` is `{source}:{hash}`.
 - Grok Build discovery uses exactly two `read_dir` levels for
   `sessions/<workspace>/<session>` and only joins the whitelisted direct
   sidecars `updates.jsonl`, `signals.json`, `summary.json`, and optional
@@ -275,9 +280,10 @@
   rejected and existing historical rows remain intact.
 - Report and dashboard projection coverage proving historical Antigravity rows
   remain aggregated and selectable.
-- Kimi, Pi, and Grok fixture tests covering normalized fields, raw/future model ids,
+- Kimi, Pi, Oh My Pi, and Grok fixture tests covering normalized fields, raw/future model ids,
   malformed/non-usage rows, second-sync idempotency, append, rewrite/truncate,
   deleted history/rebuild protection, missing roots, and status projections.
+  Pi/Oh My Pi listing tests cover disjoint roots and the three overlap shapes.
 - Sync-summary unit/subprocess tests covering the `TOTAL` row, absent and empty
   sources, ANSI-free redirected output, stderr/stdout separation, removed
   completion sentences, and narrow/wide column budgets.

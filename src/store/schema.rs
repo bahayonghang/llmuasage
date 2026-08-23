@@ -18,11 +18,12 @@ pub const fn expected_token_accounting_version(source: SourceKind) -> u32 {
     match source {
         SourceKind::Codex => 3,
         SourceKind::Grok => 3,
+        SourceKind::Pi => 3,
         SourceKind::Claude
         | SourceKind::Opencode
         | SourceKind::Antigravity
         | SourceKind::KimiCode
-        | SourceKind::Pi
+        | SourceKind::Omp
         | SourceKind::Zcode
         | SourceKind::DeepseekHarness => TOKEN_ACCOUNTING_VERSION,
     }
@@ -255,47 +256,7 @@ impl Store {
     /// by multiple sources and are cheap stale metadata until the next full GC.
     pub fn reset_for_source(&self, source: crate::models::SourceKind, host_id: &str) -> Result<()> {
         info!(source = %source, host_id, "开始按源清空可重建用量数据");
-        self.write_transaction(|tx| {
-            let source = source.as_str();
-            tx.execute(
-                "DELETE FROM usage_tool_call WHERE source = ?1 AND host_id = ?2",
-                rusqlite::params![source, host_id],
-            )?;
-            tx.execute(
-                "DELETE FROM usage_turn WHERE source = ?1 AND host_id = ?2",
-                rusqlite::params![source, host_id],
-            )?;
-            tx.execute(
-                r#"
-                DELETE FROM usage_event_raw
-                WHERE event_key IN (
-                    SELECT event_key FROM usage_event WHERE source = ?1 AND host_id = ?2
-                )
-                "#,
-                rusqlite::params![source, host_id],
-            )?;
-            tx.execute(
-                "DELETE FROM usage_event WHERE source = ?1 AND host_id = ?2",
-                rusqlite::params![source, host_id],
-            )?;
-            tx.execute(
-                "DELETE FROM usage_bucket_30m WHERE source = ?1 AND host_id = ?2",
-                rusqlite::params![source, host_id],
-            )?;
-            tx.execute(
-                "DELETE FROM source_cursor WHERE source = ?1 AND host_id = ?2",
-                rusqlite::params![source, host_id],
-            )?;
-            tx.execute(
-                "DELETE FROM source_sync_status WHERE source = ?1 AND host_id = ?2",
-                rusqlite::params![source, host_id],
-            )?;
-            tx.execute(
-                "DELETE FROM source_file WHERE source = ?1 AND host_id = ?2",
-                rusqlite::params![source, host_id],
-            )?;
-            Ok(())
-        })?;
+        self.write_transaction(|tx| reset_for_source_tx(tx, source, host_id))?;
         info!(source = %source, host_id, "完成按源清空可重建用量数据");
         Ok(())
     }
@@ -356,6 +317,56 @@ impl Store {
     }
 }
 
+pub(crate) fn omp_split_migrated_key(host_id: &str) -> String {
+    format!("omp_split_migrated.{host_id}")
+}
+
+pub(crate) fn reset_for_source_tx(
+    tx: &rusqlite::Transaction<'_>,
+    source: crate::models::SourceKind,
+    host_id: &str,
+) -> Result<()> {
+    let source = source.as_str();
+    tx.execute(
+        "DELETE FROM usage_tool_call WHERE source = ?1 AND host_id = ?2",
+        rusqlite::params![source, host_id],
+    )?;
+    tx.execute(
+        "DELETE FROM usage_turn WHERE source = ?1 AND host_id = ?2",
+        rusqlite::params![source, host_id],
+    )?;
+    tx.execute(
+        r#"
+        DELETE FROM usage_event_raw
+        WHERE event_key IN (
+            SELECT event_key FROM usage_event WHERE source = ?1 AND host_id = ?2
+        )
+        "#,
+        rusqlite::params![source, host_id],
+    )?;
+    tx.execute(
+        "DELETE FROM usage_event WHERE source = ?1 AND host_id = ?2",
+        rusqlite::params![source, host_id],
+    )?;
+    tx.execute(
+        "DELETE FROM usage_bucket_30m WHERE source = ?1 AND host_id = ?2",
+        rusqlite::params![source, host_id],
+    )?;
+    tx.execute(
+        "DELETE FROM source_cursor WHERE source = ?1 AND host_id = ?2",
+        rusqlite::params![source, host_id],
+    )?;
+    tx.execute(
+        "DELETE FROM source_sync_status WHERE source = ?1 AND host_id = ?2",
+        rusqlite::params![source, host_id],
+    )?;
+    tx.execute(
+        "DELETE FROM source_file WHERE source = ?1 AND host_id = ?2",
+        rusqlite::params![source, host_id],
+    )?;
+    Ok(())
+}
+
 fn token_accounting_key(source: crate::models::SourceKind) -> String {
     format!("token_accounting_version.{}", source.as_str())
 }
@@ -370,7 +381,7 @@ fn write_meta_flag(conn: &rusqlite::Connection, key: &str, enabled: bool) -> Res
     write_meta_value(conn, key, value)
 }
 
-fn read_meta_value(conn: &rusqlite::Connection, key: &str) -> Result<Option<String>> {
+pub(crate) fn read_meta_value(conn: &rusqlite::Connection, key: &str) -> Result<Option<String>> {
     Ok(conn
         .query_row("SELECT value FROM meta WHERE key = ?1", [key], |row| {
             row.get::<_, String>(0)
@@ -378,7 +389,7 @@ fn read_meta_value(conn: &rusqlite::Connection, key: &str) -> Result<Option<Stri
         .optional()?)
 }
 
-fn write_meta_value(conn: &rusqlite::Connection, key: &str, value: &str) -> Result<()> {
+pub(crate) fn write_meta_value(conn: &rusqlite::Connection, key: &str, value: &str) -> Result<()> {
     conn.execute(
         r#"
         INSERT INTO meta(key, value)

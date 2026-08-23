@@ -1023,6 +1023,7 @@ fn build_event(
         tokens,
         project: project.cloned(),
         session: Some(session.clone()),
+        source_cost: None,
     })
 }
 

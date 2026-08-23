@@ -29,7 +29,7 @@ pub use dsh::DeepseekHarnessParser;
 pub use grok::GrokParser;
 pub use kimi_code::KimiCodeParser;
 pub use opencode::OpencodeParser;
-pub use pi::PiParser;
+pub use pi::PiFormatParser;
 pub use source_parser::{ProgressSink, SourceParser};
 pub use zcode::ZcodeParser;
 
@@ -330,11 +330,12 @@ mod bounded_jsonl_contract_tests {
         file.write_all("{\"partial\":\"界\"}".as_bytes())?;
         drop(file);
 
-        let cases: [(SourceKind, ContractParser); 5] = [
+        let cases: [(SourceKind, ContractParser); 6] = [
             (SourceKind::Codex, codex::bounded_contract_parse),
             (SourceKind::Claude, claude::bounded_contract_parse),
             (SourceKind::KimiCode, kimi_code::bounded_contract_parse),
             (SourceKind::Pi, pi::bounded_contract_parse),
+            (SourceKind::Omp, pi::bounded_contract_parse_omp),
             (SourceKind::Grok, grok::bounded_contract_parse),
         ];
 
