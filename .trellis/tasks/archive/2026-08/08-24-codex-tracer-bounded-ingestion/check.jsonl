@@ -1,0 +1,4 @@
+{"file":".trellis/spec/llmusage/backend/codex-tracer-contracts.md","reason":"Check public tracer schema, separate-database, API, and UI compatibility."}
+{"file":".trellis/spec/llmusage/backend/source-sync-contracts.md","reason":"Check bounded memory, EOF, oversized, cancellation, cursor, and privacy behavior."}
+{"file":".trellis/spec/llmusage/backend/ci-toolchain-contracts.md","reason":"Apply the repository Rust and full-gate validation contract."}
+{"file":".trellis/tasks/08-24-project-architecture-performance-optimization/research/baseline.md","reason":"Compare performance evidence without confusing synthetic and representative results."}

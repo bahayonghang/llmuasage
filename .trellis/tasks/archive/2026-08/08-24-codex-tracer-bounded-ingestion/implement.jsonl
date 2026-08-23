@@ -1,0 +1,5 @@
+{"file":".trellis/spec/llmusage/backend/codex-tracer-contracts.md","reason":"Preserve the dedicated tracer database, public fields, and documented ingestion decisions."}
+{"file":".trellis/spec/llmusage/backend/source-sync-contracts.md","reason":"Reuse bounded JSONL, durable offset, privacy, cancellation, and retry contracts without changing main accounting."}
+{"file":"docs/agents/passive-parser-onboarding.md","reason":"Respect existing parser evidence and fixture boundaries while sharing Codex record decoding."}
+{"file":".trellis/tasks/08-24-project-architecture-performance-optimization/research/code-quality-review.md","reason":"Carry the verified CQ-001 evidence and scope limits into implementation."}
+{"file":".trellis/tasks/08-24-project-architecture-performance-optimization/research/baseline.md","reason":"Use the review baseline and evidence-level vocabulary for before/after reporting."}
