@@ -1898,3 +1898,33 @@ Grok 解析器改为读取 turn_completed.usage，趋势来源表展示完整占
 ### Status
 
 [OK] **Completed**
+
+
+## Session 64: 完成全历史会话排行查询与索引优化
+
+**Date**: 2026-08-23
+**Task**: 完成全历史会话排行查询与索引优化
+**Branch**: `dev`
+
+### Summary
+
+以单次事件投影、稳定 Top K 和 v24 covering expression index 消除全历史 Top Sessions 降级，并补齐可重复性能证据。
+
+### Main Changes
+
+- 保持 legacy serialized semantics，将 Top Sessions 收敛为单 accumulator 并移除 N+1/第二次时间扫描。
+- 加入 v24 索引迁移、Server-Timing、24-case benchmark harness、CI 接线与任务证据。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `678a60db429c48bb2f8b5240848daeb404a7ea3c` | (see git log) |
+
+### Testing
+
+- [OK] rtk just ci；Rust 991 passed / 8 ignored；24-case/120-sample HTTP matrix；独立 trellis-check GO。
+
+### Status
+
+[OK] **Completed**

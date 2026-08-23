@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 63
+- **Total Sessions**: 64
 - **Last Active**: 2026-08-23
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1900 | Active |
+| `journal-1.md` | ~1930 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 64 | 2026-08-23 | 完成全历史会话排行查询与索引优化 | `678a60db429c48bb2f8b5240848daeb404a7ea3c` | `dev` |
 | 63 | 2026-08-23 | 重设计会话排行与 Token 构成 | `7a4b4dcf5dd74cd33f1fab72a984334d85483efb` | `dev` |
 | 62 | 2026-08-23 | 重设计 Agent 徽章与侧栏标题 | `8ee7670` | `dev` |
 | 61 | 2026-08-23 | 补全 Pi 与 Oh My Pi 用量统计 | `d4e3154`, `b97dd61` | `dev` |
