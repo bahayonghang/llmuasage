@@ -103,7 +103,7 @@
   活动数据库边界与 cleanup。
 - [x] 使用 `trellis-update-spec` 判断并更新已落地的 query/migration 契约。
 - [x] 最终 diff 只含本任务代码、测试、必要 spec/ADR/docs 与 task evidence。
-- [ ] 按仓库规范本地中文 emoji Conventional Commit，随后 archive/journal；不 push、不建 PR。
+- [x] 按仓库规范本地中文 emoji Conventional Commit，随后 archive/journal；不 push、不建 PR。
 
 ## Rollback points
 
