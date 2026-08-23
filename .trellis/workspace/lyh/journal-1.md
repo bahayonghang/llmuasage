@@ -1928,3 +1928,38 @@ Grok 解析器改为读取 turn_completed.usage，趋势来源表展示完整占
 ### Status
 
 [OK] **Completed**
+
+
+## Session 65: 重组测试套件并补齐高风险回归
+
+**Date**: 2026-08-23
+**Task**: 重组测试套件并补齐高风险回归
+**Branch**: `dev`
+
+### Summary
+
+按领域重组 tests 为 8 个显式集成测试目标，守恒迁移既有测试，补齐 rebuild、recent-window 与 OMP 隐私回归，并以最小 safe_tool_preview 修复消除敏感命令和路径持久化。
+
+### Main Changes
+
+- 将 tests 按 api、architecture、cli、query、remote、store、sync、tui 分层，并统一环境变量与二进制启动测试支持。
+- 新增 6 个高风险集成测试与 2 个行为提取单元测试，修复 safe_tool_preview 的敏感字段持久化。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `dea573e` | (see git log) |
+
+### Testing
+
+- [OK] just ci（通过）
+- [OK] cargo test --locked --all-features -- --test-threads=1：999 通过，8 个既有 ignored。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 无；任务已完成并归档。
