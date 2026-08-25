@@ -1,0 +1,4 @@
+{"file":".trellis/spec/llmusage/backend/dashboard-performance-contracts.md","reason":"Check exact payload, connection, timeout, statement, and representative performance parity."}
+{"file":".trellis/spec/llmusage/backend/ci-toolchain-contracts.md","reason":"Check test discovery, Rust gates, Node checks, docs, and project-wide CI."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Verify moved DTOs still reach all consumers through canonical re-exports."}
+{"file":".trellis/tasks/08-24-project-architecture-performance-optimization/research/baseline.md","reason":"Compare file/symbol/test inventory and distinguish current from historical performance."}

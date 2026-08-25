@@ -1,0 +1,5 @@
+{"file":".trellis/spec/llmusage/backend/dashboard-performance-contracts.md","reason":"Preserve Dashboard payload, filter, cancellation, read-model, and performance contracts during module moves."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Track every public query payload through Web/TUI/root facade consumers."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Keep one canonical helper and avoid duplicate implementations during extraction."}
+{"file":".trellis/tasks/08-24-project-architecture-performance-optimization/research/code-quality-review.md","reason":"Carry CQ-003/CQ-005 evidence and avoid false positives from test-heavy files."}
+{"file":".trellis/tasks/08-24-project-architecture-performance-optimization/research/baseline.md","reason":"Reuse structural and historical performance baselines with correct evidence labels."}
