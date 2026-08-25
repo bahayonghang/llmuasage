@@ -1,0 +1,31 @@
+{
+  "id": "project-architecture-performance-optimization",
+  "name": "project-architecture-performance-optimization",
+  "title": "项目架构与性能债务优化",
+  "description": "基于全项目代码质量审查，分阶段收敛 Codex Tracer 摄取、同步应用边界、查询模块所有权与报表项目过滤性能债务；父任务只负责跨子任务契约和最终集成门。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "planning-only parent: cross-child contracts and final integration",
+  "package": null,
+  "priority": "P1",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-08-24",
+  "completedAt": "2026-08-25",
+  "branch": null,
+  "base_branch": "dev",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-24-codex-tracer-bounded-ingestion",
+    "08-24-sync-application-boundary",
+    "08-24-dashboard-query-modularization",
+    "08-24-report-project-filter-performance"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

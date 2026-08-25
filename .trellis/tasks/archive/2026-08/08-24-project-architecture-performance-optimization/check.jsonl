@@ -1,0 +1,6 @@
+{"file":".trellis/tasks/08-24-project-architecture-performance-optimization/research/code-quality-review.md","reason":"Verify every finding is resolved or explicitly deferred with evidence."}
+{"file":".trellis/tasks/08-24-project-architecture-performance-optimization/research/baseline.md","reason":"Check final evidence against the original scope and avoid historical/current drift."}
+{"file":".trellis/spec/llmusage/backend/ci-toolchain-contracts.md","reason":"Apply the complete integration and CI evidence requirements."}
+{"file":".trellis/spec/llmusage/backend/dashboard-performance-contracts.md","reason":"Check representative query and payload non-regression across query/report changes."}
+{"file":".trellis/spec/llmusage/backend/source-sync-contracts.md","reason":"Check parser and sync behavior across tracer and sync-boundary changes."}
+{"file":".trellis/spec/llmusage/backend/report-cli-contracts.md","reason":"Check all report projections and CLI compatibility after report work."}

@@ -1,0 +1,5 @@
+{"file":".trellis/tasks/08-24-project-architecture-performance-optimization/research/code-quality-review.md","reason":"Use the verified CQ findings as the parent source requirement set."}
+{"file":".trellis/tasks/08-24-project-architecture-performance-optimization/research/baseline.md","reason":"Keep evidence levels, current structural inventory, and focused checks visible during integration."}
+{"file":".trellis/spec/llmusage/backend/index.md","reason":"Route each child to the correct backend contract set."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Check public facade and adapter flows across all four children."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Enforce canonical ownership and avoid compatibility-layer duplication."}
