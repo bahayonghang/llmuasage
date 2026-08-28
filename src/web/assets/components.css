@@ -1221,8 +1221,9 @@ nav a:hover .nav-icon {
 
 .status-diagnostics-stack {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
+  align-items: start;
 }
 
 .cost-stat-grid {
@@ -2780,9 +2781,22 @@ svg.i {
 .top-session-fill.has-value { border-inline-end: 2px solid var(--data-accent-deep); }
 .top-session-value { min-width: 76px; color: var(--accent-blue); font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; }
 .logs-session-filter { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
-.logs-table-wrap { overflow-x: auto; }
-.logs-table { min-width: 900px; }
+.logs-table-wrap { max-height: min(640px, 70vh); overflow: auto; overscroll-behavior: contain; border: 1px solid var(--line); border-radius: 8px; }
+.logs-table { min-width: 960px; table-layout: fixed; border-collapse: separate; border-spacing: 0; }
+.logs-table thead th { position: sticky; top: 0; z-index: 1; background: var(--surface); }
+.logs-col-time { width: 128px; }
+.logs-col-source { width: 96px; }
+.logs-col-model { width: 170px; }
+.logs-col-session { width: 32%; }
+.logs-col-tokens { width: 96px; }
+.logs-col-cost { width: 92px; }
+.logs-col-project { width: 20%; }
+.logs-cell-clip { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.logs-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .logs-table tbody tr[data-log-key] { cursor: pointer; }
+.logs-table tbody tr[data-log-key]:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: -2px; }
+.logs-table tbody tr[data-log-key][aria-expanded='true'] td { background: color-mix(in oklab, var(--accent-blue) 6%, var(--surface)); }
+.log-raw-row td { background: var(--bg-inset); }
 .log-raw-row pre { max-height: 320px; margin: 0; overflow: auto; padding: 12px; background: var(--bg-inset); color: var(--ink); font: 11px/1.5 var(--font-mono); white-space: pre-wrap; }
 .logs-more { display: block; margin: 12px auto 0; }
 .agent-tag { font-size: 8px; font-weight: 650; text-transform: uppercase; opacity: .75; }

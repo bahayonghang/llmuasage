@@ -198,3 +198,64 @@ test('ready-widget fetchers preserve shared filtering and snapshot compatibility
     assert.equal(requests, 0);
   });
 });
+
+test('event log fetching keeps the compact page contract', async (t) => {
+  await t.test('first live page requests 20 records with shared filters', async () => {
+    dashboardFetch.clearLiveRequestCache();
+    assert.equal(dashboardFetch.LOGS_PAGE_SIZE, 20);
+    const paths = [];
+    globalThis.fetch = async (path) => {
+      paths.push(path);
+      return response({ records: [], next_cursor: null });
+    };
+    const state = {
+      mode: 'live',
+      rangePreset: '7d',
+      trendWindow: 'week',
+      filters: { source: 'codex', timezone: 'Asia/Shanghai' },
+    };
+
+    await dashboardFetch.fetchLogs(state, { cache: false });
+
+    const url = new URL(paths[0], window.location.origin);
+    assert.equal(url.pathname, '/api/logs');
+    assert.equal(url.searchParams.get('page_size'), '20');
+    assert.equal(url.searchParams.get('source'), 'codex');
+    assert.equal(url.searchParams.get('range'), '7d');
+    assert.equal(url.searchParams.get('timezone'), 'Asia/Shanghai');
+  });
+
+  await t.test('session, cursor, and event-key params survive pagination', async () => {
+    dashboardFetch.clearLiveRequestCache();
+    const paths = [];
+    globalThis.fetch = async (path) => {
+      paths.push(path);
+      return response({ records: [], next_cursor: null });
+    };
+    const state = { mode: 'live', rangePreset: '30d', trendWindow: 'month', filters: {} };
+
+    await dashboardFetch.fetchLogs(state, { session: 'sess-1', cursor: 'CURSOR123', cache: false });
+    await dashboardFetch.fetchLogs(state, { eventKey: 'codex:abc-123', cache: false });
+
+    const paged = new URL(paths[0], window.location.origin).searchParams;
+    assert.equal(paged.get('page_size'), '20');
+    assert.equal(paged.get('session'), 'sess-1');
+    assert.equal(paged.get('cursor'), 'CURSOR123');
+    assert.equal(paged.get('event_key'), null);
+
+    const detail = new URL(paths[1], window.location.origin).searchParams;
+    assert.equal(detail.get('event_key'), 'codex:abc-123');
+    assert.equal(detail.get('cursor'), null);
+  });
+
+  await t.test('snapshot mode returns empty logs without network calls', async () => {
+    let requests = 0;
+    globalThis.fetch = async () => {
+      requests += 1;
+      return response({});
+    };
+    const state = { mode: 'snapshot', snapshot: {} };
+    assert.deepEqual(await dashboardFetch.fetchLogs(state), { records: [], next_cursor: null });
+    assert.equal(requests, 0);
+  });
+});

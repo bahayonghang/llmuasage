@@ -1,25 +1,55 @@
 import { UI_COPY } from '../copy.js';
-import { escapeHtml, fetchLogs, formatNumber, formatUsd } from '../data.js';
+import { escapeHtml, fetchLogs, formatDateTime, formatNumber, formatUsd } from '../data.js';
 const view = { generation: 0, signature: '', session: '', rows: [], cursor: null, loading: false, raw: new Map() };
 export function logsGenerationIsCurrent(currentGeneration, requestGeneration, currentSignature, requestSignature) { return currentGeneration === requestGeneration && currentSignature === requestSignature; }
+export function logsTimeContent(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return { text: '--', title: '' };
+  return { text: formatDateTime(raw), title: raw };
+}
+export function logsTextContent(value) {
+  const text = String(value ?? '').trim();
+  if (!text) return { text: '--', title: '' };
+  return { text, title: text };
+}
+export function isLogsRowActivationKey(key) { return key === 'Enter' || key === ' ' || key === 'Spacebar'; }
 function signature(state) { return JSON.stringify({ filters: state?.filters || {}, range: state?.rangePreset, window: state?.trendWindow, session: view.session }); }
+function clippedCell(className, content) {
+  const title = content.title ? ` title="${escapeHtml(content.title)}"` : '';
+  return `<td class="${className}"><span class="logs-cell-clip"${title}>${escapeHtml(content.text)}</span></td>`;
+}
 function render(state) {
   const root = document.getElementById('logs-viewer');
   if (!root) return;
   const copy = UI_COPY.sessionAnalytics.logs;
   if (state.mode === 'snapshot') { root.innerHTML = `<div class="empty-state">${escapeHtml(copy.liveOnly)}</div>`; return; }
   const filter = view.session ? `<div class="logs-session-filter"><span>${escapeHtml(copy.session)}: <strong>${escapeHtml(view.session)}</strong></span><button type="button" class="btn" data-clear-session>${escapeHtml(copy.clear)}</button></div>` : '';
-  const rows = view.rows.map((row) => `<tr data-log-key="${escapeHtml(row.event_key)}" tabindex="0"><td>${escapeHtml(row.event_at || '--')}</td><td><span class="agent-tag" data-source="${escapeHtml(row.source || '')}">${escapeHtml(row.source || '--')}</span></td><td>${escapeHtml(row.model || '--')}</td><td>${escapeHtml(row.session_label || row.session_id || '--')}</td><td class="num">${formatNumber(row.total_tokens || 0)}</td><td class="num">${formatUsd(row.cost_usd || 0)}</td><td>${escapeHtml(row.project_label || '--')}</td></tr><tr class="log-raw-row" data-raw-for="${escapeHtml(row.event_key)}" hidden><td colspan="7"><pre>${escapeHtml(view.raw.get(row.event_key) || copy.rawLoading)}</pre></td></tr>`).join('');
-  const table = rows ? `<div class="logs-table-wrap"><table class="data-table logs-table"><thead><tr><th>${copy.time}</th><th>${copy.source}</th><th>${copy.model}</th><th>${copy.session}</th><th>${copy.tokens}</th><th>${copy.cost}</th><th>${copy.project}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-state compact">${escapeHtml(view.loading ? copy.loading : copy.empty)}</div>`;
+  const rows = view.rows.map((row) => {
+    const eventKey = row.event_key;
+    const rawId = `log-raw-${eventKey}`;
+    const time = logsTimeContent(row.event_at);
+    const timeTitle = time.title ? ` title="${escapeHtml(time.title)}"` : '';
+    return `<tr data-log-key="${escapeHtml(eventKey)}" tabindex="0" aria-expanded="false" aria-controls="${escapeHtml(rawId)}"><td class="logs-cell-time"><span class="logs-cell-clip"${timeTitle}>${escapeHtml(time.text)}</span></td><td class="logs-cell-source"><span class="agent-tag" data-source="${escapeHtml(row.source || '')}">${escapeHtml(row.source || '--')}</span></td>${clippedCell('logs-cell-model', logsTextContent(row.model))}${clippedCell('logs-cell-session', logsTextContent(row.session_label || row.session_id))}<td class="logs-cell-tokens num">${formatNumber(row.total_tokens || 0)}</td><td class="logs-cell-cost num">${formatUsd(row.cost_usd || 0)}</td>${clippedCell('logs-cell-project', logsTextContent(row.project_label))}</tr><tr class="log-raw-row" id="${escapeHtml(rawId)}" data-raw-for="${escapeHtml(eventKey)}" hidden><td colspan="7"><pre>${escapeHtml(view.raw.get(eventKey) || copy.rawLoading)}</pre></td></tr>`;
+  }).join('');
+  const table = rows ? `<div class="logs-table-wrap"><table class="data-table logs-table"><thead><tr><th class="logs-col-time">${copy.time}</th><th class="logs-col-source">${copy.source}</th><th class="logs-col-model">${copy.model}</th><th class="logs-col-session">${copy.session}</th><th class="logs-col-tokens r">${copy.tokens}</th><th class="logs-col-cost r">${copy.cost}</th><th class="logs-col-project">${copy.project}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-state compact">${escapeHtml(view.loading ? copy.loading : copy.empty)}</div>`;
   root.innerHTML = `${filter}${table}${view.cursor ? `<button class="btn logs-more" type="button" data-load-more ${view.loading ? 'disabled' : ''}>${copy.more}</button>` : ''}`;
   root.querySelector('[data-clear-session]')?.addEventListener('click', () => { view.session = ''; resetLogsViewer(state); void loadPage(state); });
   root.querySelector('[data-load-more]')?.addEventListener('click', () => void loadPage(state, true));
-  root.querySelectorAll('[data-log-key]').forEach((row) => row.addEventListener('click', () => void toggleRaw(state, row.dataset.logKey)));
+  root.querySelectorAll('[data-log-key]').forEach((row) => {
+    row.addEventListener('click', () => void toggleRaw(state, row.dataset.logKey));
+    row.addEventListener('keydown', (event) => {
+      if (!isLogsRowActivationKey(event.key)) return;
+      event.preventDefault();
+      void toggleRaw(state, row.dataset.logKey);
+    });
+  });
 }
 async function toggleRaw(state, eventKey) {
   const detail = document.querySelector(`[data-raw-for="${CSS.escape(eventKey)}"]`);
   if (!detail) return;
+  const row = document.querySelector(`[data-log-key="${CSS.escape(eventKey)}"]`);
   detail.hidden = !detail.hidden;
+  row?.setAttribute('aria-expanded', String(!detail.hidden));
   if (detail.hidden || view.raw.has(eventKey)) return;
   const generation = view.generation;
   const page = await fetchLogs(state, { eventKey, cache: false });

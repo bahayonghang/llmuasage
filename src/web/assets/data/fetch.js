@@ -362,10 +362,12 @@ export async function fetchHourOfWeek(state, options = {}) {
   return loadLiveJson(`/api/hour_of_week${buildFilterQuery(state)}`, options);
 }
 
+export const LOGS_PAGE_SIZE = 20;
+
 export async function fetchLogs(state, options = {}) {
   if (state.mode === 'snapshot') return { records: [], next_cursor: null };
   const params = new URLSearchParams(buildFilterQuery(state).slice(1));
-  params.set('page_size', '50');
+  params.set('page_size', String(LOGS_PAGE_SIZE));
   if (options.session) params.set('session', options.session);
   if (options.cursor) params.set('cursor', options.cursor);
   if (options.eventKey) params.set('event_key', options.eventKey);

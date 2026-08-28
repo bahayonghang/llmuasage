@@ -16,6 +16,7 @@ export {
   fetchTopSessions,
   fetchHourOfWeek,
   fetchLogs,
+  LOGS_PAGE_SIZE,
   clearLiveRequestCache,
 } from './data/fetch.js';
 export {
