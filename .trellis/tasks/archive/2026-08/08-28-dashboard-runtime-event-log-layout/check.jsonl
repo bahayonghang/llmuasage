@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/llmusage/backend/index.md", "reason": "Apply llmusage package quality checklist and focused/full gates."}
+{"file": ".trellis/spec/llmusage/backend/web-server-contracts.md", "reason": "Verify embedded shell/assets and public security boundaries remain intact."}
+{"file": ".trellis/tasks/08-28-dashboard-runtime-event-log-layout/research/dashboard-runtime-logs-evidence.md", "reason": "Check the implementation against focused repository, browser, and logs lifecycle evidence."}
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "Confirm runtime status layout changes do not alter sync health semantics."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Review API/frontend compatibility and same-concept consistency."}
