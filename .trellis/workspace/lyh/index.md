@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 65
-- **Last Active**: 2026-08-23
+- **Total Sessions**: 66
+- **Last Active**: 2026-08-29
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1965 | Active |
+| `journal-1.md` | ~1986 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 66 | 2026-08-29 | Dashboard 运行状态独立区块与事件日志布局收敛 | `a20171f` | `dev` |
 | 65 | 2026-08-23 | 重组测试套件并补齐高风险回归 | `dea573e` | `dev` |
 | 64 | 2026-08-23 | 完成全历史会话排行查询与索引优化 | `678a60db429c48bb2f8b5240848daeb404a7ea3c` | `dev` |
 | 63 | 2026-08-23 | 重设计会话排行与 Token 构成 | `7a4b4dcf5dd74cd33f1fab72a984334d85483efb` | `dev` |
