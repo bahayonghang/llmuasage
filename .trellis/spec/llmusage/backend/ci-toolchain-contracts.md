@@ -3,8 +3,9 @@
 ## 1. Scope / Trigger
 
 Apply this contract when changing `Cargo.toml` dependencies or `rust-version`,
-the pinned development toolchain, Rust CI commands, or subprocess integration
-tests.
+the pinned development toolchain, Rust CI commands, subprocess integration
+tests, GitHub Actions SHA pins in `.github/workflows/ci.yml`, or `docs/` npm
+lockfile / overrides.
 
 ## 2. Signatures
 
@@ -28,6 +29,23 @@ tests.
   `scripts/ci-rust.py` instead of maintaining duplicate Rust command lists.
 - All dependency-sensitive CI commands use `--locked`; clippy and tests use
   `--all-features`.
+- `cargo update` must keep the declared MSRV. Cargo 1.97+ will lock to the
+  latest versions compatible with `package.rust-version`. After an update,
+  align direct `Cargo.toml` patch numbers with the lockfile so the manifest
+  is not stale.
+- `0.x` breaking upgrades (for example reqwest 0.12 → 0.13) stay in a
+  separate batch from an MSRV-compatible lockfile refresh. Do not reconstruct
+  a mixed `Cargo.lock` by hand.
+- reqwest 0.13 feature name is `rustls`, not `rustls-tls`. Keep
+  `default-features = false` plus `json` and `http2` unless a later changelog
+  says otherwise.
+- Actions third-party steps stay SHA-pinned. Refresh `Swatinem/rust-cache`,
+  `taiki-e/install-action`, and `dtolnay/rust-toolchain` together with a
+  comment that names the tag. Do not change the `CI gate` job `name:`.
+- docs npm: patch nested high CVEs with `overrides` (nanoid, postcss). Do not
+  override `vite` / `esbuild` while VitePress 1.6.x depends on `vite ^5`.
+  Residual vite/esbuild advisories on `docs:dev` are accepted until VitePress
+  stable can pull vite ≥ 6.4.3.
 - GitHub branch protection on `main` requires exactly one Actions check:
   `CI gate`. That string is the `ci-gate` job `name:` in
   `.github/workflows/ci.yml`. GitHub matches the job display name, not the
@@ -56,6 +74,10 @@ tests.
 | `ci-gate` is skipped after a leaf job fails | Block; keep `if: always()` so the required check still reports |
 | Subprocess test reports an OS error | Locate the exact failing operation; do not label it an environment failure without context |
 | A test-layout change drops or duplicates an existing leaf name | Block before adding new tests; repair target/module wiring |
+| `cargo audit` reports unsound/yanked that `cargo update` can absorb (e.g. lru via ratatui-core) | Absorb in the lockfile batch; do not leave a fixable warning |
+| reqwest enabled with `rustls-tls` after 0.13 | Block compile; rename the feature to `rustls` |
+| `npm --prefix docs audit` still reports nanoid or postcss high | Block; pin overrides to patched versions and refresh `docs/package-lock.json` |
+| `npm --prefix docs audit` reports only vite/esbuild via vitepress 1.6.x | Accept; do not force VitePress 2 alpha or a vite 6 override |
 
 ## 5. Good / Base / Bad Cases
 
@@ -149,6 +171,71 @@ ci-gate:
 ```
 
 `main` required checks must be exactly `CI gate`.
+
+## Scenario: Dependency and lockfile upgrades
+
+### 1. Scope / Trigger
+
+- Trigger: bumping crate versions, refreshing `Cargo.lock`, changing docs npm
+  overrides, or retargeting Actions SHA pins.
+- Keep MSRV (`rust-version`) and the development toolchain pin as two
+  independent claims. A lockfile refresh is not permission to raise either.
+
+### 2. Signatures
+
+- Compatible refresh: `cargo update` then `cargo +<rust-version> check --locked --all-features` with an isolated `CARGO_TARGET_DIR`
+- Security: `cargo audit`
+- Docs: `npm --prefix docs install` after override edits, then `npm --prefix docs audit` and `npm --prefix docs run docs:build`
+- Full gate: `just ci`
+
+### 3. Contracts
+
+- Direct runtime reqwest stays `default-features = false` with explicit TLS.
+  After 0.13 the TLS feature is `rustls`.
+- Architecture tests keep `syn` 2 (`full`, `visit`) until a dedicated syn 3
+  batch rewrites `tests/architecture/main.rs`. Transitive syn 3 in the lock
+  is allowed.
+- `docs/package.json` may add `overrides` for nested patched majors; it must
+  not add a vite/esbuild override to silence advisories VitePress 1.6 cannot
+  take.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Lockfile refresh fails MSRV check | Roll back `Cargo.toml` + `Cargo.lock`; do not raise MSRV to paper over it |
+| reqwest 0.13 fails aws-lc native build on one OS | Roll back only the reqwest closure; keep the compatible lockfile batch |
+| Override pins drift from `docs/package-lock.json` | Re-run `npm --prefix docs install` and commit both files |
+
+### 5. Good / Base / Bad Cases
+
+- Good: `cargo update` moves `lru` 0.18.1 → 0.18.3 to clear RUSTSEC unsound
+  without bumping ratatui.
+- Base: clap/rusqlite/thiserror/base64 patch numbers in `Cargo.toml` match
+  the lockfile after the refresh.
+- Bad: enabling reqwest `rustls-tls` on 0.13, or `npm override` of `vite` to
+  8.x while VitePress still declares `vite ^5`.
+
+### 6. Tests Required
+
+- Isolated MSRV `cargo +<rust-version> check --locked --all-features`
+- `cargo audit` with no denied vulnerabilities
+- `python scripts/ci-rust.py` after any Rust lock or manifest change
+- `npm --prefix docs run docs:build` after docs lock or override changes
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```toml
+reqwest = { version = "0.13", default-features = false, features = ["rustls-tls", "json", "http2"] }
+```
+
+#### Correct
+
+```toml
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "http2"] }
+```
 
 ## Scenario: AST-Enforced Layer Dependencies
 

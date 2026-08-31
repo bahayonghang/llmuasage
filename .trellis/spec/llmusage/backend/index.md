@@ -55,7 +55,7 @@ output, and dashboard/TUI consumers.
 | [Report CLI Contracts](./report-cli-contracts.md) | Unified/focused report command surface, DTO projections, and output invariants | Documented |
 | [Web Server Contracts](./web-server-contracts.md) | Dashboard listener, browser-launch, SSH, and network-exposure contracts | Documented |
 | [Self-Update Contracts](./self-update-contracts.md) | Official channels, Cargo invocation, confirmation, and no-network test boundaries | Documented |
-| [CI And Toolchain Contracts](./ci-toolchain-contracts.md) | Shared Rust gate, verified MSRV, and subprocess-test evidence rules | Documented |
+| [CI And Toolchain Contracts](./ci-toolchain-contracts.md) | Shared Rust gate, verified MSRV, dependency batches, and subprocess-test evidence rules | Documented |
 | [Write Fencing Contracts](./write-fencing-contracts.md) | Generation permits, transaction fencing, bootstrap ordering, and mutation entrypoints | Documented |
 | [Integration File Contracts](./integration-file-contracts.md) | Cross-platform atomic replace, recovery, and integration action recording | Documented |
 | [Runtime Log Contracts](./runtime-log-contracts.md) | Bounded runtime-log rotation, retention, counters, and tail reads | Documented |
