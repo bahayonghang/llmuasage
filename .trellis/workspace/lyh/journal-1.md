@@ -1963,3 +1963,28 @@ Grok 解析器改为读取 turn_completed.usage，趋势来源表展示完整占
 ### Next Steps
 
 - 无；任务已完成并归档。
+
+
+## Session 66: 依赖扫描与分批升级
+
+**Date**: 2026-08-31
+**Task**: 依赖扫描与分批升级
+**Branch**: `dev`
+
+### Summary
+
+按风险分批升级 Actions SHA、Cargo lockfile/reqwest 0.13、docs nanoid/postcss override；每批跑 just ci。MSRV 仍 1.95。vite/esbuild 残留告警留待 VitePress 稳定线。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `eff9bf9` | (see git log) |
+| `d3ddc7d` | (see git log) |
+| `e13c6ee` | (see git log) |
+| `6afb803` | (see git log) |
+| `3276290` | (see git log) |
+
+### Status
+
+[OK] **Completed**
