@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/llmusage/backend/ci-toolchain-contracts.md", "reason": "Quality check: MSRV proof, locked clippy/test, CI gate job name"}
+{"file": ".trellis/spec/llmusage/backend/index.md", "reason": "Quality Check section for python scripts/ci-rust.py and docs:build"}
+{"file": ".trellis/tasks/08-31-deps-upgrade/research/dependency-scan-2026-08-31.md", "reason": "Verify each batch matches the classified inventory and does not take deferred items"}
+{"file": ".trellis/tasks/08-31-deps-upgrade/research/reqwest-0.13-and-syn-3.md", "reason": "Verify reqwest feature migration and that syn 3 was not mixed in"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Subscription HTTP vs Cargo TLS feature change must not alter provider payloads"}

@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/llmusage/backend/ci-toolchain-contracts.md", "reason": "MSRV 1.95, --locked gates, rust-toolchain vs rust-version, CI job naming"}
+{"file": ".trellis/spec/llmusage/backend/index.md", "reason": "Pre-dev checklist: CI/toolchain before changing dependencies"}
+{"file": ".trellis/spec/llmusage/backend/self-update-contracts.md", "reason": "update command uses cargo --locked; lockfile batches must not break install/update"}
+{"file": ".trellis/tasks/08-31-deps-upgrade/research/dependency-scan-2026-08-31.md", "reason": "Authoritative version/security inventory for each batch"}
+{"file": ".trellis/tasks/08-31-deps-upgrade/research/reqwest-0.13-and-syn-3.md", "reason": "reqwest 0.13 feature rename and out-of-scope syn 3 notes"}
+{"file": ".trellis/spec/guides/index.md", "reason": "Search-before-modify when changing version strings that appear in CI, justfile, and docs"}
