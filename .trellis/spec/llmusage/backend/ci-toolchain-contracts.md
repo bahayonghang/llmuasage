@@ -27,6 +27,12 @@ lockfile / overrides.
   development toolchain, not a second compatibility claim.
 - Local `just ci` and the three-platform Rust CI matrix must invoke
   `scripts/ci-rust.py` instead of maintaining duplicate Rust command lists.
+- The local gate requires a `python` executable on `PATH` because `just ci`
+  and the gate scripts invoke `python ...`. On machines that only ship
+  `python3`, prepend a temporary shim directory (for example
+  `ln -s "$(command -v python3)" /tmp/llmuasage-py-shim/python` and export it
+  ahead of `PATH`) instead of editing recipes or scripts to call `python3`;
+  CI runners provide `python`, so repo commands keep the portable spelling.
 - All dependency-sensitive CI commands use `--locked`; clippy and tests use
   `--all-features`.
 - `cargo update` must keep the declared MSRV. Cargo 1.97+ will lock to the

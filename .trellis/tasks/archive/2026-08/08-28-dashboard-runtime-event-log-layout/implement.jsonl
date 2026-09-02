@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/llmusage/backend/index.md", "reason": "Discover applicable llmusage dashboard checks and quality gates."}
+{"file": ".trellis/spec/llmusage/backend/web-server-contracts.md", "reason": "Preserve loopback/public route boundaries and embedded dashboard asset contracts."}
+{"file": ".trellis/tasks/08-28-dashboard-runtime-event-log-layout/research/dashboard-runtime-logs-evidence.md", "reason": "Use focused repository and live-browser evidence plus the relevant logs lifecycle contracts."}
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "Preserve current sync health semantics while relocating runtime diagnostics."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Trace API to frontend logs flow and avoid contract drift."}

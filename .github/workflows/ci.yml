@@ -121,6 +121,7 @@ jobs:
           node --test `
             scripts/tests/benchmark-top-sessions.test.mjs `
             scripts/tests/dashboard-fetch.test.mjs `
+            scripts/tests/dashboard-logs-viewer.test.mjs `
             scripts/tests/dashboard-bootstrap-watchdog.test.mjs `
             scripts/tests/dashboard-load-state.test.mjs `
             scripts/tests/dashboard-render-lifecycle.test.mjs

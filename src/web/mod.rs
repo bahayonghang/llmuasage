@@ -2847,6 +2847,96 @@ mod tests {
     }
 
     #[test]
+    fn runtime_sections_are_sibling_blocks_in_sidebar_order() {
+        fn asset(path: &str) -> &'static str {
+            asset_manifest()
+                .iter()
+                .find(|asset| asset.path == path)
+                .unwrap_or_else(|| panic!("missing dashboard asset: {path}"))
+                .body
+        }
+
+        for html in [live_index_html(), snapshot_index_html()] {
+            let cost = html
+                .find("<section id=\"cost\" class=\"block\">")
+                .expect("cost section");
+            let status = html
+                .find("<section id=\"status\" class=\"block\">")
+                .expect("independent status section");
+            let logs = html
+                .find("<section id=\"logs\" class=\"block\">")
+                .expect("logs section");
+            assert!(cost < status, "cost section must precede status");
+            assert!(status < logs, "status section must precede logs");
+            assert!(
+                html[cost..status].contains("</section>"),
+                "status must not be nested inside the cost section"
+            );
+            assert!(
+                !html.contains("cost-status-grid"),
+                "cost and status must not share one grid row"
+            );
+            assert_eq!(
+                html.matches("id=\"status\"").count(),
+                1,
+                "status anchor must be unique"
+            );
+
+            let status_block = &html[status..logs];
+            assert!(status_block.contains("data-i18n=\"shell.status.title\""));
+            assert!(status_block.contains("data-i18n=\"shell.status.sub\""));
+            assert!(status_block.contains("status-diagnostics-stack"));
+            assert!(status_block.contains("id=\"insights-card\""));
+            assert!(status_block.contains("id=\"failures-card\""));
+            assert!(!html[cost..status].contains("id=\"insights-card\""));
+            assert!(html[logs..].contains("id=\"logs-viewer\""));
+
+            let cost_nav = html.find("data-target=\"cost\"").expect("cost nav link");
+            let status_nav = html
+                .find("data-target=\"status\"")
+                .expect("status nav link");
+            let logs_nav = html.find("data-target=\"logs\"").expect("logs nav link");
+            assert!(
+                cost_nav < status_nav && status_nav < logs_nav,
+                "sidebar order must stay cost -> status -> logs"
+            );
+        }
+
+        let app_js = asset("app.js");
+        assert!(
+            app_js.contains("'explorer', 'cost', 'status', 'logs']"),
+            "observer order must match sidebar and DOM order"
+        );
+        assert!(!app_js.contains("'logs', 'cost', 'status'"));
+
+        let copy_js = asset("copy.js");
+        assert!(copy_js.contains("'shell.status.title': '运行状态'"));
+        assert!(copy_js.contains("'shell.status.title': 'Runtime status'"));
+        assert!(copy_js.matches("'shell.status.sub':").count() == 2);
+
+        let fetch_js = asset("data/fetch.js");
+        assert!(fetch_js.contains("export const LOGS_PAGE_SIZE = 20;"));
+        assert!(fetch_js.contains("params.set('page_size', String(LOGS_PAGE_SIZE));"));
+        assert!(!fetch_js.contains("'page_size', '50'"));
+
+        let viewer_js = asset("render/logs-viewer.js");
+        assert!(viewer_js.contains("isLogsRowActivationKey"));
+        assert!(viewer_js.contains("aria-expanded"));
+        assert!(viewer_js.contains("aria-controls"));
+        assert!(viewer_js.contains("logsGenerationIsCurrent"));
+        assert!(viewer_js.contains("next_cursor"));
+
+        let components_css = asset("components.css");
+        assert!(components_css.contains(".logs-table-wrap { max-height: min(640px, 70vh);"));
+        assert!(components_css.contains(".logs-table thead th { position: sticky;"));
+        assert!(components_css.contains(".status-diagnostics-stack"));
+        assert!(
+            components_css.contains("grid-template-columns: repeat(2, minmax(0, 1fr));"),
+            "status diagnostics must keep two balanced columns"
+        );
+    }
+
+    #[test]
     fn source_badge_catalog_tracks_the_registry_in_live_and_snapshot_shells() {
         fn parse_catalog(html: &str) -> Vec<serde_json::Value> {
             const OPEN: &str = "<script type=\"application/json\" id=\"source-badge-catalog\">";

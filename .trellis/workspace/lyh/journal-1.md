@@ -1965,7 +1965,28 @@ Grok 解析器改为读取 turn_completed.usage，趋势来源表展示完整占
 - 无；任务已完成并归档。
 
 
-## Session 66: 依赖扫描与分批升级
+## Session 66: Dashboard 运行状态独立区块与事件日志布局收敛
+
+**Date**: 2026-08-29
+**Task**: Dashboard 运行状态独立区块与事件日志布局收敛
+**Branch**: `dev`
+
+### Summary
+
+将 #status 从成本区块拆为独立同级区块并统一 DOM/导航/观察器顺序；运行状态改均衡双栏；事件日志首页 20 条、受限滚动容器 + 粘性表头、长文本省略号、回车/空格展开。补齐 Rust 结构回归与 Node 前端回归并接入 just ci/CI；完成 2048x1120、1440x900、390x844 三视口与暗色主题的浏览器验收。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a20171f` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 67: 依赖扫描与分批升级
 
 **Date**: 2026-08-31
 **Task**: 依赖扫描与分批升级

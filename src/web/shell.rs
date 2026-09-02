@@ -587,16 +587,6 @@ fn html_shell(mode: &str) -> String {
       </div>
     </section>
 
-    <section id="logs" class="block">
-      <div class="section-head">
-        <div>
-          <h2 class="section-title" data-i18n="shell.logs.title">事件日志</h2>
-          <div class="section-desc" data-i18n="shell.logs.sub">按游标分页查看本地标准化事件；展开行时按需读取原始记录。</div>
-        </div>
-      </div>
-      <div class="panel" id="logs-viewer" aria-live="polite"></div>
-    </section>
-
     <!-- Cost -->
     <section id="cost" class="block">
       <div class="section-head">
@@ -606,12 +596,12 @@ fn html_shell(mode: &str) -> String {
         </div>
       </div>
 
-      <div class="cost-status-grid dash-grid">
+      <div class="dash-grid">
         <div class="panel cost-summary-panel wide">
           <div class="cost-stat-grid" id="costs-stats"></div>
         </div>
 
-        <div class="panel cost-ranking-panel">
+        <div class="panel cost-ranking-panel wide">
           <div class="panel-title" data-i18n="shell.cost.panelTitle">成本最高的 5 个来源 / 模型组合</div>
           <div class="panel-sub" data-i18n="shell.cost.panelSub">单位：USD</div>
 
@@ -620,23 +610,42 @@ fn html_shell(mode: &str) -> String {
 
           <button class="show-more" type="button" data-toggle-panel="costs" aria-expanded="false" data-i18n="shell.cost.expand">展开全部成本项 →</button>
         </div>
+      </div>
+    </section>
 
-        <div class="panel status-diagnostics-panel" id="status">
-          <div class="status-diagnostics-stack">
-            <div class="subpanel-section">
-              <h3 class="subpanel-title" data-i18n="shell.insights.title">诊断线索</h3>
-              <p class="panel-sub" data-i18n="shell.insights.sub">信号只表示可能的下一步，不代表最终诊断。</p>
-              <div id="insights-card"></div>
-            </div>
+    <!-- Runtime status -->
+    <section id="status" class="block">
+      <div class="section-head">
+        <div>
+          <h2 class="section-title" data-i18n="shell.status.title">运行状态</h2>
+          <div class="section-desc" data-i18n="shell.status.sub">当前同步健康状态以最近一次同步为准；诊断线索与最近失败仅供排查参考。</div>
+        </div>
+      </div>
 
-            <div class="subpanel-section">
-              <h3 class="subpanel-title" data-i18n="shell.failures.title">最近失败</h3>
-              <div id="failures-card"></div>
-            </div>
+      <div class="panel status-diagnostics-panel">
+        <div class="status-diagnostics-stack">
+          <div class="subpanel-section">
+            <h3 class="subpanel-title" data-i18n="shell.insights.title">诊断线索</h3>
+            <p class="panel-sub" data-i18n="shell.insights.sub">信号只表示可能的下一步，不代表最终诊断。</p>
+            <div id="insights-card"></div>
+          </div>
 
+          <div class="subpanel-section">
+            <h3 class="subpanel-title" data-i18n="shell.failures.title">最近失败</h3>
+            <div id="failures-card"></div>
           </div>
         </div>
       </div>
+    </section>
+
+    <section id="logs" class="block">
+      <div class="section-head">
+        <div>
+          <h2 class="section-title" data-i18n="shell.logs.title">事件日志</h2>
+          <div class="section-desc" data-i18n="shell.logs.sub">按游标分页查看本地标准化事件；展开行时按需读取原始记录。</div>
+        </div>
+      </div>
+      <div class="panel" id="logs-viewer" aria-live="polite"></div>
     </section>
 
     <footer class="foot">

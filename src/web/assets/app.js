@@ -761,7 +761,7 @@ function escapeHtml(value) {
  * 2) 当区域进入视口时，高亮对应侧边栏链接
  */
 function setupNavigation() {
-  const sections = ['overview', 'trends', 'models', 'sources', 'projects', 'behavior', 'explorer', 'logs', 'cost', 'status'];
+  const sections = ['overview', 'trends', 'models', 'sources', 'projects', 'behavior', 'explorer', 'cost', 'status', 'logs'];
   const navLinks = document.querySelectorAll('aside nav a');
 
   function setActive(id) {

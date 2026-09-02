@@ -402,10 +402,6 @@ main {
   grid-column: 1 / -1;
 }
 
-.cost-status-grid {
-  align-items: start;
-}
-
 .cost-summary-panel {
   padding-bottom: 18px;
 }

@@ -64,6 +64,7 @@ ci:
     node --check scripts/benchmark-top-sessions.mjs
     node --test scripts/tests/benchmark-top-sessions.test.mjs
     node --test scripts/tests/dashboard-fetch.test.mjs
+    node --test scripts/tests/dashboard-logs-viewer.test.mjs
     node --test scripts/tests/dashboard-bootstrap-watchdog.test.mjs
     node --test scripts/tests/dashboard-load-state.test.mjs
     node --test scripts/tests/dashboard-render-lifecycle.test.mjs
