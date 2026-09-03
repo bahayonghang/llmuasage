@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/llmusage/backend/index.md", "reason": "Pre-development checklist and quality commands for llmusage backend tests"}
+{"file": ".trellis/spec/llmusage/backend/write-fencing-contracts.md", "reason": "Transaction fencing, LockLost, and mutation entry contracts for store tests"}
+{"file": ".trellis/spec/llmusage/backend/web-server-contracts.md", "reason": "Public vs loopback exposure and write-guard contracts for web tests"}
+{"file": ".trellis/spec/llmusage/backend/ci-toolchain-contracts.md", "reason": "cargo test --all-features -- --test-threads=1 and autotests=false integration graph"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Query filter and web param changes span store/query/web"}
+{"file": ".trellis/tasks/09-03-test-coverage-risk/research/coverage-gap-inventory.md", "reason": "Ranked uncovered paths with file:line anchors"}

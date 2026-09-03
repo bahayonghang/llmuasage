@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/llmusage/backend/index.md", "reason": "Quality Check: focused tests then cargo test -- --test-threads=1"}
+{"file": ".trellis/spec/llmusage/backend/write-fencing-contracts.md", "reason": "Store tests must not bypass permit/transaction contracts"}
+{"file": ".trellis/spec/llmusage/backend/web-server-contracts.md", "reason": "Public allowlist and local-only writes must not regress"}
+{"file": ".trellis/spec/llmusage/backend/ci-toolchain-contracts.md", "reason": "Final suite must match CI rust test invocation"}
+{"file": ".trellis/tasks/09-03-test-coverage-risk/research/coverage-gap-inventory.md", "reason": "Verify added tests match the ranked gaps, not coverage padding"}
