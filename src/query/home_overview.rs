@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 #[cfg(test)]
@@ -7,11 +7,14 @@ use rusqlite::{Connection, params_from_iter};
 use serde::{Deserialize, Serialize};
 
 use super::{Dashboard, DiagnosticsPayload, HomeOverviewSnapshot, QueryFilter};
-use crate::{error::Result, util::now_utc};
+use crate::{
+    domain::source_descriptor::registered_source_descriptors, error::Result, util::now_utc,
+};
 #[cfg(test)]
 use crate::{paths::AppPaths, store::Store};
 
-const HOME_PLATFORMS: [&str; 4] = ["claude", "codex", "antigravity", "opencode"];
+const HOME_SESSION_IDENTITY: &str =
+    "COALESCE(NULLIF(session_id, ''), NULLIF(source_path_hash, ''), event_key)";
 
 /// Homepage-oriented usage payload consumed by ccr-ui's home overview adapter.
 #[derive(Debug, Clone, Serialize)]
@@ -103,85 +106,11 @@ pub(super) fn load_compact(
     dashboard: &Dashboard,
     filter: &QueryFilter,
 ) -> Result<HomeOverviewSnapshot> {
-    let sql_filter = filter.event_filter(None);
-    let local_date = filter.local_date_expr("event_at");
-    let sql = format!(
-        r#"
-        SELECT
-            source,
-            COALESCE(NULLIF(session_id, ''), NULLIF(source_path_hash, ''), event_key),
-            {local_date},
-            input_tokens,
-            cache_creation_tokens,
-            cache_read_tokens,
-            total_tokens,
-            cost_with_cache_usd
-        FROM usage_event
-        {}
-        "#,
-        sql_filter.where_sql()
-    );
-    let mut stmt = dashboard.conn.prepare(&sql)?;
-    let mut rows = stmt.query(params_from_iter(sql_filter.params().iter()))?;
-    let mut platforms: HashMap<String, CompactPlatformAggregate> = HashMap::new();
-    let mut active_days = HashSet::new();
-    let mut summary = HomeOverviewSummary::default();
-    let mut input_tokens = 0;
-    let mut cache_creation_tokens = 0;
-    let mut cache_read_tokens = 0;
-
-    while let Some(row) = rows.next()? {
-        let source: String = row.get(0)?;
-        let identity: String = row.get(1)?;
-        active_days.insert(row.get::<_, String>(2)?);
-        input_tokens += row.get::<_, i64>(3)?;
-        cache_creation_tokens += row.get::<_, i64>(4)?;
-        cache_read_tokens += row.get::<_, i64>(5)?;
-        let tokens = row.get::<_, i64>(6)?;
-        summary.total_requests += 1;
-        summary.total_tokens += tokens;
-        summary.total_cost_usd += row.get::<_, f64>(7)?;
-
-        let platform = platforms.entry(source).or_default();
-        platform.sessions.insert(identity);
-        platform.requests += 1;
-        platform.tokens += tokens;
-    }
-
-    summary.total_sessions = platforms
-        .values()
-        .map(|platform| platform.sessions.len() as i64)
-        .sum();
-    summary.active_days = active_days.len() as i64;
-    summary.platforms = platforms.len() as i64;
-    let cache_denominator = input_tokens + cache_creation_tokens + cache_read_tokens;
-    if cache_denominator != 0 {
-        summary.cache_efficiency = cache_read_tokens as f64 / cache_denominator as f64;
-    }
-
-    let mut by_platform = default_platform_map();
-    for (source, aggregate) in platforms {
-        by_platform.insert(
-            source,
-            HomeOverviewPlatformStats {
-                sessions: aggregate.sessions.len() as i64,
-                requests: aggregate.requests,
-                tokens: aggregate.tokens,
-            },
-        );
-    }
-
+    let aggregates = load_home_aggregates(&dashboard.conn, filter, false)?;
     Ok(HomeOverviewSnapshot {
-        summary,
-        by_platform,
+        summary: aggregates.summary,
+        by_platform: aggregates.by_platform,
     })
-}
-
-#[derive(Default)]
-struct CompactPlatformAggregate {
-    sessions: HashSet<String>,
-    requests: i64,
-    tokens: i64,
 }
 
 #[cfg(test)]
@@ -219,29 +148,18 @@ fn load_inner(
     let generated_at = now_utc();
 
     let event_read_started = timing.as_ref().map(|_| Instant::now());
-    let events = load_event_rows(&dashboard.conn, filter)?;
+    let aggregates = load_home_aggregates(&dashboard.conn, filter, true)?;
     let event_read_elapsed = event_read_started.map(|started| started.elapsed());
     if let (Some(elapsed), Some(timing)) = (event_read_elapsed, timing.as_mut()) {
         timing.event_read = elapsed;
+        timing.summary = elapsed;
+        timing.by_platform = Duration::ZERO;
+        timing.series = Duration::ZERO;
     }
 
-    let summary_started = timing.as_ref().map(|_| Instant::now());
-    let summary = summarize_events(&events);
-    if let (Some(started), Some(timing)) = (summary_started, timing.as_mut()) {
-        timing.summary = event_read_elapsed.unwrap_or_default() + started.elapsed();
-    }
-
-    let by_platform_started = timing.as_ref().map(|_| Instant::now());
-    let by_platform = summarize_by_platform(&events);
-    if let (Some(started), Some(timing)) = (by_platform_started, timing.as_mut()) {
-        timing.by_platform = started.elapsed();
-    }
-
-    let series_started = timing.as_ref().map(|_| Instant::now());
-    let series = summarize_series(&events);
-    if let (Some(started), Some(timing)) = (series_started, timing.as_mut()) {
-        timing.series = started.elapsed();
-    }
+    let summary = aggregates.summary;
+    let by_platform = aggregates.by_platform;
+    let series = aggregates.series;
 
     let run_state_started = timing.as_ref().map(|_| Instant::now());
     let last_updated =
@@ -287,6 +205,158 @@ fn load_inner(
     Ok((payload, timing))
 }
 
+struct HomeAggregates {
+    summary: HomeOverviewSummary,
+    by_platform: BTreeMap<String, HomeOverviewPlatformStats>,
+    series: Vec<HomeOverviewSeriesItem>,
+}
+
+fn load_home_aggregates(
+    conn: &Connection,
+    filter: &QueryFilter,
+    include_series: bool,
+) -> Result<HomeAggregates> {
+    let sql_filter = filter.event_filter(None);
+    let local_date = filter.local_date_expr("event_at");
+    let summary_sql = format!(
+        r#"
+        /* home_overview_summary */
+        SELECT
+            COUNT(*) AS total_requests,
+            COUNT(DISTINCT source || ':' || {HOME_SESSION_IDENTITY}) AS total_sessions,
+            COALESCE(SUM(total_tokens), 0) AS total_tokens,
+            COALESCE(SUM(cost_with_cache_usd), 0.0) AS total_cost_usd,
+            COALESCE(SUM(input_tokens), 0) AS input_tokens,
+            COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens,
+            COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+            COUNT(DISTINCT {local_date}) AS active_days,
+            COUNT(DISTINCT source) AS platforms
+        FROM usage_event
+        {}
+        "#,
+        sql_filter.where_sql()
+    );
+    let mut summary_stmt = conn.prepare(&summary_sql)?;
+    let (mut summary, input_tokens, cache_creation_tokens, cache_read_tokens) = summary_stmt
+        .query_row(params_from_iter(sql_filter.params().iter()), |row| {
+            Ok((
+                HomeOverviewSummary {
+                    total_requests: row.get(0)?,
+                    total_sessions: row.get(1)?,
+                    total_tokens: row.get(2)?,
+                    total_cost_usd: row.get(3)?,
+                    cache_efficiency: 0.0,
+                    active_days: row.get(7)?,
+                    platforms: row.get(8)?,
+                },
+                row.get::<_, i64>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, i64>(6)?,
+            ))
+        })?;
+    let cache_denominator = input_tokens + cache_creation_tokens + cache_read_tokens;
+    if cache_denominator != 0 {
+        summary.cache_efficiency = cache_read_tokens as f64 / cache_denominator as f64;
+    }
+
+    let platform_sql = format!(
+        r#"
+        /* home_overview_by_platform */
+        SELECT
+            source,
+            COUNT(DISTINCT {HOME_SESSION_IDENTITY}) AS sessions,
+            COUNT(*) AS requests,
+            COALESCE(SUM(total_tokens), 0) AS tokens
+        FROM usage_event
+        {}
+        GROUP BY source
+        "#,
+        sql_filter.where_sql()
+    );
+    let mut platform_stmt = conn.prepare(&platform_sql)?;
+    let platform_rows =
+        platform_stmt.query_map(params_from_iter(sql_filter.params().iter()), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                HomeOverviewPlatformStats {
+                    sessions: row.get(1)?,
+                    requests: row.get(2)?,
+                    tokens: row.get(3)?,
+                },
+            ))
+        })?;
+    let mut by_platform = default_platform_map();
+    for row in platform_rows {
+        let (source, stats) = row?;
+        by_platform.insert(source, stats);
+    }
+
+    let series = if include_series {
+        load_home_series(conn, &sql_filter, &local_date)?
+    } else {
+        Vec::new()
+    };
+
+    Ok(HomeAggregates {
+        summary,
+        by_platform,
+        series,
+    })
+}
+
+fn load_home_series(
+    conn: &Connection,
+    sql_filter: &super::filter::SqlFilter,
+    local_date: &str,
+) -> Result<Vec<HomeOverviewSeriesItem>> {
+    let series_sql = format!(
+        r#"
+        /* home_overview_series */
+        SELECT
+            {local_date} AS local_date,
+            source,
+            COUNT(DISTINCT {HOME_SESSION_IDENTITY}) AS sessions,
+            COUNT(*) AS requests,
+            COALESCE(SUM(total_tokens), 0) AS tokens
+        FROM usage_event
+        {}
+        GROUP BY local_date, source
+        ORDER BY local_date ASC
+        "#,
+        sql_filter.where_sql()
+    );
+    let mut stmt = conn.prepare(&series_sql)?;
+    let rows = stmt.query_map(params_from_iter(sql_filter.params().iter()), |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            HomeOverviewPlatformStats {
+                sessions: row.get(2)?,
+                requests: row.get(3)?,
+                tokens: row.get(4)?,
+            },
+        ))
+    })?;
+    let mut by_date: BTreeMap<String, HomeOverviewSeriesItem> = BTreeMap::new();
+    for row in rows {
+        let (date, source, stats) = row?;
+        let item = by_date
+            .entry(date.clone())
+            .or_insert_with(|| HomeOverviewSeriesItem {
+                date,
+                ..Default::default()
+            });
+        match source.as_str() {
+            "claude" => item.claude = stats,
+            "codex" => item.codex = stats,
+            "antigravity" => item.antigravity = stats,
+            "opencode" => item.opencode = stats,
+            _ => {}
+        }
+    }
+    Ok(by_date.into_values().collect())
+}
+
 #[cfg(test)]
 fn collect_query_plan_evidence(
     conn: &Connection,
@@ -295,7 +365,7 @@ fn collect_query_plan_evidence(
     let sql_filter = filter.event_filter(None);
     let local_date = filter.local_date_expr("event_at");
     let sql = format!(
-        "SELECT source, event_key, session_id, source_path_hash, {local_date}, input_tokens, cache_creation_tokens, cache_read_tokens, total_tokens, cost_with_cache_usd FROM usage_event {}",
+        "SELECT COUNT(*) , COUNT(DISTINCT source || ':' || {HOME_SESSION_IDENTITY}), COUNT(DISTINCT {local_date}) FROM usage_event {}",
         sql_filter.where_sql()
     );
     let mut plan_stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
@@ -319,175 +389,6 @@ fn collect_query_plan_evidence(
     Ok(evidence)
 }
 
-#[derive(Debug)]
-struct HomeOverviewEvent {
-    source: String,
-    event_key: String,
-    session_id: Option<String>,
-    source_path_hash: Option<String>,
-    local_date: String,
-    input_tokens: i64,
-    cache_creation_tokens: i64,
-    cache_read_tokens: i64,
-    total_tokens: i64,
-    cost_with_cache_usd: f64,
-}
-
-fn load_event_rows(conn: &Connection, filter: &QueryFilter) -> Result<Vec<HomeOverviewEvent>> {
-    let sql_filter = filter.event_filter(None);
-    let local_date = filter.local_date_expr("event_at");
-    let sql = format!(
-        r#"
-        SELECT
-            source,
-            event_key,
-            session_id,
-            source_path_hash,
-            {local_date} AS local_date,
-            input_tokens,
-            cache_creation_tokens,
-            cache_read_tokens,
-            total_tokens,
-            cost_with_cache_usd
-        FROM usage_event
-        {}
-        "#,
-        sql_filter.where_sql()
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(params_from_iter(sql_filter.params().iter()), |row| {
-        Ok(HomeOverviewEvent {
-            source: row.get(0)?,
-            event_key: row.get(1)?,
-            session_id: row.get(2)?,
-            source_path_hash: row.get(3)?,
-            local_date: row.get(4)?,
-            input_tokens: row.get(5)?,
-            cache_creation_tokens: row.get(6)?,
-            cache_read_tokens: row.get(7)?,
-            total_tokens: row.get(8)?,
-            cost_with_cache_usd: row.get(9)?,
-        })
-    })?;
-    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
-}
-
-#[derive(Default)]
-struct EventAggregate {
-    sessions: HashSet<String>,
-    requests: i64,
-    tokens: i64,
-}
-
-fn session_key(event: &HomeOverviewEvent) -> String {
-    let identity = event
-        .session_id
-        .as_deref()
-        .filter(|value| !value.is_empty())
-        .or_else(|| {
-            event
-                .source_path_hash
-                .as_deref()
-                .filter(|value| !value.is_empty())
-        })
-        .unwrap_or(&event.event_key);
-    format!("{}:{identity}", event.source)
-}
-
-fn summarize_events(events: &[HomeOverviewEvent]) -> HomeOverviewSummary {
-    let mut sessions = HashSet::new();
-    let mut active_days = HashSet::new();
-    let mut platforms = HashSet::new();
-    let mut total_tokens = 0;
-    let mut total_cost_usd = 0.0;
-    let mut input_tokens = 0;
-    let mut cache_creation_tokens = 0;
-    let mut cache_read_tokens = 0;
-    for event in events {
-        sessions.insert(session_key(event));
-        active_days.insert(&event.local_date);
-        platforms.insert(&event.source);
-        total_tokens += event.total_tokens;
-        total_cost_usd += event.cost_with_cache_usd;
-        input_tokens += event.input_tokens;
-        cache_creation_tokens += event.cache_creation_tokens;
-        cache_read_tokens += event.cache_read_tokens;
-    }
-    let cache_denominator = input_tokens + cache_creation_tokens + cache_read_tokens;
-    HomeOverviewSummary {
-        total_sessions: sessions.len() as i64,
-        total_requests: events.len() as i64,
-        total_tokens,
-        total_cost_usd,
-        cache_efficiency: if cache_denominator == 0 {
-            0.0
-        } else {
-            cache_read_tokens as f64 / cache_denominator as f64
-        },
-        active_days: active_days.len() as i64,
-        platforms: platforms.len() as i64,
-    }
-}
-
-fn summarize_by_platform(
-    events: &[HomeOverviewEvent],
-) -> BTreeMap<String, HomeOverviewPlatformStats> {
-    let mut aggregates: HashMap<String, EventAggregate> = HashMap::new();
-    for event in events {
-        let aggregate = aggregates.entry(event.source.clone()).or_default();
-        aggregate.sessions.insert(session_key(event));
-        aggregate.requests += 1;
-        aggregate.tokens += event.total_tokens;
-    }
-    let mut result = default_platform_map();
-    for (source, aggregate) in aggregates {
-        result.insert(
-            source,
-            HomeOverviewPlatformStats {
-                sessions: aggregate.sessions.len() as i64,
-                requests: aggregate.requests,
-                tokens: aggregate.tokens,
-            },
-        );
-    }
-    result
-}
-
-fn summarize_series(events: &[HomeOverviewEvent]) -> Vec<HomeOverviewSeriesItem> {
-    let mut aggregates: BTreeMap<String, HashMap<String, EventAggregate>> = BTreeMap::new();
-    for event in events {
-        let by_source = aggregates.entry(event.local_date.clone()).or_default();
-        let aggregate = by_source.entry(event.source.clone()).or_default();
-        aggregate.sessions.insert(session_key(event));
-        aggregate.requests += 1;
-        aggregate.tokens += event.total_tokens;
-    }
-    aggregates
-        .into_iter()
-        .map(|(date, by_source)| {
-            let mut item = HomeOverviewSeriesItem {
-                date,
-                ..Default::default()
-            };
-            for (source, aggregate) in by_source {
-                let stats = HomeOverviewPlatformStats {
-                    sessions: aggregate.sessions.len() as i64,
-                    requests: aggregate.requests,
-                    tokens: aggregate.tokens,
-                };
-                match source.as_str() {
-                    "claude" => item.claude = stats,
-                    "codex" => item.codex = stats,
-                    "antigravity" => item.antigravity = stats,
-                    "opencode" => item.opencode = stats,
-                    _ => {}
-                }
-            }
-            item
-        })
-        .collect()
-}
-
 fn last_completed_usage_run(conn: &Connection) -> Result<Option<String>> {
     // `hook-run` is retained as a historical run_log label for old databases.
     Ok(conn.query_row(
@@ -507,8 +408,13 @@ fn has_successful_usage_run(conn: &Connection) -> Result<bool> {
 }
 
 fn default_platform_map() -> BTreeMap<String, HomeOverviewPlatformStats> {
-    HOME_PLATFORMS
-        .into_iter()
-        .map(|platform| (platform.to_string(), HomeOverviewPlatformStats::default()))
+    registered_source_descriptors()
+        .iter()
+        .map(|descriptor| {
+            (
+                descriptor.stable_id.to_string(),
+                HomeOverviewPlatformStats::default(),
+            )
+        })
         .collect()
 }

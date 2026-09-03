@@ -1245,7 +1245,7 @@ pub fn load_session_report(
     let mut session_times: BTreeMap<String, Vec<DateTime<FixedOffset>>> = BTreeMap::new();
     let mut totals = TokenTotals::default();
 
-    visit_filtered_events(store, filter, |event| {
+    visit_filtered_events_from(store, filter, None, session_id_filter, |event| {
         let session_id = event_session_id(&event);
         if let Some(wanted) = &wanted {
             let normalized = session_id.to_ascii_lowercase();
@@ -1583,7 +1583,7 @@ fn load_blocks_report_at(
     }
     let mut aggregates: Vec<(DateTime<Utc>, DateTime<Utc>, Aggregate)> = Vec::new();
 
-    visit_filtered_events_from(store, filter, scan.scan_start.as_deref(), |event| {
+    visit_filtered_events_from(store, filter, scan.scan_start.as_deref(), None, |event| {
         scan.scanned_events += 1;
         if aggregates.is_empty() {
             let start = floor_to_hour(event.event_utc);
@@ -2086,7 +2086,7 @@ fn load_conversation_counts(
     }
     let mut clauses = Vec::new();
     let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-    push_event_filter(filter, None, &mut clauses, &mut params);
+    push_event_filter(filter, None, None, &mut clauses, &mut params);
     push_exact_project_hashes("project_hash", project_hashes, &mut clauses, &mut params)?;
     let where_clause = if clauses.is_empty() {
         String::new()
@@ -2255,24 +2255,26 @@ fn parse_sql_local_date(value: String, column: usize) -> rusqlite::Result<NaiveD
     })
 }
 
+#[cfg(test)]
 fn visit_filtered_events<F>(store: &Store, filter: &ReportFilter, visitor: F) -> Result<()>
 where
     F: FnMut(EventRow) -> Result<()>,
 {
-    visit_filtered_events_from(store, filter, None, visitor)
+    visit_filtered_events_from(store, filter, None, None, visitor)
 }
 
 fn visit_filtered_events_from<F>(
     store: &Store,
     filter: &ReportFilter,
     exact_since: Option<&str>,
+    session_id_filter: Option<&str>,
     mut visitor: F,
 ) -> Result<()>
 where
     F: FnMut(EventRow) -> Result<()>,
 {
     let conn = store.open_connection()?;
-    visit_events_filtered(&conn, filter, exact_since, |event| {
+    visit_events_filtered(&conn, filter, exact_since, session_id_filter, |event| {
         if filter_event_post_sql(&event, filter) {
             visitor(event)?;
         }
@@ -2286,6 +2288,7 @@ fn visit_events_filtered<F>(
     conn: &Connection,
     filter: &ReportFilter,
     exact_since: Option<&str>,
+    session_id_filter: Option<&str>,
     mut visitor: F,
 ) -> Result<()>
 where
@@ -2293,7 +2296,13 @@ where
 {
     let mut clauses = Vec::new();
     let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-    push_event_filter(filter, exact_since, &mut clauses, &mut params);
+    push_event_filter(
+        filter,
+        exact_since,
+        session_id_filter,
+        &mut clauses,
+        &mut params,
+    );
 
     let where_clause = if clauses.is_empty() {
         String::new()
@@ -2303,6 +2312,7 @@ where
 
     let sql = format!(
         r#"
+        /* session_event_scan */
         SELECT
             event_key,
             source,
@@ -2327,11 +2337,18 @@ where
         ORDER BY event_at ASC, event_key ASC
         "#
     );
+    #[cfg(test)]
+    EVENT_VISIT_SQL
+        .lock()
+        .expect("event visit SQL lock")
+        .push(sql.clone());
 
     let mut stmt = conn.prepare(&sql)?;
     let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
     let mut rows = stmt.query(param_refs.as_slice())?;
     while let Some(row) = rows.next()? {
+        #[cfg(test)]
+        EVENT_VISIT_ROWS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let event_at: String = row.get(3)?;
         let event_utc = DateTime::parse_from_rfc3339(&event_at)
             .map(|value| value.with_timezone(&Utc))
@@ -2369,9 +2386,15 @@ where
     Ok(())
 }
 
+#[cfg(test)]
+static EVENT_VISIT_SQL: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+#[cfg(test)]
+static EVENT_VISIT_ROWS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 fn push_event_filter(
     filter: &ReportFilter,
     exact_since: Option<&str>,
+    session_id_filter: Option<&str>,
     clauses: &mut Vec<String>,
     params: &mut Vec<Box<dyn rusqlite::ToSql>>,
 ) {
@@ -2414,6 +2437,15 @@ fn push_event_filter(
         let utc_end = local_date_to_utc_start(exclusive, &filter.timezone);
         clauses.push("event_at < ?".to_string());
         params.push(Box::new(utc_end));
+    }
+    if let Some(session_id) = session_id_filter {
+        let wanted = session_id.to_ascii_lowercase();
+        let identity = report_session_identity_sql();
+        clauses.push(format!(
+            "(LOWER({identity}) = ? OR INSTR(LOWER({identity}), ?) > 0)"
+        ));
+        params.push(Box::new(wanted.clone()));
+        params.push(Box::new(wanted));
     }
 }
 
@@ -3939,6 +3971,77 @@ mod tests {
         )?;
         assert_eq!(report.sessions.len(), 1);
         assert_eq!(report.sessions[0].session_id, "codex:pathhash:fingerprint");
+        Ok(())
+    }
+
+    #[test]
+    fn single_session_report_sql_contains_session_predicate() -> Result<()> {
+        let fixture = ReportFixture::new()?;
+        fixture.insert_event(SeedEvent {
+            event_key: "codex:session-sql:keep",
+            source: "codex",
+            model: "gpt-5",
+            event_at: "2026-05-05T00:00:00Z",
+            total_tokens: 12,
+            project_hash: "p1",
+            project_label: "Demo",
+            session_id: "keep-session",
+        })?;
+        fixture.insert_event(SeedEvent {
+            event_key: "codex:session-sql:drop",
+            source: "codex",
+            model: "gpt-5",
+            event_at: "2026-05-05T01:00:00Z",
+            total_tokens: 8,
+            project_hash: "p1",
+            project_label: "Demo",
+            session_id: "other-session",
+        })?;
+        super::EVENT_VISIT_SQL
+            .lock()
+            .expect("event visit SQL lock")
+            .clear();
+        super::EVENT_VISIT_ROWS.store(0, std::sync::atomic::Ordering::Relaxed);
+        let report = load_single_session_report(
+            &fixture.store,
+            &ReportFilter {
+                since: None,
+                until: None,
+                order: SortOrder::Desc,
+                timezone: ReportTimezone::Utc,
+                locale: "en-US".to_string(),
+                source: None,
+                project: None,
+                breakdown: false,
+                host_id: None,
+            },
+            "keep-session",
+        )?;
+        let sqls = super::EVENT_VISIT_SQL.lock().expect("event visit SQL lock");
+        assert!(
+            sqls.iter().any(|sql| {
+                let compact = sql
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .to_ascii_uppercase();
+                compact.contains("INSTR(LOWER(")
+            }),
+            "session --id SQL must push a session identity predicate: {sqls:?}"
+        );
+        assert_eq!(
+            super::EVENT_VISIT_ROWS.load(std::sync::atomic::Ordering::Relaxed),
+            1,
+            "session --id SQL must return only matching events, not a full scan: {sqls:?}"
+        );
+        assert_eq!(
+            report.session.as_ref().map(|row| row.session_id.as_str()),
+            Some("codex:keep-session")
+        );
+        assert_eq!(
+            report.session.as_ref().map(|row| row.totals.total_tokens),
+            Some(12)
+        );
         Ok(())
     }
 

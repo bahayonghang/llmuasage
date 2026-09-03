@@ -46,24 +46,82 @@ pub struct ActivityPayload {
     pub breakdown: Vec<ActivityBreakdown>,
 }
 
-#[derive(Default)]
-struct ActivityAggregate {
-    turns: i64,
-    edit_turns: i64,
-    one_shot_turns: i64,
-    retries: i64,
-    call_count: i64,
-    total_tokens: i64,
-    estimated_cost_usd: f64,
-}
-
 impl Dashboard {
     /// Loads activity category aggregates from normalized `usage_turn` facts.
     ///
     /// This intentionally does not read raw JSONL or frontend-owned data. Cost
-    /// is attribution-only: persisted event costs are looked up by the
+    /// is attribution-only: persisted event costs are joined by the
     /// conservative event key embedded in each turn key.
     pub fn activity_breakdown(&self, filter: &QueryFilter) -> Result<ActivityPayload> {
+        let turn_filter = filter.turn_filter(Some("t"));
+        let support = behavior_support(&self.conn, "usage_turn", filter.turn_filter(None))?;
+        if !support.supported {
+            return Ok(ActivityPayload {
+                support,
+                breakdown: Vec::new(),
+            });
+        }
+        let sql = format!(
+            r#"
+            /* activity_breakdown */
+            SELECT
+                t.category,
+                COUNT(*) AS turns,
+                COALESCE(SUM(t.has_edits), 0) AS edit_turns,
+                COALESCE(SUM(t.one_shot), 0) AS one_shot_turns,
+                COALESCE(SUM(t.retries), 0) AS retries,
+                COALESCE(SUM(t.call_count), 0) AS call_count,
+                COALESCE(SUM(t.total_tokens), 0) AS total_tokens,
+                COALESCE(SUM(e.cost_with_cache_usd), 0.0) AS estimated_cost_usd
+            FROM usage_turn t
+            LEFT JOIN usage_event e ON e.event_key = substr(t.turn_key, 6)
+            {}
+            GROUP BY t.category
+            ORDER BY estimated_cost_usd DESC, total_tokens DESC, turns DESC, t.category ASC
+            "#,
+            turn_filter.where_sql()
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(turn_filter.params().iter()), |row| {
+            let turns = row.get::<_, Option<i64>>(1)?.unwrap_or_default();
+            let edit_turns = row.get::<_, Option<i64>>(2)?.unwrap_or_default();
+            let one_shot_turns = row.get::<_, Option<i64>>(3)?.unwrap_or_default();
+            let retries = row.get::<_, Option<i64>>(4)?.unwrap_or_default();
+            Ok(ActivityBreakdown {
+                category: row.get(0)?,
+                turns,
+                edit_turns,
+                one_shot_turns,
+                retries,
+                call_count: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
+                total_tokens: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
+                estimated_cost_usd: row.get::<_, Option<f64>>(7)?.unwrap_or_default(),
+                one_shot_rate: ratio(one_shot_turns, edit_turns),
+                retry_rate: ratio(retries, turns),
+            })
+        })?;
+        Ok(ActivityPayload {
+            support,
+            breakdown: rows.collect::<rusqlite::Result<Vec<_>>>()?,
+        })
+    }
+
+    #[cfg(test)]
+    pub(super) fn legacy_activity_breakdown(
+        &self,
+        filter: &QueryFilter,
+    ) -> Result<ActivityPayload> {
+        #[derive(Default)]
+        struct ActivityAggregate {
+            turns: i64,
+            edit_turns: i64,
+            one_shot_turns: i64,
+            retries: i64,
+            call_count: i64,
+            total_tokens: i64,
+            estimated_cost_usd: f64,
+        }
+
         let support = behavior_support(&self.conn, "usage_turn", filter.turn_filter(None))?;
         if !support.supported {
             return Ok(ActivityPayload {
@@ -150,56 +208,5 @@ impl Dashboard {
                 .then_with(|| left.category.cmp(&right.category))
         });
         Ok(ActivityPayload { support, breakdown })
-    }
-
-    #[cfg(test)]
-    pub(super) fn legacy_activity_breakdown(
-        &self,
-        filter: &QueryFilter,
-    ) -> Result<ActivityPayload> {
-        let turn_filter = filter.turn_filter(Some("t"));
-        let support = behavior_support(&self.conn, "usage_turn", filter.turn_filter(None))?;
-        let sql = format!(
-            r#"
-            SELECT
-                t.category,
-                COUNT(*) AS turns,
-                COALESCE(SUM(t.has_edits), 0) AS edit_turns,
-                COALESCE(SUM(t.one_shot), 0) AS one_shot_turns,
-                COALESCE(SUM(t.retries), 0) AS retries,
-                COALESCE(SUM(t.call_count), 0) AS call_count,
-                COALESCE(SUM(t.total_tokens), 0) AS total_tokens,
-                COALESCE(SUM(e.cost_with_cache_usd), 0.0) AS estimated_cost_usd
-            FROM usage_turn t
-            LEFT JOIN usage_event e ON e.event_key = substr(t.turn_key, 6)
-            {}
-            GROUP BY t.category
-            ORDER BY estimated_cost_usd DESC, total_tokens DESC, turns DESC, t.category ASC
-            "#,
-            turn_filter.where_sql()
-        );
-        let mut stmt = self.conn.prepare(&sql)?;
-        let rows = stmt.query_map(params_from_iter(turn_filter.params().iter()), |row| {
-            let turns = row.get::<_, Option<i64>>(1)?.unwrap_or_default();
-            let edit_turns = row.get::<_, Option<i64>>(2)?.unwrap_or_default();
-            let one_shot_turns = row.get::<_, Option<i64>>(3)?.unwrap_or_default();
-            let retries = row.get::<_, Option<i64>>(4)?.unwrap_or_default();
-            Ok(ActivityBreakdown {
-                category: row.get(0)?,
-                turns,
-                edit_turns,
-                one_shot_turns,
-                retries,
-                call_count: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
-                total_tokens: row.get::<_, Option<i64>>(6)?.unwrap_or_default(),
-                estimated_cost_usd: row.get::<_, Option<f64>>(7)?.unwrap_or_default(),
-                one_shot_rate: ratio(one_shot_turns, edit_turns),
-                retry_rate: ratio(retries, turns),
-            })
-        })?;
-        Ok(ActivityPayload {
-            support,
-            breakdown: rows.collect::<rusqlite::Result<Vec<_>>>()?,
-        })
     }
 }

@@ -111,6 +111,120 @@ fn source_breakdown_preserves_filtered_latest_event_time() -> Result<()> {
 }
 
 #[test]
+fn source_and_host_last_event_at_use_one_grouped_query() -> Result<()> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static GROUPED: AtomicUsize = AtomicUsize::new(0);
+    static PER_GROUP_MAX: AtomicUsize = AtomicUsize::new(0);
+
+    fn capture(event: rusqlite::trace::TraceEvent<'_>) {
+        let rusqlite::trace::TraceEvent::Stmt(_, sql) = event else {
+            return;
+        };
+        let compact = sql
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_ascii_lowercase();
+        let is_event_max = compact.contains("max(event_at)")
+            && compact.contains("from usage_event")
+            && !compact.contains("explain");
+        if is_event_max && compact.contains("group by") {
+            GROUPED.fetch_add(1, Ordering::Relaxed);
+        }
+        if is_event_max && !compact.contains("group by") {
+            PER_GROUP_MAX.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    let fixture = Fixture::new()?;
+    for event in [
+        SeedEvent {
+            event_key: "codex:last-event:1",
+            event_at: "2026-05-01T00:00:00Z",
+            total_tokens: 10,
+            ..Default::default()
+        },
+        SeedEvent {
+            event_key: "claude:last-event:1",
+            source: "claude",
+            model: "claude-sonnet-4-5",
+            event_at: "2026-05-02T00:00:00Z",
+            total_tokens: 20,
+            ..Default::default()
+        },
+        SeedEvent {
+            event_key: "opencode:last-event:1",
+            source: "opencode",
+            event_at: "2026-05-03T00:00:00Z",
+            total_tokens: 30,
+            ..Default::default()
+        },
+    ] {
+        fixture.seed_event(event)?;
+    }
+
+    let dashboard = Dashboard::open(fixture.store())?;
+    GROUPED.store(0, Ordering::Relaxed);
+    PER_GROUP_MAX.store(0, Ordering::Relaxed);
+    dashboard.conn.trace_v2(
+        rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT,
+        Some(capture),
+    );
+    let sources = dashboard.source_breakdown(&QueryFilter::default())?;
+    let hosts = dashboard.host_breakdown(&QueryFilter::default())?;
+    dashboard
+        .conn
+        .trace_v2(rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT, None);
+
+    assert!(
+        sources.len() >= 2,
+        "need multiple source groups, got {sources:?}"
+    );
+    assert!(!hosts.is_empty());
+    assert_eq!(
+        sources
+            .iter()
+            .find(|row| row.source == "codex")
+            .and_then(|row| row.last_event_at.as_deref()),
+        Some("2026-05-01T00:00:00Z")
+    );
+    assert_eq!(
+        sources
+            .iter()
+            .find(|row| row.source == "claude")
+            .and_then(|row| row.last_event_at.as_deref()),
+        Some("2026-05-02T00:00:00Z")
+    );
+    assert_eq!(
+        sources
+            .iter()
+            .find(|row| row.source == "opencode")
+            .and_then(|row| row.last_event_at.as_deref()),
+        Some("2026-05-03T00:00:00Z")
+    );
+    assert_eq!(
+        hosts
+            .iter()
+            .map(|row| row.last_event_at.as_deref())
+            .max()
+            .flatten(),
+        Some("2026-05-03T00:00:00Z")
+    );
+    assert_eq!(
+        GROUPED.load(Ordering::Relaxed),
+        2,
+        "source and host last_event_at must each issue one grouped MAX query"
+    );
+    assert_eq!(
+        PER_GROUP_MAX.load(Ordering::Relaxed),
+        0,
+        "last_event_at must not issue one MAX(event_at) per group"
+    );
+    Ok(())
+}
+
+#[test]
 fn dashboard_snapshot_keeps_historical_antigravity_usage() -> Result<()> {
     let fixture = Fixture::new()?;
     fixture.seed_event(SeedEvent {
@@ -342,8 +456,7 @@ fn overview_filter_by_date_range_clamps_correctly() -> Result<()> {
     assert_eq!(one_day.bucket_count, 24);
     assert!(one_day.total.total_tokens > 0);
     assert!(
-        one_day.total.total_tokens
-            < dashboard.overview(&Default::default())?.total.total_tokens
+        one_day.total.total_tokens < dashboard.overview(&Default::default())?.total.total_tokens
     );
     Ok(())
 }

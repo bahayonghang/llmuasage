@@ -22,15 +22,19 @@ fn period_turn_counts(
     Ok(counts)
 }
 
-fn query_token_summary(
+struct LifetimeBucketOverview {
+    tokens: TokenSummary,
+    events: i64,
+    cost_usd: f64,
+    source_count: i64,
+    bucket_count: i64,
+}
+
+fn query_lifetime_bucket_overview(
     conn: &Connection,
     filter: &QueryFilter,
-    cutoff: Option<&str>,
-) -> Result<TokenSummary> {
-    let mut sql_filter = filter.bucket_filter(None);
-    if let Some(cutoff) = cutoff {
-        sql_filter.push("hour_start >= ?", cutoff);
-    }
+) -> Result<LifetimeBucketOverview> {
+    let sql_filter = filter.bucket_filter(None);
     let sql = format!(
         r#"
         SELECT
@@ -39,48 +43,56 @@ fn query_token_summary(
             COALESCE(SUM(cache_read_tokens), 0),
             COALESCE(SUM(output_tokens), 0),
             COALESCE(SUM(reasoning_output_tokens), 0),
-            COALESCE(SUM(total_tokens), 0)
+            COALESCE(SUM(total_tokens), 0),
+            COALESCE(SUM(event_count), 0),
+            COALESCE(SUM(cost_with_cache_usd), 0.0),
+            COUNT(DISTINCT source),
+            COUNT(*)
         FROM usage_bucket_30m
         {}
         "#,
         sql_filter.where_sql()
     );
-
     let mut stmt = conn.prepare(&sql)?;
-    Ok(stmt.query_row(
-        params_from_iter(sql_filter.params().iter()),
-        map_token_summary,
-    )?)
+    Ok(
+        stmt.query_row(params_from_iter(sql_filter.params().iter()), |row| {
+            Ok(LifetimeBucketOverview {
+                tokens: map_token_summary(row)?,
+                events: row.get(6)?,
+                cost_usd: row.get(7)?,
+                source_count: row.get(8)?,
+                bucket_count: row.get(9)?,
+            })
+        })?,
+    )
 }
 
-fn query_event_count(conn: &Connection, filter: &QueryFilter, cutoff: Option<&str>) -> Result<i64> {
-    let mut sql_filter = filter.bucket_filter(None);
-    if let Some(cutoff) = cutoff {
-        sql_filter.push("hour_start >= ?", cutoff);
-    }
-    let sql = format!(
-        "SELECT COALESCE(SUM(event_count), 0) FROM usage_bucket_30m{}",
-        sql_filter.where_sql()
-    );
-    scalar_i64(conn, &sql, params_from_iter(sql_filter.params().iter()))
-}
-
-fn query_cost_with_cache(
+fn query_recent_bucket_overview(
     conn: &Connection,
     filter: &QueryFilter,
-    cutoff: Option<&str>,
-) -> Result<f64> {
+    cutoff: &str,
+) -> Result<(TokenSummary, i64)> {
     let mut sql_filter = filter.bucket_filter(None);
-    if let Some(cutoff) = cutoff {
-        sql_filter.push("hour_start >= ?", cutoff);
-    }
+    sql_filter.push("hour_start >= ?", cutoff);
     let sql = format!(
-        "SELECT COALESCE(SUM(cost_with_cache_usd), 0.0) FROM usage_bucket_30m{}",
+        r#"
+        SELECT
+            COALESCE(SUM(input_tokens), 0),
+            COALESCE(SUM(cache_creation_tokens), 0),
+            COALESCE(SUM(cache_read_tokens), 0),
+            COALESCE(SUM(output_tokens), 0),
+            COALESCE(SUM(reasoning_output_tokens), 0),
+            COALESCE(SUM(total_tokens), 0),
+            COALESCE(SUM(event_count), 0)
+        FROM usage_bucket_30m
+        {}
+        "#,
         sql_filter.where_sql()
     );
+    let mut stmt = conn.prepare(&sql)?;
     Ok(
-        conn.query_row(&sql, params_from_iter(sql_filter.params().iter()), |row| {
-            row.get::<_, f64>(0)
+        stmt.query_row(params_from_iter(sql_filter.params().iter()), |row| {
+            Ok((map_token_summary(row)?, row.get(6)?))
         })?,
     )
 }
@@ -308,32 +320,11 @@ pub struct DailyModelPoint {
 impl Dashboard {
     /// Loads top-level lifetime/24h overview metrics plus recent sync/export timestamps.
     pub fn overview(&self, filter: &QueryFilter) -> Result<OverviewPayload> {
-        let total = query_token_summary(&self.conn, filter, None)?;
+        let lifetime = query_lifetime_bucket_overview(&self.conn, filter)?;
         let cutoff = (Utc::now() - Duration::hours(24)).to_rfc3339_opts(SecondsFormat::Secs, true);
-        let last_24h = query_token_summary(&self.conn, filter, Some(&cutoff))?;
-        let total_events = query_event_count(&self.conn, filter, None)?;
-        let last_24h_events = query_event_count(&self.conn, filter, Some(&cutoff))?;
-        let total_cost_usd = query_cost_with_cache(&self.conn, filter, None)?;
-        let cache_efficiency = total.cache_efficiency();
-        let bucket_filter = filter.bucket_filter(None);
-        let source_count_sql = format!(
-            "SELECT COUNT(DISTINCT source) FROM usage_bucket_30m{}",
-            bucket_filter.where_sql()
-        );
-        let source_count = scalar_i64(
-            &self.conn,
-            &source_count_sql,
-            params_from_iter(bucket_filter.params().iter()),
-        )?;
-        let bucket_count_sql = format!(
-            "SELECT COUNT(*) FROM usage_bucket_30m{}",
-            bucket_filter.where_sql()
-        );
-        let bucket_count = scalar_i64(
-            &self.conn,
-            &bucket_count_sql,
-            params_from_iter(bucket_filter.params().iter()),
-        )?;
+        let (last_24h, last_24h_events) =
+            query_recent_bucket_overview(&self.conn, filter, &cutoff)?;
+        let cache_efficiency = lifetime.tokens.cache_efficiency();
         // `hook-run` is retained as a historical run_log label for old databases.
         let last_sync_at = scalar_optional_string(
             &self.conn,
@@ -348,13 +339,13 @@ impl Dashboard {
 
         Ok(OverviewPayload {
             generated_at: now_utc(),
-            total,
+            total: lifetime.tokens,
             last_24h,
-            source_count,
-            bucket_count,
-            total_events,
+            source_count: lifetime.source_count,
+            bucket_count: lifetime.bucket_count,
+            total_events: lifetime.events,
             last_24h_events,
-            total_cost_usd,
+            total_cost_usd: lifetime.cost_usd,
             cache_efficiency,
             last_sync_at,
             last_export_at,

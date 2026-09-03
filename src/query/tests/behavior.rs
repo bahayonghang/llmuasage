@@ -213,16 +213,179 @@ fn behavior_queries_return_activity_and_tool_breakdowns() -> Result<()> {
         assert_eq!(
             serde_json::to_value(dashboard.activity_breakdown(filter)?)?,
             serde_json::to_value(dashboard.legacy_activity_breakdown(filter)?)?,
-            "Activity JSON must match the legacy join/group query for {filter:?}"
+            "Activity JSON must match the pre-SQL hashmap oracle for {filter:?}"
         );
         assert_eq!(
             serde_json::to_value(dashboard.tool_attribution_rows(filter)?)?,
             serde_json::to_value(dashboard.legacy_tool_attribution_rows(filter)?)?,
-            "Tools attribution must match the legacy CTE query for {filter:?}"
+            "Tools attribution must match the pre-SQL rust oracle for {filter:?}"
         );
     }
     Ok(())
 }
+
+#[test]
+fn activity_breakdown_sql_joins_or_filters_usage_event() -> Result<()> {
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static SQL: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    static UNFILTERED: AtomicBool = AtomicBool::new(false);
+
+    fn is_unfiltered_usage_event_scan(sql: &str) -> bool {
+        let compact = sql
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_ascii_lowercase();
+        compact.contains("from usage_event")
+            && !compact.contains("join")
+            && !compact.contains("where")
+            && !compact.contains("group by")
+    }
+
+    fn capture(event: rusqlite::trace::TraceEvent<'_>) {
+        if let rusqlite::trace::TraceEvent::Stmt(_, sql) = event {
+            if is_unfiltered_usage_event_scan(sql) {
+                UNFILTERED.store(true, Ordering::Relaxed);
+            }
+            SQL.lock().expect("activity SQL lock").push(sql.to_string());
+        }
+    }
+
+    let fixture = Fixture::new()?;
+    fixture.seed_event(crate::testing::SeedEvent {
+        event_key: "codex:activity-sql:1",
+        event_at: "2026-05-01T00:00:00Z",
+        hour_start: Some("2026-05-01T00:00:00Z"),
+        total_tokens: 10,
+        cost_with_cache_usd: 1.0,
+        cost_without_cache_usd: 1.0,
+        session_id: Some("session-sql"),
+        ..Default::default()
+    })?;
+    let conn = fixture.store().open_connection()?;
+    conn.execute(
+        r#"
+        INSERT INTO usage_turn(
+            turn_key, source, session_id, source_path_hash, project_hash,
+            primary_model, started_at, category, has_edits, retries,
+            one_shot, call_count, input_tokens, cache_read_tokens,
+            cache_creation_tokens, output_tokens, reasoning_output_tokens,
+            total_tokens, created_at
+        ) VALUES ('turn:codex:activity-sql:1', 'codex', 'session-sql',
+            'path-sql', 'project-test', 'gpt-5', '2026-05-01T00:00:00Z',
+            'coding', 1, 0, 1, 1, 10, 0, 0, 0, 0, 10, '2026-05-01T00:00:00Z')
+        "#,
+        [],
+    )?;
+    drop(conn);
+
+    let dashboard = Dashboard::open(fixture.store())?;
+    SQL.lock().expect("activity SQL lock").clear();
+    UNFILTERED.store(false, Ordering::Relaxed);
+    dashboard.conn.trace_v2(
+        rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT,
+        Some(capture),
+    );
+    let payload = dashboard.activity_breakdown(&QueryFilter::default())?;
+    dashboard
+        .conn
+        .trace_v2(rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT, None);
+
+    assert!(payload.support.supported);
+    assert_eq!(payload.breakdown.len(), 1);
+    assert_eq!(payload.breakdown[0].estimated_cost_usd, 1.0);
+    assert!(
+        !UNFILTERED.load(Ordering::Relaxed),
+        "activity_breakdown must not scan usage_event without JOIN or WHERE: {:?}",
+        SQL.lock().expect("activity SQL lock")
+    );
+    let sqls = SQL.lock().expect("activity SQL lock");
+    assert!(
+        sqls.iter().any(|sql| {
+            let compact = sql
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_ascii_lowercase();
+            compact.contains("from usage_turn") && compact.contains("join usage_event")
+        }),
+        "activity_breakdown must join filtered turns to events: {sqls:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn tool_breakdown_sql_joins_and_groups_attribution() -> Result<()> {
+    use std::sync::Mutex;
+
+    static SQL: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    fn capture(event: rusqlite::trace::TraceEvent<'_>) {
+        if let rusqlite::trace::TraceEvent::Stmt(_, sql) = event {
+            SQL.lock().expect("tool SQL lock").push(sql.to_string());
+        }
+    }
+
+    let fixture = Fixture::new()?;
+    fixture.seed_event(crate::testing::SeedEvent {
+        event_key: "codex:tool-sql:1",
+        event_at: "2026-05-01T00:00:00Z",
+        hour_start: Some("2026-05-01T00:00:00Z"),
+        total_tokens: 10,
+        cost_with_cache_usd: 1.0,
+        cost_without_cache_usd: 1.0,
+        session_id: Some("session-sql"),
+        ..Default::default()
+    })?;
+    let conn = fixture.store().open_connection()?;
+    conn.execute(
+        r#"
+        INSERT INTO usage_tool_call(
+            tool_call_key, turn_key, event_key, source, session_id,
+            source_path_hash, project_hash, model, occurred_at, tool_name,
+            tool_kind, mcp_server, mcp_tool, input_fingerprint, safe_preview, created_at
+        ) VALUES ('tool:codex:tool-sql:1', 'turn:codex:tool-sql:1',
+            'codex:tool-sql:1', 'codex', 'session-sql', 'path-sql',
+            'project-test', 'gpt-5', '2026-05-01T00:00:00Z', 'Read', 'read',
+            NULL, NULL, 'fp-read', 'Read', '2026-05-01T00:00:00Z')
+        "#,
+        [],
+    )?;
+    drop(conn);
+
+    let dashboard = Dashboard::open(fixture.store())?;
+    SQL.lock().expect("tool SQL lock").clear();
+    dashboard.conn.trace_v2(
+        rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT,
+        Some(capture),
+    );
+    let payload = dashboard.tool_breakdown(&QueryFilter::default())?;
+    dashboard
+        .conn
+        .trace_v2(rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT, None);
+
+    assert!(payload.support.supported);
+    assert_eq!(payload.breakdown.len(), 1);
+    assert_eq!(payload.breakdown[0].tool_name, "Read");
+    assert_eq!(payload.breakdown[0].estimated_cost_usd, 1.0);
+    let sqls = SQL.lock().expect("tool SQL lock");
+    assert!(
+        sqls.iter().any(|sql| {
+            let compact = sql
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_ascii_lowercase();
+            compact.contains("from usage_tool_call")
+                && compact.contains("join usage_event")
+                && compact.contains("group by")
+        }),
+        "tool_breakdown must join tools to events and aggregate in SQL: {sqls:?}"
+    );
+    Ok(())
+}
+
 #[test]
 fn activity_serialization_is_identical_before_and_after_v19_index() -> Result<()> {
     let fixture = Fixture::new()?;

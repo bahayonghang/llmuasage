@@ -307,18 +307,9 @@ impl Dashboard {
         let mut sources = rows.collect::<rusqlite::Result<Vec<_>>>()?;
         drop(stmt);
 
+        let last_event_at = last_event_at_by_group(&self.conn, filter, "source")?;
         for source in &mut sources {
-            let mut event_filter = filter.event_filter(None);
-            event_filter.push("source = ?", source.source.clone());
-            let last_event_sql = format!(
-                "SELECT MAX(event_at) FROM usage_event {}",
-                event_filter.where_sql()
-            );
-            source.last_event_at = self.conn.query_row(
-                &last_event_sql,
-                params_from_iter(event_filter.params().iter()),
-                |row| row.get(0),
-            )?;
+            source.last_event_at = last_event_at.get(&source.source).cloned().flatten();
         }
 
         Ok(sources)
@@ -355,18 +346,9 @@ impl Dashboard {
         let mut hosts = rows.collect::<rusqlite::Result<Vec<_>>>()?;
         drop(stmt);
 
+        let last_event_at = last_event_at_by_group(&self.conn, filter, "host_id")?;
         for host in &mut hosts {
-            let mut event_filter = filter.event_filter(None);
-            event_filter.push("host_id = ?", host.host_id.clone());
-            let last_event_sql = format!(
-                "SELECT MAX(event_at) FROM usage_event {}",
-                event_filter.where_sql()
-            );
-            host.last_event_at = self.conn.query_row(
-                &last_event_sql,
-                params_from_iter(event_filter.params().iter()),
-                |row| row.get(0),
-            )?;
+            host.last_event_at = last_event_at.get(&host.host_id).cloned().flatten();
         }
 
         Ok(hosts)
@@ -458,4 +440,32 @@ impl Dashboard {
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
+}
+
+fn last_event_at_by_group(
+    conn: &Connection,
+    filter: &QueryFilter,
+    group_column: &str,
+) -> Result<HashMap<String, Option<String>>> {
+    let event_filter = filter.event_filter(None);
+    let sql = format!(
+        r#"
+        /* last_event_at_grouped */
+        SELECT {group_column}, MAX(event_at)
+        FROM usage_event
+        {}
+        GROUP BY {group_column}
+        "#,
+        event_filter.where_sql()
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params_from_iter(event_filter.params().iter()), |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+    })?;
+    let mut last_event_at = HashMap::new();
+    for row in rows {
+        let (group, event_at) = row?;
+        last_event_at.insert(group, event_at);
+    }
+    Ok(last_event_at)
 }

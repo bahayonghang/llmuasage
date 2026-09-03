@@ -8,7 +8,6 @@ use tokio::sync::{Semaphore, mpsc};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    domain::source_descriptor::registered_source_descriptors,
     query::{
         ContextPressurePayload, DailyTrendPoint, Dashboard, HourlyTrendPoint, ModelBreakdown,
         MonthlyTrendPoint, PeriodDetailRow, QueryFilter, SyncCommandCenterPayload,
@@ -24,6 +23,9 @@ use super::app::{
 
 const TUI_DASHBOARD_QUERY_PERMITS: usize = 5;
 const TUI_RESULT_CHANNEL_CAPACITY: usize = 32;
+
+#[cfg(test)]
+static RUN_QUERY_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 #[derive(Clone)]
 pub(super) struct PanelRequest {
@@ -295,61 +297,15 @@ async fn load_context_pressure(
     cancel: CancellationToken,
     filter: QueryFilter,
 ) -> Result<ContextPressurePayload, String> {
-    if filter.source.is_some() {
-        return run_query(store, semaphore, cancel, move |dashboard| {
-            dashboard
-                .context_pressure(&filter)
-                .map_err(|err| err.to_string())
-        })
-        .await;
-    }
-
-    let mut queries = tokio::task::JoinSet::new();
-    for (index, descriptor) in registered_source_descriptors().iter().enumerate() {
-        let store = store.clone();
-        let semaphore = Arc::clone(&semaphore);
-        let cancel = cancel.clone();
-        let mut source_filter = filter.clone();
-        source_filter.source = Some(descriptor.kind);
-        queries.spawn(async move {
-            let result = run_query(store, semaphore, cancel, move |dashboard| {
-                dashboard
-                    .context_pressure(&source_filter)
-                    .map_err(|err| err.to_string())
-            })
-            .await;
-            (index, result)
-        });
-    }
-
-    let mut parts = Vec::new();
-    let mut first_error = None;
-    while let Some(joined) = queries.join_next().await {
-        match joined {
-            Ok((index, Ok(payload))) => parts.push((index, payload)),
-            Ok((_, Err(err))) => {
-                if first_error.is_none() {
-                    first_error = Some(err);
-                    cancel.cancel();
-                }
-            }
-            Err(err) => {
-                if first_error.is_none() {
-                    first_error = Some(format!("context query task failed: {err}"));
-                    cancel.cancel();
-                }
-            }
-        }
-    }
-    if let Some(err) = first_error {
-        return Err(err);
-    }
-    parts.sort_by_key(|(index, _)| *index);
-    Ok(merge_context_pressure(
-        parts.into_iter().map(|(_, payload)| payload),
-    ))
+    run_query(store, semaphore, cancel, move |dashboard| {
+        dashboard
+            .context_pressure(&filter)
+            .map_err(|err| err.to_string())
+    })
+    .await
 }
 
+#[cfg(test)]
 fn merge_context_pressure(
     parts: impl IntoIterator<Item = ContextPressurePayload>,
 ) -> ContextPressurePayload {
@@ -439,6 +395,8 @@ where
     T: Send + 'static,
     F: FnOnce(&Dashboard) -> Result<T, String> + Send + 'static,
 {
+    #[cfg(test)]
+    RUN_QUERY_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let permit = tokio::select! {
         permit = semaphore.acquire_owned() => permit.map_err(|_| "dashboard query semaphore closed".to_string())?,
         _ = cancel.cancelled() => return Err("dashboard query cancelled".to_string()),
@@ -495,6 +453,31 @@ mod tests {
         let store = Store::new(&paths)?;
         store.bootstrap()?;
         Ok((temp, store))
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn unset_source_context_pressure_opens_one_dashboard() -> Result<()> {
+        let (_temp, store) = temp_store()?;
+        RUN_QUERY_CALLS.store(0, std::sync::atomic::Ordering::Relaxed);
+        let payload = load_context_pressure(
+            store.clone(),
+            Arc::new(Semaphore::new(TUI_DASHBOARD_QUERY_PERMITS)),
+            CancellationToken::new(),
+            QueryFilter::default(),
+        )
+        .await
+        .map_err(anyhow::Error::msg)?;
+        assert_eq!(
+            RUN_QUERY_CALLS.load(std::sync::atomic::Ordering::Relaxed),
+            1,
+            "unset-source context_pressure must call Dashboard::context_pressure once"
+        );
+        let serial = Dashboard::open(&store)?.context_pressure(&QueryFilter::default())?;
+        assert_eq!(
+            serde_json::to_value(&payload)?,
+            serde_json::to_value(&serial)?
+        );
+        Ok(())
     }
 
     #[test]

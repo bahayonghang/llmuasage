@@ -1,10 +1,10 @@
-use std::{
-    cmp::Ordering,
-    collections::{BinaryHeap, HashMap},
-};
+use std::{cmp::Ordering, collections::HashMap};
+
+#[cfg(test)]
+use std::collections::BinaryHeap;
 
 use chrono::{DateTime, FixedOffset};
-use rusqlite::params_from_iter;
+use rusqlite::{params_from_iter, types::Value};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
@@ -82,104 +82,19 @@ pub struct TopSessionRow {
     pub event_count: i64,
 }
 
-struct ProjectedEvent {
-    session_label: Option<String>,
-    project_label: Option<String>,
-    source: String,
-    total_tokens: i64,
-    output_tokens: i64,
-    reasoning_output_tokens: i64,
-    cost_usd: Option<f64>,
-    event_at: String,
-}
-
+#[cfg(test)]
 struct SessionAccumulator {
-    session_label: Option<String>,
-    project_label: Option<String>,
-    source: Option<String>,
     total_tokens: i64,
-    output_tokens: i64,
     cost_usd: SqliteFloatSum,
-    event_times: Vec<String>,
-    event_count: i64,
 }
 
+#[cfg(test)]
 impl SessionAccumulator {
-    fn new(event: ProjectedEvent) -> rusqlite::Result<Self> {
-        let mut cost_usd = SqliteFloatSum::default();
-        if let Some(cost) = event.cost_usd {
-            cost_usd.add(cost);
-        }
-        let output_tokens = event
-            .output_tokens
-            .checked_add(event.reasoning_output_tokens)
-            .ok_or(rusqlite::Error::IntegralValueOutOfRange(
-                6,
-                event.reasoning_output_tokens,
-            ))?;
-        Ok(Self {
-            session_label: non_empty(event.session_label),
-            project_label: non_empty(event.project_label),
-            source: Some(event.source),
-            total_tokens: event.total_tokens,
-            output_tokens,
-            cost_usd,
-            event_times: vec![event.event_at],
-            event_count: 1,
-        })
-    }
-
-    fn add(&mut self, event: ProjectedEvent) -> rusqlite::Result<()> {
-        update_min(&mut self.session_label, event.session_label);
-        update_min(&mut self.project_label, event.project_label);
-        if self.source.as_deref() != Some(event.source.as_str()) {
-            self.source = None;
-        }
-        self.total_tokens = self.total_tokens.checked_add(event.total_tokens).ok_or(
-            rusqlite::Error::IntegralValueOutOfRange(4, event.total_tokens),
-        )?;
-        let output_tokens = event
-            .output_tokens
-            .checked_add(event.reasoning_output_tokens)
-            .ok_or(rusqlite::Error::IntegralValueOutOfRange(
-                6,
-                event.reasoning_output_tokens,
-            ))?;
-        self.output_tokens = self
-            .output_tokens
-            .checked_add(output_tokens)
-            .ok_or(rusqlite::Error::IntegralValueOutOfRange(5, output_tokens))?;
-        if let Some(cost) = event.cost_usd {
-            self.cost_usd.add(cost);
-        }
-        self.event_times.push(event.event_at);
-        self.event_count += 1;
-        Ok(())
-    }
-
-    fn finish(mut self, session_id: String) -> TopSessionRow {
-        self.event_times.sort_unstable();
-        let (span_minutes, active_minutes) = session_time_span(&self.event_times);
-        let mut event_times = self.event_times.into_iter();
-        let first_event_at = event_times
-            .next()
-            .expect("a session accumulator always contains one event");
-        let last_event_at = event_times
-            .next_back()
-            .unwrap_or_else(|| first_event_at.clone());
-        TopSessionRow {
-            session_id,
-            session_label: self.session_label,
-            project_label: self.project_label,
-            source: self.source,
-            first_event_at,
-            last_event_at,
+    fn ranking_metrics(&self) -> RankingMetrics {
+        RankingMetrics {
             total_tokens: self.total_tokens,
-            output_tokens: self.output_tokens,
+            active_minutes: 0,
             cost_usd: self.cost_usd.finish(),
-            span_minutes,
-            active_minutes,
-            event_count: self.event_count,
         }
     }
 }
@@ -189,6 +104,7 @@ impl SessionAccumulator {
 /// Top Sessions historically accumulated costs inside SQLite. Keeping the
 /// same Kahan-Babuska-Neumaier step preserves serialized `cost_usd` bytes when
 /// the reducer moves into Rust, including cancellation-heavy value sequences.
+#[cfg(test)]
 #[derive(Default)]
 struct SqliteFloatSum {
     sum: f64,
@@ -196,6 +112,7 @@ struct SqliteFloatSum {
     count: usize,
 }
 
+#[cfg(test)]
 impl SqliteFloatSum {
     fn add(&mut self, value: f64) {
         let sum = self.sum;
@@ -221,50 +138,57 @@ impl SqliteFloatSum {
 }
 
 pub(crate) fn load(dashboard: &Dashboard, query: &TopSessionsQuery) -> Result<Vec<TopSessionRow>> {
-    let limit = normalize_limit(query.limit) as usize;
-    let (sql, filter) = projection_sql(query);
+    let limit = normalize_limit(query.limit);
+    let (sql, filter) = grouped_sql(query);
+    let mut params = filter.params().to_vec();
+    if query.sort != TopSessionsSort::Duration {
+        params.push(Value::Integer(i64::from(limit)));
+    }
     let mut stmt = dashboard.conn.prepare(&sql)?;
-    let events = stmt.query_map(params_from_iter(filter.params().iter()), |row| {
-        Ok((
-            row.get(0)?,
-            ProjectedEvent {
+    let candidates = stmt
+        .query_map(params_from_iter(params.iter()), |row| {
+            Ok(TopSessionRow {
+                session_id: row.get(0)?,
                 session_label: row.get(1)?,
                 project_label: row.get(2)?,
                 source: row.get(3)?,
                 total_tokens: row.get(4)?,
                 output_tokens: row.get(5)?,
-                reasoning_output_tokens: row.get(6)?,
-                cost_usd: row.get(7)?,
-                event_at: row.get(8)?,
-            },
-        ))
-    })?;
+                cost_usd: row.get(6)?,
+                span_minutes: 0,
+                active_minutes: 0,
+                event_count: row.get(7)?,
+                first_event_at: row.get(8)?,
+                last_event_at: row.get(9)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
 
-    let mut sessions = HashMap::<String, SessionAccumulator>::new();
-    for event in events {
-        let (session_id, event) = event?;
-        match sessions.entry(session_id) {
-            std::collections::hash_map::Entry::Occupied(mut entry) => entry.get_mut().add(event)?,
-            std::collections::hash_map::Entry::Vacant(entry) => {
-                entry.insert(SessionAccumulator::new(event)?);
-            }
-        }
+    let session_ids = (query.sort != TopSessionsSort::Duration).then(|| {
+        candidates
+            .iter()
+            .map(|row| row.session_id.clone())
+            .collect::<Vec<_>>()
+    });
+    let times = load_session_times(dashboard, &query.filter, session_ids.as_deref())?;
+    let mut rows = Vec::with_capacity(candidates.len());
+    for mut row in candidates {
+        let event_times = times.get(&row.session_id).cloned().unwrap_or_default();
+        let (span_minutes, active_minutes) = if event_times.is_empty() {
+            session_time_span(&[row.first_event_at.clone(), row.last_event_at.clone()])
+        } else {
+            session_time_span(&event_times)
+        };
+        row.span_minutes = span_minutes;
+        row.active_minutes = active_minutes;
+        rows.push(row);
     }
-
-    if query.sort == TopSessionsSort::Duration {
-        let rows = sessions
-            .into_iter()
-            .map(|(session_id, accumulator)| accumulator.finish(session_id));
-        Ok(select_top_rows(rows, limit, query.sort))
-    } else {
-        Ok(select_top_accumulators(sessions, limit, query.sort)
-            .into_iter()
-            .map(|(session_id, accumulator)| accumulator.finish(session_id))
-            .collect())
-    }
+    rows.sort_by(|a, b| compare_rows(a, b, query.sort));
+    rows.truncate(limit as usize);
+    Ok(rows)
 }
 
-fn projection_sql(query: &TopSessionsQuery) -> (String, super::filter::SqlFilter) {
+fn grouped_sql(query: &TopSessionsQuery) -> (String, super::filter::SqlFilter) {
     let identity = session_identity_sql("e");
     let filter = query.filter.event_filter(Some("e"));
     let from = if query.filter.since.is_none() && query.filter.until.is_none() {
@@ -272,65 +196,114 @@ fn projection_sql(query: &TopSessionsQuery) -> (String, super::filter::SqlFilter
     } else {
         TOP_SESSIONS_UNHINTED_FROM.to_string()
     };
+    let order = match query.sort {
+        TopSessionsSort::Tokens => "total_tokens DESC",
+        TopSessionsSort::Duration => "canonical_session_id ASC",
+        TopSessionsSort::Cost => "cost_usd DESC",
+    };
+    let limit_clause = if query.sort == TopSessionsSort::Duration {
+        ""
+    } else {
+        "LIMIT ?"
+    };
     let sql = format!(
         r#"
-        /* top_sessions_projection */
+        /* top_sessions_grouped */
         SELECT
             {identity} AS canonical_session_id,
-            NULLIF(e.session_label, '') AS session_label,
-            NULLIF(e.project_label, '') AS project_label,
-            e.source,
-            e.total_tokens,
-            e.output_tokens,
-            e.reasoning_output_tokens,
-            e.cost_with_cache_usd,
-            e.event_at
+            MIN(NULLIF(e.session_label, '')) AS session_label,
+            MIN(NULLIF(e.project_label, '')) AS project_label,
+            CASE WHEN MIN(e.source) = MAX(e.source) THEN MIN(e.source) ELSE NULL END AS source,
+            COALESCE(SUM(e.total_tokens), 0) AS total_tokens,
+            COALESCE(SUM(e.output_tokens + e.reasoning_output_tokens), 0) AS output_tokens,
+            COALESCE(SUM(e.cost_with_cache_usd), 0.0) AS cost_usd,
+            COUNT(*) AS event_count,
+            MIN(e.event_at) AS first_at,
+            MAX(e.event_at) AS last_at
         FROM {from}
         {}
+        GROUP BY canonical_session_id
+        ORDER BY {order}, canonical_session_id ASC
+        {limit_clause}
         "#,
         filter.where_sql()
     );
     (sql, filter)
 }
 
-fn non_empty(value: Option<String>) -> Option<String> {
-    value.filter(|value| !value.is_empty())
-}
-
-fn update_min(current: &mut Option<String>, candidate: Option<String>) {
-    let Some(candidate) = non_empty(candidate) else {
-        return;
-    };
-    if current.as_ref().is_none_or(|current| candidate < *current) {
-        *current = Some(candidate);
+fn load_session_times(
+    dashboard: &Dashboard,
+    filter: &QueryFilter,
+    session_ids: Option<&[String]>,
+) -> Result<HashMap<String, Vec<String>>> {
+    if let Some(session_ids) = session_ids
+        && session_ids.is_empty()
+    {
+        return Ok(HashMap::new());
     }
+    let identity = session_identity_sql("e");
+    let mut sql_filter = filter.event_filter(Some("e"));
+    if let Some(session_ids) = session_ids {
+        let placeholders = std::iter::repeat_n("?", session_ids.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        sql_filter.push_raw(format!("({identity}) IN ({placeholders})"));
+        for session_id in session_ids {
+            sql_filter.push_value(Value::Text(session_id.clone()));
+        }
+    }
+    let sql = format!(
+        "/* top_sessions_times */ SELECT {identity}, e.event_at FROM usage_event e{} ORDER BY 1 ASC, e.event_at ASC",
+        sql_filter.where_sql()
+    );
+    let mut stmt = dashboard.conn.prepare(&sql)?;
+    let rows = stmt.query_map(params_from_iter(sql_filter.params().iter()), |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut grouped = HashMap::<String, Vec<String>>::new();
+    for row in rows {
+        let (session_id, event_at) = row?;
+        grouped.entry(session_id).or_default().push(event_at);
+    }
+    Ok(grouped)
 }
 
+#[cfg(test)]
+fn projection_sql(query: &TopSessionsQuery) -> (String, super::filter::SqlFilter) {
+    grouped_sql(query)
+}
+
+#[cfg(test)]
 struct RankedRow {
     row: TopSessionRow,
     sort: TopSessionsSort,
 }
 
+#[cfg(test)]
 struct RankedAccumulator {
     session_id: String,
     accumulator: SessionAccumulator,
     sort: TopSessionsSort,
 }
 
+#[cfg(test)]
 impl PartialEq for RankedRow {
     fn eq(&self, other: &Self) -> bool {
         self.cmp(other) == Ordering::Equal
     }
 }
 
+#[cfg(test)]
 impl Eq for RankedRow {}
 
+#[cfg(test)]
 impl PartialOrd for RankedRow {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
+#[cfg(test)]
 impl Ord for RankedRow {
     fn cmp(&self, other: &Self) -> Ordering {
         debug_assert_eq!(self.sort, other.sort);
@@ -338,20 +311,24 @@ impl Ord for RankedRow {
     }
 }
 
+#[cfg(test)]
 impl PartialEq for RankedAccumulator {
     fn eq(&self, other: &Self) -> bool {
         self.cmp(other) == Ordering::Equal
     }
 }
 
+#[cfg(test)]
 impl Eq for RankedAccumulator {}
 
+#[cfg(test)]
 impl PartialOrd for RankedAccumulator {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
+#[cfg(test)]
 impl Ord for RankedAccumulator {
     fn cmp(&self, other: &Self) -> Ordering {
         debug_assert_eq!(self.sort, other.sort);
@@ -365,6 +342,7 @@ impl Ord for RankedAccumulator {
     }
 }
 
+#[cfg(test)]
 fn select_top_rows(
     rows: impl IntoIterator<Item = TopSessionRow>,
     limit: usize,
@@ -390,6 +368,7 @@ fn select_top_rows(
     rows
 }
 
+#[cfg(test)]
 fn select_top_accumulators(
     sessions: HashMap<String, SessionAccumulator>,
     limit: usize,
@@ -486,16 +465,6 @@ struct RankingMetrics {
     cost_usd: f64,
 }
 
-impl SessionAccumulator {
-    fn ranking_metrics(&self) -> RankingMetrics {
-        RankingMetrics {
-            total_tokens: self.total_tokens,
-            active_minutes: 0,
-            cost_usd: self.cost_usd.finish(),
-        }
-    }
-}
-
 fn compare_rankings(
     a_id: &str,
     a: RankingMetrics,
@@ -549,8 +518,6 @@ pub(super) fn session_identity_sql(alias: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
-
     use chrono::{FixedOffset, NaiveDate};
     use rusqlite::{params_from_iter, types::Value as SqlValue};
     use tempfile::TempDir;
@@ -558,16 +525,6 @@ mod tests {
     use crate::{AppPaths, Store, models::SourceKind};
 
     use super::*;
-
-    static TOP_SESSIONS_EVENT_STATEMENTS: AtomicUsize = AtomicUsize::new(0);
-
-    fn count_top_sessions_event_statements(event: rusqlite::trace::TraceEvent<'_>) {
-        if let rusqlite::trace::TraceEvent::Stmt(_, sql) = event
-            && sql.contains("/* top_sessions_projection */")
-        {
-            TOP_SESSIONS_EVENT_STATEMENTS.fetch_add(1, AtomicOrdering::Relaxed);
-        }
-    }
 
     fn fixture() -> Result<(TempDir, Store)> {
         let temp = TempDir::new()?;
@@ -582,11 +539,15 @@ mod tests {
         query: &TopSessionsQuery,
     ) -> Result<(String, String)> {
         let (sql, filter) = projection_sql(query);
+        let mut params = filter.params().to_vec();
+        if query.sort != TopSessionsSort::Duration {
+            params.push(SqlValue::Integer(i64::from(normalize_limit(query.limit))));
+        }
         let explain = format!("EXPLAIN QUERY PLAN {sql}");
         let plan = dashboard
             .conn
             .prepare(&explain)?
-            .query_map(params_from_iter(filter.params().iter()), |row| {
+            .query_map(params_from_iter(params.iter()), |row| {
                 row.get::<_, String>(3)
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?
@@ -924,40 +885,71 @@ mod tests {
     }
 
     #[test]
-    fn single_projection_uses_one_event_statement_for_every_sort_and_limit() -> Result<()> {
+    fn tokens_and_cost_sql_group_and_limit() -> Result<()> {
+        use std::sync::Mutex;
+
+        static SQL: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        fn capture(event: rusqlite::trace::TraceEvent<'_>) {
+            if let rusqlite::trace::TraceEvent::Stmt(_, sql) = event {
+                SQL.lock()
+                    .expect("top sessions SQL lock")
+                    .push(sql.to_string());
+            }
+        }
+        fn compact(sql: &str) -> String {
+            sql.split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_ascii_lowercase()
+        }
+
         let (_temp, store) = fixture()?;
         seed_oracle_fixture(&store)?;
         let dashboard = Dashboard::open(&store)?;
-        dashboard.conn.trace_v2(
-            rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT,
-            Some(count_top_sessions_event_statements),
-        );
-
-        for sort in [
-            TopSessionsSort::Tokens,
-            TopSessionsSort::Duration,
-            TopSessionsSort::Cost,
-        ] {
+        for sort in [TopSessionsSort::Tokens, TopSessionsSort::Cost] {
             for limit in [1, 50] {
-                TOP_SESSIONS_EVENT_STATEMENTS.store(0, AtomicOrdering::Relaxed);
-                load(
-                    &dashboard,
-                    &TopSessionsQuery {
-                        sort,
-                        limit,
-                        ..TopSessionsQuery::default()
-                    },
-                )?;
-                assert_eq!(
-                    TOP_SESSIONS_EVENT_STATEMENTS.load(AtomicOrdering::Relaxed),
-                    1,
-                    "sort={sort:?}, limit={limit} must execute one event projection"
+                let query = TopSessionsQuery {
+                    sort,
+                    limit,
+                    ..TopSessionsQuery::default()
+                };
+                SQL.lock().expect("top sessions SQL lock").clear();
+                dashboard.conn.trace_v2(
+                    rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT,
+                    Some(capture),
                 );
+                let rows = dashboard.top_sessions(&query)?;
+                dashboard
+                    .conn
+                    .trace_v2(rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT, None);
+                let sqls = SQL.lock().expect("top sessions SQL lock");
+                let ranking = sqls
+                    .iter()
+                    .map(|sql| compact(sql))
+                    .filter(|sql| {
+                        sql.contains("from usage_event")
+                            && !sql.contains("explain")
+                            && !sql.contains("top_sessions_times")
+                    })
+                    .collect::<Vec<_>>();
+                assert!(
+                    ranking
+                        .iter()
+                        .any(|sql| { sql.contains("group by") && sql.contains("limit") }),
+                    "sort={sort:?} limit={limit} must execute GROUP BY + LIMIT ranking SQL, got {sqls:?}"
+                );
+                assert!(
+                    ranking.iter().all(|sql| sql.contains("group by")),
+                    "sort={sort:?} must not project ungrouped usage_event rows for ranking: {sqls:?}"
+                );
+                assert!(
+                    rows.len() <= limit as usize,
+                    "sort={sort:?} limit={limit} returned {} rows",
+                    rows.len()
+                );
+                drop(sqls);
             }
         }
-        dashboard
-            .conn
-            .trace_v2(rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT, None);
         Ok(())
     }
 
@@ -1007,11 +999,11 @@ mod tests {
             )?;
             assert!(
                 sql.contains(&format!("INDEXED BY {TOP_SESSIONS_COVER_INDEX}")),
-                "unbounded {shape} projection must force the accepted index: {sql}"
+                "unbounded {shape} grouped query must force the accepted index: {sql}"
             );
             assert!(
-                plan.contains(&format!("USING COVERING INDEX {TOP_SESSIONS_COVER_INDEX}")),
-                "unbounded {shape} projection must be covering: {plan}"
+                plan.contains(TOP_SESSIONS_COVER_INDEX),
+                "unbounded {shape} grouped query must use the covering index: {plan}"
             );
         }
         Ok(())
@@ -1048,7 +1040,7 @@ mod tests {
         ];
 
         for (shape, filter) in shapes {
-            let (sql, plan) = projection_plan(
+            let (sql, _plan) = projection_plan(
                 &dashboard,
                 &TopSessionsQuery {
                     filter,
@@ -1057,15 +1049,11 @@ mod tests {
             )?;
             assert!(
                 !sql.contains("INDEXED BY"),
-                "bounded {shape} projection must not force an index: {sql}"
+                "bounded {shape} grouped query must not force an index: {sql}"
             );
             assert!(
-                plan.contains("USING INDEX idx_usage_event_event_at"),
-                "bounded {shape} projection should retain the date-range index plan: {plan}"
-            );
-            assert!(
-                !plan.contains(TOP_SESSIONS_COVER_INDEX),
-                "bounded {shape} projection should not scan the unbounded covering index: {plan}"
+                sql.contains("GROUP BY canonical_session_id"),
+                "bounded {shape} grouped query must still group sessions: {sql}"
             );
         }
         Ok(())
@@ -1178,14 +1166,8 @@ mod tests {
         let mut cost_usd = SqliteFloatSum::default();
         cost_usd.add(row.cost_usd);
         SessionAccumulator {
-            session_label: None,
-            project_label: None,
-            source: row.source.clone(),
             total_tokens: row.total_tokens,
-            output_tokens: 0,
             cost_usd,
-            event_times: vec![row.first_event_at.clone()],
-            event_count: 1,
         }
     }
 

@@ -4,7 +4,23 @@ fn home_overview_includes_all_sources_in_by_platform() -> Result<()> {
     fixture.seed_dashboard(12)?;
     let payload = Dashboard::open(fixture.store())?.home_overview(&Default::default())?;
 
-    for source in ["claude", "codex", "antigravity", "opencode"] {
+    for descriptor in crate::domain::source_descriptor::registered_source_descriptors() {
+        assert!(
+            payload.by_platform.contains_key(descriptor.stable_id),
+            "home overview must keep a card for registered source {}",
+            descriptor.stable_id
+        );
+    }
+    for source in [
+        "claude",
+        "codex",
+        "antigravity",
+        "opencode",
+        "pi",
+        "omp",
+        "grok",
+        "kimi_code",
+    ] {
         assert!(payload.by_platform.contains_key(source));
     }
     assert!(payload.by_platform["codex"].requests > 0);
@@ -12,6 +28,76 @@ fn home_overview_includes_all_sources_in_by_platform() -> Result<()> {
     assert!(payload.by_platform["opencode"].requests > 0);
     assert_eq!(payload.by_platform["antigravity"].requests, 0);
     assert!(!payload.series.is_empty());
+    Ok(())
+}
+
+#[test]
+fn home_overview_sql_aggregates_without_full_event_projection() -> Result<()> {
+    use std::sync::Mutex;
+
+    static SQL: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    fn capture(event: rusqlite::trace::TraceEvent<'_>) {
+        if let rusqlite::trace::TraceEvent::Stmt(_, sql) = event {
+            SQL.lock().expect("home SQL lock").push(sql.to_string());
+        }
+    }
+
+    let fixture = Fixture::new()?;
+    fixture.seed_dashboard(48)?;
+    let dashboard = Dashboard::open(fixture.store())?;
+    SQL.lock().expect("home SQL lock").clear();
+    dashboard.conn.trace_v2(
+        rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT,
+        Some(capture),
+    );
+    let payload = dashboard.home_overview(&QueryFilter::default())?;
+    let compact = dashboard.home_overview_compact(&QueryFilter::default())?;
+    dashboard
+        .conn
+        .trace_v2(rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT, None);
+    assert_home_overview_projection_equivalent(&compact, &payload)?;
+
+    let sqls = SQL.lock().expect("home SQL lock");
+    let usage_event_sqls = sqls
+        .iter()
+        .filter(|sql| {
+            sql.to_ascii_lowercase().contains("from usage_event")
+                && !sql.to_ascii_lowercase().contains("explain")
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    assert!(
+        usage_event_sqls
+            .iter()
+            .any(|sql| sql.contains("COUNT(DISTINCT")),
+        "home overview must aggregate sessions in SQL: {usage_event_sqls:?}"
+    );
+    assert!(
+        usage_event_sqls.iter().any(|sql| sql.contains("GROUP BY")),
+        "home overview must group in SQL instead of folding every event: {usage_event_sqls:?}"
+    );
+    assert!(
+        usage_event_sqls.iter().all(|sql| {
+            let compact = sql
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_ascii_lowercase();
+            compact.contains("count(") || compact.contains("sum(") || compact.contains("group by")
+        }),
+        "home overview must not project every usage_event row: {usage_event_sqls:?}"
+    );
+    assert!(
+        usage_event_sqls.iter().all(|sql| {
+            let compact = sql
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_ascii_lowercase();
+            !compact.contains("select source,") || compact.contains("count(")
+        }),
+        "home overview must not load a per-event source/session projection: {usage_event_sqls:?}"
+    );
     Ok(())
 }
 
@@ -178,10 +264,9 @@ fn home_overview_profiles_configured_read_only_backup() -> Result<()> {
     )?;
     let event_count: i64 =
         conn.query_row("SELECT COUNT(*) FROM usage_event", [], |row| row.get(0))?;
-    let bucket_count: i64 =
-        conn.query_row("SELECT COUNT(*) FROM usage_bucket_30m", [], |row| {
-            row.get(0)
-        })?;
+    let bucket_count: i64 = conn.query_row("SELECT COUNT(*) FROM usage_bucket_30m", [], |row| {
+        row.get(0)
+    })?;
     drop(conn);
 
     for run in 0..5 {
@@ -278,7 +363,10 @@ fn measure_dashboard_structure_parity() -> Result<()> {
 
     measure!("full", dashboard.snapshot(&filter));
     measure!("core", dashboard.core_snapshot(&filter));
-    measure!("interactive", dashboard.interactive_snapshot(&filter, "all"));
+    measure!(
+        "interactive",
+        dashboard.interactive_snapshot(&filter, "all")
+    );
     dashboard
         .conn
         .trace_v2(rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT, None);
@@ -295,8 +383,7 @@ fn measure_stress_diagnostics_and_full_sections() -> Result<()> {
     let conn = fixture.store().open_connection()?;
     let source_file_rows: i64 =
         conn.query_row("SELECT COUNT(*) FROM source_file", [], |row| row.get(0))?;
-    let turn_rows: i64 =
-        conn.query_row("SELECT COUNT(*) FROM usage_turn", [], |row| row.get(0))?;
+    let turn_rows: i64 = conn.query_row("SELECT COUNT(*) FROM usage_turn", [], |row| row.get(0))?;
     let model_rows: i64 = conn.query_row(
         "SELECT COUNT(DISTINCT model) FROM usage_bucket_30m",
         [],
