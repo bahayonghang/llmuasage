@@ -84,6 +84,8 @@ web::bind_server(store, preferred_port, bind_ip, write_exposure) -> Result<Bound
 - Public dashboard filter drops `project_hash` and `host_id` even when those query keys are present.
 - Loopback `POST /api/diagnostics/forget` without `source` returns `missing_source`; unknown
   `source` returns `unknown_source`.
+- Real TCP tests assert an evil Origin or a non-loopback Host cannot POST `/api/jobs` on loopback,
+  while same-origin loopback POST succeeds.
 - CLI help and the English/Chinese Dashboard, Safety, and CLI-reference docs must mention
   the default, flags, SSH behavior, and unauthenticated/TLS-free boundary.
 
@@ -130,7 +132,10 @@ GET /api/hour_of_week  (loopback only)
 ### 3. Contracts
 
 - `loopback_router` retains the full local API, including logs, diagnostics, project breakdowns,
-  job reads, behavior/Explorer reads, and mutation routes guarded by the real TCP peer.
+  job reads, behavior/Explorer reads, and mutation routes guarded by the real TCP peer plus an
+  Origin/Host allowlist of `http://127.0.0.1:<bound-port>`, `http://localhost:<bound-port>`, and
+  `http://[::1]:<bound-port>`. Origin is checked when present; otherwise Host must be a loopback
+  name with the bound port. These headers never select the public vs loopback router.
 - `public_router` is built from a positive allowlist containing only `/`, `/assets/{*path}`,
   `/api/dashboard`, and `/api/health`. Loopback routes are not merged into it.
 - The public dashboard DTO copies an explicit set of aggregate overview, trend, model, source, and
@@ -180,6 +185,8 @@ GET /api/hour_of_week  (loopback only)
   intentional security review.
 - Loopback regression tests cover logs, diagnostics, projects, and job polling in addition to the
   existing write-route tests.
+- Real TCP tests assert an evil Origin or a non-loopback Host cannot POST `/api/jobs` on loopback,
+  while same-origin loopback POST succeeds.
 - English/Chinese README, Dashboard, Safety, and CLI-reference docs state the capability split.
 
 ### 7. Wrong vs Correct

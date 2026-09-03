@@ -1620,7 +1620,7 @@ function setupExport(state) {
 }
 
 function syncOptionsFromState(state) {
-  const options = { rebuild: false };
+  const options = {};
   if (state.filters?.source) {
     options.source = state.filters.source;
   }

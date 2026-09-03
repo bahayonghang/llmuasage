@@ -63,10 +63,11 @@ const WEB_SERVER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Controls whether mutation routes are mounted and how write access is guarded.
 ///
-/// The default is `LocalOnly`, which mounts mutation routes and enforces that
-/// the real TCP peer is a loopback address.  `PublicReadOnly` is set by
-/// `serve --public`: mutation routes are **not mounted at all** (404/405 for
-/// any write attempt), so Host-header spoofing cannot reach them.
+/// The default is `LocalOnly`, which mounts mutation routes and requires a
+/// loopback TCP peer plus an Origin/Host allowlist for the bound port.
+/// `PublicReadOnly` is set by `serve --public`: mutation routes are **not
+/// mounted at all** (404/405 for any write attempt), so Host-header spoofing
+/// cannot reach them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum WriteExposure {
     /// Mutation routes accessible only from loopback peers (default).
@@ -285,6 +286,7 @@ pub struct WebState {
     pub dashboard_query_semaphore: Arc<Semaphore>,
     diagnostics_cache: Arc<DiagnosticsCache>,
     dashboard_query_supervisor: Arc<DashboardQuerySupervisor>,
+    listener_port: u16,
 }
 
 impl WebState {
@@ -317,6 +319,14 @@ impl WebState {
             dashboard_query_semaphore: Arc::new(Semaphore::new(permits.max(1))),
             diagnostics_cache,
             dashboard_query_supervisor: Arc::new(DashboardQuerySupervisor::new()),
+            listener_port: 0,
+        }
+    }
+
+    fn with_listener_port(self, listener_port: u16) -> Self {
+        Self {
+            listener_port,
+            ..self
         }
     }
 }
@@ -436,54 +446,39 @@ pub(crate) async fn bind_server(
 ) -> Result<BoundWebServer> {
     /*
      * ========================================================================
-     * 步骤1：组装本地 Web UI 路由
-     * ========================================================================
-     * 目标：
-     * 1) 只暴露根页面、静态资源和既有 JSON API
-     * 2) 把静态资源分发统一收敛到 assets manifest
-     * 3) 保持 serve 与 export html 共用同一套前端资源
-     */
-    info!("开始组装本地 Web UI 路由");
-
-    // 1.1 创建状态并按监听模式选择显式 route inventory
-    let state = WebState::new(store);
-    let app = match write_exposure {
-        WriteExposure::LocalOnly => loopback_router(),
-        WriteExposure::PublicReadOnly => public_router(),
-    };
-    // 对 CSS/JS/SVG 与 JSON API 做 gzip/br 压缩协商；未发 Accept-Encoding 的客户端不受影响。
-    let app = app.layer(CompressionLayer::new()).with_state(state);
-
-    info!(
-        exposure = ?write_exposure,
-        "完成本地 Web UI 路由组装"
-    );
-
-    /*
-     * ========================================================================
-     * 步骤2：绑定本地监听端口
+     * 步骤1：绑定本地监听端口
      * ========================================================================
      * 目标：
      * 1) 监听调用方指定的 IPv4 地址
      * 2) 复用既有端口探测顺序
-     * 3) 命中端口后立即后台启动 axum 服务
+     * 3) 命中端口后再组装路由，把真实监听端口写入写守卫 allowlist
      */
     info!("开始绑定本地 Web UI 监听端口");
 
-    // 2.1 根据优先端口或默认端口组探测指定的监听地址
     let ports = if let Some(port) = preferred_port {
         vec![port]
     } else {
         vec![37421, 37422, 37423, 0]
     };
 
-    // 2.2 命中可用端口后启动服务并返回最终监听地址
     let mut bind_errors = Vec::new();
     for port in ports {
         let attempted_addr = SocketAddr::new(bind_ip, port);
         match TcpListener::bind(attempted_addr).await {
             Ok(listener) => {
                 let addr = listener.local_addr()?;
+                info!("开始组装本地 Web UI 路由");
+                let state = WebState::new(store).with_listener_port(addr.port());
+                let app = match write_exposure {
+                    WriteExposure::LocalOnly => loopback_router(),
+                    WriteExposure::PublicReadOnly => public_router(),
+                };
+                // 对 CSS/JS/SVG 与 JSON API 做 gzip/br 压缩协商；未发 Accept-Encoding 的客户端不受影响。
+                let app = app.layer(CompressionLayer::new()).with_state(state);
+                info!(
+                    exposure = ?write_exposure,
+                    "完成本地 Web UI 路由组装"
+                );
                 let shutdown = CancellationToken::new();
                 let shutdown_signal = shutdown.clone();
                 let task = tokio::spawn(async move {
@@ -1208,9 +1203,10 @@ struct ForgetRequest {
 async fn api_diagnostics_forget(
     State(state): State<WebState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(payload): Json<ForgetRequest>,
 ) -> Response {
-    if let Some(response) = reject_non_local_write(peer) {
+    if let Some(response) = reject_untrusted_write(peer, &headers, state.listener_port) {
         return response;
     }
     let Some(source_str) = payload.source.as_deref() else {
@@ -1267,15 +1263,34 @@ async fn api_diagnostics_forget(
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct JobStartRequest {
+    recent_days: Option<u32>,
+    source: Option<String>,
+    parallelism: Option<usize>,
+}
+
+impl From<JobStartRequest> for SyncOptions {
+    fn from(request: JobStartRequest) -> Self {
+        Self {
+            rebuild: false,
+            recent_days: request.recent_days,
+            source: request.source,
+            parallelism: request.parallelism,
+        }
+    }
+}
+
 async fn api_jobs_start(
     State(state): State<WebState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    Json(options): Json<SyncOptions>,
+    headers: HeaderMap,
+    Json(request): Json<JobStartRequest>,
 ) -> Response {
-    if let Some(response) = reject_non_local_write(peer) {
+    if let Some(response) = reject_untrusted_write(peer, &headers, state.listener_port) {
         return response;
     }
-    let (job_id, _rx) = match state.jobs.try_start(&state.store, options) {
+    let (job_id, _rx) = match state.jobs.try_start(&state.store, request.into()) {
         Ok(started) => started,
         Err(JobStartError::InvalidRequest(error)) => {
             return (
@@ -1342,8 +1357,9 @@ async fn api_jobs_cancel(
     State(state): State<WebState>,
     Path(id): Path<String>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
 ) -> Response {
-    if let Some(response) = reject_non_local_write(peer) {
+    if let Some(response) = reject_untrusted_write(peer, &headers, state.listener_port) {
         return response;
     }
     if !state.jobs.cancel(&id) {
@@ -1367,6 +1383,20 @@ async fn api_jobs_cancel(
 
 /// Guard for mutation routes in `LocalOnly` mode.
 ///
+/// Requires a loopback TCP peer, then an Origin/Host allowlist for the bound
+/// port. Origin is checked when present; otherwise Host must be a loopback
+/// name with that port. Client headers never replace the peer check.
+fn reject_untrusted_write(
+    peer: SocketAddr,
+    headers: &HeaderMap,
+    listener_port: u16,
+) -> Option<Response> {
+    if let Some(response) = reject_non_local_write(peer) {
+        return Some(response);
+    }
+    reject_cross_site_write(headers, listener_port)
+}
+
 /// Checks the real TCP peer address (not the client-controlled Host header)
 /// so that Host-header spoofing from a remote peer is ineffective.
 fn reject_non_local_write(peer: SocketAddr) -> Option<Response> {
@@ -1378,6 +1408,100 @@ fn reject_non_local_write(peer: SocketAddr) -> Option<Response> {
         "写入 API 只接受本地连接",
         None,
     ))
+}
+
+fn reject_cross_site_write(headers: &HeaderMap, listener_port: u16) -> Option<Response> {
+    if listener_port == 0 {
+        return Some(write_guard_error(
+            "cross_origin_write_rejected",
+            "写入 API 只接受本地面板来源",
+            None,
+        ));
+    }
+    match unique_header(headers, header::ORIGIN) {
+        UniqueHeader::Value(origin) if loopback_write_origin_allowed(origin, listener_port) => None,
+        UniqueHeader::Missing => match unique_header(headers, header::HOST) {
+            UniqueHeader::Value(host) if loopback_write_host_allowed(host, listener_port) => None,
+            _ => Some(write_guard_error(
+                "untrusted_host_write_rejected",
+                "写入 API 只接受本地面板 Host",
+                None,
+            )),
+        },
+        _ => Some(write_guard_error(
+            "cross_origin_write_rejected",
+            "写入 API 只接受本地面板来源",
+            None,
+        )),
+    }
+}
+
+enum UniqueHeader<'a> {
+    Missing,
+    Invalid,
+    Value(&'a str),
+}
+
+fn unique_header(headers: &HeaderMap, name: axum::http::HeaderName) -> UniqueHeader<'_> {
+    let mut values = headers.get_all(name).iter();
+    let Some(value) = values.next() else {
+        return UniqueHeader::Missing;
+    };
+    if values.next().is_some() {
+        return UniqueHeader::Invalid;
+    }
+    match value.to_str() {
+        Ok(text) if !text.trim().is_empty() => UniqueHeader::Value(text),
+        _ => UniqueHeader::Invalid,
+    }
+}
+
+fn loopback_write_origin_allowed(origin: &str, listener_port: u16) -> bool {
+    let origin = origin.trim();
+    let Some(host) = strip_http_scheme(origin) else {
+        return false;
+    };
+    if host
+        .bytes()
+        .any(|byte| matches!(byte, b'/' | b'\\' | b'?' | b'#' | b'@' | 0))
+    {
+        return false;
+    }
+    loopback_write_host_allowed(host, listener_port)
+}
+
+fn strip_http_scheme(origin: &str) -> Option<&str> {
+    origin
+        .get(..7)
+        .filter(|scheme| scheme.eq_ignore_ascii_case("http://"))
+        .and_then(|_| origin.get(7..))
+}
+
+fn loopback_write_host_allowed(host: &str, listener_port: u16) -> bool {
+    let Some((name, port)) = split_host_port(host) else {
+        return false;
+    };
+    port == listener_port && is_allowed_loopback_name(name)
+}
+
+fn split_host_port(host: &str) -> Option<(&str, u16)> {
+    let host = host.trim();
+    if let Some(rest) = host.strip_prefix('[') {
+        let (name, suffix) = rest.split_once(']')?;
+        let port = suffix.strip_prefix(':')?.parse().ok()?;
+        return (!name.is_empty()).then_some((name, port));
+    }
+    let (name, port) = host.rsplit_once(':')?;
+    if name.is_empty() || name.contains(['[', ']', ':']) {
+        return None;
+    }
+    Some((name, port.parse().ok()?))
+}
+
+fn is_allowed_loopback_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case("localhost")
+        || name == "127.0.0.1"
+        || name.eq_ignore_ascii_case("::1")
 }
 
 fn write_guard_error(code: &str, message: &str, detail: Option<String>) -> Response {
@@ -2587,6 +2711,100 @@ mod tests {
         );
     }
 
+    fn header_map(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        for (name, value) in pairs {
+            headers.append(
+                axum::http::HeaderName::from_bytes(name.as_bytes()).expect("header name"),
+                HeaderValue::from_str(value).expect("header value"),
+            );
+        }
+        headers
+    }
+
+    fn write_guard_rejected(
+        peer: SocketAddr,
+        headers: &[(&str, &str)],
+        listener_port: u16,
+    ) -> bool {
+        super::reject_untrusted_write(peer, &header_map(headers), listener_port).is_some()
+    }
+
+    /// SEC-001 unit: loopback writes also require Origin/Host allowlist match.
+    #[test]
+    fn reject_untrusted_write_checks_origin_and_host() {
+        let peer = SocketAddr::from(([127, 0, 0, 1], 9000));
+        let remote = SocketAddr::from(([192, 168, 1, 1], 9000));
+        let port = 37421;
+
+        assert!(
+            !write_guard_rejected(peer, &[("Origin", "http://127.0.0.1:37421")], port),
+            "same-origin 127.0.0.1 must be allowed"
+        );
+        assert!(
+            !write_guard_rejected(peer, &[("Origin", "http://localhost:37421")], port),
+            "same-origin localhost must be allowed"
+        );
+        assert!(
+            !write_guard_rejected(peer, &[("Origin", "http://[::1]:37421")], port),
+            "same-origin [::1] must be allowed"
+        );
+        assert!(
+            !write_guard_rejected(peer, &[("Host", "127.0.0.1:37421")], port),
+            "loopback Host without Origin must be allowed"
+        );
+        assert!(
+            !write_guard_rejected(peer, &[("Host", "localhost:37421")], port),
+            "localhost Host without Origin must be allowed"
+        );
+
+        assert!(
+            write_guard_rejected(peer, &[("Origin", "https://evil.example")], port),
+            "cross-site Origin must be rejected"
+        );
+        assert!(
+            write_guard_rejected(
+                peer,
+                &[
+                    ("Origin", "https://evil.example"),
+                    ("Host", "127.0.0.1:37421")
+                ],
+                port
+            ),
+            "evil Origin must win over a loopback Host"
+        );
+        assert!(
+            write_guard_rejected(peer, &[("Host", "evil.example")], port),
+            "non-loopback Host without Origin must be rejected"
+        );
+        assert!(
+            write_guard_rejected(peer, &[("Host", "127.0.0.1:80")], port),
+            "loopback Host with the wrong port must be rejected"
+        );
+        assert!(
+            write_guard_rejected(peer, &[], port),
+            "missing Origin and Host must be rejected"
+        );
+        assert!(
+            write_guard_rejected(remote, &[("Origin", "http://127.0.0.1:37421")], port),
+            "non-loopback peer must be rejected even with a matching Origin"
+        );
+        assert!(
+            write_guard_rejected(peer, &[("Origin", "http://127.0.0.1:37421")], 0),
+            "unset listener port must fail closed"
+        );
+    }
+
+    #[test]
+    fn http_job_start_request_drops_rebuild() {
+        let request: super::JobStartRequest =
+            serde_json::from_str(r#"{"rebuild":true,"source":"codex"}"#)
+                .expect("HTTP job body still deserializes when rebuild is present");
+        let options = SyncOptions::from(request);
+        assert!(!options.rebuild, "HTTP jobs must not accept rebuild");
+        assert_eq!(options.source.as_deref(), Some("codex"));
+    }
+
     #[tokio::test]
     async fn server_task_errors_and_panics_are_observable() {
         let failed = tokio::spawn(async { Err(std::io::Error::other("listener failed")) });
@@ -2628,6 +2846,14 @@ mod tests {
     ) -> anyhow::Result<(StatusCode, serde_json::Value)> {
         let method = method.to_string();
         let path = path.to_string();
+        let has_host = headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("host"));
+        let host_header = if has_host {
+            String::new()
+        } else {
+            format!("Host: {addr}\r\n")
+        };
         let headers = headers
             .iter()
             .map(|(name, value)| format!("{name}: {value}\r\n"))
@@ -2639,7 +2865,7 @@ mod tests {
             let body = body.unwrap_or_default();
             let request = format!(
                 "{method} {path} HTTP/1.1\r\n\
-                 Host: {addr}\r\n\
+                 {host_header}\
                  {headers}\
                  Content-Type: application/json\r\n\
                  Accept: application/json\r\n\
@@ -3979,6 +4205,15 @@ mod tests {
             .expect("app.js asset")
             .body;
         assert!(app_js.contains("postJson('/api/jobs', syncOptionsFromState(state))"));
+        let sync_options = app_js
+            .split("function syncOptionsFromState(state)")
+            .nth(1)
+            .and_then(|rest| rest.split("async function postJson").next())
+            .expect("syncOptionsFromState");
+        assert!(
+            !sync_options.contains("rebuild"),
+            "live UI must not post rebuild on HTTP jobs"
+        );
         assert!(app_js.contains("/api/jobs/${encodeURIComponent(state.activeJobId)}/cancel"));
         assert!(app_js.contains("pollJobUntilTerminal(state, state.activeJobId)"));
         assert!(app_js.contains("await reloadDashboard(state)"));
@@ -4750,12 +4985,12 @@ mod tests {
         Ok(())
     }
 
-    /// SEC-001: mutation routes in LocalOnly mode require a loopback peer.
-    /// Cross-origin headers are ignored — only the real peer IP matters.
+    /// SEC-001: a cross-site Origin must not mutate through a loopback peer.
+    /// Pre-change code ignored Origin and returned 2xx for `{}`; this test
+    /// must fail against that behavior.
     #[tokio::test]
-    async fn write_apis_require_loopback_peer_not_headers() -> anyhow::Result<()> {
+    async fn write_apis_reject_cross_origin_on_loopback() -> anyhow::Result<()> {
         let (_temp, store) = make_store()?;
-        // Use bind_server + explicit shutdown to avoid dangling background tasks.
         let server = bind_server(
             store,
             Some(0),
@@ -4765,15 +5000,98 @@ mod tests {
         .await?;
         let addr = server.addr();
 
-        // Send invalid JSON so axum returns 422 without spawning a real sync job.
-        // 422 proves the route is mounted and the loopback check passed (no 403/404/405).
-        let (status, _body) = route_text(addr, "POST", "/api/jobs").await?;
-        assert!(
-            status != StatusCode::FORBIDDEN
-                && status != StatusCode::NOT_FOUND
-                && status != StatusCode::METHOD_NOT_ALLOWED,
-            "loopback peer must reach POST /api/jobs regardless of Origin header, got {status}"
+        let (status, payload) = route_json_with_headers(
+            addr,
+            "POST",
+            "/api/jobs",
+            Some("{}".into()),
+            &[("Origin", "https://evil.example")],
+        )
+        .await?;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "cross-site Origin must not reach POST /api/jobs, got {status} {payload}"
         );
+        assert_eq!(payload["error"]["code"], "cross_origin_write_rejected");
+
+        server.shutdown().await?;
+        Ok(())
+    }
+
+    /// SEC-001: missing Origin plus a non-loopback Host is not a local write.
+    #[tokio::test]
+    async fn write_apis_reject_non_loopback_host_without_origin() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let server = bind_server(
+            store,
+            Some(0),
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            WriteExposure::LocalOnly,
+        )
+        .await?;
+        let addr = server.addr();
+
+        let (status, payload) = route_json_with_headers(
+            addr,
+            "POST",
+            "/api/jobs",
+            Some("{}".into()),
+            &[("Host", "evil.example")],
+        )
+        .await?;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "non-loopback Host without Origin must not reach POST /api/jobs, got {status} {payload}"
+        );
+        assert_eq!(payload["error"]["code"], "untrusted_host_write_rejected");
+
+        server.shutdown().await?;
+        Ok(())
+    }
+
+    /// SEC-001: same-origin dashboard POST and curl-style loopback Host still work.
+    #[tokio::test]
+    async fn write_apis_accept_same_origin_loopback_post() -> anyhow::Result<()> {
+        let (temp, store) = make_store()?;
+        let home = temp.path().join("home");
+        let codex_home = temp.path().join("codex-home");
+        std::fs::create_dir_all(&home)?;
+        std::fs::create_dir_all(codex_home.join("sessions"))?;
+        let _env = EnvGuard::set([
+            ("HOME", home.to_string_lossy().to_string()),
+            ("USERPROFILE", home.to_string_lossy().to_string()),
+            ("CODEX_HOME", codex_home.to_string_lossy().to_string()),
+        ]);
+        let server = bind_server(
+            store,
+            Some(0),
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            WriteExposure::LocalOnly,
+        )
+        .await?;
+        let addr = server.addr();
+        let body = serde_json::to_string(&SyncOptions {
+            source: Some("codex".to_string()),
+            ..Default::default()
+        })?;
+        let origin = format!("http://127.0.0.1:{}", addr.port());
+
+        let (status, payload) = route_json_with_headers(
+            addr,
+            "POST",
+            "/api/jobs",
+            Some(body),
+            &[("Origin", origin.as_str())],
+        )
+        .await?;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "same-origin loopback POST /api/jobs must succeed: {payload}"
+        );
+        assert!(payload["job_id"].is_string());
 
         server.shutdown().await?;
         Ok(())
