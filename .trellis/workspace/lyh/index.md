@@ -7,9 +7,9 @@
 ## Current Status
 
 <!-- @@@auto:current-status -->
-- **Active File**: `journal-1.md`
-- **Total Sessions**: 67
-- **Last Active**: 2026-08-31
+- **Active File**: `journal-2.md`
+- **Total Sessions**: 68
+- **Last Active**: 2026-09-03
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,8 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~2011 | Active |
+| `journal-2.md` | ~30 | Active |
+| `journal-1.md` | ~2011 | Archived |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 68 | 2026-09-03 | 依赖扫描与分批升级 | `437e62f`, `cd1b433`, `95c4288` | `dev` |
 | 67 | 2026-08-31 | 依赖扫描与分批升级 | `eff9bf9`, `d3ddc7d`, `e13c6ee`, `6afb803`, `3276290` | `dev` |
 | 66 | 2026-08-29 | Dashboard 运行状态独立区块与事件日志布局收敛 | `a20171f` | `dev` |
 | 65 | 2026-08-23 | 重组测试套件并补齐高风险回归 | `dea573e` | `dev` |
