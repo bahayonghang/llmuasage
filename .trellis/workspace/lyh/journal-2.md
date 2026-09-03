@@ -28,3 +28,26 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 69: 按业务风险补齐核心测试覆盖
+
+**Date**: 2026-09-03
+**Task**: 按业务风险补齐核心测试覆盖
+**Branch**: `dev`
+
+### Summary
+
+静态盘点 933 个 Rust 测试后，按风险补齐 write_transaction 回滚、reset 保留运维表、cursor JSON、query/logs 边界、public host 剥离、forget/explorer 400、sync/remote/subscription 校验。全量 1030 passed。dashboard 未知 source/window/timezone 静默退化未改。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b5234b4` | (see git log) |
+| `c48f8a9` | (see git log) |
+| `010f4dc` | (see git log) |
+
+### Status
+
+[OK] **Completed**
