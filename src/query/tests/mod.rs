@@ -62,3 +62,4 @@ include!("comparison.rs");
 include!("trends.rs");
 include!("pricing.rs");
 include!("facade_performance.rs");
+include!("report_facade.rs");

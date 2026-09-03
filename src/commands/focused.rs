@@ -2,10 +2,15 @@ use anyhow::{Result, bail};
 use clap::{Args, Subcommand};
 use tracing::debug;
 
+use rusqlite::Connection;
+
 use crate::{
     app::AppContext,
     models::SourceKind,
-    query::reports::{self, PeriodKind},
+    query::{
+        Dashboard,
+        reports::{self, PeriodKind},
+    },
     store::Store,
     tui::report_table,
 };
@@ -82,6 +87,8 @@ async fn run_daily(app: &AppContext, source: SourceKind, args: DailyArgs) -> Res
     );
     let store = Store::new(&app.paths)?;
     store.require_initialized()?;
+    let dashboard = Dashboard::open(&store)?;
+    let conn = dashboard.connection();
     let mut filter = args.common.to_filter(&store, args.project.clone())?;
     if args.all && (filter.since.is_some() || filter.until.is_some()) {
         bail!("--all cannot be combined with --since or --until");
@@ -89,7 +96,7 @@ async fn run_daily(app: &AppContext, source: SourceKind, args: DailyArgs) -> Res
 
     if !args.unified.sections.is_empty() {
         let reports = focused_sections(
-            &store,
+            conn,
             &filter,
             source,
             PeriodKind::Daily,
@@ -97,7 +104,7 @@ async fn run_daily(app: &AppContext, source: SourceKind, args: DailyArgs) -> Res
             args.all,
         )?;
         print_focused_sections(
-            &store,
+            conn,
             &filter,
             &reports,
             source,
@@ -112,9 +119,9 @@ async fn run_daily(app: &AppContext, source: SourceKind, args: DailyArgs) -> Res
     if !args.all {
         unified_report::apply_daily_default(&mut filter);
     }
-    let report = reports::load_unified_report(&store, &filter, PeriodKind::Daily)?;
+    let report = reports::load_unified_report(conn, &filter, PeriodKind::Daily)?;
     print_focused_report(
-        &store,
+        conn,
         &filter,
         &unified_report::focused_report(&report, source),
         source,
@@ -138,12 +145,14 @@ async fn run_period(
     );
     let store = Store::new(&app.paths)?;
     store.require_initialized()?;
+    let dashboard = Dashboard::open(&store)?;
+    let conn = dashboard.connection();
     let filter = common.to_filter(&store, None)?;
 
     if !unified.sections.is_empty() {
-        let reports = focused_sections(&store, &filter, source, kind, &unified, false)?;
+        let reports = focused_sections(conn, &filter, source, kind, &unified, false)?;
         return print_focused_sections(
-            &store,
+            conn,
             &filter,
             &reports,
             source,
@@ -154,9 +163,9 @@ async fn run_period(
         );
     }
 
-    let report = reports::load_unified_report(&store, &filter, kind)?;
+    let report = reports::load_unified_report(conn, &filter, kind)?;
     print_focused_report(
-        &store,
+        conn,
         &filter,
         &unified_report::focused_report(&report, source),
         source,
@@ -177,11 +186,13 @@ async fn run_session(app: &AppContext, source: SourceKind, args: SessionArgs) ->
     );
     let store = Store::new(&app.paths)?;
     store.require_initialized()?;
+    let dashboard = Dashboard::open(&store)?;
+    let conn = dashboard.connection();
     let filter = args.common.to_filter(&store, args.project.clone())?;
 
     if !args.unified.sections.is_empty() {
         let reports = focused_sections(
-            &store,
+            conn,
             &filter,
             source,
             PeriodKind::Session,
@@ -189,7 +200,7 @@ async fn run_session(app: &AppContext, source: SourceKind, args: SessionArgs) ->
             false,
         )?;
         return print_focused_sections(
-            &store,
+            conn,
             &filter,
             &reports,
             source,
@@ -200,9 +211,9 @@ async fn run_session(app: &AppContext, source: SourceKind, args: SessionArgs) ->
         );
     }
 
-    let report = reports::load_unified_session_report(&store, &filter, args.id.as_deref())?;
+    let report = reports::load_unified_session_report(conn, &filter, args.id.as_deref())?;
     print_focused_report(
-        &store,
+        conn,
         &filter,
         &unified_report::focused_report(&report, source),
         source,
@@ -213,14 +224,14 @@ async fn run_session(app: &AppContext, source: SourceKind, args: SessionArgs) ->
 }
 
 fn focused_sections(
-    store: &Store,
+    conn: &Connection,
     filter: &reports::ReportFilter,
     source: SourceKind,
     command_kind: PeriodKind,
     unified: &UnifiedReportArgs,
     daily_all: bool,
 ) -> Result<Vec<reports::UnifiedReport>> {
-    unified_report::load_sections(store, filter, command_kind, &unified.sections, daily_all).map(
+    unified_report::load_sections(conn, filter, command_kind, &unified.sections, daily_all).map(
         |reports| {
             reports
                 .iter()
@@ -231,7 +242,7 @@ fn focused_sections(
 }
 
 fn print_focused_report(
-    store: &Store,
+    conn: &Connection,
     filter: &reports::ReportFilter,
     report: &reports::UnifiedReport,
     source: SourceKind,
@@ -241,7 +252,7 @@ fn print_focused_report(
 ) -> Result<()> {
     if json {
         let mut value = unified_report::focused_report_json(report, no_cost)?;
-        unified_report::attach_hosts_json(store, filter, report.kind, &mut value, no_cost)?;
+        unified_report::attach_hosts_json(conn, filter, report.kind, &mut value, no_cost)?;
         println!("{}", serde_json::to_string_pretty(&value)?);
     } else {
         println!(
@@ -254,14 +265,14 @@ fn print_focused_report(
                 report_table::ColorMode::from_env()
             )
         );
-        unified_report::print_host_section(store, filter, report.kind, compact, no_cost)?;
+        unified_report::print_host_section(conn, filter, report.kind, compact, no_cost)?;
     }
     Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
 fn print_focused_sections(
-    store: &Store,
+    conn: &Connection,
     filter: &reports::ReportFilter,
     reports: &[reports::UnifiedReport],
     source: SourceKind,
@@ -272,7 +283,7 @@ fn print_focused_sections(
 ) -> Result<()> {
     if json {
         let mut payload = unified_report::focused_sections_json(reports, command_kind, no_cost)?;
-        unified_report::attach_hosts_ordered(store, filter, command_kind, &mut payload, no_cost)?;
+        unified_report::attach_hosts_ordered(conn, filter, command_kind, &mut payload, no_cost)?;
         println!("{}", serde_json::to_string_pretty(&payload)?);
     } else {
         let color_mode = report_table::ColorMode::from_env();
@@ -285,7 +296,7 @@ fn print_focused_sections(
                 report_table::render_focused_table(report, source, compact, no_cost, color_mode)
             );
         }
-        unified_report::print_host_section(store, filter, command_kind, compact, no_cost)?;
+        unified_report::print_host_section(conn, filter, command_kind, compact, no_cost)?;
     }
     Ok(())
 }

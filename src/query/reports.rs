@@ -1,19 +1,22 @@
-use std::collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque};
+use std::{
+    collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque},
+    ops::{Deref, DerefMut},
+};
 
 use anyhow::Result;
 use chrono::{
     DateTime, Datelike, Duration, FixedOffset, Local, NaiveDate, Offset, SecondsFormat, Timelike,
     Utc,
 };
-use rusqlite::Connection;
+use rusqlite::{Connection, params_from_iter, types::Value};
 use serde::Serialize;
 use tracing::debug;
 
 pub use super::ReportTimezone;
+use super::{QueryFilter, filter::SqlFilter};
 use crate::{
     domain::source_descriptor::{registered_source_descriptors, source_descriptor},
     models::SourceKind,
-    store::Store,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,15 +27,43 @@ pub enum SortOrder {
 
 #[derive(Debug, Clone)]
 pub struct ReportFilter {
-    pub since: Option<NaiveDate>,
-    pub until: Option<NaiveDate>,
+    pub filter: QueryFilter,
     pub order: SortOrder,
-    pub timezone: ReportTimezone,
     pub locale: String,
-    pub source: Option<SourceKind>,
     pub project: Option<String>,
     pub breakdown: bool,
-    pub host_id: Option<String>,
+}
+
+impl Default for ReportFilter {
+    fn default() -> Self {
+        Self {
+            filter: QueryFilter::default(),
+            order: SortOrder::Desc,
+            locale: "en-US".to_string(),
+            project: None,
+            breakdown: false,
+        }
+    }
+}
+
+impl ReportFilter {
+    pub fn query(&self) -> &QueryFilter {
+        &self.filter
+    }
+}
+
+impl Deref for ReportFilter {
+    type Target = QueryFilter;
+
+    fn deref(&self) -> &Self::Target {
+        &self.filter
+    }
+}
+
+impl DerefMut for ReportFilter {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.filter
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -596,14 +627,14 @@ fn add_token_totals(target: &mut TokenTotals, source: &TokenTotals) {
     target.estimated_cost_usd += source.estimated_cost_usd;
 }
 
-pub fn load_daily_report(store: &Store, filter: &ReportFilter) -> Result<DailyReport> {
+pub fn load_daily_report(conn: &Connection, filter: &ReportFilter) -> Result<DailyReport> {
     let conversation_scope = if filter.project.is_some() {
         ConversationScope::Overall
     } else {
         ConversationScope::None
     };
     let bundle =
-        load_period_aggregate_bundle(store, filter, PeriodSpec::Daily, false, conversation_scope)?;
+        load_period_aggregate_bundle(conn, filter, PeriodSpec::Daily, false, conversation_scope)?;
     Ok(build_daily_report(
         filter,
         bundle.overall,
@@ -614,12 +645,12 @@ pub fn load_daily_report(store: &Store, filter: &ReportFilter) -> Result<DailyRe
 
 #[cfg(test)]
 fn load_daily_report_from_event_oracle(
-    store: &Store,
+    conn: &Connection,
     filter: &ReportFilter,
 ) -> Result<DailyReport> {
     let mut groups: BTreeMap<String, Aggregate> = BTreeMap::new();
     let mut totals = TokenTotals::default();
-    visit_filtered_events(store, filter, |event| {
+    visit_filtered_events(conn, filter, |event| {
         groups
             .entry(daily_period_key(event.local_at.date_naive()))
             .or_default()
@@ -637,13 +668,13 @@ fn load_daily_report_from_event_oracle(
 
 #[cfg(test)]
 fn load_unified_daily_from_event_oracle(
-    store: &Store,
+    conn: &Connection,
     filter: &ReportFilter,
 ) -> Result<UnifiedReport> {
-    let aggregate = load_daily_report_from_event_oracle(store, filter)?;
+    let aggregate = load_daily_report_from_event_oracle(conn, filter)?;
     let mut source_groups = SourcePeriodGroups::new();
     let mut source_totals = SourcePeriodTotals::new();
-    visit_filtered_events(store, filter, |event| {
+    visit_filtered_events(conn, filter, |event| {
         let Some(source) = SourceKind::parse_id(&event.source) else {
             return Ok(());
         };
@@ -689,7 +720,7 @@ fn load_unified_daily_from_event_oracle(
 }
 
 pub fn load_daily_reports_by_source(
-    store: &Store,
+    conn: &Connection,
     filter: &ReportFilter,
 ) -> Result<Vec<(SourceKind, DailyReport)>> {
     let conversation_scope = if filter.project.is_some() {
@@ -698,7 +729,7 @@ pub fn load_daily_reports_by_source(
         ConversationScope::None
     };
     let bundle =
-        load_period_aggregate_bundle(store, filter, PeriodSpec::Daily, false, conversation_scope)?;
+        load_period_aggregate_bundle(conn, filter, PeriodSpec::Daily, false, conversation_scope)?;
     Ok(build_daily_reports_by_source(
         filter,
         bundle.by_source,
@@ -723,23 +754,6 @@ fn week_start(date: NaiveDate) -> NaiveDate {
 }
 
 fn load_period_aggregate_bundle(
-    store: &Store,
-    filter: &ReportFilter,
-    spec: PeriodSpec,
-    include_projects: bool,
-    conversation_scope: ConversationScope,
-) -> Result<PeriodAggregateBundle> {
-    let conn = store.open_connection()?;
-    load_period_aggregate_bundle_from_conn(
-        &conn,
-        filter,
-        spec,
-        include_projects,
-        conversation_scope,
-    )
-}
-
-fn load_period_aggregate_bundle_from_conn(
     conn: &Connection,
     filter: &ReportFilter,
     spec: PeriodSpec,
@@ -866,13 +880,12 @@ fn set_bundle_conversation_count(
     }
 }
 
-fn host_identities(store: &Store) -> Result<BTreeMap<String, String>> {
-    Ok(store
-        .hosts()
-        .list()?
-        .into_iter()
-        .map(|host| (host.host_id, host.label))
-        .collect())
+fn host_identities(conn: &Connection) -> Result<BTreeMap<String, String>> {
+    let mut stmt = conn.prepare("SELECT host_id, label FROM host")?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    Ok(rows.collect::<rusqlite::Result<BTreeMap<_, _>>>()?)
 }
 
 fn host_identity(labels: &BTreeMap<String, String>, host_id: &str) -> HostIdentity {
@@ -950,7 +963,7 @@ fn build_daily_report(
 }
 
 pub fn load_daily_project_report(
-    store: &Store,
+    conn: &Connection,
     filter: &ReportFilter,
 ) -> Result<DailyProjectReport> {
     let conversation_scope = if filter.project.is_some() {
@@ -959,7 +972,7 @@ pub fn load_daily_project_report(
         ConversationScope::None
     };
     let bundle =
-        load_period_aggregate_bundle(store, filter, PeriodSpec::Daily, true, conversation_scope)?;
+        load_period_aggregate_bundle(conn, filter, PeriodSpec::Daily, true, conversation_scope)?;
     Ok(build_daily_project_report(
         filter,
         bundle.by_project,
@@ -993,9 +1006,9 @@ fn build_daily_project_report(
     DailyProjectReport { projects, totals }
 }
 
-pub fn load_monthly_report(store: &Store, filter: &ReportFilter) -> Result<MonthlyReport> {
+pub fn load_monthly_report(conn: &Connection, filter: &ReportFilter) -> Result<MonthlyReport> {
     let bundle = load_period_aggregate_bundle(
-        store,
+        conn,
         filter,
         PeriodSpec::Monthly,
         false,
@@ -1010,11 +1023,11 @@ pub fn load_monthly_report(store: &Store, filter: &ReportFilter) -> Result<Month
 }
 
 pub fn load_monthly_reports_by_source(
-    store: &Store,
+    conn: &Connection,
     filter: &ReportFilter,
 ) -> Result<Vec<(SourceKind, MonthlyReport)>> {
     let bundle = load_period_aggregate_bundle(
-        store,
+        conn,
         filter,
         PeriodSpec::Monthly,
         false,
@@ -1063,9 +1076,9 @@ fn build_monthly_report(
     MonthlyReport { monthly, totals }
 }
 
-pub fn load_weekly_report(store: &Store, filter: &ReportFilter) -> Result<WeeklyReport> {
+pub fn load_weekly_report(conn: &Connection, filter: &ReportFilter) -> Result<WeeklyReport> {
     let bundle = load_period_aggregate_bundle(
-        store,
+        conn,
         filter,
         PeriodSpec::Weekly,
         false,
@@ -1100,11 +1113,11 @@ fn build_weekly_report(
 }
 
 pub fn load_weekly_reports_by_source(
-    store: &Store,
+    conn: &Connection,
     filter: &ReportFilter,
 ) -> Result<Vec<(SourceKind, WeeklyReport)>> {
     let bundle = load_period_aggregate_bundle(
-        store,
+        conn,
         filter,
         PeriodSpec::Weekly,
         false,
@@ -1134,7 +1147,7 @@ pub fn load_weekly_reports_by_source(
 }
 
 pub fn load_daily_reports_by_host(
-    store: &Store,
+    conn: &Connection,
     filter: &ReportFilter,
 ) -> Result<Vec<(HostIdentity, DailyReport)>> {
     let conversation_scope = if filter.project.is_some() {
@@ -1143,10 +1156,10 @@ pub fn load_daily_reports_by_host(
         ConversationScope::None
     };
     let bundle =
-        load_period_aggregate_bundle(store, filter, PeriodSpec::Daily, false, conversation_scope)?;
+        load_period_aggregate_bundle(conn, filter, PeriodSpec::Daily, false, conversation_scope)?;
     let mut host_groups = bundle.by_host;
     let mut host_totals = bundle.host_totals;
-    let labels = host_identities(store)?;
+    let labels = host_identities(conn)?;
     let mut reports = Vec::new();
     for host_id in ordered_host_ids(&labels, host_groups.keys().cloned()) {
         let Some(groups) = host_groups.remove(&host_id) else {
@@ -1168,11 +1181,11 @@ pub fn load_daily_reports_by_host(
 }
 
 pub fn load_monthly_reports_by_host(
-    store: &Store,
+    conn: &Connection,
     filter: &ReportFilter,
 ) -> Result<Vec<(HostIdentity, MonthlyReport)>> {
     let bundle = load_period_aggregate_bundle(
-        store,
+        conn,
         filter,
         PeriodSpec::Monthly,
         false,
@@ -1180,7 +1193,7 @@ pub fn load_monthly_reports_by_host(
     )?;
     let mut host_groups = bundle.by_host;
     let mut host_totals = bundle.host_totals;
-    let labels = host_identities(store)?;
+    let labels = host_identities(conn)?;
     let mut reports = Vec::new();
     for host_id in ordered_host_ids(&labels, host_groups.keys().cloned()) {
         let Some(groups) = host_groups.remove(&host_id) else {
@@ -1202,11 +1215,11 @@ pub fn load_monthly_reports_by_host(
 }
 
 pub fn load_weekly_reports_by_host(
-    store: &Store,
+    conn: &Connection,
     filter: &ReportFilter,
 ) -> Result<Vec<(HostIdentity, WeeklyReport)>> {
     let bundle = load_period_aggregate_bundle(
-        store,
+        conn,
         filter,
         PeriodSpec::Weekly,
         false,
@@ -1214,7 +1227,7 @@ pub fn load_weekly_reports_by_host(
     )?;
     let mut host_groups = bundle.by_host;
     let mut host_totals = bundle.host_totals;
-    let labels = host_identities(store)?;
+    let labels = host_identities(conn)?;
     let mut reports = Vec::new();
     for host_id in ordered_host_ids(&labels, host_groups.keys().cloned()) {
         let Some(groups) = host_groups.remove(&host_id) else {
@@ -1236,7 +1249,7 @@ pub fn load_weekly_reports_by_host(
 }
 
 pub fn load_session_report(
-    store: &Store,
+    conn: &Connection,
     filter: &ReportFilter,
     session_id_filter: Option<&str>,
 ) -> Result<SessionListReport> {
@@ -1245,7 +1258,7 @@ pub fn load_session_report(
     let mut session_times: BTreeMap<String, Vec<DateTime<FixedOffset>>> = BTreeMap::new();
     let mut totals = TokenTotals::default();
 
-    visit_filtered_events_from(store, filter, None, session_id_filter, |event| {
+    visit_filtered_events_from(conn, filter, None, session_id_filter, |event| {
         let session_id = event_session_id(&event);
         if let Some(wanted) = &wanted {
             let normalized = session_id.to_ascii_lowercase();
@@ -1342,11 +1355,11 @@ fn session_time_span(times: &mut [DateTime<FixedOffset>]) -> (i64, i64) {
 }
 
 pub fn load_single_session_report(
-    store: &Store,
+    conn: &Connection,
     filter: &ReportFilter,
     session_id: &str,
 ) -> Result<SingleSessionReport> {
-    let mut report = load_session_report(store, filter, Some(session_id))?;
+    let mut report = load_session_report(conn, filter, Some(session_id))?;
     Ok(SingleSessionReport {
         session: report.sessions.pop(),
     })
@@ -1355,25 +1368,25 @@ pub fn load_single_session_report(
 /// Loads the CLI-only unified projection without changing the report payloads
 /// consumed by the dashboard, export, or interactive TUI.
 pub fn load_unified_report(
-    store: &Store,
+    conn: &Connection,
     filter: &ReportFilter,
     kind: PeriodKind,
 ) -> Result<UnifiedReport> {
     match kind {
-        PeriodKind::Daily => load_unified_period_report(store, filter, kind, PeriodSpec::Daily),
-        PeriodKind::Monthly => load_unified_period_report(store, filter, kind, PeriodSpec::Monthly),
-        PeriodKind::Session => load_unified_session_report(store, filter, None),
-        PeriodKind::Weekly => load_unified_period_report(store, filter, kind, PeriodSpec::Weekly),
+        PeriodKind::Daily => load_unified_period_report(conn, filter, kind, PeriodSpec::Daily),
+        PeriodKind::Monthly => load_unified_period_report(conn, filter, kind, PeriodSpec::Monthly),
+        PeriodKind::Session => load_unified_session_report(conn, filter, None),
+        PeriodKind::Weekly => load_unified_period_report(conn, filter, kind, PeriodSpec::Weekly),
     }
 }
 
 fn load_unified_period_report(
-    store: &Store,
+    conn: &Connection,
     filter: &ReportFilter,
     kind: PeriodKind,
     spec: PeriodSpec,
 ) -> Result<UnifiedReport> {
-    let bundle = load_period_aggregate_bundle(store, filter, spec, false, ConversationScope::None)?;
+    let bundle = load_period_aggregate_bundle(conn, filter, spec, false, ConversationScope::None)?;
     let mut aggregate_rows = bundle
         .overall
         .into_iter()
@@ -1404,11 +1417,11 @@ fn load_unified_period_report(
 }
 
 pub fn load_unified_session_report(
-    store: &Store,
+    conn: &Connection,
     filter: &ReportFilter,
     session_id_filter: Option<&str>,
 ) -> Result<UnifiedReport> {
-    let report = load_session_report(store, filter, session_id_filter)?;
+    let report = load_session_report(conn, filter, session_id_filter)?;
     let mut detected = BTreeSet::new();
     let mut rows = Vec::with_capacity(report.sessions.len());
     for row in report.sessions {
@@ -1546,15 +1559,15 @@ fn merge_unified_model_breakdowns(rows: &[UnifiedRow]) -> Vec<ModelCostBreakdown
 }
 
 pub fn load_blocks_report(
-    store: &Store,
+    conn: &Connection,
     filter: &ReportFilter,
     options: &BlockReportOptions,
 ) -> Result<BlocksReport> {
-    Ok(load_blocks_report_at(store, filter, options, Utc::now(), true)?.report)
+    Ok(load_blocks_report_at(conn, filter, options, Utc::now(), true)?.report)
 }
 
 fn load_blocks_report_at(
-    store: &Store,
+    conn: &Connection,
     filter: &ReportFilter,
     options: &BlockReportOptions,
     now: DateTime<Utc>,
@@ -1570,9 +1583,8 @@ fn load_blocks_report_at(
         && filter.project.is_none()
         && !matches!(options.token_limit, Some(TokenLimit::Max));
     if bounding_eligible {
-        let conn = store.open_connection()?;
         let anchor = find_blocks_scan_start(
-            &conn,
+            conn,
             filter,
             recent_cutoff,
             session_length,
@@ -1583,7 +1595,7 @@ fn load_blocks_report_at(
     }
     let mut aggregates: Vec<(DateTime<Utc>, DateTime<Utc>, Aggregate)> = Vec::new();
 
-    visit_filtered_events_from(store, filter, scan.scan_start.as_deref(), None, |event| {
+    visit_filtered_events_from(conn, filter, scan.scan_start.as_deref(), None, |event| {
         scan.scanned_events += 1;
         if aggregates.is_empty() {
             let start = floor_to_hour(event.event_utc);
@@ -1761,10 +1773,13 @@ fn find_blocks_scan_start(
     probe_events: &mut usize,
 ) -> Result<Option<String>> {
     let cutoff = cutoff.to_rfc3339_opts(SecondsFormat::AutoSi, true);
-    let until_exclusive = filter
-        .until
-        .and_then(|date| date.succ_opt())
-        .map(|date| local_date_to_utc_start(date, &filter.timezone));
+    let until_exclusive = filter.until.and_then(|date| date.succ_opt()).map(|date| {
+        filter
+            .timezone
+            .resolved()
+            .local_date_start_utc(date)
+            .to_rfc3339_opts(SecondsFormat::Secs, true)
+    });
     let sources = filter
         .source
         .map(|source| vec![source.as_str().to_string()])
@@ -1804,24 +1819,25 @@ fn find_blocks_scan_start(
 }
 
 pub fn load_statusline_summary(
-    store: &Store,
+    conn: &Connection,
     timezone: ReportTimezone,
 ) -> Result<StatuslineSummary> {
     let today = today_for_timezone(&timezone);
     let filter = ReportFilter {
-        since: Some(today),
-        until: Some(today),
+        filter: QueryFilter {
+            since: Some(today),
+            until: Some(today),
+            timezone,
+            ..QueryFilter::default()
+        },
         order: SortOrder::Desc,
-        timezone,
         locale: "en-US".to_string(),
-        source: None,
         project: None,
         breakdown: false,
-        host_id: None,
     };
-    let daily = load_daily_report(store, &filter)?;
+    let daily = load_daily_report(conn, &filter)?;
     let blocks = load_blocks_report(
-        store,
+        conn,
         &filter,
         &BlockReportOptions {
             active_only: true,
@@ -1872,18 +1888,8 @@ fn load_buckets_filtered(
     filter: &ReportFilter,
     project_hashes: Option<&BTreeSet<String>>,
 ) -> Result<Vec<BucketRow>> {
-    let mut clauses = Vec::new();
-    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-
-    push_bucket_filter(filter, &mut clauses, &mut params);
-    push_exact_project_hashes("project_hash", project_hashes, &mut clauses, &mut params)?;
-
-    let where_clause = if clauses.is_empty() {
-        String::new()
-    } else {
-        format!(" WHERE {}", clauses.join(" AND "))
-    };
-    let local_date_expr = bucket_local_date_expr("hour_start", &filter.timezone);
+    let sql_filter = bucket_sql_filter(filter, project_hashes)?;
+    let local_date_expr = filter.local_date_expr("hour_start");
     let sql = format!(
         r#"
         SELECT
@@ -1900,17 +1906,14 @@ fn load_buckets_filtered(
             SUM(cost_with_cache_usd),
             COALESCE(pricing_status, 'unpriced') AS pricing_status
         FROM usage_bucket_30m
-        {where_clause}
+        {}
         GROUP BY host_id, source, model, local_date, COALESCE(pricing_status, 'unpriced')
         ORDER BY local_date ASC, host_id ASC, source ASC, model ASC, pricing_status ASC
-        "#
+        "#,
+        sql_filter.where_sql()
     );
     let mut stmt = conn.prepare(&sql)?;
-    let param_refs = params
-        .iter()
-        .map(|value| value.as_ref())
-        .collect::<Vec<&dyn rusqlite::ToSql>>();
-    let rows = stmt.query_map(param_refs.as_slice(), |row| {
+    let rows = stmt.query_map(params_from_iter(sql_filter.params().iter()), |row| {
         Ok(BucketRow {
             host_id: row.get(0)?,
             source: row.get(1)?,
@@ -1936,18 +1939,8 @@ fn load_project_buckets_filtered(
     filter: &ReportFilter,
     project_hashes: Option<&BTreeSet<String>>,
 ) -> Result<Vec<ProjectBucketRow>> {
-    let mut clauses = Vec::new();
-    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-
-    push_bucket_filter(filter, &mut clauses, &mut params);
-    push_exact_project_hashes("project_hash", project_hashes, &mut clauses, &mut params)?;
-
-    let where_clause = if clauses.is_empty() {
-        String::new()
-    } else {
-        format!(" WHERE {}", clauses.join(" AND "))
-    };
-    let local_date_expr = bucket_local_date_expr("hour_start", &filter.timezone);
+    let sql_filter = bucket_sql_filter(filter, project_hashes)?;
+    let local_date_expr = filter.local_date_expr("hour_start");
     let sql = format!(
         r#"
         SELECT
@@ -1967,7 +1960,7 @@ fn load_project_buckets_filtered(
             SUM(cost_with_cache_usd),
             COALESCE(pricing_status, 'unpriced') AS pricing_status
         FROM usage_bucket_30m
-        {where_clause}
+        {}
         GROUP BY
             host_id,
             source,
@@ -1978,14 +1971,11 @@ fn load_project_buckets_filtered(
             project_ref,
             COALESCE(pricing_status, 'unpriced')
         ORDER BY local_date ASC, host_id ASC, project_hash ASC, source ASC, model ASC, pricing_status ASC
-        "#
+        "#,
+        sql_filter.where_sql()
     );
     let mut stmt = conn.prepare(&sql)?;
-    let param_refs = params
-        .iter()
-        .map(|value| value.as_ref())
-        .collect::<Vec<&dyn rusqlite::ToSql>>();
-    let rows = stmt.query_map(param_refs.as_slice(), |row| {
+    let rows = stmt.query_map(params_from_iter(sql_filter.params().iter()), |row| {
         Ok(ProjectBucketRow {
             bucket: BucketRow {
                 host_id: row.get(0)?,
@@ -2017,14 +2007,7 @@ fn resolve_project_hashes(
         return Ok(None);
     };
 
-    let mut clauses = Vec::new();
-    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-    push_bucket_filter(filter, &mut clauses, &mut params);
-    let bucket_where = if clauses.is_empty() {
-        String::new()
-    } else {
-        format!(" WHERE {}", clauses.join(" AND "))
-    };
+    let sql_filter = filter.bucket_filter(None);
     let sql = format!(
         r#"
         SELECT project_hash, project_label, project_ref
@@ -2032,15 +2015,12 @@ fn resolve_project_hashes(
         UNION
         SELECT project_hash, project_label, project_ref
         FROM usage_bucket_30m
-        {bucket_where}
-        "#
+        {}
+        "#,
+        sql_filter.where_sql()
     );
-    let param_refs = params
-        .iter()
-        .map(|value| value.as_ref())
-        .collect::<Vec<&dyn rusqlite::ToSql>>();
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(param_refs.as_slice(), |row| {
+    let rows = stmt.query_map(params_from_iter(sql_filter.params().iter()), |row| {
         Ok((
             row.get::<_, Option<String>>(0)?.unwrap_or_default(),
             row.get::<_, Option<String>>(1)?,
@@ -2059,19 +2039,60 @@ fn resolve_project_hashes(
     Ok(Some(hashes))
 }
 
+fn bucket_sql_filter(
+    filter: &ReportFilter,
+    project_hashes: Option<&BTreeSet<String>>,
+) -> Result<SqlFilter> {
+    let mut sql = filter.bucket_filter(None);
+    push_exact_project_hashes(&mut sql, "project_hash", project_hashes)?;
+    Ok(sql)
+}
+
+fn event_sql_filter(
+    filter: &ReportFilter,
+    exact_since: Option<&str>,
+    session_id_filter: Option<&str>,
+) -> SqlFilter {
+    let mut sql = filter.event_filter(None);
+    if let Some(exact_since) = exact_since {
+        if filter.source.is_none() {
+            let sources = registered_source_descriptors();
+            sql.push_raw(format!(
+                "source IN ({})",
+                std::iter::repeat_n("?", sources.len())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+            for descriptor in sources {
+                sql.push_value(Value::Text(descriptor.stable_id.to_string()));
+            }
+        }
+        sql.push("event_at >= ?", exact_since);
+    }
+    if let Some(session_id) = session_id_filter {
+        let wanted = session_id.to_ascii_lowercase();
+        let identity = report_session_identity_sql();
+        sql.push_raw(format!(
+            "(LOWER({identity}) = ? OR INSTR(LOWER({identity}), ?) > 0)"
+        ));
+        sql.push_value(Value::Text(wanted.clone()));
+        sql.push_value(Value::Text(wanted));
+    }
+    sql
+}
+
 fn push_exact_project_hashes(
+    sql: &mut SqlFilter,
     column: &str,
     project_hashes: Option<&BTreeSet<String>>,
-    clauses: &mut Vec<String>,
-    params: &mut Vec<Box<dyn rusqlite::ToSql>>,
 ) -> Result<()> {
     let Some(project_hashes) = project_hashes else {
         return Ok(());
     };
-    clauses.push(format!(
-        "COALESCE({column}, '') IN (SELECT CAST(value AS TEXT) FROM json_each(?))"
-    ));
-    params.push(Box::new(serde_json::to_string(project_hashes)?));
+    sql.push(
+        format!("COALESCE({column}, '') IN (SELECT CAST(value AS TEXT) FROM json_each(?))"),
+        serde_json::to_string(project_hashes)?,
+    );
     Ok(())
 }
 
@@ -2084,16 +2105,10 @@ fn load_conversation_counts(
     if scope == ConversationScope::None {
         return Ok(Vec::new());
     }
-    let mut clauses = Vec::new();
-    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-    push_event_filter(filter, None, None, &mut clauses, &mut params);
-    push_exact_project_hashes("project_hash", project_hashes, &mut clauses, &mut params)?;
-    let where_clause = if clauses.is_empty() {
-        String::new()
-    } else {
-        format!(" WHERE {}", clauses.join(" AND "))
-    };
-    let local_date_expr = bucket_local_date_expr("event_at", &filter.timezone);
+    let mut sql_filter = event_sql_filter(filter, None, None);
+    push_exact_project_hashes(&mut sql_filter, "project_hash", project_hashes)?;
+    let where_clause = sql_filter.where_sql();
+    let local_date_expr = filter.local_date_expr("event_at");
     let session_identity = report_session_identity_sql();
     let project_projection = if scope == ConversationScope::Project {
         "COALESCE(project_hash, '') AS project_hash,"
@@ -2160,12 +2175,8 @@ fn load_conversation_counts(
         ORDER BY local_date, dimension, source, host_id, project_hash
         "#
     );
-    let param_refs = params
-        .iter()
-        .map(|value| value.as_ref())
-        .collect::<Vec<&dyn rusqlite::ToSql>>();
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(param_refs.as_slice(), |row| {
+    let rows = stmt.query_map(params_from_iter(sql_filter.params().iter()), |row| {
         let count = row.get::<_, i64>(5)?.max(0) as usize;
         Ok(ConversationCountRow {
             dimension: row.get(0)?,
@@ -2199,52 +2210,6 @@ fn report_session_identity_sql() -> String {
     )
 }
 
-fn push_bucket_filter(
-    filter: &ReportFilter,
-    clauses: &mut Vec<String>,
-    params: &mut Vec<Box<dyn rusqlite::ToSql>>,
-) {
-    if let Some(source) = filter.source {
-        clauses.push("source = ?".to_string());
-        params.push(Box::new(source.as_str().to_string()));
-    }
-    if let Some(host_id) = filter
-        .host_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        clauses.push("host_id = ?".to_string());
-        params.push(Box::new(host_id.to_string()));
-    }
-    if let Some(since) = filter.since {
-        let utc_start = local_date_to_utc_start(since, &filter.timezone);
-        clauses.push("hour_start >= ?".to_string());
-        params.push(Box::new(utc_start));
-    }
-    if let Some(until) = filter.until
-        && let Some(exclusive) = until.succ_opt()
-    {
-        let utc_end = local_date_to_utc_start(exclusive, &filter.timezone);
-        clauses.push("hour_start < ?".to_string());
-        params.push(Box::new(utc_end));
-    }
-}
-
-fn bucket_local_date_expr(column: &str, timezone: &ReportTimezone) -> String {
-    if matches!(timezone, ReportTimezone::Iana(_)) {
-        return timezone.resolved().local_date_expr(column);
-    }
-    let seconds = fixed_offset_for(timezone).local_minus_utc();
-    if seconds == 0 {
-        format!("date({column})")
-    } else if seconds > 0 {
-        format!("date({column}, '+{seconds} seconds')")
-    } else {
-        format!("date({column}, '{seconds} seconds')")
-    }
-}
-
 fn parse_sql_local_date(value: String, column: usize) -> rusqlite::Result<NaiveDate> {
     NaiveDate::parse_from_str(&value, "%Y-%m-%d").map_err(|err| {
         rusqlite::Error::FromSqlConversionFailure(
@@ -2256,15 +2221,15 @@ fn parse_sql_local_date(value: String, column: usize) -> rusqlite::Result<NaiveD
 }
 
 #[cfg(test)]
-fn visit_filtered_events<F>(store: &Store, filter: &ReportFilter, visitor: F) -> Result<()>
+fn visit_filtered_events<F>(conn: &Connection, filter: &ReportFilter, visitor: F) -> Result<()>
 where
     F: FnMut(EventRow) -> Result<()>,
 {
-    visit_filtered_events_from(store, filter, None, None, visitor)
+    visit_filtered_events_from(conn, filter, None, None, visitor)
 }
 
 fn visit_filtered_events_from<F>(
-    store: &Store,
+    conn: &Connection,
     filter: &ReportFilter,
     exact_since: Option<&str>,
     session_id_filter: Option<&str>,
@@ -2273,8 +2238,7 @@ fn visit_filtered_events_from<F>(
 where
     F: FnMut(EventRow) -> Result<()>,
 {
-    let conn = store.open_connection()?;
-    visit_events_filtered(&conn, filter, exact_since, session_id_filter, |event| {
+    visit_events_filtered(conn, filter, exact_since, session_id_filter, |event| {
         if filter_event_post_sql(&event, filter) {
             visitor(event)?;
         }
@@ -2294,22 +2258,7 @@ fn visit_events_filtered<F>(
 where
     F: FnMut(EventRow) -> Result<()>,
 {
-    let mut clauses = Vec::new();
-    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-    push_event_filter(
-        filter,
-        exact_since,
-        session_id_filter,
-        &mut clauses,
-        &mut params,
-    );
-
-    let where_clause = if clauses.is_empty() {
-        String::new()
-    } else {
-        format!(" WHERE {}", clauses.join(" AND "))
-    };
-
+    let sql_filter = event_sql_filter(filter, exact_since, session_id_filter);
     let sql = format!(
         r#"
         /* session_event_scan */
@@ -2333,9 +2282,10 @@ where
             session_label,
             source_path_hash
         FROM usage_event
-        {where_clause}
+        {}
         ORDER BY event_at ASC, event_key ASC
-        "#
+        "#,
+        sql_filter.where_sql()
     );
     #[cfg(test)]
     EVENT_VISIT_SQL
@@ -2344,8 +2294,7 @@ where
         .push(sql.clone());
 
     let mut stmt = conn.prepare(&sql)?;
-    let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-    let mut rows = stmt.query(param_refs.as_slice())?;
+    let mut rows = stmt.query(params_from_iter(sql_filter.params().iter()))?;
     while let Some(row) = rows.next()? {
         #[cfg(test)]
         EVENT_VISIT_ROWS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -2390,83 +2339,6 @@ where
 static EVENT_VISIT_SQL: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 #[cfg(test)]
 static EVENT_VISIT_ROWS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-fn push_event_filter(
-    filter: &ReportFilter,
-    exact_since: Option<&str>,
-    session_id_filter: Option<&str>,
-    clauses: &mut Vec<String>,
-    params: &mut Vec<Box<dyn rusqlite::ToSql>>,
-) {
-    if let Some(source) = filter.source {
-        clauses.push("source = ?".to_string());
-        params.push(Box::new(source.as_str().to_string()));
-    } else if exact_since.is_some() {
-        let sources = registered_source_descriptors();
-        clauses.push(format!(
-            "source IN ({})",
-            std::iter::repeat_n("?", sources.len())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-        params.extend(sources.iter().map(|descriptor| {
-            Box::new(descriptor.stable_id.to_string()) as Box<dyn rusqlite::ToSql>
-        }));
-    }
-    if let Some(host_id) = filter
-        .host_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        clauses.push("host_id = ?".to_string());
-        params.push(Box::new(host_id.to_string()));
-    }
-    if let Some(since) = filter.since {
-        let utc_start = local_date_to_utc_start(since, &filter.timezone);
-        clauses.push("event_at >= ?".to_string());
-        params.push(Box::new(utc_start));
-    }
-    if let Some(exact_since) = exact_since {
-        clauses.push("event_at >= ?".to_string());
-        params.push(Box::new(exact_since.to_string()));
-    }
-    if let Some(until) = filter.until
-        && let Some(exclusive) = until.succ_opt()
-    {
-        let utc_end = local_date_to_utc_start(exclusive, &filter.timezone);
-        clauses.push("event_at < ?".to_string());
-        params.push(Box::new(utc_end));
-    }
-    if let Some(session_id) = session_id_filter {
-        let wanted = session_id.to_ascii_lowercase();
-        let identity = report_session_identity_sql();
-        clauses.push(format!(
-            "(LOWER({identity}) = ? OR INSTR(LOWER({identity}), ?) > 0)"
-        ));
-        params.push(Box::new(wanted.clone()));
-        params.push(Box::new(wanted));
-    }
-}
-
-/// Converts a local NaiveDate midnight to a UTC RFC 3339 string for SQL filtering.
-fn local_date_to_utc_start(date: NaiveDate, timezone: &ReportTimezone) -> String {
-    use chrono::{SecondsFormat, TimeZone, offset::LocalResult};
-    if matches!(timezone, ReportTimezone::Iana(_)) {
-        return timezone
-            .resolved()
-            .local_date_start_utc(date)
-            .to_rfc3339_opts(SecondsFormat::Secs, true);
-    }
-    let local_start = date.and_hms_opt(0, 0, 0).expect("midnight is always valid");
-    let offset = fixed_offset_for(timezone);
-    let utc = match offset.from_local_datetime(&local_start) {
-        LocalResult::Single(value) => value.with_timezone(&Utc),
-        LocalResult::Ambiguous(earliest, _) => earliest.with_timezone(&Utc),
-        LocalResult::None => offset.from_utc_datetime(&local_start).with_timezone(&Utc),
-    };
-    utc.to_rfc3339_opts(SecondsFormat::Secs, true)
-}
 
 fn fixed_offset_for(timezone: &ReportTimezone) -> FixedOffset {
     match timezone {
@@ -2650,6 +2522,43 @@ mod tests {
     use super::*;
     use crate::{paths::AppPaths, store::Store};
 
+    fn utc_report_filter() -> ReportFilter {
+        ReportFilter {
+            filter: QueryFilter {
+                timezone: ReportTimezone::Utc,
+                ..QueryFilter::default()
+            },
+            order: SortOrder::Asc,
+            locale: "en-US".to_string(),
+            project: None,
+            breakdown: false,
+        }
+    }
+
+    #[test]
+    fn reports_production_does_not_open_store_connections() {
+        let source = include_str!("reports.rs");
+        let production = source
+            .split("mod tests {")
+            .next()
+            .expect("reports.rs must keep a tests module");
+        assert!(
+            !production.contains("open_connection"),
+            "query::reports production code must not open Store connections"
+        );
+        assert!(
+            !production.contains("fn push_event_filter")
+                && !production.contains("fn push_bucket_filter")
+                && !production.contains("fn local_date_to_utc_start")
+                && !production.contains("fn bucket_local_date_expr"),
+            "query::reports must not keep a second date SQL generator"
+        );
+        assert!(
+            production.contains(".event_filter(") && production.contains(".bucket_filter("),
+            "query::reports must generate SQL through QueryFilter event/bucket filters"
+        );
+    }
+
     fn at(rfc3339: &str) -> DateTime<FixedOffset> {
         DateTime::parse_from_rfc3339(rfc3339).unwrap()
     }
@@ -2689,17 +2598,7 @@ mod tests {
     }
 
     fn blocks_filter() -> ReportFilter {
-        ReportFilter {
-            since: None,
-            until: None,
-            order: SortOrder::Asc,
-            timezone: ReportTimezone::Utc,
-            locale: "en-US".to_string(),
-            source: None,
-            project: None,
-            breakdown: false,
-            host_id: None,
-        }
+        utc_report_filter()
     }
 
     fn recent_blocks_options() -> BlockReportOptions {
@@ -2745,8 +2644,20 @@ mod tests {
         let filter = blocks_filter();
         let options = recent_blocks_options();
 
-        let bounded = load_blocks_report_at(&fixture.store, &filter, &options, now, true)?;
-        let full = load_blocks_report_at(&fixture.store, &filter, &options, now, false)?;
+        let bounded = load_blocks_report_at(
+            &fixture.store.open_connection()?,
+            &filter,
+            &options,
+            now,
+            true,
+        )?;
+        let full = load_blocks_report_at(
+            &fixture.store.open_connection()?,
+            &filter,
+            &options,
+            now,
+            false,
+        )?;
 
         assert_eq!(bounded.report.blocks, full.report.blocks);
         assert_eq!(bounded.report.blocks.len(), 1);
@@ -2773,7 +2684,7 @@ mod tests {
         let now = DateTime::parse_from_rfc3339("2026-05-10T12:00:00Z")?.with_timezone(&Utc);
 
         let report = load_blocks_report_at(
-            &fixture.store,
+            &fixture.store.open_connection()?,
             &blocks_filter(),
             &recent_blocks_options(),
             now,
@@ -2802,7 +2713,7 @@ mod tests {
         let now = DateTime::parse_from_rfc3339("2026-05-10T12:00:00Z")?.with_timezone(&Utc);
 
         let report = load_blocks_report_at(
-            &fixture.store,
+            &fixture.store.open_connection()?,
             &blocks_filter(),
             &recent_blocks_options(),
             now,
@@ -2836,7 +2747,7 @@ mod tests {
         let now = DateTime::parse_from_rfc3339("2026-05-10T12:00:00Z")?.with_timezone(&Utc);
 
         let report = load_blocks_report_at(
-            &fixture.store,
+            &fixture.store.open_connection()?,
             &blocks_filter(),
             &recent_blocks_options(),
             now,
@@ -2859,18 +2770,20 @@ mod tests {
         let options = recent_blocks_options();
         let now = Utc::now();
 
-        let _ = load_blocks_report_at(&store, &filter, &options, now, true)?;
+        let _ = load_blocks_report_at(&store.open_connection()?, &filter, &options, now, true)?;
         let mut full_ms = Vec::new();
         let mut bounded_ms = Vec::new();
         let mut last_bounded = None;
         let mut full_scanned_events = 0;
         for _ in 0..3 {
             let started = Instant::now();
-            let full = load_blocks_report_at(&store, &filter, &options, now, false)?;
+            let full =
+                load_blocks_report_at(&store.open_connection()?, &filter, &options, now, false)?;
             full_ms.push(started.elapsed().as_secs_f64() * 1_000.0);
 
             let started = Instant::now();
-            let bounded = load_blocks_report_at(&store, &filter, &options, now, true)?;
+            let bounded =
+                load_blocks_report_at(&store.open_connection()?, &filter, &options, now, true)?;
             bounded_ms.push(started.elapsed().as_secs_f64() * 1_000.0);
             assert_eq!(bounded.report.blocks, full.report.blocks);
             full_scanned_events = full.scan.scanned_events;
@@ -3057,17 +2970,10 @@ mod tests {
             [],
         )?;
 
-        let base_filter = ReportFilter {
-            since: Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap()),
-            until: Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap()),
-            order: SortOrder::Asc,
-            timezone: ReportTimezone::Utc,
-            locale: "en-US".to_string(),
-            source: None,
-            project: None,
-            breakdown: true,
-            host_id: None,
-        };
+        let mut base_filter = utc_report_filter();
+        base_filter.since = Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap());
+        base_filter.until = Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap());
+        base_filter.breakdown = true;
         let selector_cases = [
             ("HASH-ALPHA", vec!["hash-alpha"]),
             ("shared", vec!["hash-alpha", "hash-beta"]),
@@ -3098,7 +3004,7 @@ mod tests {
         assert!(empty_hashes.contains(""));
         assert!(empty_hashes.contains("stale-hash"));
         assert_eq!(
-            load_daily_report(&fixture.store, &empty_filter)?
+            load_daily_report(&fixture.store.open_connection()?, &empty_filter)?
                 .totals
                 .total_tokens,
             105
@@ -3108,14 +3014,15 @@ mod tests {
             project: Some("shared".to_string()),
             ..base_filter.clone()
         };
-        let bucket_report = load_daily_report(&fixture.store, &shared_filter)?;
-        let event_oracle = load_daily_report_from_event_oracle(&fixture.store, &shared_filter)?;
+        let bucket_report = load_daily_report(&fixture.store.open_connection()?, &shared_filter)?;
+        let event_oracle =
+            load_daily_report_from_event_oracle(&fixture.store.open_connection()?, &shared_filter)?;
         assert_eq!(bucket_report, event_oracle);
         assert_eq!(bucket_report.totals.total_tokens, 30);
         assert_eq!(bucket_report.daily[0].conversation_count, 2);
 
         let alias_report = load_daily_report(
-            &fixture.store,
+            &fixture.store.open_connection()?,
             &ReportFilter {
                 project: Some("dimension alias".to_string()),
                 ..base_filter.clone()
@@ -3123,7 +3030,7 @@ mod tests {
         )?;
         assert_eq!(alias_report.totals.total_tokens, 10);
         let stale_report = load_daily_report(
-            &fixture.store,
+            &fixture.store.open_connection()?,
             &ReportFilter {
                 project: Some("stale only".to_string()),
                 ..base_filter.clone()
@@ -3132,14 +3039,10 @@ mod tests {
         assert!(stale_report.daily.is_empty());
         assert_eq!(stale_report.totals, TokenTotals::default());
 
-        let remote_report = load_daily_report(
-            &fixture.store,
-            &ReportFilter {
-                project: Some("history".to_string()),
-                host_id: Some("remote-1".to_string()),
-                ..base_filter
-            },
-        )?;
+        let mut remote_filter = base_filter;
+        remote_filter.project = Some("history".to_string());
+        remote_filter.host_id = Some("remote-1".to_string());
+        let remote_report = load_daily_report(&fixture.store.open_connection()?, &remote_filter)?;
         assert_eq!(remote_report.totals.total_tokens, 40);
         Ok(())
     }
@@ -3174,17 +3077,9 @@ mod tests {
             cost_with_cache_usd: 0.0,
             pricing_status: "unpriced",
         })?;
-        let filter = ReportFilter {
-            since: None,
-            until: None,
-            order: SortOrder::Asc,
-            timezone: ReportTimezone::Utc,
-            locale: "en-US".to_string(),
-            source: None,
-            project: Some("trace".to_string()),
-            breakdown: true,
-            host_id: None,
-        };
+        let mut filter = utc_report_filter();
+        filter.project = Some("trace".to_string());
+        filter.breakdown = true;
         let conn = fixture.store.open_connection()?;
         conn.trace_v2(
             rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT,
@@ -3193,13 +3088,8 @@ mod tests {
 
         for spec in [PeriodSpec::Daily, PeriodSpec::Weekly, PeriodSpec::Monthly] {
             reset_period_statement_trace();
-            let bundle = load_period_aggregate_bundle_from_conn(
-                &conn,
-                &filter,
-                spec,
-                false,
-                ConversationScope::None,
-            )?;
+            let bundle =
+                load_period_aggregate_bundle(&conn, &filter, spec, false, ConversationScope::None)?;
             assert_eq!(bundle.totals.total_tokens, 10);
             assert_eq!(PERIOD_BUCKET_STATEMENTS.load(AtomicOrdering::Relaxed), 1);
             assert_eq!(
@@ -3213,7 +3103,7 @@ mod tests {
         }
 
         reset_period_statement_trace();
-        let bundle = load_period_aggregate_bundle_from_conn(
+        let bundle = load_period_aggregate_bundle(
             &conn,
             &filter,
             PeriodSpec::Daily,
@@ -3291,58 +3181,75 @@ mod tests {
                 cost_with_cache_usd: 0.0,
                 pricing_status: "unpriced",
             })?;
-            let project_filter = ReportFilter {
-                since: Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap()),
-                until: Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap()),
-                order: SortOrder::Asc,
-                timezone: ReportTimezone::Utc,
-                locale: "en-US".to_string(),
-                source: None,
-                project: Some("backlog".to_string()),
-                breakdown: true,
-                host_id: None,
-            };
+            let mut project_filter = utc_report_filter();
+            project_filter.since = Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap());
+            project_filter.until = Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap());
+            project_filter.project = Some("backlog".to_string());
+            project_filter.breakdown = true;
             let no_project_filter = ReportFilter {
                 project: None,
                 ..project_filter.clone()
             };
 
-            let after = load_unified_report(&fixture.store, &project_filter, PeriodKind::Daily)?;
-            let before = load_unified_daily_from_event_oracle(&fixture.store, &project_filter)?;
+            let after = load_unified_report(
+                &fixture.store.open_connection()?,
+                &project_filter,
+                PeriodKind::Daily,
+            )?;
+            let before = load_unified_daily_from_event_oracle(
+                &fixture.store.open_connection()?,
+                &project_filter,
+            )?;
             assert_eq!(after, before);
             assert_eq!(after.totals().total_tokens, event_count);
 
             let (before_ms, before_rows) = five_warmups_and_samples(|| {
-                Ok(
-                    load_unified_daily_from_event_oracle(&fixture.store, &project_filter)?
-                        .rows
-                        .len(),
-                )
+                Ok(load_unified_daily_from_event_oracle(
+                    &fixture.store.open_connection()?,
+                    &project_filter,
+                )?
+                .rows
+                .len())
             })?;
             let (after_ms, after_rows) = five_warmups_and_samples(|| {
+                Ok(load_unified_report(
+                    &fixture.store.open_connection()?,
+                    &project_filter,
+                    PeriodKind::Daily,
+                )?
+                .rows
+                .len())
+            })?;
+            let (overall_ms, overall_rows) = five_warmups_and_samples(|| {
                 Ok(
-                    load_unified_report(&fixture.store, &project_filter, PeriodKind::Daily)?
-                        .rows
+                    load_daily_report(&fixture.store.open_connection()?, &project_filter)?
+                        .daily
                         .len(),
                 )
             })?;
-            let (overall_ms, overall_rows) = five_warmups_and_samples(|| {
-                Ok(load_daily_report(&fixture.store, &project_filter)?
-                    .daily
-                    .len())
-            })?;
             let (source_ms, source_rows) = five_warmups_and_samples(|| {
-                Ok(load_daily_reports_by_source(&fixture.store, &project_filter)?.len())
+                Ok(load_daily_reports_by_source(
+                    &fixture.store.open_connection()?,
+                    &project_filter,
+                )?
+                .len())
             })?;
             let (host_ms, host_rows) = five_warmups_and_samples(|| {
-                Ok(load_daily_reports_by_host(&fixture.store, &project_filter)?.len())
+                Ok(
+                    load_daily_reports_by_host(&fixture.store.open_connection()?, &project_filter)?
+                        .len(),
+                )
             })?;
             let mut period_timings = Vec::new();
             for kind in [PeriodKind::Daily, PeriodKind::Weekly, PeriodKind::Monthly] {
                 let (samples, rows) = five_warmups_and_samples(|| {
-                    Ok(load_unified_report(&fixture.store, &project_filter, kind)?
-                        .rows
-                        .len())
+                    Ok(load_unified_report(
+                        &fixture.store.open_connection()?,
+                        &project_filter,
+                        kind,
+                    )?
+                    .rows
+                    .len())
                 })?;
                 period_timings.push((kind.rows_key(), samples, rows));
             }
@@ -3351,20 +3258,28 @@ mod tests {
             let (no_project_before_ms, _) = five_warmups_and_samples(|| {
                 let mut rows = 0;
                 for _ in 0..AMPLIFICATION {
-                    rows += load_daily_report(&fixture.store, &no_project_filter)?
-                        .daily
-                        .len();
-                    rows += load_daily_reports_by_source(&fixture.store, &no_project_filter)?.len();
+                    rows +=
+                        load_daily_report(&fixture.store.open_connection()?, &no_project_filter)?
+                            .daily
+                            .len();
+                    rows += load_daily_reports_by_source(
+                        &fixture.store.open_connection()?,
+                        &no_project_filter,
+                    )?
+                    .len();
                 }
                 Ok(rows)
             })?;
             let (no_project_after_ms, _) = five_warmups_and_samples(|| {
                 let mut rows = 0;
                 for _ in 0..AMPLIFICATION {
-                    rows +=
-                        load_unified_report(&fixture.store, &no_project_filter, PeriodKind::Daily)?
-                            .rows
-                            .len();
+                    rows += load_unified_report(
+                        &fixture.store.open_connection()?,
+                        &no_project_filter,
+                        PeriodKind::Daily,
+                    )?
+                    .rows
+                    .len();
                 }
                 Ok(rows)
             })?;
@@ -3439,20 +3354,15 @@ mod tests {
             cost_with_cache_usd: 0.0,
             pricing_status: "unpriced",
         })?;
-        let report = load_daily_report(
-            &fixture.store,
-            &ReportFilter {
-                since: Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap()),
-                until: Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap()),
-                order: SortOrder::Desc,
-                timezone: ReportTimezone::Fixed(FixedOffset::east_opt(8 * 3600).unwrap()),
-                locale: "en-US".to_string(),
-                source: Some(SourceKind::Codex),
-                project: Some("Demo".to_string()),
-                breakdown: true,
-                host_id: None,
-            },
-        )?;
+        let mut filter = utc_report_filter();
+        filter.since = Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap());
+        filter.until = Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap());
+        filter.order = SortOrder::Desc;
+        filter.timezone = ReportTimezone::Fixed(FixedOffset::east_opt(8 * 3600).unwrap());
+        filter.source = Some(SourceKind::Codex);
+        filter.project = Some("Demo".to_string());
+        filter.breakdown = true;
+        let report = load_daily_report(&fixture.store.open_connection()?, &filter)?;
         assert_eq!(report.daily.len(), 1);
         assert_eq!(report.daily[0].date, "2026-05-05");
         assert_eq!(report.daily[0].totals.total_tokens, 10);
@@ -3490,22 +3400,17 @@ mod tests {
             cost_with_cache_usd: 0.0,
             pricing_status: "unpriced",
         })?;
-        let filter = ReportFilter {
-            since: Some(NaiveDate::from_ymd_opt(2026, 5, 6).unwrap()),
-            until: Some(NaiveDate::from_ymd_opt(2026, 5, 6).unwrap()),
-            order: SortOrder::Desc,
-            timezone: ReportTimezone::Utc,
-            locale: "en-US".to_string(),
-            source: Some(SourceKind::Antigravity),
-            project: None,
-            breakdown: true,
-            host_id: None,
-        };
+        let mut filter = utc_report_filter();
+        filter.since = Some(NaiveDate::from_ymd_opt(2026, 5, 6).unwrap());
+        filter.until = Some(NaiveDate::from_ymd_opt(2026, 5, 6).unwrap());
+        filter.order = SortOrder::Desc;
+        filter.source = Some(SourceKind::Antigravity);
+        filter.breakdown = true;
 
-        let report = load_daily_report(&fixture.store, &filter)?;
+        let report = load_daily_report(&fixture.store.open_connection()?, &filter)?;
         assert_eq!(report.totals.total_tokens, 77);
         assert_eq!(report.daily.len(), 1);
-        let by_source = load_daily_reports_by_source(&fixture.store, &filter)?;
+        let by_source = load_daily_reports_by_source(&fixture.store.open_connection()?, &filter)?;
         assert_eq!(by_source.len(), 1);
         assert_eq!(by_source[0].0, SourceKind::Antigravity);
         assert_eq!(by_source[0].1.totals.total_tokens, 77);
@@ -3537,35 +3442,29 @@ mod tests {
         assert_eq!(event_count, 0, "test must prove bucket read model");
         drop(conn);
 
-        let filter = ReportFilter {
-            since: Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap()),
-            until: Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap()),
-            order: SortOrder::Asc,
-            timezone: ReportTimezone::Fixed(FixedOffset::east_opt(8 * 3600).unwrap()),
-            locale: "en-US".to_string(),
-            source: None,
-            project: None,
-            breakdown: true,
-            host_id: None,
-        };
-        let daily = load_daily_report(&fixture.store, &filter)?;
+        let mut filter = utc_report_filter();
+        filter.since = Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap());
+        filter.until = Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap());
+        filter.timezone = ReportTimezone::Fixed(FixedOffset::east_opt(8 * 3600).unwrap());
+        filter.breakdown = true;
+        let daily = load_daily_report(&fixture.store.open_connection()?, &filter)?;
         assert_eq!(daily.daily.len(), 1);
         assert_eq!(daily.daily[0].date, "2026-05-05");
         assert_eq!(daily.daily[0].totals.total_tokens, 999);
         assert_eq!(daily.daily[0].model_breakdowns.len(), 1);
         assert_eq!(daily.totals.estimated_cost_usd, 1.25);
 
-        let monthly = load_monthly_report(&fixture.store, &filter)?;
+        let monthly = load_monthly_report(&fixture.store.open_connection()?, &filter)?;
         assert_eq!(monthly.monthly.len(), 1);
         assert_eq!(monthly.monthly[0].month, "2026-05");
         assert_eq!(monthly.totals.total_tokens, 999);
 
-        let by_source = load_daily_reports_by_source(&fixture.store, &filter)?;
+        let by_source = load_daily_reports_by_source(&fixture.store.open_connection()?, &filter)?;
         assert_eq!(by_source.len(), 1);
         assert_eq!(by_source[0].0, SourceKind::Codex);
         assert_eq!(by_source[0].1.totals.total_tokens, 999);
 
-        let projects = load_daily_project_report(&fixture.store, &filter)?;
+        let projects = load_daily_project_report(&fixture.store.open_connection()?, &filter)?;
         let project_rows = projects
             .projects
             .get("example/project-a")
@@ -3596,28 +3495,21 @@ mod tests {
             pricing_status: "static",
         })?;
 
-        let filter = ReportFilter {
-            since: Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap()),
-            until: Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap()),
-            order: SortOrder::Asc,
-            timezone: ReportTimezone::Fixed(FixedOffset::east_opt(8 * 3600).unwrap()),
-            locale: "en-US".to_string(),
-            source: None,
-            project: None,
-            breakdown: false,
-            host_id: None,
-        };
+        let mut filter = utc_report_filter();
+        filter.since = Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap());
+        filter.until = Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap());
+        filter.timezone = ReportTimezone::Fixed(FixedOffset::east_opt(8 * 3600).unwrap());
 
-        let daily = load_daily_report(&fixture.store, &filter)?;
+        let daily = load_daily_report(&fixture.store.open_connection()?, &filter)?;
         assert_eq!(daily.totals.total_tokens, 15);
-        let monthly = load_monthly_report(&fixture.store, &filter)?;
+        let monthly = load_monthly_report(&fixture.store.open_connection()?, &filter)?;
         assert_eq!(monthly.totals.total_tokens, 15);
 
         let project_filter = ReportFilter {
             project: Some("Backlog".to_string()),
             ..filter
         };
-        let project_daily = load_daily_report(&fixture.store, &project_filter)?;
+        let project_daily = load_daily_report(&fixture.store.open_connection()?, &project_filter)?;
         assert_eq!(
             project_daily.totals.total_tokens, 0,
             "event-only drift must not override the bucket read model"
@@ -3652,20 +3544,11 @@ mod tests {
             })?;
         }
 
-        let report = load_daily_report(
-            &fixture.store,
-            &ReportFilter {
-                since: Some(NaiveDate::from_ymd_opt(2026, 3, 8).unwrap()),
-                until: Some(NaiveDate::from_ymd_opt(2026, 3, 8).unwrap()),
-                order: SortOrder::Asc,
-                timezone: ReportTimezone::Fixed(FixedOffset::east_opt(8 * 3600).unwrap()),
-                locale: "en-US".to_string(),
-                source: None,
-                project: None,
-                breakdown: false,
-                host_id: None,
-            },
-        )?;
+        let mut filter = utc_report_filter();
+        filter.since = Some(NaiveDate::from_ymd_opt(2026, 3, 8).unwrap());
+        filter.until = Some(NaiveDate::from_ymd_opt(2026, 3, 8).unwrap());
+        filter.timezone = ReportTimezone::Fixed(FixedOffset::east_opt(8 * 3600).unwrap());
+        let report = load_daily_report(&fixture.store.open_connection()?, &filter)?;
 
         assert_eq!(report.daily.len(), 1);
         assert_eq!(report.daily[0].date, "2026-03-08");
@@ -3698,20 +3581,9 @@ mod tests {
             })?;
         }
 
-        let report = load_daily_report(
-            &fixture.store,
-            &ReportFilter {
-                since: None,
-                until: None,
-                order: SortOrder::Asc,
-                timezone: ReportTimezone::Iana(chrono_tz::America::New_York),
-                locale: "en-US".to_string(),
-                source: None,
-                project: None,
-                breakdown: false,
-                host_id: None,
-            },
-        )?;
+        let mut filter = utc_report_filter();
+        filter.timezone = ReportTimezone::Iana(chrono_tz::America::New_York);
+        let report = load_daily_report(&fixture.store.open_connection()?, &filter)?;
 
         assert_eq!(
             report
@@ -3776,19 +3648,16 @@ mod tests {
             cost_with_cache_usd: 0.20,
             pricing_status: "static",
         })?;
-        let filter = ReportFilter {
-            since: Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap()),
-            until: Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap()),
-            order: SortOrder::Asc,
-            timezone: ReportTimezone::Utc,
-            locale: "en-US".to_string(),
-            source: None,
-            project: None,
-            breakdown: true,
-            host_id: None,
-        };
+        let mut filter = utc_report_filter();
+        filter.since = Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap());
+        filter.until = Some(NaiveDate::from_ymd_opt(2026, 5, 5).unwrap());
+        filter.breakdown = true;
 
-        let report = load_unified_report(&fixture.store, &filter, PeriodKind::Daily)?;
+        let report = load_unified_report(
+            &fixture.store.open_connection()?,
+            &filter,
+            PeriodKind::Daily,
+        )?;
         assert_eq!(report.detected, vec![SourceKind::Codex, SourceKind::Claude]);
         assert_eq!(report.rows.len(), 1);
         let all = &report.rows[0];
@@ -3817,7 +3686,10 @@ mod tests {
             .sum::<f64>();
         assert!((source_cost - all.totals.estimated_cost_usd).abs() <= 1e-9);
 
-        let internal = serde_json::to_value(load_daily_report(&fixture.store, &filter)?)?;
+        let internal = serde_json::to_value(load_daily_report(
+            &fixture.store.open_connection()?,
+            &filter,
+        )?)?;
         assert!(internal["daily"][0].get("cache_creation_tokens").is_some());
         assert!(internal["daily"][0].get("cacheCreationTokens").is_none());
         Ok(())
@@ -3854,25 +3726,22 @@ mod tests {
                 pricing_status: "static",
             })?;
         }
-        let filter = ReportFilter {
-            since: Some(NaiveDate::from_ymd_opt(2025, 12, 29).unwrap()),
-            until: Some(NaiveDate::from_ymd_opt(2026, 1, 5).unwrap()),
-            order: SortOrder::Asc,
-            timezone: ReportTimezone::Utc,
-            locale: "en-US".to_string(),
-            source: None,
-            project: None,
-            breakdown: true,
-            host_id: None,
-        };
+        let mut filter = utc_report_filter();
+        filter.since = Some(NaiveDate::from_ymd_opt(2025, 12, 29).unwrap());
+        filter.until = Some(NaiveDate::from_ymd_opt(2026, 1, 5).unwrap());
+        filter.breakdown = true;
 
-        let weekly = load_weekly_report(&fixture.store, &filter)?;
+        let weekly = load_weekly_report(&fixture.store.open_connection()?, &filter)?;
         assert_eq!(weekly.weekly.len(), 2);
         assert_eq!(weekly.weekly[0].week, "2025-12-29");
         assert_eq!(weekly.weekly[1].week, "2026-01-05");
         assert!(!weekly.weekly[0].week.contains('W'));
 
-        let unified = load_unified_report(&fixture.store, &filter, PeriodKind::Weekly)?;
+        let unified = load_unified_report(
+            &fixture.store.open_connection()?,
+            &filter,
+            PeriodKind::Weekly,
+        )?;
         assert_eq!(unified.rows[0].agent, UnifiedAgent::All);
         assert_eq!(unified.rows[0].agent_breakdowns.len(), 2);
         assert_eq!(unified.totals().total_tokens, 60);
@@ -3886,9 +3755,13 @@ mod tests {
         );
         assert_eq!(
             unified.totals().total_tokens,
-            load_unified_report(&fixture.store, &filter, PeriodKind::Daily)?
-                .totals()
-                .total_tokens
+            load_unified_report(
+                &fixture.store.open_connection()?,
+                &filter,
+                PeriodKind::Daily
+            )?
+            .totals()
+            .total_tokens
         );
         Ok(())
     }
@@ -3912,30 +3785,20 @@ mod tests {
             cost_with_cache_usd: 0.0,
             pricing_status: "static",
         })?;
-        let utc_filter = ReportFilter {
-            since: Some(NaiveDate::from_ymd_opt(2026, 1, 4).unwrap()),
-            until: Some(NaiveDate::from_ymd_opt(2026, 1, 4).unwrap()),
-            order: SortOrder::Asc,
-            timezone: ReportTimezone::Utc,
-            locale: "en-US".to_string(),
-            source: None,
-            project: None,
-            breakdown: false,
-            host_id: None,
-        };
-        let local_filter = ReportFilter {
-            since: Some(NaiveDate::from_ymd_opt(2026, 1, 5).unwrap()),
-            until: Some(NaiveDate::from_ymd_opt(2026, 1, 5).unwrap()),
-            timezone: ReportTimezone::Fixed(FixedOffset::east_opt(8 * 3600).unwrap()),
-            ..utc_filter.clone()
-        };
+        let mut utc_filter = utc_report_filter();
+        utc_filter.since = Some(NaiveDate::from_ymd_opt(2026, 1, 4).unwrap());
+        utc_filter.until = Some(NaiveDate::from_ymd_opt(2026, 1, 4).unwrap());
+        let mut local_filter = utc_filter.clone();
+        local_filter.since = Some(NaiveDate::from_ymd_opt(2026, 1, 5).unwrap());
+        local_filter.until = Some(NaiveDate::from_ymd_opt(2026, 1, 5).unwrap());
+        local_filter.timezone = ReportTimezone::Fixed(FixedOffset::east_opt(8 * 3600).unwrap());
 
         assert_eq!(
-            load_weekly_report(&fixture.store, &utc_filter)?.weekly[0].week,
+            load_weekly_report(&fixture.store.open_connection()?, &utc_filter)?.weekly[0].week,
             "2025-12-29"
         );
         assert_eq!(
-            load_weekly_report(&fixture.store, &local_filter)?.weekly[0].week,
+            load_weekly_report(&fixture.store.open_connection()?, &local_filter)?.weekly[0].week,
             "2026-01-05"
         );
         Ok(())
@@ -3954,21 +3817,10 @@ mod tests {
             project_label: "Demo",
             session_id: "",
         })?;
-        let report = load_session_report(
-            &fixture.store,
-            &ReportFilter {
-                since: None,
-                until: None,
-                order: SortOrder::Desc,
-                timezone: ReportTimezone::Utc,
-                locale: "en-US".to_string(),
-                source: None,
-                project: None,
-                breakdown: false,
-                host_id: None,
-            },
-            Some("pathhash"),
-        )?;
+        let mut filter = utc_report_filter();
+        filter.order = SortOrder::Desc;
+        let report =
+            load_session_report(&fixture.store.open_connection()?, &filter, Some("pathhash"))?;
         assert_eq!(report.sessions.len(), 1);
         assert_eq!(report.sessions[0].session_id, "codex:pathhash:fingerprint");
         Ok(())
@@ -4002,21 +3854,10 @@ mod tests {
             .expect("event visit SQL lock")
             .clear();
         super::EVENT_VISIT_ROWS.store(0, std::sync::atomic::Ordering::Relaxed);
-        let report = load_single_session_report(
-            &fixture.store,
-            &ReportFilter {
-                since: None,
-                until: None,
-                order: SortOrder::Desc,
-                timezone: ReportTimezone::Utc,
-                locale: "en-US".to_string(),
-                source: None,
-                project: None,
-                breakdown: false,
-                host_id: None,
-            },
-            "keep-session",
-        )?;
+        let mut filter = utc_report_filter();
+        filter.order = SortOrder::Desc;
+        let report =
+            load_single_session_report(&fixture.store.open_connection()?, &filter, "keep-session")?;
         let sqls = super::EVENT_VISIT_SQL.lock().expect("event visit SQL lock");
         assert!(
             sqls.iter().any(|sql| {

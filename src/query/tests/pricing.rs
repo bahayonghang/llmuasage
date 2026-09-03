@@ -519,17 +519,20 @@ fn source_reported_events_are_not_counted_as_unpriced() -> Result<()> {
     assert_eq!(models[0].pricing_status, "source_reported");
 
     let filter = super::reports::ReportFilter {
-        since: Some(NaiveDate::from_ymd_opt(2026, 5, 1).unwrap()),
-        until: Some(NaiveDate::from_ymd_opt(2026, 5, 1).unwrap()),
+        filter: QueryFilter {
+            since: Some(NaiveDate::from_ymd_opt(2026, 5, 1).unwrap()),
+            until: Some(NaiveDate::from_ymd_opt(2026, 5, 1).unwrap()),
+            timezone: ReportTimezone::Utc,
+            source: Some(SourceKind::Omp),
+            ..QueryFilter::default()
+        },
         order: super::reports::SortOrder::Asc,
-        timezone: ReportTimezone::Utc,
         locale: "en-US".to_string(),
-        source: Some(SourceKind::Omp),
         project: None,
         breakdown: false,
-        host_id: None,
     };
-    let report = super::reports::load_daily_report(fixture.store(), &filter)?;
+    let report =
+        super::reports::load_daily_report(&fixture.store().open_connection()?, &filter)?;
     assert_eq!(report.daily.len(), 1);
     assert!(!report.daily[0].notes.unpriced);
     assert!((report.daily[0].totals.estimated_cost_usd - 0.0125).abs() < EPSILON);

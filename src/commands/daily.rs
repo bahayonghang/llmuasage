@@ -1,7 +1,12 @@
 use anyhow::{Result, bail};
 use tracing::debug;
 
-use crate::{app::AppContext, query::reports, store::Store, tui::report_table};
+use crate::{
+    app::AppContext,
+    query::{Dashboard, reports},
+    store::Store,
+    tui::report_table,
+};
 
 use super::{report_args::DailyArgs, unified_report};
 
@@ -9,6 +14,8 @@ pub async fn run(app: &AppContext, args: DailyArgs) -> Result<()> {
     debug!("starting daily report output");
     let store = Store::new(&app.paths)?;
     store.require_initialized()?;
+    let dashboard = Dashboard::open(&store)?;
+    let conn = dashboard.connection();
     let mut filter = args.common.to_filter(&store, args.project.clone())?;
     if args.all && (filter.since.is_some() || filter.until.is_some()) {
         bail!("--all cannot be combined with --since or --until");
@@ -19,14 +26,14 @@ pub async fn run(app: &AppContext, args: DailyArgs) -> Result<()> {
 
     if !args.instances && !args.unified.sections.is_empty() {
         let reports = unified_report::load_sections(
-            &store,
+            conn,
             &filter,
             reports::PeriodKind::Daily,
             &args.unified.sections,
             args.all,
         )?;
         unified_report::print_sections(
-            &store,
+            conn,
             &filter,
             &reports,
             reports::PeriodKind::Daily,
@@ -44,7 +51,7 @@ pub async fn run(app: &AppContext, args: DailyArgs) -> Result<()> {
     }
 
     if args.instances {
-        let report = reports::load_daily_project_report(&store, &filter)?;
+        let report = reports::load_daily_project_report(conn, &filter)?;
         if args.common.json {
             let mut report = serde_json::to_value(&report)?;
             if args.common.no_cost {
@@ -80,18 +87,18 @@ pub async fn run(app: &AppContext, args: DailyArgs) -> Result<()> {
         }
     } else {
         if args.common.json {
-            let report = reports::load_unified_report(&store, &filter, reports::PeriodKind::Daily)?;
+            let report = reports::load_unified_report(conn, &filter, reports::PeriodKind::Daily)?;
             println!(
                 "{}",
                 serde_json::to_string_pretty(&unified_report::report_json_with_hosts(
-                    Some((&store, &filter)),
+                    Some((conn, &filter)),
                     &report,
                     args.unified.by_agent,
                     args.common.no_cost
                 )?)?
             );
         } else {
-            let report = reports::load_unified_report(&store, &filter, reports::PeriodKind::Daily)?;
+            let report = reports::load_unified_report(conn, &filter, reports::PeriodKind::Daily)?;
             let color_mode = report_table::ColorMode::from_env();
             println!(
                 "{}",
@@ -103,7 +110,7 @@ pub async fn run(app: &AppContext, args: DailyArgs) -> Result<()> {
                 )
             );
             unified_report::print_host_section(
-                &store,
+                conn,
                 &filter,
                 reports::PeriodKind::Daily,
                 args.common.compact,

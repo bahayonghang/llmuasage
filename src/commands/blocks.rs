@@ -1,7 +1,12 @@
 use anyhow::Result;
 use tracing::debug;
 
-use crate::{app::AppContext, query::reports, store::Store, tui::report_table};
+use crate::{
+    app::AppContext,
+    query::{Dashboard, reports},
+    store::Store,
+    tui::report_table,
+};
 
 use super::{report_args::BlocksArgs, unified_report};
 
@@ -9,9 +14,10 @@ pub async fn run(app: &AppContext, args: BlocksArgs) -> Result<()> {
     debug!("starting blocks report output");
     let store = Store::new(&app.paths)?;
     store.require_initialized()?;
+    let dashboard = Dashboard::open(&store)?;
     let filter = args.common.to_filter(&store, None)?;
     let options = args.to_options();
-    let report = reports::load_blocks_report(&store, &filter, &options)?;
+    let report = reports::load_blocks_report(dashboard.connection(), &filter, &options)?;
 
     if args.common.json {
         let mut report = serde_json::to_value(&report)?;

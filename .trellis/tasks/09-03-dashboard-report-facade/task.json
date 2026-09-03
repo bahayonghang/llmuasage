@@ -3,7 +3,7 @@
   "name": "dashboard-report-facade",
   "title": "统一 Dashboard 与 CLI reports 读路径",
   "description": "ReportFilter 与 QueryFilter 合一，blocks_report 复用 Dashboard 连接。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

@@ -1,7 +1,12 @@
 use anyhow::Result;
 use tracing::debug;
 
-use crate::{app::AppContext, query::reports, store::Store, tui::report_table};
+use crate::{
+    app::AppContext,
+    query::{Dashboard, reports},
+    store::Store,
+    tui::report_table,
+};
 
 use super::{report_args::SessionArgs, unified_report};
 
@@ -9,6 +14,8 @@ pub async fn run(app: &AppContext, args: SessionArgs) -> Result<()> {
     debug!("starting session report output");
     let store = Store::new(&app.paths)?;
     store.require_initialized()?;
+    let dashboard = Dashboard::open(&store)?;
+    let conn = dashboard.connection();
     let filter = args.common.to_filter(&store, args.project.clone())?;
 
     if args.id.is_some() && !args.unified.sections.is_empty() {
@@ -16,14 +23,14 @@ pub async fn run(app: &AppContext, args: SessionArgs) -> Result<()> {
     }
     if !args.unified.sections.is_empty() {
         let reports = unified_report::load_sections(
-            &store,
+            conn,
             &filter,
             reports::PeriodKind::Session,
             &args.unified.sections,
             false,
         )?;
         unified_report::print_sections(
-            &store,
+            conn,
             &filter,
             &reports,
             reports::PeriodKind::Session,
@@ -36,13 +43,13 @@ pub async fn run(app: &AppContext, args: SessionArgs) -> Result<()> {
         return Ok(());
     }
 
-    let report = reports::load_unified_session_report(&store, &filter, args.id.as_deref())?;
+    let report = reports::load_unified_session_report(conn, &filter, args.id.as_deref())?;
     if args.common.json {
         // Session rows are already source-specific, so --by-agent is deliberately a no-op.
         println!(
             "{}",
             serde_json::to_string_pretty(&unified_report::report_json_with_hosts(
-                Some((&store, &filter)),
+                Some((conn, &filter)),
                 &report,
                 false,
                 args.common.no_cost

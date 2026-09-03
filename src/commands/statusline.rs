@@ -9,7 +9,10 @@ use tracing::debug;
 
 use crate::{
     app::AppContext,
-    query::reports::{self, ReportTimezone},
+    query::{
+        Dashboard,
+        reports::{self, ReportTimezone},
+    },
     store::Store,
     tui::report_table,
 };
@@ -27,7 +30,9 @@ pub async fn run(app: &AppContext, args: StatuslineArgs) -> Result<()> {
         .join("statusline-cache")
         .join("latest.txt");
 
-    let line = match reports::load_statusline_summary(&store, ReportTimezone::Local) {
+    let dashboard = Dashboard::open(&store)?;
+    let line = match reports::load_statusline_summary(dashboard.connection(), ReportTimezone::Local)
+    {
         Ok(summary) => {
             let active = summary
                 .active_block

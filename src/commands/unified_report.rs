@@ -6,6 +6,8 @@ use serde::{
 };
 use serde_json::{Map, Value};
 
+use rusqlite::Connection;
+
 use crate::{
     commands::report_args::ReportSectionArg,
     models::SourceKind,
@@ -13,7 +15,6 @@ use crate::{
         HostIdentity, ModelCostBreakdown, PeriodKind, ReportFilter, TokenTotals, UnifiedReport,
         UnifiedRow, today_for_timezone,
     },
-    store::Store,
     tui::report_table,
 };
 
@@ -46,7 +47,7 @@ pub(crate) fn apply_daily_default(filter: &mut ReportFilter) {
 }
 
 pub(crate) fn load_sections(
-    store: &Store,
+    conn: &Connection,
     filter: &ReportFilter,
     command_kind: PeriodKind,
     requested: &[ReportSectionArg],
@@ -59,14 +60,14 @@ pub(crate) fn load_sections(
             if kind == PeriodKind::Daily && !daily_all {
                 apply_daily_default(&mut section_filter);
             }
-            crate::query::reports::load_unified_report(store, &section_filter, kind)
+            crate::query::reports::load_unified_report(conn, &section_filter, kind)
         })
         .collect()
 }
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn print_sections(
-    store: &Store,
+    conn: &Connection,
     filter: &ReportFilter,
     reports: &[UnifiedReport],
     command_kind: PeriodKind,
@@ -77,7 +78,7 @@ pub(crate) fn print_sections(
 ) -> Result<()> {
     if json {
         let mut payload = sections_json(reports, command_kind, include_agents, no_cost)?;
-        attach_hosts_ordered(store, filter, command_kind, &mut payload, no_cost)?;
+        attach_hosts_ordered(conn, filter, command_kind, &mut payload, no_cost)?;
         println!("{}", serde_json::to_string_pretty(&payload)?);
     } else {
         let color_mode = report_table::ColorMode::from_env();
@@ -90,7 +91,7 @@ pub(crate) fn print_sections(
                 report_table::render_unified_table(report, compact, no_cost, color_mode)
             );
         }
-        print_host_section(store, filter, command_kind, compact, no_cost)?;
+        print_host_section(conn, filter, command_kind, compact, no_cost)?;
     }
     Ok(())
 }
@@ -99,7 +100,7 @@ pub(crate) fn print_sections(
 /// deriving from the query payload structs, whose snake_case serialization is
 /// still consumed by the dashboard, export, and interactive TUI surfaces.
 pub(crate) fn report_json_with_hosts(
-    hosts: Option<(&Store, &ReportFilter)>,
+    hosts: Option<(&Connection, &ReportFilter)>,
     report: &UnifiedReport,
     include_agents: bool,
     no_cost: bool,
@@ -117,8 +118,8 @@ pub(crate) fn report_json_with_hosts(
     if no_cost {
         strip_cost_json(&mut value);
     }
-    if let Some((store, filter)) = hosts {
-        attach_hosts_json(store, filter, report.kind, &mut value, no_cost)?;
+    if let Some((conn, filter)) = hosts {
+        attach_hosts_json(conn, filter, report.kind, &mut value, no_cost)?;
     }
     Ok(value)
 }
@@ -302,13 +303,13 @@ pub(crate) fn strip_cost_json(value: &mut Value) {
 }
 
 pub(crate) fn print_host_section(
-    store: &Store,
+    conn: &Connection,
     filter: &ReportFilter,
     kind: PeriodKind,
     _compact: bool,
     no_cost: bool,
 ) -> Result<()> {
-    let rows = host_period_rows(store, filter, kind)?;
+    let rows = host_period_rows(conn, filter, kind)?;
     if rows.is_empty() {
         return Ok(());
     }
@@ -328,13 +329,13 @@ pub(crate) fn print_host_section(
 }
 
 pub(crate) fn attach_hosts_json(
-    store: &Store,
+    conn: &Connection,
     filter: &ReportFilter,
     kind: PeriodKind,
     value: &mut Value,
     no_cost: bool,
 ) -> Result<()> {
-    let hosts = hosts_json(store, filter, kind, no_cost)?;
+    let hosts = hosts_json(conn, filter, kind, no_cost)?;
     if let Value::Object(map) = value {
         map.insert("hosts".to_string(), hosts);
     }
@@ -342,23 +343,23 @@ pub(crate) fn attach_hosts_json(
 }
 
 pub(crate) fn attach_hosts_ordered(
-    store: &Store,
+    conn: &Connection,
     filter: &ReportFilter,
     kind: PeriodKind,
     payload: &mut OrderedJson,
     no_cost: bool,
 ) -> Result<()> {
-    payload.push_field("hosts", hosts_json(store, filter, kind, no_cost)?);
+    payload.push_field("hosts", hosts_json(conn, filter, kind, no_cost)?);
     Ok(())
 }
 
 fn hosts_json(
-    store: &Store,
+    conn: &Connection,
     filter: &ReportFilter,
     kind: PeriodKind,
     no_cost: bool,
 ) -> Result<Value> {
-    let mut hosts = serde_json::to_value(host_period_rows(store, filter, kind)?)?;
+    let mut hosts = serde_json::to_value(host_period_rows(conn, filter, kind)?)?;
     if no_cost {
         strip_cost_json(&mut hosts);
     }
@@ -366,13 +367,13 @@ fn hosts_json(
 }
 
 fn host_period_rows(
-    store: &Store,
+    conn: &Connection,
     filter: &ReportFilter,
     kind: PeriodKind,
 ) -> Result<Vec<HostPeriodJson>> {
     match kind {
         PeriodKind::Daily => Ok(
-            crate::query::reports::load_daily_reports_by_host(store, filter)?
+            crate::query::reports::load_daily_reports_by_host(conn, filter)?
                 .into_iter()
                 .flat_map(|(host, report)| {
                     report.daily.into_iter().map(move |row| {
@@ -387,24 +388,24 @@ fn host_period_rows(
                 })
                 .collect(),
         ),
-        PeriodKind::Weekly => Ok(crate::query::reports::load_weekly_reports_by_host(
-            store, filter,
-        )?
-        .into_iter()
-        .flat_map(|(host, report)| {
-            report.weekly.into_iter().map(move |row| {
-                HostPeriodJson::from_daily(
-                    &host,
-                    row.week,
-                    &row.totals,
-                    row.models_used,
-                    row.model_breakdowns,
-                )
-            })
-        })
-        .collect()),
+        PeriodKind::Weekly => Ok(
+            crate::query::reports::load_weekly_reports_by_host(conn, filter)?
+                .into_iter()
+                .flat_map(|(host, report)| {
+                    report.weekly.into_iter().map(move |row| {
+                        HostPeriodJson::from_daily(
+                            &host,
+                            row.week,
+                            &row.totals,
+                            row.models_used,
+                            row.model_breakdowns,
+                        )
+                    })
+                })
+                .collect(),
+        ),
         PeriodKind::Monthly => Ok(crate::query::reports::load_monthly_reports_by_host(
-            store, filter,
+            conn, filter,
         )?
         .into_iter()
         .flat_map(|(host, report)| {

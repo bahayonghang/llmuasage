@@ -1,7 +1,12 @@
 use anyhow::Result;
 use tracing::debug;
 
-use crate::{app::AppContext, query::reports, store::Store, tui::report_table};
+use crate::{
+    app::AppContext,
+    query::{Dashboard, reports},
+    store::Store,
+    tui::report_table,
+};
 
 use super::{report_args::WeeklyArgs, unified_report};
 
@@ -9,17 +14,19 @@ pub async fn run(app: &AppContext, args: WeeklyArgs) -> Result<()> {
     debug!("starting weekly report output");
     let store = Store::new(&app.paths)?;
     store.require_initialized()?;
+    let dashboard = Dashboard::open(&store)?;
+    let conn = dashboard.connection();
     let filter = args.common.to_filter(&store, None)?;
     if !args.unified.sections.is_empty() {
         let reports = unified_report::load_sections(
-            &store,
+            conn,
             &filter,
             reports::PeriodKind::Weekly,
             &args.unified.sections,
             false,
         )?;
         unified_report::print_sections(
-            &store,
+            conn,
             &filter,
             &reports,
             reports::PeriodKind::Weekly,
@@ -31,13 +38,13 @@ pub async fn run(app: &AppContext, args: WeeklyArgs) -> Result<()> {
         debug!("finished weekly report output");
         return Ok(());
     }
-    let report = reports::load_unified_report(&store, &filter, reports::PeriodKind::Weekly)?;
+    let report = reports::load_unified_report(conn, &filter, reports::PeriodKind::Weekly)?;
 
     if args.common.json {
         println!(
             "{}",
             serde_json::to_string_pretty(&unified_report::report_json_with_hosts(
-                Some((&store, &filter)),
+                Some((conn, &filter)),
                 &report,
                 args.unified.by_agent,
                 args.common.no_cost
@@ -54,7 +61,7 @@ pub async fn run(app: &AppContext, args: WeeklyArgs) -> Result<()> {
             )
         );
         unified_report::print_host_section(
-            &store,
+            conn,
             &filter,
             reports::PeriodKind::Weekly,
             args.common.compact,

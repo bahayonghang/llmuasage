@@ -260,15 +260,14 @@ impl Dashboard {
     /// dashboard-friendly defaults (recent blocks, local time, 5h windows).
     pub fn blocks_report(&self) -> anyhow::Result<Vec<reports::BlockReportRow>> {
         let filter = reports::ReportFilter {
-            since: None,
-            until: None,
+            filter: QueryFilter {
+                timezone: reports::ReportTimezone::Local,
+                ..QueryFilter::default()
+            },
             order: reports::SortOrder::Desc,
-            timezone: reports::ReportTimezone::Local,
             locale: "en-US".to_string(),
-            source: None,
             project: None,
             breakdown: false,
-            host_id: None,
         };
         let options = reports::BlockReportOptions {
             active_only: false,
@@ -276,7 +275,7 @@ impl Dashboard {
             token_limit: None,
             session_length_hours: 5.0,
         };
-        Ok(reports::load_blocks_report(&self.store, &filter, &options)?.blocks)
+        Ok(reports::load_blocks_report(&self.conn, &filter, &options)?.blocks)
     }
 
     /// Loads total token usage grouped by source plus each source's freshest event time.

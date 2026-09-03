@@ -2,7 +2,11 @@ use anyhow::{Result, anyhow};
 use chrono::{FixedOffset, NaiveDate};
 use clap::{Args, ValueEnum};
 
-use crate::{models::SourceKind, query::reports, store::Store};
+use crate::{
+    models::SourceKind,
+    query::{QueryFilter, reports},
+    store::Store,
+};
 
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
 pub enum ReportOrderArg {
@@ -75,18 +79,22 @@ impl ReportCommonArgs {
         project: Option<String>,
     ) -> Result<reports::ReportFilter> {
         Ok(reports::ReportFilter {
-            since: self.since.as_deref().map(parse_date_value).transpose()?,
-            until: self.until.as_deref().map(parse_date_value).transpose()?,
+            filter: QueryFilter {
+                source: self.source,
+                model: None,
+                since: self.since.as_deref().map(parse_date_value).transpose()?,
+                until: self.until.as_deref().map(parse_date_value).transpose()?,
+                project_hash: None,
+                host_id: resolve_host_id(store, self.host.as_deref())?,
+                timezone: parse_timezone_value(&self.timezone)?,
+            },
             order: match self.order {
                 ReportOrderArg::Asc => reports::SortOrder::Asc,
                 ReportOrderArg::Desc => reports::SortOrder::Desc,
             },
-            timezone: parse_timezone_value(&self.timezone)?,
             locale: self.locale.clone(),
-            source: self.source,
             project,
             breakdown: self.breakdown,
-            host_id: resolve_host_id(store, self.host.as_deref())?,
         })
     }
 }

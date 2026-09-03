@@ -7,7 +7,7 @@ use llmusage::{
     models::SourceKind,
     parsers::SyncEvent,
     query::{
-        Dashboard, ReportTimezone,
+        Dashboard, QueryFilter, ReportTimezone,
         reports::{ReportFilter, SortOrder, load_daily_report},
     },
     store::{Store, expected_token_accounting_version},
@@ -89,20 +89,17 @@ fn ccusage_token_semantics_are_consistent_across_sources_and_queries() -> Result
 
         let overview = Dashboard::open(&store)?.overview(&Default::default())?;
         assert_eq!(overview.total.total_tokens, event_total);
-        let daily = load_daily_report(
-            &store,
-            &ReportFilter {
-                since: None,
-                until: None,
-                order: SortOrder::Asc,
+        let filter = ReportFilter {
+            filter: QueryFilter {
                 timezone: ReportTimezone::Utc,
-                locale: "en-US".to_string(),
-                source: None,
-                project: None,
-                breakdown: true,
-                host_id: None,
+                ..QueryFilter::default()
             },
-        )?;
+            order: SortOrder::Asc,
+            locale: "en-US".to_string(),
+            project: None,
+            breakdown: true,
+        };
+        let daily = load_daily_report(&store.open_connection()?, &filter)?;
         assert_eq!(daily.totals.total_tokens, event_total);
 
         let (cost, rate_json): (f64, String) = conn.query_row(
