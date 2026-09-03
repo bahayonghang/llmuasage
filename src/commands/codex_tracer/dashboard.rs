@@ -31,9 +31,8 @@ pub struct DashboardMetadata {
 
 /// Generate a static dashboard HTML file.
 pub fn generate_dashboard(store: &CodexTracerStore, output_dir: &Path) -> Result<PathBuf> {
-    // 1. Query all events (for now, we'll add filtering later)
     let calls = store.query_calls(&super::store::CallFilters {
-        limit: Some(10000), // Limit to avoid huge payloads
+        limit: Some(super::store::INDEX_QUERY_LIMIT),
         ..Default::default()
     })?;
 

@@ -3,7 +3,7 @@
   "name": "codex-tracer-http",
   "title": "codex-tracer HTTP 边界收口",
   "description": "refresh 改为 POST，错误体去掉路径，LIMIT 绑定并夹紧。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

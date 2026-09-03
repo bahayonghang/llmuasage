@@ -7,6 +7,13 @@ use rusqlite::{Connection, params};
 
 use super::models::{CodexTracerEvent, ThreadSummary};
 
+/// Named row budget for dashboard HTML generation and `/` startup queries.
+/// This is a bound, not an unbounded scan. List APIs use [`LIST_QUERY_LIMIT_MAX`].
+pub(crate) const INDEX_QUERY_LIMIT: usize = 10_000;
+
+/// Maximum rows returned by list query APIs such as `GET /api/calls`.
+pub(crate) const LIST_QUERY_LIMIT_MAX: usize = 500;
+
 /// Durable per-file state for bounded tracer ingestion.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TracerFileState {
@@ -339,7 +346,10 @@ impl CodexTracerStore {
         sql.push_str(" ORDER BY event_timestamp DESC");
 
         if let Some(limit) = filters.limit {
-            sql.push_str(&format!(" LIMIT {}", limit));
+            let bound_limit =
+                i64::try_from(limit.min(INDEX_QUERY_LIMIT)).expect("INDEX_QUERY_LIMIT fits in i64");
+            sql.push_str(" LIMIT ?");
+            params.push(Box::new(bound_limit));
         }
 
         let params_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
@@ -709,5 +719,108 @@ mod tests {
             "old-record"
         );
         assert!(store.file_state("path-hash").unwrap().is_none());
+    }
+
+    #[test]
+    fn query_limit_constants_are_bounded() {
+        assert!(LIST_QUERY_LIMIT_MAX <= 500);
+        assert_eq!(INDEX_QUERY_LIMIT, 10_000);
+        assert!(INDEX_QUERY_LIMIT >= LIST_QUERY_LIMIT_MAX);
+    }
+
+    #[test]
+    fn query_calls_binds_and_clamps_oversized_limit() {
+        use rusqlite::trace::{TraceEvent, TraceEventCodes};
+        use std::sync::Mutex;
+
+        static TRACED_SQL: Mutex<Vec<(String, Option<String>)>> = Mutex::new(Vec::new());
+        fn capture_sql(event: TraceEvent<'_>) {
+            if let TraceEvent::Stmt(stmt, _x_sql) = event {
+                TRACED_SQL
+                    .lock()
+                    .expect("sql trace mutex")
+                    .push((stmt.sql().into_owned(), stmt.expanded_sql()));
+            }
+        }
+
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("limit.db");
+        let mut store = CodexTracerStore::open(&db_path).unwrap();
+        let events: Vec<_> = (0..3)
+            .map(|i| {
+                CodexTracerEvent::new(
+                    format!("record-{i}"),
+                    "session-1".to_string(),
+                    format!("2026-06-16T10:00:0{i}Z"),
+                    "/path/to/file1.jsonl".to_string(),
+                    i,
+                    1000,
+                    600,
+                    200,
+                    50,
+                )
+            })
+            .collect();
+        store.upsert_events(&events).unwrap();
+
+        store
+            .conn
+            .trace_v2(TraceEventCodes::SQLITE_TRACE_STMT, Some(capture_sql));
+        TRACED_SQL.lock().expect("sql trace mutex").clear();
+
+        let oversized = 999_999usize;
+        let queried = store
+            .query_calls(&CallFilters {
+                limit: Some(oversized),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(queried.len(), 3);
+
+        let traced = TRACED_SQL.lock().expect("sql trace mutex").clone();
+        store.conn.trace_v2(TraceEventCodes::empty(), None);
+
+        let limit_traces: Vec<_> = traced
+            .iter()
+            .filter(|(prepared, expanded)| {
+                let haystack = format!("{prepared} {}", expanded.as_deref().unwrap_or(""));
+                haystack
+                    .to_ascii_uppercase()
+                    .contains("FROM CODEX_TRACER_EVENTS")
+                    && haystack.to_ascii_uppercase().contains("LIMIT")
+            })
+            .collect();
+        assert!(
+            !limit_traces.is_empty(),
+            "expected a traced SELECT with LIMIT, got {traced:?}"
+        );
+
+        let raw = oversized.to_string();
+        let clamped = INDEX_QUERY_LIMIT.to_string();
+        let mut saw_clamped_bind = false;
+        for (prepared, expanded) in &limit_traces {
+            assert!(
+                !prepared.contains(&raw),
+                "prepared SQL interpolated raw limit {oversized}: {prepared}"
+            );
+            let prepared_upper = prepared.to_ascii_uppercase();
+            assert!(
+                prepared_upper.contains("LIMIT ?"),
+                "LIMIT must be a bound parameter, got prepared SQL: {prepared}"
+            );
+            if let Some(expanded) = expanded {
+                assert!(
+                    !expanded.contains(&raw),
+                    "expanded SQL interpolated raw limit {oversized}: {expanded}"
+                );
+                if expanded.contains(&clamped) {
+                    saw_clamped_bind = true;
+                }
+            }
+        }
+        assert!(
+            saw_clamped_bind,
+            "expanded SQL must bind the clamped LIMIT {clamped}, got {limit_traces:?}"
+        );
     }
 }

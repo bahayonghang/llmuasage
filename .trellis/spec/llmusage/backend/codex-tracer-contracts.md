@@ -394,16 +394,20 @@ pub async fn serve_dashboard(
 ) -> Result<()>
 ```
 
+**Listener**: bind `127.0.0.1` only. This command has no public bind option.
+
 **Endpoints**:
 
-| Route             | Method | Description                            |
-| ----------------- | ------ | -------------------------------------- |
-| `/`               | GET    | Main dashboard HTML with embedded data |
-| `/api/calls`      | GET    | Query events with filters              |
-| `/api/stats`      | GET    | Event count statistics                 |
-| `/api/refresh`    | GET    | Re-parse JSONL files (placeholder)     |
-| `/dashboard.js`   | GET    | Main dashboard JavaScript              |
-| `/dashboard_*.js` | GET    | 18 other JavaScript modules            |
+| Route             | Method | Description                                 |
+| ----------------- | ------ | ------------------------------------------- |
+| `/`               | GET    | Main dashboard HTML with embedded data      |
+| `/api/calls`      | GET    | Query events with filters                   |
+| `/api/stats`      | GET    | Event count statistics                      |
+| `/api/refresh`    | POST   | Re-ingest rollout JSONL into the tracer DB  |
+| `/dashboard.js`   | GET    | Main dashboard JavaScript                   |
+| `/dashboard_*.js` | GET    | 18 other JavaScript modules                 |
+
+GET `/api/refresh` is not mounted. The shipped router must return 405 and must not ingest.
 
 ### GET /api/calls
 
@@ -413,7 +417,9 @@ pub async fn serve_dashboard(
 - `since` (optional): ISO 8601 timestamp
 - `until` (optional): ISO 8601 timestamp
 - `include_archived` (optional): boolean, default false
-- `limit` (optional): integer
+- `limit` (optional): integer. Clamp to `LIST_QUERY_LIMIT_MAX` (500). Omitted, zero, negative, or oversized values use that cap.
+
+SQL uses a bound `LIMIT ?`. Do not interpolate the limit into the statement text. `/` and static dashboard generation use a separate named budget, `INDEX_QUERY_LIMIT` (10_000).
 
 **Response**:
 
@@ -440,6 +446,35 @@ pub async fn serve_dashboard(
 ```json
 {
   "total_events": 1234
+}
+```
+
+### POST /api/refresh
+
+Re-ingest `$CODEX_HOME/rollout` through `ingest_rollout_dir`. GET must not run this path.
+
+**Success**:
+
+```json
+{
+  "ok": true,
+  "files_parsed": 1,
+  "events_found": 10,
+  "events_inserted": 10,
+  "errors": 0
+}
+```
+
+### HTTP error bodies
+
+JSON failures use a stable `code` plus a short `message`. HTML/plain failures for `/` use the same `code` and `message`. Do not include `detail`, filesystem paths, or `rusqlite`/`SQLITE` text. Log the cause with `tracing`.
+
+```json
+{
+  "error": {
+    "code": "codex_not_found",
+    "message": "Codex rollout directory not found"
+  }
 }
 ```
 
@@ -487,13 +522,13 @@ llmusage codex-tracer [OPTIONS]
 
 ### Common Errors
 
-| Error           | Cause                               | User Message                                                                     |
-| --------------- | ----------------------------------- | -------------------------------------------------------------------------------- |
-| Codex not found | `$CODEX_HOME/rollout` doesn't exist | "Codex rollout directory not found: {path}\nPlease ensure Codex is installed..." |
-| No events       | No JSONL files or all empty         | "No events found in {path}\nPlease ensure you have used Codex at least once."    |
-| Parse error     | JSONL format invalid                | Warning logged, continue with other files                                        |
-| Port in use     | Another server on same port         | "Failed to bind to {addr}"                                                       |
-| Database error  | Disk full, permissions              | "Failed to open codex-tracer database"                                           |
+| Error           | Cause                               | CLI / log                                                                          | HTTP body                                              |
+| --------------- | ----------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| Codex not found | `$CODEX_HOME/rollout` doesn't exist | CLI may print the path. HTTP logs the path with `tracing`.                         | `codex_not_found` / "Codex rollout directory not found" |
+| No events       | No JSONL files or all empty         | CLI may print the path.                                                            | Not an HTTP error; refresh returns counts.             |
+| Parse error     | JSONL format invalid                | Warning logged, continue with other files                                          | Counted in refresh `errors`; no path in JSON.          |
+| Port in use     | Another server on same port         | "Failed to bind to {addr}"                                                         | Process does not start.                                |
+| Database error  | Disk full, permissions, query fail  | Structured log with the cause                                                      | `internal_error` plus a short static message           |
 
 ### Error Recovery
 
