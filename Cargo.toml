@@ -86,7 +86,7 @@ tokio = { version = "1.53.1", features = [
 ] }
 tokio-util = "0.7.19"
 toml_edit = "0.25.13"
-tower-http = { version = "0.7.0", features = ["fs", "compression-gzip", "compression-br"] }
+tower-http = { version = "0.7.1", features = ["fs", "compression-gzip", "compression-br"] }
 tracing = "0.1.44"
 tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "json"] }
