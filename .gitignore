@@ -7,6 +7,9 @@ ref/
 .opencode/
 .cursor/
 .kiro/
+.omp/
+.grok/
+.kimi-code/
 
 
 # Added by cargo
