@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/llmusage/backend/index.md", "reason": "Parent integration review: which backend contracts children must satisfy."}
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "Parser fail-closed and cursor/reset semantics."}
+{"file": ".trellis/spec/llmusage/backend/web-server-contracts.md", "reason": "Loopback vs public exposure; CSRF child must not weaken public allowlist."}
+{"file": ".trellis/spec/llmusage/backend/write-fencing-contracts.md", "reason": "Reset/rebuild and catalog recovery stay inside fencing."}
+{"file": ".trellis/spec/llmusage/backend/runtime-log-contracts.md", "reason": "Command logging child wraps run_tracked without breaking bounds."}
+{"file": ".trellis/spec/llmusage/backend/tui-subscription-contracts.md", "reason": "Quota HTTP is specified; docs must not call it a usage-upload API."}
+{"file": ".trellis/tasks/09-03-engineering-audit/research/engineering-audit-2026-09-03.md", "reason": "Authoritative finding inventory and child mapping."}
