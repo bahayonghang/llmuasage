@@ -134,7 +134,7 @@ pub(super) fn load_profile_read_only(
     let paths = AppPaths::with_root(root)?;
     let store = Store::new(&paths)?;
     let conn = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-    super::timezone::register_functions(&conn)?;
+    crate::store::sqlite_functions::register_functions(&conn)?;
     let dashboard = Dashboard { store, conn };
     load_profile(&dashboard, filter)
 }

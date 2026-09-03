@@ -9,8 +9,11 @@ use serde::Serialize;
 
 use super::{BootstrapProgressSink, HolderKind, Store};
 use crate::{
+    domain::{
+        pricing::PricingStatus,
+        pricing_catalog::{CatalogDocument, PricingCatalog},
+    },
     error::{LlmusageError, Result},
-    query::{PricingCatalog, PricingStatus},
     util::hash_string,
 };
 
@@ -543,11 +546,7 @@ impl Store {
         Ok(catalog)
     }
 
-    fn load_overlay_layer(
-        &self,
-        identity: &str,
-        relative: &str,
-    ) -> Result<crate::query::pricing_catalog::CatalogDocument> {
+    fn load_overlay_layer(&self, identity: &str, relative: &str) -> Result<CatalogDocument> {
         let path = self.catalog_path(relative)?;
         let raw = fs::read_to_string(&path)?;
         if !verify_content_digest(relative, &raw)? {
@@ -595,7 +594,7 @@ fn layer_from_document(
     identity: &str,
     file: Option<&str>,
     kind: &str,
-    document: &crate::query::pricing_catalog::CatalogDocument,
+    document: &CatalogDocument,
 ) -> CatalogLayerStatus {
     CatalogLayerStatus {
         identity: identity.to_string(),

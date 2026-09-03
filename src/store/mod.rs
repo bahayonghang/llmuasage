@@ -12,9 +12,12 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, warn};
 
 use crate::{
+    domain::{
+        pricing::{self, CostBreakdown, PRICING_MIXED, PRICING_UNPRICED, PricingStatus},
+        pricing_catalog::PricingCatalog,
+    },
     models::{ParseIssues, SourceKind, UsageEvent, UsageTokens, UsageToolCall, UsageTurn},
     paths::AppPaths,
-    query::pricing::{self, CostBreakdown, PRICING_MIXED, PRICING_UNPRICED, PricingStatus},
 };
 
 mod connection;
@@ -28,6 +31,7 @@ mod pricing_catalog;
 mod run_log;
 mod schema;
 mod source_file;
+pub(crate) mod sqlite_functions;
 mod sync_status;
 mod sync_writer;
 
@@ -396,10 +400,7 @@ impl Store {
     /// crash mid-run leaves the database in a consistent (partially updated)
     /// state. The final bucket reconciliation and catalog version write happen
     /// in a single closing transaction.
-    pub fn recompute_costs_with(
-        &self,
-        catalog: &crate::query::pricing_catalog::PricingCatalog,
-    ) -> crate::error::Result<usize> {
+    pub fn recompute_costs_with(&self, catalog: &PricingCatalog) -> crate::error::Result<usize> {
         let activation = pricing_catalog::PricingMetaChange::for_catalog(self, catalog)?;
         Ok(self
             .recompute_costs_with_meta_and_progress(catalog, &activation, None)?
@@ -408,7 +409,7 @@ impl Store {
 
     fn recompute_costs_with_meta(
         &self,
-        catalog: &crate::query::pricing_catalog::PricingCatalog,
+        catalog: &PricingCatalog,
         activation: &pricing_catalog::PricingMetaChange,
     ) -> crate::error::Result<usize> {
         Ok(self
@@ -418,7 +419,7 @@ impl Store {
 
     fn recompute_costs_with_meta_and_progress(
         &self,
-        catalog: &crate::query::pricing_catalog::PricingCatalog,
+        catalog: &PricingCatalog,
         activation: &pricing_catalog::PricingMetaChange,
         progress_sink: Option<BootstrapProgressSink<'_>>,
     ) -> crate::error::Result<PricingRecomputeSummary> {
@@ -430,7 +431,7 @@ impl Store {
 
     fn recompute_costs_fenced(
         &self,
-        catalog: &crate::query::pricing_catalog::PricingCatalog,
+        catalog: &PricingCatalog,
         activation: &pricing_catalog::PricingMetaChange,
         progress_sink: Option<BootstrapProgressSink<'_>>,
     ) -> crate::error::Result<PricingRecomputeSummary> {
@@ -752,7 +753,7 @@ pub struct SyncRunWriter {
     permit: Option<WritePermit>,
     run_started_at: String,
     raw_archive_enabled: bool,
-    pricing_catalog: crate::query::PricingCatalog,
+    pricing_catalog: PricingCatalog,
     provider_index: Option<crate::domain::provider_map::ProviderIndex>,
     collect_sink: Option<Box<dyn FnMut(SyncShard) -> crate::error::Result<()> + Send>>,
 }
@@ -1211,7 +1212,7 @@ struct MetadataRollup {
 }
 
 impl PricingRollup {
-    pub(super) fn add(&mut self, cost: &crate::query::pricing::CostBreakdown) {
+    pub(super) fn add(&mut self, cost: &CostBreakdown) {
         self.cost_with_cache_usd += cost.cost_with_cache_usd;
         self.cost_without_cache_usd += cost.cost_without_cache_usd;
         self.pricing_status.add(Some(cost.pricing_status.as_str()));

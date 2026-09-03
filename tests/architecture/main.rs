@@ -246,6 +246,10 @@ fn is_commands_dependency(segments: &[String]) -> bool {
     matches!(segments, [root, layer, ..] if root == "crate" && layer == "commands")
 }
 
+fn is_query_dependency(segments: &[String]) -> bool {
+    matches!(segments, [root, layer, ..] if root == "crate" && layer == "query")
+}
+
 fn is_query_forbidden_dependency(segments: &[String]) -> bool {
     matches!(segments, [root, layer, ..]
         if root == "crate" && matches!(layer.as_str(), "commands" | "web" | "tui"))
@@ -673,6 +677,22 @@ fn remote_layer_does_not_depend_on_commands() {
 }
 
 #[test]
+fn store_does_not_depend_on_query() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/store");
+    let violations =
+        violations_in(&root, &["crate", "store"], is_query_dependency).expect("parse store layer");
+    assert!(
+        violations.is_empty(),
+        "ARCH-007 store→query violations:\n{}",
+        violations
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+#[test]
 fn query_layer_does_not_depend_on_commands_web_or_tui() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/query");
     let violations = violations_in(&root, &["crate", "query"], is_query_forbidden_dependency)
@@ -790,6 +810,37 @@ fn fixtures_cover_supported_rust_path_forms() {
     )
     .expect("parse valid fixture");
     assert!(valid.is_empty(), "valid fixture: {valid:?}");
+}
+
+#[test]
+fn store_query_fixtures_cover_supported_path_forms() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/architecture/fixtures");
+    let cases = [
+        ("store_query_use.rs", "crate::query::pricing"),
+        (
+            "store_query_fully_qualified.rs",
+            "crate::query::pricing::compute_cost",
+        ),
+        ("store_query_alias.rs", "crate::query"),
+    ];
+
+    for (name, expected_target) in cases {
+        let violations = violations_in(
+            &fixtures.join(name),
+            &["crate", "store"],
+            is_query_dependency,
+        )
+        .expect("parse store→query fixture");
+        let violation = violations
+            .iter()
+            .find(|violation| violation.target == expected_target)
+            .unwrap_or_else(|| panic!("fixture {name}: {violations:?}"));
+        assert!(violation.line > 0, "fixture {name} must report a line");
+        assert!(
+            violation.file.ends_with(name),
+            "fixture {name} must report its source file: {violation:?}"
+        );
+    }
 }
 
 #[test]

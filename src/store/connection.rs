@@ -55,7 +55,7 @@ impl Store {
             "#,
         )?;
         // DATA-003: DST-aware local date/month grouping for IANA timezones.
-        crate::query::timezone::register_functions(&conn)?;
+        super::sqlite_functions::register_functions(&conn)?;
         Ok(conn)
     }
 

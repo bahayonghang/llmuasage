@@ -6,8 +6,9 @@ use tracing::info;
 
 use super::WritePermit;
 use crate::{
+    domain::pricing::PRICING_UNPRICED,
+    domain::pricing_catalog::PricingCatalog,
     error::{LlmusageError, Result},
-    query::PRICING_UNPRICED,
 };
 
 /// Migration function signature. Each migration owns one SQLite transaction.
@@ -614,9 +615,7 @@ fn m_010_add_pricing_meta(tx: &Transaction<'_>) -> Result<()> {
         VALUES ('pricing_catalog_version', ?1)
         ON CONFLICT(key) DO NOTHING
         "#,
-        [crate::query::pricing_catalog::PricingCatalog::embedded()
-            .version
-            .as_str()],
+        [PricingCatalog::embedded().version.as_str()],
     )?;
     Ok(())
 }
@@ -1726,10 +1725,7 @@ mod tests {
             [],
             |row| row.get(0),
         )?;
-        assert_eq!(
-            value,
-            crate::query::pricing_catalog::PricingCatalog::embedded().version
-        );
+        assert_eq!(value, PricingCatalog::embedded().version);
         Ok(())
     }
 

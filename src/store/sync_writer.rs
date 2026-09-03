@@ -13,13 +13,13 @@ use super::{
     schema::{omp_split_migrated_key, read_meta_value, reset_for_source_tx, write_meta_value},
 };
 use crate::{
-    domain::provider_map::ProviderIndex,
+    domain::{
+        pricing::{self, CostBreakdown, PRICING_MIXED, PRICING_UNPRICED},
+        pricing_catalog::PricingCatalog,
+        provider_map::ProviderIndex,
+    },
     error::LlmusageError,
     models::{ProjectInfo, SourceKind, UsageEvent, UsageTokens, UsageToolCall, UsageTurn},
-    query::{
-        PricingCatalog, pricing,
-        pricing::{CostBreakdown, PRICING_MIXED, PRICING_UNPRICED},
-    },
     util::now_utc,
 };
 
@@ -124,7 +124,7 @@ impl Store {
             permit: None,
             run_started_at: crate::util::now_utc_millis(),
             raw_archive_enabled: false,
-            pricing_catalog: crate::query::PricingCatalog::embedded().clone(),
+            pricing_catalog: PricingCatalog::embedded().clone(),
             provider_index: None,
             collect_sink: Some(Box::new(on_shard)),
         })
