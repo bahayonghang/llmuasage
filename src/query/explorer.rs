@@ -1585,7 +1585,7 @@ mod tests {
     use super::{
         Dashboard, ExplorerDimension, ExplorerFilters, ExplorerGranularity, ExplorerMetric,
         ExplorerQuery, ExplorerStrategy, ExplorerTokenType, choose_strategy, load_bucket_rows,
-        load_bucket_series, load_event_rows, load_event_series,
+        load_bucket_series, load_event_rows, load_event_series, sanitize_query,
     };
     use crate::{
         error::Result,
@@ -1666,6 +1666,17 @@ mod tests {
             ],
         )?;
         Ok(())
+    }
+
+    #[test]
+    fn sanitize_query_clamps_limit_into_one_through_fifty() {
+        for (input, expected) in [(0, 1), (999, 50)] {
+            let query = ExplorerQuery {
+                limit: input,
+                ..ExplorerQuery::default()
+            };
+            assert_eq!(sanitize_query(&query).limit, expected);
+        }
     }
 
     #[test]

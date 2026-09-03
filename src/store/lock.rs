@@ -701,4 +701,31 @@ mod tests {
         second_store.refresh_worker_lock(&second.lock_name, &second.owner_id, second.generation)?;
         Ok(())
     }
+
+    #[test]
+    fn write_transaction_rolls_back_when_closure_returns_err() -> Result<()> {
+        let temp = TempDir::new()?;
+        let store = test_store(&temp)?;
+
+        let error = store
+            .write_transaction(|tx| -> Result<()> {
+                tx.execute(
+                    "INSERT INTO meta(key, value) VALUES (?1, ?2)",
+                    params!["rollback-probe", "must-not-commit"],
+                )?;
+                Err(LlmusageError::ConfigInvalid {
+                    detail: "forced rollback".to_string(),
+                })
+            })
+            .expect_err("closure Err must surface without committing");
+        assert!(matches!(error, LlmusageError::ConfigInvalid { .. }));
+
+        let count: i64 = store.open_connection()?.query_row(
+            "SELECT COUNT(*) FROM meta WHERE key = ?1",
+            ["rollback-probe"],
+            |row| row.get(0),
+        )?;
+        assert_eq!(count, 0);
+        Ok(())
+    }
 }

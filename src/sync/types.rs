@@ -216,9 +216,29 @@ mod tests {
                 },
                 SyncRequestErrorCode::InvalidParallelism,
             ),
+            (
+                SyncRequestInput {
+                    parallelism: Some(0),
+                    ..Default::default()
+                },
+                SyncRequestErrorCode::InvalidParallelism,
+            ),
+            (
+                SyncRequestInput {
+                    recent_days: Some(MAX_RECENT_DAYS + 1),
+                    ..Default::default()
+                },
+                SyncRequestErrorCode::InvalidRecentDays,
+            ),
         ];
         for (input, code) in cases {
             assert_eq!(ValidatedSyncRequest::new(input).unwrap_err().code, code);
         }
+        let accepted = ValidatedSyncRequest::new(SyncRequestInput {
+            recent_days: Some(MAX_RECENT_DAYS),
+            ..Default::default()
+        })
+        .expect("recent_days=3650 is accepted");
+        assert_eq!(accepted.recent_days(), Some(MAX_RECENT_DAYS));
     }
 }

@@ -186,6 +186,42 @@ mod tests {
     }
 
     #[test]
+    fn validate_new_host_id_rejects_empty_source_collision_and_duplicate() -> anyhow::Result<()> {
+        let (_temp, store, _lock) = fenced_store()?;
+
+        let empty = validate_new_host_id(&store, "").expect_err("empty host_id");
+        assert!(
+            matches!(empty, LlmusageError::ConfigInvalid { .. }),
+            "{empty}"
+        );
+
+        let collision = validate_new_host_id(&store, "codex").expect_err("source collision");
+        assert!(
+            matches!(collision, LlmusageError::ConfigInvalid { .. }),
+            "{collision}"
+        );
+
+        let host = Host {
+            host_id: "devbox".to_string(),
+            label: "devbox".to_string(),
+            transport: "ssh".to_string(),
+            ssh_target: Some("me@devbox".to_string()),
+            command: "llmusage".to_string(),
+            added_at: now_utc(),
+            last_contacted_at: None,
+            last_error: None,
+            import_watermark: None,
+        };
+        store.hosts().upsert(&host)?;
+        let duplicate = validate_new_host_id(&store, "devbox").expect_err("duplicate host");
+        assert!(
+            matches!(duplicate, LlmusageError::ConfigInvalid { .. }),
+            "{duplicate}"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn add_rejects_missing_remote_binary() -> anyhow::Result<()> {
         let (_temp, store, _lock) = fenced_store()?;
         let runner = ScriptedCommandRunner {

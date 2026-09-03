@@ -334,4 +334,51 @@ mod tests {
         assert_eq!(tool_filter.where_sql(), " WHERE host_id = ?");
         assert_eq!(tool_filter.params(), &[Value::Text("devbox".to_string())]);
     }
+
+    #[test]
+    fn whitespace_only_host_model_project_skip_column_predicates() {
+        let filter = QueryFilter {
+            host_id: Some(" \t ".to_string()),
+            model: Some("   ".to_string()),
+            project_hash: Some("\n".to_string()),
+            timezone: ReportTimezone::Utc,
+            ..QueryFilter::default()
+        };
+
+        let sql_filter = filter.event_filter(None);
+        let where_sql = sql_filter.where_sql();
+        assert!(!where_sql.contains("host_id"));
+        assert!(!where_sql.contains("model"));
+        assert!(!where_sql.contains("project_hash"));
+        assert!(sql_filter.params().is_empty());
+    }
+
+    #[test]
+    fn until_at_max_date_omits_until_clause() {
+        let filter = QueryFilter {
+            until: Some(NaiveDate::MAX),
+            timezone: ReportTimezone::Utc,
+            ..QueryFilter::default()
+        };
+
+        let sql_filter = filter.event_filter(None);
+        assert!(!sql_filter.where_sql().contains("event_at <"));
+        assert!(sql_filter.params().is_empty());
+    }
+
+    #[test]
+    fn since_only_emits_inclusive_lower_bound() {
+        let filter = QueryFilter {
+            since: Some(NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()),
+            timezone: ReportTimezone::Utc,
+            ..QueryFilter::default()
+        };
+
+        let sql_filter = filter.event_filter(None);
+        assert_eq!(sql_filter.where_sql(), " WHERE event_at >= ?");
+        assert_eq!(
+            sql_filter.params(),
+            &[Value::Text("2026-01-01T00:00:00Z".to_string())]
+        );
+    }
 }

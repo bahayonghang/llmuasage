@@ -20,3 +20,28 @@ pub fn status_error(provider: &str, status: StatusCode) -> anyhow::Error {
         anyhow::anyhow!("{provider} usage request failed (HTTP {status})")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest::StatusCode;
+
+    #[test]
+    fn status_error_unauthorized_mentions_rejected_token() {
+        let error = status_error("Codex", StatusCode::UNAUTHORIZED).to_string();
+        assert!(
+            error.contains("stored access token was rejected"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn status_error_internal_error_is_generic_failure() {
+        let error = status_error("Codex", StatusCode::INTERNAL_SERVER_ERROR).to_string();
+        assert!(error.contains("usage request failed"), "{error}");
+        assert!(
+            !error.contains("stored access token was rejected"),
+            "{error}"
+        );
+    }
+}

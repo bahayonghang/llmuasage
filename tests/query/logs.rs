@@ -1,4 +1,5 @@
 use anyhow::Result;
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use llmusage::{AppPaths, Dashboard, LogsQuery, store::Store};
 use tempfile::TempDir;
 
@@ -11,6 +12,7 @@ fn fixture() -> Result<(TempDir, Store)> {
     for (key, session, label, at) in [
         ("event-a", "session-a", "Alpha Work", "2026-05-01T00:00:00Z"),
         ("event-b", "session-b", "Beta Work", "2026-05-01T01:00:00Z"),
+        ("event-c", "session-c", "Gamma Work", "2026-05-01T02:00:00Z"),
     ] {
         conn.execute(
             r#"
@@ -73,5 +75,61 @@ fn logs_support_session_and_single_event_detail() -> Result<()> {
         detail.records[0].raw_json.as_deref(),
         Some(r#"{"event":"event-a"}"#)
     );
+    Ok(())
+}
+
+#[test]
+fn logs_page_size_clamps_and_paginates_with_next_cursor() -> Result<()> {
+    let (_temp, store) = fixture()?;
+    let dashboard = Dashboard::open(&store)?;
+
+    let default_page = dashboard.logs(&LogsQuery {
+        page_size: 0,
+        ..Default::default()
+    })?;
+    assert!(default_page.records.len() <= 50);
+    assert_eq!(default_page.records.len(), 3);
+
+    let max_page = dashboard.logs(&LogsQuery {
+        page_size: 1000,
+        ..Default::default()
+    })?;
+    assert!(max_page.records.len() <= 500);
+    assert_eq!(max_page.records.len(), 3);
+
+    let first = dashboard.logs(&LogsQuery {
+        page_size: 1,
+        ..Default::default()
+    })?;
+    assert_eq!(first.records.len(), 1);
+    assert_eq!(first.records[0].event_key, "event-c");
+    let next_cursor = first
+        .next_cursor
+        .as_deref()
+        .expect("page_size=1 must yield a next cursor");
+
+    let second = dashboard.logs(&LogsQuery {
+        page_size: 1,
+        cursor: Some(next_cursor.to_string()),
+        ..Default::default()
+    })?;
+    assert_eq!(second.records.len(), 1);
+    assert_eq!(second.records[0].event_key, "event-b");
+    Ok(())
+}
+
+#[test]
+fn logs_reject_cursor_with_empty_event_key() -> Result<()> {
+    let (_temp, store) = fixture()?;
+    let dashboard = Dashboard::open(&store)?;
+    let cursor = URL_SAFE_NO_PAD.encode(br#"{"event_at":"2026-05-01T00:00:00Z","event_key":""}"#);
+
+    let error = dashboard
+        .logs(&LogsQuery {
+            cursor: Some(cursor),
+            ..Default::default()
+        })
+        .expect_err("empty cursor fields must fail");
+    assert!(error.to_string().contains("invalid logs cursor"), "{error}");
     Ok(())
 }

@@ -237,3 +237,38 @@ impl<'a> CursorStore<'a> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use tempfile::TempDir;
+
+    use super::*;
+    use crate::paths::AppPaths;
+
+    #[test]
+    fn load_file_cursors_treats_corrupt_last_total_json_as_none() -> Result<()> {
+        let temp = TempDir::new()?;
+        let paths = AppPaths::with_root(temp.path().to_path_buf())?;
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+        store.write_transaction(|tx| {
+            tx.execute(
+                r#"
+                INSERT INTO source_cursor(host_id, source, cursor_key, last_total_json, updated_at)
+                VALUES ('local', 'codex', 'corrupt.jsonl', 'not-json', '2026-05-08T00:00:00Z')
+                "#,
+                [],
+            )?;
+            Ok(())
+        })?;
+
+        let cursors = store
+            .cursors()
+            .load_file_cursors(SourceKind::Codex, "local")?;
+        let cursor = cursors
+            .get("corrupt.jsonl")
+            .expect("corrupt cursor row still loads");
+        assert_eq!(cursor.last_total, None);
+        Ok(())
+    }
+}

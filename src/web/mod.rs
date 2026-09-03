@@ -2339,6 +2339,21 @@ mod tests {
         }
     }
 
+    #[test]
+    fn public_dashboard_filter_ignores_host_selectors() {
+        for host_key in ["host", "host_id"] {
+            let params = std::collections::HashMap::from([
+                (host_key.to_string(), "devbox".to_string()),
+                ("source".to_string(), "codex".to_string()),
+            ]);
+
+            let filter = public_dashboard_filter_from_params(&params);
+
+            assert_eq!(filter.host_id, None);
+            assert_eq!(filter.source, Some(SourceKind::Codex));
+        }
+    }
+
     #[tokio::test]
     async fn public_sensitive_read_routes_are_absent_over_real_tcp() -> anyhow::Result<()> {
         let (_temp, store) = make_store()?;
@@ -5449,6 +5464,66 @@ mod tests {
                 .as_str()
                 .is_some_and(|detail| detail.contains("unsupported metric"))
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn explorer_api_rejects_invalid_granularity_group_by_and_token_type() -> anyhow::Result<()>
+    {
+        let (_temp, store) = make_store()?;
+        let addr = serve(store, Some(0)).await?;
+        for (query, needle) in [
+            ("granularity=bogus", "unsupported granularity"),
+            ("group_by=bogus", "unsupported group_by"),
+            ("token_type=bogus", "unsupported token_type"),
+        ] {
+            let (status, payload) =
+                route_json(addr, "GET", &format!("/api/explorer?{query}"), None).await?;
+            assert_eq!(status, StatusCode::BAD_REQUEST);
+            assert_eq!(payload["error"]["code"], "invalid_query");
+            assert!(
+                payload["error"]["detail"]
+                    .as_str()
+                    .is_some_and(|detail| detail.contains(needle)),
+                "{query} detail={payload:?}"
+            );
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn diagnostics_forget_rejects_missing_and_unknown_source() -> anyhow::Result<()> {
+        let (_temp, store) = make_store()?;
+        let server = bind_server(
+            store,
+            Some(0),
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            WriteExposure::LocalOnly,
+        )
+        .await?;
+        let addr = server.addr();
+
+        let (status, payload) = route_json(
+            addr,
+            "POST",
+            "/api/diagnostics/forget",
+            Some(r#"{"file_path":"/tmp/usage.jsonl"}"#.to_string()),
+        )
+        .await?;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(payload["error"]["code"], "missing_source");
+
+        let (status, payload) = route_json(
+            addr,
+            "POST",
+            "/api/diagnostics/forget",
+            Some(r#"{"file_path":"/tmp/usage.jsonl","source":"not-a-source"}"#.to_string()),
+        )
+        .await?;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(payload["error"]["code"], "unknown_source");
+
+        server.shutdown().await?;
         Ok(())
     }
 

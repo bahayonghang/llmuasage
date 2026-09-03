@@ -76,6 +76,19 @@ fn reset_usage_data_clears_behavior_facts() -> Result<()> {
     store.bootstrap_with(BootstrapOptions::default().with_raw_archive(true))?;
     seed_resettable_row(&store, SourceKind::Codex, "reset-codex")?;
     seed_resettable_row(&store, SourceKind::Claude, "reset-claude")?;
+    store.run_log().record_run_start("sync")?;
+    store.integration_state().record_integration_state(
+        SourceKind::Codex,
+        "plugin",
+        "installed",
+        None,
+        None,
+        None,
+    )?;
+    let run_log_before = count_rows(&store, "run_log", "")?;
+    let install_before = count_rows(&store, "integration_install", "")?;
+    assert!(run_log_before > 0);
+    assert!(install_before > 0);
 
     store.reset_usage_data()?;
 
@@ -83,5 +96,10 @@ fn reset_usage_data_clears_behavior_facts() -> Result<()> {
     assert_eq!(count_rows(&store, "usage_event_raw", "")?, 0);
     assert_eq!(count_rows(&store, "usage_turn", "")?, 0);
     assert_eq!(count_rows(&store, "usage_tool_call", "")?, 0);
+    assert_eq!(count_rows(&store, "run_log", "")?, run_log_before);
+    assert_eq!(
+        count_rows(&store, "integration_install", "")?,
+        install_before
+    );
     Ok(())
 }
