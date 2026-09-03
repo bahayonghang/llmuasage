@@ -18,16 +18,36 @@ pub fn split_remote_command(command: &str) -> Vec<String> {
     command.split_whitespace().map(str::to_string).collect()
 }
 
-pub fn ssh_args(timeout_secs: u64, ssh_target: &str, remote_argv: &[String]) -> Vec<String> {
+/// Reject a destination that OpenSSH would parse as an option.
+pub fn validate_ssh_target(ssh_target: &str) -> Result<()> {
+    if ssh_target.starts_with('-') {
+        return Err(LlmusageError::ConfigInvalid {
+            detail: format!(
+                "ssh_target {ssh_target:?} must not start with '-'; \
+                 OpenSSH would treat it as an option"
+            ),
+        });
+    }
+    Ok(())
+}
+
+/// Local `ssh` argv. `--` precedes destination. Remote sshd still shells the command.
+pub fn ssh_args(
+    timeout_secs: u64,
+    ssh_target: &str,
+    remote_argv: &[String],
+) -> Result<Vec<String>> {
+    validate_ssh_target(ssh_target)?;
     let mut args = vec![
         "-o".to_string(),
         "BatchMode=yes".to_string(),
         "-o".to_string(),
         format!("ConnectTimeout={timeout_secs}"),
+        "--".to_string(),
         ssh_target.to_string(),
     ];
     args.extend(remote_argv.iter().cloned());
-    args
+    Ok(args)
 }
 
 #[derive(Debug, Clone)]
@@ -65,7 +85,7 @@ impl RemoteCommandRunner for SshCommandRunner {
             self.connect_timeout_secs,
             &request.ssh_target,
             &request.argv,
-        );
+        )?;
         let output = Command::new("ssh")
             .args(&args)
             .stdin(Stdio::null())
@@ -166,7 +186,7 @@ impl ShardSource for SshShardSource {
             remote_argv.push("--since".to_string());
             remote_argv.push(since.to_string());
         }
-        let args = ssh_args(self.connect_timeout_secs, ssh_target, &remote_argv);
+        let args = ssh_args(self.connect_timeout_secs, ssh_target, &remote_argv)?;
         let mut child = Command::new("ssh")
             .args(&args)
             .stdin(Stdio::null())
@@ -309,11 +329,78 @@ mod tests {
             split_remote_command("docker exec c1 llmusage"),
             vec!["docker", "exec", "c1", "llmusage"]
         );
-        let args = ssh_args(15, "me@devbox", &split_remote_command("llmusage; rm -rf /"));
+        let args = ssh_args(15, "me@devbox", &split_remote_command("llmusage; rm -rf /"))
+            .expect("legal target");
         assert_eq!(args[0], "-o");
         assert_eq!(args[1], "BatchMode=yes");
+        let dest = args
+            .iter()
+            .position(|arg| arg == "me@devbox")
+            .expect("destination");
+        assert_eq!(args[dest - 1], "--");
         assert!(args.contains(&"me@devbox".to_string()));
         assert!(args.iter().any(|arg| arg.contains("llmusage;")));
         assert!(!args.iter().any(|arg| arg.contains("sh -c")));
+    }
+
+    #[test]
+    fn ssh_args_inserts_double_dash_before_legal_destinations() {
+        for target in ["me@devbox", "devbox", "ssh://user@host"] {
+            let args = ssh_args(15, target, &["llmusage".to_string()]).expect(target);
+            let dest = args.iter().position(|arg| arg == target).expect(target);
+            assert_eq!(args[dest - 1], "--", "{target}");
+            assert_eq!(args[dest + 1], "llmusage", "{target}");
+        }
+        let args = ssh_args(15, "me@devbox", &["llmusage".to_string()]).unwrap();
+        assert_eq!(
+            args,
+            [
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=15",
+                "--",
+                "me@devbox",
+                "llmusage",
+            ]
+        );
+    }
+
+    #[test]
+    fn ssh_args_rejects_option_like_targets() {
+        for target in ["-o", "-oProxyCommand=bash -c id"] {
+            let err = ssh_args(15, target, &[]).expect_err(target);
+            assert!(
+                matches!(err, LlmusageError::ConfigInvalid { .. }),
+                "{target}: {err}"
+            );
+            let text = err.to_string();
+            assert!(text.contains("must not start with '-'"), "{target}: {text}");
+        }
+    }
+
+    #[test]
+    fn ssh_shard_source_rejects_option_like_target_without_spawning() {
+        let host = Host {
+            host_id: "devbox".to_string(),
+            label: "devbox".to_string(),
+            transport: "ssh".to_string(),
+            ssh_target: Some("-oProxyCommand=true".to_string()),
+            command: "llmusage".to_string(),
+            added_at: "2026-08-20T00:00:00Z".to_string(),
+            last_contacted_at: None,
+            last_error: None,
+            import_watermark: None,
+        };
+        let err = match SshShardSource::default().open(&host, None) {
+            Ok(_) => panic!("option-like target should be rejected"),
+            Err(err) => err,
+        };
+        assert!(matches!(err, LlmusageError::ConfigInvalid { .. }), "{err}");
+        let text = err.to_string();
+        assert!(
+            text.contains("must not start with '-'"),
+            "spawn failure must not count as rejection: {text}"
+        );
     }
 }

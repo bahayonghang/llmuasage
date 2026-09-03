@@ -6,7 +6,9 @@ use crate::{
 };
 
 use super::protocol::{HandshakeResponse, SHARD_PROTOCOL_VERSION, protocol_mismatch_error};
-use super::transport::{RemoteCommandRequest, RemoteCommandRunner, split_remote_command};
+use super::transport::{
+    RemoteCommandRequest, RemoteCommandRunner, split_remote_command, validate_ssh_target,
+};
 
 /// Lowercase the label and replace characters outside `[a-z0-9_-]` with `-`.
 pub fn normalize_host_id(label: &str) -> String {
@@ -76,6 +78,7 @@ pub fn register_remote_host(
 ) -> Result<Host> {
     let host_id = normalize_host_id(label);
     validate_new_host_id(store, &host_id)?;
+    validate_ssh_target(ssh_target)?;
     let command = if command.trim().is_empty() {
         "llmusage"
     } else {
@@ -270,6 +273,33 @@ mod tests {
 
     fn latest_schema_for_test() -> u32 {
         crate::store::latest_schema_version()
+    }
+
+    #[test]
+    fn add_rejects_option_like_ssh_target() -> anyhow::Result<()> {
+        let (_temp, store, _lock) = fenced_store()?;
+        struct ProbeForbiddenRunner;
+        impl RemoteCommandRunner for ProbeForbiddenRunner {
+            fn run(&self, request: &RemoteCommandRequest) -> Result<CommandOutput> {
+                panic!(
+                    "option-like ssh_target must not reach probes: {:?}",
+                    request.ssh_target
+                );
+            }
+        }
+        for target in ["-o", "-oProxyCommand=bash -c id"] {
+            let err =
+                register_remote_host(&store, "devbox", target, "llmusage", &ProbeForbiddenRunner)
+                    .expect_err(target);
+            assert!(
+                matches!(err, LlmusageError::ConfigInvalid { .. }),
+                "{target}: {err}"
+            );
+            let text = err.to_string();
+            assert!(text.contains("must not start with '-'"), "{target}: {text}");
+        }
+        assert_eq!(store.hosts().list()?.len(), 1);
+        Ok(())
     }
 
     #[test]
