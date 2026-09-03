@@ -87,6 +87,9 @@
   isolated migration failure rolls back.
 - Read-only initialization test: missing DB returns `NotInitialized` and no DB
   or `meta` table is created.
+- `write_transaction` closure `Err` after an insert leaves that row uncommitted.
+- `reset_usage_data` clears usage/behavior tables and leaves `run_log` and
+  `integration_install` row counts unchanged.
 - Run `python scripts/ci-rust.py`, then `just ci`.
 
 ### 7. Wrong vs Correct

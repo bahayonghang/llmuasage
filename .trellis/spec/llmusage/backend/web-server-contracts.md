@@ -81,6 +81,9 @@ web::bind_server(store, preferred_port, bind_ip, write_exposure) -> Result<Bound
   loopback to preserve the live-route contract.
 - Real TCP tests assert every loopback-only read/write route is absent from the public router and
   that the public dashboard projection contains no path, raw-log, error, diagnostic, or job fields.
+- Public dashboard filter drops `project_hash` and `host_id` even when those query keys are present.
+- Loopback `POST /api/diagnostics/forget` without `source` returns `missing_source`; unknown
+  `source` returns `unknown_source`.
 - CLI help and the English/Chinese Dashboard, Safety, and CLI-reference docs must mention
   the default, flags, SSH behavior, and unauthenticated/TLS-free boundary.
 
