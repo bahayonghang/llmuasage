@@ -76,6 +76,9 @@ struct AntigravityParseResult {
     events: Vec<UsageEvent>,
     parse_issues: ParseIssues,
     cancelled: bool,
+    /// Open/prepare failed for a reason other than a missing `gen_metadata`
+    /// table. Callers must not reset events or write a success cursor.
+    unreadable: bool,
 }
 
 /// Antigravity CLI conversation parser. Owns the per-file decode + per-shard
@@ -304,6 +307,11 @@ fn parse_antigravity_file(
         progress.advance_file();
         return Ok(output);
     }
+    if parsed.unreadable {
+        // 打开/读取失败：保留已导入行，不写成功 cursor，下一轮继续重试。
+        progress.advance_file();
+        return Ok(output);
+    }
     output.bytes_scanned = decision.snapshot.file_size;
     output.events_seen = parsed.events.len();
     if existing.is_some() {
@@ -339,6 +347,7 @@ fn parse_conversation_file(
             events: Vec::new(),
             parse_issues,
             cancelled: true,
+            unreadable: false,
         });
     }
 
@@ -346,21 +355,35 @@ fn parse_conversation_file(
     {
         Ok(connection) => connection,
         Err(error) => {
-            parse_issues.record(
-                SourceKind::Antigravity,
+            tracing::warn!(
+                error = %error,
                 path_hash,
-                0,
-                ParseIssueKind::Malformed,
-                "",
+                "Antigravity conversation DB 打开失败，保留已导入用量"
             );
-            tracing::debug!(error = %error, "Antigravity conversation DB 打开失败");
-            return Ok(AntigravityParseResult {
-                events: Vec::new(),
-                parse_issues,
-                cancelled: false,
-            });
+            return Ok(unreadable_parse_result(parse_issues, path_hash));
         }
     };
+
+    let gen_metadata_exists = match sqlite_table_exists(&connection, "gen_metadata") {
+        Ok(exists) => exists,
+        Err(error) => {
+            tracing::warn!(
+                error = %error,
+                path_hash,
+                "Antigravity conversation DB schema 探测失败，保留已导入用量"
+            );
+            return Ok(unreadable_parse_result(parse_issues, path_hash));
+        }
+    };
+    if !gen_metadata_exists {
+        // 无 gen_metadata 表（空会话）：干净跳过，调用方可按整文件 replay reset。
+        return Ok(AntigravityParseResult {
+            events: Vec::new(),
+            parse_issues,
+            cancelled: false,
+            unreadable: false,
+        });
+    }
 
     // 会话级元数据：created-at 与 workspace URI（trajectory_metadata_blob）。
     let (session_created_at, workspace_uri) = read_trajectory_metadata(&connection);
@@ -370,20 +393,40 @@ fn parse_conversation_file(
     let mut statement =
         match connection.prepare("SELECT rowid, data FROM gen_metadata ORDER BY idx") {
             Ok(statement) => statement,
-            Err(_) => {
-                // 无 gen_metadata 表（空会话或异构 schema）：干净跳过。
-                return Ok(AntigravityParseResult {
-                    events: Vec::new(),
-                    parse_issues,
-                    cancelled: false,
-                });
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    path_hash,
+                    "Antigravity gen_metadata 读取失败，保留已导入用量"
+                );
+                return Ok(unreadable_parse_result(parse_issues, path_hash));
             }
         };
-    let rows = statement.query_map([], |row| {
+    let rows = match statement.query_map([], |row| {
         Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
-    })?;
+    }) {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::warn!(
+                error = %error,
+                path_hash,
+                "Antigravity gen_metadata 读取失败，保留已导入用量"
+            );
+            return Ok(unreadable_parse_result(parse_issues, path_hash));
+        }
+    };
     for row in rows {
-        let (rowid, blob) = row?;
+        let (rowid, blob) = match row {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    path_hash,
+                    "Antigravity gen_metadata 读取失败，保留已导入用量"
+                );
+                return Ok(unreadable_parse_result(parse_issues, path_hash));
+            }
+        };
         match decode_gen_metadata(&blob) {
             Some(decoded) => decoded_rows.push((rowid, decoded)),
             None => parse_issues.record(
@@ -514,7 +557,35 @@ fn parse_conversation_file(
         events,
         parse_issues,
         cancelled: false,
+        unreadable: false,
     })
+}
+
+fn unreadable_parse_result(
+    mut parse_issues: ParseIssues,
+    path_hash: &str,
+) -> AntigravityParseResult {
+    parse_issues.record(
+        SourceKind::Antigravity,
+        path_hash,
+        0,
+        ParseIssueKind::Malformed,
+        "",
+    );
+    AntigravityParseResult {
+        events: Vec::new(),
+        parse_issues,
+        cancelled: false,
+        unreadable: true,
+    }
+}
+
+fn sqlite_table_exists(connection: &Connection, table: &str) -> rusqlite::Result<bool> {
+    connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        [table],
+        |row| row.get(0),
+    )
 }
 
 fn read_trajectory_metadata(connection: &Connection) -> (Option<i64>, Option<String>) {
@@ -1059,6 +1130,7 @@ mod tests {
         let (_dir, path) = synthetic_conversation(&[]);
         let result =
             parse_conversation_file(&path, "hash", &CancellationToken::new()).expect("parse");
+        assert!(!result.unreadable);
         assert_eq!(result.events.len(), 0);
         assert_eq!(result.parse_issues.total(), 0);
     }
@@ -1157,5 +1229,112 @@ mod tests {
             parse_conversation_file(&path, "hash", &CancellationToken::new()).expect("parse");
         // workspace URI 解析为 project（解析失败 → None，不报错）。
         let _ = result.events[0].project.as_ref();
+    }
+
+    fn existing_cursor(path: &Path) -> FileCursor {
+        FileCursor {
+            cursor_key: path.to_string_lossy().into_owned(),
+            file_path: path.to_string_lossy().into_owned(),
+            file_fingerprint: "previous".into(),
+            file_size: 1,
+            file_mtime_ns: 1,
+            tail_signature: "previous".into(),
+            offset: 1,
+            last_total: None,
+            last_model: None,
+            updated_at: "2026-01-01T00:00:00Z".into(),
+        }
+    }
+
+    fn parse_existing_file(path: PathBuf) -> AntigravityShardOutput {
+        parse_antigravity_file(
+            CandidateFile {
+                existing: Some(existing_cursor(&path)),
+                path,
+            },
+            FileProgressCounter::unused(),
+            CancellationToken::new(),
+        )
+        .expect("parse")
+    }
+
+    #[test]
+    fn unreadable_conversation_db_does_not_reset_or_advance_cursor() {
+        let dir = TempDir::new().expect("temp dir");
+        let path = dir.path().join("broken.db");
+        std::fs::write(&path, b"not a sqlite database").expect("write garbage");
+        let output = parse_existing_file(path);
+        assert!(output.reset_path_hashes.is_empty());
+        assert!(output.cursors.is_empty());
+        assert!(output.events.is_empty());
+        assert_eq!(output.parse_issues.malformed_lines, 1);
+        assert_eq!(output.parse_issues.total(), 1);
+    }
+
+    #[test]
+    fn missing_gen_metadata_table_skips_without_parse_issue() {
+        let dir = TempDir::new().expect("temp dir");
+        let path = dir.path().join("empty-session.db");
+        let conn = Connection::open(&path).expect("open db");
+        conn.execute_batch("CREATE TABLE trajectory_metadata_blob(id TEXT, data BLOB);")
+            .expect("schema");
+        drop(conn);
+
+        let result =
+            parse_conversation_file(&path, "hash", &CancellationToken::new()).expect("parse");
+        assert!(!result.unreadable);
+        assert!(result.events.is_empty());
+        assert_eq!(result.parse_issues.total(), 0);
+
+        let output = parse_existing_file(path);
+        assert_eq!(output.reset_path_hashes.len(), 1);
+        assert_eq!(output.cursors.len(), 1);
+        assert!(output.events.is_empty());
+        assert_eq!(output.parse_issues.total(), 0);
+    }
+
+    #[test]
+    fn gen_metadata_prepare_error_is_unreadable() {
+        let dir = TempDir::new().expect("temp dir");
+        let path = dir.path().join("bad-schema.db");
+        let conn = Connection::open(&path).expect("open db");
+        conn.execute_batch("CREATE TABLE gen_metadata(idx INTEGER PRIMARY KEY);")
+            .expect("schema without data column");
+        drop(conn);
+
+        let result =
+            parse_conversation_file(&path, "hash", &CancellationToken::new()).expect("parse");
+        assert!(result.unreadable);
+        assert!(result.events.is_empty());
+        assert_eq!(result.parse_issues.malformed_lines, 1);
+
+        let output = parse_existing_file(path);
+        assert!(output.reset_path_hashes.is_empty());
+        assert!(output.cursors.is_empty());
+        assert_eq!(output.parse_issues.malformed_lines, 1);
+    }
+
+    #[test]
+    fn gen_metadata_query_error_is_unreadable() {
+        let dir = TempDir::new().expect("temp dir");
+        let path = dir.path().join("bad-type.db");
+        let conn = Connection::open(&path).expect("open db");
+        conn.execute_batch(
+            "CREATE TABLE gen_metadata(idx INTEGER PRIMARY KEY, data INTEGER);
+             INSERT INTO gen_metadata(idx, data) VALUES (1, 1);",
+        )
+        .expect("schema with non-blob data");
+        drop(conn);
+
+        let result =
+            parse_conversation_file(&path, "hash", &CancellationToken::new()).expect("parse");
+        assert!(result.unreadable);
+        assert!(result.events.is_empty());
+        assert_eq!(result.parse_issues.malformed_lines, 1);
+
+        let output = parse_existing_file(path);
+        assert!(output.reset_path_hashes.is_empty());
+        assert!(output.cursors.is_empty());
+        assert_eq!(output.parse_issues.malformed_lines, 1);
     }
 }

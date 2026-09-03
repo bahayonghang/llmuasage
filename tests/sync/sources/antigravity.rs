@@ -362,6 +362,113 @@ fn antigravity_deleted_conversation_preserves_history() -> Result<()> {
 }
 
 #[test]
+fn antigravity_unreadable_conversation_preserves_imported_events() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let uuid = "55555555-5555-5555-5555-555555555555";
+    let path = fixture.seed_antigravity(
+        uuid,
+        &[(
+            1,
+            ag_gen_metadata_blob(
+                500,
+                234,
+                50,
+                1200,
+                "resp-1",
+                Some("gemini-3.6-flash"),
+                None,
+                1_785_140_200,
+            ),
+        )],
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Antigravity),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(antigravity_event_count(&app.paths.db_path)?, 1);
+        let live_cursor = store
+            .cursors()
+            .load_file_cursors(SourceKind::Antigravity, "local")?
+            .into_iter()
+            .find(|(key, _)| key.ends_with(&format!("{uuid}.db")))
+            .map(|(_, cursor)| cursor)
+            .expect("live cursor");
+
+        fs::write(&path, b"not a sqlite database")?;
+        let second = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Antigravity),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(
+            antigravity_event_count(&app.paths.db_path)?,
+            1,
+            "unreadable rewrite must not reset imported events"
+        );
+        let antigravity = second
+            .sources
+            .iter()
+            .find(|stats| stats.source == SourceKind::Antigravity)
+            .expect("antigravity stats");
+        assert!(antigravity.parse_issues.malformed_lines >= 1);
+        let after = store
+            .cursors()
+            .load_file_cursors(SourceKind::Antigravity, "local")?
+            .into_iter()
+            .find(|(key, _)| key.ends_with(&format!("{uuid}.db")))
+            .map(|(_, cursor)| cursor)
+            .expect("cursor after unreadable rewrite");
+        assert_eq!(after.file_fingerprint, live_cursor.file_fingerprint);
+        assert_eq!(after.file_size, live_cursor.file_size);
+
+        let third = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Antigravity),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(antigravity_event_count(&app.paths.db_path)?, 1);
+        let antigravity = third
+            .sources
+            .iter()
+            .find(|stats| stats.source == SourceKind::Antigravity)
+            .expect("antigravity stats");
+        assert!(
+            antigravity.parse_issues.malformed_lines >= 1,
+            "unreadable file must stay eligible for retry"
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
 fn antigravity_missing_root_reports_no_data() -> Result<()> {
     let fixture = Fixture::new()?;
 

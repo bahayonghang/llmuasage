@@ -116,6 +116,13 @@ impl FileProgress {
 }
 
 impl FileProgressCounter {
+    #[cfg(test)]
+    pub(crate) fn unused() -> Self {
+        Self {
+            completed: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
     pub(crate) fn advance_file(&self) {
         self.completed.fetch_add(1, Ordering::Relaxed);
     }

@@ -123,7 +123,12 @@
 - Antigravity is parser-backed for CLI `conversations/*.db`. Hook-era rows
   with an empty `source_path_hash` stay queryable. `sync --rebuild` that
   includes Antigravity must refuse when any such unattributed row exists, even
-  when `--allow-lossy-rebuild` is present.
+  when `--allow-lossy-rebuild` is present. Conversation DB open failures,
+  `sqlite_master` probe failures, and `gen_metadata` prepare or query failures
+  other than a missing table count as malformed, must not emit
+  `reset_path_hashes`, and must not write a success cursor. A missing `gen_metadata` table is an
+  empty session: skip without a parse issue; a changed file may still reset
+  that path.
 - ZCode reads `~/.zcode/cli/db/db.sqlite` `model_usage` completed rows with a
   `completed_at` high-water cursor. Unfinished `error`/`cancelled` rows are
   counted as `skipped` against both that completed watermark and a separate
@@ -445,8 +450,10 @@ pub use crate::sync::DefaultSyncExecutor as CommandSyncExecutor;
   `[A-Za-z0-9_-]`; otherwise `unknown`. Never read `error_message`. Cache
   overlap and `computed_total` mismatch are accounting anomalies; events
   still store.
-- Antigravity open/decode/missing timestamp stay malformed. Checksum mismatch
-  and missing `response_id` with a fallback key are accounting anomalies.
+- Antigravity open/decode/missing timestamp stay malformed. Open failures and
+  `gen_metadata` prepare failures other than a missing table must not reset
+  imported events or advance the file cursor. Checksum mismatch and missing
+  `response_id` with a fallback key are accounting anomalies.
 - Grok sidecars over the size cap stay oversized; bad sidecar JSON stays
   malformed. OpenCode does not invent parse issues.
 - Sync human summary prints every non-zero class (`malformed=`, `oversized=`,
@@ -481,6 +488,11 @@ pub use crate::sync::DefaultSyncExecutor as CommandSyncExecutor;
   deserialize `reason` as `""`.
 - Doctor `parse.issues` is `ok` when every source `total() == 0`, even if
   skipped or accounting-anomaly counts are non-zero.
+- Antigravity conversation DB open failure, `sqlite_master` probe failure, or
+  `gen_metadata` prepare failure other than a missing table -> `malformed_lines`,
+  no `reset_path_hashes`, no success cursor, prior `usage_event` rows kept.
+- Antigravity missing `gen_metadata` table -> no parse issue; a changed file
+  may still reset that path.
 
 ### 5. Good/Base/Bad Cases
 
@@ -524,6 +536,9 @@ pub use crate::sync::DefaultSyncExecutor as CommandSyncExecutor;
   until a blocking worker confirms drain.
 - Migration/status tests: v17 default payload and `ParseIssues` round trip,
   including missing new fields deserializing as zero.
+- Antigravity: unreadable rewrite after a successful import keeps event count
+  and the previous cursor fingerprint; missing `gen_metadata` table skips
+  without malformed; prepare error on an existing table does not reset.
 
 ### 7. Wrong vs Correct
 
