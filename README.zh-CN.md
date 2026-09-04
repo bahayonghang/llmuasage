@@ -116,6 +116,19 @@ llmusage export html --out .\llmusage-report
 
 浏览器看板包含行为分析面板和本地用量分析工作台，可按时间、指标和分组维度分析用量，并支持工具/非工具成本归因与离线快照导出。
 
+## 桌面应用
+
+Windows 桌面应用读取与 CLI 相同的本地用量数据库。
+
+```powershell
+just desktop-dev
+just desktop-build
+```
+
+`just desktop-dev` 从 `desktop/` 启动 Tauri 开发壳。
+`just desktop-build` 在 `desktop/src-tauri/target/release/bundle/nsis/` 写出未签名 NSIS 安装包。
+安装包未做代码签名，Windows SmartScreen 可能告警。
+
 ## 模型价格目录
 
 模型价格和上下文窗口来自内置 `static-v2` 目录。该目录已为 Codex 和 OpenCode 加入 `gpt-5.6-luna`、`gpt-5.6-terra`、`gpt-5.6-sol`，其中 `gpt-5.6` 是 Sol 的精确别名；单请求提示 token 超过 272,000 时使用长上下文费率。

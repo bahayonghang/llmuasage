@@ -9,6 +9,17 @@ install:
 serve:
     cargo run -- serve
 
+desktop-dev:
+    cmd.exe /c 'desktop\node_modules\.bin\tauri.cmd dev'
+
+desktop-test:
+    npm --prefix desktop test
+    cargo test --manifest-path desktop/src-tauri/Cargo.toml -- --test-threads=1
+
+desktop-build:
+    npm --prefix desktop install
+    cmd.exe /c 'set CI=true && desktop\node_modules\.bin\tauri.cmd build --ci --no-sign --bundles nsis'
+
 build:
     cargo build --release --locked
     npm --prefix docs run docs:build

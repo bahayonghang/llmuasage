@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/llmusage/backend/ci-toolchain-contracts.md", "reason": "check-ci-gate.py still passes; CI gate name unchanged"}
+{"file": ".trellis/spec/llmusage/backend/web-server-contracts.md", "reason": "serve listener contracts remain untouched"}

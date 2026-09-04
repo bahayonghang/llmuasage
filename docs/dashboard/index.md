@@ -21,6 +21,20 @@ Use a fixed port when you need a stable URL:
 llmusage serve --port 37421
 ```
 
+## Desktop app
+
+The Windows desktop app reads the same local usage database as `llmusage serve`. The desktop app does not bind the dashboard HTTP listener.
+
+```powershell
+just desktop-dev
+just desktop-build
+```
+
+`just desktop-dev` starts the Tauri development shell from `desktop/`.
+`just desktop-build` writes an unsigned NSIS installer to `desktop/src-tauri/target/release/bundle/nsis/`.
+Windows SmartScreen may warn, because the installer is not code-signed.
+The documented installer target is Windows NSIS.
+
 ## Remote or SSH access
 
 For a remote server, opt in explicitly and suppress browser launching:

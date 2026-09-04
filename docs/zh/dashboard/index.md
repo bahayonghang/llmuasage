@@ -19,6 +19,20 @@ registry 顺序逐源安全重建。存在源文件缺失风险的来源会保�
 llmusage serve --port 37421
 ```
 
+## 桌面应用
+
+Windows 桌面应用读取与 `llmusage serve` 相同的本地用量数据库。桌面应用不绑定看板 HTTP 监听。
+
+```powershell
+just desktop-dev
+just desktop-build
+```
+
+`just desktop-dev` 从 `desktop/` 启动 Tauri 开发壳。
+`just desktop-build` 在 `desktop/src-tauri/target/release/bundle/nsis/` 写出未签名 NSIS 安装包。
+安装包未做代码签名，Windows SmartScreen 可能告警。
+文档记录的安装包目标是 Windows NSIS。
+
 ## 远程或 SSH 访问
 
 远程服务器需要显式开启监听，并关闭浏览器启动：

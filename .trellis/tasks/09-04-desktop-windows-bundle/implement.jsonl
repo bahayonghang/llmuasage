@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/llmusage/backend/ci-toolchain-contracts.md", "reason": "Keep CI gate job name; do not fold tauri build into just ci"}
+{"file": ".trellis/spec/llmusage/backend/web-server-contracts.md", "reason": "Desktop docs must not change serve bind or public exposure"}

@@ -118,6 +118,19 @@ For a single-source view, use `llmusage <source> <period>`, for example `llmusag
 
 The browser dashboard includes behavior panels and a local usage-analysis workbench for time, metric, and group-by analysis, including tool/non-tool cost attribution and offline snapshot export.
 
+## Desktop app
+
+The Windows desktop app reads the same local usage database as the CLI.
+
+```powershell
+just desktop-dev
+just desktop-build
+```
+
+`just desktop-dev` starts the Tauri development shell from `desktop/`.
+`just desktop-build` writes an unsigned NSIS installer to `desktop/src-tauri/target/release/bundle/nsis/`.
+Windows SmartScreen may warn, because the installer is not code-signed.
+
 ## Pricing catalog
 
 Model pricing and context windows come from the embedded `static-v2` catalog. It includes `gpt-5.6-luna`, `gpt-5.6-terra`, and `gpt-5.6-sol` for Codex and OpenCode, including the exact `gpt-5.6` alias for Sol and request-scoped long-context pricing above 272,000 prompt tokens.
