@@ -513,6 +513,39 @@ main {
   margin-top: 8px;
 }
 
+.logs-session-filter {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.logs-table-wrap {
+  overflow-x: auto;
+}
+
+.logs-table tr[data-event-key] {
+  cursor: pointer;
+}
+
+.log-raw-row pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+}
+
+.quota-outputs {
+  display: grid;
+  gap: 10px;
+}
+
+.quota-card {
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  padding: 10px;
+}
+
 @media (max-width: 720px) {
   .app {
     grid-template-columns: minmax(0, 1fr);

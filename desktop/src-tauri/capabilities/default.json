@@ -28,6 +28,17 @@
     "allow-cancel-queries",
     "allow-fetch-quota",
     "allow-load-prefs",
-    "allow-save-prefs"
+    "allow-save-prefs",
+    "dialog:default",
+    "fs:allow-write-text-file",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$DOCUMENT/**" },
+        { "path": "$DOWNLOAD/**" },
+        { "path": "$DESKTOP/**" }
+      ]
+    }
   ]
 }

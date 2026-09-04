@@ -191,7 +191,8 @@ describe("loadSecondarySections", () => {
     expect(ids).toEqual([41, 42, 43, 44, 45, 46, 47, 48, 49, 50]);
     expect(invokeCommand).toHaveBeenCalledTimes(SECONDARY_SECTIONS.length);
     for (const call of invokeCommand.mock.calls) {
-      expect((call[1] as { request: { request_id: number } }).request.request_id).toBeGreaterThan(40);
+      const args = call as unknown as [string, { request: { request_id: number } }];
+      expect(args[1].request.request_id).toBeGreaterThan(40);
     }
   });
 });

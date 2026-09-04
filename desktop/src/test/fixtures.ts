@@ -1,12 +1,17 @@
+import { DEFAULT_PREFS } from "../app/prefs";
 import type {
   ActivityPayload,
   ExplorerPayload,
   HostBreakdown,
   HomeOverviewPayload,
   InteractiveSnapshot,
+  LogRecord,
+  LogsPage,
   ModelComparePayload,
   OptimizePayload,
+  PrefsDto,
   ProjectBreakdown,
+  QuotaResponse,
   RuntimeInfoDto,
   ToolsPayload,
 } from "../app/types";
@@ -239,4 +244,66 @@ export function defaultSecondaryPayload(command: string): unknown {
     default:
       return null;
   }
+}
+
+export function defaultPrefs(overrides: Partial<PrefsDto> = {}): PrefsDto {
+  return {
+    ...DEFAULT_PREFS,
+    filter: { ...DEFAULT_PREFS.filter, ...(overrides.filter ?? {}) },
+    ...overrides,
+  };
+}
+
+export function emptyQuota(overrides: Partial<QuotaResponse> = {}): QuotaResponse {
+  return {
+    cache_hit: false,
+    report: { outputs: [], diagnostics: [] },
+    ...overrides,
+  };
+}
+
+export function emptyLogsPage(overrides: Partial<LogsPage> = {}): LogsPage {
+  return {
+    records: [],
+    next_cursor: null,
+    total: null,
+    ...overrides,
+  };
+}
+
+export function logRecord(eventKey: string, extra: Partial<LogRecord> = {}): LogRecord {
+  return {
+    id: eventKey,
+    event_key: eventKey,
+    source: "codex",
+    model: "gpt-4.1",
+    event_at: "2026-09-01T00:00:00Z",
+    total_tokens: 1,
+    cost_usd: 0,
+    session_id: "sess-1",
+    session_label: "alpha",
+    project_label: "proj",
+    raw_json: null,
+    ...extra,
+  };
+}
+
+export function handleDesktopOpsCommand(command: string, args?: unknown): unknown | undefined {
+  const record =
+    args && typeof args === "object" && !Array.isArray(args)
+      ? (args as Record<string, unknown>)
+      : undefined;
+  if (command === "load_prefs") {
+    return defaultPrefs();
+  }
+  if (command === "save_prefs") {
+    return (record?.prefs as PrefsDto | undefined) ?? defaultPrefs();
+  }
+  if (command === "logs") {
+    return emptyLogsPage();
+  }
+  if (command === "fetch_quota") {
+    return emptyQuota();
+  }
+  return undefined;
 }

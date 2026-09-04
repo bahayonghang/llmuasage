@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   defaultSecondaryPayload,
   emptyInteractiveSnapshot,
+  handleDesktopOpsCommand,
   hostRow,
   projectRow,
   runtimeInfo,
@@ -34,7 +35,11 @@ function installInvoke(
   info: RuntimeInfoDto = runtimeInfo(),
   secondary: Record<string, unknown> = {},
 ) {
-  invokeMock.mockImplementation(async (command: string) => {
+  invokeMock.mockImplementation(async (command: string, args?: unknown) => {
+    const ops = handleDesktopOpsCommand(command, args);
+    if (ops !== undefined) {
+      return ops;
+    }
     if (command === "runtime_info") {
       return info;
     }
@@ -218,14 +223,18 @@ describe("Shell", () => {
     );
     render(<Shell />);
     await waitFor(() => expect(screen.getByTestId("sync-button")).toBeDisabled());
-    expect(screen.getByTestId("status-panel")).toHaveAttribute("data-status", "lock_busy");
+    await waitFor(() => expect(screen.getByTestId("status-panel")).toHaveAttribute("data-status", "lock_busy"));
     expect(screen.getByTestId("status-label")).toHaveTextContent("cli:9@t");
     expect(screen.getByTestId("sync-lock-busy")).toHaveTextContent("cli:9@t");
   });
 
   it("shows lock_lost alert and stops writes", async () => {
     const user = userEvent.setup();
-    invokeMock.mockImplementation(async (command: string) => {
+    invokeMock.mockImplementation(async (command: string, args?: unknown) => {
+      const ops = handleDesktopOpsCommand(command, args);
+      if (ops !== undefined) {
+        return ops;
+      }
       if (command === "runtime_info") {
         return runtimeInfo();
       }
@@ -253,7 +262,11 @@ describe("Shell", () => {
 
   it("invokes home_overview only after the core snapshot exists", async () => {
     const core = deferred<InteractiveSnapshot>();
-    invokeMock.mockImplementation(async (command: string) => {
+    invokeMock.mockImplementation(async (command: string, args?: unknown) => {
+      const ops = handleDesktopOpsCommand(command, args);
+      if (ops !== undefined) {
+        return ops;
+      }
       if (command === "runtime_info") {
         return runtimeInfo();
       }
@@ -280,7 +293,11 @@ describe("Shell", () => {
   });
 
   it("degrades six cards on home_overview failure and keeps overview and hero", async () => {
-    invokeMock.mockImplementation(async (command: string) => {
+    invokeMock.mockImplementation(async (command: string, args?: unknown) => {
+      const ops = handleDesktopOpsCommand(command, args);
+      if (ops !== undefined) {
+        return ops;
+      }
       if (command === "runtime_info") {
         return runtimeInfo();
       }
@@ -308,7 +325,11 @@ describe("Shell", () => {
   });
 
   it("keeps other secondary sections when one section fails", async () => {
-    invokeMock.mockImplementation(async (command: string) => {
+    invokeMock.mockImplementation(async (command: string, args?: unknown) => {
+      const ops = handleDesktopOpsCommand(command, args);
+      if (ops !== undefined) {
+        return ops;
+      }
       if (command === "runtime_info") {
         return runtimeInfo();
       }
@@ -432,7 +453,11 @@ describe("Shell", () => {
   it("drops stale secondary heatmap results after a newer generation", async () => {
     const firstHeatmap = deferred<unknown>();
     let heatmapCalls = 0;
-    invokeMock.mockImplementation(async (command: string) => {
+    invokeMock.mockImplementation(async (command: string, args?: unknown) => {
+      const ops = handleDesktopOpsCommand(command, args);
+      if (ops !== undefined) {
+        return ops;
+      }
       if (command === "runtime_info") {
         return runtimeInfo();
       }
@@ -463,5 +488,108 @@ describe("Shell", () => {
     firstHeatmap.resolve([{ date: "2026-01-01", event_count: 9, total_tokens: 9 }]);
     await waitFor(() => expect(screen.getByTestId("heatmap-date-2026-08-01")).toBeInTheDocument());
     expect(screen.queryByTestId("heatmap-date-2026-01-01")).not.toBeInTheDocument();
+  });
+
+  it("sends LogsDto.session from a session ranking jump", async () => {
+    const user = userEvent.setup();
+    installInvoke();
+    render(<Shell />);
+    await waitFor(() => expect(screen.getByTestId("session-row-sess-1")).toBeInTheDocument());
+    await user.click(screen.getByTestId("session-row-sess-1"));
+    await waitFor(() => {
+      const logsCalls = invokeMock.mock.calls.filter((call) => call[0] === "logs");
+      const withSession = logsCalls.find(
+        (call) => (call[1] as { request: { session?: string } }).request.session === "sess-1",
+      );
+      expect(withSession).toBeTruthy();
+      expect((withSession?.[1] as { request: { page_size: number } }).request.page_size).toBe(20);
+    });
+  });
+
+  it("restores theme, locale, refresh interval, and filter from load_prefs", async () => {
+    invokeMock.mockImplementation(async (command: string, args?: unknown) => {
+      const ops = handleDesktopOpsCommand(command, args);
+      if (command === "load_prefs") {
+        return {
+          theme: "light",
+          locale: "en",
+          auto_refresh_ms: 60_000,
+          filter: {
+            source: "codex",
+            model: null,
+            since: null,
+            until: null,
+            project_hash: null,
+            host_id: null,
+            timezone: null,
+          },
+          window: "week",
+          range_preset: "7d",
+        };
+      }
+      if (ops !== undefined) {
+        return ops;
+      }
+      if (command === "runtime_info") {
+        return runtimeInfo();
+      }
+      if (command === "dashboard_interactive") {
+        return emptyInteractiveSnapshot();
+      }
+      if (command === "cancel_queries") {
+        return null;
+      }
+      if (SECONDARY_COMMANDS.has(command)) {
+        return defaultSecondaryPayload(command);
+      }
+      throw new Error(`unexpected command ${command}`);
+    });
+    render(<Shell />);
+    await waitFor(() => expect(document.documentElement.getAttribute("data-theme")).toBe("light"));
+    await waitFor(() => expect(screen.getByTestId("nav-overview")).toHaveTextContent(COPY.en.navUsage));
+    await waitFor(() => expect(screen.getByTestId("auto-refresh-60000")).toHaveClass("active"));
+    await waitFor(() => expect(screen.getByTestId("range-7d")).toHaveClass("active"));
+    await waitFor(() => {
+      const last = interactiveCalls().at(-1)?.[1] as { request: { window: string; filter: { source?: string } } };
+      expect(last.request.window).toBe("week");
+      expect(last.request.filter.source).toBe("codex");
+    });
+  });
+
+  it("keeps the core snapshot when fetch_quota fails", async () => {
+    invokeMock.mockImplementation(async (command: string, args?: unknown) => {
+      if (command === "fetch_quota") {
+        throw { code: "error", message: "quota down" };
+      }
+      const ops = handleDesktopOpsCommand(command, args);
+      if (ops !== undefined) {
+        return ops;
+      }
+      if (command === "runtime_info") {
+        return runtimeInfo();
+      }
+      if (command === "dashboard_interactive") {
+        return emptyInteractiveSnapshot();
+      }
+      if (command === "cancel_queries") {
+        return null;
+      }
+      if (SECONDARY_COMMANDS.has(command)) {
+        return defaultSecondaryPayload(command);
+      }
+      throw new Error(`unexpected command ${command}`);
+    });
+    const interactiveBefore = interactiveCalls().length;
+    render(<Shell />);
+    await waitFor(() => expect(screen.getByTestId("core-blocks")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("quota-error")).toBeInTheDocument());
+    expect(screen.getByTestId("overview-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("heatmap-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("status-panel")).toBeInTheDocument();
+    expect(interactiveCalls().length).toBeGreaterThan(interactiveBefore);
+    const afterError = interactiveCalls().length;
+    await waitFor(() => expect(screen.getByTestId("quota-error")).toHaveTextContent("quota down"));
+    expect(interactiveCalls().length).toBe(afterError);
+    expect(screen.getByTestId("core-blocks")).toBeInTheDocument();
   });
 });

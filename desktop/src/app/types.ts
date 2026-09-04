@@ -3,13 +3,24 @@ export type ThemeName = "light" | "dark";
 export type Locale = "zh" | "en";
 
 export type FilterDto = {
-  source?: string;
-  model?: string;
-  since?: string;
-  until?: string;
-  project_hash?: string;
-  host_id?: string;
-  timezone?: string;
+  source?: string | null;
+  model?: string | null;
+  since?: string | null;
+  until?: string | null;
+  project_hash?: string | null;
+  host_id?: string | null;
+  timezone?: string | null;
+};
+
+export type AutoRefreshMs = 0 | 30000 | 60000;
+
+export type PrefsDto = {
+  theme: ThemeName;
+  locale: Locale;
+  auto_refresh_ms: AutoRefreshMs;
+  filter: FilterDto;
+  window: string;
+  range_preset: string;
 };
 
 export type SyncStartDto = {
@@ -384,6 +395,76 @@ export type ExplorerPayload = {
 
 export type LogsNavigationIntent = {
   session: string;
+};
+
+export type LogRecord = {
+  id: string;
+  event_key: string;
+  source: string;
+  model: string;
+  event_at: string;
+  total_tokens: number;
+  cost_usd: number;
+  project_label?: string | null;
+  session_id?: string | null;
+  session_label?: string | null;
+  raw_json?: string | null;
+};
+
+export type LogsPage = {
+  records: LogRecord[];
+  next_cursor?: string | null;
+  total?: number | null;
+};
+
+export type LogsDto = {
+  request_id: number;
+  filter: FilterDto;
+  page_size: number;
+  cursor?: string | null;
+  include_total?: boolean | null;
+  include_raw_json?: boolean | null;
+  session?: string | null;
+  event_key?: string | null;
+};
+
+export type UsageMetric = {
+  label: string;
+  used_percent: number;
+  remaining_percent: number;
+  remaining_label?: string | null;
+  resets_at?: string | null;
+};
+
+export type UsageAccount = {
+  id: string;
+  label?: string | null;
+  is_active: boolean;
+};
+
+export type UsageOutput = {
+  provider: string;
+  account?: UsageAccount | null;
+  credential_source?: string | null;
+  plan?: string | null;
+  email?: string | null;
+  metrics: UsageMetric[];
+};
+
+export type UsageFetchDiagnostic = {
+  provider: string;
+  message: string;
+  severity?: string;
+};
+
+export type UsageFetchReport = {
+  outputs: UsageOutput[];
+  diagnostics: UsageFetchDiagnostic[];
+};
+
+export type QuotaResponse = {
+  cache_hit: boolean;
+  report: UsageFetchReport;
 };
 
 export type SecondarySectionStatus = "loading" | "ready" | "degraded";

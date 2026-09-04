@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Shell } from "../app/shell";
-import { emptyInteractiveSnapshot, runtimeInfo } from "../test/fixtures";
+import { emptyInteractiveSnapshot, handleDesktopOpsCommand, runtimeInfo } from "../test/fixtures";
 
 const invokeMock = vi.mocked(invoke);
 
@@ -18,7 +18,11 @@ function computedToken(name: string): string {
 
 describe("theme tokens", () => {
   beforeEach(() => {
-    invokeMock.mockImplementation(async (command: string) => {
+    invokeMock.mockImplementation(async (command: string, args?: unknown) => {
+      const ops = handleDesktopOpsCommand(command, args);
+      if (ops !== undefined) {
+        return ops;
+      }
       if (command === "runtime_info") {
         return runtimeInfo();
       }

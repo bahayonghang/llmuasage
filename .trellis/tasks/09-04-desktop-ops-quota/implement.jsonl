@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/llmusage/backend/tui-subscription-contracts.md", "reason": "Quota fetch cache, read-only credentials, hidden email"}
+{"file": "docs/reference/library-api.md", "reason": "LogsQuery and JobRegistry remain the ops write/read seam"}
+{"file": ".trellis/tasks/09-04-llmusage-desktop-mvp/research/serve-parity-and-desktop-gaps.md", "reason": "CSV columns, live-only logs, quota is TUI-only today"}

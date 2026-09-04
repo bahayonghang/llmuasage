@@ -1,13 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BehaviorPanel } from "../features/behavior/BehaviorPanel";
 import { CostsPanel } from "../features/costs/CostsPanel";
+import { buildAnalyticsCsv } from "../features/export/csv";
+import { saveAnalyticsCsv } from "../features/export/save";
 import { ExplorerPanel } from "../features/explorer/ExplorerPanel";
 import { HeatmapPanel } from "../features/heatmap/HeatmapPanel";
 import { HourOfWeekPanel } from "../features/heatmap/HourOfWeekPanel";
 import { HostsPanel } from "../features/hosts/HostsPanel";
+import { LogsPage } from "../features/logs/LogsPage";
 import { ModelsPanel } from "../features/models/ModelsPanel";
 import { OverviewPanel } from "../features/overview/OverviewPanel";
 import { ProjectsPanel } from "../features/projects/ProjectsPanel";
+import { QuotaPage } from "../features/quota/QuotaPage";
 import { TopSessionsPanel } from "../features/sessions/TopSessionsPanel";
 import { SourcesPanel } from "../features/sources/SourcesPanel";
 import { deriveRuntimeStatus, StatusPanel } from "../features/status/StatusPanel";
@@ -23,6 +27,14 @@ import {
 import { COPY, NAV_ITEMS, type Copy } from "./i18n";
 import { applyRange, rangeToFilterDto, syncOptionsFromState } from "./filters";
 import { createLoadController } from "./load-state";
+import {
+  AUTO_REFRESH_OPTIONS,
+  createAutoRefreshController,
+  filterFromPrefs,
+  loadPrefs,
+  savePrefs,
+  toPrefsDto,
+} from "./prefs";
 import {
   DEFAULT_EXPLORER_QUERY,
   SECONDARY_SECTIONS,
@@ -52,6 +64,7 @@ import type {
   ThemeName,
   ToolsPayload,
   TopSessionRow,
+  AutoRefreshMs,
 } from "./types";
 
 const DEFAULT_FILTER: FilterState = { range: "all", window: "all" };
@@ -87,26 +100,11 @@ function lockHolderText(info: RuntimeInfoDto | null, copy: Copy): string {
   return lockIdentity(info?.lock) ?? copy.noLock;
 }
 
-function Placeholder({
-  id,
-  title,
-  note,
-}: {
-  id: string;
-  title: string;
-  note: string;
-}) {
-  return (
-    <section id={id} className="block" data-testid={`${id}-panel`}>
-      <h2 className="section-title">{title}</h2>
-      <p className="muted">{note}</p>
-    </section>
-  );
-}
-
 export function Shell() {
   const [locale, setLocale] = useState<Locale>("zh");
   const [theme, setTheme] = useState<ThemeName>("dark");
+  const [autoRefreshMs, setAutoRefreshMs] = useState<AutoRefreshMs>(0);
+  const [prefsReady, setPrefsReady] = useState(false);
   const [filter, setFilter] = useState<FilterState>(DEFAULT_FILTER);
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfoDto | null>(null);
   const [snapshot, setSnapshot] = useState<InteractiveSnapshot | null>(null);
@@ -198,9 +196,53 @@ export function Shell() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    void loadPrefs()
+      .then((prefs) => {
+        if (cancelled) {
+          return;
+        }
+        setTheme(prefs.theme);
+        setLocale(prefs.locale);
+        setAutoRefreshMs(prefs.auto_refresh_ms);
+        setFilter(filterFromPrefs(prefs));
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setPrefsReady(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!prefsReady) {
+      return;
+    }
+    void savePrefs(toPrefsDto(theme, locale, autoRefreshMs, filter)).catch((error) => {
+      setCommandError(normalizeInvokeError(error));
+    });
+  }, [prefsReady, theme, locale, autoRefreshMs, filter]);
+
+  useEffect(() => {
+    if (!prefsReady) {
+      return;
+    }
+    const refresh = createAutoRefreshController(autoRefreshMs, () => {
+      void controllerRef.current.loadDashboardProgressive(filterRef.current);
+    });
+    return () => refresh.stop();
+  }, [prefsReady, autoRefreshMs]);
+
+  useEffect(() => {
+    if (!prefsReady) {
+      return;
+    }
     setSlow(false);
     void controllerRef.current.loadDashboardProgressive(filter);
-  }, [filter]);
+  }, [filter, prefsReady]);
 
   useEffect(() => {
     if (!job || (job.status !== "running" && job.status !== "cancelling")) {
@@ -337,6 +379,34 @@ export function Shell() {
     setFilter(next.filter);
   }
 
+  async function handleExportCsv(): Promise<void> {
+    if (!snapshot) {
+      return;
+    }
+    const csv = buildAnalyticsCsv(
+      {
+        home_overview: readSection<HomeOverviewPayload>(secondary, "home_overview").payload ?? undefined,
+        trends_daily: readSection<DailyTrendPoint[]>(secondary, "trends_daily").payload ?? [],
+        projects: snapshot.projects,
+        models: snapshot.models,
+        sources: snapshot.sources,
+        top_sessions: readSection<TopSessionRow[]>(secondary, "top_sessions").payload ?? [],
+      },
+      locale,
+    );
+    try {
+      await saveAnalyticsCsv(csv);
+    } catch (error) {
+      setCommandError(normalizeInvokeError(error));
+    }
+  }
+
+  const refreshLabel: Record<AutoRefreshMs, string> = {
+    0: copy.autoRefreshOff,
+    30000: copy.autoRefresh30,
+    60000: copy.autoRefresh60,
+  };
+
   return (
     <div className="app" data-locale={locale}>
       <aside className="sidebar" data-testid="sidebar">
@@ -400,6 +470,29 @@ export function Shell() {
         <div className="topbar">
           <div>{copy.heroTitle}</div>
           <div className="topbar-actions">
+            <div className="seg" role="group" data-testid="auto-refresh">
+              {AUTO_REFRESH_OPTIONS.map((interval) => (
+                <button
+                  key={interval}
+                  type="button"
+                  className={autoRefreshMs === interval ? "active" : ""}
+                  data-testid={`auto-refresh-${interval}`}
+                  aria-pressed={autoRefreshMs === interval}
+                  onClick={() => setAutoRefreshMs(interval)}
+                >
+                  {refreshLabel[interval]}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="btn"
+              data-testid="export-csv"
+              disabled={!snapshot}
+              onClick={() => void handleExportCsv()}
+            >
+              {copy.exportCsv}
+            </button>
             {running ? (
               <button
                 type="button"
@@ -589,8 +682,8 @@ export function Shell() {
               diagnostics={snapshot.diagnostics}
               copy={copy}
             />
-            <Placeholder id="logs" title={copy.logsTitle} note={copy.secondaryLoading} />
-            <Placeholder id="quota" title={copy.quotaTitle} note={copy.quotaPlaceholder} />
+            <LogsPage filter={filter} copy={copy} />
+            <QuotaPage copy={copy} />
           </div>
         ) : null}
       </main>

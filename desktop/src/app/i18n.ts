@@ -55,6 +55,31 @@ export type Copy = {
   quotaTitle: string;
   secondaryLoading: string;
   quotaPlaceholder: string;
+  exportCsv: string;
+  autoRefreshOff: string;
+  autoRefresh30: string;
+  autoRefresh60: string;
+  logsSession: string;
+  logsClear: string;
+  logsTime: string;
+  logsSource: string;
+  logsModel: string;
+  logsTokens: string;
+  logsCost: string;
+  logsProject: string;
+  logsLoading: string;
+  logsEmpty: string;
+  logsMore: string;
+  logsRawLoading: string;
+  logsRawUnavailable: string;
+  quotaRefresh: string;
+  quotaEmpty: string;
+  quotaLoading: string;
+  quotaFailed: string;
+  quotaCacheHit: string;
+  quotaShowEmail: string;
+  quotaHideEmail: string;
+  quotaPlan: string;
   statusIdle: string;
   statusRunning: string;
   statusFailed: string;
@@ -192,6 +217,31 @@ export const COPY: Record<Locale, Copy> = {
     quotaTitle: "额度",
     secondaryLoading: "次级面板稍后加载。",
     quotaPlaceholder: "额度页由 ops-quota 填充。",
+    exportCsv: "导出 CSV",
+    autoRefreshOff: "关闭刷新",
+    autoRefresh30: "30秒",
+    autoRefresh60: "60秒",
+    logsSession: "会话",
+    logsClear: "清除",
+    logsTime: "时间",
+    logsSource: "来源",
+    logsModel: "模型",
+    logsTokens: "Token 用量",
+    logsCost: "估算成本",
+    logsProject: "项目",
+    logsLoading: "正在加载事件日志…",
+    logsEmpty: "当前筛选暂无事件。",
+    logsMore: "下一页",
+    logsRawLoading: "正在读取原始记录…",
+    logsRawUnavailable: "未保留原始记录。",
+    quotaRefresh: "刷新",
+    quotaEmpty: "无本地凭证，额度不可用。",
+    quotaLoading: "正在读取额度…",
+    quotaFailed: "额度读取失败",
+    quotaCacheHit: "缓存命中",
+    quotaShowEmail: "显示邮箱",
+    quotaHideEmail: "隐藏邮箱",
+    quotaPlan: "方案",
     statusIdle: "空闲",
     statusRunning: "运行中",
     statusFailed: "失败",
@@ -327,6 +377,31 @@ export const COPY: Record<Locale, Copy> = {
     quotaTitle: "Quota",
     secondaryLoading: "Secondary panels load later.",
     quotaPlaceholder: "Quota data is filled by ops-quota.",
+    exportCsv: "Export CSV",
+    autoRefreshOff: "Refresh off",
+    autoRefresh30: "30s",
+    autoRefresh60: "60s",
+    logsSession: "Session",
+    logsClear: "Clear",
+    logsTime: "Time",
+    logsSource: "Source",
+    logsModel: "Model",
+    logsTokens: "Token usage",
+    logsCost: "Estimated cost",
+    logsProject: "Project",
+    logsLoading: "Loading events…",
+    logsEmpty: "No events match these filters.",
+    logsMore: "Next page",
+    logsRawLoading: "Loading raw record…",
+    logsRawUnavailable: "Raw record was not retained.",
+    quotaRefresh: "Refresh",
+    quotaEmpty: "No local credentials, quota is unavailable.",
+    quotaLoading: "Loading quota…",
+    quotaFailed: "Quota fetch failed",
+    quotaCacheHit: "Cache hit",
+    quotaShowEmail: "Show email",
+    quotaHideEmail: "Hide email",
+    quotaPlan: "Plan",
     statusIdle: "Idle",
     statusRunning: "Running",
     statusFailed: "Failed",
