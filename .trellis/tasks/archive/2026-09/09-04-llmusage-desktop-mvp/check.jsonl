@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/llmusage/backend/write-fencing-contracts.md", "reason": "LockBusy LockLost SchemaTooNew must stay visible"}
+{"file": ".trellis/spec/llmusage/backend/tui-subscription-contracts.md", "reason": "Quota tests must not hit public hosts"}
+{"file": ".trellis/spec/llmusage/backend/ci-toolchain-contracts.md", "reason": "CI gate job name and just ci surface"}
+{"file": "docs/reference/library-api.md", "reason": "Commands must stay on the public facade"}

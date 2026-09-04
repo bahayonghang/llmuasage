@@ -1,0 +1,6 @@
+{"file": "docs/reference/library-api.md", "reason": "Stable embedding facade for Tauri commands"}
+{"file": ".trellis/spec/llmusage/backend/write-fencing-contracts.md", "reason": "Worker lock fencing for desktop vs CLI sync"}
+{"file": ".trellis/spec/llmusage/backend/dashboard-performance-contracts.md", "reason": "Live interactive snapshot and secondary degrade budgets"}
+{"file": ".trellis/spec/llmusage/backend/tui-subscription-contracts.md", "reason": "Quota fetch cache and credential read-only rules"}
+{"file": ".trellis/spec/llmusage/backend/ci-toolchain-contracts.md", "reason": "Do not rename CI gate or fold tauri build into just ci"}
+{"file": ".trellis/tasks/09-04-llmusage-desktop-mvp/research/serve-parity-and-desktop-gaps.md", "reason": "Serve panel inventory and desktop gaps"}

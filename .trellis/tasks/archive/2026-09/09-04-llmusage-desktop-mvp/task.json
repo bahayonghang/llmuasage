@@ -1,0 +1,32 @@
+{
+  "id": "llmusage-desktop-mvp",
+  "name": "llmusage-desktop-mvp",
+  "title": "llmusage Desktop MVP",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-09-04",
+  "completedAt": "2026-09-04",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "09-04-desktop-shell-ipc",
+    "09-04-desktop-core-ui",
+    "09-04-desktop-secondary-ui",
+    "09-04-desktop-ops-quota",
+    "09-04-desktop-windows-bundle"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
