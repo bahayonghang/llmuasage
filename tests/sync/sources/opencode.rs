@@ -433,3 +433,206 @@ fn opencode_explicit_db_env_is_imported() -> Result<()> {
     fixture.restore_env();
     Ok(())
 }
+
+#[test]
+fn opencode_source_db_opens_read_only_with_busy_timeout() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_opencode("msg-1", 1776823200000, 64)?;
+    let db_path = fixture.opencode_home.join("opencode.db");
+    let conn = llmusage::parsers::opencode::open_source_db(&db_path)?;
+    let timeout_ms: i64 = conn.query_row("PRAGMA busy_timeout", [], |row| row.get(0))?;
+    assert!(
+        timeout_ms >= 1000,
+        "busy timeout must be at least 1s, got {timeout_ms}"
+    );
+    assert!(
+        conn.execute("CREATE TABLE write_probe(x INTEGER)", [])
+            .is_err(),
+        "OpenCode source DB must open read-only"
+    );
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn opencode_malformed_tool_part_increments_parse_issues() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_opencode("msg-1", 1776823200000, 64)?;
+    fixture.seed_opencode_tool_part_raw(
+        "prt-bad",
+        "msg-1",
+        "session-1",
+        1776823200050,
+        r#"{"type":"tool", not-json"#,
+    )?;
+    fixture.seed_opencode_tool_part(
+        "prt-good",
+        "msg-1",
+        "session-1",
+        1776823200060,
+        serde_json::json!({
+            "id": "prt-good",
+            "messageID": "msg-1",
+            "sessionID": "session-1",
+            "type": "tool",
+            "tool": "read",
+            "state": { "status": "completed", "input": { "file_path": "src/lib.rs" } }
+        }),
+    )?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let first = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Opencode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(first.sources[0].parse_issues.malformed_lines, 1);
+        assert_eq!(
+            first.sources[0].parse_issues.samples[0].reason,
+            "opencode_tool_json"
+        );
+        assert_eq!(usage_tool_call_count(&app.paths.db_path)?, 1);
+        assert_eq!(usage_event_count(&app.paths.db_path)?, 1);
+
+        let second = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Opencode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(second.sources[0].parse_issues.malformed_lines, 0);
+        assert_eq!(usage_tool_call_count(&app.paths.db_path)?, 1);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn opencode_shard_commits_cursor_with_events() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_opencode("msg-1", 1776823200000, 64)?;
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let observed = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed_for_hook = std::sync::Arc::clone(&observed);
+        let _guard = llmusage::store::set_after_commit_shard_hook(move |store, shard| {
+            if shard.source != SourceKind::Opencode {
+                return;
+            }
+            if shard.events.is_empty() && shard.tool_calls.is_empty() {
+                return;
+            }
+            observed_for_hook.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let cursor = shard
+                .opencode_cursor
+                .as_deref()
+                .expect("OpenCode events/tool_calls must commit with opencode_cursor");
+            let loaded = store
+                .cursors()
+                .load_opencode_cursor(&shard.host_id)
+                .expect("load opencode cursor after commit_shard");
+            assert_eq!(loaded.last_time_created, cursor.last_time_created);
+            assert_eq!(loaded.last_processed_ids, cursor.last_processed_ids);
+        });
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Opencode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert!(
+            observed.load(std::sync::atomic::Ordering::SeqCst) >= 1,
+            "commit_shard hook must observe an OpenCode event/tool shard"
+        );
+        assert_eq!(usage_event_count(&app.paths.db_path)?, 1);
+        let cursor = store.cursors().load_opencode_cursor("local")?;
+        assert_eq!(cursor.last_time_created, 1776823200000);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn opencode_unreadable_db_sets_last_error_without_advancing_cursor() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_opencode("msg-1", 1776823200000, 64)?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Opencode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        let first_cursor = store.cursors().load_opencode_cursor("local")?;
+        assert_eq!(first_cursor.last_time_created, 1776823200000);
+
+        fs::write(
+            fixture.opencode_home.join("opencode.db"),
+            b"not a sqlite database",
+        )?;
+        let second = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Opencode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(
+            second.sources[0].last_error.as_deref(),
+            Some("OpenCode SQLite DB 打开失败")
+        );
+        assert!(!second.sources[0].absent);
+        let after = store.cursors().load_opencode_cursor("local")?;
+        assert_eq!(after.last_time_created, first_cursor.last_time_created);
+        assert_eq!(after.last_processed_ids, first_cursor.last_processed_ids);
+        assert_eq!(usage_event_count(&app.paths.db_path)?, 1);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}

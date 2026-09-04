@@ -48,6 +48,8 @@ pub use run_log::RunLog;
 pub use schema::{TOKEN_ACCOUNTING_VERSION, expected_token_accounting_version};
 pub use source_file::{LossyRebuildRisk, SourceFileStateCounts, SourceFileStore};
 pub use sync_status::SyncStatusStore;
+#[doc(hidden)]
+pub use sync_writer::{AfterCommitShardGuard, set_after_commit_shard_hook};
 
 const WORKER_LOCK_NAME: &str = "sync-worker";
 const WORKER_LOCK_LEASE_MINUTES: i64 = 30;
@@ -784,8 +786,10 @@ impl SyncRunWriter {
 /// Bundles the implicit reset → write_event → write_cursor protocol that every
 /// file-backed parser used to inline. Parsers produce one shard per chunk of
 /// candidate files; the writer enforces ordering and chunking. Streaming
-/// sources (e.g. OpenCode) submit shards with empty `reset_path_hashes` and
-/// `cursors`, retaining their own custom cursor persistence.
+/// sources (OpenCode/ZCode) submit shards with empty `reset_path_hashes` and
+/// file `cursors`, and persist their SQLite high-water on
+/// [`SyncShard::opencode_cursor`] / [`SyncShard::zcode_cursor`] in the same
+/// Immediate transaction.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncShard {
     /// Source the shard belongs to. Used by reset/cursor SQL keys.
@@ -829,6 +833,16 @@ pub struct SyncShard {
     /// views without requiring raw archive to be enabled.
     #[serde(default)]
     pub tool_calls: Vec<UsageToolCall>,
+    /// OpenCode SQLite high-water committed with this shard. `None` for
+    /// file-backed sources and for bounded OpenCode runs that must not advance
+    /// the full-history cursor.
+    #[serde(default)]
+    pub opencode_cursor: Option<Box<OpencodeCursor>>,
+    /// ZCode SQLite high-water committed with this shard. `None` for other
+    /// sources and for bounded ZCode runs that must not advance either
+    /// watermark.
+    #[serde(default)]
+    pub zcode_cursor: Option<Box<ZcodeCursor>>,
 }
 
 fn default_sync_shard_host_id() -> String {
@@ -854,6 +868,8 @@ impl SyncShard {
             raw_records: Vec::new(),
             turns: Vec::new(),
             tool_calls: Vec::new(),
+            opencode_cursor: None,
+            zcode_cursor: None,
         }
     }
 }

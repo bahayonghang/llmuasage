@@ -736,3 +736,80 @@ fn zcode_cancel_after_first_page_does_not_advance_skip_watermark() -> Result<()>
     fixture.restore_env();
     Ok(())
 }
+
+#[test]
+fn zcode_source_db_opens_read_only_with_busy_timeout() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.insert_zcode_row(zcode_row("row-a", 1_000, 100, 40))?;
+    let conn = llmusage::parsers::zcode::open_source_db(&fixture.zcode_db_path())?;
+    let timeout_ms: i64 = conn.query_row("PRAGMA busy_timeout", [], |row| row.get(0))?;
+    assert!(
+        timeout_ms >= 1000,
+        "busy timeout must be at least 1s, got {timeout_ms}"
+    );
+    assert!(
+        conn.execute("CREATE TABLE write_probe(x INTEGER)", [])
+            .is_err(),
+        "ZCode source DB must open read-only"
+    );
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn zcode_shard_commits_cursor_with_events() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.insert_zcode_row(zcode_row("row-a", 1_000, 100, 40))?;
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let observed = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed_for_hook = std::sync::Arc::clone(&observed);
+        let _guard = llmusage::store::set_after_commit_shard_hook(move |store, shard| {
+            if shard.source != SourceKind::Zcode {
+                return;
+            }
+            if shard.events.is_empty() {
+                return;
+            }
+            observed_for_hook.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let cursor = shard
+                .zcode_cursor
+                .as_deref()
+                .expect("ZCode events must commit with zcode_cursor");
+            let loaded = store
+                .cursors()
+                .load_zcode_cursor(&shard.host_id)
+                .expect("load zcode cursor after commit_shard");
+            assert_eq!(loaded.last_completed_at, cursor.last_completed_at);
+            assert_eq!(loaded.last_processed_ids, cursor.last_processed_ids);
+        });
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Zcode),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert!(
+            observed.load(std::sync::atomic::Ordering::SeqCst) >= 1,
+            "commit_shard hook must observe a ZCode event shard"
+        );
+        let cursor = store.cursors().load_zcode_cursor("local")?;
+        assert_eq!(cursor.last_completed_at, 1_000);
+        assert_eq!(zcode_source_count(&app.paths.db_path)?, 1);
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}

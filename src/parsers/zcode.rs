@@ -21,7 +21,12 @@
 //! rows use a parallel skip watermark so the same error/cancelled row is
 //! reported only once.
 
-use std::{future::Future, path::PathBuf, pin::Pin, time::Instant};
+use std::{
+    future::Future,
+    path::Path,
+    pin::Pin,
+    time::{Duration, Instant},
+};
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -39,6 +44,7 @@ use crate::{
 };
 
 const ZCODE_PAGE_SIZE: i64 = 1000;
+const SOURCE_DB_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// Fallback model when a completed row omits `model_id` (never observed
 /// locally, but the schema allows it).
 const FALLBACK_MODEL: &str = "zcode-unknown";
@@ -128,7 +134,13 @@ async fn sync_zcode(
         return Ok(stats);
     }
 
-    let connection = open_readonly(&db_path)?;
+    let connection = match open_source_db(&db_path) {
+        Ok(connection) => connection,
+        Err(_) => {
+            stats.last_error = Some("ZCode SQLite DB 打开失败".to_string());
+            return Ok(stats);
+        }
+    };
     let has_computed_total = zcode_column_exists(&connection, "computed_total_tokens")?;
     let has_session_table = zcode_table_exists(&connection, "session")?;
 
@@ -228,29 +240,21 @@ async fn sync_zcode(
         }
 
         normalized_events_seen += page_events.len();
-        if !page_events.is_empty() {
-            // 流式分页：shard 仅承载本页 event，cursor 由 save_zcode_cursor 收尾。
+        let zcode_cursor = snapshot_zcode_completed_cursor(
+            recent_cutoff,
+            cancel.is_cancelled(),
+            &mut cursor,
+            latest_completed,
+            &latest_ids,
+        );
+        if !page_events.is_empty() || zcode_cursor.is_some() {
             let commit = writer.commit_shard(SyncShard {
-                source: SourceKind::Zcode,
-                reset_path_hashes: Vec::new(),
                 events: page_events,
-                cursors: Vec::new(),
-                seen_file_paths: Vec::new(),
-                raw_records: Vec::new(),
-                turns: Vec::new(),
-                tool_calls: Vec::new(),
+                zcode_cursor,
                 ..SyncShard::new(SourceKind::Zcode)
             })?;
             inserted += commit.events_inserted;
             write_ms += commit.write_ms;
-        }
-        // 全量模式页后持久化高水位（bounded run 不推进水位/锚点）。
-        if recent_cutoff.is_none() && !cancel.is_cancelled() {
-            cursor.last_completed_at = latest_completed;
-            cursor.last_processed_ids = latest_ids.clone();
-            cursor.sqlite_status = "ok".to_string();
-            cursor.updated_at = now_utc();
-            store.cursors().save_zcode_cursor("local", &cursor)?;
         }
         emit_progress(
             &mut progress,
@@ -267,7 +271,11 @@ async fn sync_zcode(
         advance_skip_watermark(&mut cursor, &skipped_rows);
         cursor.sqlite_status = "ok".to_string();
         cursor.updated_at = now_utc();
-        store.cursors().save_zcode_cursor("local", &cursor)?;
+        let commit = writer.commit_shard(SyncShard {
+            zcode_cursor: Some(Box::new(cursor.clone())),
+            ..SyncShard::new(SourceKind::Zcode)
+        })?;
+        write_ms += commit.write_ms;
     }
 
     stats.files_processed = 1;
@@ -295,11 +303,29 @@ fn emit_progress(sink: &mut Option<ProgressSink<'_>>, event: SyncEvent) {
     }
 }
 
-fn open_readonly(path: &PathBuf) -> Result<Connection> {
-    Ok(Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )?)
+/// Opens the user's ZCode SQLite database read-only with a busy timeout.
+pub fn open_source_db(path: &Path) -> Result<Connection> {
+    let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    connection.busy_timeout(SOURCE_DB_BUSY_TIMEOUT)?;
+    connection.query_row("PRAGMA schema_version", [], |row| row.get::<_, i64>(0))?;
+    Ok(connection)
+}
+
+fn snapshot_zcode_completed_cursor(
+    recent_cutoff: Option<DateTime<Utc>>,
+    cancelled: bool,
+    cursor: &mut ZcodeCursor,
+    latest_completed: i64,
+    latest_ids: &[String],
+) -> Option<Box<ZcodeCursor>> {
+    if recent_cutoff.is_some() || cancelled {
+        return None;
+    }
+    cursor.last_completed_at = latest_completed;
+    cursor.last_processed_ids = latest_ids.to_vec();
+    cursor.sqlite_status = "ok".to_string();
+    cursor.updated_at = now_utc();
+    Some(Box::new(cursor.clone()))
 }
 
 fn zcode_column_exists(connection: &Connection, column: &str) -> Result<bool> {
@@ -663,6 +689,27 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn open_source_db_is_read_only_with_busy_timeout() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let path = dir.path().join("db.sqlite");
+        Connection::open(&path).expect("create db");
+        let connection = open_source_db(&path).expect("open source db");
+        let timeout_ms: i64 = connection
+            .query_row("PRAGMA busy_timeout", [], |row| row.get(0))
+            .expect("busy_timeout");
+        assert!(
+            timeout_ms >= 1000,
+            "busy timeout must be at least 1s, got {timeout_ms}"
+        );
+        assert!(
+            connection
+                .execute("CREATE TABLE write_probe(x INTEGER)", [])
+                .is_err(),
+            "ZCode source DB must open read-only"
+        );
+    }
 
     /// Creates a synthetic ZCode DB with the current `model_usage` schema and
     /// the minimal `session` columns the parser joins for project attribution.

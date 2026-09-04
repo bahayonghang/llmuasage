@@ -10,6 +10,7 @@ use tracing::info;
 use super::{
     BucketKey, BucketRollup, FileCursor, HolderKind, LOCAL_HOST_ID, PricingRollup,
     ShardCommitStats, Store, SyncRunWriter, SyncShard,
+    cursor::{persist_opencode_cursor_tx, persist_zcode_cursor_tx},
     schema::{omp_split_migrated_key, read_meta_value, reset_for_source_tx, write_meta_value},
 };
 use crate::{
@@ -73,6 +74,45 @@ fn fail_shard_commit_at(
         });
     }
     Ok(())
+}
+
+type AfterCommitShardHook = Box<dyn FnMut(&Store, &SyncShard) + 'static>;
+
+thread_local! {
+    static AFTER_COMMIT_SHARD: std::cell::RefCell<Option<AfterCommitShardHook>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Guard that clears the `commit_shard` post-commit hook on drop.
+#[must_use]
+#[doc(hidden)]
+pub struct AfterCommitShardGuard;
+
+impl Drop for AfterCommitShardGuard {
+    fn drop(&mut self) {
+        AFTER_COMMIT_SHARD.with(|slot| *slot.borrow_mut() = None);
+    }
+}
+
+/// Installs a hook that runs after a successful persisted [`SyncRunWriter::commit_shard`].
+///
+/// Test-only observer of the shipped commit path: a shard with events/tool
+/// calls but no SQLite cursor is visible here if those writes were split
+/// across transactions.
+#[doc(hidden)]
+pub fn set_after_commit_shard_hook(
+    hook: impl FnMut(&Store, &SyncShard) + 'static,
+) -> AfterCommitShardGuard {
+    AFTER_COMMIT_SHARD.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+    AfterCommitShardGuard
+}
+
+fn invoke_after_commit_shard(store: &Store, shard: &SyncShard) {
+    AFTER_COMMIT_SHARD.with(|slot| {
+        if let Some(hook) = slot.borrow_mut().as_mut() {
+            hook(store, shard);
+        }
+    });
 }
 
 impl Store {
@@ -541,7 +581,15 @@ impl SyncRunWriter {
             }
             return Ok(stats);
         }
-        self.commit_shard_inner(shard, None)
+
+        let hook_shard = AFTER_COMMIT_SHARD
+            .with(|slot| slot.borrow().is_some())
+            .then(|| shard.clone());
+        let stats = self.commit_shard_inner(shard, None)?;
+        if let Some(hook_shard) = hook_shard.as_ref() {
+            invoke_after_commit_shard(&self.store, hook_shard);
+        }
+        Ok(stats)
     }
 
     #[cfg(test)]
@@ -634,6 +682,12 @@ impl SyncRunWriter {
         fail_shard_commit_at(failpoint, ShardCommitFailpoint::Events)?;
         if !shard.cursors.is_empty() {
             Self::write_cursor_batch_tx(&tx, shard.source, &host_id, &shard.cursors)?;
+        }
+        if let Some(cursor) = shard.opencode_cursor.as_deref() {
+            persist_opencode_cursor_tx(&tx, &host_id, cursor)?;
+        }
+        if let Some(cursor) = shard.zcode_cursor.as_deref() {
+            persist_zcode_cursor_tx(&tx, &host_id, cursor)?;
         }
         fail_shard_commit_at(failpoint, ShardCommitFailpoint::Cursor)?;
         // 7.3 把本轮看到的候选文件登记为 source_file.state='live'
@@ -1231,7 +1285,7 @@ mod tests {
             UsageTokens, UsageToolCall, UsageTurn,
         },
         paths::AppPaths,
-        store::{BootstrapOptions, FileCursor},
+        store::{BootstrapOptions, FileCursor, OpencodeCursor, ZcodeCursor},
     };
     use tempfile::TempDir;
 
@@ -1338,6 +1392,8 @@ mod tests {
                 tool_kind: ToolKind::Edit,
                 ..build_tool_call(&replacement, "Edit")
             }],
+            opencode_cursor: None,
+            zcode_cursor: None,
         }
     }
 
@@ -1368,6 +1424,8 @@ mod tests {
                     raw_records: Vec::new(),
                     turns: Vec::new(),
                     tool_calls: Vec::new(),
+                    opencode_cursor: None,
+                    zcode_cursor: None,
                 }
             })
             .collect()
@@ -1656,6 +1714,8 @@ mod tests {
                 }],
                 turns: vec![build_behavior_turn(&seed, ActivityCategory::Exploration)],
                 tool_calls: vec![build_tool_call(&seed, "Read")],
+                opencode_cursor: None,
+                zcode_cursor: None,
             })?;
 
             let err = writer
@@ -1701,6 +1761,8 @@ mod tests {
             raw_records: Vec::new(),
             turns: Vec::new(),
             tool_calls: Vec::new(),
+            opencode_cursor: None,
+            zcode_cursor: None,
         })?;
         assert_eq!(seed.events_inserted, 1);
 
@@ -1718,6 +1780,8 @@ mod tests {
             raw_records: Vec::new(),
             turns: Vec::new(),
             tool_calls: Vec::new(),
+            opencode_cursor: None,
+            zcode_cursor: None,
         })?;
         assert_eq!(stats.events_inserted, 5);
 
@@ -1755,6 +1819,81 @@ mod tests {
     }
 
     #[test]
+    fn commit_shard_persists_sqlite_cursors_with_events_in_one_transaction() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = build_paths(temp.path());
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+
+        let mut opencode_event = build_event("oc", "pathOc", 10);
+        opencode_event.source = SourceKind::Opencode;
+        opencode_event.event_key = "opencode:oc".to_string();
+        let opencode_cursor = OpencodeCursor {
+            last_time_created: 42,
+            last_processed_ids: vec!["oc".to_string()],
+            last_part_rowid: 7,
+            sqlite_status: "ok".to_string(),
+            updated_at: "2026-05-01T10:00:00Z".to_string(),
+            ..OpencodeCursor::default()
+        };
+        let mut writer = store.begin_sync_run()?;
+        writer.commit_shard(SyncShard {
+            events: vec![opencode_event],
+            opencode_cursor: Some(Box::new(opencode_cursor.clone())),
+            ..SyncShard::new(SourceKind::Opencode)
+        })?;
+        drop(writer);
+
+        let loaded = store.cursors().load_opencode_cursor("local")?;
+        assert_eq!(loaded.last_time_created, 42);
+        assert_eq!(loaded.last_processed_ids, vec!["oc".to_string()]);
+        assert_eq!(loaded.last_part_rowid, 7);
+        let event_count: i64 = store.open_connection()?.query_row(
+            "SELECT COUNT(*) FROM usage_event WHERE source = 'opencode'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(event_count, 1);
+
+        let mut zcode_event = build_event("zc", "pathZc", 20);
+        zcode_event.source = SourceKind::Zcode;
+        zcode_event.event_key = "zcode:zc".to_string();
+        let zcode_cursor = ZcodeCursor {
+            last_completed_at: 99,
+            last_processed_ids: vec!["zc".to_string()],
+            sqlite_status: "ok".to_string(),
+            updated_at: "2026-05-01T10:00:00Z".to_string(),
+            ..ZcodeCursor::default()
+        };
+        let mut writer = store.begin_sync_run()?;
+        // Cursor failpoint runs after sqlite cursor persist and before
+        // `tx.commit()`, so a split write would leave events or the cursor.
+        let err = writer
+            .commit_shard_with_failpoint(
+                SyncShard {
+                    events: vec![zcode_event],
+                    zcode_cursor: Some(Box::new(zcode_cursor)),
+                    ..SyncShard::new(SourceKind::Zcode)
+                },
+                ShardCommitFailpoint::Cursor,
+            )
+            .expect_err("cursor failpoint must abort after sqlite cursor persist");
+        assert!(err.to_string().contains("test failpoint"));
+        drop(writer);
+
+        let zcode_loaded = store.cursors().load_zcode_cursor("local")?;
+        assert_eq!(zcode_loaded.last_completed_at, 0);
+        assert!(zcode_loaded.last_processed_ids.is_empty());
+        let zcode_events: i64 = store.open_connection()?.query_row(
+            "SELECT COUNT(*) FROM usage_event WHERE source = 'zcode'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(zcode_events, 0);
+        Ok(())
+    }
+
+    #[test]
     fn commit_shard_writes_behavior_facts_and_resets_them_by_source_path() -> anyhow::Result<()> {
         let temp = TempDir::new()?;
         let paths = build_paths(temp.path());
@@ -1779,6 +1918,8 @@ mod tests {
             raw_records: Vec::new(),
             turns: vec![first_turn],
             tool_calls: vec![first_tool],
+            opencode_cursor: None,
+            zcode_cursor: None,
         })?;
         assert_eq!(stats.events_inserted, 1);
         assert_eq!(stats.turns_inserted, 1);
@@ -1819,6 +1960,8 @@ mod tests {
                 tool_kind: ToolKind::Edit,
                 ..build_tool_call(&replacement_event, "Edit")
             }],
+            opencode_cursor: None,
+            zcode_cursor: None,
         })?;
 
         let conn = store.open_connection()?;
@@ -1865,6 +2008,8 @@ mod tests {
             raw_records: Vec::new(),
             turns: vec![turn.clone(), turn],
             tool_calls: vec![tool.clone(), tool],
+            opencode_cursor: None,
+            zcode_cursor: None,
         };
 
         dedupe_behavior_facts(&mut shard);
@@ -1900,6 +2045,8 @@ mod tests {
             raw_records: Vec::new(),
             turns: Vec::new(),
             tool_calls: Vec::new(),
+            opencode_cursor: None,
+            zcode_cursor: None,
         })?;
         assert_eq!(seed.events_inserted, 2);
 
@@ -1936,6 +2083,8 @@ mod tests {
             raw_records: Vec::new(),
             turns: Vec::new(),
             tool_calls: Vec::new(),
+            opencode_cursor: None,
+            zcode_cursor: None,
         })?;
 
         let conn = store.open_connection()?;
@@ -2009,6 +2158,8 @@ mod tests {
             raw_records: Vec::new(),
             turns: Vec::new(),
             tool_calls: Vec::new(),
+            opencode_cursor: None,
+            zcode_cursor: None,
         })?;
 
         let conn = store.open_connection()?;
@@ -2031,6 +2182,8 @@ mod tests {
             raw_records: Vec::new(),
             turns: Vec::new(),
             tool_calls: Vec::new(),
+            opencode_cursor: None,
+            zcode_cursor: None,
         })?;
         drop(writer);
 
@@ -2133,6 +2286,8 @@ mod tests {
             raw_records: Vec::new(),
             turns: Vec::new(),
             tool_calls: Vec::new(),
+            opencode_cursor: None,
+            zcode_cursor: None,
         })?;
         assert_eq!(stats.events_inserted, 2);
 
@@ -2224,6 +2379,8 @@ mod tests {
             raw_records: Vec::new(),
             turns: Vec::new(),
             tool_calls: Vec::new(),
+            opencode_cursor: None,
+            zcode_cursor: None,
         })?;
         assert_eq!(stats.events_inserted, 3);
 
@@ -2310,6 +2467,8 @@ mod tests {
             raw_records: Vec::new(),
             turns: Vec::new(),
             tool_calls: Vec::new(),
+            opencode_cursor: None,
+            zcode_cursor: None,
         })?;
 
         let conn = store.open_connection()?;
@@ -2370,6 +2529,8 @@ mod tests {
             raw_records: Vec::new(),
             turns: Vec::new(),
             tool_calls: Vec::new(),
+            opencode_cursor: None,
+            zcode_cursor: None,
         })?;
 
         let conn = store.open_connection()?;
@@ -2793,6 +2954,8 @@ mod tests {
             raw_records: Vec::new(),
             turns: Vec::new(),
             tool_calls: Vec::new(),
+            opencode_cursor: None,
+            zcode_cursor: None,
         })?;
 
         let conn = store.open_connection()?;

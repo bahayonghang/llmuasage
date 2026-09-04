@@ -1,8 +1,13 @@
-use std::{future::Future, path::PathBuf, pin::Pin, time::Instant};
+use std::{
+    future::Future,
+    path::{Path, PathBuf},
+    pin::Pin,
+    time::{Duration, Instant},
+};
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OpenFlags, params};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -10,19 +15,20 @@ use tracing::info;
 use crate::{
     integrations,
     models::{
-        ActivityCategory, SessionInfo, SourceKind, UsageEvent, UsageTokens, UsageToolCall,
-        UsageTurn,
+        ActivityCategory, ParseIssueKind, ParseIssues, SessionInfo, SourceKind, UsageEvent,
+        UsageTokens, UsageToolCall, UsageTurn,
     },
     parsers::{
         ProgressSink, SourceParser, SourceSyncStats, SyncEvent, behavior::opencode_tool_evidence,
     },
     project::ProjectResolver,
-    store::{Store, SyncRunWriter, SyncShard},
-    util::{bucket_start_from_rfc3339, normalize_model, now_utc},
+    store::{OpencodeCursor, Store, SyncRunWriter, SyncShard},
+    util::{bucket_start_from_rfc3339, hash_string, normalize_model, now_utc},
 };
 
 const OPENCODE_PAGE_SIZE: i64 = 1000;
 const OPENCODE_PART_PAGE_SIZE: i64 = 1000;
+const SOURCE_DB_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug)]
 struct OpencodeRow {
@@ -118,7 +124,15 @@ async fn sync_opencode(
 
     // 1.2 用已处理消息作为数据库代际锚点。文件长度/mtime 会随 SQLite
     // 正常增长变化，不能用于区分原库增长与替换库。
-    let connection = Connection::open(&db_path)?;
+    let connection = match open_source_db(&db_path) {
+        Ok(connection) => connection,
+        Err(_) => {
+            stats.last_error = Some("OpenCode SQLite DB 打开失败".to_string());
+            return Ok(stats);
+        }
+    };
+    let path_hash = hash_string(&db_path.to_string_lossy());
+    let mut parse_issues = ParseIssues::default();
     if !opencode_cursor_anchor_exists(&connection, &cursor)? {
         info!(
             last_time_created = cursor.last_time_created,
@@ -214,17 +228,16 @@ async fn sync_opencode(
 
         normalized_events_seen += page_events.len();
         if !page_events.is_empty() {
-            // OpenCode 是流式分页，shard 仅承载本页 event；
-            // OpencodeCursor 仍由 store.save_opencode_cursor 自行收尾，故 cursors/resets 均为空。
             let commit = writer.commit_shard(SyncShard {
-                source: SourceKind::Opencode,
-                reset_path_hashes: Vec::new(),
                 events: page_events,
-                cursors: Vec::new(),
-                seen_file_paths: Vec::new(),
                 raw_records: page_raw,
                 turns: page_turns,
-                tool_calls: Vec::new(),
+                opencode_cursor: snapshot_opencode_cursor(
+                    recent_cutoff,
+                    &mut cursor,
+                    latest_time,
+                    &latest_ids,
+                ),
                 ..SyncShard::new(SourceKind::Opencode)
             })?;
             inserted += commit.events_inserted;
@@ -264,6 +277,13 @@ async fn sync_opencode(
                 part_rows_seen += 1;
                 scanned_bytes += row.data.len() as u64;
                 let Ok(value) = serde_json::from_str::<Value>(&row.data) else {
+                    parse_issues.record(
+                        SourceKind::Opencode,
+                        &path_hash,
+                        row.rowid.max(0) as u64,
+                        ParseIssueKind::Malformed,
+                        "opencode_tool_json",
+                    );
                     continue;
                 };
                 if let Some(call) = part_to_tool_call(&value, row.time_created, row.rowid) {
@@ -272,14 +292,13 @@ async fn sync_opencode(
             }
             if !tool_calls.is_empty() {
                 let commit = writer.commit_shard(SyncShard {
-                    source: SourceKind::Opencode,
-                    reset_path_hashes: Vec::new(),
-                    events: Vec::new(),
-                    cursors: Vec::new(),
-                    seen_file_paths: Vec::new(),
-                    raw_records: Vec::new(),
-                    turns: Vec::new(),
                     tool_calls,
+                    opencode_cursor: snapshot_opencode_cursor(
+                        recent_cutoff,
+                        &mut cursor,
+                        latest_time,
+                        &latest_ids,
+                    ),
                     ..SyncShard::new(SourceKind::Opencode)
                 })?;
                 write_ms += commit.write_ms;
@@ -299,12 +318,14 @@ async fn sync_opencode(
         }
     }
 
-    if recent_cutoff.is_none() {
-        cursor.last_time_created = latest_time;
-        cursor.last_processed_ids = latest_ids;
-        cursor.sqlite_status = "ok".to_string();
-        cursor.updated_at = now_utc();
-        store.cursors().save_opencode_cursor("local", &cursor)?;
+    if let Some(final_cursor) =
+        snapshot_opencode_cursor(recent_cutoff, &mut cursor, latest_time, &latest_ids)
+    {
+        let commit = writer.commit_shard(SyncShard {
+            opencode_cursor: Some(final_cursor),
+            ..SyncShard::new(SourceKind::Opencode)
+        })?;
+        write_ms += commit.write_ms;
     }
 
     stats.files_processed = 1;
@@ -316,6 +337,7 @@ async fn sync_opencode(
     stats.events_seen = normalized_events_seen;
     stats.events_inserted = inserted;
     stats.write_ms = write_ms;
+    stats.parse_issues = parse_issues;
     let total_elapsed = parse_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
     stats.parse_ms = total_elapsed.saturating_sub(write_ms);
 
@@ -333,6 +355,30 @@ fn emit_progress(sink: &mut Option<ProgressSink<'_>>, event: SyncEvent) {
     if let Some(sink) = sink.as_mut() {
         sink(event);
     }
+}
+
+/// Opens the user's OpenCode SQLite database read-only with a busy timeout.
+pub fn open_source_db(path: &Path) -> Result<Connection> {
+    let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    connection.busy_timeout(SOURCE_DB_BUSY_TIMEOUT)?;
+    connection.query_row("PRAGMA schema_version", [], |row| row.get::<_, i64>(0))?;
+    Ok(connection)
+}
+
+fn snapshot_opencode_cursor(
+    recent_cutoff: Option<DateTime<Utc>>,
+    cursor: &mut OpencodeCursor,
+    latest_time: i64,
+    latest_ids: &[String],
+) -> Option<Box<OpencodeCursor>> {
+    if recent_cutoff.is_some() {
+        return None;
+    }
+    cursor.last_time_created = latest_time;
+    cursor.last_processed_ids = latest_ids.to_vec();
+    cursor.sqlite_status = "ok".to_string();
+    cursor.updated_at = now_utc();
+    Some(Box::new(cursor.clone()))
 }
 
 fn load_opencode_page(
@@ -666,9 +712,29 @@ fn part_to_tool_call(part: &Value, time_created: i64, rowid: i64) -> Option<Usag
 
 #[cfg(test)]
 mod tests {
-    use super::{load_opencode_page, normalize_opencode_tokens};
+    use super::{load_opencode_page, normalize_opencode_tokens, open_source_db};
     use rusqlite::Connection;
     use serde_json::json;
+
+    #[test]
+    fn open_source_db_is_read_only_with_busy_timeout() -> anyhow::Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let path = dir.path().join("opencode.db");
+        Connection::open(&path)?;
+        let connection = open_source_db(&path)?;
+        let timeout_ms: i64 = connection.query_row("PRAGMA busy_timeout", [], |row| row.get(0))?;
+        assert!(
+            timeout_ms >= 1000,
+            "busy timeout must be at least 1s, got {timeout_ms}"
+        );
+        assert!(
+            connection
+                .execute("CREATE TABLE write_probe(x INTEGER)", [])
+                .is_err(),
+            "OpenCode source DB must open read-only"
+        );
+        Ok(())
+    }
 
     #[test]
     fn recent_lower_bound_prunes_old_message_rows_in_sql() -> anyhow::Result<()> {

@@ -1217,6 +1217,23 @@ impl Fixture {
         time_created: i64,
         data: serde_json::Value,
     ) -> Result<()> {
+        self.seed_opencode_tool_part_raw(
+            part_id,
+            message_id,
+            session_id,
+            time_created,
+            &data.to_string(),
+        )
+    }
+
+    fn seed_opencode_tool_part_raw(
+        &self,
+        part_id: &str,
+        message_id: &str,
+        session_id: &str,
+        time_created: i64,
+        data: &str,
+    ) -> Result<()> {
         let db_path = self.opencode_home.join("opencode.db");
         let conn = Connection::open(&db_path)?;
         conn.execute_batch(
@@ -1224,7 +1241,7 @@ impl Fixture {
         )?;
         conn.execute(
             "INSERT OR REPLACE INTO part(id, message_id, session_id, time_created, data) VALUES (?1, ?2, ?3, ?4, ?5)",
-            (&part_id, &message_id, &session_id, &time_created, &data.to_string()),
+            (&part_id, &message_id, &session_id, &time_created, &data),
         )?;
         Ok(())
     }

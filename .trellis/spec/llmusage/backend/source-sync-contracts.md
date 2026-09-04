@@ -316,6 +316,9 @@
   scanned.
 - OpenCode growth/replacement and part high-water tests covering hot zero-row,
   one-row append, closed upper bounds, and idempotent replacement replay.
+  OpenCode source DB open is read-only with a non-zero busy timeout; malformed
+  tool-part JSON increments `parse_issues.malformed_lines`; OpenCode/ZCode
+  SQLite cursors commit in the same `commit_shard` transaction as their events.
 - Table-driven CLI, Web, and public `JobRegistry::try_start` tests asserting
   the same validation codes and no job creation for invalid input.
 - Architecture tests scan `sync`/`remote -> commands`, every non-command
@@ -455,7 +458,8 @@ pub use crate::sync::DefaultSyncExecutor as CommandSyncExecutor;
   imported events or advance the file cursor. Checksum mismatch and missing
   `response_id` with a fallback key are accounting anomalies.
 - Grok sidecars over the size cap stay oversized; bad sidecar JSON stays
-  malformed. OpenCode does not invent parse issues.
+  malformed. OpenCode records malformed tool-part JSON as `malformed_lines`
+  and continues other parts; non-usage message rows stay silent.
 - Sync human summary prints every non-zero class (`malformed=`, `oversized=`,
   `skipped=`, `accounting=`). Warning color is only for malformed/oversized.
 - Interactive dashboard `SyncSourcePayload` carries the four counters and

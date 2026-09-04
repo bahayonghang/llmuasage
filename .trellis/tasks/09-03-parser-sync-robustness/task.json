@@ -3,7 +3,7 @@
   "name": "parser-sync-robustness",
   "title": "OpenCode/ZCode 同步健壮性",
   "description": "OpenCode 只读打开加 busy timeout，工具 JSON 失败记 parse_issues，cursor 与 shard 同事务。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

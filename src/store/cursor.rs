@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::error::{LlmusageError, Result};
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{OptionalExtension, Transaction, params};
 
 use super::{FileCursor, OpencodeCursor, Store, ZcodeCursor};
 use crate::{
@@ -113,40 +113,8 @@ impl<'a> CursorStore<'a> {
         if self.store.emit_only() {
             return Ok(());
         }
-        let processed_ids =
-            serde_json::to_string(&cursor.last_processed_ids).map_err(|source| {
-                LlmusageError::Parse {
-                    context: "opencode cursor",
-                    source,
-                }
-            })?;
-        self.store.write_transaction(|tx| {
-            tx.execute(
-                r#"
-            INSERT INTO source_cursor(
-                host_id, source, cursor_key, inode, last_time_created, last_processed_ids_json,
-                last_part_rowid, sqlite_status, updated_at
-            ) VALUES (?1, 'opencode', 'main', ?2, ?3, ?4, ?5, ?6, ?7)
-            ON CONFLICT(host_id, source, cursor_key) DO UPDATE SET
-                inode = excluded.inode,
-                last_time_created = excluded.last_time_created,
-                last_processed_ids_json = excluded.last_processed_ids_json,
-                last_part_rowid = excluded.last_part_rowid,
-                sqlite_status = excluded.sqlite_status,
-                updated_at = excluded.updated_at
-            "#,
-                params![
-                    host_id,
-                    cursor.inode as i64,
-                    cursor.last_time_created,
-                    processed_ids,
-                    cursor.last_part_rowid,
-                    cursor.sqlite_status,
-                    cursor.updated_at,
-                ],
-            )?;
-            Ok(())
-        })?;
+        self.store
+            .write_transaction(|tx| persist_opencode_cursor_tx(tx, host_id, cursor))?;
         Ok(())
     }
 
@@ -194,22 +162,68 @@ impl<'a> CursorStore<'a> {
         if self.store.emit_only() {
             return Ok(());
         }
-        let processed_ids =
-            serde_json::to_string(&cursor.last_processed_ids).map_err(|source| {
-                LlmusageError::Parse {
-                    context: "zcode cursor",
-                    source,
-                }
-            })?;
-        let skipped_ids = serde_json::to_string(&cursor.last_skipped_ids).map_err(|source| {
-            LlmusageError::Parse {
-                context: "zcode skip cursor",
-                source,
-            }
+        self.store
+            .write_transaction(|tx| persist_zcode_cursor_tx(tx, host_id, cursor))?;
+        Ok(())
+    }
+}
+
+pub(super) fn persist_opencode_cursor_tx(
+    tx: &Transaction<'_>,
+    host_id: &str,
+    cursor: &OpencodeCursor,
+) -> Result<()> {
+    let processed_ids = serde_json::to_string(&cursor.last_processed_ids).map_err(|source| {
+        LlmusageError::Parse {
+            context: "opencode cursor",
+            source,
+        }
+    })?;
+    tx.execute(
+        r#"
+            INSERT INTO source_cursor(
+                host_id, source, cursor_key, inode, last_time_created, last_processed_ids_json,
+                last_part_rowid, sqlite_status, updated_at
+            ) VALUES (?1, 'opencode', 'main', ?2, ?3, ?4, ?5, ?6, ?7)
+            ON CONFLICT(host_id, source, cursor_key) DO UPDATE SET
+                inode = excluded.inode,
+                last_time_created = excluded.last_time_created,
+                last_processed_ids_json = excluded.last_processed_ids_json,
+                last_part_rowid = excluded.last_part_rowid,
+                sqlite_status = excluded.sqlite_status,
+                updated_at = excluded.updated_at
+            "#,
+        params![
+            host_id,
+            cursor.inode as i64,
+            cursor.last_time_created,
+            processed_ids,
+            cursor.last_part_rowid,
+            cursor.sqlite_status,
+            cursor.updated_at,
+        ],
+    )?;
+    Ok(())
+}
+
+pub(super) fn persist_zcode_cursor_tx(
+    tx: &Transaction<'_>,
+    host_id: &str,
+    cursor: &ZcodeCursor,
+) -> Result<()> {
+    let processed_ids = serde_json::to_string(&cursor.last_processed_ids).map_err(|source| {
+        LlmusageError::Parse {
+            context: "zcode cursor",
+            source,
+        }
+    })?;
+    let skipped_ids =
+        serde_json::to_string(&cursor.last_skipped_ids).map_err(|source| LlmusageError::Parse {
+            context: "zcode skip cursor",
+            source,
         })?;
-        self.store.write_transaction(|tx| {
-            tx.execute(
-                r#"
+    tx.execute(
+        r#"
             INSERT INTO source_cursor(
                 host_id, source, cursor_key, last_time_created, last_processed_ids_json,
                 sqlite_status, updated_at, last_skipped_at, last_skipped_ids_json
@@ -222,20 +236,17 @@ impl<'a> CursorStore<'a> {
                 last_skipped_at = excluded.last_skipped_at,
                 last_skipped_ids_json = excluded.last_skipped_ids_json
             "#,
-                params![
-                    host_id,
-                    cursor.last_completed_at,
-                    processed_ids,
-                    cursor.sqlite_status,
-                    cursor.updated_at,
-                    cursor.last_skipped_at,
-                    skipped_ids,
-                ],
-            )?;
-            Ok(())
-        })?;
-        Ok(())
-    }
+        params![
+            host_id,
+            cursor.last_completed_at,
+            processed_ids,
+            cursor.sqlite_status,
+            cursor.updated_at,
+            cursor.last_skipped_at,
+            skipped_ids,
+        ],
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]

@@ -76,7 +76,7 @@ Parser 不再 import 任何写入协议细节；不感知 batch size / 顺序 / 
 
 ### 4. Streaming 源用同一接口
 
-OpenCode 是流式（page-by-page）：每页 events 一次 `commit_shard`，`reset_path_hashes` 与 `cursors` 传空，`OpencodeCursor` 仍由 `store.cursors().save_opencode_cursor` 自行收尾。流式 vs 批式在 writer 内部已被 `commit_shard` 抹平。
+OpenCode/ZCode 是流式（page-by-page）：每页 events 一次 `commit_shard`，`reset_path_hashes` 与 file `cursors` 传空。SQLite 高水位走 shard 上的可选 `opencode_cursor` / `zcode_cursor`，由 `commit_shard` 在同一 Immediate 事务里写入。`save_opencode_cursor` / `save_zcode_cursor` 仍用于 load 与缺失库诊断，不再作为成功路径上的第二段事务。流式 vs 批式在 writer 内部已被 `commit_shard` 抹平。
 
 ## 备选方案与否决理由
 
