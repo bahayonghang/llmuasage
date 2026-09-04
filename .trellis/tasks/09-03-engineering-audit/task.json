@@ -3,7 +3,7 @@
   "name": "engineering-audit",
   "title": "工程审查整改",
   "description": "2026-09-03 全库工程审查的父任务：持有发现分类、严重度与成本排序、子任务映射与最终集成审查。父任务不改产品代码。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

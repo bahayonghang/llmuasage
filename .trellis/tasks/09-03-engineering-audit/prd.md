@@ -51,8 +51,8 @@
 - [ ] AC1. `research/engineering-audit-2026-09-03.md` 中每条 high/medium 发现都映射到恰好一个子任务，无遗漏、无重复实现范围。
 - [ ] AC2. 每个子任务 `prd.md` 含可观察验收标准和 `file:line` 锚点。
 - [ ] AC3. 复杂子任务（query-sql-performance、store-query-decouple、dashboard-report-facade、loopback-write-csrf、parser-sync-robustness、store-reset-rebuild-recovery）在 `task.py start` 前有 `design.md` 和 `implement.md`。
-- [ ] AC4. 全部子任务归档后，父任务对照研究清单做一次集成审查：high 发现为 Fixed；medium 为 Fixed 或显式延期。
-- [ ] AC5. 父任务自身 `git diff` 不含 `src/**` 产品逻辑。
+- [x] AC4. 全部子任务归档后，父任务对照研究清单做一次集成审查：high 发现为 Fixed；medium 为 Fixed 或显式延期。
+- [x] AC5. 父任务自身 `git diff` 不含 `src/**` 产品逻辑。
 
 ## Out of scope
 
