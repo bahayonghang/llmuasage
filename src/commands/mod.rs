@@ -288,7 +288,7 @@ where
     }
 }
 
-/// Records `run_log` plus `error!` for report and ops commands that do not
+/// Records `run_log` plus `error!` for report and catalog commands that do not
 /// already wrap themselves in `run_tracked`. Uninitialized homes cannot
 /// write `run_log`; those failures still emit `error!`.
 async fn run_logged<Fut>(app: &AppContext, command: &str, body: Fut) -> Result<()>
@@ -298,13 +298,22 @@ where
     let store = Store::new(&app.paths)?;
     match store.require_initialized() {
         Ok(()) => run_tracked(&store, command, body, |_| None).await,
-        Err(_) => match body.await {
-            Ok(value) => Ok(value),
-            Err(err) => {
-                error!(command, error = %err, "run failed");
-                Err(err)
-            }
-        },
+        Err(_) => run_untracked(command, body).await,
+    }
+}
+
+/// Emits `error!` when `body` fails. Does not open Store or write `run_log`,
+/// so read-only commands can run while another holder owns the worker lock.
+async fn run_untracked<Fut>(command: &str, body: Fut) -> Result<()>
+where
+    Fut: Future<Output = Result<()>>,
+{
+    match body.await {
+        Ok(value) => Ok(value),
+        Err(err) => {
+            error!(command, error = %err, "run failed");
+            Err(err)
+        }
     }
 }
 
@@ -397,17 +406,16 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
             .await
         }
         Some(Commands::Remote { command }) => remote::run(&app, command).await,
-        Some(Commands::Status) => run_logged(&app, "status", status::run(&app)).await,
+        Some(Commands::Status) => run_untracked("status", status::run(&app)).await,
         Some(Commands::SourceStatus) => {
-            run_logged(&app, "source-status", source_status::run(&app)).await
+            run_untracked("source-status", source_status::run(&app)).await
         }
         Some(Commands::Diagnostics {
             out,
             forget_file,
             source,
         }) => {
-            run_logged(
-                &app,
+            run_untracked(
                 "diagnostics",
                 diagnostics::run(&app, out, forget_file, source),
             )
@@ -416,7 +424,7 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
         Some(Commands::Doctor {
             json,
             refresh_pricing,
-        }) => run_logged(&app, "doctor", doctor::run(&app, json, refresh_pricing)).await,
+        }) => run_untracked("doctor", doctor::run(&app, json, refresh_pricing)).await,
         Some(Commands::Catalog { command }) => match command {
             CatalogCommand::Apply { path } => {
                 run_logged(&app, "catalog apply", catalog::apply(&app, &path)).await
@@ -431,14 +439,14 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
             level,
             command,
             json,
-        }) => run_logged(&app, "logs", logs::run(&app, limit, level, command, json)).await,
+        }) => run_untracked("logs", logs::run(&app, limit, level, command, json)).await,
         Some(Commands::Serve {
             port,
             public,
             no_open,
         }) => serve::run_with_options(&app, port, public, no_open).await,
-        Some(Commands::Dash) => run_logged(&app, "dash", dash::run(&app, false)).await,
-        Some(Commands::Tui) => run_logged(&app, "tui", dash::run(&app, true)).await,
+        Some(Commands::Dash) => run_untracked("dash", dash::run(&app, false)).await,
+        Some(Commands::Tui) => run_untracked("tui", dash::run(&app, true)).await,
         Some(Commands::Export { command }) => match command {
             ExportCommand::Html { out } => export::run_html(&app, out).await,
         },

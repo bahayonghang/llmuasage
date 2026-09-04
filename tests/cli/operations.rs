@@ -233,6 +233,62 @@ fn run_tracked_records_failure_for_daily() -> Result<()> {
 }
 
 #[test]
+fn status_does_not_record_run_log() -> Result<()> {
+    let fixture = ReportCliFixture::new()?;
+    let output = fixture.output_with_env(
+        &["status"],
+        &[("LLMUSAGE_LOG", "error"), ("RUST_LOG", "off")],
+    )?;
+    assert!(output.status.success(), "{output:?}");
+
+    let store = Store::new(&fixture.paths)?;
+    let recent = store.run_log().recent_runs(5)?;
+    assert!(
+        recent.iter().all(|run| run.command != "status"),
+        "read-only status must not write run_log: {recent:#?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn status_failure_emits_error_without_run_log() -> Result<()> {
+    let fixture = ReportCliFixture::new()?;
+    let conn = Connection::open(&fixture.paths.db_path)?;
+    conn.execute(
+        "UPDATE meta SET value = '99999' WHERE key = 'schema_version'",
+        [],
+    )?;
+    drop(conn);
+
+    let output = fixture.output_with_env(
+        &["status"],
+        &[("LLMUSAGE_LOG", "error"), ("RUST_LOG", "off")],
+    )?;
+    assert!(!output.status.success(), "{output:?}");
+
+    let store = Store::new(&fixture.paths)?;
+    let recent = store.run_log().recent_runs(5)?;
+    assert!(
+        recent.iter().all(|run| run.command != "status"),
+        "failed status must not write run_log: {recent:#?}"
+    );
+
+    let entries = read_recent_log_entries(&fixture.paths, 100, Some("error"), Some("status"))?;
+    assert!(
+        entries.iter().any(|entry| {
+            entry.level == "ERROR"
+                && entry.command.as_deref() == Some("status")
+                && entry
+                    .message
+                    .as_deref()
+                    .is_some_and(|message| message.contains("run failed"))
+        }),
+        "expected ERROR status event in logs: {entries:#?}"
+    );
+    Ok(())
+}
+
+#[test]
 fn cli_home_flag_overrides_llmusage_home_env() -> Result<()> {
     let fixture = ReportCliFixture::new()?;
     let other = TempDir::new()?;
