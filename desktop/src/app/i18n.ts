@@ -67,6 +67,73 @@ export type Copy = {
   loadFailed: string;
   emptyRows: string;
   sixCardsLoading: string;
+  cardsDegraded: string;
+  cardSessions: string;
+  cardRequests: string;
+  cardTokens: string;
+  cardCost: string;
+  cardActiveDays: string;
+  cardCache: string;
+  heatmapTitle: string;
+  hourOfWeekTitle: string;
+  topSessionsTitle: string;
+  trendsDailyTitle: string;
+  supportNormalized: string;
+  supportNoData: string;
+  supportDegraded: string;
+  supportUnsupported: string;
+  supportInsufficient: string;
+  supportLowSample: string;
+  activityTitle: string;
+  toolsTitle: string;
+  optimizeTitle: string;
+  compareTitle: string;
+  explorerMetric: string;
+  explorerGroupBy: string;
+  explorerGranularity: string;
+  explorerLimit: string;
+  explorerSession: string;
+  explorerToolName: string;
+  explorerToolKind: string;
+  explorerTokenType: string;
+  explorerIncludeOther: string;
+  explorerIncludeNonTool: string;
+  explorerAll: string;
+  sortTokens: string;
+  sortDuration: string;
+  sortCost: string;
+  weekdayMon: string;
+  weekdayTue: string;
+  weekdayWed: string;
+  weekdayThu: string;
+  weekdayFri: string;
+  weekdaySat: string;
+  weekdaySun: string;
+  inputTokens: string;
+  cacheReadTokens: string;
+  cacheCreationTokens: string;
+  outputTokens: string;
+  otherTokens: string;
+  optimizeScore: string;
+  optimizeSavings: string;
+  compareMetric: string;
+  metricCost: string;
+  metricCalls: string;
+  metricTurns: string;
+  metricSessions: string;
+  metricTokens: string;
+  groupSource: string;
+  groupModel: string;
+  groupProject: string;
+  groupSession: string;
+  groupTool: string;
+  groupToolKind: string;
+  groupIsTool: string;
+  groupTokenType: string;
+  granularityTotal: string;
+  granularityDay: string;
+  granularityWeek: string;
+  granularityMonth: string;
 };
 
 export const COPY: Record<Locale, Copy> = {
@@ -105,7 +172,7 @@ export const COPY: Record<Locale, Copy> = {
     sync: "同步",
     cancelSync: "取消同步",
     heroTitle: "本地用量概览",
-    heroDesc: "核心块来自 dashboard_interactive。次级六卡稍后由 secondary-ui 加载。",
+    heroDesc: "核心块来自 dashboard_interactive。六张概览卡在核心绘制后加载。",
     kpiTotal: "总用量",
     kpiDay: "近 24 小时",
     kpiCost: "估算成本",
@@ -137,6 +204,73 @@ export const COPY: Record<Locale, Copy> = {
     loadFailed: "核心查询失败",
     emptyRows: "暂无数据",
     sixCardsLoading: "概览六卡加载中",
+    cardsDegraded: "概览六卡不可用",
+    cardSessions: "会话数",
+    cardRequests: "请求数",
+    cardTokens: "Token 用量",
+    cardCost: "估算成本",
+    cardActiveDays: "活跃天数",
+    cardCache: "缓存读取占比",
+    heatmapTitle: "每日活跃度",
+    hourOfWeekTitle: "每周活跃时段",
+    topSessionsTitle: "会话消耗排行",
+    trendsDailyTitle: "Token 用量构成",
+    supportNormalized: "数据完整",
+    supportNoData: "暂无数据",
+    supportDegraded: "部分数据",
+    supportUnsupported: "不支持",
+    supportInsufficient: "模型不足",
+    supportLowSample: "样本较少",
+    activityTitle: "活动类型",
+    toolsTitle: "工具调用",
+    optimizeTitle: "优化建议",
+    compareTitle: "模型对比",
+    explorerMetric: "指标",
+    explorerGroupBy: "分组维度",
+    explorerGranularity: "时间粒度",
+    explorerLimit: "最多显示",
+    explorerSession: "会话过滤",
+    explorerToolName: "工具过滤",
+    explorerToolKind: "工具类型",
+    explorerTokenType: "Token 类型",
+    explorerIncludeOther: "合并其他项",
+    explorerIncludeNonTool: "包含非工具",
+    explorerAll: "全部",
+    sortTokens: "Token 用量",
+    sortDuration: "活跃时长",
+    sortCost: "估算成本",
+    weekdayMon: "周一",
+    weekdayTue: "周二",
+    weekdayWed: "周三",
+    weekdayThu: "周四",
+    weekdayFri: "周五",
+    weekdaySat: "周六",
+    weekdaySun: "周日",
+    inputTokens: "输入",
+    cacheReadTokens: "缓存读取",
+    cacheCreationTokens: "缓存写入",
+    outputTokens: "输出",
+    otherTokens: "其他",
+    optimizeScore: "优化评分",
+    optimizeSavings: "可优化空间",
+    compareMetric: "指标",
+    metricCost: "归因成本",
+    metricCalls: "调用数",
+    metricTurns: "轮次",
+    metricSessions: "会话数",
+    metricTokens: "总 Token",
+    groupSource: "来源",
+    groupModel: "模型",
+    groupProject: "项目",
+    groupSession: "会话",
+    groupTool: "工具",
+    groupToolKind: "工具类型",
+    groupIsTool: "工具/非工具",
+    groupTokenType: "Token 类型",
+    granularityTotal: "总计",
+    granularityDay: "按日",
+    granularityWeek: "按周",
+    granularityMonth: "按月",
   },
   en: {
     brandSub: "local",
@@ -173,7 +307,7 @@ export const COPY: Record<Locale, Copy> = {
     sync: "Sync",
     cancelSync: "Cancel sync",
     heroTitle: "Local usage overview",
-    heroDesc: "Core blocks come from dashboard_interactive. The six summary cards load later in secondary-ui.",
+    heroDesc: "Core blocks come from dashboard_interactive. The six summary cards load after core paint.",
     kpiTotal: "Total",
     kpiDay: "Last 24h",
     kpiCost: "Estimated cost",
@@ -205,6 +339,73 @@ export const COPY: Record<Locale, Copy> = {
     loadFailed: "Core query failed",
     emptyRows: "No data",
     sixCardsLoading: "Summary cards loading",
+    cardsDegraded: "Summary cards unavailable",
+    cardSessions: "Sessions",
+    cardRequests: "Requests",
+    cardTokens: "Token usage",
+    cardCost: "Estimated cost",
+    cardActiveDays: "Active days",
+    cardCache: "Cache-read share",
+    heatmapTitle: "Daily activity",
+    hourOfWeekTitle: "Weekly activity",
+    topSessionsTitle: "Session ranking",
+    trendsDailyTitle: "Token usage mix",
+    supportNormalized: "Complete data",
+    supportNoData: "No data",
+    supportDegraded: "Partial data",
+    supportUnsupported: "Unsupported",
+    supportInsufficient: "Not enough models",
+    supportLowSample: "Small sample",
+    activityTitle: "Activity",
+    toolsTitle: "Tool usage",
+    optimizeTitle: "Optimize",
+    compareTitle: "Compare",
+    explorerMetric: "Metric",
+    explorerGroupBy: "Group by",
+    explorerGranularity: "Granularity",
+    explorerLimit: "Limit",
+    explorerSession: "Session",
+    explorerToolName: "Tool",
+    explorerToolKind: "Tool kind",
+    explorerTokenType: "Token type",
+    explorerIncludeOther: "Include other",
+    explorerIncludeNonTool: "Include non-tool",
+    explorerAll: "All",
+    sortTokens: "Token usage",
+    sortDuration: "Active duration",
+    sortCost: "Estimated cost",
+    weekdayMon: "Mon",
+    weekdayTue: "Tue",
+    weekdayWed: "Wed",
+    weekdayThu: "Thu",
+    weekdayFri: "Fri",
+    weekdaySat: "Sat",
+    weekdaySun: "Sun",
+    inputTokens: "Input",
+    cacheReadTokens: "Cache-read",
+    cacheCreationTokens: "Cache-creation",
+    outputTokens: "Output",
+    otherTokens: "Other",
+    optimizeScore: "Score",
+    optimizeSavings: "Potential savings",
+    compareMetric: "Metric",
+    metricCost: "Attributed cost",
+    metricCalls: "Calls",
+    metricTurns: "Turns",
+    metricSessions: "Sessions",
+    metricTokens: "Total tokens",
+    groupSource: "Source",
+    groupModel: "Model",
+    groupProject: "Project",
+    groupSession: "Session",
+    groupTool: "Tool",
+    groupToolKind: "Tool kind",
+    groupIsTool: "Tool / non-tool",
+    groupTokenType: "Token type",
+    granularityTotal: "Total",
+    granularityDay: "Day",
+    granularityWeek: "Week",
+    granularityMonth: "Month",
   },
 };
 

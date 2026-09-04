@@ -24,6 +24,8 @@ describe("invokeCommand", () => {
       expect(contents, path).not.toMatch(/["'`]\/api\//);
       if (!path.endsWith("invoke.ts")) {
         expect(contents, path).not.toMatch(/from ["']@tauri-apps\/api/);
+      }
+      if (path.endsWith("load-state.ts")) {
         expect(contents, path).not.toMatch(/\bhome_overview\b/);
       }
     }

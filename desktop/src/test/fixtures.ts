@@ -1,8 +1,14 @@
 import type {
+  ActivityPayload,
+  ExplorerPayload,
   HostBreakdown,
+  HomeOverviewPayload,
   InteractiveSnapshot,
+  ModelComparePayload,
+  OptimizePayload,
   ProjectBreakdown,
   RuntimeInfoDto,
+  ToolsPayload,
 } from "../app/types";
 
 export function zeroTokens() {
@@ -108,4 +114,129 @@ export function runtimeInfo(overrides: Partial<RuntimeInfoDto> = {}): RuntimeInf
     lock: null,
     ...overrides,
   };
+}
+
+export function emptyHomeOverview(
+  overrides: Partial<HomeOverviewPayload> = {},
+): HomeOverviewPayload {
+  return {
+    summary: {
+      total_sessions: 4,
+      total_requests: 12,
+      total_tokens: 100,
+      total_cost_usd: 0.5,
+      cache_efficiency: 0.25,
+      active_days: 3,
+      platforms: 1,
+    },
+    by_platform: {},
+    ...overrides,
+  };
+}
+
+export function emptyExplorer(overrides: Partial<ExplorerPayload> = {}): ExplorerPayload {
+  return {
+    support: { supported: true, level: "normalized", reason: null, strategy: "event" },
+    warning: null,
+    granularity: "day",
+    metric: "attributed_cost_usd",
+    group_by: "source",
+    limit: 8,
+    include_other: true,
+    totals: { value: 0 },
+    rows: [],
+    series: [],
+    ...overrides,
+  };
+}
+
+export function emptyActivity(): ActivityPayload {
+  return { support: { supported: true, level: "normalized", reason: null }, breakdown: [] };
+}
+
+export function emptyTools(): ToolsPayload {
+  return { support: { supported: true, level: "normalized", reason: null }, breakdown: [] };
+}
+
+export function emptyOptimize(): OptimizePayload {
+  return {
+    support: { supported: true, level: "normalized", reason: null },
+    score: 90,
+    grade: "A",
+    estimated_savings_tokens: 0,
+    estimated_savings_usd: 0,
+    findings: [],
+  };
+}
+
+export function insufficientCompare(): ModelComparePayload {
+  return {
+    support: {
+      supported: false,
+      level: "insufficient_models",
+      reason: "At least two models with local usage are required for comparison.",
+    },
+    candidates: [],
+    model_a: null,
+    model_b: null,
+    metrics: [
+      { id: "cost_per_call", label: "cost", model_a_value: 0, model_b_value: 0 },
+    ],
+    category_head_to_head: [],
+    working_style: [],
+    warning: "Need at least two models in the current filter.",
+  };
+}
+
+export function defaultSecondaryPayload(command: string): unknown {
+  switch (command) {
+    case "home_overview":
+      return emptyHomeOverview();
+    case "heatmap":
+      return [{ date: "2026-09-01", event_count: 2, total_tokens: 40 }];
+    case "trends_daily":
+      return [
+        {
+          date: "2026-09-01",
+          input_tokens: 10,
+          cache_read_tokens: 2,
+          cache_creation_tokens: 1,
+          output_tokens: 7,
+          total_tokens: 20,
+          event_count: 2,
+          cost_with_cache_usd: 0.1,
+        },
+      ];
+    case "hour_of_week":
+      return [{ dow: 0, hour: 9, total_tokens: 12, event_count: 1 }];
+    case "top_sessions":
+      return [
+        {
+          session_id: "sess-1",
+          session_label: "alpha",
+          project_label: "proj",
+          source: "codex",
+          first_event_at: "2026-09-01T00:00:00Z",
+          last_event_at: "2026-09-01T01:00:00Z",
+          total_tokens: 40,
+          output_tokens: 10,
+          cost_usd: 0.2,
+          span_minutes: 60,
+          active_minutes: 20,
+          event_count: 4,
+        },
+      ];
+    case "activity":
+      return emptyActivity();
+    case "tools":
+      return emptyTools();
+    case "optimize":
+      return emptyOptimize();
+    case "compare":
+      return insufficientCompare();
+    case "explorer":
+      return emptyExplorer();
+    default:
+      return null;
+  }
 }

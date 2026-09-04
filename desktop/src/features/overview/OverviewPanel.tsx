@@ -1,5 +1,6 @@
 import type { Copy } from "../../app/i18n";
-import type { OverviewPayload } from "../../app/types";
+import type { HomeOverviewSummary, OverviewPayload, SecondarySectionStatus } from "../../app/types";
+import { SummaryCards } from "./SummaryCards";
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat().format(value);
@@ -12,9 +13,15 @@ function formatUsd(value: number): string {
 export function OverviewPanel({
   overview,
   copy,
+  summaryStatus = "loading",
+  summary = null,
+  summaryReason,
 }: {
   overview: OverviewPayload;
   copy: Copy;
+  summaryStatus?: SecondarySectionStatus;
+  summary?: HomeOverviewSummary | null;
+  summaryReason?: string;
 }) {
   return (
     <section id="overview" className="block" data-testid="overview-panel">
@@ -45,14 +52,7 @@ export function OverviewPanel({
           </div>
         </div>
       </div>
-      <div className="six-cards" data-testid="home-overview-placeholder">
-        {Array.from({ length: 6 }, (_, index) => (
-          <div className="kpi" key={index}>
-            <div className="kpi-label">{copy.sixCardsLoading}</div>
-            <div className="muted">…</div>
-          </div>
-        ))}
-      </div>
+      <SummaryCards status={summaryStatus} summary={summary} reason={summaryReason} copy={copy} />
     </section>
   );
 }

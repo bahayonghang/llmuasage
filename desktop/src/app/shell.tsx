@@ -1,33 +1,76 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { BehaviorPanel } from "../features/behavior/BehaviorPanel";
 import { CostsPanel } from "../features/costs/CostsPanel";
+import { ExplorerPanel } from "../features/explorer/ExplorerPanel";
+import { HeatmapPanel } from "../features/heatmap/HeatmapPanel";
+import { HourOfWeekPanel } from "../features/heatmap/HourOfWeekPanel";
 import { HostsPanel } from "../features/hosts/HostsPanel";
 import { ModelsPanel } from "../features/models/ModelsPanel";
 import { OverviewPanel } from "../features/overview/OverviewPanel";
 import { ProjectsPanel } from "../features/projects/ProjectsPanel";
+import { TopSessionsPanel } from "../features/sessions/TopSessionsPanel";
 import { SourcesPanel } from "../features/sources/SourcesPanel";
 import { deriveRuntimeStatus, StatusPanel } from "../features/status/StatusPanel";
 import { SyncCenter } from "../features/sync/SyncCenter";
+import { TrendsDailyPanel } from "../features/trends/TrendsDailyPanel";
 import { TrendsPanel } from "../features/trends/TrendsPanel";
 import {
+  allocateRequestId,
   invokeCommand,
   normalizeInvokeError,
   type DesktopCommandError,
 } from "../runtime/invoke";
 import { COPY, NAV_ITEMS, type Copy } from "./i18n";
-import { applyRange, syncOptionsFromState } from "./filters";
+import { applyRange, rangeToFilterDto, syncOptionsFromState } from "./filters";
 import { createLoadController } from "./load-state";
+import {
+  DEFAULT_EXPLORER_QUERY,
+  SECONDARY_SECTIONS,
+  applyHeatmapDateClick,
+  emitLogsNavigationIntent,
+  loadSecondarySections,
+  toExplorerDto,
+  type HeatmapDrill,
+} from "./secondary";
 import type {
+  ActivityPayload,
+  DailyTrendPoint,
+  ExplorerPayload,
+  ExplorerQueryState,
   FilterState,
+  HeatmapPoint,
+  HomeOverviewPayload,
+  HourOfWeekCell,
   InteractiveSnapshot,
   JobSnapshot,
   Locale,
+  ModelComparePayload,
+  OptimizePayload,
   RangePreset,
   RuntimeInfoDto,
+  SecondarySectionState,
   ThemeName,
+  ToolsPayload,
+  TopSessionRow,
 } from "./types";
 
 const DEFAULT_FILTER: FilterState = { range: "all", window: "all" };
 const RANGES: RangePreset[] = ["1d", "7d", "30d", "all", "custom"];
+
+function loadingSection<T>(): SecondarySectionState<T> {
+  return { status: "loading", payload: null };
+}
+
+function readSection<T>(
+  store: Record<string, SecondarySectionState<unknown>>,
+  key: string,
+): SecondarySectionState<T> {
+  const value = store[key];
+  if (!value) {
+    return loadingSection<T>();
+  }
+  return value as SecondarySectionState<T>;
+}
 
 function applyTheme(theme: ThemeName): void {
   document.documentElement.setAttribute("data-theme", theme);
@@ -71,7 +114,60 @@ export function Shell() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [job, setJob] = useState<JobSnapshot | null>(null);
   const [commandError, setCommandError] = useState<DesktopCommandError | null>(null);
+  const [explorerQuery, setExplorerQuery] = useState<ExplorerQueryState>(DEFAULT_EXPLORER_QUERY);
+  const [sessionsSort, setSessionsSort] = useState<"tokens" | "duration" | "cost">("tokens");
+  const [heatmapDrill, setHeatmapDrill] = useState<HeatmapDrill>({ date: null, previous: null });
+  const [secondary, setSecondary] = useState<Record<string, SecondarySectionState<unknown>>>({});
   const copy = COPY[locale];
+
+  const filterRef = useRef(filter);
+  filterRef.current = filter;
+  const explorerQueryRef = useRef(explorerQuery);
+  explorerQueryRef.current = explorerQuery;
+  const sessionsSortRef = useRef(sessionsSort);
+  sessionsSortRef.current = sessionsSort;
+  const explorerSeqRef = useRef(0);
+  const snapshotRef = useRef(snapshot);
+  snapshotRef.current = snapshot;
+
+  const applySection = (section: string, payload: unknown, error: unknown) => {
+    setSecondary((current) => ({
+      ...current,
+      [section]: error
+        ? {
+            status: "degraded",
+            payload: payload ?? null,
+            error: normalizeInvokeError(error).message,
+          }
+        : { status: "ready", payload },
+    }));
+  };
+
+  const trackRequestId = (id: number) => {
+    controllerRef.current.inflightIds.push(id);
+  };
+
+  const loadSecondaryRef = useRef<(generation: number) => Promise<void>>(async () => {});
+  loadSecondaryRef.current = async (generation: number) => {
+    const explorerSeq = explorerSeqRef.current;
+    setSecondary(
+      Object.fromEntries(SECONDARY_SECTIONS.map((section) => [section, loadingSection()])),
+    );
+    await loadSecondarySections({
+      generation,
+      isCurrent: (value) => value === controllerRef.current.generation,
+      filter: filterRef.current,
+      explorer: explorerQueryRef.current,
+      sessionsSort: sessionsSortRef.current,
+      onRequestId: trackRequestId,
+      onResult: (section, payload, error) => {
+        if (section === "explorer" && explorerSeq !== explorerSeqRef.current) {
+          return;
+        }
+        applySection(section, payload, error);
+      },
+    });
+  };
 
   const controllerRef = useRef(
     createLoadController({
@@ -82,10 +178,11 @@ export function Shell() {
         setLoadError(parsed.message);
         setSlow(false);
       },
-      onSnapshot: (_generation, next) => {
+      onSnapshot: (generation, next) => {
         setSnapshot(next);
         setSlow(false);
         setLoadError(null);
+        void loadSecondaryRef.current(generation);
       },
     }),
   );
@@ -176,6 +273,68 @@ export function Shell() {
     } catch (error) {
       setCommandError(normalizeInvokeError(error));
     }
+  }
+
+  async function handleExplorerChange(next: ExplorerQueryState): Promise<void> {
+    setExplorerQuery(next);
+    explorerQueryRef.current = next;
+    if (!snapshotRef.current) {
+      return;
+    }
+    const generation = controllerRef.current.generation;
+    const seq = (explorerSeqRef.current += 1);
+    const requestId = allocateRequestId();
+    trackRequestId(requestId);
+    try {
+      const payload = await invokeCommand<ExplorerPayload>("explorer", {
+        request: toExplorerDto(rangeToFilterDto(filterRef.current), requestId, next),
+      });
+      if (generation !== controllerRef.current.generation || seq !== explorerSeqRef.current) {
+        return;
+      }
+      applySection("explorer", payload, null);
+    } catch (error) {
+      if (generation !== controllerRef.current.generation || seq !== explorerSeqRef.current) {
+        return;
+      }
+      applySection("explorer", null, error);
+    }
+  }
+
+  async function handleSessionsSort(sort: "tokens" | "duration" | "cost"): Promise<void> {
+    setSessionsSort(sort);
+    sessionsSortRef.current = sort;
+    if (!snapshotRef.current) {
+      return;
+    }
+    const generation = controllerRef.current.generation;
+    const requestId = allocateRequestId();
+    trackRequestId(requestId);
+    try {
+      const payload = await invokeCommand<TopSessionRow[]>("top_sessions", {
+        request: {
+          request_id: requestId,
+          filter: rangeToFilterDto(filterRef.current),
+          sort,
+          limit: 10,
+        },
+      });
+      if (generation !== controllerRef.current.generation) {
+        return;
+      }
+      applySection("top_sessions", payload, null);
+    } catch (error) {
+      if (generation !== controllerRef.current.generation) {
+        return;
+      }
+      applySection("top_sessions", null, error);
+    }
+  }
+
+  function handleHeatmapDate(date: string): void {
+    const next = applyHeatmapDateClick(filter, heatmapDrill, date);
+    setHeatmapDrill(next.drill);
+    setFilter(next.filter);
   }
 
   return (
@@ -299,7 +458,10 @@ export function Shell() {
                   type="button"
                   className={filter.range === range ? "active" : ""}
                   data-testid={`range-${range}`}
-                  onClick={() => setFilter((current) => applyRange(current, range))}
+                  onClick={() => {
+                    setHeatmapDrill({ date: null, previous: null });
+                    setFilter((current) => applyRange(current, range));
+                  }}
                 >
                   {rangeLabel[range]}
                 </button>
@@ -347,7 +509,42 @@ export function Shell() {
         ) : null}
         {snapshot ? (
           <div data-testid="core-blocks">
-            <OverviewPanel overview={snapshot.overview} copy={copy} />
+            <OverviewPanel
+              overview={snapshot.overview}
+              copy={copy}
+              summaryStatus={readSection<HomeOverviewPayload>(secondary, "home_overview").status}
+              summary={readSection<HomeOverviewPayload>(secondary, "home_overview").payload?.summary ?? null}
+              summaryReason={readSection<HomeOverviewPayload>(secondary, "home_overview").error}
+            />
+            <HeatmapPanel
+              status={readSection<HeatmapPoint[]>(secondary, "heatmap").status}
+              rows={readSection<HeatmapPoint[]>(secondary, "heatmap").payload}
+              reason={readSection<HeatmapPoint[]>(secondary, "heatmap").error}
+              selectedDate={heatmapDrill.date}
+              copy={copy}
+              onDateClick={handleHeatmapDate}
+            />
+            <HourOfWeekPanel
+              status={readSection<HourOfWeekCell[]>(secondary, "hour_of_week").status}
+              cells={readSection<HourOfWeekCell[]>(secondary, "hour_of_week").payload}
+              reason={readSection<HourOfWeekCell[]>(secondary, "hour_of_week").error}
+              copy={copy}
+            />
+            <TrendsDailyPanel
+              status={readSection<DailyTrendPoint[]>(secondary, "trends_daily").status}
+              rows={readSection<DailyTrendPoint[]>(secondary, "trends_daily").payload}
+              reason={readSection<DailyTrendPoint[]>(secondary, "trends_daily").error}
+              copy={copy}
+            />
+            <TopSessionsPanel
+              status={readSection<TopSessionRow[]>(secondary, "top_sessions").status}
+              rows={readSection<TopSessionRow[]>(secondary, "top_sessions").payload}
+              sort={sessionsSort}
+              reason={readSection<TopSessionRow[]>(secondary, "top_sessions").error}
+              copy={copy}
+              onSortChange={(sort) => void handleSessionsSort(sort)}
+              onSessionClick={(session) => emitLogsNavigationIntent(session)}
+            />
             <TrendsPanel trends={snapshot.trends} copy={copy} />
             <ModelsPanel models={snapshot.models} copy={copy} />
             <SourcesPanel sources={snapshot.sources} copy={copy} />
@@ -363,8 +560,21 @@ export function Shell() {
                 setFilter((current) => ({ ...current, project_hash: projectHash }))
               }
             />
-            <Placeholder id="behavior" title={copy.behaviorTitle} note={copy.secondaryLoading} />
-            <Placeholder id="explorer" title={copy.explorerTitle} note={copy.secondaryLoading} />
+            <BehaviorPanel
+              activity={readSection<ActivityPayload>(secondary, "activity")}
+              tools={readSection<ToolsPayload>(secondary, "tools")}
+              optimize={readSection<OptimizePayload>(secondary, "optimize")}
+              compare={readSection<ModelComparePayload>(secondary, "compare")}
+              copy={copy}
+            />
+            <ExplorerPanel
+              query={explorerQuery}
+              status={readSection<ExplorerPayload>(secondary, "explorer").status}
+              payload={readSection<ExplorerPayload>(secondary, "explorer").payload}
+              reason={readSection<ExplorerPayload>(secondary, "explorer").error}
+              copy={copy}
+              onChange={(next) => void handleExplorerChange(next)}
+            />
             <CostsPanel costs={snapshot.costs} copy={copy} />
             <SyncCenter
               center={snapshot.sync_command_center}

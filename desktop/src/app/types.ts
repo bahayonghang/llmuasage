@@ -217,3 +217,179 @@ export type JobSnapshot = {
   started_at: string;
   finished_at: string | null;
 };
+
+export type SupportState = {
+  supported: boolean;
+  level: string;
+  reason?: string | null;
+  strategy?: string;
+};
+
+export type HomeOverviewSummary = {
+  total_sessions: number;
+  total_requests: number;
+  total_tokens: number;
+  total_cost_usd: number;
+  cache_efficiency: number;
+  active_days: number;
+  platforms?: number;
+};
+
+export type HomeOverviewPayload = {
+  summary: HomeOverviewSummary;
+  by_platform?: Record<string, { sessions?: number; requests?: number; tokens?: number }>;
+  support?: SupportState;
+};
+
+export type HeatmapPoint = {
+  date: string;
+  event_count: number;
+  total_tokens: number;
+};
+
+export type DailyTrendPoint = {
+  date: string;
+  input_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  event_count: number;
+  cost_with_cache_usd: number;
+};
+
+export type HourOfWeekCell = {
+  dow: number;
+  hour: number;
+  total_tokens: number;
+  event_count: number;
+};
+
+export type TopSessionRow = {
+  session_id: string;
+  session_label?: string | null;
+  project_label?: string | null;
+  source?: string | null;
+  first_event_at: string;
+  last_event_at: string;
+  total_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  span_minutes: number;
+  active_minutes: number;
+  event_count: number;
+};
+
+export type ActivityBreakdown = {
+  category: string;
+  turns: number;
+  edit_turns: number;
+  one_shot_rate: number;
+  estimated_cost_usd: number;
+};
+
+export type ActivityPayload = {
+  support: SupportState;
+  breakdown: ActivityBreakdown[];
+};
+
+export type ToolBreakdown = {
+  tool_kind: string;
+  tool_name: string;
+  mcp_server?: string | null;
+  calls: number;
+  estimated_cost_usd: number;
+  call_share: number;
+};
+
+export type ToolsPayload = {
+  support: SupportState;
+  breakdown: ToolBreakdown[];
+};
+
+export type OptimizeFinding = {
+  id: string;
+  title: string;
+  severity: string;
+  evidence: string;
+  recommendation: string;
+  estimated_savings_tokens: number;
+  estimated_savings_usd: number;
+};
+
+export type OptimizePayload = {
+  support: SupportState;
+  score: number;
+  grade: string;
+  estimated_savings_tokens: number;
+  estimated_savings_usd: number;
+  findings: OptimizeFinding[];
+};
+
+export type CompareMetric = {
+  id: string;
+  label?: string;
+  model_a_value: number;
+  model_b_value: number;
+};
+
+export type ModelCompareStats = {
+  model: string;
+};
+
+export type ModelComparePayload = {
+  support: SupportState;
+  candidates: { model: string }[];
+  model_a: ModelCompareStats | null;
+  model_b: ModelCompareStats | null;
+  metrics: CompareMetric[];
+  category_head_to_head: unknown[];
+  working_style: CompareMetric[];
+  warning?: string | null;
+};
+
+export type ExplorerQueryState = {
+  granularity: string;
+  metric: string;
+  group_by: string;
+  session_id: string;
+  tool_name: string;
+  tool_kind: string;
+  token_type: string;
+  include_other: boolean;
+  include_non_tool: boolean;
+  limit: number;
+};
+
+export type ExplorerRow = {
+  key: string;
+  label: string;
+  value: number;
+  share: number;
+  is_other: boolean;
+};
+
+export type ExplorerPayload = {
+  support: SupportState;
+  warning?: string | null;
+  granularity: string;
+  metric: string;
+  group_by: string;
+  limit: number;
+  include_other: boolean;
+  totals: { value: number };
+  rows: ExplorerRow[];
+  series: { bucket: string; key: string; label: string; value: number; is_other: boolean }[];
+};
+
+export type LogsNavigationIntent = {
+  session: string;
+};
+
+export type SecondarySectionStatus = "loading" | "ready" | "degraded";
+
+export type SecondarySectionState<T> = {
+  status: SecondarySectionStatus;
+  payload: T | null;
+  error?: string;
+};

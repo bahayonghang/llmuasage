@@ -364,6 +364,155 @@ main {
   min-height: 72px;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.heatmap-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.heatmap-cell,
+.hour-cell {
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 1px solid var(--line-2);
+  border-radius: 2px;
+  background: var(--hm-l0);
+  cursor: pointer;
+}
+
+.hour-cell {
+  cursor: default;
+  display: inline-block;
+}
+
+.heatmap-cell.selected {
+  outline: 2px solid var(--accent);
+}
+
+.hm-l0 { background: var(--hm-l0); }
+.hm-l1 { background: var(--hm-l1); }
+.hm-l2 { background: var(--hm-l2); }
+.hm-l3 { background: var(--hm-l3); }
+.hm-l4 { background: var(--hm-l4); }
+
+.hour-grid {
+  overflow-x: auto;
+}
+
+.hour-row {
+  display: grid;
+  grid-template-columns: 36px repeat(24, 12px);
+  gap: 2px;
+  align-items: center;
+  margin-bottom: 2px;
+}
+
+.hour-dow {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.ready-widget-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.seg {
+  display: flex;
+  gap: 4px;
+}
+
+.seg button {
+  min-height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted);
+  padding: 4px 8px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.seg button.active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.session-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  color: inherit;
+  padding: 8px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.explorer-controls {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  border: 0;
+  margin: 0 0 12px;
+  padding: 0;
+  min-width: 0;
+}
+
+.explorer-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+}
+
+.section-head,
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.support-tag {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.behavior-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.finding-card {
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  padding: 8px;
+  margin-top: 8px;
+}
+
 @media (max-width: 720px) {
   .app {
     grid-template-columns: minmax(0, 1fr);
@@ -419,7 +568,9 @@ main {
   .hero,
   .filter-rail,
   .six-cards,
-  .grid-2 {
+  .grid-2,
+  .behavior-grid,
+  .explorer-controls {
     grid-template-columns: minmax(0, 1fr);
   }
 
