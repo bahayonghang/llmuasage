@@ -195,6 +195,44 @@ fn run_tracked_records_failure_for_sync_rebuild() -> Result<()> {
 }
 
 #[test]
+fn run_tracked_records_failure_for_daily() -> Result<()> {
+    let fixture = ReportCliFixture::new()?;
+    let output = fixture.output_with_env(
+        &["daily", "--all", "--since", "2026-01-01"],
+        &[("LLMUSAGE_LOG", "error"), ("RUST_LOG", "off")],
+    )?;
+    assert!(!output.status.success(), "{output:?}");
+
+    let store = Store::new(&fixture.paths)?;
+    let recent = store.run_log().recent_runs(5)?;
+    let failed = recent
+        .iter()
+        .find(|run| run.command == "daily")
+        .expect("daily run should be recorded");
+    assert_eq!(failed.status, "failed");
+    assert!(
+        failed.error.as_deref().is_some_and(|error| {
+            error.contains("--all cannot be combined with --since or --until")
+        }),
+        "{failed:#?}"
+    );
+
+    let entries = read_recent_log_entries(&fixture.paths, 100, Some("error"), Some("daily"))?;
+    assert!(
+        entries.iter().any(|entry| {
+            entry.level == "ERROR"
+                && entry.command.as_deref() == Some("daily")
+                && entry
+                    .message
+                    .as_deref()
+                    .is_some_and(|message| message.contains("run failed"))
+        }),
+        "expected ERROR daily run_tracked event in logs: {entries:#?}"
+    );
+    Ok(())
+}
+
+#[test]
 fn cli_home_flag_overrides_llmusage_home_env() -> Result<()> {
     let fixture = ReportCliFixture::new()?;
     let other = TempDir::new()?;

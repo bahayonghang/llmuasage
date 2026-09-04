@@ -268,13 +268,6 @@ impl PricingCatalog {
         })
     }
 
-    /// Compatibility wrapper retained for downstream callers compiled against
-    /// the old API name. It now returns the current embedded catalog.
-    #[deprecated(note = "use PricingCatalog::embedded()")]
-    pub fn static_v1() -> &'static PricingCatalog {
-        Self::embedded()
-    }
-
     pub fn new(
         version: impl Into<String>,
         status: PricingStatus,

@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use tracing::{error, info};
 
-use crate::{app::AppContext, models::SourceKind};
+use crate::{app::AppContext, models::SourceKind, store::Store};
 
 pub mod blocks;
 pub mod catalog;
@@ -29,7 +29,6 @@ pub mod statusline;
 pub mod sync;
 pub mod sync_progress;
 pub mod sync_summary;
-pub mod tui;
 pub(crate) mod unified_report;
 pub mod uninstall;
 pub mod update;
@@ -180,7 +179,7 @@ pub enum Commands {
     },
     /// Interactive terminal dashboard (replaces `tui`).
     Dash,
-    /// Deprecated: use `dash` instead.
+    /// Deprecated alias for `dash`; dispatch calls `dash::run` with a warning.
     #[command(hide = true)]
     Tui,
     Export {
@@ -289,21 +288,69 @@ where
     }
 }
 
+/// Records `run_log` plus `error!` for report and ops commands that do not
+/// already wrap themselves in `run_tracked`. Uninitialized homes cannot
+/// write `run_log`; those failures still emit `error!`.
+async fn run_logged<Fut>(app: &AppContext, command: &str, body: Fut) -> Result<()>
+where
+    Fut: Future<Output = Result<()>>,
+{
+    let store = Store::new(&app.paths)?;
+    match store.require_initialized() {
+        Ok(()) => run_tracked(&store, command, body, |_| None).await,
+        Err(_) => match body.await {
+            Ok(value) => Ok(value),
+            Err(err) => {
+                error!(command, error = %err, "run failed");
+                Err(err)
+            }
+        },
+    }
+}
+
 pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
     match cli.command {
-        None => daily::run(&app, cli.default_daily).await,
-        Some(Commands::Daily(args)) => daily::run(&app, args).await,
-        Some(Commands::Monthly(args)) => monthly::run(&app, args).await,
-        Some(Commands::Weekly(args)) => weekly::run(&app, args).await,
-        Some(Commands::Session(args)) => session::run(&app, args).await,
-        Some(Commands::Blocks(args)) => blocks::run(&app, args).await,
-        Some(Commands::Claude(args)) => focused::run(&app, SourceKind::Claude, args.command).await,
-        Some(Commands::Codex(args)) => focused::run(&app, SourceKind::Codex, args.command).await,
+        None => run_logged(&app, "daily", daily::run(&app, cli.default_daily)).await,
+        Some(Commands::Daily(args)) => run_logged(&app, "daily", daily::run(&app, args)).await,
+        Some(Commands::Monthly(args)) => {
+            run_logged(&app, "monthly", monthly::run(&app, args)).await
+        }
+        Some(Commands::Weekly(args)) => run_logged(&app, "weekly", weekly::run(&app, args)).await,
+        Some(Commands::Session(args)) => {
+            run_logged(&app, "session", session::run(&app, args)).await
+        }
+        Some(Commands::Blocks(args)) => run_logged(&app, "blocks", blocks::run(&app, args)).await,
+        Some(Commands::Claude(args)) => {
+            run_logged(
+                &app,
+                "claude",
+                focused::run(&app, SourceKind::Claude, args.command),
+            )
+            .await
+        }
+        Some(Commands::Codex(args)) => {
+            run_logged(
+                &app,
+                "codex",
+                focused::run(&app, SourceKind::Codex, args.command),
+            )
+            .await
+        }
         Some(Commands::Opencode(args)) => {
-            focused::run(&app, SourceKind::Opencode, args.command).await
+            run_logged(
+                &app,
+                "opencode",
+                focused::run(&app, SourceKind::Opencode, args.command),
+            )
+            .await
         }
         Some(Commands::Antigravity(args)) => {
-            focused::run(&app, SourceKind::Antigravity, args.command).await
+            run_logged(
+                &app,
+                "antigravity",
+                focused::run(&app, SourceKind::Antigravity, args.command),
+            )
+            .await
         }
         Some(Commands::Statusline(args)) => statusline::run(&app, args).await,
         Some(Commands::Init) => init::run(&app).await,
@@ -350,40 +397,62 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
             .await
         }
         Some(Commands::Remote { command }) => remote::run(&app, command).await,
-        Some(Commands::Status) => status::run(&app).await,
-        Some(Commands::SourceStatus) => source_status::run(&app).await,
+        Some(Commands::Status) => run_logged(&app, "status", status::run(&app)).await,
+        Some(Commands::SourceStatus) => {
+            run_logged(&app, "source-status", source_status::run(&app)).await
+        }
         Some(Commands::Diagnostics {
             out,
             forget_file,
             source,
-        }) => diagnostics::run(&app, out, forget_file, source).await,
+        }) => {
+            run_logged(
+                &app,
+                "diagnostics",
+                diagnostics::run(&app, out, forget_file, source),
+            )
+            .await
+        }
         Some(Commands::Doctor {
             json,
             refresh_pricing,
-        }) => doctor::run(&app, json, refresh_pricing).await,
+        }) => run_logged(&app, "doctor", doctor::run(&app, json, refresh_pricing)).await,
         Some(Commands::Catalog { command }) => match command {
-            CatalogCommand::Apply { path } => catalog::apply(&app, &path).await,
-            CatalogCommand::Status { json } => catalog::status(&app, json).await,
-            CatalogCommand::Reset => catalog::reset(&app).await,
+            CatalogCommand::Apply { path } => {
+                run_logged(&app, "catalog apply", catalog::apply(&app, &path)).await
+            }
+            CatalogCommand::Status { json } => {
+                run_logged(&app, "catalog status", catalog::status(&app, json)).await
+            }
+            CatalogCommand::Reset => run_logged(&app, "catalog reset", catalog::reset(&app)).await,
         },
         Some(Commands::Logs {
             limit,
             level,
             command,
             json,
-        }) => logs::run(&app, limit, level, command, json).await,
+        }) => run_logged(&app, "logs", logs::run(&app, limit, level, command, json)).await,
         Some(Commands::Serve {
             port,
             public,
             no_open,
         }) => serve::run_with_options(&app, port, public, no_open).await,
-        Some(Commands::Dash) => dash::run(&app, false).await,
-        Some(Commands::Tui) => dash::run(&app, true).await,
+        Some(Commands::Dash) => run_logged(&app, "dash", dash::run(&app, false)).await,
+        Some(Commands::Tui) => run_logged(&app, "tui", dash::run(&app, true)).await,
         Some(Commands::Export { command }) => match command {
             ExportCommand::Html { out } => export::run_html(&app, out).await,
         },
         Some(Commands::Uninstall { purge }) => uninstall::run(&app, purge).await,
-        Some(Commands::Update { check, channel }) => update::run(channel, check),
+        Some(Commands::Update { check, channel }) => {
+            // Self-update must not open SQLite or wait on the worker lock.
+            match update::run(channel, check) {
+                Ok(()) => Ok(()),
+                Err(err) => {
+                    error!(command = "update", error = %err, "run failed");
+                    Err(err)
+                }
+            }
+        }
         Some(Commands::CodexTracer {
             port,
             no_open,

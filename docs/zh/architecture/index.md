@@ -7,6 +7,7 @@
 运行时状态默认在 `~/.llmusage/`，可用 `--home <PATH>` 或 `LLMUSAGE_HOME` 覆盖。
 
 - `llmusage.db` 保存 schema metadata、cursor、event、30 分钟 bucket、行为事实、项目元数据、source-file 诊断、价格元信息、worker lock 元信息和 run log。历史 `trigger_state` 与 `integration_install` 表只为旧库兼容而保留；只有实际遗留清理会追加 integration 审计行。
+- `codex-tracer.db` 是 `llmusage codex-tracer` 的独立 SQLite 文件。它不是 `SyncShard` 写入目标，也不并入主 `Store`。
 - `exports/` 保存静态 HTML 报告。
 - `backups/` 保留历史集成配置备份以及价格/数据库恢复材料。
 - `pricing/` 保存由 `catalog` 或 `doctor --refresh-pricing` 激活的内容寻址 base、overlay 和 effective 价格目录。
@@ -37,9 +38,15 @@
 
 重复 sync 工作通过每个来源自己的 cursor 避免。Codex、Claude、Kimi Code、Pi、Oh My Pi 和 Grok Build 会在重解析前比较文件大小、mtime、头部 fingerprint、尾部签名和 offset；OpenCode 会比较 DB 身份和 message 高水位 cursor。Kimi 只导入 turn-scoped `usage.record`；Pi 读取 `~/.pi/agent/sessions`（或 `PI_AGENT_DIR`）记为 `pi`，Oh My Pi 读取 `~/.omp/agent/sessions` 记为 `omp`，共用一份解析实现，路径重叠归 `pi`。两者以上游 total 为权威，并把 reasoning 保持为独立诊断通道。Grok 只扫描会话根 sidecar，任一 sidecar 变化时整体重放会话，把 `turn_completed.usage` 写成 precise 事件（无 usage 时回退 total-only），成本保持 unpriced。Sync stats 会把未变化工作显示为 skipped，把变化 artifact 显示为 parsed，把本次新增写入显示为 committed，把数据库持久总量显示为 stored events。
 
+## Codex Tracer sidecar
+
+`llmusage codex-tracer` 是独立 sidecar。它读取 Codex JSONL，并把状态写入同一运行时根目录下的 `codex-tracer.db`。它不产出 `SyncShard`，也不走主库 `llmusage.db` 的用量导入路径。不要把它并入 `Store`。
+
 ## 查询与 Dashboard 流程
 
-报表命令、TUI、Web Dashboard 和 HTML export 都通过 query 层读取本地 SQLite。
+报表命令、TUI（`llmusage dash`；隐藏的 `tui` 命令是 `dash` 的废弃别名）、Web Dashboard 和 HTML export 都通过 query 层读取本地 SQLite。
+
+TUI Usage 在本机已有凭证文件时，可以向供应商端点发送只读配额请求（Claude、Codex、Grok Build、Kimi）。拉取器不会刷新 token、改写凭证文件、创建账号，也不会上传用量事件。
 
 `Dashboard::snapshot(&QueryFilter)` 是看板的主要接口。`llmusage serve` 优先使用 `/api/dashboard`，通过一个核心快照加载概览、趋势序列、模型/来源/项目/成本排行、运行状态、诊断和默认用量分析数据。活动类型（`activity`）、工具使用（`tools`）、优化建议（`optimize`）、用量分析（`explorer`）和模型对比（`compare`）在来源明细不可用或查询超时时可以独立降级。
 
@@ -72,7 +79,7 @@ SQLite meta 记录 active、base、overlay 的身份和文件。已选择文件�
 
 ## Store façade
 
-`Store` 是 paths、connections、worker locks、bootstrap、rebuild/reset 和 sync writer 创建的 façade。领域 store 通过 borrowed view 暴露，例如 `CursorStore`、`RunLog`、`SyncStatusStore`、`SourceFileStore`。当前没有活动 hook worker 或 trigger-state 写入 API。
+`Store` 是 paths、connections、worker locks、bootstrap、rebuild/reset 和 sync writer 创建的 façade。领域 store 通过 borrowed view 暴露，例如 `CursorStore`、`HostStore`、`RunLog`、`SyncStatusStore`、`SourceFileStore`。当前没有活动 hook worker 或 trigger-state 写入 API。
 
 ## JobRegistry
 
@@ -100,6 +107,7 @@ Schema migration 显式按版本推进。当前线包含：
 - 不生成 device token。
 - 不登录账号。
 - 不建立上传队列。
-- 不调用远端用量 API。
+- 用量事件、报表、浏览器 Dashboard 和 HTML 导出都留在本地 SQLite。llmusage 不上传用量数据。
+- TUI Usage（`llmusage dash`）可以用本机已有凭证只读拉取供应商配额。该路径只用于配额展示，不是账号登录，也不是用量上传 API。
 - 价格目录激活只读取用户提供的本地 JSON 文件，不会联网拉取价格。
 - 浏览器 Dashboard 默认绑定 `127.0.0.1`；`serve --public` 会显式改为监听 `0.0.0.0`，但不会添加认证或 TLS。

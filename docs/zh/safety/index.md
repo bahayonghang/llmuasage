@@ -26,7 +26,9 @@
 
 ## 不上传什么
 
-`llmusage` 不创建账号会话、device token、上传队列或远端用量 API 调用。报表、Dashboard 和导出都读取本地 SQLite。
+`llmusage` 不创建账号会话、device token 或上传队列。它不上传用量事件。报表、Dashboard 和导出都读取本地 SQLite。
+
+TUI Usage（`llmusage dash`；隐藏的 `tui` 命令是废弃别名）在本机已有凭证文件时，可以向 Claude、Codex、Grok Build 或 Kimi 发送只读配额请求。拉取器不会刷新 token，也不会改写凭证文件。配额展示不是用量上传 API。
 
 可选的 SSH 远端导入由你触发：用 `llmusage remote add` 注册主机后，本机执行 `ssh` 并从 stdout 拉取规范化 shard 字段。不会传输 prompt 正文或原始会话 JSON。解析发生在拥有产物的那台机器上；只有本地数据库被写入。
 

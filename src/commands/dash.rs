@@ -60,6 +60,8 @@ mod tests {
 
     #[test]
     fn tui_parses_from_args_hidden_but_functional() {
+        // Hidden alias: dispatch maps `Commands::Tui` to `dash::run(..., true)`.
+        // `src/commands/tui.rs` was removed.
         let cli = Cli::try_parse_from(["llmusage", "tui"]).expect("should parse `tui`");
         assert!(matches!(cli.command, Some(Commands::Tui)));
     }

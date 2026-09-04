@@ -429,10 +429,7 @@ pub(crate) fn reset_for_source_tx(
         "DELETE FROM source_sync_status WHERE source = ?1 AND host_id = ?2",
         rusqlite::params![source, host_id],
     )?;
-    tx.execute(
-        "DELETE FROM source_file WHERE source = ?1 AND host_id = ?2",
-        rusqlite::params![source, host_id],
-    )?;
+    super::source_file::delete_for_source_in_tx(tx, source, host_id)?;
     Ok(())
 }
 

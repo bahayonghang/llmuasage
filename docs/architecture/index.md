@@ -7,6 +7,7 @@ This page explains the current architecture shape. For decision records, see [AD
 The runtime state lives under `~/.llmusage/` unless overridden by `--home <PATH>` or `LLMUSAGE_HOME`.
 
 - `llmusage.db` stores schema metadata, cursors, events, 30-minute buckets, behavior facts, project metadata, source-file diagnostics, pricing metadata, worker lock metadata, and run logs. Historical `trigger_state` and `integration_install` tables remain for database compatibility; only actual legacy cleanup can append integration audit rows.
+- `codex-tracer.db` is the independent SQLite file for `llmusage codex-tracer`. It is not a `SyncShard` target and is not merged into the main `Store`.
 - `exports/` stores static HTML reports.
 - `backups/` retains historical integration config backups and pricing/database recovery material.
 - `pricing/` stores content-addressed base, overlay, and effective pricing catalogs activated by `catalog` or `doctor --refresh-pricing`.
@@ -37,9 +38,15 @@ Adding a source means adding a `SourceKind` variant plus a descriptor. A parser 
 
 Repeated sync work is avoided through per-source cursors. Codex, Claude, Kimi Code, Pi, Oh My Pi, and Grok Build compare file size, mtime, head fingerprint, tail signature, and offset before reparsing; OpenCode compares DB identity and message high-water cursors. Kimi imports only turn-scoped `usage.record` rows. Pi reads `~/.pi/agent/sessions` (or `PI_AGENT_DIR`) as `pi`; Oh My Pi reads `~/.omp/agent/sessions` as `omp`. They share one parse implementation. Overlapping paths belong to `pi`. Both keep upstream totals authoritative, with reasoning as a separate diagnostic channel. Grok scans only direct session sidecars, replays the full session when any sidecar changes, maps `turn_completed.usage` as precise events (total-only fallback when usage is absent), and keeps cost unpriced. Sync stats expose unchanged work as skipped, changed artifacts as parsed, newly inserted rows as committed, and durable totals as stored events.
 
+## Codex Tracer sidecar
+
+`llmusage codex-tracer` is a sidecar product island. It reads Codex JSONL files and writes `codex-tracer.db` under the same runtime root. It does not emit `SyncShard` values and does not share the main `llmusage.db` usage import path. Do not merge it into `Store`.
+
 ## Query and dashboard flow
 
-Report commands, TUI, web dashboard, and HTML export all read local SQLite through the query layer.
+Report commands, TUI (`llmusage dash`; the hidden `tui` command is a deprecated alias for `dash`), web dashboard, and HTML export all read local SQLite through the query layer.
+
+TUI Usage may send a read-only quota request to a vendor endpoint when a local credential file already exists (Claude, Codex, Grok Build, Kimi). The fetchers do not refresh tokens, rewrite credential files, create an account, or upload usage events.
 
 `Dashboard::snapshot(&QueryFilter)` is the primary dashboard seam. `llmusage serve` prefers `/api/dashboard` so overview, trend series, model/source/project/cost rankings, health, diagnostics, and the default Usage analysis payload are loaded from one core snapshot. Activity categories (`activity`), Tool usage (`tools`), Optimization hints (`optimize`), Usage analysis (`explorer`), and Model comparison (`compare`) may degrade independently when source facts are unavailable or queries time out.
 
@@ -72,7 +79,7 @@ Privacy boundary: behavior facts must not store full prompts, full assistant tex
 
 ## Store façade
 
-`Store` is a façade for paths, connections, worker locks, bootstrap, rebuild/reset, and sync writer creation. Domain stores are exposed as borrowed views such as `CursorStore`, `RunLog`, `SyncStatusStore`, and `SourceFileStore`. There is no active hook worker or trigger-state write API.
+`Store` is a façade for paths, connections, worker locks, bootstrap, rebuild/reset, and sync writer creation. Domain stores are exposed as borrowed views such as `CursorStore`, `HostStore`, `RunLog`, `SyncStatusStore`, and `SourceFileStore`. There is no active hook worker or trigger-state write API.
 
 ## JobRegistry
 
@@ -100,6 +107,7 @@ Schema migrations are explicit and versioned. The current line includes:
 - No device token.
 - No account login.
 - No upload queue.
-- No remote usage API call.
+- Usage events, reports, the browser dashboard, and HTML export stay on local SQLite. llmusage does not upload usage data.
+- TUI Usage (`llmusage dash`) may read-only fetch vendor quota with credentials already stored on the machine. That path is quota display only. It is not an account login and not a usage-upload API.
 - Pricing catalog activation reads user-provided local JSON files and never fetches remote pricing.
 - Browser dashboard binds to `127.0.0.1` by default; `serve --public` explicitly changes the listener to `0.0.0.0` without adding authentication or TLS.

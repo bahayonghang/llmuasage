@@ -3,7 +3,7 @@
 - 状态：已采纳
 - 落地阶段：阶段 5
 - 落地日期：2026-05-06
-- 相关代码：`src/store/mod.rs`、`src/store/{cursor,integration,run_log,sync_status,trigger}.rs`
+- 相关代码：`src/store/mod.rs`、`src/store/{cursor,host,integration,run_log,source_file,sync_status}.rs`
 - 相关术语：[Store](https://github.com/bahayonghang/llmuasage/blob/main/CONTEXT.md#9-store) / [RunLog](https://github.com/bahayonghang/llmuasage/blob/main/CONTEXT.md#11-runlog) / [Cursor](https://github.com/bahayonghang/llmuasage/blob/main/CONTEXT.md#5-cursor)
 
 ## 背景
@@ -18,38 +18,33 @@ integration.rs : record_integration_state / load_integration_states / load_integ
 lease.rs       : acquire_worker_lock / release_worker_lock / recover_stale_lease
 run_log.rs     : record_run_start / finish_run / recover_running_runs / recent_runs / recent_runs_with_conn
 sync_status.rs : save_source_sync_statuses / load_source_sync_statuses
-trigger.rs     : record_trigger / load_triggers
+trigger.rs     : record_trigger / load_triggers   # 2026-05-06 快照；写 API 已删除
 ```
 
-调用方需要 `store.record_run_start(...)`、`store.load_file_cursors(...)`、`store.upsert_trigger_state(...)` —— 25+ 个方法在同一个 façade 上扁平展开，没有子领域语义。新增子领域时所有 caller 又看到全表面。
+调用方需要 `store.record_run_start(...)`、`store.load_file_cursors(...)`，以及当时仍存在的 trigger 写入口 —— 25+ 个方法在同一个 façade 上扁平展开，没有子领域语义。新增子领域时所有 caller 又看到全表面。
 
 ## 决策
 
-### 1. 拆 5 个借用 view
+### 1. 拆借用 view
 
-```rust
-pub struct CursorStore<'a> { store: &'a Store }
-pub struct IntegrationStateStore<'a> { store: &'a Store }
-pub struct RunLog<'a> { store: &'a Store }
-pub struct SyncStatusStore<'a> { store: &'a Store }
-pub struct TriggerStore<'a> { store: &'a Store }
-```
+2026-05-06 落地时拆出 5 个借用 view（`CursorStore`、`IntegrationStateStore`、`RunLog`、`SyncStatusStore`，以及后来删除写入口的 Trigger 域）。当前 view 集见文末 Amendment。
 
-5 个 view 全部用 `pub struct XxxStore<'a> { store: &'a Store }` 借用形态。每个 view 通过 `XxxStore::new(store)`（pub(super) 限定）构造。原 `impl Store { fn ... }` 整段迁到 `impl<'a> XxxStore<'a> { fn ... }`，方法体内 `self.open_connection()` 改成 `self.store.open_connection()`。
+每个 view 用 `pub struct XxxStore<'a> { store: &'a Store }` 借用形态。通过 `XxxStore::new(store)`（pub(super) 限定）构造。原 `impl Store { fn ... }` 整段迁到 `impl<'a> XxxStore<'a> { fn ... }`，方法体内 `self.open_connection()` 改成 `self.store.open_connection()`。
 
 ### 2. view-getter 集中暴露在 `store/mod.rs`
 
 ```rust
 impl Store {
     pub fn cursors(&self) -> CursorStore<'_>;
+    pub fn hosts(&self) -> HostStore<'_>;
     pub fn integration_state(&self) -> IntegrationStateStore<'_>;
     pub fn run_log(&self) -> RunLog<'_>;
+    pub fn source_files(&self) -> SourceFileStore<'_>;
     pub fn sync_status(&self) -> SyncStatusStore<'_>;
-    pub fn triggers(&self) -> TriggerStore<'_>;
 }
 ```
 
-5 个 view-getter 集中在 `store/mod.rs` 顶部 `impl Store {}` 块——façade 入口集中暴露，看一眼就能列出所有子领域。同时 `pub use cursor::CursorStore;` 等 re-export 让 caller 写具体类型。
+view-getter 集中在 `store/mod.rs` 顶部 `impl Store {}` 块——façade 入口集中暴露，看一眼就能列出所有子领域。同时 `pub use cursor::CursorStore;` 等 re-export 让 caller 写具体类型。Trigger 域不再提供写 getter。
 
 ### 3. façade 自身能力最小化
 
@@ -59,13 +54,13 @@ impl Store {
 - `Store::acquire_worker_lock()` / `Store::release_worker_lock()` / `Store::recover_stale_lease()`
 - `Store::bootstrap()` / `Store::reset_usage_data()`
 - `Store::begin_sync_run()`
-- 5 个 view-getter
+- 当前 view-getter（见 Amendment）
 
 其他原 `Store::xxx` 全部迁到对应 view。规划文档原本提的"`recover_running_runs` 留在 Store"被否决——它属于 `run_log` 子领域，留在 `RunLog<'a>` 上更深。
 
 ### 4. 方法名留旧
 
-调用方写 `store.run_log().recent_runs()` 而不是 `store.run_log().recent()`。`load_file_cursors` / `record_integration_state` / `record_run_start` / `load_source_sync_statuses` / `upsert_trigger_state` 等 18 个方法名一字未改。
+调用方写 `store.run_log().recent_runs()` 而不是 `store.run_log().recent()`。`load_file_cursors` / `record_integration_state` / `record_run_start` / `load_source_sync_statuses` 等方法名一字未改。历史 trigger 写方法已随写 API 一起删除。
 
 ### 5. `_with_conn` 变体保持 `pub(crate)`
 
@@ -119,3 +114,18 @@ impl Store {
 - `tests/sync/sources/codex_claude.rs` 与 `tests/sync/sources/opencode.rs` 的三源 append / replace / inode-rotate 覆盖通过。
 - `tests/cli/local_flow.rs` 的本地 init/sync/export/uninstall 覆盖通过，端到端流程不变。
 - `dashboard_snapshot_uses_single_connection_and_matches_individual_methods` 继续通过——Dashboard 单连接断言未受 view 切换影响。
+
+## Amendment (2026-09-04) — HostStore / SourceFileStore；Trigger 写 API 已删除
+
+当前 `Store` borrowed views：
+
+| Getter | View | 职责 |
+| --- | --- | --- |
+| `cursors()` | `CursorStore` | `source_cursor` |
+| `hosts()` | `HostStore` | `host` 注册表 |
+| `integration_state()` | `IntegrationStateStore` | 遗留 integration 审计 |
+| `run_log()` | `RunLog` | `run_log` |
+| `source_files()` | `SourceFileStore` | `source_file` 状态机 |
+| `sync_status()` | `SyncStatusStore` | `source_sync_status` |
+
+Trigger 写 API 已删除：没有 `TriggerStore` view，也没有当前写 getter。`trigger_state` 表只为旧库兼容保留，不接受新的控制面写入。

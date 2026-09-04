@@ -336,9 +336,8 @@ pub(crate) fn update_missing_with_conn(
     Ok(updated)
 }
 
-/// Removes all `source_file` rows belonging to one source. Used by
-/// `Store::reset_for_source` (Phase 4.5) and not for general cleanup.
-#[allow(dead_code)]
+/// Removes all `source_file` rows belonging to one source. Called from
+/// `reset_for_source_tx`; not a general cleanup API.
 pub(crate) fn delete_for_source_in_tx(
     tx: &Transaction<'_>,
     source: &str,

@@ -23,8 +23,6 @@
   the longest normalized matcher wins.
 - Runtime APIs: `PricingCatalog::embedded()`, `load_snapshot`, `find`,
   `context_window`, and Store catalog apply/status/reset services.
-- `PricingCatalog::static_v1()` is only a deprecated source-compatibility wrapper
-  around the current embedded catalog.
 
 ### 3. Model And Matcher Contracts
 

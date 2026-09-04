@@ -26,7 +26,9 @@ Current releases do not install hooks or plugins. After upgrading a machine that
 
 ## What is not uploaded
 
-`llmusage` does not create an account session, device token, upload queue, or remote usage API call. Report, dashboard, and export surfaces read local SQLite.
+`llmusage` does not create an account session, device token, or upload queue. It does not upload usage events. Report, dashboard, and export surfaces read local SQLite.
+
+TUI Usage (`llmusage dash`; the hidden `tui` command is a deprecated alias) may send a read-only quota request to Claude, Codex, Grok Build, or Kimi when a local credential file already exists. Fetchers do not refresh tokens or rewrite credential files. Quota display is not a usage-upload API.
 
 Optional SSH remote import is a user-triggered pull from a host you register with `llmusage remote add`. The local process runs `ssh` and reads normalized shard fields from stdout. Prompt text and raw session JSON are not sent. The remote binary parses artifacts on that machine; the local database is the only write target.
 
