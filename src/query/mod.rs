@@ -121,7 +121,7 @@ impl Dashboard {
         &self.conn
     }
 
-    pub(crate) fn interrupt_handle(&self) -> rusqlite::InterruptHandle {
+    pub fn interrupt_handle(&self) -> rusqlite::InterruptHandle {
         self.conn.get_interrupt_handle()
     }
 

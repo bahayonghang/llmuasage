@@ -1,0 +1,41 @@
+[package]
+name = "llmusage-desktop"
+version = "1.3.0"
+description = "Local-first llmusage desktop shell"
+authors = ["bahayonghang"]
+edition = "2024"
+rust-version = "1.95"
+
+[lib]
+name = "llmusage_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "llmusage-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+anyhow = "1.0.104"
+chrono = { version = "0.4.45", features = ["clock", "serde"] }
+chrono-tz = { version = "0.10.4", features = ["case-insensitive"] }
+iana-time-zone = "0.1.65"
+llmusage = { path = "../.." }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tauri = { version = "2.11.5", features = [] }
+tauri-plugin-single-instance = "2.4.4"
+tokio = { version = "1.53.1", features = [
+    "macros",
+    "rt-multi-thread",
+    "sync",
+    "time",
+] }
+
+[dev-dependencies]
+anyhow = "1.0.104"
+llmusage = { path = "../..", features = ["testing"] }
+tempfile = "3.27.0"

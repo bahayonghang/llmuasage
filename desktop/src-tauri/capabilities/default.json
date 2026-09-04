@@ -1,0 +1,33 @@
+{
+  "identifier": "default",
+  "description": "Main window capability",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:default",
+    "core:window:allow-set-focus",
+    "core:window:allow-unminimize",
+    "allow-runtime-info",
+    "allow-dashboard-interactive",
+    "allow-home-overview",
+    "allow-heatmap",
+    "allow-trends-daily",
+    "allow-hour-of-week",
+    "allow-top-sessions",
+    "allow-activity",
+    "allow-tools",
+    "allow-optimize",
+    "allow-compare",
+    "allow-explorer",
+    "allow-logs",
+    "allow-diagnostics",
+    "allow-start-sync",
+    "allow-job-snapshot",
+    "allow-cancel-job",
+    "allow-cancel-queries",
+    "allow-fetch-quota",
+    "allow-load-prefs",
+    "allow-save-prefs"
+  ]
+}

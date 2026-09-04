@@ -16,6 +16,12 @@ ref/
 
 /target
 
+# Desktop (Tauri) artifacts
+/desktop/node_modules/
+/desktop/dist/
+/desktop/src-tauri/target/
+/desktop/src-tauri/gen/
+
 # Added by docs workflow
 /docs/node_modules/
 /docs/.vitepress/cache/

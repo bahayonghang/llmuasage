@@ -1,0 +1,4 @@
+{"file": "docs/reference/library-api.md", "reason": "Command layer uses public facade only"}
+{"file": ".trellis/spec/llmusage/backend/write-fencing-contracts.md", "reason": "Bootstrap after lock rules; map LockBusy"}
+{"file": ".trellis/spec/llmusage/backend/dashboard-performance-contracts.md", "reason": "SQLite interrupt, spawn_blocking supervisor, hard-deadline return"}
+{"file": ".trellis/spec/llmusage/backend/tui-subscription-contracts.md", "reason": "FetchContext user_home vs cache_path; injected endpoints"}

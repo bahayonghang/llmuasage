@@ -1,0 +1,83 @@
+[[permission]]
+identifier = "allow-runtime-info"
+commands.allow = ["runtime_info"]
+
+[[permission]]
+identifier = "allow-dashboard-interactive"
+commands.allow = ["dashboard_interactive"]
+
+[[permission]]
+identifier = "allow-home-overview"
+commands.allow = ["home_overview"]
+
+[[permission]]
+identifier = "allow-heatmap"
+commands.allow = ["heatmap"]
+
+[[permission]]
+identifier = "allow-trends-daily"
+commands.allow = ["trends_daily"]
+
+[[permission]]
+identifier = "allow-hour-of-week"
+commands.allow = ["hour_of_week"]
+
+[[permission]]
+identifier = "allow-top-sessions"
+commands.allow = ["top_sessions"]
+
+[[permission]]
+identifier = "allow-activity"
+commands.allow = ["activity"]
+
+[[permission]]
+identifier = "allow-tools"
+commands.allow = ["tools"]
+
+[[permission]]
+identifier = "allow-optimize"
+commands.allow = ["optimize"]
+
+[[permission]]
+identifier = "allow-compare"
+commands.allow = ["compare"]
+
+[[permission]]
+identifier = "allow-explorer"
+commands.allow = ["explorer"]
+
+[[permission]]
+identifier = "allow-logs"
+commands.allow = ["logs"]
+
+[[permission]]
+identifier = "allow-diagnostics"
+commands.allow = ["diagnostics"]
+
+[[permission]]
+identifier = "allow-start-sync"
+commands.allow = ["start_sync"]
+
+[[permission]]
+identifier = "allow-job-snapshot"
+commands.allow = ["job_snapshot"]
+
+[[permission]]
+identifier = "allow-cancel-job"
+commands.allow = ["cancel_job"]
+
+[[permission]]
+identifier = "allow-cancel-queries"
+commands.allow = ["cancel_queries"]
+
+[[permission]]
+identifier = "allow-fetch-quota"
+commands.allow = ["fetch_quota"]
+
+[[permission]]
+identifier = "allow-load-prefs"
+commands.allow = ["load_prefs"]
+
+[[permission]]
+identifier = "allow-save-prefs"
+commands.allow = ["save_prefs"]

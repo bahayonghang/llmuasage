@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>llmusage</title>
+  </head>
+  <body>
+    <main>
+      <h1>llmusage</h1>
+      <button id="runtime-info" type="button">runtime_info</button>
+      <pre id="out"></pre>
+    </main>
+    <script>
+      const out = document.getElementById("out");
+      document.getElementById("runtime-info").addEventListener("click", async () => {
+        try {
+          const info = await window.__TAURI__.core.invoke("runtime_info");
+          out.textContent = JSON.stringify(info, null, 2);
+          console.log(info.root_dir);
+        } catch (error) {
+          out.textContent = String(error);
+        }
+      });
+    </script>
+  </body>
+</html>
