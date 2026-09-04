@@ -1,0 +1,195 @@
+/*
+ * Semantic tokens copied from src/web/assets/base.css.
+ * Theme switching uses data-theme="light"|"dark".
+ */
+:root,
+[data-theme='light'] {
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+
+  --bg-primary: #f5f6f8;
+  --bg-surface: #ffffff;
+  --bg-surface-hover: #f0f1f4;
+  --bg-inset: #ecedf2;
+  --border-default: #d8dae2;
+  --border-muted: #e4e6ec;
+  --text-primary: #181b24;
+  --text-secondary: #555b6e;
+  --text-muted: #878ea0;
+  --accent-blue: #2563eb;
+  --accent-amber: #d97706;
+  --accent-purple: #7c3aed;
+  --accent-green: #059669;
+  --accent-red: #dc2626;
+  --accent-teal: #0891b2;
+
+  --source-claude: var(--accent-blue);
+  --source-codex: var(--accent-green);
+  --source-opencode: var(--accent-purple);
+  --source-kimi-code: #ec4899;
+  --source-pi: #4f46e5;
+  --source-omp: #0f766e;
+  --source-antigravity: #7c3aed;
+  --source-grok: var(--text-muted);
+
+  --chart-cat-1: #2a78d6;
+  --chart-cat-2: #1baf7a;
+  --chart-cat-3: #eda100;
+  --chart-cat-4: #008300;
+  --chart-cat-5: #4a3aa7;
+  --chart-cat-6: #e34948;
+  --chart-cat-other: #898781;
+
+  --hm-l0: var(--bg-inset);
+  --hm-l1: #9be9a8;
+  --hm-l2: #40c463;
+  --hm-l3: #30a14e;
+  --hm-l4: #216e39;
+
+  --bg: var(--bg-primary);
+  --surface: var(--bg-surface);
+  --surface-2: var(--bg-inset);
+  --ink: var(--text-primary);
+  --ink-2: var(--text-secondary);
+  --ink-strong: var(--text-primary);
+  --muted: var(--text-muted);
+  --muted-2: color-mix(in srgb, var(--text-muted) 82%, var(--bg-surface));
+  --line: var(--border-default);
+  --line-2: var(--border-muted);
+  --accent: var(--accent-blue);
+  --accent-soft: color-mix(in srgb, var(--accent-blue) 12%, var(--bg-surface));
+  --accent-deep: color-mix(in srgb, var(--accent-blue) 78%, var(--text-primary));
+  --data-accent: var(--accent-blue);
+  --data-accent-soft: color-mix(in srgb, var(--accent-blue) 12%, var(--bg-surface));
+  --data-accent-deep: color-mix(in srgb, var(--accent-blue) 78%, var(--text-primary));
+  --good: var(--accent-green);
+  --good-soft: color-mix(in srgb, var(--accent-green) 12%, var(--bg-surface));
+  --warn: var(--accent-amber);
+  --warn-soft: color-mix(in srgb, var(--accent-amber) 14%, var(--bg-surface));
+  --danger: var(--accent-red);
+  --danger-soft: color-mix(in srgb, var(--accent-red) 12%, var(--bg-surface));
+  --pct-low-bg: color-mix(in srgb, var(--accent-green) 10%, var(--bg-surface));
+  --kpi-featured-grad: var(--bg-surface);
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.1);
+  --shadow-soft: var(--shadow-md);
+  --focus-ring: 2px solid var(--accent-blue);
+  --transition-fast: 0.12s;
+
+  --dark: #16161e;
+  --dark-bg: #0d0d12;
+  --dark-2: #1f1f2a;
+  --dark-line: #333345;
+  --dark-text: #ececf1;
+  --dark-muted: #8b93a8;
+}
+
+[data-theme='dark'] {
+  --bg-primary: #0d0d12;
+  --bg-surface: #16161e;
+  --bg-surface-hover: #1f1f2a;
+  --bg-inset: #111116;
+  --border-default: #333345;
+  --border-muted: #2a2a3a;
+  --text-primary: #ececf1;
+  --text-secondary: #b4bcd0;
+  --text-muted: #8b93a8;
+  --accent-blue: #60a5fa;
+  --accent-amber: #fbbf24;
+  --accent-purple: #a78bfa;
+  --accent-green: #4ade80;
+  --accent-red: #f87171;
+  --accent-teal: #22d3ee;
+
+  --source-claude: var(--accent-blue);
+  --source-codex: var(--accent-green);
+  --source-opencode: var(--accent-purple);
+  --source-kimi-code: #f472b6;
+  --source-pi: #818cf8;
+  --source-omp: #2dd4bf;
+  --source-antigravity: #a78bfa;
+  --source-grok: var(--text-muted);
+
+  --chart-cat-1: #3987e5;
+  --chart-cat-2: #199e70;
+  --chart-cat-3: #c98500;
+  --chart-cat-4: #008300;
+  --chart-cat-5: #9085e9;
+  --chart-cat-6: #e66767;
+  --chart-cat-other: #898781;
+
+  --hm-l0: var(--bg-inset);
+  --hm-l1: #0e4429;
+  --hm-l2: #006d32;
+  --hm-l3: #26a641;
+  --hm-l4: #39d353;
+
+  --bg: var(--bg-primary);
+  --surface: var(--bg-surface);
+  --surface-2: var(--bg-inset);
+  --ink: var(--text-primary);
+  --ink-2: var(--text-secondary);
+  --ink-strong: var(--text-primary);
+  --muted: var(--text-muted);
+  --muted-2: color-mix(in srgb, var(--text-muted) 82%, var(--bg-surface));
+  --line: var(--border-default);
+  --line-2: var(--border-muted);
+  --accent: var(--accent-blue);
+  --accent-soft: color-mix(in srgb, var(--accent-blue) 14%, var(--bg-surface));
+  --accent-deep: color-mix(in srgb, var(--accent-blue) 78%, var(--text-primary));
+  --data-accent: var(--accent-blue);
+  --data-accent-soft: color-mix(in srgb, var(--accent-blue) 14%, var(--bg-surface));
+  --data-accent-deep: color-mix(in srgb, var(--accent-blue) 78%, var(--text-primary));
+  --good: var(--accent-green);
+  --good-soft: color-mix(in srgb, var(--accent-green) 14%, var(--bg-surface));
+  --warn: var(--accent-amber);
+  --warn-soft: color-mix(in srgb, var(--accent-amber) 14%, var(--bg-surface));
+  --danger: var(--accent-red);
+  --danger-soft: color-mix(in srgb, var(--accent-red) 13%, var(--bg-surface));
+  --pct-low-bg: color-mix(in srgb, var(--accent-green) 14%, var(--bg-surface));
+  --kpi-featured-grad: var(--bg-surface);
+
+  --dark: var(--bg-surface);
+  --dark-bg: var(--bg-primary);
+  --dark-2: var(--bg-surface-hover);
+  --dark-line: var(--border-default);
+  --dark-text: var(--text-primary);
+  --dark-muted: var(--text-muted);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 13px;
+}
+
+html,
+body,
+#root {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+body {
+  min-height: 100vh;
+}
+
+.mono,
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}

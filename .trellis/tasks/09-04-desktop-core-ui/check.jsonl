@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/llmusage/backend/dashboard-performance-contracts.md", "reason": "Stale generation must not paint; core timeout semantics"}
+{"file": "docs/reference/library-api.md", "reason": "No /api HTTP from the React shell; facade payloads only"}
+{"file": ".trellis/tasks/09-04-llmusage-desktop-mvp/research/serve-parity-and-desktop-gaps.md", "reason": "Core blocks listed in the serve inventory are present"}
+{"file": "src/web/assets/base.css", "reason": "Theme tokens must match live serve, not DESIGN.md draft palettes"}
+

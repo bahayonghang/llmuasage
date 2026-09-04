@@ -1,18 +1,18 @@
-import { invoke } from "@tauri-apps/api/core";
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { Shell } from "./app/shell";
+import "./styles/tokens.css";
+import "./styles/layout.css";
+
+document.documentElement.setAttribute("data-theme", "dark");
 
 const root = document.getElementById("root");
-
-async function showRuntimeInfo() {
-  const info = await invoke("runtime_info");
-  console.log(info);
-  if (root) {
-    root.textContent = JSON.stringify(info, null, 2);
-  }
+if (!root) {
+  throw new Error("missing #root");
 }
 
-document.addEventListener("DOMContentLoaded", () => {
-  const button = document.getElementById("runtime-info");
-  button?.addEventListener("click", () => {
-    void showRuntimeInfo();
-  });
-});
+createRoot(root).render(
+  <StrictMode>
+    <Shell />
+  </StrictMode>,
+);

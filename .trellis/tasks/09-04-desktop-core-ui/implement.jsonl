@@ -1,0 +1,7 @@
+{"file": "docs/reference/library-api.md", "reason": "Interactive snapshot and QueryFilter are the only data the core UI may invoke"}
+{"file": ".trellis/spec/llmusage/backend/dashboard-performance-contracts.md", "reason": "Core 2s/6s budget, generation cancel, interactive snapshot shape"}
+{"file": ".trellis/tasks/09-04-llmusage-desktop-mvp/research/serve-parity-and-desktop-gaps.md", "reason": "Serve nav and core panel inventory the React shell must cover"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "IPC JSON must match Dashboard serde fields without local recasting"}
+{"file": "src/web/assets/base.css", "reason": "Unique visual token source for light/dark (TPR-09)"}
+{"file": "src/web/assets/layout.css", "reason": "Sidebar 248px and 720px collapse baseline"}
+
