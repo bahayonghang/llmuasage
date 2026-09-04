@@ -131,4 +131,6 @@ The reduced public view still has no authentication or TLS and reveals aggregate
 
 ## Static export boundary
 
-`llmusage export html` writes a static snapshot directory. Share it only if you are comfortable sharing the aggregated usage values and labels captured in `snapshot.json`.
+`llmusage export html` writes a static snapshot directory. `snapshot.json` includes aggregate tables such as `projects`, `hosts`, models, and sources, plus any `recent_failures` error strings captured at export time. Share the directory only if you accept those project labels, hosts, usage totals, and failure strings.
+
+The live diagnostics payload also includes `archive_root`, which is the runtime home path. The default HTML export strips `archive_root` from `snapshot.json`.

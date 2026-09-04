@@ -3,7 +3,7 @@
   "name": "remaining-security-hygiene",
   "title": "剩余安全收口",
   "description": "订阅 HTTP 禁止跨主机重定向；explorer 绑定 tool 过滤；导出快照脱敏；CSP/frame-deny。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

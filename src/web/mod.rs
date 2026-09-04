@@ -12,8 +12,9 @@ use std::{
 use anyhow::{Context, Result, bail};
 use axum::{
     Json, Router,
-    extract::{ConnectInfo, Path, Query, State},
+    extract::{ConnectInfo, Path, Query, Request, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
+    middleware::{self, Next},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
@@ -510,6 +511,18 @@ fn browser_shell_router() -> Router<WebState> {
     Router::new()
         .route("/", get(index_live))
         .route("/assets/{*path}", get(asset_file))
+        .layer(middleware::from_fn(browser_isolation_headers))
+}
+
+async fn browser_isolation_headers(request: Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    response
 }
 
 fn public_router() -> Router<WebState> {
@@ -2383,6 +2396,37 @@ mod tests {
         let (status, _body) = route_text(addr, "GET", "/").await?;
         assert_eq!(status, StatusCode::OK);
         server.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn loopback_and_public_html_assets_set_isolation_headers() -> anyhow::Result<()> {
+        for (exposure, bind_ip) in [
+            (WriteExposure::LocalOnly, IpAddr::V4(Ipv4Addr::LOCALHOST)),
+            (
+                WriteExposure::PublicReadOnly,
+                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            ),
+        ] {
+            let (_temp, store) = make_store()?;
+            let server = bind_server(store, Some(0), bind_ip, exposure).await?;
+            let addr = SocketAddr::from(([127, 0, 0, 1], server.addr().port()));
+            for path in ["/", "/assets/app.js"] {
+                let (status, head, _) = route_bytes(addr, path, &[]).await?;
+                assert_eq!(status, StatusCode::OK, "{exposure:?} {path}");
+                assert_eq!(
+                    response_header(&head, "x-content-type-options"),
+                    Some("nosniff"),
+                    "{exposure:?} {path} headers:\n{head}"
+                );
+                assert_eq!(
+                    response_header(&head, "x-frame-options"),
+                    Some("DENY"),
+                    "{exposure:?} {path} headers:\n{head}"
+                );
+            }
+            server.shutdown().await?;
+        }
         Ok(())
     }
 

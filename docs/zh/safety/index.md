@@ -124,4 +124,6 @@ llmusage doctor --refresh-pricing .\litellm-prices.json
 
 ## 静态导出边界
 
-`llmusage export html` 会写静态快照目录。只有在你愿意分享 `snapshot.json` 中聚合用量值和 label 时，才分享该目录。
+`llmusage export html` 会写静态快照目录。`snapshot.json` 含 `projects`、`hosts`、模型、来源等聚合表，以及导出时捕获的 `recent_failures` 失败字符串。只有在你愿意分享这些项目标签、host、用量合计和失败文案时，才分享该目录。
+
+实时 diagnostics 还含 `archive_root`（运行时根路径）。默认 HTML 导出会从 `snapshot.json` 剥离 `archive_root`。

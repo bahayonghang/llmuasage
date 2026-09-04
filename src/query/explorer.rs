@@ -765,14 +765,12 @@ fn load_attribution_rows(
                 {label_expr} AS group_label,
                 {value_expr} AS metric_value
             FROM attributed_rows a
-            {extra_where}
             GROUP BY group_key, group_label
             ORDER BY metric_value DESC, group_label ASC
             "#,
             key_expr = spec.key_expr,
             label_expr = spec.label_expr,
-            value_expr = value_expr,
-            extra_where = attribution_extra_where(query)
+            value_expr = value_expr
         ),
     )?;
     // Compute grand total via a wrapping SUM, then fetch limited rows.
@@ -808,15 +806,13 @@ fn load_attribution_series(
                 {label_expr} AS group_label,
                 {value_expr} AS metric_value
             FROM attributed_rows a
-            {extra_where}
             GROUP BY bucket_key, group_key, group_label
             ORDER BY bucket_key ASC, metric_value DESC, group_label ASC
             "#,
             bucket_expr = bucket_expr,
             key_expr = spec.key_expr,
             label_expr = spec.label_expr,
-            value_expr = value_expr,
-            extra_where = attribution_extra_where(query)
+            value_expr = value_expr
         ),
     )?;
     query_series_values_with_params(conn, &base_sql, params)
@@ -912,7 +908,7 @@ fn load_attribution_token_type_rows(
         scope,
         &token_type_union_sql(
             "attributed_rows a",
-            &attribution_extra_where(query),
+            "",
             &[
                 ("input", "input", "COALESCE(a.input_tokens, 0.0)"),
                 (
@@ -949,7 +945,7 @@ fn load_attribution_token_type_series(
         scope,
         &token_type_union_sql(
             "attributed_rows a",
-            &attribution_extra_where(query),
+            "",
             &[
                 ("input", "input", "COALESCE(a.input_tokens, 0.0)"),
                 (
@@ -1003,6 +999,7 @@ fn attribution_outer_sql(
         Some("tc"),
         scope.allowed_sources.as_deref(),
     );
+    let extra_filter = attribution_extra_filter(query);
 
     let sql = format!(
         r#"
@@ -1050,7 +1047,7 @@ fn attribution_outer_sql(
             FROM filtered_tools
             GROUP BY event_key
         ),
-        attributed_rows AS (
+        attributed_rows_unfiltered AS (
             SELECT
                 e.source,
                 COALESCE(tc.model, e.model) AS model,
@@ -1104,24 +1101,30 @@ fn attribution_outer_sql(
             FROM filtered_events e
             LEFT JOIN filtered_tools tc ON tc.event_key = e.event_key
             WHERE tc.tool_call_key IS NULL
+        ),
+        attributed_rows AS (
+            SELECT * FROM attributed_rows_unfiltered a
+            {extra_where}
         )
         {outer_select}
         "#,
         event_where = event_filter.where_sql(),
         tool_where = tool_filter.where_sql(),
+        extra_where = extra_filter.where_sql(),
         outer_select = outer_select
     );
     let params = event_filter
         .params()
         .iter()
         .chain(tool_filter.params().iter())
+        .chain(extra_filter.params().iter())
         .cloned()
         .collect::<Vec<_>>();
     Ok((sql, params))
 }
 
-fn attribution_extra_where(query: &ExplorerQuery) -> String {
-    let mut clauses = Vec::new();
+fn attribution_extra_filter(query: &ExplorerQuery) -> SqlFilter {
+    let mut filter = SqlFilter::default();
     if let Some(tool_name) = query
         .filters
         .tool_name
@@ -1129,7 +1132,7 @@ fn attribution_extra_where(query: &ExplorerQuery) -> String {
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        clauses.push(format!("a.tool_name = '{}'", escape_sql_literal(tool_name)));
+        filter.push("a.tool_name = ?", tool_name.to_string());
     }
     if let Some(tool_kind) = query
         .filters
@@ -1138,16 +1141,12 @@ fn attribution_extra_where(query: &ExplorerQuery) -> String {
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        clauses.push(format!("a.tool_kind = '{}'", escape_sql_literal(tool_kind)));
+        filter.push("a.tool_kind = ?", tool_kind.to_string());
     }
     if let Some(is_tool) = query.filters.is_tool {
-        clauses.push(format!("a.is_tool = {}", if is_tool { 1 } else { 0 }));
+        filter.push_raw(format!("a.is_tool = {}", if is_tool { 1 } else { 0 }));
     }
-    if clauses.is_empty() {
-        String::new()
-    } else {
-        format!("WHERE {}", clauses.join(" AND "))
-    }
+    filter
 }
 
 fn event_group_spec(group_by: ExplorerDimension) -> GroupSpec {
@@ -1565,10 +1564,6 @@ fn qualified(alias: Option<&str>, column: &str) -> String {
         .unwrap_or_else(|| column.to_string())
 }
 
-fn escape_sql_literal(raw: &str) -> String {
-    raw.replace('\'', "''")
-}
-
 fn share(value: f64, total: f64) -> f64 {
     if total <= f64::EPSILON {
         0.0
@@ -1581,11 +1576,13 @@ fn share(value: f64, total: f64) -> f64 {
 mod tests {
     use chrono::{FixedOffset, NaiveDate};
     use rusqlite::Connection;
+    use rusqlite::types::Value;
 
     use super::{
-        Dashboard, ExplorerDimension, ExplorerFilters, ExplorerGranularity, ExplorerMetric,
-        ExplorerQuery, ExplorerStrategy, ExplorerTokenType, choose_strategy, load_bucket_rows,
-        load_bucket_series, load_event_rows, load_event_series, sanitize_query,
+        CapabilityScope, Dashboard, ExplorerDimension, ExplorerFilters, ExplorerGranularity,
+        ExplorerMetric, ExplorerQuery, ExplorerStrategy, ExplorerSupport, ExplorerTokenType,
+        attribution_outer_sql, choose_strategy, load_bucket_rows, load_bucket_series,
+        load_event_rows, load_event_series, sanitize_query,
     };
     use crate::{
         error::Result,
@@ -2147,6 +2144,100 @@ mod tests {
         assert_eq!(input.value, 60.0);
         assert_eq!(output.value, 30.0);
         assert_eq!(payload.totals.value, 90.0);
+        Ok(())
+    }
+
+    #[test]
+    fn explorer_tool_filters_bind_parameters_instead_of_sql_literals() -> Result<()> {
+        let query = ExplorerQuery {
+            filters: ExplorerFilters {
+                tool_name: Some("Read'; DROP TABLE usage_event; --".to_string()),
+                tool_kind: Some("kind' OR '1'='1".to_string()),
+                ..Default::default()
+            },
+            ..ExplorerQuery::default()
+        };
+        let scope = CapabilityScope {
+            support: ExplorerSupport {
+                supported: true,
+                level: "normalized".to_string(),
+                reason: None,
+                strategy: "attribution".to_string(),
+            },
+            allowed_sources: None,
+        };
+        let (sql, params) =
+            attribution_outer_sql(&query, &scope, "SELECT a.tool_name FROM attributed_rows a")?;
+        assert!(sql.contains("a.tool_name = ?"), "{sql}");
+        assert!(sql.contains("a.tool_kind = ?"), "{sql}");
+        assert!(!sql.contains("a.tool_name = '"), "{sql}");
+        assert!(!sql.contains("a.tool_kind = '"), "{sql}");
+        assert!(!sql.contains("DROP TABLE"), "{sql}");
+        assert!(
+            params.iter().any(|value| matches!(
+                value,
+                Value::Text(text) if text.contains("DROP TABLE")
+            )),
+            "{params:?}"
+        );
+        assert!(
+            params.iter().any(|value| matches!(
+                value,
+                Value::Text(text) if text.contains("OR")
+            )),
+            "{params:?}"
+        );
+
+        let fixture = Fixture::new()?;
+        fixture.seed_event(SeedEvent {
+            event_key: "codex:explorer:bind-params",
+            source: "codex",
+            model: "gpt-5",
+            event_at: "2026-05-01T00:00:00Z",
+            hour_start: Some("2026-05-01T00:00:00Z"),
+            input_tokens: 120,
+            output_tokens: 60,
+            total_tokens: 180,
+            cost_with_cache_usd: 1.0,
+            cost_without_cache_usd: 1.0,
+            pricing_status: "static",
+            pricing_source: Some("static-v1"),
+            session_id: Some("session-a"),
+            source_path_hash: Some("session-a"),
+            created_at: Some("2026-05-01T00:00:00Z"),
+            ..Default::default()
+        })?;
+        let conn = fixture.store().open_connection()?;
+        insert_tool(
+            &conn,
+            ToolFixture {
+                tool_call_key: "tool:read:bind-params",
+                turn_key: "turn:codex:explorer:bind-params",
+                event_key: "codex:explorer:bind-params",
+                source: "codex",
+                session_id: "session-a",
+                project_hash: "project-a",
+                model: "gpt-5",
+                occurred_at: "2026-05-01T00:00:00Z",
+                tool_name: "Read",
+                tool_kind: "read",
+            },
+        )?;
+        drop(conn);
+
+        let payload = Dashboard::open(fixture.store())?.explorer(&query)?;
+        assert!(
+            payload.support.supported,
+            "shipped explorer query must execute hostile tool filters: {:?}",
+            payload.support
+        );
+        assert!(payload.rows.is_empty(), "{:?}", payload.rows);
+        let remaining: i64 = fixture.store().open_connection()?.query_row(
+            "SELECT COUNT(*) FROM usage_event",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(remaining, 1, "tool filters must not execute SQL literals");
         Ok(())
     }
 }
