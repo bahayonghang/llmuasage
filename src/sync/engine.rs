@@ -511,11 +511,7 @@ fn assert_no_unattributed_antigravity_history(
 }
 
 fn reset_sources_for_rebuild(store: &Store, sources: &[SourceKind]) -> Result<()> {
-    for source in sources {
-        let source = *source;
-        store.reset_for_source(source, "local")?;
-        store.clear_token_accounting_version(source)?;
-    }
+    store.reset_for_sources(sources, LOCAL_HOST_ID)?;
     Ok(())
 }
 

@@ -5,7 +5,7 @@ use std::{
 };
 
 use rusqlite::OptionalExtension;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::{BootstrapProgressSink, HolderKind, Store};
 use crate::{
@@ -149,6 +149,45 @@ impl PricingMetaChange {
     fn upsert(&mut self, key: &str, value: &str) {
         self.upserts.push((key.to_string(), value.to_string()));
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(super) struct RecomputeInProgress {
+    identity: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    file: Option<String>,
+    #[serde(default)]
+    deletes: Vec<String>,
+    #[serde(default)]
+    upserts: Vec<(String, String)>,
+}
+
+pub(super) fn in_progress_marker_value(
+    catalog: &PricingCatalog,
+    activation: &PricingMetaChange,
+) -> Result<String> {
+    let file = activation
+        .upserts
+        .iter()
+        .find(|(key, _)| key == META_ACTIVE_FILE)
+        .map(|(_, value)| value.clone())
+        .or_else(|| {
+            catalog
+                .version
+                .starts_with("effective-")
+                .then(|| format!("{}.json", catalog.version))
+        });
+    let marker = RecomputeInProgress {
+        identity: catalog.version.clone(),
+        file,
+        deletes: activation.deletes.clone(),
+        upserts: activation.upserts.clone(),
+    };
+    serde_json::to_string(&marker).map_err(|error| {
+        config_invalid(format!(
+            "pricing recompute in-progress marker could not be encoded: {error}"
+        ))
+    })
 }
 
 #[derive(Debug, Default)]
@@ -437,13 +476,12 @@ impl Store {
             )
             .optional()?;
         drop(conn);
-        if let Some(ref target_version) = in_progress_version {
+        if let Some(ref marker) = in_progress_version {
+            let (catalog, activation) = self.load_in_progress_target(marker)?;
             tracing::warn!(
-                target_version = %target_version,
+                target_version = %catalog.version,
                 "发现定价重算未完成标记，正在恢复一致性重算"
             );
-            let catalog = self.active_pricing_catalog()?;
-            let activation = PricingMetaChange::for_catalog(self, &catalog)?;
             self.recompute_costs_with_meta_and_progress(&catalog, &activation, None)?;
             return Ok(());
         }
@@ -461,6 +499,61 @@ impl Store {
             self.recompute_costs_with_meta_and_progress(&catalog, &activation, progress_sink)?;
         }
         Ok(())
+    }
+
+    fn load_in_progress_target(&self, marker: &str) -> Result<(PricingCatalog, PricingMetaChange)> {
+        let marker = marker.trim();
+        if marker.starts_with('{') {
+            let spec: RecomputeInProgress = serde_json::from_str(marker).map_err(|error| {
+                config_invalid(format!(
+                    "pricing recompute in-progress marker is invalid: {error}"
+                ))
+            })?;
+            if spec.identity.trim().is_empty() {
+                return Err(config_invalid(
+                    "pricing recompute in-progress marker is missing catalog identity",
+                ));
+            }
+            let catalog = self.load_target_catalog(&spec.identity, spec.file.as_deref())?;
+            return Ok((
+                catalog,
+                PricingMetaChange {
+                    deletes: spec.deletes,
+                    upserts: spec.upserts,
+                },
+            ));
+        }
+        if marker.is_empty() {
+            return Err(config_invalid(
+                "pricing recompute in-progress marker is empty",
+            ));
+        }
+        let catalog = self.load_target_catalog(marker, None)?;
+        let activation = if marker == PricingCatalog::embedded().version {
+            PricingMetaChange::preserve()
+        } else {
+            PricingMetaChange::active(marker, Some(&format!("{marker}.json")))
+        };
+        Ok((catalog, activation))
+    }
+
+    fn load_target_catalog(&self, identity: &str, file: Option<&str>) -> Result<PricingCatalog> {
+        if let Some(relative) = file {
+            return self.load_in_progress_file(identity, relative);
+        }
+        if identity == PricingCatalog::embedded().version {
+            return Ok(PricingCatalog::embedded().clone());
+        }
+        self.load_in_progress_file(identity, &format!("{identity}.json"))
+    }
+
+    fn load_in_progress_file(&self, identity: &str, relative: &str) -> Result<PricingCatalog> {
+        self.load_base_layer(identity, relative, PricingStatus::Snapshot)
+            .map_err(|error| {
+                config_invalid(format!(
+                    "pricing recompute in-progress catalog `{identity}` could not be loaded: {error}"
+                ))
+            })
     }
 
     fn pricing_meta(&self) -> Result<CatalogMeta> {
@@ -1139,6 +1232,161 @@ mod tests {
             store.meta_value(META_RECOMPUTE_IN_PROGRESS)?.is_none(),
             "in-progress marker must be cleared after recovery"
         );
+        Ok(())
+    }
+
+    fn revert_active_catalog_to_embedded(store: &Store) -> anyhow::Result<()> {
+        store.write_transaction(|tx| {
+            for key in [
+                META_ACTIVE_FILE,
+                META_BASE_VERSION,
+                META_BASE_FILE,
+                META_OVERLAY_VERSION,
+                META_OVERLAY_FILE,
+            ] {
+                tx.execute("DELETE FROM meta WHERE key = ?1", [key])?;
+            }
+            tx.execute(
+                r#"
+                INSERT INTO meta(key, value)
+                VALUES (?1, ?2)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                "#,
+                rusqlite::params![META_ACTIVE_VERSION, PricingCatalog::embedded().version],
+            )?;
+            Ok(())
+        })?;
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_recovers_overlay_when_files_exist_and_meta_is_stale() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let store = test_store(&temp)?;
+        let overlay = write_overlay(&temp, "team-models-1", "team-model")?;
+        let applied = store.apply_pricing_overlay(&overlay)?;
+        let overlay_file = applied
+            .overlay
+            .file
+            .as_deref()
+            .expect("overlay apply persists a content-addressed file")
+            .to_string();
+        let effective_file = applied
+            .effective
+            .file
+            .as_deref()
+            .expect("overlay apply persists an effective catalog file")
+            .to_string();
+        let base_file = applied
+            .base
+            .file
+            .as_deref()
+            .expect("overlay apply persists a base catalog file")
+            .to_string();
+        let catalog = store.active_pricing_catalog()?;
+        let marker = in_progress_marker_value(
+            &catalog,
+            &PricingMetaChange::overlay(
+                &applied.effective.identity,
+                &effective_file,
+                &applied.base.identity,
+                &base_file,
+                &applied.overlay.identity,
+                &overlay_file,
+            ),
+        )?;
+
+        revert_active_catalog_to_embedded(&store)?;
+        store.set_meta_value(META_RECOMPUTE_IN_PROGRESS, &marker)?;
+        let conn = store.open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO usage_event(
+                event_key, source, model, event_at, hour_start,
+                input_tokens, cache_read_tokens, cache_creation_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens, created_at
+            ) VALUES ('overlay-recovery', 'codex', 'team-model', ?1, ?1,
+                      1000, 0, 0, 0, 0, 1000, ?1)
+            "#,
+            ["2026-07-16T00:00:00Z"],
+        )?;
+        drop(conn);
+        assert!(
+            store
+                .active_pricing_catalog()?
+                .find("codex", "team-model")
+                .is_none(),
+            "pre-recovery active catalog must still be the old embedded catalog"
+        );
+
+        store.bootstrap()?;
+
+        assert!(
+            store.meta_value(META_RECOMPUTE_IN_PROGRESS)?.is_none(),
+            "successful overlay recovery must clear the in-progress marker"
+        );
+        let status = store.pricing_catalog_status()?;
+        assert_eq!(status.effective.identity, applied.effective.identity);
+        assert_eq!(
+            status.overlay.as_ref().map(|layer| layer.version.as_str()),
+            Some("team-models-1")
+        );
+        assert!(
+            store
+                .active_pricing_catalog()?
+                .find("codex", "team-model")
+                .is_some()
+        );
+        let (pricing_status, cost_with_cache_usd): (String, f64) = store
+            .open_connection()?
+            .query_row(
+                "SELECT pricing_status, cost_with_cache_usd FROM usage_event WHERE event_key = 'overlay-recovery'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+        assert_ne!(
+            pricing_status, "unpriced",
+            "recovery must reprice with the in-progress overlay catalog, not the old active catalog"
+        );
+        assert!(
+            cost_with_cache_usd > 0.0,
+            "overlay recovery must persist overlay rates, got status={pricing_status} cost={cost_with_cache_usd}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_fails_closed_when_in_progress_catalog_target_is_missing() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let store = test_store(&temp)?;
+        let identity = "effective-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let marker = serde_json::to_string(&RecomputeInProgress {
+            identity: identity.to_string(),
+            file: Some(format!("{identity}.json")),
+            deletes: Vec::new(),
+            upserts: vec![(META_ACTIVE_VERSION.to_string(), identity.to_string())],
+        })?;
+        store.set_meta_value(META_RECOMPUTE_IN_PROGRESS, &marker)?;
+
+        let error = store
+            .bootstrap()
+            .expect_err("missing in-progress catalog must fail closed");
+        assert!(
+            error
+                .to_string()
+                .contains("pricing recompute in-progress catalog"),
+            "unexpected error: {error}"
+        );
+        assert_eq!(
+            store.meta_value(META_RECOMPUTE_IN_PROGRESS)?.as_deref(),
+            Some(marker.as_str()),
+            "fail-closed recovery must keep the in-progress marker"
+        );
+        assert_eq!(
+            store.meta_value(META_ACTIVE_VERSION)?.as_deref(),
+            Some(PricingCatalog::embedded().version.as_str())
+        );
+        assert!(store.meta_value(META_OVERLAY_VERSION)?.is_none());
         Ok(())
     }
 }

@@ -3,7 +3,7 @@
   "name": "store-reset-rebuild-recovery",
   "title": "reset/rebuild 与定价恢复一致性",
   "description": "reset_usage_data 删除 source_file；rebuild 所选源同一事务；定价恢复读取 in-progress catalog。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

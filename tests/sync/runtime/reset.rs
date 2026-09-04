@@ -1,3 +1,5 @@
+use llmusage::store::{expected_token_accounting_version, set_rebuild_reset_failpoint};
+
 use super::*;
 
 #[test]
@@ -87,8 +89,13 @@ fn reset_usage_data_clears_behavior_facts() -> Result<()> {
     )?;
     let run_log_before = count_rows(&store, "run_log", "")?;
     let install_before = count_rows(&store, "integration_install", "")?;
+    let source_file_before = count_rows(&store, "source_file", "")?;
     assert!(run_log_before > 0);
     assert!(install_before > 0);
+    assert!(
+        source_file_before > 0,
+        "reset_usage_data must observe source_file rows before deleting them"
+    );
 
     store.reset_usage_data()?;
 
@@ -96,10 +103,64 @@ fn reset_usage_data_clears_behavior_facts() -> Result<()> {
     assert_eq!(count_rows(&store, "usage_event_raw", "")?, 0);
     assert_eq!(count_rows(&store, "usage_turn", "")?, 0);
     assert_eq!(count_rows(&store, "usage_tool_call", "")?, 0);
+    assert_eq!(count_rows(&store, "source_file", "")?, 0);
     assert_eq!(count_rows(&store, "run_log", "")?, run_log_before);
     assert_eq!(
         count_rows(&store, "integration_install", "")?,
         install_before
+    );
+    Ok(())
+}
+
+#[test]
+fn rebuild_reset_rolls_back_when_a_later_source_fails() -> Result<()> {
+    let temp = TempDir::new()?;
+    let paths = AppPaths::with_root(temp.path().join(".llmusage"))?;
+    let store = Store::new(&paths)?;
+    store.bootstrap_with(BootstrapOptions::default().with_raw_archive(true))?;
+    seed_resettable_row(&store, SourceKind::Codex, "reset-codex")?;
+    seed_resettable_row(&store, SourceKind::Claude, "reset-claude")?;
+    store.mark_current_token_accounting(SourceKind::Codex)?;
+    store.mark_current_token_accounting(SourceKind::Claude)?;
+
+    let _guard = set_rebuild_reset_failpoint(SourceKind::Claude);
+    let error = store
+        .reset_for_sources(&[SourceKind::Codex, SourceKind::Claude], "local")
+        .expect_err("second-source failpoint must abort the batch reset");
+    assert!(
+        error.to_string().contains("test failpoint"),
+        "unexpected error: {error}"
+    );
+
+    assert_eq!(
+        count_rows(&store, "usage_event", "WHERE source = 'codex'")?,
+        1
+    );
+    assert_eq!(
+        count_rows(&store, "usage_event", "WHERE source = 'claude'")?,
+        1
+    );
+    assert_eq!(
+        store
+            .source_files()
+            .counts(SourceKind::Codex, "local")?
+            .live,
+        1
+    );
+    assert_eq!(
+        store
+            .source_files()
+            .counts(SourceKind::Claude, "local")?
+            .live,
+        1
+    );
+    assert_eq!(
+        store.token_accounting_version(SourceKind::Codex)?,
+        Some(expected_token_accounting_version(SourceKind::Codex))
+    );
+    assert_eq!(
+        store.token_accounting_version(SourceKind::Claude)?,
+        Some(expected_token_accounting_version(SourceKind::Claude))
     );
     Ok(())
 }

@@ -1,4 +1,4 @@
-use std::fs;
+use std::{cell::Cell, fs};
 
 use rusqlite::OptionalExtension;
 use tracing::info;
@@ -6,7 +6,44 @@ use tracing::info;
 use super::{
     BootstrapOptions, BootstrapProgressEvent, BootstrapProgressSink, HolderKind, Store, migrations,
 };
-use crate::{error::Result, models::SourceKind};
+use crate::{
+    error::{LlmusageError, Result},
+    models::SourceKind,
+};
+
+thread_local! {
+    static REBUILD_RESET_FAIL_SOURCE: Cell<Option<SourceKind>> = const { Cell::new(None) };
+}
+
+/// Guard that clears the rebuild-reset failpoint on drop.
+#[must_use]
+#[doc(hidden)]
+pub struct RebuildResetFailpointGuard;
+
+impl Drop for RebuildResetFailpointGuard {
+    fn drop(&mut self) {
+        REBUILD_RESET_FAIL_SOURCE.with(|slot| slot.set(None));
+    }
+}
+
+/// Injects a failure before the matching source is reset inside
+/// [`Store::reset_for_sources`].
+///
+/// Test-only observer of the shipped multi-source reset transaction.
+#[doc(hidden)]
+pub fn set_rebuild_reset_failpoint(source: SourceKind) -> RebuildResetFailpointGuard {
+    REBUILD_RESET_FAIL_SOURCE.with(|slot| slot.set(Some(source)));
+    RebuildResetFailpointGuard
+}
+
+fn fail_rebuild_reset_at(source: SourceKind) -> Result<()> {
+    if REBUILD_RESET_FAIL_SOURCE.with(|slot| slot.get()) == Some(source) {
+        return Err(LlmusageError::ConfigInvalid {
+            detail: format!("test failpoint during rebuild reset: {}", source.as_str()),
+        });
+    }
+    Ok(())
+}
 
 const META_RAW_ARCHIVE_KEY: &str = "raw_archive_enabled";
 
@@ -218,13 +255,7 @@ impl Store {
 
     /// Clears the marker before a guarded rebuild starts.
     pub fn clear_token_accounting_version(&self, source: SourceKind) -> Result<()> {
-        self.write_transaction(|tx| {
-            tx.execute(
-                "DELETE FROM meta WHERE key = ?1",
-                [token_accounting_key(source)],
-            )?;
-            Ok(())
-        })?;
+        self.write_transaction(|tx| clear_token_accounting_version_tx(tx, source))?;
         Ok(())
     }
 
@@ -261,6 +292,32 @@ impl Store {
         Ok(())
     }
 
+    /// Deletes rebuildable usage state for every listed source on one host in a
+    /// single Immediate transaction. A later source failure rolls back the
+    /// whole batch, including token-accounting version markers.
+    pub fn reset_for_sources(&self, sources: &[SourceKind], host_id: &str) -> Result<()> {
+        if sources.is_empty() {
+            return Ok(());
+        }
+        info!(
+            source_count = sources.len(),
+            host_id, "开始按源批量清空可重建用量数据"
+        );
+        self.write_transaction(|tx| {
+            for source in sources {
+                fail_rebuild_reset_at(*source)?;
+                reset_for_source_tx(tx, *source, host_id)?;
+                clear_token_accounting_version_tx(tx, *source)?;
+            }
+            Ok(())
+        })?;
+        info!(
+            source_count = sources.len(),
+            host_id, "完成按源批量清空可重建用量数据"
+        );
+        Ok(())
+    }
+
     pub fn reset_usage_data(&self) -> Result<()> {
         /*
          * ========================================================================
@@ -285,6 +342,7 @@ impl Store {
             DELETE FROM source_cursor;
             DELETE FROM source_sync_status;
             DELETE FROM usage_event_raw;
+            DELETE FROM source_file;
             "#,
             )?;
             Ok(())
@@ -319,6 +377,17 @@ impl Store {
 
 pub(crate) fn omp_split_migrated_key(host_id: &str) -> String {
     format!("omp_split_migrated.{host_id}")
+}
+
+pub(crate) fn clear_token_accounting_version_tx(
+    tx: &rusqlite::Transaction<'_>,
+    source: SourceKind,
+) -> Result<()> {
+    tx.execute(
+        "DELETE FROM meta WHERE key = ?1",
+        [token_accounting_key(source)],
+    )?;
+    Ok(())
 }
 
 pub(crate) fn reset_for_source_tx(

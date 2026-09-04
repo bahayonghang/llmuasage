@@ -45,6 +45,8 @@ pub use pricing_catalog::{
     CatalogApplyResult, CatalogLayerStatus, CatalogResetResult, PricingCatalogStatus,
 };
 pub use run_log::RunLog;
+#[doc(hidden)]
+pub use schema::{RebuildResetFailpointGuard, set_rebuild_reset_failpoint};
 pub use schema::{TOKEN_ACCOUNTING_VERSION, expected_token_accounting_version};
 pub use source_file::{LossyRebuildRisk, SourceFileStateCounts, SourceFileStore};
 pub use sync_status::SyncStatusStore;
@@ -473,7 +475,7 @@ impl Store {
             "#,
                 rusqlite::params![
                     pricing_catalog::META_RECOMPUTE_IN_PROGRESS,
-                    &catalog.version,
+                    pricing_catalog::in_progress_marker_value(catalog, activation)?,
                 ],
             )?;
             self.validate_write_transaction(&tx)?;
