@@ -723,9 +723,11 @@ mod tests {
 
     #[test]
     fn query_limit_constants_are_bounded() {
-        assert!(LIST_QUERY_LIMIT_MAX <= 500);
-        assert_eq!(INDEX_QUERY_LIMIT, 10_000);
-        assert!(INDEX_QUERY_LIMIT >= LIST_QUERY_LIMIT_MAX);
+        const {
+            assert!(LIST_QUERY_LIMIT_MAX <= 500);
+            assert!(INDEX_QUERY_LIMIT == 10_000);
+            assert!(INDEX_QUERY_LIMIT >= LIST_QUERY_LIMIT_MAX);
+        }
     }
 
     #[test]
