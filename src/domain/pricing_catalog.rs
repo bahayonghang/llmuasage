@@ -256,12 +256,12 @@ struct LegacyPricingEntry {
 }
 
 impl PricingCatalog {
-    /// Returns the embedded static-v2 catalog. The file is parsed at most
+    /// Returns the embedded static-v3 catalog. The file is parsed at most
     /// once per process; subsequent callers share the cached value.
     pub fn embedded() -> &'static PricingCatalog {
         static CATALOG: OnceLock<PricingCatalog> = OnceLock::new();
         CATALOG.get_or_init(|| {
-            let document = catalog_document_from_str(STATIC_V2_JSON, Some("static-v2"))
+            let document = catalog_document_from_str(STATIC_V2_JSON, Some("static-v3"))
                 .expect("pricing/static-v2.json must be valid JSON");
             PricingCatalog::from_document(document, PricingStatus::Static)
                 .expect("pricing/static-v2.json must contain valid non-overlapping rules")
@@ -967,13 +967,13 @@ mod tests {
     use crate::domain::pricing::PricingStatus;
     use crate::error::LlmusageError;
 
-    /// The shipped static-v2 catalog must parse cleanly and cover the
+    /// The shipped static-v2.json catalog must parse cleanly and cover the
     /// matchers the test suite asserts against (`gpt-5`, `claude-sonnet`,
     /// `opus`, `o3`).
     #[test]
     fn pricing_catalog_loads_static_v2() {
         let catalog = PricingCatalog::embedded();
-        assert_eq!(catalog.version, "static-v2");
+        assert_eq!(catalog.version, "static-v3");
         assert_eq!(catalog.status, PricingStatus::Static);
         assert!(catalog.find("codex", "gpt-5").is_some());
         assert!(catalog.find("codex", "gpt-5.5").is_some());
@@ -984,6 +984,9 @@ mod tests {
         assert!(catalog.find("claude", "claude-sonnet-4-5").is_some());
         assert!(catalog.find("claude", "claude-fable-5").is_some());
         assert!(catalog.find("claude", "claude-mythos-5").is_some());
+        assert!(catalog.find("claude", "claude-fable-5-1").is_some());
+        assert!(catalog.find("claude", "claude-mythos-5-1").is_some());
+        assert!(catalog.find("codex", "gpt-6-astra").is_some());
         assert!(catalog.find("opencode", "gpt-5").is_some());
         assert!(catalog.find("codex", "gpt-5-codex").is_some());
         assert!(catalog.find("opencode", "claude.sonnet.4.5").is_some());
@@ -1048,6 +1051,103 @@ mod tests {
             assert!(
                 matched.is_none() || !matched.is_some_and(|entry| entry.id.starts_with("gpt-5.6")),
                 "exact GPT-5.6 matchers must not claim {model}"
+            );
+        }
+    }
+
+    #[test]
+    fn pricing_catalog_covers_gpt_6_astra_and_claude_5_1() {
+        let catalog = PricingCatalog::embedded();
+        for source in ["codex", "opencode"] {
+            for model in ["gpt-6-astra", "gpt-6-astra-2026-09-03"] {
+                let entry = catalog.find(source, model).expect("Astra row");
+                assert_eq!(entry.id, "gpt-6-astra", "{source}:{model}");
+                assert_eq!(entry.default_rate.input_per_mtok, 10.0, "{model}");
+                assert_eq!(entry.default_rate.cached_per_mtok, 1.0, "{model}");
+                assert_eq!(
+                    entry.default_rate.cache_creation_per_mtok(),
+                    12.5,
+                    "{model}"
+                );
+                assert_eq!(entry.default_rate.output_per_mtok, 50.0, "{model}");
+                assert_eq!(entry.context_window, Some(1_050_000), "{model}");
+                assert_eq!(entry.tiers.len(), 1, "{model}");
+                assert_eq!(entry.tiers[0].prompt_tokens_above, 272_000, "{model}");
+                assert_eq!(entry.tiers[0].rate.input_per_mtok, 20.0, "{model}");
+                assert_eq!(entry.tiers[0].rate.cached_per_mtok, 2.0, "{model}");
+                assert_eq!(
+                    entry.tiers[0].rate.cache_creation_per_mtok(),
+                    25.0,
+                    "{model}"
+                );
+                assert_eq!(entry.tiers[0].rate.output_per_mtok, 75.0, "{model}");
+            }
+        }
+
+        let opencode_astra = catalog
+            .find("opencode", "gpt-6-astra")
+            .expect("OpenCode Astra must outrank the GPT-5 family");
+        assert_eq!(opencode_astra.id, "gpt-6-astra");
+
+        for (source, model, expected_id) in [
+            ("claude", "claude-fable-5-1", "claude-fable-5-1"),
+            ("claude", "claude-fable-5.1", "claude-fable-5-1"),
+            ("claude", "fable-5-1", "claude-fable-5-1"),
+            ("opencode", "anthropic.claude-fable-5-1", "claude-fable-5-1"),
+            ("opencode", "anthropic/claude-fable-5-1", "claude-fable-5-1"),
+            ("claude", "claude-mythos-5-1", "claude-mythos-5-1"),
+            ("claude", "claude-mythos-5.1", "claude-mythos-5-1"),
+            ("claude", "mythos-5-1", "claude-mythos-5-1"),
+            (
+                "opencode",
+                "anthropic.claude-mythos-5-1",
+                "claude-mythos-5-1",
+            ),
+            (
+                "opencode",
+                "anthropic/claude-mythos-5-1",
+                "claude-mythos-5-1",
+            ),
+        ] {
+            let entry = catalog.find(source, model).expect("5.1 row");
+            assert_eq!(entry.id, expected_id, "{source}:{model}");
+            assert_eq!(entry.default_rate.input_per_mtok, 10.0, "{model}");
+            assert_eq!(entry.default_rate.cached_per_mtok, 0.25, "{model}");
+            assert_eq!(
+                entry.default_rate.cache_creation_per_mtok(),
+                12.5,
+                "{model}"
+            );
+            assert_eq!(entry.default_rate.output_per_mtok, 50.0, "{model}");
+            assert_eq!(entry.context_window, Some(1_000_000), "{model}");
+            assert!(entry.tiers.is_empty(), "{model}");
+        }
+
+        for model in ["claude-fable-5", "claude-mythos-5"] {
+            let entry = catalog.find("claude", model).expect("5.0 row");
+            assert_eq!(entry.id, model);
+            assert_eq!(entry.default_rate.cached_per_mtok, 1.0, "{model}");
+        }
+
+        for (source, model) in [
+            ("codex", "not-gpt-6-astra"),
+            ("opencode", "not-gpt-6-astra"),
+            ("codex", "gpt-6-rewrite"),
+            ("opencode", "gpt-6-rewrite"),
+            ("claude", "not-fable-5-1"),
+            ("claude", "not-mythos-5-1"),
+            ("claude", "claude-mythos-preview"),
+        ] {
+            let matched = catalog.find(source, model);
+            assert!(
+                matched.is_none()
+                    || !matched.is_some_and(|entry| {
+                        matches!(
+                            entry.id.as_str(),
+                            "gpt-6-astra" | "claude-fable-5-1" | "claude-mythos-5-1"
+                        )
+                    }),
+                "new catalog rows must not claim {source}:{model}"
             );
         }
     }
@@ -1311,6 +1411,22 @@ mod tests {
         assert_eq!(
             catalog.context_window("opencode", "anthropic.claude-fable-5"),
             Some(1_000_000)
+        );
+        assert_eq!(
+            catalog.context_window("claude", "claude-fable-5-1"),
+            Some(1_000_000)
+        );
+        assert_eq!(
+            catalog.context_window("claude", "claude-mythos-5-1"),
+            Some(1_000_000)
+        );
+        assert_eq!(
+            catalog.context_window("codex", "gpt-6-astra"),
+            Some(1_050_000)
+        );
+        assert_eq!(
+            catalog.context_window("opencode", "gpt-6-astra"),
+            Some(1_050_000)
         );
         // Unknown model degrades to None rather than panicking.
         assert_eq!(catalog.context_window("codex", "made-up-model"), None);

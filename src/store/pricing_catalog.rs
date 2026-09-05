@@ -844,7 +844,7 @@ mod tests {
         let overlay = write_overlay(&temp, "team-models-1", "team-model")?;
 
         let applied = store.apply_pricing_overlay(&overlay)?;
-        assert_eq!(applied.base.identity, "static-v2");
+        assert_eq!(applied.base.identity, "static-v3");
         assert!(
             applied
                 .base
@@ -872,7 +872,7 @@ mod tests {
         assert!(active.find("codex", "team-model").is_some());
         assert_eq!(active.version, applied.effective.identity);
         let status = restarted.pricing_catalog_status()?;
-        assert_eq!(status.base.identity, "static-v2");
+        assert_eq!(status.base.identity, "static-v3");
         assert_eq!(
             status.overlay.as_ref().map(|layer| layer.version.as_str()),
             Some("team-models-1")
@@ -881,7 +881,7 @@ mod tests {
 
         let reset = restarted.reset_pricing_catalog()?;
         assert!(reset.removed_overlay);
-        assert_eq!(reset.effective.identity, "static-v2");
+        assert_eq!(reset.effective.identity, "static-v3");
         assert!(
             restarted
                 .active_pricing_catalog()?
@@ -1008,7 +1008,7 @@ mod tests {
         assert_eq!(priced_after_failure, 5_000);
         assert_eq!(
             store.meta_value(META_ACTIVE_VERSION)?.as_deref(),
-            Some("static-v2"),
+            Some("static-v3"),
             "activation metadata must not switch before bucket reconciliation"
         );
         conn.execute_batch("DROP TRIGGER fail_second_recompute_page;")?;
@@ -1111,11 +1111,11 @@ mod tests {
     fn bootstrap_upgrades_unpinned_old_static_catalog() -> anyhow::Result<()> {
         let temp = TempDir::new()?;
         let store = test_store(&temp)?;
-        store.set_meta_value(META_ACTIVE_VERSION, "static-v1")?;
+        store.set_meta_value(META_ACTIVE_VERSION, "static-v2")?;
         store.bootstrap()?;
         assert_eq!(
             store.meta_value(META_ACTIVE_VERSION)?.as_deref(),
-            Some("static-v2")
+            Some("static-v3")
         );
         Ok(())
     }
@@ -1183,7 +1183,7 @@ mod tests {
                     ..
                 }
             ] if from_version == "static-v1"
-                && to_version == "static-v2"
+                && to_version == "static-v3"
                 && progress_from == from_version
                 && progress_to == to_version
                 && reconcile_to == to_version
@@ -1192,7 +1192,7 @@ mod tests {
         ));
         assert_eq!(
             store.meta_value(META_ACTIVE_VERSION)?.as_deref(),
-            Some("static-v2")
+            Some("static-v3")
         );
 
         let mut noop_events = Vec::new();

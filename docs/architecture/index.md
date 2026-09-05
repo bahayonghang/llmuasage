@@ -54,7 +54,7 @@ Custom Usage analysis queries use `Dashboard::explorer(&ExplorerQuery)` and the 
 
 ## Pricing catalog flow
 
-The embedded `pricing/static-v2.json` file is the default base. It owns stable model ids, source expansion, exact/family matchers, default and threshold rates, and context windows. Parser-owned model strings remain unchanged in SQLite.
+The embedded `pricing/static-v2.json` file is the default base, currently labeled `static-v3`. It owns stable model ids, source expansion, exact/family matchers, default and threshold rates, and context windows, including GPT-6 Astra, Claude Fable 5.1, and Claude Mythos 5.1. Parser-owned model strings remain unchanged in SQLite.
 
 The optional user layer is a v2 `overlay` activated explicitly with `catalog apply`. Merge is deterministic: validate the base, apply strict `remove_models`, replace or append complete definitions by stable id, then validate the effective catalog. There is no field-level deep merge. Exact matchers win over family matchers, then longer matchers win.
 

@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "kind": "base",
-  "version": "static-v2",
+  "version": "static-v3",
   "models": [
     {
       "id": "gpt-5-mini",
@@ -104,6 +104,24 @@
       "context_window": 1000000
     },
     {
+      "id": "claude-fable-5-1",
+      "sources": ["claude", "opencode"],
+      "matches": [
+        { "value": "claude-fable-5-1", "mode": "family" },
+        { "value": "fable-5-1", "mode": "family" },
+        { "value": "anthropic-claude-fable-5-1", "mode": "family" }
+      ],
+      "rates": {
+        "default": {
+          "input_per_mtok": 10.0,
+          "cached_per_mtok": 0.25,
+          "cache_creation_per_mtok": 12.5,
+          "output_per_mtok": 50.0
+        }
+      },
+      "context_window": 1000000
+    },
+    {
       "id": "claude-mythos-5",
       "sources": ["claude", "opencode"],
       "matches": [
@@ -115,6 +133,24 @@
         "default": {
           "input_per_mtok": 10.0,
           "cached_per_mtok": 1.0,
+          "cache_creation_per_mtok": 12.5,
+          "output_per_mtok": 50.0
+        }
+      },
+      "context_window": 1000000
+    },
+    {
+      "id": "claude-mythos-5-1",
+      "sources": ["claude", "opencode"],
+      "matches": [
+        { "value": "claude-mythos-5-1", "mode": "family" },
+        { "value": "mythos-5-1", "mode": "family" },
+        { "value": "anthropic-claude-mythos-5-1", "mode": "family" }
+      ],
+      "rates": {
+        "default": {
+          "input_per_mtok": 10.0,
+          "cached_per_mtok": 0.25,
           "cache_creation_per_mtok": 12.5,
           "output_per_mtok": 50.0
         }
@@ -246,6 +282,33 @@
             "cached_per_mtok": 1.0,
             "cache_creation_per_mtok": 12.5,
             "output_per_mtok": 45.0
+          }
+        ]
+      },
+      "context_window": 1050000
+    },
+    {
+      "id": "gpt-6-astra",
+      "sources": ["codex", "opencode"],
+      "matches": [
+        { "value": "gpt-6-astra", "mode": "exact" },
+        { "value": "gpt-6-astra", "mode": "family" }
+      ],
+      "rates": {
+        "default": {
+          "input_per_mtok": 10.0,
+          "cached_per_mtok": 1.0,
+          "cache_creation_per_mtok": 12.5,
+          "output_per_mtok": 50.0
+        },
+        "tiers": [
+          {
+            "name": "long_context",
+            "prompt_tokens_above": 272000,
+            "input_per_mtok": 20.0,
+            "cached_per_mtok": 2.0,
+            "cache_creation_per_mtok": 25.0,
+            "output_per_mtok": 75.0
           }
         ]
       },

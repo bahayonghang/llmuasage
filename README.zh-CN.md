@@ -132,7 +132,7 @@ just tinstall
 
 ## 模型价格目录
 
-模型价格和上下文窗口来自内置 `static-v2` 目录。该目录已为 Codex 和 OpenCode 加入 `gpt-5.6-luna`、`gpt-5.6-terra`、`gpt-5.6-sol`，其中 `gpt-5.6` 是 Sol 的精确别名；单请求提示 token 超过 272,000 时使用长上下文费率。
+模型价格和上下文窗口来自内置 `static-v3` 目录。该目录已为 Codex 和 OpenCode 加入 `gpt-6-astra`，为 Claude 和 OpenCode 加入 `claude-fable-5-1` 与 `claude-mythos-5-1`，并为 Codex 和 OpenCode 保留 `gpt-5.6-luna`、`gpt-5.6-terra`、`gpt-5.6-sol`（`gpt-5.6` 是 Sol 的精确别名）。Astra 和 GPT-5.6 在单请求提示 token 超过 272,000 时使用长上下文费率。
 
 可以只写增量覆盖，不需要复制整份内置目录：
 

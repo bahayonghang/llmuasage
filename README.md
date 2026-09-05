@@ -134,7 +134,7 @@ Windows SmartScreen may warn, because the installer is not code-signed.
 
 ## Pricing catalog
 
-Model pricing and context windows come from the embedded `static-v2` catalog. It includes `gpt-5.6-luna`, `gpt-5.6-terra`, and `gpt-5.6-sol` for Codex and OpenCode, including the exact `gpt-5.6` alias for Sol and request-scoped long-context pricing above 272,000 prompt tokens.
+Model pricing and context windows come from the embedded `static-v3` catalog. It includes `gpt-6-astra` for Codex and OpenCode, `claude-fable-5-1` and `claude-mythos-5-1` for Claude and OpenCode, and `gpt-5.6-luna`, `gpt-5.6-terra`, and `gpt-5.6-sol` for Codex and OpenCode, including the exact `gpt-5.6` alias for Sol. Astra and GPT-5.6 use request-scoped long-context pricing above 272,000 prompt tokens.
 
 Apply a local incremental overlay without copying the embedded catalog:
 

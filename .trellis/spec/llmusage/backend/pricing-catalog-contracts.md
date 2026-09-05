@@ -14,7 +14,8 @@
 
 ### 2. Catalog V2 Signatures
 
-- Embedded base: `pricing/static-v2.json`.
+- Embedded base file: `pricing/static-v2.json`.
+- Current embedded identity: `static-v3`. `schema_version` stays `2`.
 - Top level: `schema_version = 2`, `kind = base|overlay`, human `version`,
   `models`, and overlay-only `remove_models`.
 - Model: stable `id`, one or more `sources`, explicit `matches`, `rates.default`,
@@ -156,3 +157,27 @@
 - Context pressure for embedded and configured models; unknown windows remain
   counted separately.
 - Final gates: fmt, strict Clippy, serial full tests, docs build, and diff check.
+
+### 9. GPT-6 Astra And Claude Fable/Mythos 5.1 Contract
+
+- `gpt-6-astra` is an exact-plus-family entry for `codex` and `opencode`, with
+  context window `1_050_000`. Family covers dated snapshots such as
+  `gpt-6-astra-2026-09-03`. Do not add a `gpt-6` alias or `gpt-6-astra-aeon`.
+- Default input/cache-read/cache-write/output MTok rates: `10.0 / 1.0 / 12.5 / 50.0`.
+  Above 272,000 prompt tokens, all input channels use 2x default and output uses
+  1.5x default. Exactly 272,000 remains on the default tier.
+- `claude-fable-5-1` and `claude-mythos-5-1` are family entries for `claude` and
+  `opencode`. Matchers: `claude-fable-5-1` / `fable-5-1` /
+  `anthropic-claude-fable-5-1`, and `claude-mythos-5-1` / `mythos-5-1` /
+  `anthropic-claude-mythos-5-1`. Do not add a bare `mythos` matcher.
+- Fable/Mythos 5.1 default rates: `10.0 / 0.25 / 12.5 / 50.0`, context window
+  `1_000_000`, no long-context tier. `cache_creation_per_mtok = 12.5` is the 5m
+  write approximation. Claude Fable 5 and Claude Mythos 5 keep cache read `1.0`.
+- Wrong: omit a 5.1 / Astra row and assume family `claude-fable-5`, `claude-mythos-5`,
+  or OpenCode `gpt` will "just miss" the new ids. Those matchers already claim
+  `claude-fable-5-1`, `claude-mythos-5-1`, and `gpt-6-astra`, so the events are
+  mispriced rather than unpriced.
+- Correct: add a longer family or exact matcher, then assert both the new id
+  (Fable/Mythos 5.1 cache read `0.25`; Astra `10 / 1 / 12.5 / 50` plus 272K
+  tier) and the old row (Fable/Mythos 5 cache read `1.0`; OpenCode GPT-5
+  family still owns `gpt-5`).

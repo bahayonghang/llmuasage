@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+
+- Add GPT-6 Astra, Claude Fable 5.1, and Claude Mythos 5.1 static pricing and context-window coverage.
+
+### Changed
+
+- Bump the embedded catalog identity from `static-v2` to `static-v3` so unpinned databases reprice on the next sync.
+
 ## 1.3.0 - 2026-08-21
 
 ### Added

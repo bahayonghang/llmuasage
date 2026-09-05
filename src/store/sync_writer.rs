@@ -2062,7 +2062,7 @@ mod tests {
         )?;
         assert!(event_cost > 0.0);
         assert_eq!(event_status, "static");
-        assert_eq!(event_source, "static-v2");
+        assert_eq!(event_source, "static-v3");
 
         let bucket_count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM usage_bucket_30m WHERE source = 'codex'",
@@ -2117,7 +2117,7 @@ mod tests {
             "bucket cost should match persisted event cost after reset"
         );
         assert_eq!(bucket_status, "static");
-        assert_eq!(bucket_source, "static-v2");
+        assert_eq!(bucket_source, "static-v3");
         assert_eq!(event_count, 1);
 
         let unpriced_bucket_count: i64 = conn.query_row(
@@ -2548,7 +2548,7 @@ mod tests {
         assert!((event_cost - 72.6).abs() < 1e-9);
         assert!((without_cache - 78.0).abs() < 1e-9);
         assert_eq!(status, "static");
-        assert_eq!(source, "static-v2");
+        assert_eq!(source, "static-v3");
 
         let (bucket_cost, cache_creation, cache_read, bucket_status): (f64, i64, i64, String) =
             conn.query_row(

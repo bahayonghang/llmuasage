@@ -57,7 +57,7 @@ pub struct CostBreakdown {
     pub cost_without_cache_usd: f64,
     /// Catalog match outcome.
     pub pricing_status: PricingStatus,
-    /// Catalog version label (e.g. `static-v2` or
+    /// Catalog version label (e.g. `static-v3` or
     /// `litellm-snapshot-2026-05`) when matched.
     pub pricing_source: Option<String>,
     /// JSON-encoded rate row used for the calculation, when matched.
@@ -241,7 +241,7 @@ mod tests {
     fn pricing_static_v2_hits_known_model() {
         let cost = compute_cost("codex", "gpt-5", tokens(1_000_000, 200_000, 0, 500_000, 0));
         assert_eq!(cost.pricing_status, PricingStatus::Static);
-        assert_eq!(cost.pricing_source.as_deref(), Some("static-v2"));
+        assert_eq!(cost.pricing_source.as_deref(), Some("static-v3"));
         assert!(cost.cost_with_cache_usd > 0.0);
         // Without-cache lower-bounds: cache_read priced at full input rate.
         assert!(cost.cost_without_cache_usd > cost.cost_with_cache_usd);
@@ -254,7 +254,7 @@ mod tests {
             let cost = compute_cost("codex", model, tokens(1_000_000, 200_000, 0, 500_000, 0));
 
             assert_eq!(cost.pricing_status, PricingStatus::Static, "{model}");
-            assert_eq!(cost.pricing_source.as_deref(), Some("static-v2"));
+            assert_eq!(cost.pricing_source.as_deref(), Some("static-v3"));
             assert!(cost.cost_with_cache_usd > 0.0, "{model}");
         }
     }
@@ -269,7 +269,7 @@ mod tests {
             );
 
             assert_eq!(cost.pricing_status, PricingStatus::Static, "{model}");
-            assert_eq!(cost.pricing_source.as_deref(), Some("static-v2"));
+            assert_eq!(cost.pricing_source.as_deref(), Some("static-v3"));
             assert!((cost.cost_with_cache_usd - 33.95).abs() < 1e-9, "{model}");
             assert!((cost.cost_without_cache_usd - 35.0).abs() < 1e-9, "{model}");
             let pricing_rate = cost
@@ -282,6 +282,70 @@ mod tests {
                 "{model}"
             );
             assert!(pricing_rate.contains("\"output_per_mtok\":50.0"), "{model}");
+        }
+    }
+
+    #[test]
+    fn pricing_static_v3_hits_claude_fable_and_mythos_5_1() {
+        for model in ["claude-fable-5-1", "claude-mythos-5-1"] {
+            let cost = compute_cost(
+                "claude",
+                model,
+                tokens(1_000_000, 200_000, 300_000, 400_000, 0),
+            );
+
+            assert_eq!(cost.pricing_status, PricingStatus::Static, "{model}");
+            assert_eq!(cost.pricing_source.as_deref(), Some("static-v3"));
+            assert!((cost.cost_with_cache_usd - 33.80).abs() < 1e-9, "{model}");
+            assert!((cost.cost_without_cache_usd - 35.0).abs() < 1e-9, "{model}");
+            let pricing_rate = cost
+                .pricing_rate
+                .as_deref()
+                .expect("matched Fable/Mythos 5.1 rows should carry pricing_rate");
+            assert!(pricing_rate.contains("\"cached_per_mtok\":0.25"), "{model}");
+            assert!(
+                pricing_rate.contains("\"cache_creation_per_mtok\":12.5"),
+                "{model}"
+            );
+        }
+    }
+
+    #[test]
+    fn pricing_gpt_6_astra_uses_request_scoped_short_and_long_tiers() {
+        for source in ["codex", "opencode"] {
+            let short = compute_cost(
+                source,
+                "gpt-6-astra",
+                tokens(100_000, 100_000, 72_000, 100_000, 0),
+            );
+            assert_eq!(short.pricing_status, PricingStatus::Static, "{source}");
+            assert_eq!(short.pricing_source.as_deref(), Some("static-v3"));
+            assert!((short.cost_with_cache_usd - 7.0).abs() < 1e-9, "{source}");
+            let short_rate = short.pricing_rate.expect("short tier audit row");
+            assert!(short_rate.contains("\"tier\":\"default\""), "{short_rate}");
+            assert!(
+                short_rate.contains("\"model_id\":\"gpt-6-astra\""),
+                "{short_rate}"
+            );
+
+            let long = compute_cost(
+                source,
+                "gpt-6-astra",
+                tokens(100_000, 100_000, 72_001, 100_000, 0),
+            );
+            assert!(
+                (long.cost_with_cache_usd - 11.500_025).abs() < 1e-9,
+                "{source}"
+            );
+            let long_rate = long.pricing_rate.expect("long tier audit row");
+            assert!(
+                long_rate.contains("\"tier\":\"long_context\""),
+                "{long_rate}"
+            );
+            assert!(
+                long_rate.contains("\"prompt_tokens_above\":272000"),
+                "{long_rate}"
+            );
         }
     }
 

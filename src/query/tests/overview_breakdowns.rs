@@ -431,6 +431,56 @@ fn context_pressure_knows_claude_fable_and_mythos_windows() -> Result<()> {
 }
 
 #[test]
+fn context_pressure_knows_fable_mythos_5_1_and_astra_windows() -> Result<()> {
+    use crate::testing::SeedEvent;
+
+    let fixture = Fixture::new()?;
+    fixture.seed_event(SeedEvent {
+        event_key: "codex:ctx:astra",
+        source: "codex",
+        model: "gpt-6-astra",
+        input_tokens: 630_000,
+        total_tokens: 630_000,
+        ..SeedEvent::default()
+    })?;
+    fixture.seed_event(SeedEvent {
+        event_key: "claude:ctx:fable-5-1",
+        source: "claude",
+        model: "claude-fable-5-1",
+        input_tokens: 450_000,
+        cache_read_tokens: 50_000,
+        total_tokens: 500_000,
+        ..SeedEvent::default()
+    })?;
+    fixture.seed_event(SeedEvent {
+        event_key: "claude:ctx:mythos-5-1",
+        source: "claude",
+        model: "claude-mythos-5-1",
+        input_tokens: 250_000,
+        total_tokens: 250_000,
+        ..SeedEvent::default()
+    })?;
+    fixture.seed_event(SeedEvent {
+        event_key: "claude:ctx:unknown-5-1",
+        source: "claude",
+        model: "claude-mythos-preview",
+        input_tokens: 1_000_000,
+        total_tokens: 1_000_000,
+        ..SeedEvent::default()
+    })?;
+
+    let dashboard = Dashboard::open(fixture.store())?;
+    let pressure = dashboard.context_pressure(&Default::default())?;
+
+    assert!((pressure.peak_percent - 0.6).abs() < 1e-9);
+    assert!((pressure.avg_percent - 0.45).abs() < 1e-9);
+    assert_eq!(pressure.priced_events, 3);
+    assert_eq!(pressure.unpriced_events, 1);
+    assert_eq!(pressure.peak_model.as_deref(), Some("codex:gpt-6-astra"));
+    Ok(())
+}
+
+#[test]
 fn context_pressure_empty_is_zero() -> Result<()> {
     let fixture = Fixture::new()?;
     let dashboard = Dashboard::open(fixture.store())?;
@@ -539,7 +589,7 @@ fn dashboard_ccr_ui_contract_exposes_cost_cache_and_pricing_fields() -> Result<(
     assert!(model.cost_without_cache_usd >= model.cost_with_cache_usd);
     assert!(model.cache_savings_usd >= 0.0);
     assert_eq!(model.pricing_status, "static");
-    assert_eq!(model.pricing_source.as_deref(), Some("static-v2"));
+    assert_eq!(model.pricing_source.as_deref(), Some("static-v3"));
     assert!(model.pricing_rate.is_some());
 
     let project = dashboard

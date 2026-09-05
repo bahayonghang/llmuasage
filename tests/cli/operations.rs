@@ -518,7 +518,7 @@ fn catalog_cli_applies_reports_and_resets_overlay_across_processes() -> Result<(
     let applied = fixture.output(&["catalog", "apply", overlay.to_str().unwrap()])?;
     assert!(applied.status.success(), "{applied:?}");
     let status = fixture.json(&["catalog", "status", "--json"])?;
-    assert_eq!(status["base"]["identity"].as_str(), Some("static-v2"));
+    assert_eq!(status["base"]["identity"].as_str(), Some("static-v3"));
     assert_eq!(
         status["overlay"]["version"].as_str(),
         Some("team-catalog-1")
@@ -554,7 +554,7 @@ fn catalog_cli_applies_reports_and_resets_overlay_across_processes() -> Result<(
     assert!(reset_status["overlay"].is_null());
     assert_eq!(
         reset_status["effective"]["identity"].as_str(),
-        Some("static-v2")
+        Some("static-v3")
     );
 
     let conn = Connection::open(&fixture.paths.db_path)?;

@@ -505,22 +505,30 @@ fn sync_prices_claude_fable_and_mythos_usage() -> Result<()> {
         let store = Store::new(&app.paths)?;
         let dashboard = Dashboard::open(&store)?;
         let models = dashboard.model_breakdown(&Default::default())?;
-        for model in ["claude-fable-5", "claude-mythos-5"] {
+        for (model, expected_cost) in [
+            ("claude-fable-5", 33.95),
+            ("claude-mythos-5", 33.95),
+            ("claude-fable-5-1", 33.80),
+            ("claude-mythos-5-1", 33.80),
+        ] {
             let row = models
                 .iter()
                 .find(|item| item.model == model)
                 .unwrap_or_else(|| panic!("{model} should be present in model breakdown"));
             assert_eq!(row.pricing_status, "static", "{model}");
-            assert_eq!(row.pricing_source.as_deref(), Some("static-v2"), "{model}");
+            assert_eq!(row.pricing_source.as_deref(), Some("static-v3"), "{model}");
             assert!(
-                (row.cost_with_cache_usd - 33.95).abs() < 1e-9,
+                (row.cost_with_cache_usd - expected_cost).abs() < 1e-9,
                 "{model} cost should use Fable/Mythos embedded rates"
             );
         }
         assert!(
             models
                 .iter()
-                .filter(|item| matches!(item.model.as_str(), "claude-fable-5" | "claude-mythos-5"))
+                .filter(|item| matches!(
+                    item.model.as_str(),
+                    "claude-fable-5" | "claude-mythos-5" | "claude-fable-5-1" | "claude-mythos-5-1"
+                ))
                 .all(|item| item.pricing_status != "unpriced")
         );
 
@@ -569,7 +577,7 @@ fn sync_prices_gpt_5_6_per_request_for_codex_and_opencode() -> Result<()> {
         assert_eq!(rows.len(), 4);
         assert!(
             rows.iter()
-                .all(|row| row.2 == "static" && row.3 == "static-v2")
+                .all(|row| row.2 == "static" && row.3 == "static-v3")
         );
         assert_eq!(rows[0].0, "codex");
         assert_eq!(rows[0].1, "gpt-5.6-luna");
@@ -609,6 +617,78 @@ fn sync_prices_gpt_5_6_per_request_for_codex_and_opencode() -> Result<()> {
                 .peak_model
                 .as_deref()
                 .is_some_and(|model| model.contains("gpt-5.6"))
+        );
+
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn sync_prices_gpt_6_astra_per_request_for_codex_and_opencode() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_codex_gpt_6_astra()?;
+    fixture.seed_opencode_gpt_6_astra()?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        commands::sync::run(&app).await?;
+
+        let store = Store::new(&app.paths)?;
+        let conn = store.open_connection()?;
+        let rows = {
+            let mut stmt = conn.prepare(
+                r#"
+                SELECT source, model, pricing_status, pricing_source, pricing_rate,
+                       cost_with_cache_usd
+                FROM usage_event
+                WHERE model = 'gpt-6-astra'
+                ORDER BY source, event_at
+                "#,
+            )?;
+            stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, f64>(5)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        assert_eq!(rows.len(), 4);
+        assert!(
+            rows.iter()
+                .all(|row| row.1 == "gpt-6-astra" && row.2 == "static" && row.3 == "static-v3")
+        );
+        assert_eq!(rows[0].0, "codex");
+        assert!(rows[0].4.contains("\"tier\":\"default\""));
+        assert!((rows[0].5 - 7.0).abs() < 1e-9);
+        assert!(rows[1].4.contains("\"tier\":\"long_context\""));
+        assert!((rows[1].5 - 11.500025).abs() < 1e-9);
+        assert_eq!(rows[2].0, "opencode");
+        assert!(rows[2].4.contains("\"tier\":\"default\""));
+        assert!((rows[2].5 - 7.0).abs() < 1e-9);
+        assert!(rows[3].4.contains("\"tier\":\"long_context\""));
+        assert!((rows[3].5 - 11.500025).abs() < 1e-9);
+
+        drop(conn);
+
+        let dashboard = Dashboard::open(&store)?;
+        let pressure = dashboard.context_pressure(&Default::default())?;
+        assert_eq!(pressure.priced_events, 4);
+        assert_eq!(pressure.unpriced_events, 0);
+        assert!((pressure.peak_percent - (272_001.0 / 1_050_000.0)).abs() < 1e-9);
+        assert!(
+            pressure
+                .peak_model
+                .as_deref()
+                .is_some_and(|model| model.ends_with(":gpt-6-astra"))
         );
 
         Ok::<_, anyhow::Error>(())
@@ -783,6 +863,8 @@ impl Fixture {
         let rows = [
             "{\"timestamp\":\"2026-07-03T02:00:00Z\",\"message\":{\"model\":\"claude-fable-5\",\"usage\":{\"input_tokens\":1000000,\"cache_creation_input_tokens\":300000,\"cache_read_input_tokens\":200000,\"output_tokens\":400000,\"total_tokens\":1900000}}}",
             "{\"timestamp\":\"2026-07-03T02:30:00Z\",\"message\":{\"model\":\"claude-mythos-5\",\"usage\":{\"input_tokens\":1000000,\"cache_creation_input_tokens\":300000,\"cache_read_input_tokens\":200000,\"output_tokens\":400000,\"total_tokens\":1900000}}}",
+            "{\"timestamp\":\"2026-09-01T02:00:00Z\",\"message\":{\"model\":\"claude-fable-5-1\",\"usage\":{\"input_tokens\":1000000,\"cache_creation_input_tokens\":300000,\"cache_read_input_tokens\":200000,\"output_tokens\":400000,\"total_tokens\":1900000}}}",
+            "{\"timestamp\":\"2026-09-01T02:30:00Z\",\"message\":{\"model\":\"claude-mythos-5-1\",\"usage\":{\"input_tokens\":1000000,\"cache_creation_input_tokens\":300000,\"cache_read_input_tokens\":200000,\"output_tokens\":400000,\"total_tokens\":1900000}}}",
         ]
         .join("\n");
         fs::write(claude_file, format!("{rows}\n"))?;
@@ -863,6 +945,111 @@ impl Fixture {
                 "id": id,
                 "role": "assistant",
                 "modelID": model,
+                "tokens": {
+                    "input": 100_000,
+                    "output": 100_000,
+                    "reasoning": 0,
+                    "cache": { "read": 100_000, "write": cache_write }
+                },
+                "time": {
+                    "created": time_created,
+                    "completed": time_created
+                }
+            });
+            conn.execute(
+                "INSERT INTO message(id, session_id, time_created, data) VALUES (?1, ?2, ?3, ?4)",
+                (&id, &"session-1", &time_created, &message.to_string()),
+            )?;
+        }
+        Ok(())
+    }
+
+    fn seed_codex_gpt_6_astra(&self) -> Result<()> {
+        let repo_root = self.home.join("workspace").join("demo-repo");
+        write_git_repo(&repo_root)?;
+        let sessions_dir = self
+            .codex_home
+            .join("sessions")
+            .join("2026")
+            .join("09")
+            .join("03");
+        fs::create_dir_all(&sessions_dir)?;
+        for (file, timestamp, cache_creation) in [
+            (
+                "rollout-gpt-6-astra-short.jsonl",
+                "2026-09-03T01:12:00Z",
+                72_000,
+            ),
+            (
+                "rollout-gpt-6-astra-long.jsonl",
+                "2026-09-03T01:13:00Z",
+                72_001,
+            ),
+        ] {
+            let total_tokens = 300_000 + cache_creation;
+            let usage = serde_json::json!({
+                "input_tokens": 200_000,
+                "cached_input_tokens": 100_000,
+                "cache_creation_tokens": cache_creation,
+                "output_tokens": 100_000,
+                "reasoning_output_tokens": 0,
+                "total_tokens": total_tokens
+            });
+            let payload = [
+                serde_json::json!({
+                    "type": "session_meta",
+                    "payload": {
+                        "model": "gpt-6-astra",
+                        "cwd": repo_root.to_string_lossy()
+                    }
+                })
+                .to_string(),
+                serde_json::json!({
+                    "timestamp": timestamp,
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "last_token_usage": usage,
+                            "total_token_usage": usage
+                        }
+                    }
+                })
+                .to_string(),
+            ]
+            .join("\n");
+            fs::write(sessions_dir.join(file), payload)?;
+        }
+        Ok(())
+    }
+
+    fn seed_opencode_gpt_6_astra(&self) -> Result<()> {
+        let repo_root = self.home.join("workspace").join("demo-repo");
+        write_git_repo(&repo_root)?;
+        let db_path = self.opencode_home.join("opencode.db");
+        let conn = Connection::open(&db_path)?;
+        conn.execute_batch(
+            r#"
+            CREATE TABLE project(id TEXT PRIMARY KEY, worktree TEXT);
+            CREATE TABLE session(id TEXT PRIMARY KEY, project_id TEXT);
+            CREATE TABLE message(id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT);
+            "#,
+        )?;
+        conn.execute(
+            "INSERT INTO project(id, worktree) VALUES (?1, ?2)",
+            (&"project-1", &repo_root.to_string_lossy().to_string()),
+        )?;
+        conn.execute(
+            "INSERT INTO session(id, project_id) VALUES (?1, ?2)",
+            (&"session-1", &"project-1"),
+        )?;
+        for (id, cache_write, time_created) in [
+            ("msg-astra-short", 72_000, 1_788_408_720_000_i64),
+            ("msg-astra-long", 72_001, 1_788_408_780_000_i64),
+        ] {
+            let message = serde_json::json!({
+                "id": id,
+                "role": "assistant",
+                "modelID": "gpt-6-astra",
                 "tokens": {
                     "input": 100_000,
                     "output": 100_000,

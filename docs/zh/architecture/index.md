@@ -54,7 +54,7 @@ TUI Usage 在本机已有凭证文件时，可以向供应商端点发送只读�
 
 ## 价格目录流程
 
-内置 `pricing/static-v2.json` 是默认 base，统一保存稳定模型 id、来源展开、exact/family matcher、默认/阈值费率和上下文窗口。Parser 写入 SQLite 的原始模型字符串不变。
+内置 `pricing/static-v2.json` 是默认 base，当前身份为 `static-v3`，统一保存稳定模型 id、来源展开、exact/family matcher、默认/阈值费率和上下文窗口，并覆盖 GPT-6 Astra、Claude Fable 5.1 与 Claude Mythos 5.1。Parser 写入 SQLite 的原始模型字符串不变。
 
 可选用户层是通过 `catalog apply` 显式激活的 v2 `overlay`。合并顺序固定：校验 base，执行严格 `remove_models`，按稳定 id 完整替换或追加定义，最后校验 effective catalog。不做字段级深合并。Exact matcher 优先于 family matcher，同模式下更长 matcher 优先。
 

@@ -37,7 +37,7 @@ fn refresh_pricing_recomputes_all_costs() -> Result<()> {
     assert!(cost_with > 0.0);
     assert!(cost_without > cost_with);
     assert_eq!(status, "static");
-    assert_eq!(source, "static-v2");
+    assert_eq!(source, "static-v3");
     let (bucket_cost_with, bucket_status, bucket_source): (f64, String, String) = conn
         .query_row(
             r#"
@@ -50,7 +50,7 @@ fn refresh_pricing_recomputes_all_costs() -> Result<()> {
         )?;
     assert!((bucket_cost_with - cost_with).abs() < 1e-9);
     assert_eq!(bucket_status, "static");
-    assert_eq!(bucket_source, "static-v2");
+    assert_eq!(bucket_source, "static-v3");
     Ok(())
 }
 
