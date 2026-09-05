@@ -123,12 +123,13 @@ The browser dashboard includes behavior panels and a local usage-analysis workbe
 The Windows desktop app reads the same local usage database as the CLI.
 
 ```powershell
-just desktop-dev
-just desktop-build
+just tdev
+just tinstall
 ```
 
-`just desktop-dev` starts the Tauri development shell from `desktop/`.
-`just desktop-build` writes an unsigned NSIS installer to `desktop/src-tauri/target/release/bundle/nsis/`.
+`just tdev` starts the Tauri development shell from `desktop/` (same as `just desktop-dev`).
+`just tinstall` writes an unsigned NSIS installer and runs it.
+`just desktop-build` writes the installer to `desktop/src-tauri/target/release/bundle/nsis/` without running it.
 Windows SmartScreen may warn, because the installer is not code-signed.
 
 ## Pricing catalog

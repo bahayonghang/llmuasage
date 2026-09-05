@@ -12,6 +12,8 @@ serve:
 desktop-dev:
     cmd.exe /c 'desktop\node_modules\.bin\tauri.cmd dev'
 
+alias tdev := desktop-dev
+
 desktop-test:
     npm --prefix desktop test
     cargo test --manifest-path desktop/src-tauri/Cargo.toml -- --test-threads=1
@@ -19,6 +21,24 @@ desktop-test:
 desktop-build:
     npm --prefix desktop install
     cmd.exe /c 'set CI=true && desktop\node_modules\.bin\tauri.cmd build --ci --no-sign --bundles nsis'
+
+[script("powershell.exe", "-NoLogo", "-NoProfile", "-File")]
+tinstall: desktop-build
+    $ErrorActionPreference = "Stop"
+    $nsisDir = "desktop\src-tauri\target\release\bundle\nsis"
+    if (-not (Test-Path $nsisDir)) {
+        throw "NSIS output directory not found: $nsisDir"
+    }
+    $installer = Get-ChildItem -Path $nsisDir -Filter *.exe |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if (-not $installer) {
+        throw "No NSIS installer found in $nsisDir"
+    }
+    $process = Start-Process -FilePath $installer.FullName -Wait -PassThru
+    if ($process.ExitCode -ne 0) {
+        throw "NSIS installer exited with code $($process.ExitCode)"
+    }
 
 build:
     cargo build --release --locked

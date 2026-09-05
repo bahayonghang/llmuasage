@@ -121,12 +121,13 @@ llmusage export html --out .\llmusage-report
 Windows 桌面应用读取与 CLI 相同的本地用量数据库。
 
 ```powershell
-just desktop-dev
-just desktop-build
+just tdev
+just tinstall
 ```
 
-`just desktop-dev` 从 `desktop/` 启动 Tauri 开发壳。
-`just desktop-build` 在 `desktop/src-tauri/target/release/bundle/nsis/` 写出未签名 NSIS 安装包。
+`just tdev` 从 `desktop/` 启动 Tauri 开发壳（同 `just desktop-dev`）。
+`just tinstall` 写出未签名 NSIS 安装包并运行它。
+`just desktop-build` 只在 `desktop/src-tauri/target/release/bundle/nsis/` 写出安装包，不运行。
 安装包未做代码签名，Windows SmartScreen 可能告警。
 
 ## 模型价格目录

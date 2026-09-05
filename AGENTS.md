@@ -8,6 +8,8 @@
 
 - `cargo run -- <command>`: run the CLI locally, e.g. `cargo run -- sync` or `cargo run -- serve`.
 - `just serve`: start the local web dashboard.
+- `just tdev`: start the Tauri desktop development shell (`desktop-dev`).
+- `just tinstall`: build the unsigned Windows NSIS installer and run it.
 - `just docs`: run the VitePress docs dev server.
 - `just build`: build the release binary and production docs.
 - `just ci`: full gate: `python scripts/check-ci-gate.py`, `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test --all-features -- --test-threads=1`, `cargo doc --no-deps`, the dashboard JS checks (`node --check` / `node --test`), and `npm --prefix docs run docs:build`.
