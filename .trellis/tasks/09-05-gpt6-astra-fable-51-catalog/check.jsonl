@@ -1,0 +1,4 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/llmusage/backend/pricing-catalog-contracts.md", "reason": "Catalog contracts the check agent must verify"}
+{"file": ".trellis/tasks/09-05-gpt6-astra-fable-51-catalog/research/official-model-facts.md", "reason": "Official rates used in acceptance"}
+{"file": ".trellis/tasks/09-05-gpt6-astra-fable-51-catalog/research/current-catalog-gaps.md", "reason": "Family-prefix mispricing that check must still see as fixed"}

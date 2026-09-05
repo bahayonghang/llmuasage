@@ -1,0 +1,5 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/llmusage/backend/pricing-catalog-contracts.md", "reason": "Matcher specificity, embedded upgrade, GPT-5.6 tier shape, and overlay pin rules"}
+{"file": ".trellis/spec/llmusage/backend/index.md", "reason": "Backend pre-dev checklist for catalog work"}
+{"file": ".trellis/tasks/09-05-gpt6-astra-fable-51-catalog/research/official-model-facts.md", "reason": "Official Astra and Fable 5.1 ids, rates, and windows"}
+{"file": ".trellis/tasks/09-05-gpt6-astra-fable-51-catalog/research/current-catalog-gaps.md", "reason": "Current mispricing via gpt and fable-5 family matchers"}
