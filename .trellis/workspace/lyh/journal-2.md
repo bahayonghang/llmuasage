@@ -51,3 +51,25 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 70: 添加 GPT-6 Astra 与 Claude Fable/Mythos 5.1 定价覆盖
+
+**Date**: 2026-09-05
+**Task**: 添加 GPT-6 Astra 与 Claude Fable/Mythos 5.1 定价覆盖
+**Branch**: `dev`
+
+### Summary
+
+内置目录升为 static-v3，加入 gpt-6-astra、claude-fable-5-1、claude-mythos-5-1。Astra 修 OpenCode gpt family 误计价与 Codex unpriced；Fable/Mythos 5.1 cache read 0.25，5.0 行保持 1.00。未 pin 库下次 sync 重算。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8e9b6ae` | (see git log) |
+| `5544175` | (see git log) |
+
+### Status
+
+[OK] **Completed**
