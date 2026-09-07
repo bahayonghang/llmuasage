@@ -257,7 +257,10 @@ mod tests {
         let err = register_remote_host(&store, "devbox", "me@devbox", "llmusage", &mismatch)
             .expect_err("protocol");
         let text = err.to_string();
-        assert!(text.contains("local=1"), "{text}");
+        assert!(
+            text.contains(&format!("local={SHARD_PROTOCOL_VERSION}")),
+            "{text}"
+        );
         assert!(text.contains("remote=99"), "{text}");
         assert_eq!(store.hosts().list()?.len(), 1);
 

@@ -101,6 +101,11 @@ async fn emit_shards_cli_leaves_user_db_counts_and_lock_unchanged() -> Result<()
     let stdout = String::from_utf8(output.stdout)?;
     assert!(stdout.contains("\"kind\":\"header\""), "{stdout}");
     assert!(stdout.contains("\"kind\":\"trailer\""), "{stdout}");
+    assert!(
+        stdout.contains("\"source_accounting_versions\""),
+        "{stdout}"
+    );
+    assert!(stdout.contains("\"zcode\":2"), "{stdout}");
     assert!(!stdout.contains("raw_records"), "{stdout}");
 
     emit_shards_to(

@@ -82,10 +82,32 @@ impl<'a> SyncStatusStore<'a> {
             {
                 continue;
             }
-            status.token_accounting_version = self.store.token_accounting_version(source)?;
-            status.legacy_token_accounting = self.store.has_legacy_token_accounting(source)?;
-            if status.legacy_token_accounting {
-                status.token_accounting_warning = Some(Self::legacy_repair_warning(source));
+            if host_id == crate::store::LOCAL_HOST_ID {
+                status.token_accounting_version = self.store.token_accounting_version(source)?;
+                status.legacy_token_accounting = self.store.has_legacy_token_accounting(source)?;
+                if status.legacy_token_accounting {
+                    status.token_accounting_warning = Some(Self::legacy_repair_warning(source));
+                }
+                continue;
+            }
+            status.token_accounting_version = self
+                .store
+                .token_accounting_version_for_host(host_id, source)?;
+            let expected = crate::store::expected_token_accounting_version(source);
+            match status.token_accounting_version {
+                Some(version) if version == expected => {
+                    status.legacy_token_accounting = false;
+                }
+                Some(_) => {
+                    status.legacy_token_accounting = true;
+                    status.token_accounting_warning = Some(format!(
+                        "remote host {host_id} source {} token accounting is not current; a full restore is required",
+                        source.as_str()
+                    ));
+                }
+                None => {
+                    status.legacy_token_accounting = false;
+                }
             }
         }
         Ok(statuses)

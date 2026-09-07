@@ -17,8 +17,8 @@ use crate::{
     models::{ParseIssues, SourceKind},
     parsers::{SyncEvent, SyncSummaryEvent, driver},
     registry,
-    remote::protocol::{SHARD_PROTOCOL_VERSION, ShardRecord, encode_record},
-    store::{BootstrapProgressEvent, HolderKind, Store, latest_schema_version},
+    remote::protocol::{ShardRecord, encode_record, source_accounting_versions},
+    store::{BootstrapProgressEvent, HolderKind, Store},
     util::{hash_string, now_utc},
 };
 
@@ -86,14 +86,20 @@ pub async fn emit_shards_to(
     };
     let store = Store::new_emit_only()?;
     let out = Arc::new(Mutex::new(out));
+    let parsers = registry::registered_parsers()
+        .into_iter()
+        .filter(|parser| {
+            request
+                .source_kind()
+                .is_none_or(|source| parser.source() == source)
+        })
+        .collect::<Vec<_>>();
     write_record(
         &out,
-        &ShardRecord::Header {
-            shard_protocol: SHARD_PROTOCOL_VERSION,
-            llmusage_version: env!("CARGO_PKG_VERSION").to_string(),
-            schema_version: latest_schema_version(),
-            emitted_at: now_utc(),
-        },
+        &ShardRecord::header(
+            now_utc(),
+            source_accounting_versions(parsers.iter().map(|parser| parser.source())),
+        ),
     )?;
     let sink = Arc::clone(&out);
     let mut writer = store.begin_collect_run(move |shard| {
@@ -103,14 +109,6 @@ pub async fn emit_shards_to(
             }
         })
     })?;
-    let parsers = registry::registered_parsers()
-        .into_iter()
-        .filter(|parser| {
-            request
-                .source_kind()
-                .is_none_or(|source| parser.source() == source)
-        })
-        .collect::<Vec<_>>();
     let cancel = CancellationToken::new();
     let sources = driver::drive_with_events(driver::DriveContext {
         parsers: &parsers,

@@ -10,7 +10,8 @@ use llmusage::{
     models::{ParseIssues, SourceKind, UsageEvent, UsageTokens},
     parsers::{SourceSyncStats, SyncEvent},
     remote::{
-        MemoryShardSource, SHARD_PROTOCOL_VERSION, ScriptedShardSource, ShardRecord, encode_record,
+        MemoryShardSource, ScriptedShardSource, ShardRecord, encode_record,
+        source_accounting_versions,
     },
     store::{FileCursor, Host, Store, SyncShard},
 };
@@ -152,12 +153,10 @@ fn shard_stream(host_id: &str, key: &str) -> Result<String> {
         .push(format!("/{host_id}/codex.jsonl"));
     let mut stdout = String::new();
     for record in [
-        ShardRecord::Header {
-            shard_protocol: SHARD_PROTOCOL_VERSION,
-            llmusage_version: "1.2.0".to_string(),
-            schema_version: 23,
-            emitted_at: "2026-08-20T02:00:00Z".to_string(),
-        },
+        ShardRecord::header(
+            "2026-08-20T02:00:00Z",
+            source_accounting_versions([SourceKind::Codex]),
+        ),
         ShardRecord::Shard { shard },
         ShardRecord::Trailer {
             sources: vec![SourceSyncStats {
@@ -436,6 +435,112 @@ fn source_status_reports_three_host_states_and_omits_live() -> Result<()> {
     assert!(
         !stdout.contains("status=live"),
         "source-status must not print live: {stdout}"
+    );
+    Ok(())
+}
+
+#[test]
+fn source_status_does_not_use_local_marker_for_remote_unknown() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let app = fixture.app()?;
+    let store = Store::new(&app.paths)?;
+    store.bootstrap()?;
+    store.mark_current_token_accounting(SourceKind::Codex)?;
+    seed_remote_codex(&store, "devbox", "/remote/codex.jsonl", "codex:r:1")?;
+
+    let output = crate::test_process::llmusage_command()
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .args([
+            "--home",
+            app.paths.root_dir.to_str().expect("utf8 home"),
+            "source-status",
+        ])
+        .env("RUST_LOG", "off")
+        .env("LLMUSAGE_LOG", "off")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .context("spawn llmusage source-status")?;
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout)?;
+    assert!(stdout.contains("Host local:"), "{stdout}");
+    assert!(stdout.contains("Host devbox:"), "{stdout}");
+    let local_block = stdout
+        .split("Host ")
+        .find(|block| block.starts_with("local:"))
+        .expect("local host block");
+    let remote_block = stdout
+        .split("Host ")
+        .find(|block| block.starts_with("devbox:"))
+        .expect("devbox host block");
+    assert!(
+        local_block.contains("Source status codex:") && local_block.contains("accounting=current"),
+        "{local_block}"
+    );
+    assert!(
+        remote_block.contains("Source status codex:")
+            && remote_block.contains("accounting=unknown"),
+        "{remote_block}"
+    );
+    assert!(
+        !remote_block.contains("accounting=current"),
+        "remote unknown must not inherit the local marker: {remote_block}"
+    );
+    Ok(())
+}
+
+#[test]
+fn source_status_prints_legacy_for_old_remote_marker() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let app = fixture.app()?;
+    let store = Store::new(&app.paths)?;
+    store.bootstrap()?;
+    store.mark_current_token_accounting(SourceKind::Codex)?;
+    seed_remote_codex(&store, "devbox", "/remote/codex.jsonl", "codex:r:1")?;
+    store.set_meta_value("token_accounting_version.devbox.codex", "2")?;
+
+    let output = crate::test_process::llmusage_command()
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .args([
+            "--home",
+            app.paths.root_dir.to_str().expect("utf8 home"),
+            "source-status",
+        ])
+        .env("RUST_LOG", "off")
+        .env("LLMUSAGE_LOG", "off")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .context("spawn llmusage source-status")?;
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout)?;
+    let local_block = stdout
+        .split("Host ")
+        .find(|block| block.starts_with("local:"))
+        .expect("local host block");
+    let remote_block = stdout
+        .split("Host ")
+        .find(|block| block.starts_with("devbox:"))
+        .expect("devbox host block");
+    assert!(
+        local_block.contains("Source status codex:") && local_block.contains("accounting=current"),
+        "{local_block}"
+    );
+    assert!(
+        remote_block.contains("Source status codex:") && remote_block.contains("accounting=legacy"),
+        "{remote_block}"
+    );
+    assert!(
+        !remote_block.contains("accounting=current"),
+        "old remote marker must not print current: {remote_block}"
     );
     Ok(())
 }

@@ -167,6 +167,32 @@
   `RemoteHostSkipped`, and continues. Process exit stays success when local
   sync succeeded. `remote sync [--host <label>]` uses the same importer and
   does not run the local driver.
+- Remote shard Header (`SHARD_PROTOCOL_VERSION` 2) carries
+  `source_accounting_versions` for every source in that stream. `sync
+  --emit-shards` lists the registry parsers selected for the run. The
+  decoder owns wire/structure version. The importer validates token
+  accounting after Header and before the first related shard commit. Same
+  wire protocol does not mean the same token semantics. Old protocol
+  streams fail with an explicit mismatch; do not guess accounting from
+  `llmusage_version` or schema version. Schema version stays diagnostic.
+- Missing or unequal per-source accounting versions refuse before the first
+  related shard commit. Do not change existing events or watermarks for that
+  host/source. The error names the source and the upgrade action. A shard
+  whose source is absent from the Header is refused before that commit.
+- Persist certified remote history in the existing `meta` table as
+  `token_accounting_version.<host_id>.<source>`. Do not add a schema and do
+  not use the local global marker as remote truth. `source-status` for a
+  remote host uses that host/source evidence. No evidence stays `unknown`,
+  not local-marker `current`.
+- If a remote source already has rows and the historical marker is unknown
+  or incompatible, refuse a current-version incremental mix-in. Tell the
+  caller a full restore is required (not implemented here). Keep old rows
+  and watermarks. Do not auto-backfill historical markers.
+- Establish a host/source marker only when the source was empty (Pi rows
+  that the first remote Omp shard will reset count as empty), the request
+  has no `since`, the trailer succeeds, and that source has no parse error
+  (`ParseIssues::total()` and `last_error`). Matching existing markers may
+  increment. Mid-stream failure does not advance marker or watermark.
 - Additive sync events `remote_host_started`, `remote_host_finished`, and
   `remote_host_skipped` are public `--json-events` / job tags. Dashboard job
   UI must tolerate unknown event tags.
@@ -261,6 +287,14 @@
 - A command compatibility entry is called -> delegate to the matching
   `sync::engine` public function with the same arguments and output; do not
   duplicate validation, locking, parser selection, or run-log state.
+- Remote Header missing or unequal `source_accounting_versions` -> refuse
+  before the first related shard commit; keep that host/source events and
+  watermark; name the source and the upgrade action.
+- Remote source has rows and historical host/source marker is unknown or
+  not current -> refuse current-version incremental mix-in; require a full
+  restore (not implemented); keep old rows and watermarks.
+- Remote `source-status` with no host/source marker -> `unknown`, never
+  local-marker `current`.
 
 ### 5. Good/Base/Bad Cases
 
@@ -286,6 +320,10 @@
   `commands`, or making Web/TUI import `CommandSyncExecutor`.
 - Bad: adding a Gemini/Cursor/etc. parser ID only because a root directory was
   detected, without token fixtures and cursor/fingerprint tests.
+- Bad: importing a remote shard because `shard_protocol` matches while the
+  Header omits or disagrees on that source's token-accounting version.
+- Bad: printing remote `accounting=current` from the local global marker
+  when that host/source has no certified evidence.
 
 ### 6. Tests Required
 
@@ -324,6 +362,15 @@
 - Architecture tests scan `sync`/`remote -> commands`, every non-command
   layer's dependency on `commands::sync`, and sync-owned trait/type impls
   placed in `commands`; each policy has a negative fixture.
+- Remote accounting tests drive the shipped importer, protocol
+  encode/decode, and `source-status`. Missing/mismatched Header versions
+  refuse before the first related shard commit. Local current plus remote
+  unknown/old fixtures print accurate labels. Existing remote rows without
+  a trusted marker refuse current-version incremental mix-in. Empty source
+  plus no `since` plus success may establish a host/source marker that
+  survives Store reopen; mid-failure does not. Matching-version replay,
+  cross-host isolation, OMP/Pi migration, and missing-trailer watermark
+  rules stay green. No live SSH. No history restore.
 - Recent-window regressions asserting event-time filtering, an old file with a
   recent append, no bounded cursor/reset writes, later full-history recovery,
   OpenCode SQL lower-bound pruning, and `RecentReady` ordering.

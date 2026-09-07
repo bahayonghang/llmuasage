@@ -230,6 +230,28 @@ impl Store {
             .and_then(|value| value.parse().ok()))
     }
 
+    /// Host-scoped token-accounting marker. Local keeps the global key;
+    /// remote hosts use `token_accounting_version.<host_id>.<source>`.
+    pub fn token_accounting_version_for_host(
+        &self,
+        host_id: &str,
+        source: SourceKind,
+    ) -> Result<Option<u32>> {
+        Ok(self
+            .meta_value(&token_accounting_key_for_host(host_id, source))?
+            .and_then(|value| value.parse().ok()))
+    }
+
+    /// Event rows stored for one source on one host.
+    pub fn host_source_event_count(&self, host_id: &str, source: SourceKind) -> Result<i64> {
+        let conn = self.open_connection()?;
+        Ok(conn.query_row(
+            "SELECT COUNT(*) FROM usage_event WHERE source = ?1 AND host_id = ?2",
+            rusqlite::params![source.as_str(), host_id],
+            |row| row.get(0),
+        )?)
+    }
+
     /// True when persisted rows predate the current token-accounting contract.
     pub fn has_legacy_token_accounting(&self, source: SourceKind) -> Result<bool> {
         if self.token_accounting_version(source)? == Some(expected_token_accounting_version(source))
@@ -249,6 +271,18 @@ impl Store {
     pub fn mark_current_token_accounting(&self, source: SourceKind) -> Result<()> {
         self.set_meta_value(
             &token_accounting_key(source),
+            &expected_token_accounting_version(source).to_string(),
+        )
+    }
+
+    /// Records a certified historical token-accounting version for one host/source.
+    pub fn mark_current_token_accounting_for_host(
+        &self,
+        host_id: &str,
+        source: SourceKind,
+    ) -> Result<()> {
+        self.set_meta_value(
+            &token_accounting_key_for_host(host_id, source),
             &expected_token_accounting_version(source).to_string(),
         )
     }
@@ -437,6 +471,14 @@ fn token_accounting_key(source: crate::models::SourceKind) -> String {
     format!("token_accounting_version.{}", source.as_str())
 }
 
+fn token_accounting_key_for_host(host_id: &str, source: crate::models::SourceKind) -> String {
+    if host_id == super::LOCAL_HOST_ID {
+        token_accounting_key(source)
+    } else {
+        format!("token_accounting_version.{host_id}.{}", source.as_str())
+    }
+}
+
 fn read_meta_flag(conn: &rusqlite::Connection, key: &str) -> Result<bool> {
     let raw = read_meta_value(conn, key)?;
     Ok(matches!(raw.as_deref(), Some("1")))
@@ -505,6 +547,42 @@ mod tests {
             } if db_version == future_version
                 && binary_version == migrations::latest_schema_version()
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn host_token_accounting_markers_are_namespaced() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = AppPaths::with_root(temp.path().join("runtime"))?;
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+        store.mark_current_token_accounting(SourceKind::Codex)?;
+        store.mark_current_token_accounting_for_host("devbox", SourceKind::Codex)?;
+        store.set_meta_value("token_accounting_version.other.codex", "2")?;
+
+        assert_eq!(
+            store.token_accounting_version(SourceKind::Codex)?,
+            Some(expected_token_accounting_version(SourceKind::Codex))
+        );
+        assert_eq!(
+            store.token_accounting_version_for_host(
+                super::super::LOCAL_HOST_ID,
+                SourceKind::Codex
+            )?,
+            store.token_accounting_version(SourceKind::Codex)?
+        );
+        assert_eq!(
+            store.token_accounting_version_for_host("devbox", SourceKind::Codex)?,
+            Some(expected_token_accounting_version(SourceKind::Codex))
+        );
+        assert_eq!(
+            store.token_accounting_version_for_host("other", SourceKind::Codex)?,
+            Some(2)
+        );
+        assert_eq!(
+            store.token_accounting_version_for_host("missing", SourceKind::Codex)?,
+            None
+        );
         Ok(())
     }
 }

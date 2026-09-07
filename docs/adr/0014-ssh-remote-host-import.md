@@ -34,7 +34,14 @@ Add a host dimension and an SSH pull of normalized `SyncShard` records.
 
 - Register a remote with `llmusage remote add <label> <ssh-target>`. The
   handshake requires an equal shard protocol version. Schema version is
-  diagnostic only.
+  diagnostic only and must not be treated as token-accounting equality.
+- Shard protocol 2 requires the Header to carry `source_accounting_versions`
+  for every source in that stream. The decoder owns wire/structure version
+  checks. The importer owns semantic token-accounting validation after Header
+  and before the first related shard commit. A matching wire version does not
+  mean matching token semantics. Old protocol streams are rejected with an
+  explicit mismatch error; there is no compatibility guesswork. Both sides
+  must be upgraded together to this protocol.
 - On the remote host, `llmusage sync --emit-shards` parses local artifacts
   with the registered parsers and writes NDJSON shards to stdout. It does
   not open the user database and does not take the user-database worker lock.
@@ -66,7 +73,21 @@ ProxyJump, agent, and known_hosts.
   local machine does not parse remote files, mount sshfs, or copy prompt
   text. Shard `raw_records` are skipped on the wire.
 - Users must install a compatible llmusage binary on each remote host and
-  keep shard protocol versions equal.
+  keep shard protocol versions equal. Protocol 2 also requires matching
+  per-source token-accounting versions in the Header. Missing or unequal
+  accounting versions refuse the related import before any matching shard
+  commit and leave that host/source's events and watermark unchanged. The
+  error names the source and the upgrade action.
+- Certified remote history is stored in the existing `meta` table as
+  `token_accounting_version.<host_id>.<source>`. The local global marker is
+  not remote truth. `source-status` for a remote host uses that host/source
+  evidence; no evidence stays `unknown`.
+- Existing remote rows without a trusted current host/source marker cannot
+  accept a current-version incremental mix-in. A full restore is required
+  and is not implemented by this change. Empty source, no `since`, successful
+  trailer, and no parse error may establish the host/source marker. Matching
+  markers may increment. Mid-stream failure does not advance marker or
+  watermark.
 - A missing remote file path is not a local-disk path. Uncontacted SSH
   hosts must not flip `source_file` rows to `missing` and must not block
   `sync --rebuild` or automatic token-accounting repair.
@@ -92,7 +113,11 @@ ProxyJump, agent, and known_hosts.
 ## Verification
 
 - Injected `ShardSource` tests cover handshake, protocol mismatch, motd
-  skip, trailer-missing watermark rules, and unreachable hosts.
+  skip, trailer-missing watermark rules, unreachable hosts, per-source
+  accounting refusal before commit, host/source marker isolation, and
+  source-status unknown vs local current. Tests use local fixtures only;
+  they do not connect to or upgrade real SSH hosts, and they do not rebuild
+  historical remote databases.
 - `llmusage sync` against an unreachable host completes local sync, exits
   successfully, emits `RemoteHostSkipped`, and leaves that host's
   `source_file` rows live.

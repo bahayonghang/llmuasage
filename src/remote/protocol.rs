@@ -1,16 +1,20 @@
-use std::io::BufRead;
+use std::{collections::BTreeMap, io::BufRead};
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
     error::{LlmusageError, Result},
-    models::ParseIssues,
+    models::{ParseIssues, SourceKind},
     parsers::SourceSyncStats,
-    store::{SyncShard, latest_schema_version},
+    store::{SyncShard, expected_token_accounting_version, latest_schema_version},
 };
 
 /// Wire version for NDJSON shard records. Schema version is diagnostic only.
-pub const SHARD_PROTOCOL_VERSION: u32 = 1;
+///
+/// Version 2 requires `source_accounting_versions` on every Header. The same
+/// wire version never implied matching token semantics; v2 makes that contract
+/// explicit. Old protocol streams are rejected with no compatibility guesswork.
+pub const SHARD_PROTOCOL_VERSION: u32 = 2;
 
 /// One NDJSON record in a shard stream.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,6 +25,9 @@ pub enum ShardRecord {
         llmusage_version: String,
         schema_version: u32,
         emitted_at: String,
+        /// This stream's sources mapped to their expected token-accounting versions.
+        #[serde(default)]
+        source_accounting_versions: BTreeMap<String, u32>,
     },
     Shard {
         shard: SyncShard,
@@ -45,6 +52,36 @@ impl HandshakeResponse {
             shard_protocol: SHARD_PROTOCOL_VERSION,
             schema_version: latest_schema_version(),
             llmusage_version: env!("CARGO_PKG_VERSION").to_string(),
+        }
+    }
+}
+
+/// Expected token-accounting versions for the sources in this emit-shards run.
+pub fn source_accounting_versions(
+    sources: impl IntoIterator<Item = SourceKind>,
+) -> BTreeMap<String, u32> {
+    sources
+        .into_iter()
+        .map(|source| {
+            (
+                source.as_str().to_string(),
+                expected_token_accounting_version(source),
+            )
+        })
+        .collect()
+}
+
+impl ShardRecord {
+    pub fn header(
+        emitted_at: impl Into<String>,
+        source_accounting_versions: BTreeMap<String, u32>,
+    ) -> Self {
+        Self::Header {
+            shard_protocol: SHARD_PROTOCOL_VERSION,
+            llmusage_version: env!("CARGO_PKG_VERSION").to_string(),
+            schema_version: latest_schema_version(),
+            emitted_at: emitted_at.into(),
+            source_accounting_versions,
         }
     }
 }
@@ -166,12 +203,10 @@ mod tests {
     }
 
     fn header() -> ShardRecord {
-        ShardRecord::Header {
-            shard_protocol: SHARD_PROTOCOL_VERSION,
-            llmusage_version: "1.2.0".to_string(),
-            schema_version: 23,
-            emitted_at: "2026-08-20T00:00:00Z".to_string(),
-        }
+        ShardRecord::header(
+            "2026-08-20T00:00:00Z",
+            source_accounting_versions([SourceKind::Codex]),
+        )
     }
 
     #[test]
@@ -211,9 +246,72 @@ mod tests {
         );
         let err = stream.next_record().expect_err("mismatch");
         let text = err.to_string();
-        assert!(text.contains("local=1"), "{text}");
+        assert!(
+            text.contains(&format!("local={SHARD_PROTOCOL_VERSION}")),
+            "{text}"
+        );
         assert!(text.contains("remote=99"), "{text}");
         assert!(text.contains("schema_version=22"), "{text}");
+        Ok(())
+    }
+
+    #[test]
+    fn protocol_v1_header_fails_without_guessing_accounting() -> anyhow::Result<()> {
+        let mut stream = decoder(
+            r#"{"kind":"header","shard_protocol":1,"llmusage_version":"1.2.0","schema_version":23,"emitted_at":"2026-08-20T00:00:00Z"}
+"#,
+        );
+        let err = stream.next_record().expect_err("old protocol");
+        let text = err.to_string();
+        assert!(
+            text.contains(&format!("local={SHARD_PROTOCOL_VERSION}")),
+            "{text}"
+        );
+        assert!(text.contains("remote=1"), "{text}");
+        Ok(())
+    }
+
+    #[test]
+    fn header_round_trip_includes_source_accounting_versions() -> anyhow::Result<()> {
+        let encoded = encode_record(&header())?;
+        assert!(
+            encoded.contains("\"source_accounting_versions\""),
+            "{encoded}"
+        );
+        assert!(encoded.contains("\"codex\":3"), "{encoded}");
+        let mut stream = decoder(&format!("{encoded}\n"));
+        match stream.next_record()?.expect("header") {
+            ShardRecord::Header {
+                shard_protocol,
+                source_accounting_versions,
+                ..
+            } => {
+                assert_eq!(shard_protocol, SHARD_PROTOCOL_VERSION);
+                assert_eq!(
+                    source_accounting_versions.get("codex").copied(),
+                    Some(expected_token_accounting_version(SourceKind::Codex))
+                );
+            }
+            other => panic!("expected header, got {other:?}"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn missing_source_accounting_versions_deserializes_as_empty_map() -> anyhow::Result<()> {
+        let mut stream = decoder(&format!(
+            r#"{{"kind":"header","shard_protocol":{SHARD_PROTOCOL_VERSION},"llmusage_version":"1.2.0","schema_version":23,"emitted_at":"2026-08-20T00:00:00Z"}}
+"#
+        ));
+        match stream.next_record()?.expect("header") {
+            ShardRecord::Header {
+                source_accounting_versions,
+                ..
+            } => {
+                assert!(source_accounting_versions.is_empty());
+            }
+            other => panic!("expected header, got {other:?}"),
+        }
         Ok(())
     }
 

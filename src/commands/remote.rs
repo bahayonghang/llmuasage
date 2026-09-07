@@ -239,10 +239,7 @@ mod tests {
     use crate::{
         models::{ParseIssues, UsageEvent, UsageTokens},
         paths::AppPaths,
-        remote::{
-            MemoryShardSource, SHARD_PROTOCOL_VERSION, ScriptedShardSource, ShardRecord,
-            encode_record,
-        },
+        remote::{MemoryShardSource, ScriptedShardSource, ShardRecord, encode_record},
         store::{FileCursor, SyncShard},
     };
     use std::collections::BTreeMap;
@@ -377,12 +374,10 @@ mod tests {
         remote_shard.events.push(usage_event("codex:remote:1"));
         let mut stdout = String::new();
         for record in [
-            ShardRecord::Header {
-                shard_protocol: SHARD_PROTOCOL_VERSION,
-                llmusage_version: "1.2.0".to_string(),
-                schema_version: 23,
-                emitted_at: "2026-08-20T02:00:00Z".to_string(),
-            },
+            crate::remote::protocol::ShardRecord::header(
+                "2026-08-20T02:00:00Z",
+                crate::remote::protocol::source_accounting_versions([SourceKind::Codex]),
+            ),
             ShardRecord::Shard {
                 shard: remote_shard,
             },

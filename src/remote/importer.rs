@@ -1,14 +1,18 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 
 use crate::{
     error::{LlmusageError, Result},
     models::SourceKind,
     parsers::SourceSyncStats,
-    store::{Host, SourceSyncStatus, Store, SyncRunWriter, SyncShard},
+    store::{
+        Host, SourceSyncStatus, Store, SyncRunWriter, SyncShard, expected_token_accounting_version,
+    },
     util::now_utc,
 };
 
-use super::protocol::{ShardDecoder, ShardRecord};
+use super::protocol::{SHARD_PROTOCOL_VERSION, ShardDecoder, ShardRecord};
 use super::transport::ShardSource;
 
 pub const IMPORT_WATERMARK_OVERLAP_HOURS: i64 = 48;
@@ -36,6 +40,9 @@ impl RemoteImporter {
         let mut max_event_at: Option<DateTime<Utc>> = None;
         let mut shards_committed = 0usize;
         let mut trailer_sources: Option<Vec<SourceSyncStats>> = None;
+        let mut listed_sources: Option<BTreeMap<SourceKind, u32>> = None;
+        let mut empty_sources = BTreeSet::new();
+        let mut pi_awaiting_omp_reset = false;
         let skipped_lines;
         let saw_header;
         let saw_trailer;
@@ -47,8 +54,35 @@ impl RemoteImporter {
                 .is_some();
             while let Some(record) = decoder.next_record()? {
                 match record {
-                    ShardRecord::Header { .. } => {}
+                    ShardRecord::Header {
+                        source_accounting_versions,
+                        ..
+                    } => {
+                        if listed_sources.is_some() {
+                            continue;
+                        }
+                        let (parsed, empty, awaiting_reset) = validate_header_accounting(
+                            host,
+                            store,
+                            &source_accounting_versions,
+                            omp_split_migrated,
+                        )?;
+                        listed_sources = Some(parsed);
+                        empty_sources = empty;
+                        pi_awaiting_omp_reset = awaiting_reset;
+                    }
                     ShardRecord::Shard { shard } => {
+                        let listed = listed_sources.as_ref().ok_or_else(|| {
+                            LlmusageError::ConfigInvalid {
+                                detail: format!(
+                                    "remote host {} emitted a shard before a validated header",
+                                    host.host_id
+                                ),
+                            }
+                        })?;
+                        if !listed.contains_key(&shard.source) {
+                            return Err(unlisted_shard_source_error(&host.host_id, shard.source));
+                        }
                         let shard = bind_shard_to_host(shard, &host.host_id);
                         for event in &shard.events {
                             if let Ok(parsed) = DateTime::parse_from_rfc3339(&event.event_at) {
@@ -58,9 +92,12 @@ impl RemoteImporter {
                             }
                         }
                         // First Omp commit resets pre-split Pi for this host.
-                        // Defer Pi shards until that reset runs, otherwise a
+                        // Defer Pi only when this stream listed Omp, otherwise a
                         // Pi-then-Omp stream would delete the post-split Pi rows.
-                        if !omp_split_migrated && shard.source == SourceKind::Pi {
+                        if shard.source == SourceKind::Pi
+                            && listed.contains_key(&SourceKind::Omp)
+                            && !omp_split_migrated
+                        {
                             deferred_pi.push(shard);
                             continue;
                         }
@@ -69,6 +106,10 @@ impl RemoteImporter {
                         shards_committed += 1;
                         if shard_source == SourceKind::Omp {
                             omp_split_migrated = true;
+                            if pi_awaiting_omp_reset {
+                                empty_sources.insert(SourceKind::Pi);
+                                pi_awaiting_omp_reset = false;
+                            }
                             for pi_shard in deferred_pi.drain(..) {
                                 writer.commit_shard(pi_shard)?;
                                 shards_committed += 1;
@@ -79,6 +120,14 @@ impl RemoteImporter {
                         trailer_sources = Some(sources);
                     }
                 }
+            }
+            if pi_awaiting_omp_reset && !deferred_pi.is_empty() {
+                return Err(historical_restore_error(
+                    &host.host_id,
+                    SourceKind::Pi,
+                    store.token_accounting_version_for_host(&host.host_id, SourceKind::Pi)?,
+                    expected_token_accounting_version(SourceKind::Pi),
+                ));
             }
             for pi_shard in deferred_pi {
                 writer.commit_shard(pi_shard)?;
@@ -122,6 +171,11 @@ impl RemoteImporter {
             .sync_status()
             .save_source_sync_statuses(&host.host_id, &statuses)?;
         store.hosts().record_contact(&host.host_id, None)?;
+        if since.is_none()
+            && let Some(listed) = listed_sources.as_ref()
+        {
+            establish_host_source_markers(store, &host.host_id, listed, &empty_sources, &sources)?;
+        }
         if let Some(watermark) = max_event_at {
             store.hosts().set_watermark(
                 &host.host_id,
@@ -187,6 +241,147 @@ fn status_from_stats(stats: &SourceSyncStats) -> SourceSyncStatus {
     }
 }
 
+fn validate_header_accounting(
+    host: &Host,
+    store: &Store,
+    versions: &BTreeMap<String, u32>,
+    omp_split_migrated: bool,
+) -> Result<(BTreeMap<SourceKind, u32>, BTreeSet<SourceKind>, bool)> {
+    if versions.is_empty() {
+        return Err(LlmusageError::ConfigInvalid {
+            detail: format!(
+                "remote host {} shard header is missing source token-accounting versions; \
+                 upgrade llmusage on that host so both sides share shard_protocol {SHARD_PROTOCOL_VERSION} \
+                 and the header lists each source's token_accounting_version",
+                host.host_id
+            ),
+        });
+    }
+
+    let mut parsed = BTreeMap::new();
+    for (name, version) in versions {
+        let Some(source) = SourceKind::parse_id(name) else {
+            return Err(LlmusageError::ConfigInvalid {
+                detail: format!(
+                    "remote host {} shard header lists unknown source {name}; \
+                     upgrade llmusage so both sides share shard_protocol {SHARD_PROTOCOL_VERSION}",
+                    host.host_id
+                ),
+            });
+        };
+        let expected = expected_token_accounting_version(source);
+        if *version != expected {
+            return Err(accounting_mismatch_error(
+                &host.host_id,
+                source,
+                Some(*version),
+                expected,
+            ));
+        }
+        parsed.insert(source, *version);
+    }
+
+    let omp_split_pending = parsed.contains_key(&SourceKind::Omp) && !omp_split_migrated;
+    let mut empty_sources = BTreeSet::new();
+    let mut pi_awaiting_omp_reset = false;
+    for source in parsed.keys().copied() {
+        let rows = store.host_source_event_count(&host.host_id, source)?;
+        if source == SourceKind::Pi && omp_split_pending {
+            if rows == 0 {
+                empty_sources.insert(source);
+            } else {
+                // First Omp shard will reset these rows. Do not certify Pi
+                // until that reset commits; do not mix new Pi in before it.
+                pi_awaiting_omp_reset = true;
+            }
+            continue;
+        }
+        if rows == 0 {
+            empty_sources.insert(source);
+            continue;
+        }
+        let marker = store.token_accounting_version_for_host(&host.host_id, source)?;
+        let expected = expected_token_accounting_version(source);
+        if marker != Some(expected) {
+            return Err(historical_restore_error(
+                &host.host_id,
+                source,
+                marker,
+                expected,
+            ));
+        }
+    }
+    Ok((parsed, empty_sources, pi_awaiting_omp_reset))
+}
+
+fn establish_host_source_markers(
+    store: &Store,
+    host_id: &str,
+    listed: &BTreeMap<SourceKind, u32>,
+    empty_sources: &BTreeSet<SourceKind>,
+    trailer_sources: &[SourceSyncStats],
+) -> Result<()> {
+    for source in listed.keys().copied() {
+        if !empty_sources.contains(&source) {
+            continue;
+        }
+        let Some(stats) = trailer_sources.iter().find(|stats| stats.source == source) else {
+            continue;
+        };
+        if stats.parse_issues.total() > 0 || stats.last_error.is_some() {
+            continue;
+        }
+        store.mark_current_token_accounting_for_host(host_id, source)?;
+    }
+    Ok(())
+}
+
+fn accounting_mismatch_error(
+    host_id: &str,
+    source: SourceKind,
+    remote_version: Option<u32>,
+    expected: u32,
+) -> LlmusageError {
+    let remote =
+        remote_version.map_or_else(|| "<missing>".to_string(), |version| version.to_string());
+    LlmusageError::ConfigInvalid {
+        detail: format!(
+            "token accounting mismatch for host {host_id} source {}: local={expected} remote={remote}; \
+             upgrade llmusage on that host so source {} reports token_accounting_version {expected} \
+             in shard protocol {SHARD_PROTOCOL_VERSION}",
+            source.as_str(),
+            source.as_str()
+        ),
+    }
+}
+
+fn historical_restore_error(
+    host_id: &str,
+    source: SourceKind,
+    marker: Option<u32>,
+    expected: u32,
+) -> LlmusageError {
+    let historical = marker.map_or_else(|| "unknown".to_string(), |version| version.to_string());
+    LlmusageError::ConfigInvalid {
+        detail: format!(
+            "remote host {host_id} source {} already has imported rows without a trusted \
+             current token-accounting marker (historical={historical}, current={expected}); \
+             a full restore is required (not implemented); existing events and watermarks were left unchanged",
+            source.as_str()
+        ),
+    }
+}
+
+fn unlisted_shard_source_error(host_id: &str, source: SourceKind) -> LlmusageError {
+    LlmusageError::ConfigInvalid {
+        detail: format!(
+            "remote host {host_id} shard source {} is not listed in the header source_accounting_versions map; \
+             upgrade llmusage on that host so the header lists every shard source and its token_accounting_version",
+            source.as_str()
+        ),
+    }
+}
+
 fn format_stderr_suffix(stderr: &str) -> String {
     let trimmed = stderr.trim();
     if trimmed.is_empty() {
@@ -202,10 +397,11 @@ mod tests {
     use crate::{
         models::{ParseIssues, SourceKind, UsageEvent, UsageTokens},
         paths::AppPaths,
-        remote::protocol::{SHARD_PROTOCOL_VERSION, ShardRecord, encode_record},
+        remote::protocol::{ShardRecord, encode_record, source_accounting_versions},
         remote::transport::MemoryShardSource,
         store::{FileCursor, HolderKind, LOCAL_HOST_ID, Store},
     };
+    use std::collections::BTreeMap;
     use tempfile::TempDir;
 
     fn event(key: &str, at: &str) -> UsageEvent {
@@ -257,6 +453,29 @@ mod tests {
         out
     }
 
+    fn header(sources: &[SourceKind]) -> ShardRecord {
+        ShardRecord::header(
+            "2026-08-20T02:00:00Z",
+            source_accounting_versions(sources.iter().copied()),
+        )
+    }
+
+    fn trailer(sources: Vec<SourceSyncStats>) -> ShardRecord {
+        ShardRecord::Trailer {
+            sources,
+            parse_issues: ParseIssues::default(),
+        }
+    }
+
+    fn source_stats(source: SourceKind, events: usize) -> SourceSyncStats {
+        SourceSyncStats {
+            source,
+            events_seen: events,
+            events_inserted: events,
+            ..SourceSyncStats::default()
+        }
+    }
+
     fn fenced_store() -> anyhow::Result<(TempDir, Store, crate::store::WorkerLock)> {
         let temp = TempDir::new()?;
         let paths = AppPaths::with_root(temp.path().to_path_buf())?;
@@ -279,22 +498,9 @@ mod tests {
             .push(event("codex:a:1", "2026-08-20T01:00:00Z"));
         let stdout = stream(
             &[
-                ShardRecord::Header {
-                    shard_protocol: SHARD_PROTOCOL_VERSION,
-                    llmusage_version: "1.2.0".to_string(),
-                    schema_version: 23,
-                    emitted_at: "2026-08-20T02:00:00Z".to_string(),
-                },
+                header(&[SourceKind::Codex]),
                 ShardRecord::Shard { shard },
-                ShardRecord::Trailer {
-                    sources: vec![SourceSyncStats {
-                        source: SourceKind::Codex,
-                        events_seen: 1,
-                        events_inserted: 1,
-                        ..SourceSyncStats::default()
-                    }],
-                    parse_issues: ParseIssues::default(),
-                },
+                trailer(vec![source_stats(SourceKind::Codex, 1)]),
             ],
             "Welcome to devbox\n",
         );
@@ -318,6 +524,12 @@ mod tests {
         assert_eq!(
             refreshed.import_watermark.as_deref(),
             Some("2026-08-20T01:00:00Z")
+        );
+        assert_eq!(
+            store.token_accounting_version_for_host("devbox", SourceKind::Codex)?,
+            Some(crate::store::expected_token_accounting_version(
+                SourceKind::Codex
+            ))
         );
         Ok(())
     }
@@ -345,15 +557,7 @@ mod tests {
         });
         shard.seen_file_paths.push("/same/path.jsonl".to_string());
         let stdout = stream(
-            &[
-                ShardRecord::Header {
-                    shard_protocol: SHARD_PROTOCOL_VERSION,
-                    llmusage_version: "1.2.0".to_string(),
-                    schema_version: 23,
-                    emitted_at: "2026-08-20T02:00:00Z".to_string(),
-                },
-                ShardRecord::Shard { shard },
-            ],
+            &[header(&[SourceKind::Codex]), ShardRecord::Shard { shard }],
             "",
         );
         let source = MemoryShardSource {
@@ -374,6 +578,11 @@ mod tests {
         assert_eq!(events, 1);
         let refreshed = store.hosts().get_by_label("devbox")?.expect("host");
         assert!(refreshed.import_watermark.is_none());
+        assert_eq!(
+            store.token_accounting_version_for_host("devbox", SourceKind::Codex)?,
+            None,
+            "mid-stream failure must not establish a host/source marker"
+        );
         Ok(())
     }
 
@@ -423,19 +632,11 @@ mod tests {
             .push(event("codex:remote:1", "2026-08-20T01:00:00Z"));
         let stdout = stream(
             &[
-                ShardRecord::Header {
-                    shard_protocol: SHARD_PROTOCOL_VERSION,
-                    llmusage_version: "1.2.0".to_string(),
-                    schema_version: 23,
-                    emitted_at: "2026-08-20T02:00:00Z".to_string(),
-                },
+                header(&[SourceKind::Codex]),
                 ShardRecord::Shard {
                     shard: remote_shard,
                 },
-                ShardRecord::Trailer {
-                    sources: vec![SourceSyncStats::default()],
-                    parse_issues: ParseIssues::default(),
-                },
+                trailer(vec![SourceSyncStats::default()]),
             ],
             "",
         );
@@ -544,22 +745,9 @@ mod tests {
         ));
         let stdout = stream(
             &[
-                ShardRecord::Header {
-                    shard_protocol: SHARD_PROTOCOL_VERSION,
-                    llmusage_version: "1.2.0".to_string(),
-                    schema_version: 23,
-                    emitted_at: "2026-08-20T02:00:00Z".to_string(),
-                },
+                header(&[SourceKind::Omp]),
                 ShardRecord::Shard { shard: omp_shard },
-                ShardRecord::Trailer {
-                    sources: vec![SourceSyncStats {
-                        source: SourceKind::Omp,
-                        events_seen: 1,
-                        events_inserted: 1,
-                        ..SourceSyncStats::default()
-                    }],
-                    parse_issues: ParseIssues::default(),
-                },
+                trailer(vec![source_stats(SourceKind::Omp, 1)]),
             ],
             "",
         );
@@ -591,17 +779,9 @@ mod tests {
         ));
         let stdout = stream(
             &[
-                ShardRecord::Header {
-                    shard_protocol: SHARD_PROTOCOL_VERSION,
-                    llmusage_version: "1.2.0".to_string(),
-                    schema_version: 23,
-                    emitted_at: "2026-08-20T05:00:00Z".to_string(),
-                },
+                header(&[SourceKind::Omp]),
                 ShardRecord::Shard { shard: second_omp },
-                ShardRecord::Trailer {
-                    sources: vec![SourceSyncStats::default()],
-                    parse_issues: ParseIssues::default(),
-                },
+                trailer(vec![SourceSyncStats::default()]),
             ],
             "",
         );
@@ -645,31 +825,13 @@ mod tests {
         ));
         let stdout = stream(
             &[
-                ShardRecord::Header {
-                    shard_protocol: SHARD_PROTOCOL_VERSION,
-                    llmusage_version: "1.2.0".to_string(),
-                    schema_version: 23,
-                    emitted_at: "2026-08-20T03:00:00Z".to_string(),
-                },
+                header(&[SourceKind::Pi, SourceKind::Omp]),
                 ShardRecord::Shard { shard: live_pi },
                 ShardRecord::Shard { shard: omp_shard },
-                ShardRecord::Trailer {
-                    sources: vec![
-                        SourceSyncStats {
-                            source: SourceKind::Pi,
-                            events_seen: 1,
-                            events_inserted: 1,
-                            ..SourceSyncStats::default()
-                        },
-                        SourceSyncStats {
-                            source: SourceKind::Omp,
-                            events_seen: 1,
-                            events_inserted: 1,
-                            ..SourceSyncStats::default()
-                        },
-                    ],
-                    parse_issues: ParseIssues::default(),
-                },
+                trailer(vec![
+                    source_stats(SourceKind::Pi, 1),
+                    source_stats(SourceKind::Omp, 1),
+                ]),
             ],
             "",
         );
@@ -692,6 +854,436 @@ mod tests {
             store
                 .meta_value(&format!("omp_split_migrated.{}", host.host_id))?
                 .is_some()
+        );
+        Ok(())
+    }
+
+    fn import_stream(store: &Store, host: &Host, stdout: String) -> Result<ImportOutcome> {
+        let source = MemoryShardSource {
+            stdout,
+            stderr: String::new(),
+            status: 0,
+        };
+        let mut writer = store.begin_sync_run()?;
+        RemoteImporter::import(host, store, &mut writer, &source)
+    }
+
+    fn event_count(store: &Store, host_id: &str, source: SourceKind) -> anyhow::Result<i64> {
+        count_source(store, source, host_id)
+    }
+
+    #[test]
+    fn missing_accounting_versions_refuse_before_any_shard_commit() -> anyhow::Result<()> {
+        let (_temp, store, _lock) = fenced_store()?;
+        store.hosts().upsert(&ssh_host(None))?;
+        let host = store.hosts().get_by_label("devbox")?.expect("host");
+        let mut shard = SyncShard::new(SourceKind::Codex);
+        shard
+            .events
+            .push(event("codex:a:1", "2026-08-20T01:00:00Z"));
+        let stdout = stream(
+            &[
+                ShardRecord::header("2026-08-20T02:00:00Z", BTreeMap::new()),
+                ShardRecord::Shard { shard },
+                trailer(vec![source_stats(SourceKind::Codex, 1)]),
+            ],
+            "",
+        );
+        let err = import_stream(&store, &host, stdout).expect_err("missing versions");
+        let text = err.to_string();
+        assert!(
+            text.contains("codex") || text.contains("token-accounting"),
+            "{text}"
+        );
+        assert!(text.contains("upgrade"), "{text}");
+        assert_eq!(event_count(&store, "devbox", SourceKind::Codex)?, 0);
+        let refreshed = store.hosts().get_by_label("devbox")?.expect("host");
+        assert!(refreshed.import_watermark.is_none());
+        assert_eq!(
+            store.token_accounting_version_for_host("devbox", SourceKind::Codex)?,
+            None
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn mismatched_accounting_version_refuse_before_any_shard_commit() -> anyhow::Result<()> {
+        let (_temp, store, _lock) = fenced_store()?;
+        store.hosts().upsert(&ssh_host(None))?;
+        let host = store.hosts().get_by_label("devbox")?.expect("host");
+        let mut shard = SyncShard::new(SourceKind::Codex);
+        shard
+            .events
+            .push(event("codex:a:1", "2026-08-20T01:00:00Z"));
+        let mut versions = BTreeMap::new();
+        versions.insert("codex".to_string(), 2);
+        let stdout = stream(
+            &[
+                ShardRecord::header("2026-08-20T02:00:00Z", versions),
+                ShardRecord::Shard { shard },
+                trailer(vec![source_stats(SourceKind::Codex, 1)]),
+            ],
+            "",
+        );
+        let err = import_stream(&store, &host, stdout).expect_err("mismatch");
+        let text = err.to_string();
+        assert!(text.contains("codex"), "{text}");
+        assert!(text.contains("upgrade"), "{text}");
+        assert!(text.contains("local=3"), "{text}");
+        assert!(text.contains("remote=2"), "{text}");
+        assert_eq!(event_count(&store, "devbox", SourceKind::Codex)?, 0);
+        let refreshed = store.hosts().get_by_label("devbox")?.expect("host");
+        assert!(refreshed.import_watermark.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn unlisted_shard_source_is_refused_before_that_commit() -> anyhow::Result<()> {
+        let (_temp, store, _lock) = fenced_store()?;
+        store.hosts().upsert(&ssh_host(None))?;
+        let host = store.hosts().get_by_label("devbox")?.expect("host");
+        let mut shard = SyncShard::new(SourceKind::Claude);
+        shard.events.push(event_for(
+            SourceKind::Claude,
+            "claude:a:1",
+            "2026-08-20T01:00:00Z",
+        ));
+        let stdout = stream(
+            &[
+                header(&[SourceKind::Codex]),
+                ShardRecord::Shard { shard },
+                trailer(vec![source_stats(SourceKind::Claude, 1)]),
+            ],
+            "",
+        );
+        let err = import_stream(&store, &host, stdout).expect_err("unlisted");
+        let text = err.to_string();
+        assert!(text.contains("claude"), "{text}");
+        assert!(text.contains("upgrade"), "{text}");
+        assert_eq!(event_count(&store, "devbox", SourceKind::Claude)?, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn existing_remote_rows_without_marker_refuse_current_incremental() -> anyhow::Result<()> {
+        let (_temp, store, _lock) = fenced_store()?;
+        store
+            .hosts()
+            .upsert(&ssh_host(Some("2026-08-20T01:00:00Z")))?;
+        let host = store.hosts().get_by_label("devbox")?.expect("host");
+        let mut existing = SyncShard::new_for_host(SourceKind::Codex, "devbox");
+        existing
+            .events
+            .push(event("codex:old:1", "2026-08-20T00:00:00Z"));
+        let mut writer = store.begin_sync_run()?;
+        writer.commit_shard(existing)?;
+        assert_eq!(event_count(&store, "devbox", SourceKind::Codex)?, 1);
+        assert_eq!(
+            store.token_accounting_version_for_host("devbox", SourceKind::Codex)?,
+            None
+        );
+
+        let mut shard = SyncShard::new(SourceKind::Codex);
+        shard
+            .events
+            .push(event("codex:new:1", "2026-08-20T03:00:00Z"));
+        let stdout = stream(
+            &[
+                header(&[SourceKind::Codex]),
+                ShardRecord::Shard { shard },
+                trailer(vec![source_stats(SourceKind::Codex, 1)]),
+            ],
+            "",
+        );
+        let err = import_stream(&store, &host, stdout).expect_err("mix-in");
+        let text = err.to_string();
+        assert!(text.contains("codex"), "{text}");
+        assert!(text.contains("full restore"), "{text}");
+        assert_eq!(event_count(&store, "devbox", SourceKind::Codex)?, 1);
+        let refreshed = store.hosts().get_by_label("devbox")?.expect("host");
+        assert_eq!(
+            refreshed.import_watermark.as_deref(),
+            Some("2026-08-20T01:00:00Z")
+        );
+        assert_eq!(
+            store.token_accounting_version_for_host("devbox", SourceKind::Codex)?,
+            None
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn empty_source_no_since_establishes_marker_and_survives_reopen() -> anyhow::Result<()> {
+        let (_temp, store, _lock) = fenced_store()?;
+        store.hosts().upsert(&ssh_host(None))?;
+        let host = store.hosts().get_by_label("devbox")?.expect("host");
+        let mut shard = SyncShard::new(SourceKind::Codex);
+        shard
+            .events
+            .push(event("codex:a:1", "2026-08-20T01:00:00Z"));
+        let stdout = stream(
+            &[
+                header(&[SourceKind::Codex]),
+                ShardRecord::Shard { shard },
+                trailer(vec![source_stats(SourceKind::Codex, 1)]),
+            ],
+            "",
+        );
+        import_stream(&store, &host, stdout)?;
+        let expected = crate::store::expected_token_accounting_version(SourceKind::Codex);
+        assert_eq!(
+            store.token_accounting_version_for_host("devbox", SourceKind::Codex)?,
+            Some(expected)
+        );
+        assert_eq!(store.token_accounting_version(SourceKind::Codex)?, None);
+
+        let paths = store.paths.clone();
+        drop(store);
+        let reopened = Store::new(&paths)?;
+        assert_eq!(
+            reopened.token_accounting_version_for_host("devbox", SourceKind::Codex)?,
+            Some(expected)
+        );
+        let loaded = reopened.sync_status().load_source_sync_statuses("devbox")?;
+        let codex = loaded
+            .iter()
+            .find(|status| status.source == "codex")
+            .expect("codex status");
+        assert_eq!(codex.token_accounting_version, Some(expected));
+        assert!(!codex.legacy_token_accounting);
+        Ok(())
+    }
+
+    #[test]
+    fn matching_version_replay_is_idempotent_and_isolated_across_hosts() -> anyhow::Result<()> {
+        let (_temp, store, _lock) = fenced_store()?;
+        store.hosts().upsert(&ssh_host(None))?;
+        store.hosts().upsert(&Host {
+            host_id: "other".to_string(),
+            label: "other".to_string(),
+            transport: "ssh".to_string(),
+            ssh_target: Some("me@other".to_string()),
+            command: "llmusage".to_string(),
+            added_at: "2026-08-20T00:00:00Z".to_string(),
+            last_contacted_at: None,
+            last_error: None,
+            import_watermark: None,
+        })?;
+        store.mark_current_token_accounting(SourceKind::Codex)?;
+        let host = store.hosts().get_by_label("devbox")?.expect("host");
+        let mut shard = SyncShard::new(SourceKind::Codex);
+        shard
+            .events
+            .push(event("codex:a:1", "2026-08-20T01:00:00Z"));
+        let stdout = stream(
+            &[
+                header(&[SourceKind::Codex]),
+                ShardRecord::Shard {
+                    shard: shard.clone(),
+                },
+                trailer(vec![source_stats(SourceKind::Codex, 1)]),
+            ],
+            "",
+        );
+        import_stream(&store, &host, stdout.clone())?;
+        import_stream(&store, &host, stdout)?;
+        assert_eq!(event_count(&store, "devbox", SourceKind::Codex)?, 1);
+        let expected = crate::store::expected_token_accounting_version(SourceKind::Codex);
+        assert_eq!(
+            store.token_accounting_version_for_host("devbox", SourceKind::Codex)?,
+            Some(expected)
+        );
+        assert_eq!(
+            store.token_accounting_version_for_host("other", SourceKind::Codex)?,
+            None
+        );
+        assert_eq!(
+            store.token_accounting_version(SourceKind::Codex)?,
+            Some(expected)
+        );
+        assert_eq!(event_count(&store, "other", SourceKind::Codex)?, 0);
+        assert_eq!(event_count(&store, LOCAL_HOST_ID, SourceKind::Codex)?, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn parse_error_trailer_does_not_establish_marker() -> anyhow::Result<()> {
+        let (_temp, store, _lock) = fenced_store()?;
+        store.hosts().upsert(&ssh_host(None))?;
+        let host = store.hosts().get_by_label("devbox")?.expect("host");
+        let mut shard = SyncShard::new(SourceKind::Codex);
+        shard
+            .events
+            .push(event("codex:a:1", "2026-08-20T01:00:00Z"));
+        let mut stats = source_stats(SourceKind::Codex, 1);
+        stats.parse_issues.malformed_lines = 1;
+        let stdout = stream(
+            &[
+                header(&[SourceKind::Codex]),
+                ShardRecord::Shard { shard },
+                trailer(vec![stats]),
+            ],
+            "",
+        );
+        import_stream(&store, &host, stdout)?;
+        assert_eq!(event_count(&store, "devbox", SourceKind::Codex)?, 1);
+        assert_eq!(
+            store.token_accounting_version_for_host("devbox", SourceKind::Codex)?,
+            None
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn protocol_v1_header_refuses_before_any_shard_commit() -> anyhow::Result<()> {
+        let (_temp, store, _lock) = fenced_store()?;
+        store.hosts().upsert(&ssh_host(None))?;
+        let host = store.hosts().get_by_label("devbox")?.expect("host");
+        let mut shard = SyncShard::new(SourceKind::Codex);
+        shard
+            .events
+            .push(event("codex:a:1", "2026-08-20T01:00:00Z"));
+        let stdout = format!(
+            "{}\n{}\n{}\n",
+            r#"{"kind":"header","shard_protocol":1,"llmusage_version":"1.2.0","schema_version":23,"emitted_at":"2026-08-20T00:00:00Z"}"#,
+            encode_record(&ShardRecord::Shard { shard })?,
+            encode_record(&trailer(vec![source_stats(SourceKind::Codex, 1)]))?,
+        );
+        let err = import_stream(&store, &host, stdout).expect_err("old protocol");
+        let text = err.to_string();
+        assert!(text.contains("remote=1"), "{text}");
+        assert!(text.contains("upgrade"), "{text}");
+        assert_eq!(event_count(&store, "devbox", SourceKind::Codex)?, 0);
+        let refreshed = store.hosts().get_by_label("devbox")?.expect("host");
+        assert!(refreshed.import_watermark.is_none());
+        assert_eq!(
+            store.token_accounting_version_for_host("devbox", SourceKind::Codex)?,
+            None
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn since_set_does_not_establish_host_source_marker() -> anyhow::Result<()> {
+        let (_temp, store, _lock) = fenced_store()?;
+        store
+            .hosts()
+            .upsert(&ssh_host(Some("2026-08-20T01:00:00Z")))?;
+        let host = store.hosts().get_by_label("devbox")?.expect("host");
+        let mut shard = SyncShard::new(SourceKind::Codex);
+        shard
+            .events
+            .push(event("codex:a:1", "2026-08-20T03:00:00Z"));
+        let stdout = stream(
+            &[
+                header(&[SourceKind::Codex]),
+                ShardRecord::Shard { shard },
+                trailer(vec![source_stats(SourceKind::Codex, 1)]),
+            ],
+            "",
+        );
+        import_stream(&store, &host, stdout)?;
+        assert_eq!(event_count(&store, "devbox", SourceKind::Codex)?, 1);
+        assert_eq!(
+            store.token_accounting_version_for_host("devbox", SourceKind::Codex)?,
+            None,
+            "incremental since must not certify historical accounting"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn matching_host_marker_allows_incremental_when_since_is_set() -> anyhow::Result<()> {
+        let (_temp, store, _lock) = fenced_store()?;
+        store.hosts().upsert(&ssh_host(None))?;
+        let host = store.hosts().get_by_label("devbox")?.expect("host");
+        let mut first = SyncShard::new(SourceKind::Codex);
+        first
+            .events
+            .push(event("codex:a:1", "2026-08-20T01:00:00Z"));
+        let first_stdout = stream(
+            &[
+                header(&[SourceKind::Codex]),
+                ShardRecord::Shard { shard: first },
+                trailer(vec![source_stats(SourceKind::Codex, 1)]),
+            ],
+            "",
+        );
+        import_stream(&store, &host, first_stdout)?;
+        let expected = crate::store::expected_token_accounting_version(SourceKind::Codex);
+        assert_eq!(
+            store.token_accounting_version_for_host("devbox", SourceKind::Codex)?,
+            Some(expected)
+        );
+
+        let host = store.hosts().get_by_label("devbox")?.expect("host");
+        assert!(host.import_watermark.is_some());
+        let mut second = SyncShard::new(SourceKind::Codex);
+        second
+            .events
+            .push(event("codex:b:1", "2026-08-20T03:00:00Z"));
+        let second_stdout = stream(
+            &[
+                header(&[SourceKind::Codex]),
+                ShardRecord::Shard { shard: second },
+                trailer(vec![source_stats(SourceKind::Codex, 1)]),
+            ],
+            "",
+        );
+        import_stream(&store, &host, second_stdout)?;
+        assert_eq!(event_count(&store, "devbox", SourceKind::Codex)?, 2);
+        assert_eq!(
+            store.token_accounting_version_for_host("devbox", SourceKind::Codex)?,
+            Some(expected)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn pi_without_omp_reset_does_not_mix_into_existing_unmarked_rows() -> anyhow::Result<()> {
+        let (_temp, store, _lock) = fenced_store()?;
+        store.hosts().upsert(&ssh_host(None))?;
+        let host = store.hosts().get_by_label("devbox")?.expect("host");
+        let mut old_pi = SyncShard::new_for_host(SourceKind::Pi, "devbox");
+        old_pi
+            .events
+            .push(event_for(SourceKind::Pi, "pi:old", "2026-08-20T00:00:00Z"));
+        let mut writer = store.begin_sync_run()?;
+        writer.commit_shard(old_pi)?;
+        drop(writer);
+        assert_eq!(count_source(&store, SourceKind::Pi, "devbox")?, 1);
+
+        let mut live_pi = SyncShard::new(SourceKind::Pi);
+        live_pi
+            .events
+            .push(event_for(SourceKind::Pi, "pi:new", "2026-08-20T01:00:00Z"));
+        let stdout = stream(
+            &[
+                header(&[SourceKind::Pi, SourceKind::Omp]),
+                ShardRecord::Shard { shard: live_pi },
+                trailer(vec![
+                    source_stats(SourceKind::Pi, 1),
+                    source_stats(SourceKind::Omp, 0),
+                ]),
+            ],
+            "",
+        );
+        let err = import_stream(&store, &host, stdout).expect_err("mix-in");
+        let text = err.to_string();
+        assert!(text.contains("pi"), "{text}");
+        assert!(text.contains("full restore"), "{text}");
+        assert_eq!(count_source(&store, SourceKind::Pi, "devbox")?, 1);
+        assert_eq!(count_source(&store, SourceKind::Omp, "devbox")?, 0);
+        let conn = store.open_connection()?;
+        let pi_at: String = conn.query_row(
+            "SELECT event_at FROM usage_event WHERE source = 'pi' AND host_id = 'devbox'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(pi_at, "2026-08-20T00:00:00Z");
+        assert_eq!(
+            store.token_accounting_version_for_host("devbox", SourceKind::Pi)?,
+            None
         );
         Ok(())
     }

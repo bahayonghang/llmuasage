@@ -3,14 +3,20 @@ use std::{fs, path::PathBuf};
 use anyhow::Result;
 use llmusage::{
     app::AppContext,
-    commands,
-    models::SourceKind,
+    commands::{
+        self,
+        source_status::{
+            apply_token_accounting_statuses, apply_token_accounting_statuses_for_host,
+            build_source_capability_statuses,
+        },
+    },
+    models::{SourceKind, UsageEvent, UsageTokens},
     parsers::SyncEvent,
     query::{
-        Dashboard, QueryFilter, ReportTimezone,
+        Dashboard, QueryFilter, ReportTimezone, SourceBreakdown,
         reports::{ReportFilter, SortOrder, load_daily_report},
     },
-    store::{Store, expected_token_accounting_version},
+    store::{Host, Store, SyncShard, expected_token_accounting_version},
 };
 use rusqlite::Connection;
 use tempfile::TempDir;
@@ -1235,6 +1241,97 @@ fn full_rebuild_checks_all_parser_risks_before_resetting_any_source() -> Result<
         Ok::<_, anyhow::Error>(())
     })?;
 
+    Ok(())
+}
+
+#[test]
+fn source_status_uses_host_source_accounting_evidence() -> Result<()> {
+    let temp = TempDir::new()?;
+    let paths = llmusage::paths::AppPaths::with_root(temp.path().to_path_buf())?;
+    let store = Store::new(&paths)?;
+    store.bootstrap()?;
+    store.mark_current_token_accounting(SourceKind::Codex)?;
+    store.hosts().upsert(&Host {
+        host_id: "devbox".to_string(),
+        label: "devbox".to_string(),
+        transport: "ssh".to_string(),
+        ssh_target: Some("me@devbox".to_string()),
+        command: "llmusage".to_string(),
+        added_at: "2026-08-20T00:00:00Z".to_string(),
+        last_contacted_at: None,
+        last_error: None,
+        import_watermark: None,
+    })?;
+    let mut shard = SyncShard::new_for_host(SourceKind::Codex, "devbox");
+    shard.events.push(UsageEvent {
+        event_key: "codex:remote:1".to_string(),
+        source: SourceKind::Codex,
+        provider_label: String::new(),
+        model: "gpt-5".to_string(),
+        event_at: "2026-08-20T00:00:00Z".to_string(),
+        hour_start: "2026-08-20T00:00:00Z".to_string(),
+        tokens: UsageTokens {
+            input_tokens: 1,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            output_tokens: 1,
+            reasoning_output_tokens: 0,
+            total_tokens: 2,
+        },
+        project: None,
+        session: None,
+        source_cost: None,
+    });
+    let mut writer = store.begin_sync_run()?;
+    writer.commit_shard(shard)?;
+
+    let breakdown = vec![SourceBreakdown {
+        source: "codex".to_string(),
+        total_tokens: 2,
+        last_event_at: Some("2026-08-20T00:00:00Z".to_string()),
+        event_count: 1,
+    }];
+    let mut local = build_source_capability_statuses(&breakdown);
+    apply_token_accounting_statuses(&store, &mut local)?;
+    let local_codex = local
+        .iter()
+        .find(|status| status.source == SourceKind::Codex)
+        .expect("codex");
+    assert_eq!(local_codex.accounting, "current");
+    assert_eq!(
+        local_codex.token_accounting_version,
+        Some(expected_token_accounting_version(SourceKind::Codex))
+    );
+
+    let mut remote = build_source_capability_statuses(&breakdown);
+    apply_token_accounting_statuses_for_host(&store, "devbox", &mut remote)?;
+    let remote_codex = remote
+        .iter()
+        .find(|status| status.source == SourceKind::Codex)
+        .expect("codex");
+    assert_eq!(remote_codex.accounting, "unknown");
+    assert_eq!(remote_codex.token_accounting_version, None);
+    assert!(!remote_codex.legacy_token_accounting);
+
+    store.set_meta_value("token_accounting_version.devbox.codex", "2")?;
+    let mut remote_old = build_source_capability_statuses(&breakdown);
+    apply_token_accounting_statuses_for_host(&store, "devbox", &mut remote_old)?;
+    let remote_old_codex = remote_old
+        .iter()
+        .find(|status| status.source == SourceKind::Codex)
+        .expect("codex");
+    assert_eq!(remote_old_codex.accounting, "legacy");
+    assert_eq!(remote_old_codex.token_accounting_version, Some(2));
+    assert!(remote_old_codex.legacy_token_accounting);
+    let warning = remote_old_codex
+        .token_accounting_warning
+        .as_deref()
+        .expect("warning");
+    assert!(warning.contains("full restore"), "{warning}");
+    assert!(
+        !warning.contains("llmusage sync --rebuild --source"),
+        "{warning}"
+    );
     Ok(())
 }
 

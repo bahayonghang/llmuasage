@@ -11,6 +11,7 @@ pub mod transport;
 pub use importer::{IMPORT_WATERMARK_OVERLAP_HOURS, ImportOutcome, RemoteImporter};
 pub use protocol::{
     HandshakeResponse, SHARD_PROTOCOL_VERSION, ShardDecoder, ShardRecord, encode_record,
+    source_accounting_versions,
 };
 pub use register::{normalize_host_id, register_remote_host, validate_new_host_id};
 pub use transport::{

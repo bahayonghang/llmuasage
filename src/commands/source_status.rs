@@ -12,7 +12,7 @@ use crate::{
     models::{ParseIssues, SourceKind},
     query::{Dashboard, QueryFilter, SourceBreakdown},
     registry,
-    store::{Host, Store},
+    store::{Host, LOCAL_HOST_ID, Store, expected_token_accounting_version},
 };
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -27,6 +27,8 @@ pub struct SourceCapabilityStatus {
     pub token_accounting_version: Option<u32>,
     pub legacy_token_accounting: bool,
     pub token_accounting_warning: Option<String>,
+    /// `current`, `legacy`, `unversioned`, or `unknown`.
+    pub accounting: &'static str,
     pub detail: String,
 }
 
@@ -65,7 +67,7 @@ pub async fn run(app: &AppContext) -> Result<()> {
             ..Default::default()
         })?;
         let mut capability_statuses = build_source_capability_statuses(&sources);
-        apply_token_accounting_statuses(&store, &mut capability_statuses)?;
+        apply_token_accounting_statuses_for_host(&store, &host.host_id, &mut capability_statuses)?;
         let parse_issues = store
             .sync_status()
             .load_source_sync_statuses(&host.host_id)?
@@ -108,21 +110,66 @@ pub fn apply_token_accounting_statuses(
     store: &Store,
     statuses: &mut [SourceCapabilityStatus],
 ) -> Result<()> {
+    apply_token_accounting_statuses_for_host(store, LOCAL_HOST_ID, statuses)
+}
+
+pub fn apply_token_accounting_statuses_for_host(
+    store: &Store,
+    host_id: &str,
+    statuses: &mut [SourceCapabilityStatus],
+) -> Result<()> {
     for status in statuses {
         if !registry::source_descriptor(status.source)
             .is_some_and(|descriptor| descriptor.capabilities.parser)
         {
             continue;
         }
-        status.token_accounting_version = store.token_accounting_version(status.source)?;
-        status.legacy_token_accounting = store.has_legacy_token_accounting(status.source)?;
-        if status.legacy_token_accounting {
-            status.token_accounting_warning = Some(
-                crate::store::SyncStatusStore::legacy_repair_warning(status.source),
-            );
+        if host_id == LOCAL_HOST_ID {
+            status.token_accounting_version = store.token_accounting_version(status.source)?;
+            status.legacy_token_accounting = store.has_legacy_token_accounting(status.source)?;
+            if status.legacy_token_accounting {
+                status.token_accounting_warning = Some(
+                    crate::store::SyncStatusStore::legacy_repair_warning(status.source),
+                );
+            }
+            status.accounting = local_accounting_label(status);
+            continue;
+        }
+        status.token_accounting_version =
+            store.token_accounting_version_for_host(host_id, status.source)?;
+        let expected = expected_token_accounting_version(status.source);
+        match status.token_accounting_version {
+            Some(version) if version == expected => {
+                status.legacy_token_accounting = false;
+                status.token_accounting_warning = None;
+                status.accounting = "current";
+            }
+            Some(_) => {
+                status.legacy_token_accounting = true;
+                status.token_accounting_warning = Some(format!(
+                    "remote host {host_id} source {} token accounting is not current; a full restore is required",
+                    status.source.as_str()
+                ));
+                status.accounting = "legacy";
+            }
+            None => {
+                status.legacy_token_accounting = false;
+                status.token_accounting_warning = None;
+                status.accounting = "unknown";
+            }
         }
     }
     Ok(())
+}
+
+fn local_accounting_label(status: &SourceCapabilityStatus) -> &'static str {
+    if status.legacy_token_accounting {
+        "legacy"
+    } else if status.token_accounting_version.is_some() {
+        "current"
+    } else {
+        "unversioned"
+    }
 }
 
 pub fn print_human_statuses(
@@ -138,13 +185,7 @@ pub fn print_human_statuses(
             status.quality,
             status.total_tokens,
             status.last_event_at.as_deref().unwrap_or("never"),
-            if status.legacy_token_accounting {
-                "legacy"
-            } else if status.token_accounting_version.is_some() {
-                "current"
-            } else {
-                "unversioned"
-            },
+            status.accounting,
             status.display_name
         );
         if let Some(warning) = &status.token_accounting_warning {
@@ -245,6 +286,7 @@ fn source_status_from_parts(
         token_accounting_version: None,
         legacy_token_accounting: false,
         token_accounting_warning: None,
+        accounting: "unversioned",
         detail,
     }
 }
