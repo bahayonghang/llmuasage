@@ -1,5 +1,16 @@
 use super::*;
 
+#[cfg(test)]
+use std::cell::{Cell, RefCell};
+
+#[cfg(test)]
+thread_local! {
+    static SNAPSHOT_SECTION_BARRIER: RefCell<Option<Box<dyn FnMut() + 'static>>> =
+        const { RefCell::new(None) };
+    static SNAPSHOT_FAIL_NEXT: Cell<bool> = const { Cell::new(false) };
+    static SNAPSHOT_INTERRUPT_NEXT: Cell<bool> = const { Cell::new(false) };
+}
+
 /// Full snapshot embedded into exported HTML bundles.
 #[derive(Debug, Clone, Serialize)]
 pub struct DashboardSnapshot {
@@ -157,38 +168,41 @@ impl Dashboard {
     /// the legacy scalar trend shape because `/api/trends?window=` still
     /// exposes that contract.
     pub fn snapshot(&self, filter: &QueryFilter) -> Result<DashboardSnapshot> {
-        let core = self.core_snapshot(filter)?;
-        let home_overview = self.home_overview_compact(filter)?;
-        Ok(DashboardSnapshot {
-            overview: core.overview,
-            sync_command_center: core.sync_command_center,
-            day_trends: core.day_trends,
-            week_trends: core.week_trends,
-            month_trends: core.month_trends,
-            all_trends: core.all_trends,
-            models: core.models,
-            sources: core.sources,
-            hosts: core.hosts,
-            projects: core.projects,
-            costs: core.costs,
-            activity: self.activity_breakdown(filter)?,
-            tools: self.tool_breakdown(filter)?,
-            optimize: self.optimize(filter)?,
-            compare: self.model_compare(filter, None, None)?,
-            explorer: self.explorer(&ExplorerQuery {
-                filter: filter.clone(),
-                ..Default::default()
-            })?,
-            health: core.health,
-            diagnostics: core.diagnostics,
-            home_overview: Some(home_overview),
-            heatmap: Some(self.heatmap(filter, 366)?),
-            trends_daily: Some(self.trends_daily(filter)?),
-            top_sessions: Some(self.top_sessions(&TopSessionsQuery {
-                filter: filter.clone(),
-                ..TopSessionsQuery::default()
-            })?),
-            hour_of_week: Some(self.hour_of_week(filter)?),
+        let diagnostics = self.diagnostics()?;
+        self.with_read_snapshot(|| {
+            let core = self.core_snapshot_with_diagnostics(filter, &diagnostics)?;
+            let home_overview = self.home_overview_compact(filter)?;
+            Ok(DashboardSnapshot {
+                overview: core.overview,
+                sync_command_center: core.sync_command_center,
+                day_trends: core.day_trends,
+                week_trends: core.week_trends,
+                month_trends: core.month_trends,
+                all_trends: core.all_trends,
+                models: core.models,
+                sources: core.sources,
+                hosts: core.hosts,
+                projects: core.projects,
+                costs: core.costs,
+                activity: self.activity_breakdown(filter)?,
+                tools: self.tool_breakdown(filter)?,
+                optimize: self.optimize(filter)?,
+                compare: self.model_compare(filter, None, None)?,
+                explorer: self.explorer(&ExplorerQuery {
+                    filter: filter.clone(),
+                    ..Default::default()
+                })?,
+                health: core.health,
+                diagnostics: core.diagnostics,
+                home_overview: Some(home_overview),
+                heatmap: Some(self.heatmap(filter, 366)?),
+                trends_daily: Some(self.trends_daily(filter)?),
+                top_sessions: Some(self.top_sessions(&TopSessionsQuery {
+                    filter: filter.clone(),
+                    ..TopSessionsQuery::default()
+                })?),
+                hour_of_week: Some(self.hour_of_week(filter)?),
+            })
         })
     }
 
@@ -207,25 +221,32 @@ impl Dashboard {
     /// The web layer caches `Dashboard::diagnostics()` at the request
     /// boundary and injects the cached value here; `Dashboard::diagnostics`
     /// itself stays a cold read and `home_overview` is untouched.
+    /// Database metric sections share one deferred read transaction.
     pub fn core_snapshot_with_diagnostics(
         &self,
         filter: &QueryFilter,
         diagnostics: &DiagnosticsPayload,
     ) -> Result<DashboardCoreSnapshot> {
-        Ok(DashboardCoreSnapshot {
-            overview: self.overview(filter)?,
-            sync_command_center: self.sync_command_center_with_diagnostics(filter, diagnostics)?,
-            day_trends: self.trends("day", filter)?,
-            week_trends: self.trends("week", filter)?,
-            month_trends: self.trends("month", filter)?,
-            all_trends: self.trends("all", filter)?,
-            models: self.model_breakdown(filter)?,
-            sources: self.source_breakdown(filter)?,
-            hosts: self.host_breakdown(filter)?,
-            projects: self.project_breakdown(filter)?,
-            costs: self.cost_breakdown(filter)?,
-            health: self.health()?,
-            diagnostics: diagnostics.clone(),
+        self.with_read_snapshot(|| {
+            let overview = self.overview(filter)?;
+            #[cfg(test)]
+            self.fire_snapshot_section_hooks()?;
+            Ok(DashboardCoreSnapshot {
+                overview,
+                sync_command_center: self
+                    .sync_command_center_with_diagnostics(filter, diagnostics)?,
+                day_trends: self.trends("day", filter)?,
+                week_trends: self.trends("week", filter)?,
+                month_trends: self.trends("month", filter)?,
+                all_trends: self.trends("all", filter)?,
+                models: self.model_breakdown(filter)?,
+                sources: self.source_breakdown(filter)?,
+                hosts: self.host_breakdown(filter)?,
+                projects: self.project_breakdown(filter)?,
+                costs: self.cost_breakdown(filter)?,
+                health: self.health()?,
+                diagnostics: diagnostics.clone(),
+            })
         })
     }
 
@@ -248,17 +269,134 @@ impl Dashboard {
         window: &str,
         diagnostics: &DiagnosticsPayload,
     ) -> Result<DashboardInteractiveSnapshot> {
-        Ok(DashboardInteractiveSnapshot {
-            overview: self.overview(filter)?,
-            sync_command_center: self.sync_command_center_with_diagnostics(filter, diagnostics)?,
-            trends: self.trends(window, filter)?,
-            models: self.model_breakdown(filter)?,
-            sources: self.source_breakdown(filter)?,
-            hosts: self.host_breakdown(filter)?,
-            projects: self.project_breakdown(filter)?,
-            costs: self.cost_breakdown(filter)?,
-            health: self.health_summary()?,
-            diagnostics: diagnostics.clone(),
+        self.with_read_snapshot(|| {
+            let overview = self.overview(filter)?;
+            #[cfg(test)]
+            self.fire_snapshot_section_hooks()?;
+            Ok(DashboardInteractiveSnapshot {
+                overview,
+                sync_command_center: self
+                    .sync_command_center_with_diagnostics(filter, diagnostics)?,
+                trends: self.trends(window, filter)?,
+                models: self.model_breakdown(filter)?,
+                sources: self.source_breakdown(filter)?,
+                hosts: self.host_breakdown(filter)?,
+                projects: self.project_breakdown(filter)?,
+                costs: self.cost_breakdown(filter)?,
+                health: self.health_summary()?,
+                diagnostics: diagnostics.clone(),
+            })
         })
     }
+
+    /// Starts a deferred read transaction on the first snapshot entry and
+    /// reuses it for nested composite snapshot calls. Independent health and
+    /// diagnostics endpoints do not enter this boundary.
+    fn with_read_snapshot<T>(&self, f: impl FnOnce() -> Result<T>) -> Result<T> {
+        if !self.conn.is_autocommit() {
+            return f();
+        }
+        // `new_unchecked` keeps `self.conn` usable for section queries.
+        // Drop rolls back on success, query error, and SQLite interrupt so the
+        // next statement on this connection is autocommit again.
+        let _txn = rusqlite::Transaction::new_unchecked(
+            &self.conn,
+            rusqlite::TransactionBehavior::Deferred,
+        )?;
+        f()
+    }
+
+    #[cfg(test)]
+    fn fire_snapshot_section_hooks(&self) -> Result<()> {
+        assert!(
+            !self.conn.is_autocommit(),
+            "snapshot section barrier must run inside the deferred read transaction"
+        );
+        SNAPSHOT_SECTION_BARRIER.with(|cell| {
+            if let Some(hook) = cell.borrow_mut().as_mut() {
+                hook();
+            }
+        });
+        if SNAPSHOT_INTERRUPT_NEXT.with(|flag| flag.replace(false)) {
+            // sqlite3_interrupt is a no-op until a statement is running, so the
+            // worker keeps the flag set across prepare/step of the slow query.
+            let handle = self.conn.get_interrupt_handle();
+            let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let worker_stop = std::sync::Arc::clone(&stop);
+            let worker = std::thread::spawn(move || {
+                while !worker_stop.load(std::sync::atomic::Ordering::SeqCst) {
+                    handle.interrupt();
+                    std::thread::yield_now();
+                }
+            });
+            let _stop_worker = InterruptWorkerGuard {
+                stop,
+                worker: Some(worker),
+            };
+            self.test_slow_query()?;
+        }
+        if SNAPSHOT_FAIL_NEXT.with(|flag| flag.replace(false)) {
+            self.conn.execute(
+                "SELECT * FROM __llmusage_snapshot_consistency_missing__",
+                [],
+            )?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+struct InterruptWorkerGuard {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(test)]
+impl Drop for InterruptWorkerGuard {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+#[cfg(test)]
+#[must_use]
+pub(crate) struct SnapshotTestHooksGuard;
+
+#[cfg(test)]
+impl Drop for SnapshotTestHooksGuard {
+    fn drop(&mut self) {
+        clear_snapshot_test_hooks();
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn set_snapshot_section_barrier(hook: impl FnMut() + 'static) -> SnapshotTestHooksGuard {
+    SNAPSHOT_SECTION_BARRIER.with(|cell| {
+        *cell.borrow_mut() = Some(Box::new(hook));
+    });
+    SnapshotTestHooksGuard
+}
+
+#[cfg(test)]
+pub(crate) fn fail_next_snapshot_section() -> SnapshotTestHooksGuard {
+    SNAPSHOT_FAIL_NEXT.with(|flag| flag.set(true));
+    SnapshotTestHooksGuard
+}
+
+#[cfg(test)]
+pub(crate) fn interrupt_next_snapshot_section() -> SnapshotTestHooksGuard {
+    SNAPSHOT_INTERRUPT_NEXT.with(|flag| flag.set(true));
+    SnapshotTestHooksGuard
+}
+
+#[cfg(test)]
+fn clear_snapshot_test_hooks() {
+    SNAPSHOT_SECTION_BARRIER.with(|cell| {
+        *cell.borrow_mut() = None;
+    });
+    SNAPSHOT_FAIL_NEXT.with(|flag| flag.set(false));
+    SNAPSHOT_INTERRUPT_NEXT.with(|flag| flag.set(false));
 }

@@ -802,6 +802,102 @@ Also wrong: force the all-range covering index on a bounded date query, accept
 an index from plan evidence alone, or treat deleting a v24 index as a schema
 rollback.
 
+## Scenario: Composite dashboard SQLite snapshot version
+
+### 1. Scope / Trigger
+
+- Apply this contract when changing `Dashboard::snapshot`, `core_snapshot`,
+  `interactive_snapshot`, their `*_with_diagnostics` variants, or the private
+  `with_read_snapshot` boundary.
+- Applicable tools: Claude Code, Codex, Grok Build, Kimi Code, OMP.
+
+### 2. Signatures
+
+```text
+Dashboard::snapshot(&QueryFilter) -> Result<DashboardSnapshot>
+Dashboard::core_snapshot(&QueryFilter) -> Result<DashboardCoreSnapshot>
+Dashboard::core_snapshot_with_diagnostics(&QueryFilter, &DiagnosticsPayload)
+Dashboard::interactive_snapshot(&QueryFilter, window)
+    -> Result<DashboardInteractiveSnapshot>
+Dashboard::interactive_snapshot_with_diagnostics(
+    &QueryFilter, window, &DiagnosticsPayload)
+private with_read_snapshot
+```
+
+### 3. Contracts
+
+- Overview, grouping, and trends in one composite snapshot come from one SQLite
+  read version. A concurrent commit between two database sections of that
+  snapshot must not split versions.
+- `with_read_snapshot` starts `BEGIN DEFERRED` only when `conn.is_autocommit()`
+  is true. Nested snapshot entries reuse the open read transaction. Do not
+  `BEGIN` in `Dashboard::open`. Do not nest `BEGIN`.
+- The transaction wraps database metric reads only. Network quota and external
+  file scans stay outside. `snapshot`, `core_snapshot`, and
+  `interactive_snapshot` load diagnostics, including `Path::exists` file stats,
+  before entering the metrics transaction. Independent `Dashboard::diagnostics`,
+  `Dashboard::health`, and `/api/diagnostics` calls must not claim they share
+  that snapshot version.
+- Keep the single Dashboard connection. Do not open a second connection for the
+  snapshot.
+- On query error or SQLite interrupt, the read transaction ends. The next query
+  on the same connection or request supervisor path must succeed.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Concurrent writer commits between overview and grouping/trends | Current snapshot overview, grouping, and trends stay on the old version; the next snapshot sees the new version |
+| Nested `core_snapshot_with_diagnostics` inside `snapshot` | Reuse the outer read transaction; do not nest `BEGIN` |
+| Query error or `OperationInterrupted` during a snapshot section | End the read transaction; the next query on that connection succeeds |
+| Independent health/diagnostics endpoint | Autocommit cold read; do not claim the composite snapshot version |
+| No concurrent writer | Composite snapshot fields match the previous result and still use one connection |
+
+### 5. Good/Base/Bad Cases
+
+- Good: a writer commits a new event at a test barrier between overview and
+  grouping; the current snapshot totals stay aligned; the next snapshot includes
+  the event.
+- Base: two snapshots with no writer return the same overview, grouping, and
+  trend totals on the original Dashboard connection.
+- Bad: starting a long transaction in `Dashboard::open`, opening a second
+  snapshot connection, wrapping file-scan diagnostics or network quota inside
+  the metrics transaction, or using `sleep` to race the writer.
+
+### 6. Tests Required
+
+- Barrier tests drive shipped `Dashboard::snapshot`, `core_snapshot`, and
+  `interactive_snapshot`. Another connection commits a new event between two
+  database sections with no sleep. Overview, grouping, and trends stay on the
+  old version; the next snapshot sees the new version.
+- Query error and SQLite interrupt tests end the read transaction and prove a
+  following query on the same Dashboard succeeds. Existing cancel/timeout
+  regressions remain passing.
+- With no concurrent writer, consecutive composite snapshots match and
+  `Store::open_connection_count()` stays at one after `Dashboard::open`.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+snapshot -> SELECT overview -> writer COMMIT -> SELECT grouping/trends
+```
+
+Later sections can observe a newer SQLite version than overview.
+
+#### Correct
+
+```text
+diagnostics/file scans
+BEGIN DEFERRED
+SELECT overview -> writer COMMIT -> SELECT grouping/trends
+ROLLBACK
+```
+
+All database metric sections observe the version established by the first
+read. Diagnostics loaded before `BEGIN` remain outside that version.
+
 ## Query Vertical Module Ownership
 
 ### Scenario: Keep the Dashboard facade shallow and feature ownership canonical
@@ -816,10 +912,12 @@ rollback.
   below 1,000 production lines.
 - Public paths remain compatibility re-exports from `query/mod.rs`; a re-export
   never duplicates an implementation or creates a second DTO definition.
-- Only `snapshot.rs` owns full/core/interactive composition. Feature modules may
-  share the single `Dashboard` connection through the facade, but must not own
-  another connection, clone the store into a query service, or depend on
-  `commands`, `web`, or `tui`.
+- Only `snapshot.rs` owns full/core/interactive composition and the private
+  `with_read_snapshot` boundary. Feature modules may share the single
+  `Dashboard` connection through the facade, but must not own another
+  connection, clone the store into a query service, or depend on `commands`,
+  `web`, or `tui`. Independent health/diagnostics endpoints do not share the
+  composite snapshot read version.
 - Cross-feature helpers stay at the narrowest common ancestor. Feature-local
   helpers must move with their owner instead of accumulating in `query/mod.rs`
   or a generic `common`/`service` module.

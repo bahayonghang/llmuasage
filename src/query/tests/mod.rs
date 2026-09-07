@@ -56,6 +56,7 @@ struct ReadyWidgetsSnapshotCompatibility {
 }
 
 include!("diagnostics_snapshot.rs");
+include!("snapshot_consistency.rs");
 include!("overview_breakdowns.rs");
 include!("behavior.rs");
 include!("comparison.rs");

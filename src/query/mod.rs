@@ -84,6 +84,8 @@ pub(crate) use diagnostics::{
 
 /// Read-side façade backed by a single SQLite connection. All eight dashboard
 /// queries share the same connection so a snapshot only opens the DB once.
+/// Composite snapshot methods wrap database metric reads in a short deferred
+/// transaction on that connection; [`Dashboard::open`] does not start it.
 pub struct Dashboard {
     pub(super) store: Store,
     pub(super) conn: Connection,
