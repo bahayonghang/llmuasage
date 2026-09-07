@@ -1,0 +1,33 @@
+{
+  "id": "evergreen-snapshot-consistency",
+  "name": "evergreen-snapshot-consistency",
+  "title": "保证看板数据库快照一致性",
+  "description": "同一次复合Dashboard快照的数据库总量、分组与趋势来自一个SQLite读取版本。",
+  "status": "in_progress",
+  "dev_type": "backend",
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-09-07",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "09-07-evergreen-harness-audit",
+  "relatedFiles": [
+    "src/query/snapshot.rs",
+    "src/query/mod.rs",
+    "src/query/tests/diagnostics_snapshot.rs",
+    "src/query/tests/mod.rs",
+    "src/query/tests/snapshot_consistency.rs",
+    ".trellis/spec/llmusage/backend/dashboard-performance-contracts.md"
+  ],
+  "notes": "planning only; 用户尚未批准实施。P1先行；与quota-provenance可独立，但不与其他query改动重叠。",
+  "meta": {}
+}
