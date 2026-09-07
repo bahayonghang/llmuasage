@@ -1,0 +1,1147 @@
+Architecture checks	UNKNOWN STEP	﻿2026-08-12T17:16:58.5169693Z Current runner version: '2.336.0'
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5195122Z ##[group]Runner Image Provisioner
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5195961Z Hosted Compute Agent
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5196609Z Version: 20260707.563
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5197330Z Commit: 02667638d2b423fbc733a8e32a88b44996a3ba6e
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5198102Z Build Date: 2026-07-07T19:33:50Z
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5198832Z Worker ID: {8a2d76cf-706a-4559-ac35-a1e7e53b09d0}
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5199578Z Azure Region: northcentralus
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5200238Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5201839Z ##[group]Operating System
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5202476Z Ubuntu
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5202990Z 24.04.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5203592Z LTS
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5204158Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5204754Z ##[group]Runner Image
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5205383Z Image: ubuntu-24.04
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5205960Z Version: 20260720.247.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5207293Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260720.247/images/ubuntu/Ubuntu2404-Readme.md
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5208845Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260720.247
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5209913Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5211103Z ##[group]GITHUB_TOKEN Permissions
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5213756Z Contents: read
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5214409Z Metadata: read
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5215048Z Packages: read
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5215650Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5217678Z Secret source: Actions
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5219566Z Prepare workflow directory
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5551927Z Prepare all required actions
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.5601444Z Getting action download info
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:58.8639403Z Download action repository 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:59.2316162Z Download action repository 'dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c' (SHA:2c7215f132e9ebf062739d9130488b56d53c060c)
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:59.3775068Z Download action repository 'taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf' (SHA:41049aa56687c35e0afa74eed4f09cec4f9afabf)
+Architecture checks	UNKNOWN STEP	2026-08-12T17:16:59.9404132Z Complete job name: Architecture checks
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.0319820Z ##[group]Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.0322528Z with:
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.0323729Z   repository: bahayonghang/llmuasage
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.0335832Z   token: ***
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.0336952Z   ssh-strict: true
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.0338018Z   ssh-user: git
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.0339059Z   persist-credentials: true
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.0340265Z   clean: true
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.0341496Z   sparse-checkout-cone-mode: true
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.0343128Z   fetch-depth: 1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.0344357Z   fetch-tags: false
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.0345574Z   show-progress: true
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.0346807Z   lfs: false
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.0347956Z   submodules: false
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.0349212Z   set-safe-directory: true
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.0350604Z   allow-unsafe-pr-checkout: false
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.0352674Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.1524049Z Syncing repository: bahayonghang/llmuasage
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.1526751Z ##[group]Getting Git version info
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.1528051Z Working directory is '/home/runner/work/llmuasage/llmuasage'
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.1529976Z [command]/usr/bin/git version
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4747978Z git version 2.54.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4766091Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4777077Z Temporarily overriding HOME='/home/runner/work/_temp/00151a15-36f7-4fbf-8466-d0e7fe23e7b1' before making global git config changes
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4778498Z Adding repository directory to the temporary git global config as a safe directory
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4782886Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/llmuasage/llmuasage
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4828041Z Deleting the contents of '/home/runner/work/llmuasage/llmuasage'
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4831537Z ##[group]Determining repository object format
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4833287Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4834229Z ##[group]Initializing the repository
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4837623Z [command]/usr/bin/git init /home/runner/work/llmuasage/llmuasage
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4916032Z hint: Using 'master' as the name for the initial branch. This default branch name
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4920556Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4922024Z hint: to use in all of your new repositories, which will suppress this warning,
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4923089Z hint: call:
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4924085Z hint:
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4925149Z hint: 	git config --global init.defaultBranch <name>
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4925882Z hint:
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4926512Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4927554Z hint: 'development'. The just-created branch can be renamed via this command:
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4928370Z hint:
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4928825Z hint: 	git branch -m <name>
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4929332Z hint:
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4930043Z hint: Disable this message with "git config set advice.defaultBranchName false"
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4931189Z Initialized empty Git repository in /home/runner/work/llmuasage/llmuasage/.git/
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4946093Z [command]/usr/bin/git remote add origin https://github.com/bahayonghang/llmuasage
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4982256Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4982878Z ##[group]Disabling automatic garbage collection
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.4985869Z [command]/usr/bin/git config --local gc.auto 0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.5020094Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.5020771Z ##[group]Setting up auth
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.5021167Z Removing SSH command configuration
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.5027211Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.5065624Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.5377442Z Removing HTTP extra header
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.5382936Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.5423442Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.5683831Z Removing includeIf entries pointing to credentials config files
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.5707372Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.5723774Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.5982288Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-d7e18881-616e-4c8a-94a3-822343d306b8.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.6024593Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/llmuasage/llmuasage/.git.path /home/runner/work/_temp/git-credentials-d7e18881-616e-4c8a-94a3-822343d306b8.config
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.6060185Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/llmuasage/llmuasage/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-d7e18881-616e-4c8a-94a3-822343d306b8.config
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.6101567Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-d7e18881-616e-4c8a-94a3-822343d306b8.config
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.6138157Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-d7e18881-616e-4c8a-94a3-822343d306b8.config
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.6173496Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.6174276Z ##[group]Fetching the repository
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:00.6180153Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +9b49f4006cbca7636798c2b6892143c6a7d16a72:refs/remotes/origin/main
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.4839273Z From https://github.com/bahayonghang/llmuasage
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.4840742Z  * [new ref]         9b49f4006cbca7636798c2b6892143c6a7d16a72 -> origin/main
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.4874975Z [command]/usr/bin/git branch --list --remote origin/main
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.4908082Z   origin/main
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.4916249Z [command]/usr/bin/git rev-parse refs/remotes/origin/main
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.4943705Z 9b49f4006cbca7636798c2b6892143c6a7d16a72
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.4958157Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.4958691Z ##[group]Determining the checkout info
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.4959212Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.4961015Z [command]/usr/bin/git sparse-checkout disable
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.5012000Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.5046124Z ##[group]Checking out the ref
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.5052112Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.5771838Z Switched to a new branch 'main'
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.5773461Z branch 'main' set up to track 'origin/main'.
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.5782682Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.5832244Z [command]/usr/bin/git log -1 --format=%H
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.5862768Z 9b49f4006cbca7636798c2b6892143c6a7d16a72
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6272832Z ##[group]Run dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6273319Z with:
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6273574Z   toolchain: 1.97.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6273846Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6368251Z ##[start-action display=Run : parse toolchain version;id=__dtolnay_rust-toolchain.parse]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6407871Z ##[group]Run : parse toolchain version
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6408304Z ^[[36;1m: parse toolchain version^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6408652Z ^[[36;1mif [[ -z $toolchain ]]; then^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6409259Z ^[[36;1m  # GitHub does not enforce `required: true` inputs itself. https://github.com/actions/runner/issues/1070^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6409898Z ^[[36;1m  echo "'toolchain' is a required input" >&2^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6410256Z ^[[36;1m  exit 1^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6410660Z ^[[36;1melif [[ $toolchain =~ ^stable' '[0-9]+' '(year|month|week|day)s?' 'ago$ ]]; then^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6411186Z ^[[36;1m  if [[ Linux == macOS ]]; then^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6411969Z ^[[36;1m    echo "toolchain=1.$((($(date -v-$(sed 's/stable \([0-9]*\) \(.\).*/\1\2/' <<< $toolchain) +%s)/60/60/24-16569)/7/6))" >> $GITHUB_OUTPUT^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6412506Z ^[[36;1m  else^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6412953Z ^[[36;1m    echo "toolchain=1.$((($(date --date "${toolchain#stable }" +%s)/60/60/24-16569)/7/6))" >> $GITHUB_OUTPUT^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6413441Z ^[[36;1m  fi^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6413791Z ^[[36;1melif [[ $toolchain =~ ^stable' 'minus' '[0-9]+' 'releases?$ ]]; then^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6414383Z ^[[36;1m  echo "toolchain=1.$((($(date +%s)/60/60/24-16569)/7/6-${toolchain//[^0-9]/}))" >> $GITHUB_OUTPUT^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6414888Z ^[[36;1melif [[ $toolchain =~ ^1\.[0-9]+$ ]]; then^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6415437Z ^[[36;1m  echo "toolchain=1.$((i=${toolchain#1.}, c=($(date +%s)/60/60/24-16569)/7/6, i+9*i*(10*i<=c)+90*i*(100*i<=c)))" >> $GITHUB_OUTPUT^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6416033Z ^[[36;1melse^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6416381Z ^[[36;1m  echo "toolchain=$toolchain" >> $GITHUB_OUTPUT^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6416726Z ^[[36;1mfi^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6470385Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6470803Z env:
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6471062Z   toolchain: 1.97.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6471335Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6595942Z ##[end-action id=__dtolnay_rust-toolchain.parse;outcome=success;conclusion=success;duration_ms=22]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6618123Z ##[start-action display=Run : construct rustup command line;id=__dtolnay_rust-toolchain.flags]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6638529Z ##[group]Run : construct rustup command line
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6638912Z ^[[36;1m: construct rustup command line^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6639596Z ^[[36;1mecho "targets=$(for t in ${targets//,/ }; do echo -n ' --target' $t; done)" >> $GITHUB_OUTPUT^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6640259Z ^[[36;1mecho "components=$(for c in ${components//,/ }; do echo -n ' --component' $c; done)" >> $GITHUB_OUTPUT^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6640794Z ^[[36;1mecho "downgrade=" >> $GITHUB_OUTPUT^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6687051Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6687553Z env:
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6687869Z   targets: 
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6688128Z   components: 
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6688380Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6771445Z ##[end-action id=__dtolnay_rust-toolchain.flags;outcome=success;conclusion=success;duration_ms=15]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6775456Z ##[start-action display=Run : set $CARGO_HOME;id=__dtolnay_rust-toolchain.__run]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6795149Z ##[group]Run : set $CARGO_HOME
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6795474Z ^[[36;1m: set $CARGO_HOME^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6795843Z ^[[36;1mecho CARGO_HOME=${CARGO_HOME:-"$HOME/.cargo"} >> $GITHUB_ENV^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6842582Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6842989Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6921237Z ##[end-action id=__dtolnay_rust-toolchain.__run;outcome=success;conclusion=success;duration_ms=14]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6924317Z ##[start-action display=Run : install rustup if needed;id=__dtolnay_rust-toolchain.__run_2]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6950025Z ##[group]Run : install rustup if needed
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6950394Z ^[[36;1m: install rustup if needed^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6950750Z ^[[36;1mif ! command -v rustup &>/dev/null; then^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6951549Z ^[[36;1m  curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused --location --silent --show-error --fail https://sh.rustup.rs | sh -s -- --default-toolchain none -y^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6952564Z ^[[36;1m  echo "$CARGO_HOME/bin" >> $GITHUB_PATH^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.6952899Z ^[[36;1mfi^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.7000550Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.7000963Z env:
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.7001221Z   CARGO_HOME: /home/runner/.cargo
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.7001522Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.7077478Z ##[end-action id=__dtolnay_rust-toolchain.__run_2;outcome=success;conclusion=success;duration_ms=15]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.7081865Z ##[start-action display=Run : install rustup if needed on windows;id=__dtolnay_rust-toolchain.__run_3]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.7088735Z ##[end-action id=__dtolnay_rust-toolchain.__run_3;outcome=skipped;conclusion=skipped;duration_ms=0]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.7092667Z ##[start-action display=rustup toolchain install 1.97.0;id=__dtolnay_rust-toolchain.__run_4]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.7112829Z ##[group]Run rustup toolchain install 1.97.0 --profile minimal --no-self-update
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.7113420Z ^[[36;1mrustup toolchain install 1.97.0 --profile minimal --no-self-update^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.7160815Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.7161207Z env:
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.7161470Z   CARGO_HOME: /home/runner/.cargo
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.7162003Z   RUSTUP_PERMIT_COPY_RENAME: 1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.7162384Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:01.7987438Z info: syncing channel updates for 1.97.0-x86_64-unknown-linux-gnu
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:02.1368602Z info: latest update on 2026-07-09 for version 1.97.0 (2d8144b78 2026-07-07)
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:02.1445045Z info: downloading 3 components
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.1866551Z 
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.1941020Z   1.97.0-x86_64-unknown-linux-gnu installed - rustc 1.97.0 (2d8144b78 2026-07-07)
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.1941452Z 
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.1994825Z ##[end-action id=__dtolnay_rust-toolchain.__run_4;outcome=success;conclusion=success;duration_ms=8490]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2000623Z ##[start-action display=Run rustup default 1.97.0;id=__dtolnay_rust-toolchain.__run_5]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2017456Z ##[group]Run rustup default 1.97.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2017781Z ^[[36;1mrustup default 1.97.0^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2064621Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2065155Z env:
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2065366Z   CARGO_HOME: /home/runner/.cargo
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2065626Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2186084Z info: using existing install for 1.97.0-x86_64-unknown-linux-gnu
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2191862Z info: default toolchain set to 1.97.0-x86_64-unknown-linux-gnu
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2192352Z 
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2260136Z   1.97.0-x86_64-unknown-linux-gnu unchanged - rustc 1.97.0 (2d8144b78 2026-07-07)
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2261374Z info: note that the toolchain '1.97.0-x86_64-unknown-linux-gnu' is currently in use (overridden by '/home/runner/work/llmuasage/llmuasage/rust-toolchain.toml')
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2262425Z 
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2276894Z ##[end-action id=__dtolnay_rust-toolchain.__run_5;outcome=success;conclusion=success;duration_ms=27]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2281013Z ##[start-action display=Run : create cachekey;id=__dtolnay_rust-toolchain.rustc-version]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2297414Z ##[group]Run : create cachekey
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2297713Z ^[[36;1m: create cachekey^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2298221Z ^[[36;1mDATE=$(rustc +1.97.0 --version --verbose | sed -ne 's/^commit-date: \(20[0-9][0-9]\)-\([01][0-9]\)-\([0-3][0-9]\)$/\1\2\3/p')^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2298838Z ^[[36;1mHASH=$(rustc +1.97.0 --version --verbose | sed -ne 's/^commit-hash: //p')^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2299499Z ^[[36;1mecho "cachekey=$(echo $DATE$HASH | head -c12)" >> $GITHUB_OUTPUT^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2342814Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2343149Z env:
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2343355Z   CARGO_HOME: /home/runner/.cargo
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2343608Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2694071Z ##[end-action id=__dtolnay_rust-toolchain.rustc-version;outcome=success;conclusion=success;duration_ms=41]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2696712Z ##[start-action display=Run : disable incremental compilation;id=__dtolnay_rust-toolchain.__run_6]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2712670Z ##[group]Run : disable incremental compilation
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2713034Z ^[[36;1m: disable incremental compilation^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2713370Z ^[[36;1mif [ -z "${CARGO_INCREMENTAL+set}" ]; then^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2713710Z ^[[36;1m  echo CARGO_INCREMENTAL=0 >> $GITHUB_ENV^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2713994Z ^[[36;1mfi^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2759284Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2759626Z env:
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2759831Z   CARGO_HOME: /home/runner/.cargo
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2760085Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2854092Z ##[end-action id=__dtolnay_rust-toolchain.__run_6;outcome=success;conclusion=success;duration_ms=15]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2856159Z ##[start-action display=Run : enable colors in Cargo output;id=__dtolnay_rust-toolchain.__run_7]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2871113Z ##[group]Run : enable colors in Cargo output
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2871448Z ^[[36;1m: enable colors in Cargo output^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2872041Z ^[[36;1mif [ -z "${CARGO_TERM_COLOR+set}" ]; then^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2872387Z ^[[36;1m  echo CARGO_TERM_COLOR=always >> $GITHUB_ENV^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2872689Z ^[[36;1mfi^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2914413Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2914748Z env:
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2914960Z   CARGO_HOME: /home/runner/.cargo
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2915213Z   CARGO_INCREMENTAL: 0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2915441Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2982335Z ##[end-action id=__dtolnay_rust-toolchain.__run_7;outcome=success;conclusion=success;duration_ms=12]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.2986763Z ##[start-action display=Run : enable Cargo sparse registry;id=__dtolnay_rust-toolchain.__run_8]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3002417Z ##[group]Run : enable Cargo sparse registry
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3002746Z ^[[36;1m: enable Cargo sparse registry^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3003107Z ^[[36;1m# implemented in 1.66, stabilized in 1.68, made default in 1.70^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3003795Z ^[[36;1mif [ -z "${CARGO_REGISTRIES_CRATES_IO_PROTOCOL+set}" -o -f "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol ]; then^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3004675Z ^[[36;1m  if rustc +1.97.0 --version --verbose | grep -q '^release: 1\.6[89]\.'; then^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3005252Z ^[[36;1m    touch "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol || true^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3005799Z ^[[36;1m    echo CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse >> $GITHUB_ENV^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3006280Z ^[[36;1m  elif rustc +1.97.0 --version --verbose | grep -q '^release: 1\.6[67]\.'; then^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3006811Z ^[[36;1m    touch "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol || true^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3007308Z ^[[36;1m    echo CARGO_REGISTRIES_CRATES_IO_PROTOCOL=git >> $GITHUB_ENV^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3007647Z ^[[36;1m  fi^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3007842Z ^[[36;1mfi^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3049465Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3049798Z env:
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3050005Z   CARGO_HOME: /home/runner/.cargo
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3050272Z   CARGO_INCREMENTAL: 0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3050496Z   CARGO_TERM_COLOR: always
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3050729Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3373399Z ##[end-action id=__dtolnay_rust-toolchain.__run_8;outcome=success;conclusion=success;duration_ms=38]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3377557Z ##[start-action display=Run : work around spurious network errors in curl 8.0;id=__dtolnay_rust-toolchain.__run_9]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3393584Z ##[group]Run : work around spurious network errors in curl 8.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3394011Z ^[[36;1m: work around spurious network errors in curl 8.0^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3394552Z ^[[36;1m# https://rust-lang.zulipchat.com/#narrow/stream/246057-t-cargo/topic/timeout.20investigation^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3395154Z ^[[36;1mif rustc +1.97.0 --version --verbose | grep -q '^release: 1\.7[01]\.'; then^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3395602Z ^[[36;1m  echo CARGO_HTTP_MULTIPLEXING=false >> $GITHUB_ENV^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3395916Z ^[[36;1mfi^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3440326Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3440688Z env:
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3440901Z   CARGO_HOME: /home/runner/.cargo
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3441162Z   CARGO_INCREMENTAL: 0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3441387Z   CARGO_TERM_COLOR: always
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3441618Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3637803Z ##[end-action id=__dtolnay_rust-toolchain.__run_9;outcome=success;conclusion=success;duration_ms=25]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3641340Z ##[start-action display=Run rustc +1.97.0 --version --verbose;id=__dtolnay_rust-toolchain.__run_10]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3657097Z ##[group]Run rustc +1.97.0 --version --verbose
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3657434Z ^[[36;1mrustc +1.97.0 --version --verbose^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3701042Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3701393Z env:
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3701603Z   CARGO_HOME: /home/runner/.cargo
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3702079Z   CARGO_INCREMENTAL: 0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3702339Z   CARGO_TERM_COLOR: always
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3702570Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3882212Z rustc 1.97.0 (2d8144b78 2026-07-07)
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3882827Z binary: rustc
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3883166Z commit-hash: 2d8144b7880597b6e6d3dfd63a9a9efae3f533d3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3883501Z commit-date: 2026-07-07
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3883742Z host: x86_64-unknown-linux-gnu
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3884002Z release: 1.97.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3884285Z LLVM version: 22.1.6
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3898976Z ##[end-action id=__dtolnay_rust-toolchain.__run_10;outcome=success;conclusion=success;duration_ms=25]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3954187Z ##[group]Run cargo test --locked --all-features --test architecture_dependencies
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3954767Z ^[[36;1mcargo test --locked --all-features --test architecture_dependencies^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3998274Z shell: /usr/bin/bash -e {0}
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3998531Z env:
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3998753Z   CARGO_HOME: /home/runner/.cargo
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3999017Z   CARGO_INCREMENTAL: 0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3999243Z   CARGO_TERM_COLOR: always
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.3999661Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.4576149Z info: syncing channel updates for 1.97.0-x86_64-unknown-linux-gnu
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.5376966Z info: latest update on 2026-07-09 for version 1.97.0 (2d8144b78 2026-07-07)
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:10.5487769Z info: downloading component clippy
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.2762489Z ^[[1m^[[92m    Updating^[[0m crates.io index
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.6491630Z ^[[1m^[[92m Downloading^[[0m crates ...
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.6993069Z ^[[1m^[[92m  Downloaded^[[0m adler2 v2.0.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7009018Z ^[[1m^[[92m  Downloaded^[[0m rustversion v1.0.23
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7038150Z ^[[1m^[[92m  Downloaded^[[0m ryu v1.0.23
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7071990Z ^[[1m^[[92m  Downloaded^[[0m rusty-fork v0.3.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7088581Z ^[[1m^[[92m  Downloaded^[[0m signal-hook-registry v1.4.8
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7099333Z ^[[1m^[[92m  Downloaded^[[0m strum v0.28.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7108381Z ^[[1m^[[92m  Downloaded^[[0m serde_urlencoded v0.7.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7125891Z ^[[1m^[[92m  Downloaded^[[0m siphasher v1.0.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7140054Z ^[[1m^[[92m  Downloaded^[[0m anstream v1.0.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7160428Z ^[[1m^[[92m  Downloaded^[[0m same-file v1.0.6
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7175032Z ^[[1m^[[92m  Downloaded^[[0m line-clipping v0.3.7
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7191320Z ^[[1m^[[92m  Downloaded^[[0m signal-hook-mio v0.2.5
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7204117Z ^[[1m^[[92m  Downloaded^[[0m strsim v0.11.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7218042Z ^[[1m^[[92m  Downloaded^[[0m sync_wrapper v1.0.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7227444Z ^[[1m^[[92m  Downloaded^[[0m lab v0.11.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7242134Z ^[[1m^[[92m  Downloaded^[[0m sha2 v0.11.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7282281Z ^[[1m^[[92m  Downloaded^[[0m slab v0.4.12
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7297036Z ^[[1m^[[92m  Downloaded^[[0m symlink v0.1.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7309517Z ^[[1m^[[92m  Downloaded^[[0m ident_case v1.0.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7326610Z ^[[1m^[[92m  Downloaded^[[0m scopeguard v1.2.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7355123Z ^[[1m^[[92m  Downloaded^[[0m atomic v0.6.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7383112Z ^[[1m^[[92m  Downloaded^[[0m lazy_static v1.5.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7420753Z ^[[1m^[[92m  Downloaded^[[0m uncased v0.9.10
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7446618Z ^[[1m^[[92m  Downloaded^[[0m anstyle-query v1.1.5
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7460657Z ^[[1m^[[92m  Downloaded^[[0m phf_shared v0.11.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7470645Z ^[[1m^[[92m  Downloaded^[[0m rand_xorshift v0.4.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7483221Z ^[[1m^[[92m  Downloaded^[[0m thread_local v1.1.10
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7497131Z ^[[1m^[[92m  Downloaded^[[0m time-core v0.1.9
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7509350Z ^[[1m^[[92m  Downloaded^[[0m tower-layer v0.3.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7520736Z ^[[1m^[[92m  Downloaded^[[0m tower-service v0.3.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7530549Z ^[[1m^[[92m  Downloaded^[[0m utf8parse v0.2.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7542689Z ^[[1m^[[92m  Downloaded^[[0m itoa v1.0.18
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7558725Z ^[[1m^[[92m  Downloaded^[[0m lock_api v0.4.14
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7572353Z ^[[1m^[[92m  Downloaded^[[0m mac_address v1.1.8
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7592764Z ^[[1m^[[92m  Downloaded^[[0m matchers v0.2.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7602709Z ^[[1m^[[92m  Downloaded^[[0m memoffset v0.9.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7632840Z ^[[1m^[[92m  Downloaded^[[0m num-derive v0.4.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7647315Z ^[[1m^[[92m  Downloaded^[[0m tracing-serde v0.2.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7647907Z ^[[1m^[[92m  Downloaded^[[0m unarray v0.1.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7682871Z ^[[1m^[[92m  Downloaded^[[0m unit-prefix v0.5.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7693125Z ^[[1m^[[92m  Downloaded^[[0m vtparse v0.6.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7693766Z ^[[1m^[[92m  Downloaded^[[0m wezterm-color-types v0.3.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7694437Z ^[[1m^[[92m  Downloaded^[[0m wezterm-dynamic v0.2.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7709545Z ^[[1m^[[92m  Downloaded^[[0m wezterm-dynamic-derive v0.1.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7720575Z ^[[1m^[[92m  Downloaded^[[0m alloc-stdlib v0.2.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7741295Z ^[[1m^[[92m  Downloaded^[[0m instability v0.3.12
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7762592Z ^[[1m^[[92m  Downloaded^[[0m lru v0.18.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7778035Z ^[[1m^[[92m  Downloaded^[[0m option-ext v0.2.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7792965Z ^[[1m^[[92m  Downloaded^[[0m parse-zoneinfo v0.4.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7804134Z ^[[1m^[[92m  Downloaded^[[0m percent-encoding v2.3.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7819749Z ^[[1m^[[92m  Downloaded^[[0m serde_path_to_error v0.1.20
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7837151Z ^[[1m^[[92m  Downloaded^[[0m sha2 v0.10.9
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7864511Z ^[[1m^[[92m  Downloaded^[[0m shlex v2.0.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7883109Z ^[[1m^[[92m  Downloaded^[[0m static_assertions v1.1.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7905344Z ^[[1m^[[92m  Downloaded^[[0m tokio-macros v2.7.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7917565Z ^[[1m^[[92m  Downloaded^[[0m wait-timeout v0.2.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7934250Z ^[[1m^[[92m  Downloaded^[[0m wezterm-blob-leases v0.1.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7946728Z ^[[1m^[[92m  Downloaded^[[0m approx v0.5.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7965630Z ^[[1m^[[92m  Downloaded^[[0m bit-set v0.5.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7976858Z ^[[1m^[[92m  Downloaded^[[0m bit-set v0.8.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.7989852Z ^[[1m^[[92m  Downloaded^[[0m cpufeatures v0.3.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8004252Z ^[[1m^[[92m  Downloaded^[[0m iana-time-zone v0.1.65
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8033512Z ^[[1m^[[92m  Downloaded^[[0m matchit v0.8.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8055540Z ^[[1m^[[92m  Downloaded^[[0m num-conv v0.2.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8064094Z ^[[1m^[[92m  Downloaded^[[0m num_threads v0.1.7
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8074302Z ^[[1m^[[92m  Downloaded^[[0m semver v1.0.28
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8098106Z ^[[1m^[[92m  Downloaded^[[0m smallvec v1.15.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8113022Z ^[[1m^[[92m  Downloaded^[[0m strum_macros v0.28.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8137475Z ^[[1m^[[92m  Downloaded^[[0m termios v0.3.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8155059Z ^[[1m^[[92m  Downloaded^[[0m thiserror v1.0.69
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8212847Z ^[[1m^[[92m  Downloaded^[[0m thiserror v2.0.19
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8280041Z ^[[1m^[[92m  Downloaded^[[0m thiserror-impl v1.0.69
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8293528Z ^[[1m^[[92m  Downloaded^[[0m toml_datetime v1.1.1+spec-1.1.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8306045Z ^[[1m^[[92m  Downloaded^[[0m tracing-appender v0.2.5
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8321877Z ^[[1m^[[92m  Downloaded^[[0m unicase v2.9.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8335971Z ^[[1m^[[92m  Downloaded^[[0m version_check v0.9.5
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8348647Z ^[[1m^[[92m  Downloaded^[[0m wezterm-input-types v0.1.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8356651Z ^[[1m^[[92m  Downloaded^[[0m zmij v1.0.23
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8374971Z ^[[1m^[[92m  Downloaded^[[0m alloc-no-stdlib v2.0.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8392349Z ^[[1m^[[92m  Downloaded^[[0m anstyle v1.0.14
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8407285Z ^[[1m^[[92m  Downloaded^[[0m anstyle-parse v1.0.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8424076Z ^[[1m^[[92m  Downloaded^[[0m anyhow v1.0.104
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8465511Z ^[[1m^[[92m  Downloaded^[[0m block-buffer v0.12.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8478185Z ^[[1m^[[92m  Downloaded^[[0m castaway v0.2.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8492794Z ^[[1m^[[92m  Downloaded^[[0m serde_derive v1.0.229
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8524150Z ^[[1m^[[92m  Downloaded^[[0m simd-adler32 v0.3.10
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8543379Z ^[[1m^[[92m  Downloaded^[[0m tempfile v3.27.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8569694Z ^[[1m^[[92m  Downloaded^[[0m thiserror-impl v2.0.19
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8584798Z ^[[1m^[[92m  Downloaded^[[0m time-macros v0.2.32
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8609654Z ^[[1m^[[92m  Downloaded^[[0m toml_parser v1.1.2+spec-1.1.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8633224Z ^[[1m^[[92m  Downloaded^[[0m toml_writer v1.1.2+spec-1.1.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8647424Z ^[[1m^[[92m  Downloaded^[[0m tracing-attributes v0.1.31
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8674781Z ^[[1m^[[92m  Downloaded^[[0m tracing-log v0.2.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8688775Z ^[[1m^[[92m  Downloaded^[[0m ucd-trie v0.1.7
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8703462Z ^[[1m^[[92m  Downloaded^[[0m unicode-truncate v2.0.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8720164Z ^[[1m^[[92m  Downloaded^[[0m walkdir v2.5.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8739194Z ^[[1m^[[92m  Downloaded^[[0m crypto-common v0.1.7
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8748763Z ^[[1m^[[92m  Downloaded^[[0m crypto-common v0.2.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8760721Z ^[[1m^[[92m  Downloaded^[[0m fallible-streaming-iterator v0.1.9
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8770054Z ^[[1m^[[92m  Downloaded^[[0m fixedbitset v0.4.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8782993Z ^[[1m^[[92m  Downloaded^[[0m indoc v2.0.7
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8814147Z ^[[1m^[[92m  Downloaded^[[0m is_terminal_polyfill v1.70.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8823907Z ^[[1m^[[92m  Downloaded^[[0m memmem v0.1.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8834916Z ^[[1m^[[92m  Downloaded^[[0m mime v0.3.17
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8848070Z ^[[1m^[[92m  Downloaded^[[0m phf_generator v0.11.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8859715Z ^[[1m^[[92m  Downloaded^[[0m phf_generator v0.12.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8871484Z ^[[1m^[[92m  Downloaded^[[0m phf_shared v0.12.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8881114Z ^[[1m^[[92m  Downloaded^[[0m ppv-lite86 v0.2.21
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8894501Z ^[[1m^[[92m  Downloaded^[[0m ratatui-macros v0.7.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8909707Z ^[[1m^[[92m  Downloaded^[[0m ratatui-termina v0.1.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8920393Z ^[[1m^[[92m  Downloaded^[[0m serde_core v1.0.229
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8948694Z ^[[1m^[[92m  Downloaded^[[0m sharded-slab v0.1.7
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.8983067Z ^[[1m^[[92m  Downloaded^[[0m terminfo v0.9.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9011051Z ^[[1m^[[92m  Downloaded^[[0m toml_edit v0.25.13+spec-1.1.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9051637Z ^[[1m^[[92m  Downloaded^[[0m tracing-core v0.1.36
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9079422Z ^[[1m^[[92m  Downloaded^[[0m unicode-ident v1.0.24
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9108008Z ^[[1m^[[92m  Downloaded^[[0m uuid v1.24.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9138812Z ^[[1m^[[92m  Downloaded^[[0m document-features v0.2.12
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9152192Z ^[[1m^[[92m  Downloaded^[[0m fallible-iterator v0.3.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9165134Z ^[[1m^[[92m  Downloaded^[[0m fnv v1.0.7
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9173819Z ^[[1m^[[92m  Downloaded^[[0m kasuari v0.4.12
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9197311Z ^[[1m^[[92m  Downloaded^[[0m mime_guess v2.0.5
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9215007Z ^[[1m^[[92m  Downloaded^[[0m once_cell v1.21.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9241109Z ^[[1m^[[92m  Downloaded^[[0m ordered-float v4.6.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9257280Z ^[[1m^[[92m  Downloaded^[[0m pest_generator v2.8.8
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9271997Z ^[[1m^[[92m  Downloaded^[[0m phf v0.11.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9284818Z ^[[1m^[[92m  Downloaded^[[0m phf_codegen v0.11.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9294087Z ^[[1m^[[92m  Downloaded^[[0m phf_codegen v0.12.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9303228Z ^[[1m^[[92m  Downloaded^[[0m phf_macros v0.11.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9313121Z ^[[1m^[[92m  Downloaded^[[0m phf_macros v0.12.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9323235Z ^[[1m^[[92m  Downloaded^[[0m pin-project-lite v0.2.17
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9384117Z ^[[1m^[[92m  Downloaded^[[0m powerfmt v0.2.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9395794Z ^[[1m^[[92m  Downloaded^[[0m quick-error v1.2.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9408626Z ^[[1m^[[92m  Downloaded^[[0m quote v1.0.47
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9436178Z ^[[1m^[[92m  Downloaded^[[0m rand_chacha v0.9.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9448672Z ^[[1m^[[92m  Downloaded^[[0m rand_core v0.9.5
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9462447Z ^[[1m^[[92m  Downloaded^[[0m rustc_version v0.4.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9475739Z ^[[1m^[[92m  Downloaded^[[0m serde v1.0.229
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9511293Z ^[[1m^[[92m  Downloaded^[[0m signal-hook v0.3.18
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9543607Z ^[[1m^[[92m  Downloaded^[[0m socket2 v0.6.5
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9563073Z ^[[1m^[[92m  Downloaded^[[0m wezterm-bidi v0.2.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9583762Z ^[[1m^[[92m  Downloaded^[[0m allocator-api2 v0.2.21
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9610305Z ^[[1m^[[92m  Downloaded^[[0m axum-core v0.5.6
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9633796Z ^[[1m^[[92m  Downloaded^[[0m bit-vec v0.6.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9647164Z ^[[1m^[[92m  Downloaded^[[0m bit-vec v0.8.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9663844Z ^[[1m^[[92m  Downloaded^[[0m bitflags v1.3.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9698582Z ^[[1m^[[92m  Downloaded^[[0m block-buffer v0.10.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9709395Z ^[[1m^[[92m  Downloaded^[[0m clap v4.6.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9810870Z ^[[1m^[[92m  Downloaded^[[0m colorchoice v1.0.5
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9820354Z ^[[1m^[[92m  Downloaded^[[0m compression-core v0.4.32
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9831334Z ^[[1m^[[92m  Downloaded^[[0m const-oid v0.10.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9855707Z ^[[1m^[[92m  Downloaded^[[0m cpufeatures v0.2.17
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9870487Z ^[[1m^[[92m  Downloaded^[[0m csscolorparser v0.6.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9883612Z ^[[1m^[[92m  Downloaded^[[0m darling_macro v0.23.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9890233Z ^[[1m^[[92m  Downloaded^[[0m getrandom v0.4.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9930449Z ^[[1m^[[92m  Downloaded^[[0m litrs v1.0.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9960954Z ^[[1m^[[92m  Downloaded^[[0m log v0.4.33
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:11.9986734Z ^[[1m^[[92m  Downloaded^[[0m palette_derive v0.7.6
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0004991Z ^[[1m^[[92m  Downloaded^[[0m parking_lot v0.12.5
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0030327Z ^[[1m^[[92m  Downloaded^[[0m parking_lot_core v0.9.12
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0052700Z ^[[1m^[[92m  Downloaded^[[0m pest_derive v2.8.8
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0074260Z ^[[1m^[[92m  Downloaded^[[0m phf v0.12.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0088491Z ^[[1m^[[92m  Downloaded^[[0m rand_core v0.6.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0102725Z ^[[1m^[[92m  Downloaded^[[0m ratatui-crossterm v0.1.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0113432Z ^[[1m^[[92m  Downloaded^[[0m ratatui-termwiz v0.1.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0123955Z ^[[1m^[[92m  Downloaded^[[0m termina v0.3.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0162747Z ^[[1m^[[92m  Downloaded^[[0m typenum v1.20.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0199001Z ^[[1m^[[92m  Downloaded^[[0m atomic-waker v1.1.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0211555Z ^[[1m^[[92m  Downloaded^[[0m autocfg v1.5.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0231231Z ^[[1m^[[92m  Downloaded^[[0m bitflags v2.13.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0278609Z ^[[1m^[[92m  Downloaded^[[0m by_address v1.2.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0287618Z ^[[1m^[[92m  Downloaded^[[0m cfg-if v1.0.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0300776Z ^[[1m^[[92m  Downloaded^[[0m cfg_aliases v0.2.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0310862Z ^[[1m^[[92m  Downloaded^[[0m clap_lex v1.1.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0322154Z ^[[1m^[[92m  Downloaded^[[0m critical-section v1.2.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0339141Z ^[[1m^[[92m  Downloaded^[[0m darling v0.23.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0395524Z ^[[1m^[[92m  Downloaded^[[0m deranged v0.5.8
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0410214Z ^[[1m^[[92m  Downloaded^[[0m futures-task v0.3.33
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0422681Z ^[[1m^[[92m  Downloaded^[[0m generic-array v0.14.7
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0436985Z ^[[1m^[[92m  Downloaded^[[0m indicatif v0.18.6
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0474065Z ^[[1m^[[92m  Downloaded^[[0m miniz_oxide v0.8.9
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0501516Z ^[[1m^[[92m  Downloaded^[[0m nu-ansi-term v0.50.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0526130Z ^[[1m^[[92m  Downloaded^[[0m num-traits v0.2.19
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0553093Z ^[[1m^[[92m  Downloaded^[[0m pest_meta v2.8.8
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0574547Z ^[[1m^[[92m  Downloaded^[[0m pkg-config v0.3.33
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0591113Z ^[[1m^[[92m  Downloaded^[[0m proc-macro2 v1.0.107
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0621939Z ^[[1m^[[92m  Downloaded^[[0m serde_json v1.0.151
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0699436Z ^[[1m^[[92m  Downloaded^[[0m tower v0.5.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0808168Z ^[[1m^[[92m  Downloaded^[[0m unicode-segmentation v1.13.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0839013Z ^[[1m^[[92m  Downloaded^[[0m chrono-tz-build v0.5.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0847697Z ^[[1m^[[92m  Downloaded^[[0m clap_derive v4.6.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0870460Z ^[[1m^[[92m  Downloaded^[[0m compression-codecs v0.4.38
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0912679Z ^[[1m^[[92m  Downloaded^[[0m crc32fast v1.5.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0932514Z ^[[1m^[[92m  Downloaded^[[0m crossbeam-utils v0.8.22
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0961993Z ^[[1m^[[92m  Downloaded^[[0m dashmap v6.2.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.0987753Z ^[[1m^[[92m  Downloaded^[[0m digest v0.10.7
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1006894Z ^[[1m^[[92m  Downloaded^[[0m digest v0.11.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1032281Z ^[[1m^[[92m  Downloaded^[[0m dirs v6.0.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1046382Z ^[[1m^[[92m  Downloaded^[[0m dirs-sys v0.5.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1058025Z ^[[1m^[[92m  Downloaded^[[0m equivalent v1.0.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1068910Z ^[[1m^[[92m  Downloaded^[[0m errno v0.3.14
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1085048Z ^[[1m^[[92m  Downloaded^[[0m euclid v0.22.14
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1118639Z ^[[1m^[[92m  Downloaded^[[0m filedescriptor v0.8.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1128663Z ^[[1m^[[92m  Downloaded^[[0m form_urlencoded v1.2.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1136932Z ^[[1m^[[92m  Downloaded^[[0m futures-core v0.3.33
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1150909Z ^[[1m^[[92m  Downloaded^[[0m futures-sink v0.3.33
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1159700Z ^[[1m^[[92m  Downloaded^[[0m indexmap v2.14.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1204157Z ^[[1m^[[92m  Downloaded^[[0m ratatui v0.30.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1244573Z ^[[1m^[[92m  Downloaded^[[0m tokio-util v0.7.19
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1328131Z ^[[1m^[[92m  Downloaded^[[0m base64 v0.22.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1368769Z ^[[1m^[[92m  Downloaded^[[0m bytemuck v1.25.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1401942Z ^[[1m^[[92m  Downloaded^[[0m console v0.16.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1420161Z ^[[1m^[[92m  Downloaded^[[0m darling_core v0.23.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1478874Z ^[[1m^[[92m  Downloaded^[[0m either v1.17.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1494516Z ^[[1m^[[92m  Downloaded^[[0m fast-srgb8 v1.0.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1507099Z ^[[1m^[[92m  Downloaded^[[0m find-msvc-tools v0.1.9
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1523685Z ^[[1m^[[92m  Downloaded^[[0m foldhash v0.2.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1536310Z ^[[1m^[[92m  Downloaded^[[0m heck v0.5.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1549592Z ^[[1m^[[92m  Downloaded^[[0m hex v0.4.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1566115Z ^[[1m^[[92m  Downloaded^[[0m http-body v1.1.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1576903Z ^[[1m^[[92m  Downloaded^[[0m httpdate v1.0.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1589673Z ^[[1m^[[92m  Downloaded^[[0m hyper-util v0.1.20
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1655289Z ^[[1m^[[92m  Downloaded^[[0m memchr v2.8.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1713737Z ^[[1m^[[92m  Downloaded^[[0m minimal-lexical v0.2.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1761909Z ^[[1m^[[92m  Downloaded^[[0m nom v7.1.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1816863Z ^[[1m^[[92m  Downloaded^[[0m rand v0.8.7
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1852167Z ^[[1m^[[92m  Downloaded^[[0m aho-corasick v1.1.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1907508Z ^[[1m^[[92m  Downloaded^[[0m async-compression v0.4.42
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.1983966Z ^[[1m^[[92m  Downloaded^[[0m base64 v0.23.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.2025261Z ^[[1m^[[92m  Downloaded^[[0m bytes v1.12.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.2061979Z ^[[1m^[[92m  Downloaded^[[0m convert_case v0.10.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.2079501Z ^[[1m^[[92m  Downloaded^[[0m crossbeam-channel v0.5.16
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.2122036Z ^[[1m^[[92m  Downloaded^[[0m fastrand v2.5.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.2136611Z ^[[1m^[[92m  Downloaded^[[0m flate2 v1.1.9
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.2189247Z ^[[1m^[[92m  Downloaded^[[0m futures-channel v0.3.33
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.2209060Z ^[[1m^[[92m  Downloaded^[[0m getrandom v0.3.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.2245626Z ^[[1m^[[92m  Downloaded^[[0m http-body-util v0.1.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.2266773Z ^[[1m^[[92m  Downloaded^[[0m http-range-header v0.4.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.2276867Z ^[[1m^[[92m  Downloaded^[[0m mio v1.2.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.2342206Z ^[[1m^[[92m  Downloaded^[[0m pest v2.8.8
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.2389878Z ^[[1m^[[92m  Downloaded^[[0m rand v0.9.5
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.2429291Z ^[[1m^[[92m  Downloaded^[[0m winnow v1.0.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.2532182Z ^[[1m^[[92m  Downloaded^[[0m cc v1.4.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.2564003Z ^[[1m^[[92m  Downloaded^[[0m clap_builder v4.6.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.2630574Z ^[[1m^[[92m  Downloaded^[[0m compact_str v0.9.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.2666471Z ^[[1m^[[92m  Downloaded^[[0m derive_more-impl v2.1.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.2721257Z ^[[1m^[[92m  Downloaded^[[0m fs4 v1.1.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.2765282Z ^[[1m^[[92m  Downloaded^[[0m hashbrown v0.14.5
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.2815624Z ^[[1m^[[92m  Downloaded^[[0m hashlink v0.12.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.2836969Z ^[[1m^[[92m  Downloaded^[[0m httparse v1.10.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.2863057Z ^[[1m^[[92m  Downloaded^[[0m hybrid-array v0.4.13
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.2886188Z ^[[1m^[[92m  Downloaded^[[0m tower-http v0.7.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.2997272Z ^[[1m^[[92m  Downloaded^[[0m crossterm v0.29.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.3069606Z ^[[1m^[[92m  Downloaded^[[0m derive_more v2.1.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.3206020Z ^[[1m^[[92m  Downloaded^[[0m finl_unicode v1.4.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.3262375Z ^[[1m^[[92m  Downloaded^[[0m hyper v1.11.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.3316501Z ^[[1m^[[92m  Downloaded^[[0m libm v0.2.16
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.3432064Z ^[[1m^[[92m  Downloaded^[[0m rusqlite v0.40.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.3502975Z ^[[1m^[[92m  Downloaded^[[0m hashbrown v0.16.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.3555875Z ^[[1m^[[92m  Downloaded^[[0m itertools v0.14.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.3628455Z ^[[1m^[[92m  Downloaded^[[0m ratatui-core v0.1.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.3700101Z ^[[1m^[[92m  Downloaded^[[0m regex v1.13.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.3757026Z ^[[1m^[[92m  Downloaded^[[0m rustix v1.1.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.4039589Z ^[[1m^[[92m  Downloaded^[[0m tracing-subscriber v0.3.23
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.4125978Z ^[[1m^[[92m  Downloaded^[[0m vcpkg v0.2.15
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.4694795Z ^[[1m^[[92m  Downloaded^[[0m axum v0.8.9
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.4780564Z ^[[1m^[[92m  Downloaded^[[0m chrono v0.4.45
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.4849787Z ^[[1m^[[92m  Downloaded^[[0m fancy-regex v0.11.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.4884927Z ^[[1m^[[92m  Downloaded^[[0m http v1.4.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.4923375Z ^[[1m^[[92m  Downloaded^[[0m portable-atomic v1.14.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.5000010Z ^[[1m^[[92m  Downloaded^[[0m brotli-decompressor v5.0.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.5060622Z ^[[1m^[[92m  Downloaded^[[0m hashbrown v0.17.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.5116001Z ^[[1m^[[92m  Downloaded^[[0m proptest v1.11.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.5217612Z ^[[1m^[[92m  Downloaded^[[0m syn v1.0.109
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.5316518Z ^[[1m^[[92m  Downloaded^[[0m futures-util v0.3.33
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.5456137Z ^[[1m^[[92m  Downloaded^[[0m palette v0.7.6
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.5572811Z ^[[1m^[[92m  Downloaded^[[0m syn v2.0.119
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.5684653Z ^[[1m^[[92m  Downloaded^[[0m time v0.3.54
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.5837379Z ^[[1m^[[92m  Downloaded^[[0m zerocopy v0.8.55
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.6063212Z ^[[1m^[[92m  Downloaded^[[0m unicode-width v0.2.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.6122221Z ^[[1m^[[92m  Downloaded^[[0m syn v3.0.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.6232528Z ^[[1m^[[92m  Downloaded^[[0m ratatui-widgets v0.3.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.6315684Z ^[[1m^[[92m  Downloaded^[[0m nix v0.29.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.6432994Z ^[[1m^[[92m  Downloaded^[[0m termwiz v0.23.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.6561473Z ^[[1m^[[92m  Downloaded^[[0m regex-syntax v0.8.11
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.6632120Z ^[[1m^[[92m  Downloaded^[[0m tracing v0.1.44
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.6796937Z ^[[1m^[[92m  Downloaded^[[0m regex-automata v0.4.16
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.6944875Z ^[[1m^[[92m  Downloaded^[[0m libc v0.2.189
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.7417623Z ^[[1m^[[92m  Downloaded^[[0m chrono-tz v0.10.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.7582462Z ^[[1m^[[92m  Downloaded^[[0m brotli v8.0.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.7742827Z ^[[1m^[[92m  Downloaded^[[0m tokio v1.53.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.8226195Z ^[[1m^[[92m  Downloaded^[[0m deltae v0.3.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.8396602Z ^[[1m^[[92m  Downloaded^[[0m linux-raw-sys v0.12.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:12.9054262Z ^[[1m^[[92m  Downloaded^[[0m libsqlite3-sys v0.38.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:13.0414080Z ^[[1m^[[92m   Compiling^[[0m unicode-ident v1.0.24
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:13.0414724Z ^[[1m^[[92m   Compiling^[[0m proc-macro2 v1.0.107
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:13.0416243Z ^[[1m^[[92m   Compiling^[[0m quote v1.0.47
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:13.0416573Z ^[[1m^[[92m   Compiling^[[0m libc v0.2.189
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:13.0983585Z ^[[1m^[[92m   Compiling^[[0m cfg-if v1.0.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:13.1295314Z ^[[1m^[[92m   Compiling^[[0m itoa v1.0.18
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:13.2167931Z ^[[1m^[[92m   Compiling^[[0m log v0.4.33
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:13.2863401Z ^[[1m^[[92m   Compiling^[[0m pin-project-lite v0.2.17
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:13.3270421Z ^[[1m^[[92m   Compiling^[[0m bitflags v2.13.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:13.3413188Z ^[[1m^[[92m   Compiling^[[0m serde_core v1.0.229
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:13.4883484Z ^[[1m^[[92m   Compiling^[[0m equivalent v1.0.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:13.4973284Z ^[[1m^[[92m   Compiling^[[0m allocator-api2 v0.2.21
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:13.5157609Z ^[[1m^[[92m   Compiling^[[0m foldhash v0.2.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:13.6176835Z ^[[1m^[[92m   Compiling^[[0m once_cell v1.21.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:13.7893263Z ^[[1m^[[92m   Compiling^[[0m smallvec v1.15.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:13.8683058Z ^[[1m^[[92m   Compiling^[[0m bytes v1.12.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:13.9363667Z ^[[1m^[[92m   Compiling^[[0m syn v2.0.119
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:13.9453074Z ^[[1m^[[92m   Compiling^[[0m syn v3.0.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:14.1753165Z ^[[1m^[[92m   Compiling^[[0m errno v0.3.14
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:14.2553255Z ^[[1m^[[92m   Compiling^[[0m signal-hook-registry v1.4.8
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:14.4780613Z ^[[1m^[[92m   Compiling^[[0m mio v1.2.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:14.4854091Z ^[[1m^[[92m   Compiling^[[0m version_check v0.9.5
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:14.6863247Z ^[[1m^[[92m   Compiling^[[0m uncased v0.9.10
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:14.9803263Z ^[[1m^[[92m   Compiling^[[0m hashbrown v0.17.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:15.5423480Z ^[[1m^[[92m   Compiling^[[0m unicode-segmentation v1.13.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:15.9083079Z ^[[1m^[[92m   Compiling^[[0m strsim v0.11.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:16.2303646Z ^[[1m^[[92m   Compiling^[[0m serde v1.0.229
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:16.3880808Z ^[[1m^[[92m   Compiling^[[0m futures-core v0.3.33
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:16.5489880Z ^[[1m^[[92m   Compiling^[[0m rustversion v1.0.23
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:16.7403094Z ^[[1m^[[92m   Compiling^[[0m rustix v1.1.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:16.8910619Z ^[[1m^[[92m   Compiling^[[0m siphasher v1.0.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:16.9466395Z ^[[1m^[[92m   Compiling^[[0m heck v0.5.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:17.0173420Z ^[[1m^[[92m   Compiling^[[0m thiserror v2.0.19
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:17.1923429Z ^[[1m^[[92m   Compiling^[[0m socket2 v0.6.5
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:17.2574107Z ^[[1m^[[92m   Compiling^[[0m tracing-core v0.1.36
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:17.5045942Z ^[[1m^[[92m   Compiling^[[0m serde_derive v1.0.229
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:17.6773860Z ^[[1m^[[92m   Compiling^[[0m thiserror-impl v2.0.19
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:17.8063161Z ^[[1m^[[92m   Compiling^[[0m ident_case v1.0.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:17.8573701Z ^[[1m^[[92m   Compiling^[[0m linux-raw-sys v0.12.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:18.1503336Z ^[[1m^[[92m   Compiling^[[0m ryu v1.0.23
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:18.2767930Z ^[[1m^[[92m   Compiling^[[0m unicode-width v0.2.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:18.3333082Z ^[[1m^[[92m   Compiling^[[0m tokio-macros v2.7.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:18.7433167Z ^[[1m^[[92m   Compiling^[[0m darling_core v0.23.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:18.8133215Z ^[[1m^[[92m   Compiling^[[0m tokio v1.53.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:20.8093332Z ^[[1m^[[92m   Compiling^[[0m http v1.4.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:21.1353120Z ^[[1m^[[92m   Compiling^[[0m autocfg v1.5.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:21.2868111Z ^[[1m^[[92m   Compiling^[[0m memchr v2.8.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:21.4343750Z ^[[1m^[[92m   Compiling^[[0m parking_lot_core v0.9.12
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:21.5663027Z ^[[1m^[[92m   Compiling^[[0m either v1.17.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:21.7203176Z ^[[1m^[[92m   Compiling^[[0m itertools v0.14.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:21.8383120Z ^[[1m^[[92m   Compiling^[[0m http-body v1.1.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:21.9183235Z ^[[1m^[[92m   Compiling^[[0m num-traits v0.2.19
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:21.9623663Z ^[[1m^[[92m   Compiling^[[0m darling_macro v0.23.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:22.0050721Z ^[[1m^[[92m   Compiling^[[0m castaway v0.2.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:22.0548428Z ^[[1m^[[92m   Compiling^[[0m strum_macros v0.28.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:22.1863652Z ^[[1m^[[92m   Compiling^[[0m tracing-attributes v0.1.31
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:23.0443116Z ^[[1m^[[92m   Compiling^[[0m phf_shared v0.12.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:23.1458740Z ^[[1m^[[92m   Compiling^[[0m hashbrown v0.16.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:23.1923257Z ^[[1m^[[92m   Compiling^[[0m alloc-no-stdlib v2.0.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:23.2453566Z ^[[1m^[[92m   Compiling^[[0m zmij v1.0.23
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:23.4063163Z ^[[1m^[[92m   Compiling^[[0m signal-hook v0.3.18
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:23.4903424Z ^[[1m^[[92m   Compiling^[[0m scopeguard v1.2.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:23.5313146Z ^[[1m^[[92m   Compiling^[[0m static_assertions v1.1.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:23.5613056Z ^[[1m^[[92m   Compiling^[[0m instability v0.3.12
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:23.6483745Z ^[[1m^[[92m   Compiling^[[0m crc32fast v1.5.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:23.6653646Z ^[[1m^[[92m   Compiling^[[0m fastrand v2.5.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:23.7539473Z ^[[1m^[[92m   Compiling^[[0m phf_generator v0.12.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:23.8089852Z ^[[1m^[[92m   Compiling^[[0m kasuari v0.4.12
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:23.8693304Z ^[[1m^[[92m   Compiling^[[0m compact_str v0.9.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:23.9163004Z ^[[1m^[[92m   Compiling^[[0m strum v0.28.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:23.9713734Z ^[[1m^[[92m   Compiling^[[0m lock_api v0.4.14
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:24.1653679Z ^[[1m^[[92m   Compiling^[[0m alloc-stdlib v0.2.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:24.2233213Z ^[[1m^[[92m   Compiling^[[0m tracing v0.1.44
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:24.3643498Z ^[[1m^[[92m   Compiling^[[0m unicode-truncate v2.0.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:24.4213627Z ^[[1m^[[92m   Compiling^[[0m darling v0.23.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:24.4583478Z ^[[1m^[[92m   Compiling^[[0m convert_case v0.10.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:24.5133041Z ^[[1m^[[92m   Compiling^[[0m lru v0.18.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:24.6233242Z ^[[1m^[[92m   Compiling^[[0m shlex v2.0.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:24.6292667Z ^[[1m^[[92m   Compiling^[[0m crossbeam-utils v0.8.22
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:24.6523625Z ^[[1m^[[92m   Compiling^[[0m find-msvc-tools v0.1.9
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:24.7343822Z ^[[1m^[[92m   Compiling^[[0m tower-service v0.3.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:24.7718657Z ^[[1m^[[92m   Compiling^[[0m adler2 v2.0.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:24.7767125Z ^[[1m^[[92m   Compiling^[[0m indoc v2.0.7
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:24.8044074Z ^[[1m^[[92m   Compiling^[[0m httparse v1.10.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:24.8408931Z ^[[1m^[[92m   Compiling^[[0m serde_json v1.0.151
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:24.9273825Z ^[[1m^[[92m   Compiling^[[0m typenum v1.20.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:25.0083050Z ^[[1m^[[92m   Compiling^[[0m regex-syntax v0.8.11
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:25.0343616Z ^[[1m^[[92m   Compiling^[[0m critical-section v1.2.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:25.0762997Z ^[[1m^[[92m   Compiling^[[0m deranged v0.5.8
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:25.1283689Z ^[[1m^[[92m   Compiling^[[0m getrandom v0.3.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:25.2982945Z ^[[1m^[[92m   Compiling^[[0m time-core v0.1.9
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:25.4393008Z ^[[1m^[[92m   Compiling^[[0m num-conv v0.2.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:25.5353266Z ^[[1m^[[92m   Compiling^[[0m simd-adler32 v0.3.10
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:25.6753342Z ^[[1m^[[92m   Compiling^[[0m getrandom v0.4.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:25.7689732Z ^[[1m^[[92m   Compiling^[[0m powerfmt v0.2.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:25.7933744Z ^[[1m^[[92m   Compiling^[[0m num_threads v0.1.7
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:25.8805240Z ^[[1m^[[92m   Compiling^[[0m hybrid-array v0.4.13
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:25.9093606Z ^[[1m^[[92m   Compiling^[[0m miniz_oxide v0.8.9
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:26.1143205Z ^[[1m^[[92m   Compiling^[[0m time v0.3.54
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:26.3623128Z ^[[1m^[[92m   Compiling^[[0m ratatui-core v0.1.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:27.0313352Z ^[[1m^[[92m   Compiling^[[0m cc v1.4.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:27.9743695Z ^[[1m^[[92m   Compiling^[[0m derive_more-impl v2.1.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:28.3093495Z ^[[1m^[[92m   Compiling^[[0m brotli-decompressor v5.0.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:28.6113962Z ^[[1m^[[92m   Compiling^[[0m phf_codegen v0.12.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:28.7583168Z ^[[1m^[[92m   Compiling^[[0m parse-zoneinfo v0.4.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:28.7793224Z ^[[1m^[[92m   Compiling^[[0m tower-layer v0.3.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:28.8804549Z ^[[1m^[[92m   Compiling^[[0m unicase v2.9.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:28.9083220Z ^[[1m^[[92m   Compiling^[[0m httpdate v1.0.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:29.0093449Z ^[[1m^[[92m   Compiling^[[0m mime v0.3.17
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:29.0763451Z ^[[1m^[[92m   Compiling^[[0m litrs v1.0.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:29.2133105Z ^[[1m^[[92m   Compiling^[[0m vcpkg v0.2.15
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:29.2714211Z ^[[1m^[[92m   Compiling^[[0m utf8parse v0.2.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:29.3133821Z ^[[1m^[[92m   Compiling^[[0m pkg-config v0.3.33
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:29.3313524Z ^[[1m^[[92m   Compiling^[[0m slab v0.4.12
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:29.4333398Z ^[[1m^[[92m   Compiling^[[0m futures-task v0.3.33
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:29.4923817Z ^[[1m^[[92m   Compiling^[[0m percent-encoding v2.3.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:29.5273539Z ^[[1m^[[92m   Compiling^[[0m futures-util v0.3.33
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:29.6123168Z ^[[1m^[[92m   Compiling^[[0m document-features v0.2.12
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:29.7513831Z ^[[1m^[[92m   Compiling^[[0m anstyle-parse v1.0.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:29.8043182Z ^[[1m^[[92m   Compiling^[[0m libsqlite3-sys v0.38.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:29.8603691Z ^[[1m^[[92m   Compiling^[[0m chrono-tz-build v0.5.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:29.9753122Z ^[[1m^[[92m   Compiling^[[0m mime_guess v2.0.5
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:29.9913077Z ^[[1m^[[92m   Compiling^[[0m brotli v8.0.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:30.1883749Z ^[[1m^[[92m   Compiling^[[0m flate2 v1.1.9
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:30.2433385Z ^[[1m^[[92m   Compiling^[[0m signal-hook-mio v0.2.5
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:30.5403347Z ^[[1m^[[92m   Compiling^[[0m derive_more v2.1.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:31.1483060Z ^[[1m^[[92m   Compiling^[[0m regex-automata v0.4.16
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:31.5033590Z ^[[1m^[[92m   Compiling^[[0m parking_lot v0.12.5
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:31.6052955Z ^[[1m^[[92m   Compiling^[[0m http-body-util v0.1.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:31.8040200Z ^[[1m^[[92m   Compiling^[[0m futures-channel v0.3.33
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:31.9123225Z ^[[1m^[[92m   Compiling^[[0m line-clipping v0.3.7
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:31.9643247Z ^[[1m^[[92m   Compiling^[[0m is_terminal_polyfill v1.70.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:32.0003130Z ^[[1m^[[92m   Compiling^[[0m sync_wrapper v1.0.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:32.0342986Z ^[[1m^[[92m   Compiling^[[0m anstyle-query v1.1.5
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:32.0498493Z ^[[1m^[[92m   Compiling^[[0m atomic-waker v1.1.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:32.0913635Z ^[[1m^[[92m   Compiling^[[0m anstyle v1.0.14
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:32.1503811Z ^[[1m^[[92m   Compiling^[[0m iana-time-zone v0.1.65
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:32.2923114Z ^[[1m^[[92m   Compiling^[[0m portable-atomic v1.14.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:32.4013774Z ^[[1m^[[92m   Compiling^[[0m colorchoice v1.0.5
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:32.4453322Z ^[[1m^[[92m   Compiling^[[0m zerocopy v0.8.55
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:32.6863726Z ^[[1m^[[92m   Compiling^[[0m compression-core v0.4.32
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:32.7172553Z ^[[1m^[[92m   Compiling^[[0m lazy_static v1.5.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:32.7593384Z ^[[1m^[[92m   Compiling^[[0m sharded-slab v0.1.7
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:32.7927056Z ^[[1m^[[92m   Compiling^[[0m compression-codecs v0.4.38
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:33.0543044Z ^[[1m^[[92m   Compiling^[[0m matchers v0.2.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:33.1293427Z ^[[1m^[[92m   Compiling^[[0m tempfile v3.27.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:33.2712992Z ^[[1m^[[92m   Compiling^[[0m anstream v1.0.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:33.4955193Z ^[[1m^[[92m   Compiling^[[0m chrono v0.4.45
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:33.4997747Z ^[[1m^[[92m   Compiling^[[0m hyper v1.11.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:34.1613283Z ^[[1m^[[92m   Compiling^[[0m ratatui-widgets v0.3.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:34.7673368Z ^[[1m^[[92m   Compiling^[[0m crossterm v0.29.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:34.8203295Z ^[[1m^[[92m   Compiling^[[0m rand_core v0.9.5
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:34.9593291Z ^[[1m^[[92m   Compiling^[[0m chrono-tz v0.10.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:35.0658840Z ^[[1m^[[92m   Compiling^[[0m form_urlencoded v1.2.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:35.1733725Z ^[[1m^[[92m   Compiling^[[0m block-buffer v0.12.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:35.2611221Z ^[[1m^[[92m   Compiling^[[0m crypto-common v0.2.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:35.8183672Z ^[[1m^[[92m   Compiling^[[0m tracing-serde v0.2.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:35.9063536Z ^[[1m^[[92m   Compiling^[[0m tracing-log v0.2.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:36.0623168Z ^[[1m^[[92m   Compiling^[[0m thread_local v1.1.10
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:36.2213782Z ^[[1m^[[92m   Compiling^[[0m winnow v1.0.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:36.3205998Z ^[[1m^[[92m   Compiling^[[0m clap_lex v1.1.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:36.3242873Z ^[[1m^[[92m   Compiling^[[0m option-ext v0.2.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:36.3593124Z ^[[1m^[[92m   Compiling^[[0m nu-ansi-term v0.50.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:36.4853125Z ^[[1m^[[92m   Compiling^[[0m const-oid v0.10.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:36.6103228Z ^[[1m^[[92m   Compiling^[[0m futures-sink v0.3.33
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:36.6103883Z ^[[1m^[[92m   Compiling^[[0m anyhow v1.0.104
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:36.6573322Z ^[[1m^[[92m   Compiling^[[0m tokio-util v0.7.19
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:36.8223561Z ^[[1m^[[92m   Compiling^[[0m digest v0.11.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:36.9199398Z ^[[1m^[[92m   Compiling^[[0m tracing-subscriber v0.3.23
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:37.0673301Z ^[[1m^[[92m   Compiling^[[0m clap_builder v4.6.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:37.3653258Z ^[[1m^[[92m   Compiling^[[0m toml_parser v1.1.2+spec-1.1.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:38.0843523Z ^[[1m^[[92m   Compiling^[[0m dirs-sys v0.5.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:38.4142783Z ^[[1m^[[92m   Compiling^[[0m phf v0.12.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:38.5023321Z ^[[1m^[[92m   Compiling^[[0m ratatui-crossterm v0.1.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:38.6463427Z ^[[1m^[[92m   Compiling^[[0m ratatui-macros v0.7.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:38.7172955Z ^[[1m^[[92m   Compiling^[[0m serde_urlencoded v0.7.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:40.0053044Z ^[[1m^[[92m   Compiling^[[0m hyper-util v0.1.20
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:40.6363236Z ^[[1m^[[92m   Compiling^[[0m async-compression v0.4.42
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:40.9113165Z ^[[1m^[[92m   Compiling^[[0m tower v0.5.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:41.2329645Z ^[[1m^[[92m   Compiling^[[0m axum-core v0.5.6
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:41.2373295Z ^[[1m^[[92m   Compiling^[[0m crossbeam-channel v0.5.16
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:41.6653196Z ^[[1m^[[92m   Compiling^[[0m console v0.16.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:42.2553213Z ^[[1m^[[92m   Compiling^[[0m clap_derive v4.6.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:42.6993756Z ^[[1m^[[92m   Compiling^[[0m serde_path_to_error v0.1.20
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:43.0063204Z ^[[1m^[[92m   Compiling^[[0m indexmap v2.14.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:43.5743162Z ^[[1m^[[92m   Compiling^[[0m hashlink v0.12.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:43.7563927Z ^[[1m^[[92m   Compiling^[[0m http-range-header v0.4.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:43.8133546Z ^[[1m^[[92m   Compiling^[[0m fallible-iterator v0.3.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:43.8162444Z ^[[1m^[[92m   Compiling^[[0m hashbrown v0.14.5
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:43.9042837Z ^[[1m^[[92m   Compiling^[[0m symlink v0.1.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:43.9398071Z ^[[1m^[[92m   Compiling^[[0m same-file v1.0.6
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:44.0373791Z ^[[1m^[[92m   Compiling^[[0m toml_writer v1.1.2+spec-1.1.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:44.0763219Z ^[[1m^[[92m   Compiling^[[0m toml_datetime v1.1.1+spec-1.1.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:44.1713870Z ^[[1m^[[92m   Compiling^[[0m cpufeatures v0.3.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:44.2023089Z ^[[1m^[[92m   Compiling^[[0m matchit v0.8.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:44.2733142Z ^[[1m^[[92m   Compiling^[[0m unit-prefix v0.5.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:44.3123339Z ^[[1m^[[92m   Compiling^[[0m fallible-streaming-iterator v0.1.9
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:44.3295779Z ^[[1m^[[92m   Compiling^[[0m indicatif v0.18.6
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:44.3776043Z ^[[1m^[[92m   Compiling^[[0m axum v0.8.9
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:44.4613291Z ^[[1m^[[92m   Compiling^[[0m dashmap v6.2.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:44.7061187Z ^[[1m^[[92m   Compiling^[[0m toml_edit v0.25.13+spec-1.1.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:45.2649217Z ^[[1m^[[92m   Compiling^[[0m sha2 v0.11.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:45.9570796Z ^[[1m^[[92m   Compiling^[[0m walkdir v2.5.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:46.0164567Z ^[[1m^[[92m   Compiling^[[0m tracing-appender v0.2.5
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:46.1540090Z ^[[1m^[[92m   Compiling^[[0m tower-http v0.7.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:47.0994925Z ^[[1m^[[92m   Compiling^[[0m clap v4.6.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:47.1481646Z ^[[1m^[[92m   Compiling^[[0m ppv-lite86 v0.2.21
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:47.4051392Z ^[[1m^[[92m   Compiling^[[0m ratatui v0.30.2
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:47.7841320Z ^[[1m^[[92m   Compiling^[[0m dirs v6.0.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:48.1073788Z ^[[1m^[[92m   Compiling^[[0m fs4 v1.1.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:48.2027269Z ^[[1m^[[92m   Compiling^[[0m wait-timeout v0.2.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:48.3638919Z ^[[1m^[[92m   Compiling^[[0m bit-vec v0.8.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:48.3998950Z ^[[1m^[[92m   Compiling^[[0m base64 v0.23.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:48.4900162Z ^[[1m^[[92m   Compiling^[[0m quick-error v1.2.3
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:48.5203491Z ^[[1m^[[92m   Compiling^[[0m fnv v1.0.7
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:48.5486000Z ^[[1m^[[92m   Compiling^[[0m rusty-fork v0.3.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:48.7517326Z ^[[1m^[[92m   Compiling^[[0m bit-set v0.8.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:48.8293772Z ^[[1m^[[92m   Compiling^[[0m rand_chacha v0.9.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:48.9903121Z ^[[1m^[[92m   Compiling^[[0m rand v0.9.5
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:49.0146996Z ^[[1m^[[92m   Compiling^[[0m rand_xorshift v0.4.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:49.0800475Z ^[[1m^[[92m   Compiling^[[0m unarray v0.1.4
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:49.3510519Z ^[[1m^[[92m   Compiling^[[0m proptest v1.11.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:53.0201386Z ^[[1m^[[92m   Compiling^[[0m rusqlite v0.40.1
+Architecture checks	UNKNOWN STEP	2026-08-12T17:17:53.6184837Z ^[[1m^[[92m   Compiling^[[0m llmusage v1.1.2 (/home/runner/work/llmuasage/llmuasage)
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.5131265Z ^[[1m^[[92m    Finished^[[0m `test` profile [unoptimized + debuginfo] target(s) in 1m 00s
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.5765363Z ^[[1m^[[92m     Running^[[0m tests/architecture_dependencies.rs (target/debug/deps/architecture_dependencies-fa012fb8d51983a6)
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.5792096Z 
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.5792291Z running 2 tests
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.5806138Z test fixtures_cover_supported_rust_path_forms ... ok
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6109357Z test sync_layer_does_not_depend_on_commands ... ok
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6109609Z 
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6109856Z test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6110181Z 
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6302386Z ##[group]Run echo "=== Module line counts (target: <800 excl. tests) ==="
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6302886Z ^[[36;1mecho "=== Module line counts (target: <800 excl. tests) ==="^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6303402Z ^[[36;1mfor f in src/query/mod.rs src/web/mod.rs src/query/explorer.rs src/store/sync_writer.rs; do^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6303850Z ^[[36;1m  lines=$(wc -l < "$f")^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6304106Z ^[[36;1m  flag=""^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6304388Z ^[[36;1m  if [ "$lines" -gt 800 ]; then flag=" ← over budget"; fi^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6304715Z ^[[36;1m  echo "$lines  $f$flag"^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6304950Z ^[[36;1mdone^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6351119Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6351457Z env:
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6351778Z   CARGO_HOME: /home/runner/.cargo
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6352035Z   CARGO_INCREMENTAL: 0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6352258Z   CARGO_TERM_COLOR: always
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6352482Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6416267Z === Module line counts (target: <800 excl. tests) ===
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6438070Z 6493  src/query/mod.rs ← over budget
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6453606Z 6069  src/web/mod.rs ← over budget
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6469301Z 2141  src/query/explorer.rs ← over budget
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6484860Z 2130  src/store/sync_writer.rs ← over budget
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6578104Z ##[group]Run taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6578487Z with:
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6578710Z   tool: cargo-semver-checks
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6578942Z   checksum: true
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6579149Z   fallback: cargo-binstall
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6579544Z env:
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6579742Z   CARGO_HOME: /home/runner/.cargo
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6579988Z   CARGO_INCREMENTAL: 0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6580203Z   CARGO_TERM_COLOR: always
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6580422Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6586111Z ##[start-action display=Run bail() {;id=__taiki-e_install-action.__run]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6600479Z ##[group]Run bail() {
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6600732Z ^[[36;1mbail() {^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6600976Z ^[[36;1m  printf '::error::install-action: %s\n' "$*"^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6601281Z ^[[36;1m  exit 1^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6601470Z ^[[36;1m}^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6602012Z ^[[36;1m# If /bin/sh is dash, environment variable containing % is not imported, but is fine^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6602532Z ^[[36;1m# because it also means that it will not be exposed to subprocess.^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6602942Z ^[[36;1mif /usr/bin/env | grep -Eq '^BASH_FUNC_'; then^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6603466Z ^[[36;1m  bail 'bash function injection via BASH_FUNC_ environment variable is not allowed for security reasons'^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6603942Z ^[[36;1mfi^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6604164Z ^[[36;1mif ! command -v bash >/dev/null; then^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6604495Z ^[[36;1m  if grep -Eq '^ID=alpine' /etc/os-release; then^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6604916Z ^[[36;1m    printf '::group::Install packages required for install-action (bash)\n'^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6605328Z ^[[36;1m    # NB: sync with apk_install in main.sh^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6605630Z ^[[36;1m    if command -v sudo >/dev/null; then^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6605929Z ^[[36;1m      sudo apk --no-cache add bash^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6606225Z ^[[36;1m    elif command -v doas >/dev/null; then^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6606516Z ^[[36;1m      doas apk --no-cache add bash^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6606769Z ^[[36;1m    else^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6606977Z ^[[36;1m      apk --no-cache add bash^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6607222Z ^[[36;1m    fi^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6607430Z ^[[36;1m    printf '::endgroup::\n'^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6607675Z ^[[36;1m  else^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6607890Z ^[[36;1m    bail 'this action requires bash'^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6608155Z ^[[36;1m  fi^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6608334Z ^[[36;1mfi^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6608602Z ^[[36;1mbash --noprofile --norc "${GITHUB_ACTION_PATH:?}/main.sh"^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6609689Z shell: /usr/bin/env -u ENV -u BASH_ENV -u CDPATH -u SHELLOPTS -u BASHOPTS /bin/sh -eu {0}
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6610077Z env:
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6610273Z   CARGO_HOME: /home/runner/.cargo
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6610518Z   CARGO_INCREMENTAL: 0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6610734Z   CARGO_TERM_COLOR: always
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6610971Z   INPUT_TOOL: cargo-semver-checks
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6611215Z   INPUT_CHECKSUM: true
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6611434Z   INPUT_FALLBACK: cargo-binstall
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6614438Z   DEFAULT_GITHUB_TOKEN: ***
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6614853Z   ACTION_USER_AGENT: taiki-e/install-action (41049aa56687c35e0afa74eed4f09cec4f9afabf)
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6615259Z   RUNNER_OS: Linux
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6615470Z   RUNNER_ARCH: X64
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6615666Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6749980Z info: host platform: x86_64_linux
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.6932381Z info: installing cargo-semver-checks@latest
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.7139089Z info: downloading https://github.com/obi1kenobi/cargo-semver-checks/releases/download/v0.49.0/cargo-semver-checks-x86_64-unknown-linux-musl.tar.gz
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:11.9674315Z info: verifying sha256 checksum for cargo-semver-checks-x86_64-unknown-linux-musl.tar.gz
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.1565973Z info: cargo-semver-checks installed at /home/runner/.cargo/bin/cargo-semver-checks
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.1569708Z + cargo-semver-checks semver-checks --version
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.1580972Z cargo-semver-checks 0.49.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.1583448Z 
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.1594442Z ##[end-action id=__taiki-e_install-action.__run;outcome=success;conclusion=success;duration_ms=500]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.1598849Z ##[start-action display=Run Set-StrictMode -Version Latest;id=__taiki-e_install-action.__run_2]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.1617003Z ##[end-action id=__taiki-e_install-action.__run_2;outcome=skipped;conclusion=skipped;duration_ms=0]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.1646420Z ##[group]Run cargo semver-checks --locked
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.1646750Z ^[[36;1mcargo semver-checks --locked^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.1693178Z shell: /usr/bin/bash -e {0}
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.1693426Z env:
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.1693627Z   CARGO_HOME: /home/runner/.cargo
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.1693881Z   CARGO_INCREMENTAL: 0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.1694097Z   CARGO_TERM_COLOR: always
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.1694317Z ##[endgroup]
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.2102876Z ^[[1m^[[91merror:^[[0m unexpected argument '^[[1m^[[33m--locked^[[0m' found
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.2103321Z 
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.2103653Z ^[[1m^[[92mUsage:^[[0m ^[[1m^[[96mcargo semver-checks^[[0m ^[[36m[OPTIONS]^[[0m
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.2104022Z 
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.2104265Z For more information, try '^[[1m^[[96m--help^[[0m'.
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.2118611Z ##[error]Process completed with exit code 2.
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.2218556Z Post job cleanup.
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.3053889Z [command]/usr/bin/git version
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.3096529Z git version 2.54.0
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.3139349Z Temporarily overriding HOME='/home/runner/work/_temp/f5c31af0-ae25-4ad5-a745-9327d2401983' before making global git config changes
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.3140608Z Adding repository directory to the temporary git global config as a safe directory
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.3144819Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/llmuasage/llmuasage
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.3178107Z Removing SSH command configuration
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.3184378Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.3220400Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.3500398Z Removing HTTP extra header
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.3505865Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.3546722Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.3812921Z Removing includeIf entries pointing to credentials config files
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.3820727Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.3851640Z includeif.gitdir:/home/runner/work/llmuasage/llmuasage/.git.path
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.3852737Z includeif.gitdir:/home/runner/work/llmuasage/llmuasage/.git/worktrees/*.path
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.3853528Z includeif.gitdir:/github/workspace/.git.path
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.3854181Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.3861136Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/llmuasage/llmuasage/.git.path
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.3890837Z /home/runner/work/_temp/git-credentials-d7e18881-616e-4c8a-94a3-822343d306b8.config
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.3913270Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/llmuasage/llmuasage/.git.path \/home\/runner\/work\/_temp\/git\-credentials\-d7e18881\-616e\-4c8a\-94a3\-822343d306b8\.config
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.3953133Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/llmuasage/llmuasage/.git/worktrees/*.path
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.3981123Z /home/runner/work/_temp/git-credentials-d7e18881-616e-4c8a-94a3-822343d306b8.config
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.3990917Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/llmuasage/llmuasage/.git/worktrees/*.path \/home\/runner\/work\/_temp\/git\-credentials\-d7e18881\-616e\-4c8a\-94a3\-822343d306b8\.config
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.4032998Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.4061832Z /github/runner_temp/git-credentials-d7e18881-616e-4c8a-94a3-822343d306b8.config
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.4071935Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path \/github\/runner_temp\/git\-credentials\-d7e18881\-616e\-4c8a\-94a3\-822343d306b8\.config
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.4109754Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.4138381Z /github/runner_temp/git-credentials-d7e18881-616e-4c8a-94a3-822343d306b8.config
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.4147200Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-d7e18881\-616e\-4c8a\-94a3\-822343d306b8\.config
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.4187722Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.4425251Z Removing credentials config '/home/runner/work/_temp/git-credentials-d7e18881-616e-4c8a-94a3-822343d306b8.config'
+Architecture checks	UNKNOWN STEP	2026-08-12T17:18:12.4560519Z Cleaning up orphan processes
+CI gate	UNKNOWN STEP	﻿2026-08-12T17:23:55.3660697Z Current runner version: '2.336.0'
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.3683951Z ##[group]Runner Image Provisioner
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.3684860Z Hosted Compute Agent
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.3685656Z Version: 20260729.566
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.3686219Z Commit: cf7153fe6e25b664e8693c24944bf2b00355d109
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.3686954Z Build Date: 2026-07-29T19:17:02Z
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.3687584Z Worker ID: {64f51d5e-50eb-4f6e-8203-91c7ff5f41f8}
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.3688280Z Azure Region: westus3
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.3688822Z ##[endgroup]
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.3690217Z ##[group]Operating System
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.3690854Z Ubuntu
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.3691329Z 24.04.4
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.3691787Z LTS
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.3692290Z ##[endgroup]
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.3692778Z ##[group]Runner Image
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.3693326Z Image: ubuntu-24.04
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.3693866Z Version: 20260810.271.1
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.3694944Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260810.271/images/ubuntu/Ubuntu2404-Readme.md
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.3696488Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260810.271
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.3697319Z ##[endgroup]
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.3698497Z ##[group]GITHUB_TOKEN Permissions
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.3700714Z Contents: read
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.3701289Z Metadata: read
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.3701797Z Packages: read
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.3702344Z ##[endgroup]
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.3704340Z Secret source: Actions
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.3705434Z Prepare workflow directory
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.4030759Z Prepare all required actions
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.4078043Z Getting action download info
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.7256112Z Download action repository 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+CI gate	UNKNOWN STEP	2026-08-12T17:23:55.9670533Z Complete job name: CI gate
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.0341030Z ##[group]Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.0342064Z with:
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.0342666Z   repository: bahayonghang/llmuasage
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.0346699Z   token: ***
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.0347167Z   ssh-strict: true
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.0347701Z   ssh-user: git
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.0348182Z   persist-credentials: true
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.0348726Z   clean: true
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.0349210Z   sparse-checkout-cone-mode: true
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.0349772Z   fetch-depth: 1
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.0350275Z   fetch-tags: false
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.0350769Z   show-progress: true
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.0351253Z   lfs: false
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.0351737Z   submodules: false
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.0352220Z   set-safe-directory: true
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.0352755Z   allow-unsafe-pr-checkout: false
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.0353596Z ##[endgroup]
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1336034Z Syncing repository: bahayonghang/llmuasage
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1339375Z ##[group]Getting Git version info
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1340677Z Working directory is '/home/runner/work/llmuasage/llmuasage'
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1342697Z [command]/usr/bin/git version
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1361187Z git version 2.54.0
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1384851Z ##[endgroup]
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1395735Z Temporarily overriding HOME='/home/runner/work/_temp/d39bf45c-6f81-4fd6-9f13-ad81c5cde702' before making global git config changes
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1397571Z Adding repository directory to the temporary git global config as a safe directory
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1402184Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/llmuasage/llmuasage
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1448550Z Deleting the contents of '/home/runner/work/llmuasage/llmuasage'
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1461202Z ##[group]Determining repository object format
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1487289Z ##[endgroup]
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1488720Z ##[group]Initializing the repository
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1490121Z [command]/usr/bin/git init /home/runner/work/llmuasage/llmuasage
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1558623Z hint: Using 'master' as the name for the initial branch. This default branch name
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1560599Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1563035Z hint: to use in all of your new repositories, which will suppress this warning,
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1564664Z hint: call:
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1565805Z hint:
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1566957Z hint: 	git config --global init.defaultBranch <name>
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1568285Z hint:
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1569702Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1571745Z hint: 'development'. The just-created branch can be renamed via this command:
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1573325Z hint:
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1574304Z hint: 	git branch -m <name>
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1575492Z hint:
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1576937Z hint: Disable this message with "git config set advice.defaultBranchName false"
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1579028Z Initialized empty Git repository in /home/runner/work/llmuasage/llmuasage/.git/
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1582600Z [command]/usr/bin/git remote add origin https://github.com/bahayonghang/llmuasage
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1616374Z ##[endgroup]
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1617759Z ##[group]Disabling automatic garbage collection
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1619695Z [command]/usr/bin/git config --local gc.auto 0
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1646627Z ##[endgroup]
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1647414Z ##[group]Setting up auth
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1648159Z Removing SSH command configuration
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1653389Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1685515Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1984597Z Removing HTTP extra header
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.1992702Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.2025397Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.2222818Z Removing includeIf entries pointing to credentials config files
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.2228895Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.2260272Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.2435708Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-cab20a90-1a6b-4c47-876f-821935892423.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.2468852Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/llmuasage/llmuasage/.git.path /home/runner/work/_temp/git-credentials-cab20a90-1a6b-4c47-876f-821935892423.config
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.2493134Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/llmuasage/llmuasage/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-cab20a90-1a6b-4c47-876f-821935892423.config
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.2522282Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-cab20a90-1a6b-4c47-876f-821935892423.config
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.2546751Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-cab20a90-1a6b-4c47-876f-821935892423.config
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.2570266Z ##[endgroup]
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.2571067Z ##[group]Fetching the repository
+CI gate	UNKNOWN STEP	2026-08-12T17:23:56.2576265Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +9b49f4006cbca7636798c2b6892143c6a7d16a72:refs/remotes/origin/main
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.6017769Z From https://github.com/bahayonghang/llmuasage
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.6019621Z  * [new ref]         9b49f4006cbca7636798c2b6892143c6a7d16a72 -> origin/main
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.6049738Z [command]/usr/bin/git branch --list --remote origin/main
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.6073895Z   origin/main
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.6081874Z [command]/usr/bin/git rev-parse refs/remotes/origin/main
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.6101930Z 9b49f4006cbca7636798c2b6892143c6a7d16a72
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.6105647Z ##[endgroup]
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.6107044Z ##[group]Determining the checkout info
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.6109091Z ##[endgroup]
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.6110252Z [command]/usr/bin/git sparse-checkout disable
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.6146553Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.6171000Z ##[group]Checking out the ref
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.6173844Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.6684485Z Switched to a new branch 'main'
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.6686959Z branch 'main' set up to track 'origin/main'.
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.6692559Z ##[endgroup]
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.6731458Z [command]/usr/bin/git log -1 --format=%H
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.6754950Z 9b49f4006cbca7636798c2b6892143c6a7d16a72
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.6990223Z ##[group]Run python scripts/check-ci-gate.py
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.6991858Z ^[[36;1mpython scripts/check-ci-gate.py^[[0m
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.7019113Z shell: /usr/bin/bash -e {0}
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.7020286Z ##[endgroup]
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.7420474Z CI gate contract ok
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.7580308Z ##[group]Run python scripts/check-ci-gate.py --needs-json "$NEEDS_JSON"
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.7582364Z ^[[36;1mpython scripts/check-ci-gate.py --needs-json "$NEEDS_JSON"^[[0m
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.7606328Z shell: /usr/bin/bash -e {0}
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.7607375Z env:
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.7610931Z   NEEDS_JSON: {
+CI gate	UNKNOWN STEP	  "rust": {
+CI gate	UNKNOWN STEP	    "result": "success",
+CI gate	UNKNOWN STEP	    "outputs": {}
+CI gate	UNKNOWN STEP	  },
+CI gate	UNKNOWN STEP	  "msrv": {
+CI gate	UNKNOWN STEP	    "result": "success",
+CI gate	UNKNOWN STEP	    "outputs": {}
+CI gate	UNKNOWN STEP	  },
+CI gate	UNKNOWN STEP	  "docs-and-js": {
+CI gate	UNKNOWN STEP	    "result": "success",
+CI gate	UNKNOWN STEP	    "outputs": {}
+CI gate	UNKNOWN STEP	  },
+CI gate	UNKNOWN STEP	  "arch-gate": {
+CI gate	UNKNOWN STEP	    "result": "failure",
+CI gate	UNKNOWN STEP	    "outputs": {}
+CI gate	UNKNOWN STEP	  },
+CI gate	UNKNOWN STEP	  "security": {
+CI gate	UNKNOWN STEP	    "result": "success",
+CI gate	UNKNOWN STEP	    "outputs": {}
+CI gate	UNKNOWN STEP	  }
+CI gate	UNKNOWN STEP	}
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.7614905Z ##[endgroup]
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.7993012Z error: required job `arch-gate` result is 'failure'
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.8058055Z ##[error]Process completed with exit code 1.
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.8321113Z Post job cleanup.
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.9165593Z [command]/usr/bin/git version
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.9203503Z git version 2.54.0
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.9249683Z Temporarily overriding HOME='/home/runner/work/_temp/fc6e79be-7c39-4ae7-a820-37d1462a34eb' before making global git config changes
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.9254907Z Adding repository directory to the temporary git global config as a safe directory
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.9259531Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/llmuasage/llmuasage
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.9287926Z Removing SSH command configuration
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.9294223Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.9329314Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.9544877Z Removing HTTP extra header
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.9552244Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.9585754Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.9793656Z Removing includeIf entries pointing to credentials config files
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.9797584Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.9822208Z includeif.gitdir:/home/runner/work/llmuasage/llmuasage/.git.path
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.9826424Z includeif.gitdir:/home/runner/work/llmuasage/llmuasage/.git/worktrees/*.path
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.9830186Z includeif.gitdir:/github/workspace/.git.path
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.9832987Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.9840818Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/llmuasage/llmuasage/.git.path
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.9851202Z /home/runner/work/_temp/git-credentials-cab20a90-1a6b-4c47-876f-821935892423.config
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.9861388Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/llmuasage/llmuasage/.git.path \/home\/runner\/work\/_temp\/git\-credentials\-cab20a90\-1a6b\-4c47\-876f\-821935892423\.config
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.9889135Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/llmuasage/llmuasage/.git/worktrees/*.path
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.9913608Z /home/runner/work/_temp/git-credentials-cab20a90-1a6b-4c47-876f-821935892423.config
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.9925326Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/llmuasage/llmuasage/.git/worktrees/*.path \/home\/runner\/work\/_temp\/git\-credentials\-cab20a90\-1a6b\-4c47\-876f\-821935892423\.config
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.9956599Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.9974893Z /github/runner_temp/git-credentials-cab20a90-1a6b-4c47-876f-821935892423.config
+CI gate	UNKNOWN STEP	2026-08-12T17:23:57.9984129Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path \/github\/runner_temp\/git\-credentials\-cab20a90\-1a6b\-4c47\-876f\-821935892423\.config
+CI gate	UNKNOWN STEP	2026-08-12T17:23:58.0008499Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+CI gate	UNKNOWN STEP	2026-08-12T17:23:58.0042785Z /github/runner_temp/git-credentials-cab20a90-1a6b-4c47-876f-821935892423.config
+CI gate	UNKNOWN STEP	2026-08-12T17:23:58.0109967Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-cab20a90\-1a6b\-4c47\-876f\-821935892423\.config
+CI gate	UNKNOWN STEP	2026-08-12T17:23:58.0118904Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+CI gate	UNKNOWN STEP	2026-08-12T17:23:58.0329779Z Removing credentials config '/home/runner/work/_temp/git-credentials-cab20a90-1a6b-4c47-876f-821935892423.config'
+CI gate	UNKNOWN STEP	2026-08-12T17:23:58.0467613Z Cleaning up orphan processes

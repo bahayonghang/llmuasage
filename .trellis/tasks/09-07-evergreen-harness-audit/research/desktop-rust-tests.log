@@ -1,0 +1,87 @@
+   Compiling llmusage v1.3.0 (D:\Documents\Code\CLI\llmusage)
+   Compiling llmusage-desktop v1.3.0 (D:\Documents\Code\CLI\llmusage\desktop\src-tauri)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\desktop\src-tauri\target\debug\deps\llmusage_desktop_lib-55a900a6611bad76.lib 和对象 D:\Documents\Code\CLI\llmusage\desktop\src-tauri\target\debug\deps\llmusage_desktop_lib-55a900a6611bad76.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage-desktop` (lib test) generated 1 warning
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\desktop\src-tauri\target\debug\deps\llmusage_desktop_lib.dll.lib 和对象 D:\Documents\Code\CLI\llmusage\desktop\src-tauri\target\debug\deps\llmusage_desktop_lib.dll.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage-desktop` (lib) generated 1 warning
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\desktop\src-tauri\target\debug\deps\llmusage_desktop.lib 和对象 D:\Documents\Code\CLI\llmusage\desktop\src-tauri\target\debug\deps\llmusage_desktop.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\desktop\src-tauri\target\debug\deps\quota-a378f1d187dd5d04.lib 和对象 D:\Documents\Code\CLI\llmusage\desktop\src-tauri\target\debug\deps\quota-a378f1d187dd5d04.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage-desktop` (bin "llmusage-desktop") generated 1 warning
+warning: `llmusage-desktop` (test "quota") generated 1 warning
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\desktop\src-tauri\target\debug\deps\ac-71836e5bbf110f75.lib 和对象 D:\Documents\Code\CLI\llmusage\desktop\src-tauri\target\debug\deps\ac-71836e5bbf110f75.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage-desktop` (test "ac") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 32.06s
+     Running unittests src\lib.rs (desktop\src-tauri\target\debug\deps\llmusage_desktop_lib-55a900a6611bad76.exe)
+
+running 18 tests
+test dto::tests::convert_explorer_rejects_unknown_enum_and_sets_is_tool ... ok
+test dto::tests::convert_filter_accepts_valid_iana ... ok
+test dto::tests::convert_filter_rejects_invalid_date ... ok
+test dto::tests::convert_filter_rejects_invalid_iana ... ok
+test dto::tests::convert_filter_rejects_unknown_source ... ok
+test dto::tests::convert_filter_rejects_until_before_since ... ok
+test dto::tests::convert_filter_utc_and_local_aliases ... ok
+test dto::tests::convert_logs_requires_page_size_20 ... ok
+test dto::tests::convert_sync_forces_rebuild_false ... ok
+test dto::tests::convert_sync_ignores_rebuild_in_raw_json ... ok
+test dto::tests::convert_sync_rejects_recent_days_zero ... ok
+test error::tests::map_job_start_error_active ... ok
+test error::tests::map_llmusage_error_cancelled ... ok
+test error::tests::map_llmusage_error_lock_busy_keeps_holder ... ok
+test error::tests::map_llmusage_error_lock_lost ... ok
+test error::tests::map_llmusage_error_not_initialized ... ok
+test error::tests::map_llmusage_error_schema_too_new ... ok
+test error::tests::map_llmusage_error_timeout_config ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running unittests src\main.rs (desktop\src-tauri\target\debug\deps\llmusage_desktop-546f099d0032d0cd.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\ac.rs (desktop\src-tauri\target\debug\deps\ac-71836e5bbf110f75.exe)
+
+running 9 tests
+test ac1_empty_temp_root_startup_and_independent_crate ... ok
+test ac2_fixture_snapshot_matches_interactive_snapshot ... ok
+test ac3_lock_busy_and_runtime_info ... ok
+test ac4_schema_too_new_does_not_migrate ... ok
+test ac5_root_src_and_ci_gate_untouched ... ok
+test ac6_cancel_first_request_second_completes ... ok
+test ac7_convert_sync_rebuild_stays_false ... ok
+test ac8_single_instance_plugin_configured ... ok
+test ac9_fetch_quota_injected_local_endpoints_and_cache_hit ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.75s
+
+     Running tests\quota.rs (desktop\src-tauri\target\debug\deps\quota-a378f1d187dd5d04.exe)
+
+running 2 tests
+test fetch_quota_empty_without_credentials_uses_local_endpoints ... ok
+test fetch_quota_fixture_credentials_keep_bytes_and_report_cache_hit ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.42s
+
+   Doc-tests llmusage_desktop_lib
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

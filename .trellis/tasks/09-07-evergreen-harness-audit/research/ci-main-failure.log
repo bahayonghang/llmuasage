@@ -1,0 +1,43 @@
+Architecture checks	API-002 semver check (against published crate)	﻿2026-08-19T16:44:03.9992295Z ##[group]Run cargo semver-checks --locked
+Architecture checks	API-002 semver check (against published crate)	2026-08-19T16:44:03.9992583Z ^[[36;1mcargo semver-checks --locked^[[0m
+Architecture checks	API-002 semver check (against published crate)	2026-08-19T16:44:04.0024380Z shell: /usr/bin/bash -e {0}
+Architecture checks	API-002 semver check (against published crate)	2026-08-19T16:44:04.0024594Z env:
+Architecture checks	API-002 semver check (against published crate)	2026-08-19T16:44:04.0024774Z   CARGO_HOME: /home/runner/.cargo
+Architecture checks	API-002 semver check (against published crate)	2026-08-19T16:44:04.0024993Z   CARGO_INCREMENTAL: 0
+Architecture checks	API-002 semver check (against published crate)	2026-08-19T16:44:04.0025178Z   CARGO_TERM_COLOR: always
+Architecture checks	API-002 semver check (against published crate)	2026-08-19T16:44:04.0025512Z ##[endgroup]
+Architecture checks	API-002 semver check (against published crate)	2026-08-19T16:44:04.0349167Z ^[[1m^[[91merror:^[[0m unexpected argument '^[[1m^[[33m--locked^[[0m' found
+Architecture checks	API-002 semver check (against published crate)	2026-08-19T16:44:04.0349752Z 
+Architecture checks	API-002 semver check (against published crate)	2026-08-19T16:44:04.0350062Z ^[[1m^[[92mUsage:^[[0m ^[[1m^[[96mcargo semver-checks^[[0m ^[[36m[OPTIONS]^[[0m
+Architecture checks	API-002 semver check (against published crate)	2026-08-19T16:44:04.0350394Z 
+Architecture checks	API-002 semver check (against published crate)	2026-08-19T16:44:04.0350598Z For more information, try '^[[1m^[[96m--help^[[0m'.
+Architecture checks	API-002 semver check (against published crate)	2026-08-19T16:44:04.0362503Z ##[error]Process completed with exit code 2.
+CI gate	Require all jobs	﻿2026-08-19T16:49:23.1946112Z ##[group]Run python scripts/check-ci-gate.py --needs-json "$NEEDS_JSON"
+CI gate	Require all jobs	2026-08-19T16:49:23.1948276Z ^[[36;1mpython scripts/check-ci-gate.py --needs-json "$NEEDS_JSON"^[[0m
+CI gate	Require all jobs	2026-08-19T16:49:23.1991300Z shell: /usr/bin/bash -e {0}
+CI gate	Require all jobs	2026-08-19T16:49:23.1992351Z env:
+CI gate	Require all jobs	2026-08-19T16:49:23.1996219Z   NEEDS_JSON: {
+CI gate	Require all jobs	  "rust": {
+CI gate	Require all jobs	    "result": "success",
+CI gate	Require all jobs	    "outputs": {}
+CI gate	Require all jobs	  },
+CI gate	Require all jobs	  "msrv": {
+CI gate	Require all jobs	    "result": "success",
+CI gate	Require all jobs	    "outputs": {}
+CI gate	Require all jobs	  },
+CI gate	Require all jobs	  "docs-and-js": {
+CI gate	Require all jobs	    "result": "success",
+CI gate	Require all jobs	    "outputs": {}
+CI gate	Require all jobs	  },
+CI gate	Require all jobs	  "arch-gate": {
+CI gate	Require all jobs	    "result": "failure",
+CI gate	Require all jobs	    "outputs": {}
+CI gate	Require all jobs	  },
+CI gate	Require all jobs	  "security": {
+CI gate	Require all jobs	    "result": "success",
+CI gate	Require all jobs	    "outputs": {}
+CI gate	Require all jobs	  }
+CI gate	Require all jobs	}
+CI gate	Require all jobs	2026-08-19T16:49:23.2000370Z ##[endgroup]
+CI gate	Require all jobs	2026-08-19T16:49:23.2431305Z error: required job `arch-gate` result is 'failure'
+CI gate	Require all jobs	2026-08-19T16:49:23.2499515Z ##[error]Process completed with exit code 1.

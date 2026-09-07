@@ -1,0 +1,4 @@
+{"file":".trellis/spec/llmusage/backend/ci-toolchain-contracts.md","reason":"当前测试发现与CI合同"}
+{"file":".trellis/spec/llmusage/backend/token-accounting-contracts.md","reason":"自动修复数据保留和来源语义"}
+{"file":".trellis/tasks/09-07-evergreen-harness-audit/research/audit.md","reason":"统一证据、优先级与批准范围"}
+{"file":".trellis/tasks/09-07-evergreen-harness-audit/research/harness-matrix.md","reason":"五工具加载、模型与权限矩阵"}
