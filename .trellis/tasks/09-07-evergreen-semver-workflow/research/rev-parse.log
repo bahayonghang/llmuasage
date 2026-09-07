@@ -1,0 +1,3 @@
+cmd: ['git', 'rev-parse', 'v1.2.0^{commit}']
+
+9b7a6f3dec12764222891c2d8f5aeb42db7bd490

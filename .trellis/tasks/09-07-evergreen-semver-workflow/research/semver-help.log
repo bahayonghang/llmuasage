@@ -1,0 +1,94 @@
+cmd: ['cargo', 'semver-checks', '--help']
+
+Usage: cargo semver-checks [OPTIONS]
+
+Options:
+      --bugreport
+          
+
+      --explain <EXPLAIN>
+          
+
+      --list
+          
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
+
+Current:
+      --manifest-path <PATH>
+          Path to Cargo.toml
+
+  -p, --package <SPEC>
+          Package to process (see `cargo help pkgid`)
+
+      --workspace
+          Process all packages in the workspace
+
+      --exclude <SPEC>
+          Exclude packages from being processed
+
+      --current-rustdoc <JSON_PATH>
+          The current rustdoc json output to test for semver violations
+
+      --target <BUILD_TARGET>
+          Which target to build the crate for, to check platform-specific APIs, e.g. `x86_64-unknown-linux-gnu`
+
+      --color <WHEN>
+          Choose whether to output colors
+          
+          [possible values: auto, always, never]
+
+  -v, --verbose...
+          Increase logging verbosity
+
+  -q, --quiet...
+          Decrease logging verbosity
+
+  -Z <FLAG>
+          Enable unstable feature flags, run `cargo semver-checks -Z help` for more help
+
+Baseline:
+      --baseline-version <X.Y.Z>
+          Version from registry to lookup for a baseline
+
+      --baseline-rev <REV>
+          Git revision to lookup for a baseline
+
+      --baseline-root <MANIFEST_ROOT>
+          Directory containing baseline crate source
+
+      --baseline-rustdoc <JSON_PATH>
+          The rustdoc json file to use as a semver baseline
+
+Overrides:
+      --release-type <TYPE>
+          Sets the release type instead of deriving it from the version number
+          
+          [possible values: major, minor, patch]
+
+Features:
+      --default-features
+          Use only the crate-defined default features, as well as any features added explicitly via other flags.
+          
+          Using this flag disables the heuristic that enables all features except `unstable`, `nightly`, `bench`, `no_std`, and ones starting with prefixes `_`, `unstable_`, `unstable-`.
+
+      --only-explicit-features
+          Use no features except ones explicitly added by other flags.
+          
+          Using this flag disables the heuristic that enables all features except `unstable`, `nightly`, `bench`, `no_std`, and ones starting with prefixes `_`, `unstable_`, `unstable-`.
+
+      --features <NAME>
+          Add a feature to the set of features being checked. The feature will be used in both the baseline and the current version of the crate
+
+      --baseline-features <NAME>
+          Add a feature to the set of features being checked. The feature will be used in the baseline version of the crate only
+
+      --current-features <NAME>
+          Add a feature to the set of features being checked. The feature will be used in the current version of the crate only
+
+      --all-features
+          Use all the features, including features named `unstable`, `nightly`, `bench`, `no_std` or starting with prefixes `_`, `unstable_`, `unstable-` that are otherwise disabled by default

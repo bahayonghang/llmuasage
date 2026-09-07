@@ -1,0 +1,30 @@
+{
+  "id": "evergreen-semver-workflow",
+  "name": "evergreen-semver-workflow",
+  "title": "修复 Semver 工作流与同源基线",
+  "description": "Semver 检查使用工具支持的参数和本仓库已验证 release 基线，不从同名但不同项目的 crates.io 条目选基线。",
+  "status": "in_progress",
+  "dev_type": "backend",
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-09-07",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "09-07-evergreen-harness-audit",
+  "relatedFiles": [
+    ".github/workflows/ci.yml",
+    "Cargo.toml",
+    ".trellis/spec/llmusage/backend/ci-toolchain-contracts.md"
+  ],
+  "notes": "planning only; 用户尚未批准实施。在 test-gates 之前修改共享 ci.yml；不与其并行写。",
+  "meta": {}
+}

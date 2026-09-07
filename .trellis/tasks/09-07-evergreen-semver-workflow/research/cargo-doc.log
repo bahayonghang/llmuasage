@@ -1,0 +1,5 @@
+cmd: ['cargo', 'doc', '--locked', '--no-deps']
+
+ Documenting llmusage v1.3.0 (D:\Documents\Code\CLI\llmusage)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.62s
+   Generated D:\Documents\Code\CLI\llmusage\target\doc\llmusage\index.html

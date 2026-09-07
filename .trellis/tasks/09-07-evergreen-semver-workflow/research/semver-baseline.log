@@ -1,0 +1,229 @@
+cmd: ['cargo', 'semver-checks', '--baseline-rev', 'v1.2.0']
+
+     Cloning v1.2.0
+    Building llmusage v1.3.0 (current)
+       Built [  69.558s] (current)
+     Parsing llmusage v1.3.0 (current)
+      Parsed [   0.099s] (current)
+    Building llmusage v1.2.0 (baseline)
+       Built [  22.869s] (baseline)
+     Parsing llmusage v1.2.0 (baseline)
+      Parsed [   0.094s] (baseline)
+    Checking llmusage v1.2.0 -> v1.3.0 (minor change)
+     Checked [   0.081s] 196 checks: 184 pass, 11 fail, 1 warn, 58 skip
+
+--- failure constructible_struct_adds_field: struct exhaustively constructible through public API adds field ---
+
+Description:
+A pub struct that could be exhaustively constructed with a literal using only public API has a new pub field, breaking existing exhaustive literals.
+        ref: https://doc.rust-lang.org/reference/expressions/struct-expr.html
+       impl: https://github.com/obi1kenobi/cargo-semver-checks/tree/v0.50.0/src/lints/constructible_struct_adds_field.ron
+
+Failed in:
+  field LossyRebuildRisk.host_id in D:\Documents\Code\CLI\llmusage\src\store\source_file.rs:59
+  field DashboardSnapshot.hosts in D:\Documents\Code\CLI\llmusage\src\query\snapshot.rs:23
+  field UsageEvent.source_cost in D:\Documents\Code\CLI\llmusage\src\domain\models.rs:330
+  field UsageEvent.source_cost in D:\Documents\Code\CLI\llmusage\src\domain\models.rs:330
+  field DriveContext.sweep_host_ids in D:\Documents\Code\CLI\llmusage\src\parsers\driver.rs:60
+  field JsonlRecord.line_number in D:\Documents\Code\CLI\llmusage\src\parsers\file_state.rs:146
+  field JsonlRecord.durable in D:\Documents\Code\CLI\llmusage\src\parsers\file_state.rs:148
+  field QueryFilter.host_id in D:\Documents\Code\CLI\llmusage\src\query\filter.rs:41
+  field QueryFilter.host_id in D:\Documents\Code\CLI\llmusage\src\query\filter.rs:41
+  field QueryFilter.host_id in D:\Documents\Code\CLI\llmusage\src\query\filter.rs:41
+  field ReportCommonArgs.host in D:\Documents\Code\CLI\llmusage\src\commands\report_args.rs:72
+  field TopSessionRow.first_event_at in D:\Documents\Code\CLI\llmusage\src\query\top_sessions.rs:74
+  field TopSessionRow.last_event_at in D:\Documents\Code\CLI\llmusage\src\query\top_sessions.rs:76
+  field TopSessionRow.first_event_at in D:\Documents\Code\CLI\llmusage\src\query\top_sessions.rs:74
+  field TopSessionRow.last_event_at in D:\Documents\Code\CLI\llmusage\src\query\top_sessions.rs:76
+  field SyncShard.host_id in D:\Documents\Code\CLI\llmusage\src\store\mod.rs:803
+  field SyncShard.host_prefix_applied in D:\Documents\Code\CLI\llmusage\src\store\mod.rs:807
+  field SyncShard.opencode_cursor in D:\Documents\Code\CLI\llmusage\src\store\mod.rs:842
+  field SyncShard.zcode_cursor in D:\Documents\Code\CLI\llmusage\src\store\mod.rs:847
+  field DashboardCoreSnapshot.hosts in D:\Documents\Code\CLI\llmusage\src\query\snapshot.rs:87
+  field DashboardCoreSnapshot.hosts in D:\Documents\Code\CLI\llmusage\src\query\snapshot.rs:87
+  field DashboardInteractiveSnapshot.hosts in D:\Documents\Code\CLI\llmusage\src\query\snapshot.rs:106
+  field ReportFilter.filter in D:\Documents\Code\CLI\llmusage\src\query\reports.rs:30
+
+--- failure derive_trait_impl_removed: built-in derived trait no longer implemented ---
+
+Description:
+A public type has stopped deriving one or more traits. This can break downstream code that depends on those types implementing those traits.
+        ref: https://doc.rust-lang.org/reference/attributes/derive.html#derive
+       impl: https://github.com/obi1kenobi/cargo-semver-checks/tree/v0.50.0/src/lints/derive_trait_impl_removed.ron
+
+Failed in:
+  type LossyRebuildRisk no longer derives Copy, in D:\Documents\Code\CLI\llmusage\src\store\source_file.rs:57
+
+--- failure enum_no_repr_variant_discriminant_changed: enum variant had its discriminant change value ---
+
+Description:
+The enum's variant had its discriminant value change. This breaks downstream code that used its value via a numeric cast like `as isize`.
+        ref: https://doc.rust-lang.org/reference/items/enumerations.html#assigning-discriminant-values
+       impl: https://github.com/obi1kenobi/cargo-semver-checks/tree/v0.50.0/src/lints/enum_no_repr_variant_discriminant_changed.ron
+
+Failed in:
+  variant PricingStatus::Unpriced 2 -> 3 in D:\Documents\Code\CLI\llmusage\src\domain\pricing.rs:23
+  variant PricingStatus::Unpriced 2 -> 3 in D:\Documents\Code\CLI\llmusage\src\domain\pricing.rs:23
+  variant SyncEvent::Finished 16 -> 19 in D:\Documents\Code\CLI\llmusage\src\parsers\mod.rs:140
+  variant SyncEvent::Failed 17 -> 20 in D:\Documents\Code\CLI\llmusage\src\parsers\mod.rs:142
+  variant SyncEvent::Cancelled 18 -> 21 in D:\Documents\Code\CLI\llmusage\src\parsers\mod.rs:144
+  variant SyncEvent::Finished 16 -> 19 in D:\Documents\Code\CLI\llmusage\src\parsers\mod.rs:140
+  variant SyncEvent::Failed 17 -> 20 in D:\Documents\Code\CLI\llmusage\src\parsers\mod.rs:142
+  variant SyncEvent::Cancelled 18 -> 21 in D:\Documents\Code\CLI\llmusage\src\parsers\mod.rs:144
+  variant SyncEvent::Finished 16 -> 19 in D:\Documents\Code\CLI\llmusage\src\parsers\mod.rs:140
+  variant SyncEvent::Failed 17 -> 20 in D:\Documents\Code\CLI\llmusage\src\parsers\mod.rs:142
+  variant SyncEvent::Cancelled 18 -> 21 in D:\Documents\Code\CLI\llmusage\src\parsers\mod.rs:144
+  variant SyncEvent::Finished 16 -> 19 in D:\Documents\Code\CLI\llmusage\src\parsers\mod.rs:140
+  variant SyncEvent::Failed 17 -> 20 in D:\Documents\Code\CLI\llmusage\src\parsers\mod.rs:142
+  variant SyncEvent::Cancelled 18 -> 21 in D:\Documents\Code\CLI\llmusage\src\parsers\mod.rs:144
+  variant SourceKind::Grok 6 -> 7 in D:\Documents\Code\CLI\llmusage\src\domain\models.rs:32
+  variant SourceKind::Zcode 7 -> 8 in D:\Documents\Code\CLI\llmusage\src\domain\models.rs:35
+  variant SourceKind::DeepseekHarness 8 -> 9 in D:\Documents\Code\CLI\llmusage\src\domain\models.rs:38
+  variant SourceKind::Grok 6 -> 7 in D:\Documents\Code\CLI\llmusage\src\domain\models.rs:32
+  variant SourceKind::Zcode 7 -> 8 in D:\Documents\Code\CLI\llmusage\src\domain\models.rs:35
+  variant SourceKind::DeepseekHarness 8 -> 9 in D:\Documents\Code\CLI\llmusage\src\domain\models.rs:38
+  variant SourceKind::Grok 6 -> 7 in D:\Documents\Code\CLI\llmusage\src\domain\models.rs:32
+  variant SourceKind::Zcode 7 -> 8 in D:\Documents\Code\CLI\llmusage\src\domain\models.rs:35
+  variant SourceKind::DeepseekHarness 8 -> 9 in D:\Documents\Code\CLI\llmusage\src\domain\models.rs:38
+
+--- failure enum_struct_variant_field_added: pub enum struct variant field added ---
+
+Description:
+An enum's exhaustive struct variant has a new field, which has to be included when constructing or matching on this variant.
+        ref: https://doc.rust-lang.org/reference/attributes/type_system.html#the-non_exhaustive-attribute
+       impl: https://github.com/obi1kenobi/cargo-semver-checks/tree/v0.50.0/src/lints/enum_struct_variant_field_added.ron
+
+Failed in:
+  field emit_shards of variant Commands::Sync in D:\Documents\Code\CLI\llmusage\src\commands\mod.rs:113
+  field since of variant Commands::Sync in D:\Documents\Code\CLI\llmusage\src\commands\mod.rs:116
+
+--- failure enum_variant_added: enum variant added on exhaustive enum ---
+
+Description:
+A publicly-visible enum without #[non_exhaustive] has a new variant.
+        ref: https://doc.rust-lang.org/cargo/reference/semver.html#enum-variant-new
+       impl: https://github.com/obi1kenobi/cargo-semver-checks/tree/v0.50.0/src/lints/enum_variant_added.ron
+
+Failed in:
+  variant SourceKind:Omp in D:\Documents\Code\CLI\llmusage\src\domain\models.rs:29
+  variant SourceKind:Omp in D:\Documents\Code\CLI\llmusage\src\domain\models.rs:29
+  variant SourceKind:Omp in D:\Documents\Code\CLI\llmusage\src\domain\models.rs:29
+  variant Commands:Remote in D:\Documents\Code\CLI\llmusage\src\commands\mod.rs:119
+  variant SyncEvent:RemoteHostStarted in D:\Documents\Code\CLI\llmusage\src\parsers\mod.rs:126
+  variant SyncEvent:RemoteHostFinished in D:\Documents\Code\CLI\llmusage\src\parsers\mod.rs:128
+  variant SyncEvent:RemoteHostSkipped in D:\Documents\Code\CLI\llmusage\src\parsers\mod.rs:134
+  variant SyncEvent:RemoteHostStarted in D:\Documents\Code\CLI\llmusage\src\parsers\mod.rs:126
+  variant SyncEvent:RemoteHostFinished in D:\Documents\Code\CLI\llmusage\src\parsers\mod.rs:128
+  variant SyncEvent:RemoteHostSkipped in D:\Documents\Code\CLI\llmusage\src\parsers\mod.rs:134
+  variant SyncEvent:RemoteHostStarted in D:\Documents\Code\CLI\llmusage\src\parsers\mod.rs:126
+  variant SyncEvent:RemoteHostFinished in D:\Documents\Code\CLI\llmusage\src\parsers\mod.rs:128
+  variant SyncEvent:RemoteHostSkipped in D:\Documents\Code\CLI\llmusage\src\parsers\mod.rs:134
+  variant SyncEvent:RemoteHostStarted in D:\Documents\Code\CLI\llmusage\src\parsers\mod.rs:126
+  variant SyncEvent:RemoteHostFinished in D:\Documents\Code\CLI\llmusage\src\parsers\mod.rs:128
+  variant SyncEvent:RemoteHostSkipped in D:\Documents\Code\CLI\llmusage\src\parsers\mod.rs:134
+  variant PricingStatus:SourceReported in D:\Documents\Code\CLI\llmusage\src\domain\pricing.rs:21
+  variant PricingStatus:SourceReported in D:\Documents\Code\CLI\llmusage\src\domain\pricing.rs:21
+
+--- failure function_missing: pub fn removed or renamed ---
+
+Description:
+A publicly-visible function cannot be imported by its prior path. A `pub use` may have been removed, or the function itself may have been renamed or removed entirely.
+        ref: https://doc.rust-lang.org/cargo/reference/semver.html#item-remove
+       impl: https://github.com/obi1kenobi/cargo-semver-checks/tree/v0.50.0/src/lints/function_missing.ron
+
+Failed in:
+  function llmusage::commands::tui::run, previously in file D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\commands\tui.rs:6
+
+--- failure inherent_method_missing: pub method removed or renamed ---
+
+Description:
+A publicly-visible method or associated fn is no longer available under its prior name. It may have been renamed or removed entirely.
+        ref: https://doc.rust-lang.org/cargo/reference/semver.html#item-remove
+       impl: https://github.com/obi1kenobi/cargo-semver-checks/tree/v0.50.0/src/lints/inherent_method_missing.ron
+
+Failed in:
+  PricingCatalog::static_v1, previously in file D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\query\pricing_catalog.rs:274
+  PricingCatalog::static_v1, previously in file D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\query\pricing_catalog.rs:274
+
+--- failure method_parameter_count_changed: pub method parameter count changed ---
+
+Description:
+A publicly-visible method now takes a different number of parameters, not counting the receiver (self) parameter.
+        ref: https://doc.rust-lang.org/cargo/reference/semver.html#fn-change-arity
+       impl: https://github.com/obi1kenobi/cargo-semver-checks/tree/v0.50.0/src/lints/method_parameter_count_changed.ron
+
+Failed in:
+  llmusage::commands::report_args::ReportCommonArgs::to_filter takes 1 parameters in D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\commands\report_args.rs:68, but now takes 2 parameters in D:\Documents\Code\CLI\llmusage\src\commands\report_args.rs:76
+  llmusage::store::SourceFileStore::counts takes 1 parameters in D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\store\source_file.rs:90, but now takes 2 parameters in D:\Documents\Code\CLI\llmusage\src\store\source_file.rs:92
+  llmusage::store::SourceFileStore::tracked_paths takes 1 parameters in D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\store\source_file.rs:96, but now takes 2 parameters in D:\Documents\Code\CLI\llmusage\src\store\source_file.rs:98
+  llmusage::store::SourceFileStore::sweep_missing takes 2 parameters in D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\store\source_file.rs:111, but now takes 3 parameters in D:\Documents\Code\CLI\llmusage\src\store\source_file.rs:118
+  llmusage::store::SourceFileStore::mark_inventory_seen takes 3 parameters in D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\store\source_file.rs:123, but now takes 4 parameters in D:\Documents\Code\CLI\llmusage\src\store\source_file.rs:139
+  llmusage::store::SourceFileStore::lossy_rebuild_risk takes 1 parameters in D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\store\source_file.rs:139, but now takes 2 parameters in D:\Documents\Code\CLI\llmusage\src\store\source_file.rs:157
+  llmusage::store::SyncStatusStore::load_source_sync_statuses takes 0 parameters in D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\store\sync_status.rs:18, but now takes 1 parameters in D:\Documents\Code\CLI\llmusage\src\store\sync_status.rs:27
+  llmusage::store::SyncStatusStore::save_source_sync_statuses takes 1 parameters in D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\store\sync_status.rs:87, but now takes 2 parameters in D:\Documents\Code\CLI\llmusage\src\store\sync_status.rs:94
+  llmusage::store::SyncStatusStore::mark_recent_completed takes 2 parameters in D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\store\sync_status.rs:159, but now takes 3 parameters in D:\Documents\Code\CLI\llmusage\src\store\sync_status.rs:172
+  llmusage::store::Store::reset_for_source takes 1 parameters in D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\store\schema.rs:249, but now takes 2 parameters in D:\Documents\Code\CLI\llmusage\src\store\schema.rs:288
+  llmusage::store::Store::mark_source_file_deleted takes 2 parameters in D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\store\source_file.rs:322, but now takes 3 parameters in D:\Documents\Code\CLI\llmusage\src\store\source_file.rs:364
+  llmusage::Store::reset_for_source takes 1 parameters in D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\store\schema.rs:249, but now takes 2 parameters in D:\Documents\Code\CLI\llmusage\src\store\schema.rs:288
+  llmusage::Store::mark_source_file_deleted takes 2 parameters in D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\store\source_file.rs:322, but now takes 3 parameters in D:\Documents\Code\CLI\llmusage\src\store\source_file.rs:364
+  llmusage::store::CursorStore::load_file_cursors takes 1 parameters in D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\store\cursor.rs:24, but now takes 2 parameters in D:\Documents\Code\CLI\llmusage\src\store\cursor.rs:24
+  llmusage::store::CursorStore::load_opencode_cursor takes 0 parameters in D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\store\cursor.rs:69, but now takes 1 parameters in D:\Documents\Code\CLI\llmusage\src\store\cursor.rs:76
+  llmusage::store::CursorStore::save_opencode_cursor takes 1 parameters in D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\store\cursor.rs:102, but now takes 2 parameters in D:\Documents\Code\CLI\llmusage\src\store\cursor.rs:112
+  llmusage::store::CursorStore::load_zcode_cursor takes 0 parameters in D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\store\cursor.rs:139, but now takes 1 parameters in D:\Documents\Code\CLI\llmusage\src\store\cursor.rs:121
+  llmusage::store::CursorStore::save_zcode_cursor takes 1 parameters in D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\store\cursor.rs:176, but now takes 2 parameters in D:\Documents\Code\CLI\llmusage\src\store\cursor.rs:161
+
+--- failure module_missing: pub module removed or renamed ---
+
+Description:
+A publicly-visible module cannot be imported by its prior path. A `pub use` may have been removed, or the module may have been renamed, removed, or made non-public.
+        ref: https://doc.rust-lang.org/cargo/reference/semver.html#item-remove
+       impl: https://github.com/obi1kenobi/cargo-semver-checks/tree/v0.50.0/src/lints/module_missing.ron
+
+Failed in:
+  mod llmusage::commands::tui, previously in file D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\commands\tui.rs:1
+
+--- failure struct_missing: pub struct removed or renamed ---
+
+Description:
+A publicly-visible struct cannot be imported by its prior path. A `pub use` may have been removed, or the struct itself may have been renamed or removed entirely.
+        ref: https://doc.rust-lang.org/cargo/reference/semver.html#item-remove
+       impl: https://github.com/obi1kenobi/cargo-semver-checks/tree/v0.50.0/src/lints/struct_missing.ron
+
+Failed in:
+  struct llmusage::parsers::pi::PiParser, previously in file D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\parsers\pi.rs:75
+  struct llmusage::parsers::PiParser, previously in file D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\parsers\pi.rs:75
+
+--- failure struct_pub_field_missing: pub struct's pub field removed or renamed ---
+
+Description:
+A publicly-visible struct has at least one public field that is no longer available under its prior name. It may have been renamed or removed entirely.
+        ref: https://doc.rust-lang.org/cargo/reference/semver.html#item-remove
+       impl: https://github.com/obi1kenobi/cargo-semver-checks/tree/v0.50.0/src/lints/struct_pub_field_missing.ron
+
+Failed in:
+  field since of struct ReportFilter, previously in file D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\query\reports.rs:27
+  field until of struct ReportFilter, previously in file D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\query\reports.rs:28
+  field timezone of struct ReportFilter, previously in file D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\query\reports.rs:30
+  field source of struct ReportFilter, previously in file D:\Documents\Code\CLI\llmusage\target\semver-checks\git-v1_2_0\74fa9a2a58e69334f828b677643344b2d3577723\src\query\reports.rs:32
+
+--- warning partial_ord_enum_variants_reordered: enum variants reordered in #[derive(PartialOrd)] enum ---
+
+Description:
+A public enum that derives PartialOrd had its variants reordered. #[derive(PartialOrd)] uses the enum variant order to set the enum's ordering behavior, so this change may break downstream code that relies on the previous order.
+        ref: https://doc.rust-lang.org/std/cmp/trait.PartialOrd.html#derivable
+       impl: https://github.com/obi1kenobi/cargo-semver-checks/tree/v0.50.0/src/lints/partial_ord_enum_variants_reordered.ron
+
+Failed in:
+  SourceKind::Grok moved from position 7 to 8, in D:\Documents\Code\CLI\llmusage\src\domain\models.rs:32
+  SourceKind::Zcode moved from position 8 to 9, in D:\Documents\Code\CLI\llmusage\src\domain\models.rs:35
+  SourceKind::DeepseekHarness moved from position 9 to 10, in D:\Documents\Code\CLI\llmusage\src\domain\models.rs:38
+  SourceKind::Grok moved from position 7 to 8, in D:\Documents\Code\CLI\llmusage\src\domain\models.rs:32
+  SourceKind::Zcode moved from position 8 to 9, in D:\Documents\Code\CLI\llmusage\src\domain\models.rs:35
+  SourceKind::DeepseekHarness moved from position 9 to 10, in D:\Documents\Code\CLI\llmusage\src\domain\models.rs:38
+  SourceKind::Grok moved from position 7 to 8, in D:\Documents\Code\CLI\llmusage\src\domain\models.rs:32
+  SourceKind::Zcode moved from position 8 to 9, in D:\Documents\Code\CLI\llmusage\src\domain\models.rs:35
+  SourceKind::DeepseekHarness moved from position 9 to 10, in D:\Documents\Code\CLI\llmusage\src\domain\models.rs:38
+
+     Summary semver requires new major version: 11 major and 0 minor checks failed
+     Warning produced 1 major and 0 minor level warnings
+    Finished [ 105.635s] llmusage

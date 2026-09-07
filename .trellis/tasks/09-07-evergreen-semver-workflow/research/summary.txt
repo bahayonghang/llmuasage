@@ -1,0 +1,4 @@
+rev-parse	0	C:\Users\lyh\AppData\Local\Temp\grok-goal-2de7d21a862e\implementer\semver-workflow\logs\rev-parse.log
+semver-help	0	C:\Users\lyh\AppData\Local\Temp\grok-goal-2de7d21a862e\implementer\semver-workflow\logs\semver-help.log
+semver-baseline	100	C:\Users\lyh\AppData\Local\Temp\grok-goal-2de7d21a862e\implementer\semver-workflow\logs\semver-baseline.log
+cargo-doc	0	C:\Users\lyh\AppData\Local\Temp\grok-goal-2de7d21a862e\implementer\semver-workflow\logs\cargo-doc.log
