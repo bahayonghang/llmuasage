@@ -2,11 +2,18 @@ use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
     thread,
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use llmusage::{Fixture, SourceKind, Store, app::AppContext, subscription::UsageEndpoints};
+use llmusage::{
+    Fixture, SourceKind, Store, app::AppContext,
+    subscription::{UsageEndpoints, UsageFetchReport, UsageOutput},
+};
 use llmusage_desktop_lib::startup;
 
 fn suppress_startup_repair(store: &Store) -> anyhow::Result<()> {
@@ -74,7 +81,8 @@ fn write_http(stream: &mut TcpStream, status: &str, body: &str) -> std::io::Resu
     stream.flush()
 }
 
-fn handle_conn(mut stream: TcpStream) {
+fn handle_conn(mut stream: TcpStream, hits: &AtomicUsize) {
+    hits.fetch_add(1, Ordering::SeqCst);
     stream.set_read_timeout(Some(Duration::from_secs(2))).ok();
     let mut buf = Vec::new();
     let mut chunk = [0u8; 1024];
@@ -112,17 +120,67 @@ fn handle_conn(mut stream: TcpStream) {
     let _ = write_http(&mut stream, "200 OK", body);
 }
 
-fn spawn_local_quota_server() -> anyhow::Result<(String, thread::JoinHandle<()>)> {
+fn spawn_local_quota_server() -> anyhow::Result<(String, Arc<AtomicUsize>, thread::JoinHandle<()>)> {
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let addr = listener.local_addr()?;
+    let hits = Arc::new(AtomicUsize::new(0));
+    let hits_for_server = hits.clone();
     let handle = thread::spawn(move || {
         for stream in listener.incoming() {
             if let Ok(stream) = stream {
-                handle_conn(stream);
+                handle_conn(stream, &hits_for_server);
             }
         }
     });
-    Ok((format!("http://127.0.0.1:{}", addr.port()), handle))
+    Ok((
+        format!("http://127.0.0.1:{}", addr.port()),
+        hits,
+        handle,
+    ))
+}
+
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn marker_report() -> UsageFetchReport {
+    UsageFetchReport {
+        outputs: vec![UsageOutput {
+            provider: "Cached".into(),
+            account: None,
+            credential_source: None,
+            plan: Some("cached".into()),
+            email: None,
+            metrics: Vec::new(),
+        }],
+        diagnostics: Vec::new(),
+    }
+}
+
+fn write_usage_cache(path: &Path, fetched_at: u64, report: &UsageFetchReport) {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    let document = serde_json::json!({
+        "fetched_at": fetched_at,
+        "report": report,
+    });
+    std::fs::write(path, serde_json::to_string(&document).unwrap()).unwrap();
+}
+
+fn set_mtime_old(path: &Path) {
+    let modified = SystemTime::now()
+        .checked_sub(Duration::from_secs(3600))
+        .expect("mtime age");
+    std::fs::File::options()
+        .write(true)
+        .open(path)
+        .expect("open cache")
+        .set_modified(modified)
+        .expect("set mtime");
 }
 
 fn write_creds(home: &Path) -> anyhow::Result<()> {
@@ -213,7 +271,7 @@ async fn fetch_quota_empty_without_credentials_uses_local_endpoints() -> anyhow:
     suppress_startup_repair(fixture.store())?;
     let app = AppContext::with_cli_home(Some(fixture.paths().root_dir.clone()))?;
     let state = startup(app).await?;
-    let (base, server) = spawn_local_quota_server()?;
+    let (base, _hits, server) = spawn_local_quota_server()?;
     let endpoints = local_endpoints(&base);
     assert_local_only(&endpoints);
     let user_home = tempfile::TempDir::new()?;
@@ -244,7 +302,7 @@ async fn fetch_quota_fixture_credentials_keep_bytes_and_report_cache_hit() -> an
     suppress_startup_repair(fixture.store())?;
     let app = AppContext::with_cli_home(Some(fixture.paths().root_dir.clone()))?;
     let state = startup(app).await?;
-    let (base, server) = spawn_local_quota_server()?;
+    let (base, _hits, server) = spawn_local_quota_server()?;
     let endpoints = local_endpoints(&base);
     assert_local_only(&endpoints);
     let user_home = tempfile::TempDir::new()?;
@@ -269,6 +327,172 @@ async fn fetch_quota_fixture_credentials_keep_bytes_and_report_cache_hit() -> an
     let refreshed =
         llmusage_desktop_lib::commands::runtime::fetch_quota(&state, true, inject).await?;
     assert!(!refreshed.cache_hit);
+    drop(server);
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fetch_quota_expired_fetched_at_hits_endpoint() -> anyhow::Result<()> {
+    let _lock = ENV_LOCK.lock().await;
+    let _env = isolate_credential_env();
+    let fixture = Fixture::new()?;
+    suppress_startup_repair(fixture.store())?;
+    let app = AppContext::with_cli_home(Some(fixture.paths().root_dir.clone()))?;
+    let state = startup(app).await?;
+    let (base, hits, server) = spawn_local_quota_server()?;
+    let endpoints = local_endpoints(&base);
+    assert_local_only(&endpoints);
+    let user_home = tempfile::TempDir::new()?;
+    write_creds(user_home.path())?;
+    let before = read_cred_bytes(user_home.path())?;
+    write_usage_cache(&state.paths.subscription_cache_path(), 1, &marker_report());
+    let inject = llmusage_desktop_lib::commands::runtime::QuotaInject {
+        user_home: Some(user_home.path().to_path_buf()),
+        endpoints: Some(endpoints),
+    };
+    let response =
+        llmusage_desktop_lib::commands::runtime::fetch_quota(&state, false, inject).await?;
+    assert!(!response.cache_hit);
+    assert!(hits.load(Ordering::SeqCst) > 0);
+    assert!(
+        response
+            .report
+            .outputs
+            .iter()
+            .any(|output| output.provider == "Claude"),
+        "{:?}",
+        response.report
+    );
+    assert!(
+        !response
+            .report
+            .outputs
+            .iter()
+            .any(|output| output.provider == "Cached"),
+        "{:?}",
+        response.report
+    );
+    assert_eq!(
+        read_cred_bytes(user_home.path())?,
+        before,
+        "credential files must stay byte-identical"
+    );
+    drop(server);
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fetch_quota_corrupt_cache_is_not_a_hit() -> anyhow::Result<()> {
+    let _lock = ENV_LOCK.lock().await;
+    let _env = isolate_credential_env();
+    let fixture = Fixture::new()?;
+    suppress_startup_repair(fixture.store())?;
+    let app = AppContext::with_cli_home(Some(fixture.paths().root_dir.clone()))?;
+    let state = startup(app).await?;
+    let (base, hits, server) = spawn_local_quota_server()?;
+    let endpoints = local_endpoints(&base);
+    assert_local_only(&endpoints);
+    let user_home = tempfile::TempDir::new()?;
+    write_creds(user_home.path())?;
+    let before = read_cred_bytes(user_home.path())?;
+    let cache_path = state.paths.subscription_cache_path();
+    if let Some(parent) = cache_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&cache_path, "{not-json")?;
+    let inject = llmusage_desktop_lib::commands::runtime::QuotaInject {
+        user_home: Some(user_home.path().to_path_buf()),
+        endpoints: Some(endpoints),
+    };
+    let response =
+        llmusage_desktop_lib::commands::runtime::fetch_quota(&state, false, inject).await?;
+    assert!(!response.cache_hit);
+    assert!(hits.load(Ordering::SeqCst) > 0);
+    assert_eq!(
+        read_cred_bytes(user_home.path())?,
+        before,
+        "credential files must stay byte-identical"
+    );
+    drop(server);
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fetch_quota_fresh_fetched_at_old_mtime_is_cache_hit() -> anyhow::Result<()> {
+    let _lock = ENV_LOCK.lock().await;
+    let _env = isolate_credential_env();
+    let fixture = Fixture::new()?;
+    suppress_startup_repair(fixture.store())?;
+    let app = AppContext::with_cli_home(Some(fixture.paths().root_dir.clone()))?;
+    let state = startup(app).await?;
+    let (base, hits, server) = spawn_local_quota_server()?;
+    let endpoints = local_endpoints(&base);
+    assert_local_only(&endpoints);
+    let user_home = tempfile::TempDir::new()?;
+    write_creds(user_home.path())?;
+    let before = read_cred_bytes(user_home.path())?;
+    let cache_path = state.paths.subscription_cache_path();
+    write_usage_cache(&cache_path, unix_now(), &marker_report());
+    set_mtime_old(&cache_path);
+    let inject = llmusage_desktop_lib::commands::runtime::QuotaInject {
+        user_home: Some(user_home.path().to_path_buf()),
+        endpoints: Some(endpoints),
+    };
+    let response =
+        llmusage_desktop_lib::commands::runtime::fetch_quota(&state, false, inject).await?;
+    assert!(response.cache_hit);
+    assert_eq!(hits.load(Ordering::SeqCst), 0);
+    assert_eq!(response.report, marker_report());
+    assert_eq!(
+        read_cred_bytes(user_home.path())?,
+        before,
+        "credential files must stay byte-identical"
+    );
+    drop(server);
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fetch_quota_bypass_cache_is_live_miss() -> anyhow::Result<()> {
+    let _lock = ENV_LOCK.lock().await;
+    let _env = isolate_credential_env();
+    let fixture = Fixture::new()?;
+    suppress_startup_repair(fixture.store())?;
+    let app = AppContext::with_cli_home(Some(fixture.paths().root_dir.clone()))?;
+    let state = startup(app).await?;
+    let (base, hits, server) = spawn_local_quota_server()?;
+    let endpoints = local_endpoints(&base);
+    assert_local_only(&endpoints);
+    let user_home = tempfile::TempDir::new()?;
+    write_creds(user_home.path())?;
+    let before = read_cred_bytes(user_home.path())?;
+    write_usage_cache(
+        &state.paths.subscription_cache_path(),
+        unix_now(),
+        &marker_report(),
+    );
+    let inject = llmusage_desktop_lib::commands::runtime::QuotaInject {
+        user_home: Some(user_home.path().to_path_buf()),
+        endpoints: Some(endpoints),
+    };
+    let response =
+        llmusage_desktop_lib::commands::runtime::fetch_quota(&state, true, inject).await?;
+    assert!(!response.cache_hit);
+    assert!(hits.load(Ordering::SeqCst) > 0);
+    assert!(
+        !response
+            .report
+            .outputs
+            .iter()
+            .any(|output| output.provider == "Cached"),
+        "{:?}",
+        response.report
+    );
+    assert_eq!(
+        read_cred_bytes(user_home.path())?,
+        before,
+        "credential files must stay byte-identical"
+    );
     drop(server);
     Ok(())
 }

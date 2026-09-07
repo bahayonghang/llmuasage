@@ -1,8 +1,4 @@
-use std::{
-    fs,
-    path::PathBuf,
-    time::{Duration, SystemTime},
-};
+use std::{fs, path::PathBuf, time::Duration};
 
 use llmusage::{
     subscription::{FetchContext, UsageEndpoints, fetch_all},
@@ -15,7 +11,6 @@ use crate::{
     state::AppState,
 };
 
-const QUOTA_CACHE_TTL: Duration = Duration::from_secs(300);
 const QUOTA_TIMEOUT: Duration = Duration::from_secs(8);
 
 #[derive(Debug, Clone, Default)]
@@ -59,15 +54,17 @@ pub async fn fetch_quota(
     let user_home = inject.user_home.unwrap_or_else(resolve_home_dir);
     let endpoints = inject.endpoints.unwrap_or_else(UsageEndpoints::production);
     let cache_path = state.paths.subscription_cache_path();
-    let cache_hit = !bypass_cache && cache_file_fresh(&cache_path, QUOTA_CACHE_TTL);
     let ctx = FetchContext {
         endpoints,
         user_home,
         cache_path: Some(cache_path),
         timeout: QUOTA_TIMEOUT,
     };
-    let report = fetch_all(&ctx, bypass_cache).await;
-    Ok(QuotaResponse { cache_hit, report })
+    let outcome = fetch_all(&ctx, bypass_cache).await;
+    Ok(QuotaResponse {
+        cache_hit: outcome.cache_hit,
+        report: outcome.report,
+    })
 }
 
 pub fn load_prefs(state: &AppState) -> Result<PrefsDto, DesktopError> {
@@ -107,17 +104,4 @@ pub fn save_prefs(state: &AppState, prefs: PrefsDto) -> Result<PrefsDto, Desktop
 
 fn prefs_path(state: &AppState) -> PathBuf {
     state.paths.root_dir.join("desktop.json")
-}
-
-fn cache_file_fresh(path: &std::path::Path, ttl: Duration) -> bool {
-    let Ok(metadata) = fs::metadata(path) else {
-        return false;
-    };
-    let Ok(modified) = metadata.modified() else {
-        return false;
-    };
-    match SystemTime::now().duration_since(modified) {
-        Ok(age) => age <= ttl,
-        Err(_) => false,
-    }
 }

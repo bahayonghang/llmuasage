@@ -56,19 +56,33 @@ impl FetchContext {
     }
 }
 
-pub async fn fetch_all(ctx: &FetchContext, bypass_cache: bool) -> UsageFetchReport {
+/// Quota report plus whether `fetch_all` served it from a successful cache load.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UsageFetchOutcome {
+    pub report: UsageFetchReport,
+    pub cache_hit: bool,
+}
+
+/// Fetch quota for enabled providers. `cache_hit` follows `cache::load`, not mtime.
+pub async fn fetch_all(ctx: &FetchContext, bypass_cache: bool) -> UsageFetchOutcome {
     if !bypass_cache
         && let Some(path) = &ctx.cache_path
         && let Some(report) = cache::load(path)
     {
-        return report;
+        return UsageFetchOutcome {
+            report,
+            cache_hit: true,
+        };
     }
 
     let report = fetch_live(ctx).await;
     if let Some(path) = &ctx.cache_path {
         cache::save(path, &report);
     }
-    report
+    UsageFetchOutcome {
+        report,
+        cache_hit: false,
+    }
 }
 
 async fn fetch_live(ctx: &FetchContext) -> UsageFetchReport {
@@ -137,14 +151,24 @@ mod tests {
     use std::net::SocketAddr;
     use std::path::Path;
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::net::TcpListener;
 
     #[derive(Clone)]
     struct Fixture {
         claude: StatusCode,
+        hits: Arc<AtomicUsize>,
+    }
+
+    impl Fixture {
+        fn bump(&self) {
+            self.hits.fetch_add(1, Ordering::SeqCst);
+        }
     }
 
     async fn claude_handler(State(fixture): State<Arc<Fixture>>) -> impl IntoResponse {
+        fixture.bump();
         (
             fixture.claude,
             Json(json!({
@@ -154,20 +178,23 @@ mod tests {
         )
     }
 
-    async fn kimi_handler() -> impl IntoResponse {
+    async fn kimi_handler(State(fixture): State<Arc<Fixture>>) -> impl IntoResponse {
+        fixture.bump();
         Json(json!({
             "user": { "membership": { "level": "LEVEL_INTERMED" } },
             "usage": { "limit": "100", "remaining": "34", "resetTime": "2026-08-19T12:04:00Z" }
         }))
     }
 
-    async fn grok_subs() -> impl IntoResponse {
+    async fn grok_subs(State(fixture): State<Arc<Fixture>>) -> impl IntoResponse {
+        fixture.bump();
         Json(json!({
             "subscriptions": [{ "status": "active", "tier": "SUBSCRIPTION_TIER_UNKNOWN" }]
         }))
     }
 
-    async fn grok_tasks() -> impl IntoResponse {
+    async fn grok_tasks(State(fixture): State<Arc<Fixture>>) -> impl IntoResponse {
+        fixture.bump();
         Json(json!({
             "usage": 30.0,
             "limit": 100.0,
@@ -175,7 +202,8 @@ mod tests {
         }))
     }
 
-    async fn codex_handler() -> impl IntoResponse {
+    async fn codex_handler(State(fixture): State<Arc<Fixture>>) -> impl IntoResponse {
+        fixture.bump();
         Json(json!({
             "email": "user@example.com",
             "plan_type": "plus",
@@ -186,9 +214,13 @@ mod tests {
         }))
     }
 
-    async fn spawn_server(claude_status: StatusCode) -> (String, tokio::task::JoinHandle<()>) {
+    async fn spawn_server(
+        claude_status: StatusCode,
+    ) -> (String, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
+        let hits = Arc::new(AtomicUsize::new(0));
         let fixture = Arc::new(Fixture {
             claude: claude_status,
+            hits: hits.clone(),
         });
         let app = axum::Router::new()
             .route("/oauth/usage", get(claude_handler))
@@ -202,7 +234,7 @@ mod tests {
         let handle = tokio::spawn(async move {
             axum::serve(listener, app).await.expect("serve");
         });
-        (format!("http://{addr}"), handle)
+        (format!("http://{addr}"), hits, handle)
     }
 
     static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -285,6 +317,62 @@ mod tests {
         }
     }
 
+    fn unix_now() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+    }
+
+    fn marker_report() -> UsageFetchReport {
+        UsageFetchReport {
+            outputs: vec![UsageOutput {
+                provider: "Cached".into(),
+                account: None,
+                credential_source: None,
+                plan: Some("cached".into()),
+                email: None,
+                metrics: Vec::new(),
+            }],
+            diagnostics: Vec::new(),
+        }
+    }
+
+    fn write_cache(path: &Path, fetched_at: u64, report: UsageFetchReport) {
+        let document = serde_json::json!({
+            "fetched_at": fetched_at,
+            "report": report,
+        });
+        std::fs::write(path, serde_json::to_string(&document).unwrap()).unwrap();
+    }
+
+    fn set_mtime_old(path: &Path) {
+        let modified = SystemTime::now()
+            .checked_sub(Duration::from_secs(3600))
+            .expect("mtime age");
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .expect("open cache")
+            .set_modified(modified)
+            .expect("set mtime");
+    }
+
+    fn read_creds(home: &Path) -> Vec<(std::path::PathBuf, Vec<u8>)> {
+        [
+            home.join(".claude/.credentials.json"),
+            home.join(".kimi-code/credentials/kimi-code.json"),
+            home.join(".grok/auth.json"),
+            home.join(".codex/auth.json"),
+        ]
+        .into_iter()
+        .map(|path| {
+            let bytes = std::fs::read(&path).unwrap();
+            (path, bytes)
+        })
+        .collect()
+    }
+
     #[tokio::test]
     async fn fetch_all_reads_four_providers_without_writing_credentials() {
         let _lock = ENV_LOCK.lock().await;
@@ -294,9 +382,11 @@ mod tests {
         let claude_before = std::fs::read(dir.path().join(".claude/.credentials.json")).unwrap();
         let kimi_before =
             std::fs::read(dir.path().join(".kimi-code/credentials/kimi-code.json")).unwrap();
-        let (base, server) = spawn_server(StatusCode::OK).await;
-        let report = fetch_all(&ctx(dir.path(), &base), true).await;
+        let (base, _hits, server) = spawn_server(StatusCode::OK).await;
+        let outcome = fetch_all(&ctx(dir.path(), &base), true).await;
         server.abort();
+        assert!(!outcome.cache_hit);
+        let report = outcome.report;
 
         assert_eq!(report.outputs.len(), 4, "{report:?}");
         assert!(report.diagnostics.is_empty(), "{report:?}");
@@ -341,9 +431,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write_creds(dir.path());
         let claude_before = std::fs::read(dir.path().join(".claude/.credentials.json")).unwrap();
-        let (base, server) = spawn_server(StatusCode::TOO_MANY_REQUESTS).await;
-        let report = fetch_all(&ctx(dir.path(), &base), true).await;
+        let (base, _hits, server) = spawn_server(StatusCode::TOO_MANY_REQUESTS).await;
+        let outcome = fetch_all(&ctx(dir.path(), &base), true).await;
         server.abort();
+        assert!(!outcome.cache_hit);
+        let report = outcome.report;
 
         assert_eq!(report.outputs.len(), 3, "{report:?}");
         assert_eq!(report.diagnostics.len(), 1);
@@ -360,10 +452,117 @@ mod tests {
         let _lock = ENV_LOCK.lock().await;
         let _env = isolate_credential_env();
         let dir = tempfile::tempdir().unwrap();
-        let (base, server) = spawn_server(StatusCode::OK).await;
-        let report = fetch_all(&ctx(dir.path(), &base), true).await;
+        let (base, hits, server) = spawn_server(StatusCode::OK).await;
+        let outcome = fetch_all(&ctx(dir.path(), &base), true).await;
         server.abort();
-        assert!(report.outputs.is_empty());
-        assert!(report.diagnostics.is_empty());
+        assert!(!outcome.cache_hit);
+        assert!(outcome.report.outputs.is_empty());
+        assert!(outcome.report.diagnostics.is_empty());
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn expired_fetched_at_is_live_cache_miss() {
+        let _lock = ENV_LOCK.lock().await;
+        let _env = isolate_credential_env();
+        let dir = tempfile::tempdir().unwrap();
+        write_creds(dir.path());
+        let before = read_creds(dir.path());
+        let fetch_ctx = ctx(dir.path(), "http://127.0.0.1:1");
+        let cache_path = fetch_ctx.cache_path.clone().unwrap();
+        write_cache(&cache_path, 1, marker_report());
+        let (base, hits, server) = spawn_server(StatusCode::OK).await;
+        let outcome = fetch_all(&ctx(dir.path(), &base), false).await;
+        server.abort();
+
+        assert!(!outcome.cache_hit);
+        assert!(hits.load(Ordering::SeqCst) > 0);
+        assert!(
+            outcome
+                .report
+                .outputs
+                .iter()
+                .any(|output| output.provider == "Claude"),
+            "{:?}",
+            outcome.report
+        );
+        assert!(
+            !outcome
+                .report
+                .outputs
+                .iter()
+                .any(|output| output.provider == "Cached"),
+            "{:?}",
+            outcome.report
+        );
+        assert_eq!(read_creds(dir.path()), before);
+    }
+
+    #[tokio::test]
+    async fn corrupt_cache_is_not_reported_as_hit() {
+        let _lock = ENV_LOCK.lock().await;
+        let _env = isolate_credential_env();
+        let dir = tempfile::tempdir().unwrap();
+        write_creds(dir.path());
+        let before = read_creds(dir.path());
+        let fetch_ctx = ctx(dir.path(), "http://127.0.0.1:1");
+        let cache_path = fetch_ctx.cache_path.clone().unwrap();
+        std::fs::write(&cache_path, "{not-json").unwrap();
+        let (base, hits, server) = spawn_server(StatusCode::OK).await;
+        let outcome = fetch_all(&ctx(dir.path(), &base), false).await;
+        server.abort();
+
+        assert!(!outcome.cache_hit);
+        assert!(hits.load(Ordering::SeqCst) > 0);
+        assert_eq!(read_creds(dir.path()), before);
+    }
+
+    #[tokio::test]
+    async fn fresh_fetched_at_with_old_mtime_is_cache_hit() {
+        let _lock = ENV_LOCK.lock().await;
+        let _env = isolate_credential_env();
+        let dir = tempfile::tempdir().unwrap();
+        write_creds(dir.path());
+        let before = read_creds(dir.path());
+        let fetch_ctx = ctx(dir.path(), "http://127.0.0.1:1");
+        let cache_path = fetch_ctx.cache_path.clone().unwrap();
+        write_cache(&cache_path, unix_now(), marker_report());
+        set_mtime_old(&cache_path);
+        let (base, hits, server) = spawn_server(StatusCode::OK).await;
+        let outcome = fetch_all(&ctx(dir.path(), &base), false).await;
+        server.abort();
+
+        assert!(outcome.cache_hit);
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
+        assert_eq!(outcome.report, marker_report());
+        assert_eq!(read_creds(dir.path()), before);
+    }
+
+    #[tokio::test]
+    async fn bypass_cache_is_live_miss() {
+        let _lock = ENV_LOCK.lock().await;
+        let _env = isolate_credential_env();
+        let dir = tempfile::tempdir().unwrap();
+        write_creds(dir.path());
+        let before = read_creds(dir.path());
+        let fetch_ctx = ctx(dir.path(), "http://127.0.0.1:1");
+        let cache_path = fetch_ctx.cache_path.clone().unwrap();
+        write_cache(&cache_path, unix_now(), marker_report());
+        let (base, hits, server) = spawn_server(StatusCode::OK).await;
+        let outcome = fetch_all(&ctx(dir.path(), &base), true).await;
+        server.abort();
+
+        assert!(!outcome.cache_hit);
+        assert!(hits.load(Ordering::SeqCst) > 0);
+        assert!(
+            !outcome
+                .report
+                .outputs
+                .iter()
+                .any(|output| output.provider == "Cached"),
+            "{:?}",
+            outcome.report
+        );
+        assert_eq!(read_creds(dir.path()), before);
     }
 }

@@ -51,7 +51,7 @@ impl QuotaController {
         self.runtime.spawn(async move {
             let report = tokio::select! {
                 _ = cancel.cancelled() => return,
-                report = fetch_all(&ctx, bypass_cache) => report,
+                outcome = fetch_all(&ctx, bypass_cache) => outcome.report,
             };
             let _ = tx.send(report).await;
         });
