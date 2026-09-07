@@ -1,0 +1,30 @@
+{
+  "id": "evergreen-harness-contracts",
+  "name": "evergreen-harness-contracts",
+  "title": "对齐五套 Harness 项目契约",
+  "description": "AGENTS.md是版本化项目事实入口；CLAUDE.md保持有效导入；五套工具的加载、权限、hooks、skills、委派与验证边界可查。",
+  "status": "in_progress",
+  "dev_type": "docs",
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-09-07",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "09-07-evergreen-harness-audit",
+  "relatedFiles": [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "docs/agents/harness-contracts.md"
+  ],
+  "notes": "planning only; 用户尚未批准实施。可先独立起草；在其余批准子任务完成后最后回写实际命令/行为。不修改上述子任务拥有的spec。",
+  "meta": {}
+}
