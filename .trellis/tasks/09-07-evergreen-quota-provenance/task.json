@@ -1,0 +1,33 @@
+{
+  "id": "evergreen-quota-provenance",
+  "name": "evergreen-quota-provenance",
+  "title": "统一配额缓存命中来源",
+  "description": "桌面cache_hit来自subscription实际使用缓存的分支；不通过文件mtime推断。",
+  "status": "in_progress",
+  "dev_type": "backend",
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-09-07",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "09-07-evergreen-harness-audit",
+  "relatedFiles": [
+    "src/subscription/mod.rs",
+    "src/subscription/cache.rs",
+    "desktop/src-tauri/src/commands/runtime.rs",
+    "desktop/src-tauri/tests/quota.rs",
+    "src/tui/quota.rs",
+    ".trellis/spec/llmusage/backend/tui-subscription-contracts.md"
+  ],
+  "notes": "planning only; 用户尚未批准实施。test-gates后实施；公开API变化必须在semver基线修复后重新审查。",
+  "meta": {}
+}
