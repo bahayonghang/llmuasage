@@ -5,16 +5,26 @@
 Apply this contract when changing `Cargo.toml` dependencies, `[package]`
 metadata, or `rust-version`, the pinned development toolchain, Rust CI
 commands (including `cargo semver-checks`), subprocess integration tests,
-GitHub Actions SHA pins in `.github/workflows/ci.yml`, or `docs/` npm
-lockfile / overrides.
+GitHub Actions SHA pins in `.github/workflows/ci.yml`, `docs/` npm
+lockfile / overrides, dashboard JS tests under `scripts/tests/`,
+`scripts/ci-js.mjs`, the `justfile` `ci` / `desktop-check` recipes, or
+desktop frontend/CI gate membership.
 
-Applicable tools for the `--locked` vs `cargo semver-checks` split and the
-git-tag semver baseline: Claude Code, Codex, Grok Build, Kimi Code, OMP.
+Applicable tools for the `--locked` vs `cargo semver-checks` split, the
+git-tag semver baseline, JS test discovery, desktop gate membership, and
+the `just ci` lockfile-readonly rule: Claude Code, Codex, Grok Build,
+Kimi Code, OMP.
 
 ## 2. Signatures
 
 - Shared Rust gate: `python scripts/ci-rust.py`
-- Full local gate: `just ci`
+- Full local gate: `just ci` (ci-gate self-test, shared Rust gate, JS
+  discovery, desktop-check, docs build). Not MSRV, `cargo audit`, or
+  `cargo semver-checks`.
+- JS discovery gate: `node scripts/ci-js.mjs`
+- Desktop local/CI check: `just desktop-check`
+- Desktop Cargo tests:
+  `cargo test --locked --manifest-path desktop/src-tauri/Cargo.toml -- --test-threads=1`
 - MSRV proof: `cargo +<rust-version> check --locked --all-features`
 - Semver: `cargo semver-checks --baseline-rev v1.2.0`
 - Baseline identity: `git rev-parse "v1.2.0^{commit}"` equals
@@ -35,6 +45,27 @@ git-tag semver baseline: Claude Code, Codex, Grok Build, Kimi Code, OMP.
   development toolchain, not a second compatibility claim.
 - Local `just ci` and the three-platform Rust CI matrix must invoke
   `scripts/ci-rust.py` instead of maintaining duplicate Rust command lists.
+  `just ci` is not the MSRV job, the security audit, or the semver
+  comparison; those stay dedicated CI jobs.
+- `just ci` must not run `cargo update` or otherwise rewrite lockfiles.
+  A lockfile mismatch fails (`cargo --locked`, `npm ci`) and the gate
+  must not auto-fix it. `just version-sync` may still run
+  `cargo update --offline --package llmusage` to refresh the root
+  `Cargo.lock` after a version bump.
+- Dashboard JS checks and tests use `node scripts/ci-js.mjs`. That
+  script enumerates every `scripts/tests/*.test.mjs` file (sorted),
+  runs `node --check` on `scripts/benchmark-dashboard-range.mjs` and
+  `scripts/benchmark-top-sessions.mjs`, then spawns the same Node
+  binary with `--test` on the discovered files and propagates a
+  non-zero exit. Do not keep a second hard-coded test-file list in
+  `justfile` or `.github/workflows/ci.yml`.
+- Desktop frontend tests, `tsc --noEmit`, production `vite` build
+  (`npm --prefix desktop run build`), and
+  `cargo test --locked --manifest-path desktop/src-tauri/Cargo.toml`
+  belong in both local `just desktop-check` / `just ci` and the Windows
+  `desktop` CI job. That job uses Node 22 (Vite 7 compatible) and
+  `npm ci --prefix desktop`. Do not build or run NSIS/Tauri installer
+  bundles in this gate, and do not treat unit tests as native GUI proof.
 - The local gate requires a `python` executable on `PATH` because `just ci`
   and the gate scripts invoke `python ...`. On machines that only ship
   `python3`, prepend a temporary shim directory (for example
@@ -103,6 +134,11 @@ git-tag semver baseline: Claude Code, Codex, Grok Build, Kimi Code, OMP.
 | Shared Rust gate fails locally or in one CI OS | Block; do not bypass that command in only one environment |
 | `main` required check name is absent from workflow job names | Block merge; restore `CI gate` or update protection in the same change |
 | A new CI job is omitted from `ci-gate.needs` | `python scripts/check-ci-gate.py` fails |
+| Hard-coded JS test list omits a `scripts/tests/*.test.mjs` file | Block; `scripts/ci-js.mjs` must enumerate the directory |
+| `just ci` runs `cargo update` or rewrites lockfiles | Block; remove the update from `ci`; keep it in `version-sync` |
+| Lockfile mismatch is auto-fixed by the verification gate | Block; `--locked` / `npm ci` must fail and leave the files unchanged |
+| Local `just ci` treated as MSRV, `cargo audit`, or semver proof | Block; those remain dedicated CI jobs |
+| Desktop frontend tests, `tsc --noEmit`, Vite production build, or desktop `--locked` tests omitted from local or CI gates | Block; keep them in `just desktop-check` and the Windows `desktop` job |
 | `ci-gate` is skipped after a leaf job fails | Block; keep `if: always()` so the required check still reports |
 | Subprocess test reports an OS error | Locate the exact failing operation; do not label it an environment failure without context |
 | A test-layout change drops or duplicates an existing leaf name | Block before adding new tests; repair target/module wiring |
@@ -134,12 +170,29 @@ git-tag semver baseline: Claude Code, Codex, Grok Build, Kimi Code, OMP.
   against this repo's commit `9b7a6f3dec12764222891c2d8f5aeb42db7bd490`.
 - Bad: `cargo semver-checks --locked`, a crates.io baseline for
   `openrijal/llmusage`, or `documentation = "https://docs.rs/llmusage"`.
+- Good: adding `scripts/tests/dashboard-csv-export.test.mjs` is picked
+  up by `node scripts/ci-js.mjs` without editing `justfile` or Actions.
+- Good: `just ci` leaves `Cargo.lock`, `docs/package-lock.json`, and
+  `desktop/package-lock.json` byte-identical to HEAD.
+- Bad: listing six `node --test` files in Actions while seven
+  `*.test.mjs` files exist, or starting `just ci` with
+  `cargo update --offline --package llmusage`.
+- Good: the Windows `desktop` job runs `npm ci`, frontend tests,
+  `tsc --noEmit`, production `vite` build, and desktop
+  `cargo test --locked`, and does not build NSIS.
+- Bad: treating a green local `just ci` as proof of MSRV, `cargo audit`,
+  or `cargo semver-checks`.
 
 ## 6. Tests Required
 
 - Run the MSRV proof with an isolated `CARGO_TARGET_DIR` after dependency
   updates.
 - Run `python scripts/ci-rust.py` before committing Rust changes.
+- Run `node scripts/ci-js.mjs` before committing dashboard JS tests or
+  the JS gate entry. A temporary extra `scripts/tests/*.test.mjs` that
+  fails must make the entry exit non-zero; removing it must restore green.
+- Run `just desktop-check` (or the same four commands) before committing
+  desktop frontend/CI gate changes.
 - Run `python scripts/check-ci-gate.py --self-test` and
   `python scripts/check-ci-gate.py` before committing workflow or required-check
   changes. Run `--github-protection` after changing `main` protection.
@@ -212,10 +265,40 @@ jobs:
 ci-gate:
   name: CI gate
   if: always()
-  needs: [rust, msrv, docs-and-js, arch-gate, security]
+  needs: [rust, msrv, docs-and-js, desktop, arch-gate, security]
 ```
 
-`main` required checks must be exactly `CI gate`.
+`main` required checks must be exactly `CI gate`. The `desktop` job id
+must appear in `needs`; omitting it fails `python scripts/check-ci-gate.py`.
+
+For dashboard JS discovery and lockfile-readonly `just ci`:
+
+### Wrong
+
+```just
+ci:
+    cargo update --offline --package llmusage
+    node --test scripts/tests/dashboard-fetch.test.mjs
+    # …hard-coded list that can omit CSV or future files
+```
+
+### Correct
+
+```just
+ci:
+    python scripts/check-ci-gate.py --self-test
+    python scripts/check-ci-gate.py
+    python scripts/ci-rust.py
+    node scripts/ci-js.mjs
+    just desktop-check
+    npm --prefix docs run docs:build
+```
+
+`scripts/ci-js.mjs` enumerates `scripts/tests/*.test.mjs`. `version-sync`
+may still run `cargo update --offline --package llmusage`. Local `just ci`
+does not imply MSRV, security, or semver.
+
+Applicable tools: Claude Code, Codex, Grok Build, Kimi Code, OMP.
 
 For semver and `--locked`:
 
@@ -264,7 +347,8 @@ Applicable tools: Claude Code, Codex, Grok Build, Kimi Code, OMP.
 - Compatible refresh: `cargo update` then `cargo +<rust-version> check --locked --all-features` with an isolated `CARGO_TARGET_DIR`
 - Security: `cargo audit`
 - Docs: `npm --prefix docs install` after override edits, then `npm --prefix docs audit` and `npm --prefix docs run docs:build`
-- Full gate: `just ci`
+- Full local gate after an explicit refresh: `just ci` (does not itself
+  run `cargo update`)
 
 ### 3. Contracts
 

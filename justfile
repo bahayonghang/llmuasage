@@ -14,9 +14,21 @@ desktop-dev:
 
 alias tdev := desktop-dev
 
-desktop-test:
+[windows]
+_desktop-tsc:
+    cmd.exe /c 'desktop\node_modules\.bin\tsc.cmd --noEmit -p desktop\tsconfig.json'
+
+[unix]
+_desktop-tsc:
+    desktop/node_modules/.bin/tsc --noEmit -p desktop/tsconfig.json
+
+desktop-check:
     npm --prefix desktop test
-    cargo test --manifest-path desktop/src-tauri/Cargo.toml -- --test-threads=1
+    just _desktop-tsc
+    npm --prefix desktop run build
+    cargo test --locked --manifest-path desktop/src-tauri/Cargo.toml -- --test-threads=1
+
+alias desktop-test := desktop-check
 
 desktop-build:
     npm --prefix desktop install
@@ -87,16 +99,9 @@ version-sync version:
     cargo update --offline --package llmusage
 
 ci:
-    cargo update --offline --package llmusage
     python scripts/check-ci-gate.py --self-test
     python scripts/check-ci-gate.py
     python scripts/ci-rust.py
-    node --check scripts/benchmark-dashboard-range.mjs
-    node --check scripts/benchmark-top-sessions.mjs
-    node --test scripts/tests/benchmark-top-sessions.test.mjs
-    node --test scripts/tests/dashboard-fetch.test.mjs
-    node --test scripts/tests/dashboard-logs-viewer.test.mjs
-    node --test scripts/tests/dashboard-bootstrap-watchdog.test.mjs
-    node --test scripts/tests/dashboard-load-state.test.mjs
-    node --test scripts/tests/dashboard-render-lifecycle.test.mjs
+    node scripts/ci-js.mjs
+    just desktop-check
     npm --prefix docs run docs:build
