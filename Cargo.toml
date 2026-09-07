@@ -7,7 +7,6 @@ autotests = false
 description = "Local-first AI CLI usage analytics with Rust, SQLite, and zero upload."
 repository = "https://github.com/bahayonghang/llmuasage"
 homepage = "https://github.com/bahayonghang/llmuasage"
-documentation = "https://docs.rs/llmusage"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 

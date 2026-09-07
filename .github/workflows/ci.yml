@@ -139,6 +139,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
@@ -165,11 +167,10 @@ jobs:
         with:
           tool: cargo-semver-checks
 
-      - name: API-002 semver check (against published crate)
-        # Runs only on pushes to main so PR builds are not blocked while the
-        # public API is still being stabilised.
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: cargo semver-checks --locked
+      - name: API-002 semver check (git baseline v1.2.0)
+        # Compare public API to this repo's verified release tag, not crates.io.
+        # Update --baseline-rev on a real release; do not auto-advance to HEAD.
+        run: cargo semver-checks --baseline-rev v1.2.0
 
   security:
     name: Security audit

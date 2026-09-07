@@ -2,16 +2,24 @@
 
 ## 1. Scope / Trigger
 
-Apply this contract when changing `Cargo.toml` dependencies or `rust-version`,
-the pinned development toolchain, Rust CI commands, subprocess integration
-tests, GitHub Actions SHA pins in `.github/workflows/ci.yml`, or `docs/` npm
+Apply this contract when changing `Cargo.toml` dependencies, `[package]`
+metadata, or `rust-version`, the pinned development toolchain, Rust CI
+commands (including `cargo semver-checks`), subprocess integration tests,
+GitHub Actions SHA pins in `.github/workflows/ci.yml`, or `docs/` npm
 lockfile / overrides.
+
+Applicable tools for the `--locked` vs `cargo semver-checks` split and the
+git-tag semver baseline: Claude Code, Codex, Grok Build, Kimi Code, OMP.
 
 ## 2. Signatures
 
 - Shared Rust gate: `python scripts/ci-rust.py`
 - Full local gate: `just ci`
 - MSRV proof: `cargo +<rust-version> check --locked --all-features`
+- Semver: `cargo semver-checks --baseline-rev v1.2.0`
+- Baseline identity: `git rev-parse "v1.2.0^{commit}"` equals
+  `9b7a6f3dec12764222891c2d8f5aeb42db7bd490`
+- API docs: `cargo doc --locked --no-deps` plus this repo's `docs/`
 - Required-check contract: `python scripts/check-ci-gate.py`
 - Live protection probe: `python scripts/check-ci-gate.py --github-protection`
 - Integration-test graph: `[package] autotests = false` plus explicit targets
@@ -33,8 +41,26 @@ lockfile / overrides.
   `ln -s "$(command -v python3)" /tmp/llmuasage-py-shim/python` and export it
   ahead of `PATH`) instead of editing recipes or scripts to call `python3`;
   CI runners provide `python`, so repo commands keep the portable spelling.
-- All dependency-sensitive CI commands use `--locked`; clippy and tests use
-  `--all-features`.
+- Dependency-sensitive Cargo subcommands that support `--locked` use it
+  (`cargo test`, `cargo check`, `cargo clippy`, `cargo metadata`,
+  `cargo doc`, `cargo install`). Clippy and tests use `--all-features`.
+  Do not pass `--locked` to `cargo semver-checks`; that flag is unexpected
+  on this tool.
+- Semver comparison uses `cargo semver-checks --baseline-rev v1.2.0`.
+  Tag `v1.2.0` is this repo's verified release baseline and must resolve to
+  commit `9b7a6f3dec12764222891c2d8f5aeb42db7bd490`. Update the baseline on
+  a real release; do not auto-advance it to HEAD. Do not select crates.io
+  crate `openrijal/llmusage`. If the baseline rev is missing, fail clearly;
+  do not fall back to the registry. If the comparison reports SemVer diffs,
+  record them; do not silence, wrap, downgrade the failure, add a
+  compatibility shim, or bump the crate version without a separate approval.
+- Architecture-checks checkout must fetch the release tag (`fetch-depth: 0`
+  or an equivalent tag fetch) so `--baseline-rev v1.2.0` resolves in CI.
+  The semver step runs on `pull_request`, `push` to `main`, and
+  `workflow_dispatch`; do not guard it with a main-only `if:`.
+- `[package] documentation` must not point at `https://docs.rs/llmusage`.
+  That URL is a different crates.io crate. Generate API docs with
+  `cargo doc --locked --no-deps` and read product docs under `docs/`.
 - `cargo update` must keep the declared MSRV. Cargo 1.97+ will lock to the
   latest versions compatible with `package.rust-version`. After an update,
   align direct `Cargo.toml` patch numbers with the lockfile so the manifest
@@ -81,6 +107,11 @@ lockfile / overrides.
 | Subprocess test reports an OS error | Locate the exact failing operation; do not label it an environment failure without context |
 | A test-layout change drops or duplicates an existing leaf name | Block before adding new tests; repair target/module wiring |
 | `cargo audit` reports unsound/yanked that `cargo update` can absorb (e.g. lru via ratatui-core) | Absorb in the lockfile batch; do not leave a fixable warning |
+| `cargo semver-checks --locked` | Block; that flag is unexpected. Use `--baseline-rev v1.2.0` |
+| Semver baseline tag missing or not commit `9b7a6f3dec12764222891c2d8f5aeb42db7bd490` | Fail clearly; do not fall back to crates.io |
+| Semver step skipped on `pull_request` or `workflow_dispatch` | Block; remove the main-only `if:` |
+| Real SemVer diffs versus 1.2.0 | Record each diff; do not silence, wrap, downgrade, shim, or bump version in this gate |
+| `[package] documentation` is `https://docs.rs/llmusage` | Block; delete the unverified field. Use `cargo doc` and `docs/` |
 | reqwest enabled with `rustls-tls` after 0.13 | Block compile; rename the feature to `rustls` |
 | `npm --prefix docs audit` still reports nanoid or postcss high | Block; pin overrides to patched versions and refresh `docs/package-lock.json` |
 | `npm --prefix docs audit` reports only vite/esbuild via vitepress 1.6.x | Accept; do not force VitePress 2 alpha or a vite 6 override |
@@ -99,6 +130,10 @@ lockfile / overrides.
 - Bad: move `tests/foo.rs` into `tests/sync/foo.rs` while relying on Cargo's
   root auto-discovery, then treat newly added tests as proof that no old test
   disappeared.
+- Good: `cargo semver-checks --baseline-rev v1.2.0` enters API comparison
+  against this repo's commit `9b7a6f3dec12764222891c2d8f5aeb42db7bd490`.
+- Bad: `cargo semver-checks --locked`, a crates.io baseline for
+  `openrijal/llmusage`, or `documentation = "https://docs.rs/llmusage"`.
 
 ## 6. Tests Required
 
@@ -108,6 +143,10 @@ lockfile / overrides.
 - Run `python scripts/check-ci-gate.py --self-test` and
   `python scripts/check-ci-gate.py` before committing workflow or required-check
   changes. Run `--github-protection` after changing `main` protection.
+- After public-API or Architecture-checks workflow changes, run
+  `git rev-parse "v1.2.0^{commit}"` and
+  `cargo semver-checks --baseline-rev v1.2.0`. Record real SemVer diffs;
+  do not paper over them.
 - Subprocess regression tests must assert the executable exists and attach
   spawn context; they must consume current public runtime paths/readers rather
   than stale compatibility fields.
@@ -177,6 +216,39 @@ ci-gate:
 ```
 
 `main` required checks must be exactly `CI gate`.
+
+For semver and `--locked`:
+
+### Wrong
+
+```yaml
+- name: API-002 semver check (against published crate)
+  if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  run: cargo semver-checks --locked
+```
+
+```toml
+documentation = "https://docs.rs/llmusage"
+```
+
+### Correct
+
+```yaml
+- name: Checkout
+  uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+  with:
+    fetch-depth: 0
+
+- name: API-002 semver check (git baseline v1.2.0)
+  run: cargo semver-checks --baseline-rev v1.2.0
+```
+
+`--locked` stays on Cargo subcommands that support it (`cargo test`,
+`cargo metadata`, `cargo doc`, `cargo install`). `v1.2.0` is a verified
+release baseline, not HEAD and not crates.io `openrijal/llmusage`. Generate
+API docs with `cargo doc --locked --no-deps`; product docs live in `docs/`.
+
+Applicable tools: Claude Code, Codex, Grok Build, Kimi Code, OMP.
 
 ## Scenario: Dependency and lockfile upgrades
 
