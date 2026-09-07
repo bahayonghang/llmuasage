@@ -370,7 +370,7 @@ fn grok_turn_usage_is_precise_idempotent_and_replays() -> Result<()> {
 }
 
 #[test]
-fn grok_legacy_marker_2_replays_on_unbounded_sync() -> Result<()> {
+fn grok_legacy_marker_2_is_skipped_on_ordinary_sync_until_explicit_rebuild() -> Result<()> {
     let fixture = Fixture::new()?;
     let usage = r#"{"inputTokens":1000,"cachedReadTokens":400,"cacheCreationTokens":0,"outputTokens":50,"reasoningTokens":20,"totalTokens":1050,"modelUsage":{"grok-4.6-build":{}}}"#;
     fixture.seed_grok(
@@ -400,19 +400,33 @@ fn grok_legacy_marker_2_replays_on_unbounded_sync() -> Result<()> {
         while let Ok(event) = rx.try_recv() {
             events.push(event);
         }
+        assert_eq!(store.token_accounting_version(SourceKind::Grok)?, Some(2));
+        assert!(store.has_legacy_token_accounting(SourceKind::Grok)?);
+        assert_grok_totals(&app.paths.db_path, 1, 1050)?;
+        assert!(
+            !events.iter().any(|event| matches!(
+                event,
+                SyncEvent::TokenAccountingRepairStarted { .. }
+                    | SyncEvent::TokenAccountingRepairFinished { .. }
+            )),
+            "ordinary sync must not claim token-accounting repair"
+        );
+
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                rebuild: true,
+                source: Some(SourceKind::Grok),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
         assert_eq!(store.token_accounting_version(SourceKind::Grok)?, Some(3));
         assert!(!store.has_legacy_token_accounting(SourceKind::Grok)?);
         assert_grok_totals(&app.paths.db_path, 1, 1050)?;
-        assert!(
-            events.iter().any(|event| {
-                matches!(
-                    event,
-                    SyncEvent::TokenAccountingRepairStarted { sources }
-                        if sources.as_slice() == [SourceKind::Grok]
-                )
-            }),
-            "legacy grok marker 2 must start token-accounting repair"
-        );
         Ok::<_, anyhow::Error>(())
     })?;
 

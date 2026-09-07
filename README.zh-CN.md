@@ -57,9 +57,9 @@ llmusage serve
 含义：
 
 1. `init` 创建 `~/.llmusage/` 并初始化 `llmusage.db`，不会修改第三方工具配置。
-2. `sync` 被动、增量解析本地真源，写入 usage 行、30 分钟 bucket、source-file 诊断和行为事实；本地 driver 之后还会拉取已注册的 SSH 远端。无界 sync 还会先告警，并在写入新数据前自动重建可无损修复的旧版 token accounting 来源。
+2. `sync` 被动、增量解析本地真源，写入 usage 行、30 分钟 bucket、source-file 诊断和行为事实；本地 driver 之后还会拉取已注册的 SSH 远端。普通 sync（有界或无界）会保留旧版 token accounting 历史、跳过该来源本轮写入，并提示修复入口是显式 `llmusage sync --rebuild --source <source>`。
 3. `llmusage` 显示默认 daily 报表：所选时区下最近 7 个自然日。
-4. `serve` 会按需安全重建旧版 parser token 统计口径，然后默认在 `127.0.0.1` 启动浏览器 Dashboard。只有明确需要远程访问时才使用 `serve --public`：它会暴露不带认证和 TLS 的聚合 Dashboard，但 project label、日志、诊断、job 状态和所有写路由仍只允许本地访问。
+4. `serve` 会保留已有用量和 token-accounting 警告，然后默认在 `127.0.0.1` 启动浏览器 Dashboard。它不会隐式 rebuild。只有明确需要远程访问时才使用 `serve --public`：它会暴露不带认证和 TLS 的聚合 Dashboard，但 project label、日志、诊断、job 状态和所有写路由仍只允许本地访问。
 
 内置定价目录升级后的第一次 sync 会在扫描来源前重算历史事件价格。stderr 会显示目录版本、已处理/总事件数、汇总桶对账和完成状态；`sync --json-events` 会在纯 NDJSON stdout 中提供同一套定价生命周期。
 
@@ -73,7 +73,7 @@ llmusage serve
 | Antigravity | `~/.gemini/antigravity-cli/conversations/*.db`（或 `GEMINI_CLI_HOME`）；hook 时代的历史行继续可查，存在未归属历史时拒绝 rebuild |
 | Kimi Code | `~/.kimi-code/sessions/**/wire.jsonl`（或 `KIMI_CODE_HOME`），只读取 turn-scoped `usage.record` |
 | Pi | `~/.pi/agent/sessions/**/*.jsonl`（或 `PI_AGENT_DIR`），来源 id 为 `pi` |
-| Oh My Pi | `~/.omp/agent/sessions/**/*.jsonl`，来源 id 为 `omp`。路径重叠时归 `pi`。升级后第一次不带 `--source` 的 `sync` 会重建存量 `pi` 行。后续 provider/project/成本/行为回填使用 `sync --rebuild --source omp`。 |
+| Oh My Pi | `~/.omp/agent/sessions/**/*.jsonl`，来源 id 为 `omp`。路径重叠时归 `pi`。普通 `sync` 会保留存量 `pi` 行并跳过 `pi` 写入；修复入口是 `sync --rebuild --source pi`。后续 provider/project/成本/行为回填使用 `sync --rebuild --source omp`。 |
 | Grok Build | `~/.grok/sessions/*/*/`（或 `GROK_HOME`），只读取会话根目录的 `updates.jsonl`、`signals.json`、`summary.json` 和可选 `events.jsonl` sidecar |
 | ZCode | `~/.zcode/cli/db/db.sqlite`（或 `ZCODE_HOME`）中 `model_usage` 的 completed 行 |
 | DeepSeek Harness | `~/.dsh/sessions/**/session.jsonl.zstd` 或 `session.jsonl`（或 `DSH_HOME`）；按帧魔数分派压缩与否 |
@@ -160,14 +160,14 @@ llmusage codex-tracer --rebuild
 ## 安全默认值
 
 - 不需要账号登录、device token、上传队列或远端用量 API。SSH 远端导入是你触发的、从已注册主机拉取规范化字段，不会上传用量。
-- 普通无界 `llmusage sync` 只会在全部目标都通过无损预检后，自动重建所选的旧版 token accounting 来源；任一目标不安全时，不会 reset 任何自动修复目标。
+- 普通 `llmusage sync`（有界或无界）不会重建旧版 token accounting 来源。它会保留该来源已有的 event、raw、bucket、turn、tool、cursor、source_file 数据，跳过该来源本轮写入，并提示修复入口是 `llmusage sync --rebuild --source <source>`。同一轮中的非 legacy 来源仍正常同步。Claude Code、Codex、Grok Build、Kimi Code、Oh My Pi（OMP）都按「普通同步 / 显式重建」区分。
 - 普通 `llmusage sync` 遇到原始源文件缺失时会保留已导入 usage。
 - `llmusage sync --recent-days N` 只导入最近的 UTC 事件窗口（`1..=3650`），且不推进全历史 cursor；`--parallelism` 合法范围为 `1..=32`。
-- bounded sync 不会自动重建旧版 accounting，因为清空全历史后只导入时间窗口会造成丢失；请先运行无界 `llmusage sync`。
+- bounded 普通 sync 同样对 legacy 来源 skip+warn，不得清空全历史。
 - `llmusage sync --rebuild` 默认拒绝有损重建，除非同时传入 `--allow-lossy-rebuild`。
 - 无 source 的 `llmusage sync --rebuild` 会重置 parser-backed 来源。若重建会删除未归属的 hook 时代 Antigravity 行，即使带 `--allow-lossy-rebuild` 也会拒绝。
-- `llmusage serve` 也会在绑定端口前自动重建可安全迁移的旧版 parser 来源。与普通 sync 的全量预检不同，serve 只跳过有风险的来源，让只读 Dashboard 仍可启动。
-- 自动修复永远不会启用 `--allow-lossy-rebuild`；请先恢复缺失源文件，再显式执行 `llmusage sync --rebuild --source <source>`。
+- `llmusage serve` 会保留并展示已有数据和 accounting 警告，不会隐式 rebuild。损坏的 legacy 来源不得阻止看板启动。
+- 普通 sync 会忽略 `--allow-lossy-rebuild`，因为它不再重建。请显式执行 `llmusage sync --rebuild --source <source>`；只有在接受清空不可重建历史时才加 `--allow-lossy-rebuild`。
 - `llmusage diagnostics --forget-file <PATH> --source <SOURCE>` 是显式忽略源文件的写入入口。
 - `llmusage logs` 查询本地运行日志和最近命令审计记录，不改变报表 stdout 或 `sync --json-events` stdout 合同。
 - `llmusage serve --public` 只暴露聚合看板的总量、趋势、模型、来源、成本和最小健康状态响应。项目、日志、诊断、任务状态、行为明细、用量分析和写操作必须使用默认回环地址监听，远程场景通常通过 SSH 隧道访问。

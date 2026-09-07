@@ -15,6 +15,15 @@ impl<'a> SyncStatusStore<'a> {
         Self { store }
     }
 
+    /// Warning copy for a skipped legacy parser source. Ordinary sync and serve
+    /// keep history; repair is explicit `sync --rebuild --source <source>`.
+    pub fn legacy_repair_warning(source: crate::models::SourceKind) -> String {
+        format!(
+            "legacy token accounting; existing history was kept and this source was skipped for this round. Run `llmusage sync --rebuild --source {}` to repair. If source files are missing, restore them or add `--allow-lossy-rebuild` to that rebuild command to explicitly accept clearing unrebuildable history.",
+            source.as_str()
+        )
+    }
+
     pub fn load_source_sync_statuses(&self, host_id: &str) -> Result<Vec<SourceSyncStatus>> {
         let conn = self.store.open_connection()?;
         let mut stmt = conn.prepare(
@@ -76,10 +85,7 @@ impl<'a> SyncStatusStore<'a> {
             status.token_accounting_version = self.store.token_accounting_version(source)?;
             status.legacy_token_accounting = self.store.has_legacy_token_accounting(source)?;
             if status.legacy_token_accounting {
-                status.token_accounting_warning = Some(format!(
-                    "legacy token accounting; run unbounded `llmusage sync` for automatic safe repair; if blocked, restore source files and run `llmusage sync --rebuild --source {}`",
-                    source.as_str()
-                ));
+                status.token_accounting_warning = Some(Self::legacy_repair_warning(source));
             }
         }
         Ok(statuses)

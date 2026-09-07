@@ -127,119 +127,54 @@ fn ccusage_token_semantics_are_consistent_across_sources_and_queries() -> Result
 }
 
 #[test]
-fn ordinary_sync_automatically_repairs_safe_legacy_source() -> Result<()> {
+fn ordinary_sync_keeps_unparseable_legacy_history_and_warns_for_explicit_rebuild() -> Result<()> {
     let fixture = Fixture::new()?;
-    fixture.seed_codex_copied_event()?;
+    fixture.seed_opencode_authoritative_total()?;
 
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let app = AppContext::discover()?;
         let store = Store::new(&app.paths)?;
         store.bootstrap()?;
-        let source_options = commands::sync::SyncRunOptions {
-            source: Some(SourceKind::Codex),
+        let options = commands::sync::SyncRunOptions {
+            source: Some(SourceKind::Opencode),
             ..Default::default()
         };
-        commands::sync::run_once_with_options(&app, &store, 0, &source_options, None).await?;
-        assert_eq!(store.token_accounting_version(SourceKind::Codex)?, Some(3));
+        commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        store.clear_token_accounting_version(SourceKind::Opencode)?;
+        fixture.break_opencode_schema()?;
+        assert!(store.has_legacy_token_accounting(SourceKind::Opencode)?);
+        let before = source_history_snapshot(&store, SourceKind::Opencode)?;
+        let marker_before = store.token_accounting_version(SourceKind::Opencode)?;
 
-        store.set_meta_value("token_accounting_version.codex", "2")?;
-        assert!(store.has_legacy_token_accounting(SourceKind::Codex)?);
-        let status = store
-            .sync_status()
-            .load_source_sync_statuses("local")?
-            .into_iter()
-            .find(|status| status.source == "codex")
-            .expect("codex sync status");
-        assert!(status.legacy_token_accounting);
-        assert!(
-            status
-                .token_accounting_warning
-                .as_deref()
-                .is_some_and(|warning| warning
-                    .contains("run unbounded `llmusage sync` for automatic safe repair"))
-        );
-        let before: i64 = Connection::open(&app.paths.db_path)?.query_row(
-            "SELECT COUNT(*) FROM usage_event WHERE source = 'codex'",
-            [],
-            |row| row.get(0),
-        )?;
         let (mut tx, mut rx) = tokio::sync::mpsc::channel(256);
-        commands::sync::run_once_with_options(&app, &store, 0, &source_options, Some(&mut tx))
-            .await?;
-        let mut events = Vec::new();
-        while let Ok(event) = rx.try_recv() {
-            events.push(event);
-        }
-        let after: i64 = Connection::open(&app.paths.db_path)?.query_row(
-            "SELECT COUNT(*) FROM usage_event WHERE source = 'codex'",
-            [],
-            |row| row.get(0),
-        )?;
-        assert_eq!(after, before);
-        assert_eq!(store.token_accounting_version(SourceKind::Codex)?, Some(3));
-        assert!(!store.has_legacy_token_accounting(SourceKind::Codex)?);
-        let repair_started = events
-            .iter()
-            .position(|event| {
-                matches!(
-                    event,
-                    SyncEvent::TokenAccountingRepairStarted { sources }
-                        if sources.as_slice() == [SourceKind::Codex]
-                )
-            })
-            .expect("repair started event");
-        let source_started = events
-            .iter()
-            .position(|event| {
-                matches!(
-                    event,
-                    SyncEvent::SourceStarted {
-                        source: SourceKind::Codex,
-                        ..
-                    }
-                )
-            })
-            .expect("source started event");
-        let source_finished = events
-            .iter()
-            .position(|event| {
-                matches!(
-                    event,
-                    SyncEvent::SourceFinished {
-                        source: SourceKind::Codex,
-                        ..
-                    }
-                )
-            })
-            .expect("source finished event");
-        let repair_finished = events
-            .iter()
-            .position(|event| {
-                matches!(
-                    event,
-                    SyncEvent::TokenAccountingRepairFinished { sources }
-                        if sources.as_slice() == [SourceKind::Codex]
-                )
-            })
-            .expect("repair finished event");
-        assert!(repair_started < source_started);
-        assert!(source_finished < repair_finished);
+        commands::sync::run_once_with_options(&app, &store, 0, &options, Some(&mut tx)).await?;
+        let events = drain_events(&mut rx);
+
         assert_eq!(
-            events
-                .iter()
-                .filter(|event| {
-                    matches!(
-                        event,
-                        SyncEvent::SourceStarted {
-                            source: SourceKind::Codex,
-                            ..
-                        }
-                    )
-                })
-                .count(),
-            1,
-            "automatic repair must not parse the source twice"
+            source_history_snapshot(&store, SourceKind::Opencode)?,
+            before
+        );
+        assert_eq!(
+            store.token_accounting_version(SourceKind::Opencode)?,
+            marker_before
+        );
+        assert!(store.has_legacy_token_accounting(SourceKind::Opencode)?);
+        assert_no_repair_claim(&events);
+        assert!(!events.iter().any(|event| {
+            matches!(
+                event,
+                SyncEvent::SourceStarted {
+                    source: SourceKind::Opencode,
+                    ..
+                }
+            )
+        }));
+        let status = loaded_source_status(&store, "opencode")?;
+        assert!(status.legacy_token_accounting);
+        assert_explicit_repair_warning(
+            status.token_accounting_warning.as_deref(),
+            SourceKind::Opencode,
         );
 
         Ok::<_, anyhow::Error>(())
@@ -249,7 +184,7 @@ fn ordinary_sync_automatically_repairs_safe_legacy_source() -> Result<()> {
 }
 
 #[test]
-fn automatic_repair_handles_multiple_legacy_sources_in_registry_order() -> Result<()> {
+fn ordinary_sync_skips_every_legacy_source_and_preserves_parserless_history() -> Result<()> {
     let fixture = Fixture::new()?;
     fixture.seed_codex_copied_event()?;
     fixture.seed_claude_streaming_and_sidechain_replay()?;
@@ -268,8 +203,11 @@ fn automatic_repair_handles_multiple_legacy_sources_in_registry_order() -> Resul
             None,
         )
         .await?;
-        for source in [SourceKind::Codex, SourceKind::Claude, SourceKind::Opencode] {
+        let legacy = [SourceKind::Codex, SourceKind::Claude, SourceKind::Opencode];
+        let mut before = Vec::new();
+        for source in legacy {
             store.clear_token_accounting_version(source)?;
+            before.push(source_history_snapshot(&store, source)?);
         }
         seed_antigravity_history(&store)?;
 
@@ -282,57 +220,30 @@ fn automatic_repair_handles_multiple_legacy_sources_in_registry_order() -> Resul
             Some(&mut tx),
         )
         .await?;
-        let mut events = Vec::new();
-        while let Ok(event) = rx.try_recv() {
-            events.push(event);
-        }
+        let events = drain_events(&mut rx);
 
-        let expected = vec![SourceKind::Codex, SourceKind::Claude, SourceKind::Opencode];
-        assert!(events.iter().any(|event| {
-            matches!(
-                event,
-                SyncEvent::TokenAccountingRepairStarted { sources } if sources == &expected
-            )
-        }));
-        assert!(events.iter().any(|event| {
-            matches!(
-                event,
-                SyncEvent::TokenAccountingRepairFinished { sources } if sources == &expected
-            )
-        }));
-        for source in expected {
-            assert_eq!(
-                events
-                    .iter()
-                    .filter(|event| {
-                        matches!(
-                            event,
-                            SyncEvent::SourceStarted {
-                                source: actual,
-                                ..
-                            } if *actual == source
-                        )
-                    })
-                    .count(),
-                1,
-                "{source} must be parsed exactly once"
-            );
-            assert!(!store.has_legacy_token_accounting(source)?);
+        assert_no_repair_claim(&events);
+        for (index, source) in legacy.into_iter().enumerate() {
+            assert_eq!(source_history_snapshot(&store, source)?, before[index]);
+            assert!(store.has_legacy_token_accounting(source)?);
+            assert_eq!(store.token_accounting_version(source)?, None);
+            assert!(!events.iter().any(|event| {
+                matches!(
+                    event,
+                    SyncEvent::SourceStarted {
+                        source: actual,
+                        ..
+                    } if *actual == source
+                )
+            }));
+            let status = loaded_source_status(&store, source.as_str())?;
+            assert!(status.legacy_token_accounting);
+            assert_explicit_repair_warning(status.token_accounting_warning.as_deref(), source);
         }
-        for table in [
-            "usage_event",
-            "usage_bucket_30m",
-            "usage_turn",
-            "usage_tool_call",
-            "source_cursor",
-            "source_file",
-        ] {
-            assert_eq!(
-                source_row_count(&store, table, SourceKind::Antigravity)?,
-                1,
-                "automatic repair must preserve Antigravity rows in {table}"
-            );
-        }
+        assert_eq!(
+            source_row_count(&store, "usage_event", SourceKind::Antigravity)?,
+            1
+        );
         assert_eq!(
             store.token_accounting_version(SourceKind::Antigravity)?,
             Some(expected_token_accounting_version(SourceKind::Antigravity))
@@ -344,7 +255,7 @@ fn automatic_repair_handles_multiple_legacy_sources_in_registry_order() -> Resul
 }
 
 #[test]
-fn automatic_repair_resets_only_legacy_sources_in_a_mixed_run() -> Result<()> {
+fn ordinary_sync_skips_only_legacy_in_a_mixed_run_and_stays_idempotent() -> Result<()> {
     let fixture = Fixture::new()?;
     fixture.seed_codex_copied_event()?;
     fixture.seed_claude_streaming_and_sidechain_replay()?;
@@ -363,6 +274,8 @@ fn automatic_repair_resets_only_legacy_sources_in_a_mixed_run() -> Result<()> {
         )
         .await?;
         store.set_meta_value("token_accounting_version.codex", "2")?;
+        let codex_before = source_history_snapshot(&store, SourceKind::Codex)?;
+        let claude_before = source_history_snapshot(&store, SourceKind::Claude)?;
 
         let (mut tx, mut rx) = tokio::sync::mpsc::channel(256);
         commands::sync::run_once_with_options(
@@ -373,29 +286,53 @@ fn automatic_repair_resets_only_legacy_sources_in_a_mixed_run() -> Result<()> {
             Some(&mut tx),
         )
         .await?;
-        let mut events = Vec::new();
-        while let Ok(event) = rx.try_recv() {
-            events.push(event);
-        }
-
-        assert!(events.iter().any(|event| {
+        let events = drain_events(&mut rx);
+        assert_no_repair_claim(&events);
+        assert!(!events.iter().any(|event| {
             matches!(
                 event,
-                SyncEvent::TokenAccountingRepairStarted { sources }
-                    if sources.as_slice() == [SourceKind::Codex]
+                SyncEvent::SourceStarted {
+                    source: SourceKind::Codex,
+                    ..
+                }
             )
         }));
-        let codex_stats = events
+        let claude_stats = events
             .iter()
             .find_map(|event| match event {
                 SyncEvent::SourceFinished {
-                    source: SourceKind::Codex,
+                    source: SourceKind::Claude,
                     stats,
-                } => Some(stats),
+                } => Some(stats.clone()),
                 _ => None,
             })
-            .expect("codex stats");
-        let claude_stats = events
+            .expect("claude stats");
+        assert_eq!(claude_stats.changed_files, 0);
+        assert!(claude_stats.skipped_files > 0);
+        assert_eq!(
+            source_history_snapshot(&store, SourceKind::Codex)?,
+            codex_before
+        );
+        assert_usage_rows_eq(
+            &source_history_snapshot(&store, SourceKind::Claude)?,
+            &claude_before,
+        );
+        assert_eq!(store.token_accounting_version(SourceKind::Codex)?, Some(2));
+        assert_eq!(store.token_accounting_version(SourceKind::Claude)?, Some(2));
+        assert!(store.has_legacy_token_accounting(SourceKind::Codex)?);
+        assert!(!store.has_legacy_token_accounting(SourceKind::Claude)?);
+
+        let (mut tx, mut rx) = tokio::sync::mpsc::channel(256);
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions::default(),
+            Some(&mut tx),
+        )
+        .await?;
+        let second = drain_events(&mut rx);
+        let claude_second = second
             .iter()
             .find_map(|event| match event {
                 SyncEvent::SourceFinished {
@@ -404,12 +341,19 @@ fn automatic_repair_resets_only_legacy_sources_in_a_mixed_run() -> Result<()> {
                 } => Some(stats),
                 _ => None,
             })
-            .expect("claude stats");
-        assert!(codex_stats.changed_files > 0);
-        assert_eq!(claude_stats.changed_files, 0);
-        assert!(claude_stats.skipped_files > 0);
-        assert_eq!(store.token_accounting_version(SourceKind::Codex)?, Some(3));
-        assert_eq!(store.token_accounting_version(SourceKind::Claude)?, Some(2));
+            .expect("claude second stats");
+        assert_eq!(claude_second.changed_files, 0);
+        assert_eq!(claude_second.events_inserted, 0);
+        assert!(claude_second.skipped_files > 0);
+        assert_eq!(
+            source_history_snapshot(&store, SourceKind::Codex)?,
+            codex_before
+        );
+        assert_usage_rows_eq(
+            &source_history_snapshot(&store, SourceKind::Claude)?,
+            &claude_before,
+        );
+        assert_eq!(store.token_accounting_version(SourceKind::Codex)?, Some(2));
         Ok::<_, anyhow::Error>(())
     })?;
 
@@ -417,7 +361,7 @@ fn automatic_repair_resets_only_legacy_sources_in_a_mixed_run() -> Result<()> {
 }
 
 #[test]
-fn bounded_sync_refuses_legacy_repair_before_resetting_history() -> Result<()> {
+fn bounded_sync_skips_legacy_history_instead_of_resetting() -> Result<()> {
     let fixture = Fixture::new()?;
     fixture.seed_codex_copied_event()?;
 
@@ -432,9 +376,9 @@ fn bounded_sync_refuses_legacy_repair_before_resetting_history() -> Result<()> {
         };
         commands::sync::run_once_with_options(&app, &store, 0, &source_options, None).await?;
         store.set_meta_value("token_accounting_version.codex", "2")?;
-        let before = source_row_count(&store, "usage_event", SourceKind::Codex)?;
+        let before = source_history_snapshot(&store, SourceKind::Codex)?;
 
-        let error = commands::sync::run_once_with_options(
+        commands::sync::run_once_with_options(
             &app,
             &store,
             0,
@@ -445,18 +389,16 @@ fn bounded_sync_refuses_legacy_repair_before_resetting_history() -> Result<()> {
             },
             None,
         )
-        .await
-        .expect_err("bounded sync must not partially rebuild legacy history");
+        .await?;
 
-        assert!(
-            error.to_string().contains("without --recent-days"),
-            "{error:#}"
-        );
-        assert_eq!(
-            source_row_count(&store, "usage_event", SourceKind::Codex)?,
-            before
-        );
+        assert_eq!(source_history_snapshot(&store, SourceKind::Codex)?, before);
         assert_eq!(store.token_accounting_version(SourceKind::Codex)?, Some(2));
+        let status = loaded_source_status(&store, "codex")?;
+        assert!(status.legacy_token_accounting);
+        assert_explicit_repair_warning(
+            status.token_accounting_warning.as_deref(),
+            SourceKind::Codex,
+        );
         Ok::<_, anyhow::Error>(())
     })?;
 
@@ -464,7 +406,7 @@ fn bounded_sync_refuses_legacy_repair_before_resetting_history() -> Result<()> {
 }
 
 #[test]
-fn automatic_repair_never_uses_lossy_opt_in_from_normal_sync_options() -> Result<()> {
+fn ordinary_sync_ignores_lossy_opt_in_and_skips_legacy_writes() -> Result<()> {
     let fixture = Fixture::new()?;
     fixture.seed_codex_copied_event()?;
 
@@ -481,9 +423,9 @@ fn automatic_repair_never_uses_lossy_opt_in_from_normal_sync_options() -> Result
         fixture.remove_codex_inputs()?;
         commands::sync::run_once_with_options(&app, &store, 0, &source_options, None).await?;
         store.clear_token_accounting_version(SourceKind::Codex)?;
-        let before = source_row_count(&store, "usage_event", SourceKind::Codex)?;
+        let before = source_history_snapshot(&store, SourceKind::Codex)?;
 
-        let error = commands::sync::run_once_with_options(
+        commands::sync::run_once_with_options(
             &app,
             &store,
             0,
@@ -494,15 +436,11 @@ fn automatic_repair_never_uses_lossy_opt_in_from_normal_sync_options() -> Result
             },
             None,
         )
-        .await
-        .expect_err("normal sync must never inherit lossy rebuild authorization");
+        .await?;
 
-        assert!(error.to_string().contains("missing_files=2"), "{error:#}");
-        assert_eq!(
-            source_row_count(&store, "usage_event", SourceKind::Codex)?,
-            before
-        );
+        assert_eq!(source_history_snapshot(&store, SourceKind::Codex)?, before);
         assert_eq!(store.token_accounting_version(SourceKind::Codex)?, None);
+        assert!(store.has_legacy_token_accounting(SourceKind::Codex)?);
         Ok::<_, anyhow::Error>(())
     })?;
 
@@ -510,7 +448,7 @@ fn automatic_repair_never_uses_lossy_opt_in_from_normal_sync_options() -> Result
 }
 
 #[test]
-fn automatic_repair_preflights_all_legacy_sources_before_any_reset() -> Result<()> {
+fn ordinary_sync_skips_lossy_and_safe_legacy_sources_without_resetting_either() -> Result<()> {
     let fixture = Fixture::new()?;
     fixture.seed_codex_copied_event()?;
     fixture.seed_claude_streaming_and_sidechain_replay()?;
@@ -542,26 +480,24 @@ fn automatic_repair_preflights_all_legacy_sources_before_any_reset() -> Result<(
         .await?;
         store.clear_token_accounting_version(SourceKind::Codex)?;
         store.clear_token_accounting_version(SourceKind::Claude)?;
-        let codex_before = source_row_count(&store, "usage_event", SourceKind::Codex)?;
-        let claude_before = source_row_count(&store, "usage_event", SourceKind::Claude)?;
+        let codex_before = source_history_snapshot(&store, SourceKind::Codex)?;
+        let claude_before = source_history_snapshot(&store, SourceKind::Claude)?;
 
-        let error = commands::sync::run_once_with_options(
+        commands::sync::run_once_with_options(
             &app,
             &store,
             0,
             &commands::sync::SyncRunOptions::default(),
             None,
         )
-        .await
-        .expect_err("one lossy legacy source must block every automatic reset");
+        .await?;
 
-        assert!(error.to_string().contains("missing_files=2"), "{error:#}");
         assert_eq!(
-            source_row_count(&store, "usage_event", SourceKind::Codex)?,
+            source_history_snapshot(&store, SourceKind::Codex)?,
             codex_before
         );
         assert_eq!(
-            source_row_count(&store, "usage_event", SourceKind::Claude)?,
+            source_history_snapshot(&store, SourceKind::Claude)?,
             claude_before
         );
         assert_eq!(store.token_accounting_version(SourceKind::Codex)?, None);
@@ -612,13 +548,7 @@ fn targeted_current_sync_ignores_unselected_legacy_source() -> Result<()> {
             events.push(event);
         }
 
-        assert!(!events.iter().any(|event| {
-            matches!(
-                event,
-                SyncEvent::TokenAccountingRepairStarted { .. }
-                    | SyncEvent::TokenAccountingRepairFinished { .. }
-            )
-        }));
+        assert_no_repair_claim(&events);
         assert_eq!(store.token_accounting_version(SourceKind::Codex)?, Some(3));
         assert_eq!(store.token_accounting_version(SourceKind::Claude)?, None);
         assert_eq!(
@@ -632,7 +562,7 @@ fn targeted_current_sync_ignores_unselected_legacy_source() -> Result<()> {
 }
 
 #[test]
-fn empty_and_parserless_selected_sources_do_not_enter_automatic_repair() -> Result<()> {
+fn empty_and_preset_current_sources_are_not_skipped_as_legacy() -> Result<()> {
     let _fixture = Fixture::new()?;
 
     let runtime = tokio::runtime::Runtime::new()?;
@@ -643,7 +573,7 @@ fn empty_and_parserless_selected_sources_do_not_enter_automatic_repair() -> Resu
         seed_antigravity_history(&store)?;
 
         for source in [SourceKind::Codex, SourceKind::Antigravity] {
-            let (mut tx, mut rx) = tokio::sync::mpsc::channel(256);
+            let (mut tx, rx) = tokio::sync::mpsc::channel(256);
             commands::sync::run_once_with_options(
                 &app,
                 &store,
@@ -656,21 +586,18 @@ fn empty_and_parserless_selected_sources_do_not_enter_automatic_repair() -> Resu
             )
             .await?;
             drop(tx);
-            while let Some(event) = rx.recv().await {
-                assert!(
-                    !matches!(
-                        event,
-                        SyncEvent::TokenAccountingRepairStarted { .. }
-                            | SyncEvent::TokenAccountingRepairFinished { .. }
-                    ),
-                    "{source} must not enter automatic repair without selected legacy parser rows"
-                );
-            }
+            let events = drain_recv_events(rx).await;
+            assert_no_repair_claim(&events);
         }
 
         assert_eq!(
             source_row_count(&store, "usage_event", SourceKind::Codex)?,
             0
+        );
+        assert_eq!(
+            store.token_accounting_version(SourceKind::Codex)?,
+            Some(expected_token_accounting_version(SourceKind::Codex)),
+            "first sync of an empty source with no marker must still be allowed"
         );
         assert_eq!(
             source_row_count(&store, "usage_event", SourceKind::Antigravity)?,
@@ -687,46 +614,65 @@ fn empty_and_parserless_selected_sources_do_not_enter_automatic_repair() -> Resu
 }
 
 #[test]
-fn automatic_repair_parser_failure_does_not_finish_or_advance_marker() -> Result<()> {
+fn cancel_after_legacy_detect_still_preserves_skipped_history() -> Result<()> {
     let fixture = Fixture::new()?;
-    fixture.seed_opencode_authoritative_total()?;
+    fixture.seed_codex_copied_event()?;
+    fixture.seed_claude_streaming_and_sidechain_replay()?;
 
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let app = AppContext::discover()?;
         let store = Store::new(&app.paths)?;
         store.bootstrap()?;
-        let options = commands::sync::SyncRunOptions {
-            source: Some(SourceKind::Opencode),
-            ..Default::default()
-        };
-        commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
-        store.clear_token_accounting_version(SourceKind::Opencode)?;
-        fixture.break_opencode_schema()?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions::default(),
+            None,
+        )
+        .await?;
+        store.clear_token_accounting_version(SourceKind::Codex)?;
+        let before = source_history_snapshot(&store, SourceKind::Codex)?;
+        let marker_before = store.token_accounting_version(SourceKind::Codex)?;
 
-        let (mut tx, mut rx) = tokio::sync::mpsc::channel(256);
-        commands::sync::run_once_with_options(&app, &store, 0, &options, Some(&mut tx))
-            .await
-            .expect_err("automatic repair must propagate parser failures");
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let (mut tx, rx) = tokio::sync::mpsc::channel(256);
+        commands::sync::run_once_with_cancel(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions::default(),
+            Some(&mut tx),
+            &cancel,
+        )
+        .await?;
         drop(tx);
-        let mut events = Vec::new();
-        while let Some(event) = rx.recv().await {
-            events.push(event);
-        }
+        let events = drain_recv_events(rx).await;
 
-        assert!(events.iter().any(|event| {
+        assert_eq!(source_history_snapshot(&store, SourceKind::Codex)?, before);
+        assert_eq!(
+            store.token_accounting_version(SourceKind::Codex)?,
+            marker_before
+        );
+        assert!(store.has_legacy_token_accounting(SourceKind::Codex)?);
+        assert_no_repair_claim(&events);
+        assert!(!events.iter().any(|event| {
             matches!(
                 event,
-                SyncEvent::TokenAccountingRepairStarted { sources }
-                    if sources.as_slice() == [SourceKind::Opencode]
+                SyncEvent::SourceStarted {
+                    source: SourceKind::Codex,
+                    ..
+                }
             )
         }));
-        assert!(
-            !events
-                .iter()
-                .any(|event| { matches!(event, SyncEvent::TokenAccountingRepairFinished { .. }) })
+        let status = loaded_source_status(&store, "codex")?;
+        assert!(status.legacy_token_accounting);
+        assert_explicit_repair_warning(
+            status.token_accounting_warning.as_deref(),
+            SourceKind::Codex,
         );
-        assert_eq!(store.token_accounting_version(SourceKind::Opencode)?, None);
         Ok::<_, anyhow::Error>(())
     })?;
 
@@ -734,30 +680,40 @@ fn automatic_repair_parser_failure_does_not_finish_or_advance_marker() -> Result
 }
 
 #[test]
-fn automatic_repair_cancellation_does_not_finish_or_advance_marker() -> Result<()> {
+fn cancel_after_current_source_starts_still_skips_legacy() -> Result<()> {
     let fixture = Fixture::new()?;
     fixture.seed_codex_copied_event()?;
+    fixture.seed_claude_streaming_and_sidechain_replay()?;
 
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let app = AppContext::discover()?;
         let store = Store::new(&app.paths)?;
         store.bootstrap()?;
-        let options = commands::sync::SyncRunOptions {
-            source: Some(SourceKind::Codex),
-            ..Default::default()
-        };
-        commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
-        store.clear_token_accounting_version(SourceKind::Codex)?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions::default(),
+            None,
+        )
+        .await?;
+        store.set_meta_value("token_accounting_version.codex", "2")?;
+        let before = source_history_snapshot(&store, SourceKind::Codex)?;
 
         let cancel = CancellationToken::new();
         let watcher_cancel = cancel.clone();
-        let (mut tx, mut rx) = tokio::sync::mpsc::channel(1);
-        tx.send(SyncEvent::BootstrapStarted).await?;
+        let (mut tx, mut rx) = tokio::sync::mpsc::channel(256);
         let watcher = tokio::spawn(async move {
             let mut events = Vec::new();
             while let Some(event) = rx.recv().await {
-                if matches!(event, SyncEvent::TokenAccountingRepairStarted { .. }) {
+                if matches!(
+                    event,
+                    SyncEvent::SourceStarted {
+                        source: SourceKind::Claude,
+                        ..
+                    }
+                ) {
                     watcher_cancel.cancel();
                 }
                 events.push(event);
@@ -765,29 +721,30 @@ fn automatic_repair_cancellation_does_not_finish_or_advance_marker() -> Result<(
             events
         });
 
-        commands::sync::run_once_with_cancel(&app, &store, 0, &options, Some(&mut tx), &cancel)
-            .await?;
+        commands::sync::run_once_with_cancel(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions::default(),
+            Some(&mut tx),
+            &cancel,
+        )
+        .await?;
         drop(tx);
         let events = watcher.await?;
 
-        assert!(events.iter().any(|event| {
+        assert_eq!(source_history_snapshot(&store, SourceKind::Codex)?, before);
+        assert_eq!(store.token_accounting_version(SourceKind::Codex)?, Some(2));
+        assert_no_repair_claim(&events);
+        assert!(!events.iter().any(|event| {
             matches!(
                 event,
-                SyncEvent::TokenAccountingRepairStarted { sources }
-                    if sources.as_slice() == [SourceKind::Codex]
+                SyncEvent::SourceStarted {
+                    source: SourceKind::Codex,
+                    ..
+                }
             )
         }));
-        assert!(
-            events
-                .iter()
-                .any(|event| matches!(event, SyncEvent::Cancelled))
-        );
-        assert!(
-            !events
-                .iter()
-                .any(|event| { matches!(event, SyncEvent::TokenAccountingRepairFinished { .. }) })
-        );
-        assert_eq!(store.token_accounting_version(SourceKind::Codex)?, None);
         Ok::<_, anyhow::Error>(())
     })?;
 
@@ -795,7 +752,7 @@ fn automatic_repair_cancellation_does_not_finish_or_advance_marker() -> Result<(
 }
 
 #[test]
-fn serve_repair_rebuilds_safe_legacy_sources_and_unblocks_normal_sync() -> Result<()> {
+fn serve_repair_keeps_legacy_history_and_does_not_implicit_rebuild() -> Result<()> {
     let fixture = Fixture::new()?;
     fixture.seed_codex_copied_event()?;
 
@@ -810,18 +767,31 @@ fn serve_repair_rebuilds_safe_legacy_sources_and_unblocks_normal_sync() -> Resul
         };
         commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
         store.clear_token_accounting_version(SourceKind::Codex)?;
+        let before = source_history_snapshot(&store, SourceKind::Codex)?;
+        let totals_before = Dashboard::open(&store)?.overview(&Default::default())?;
 
         let report = commands::serve::repair_legacy_token_accounting(&app, &store).await?;
-        assert_eq!(report.rebuilt_sources, vec![SourceKind::Codex]);
-        assert!(report.blocked_sources.is_empty());
-        assert_eq!(store.token_accounting_version(SourceKind::Codex)?, Some(3));
-
-        commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
-        let repeated = commands::serve::repair_legacy_token_accounting(&app, &store).await?;
+        assert!(report.rebuilt_sources.is_empty());
+        assert_eq!(report.blocked_sources.len(), 1);
+        assert_eq!(report.blocked_sources[0].source, SourceKind::Codex);
+        assert_eq!(source_history_snapshot(&store, SourceKind::Codex)?, before);
+        assert_eq!(store.token_accounting_version(SourceKind::Codex)?, None);
+        assert!(store.has_legacy_token_accounting(SourceKind::Codex)?);
+        let totals_after = Dashboard::open(&store)?.overview(&Default::default())?;
         assert_eq!(
-            repeated,
-            commands::serve::TokenAccountingRepairReport::default()
+            totals_after.total.total_tokens,
+            totals_before.total.total_tokens
         );
+        let status = loaded_source_status(&store, "codex")?;
+        assert!(status.legacy_token_accounting);
+        assert_explicit_repair_warning(
+            status.token_accounting_warning.as_deref(),
+            SourceKind::Codex,
+        );
+
+        let repeated = commands::serve::repair_legacy_token_accounting(&app, &store).await?;
+        assert!(repeated.rebuilt_sources.is_empty());
+        assert_eq!(repeated.blocked_sources[0].source, SourceKind::Codex);
         Ok::<_, anyhow::Error>(())
     })?;
 
@@ -829,7 +799,7 @@ fn serve_repair_rebuilds_safe_legacy_sources_and_unblocks_normal_sync() -> Resul
 }
 
 #[test]
-fn serve_repair_rebuilds_multiple_legacy_sources_in_registry_order() -> Result<()> {
+fn serve_repair_records_every_legacy_source_as_not_rebuilt() -> Result<()> {
     let fixture = Fixture::new()?;
     fixture.seed_codex_copied_event()?;
     fixture.seed_claude_streaming_and_sidechain_replay()?;
@@ -848,17 +818,26 @@ fn serve_repair_rebuilds_multiple_legacy_sources_in_registry_order() -> Result<(
             None,
         )
         .await?;
-        for source in [SourceKind::Codex, SourceKind::Claude, SourceKind::Opencode] {
+        let legacy = [SourceKind::Codex, SourceKind::Claude, SourceKind::Opencode];
+        let mut before = Vec::new();
+        for source in legacy {
             store.clear_token_accounting_version(source)?;
+            before.push(source_history_snapshot(&store, source)?);
         }
         seed_antigravity_history(&store)?;
 
         let report = commands::serve::repair_legacy_token_accounting(&app, &store).await?;
-        assert_eq!(
-            report.rebuilt_sources,
-            vec![SourceKind::Codex, SourceKind::Claude, SourceKind::Opencode]
-        );
-        assert!(report.blocked_sources.is_empty());
+        assert!(report.rebuilt_sources.is_empty());
+        let blocked = report
+            .blocked_sources
+            .iter()
+            .map(|row| row.source)
+            .collect::<Vec<_>>();
+        assert_eq!(blocked, legacy.to_vec());
+        for (index, source) in legacy.into_iter().enumerate() {
+            assert_eq!(source_history_snapshot(&store, source)?, before[index]);
+            assert!(store.has_legacy_token_accounting(source)?);
+        }
         assert_eq!(
             source_row_count(&store, "usage_event", SourceKind::Antigravity)?,
             1
@@ -891,7 +870,8 @@ fn serve_repair_skips_lossy_legacy_source_without_deleting_history() -> Result<(
         fixture.remove_codex_inputs()?;
         commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
         store.clear_token_accounting_version(SourceKind::Codex)?;
-        let before = source_row_count(&store, "usage_event", SourceKind::Codex)?;
+        let before = source_history_snapshot(&store, SourceKind::Codex)?;
+        let event_count = source_row_count(&store, "usage_event", SourceKind::Codex)?;
 
         let report = commands::serve::repair_legacy_token_accounting(&app, &store).await?;
         assert!(report.rebuilt_sources.is_empty());
@@ -899,11 +879,8 @@ fn serve_repair_skips_lossy_legacy_source_without_deleting_history() -> Result<(
         let blocked = &report.blocked_sources[0];
         assert_eq!(blocked.source, SourceKind::Codex);
         assert_eq!(blocked.missing_file_count, 2);
-        assert_eq!(blocked.protected_event_count, before as u64);
-        assert_eq!(
-            source_row_count(&store, "usage_event", SourceKind::Codex)?,
-            before
-        );
+        assert_eq!(blocked.protected_event_count, event_count as u64);
+        assert_eq!(source_history_snapshot(&store, SourceKind::Codex)?, before);
         assert!(store.has_legacy_token_accounting(SourceKind::Codex)?);
         assert_eq!(store.token_accounting_version(SourceKind::Codex)?, None);
         Ok::<_, anyhow::Error>(())
@@ -913,7 +890,7 @@ fn serve_repair_skips_lossy_legacy_source_without_deleting_history() -> Result<(
 }
 
 #[test]
-fn serve_repair_propagates_safe_rebuild_failures() -> Result<()> {
+fn serve_repair_succeeds_when_legacy_source_is_unparseable() -> Result<()> {
     let fixture = Fixture::new()?;
     fixture.seed_opencode_authoritative_total()?;
 
@@ -935,17 +912,72 @@ fn serve_repair_propagates_safe_rebuild_failures() -> Result<()> {
         .await?;
         store.clear_token_accounting_version(SourceKind::Opencode)?;
         fixture.break_opencode_schema()?;
+        let before = source_history_snapshot(&store, SourceKind::Opencode)?;
+        let totals_before = Dashboard::open(&store)?.overview(&Default::default())?;
 
-        let error = commands::serve::repair_legacy_token_accounting(&app, &store)
-            .await
-            .expect_err("safe rebuild parser failures must stop serve startup");
-        assert!(
-            error
-                .to_string()
-                .contains("Failed to rebuild legacy token accounting for opencode"),
-            "{error:#}"
+        let report = commands::serve::repair_legacy_token_accounting(&app, &store).await?;
+        assert!(report.rebuilt_sources.is_empty());
+        assert_eq!(report.blocked_sources.len(), 1);
+        assert_eq!(report.blocked_sources[0].source, SourceKind::Opencode);
+        assert_eq!(
+            source_history_snapshot(&store, SourceKind::Opencode)?,
+            before
         );
         assert_eq!(store.token_accounting_version(SourceKind::Opencode)?, None);
+        let totals_after = Dashboard::open(&store)?.overview(&Default::default())?;
+        assert_eq!(
+            totals_after.total.total_tokens,
+            totals_before.total.total_tokens
+        );
+        let status = loaded_source_status(&store, "opencode")?;
+        assert!(status.legacy_token_accounting);
+        assert_explicit_repair_warning(
+            status.token_accounting_warning.as_deref(),
+            SourceKind::Opencode,
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    Ok(())
+}
+
+#[test]
+fn explicit_rebuild_repairs_selected_legacy_source() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_codex_copied_event()?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let options = commands::sync::SyncRunOptions {
+            source: Some(SourceKind::Codex),
+            ..Default::default()
+        };
+        commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        store.set_meta_value("token_accounting_version.codex", "2")?;
+        assert!(store.has_legacy_token_accounting(SourceKind::Codex)?);
+
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                rebuild: true,
+                source: Some(SourceKind::Codex),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+        assert_eq!(store.token_accounting_version(SourceKind::Codex)?, Some(3));
+        assert!(!store.has_legacy_token_accounting(SourceKind::Codex)?);
+        assert_eq!(
+            source_row_count(&store, "usage_event", SourceKind::Codex)?,
+            1
+        );
         Ok::<_, anyhow::Error>(())
     })?;
 
@@ -1204,6 +1236,151 @@ fn full_rebuild_checks_all_parser_risks_before_resetting_any_source() -> Result<
     })?;
 
     Ok(())
+}
+
+fn drain_events(rx: &mut tokio::sync::mpsc::Receiver<SyncEvent>) -> Vec<SyncEvent> {
+    let mut events = Vec::new();
+    while let Ok(event) = rx.try_recv() {
+        events.push(event);
+    }
+    events
+}
+
+async fn drain_recv_events(mut rx: tokio::sync::mpsc::Receiver<SyncEvent>) -> Vec<SyncEvent> {
+    let mut events = Vec::new();
+    while let Some(event) = rx.recv().await {
+        events.push(event);
+    }
+    events
+}
+
+fn loaded_source_status(store: &Store, source: &str) -> Result<llmusage::store::SourceSyncStatus> {
+    Ok(store
+        .sync_status()
+        .load_source_sync_statuses("local")?
+        .into_iter()
+        .find(|status| status.source == source)
+        .unwrap_or_else(|| panic!("{source} sync status")))
+}
+
+fn assert_explicit_repair_warning(warning: Option<&str>, source: SourceKind) {
+    let warning = warning.expect("legacy warning");
+    assert!(
+        warning.contains(&format!(
+            "llmusage sync --rebuild --source {}",
+            source.as_str()
+        )),
+        "{warning}"
+    );
+    assert!(warning.contains("--allow-lossy-rebuild"), "{warning}");
+    assert!(
+        !warning.to_ascii_lowercase().contains("automatic"),
+        "{warning}"
+    );
+    assert!(!warning.contains("repaired"), "{warning}");
+    assert!(!warning.contains("unbounded"), "{warning}");
+}
+
+fn assert_usage_rows_eq(actual: &SourceHistorySnapshot, expected: &SourceHistorySnapshot) {
+    assert_eq!(actual.events, expected.events);
+    assert_eq!(actual.raw, expected.raw);
+    assert_eq!(actual.buckets, expected.buckets);
+    assert_eq!(actual.turns, expected.turns);
+    assert_eq!(actual.tools, expected.tools);
+    assert_eq!(actual.cursors, expected.cursors);
+}
+
+fn assert_no_repair_claim(events: &[SyncEvent]) {
+    assert!(
+        !events.iter().any(|event| matches!(
+            event,
+            SyncEvent::TokenAccountingRepairStarted { .. }
+                | SyncEvent::TokenAccountingRepairFinished { .. }
+        )),
+        "{events:?}"
+    );
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SourceHistorySnapshot {
+    events: Vec<Vec<String>>,
+    raw: Vec<Vec<String>>,
+    buckets: Vec<Vec<String>>,
+    turns: Vec<Vec<String>>,
+    tools: Vec<Vec<String>>,
+    cursors: Vec<Vec<String>>,
+    source_files: Vec<Vec<String>>,
+}
+
+fn source_history_snapshot(store: &Store, source: SourceKind) -> Result<SourceHistorySnapshot> {
+    let conn = store.open_connection()?;
+    let source_id = source.as_str();
+    Ok(SourceHistorySnapshot {
+        events: dump_query(
+            &conn,
+            "SELECT * FROM usage_event WHERE source = ?1 ORDER BY event_key, event_at, rowid",
+            source_id,
+        )?,
+        raw: dump_query(
+            &conn,
+            r#"
+            SELECT r.event_key, r.raw_json, r.created_at
+            FROM usage_event_raw r
+            INNER JOIN usage_event e ON e.event_key = r.event_key
+            WHERE e.source = ?1
+            ORDER BY r.event_key
+            "#,
+            source_id,
+        )?,
+        buckets: dump_query(
+            &conn,
+            "SELECT * FROM usage_bucket_30m WHERE source = ?1 ORDER BY hour_start, model, project_hash, rowid",
+            source_id,
+        )?,
+        turns: dump_query(
+            &conn,
+            "SELECT * FROM usage_turn WHERE source = ?1 ORDER BY turn_key, rowid",
+            source_id,
+        )?,
+        tools: dump_query(
+            &conn,
+            "SELECT * FROM usage_tool_call WHERE source = ?1 ORDER BY tool_call_key, rowid",
+            source_id,
+        )?,
+        cursors: dump_query(
+            &conn,
+            "SELECT * FROM source_cursor WHERE source = ?1 ORDER BY cursor_key, rowid",
+            source_id,
+        )?,
+        source_files: dump_query(
+            &conn,
+            "SELECT * FROM source_file WHERE source = ?1 ORDER BY file_path, rowid",
+            source_id,
+        )?,
+    })
+}
+
+fn dump_query(conn: &Connection, sql: &str, source: &str) -> Result<Vec<Vec<String>>> {
+    let mut stmt = conn.prepare(sql)?;
+    let col_count = stmt.column_count();
+    let mut rows = stmt.query([source])?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next()? {
+        let mut values = Vec::with_capacity(col_count);
+        for index in 0..col_count {
+            values.push(match row.get_ref(index)? {
+                rusqlite::types::ValueRef::Null => "NULL".to_string(),
+                rusqlite::types::ValueRef::Integer(value) => value.to_string(),
+                rusqlite::types::ValueRef::Real(value) => value.to_string(),
+                rusqlite::types::ValueRef::Text(value) => {
+                    String::from_utf8_lossy(value).into_owned()
+                }
+                rusqlite::types::ValueRef::Blob(value) => format!("blob:{}", value.len()),
+            });
+        }
+        out.push(values);
+    }
+    Ok(out)
 }
 
 fn seed_antigravity_history(store: &Store) -> Result<()> {

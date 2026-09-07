@@ -699,6 +699,7 @@ fn zcode_cancel_after_first_page_does_not_advance_skip_watermark() -> Result<()>
             .parse(&store, &mut writer, 1, None, &cancel, Some(&mut progress))
             .await?;
         writer.finish_sync_run()?;
+        store.mark_current_token_accounting(SourceKind::Zcode)?;
 
         let cursor = store.cursors().load_zcode_cursor("local")?;
         assert_eq!(

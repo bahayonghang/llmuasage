@@ -1008,7 +1008,10 @@ fn pi_token_accounting_bump_replays_omp_identity_set() -> Result<()> {
             &app,
             &store,
             0,
-            &commands::sync::SyncRunOptions::default(),
+            &commands::sync::SyncRunOptions {
+                rebuild: true,
+                ..Default::default()
+            },
             None,
         )
         .await?;
@@ -1110,6 +1113,12 @@ fn omp_source_sync_refuses_until_pi_split_migration() -> Result<()> {
             err.to_string().contains("pre-split token-accounting"),
             "{err}"
         );
+        assert!(
+            err.to_string()
+                .contains("llmusage sync --rebuild --source pi"),
+            "{err}"
+        );
+        assert!(!err.to_string().contains("no `--source`"), "{err}");
         assert_eq!(omp_event_count(&app.paths.db_path)?, 0);
         assert_eq!(pi_event_count(&app.paths.db_path)?, 1);
 
@@ -1117,7 +1126,10 @@ fn omp_source_sync_refuses_until_pi_split_migration() -> Result<()> {
             &app,
             &store,
             0,
-            &commands::sync::SyncRunOptions::default(),
+            &commands::sync::SyncRunOptions {
+                rebuild: true,
+                ..Default::default()
+            },
             None,
         )
         .await?;

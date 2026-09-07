@@ -117,10 +117,9 @@ pub fn apply_token_accounting_statuses(
         status.token_accounting_version = store.token_accounting_version(status.source)?;
         status.legacy_token_accounting = store.has_legacy_token_accounting(status.source)?;
         if status.legacy_token_accounting {
-            status.token_accounting_warning = Some(format!(
-                "legacy token accounting; run unbounded `llmusage sync` for automatic safe repair; if blocked, restore source files and run `llmusage sync --rebuild --source {}`",
-                status.source.as_str()
-            ));
+            status.token_accounting_warning = Some(
+                crate::store::SyncStatusStore::legacy_repair_warning(status.source),
+            );
         }
     }
     Ok(())

@@ -154,11 +154,11 @@ llmusage sync --rebuild --allow-lossy-rebuild
 
 `--source`、`--recent-days` 与 `--parallelism` 和 `POST /api/jobs`、公开 `JobRegistry` API 共用同一校验契约。非法值分别返回稳定错误码 `unknown_source`、`invalid_recent_days` 或 `invalid_parallelism`。
 
-先导入本地来源，再拉取已注册的 SSH 远端。单台不可达主机会被跳过并告警；本地 sync 成功时进程退出码仍为成功。未联系成功的远端不会被扫成 `missing`，也不会阻断 `--rebuild` 或自动 token-accounting 修复。`--json-events` 还会发出 `remote_host_started`、`remote_host_finished` 和 `remote_host_skipped`。
+先导入本地来源，再拉取已注册的 SSH 远端。单台不可达主机会被跳过并告警；本地 sync 成功时进程退出码仍为成功。未联系成功的远端不会被扫成 `missing`，也不会阻断 `--rebuild`。`--json-events` 还会发出 `remote_host_started`、`remote_host_finished` 和 `remote_host_skipped`。
 
-扫描来源前，bootstrap 可能升级未固定的内置定价目录并重算历史事件价格。普通无界 sync 还会检测所选的旧版 token-accounting 来源，先告警，并且只在全部目标都通过无损预检后自动重建；一个风险目标会阻止全部自动 reset。存在旧版 accounting 时，bounded `--recent-days` 请求必须先运行一次无界 sync。
+扫描来源前，bootstrap 可能升级未固定的内置定价目录并重算历史事件价格。普通 sync（有界或无界）会检测所选的旧版 token-accounting 来源，保留该来源已有数据，跳过该来源本轮写入，并提示修复入口是 `llmusage sync --rebuild --source <source>`。它不会 reset、不会解析被跳过的来源，也不会提升其 marker。同一轮中的非 legacy 来源仍正常同步。Claude Code、Codex、Grok Build、Kimi Code、Oh My Pi（OMP）都按「普通同步 / 显式重建」区分。
 
-人读 stderr 会显示目录版本、已处理/总事件数、汇总桶对账、token-accounting 自动修复边界、远端主机跳过告警和完成耗时。`--json-events` 在纯 NDJSON stdout 写同一生命周期，包括新增的 `token_accounting_repair_started` / `token_accounting_repair_finished`、远端主机事件和既有 pricing 事件。目录已是最新或固定了 snapshot/overlay 时不会输出 pricing 事件；accounting 已是当前版本时不会输出 repair 事件。`--allow-lossy-rebuild` 必须显式配合 `--rebuild`，普通 sync 永远不会推断该授权。
+人读 stderr 会显示目录版本、已处理/总事件数、汇总桶对账、被跳过 legacy 来源的显式修复警告、远端主机跳过告警和完成耗时。`--json-events` 在纯 NDJSON stdout 写同一生命周期，包括远端主机事件和既有 pricing 事件。普通 sync 不会把 `token_accounting_repair_finished` 当作修复成功发出。目录已是最新或固定了 snapshot/overlay 时不会输出 pricing 事件。`--allow-lossy-rebuild` 必须显式配合 `--rebuild`；普通 sync 会忽略该授权。
 
 设置 `LLMUSAGE_LOG=info` 可记录结构化的定价开始/对账/完成文件日志，`debug` 还会记录节流后的页进度。默认 `warn` 级别会在重算持续超过 30 秒时记录一次存活告警；终端进度不受文件日志级别影响。
 
@@ -300,7 +300,7 @@ llmusage serve --port 37421
 llmusage serve --public --no-open --port 37421
 ```
 
-默认在 `127.0.0.1` 启动完整 Web Dashboard 和本地 JSON API。`--public` 会绑定 `0.0.0.0`，但只暴露只读聚合 Dashboard allowlist（`/`、静态资源、`/api/dashboard` 和 `/api/health`）；projects、日志、diagnostics、jobs、行为/Explorer 明细和写操作仍只限 loopback。public 聚合视图不提供认证或 TLS。`--no-open` 会关闭浏览器启动；SSH 会话也会自动跳过浏览器启动。远程需要完整本地 API 时，应通过 SSH 隧道访问 loopback 监听。
+默认在 `127.0.0.1` 启动完整 Web Dashboard 和本地 JSON API。启动时保留已有用量并展示 token-accounting 警告，不会隐式 rebuild；无法解析的 legacy 来源不得阻止看板启动。`--public` 会绑定 `0.0.0.0`，但只暴露只读聚合 Dashboard allowlist（`/`、静态资源、`/api/dashboard` 和 `/api/health`）；projects、日志、diagnostics、jobs、行为/Explorer 明细和写操作仍只限 loopback。public 聚合视图不提供认证或 TLS。`--no-open` 会关闭浏览器启动；SSH 会话也会自动跳过浏览器启动。远程需要完整本地 API 时，应通过 SSH 隧道访问 loopback 监听。
 
 SSH 也可以作为数据通道：`llmusage remote add` / `llmusage sync` 从用户自有主机拉取规范化 shard。这条路径与 Dashboard 隧道是分开的。
 

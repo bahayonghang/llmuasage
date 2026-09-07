@@ -59,9 +59,9 @@ llmusage serve
 What this does:
 
 1. `init` creates `~/.llmusage/` and bootstraps `llmusage.db`; it does not modify third-party tool configuration.
-2. `sync` passively parses local sources incrementally and writes usage rows, 30-minute buckets, source-file diagnostics, and behavior facts. After the local driver it also pulls registered SSH remotes. An unbounded sync also warns and automatically rebuilds safe legacy token-accounting sources before writing new rows.
+2. `sync` passively parses local sources incrementally and writes usage rows, 30-minute buckets, source-file diagnostics, and behavior facts. After the local driver it also pulls registered SSH remotes. Ordinary sync (bounded or unbounded) keeps legacy token-accounting history, skips that source's writes, and warns that repair is explicit `llmusage sync --rebuild --source <source>`.
 3. `llmusage` shows the default daily report for the last 7 calendar days.
-4. `serve` safely rebuilds legacy parser-backed token accounting when needed, then starts the dashboard on `127.0.0.1` by default. Use `serve --public` only when you intentionally need remote access: it exposes an unauthenticated, non-TLS aggregate dashboard, but keeps project labels, logs, diagnostics, job state, and all write routes local-only.
+4. `serve` keeps existing usage plus any token-accounting warning and starts the dashboard on `127.0.0.1` by default. It does not implicit-rebuild. Use `serve --public` only when you intentionally need remote access: it exposes an unauthenticated, non-TLS aggregate dashboard, but keeps project labels, logs, diagnostics, job state, and all write routes local-only.
 
 On the first sync after an embedded pricing catalog upgrade, `sync` reprices historical events before scanning sources. Stderr reports the catalog versions, processed/total events, bucket reconciliation, and completion. `sync --json-events` exposes the same pricing lifecycle as NDJSON-only stdout.
 
@@ -75,7 +75,7 @@ On the first sync after an embedded pricing catalog upgrade, `sync` reprices his
 | Antigravity   | `~/.gemini/antigravity-cli/conversations/*.db` (or `GEMINI_CLI_HOME`); hook-era rows stay queryable and a rebuild is refused while unattributed history exists       |
 | Kimi Code     | `~/.kimi-code/sessions/**/wire.jsonl` (or `KIMI_CODE_HOME`), turn-scoped `usage.record` rows only                                                                    |
 | Pi            | `~/.pi/agent/sessions/**/*.jsonl` (or `PI_AGENT_DIR`) as source `pi`                                                                                                |
-| Oh My Pi      | `~/.omp/agent/sessions/**/*.jsonl` as source `omp`. Overlapping paths belong to `pi`. First unbounded `sync` after upgrade rebuilds legacy `pi` rows. Later provider/project/cost/behavior backfill uses `sync --rebuild --source omp`. |
+| Oh My Pi      | `~/.omp/agent/sessions/**/*.jsonl` as source `omp`. Overlapping paths belong to `pi`. Ordinary `sync` keeps legacy `pi` rows and skips `pi` writes; repair is `sync --rebuild --source pi`. Later provider/project/cost/behavior backfill uses `sync --rebuild --source omp`. |
 | Grok Build    | `~/.grok/sessions/*/*/` (or `GROK_HOME`), reading only the session-root `updates.jsonl`, `signals.json`, `summary.json`, and optional `events.jsonl` sidecars       |
 | ZCode         | `~/.zcode/cli/db/db.sqlite` (or `ZCODE_HOME`) `model_usage` completed rows                                                                                           |
 | DeepSeek Harness | `~/.dsh/sessions/**/session.jsonl.zstd` or `session.jsonl` (or `DSH_HOME`); zstd frames dispatched by magic bytes                                                 |
@@ -162,14 +162,14 @@ llmusage codex-tracer --rebuild
 ## Safety defaults
 
 - No account login, device token, upload queue, or remote usage API call. SSH remote import is a user-triggered pull of normalized fields from a host you register; it does not upload usage.
-- Normal unbounded `llmusage sync` automatically rebuilds selected legacy token-accounting sources only after every target passes the lossless-rebuild preflight. If any target is unsafe, no automatic target is reset.
+- Ordinary `llmusage sync` (bounded or unbounded) never rebuilds legacy token-accounting sources. It keeps that source's existing event, raw, bucket, turn, tool, cursor, and source_file data, skips that source's writes for the round, and warns that repair is `llmusage sync --rebuild --source <source>`. Other current sources in the same run still sync. Claude Code, Codex, Grok Build, Kimi Code, and Oh My Pi (OMP) use this ordinary-sync vs explicit-rebuild split.
 - Normal `llmusage sync` keeps imported usage when original source files are missing.
 - `llmusage sync --recent-days N` imports only the latest UTC event window (`1..=3650`) without advancing full-history cursors; `--parallelism` accepts `1..=32`.
-- A bounded sync never auto-rebuilds legacy accounting because resetting full history and importing only a time window would be lossy. Run unbounded `llmusage sync` first.
+- Bounded ordinary sync also skips+warns for legacy sources. It must not reset full history.
 - `llmusage sync --rebuild` refuses lossy rebuilds unless you also pass `--allow-lossy-rebuild`.
 - A full `llmusage sync --rebuild` resets parser-backed sources. A rebuild that would delete unattributed hook-era Antigravity rows is refused even with `--allow-lossy-rebuild`.
-- `llmusage serve` also automatically rebuilds safe legacy parser sources before binding a port. Unlike the all-or-nothing normal sync preflight, serve skips only risky sources so the read-only dashboard can still start.
-- Automatic repair never enables `--allow-lossy-rebuild`; use `llmusage sync --rebuild --source <source>` explicitly after restoring missing source files.
+- `llmusage serve` keeps and shows existing data plus the accounting warning. It does not implicit-rebuild. A broken legacy source does not stop dashboard startup.
+- Ordinary sync ignores `--allow-lossy-rebuild` because it does not rebuild. Use `llmusage sync --rebuild --source <source>` explicitly; add `--allow-lossy-rebuild` only when you accept clearing unrebuildable history.
 - `llmusage diagnostics --forget-file <PATH> --source <SOURCE>` is the explicit write path for intentionally ignored source files.
 - `llmusage logs` queries local runtime logs and recent command audit rows without changing report stdout or `sync --json-events` stdout contracts.
 - `llmusage serve --public` exposes only aggregate dashboard totals/trends/models/sources/costs plus a minimal health response. Use the default loopback listener, normally through an SSH tunnel, for projects, logs, diagnostics, jobs, behavior detail, Usage analysis, and writes.
