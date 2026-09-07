@@ -1,0 +1,32 @@
+{
+  "id": "evergreen-test-gates",
+  "name": "evergreen-test-gates",
+  "title": "补齐桌面与看板测试门禁",
+  "description": "现有全部看板 JS 测试由同一个执行入口发现并运行，包括 CSV；不维持多份易漏的测试文件清单。",
+  "status": "in_progress",
+  "dev_type": "backend",
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-09-07",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "09-07-evergreen-harness-audit",
+  "relatedFiles": [
+    "justfile",
+    "scripts/ci-js.mjs",
+    ".github/workflows/ci.yml",
+    "desktop/package.json",
+    ".trellis/spec/llmusage/backend/ci-toolchain-contracts.md"
+  ],
+  "notes": "planning only; 用户尚未批准实施。semver-workflow先完成；两者共享ci.yml和ci-toolchain-contracts.md，串行合并。",
+  "meta": {}
+}
