@@ -67,7 +67,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 tempfile = { version = "3.27.0", optional = true }
 chrono-tz = { version = "0.10.4", features = ["case-insensitive"] }
 iana-time-zone = "0.1.65"
-zstd = "0.13.3"
+zstd = "0.14.0"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
