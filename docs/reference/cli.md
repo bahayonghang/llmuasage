@@ -31,7 +31,7 @@ Usage: llmusage [OPTIONS] [COMMAND]
 | `--locale <LOCALE>` | Lightweight locale selector for titles and number formatting |
 | `--compact` | Use a narrower table layout |
 | `--no-cost` | Hide cost columns and cost fields from report output |
-| `--source codex\|claude\|opencode\|antigravity\|kimi_code\|pi\|omp\|grok` | Restrict a top-level report or sync command to one source |
+| `--source codex\|claude\|opencode\|antigravity\|antigravity_ide\|kimi_code\|pi\|omp\|grok` | Restrict a top-level report or sync command to one source |
 | `--host <LABEL>` | Restrict a report to one registered host label |
 | `-A, --by-agent` | Add nested source rows to unified report JSON |
 | `--sections daily\|weekly\|monthly\|session` | Add report periods to one combined output |
@@ -100,9 +100,10 @@ llmusage claude daily
 llmusage codex monthly --json
 llmusage opencode weekly --no-cost
 llmusage antigravity session
+llmusage antigravity-ide session
 ```
 
-`claude`, `codex`, `opencode`, and `antigravity` each host `daily`, `weekly`, `monthly`, and `session`. A focused command injects the matching source filter, has the same data as `<period> --source <source>`, and removes the `Agent`/`Detected` comparison layer. Its JSON has no `agent` or `agents` fields. A duplicate matching `--source` is accepted; a conflicting value is rejected. `blocks` is deliberately not available in this tree.
+`claude`, `codex`, `opencode`, `antigravity`, and `antigravity-ide` each host `daily`, `weekly`, `monthly`, and `session`. A focused command injects the matching source filter, has the same data as `<period> --source <source>`, and removes the `Agent`/`Detected` comparison layer. Its JSON has no `agent` or `agents` fields. A duplicate matching `--source` is accepted; a conflicting value is rejected. `blocks` is deliberately not available in this tree.
 
 This is a uniform llmusage extension, not a source-by-source reproduction of ccusage's capability matrix.
 

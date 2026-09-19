@@ -15,7 +15,9 @@ is the compatibility baseline when reference implementations disagree.
 - Version metadata:
   `meta('token_accounting_version.codex') = '3'`;
   `meta('token_accounting_version.grok') = '3'`;
-  `meta('token_accounting_version.pi') = '3'`; Claude, OpenCode, Antigravity,
+  `meta('token_accounting_version.pi') = '3'`;
+  `meta('token_accounting_version.antigravity') = '3'` and
+  `meta('token_accounting_version.antigravity_ide') = '3'`; Claude, OpenCode,
   Kimi Code, Oh My Pi (`omp`), ZCode, and DeepSeek Harness remain `2`.
   `expected_token_accounting_version(SourceKind) -> u32` owns this source-aware
   contract.
@@ -107,10 +109,21 @@ is the compatibility baseline when reference implementations disagree.
   inside it). Persist `reasoning_tokens` as the diagnostic channel. Trust
   `computed_total_tokens` when present; otherwise fall back to
   `provider_total_tokens`, then the channel sum.
-- Antigravity CLI maps `input = #2 + #1`, `cache_read = #5`, `output = #9`
-  (text only), and `reasoning = #10`. The `#3 == #9 + #10` checksum proves
-  thinking tokens are disjoint from text output, so the total is the channel
-  sum including reasoning. There is no authoritative grand total.
+- Antigravity CLI and IDE use installed protobuf descriptor semantics:
+  `#1` is a model enum, `input = #2`, `cache_creation = #4`,
+  `cache_read = #5`, `reasoning = #9`, and visible `output = #10`.
+  `#3` is total output and must equal `#9 + #10`; it is not the grand total.
+  Normalize total to the sum of the five disjoint token channels. The sum
+  alone does not prove channel names; descriptors are the semantic oracle.
+  Native `retry_infos` are attempt records and direct usage can be their
+  cumulative sum. When attempts are available, use them instead of adding
+  direct usage; deduplicate their generation/step mirrors by request identity.
+  Migration v21 must keep its historical literal marker `2`. Ordinary sync
+  preserves/skips v2; explicit rebuild stages before atomically replacing
+  attributed parser rows and setting v3. Unattributed hook-era rows remain
+  included in historical totals with a retained-history warning; they are
+  not claimed to have been converted to v3. Remote old accounting continues
+  to be refused: host-history restoration is not implemented.
 - DeepSeek Harness `inputTokens` already excludes cache. Map cache read and
   cache write once each. Keep `outputTokens` verbatim. Persist
   `reasoningTokens` as the diagnostic channel and do not add it to total.
@@ -139,9 +152,11 @@ is the compatibility baseline when reference implementations disagree.
   and `--allow-lossy-rebuild` gate. Do not add auto-backup, staging DB,
   compatibility framework, or optional config flags.
 - A no-source full rebuild derives its preflight, reset, marker-clear, and
-  parser fan-out boundaries from the same parser collection. It calls
-  `Store::reset_for_source` for each parser source and preserves parserless
-  events, buckets, behavior facts, cursors, and source-file state.
+  parser fan-out boundaries from the same parser collection. Ordinary parser
+  sources use the source reset path. Antigravity CLI/IDE bypass pre-reset and
+  use `SyncWriter::commit_antigravity_snapshot(shards, rebuild)` after staging.
+  Both paths preserve parserless events, buckets, behavior facts, cursors and
+  source-file state; the native snapshot also preserves unattributed hooks.
 - `Store::reset_usage_data` is a low-level global reset surface. Command-level
   full rebuild must not call it because it has no parser capability boundary.
 
@@ -149,18 +164,20 @@ is the compatibility baseline when reference implementations disagree.
 
 | Condition | Required behavior |
 | --- | --- |
-| Source has rows and marker `2` | Normal incremental writes are allowed |
+| Source has rows and its expected source-specific marker | Normal incremental writes are allowed |
 | Source has rows and no/currently different marker; ordinary sync (bounded or unbounded) | Keep existing data, skip that source's writes, warn for explicit `llmusage sync --rebuild --source <source>`, do not advance the marker |
 | Ordinary sync caller sets `allow_lossy_rebuild=true` | Ignore it; still skip+warn and do not rebuild |
 | Source has no rows and no marker | Allow first sync; write marker only after success |
 | Rebuild has missing source files | Existing lossy-rebuild guard refuses it |
-| Rebuild parser/store commit fails | Leave marker absent; do not claim parity |
+| Ordinary pre-reset rebuild parser/store commit fails | Leave marker absent; do not claim parity |
+| Antigravity staging/transaction fails | Preserve prior rows and marker atomically; do not claim repair |
 | Parserless source | Do not invent a marker or token normalization |
 | Persisted Codex marker is `2` | Treat only Codex as legacy; ordinary sync skips it; explicit rebuild repairs it |
 | Persisted Grok marker is `2` | Treat Grok as legacy; ordinary sync skips it; explicit rebuild repairs it |
 | Persisted Claude/OpenCode marker is `2` | Treat it as current |
 | Persisted Pi marker is `2` | Treat Pi as legacy; ordinary sync skips it; explicit `sync --rebuild --source pi` repairs it |
-| Persisted Kimi Code/Omp/ZCode/Antigravity/DeepSeek Harness marker is `2` | Treat it as current |
+| Persisted Kimi Code/Omp/ZCode/DeepSeek Harness marker is `2` | Treat it as current |
+| Persisted Antigravity CLI/IDE marker is `2` | Keep history and skip ordinary writes; require explicit staged rebuild |
 | `sync --source omp` while Pi is legacy | Refuse before any omp writes; direct the caller to `llmusage sync --rebuild --source pi` |
 | Replay marker exists and first two token snapshots share a second | Skip that second's prefix while retaining the latest cumulative baseline |
 | Two ordinary Codex requests share a second without a replay marker | Keep both events |
@@ -214,6 +231,14 @@ Never enable `--allow-lossy-rebuild` automatically.
 ## 6. Tests Required
 
 - Parser unit tests assert exact integer channel values and total fallbacks.
+- Antigravity's sanitized native fixture test asserts every channel against
+  an independent descriptor-based oracle. Labeled constructed tests cover
+  positive cache creation and thinking-only/visible-only output; do not claim
+  those positive shapes were observed in the native corpus.
+- Native busy/cancel regressions start with positive imported history, compare
+  full event/bucket/cursor/inventory rows and the old marker, then assert no
+  repair certification. A real SQLite exclusive lock must demonstrate BUSY;
+  a cancelled snapshot must not be mistaken for a malformed busy failure.
 - Kimi, Pi, Oh My Pi, and Grok parser tests assert raw/future model preservation, authoritative
   versus fallback totals, reasoning isolation, malformed-row tolerance, and
   saturating channel sums. Pi and Oh My Pi `event_key` prefixes (`pi:` / `omp:`)
@@ -293,13 +318,15 @@ store.reset_usage_data()?;
 ### Correct
 
 ```rust
-for source in parser_sources {
+for source in ordinary_pre_reset_sources {
     store.reset_for_source(source)?;
 }
+// Antigravity stages complete input first; the writer owns reset + insert + marker.
+writer.commit_antigravity_snapshot(native_shards, true)?;
 ```
 
 The correct form cannot delete a parserless source that the subsequent parser
-fan-out is unable to reconstruct.
+fan-out is unable to reconstruct, or native history before its snapshot is ready.
 
 For Grok Build request usage:
 

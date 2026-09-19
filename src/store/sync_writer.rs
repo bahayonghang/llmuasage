@@ -11,7 +11,10 @@ use super::{
     BucketKey, BucketRollup, FileCursor, HolderKind, LOCAL_HOST_ID, PricingRollup,
     ShardCommitStats, Store, SyncRunWriter, SyncShard,
     cursor::{persist_opencode_cursor_tx, persist_zcode_cursor_tx},
-    schema::{omp_split_migrated_key, read_meta_value, reset_for_source_tx, write_meta_value},
+    schema::{
+        omp_split_migrated_key, read_meta_value, reset_for_source_tx,
+        token_accounting_key_for_host, write_meta_value,
+    },
 };
 use crate::{
     domain::{
@@ -592,6 +595,179 @@ impl SyncRunWriter {
         Ok(stats)
     }
 
+    /// Atomically commits complete Antigravity source-family snapshots.
+    ///
+    /// The caller must finish discovery and decoding, reject incomplete/missing
+    /// members, and check cancellation before calling. Bounded imports carry
+    /// no resets/cursors; certification covers token semantics, not history
+    /// completeness. A nonempty path-reset list denotes a complete ordinary
+    /// source snapshot: its cursors and seen paths replace that source/host's
+    /// entire membership. Explicit rebuild additionally replaces all attributed
+    /// history for the selected source/host. Hook-era
+    /// unattributed rows always survive. Accounting markers commit with usage.
+    /// Collect mode emits ordinary shards, never a destructive rebuild flag.
+    pub fn commit_antigravity_snapshot(
+        &mut self,
+        shards: Vec<SyncShard>,
+        rebuild: bool,
+    ) -> Result<Vec<ShardCommitStats>> {
+        self.commit_antigravity_snapshot_inner(shards, rebuild, None)
+    }
+
+    fn commit_antigravity_snapshot_inner(
+        &mut self,
+        mut shards: Vec<SyncShard>,
+        rebuild: bool,
+        failpoint: Option<(usize, ShardCommitFailpoint)>,
+    ) -> Result<Vec<ShardCommitStats>> {
+        let mut selected = HashSet::new();
+        for shard in &shards {
+            if !matches!(
+                shard.source,
+                SourceKind::Antigravity | SourceKind::AntigravityIde
+            ) || !selected.insert((shard.source, shard.host_id.clone()))
+            {
+                return Err(LlmusageError::ConfigInvalid {
+                    detail: "Antigravity snapshots require one shard per selected Antigravity source and host".to_string(),
+                });
+            }
+        }
+        if shards.is_empty() {
+            return Ok(Vec::new());
+        }
+        if self.collect_sink.is_some() {
+            return shards
+                .into_iter()
+                .map(|shard| self.commit_shard(shard))
+                .collect();
+        }
+
+        for shard in &mut shards {
+            apply_host_prefix(shard);
+            dedupe_behavior_facts(shard);
+            if let Some(index) = &self.provider_index {
+                for event in &mut shard.events {
+                    if event.provider_label.is_empty() {
+                        event.provider_label = index.label_for(event.source, &event.event_at);
+                    }
+                }
+            }
+        }
+        let operation = if self.permit.is_none() {
+            Some(self.store.write_operation(HolderKind::Library)?)
+        } else {
+            None
+        };
+        let permit = match self.permit.as_ref() {
+            Some(permit) => permit.clone(),
+            None => operation
+                .as_ref()
+                .expect("writer owns a temporary operation")
+                .store
+                .write_permit()?
+                .clone(),
+        };
+        let tx = self
+            .conn
+            .as_mut()
+            .expect("persist writer has a connection")
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        permit.validate_in_transaction(&tx)?;
+        // Reset every selected owner before inserting any winners, so an event
+        // moving between CLI and IDE cannot collide with its previous owner.
+        for shard in &shards {
+            if rebuild {
+                Self::reset_antigravity_attributed_history_tx(&tx, shard.source, &shard.host_id)?;
+            } else {
+                Self::reset_file_events_batch_tx(
+                    &tx,
+                    shard.source,
+                    &shard.host_id,
+                    &shard.reset_path_hashes,
+                )?;
+                Self::reset_behavior_facts_batch_tx(
+                    &tx,
+                    shard.source,
+                    &shard.host_id,
+                    &shard.reset_path_hashes,
+                )?;
+            }
+            if rebuild || !shard.reset_path_hashes.is_empty() {
+                Self::reset_antigravity_membership_tx(&tx, shard.source, &shard.host_id)?;
+            }
+        }
+        let mut results = Vec::with_capacity(shards.len());
+        for (index, shard) in shards.iter().enumerate() {
+            let started = Instant::now();
+            let active_failpoint = failpoint
+                .filter(|(target, _)| *target == index)
+                .map(|(_, point)| point);
+            let mut stats = Self::apply_shard_tx(
+                &tx,
+                &self.pricing_catalog,
+                self.raw_archive_enabled,
+                &self.run_started_at,
+                shard,
+                active_failpoint,
+                false,
+            )?;
+            write_meta_value(
+                &tx,
+                &token_accounting_key_for_host(&shard.host_id, shard.source),
+                &super::expected_token_accounting_version(shard.source).to_string(),
+            )?;
+            stats.files_seen = shard.seen_file_paths.len();
+            stats.write_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+            results.push(stats);
+        }
+        permit.validate_in_transaction(&tx)?;
+        tx.commit()?;
+        for shard in &shards {
+            invoke_after_commit_shard(&self.store, shard);
+        }
+        Ok(results)
+    }
+
+    fn reset_antigravity_attributed_history_tx(
+        tx: &Transaction<'_>,
+        source: SourceKind,
+        host_id: &str,
+    ) -> Result<()> {
+        let path_hashes = {
+            let mut statement = tx.prepare(
+                "SELECT DISTINCT source_path_hash FROM usage_event WHERE source = ?1 AND host_id = ?2 AND COALESCE(source_path_hash, '') <> ''",
+            )?;
+            statement
+                .query_map(rusqlite::params![source.as_str(), host_id], |row| {
+                    row.get::<_, String>(0)
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        tx.execute(
+            "DELETE FROM usage_event_raw WHERE event_key IN (SELECT event_key FROM usage_event WHERE source = ?1 AND host_id = ?2 AND COALESCE(source_path_hash, '') <> '')",
+            rusqlite::params![source.as_str(), host_id],
+        )?;
+        Self::reset_file_events_batch_tx(tx, source, host_id, &path_hashes)?;
+        Self::reset_behavior_facts_batch_tx(tx, source, host_id, &path_hashes)?;
+        tx.execute(
+            "DELETE FROM source_sync_status WHERE source = ?1 AND host_id = ?2",
+            rusqlite::params![source.as_str(), host_id],
+        )?;
+        Ok(())
+    }
+
+    fn reset_antigravity_membership_tx(
+        tx: &Transaction<'_>,
+        source: SourceKind,
+        host_id: &str,
+    ) -> Result<()> {
+        tx.execute(
+            "DELETE FROM source_cursor WHERE source = ?1 AND host_id = ?2",
+            rusqlite::params![source.as_str(), host_id],
+        )?;
+        super::source_file::delete_for_source_in_tx(tx, source.as_str(), host_id)
+    }
+
     #[cfg(test)]
     fn commit_shard_with_failpoint(
         &mut self,
@@ -631,7 +807,6 @@ impl SyncRunWriter {
 
         // 7.1 计时入口与累加器
         let started = Instant::now();
-        let mut stats = ShardCommitStats::default();
         if let Some(index) = self.provider_index.as_ref() {
             for event in &mut shard.events {
                 if event.provider_label.is_empty() {
@@ -665,71 +840,15 @@ impl SyncRunWriter {
         permit.validate_in_transaction(&tx)?;
         Self::migrate_omp_split_if_needed_tx(&tx, shard.source, &host_id, &run_started_at)?;
 
-        // 7.2 先清旧 event，再批写 event，最后落 cursor —— 顺序由协议保证
-        if !shard.reset_path_hashes.is_empty() {
-            Self::reset_file_events_batch_tx(
-                &tx,
-                shard.source,
-                &host_id,
-                &shard.reset_path_hashes,
-            )?;
-        }
-        fail_shard_commit_at(failpoint, ShardCommitFailpoint::Reset)?;
-        for batch in shard.events.chunks(EVENT_WRITE_BATCH_SIZE) {
-            stats.events_inserted +=
-                Self::write_event_batch_tx(&tx, pricing_catalog, &host_id, batch)?;
-        }
-        fail_shard_commit_at(failpoint, ShardCommitFailpoint::Events)?;
-        if !shard.cursors.is_empty() {
-            Self::write_cursor_batch_tx(&tx, shard.source, &host_id, &shard.cursors)?;
-        }
-        if let Some(cursor) = shard.opencode_cursor.as_deref() {
-            persist_opencode_cursor_tx(&tx, &host_id, cursor)?;
-        }
-        if let Some(cursor) = shard.zcode_cursor.as_deref() {
-            persist_zcode_cursor_tx(&tx, &host_id, cursor)?;
-        }
-        fail_shard_commit_at(failpoint, ShardCommitFailpoint::Cursor)?;
-        // 7.3 把本轮看到的候选文件登记为 source_file.state='live'
-        //     （D15 / ADR 0006）。OpenCode 等无 file 身份的源传空 vec。
-        if !shard.seen_file_paths.is_empty() {
-            Self::write_source_file_seen_tx(
-                &tx,
-                shard.source,
-                &host_id,
-                &shard.seen_file_paths,
-                &run_started_at,
-            )?;
-        }
-        fail_shard_commit_at(failpoint, ShardCommitFailpoint::SourceFile)?;
-        // 7.4 raw archive opt-in（D11 / F1.5）：开关关时丢弃 raw_records，
-        //     避免 parser 端必须同步判定开关；开关开时与 event 共享 commit
-        //     周期落库（INSERT OR IGNORE 保证 event_key 重复时幂等）。
-        if raw_archive_enabled && !shard.raw_records.is_empty() {
-            Self::write_raw_records_batch_tx(&tx, &shard.raw_records)?;
-        }
-        fail_shard_commit_at(failpoint, ShardCommitFailpoint::Raw)?;
-        // 7.5 行为事实是 usage_event/bucket 之外的独立 normalized 表。
-        //     reset 同源文件时先清掉旧 path_hash 关联事实，随后 INSERT OR IGNORE
-        //     新事实；未支持行为提取的 parser 可继续传空 vec。
-        if !shard.reset_path_hashes.is_empty() {
-            Self::reset_behavior_facts_batch_tx(
-                &tx,
-                shard.source,
-                &host_id,
-                &shard.reset_path_hashes,
-            )?;
-        }
-        fail_shard_commit_at(failpoint, ShardCommitFailpoint::BehaviorReset)?;
-        if !shard.turns.is_empty() {
-            stats.turns_inserted += Self::write_turn_batch_tx(&tx, &host_id, &shard.turns)?;
-        }
-        fail_shard_commit_at(failpoint, ShardCommitFailpoint::Turns)?;
-        if !shard.tool_calls.is_empty() {
-            stats.tool_calls_inserted +=
-                Self::write_tool_call_batch_tx(&tx, &host_id, &shard.tool_calls)?;
-        }
-        fail_shard_commit_at(failpoint, ShardCommitFailpoint::ToolCalls)?;
+        let mut stats = Self::apply_shard_tx(
+            &tx,
+            pricing_catalog,
+            raw_archive_enabled,
+            &run_started_at,
+            &shard,
+            failpoint,
+            true,
+        )?;
         permit.validate_in_transaction(&tx)?;
         tx.commit()?;
 
@@ -743,6 +862,81 @@ impl SyncRunWriter {
             write_ms = stats.write_ms,
             "完成 shard 提交"
         );
+        Ok(stats)
+    }
+
+    fn apply_shard_tx(
+        tx: &Transaction<'_>,
+        pricing_catalog: &PricingCatalog,
+        raw_archive_enabled: bool,
+        run_started_at: &str,
+        shard: &SyncShard,
+        failpoint: Option<ShardCommitFailpoint>,
+        reset_paths: bool,
+    ) -> Result<ShardCommitStats> {
+        let mut stats = ShardCommitStats::default();
+        let host_id = &shard.host_id;
+
+        // 7.2 先清旧 event，再批写 event，最后落 cursor —— 顺序由协议保证
+        if reset_paths && !shard.reset_path_hashes.is_empty() {
+            Self::reset_file_events_batch_tx(tx, shard.source, host_id, &shard.reset_path_hashes)?;
+        }
+        fail_shard_commit_at(failpoint, ShardCommitFailpoint::Reset)?;
+        for batch in shard.events.chunks(EVENT_WRITE_BATCH_SIZE) {
+            stats.events_inserted +=
+                Self::write_event_batch_tx(tx, pricing_catalog, host_id, batch)?;
+        }
+        fail_shard_commit_at(failpoint, ShardCommitFailpoint::Events)?;
+        if !shard.cursors.is_empty() {
+            Self::write_cursor_batch_tx(tx, shard.source, host_id, &shard.cursors)?;
+        }
+        if let Some(cursor) = shard.opencode_cursor.as_deref() {
+            persist_opencode_cursor_tx(tx, host_id, cursor)?;
+        }
+        if let Some(cursor) = shard.zcode_cursor.as_deref() {
+            persist_zcode_cursor_tx(tx, host_id, cursor)?;
+        }
+        fail_shard_commit_at(failpoint, ShardCommitFailpoint::Cursor)?;
+        // 7.3 把本轮看到的候选文件登记为 source_file.state='live'
+        //     （D15 / ADR 0006）。OpenCode 等无 file 身份的源传空 vec。
+        if !shard.seen_file_paths.is_empty() {
+            Self::write_source_file_seen_tx(
+                tx,
+                shard.source,
+                host_id,
+                &shard.seen_file_paths,
+                run_started_at,
+            )?;
+        }
+        fail_shard_commit_at(failpoint, ShardCommitFailpoint::SourceFile)?;
+        // 7.4 raw archive opt-in（D11 / F1.5）：开关关时丢弃 raw_records，
+        //     避免 parser 端必须同步判定开关；开关开时与 event 共享 commit
+        //     周期落库（INSERT OR IGNORE 保证 event_key 重复时幂等）。
+        if raw_archive_enabled && !shard.raw_records.is_empty() {
+            Self::write_raw_records_batch_tx(tx, &shard.raw_records)?;
+        }
+        fail_shard_commit_at(failpoint, ShardCommitFailpoint::Raw)?;
+        // 7.5 行为事实是 usage_event/bucket 之外的独立 normalized 表。
+        //     reset 同源文件时先清掉旧 path_hash 关联事实，随后 INSERT OR IGNORE
+        //     新事实；未支持行为提取的 parser 可继续传空 vec。
+        if reset_paths && !shard.reset_path_hashes.is_empty() {
+            Self::reset_behavior_facts_batch_tx(
+                tx,
+                shard.source,
+                host_id,
+                &shard.reset_path_hashes,
+            )?;
+        }
+        fail_shard_commit_at(failpoint, ShardCommitFailpoint::BehaviorReset)?;
+        if !shard.turns.is_empty() {
+            stats.turns_inserted += Self::write_turn_batch_tx(tx, host_id, &shard.turns)?;
+        }
+        fail_shard_commit_at(failpoint, ShardCommitFailpoint::Turns)?;
+        if !shard.tool_calls.is_empty() {
+            stats.tool_calls_inserted +=
+                Self::write_tool_call_batch_tx(tx, host_id, &shard.tool_calls)?;
+        }
+        fail_shard_commit_at(failpoint, ShardCommitFailpoint::ToolCalls)?;
         Ok(stats)
     }
 
@@ -1334,6 +1528,362 @@ mod tests {
         }
     }
 
+    fn antigravity_shard(source: SourceKind, path: &str, value: i64) -> SyncShard {
+        let mut event = build_event("generation", path, value);
+        event.source = source;
+        event.event_key = format!("{}:{path}:generation", source.as_str());
+        SyncShard {
+            events: vec![event],
+            cursors: vec![build_cursor(path)],
+            seen_file_paths: vec![format!("/tmp/{path}.jsonl")],
+            ..SyncShard::new(source)
+        }
+    }
+
+    fn source_total(store: &Store, source: SourceKind, host: &str) -> Result<(i64, i64)> {
+        Ok(store.open_connection()?.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(total_tokens), 0) FROM usage_event WHERE source = ?1 AND host_id = ?2",
+            rusqlite::params![source.as_str(), host],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?)
+    }
+
+    #[test]
+    fn antigravity_snapshot_rebuild_preserves_hooks_and_other_hosts() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = build_paths(temp.path());
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+        store.set_raw_archive(true)?;
+        let mut writer = store.begin_sync_run()?;
+        let mut old = antigravity_shard(SourceKind::Antigravity, "old-cli", 100);
+        let mut hook = build_event("hook", "unused", 5);
+        hook.source = SourceKind::Antigravity;
+        hook.event_key = "antigravity:hook".to_string();
+        hook.session = None;
+        let mut empty_hook = hook.clone();
+        empty_hook.event_key = "antigravity:empty-hook".to_string();
+        empty_hook.tokens.total_tokens = 14;
+        empty_hook.tokens.input_tokens = 7;
+        empty_hook.tokens.output_tokens = 7;
+        empty_hook.session = Some(SessionInfo {
+            session_id: "old-hook".to_string(),
+            session_label: None,
+            source_path_hash: Some(String::new()),
+        });
+        old.raw_records = vec![
+            super::super::RawRecord {
+                event_key: old.events[0].event_key.clone(),
+                raw_json: "{}".to_string(),
+            },
+            super::super::RawRecord {
+                event_key: hook.event_key.clone(),
+                raw_json: "{}".to_string(),
+            },
+        ];
+        old.events.extend([hook, empty_hook]);
+        writer.commit_shard(old)?;
+        writer.commit_shard(antigravity_shard(SourceKind::AntigravityIde, "old-ide", 13))?;
+        let mut remote = antigravity_shard(SourceKind::Antigravity, "old-cli", 19);
+        remote.host_id = "remote".to_string();
+        writer.commit_shard(remote)?;
+        writer.commit_shard(SyncShard {
+            events: vec![build_event("unrelated", "codex", 23)],
+            ..SyncShard::new(SourceKind::Codex)
+        })?;
+        store.set_meta_value("token_accounting_version.antigravity", "2")?;
+        store.set_meta_value("token_accounting_version.antigravity_ide", "2")?;
+
+        writer.commit_antigravity_snapshot(
+            vec![
+                antigravity_shard(SourceKind::Antigravity, "new-cli", 11),
+                antigravity_shard(SourceKind::AntigravityIde, "new-ide", 17),
+            ],
+            true,
+        )?;
+        assert_eq!(
+            source_total(&store, SourceKind::Antigravity, "local")?,
+            (3, 46)
+        );
+        assert_eq!(
+            source_total(&store, SourceKind::AntigravityIde, "local")?,
+            (1, 34)
+        );
+        assert_eq!(
+            source_total(&store, SourceKind::Antigravity, "remote")?,
+            (1, 38)
+        );
+        assert_eq!(source_total(&store, SourceKind::Codex, "local")?, (1, 46));
+        assert_eq!(store.retained_antigravity_history_count("local")?, 2);
+        assert_eq!(store.retained_antigravity_history_count("remote")?, 0);
+        assert_eq!(
+            store.token_accounting_version(SourceKind::Antigravity)?,
+            Some(3)
+        );
+        assert_eq!(
+            store.token_accounting_version(SourceKind::AntigravityIde)?,
+            Some(3)
+        );
+        assert!(!store.has_legacy_token_accounting(SourceKind::Antigravity)?);
+        let cursors = store
+            .cursors()
+            .load_file_cursors(SourceKind::Antigravity, "local")?;
+        assert_eq!(cursors.len(), 1);
+        assert!(cursors.contains_key("cursor:new-cli"));
+        assert_eq!(
+            store
+                .source_files()
+                .tracked_paths(SourceKind::Antigravity, "local")?,
+            vec!["/tmp/new-cli.jsonl"]
+        );
+        let conn = store.open_connection()?;
+        let bucket_total: i64 = conn.query_row("SELECT SUM(total_tokens) FROM usage_bucket_30m WHERE source = 'antigravity' AND host_id = 'local'", [], |row| row.get(0))?;
+        assert_eq!(bucket_total, 46);
+        let raw_keys = conn
+            .prepare("SELECT event_key FROM usage_event_raw ORDER BY event_key")?
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        assert_eq!(raw_keys, vec!["local:antigravity:hook"]);
+        drop(conn);
+        store
+            .sync_status()
+            .mark_recent_completed(SourceKind::Antigravity, "local", now_utc())?;
+        let reopened = Store::new(&paths)?;
+        let statuses = reopened.sync_status().load_source_sync_statuses("local")?;
+        let status = statuses
+            .iter()
+            .find(|row| row.source == "antigravity")
+            .expect("source status");
+        assert_eq!(status.token_accounting_version, Some(3));
+        assert!(!status.legacy_token_accounting);
+        assert!(
+            status
+                .token_accounting_warning
+                .as_deref()
+                .is_some_and(|warning| warning.contains("2 hook-era"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn antigravity_snapshot_failure_rolls_back_every_source_and_marker() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let store = Store::new(&build_paths(temp.path()))?;
+        store.bootstrap()?;
+        let mut writer = store.begin_sync_run()?;
+        for source in [SourceKind::Antigravity, SourceKind::AntigravityIde] {
+            writer.commit_shard(antigravity_shard(source, "old", 10))?;
+            store.set_meta_value(&token_accounting_key_for_host("local", source), "2")?;
+        }
+        let error = writer
+            .commit_antigravity_snapshot_inner(
+                vec![
+                    antigravity_shard(SourceKind::Antigravity, "new", 20),
+                    antigravity_shard(SourceKind::AntigravityIde, "new", 30),
+                ],
+                true,
+                Some((1, ShardCommitFailpoint::Events)),
+            )
+            .expect_err("second-source failure");
+        assert!(error.to_string().contains("failpoint"));
+        for source in [SourceKind::Antigravity, SourceKind::AntigravityIde] {
+            assert_eq!(source_total(&store, source, "local")?, (1, 20));
+            assert_eq!(store.token_accounting_version(source)?, Some(2));
+            let cursors = store.cursors().load_file_cursors(source, "local")?;
+            assert!(cursors.contains_key("cursor:old"));
+            assert!(!cursors.contains_key("cursor:new"));
+            assert_eq!(
+                store.source_files().tracked_paths(source, "local")?,
+                vec!["/tmp/old.jsonl"]
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn antigravity_snapshot_resets_all_owners_before_inserting_a_transfer() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let transferred_path = temp.path().join("transferred.db");
+        std::fs::write(&transferred_path, b"test artifact")?;
+        let transferred = transferred_path.to_string_lossy().to_string();
+        let store = Store::new(&build_paths(temp.path()))?;
+        store.bootstrap()?;
+        let mut writer = store.begin_sync_run()?;
+        let mut old = antigravity_shard(SourceKind::AntigravityIde, "ide-group", 10);
+        old.events[0].event_key = "antigravity:shared-response".to_string();
+        old.cursors[0].cursor_key = transferred.clone();
+        old.cursors[0].file_path = transferred.clone();
+        old.seen_file_paths = vec![transferred.clone()];
+        writer.commit_shard(old)?;
+        let mut cli = antigravity_shard(SourceKind::Antigravity, "cli-group", 20);
+        cli.events[0].event_key = "antigravity:shared-response".to_string();
+        cli.cursors[0].cursor_key = transferred.clone();
+        cli.cursors[0].file_path = transferred.clone();
+        cli.seen_file_paths = vec![transferred.clone()];
+        cli.reset_path_hashes = vec!["cli-group".to_string()];
+        let ide = SyncShard {
+            reset_path_hashes: vec!["ide-group".to_string()],
+            ..SyncShard::new(SourceKind::AntigravityIde)
+        };
+        writer.commit_antigravity_snapshot(vec![cli, ide], false)?;
+        assert_eq!(
+            source_total(&store, SourceKind::Antigravity, "local")?,
+            (1, 40)
+        );
+        assert_eq!(
+            source_total(&store, SourceKind::AntigravityIde, "local")?,
+            (0, 0)
+        );
+        assert!(
+            store
+                .cursors()
+                .load_file_cursors(SourceKind::AntigravityIde, "local")?
+                .is_empty()
+        );
+        assert!(
+            store
+                .source_files()
+                .tracked_paths(SourceKind::AntigravityIde, "local")?
+                .is_empty()
+        );
+        assert_eq!(
+            store
+                .source_files()
+                .tracked_paths(SourceKind::Antigravity, "local")?,
+            vec![transferred.clone()]
+        );
+        assert!(
+            store
+                .cursors()
+                .load_file_cursors(SourceKind::Antigravity, "local")?
+                .contains_key(&transferred)
+        );
+        std::fs::remove_file(&transferred_path)?;
+        let former_owner = store
+            .source_files()
+            .lossy_rebuild_risk(SourceKind::AntigravityIde, "local")?;
+        assert_eq!(
+            former_owner.missing_file_count, 0,
+            "a moved member must not block its former owner after deletion"
+        );
+        assert!(
+            store
+                .source_files()
+                .lossy_rebuild_risk(SourceKind::Antigravity, "local")?
+                .has_risk()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn antigravity_bounded_snapshot_keeps_full_history_cursor() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let store = Store::new(&build_paths(temp.path()))?;
+        store.bootstrap()?;
+        let mut writer = store.begin_sync_run()?;
+        writer.commit_shard(antigravity_shard(SourceKind::Antigravity, "old", 10))?;
+        let mut bounded = antigravity_shard(SourceKind::Antigravity, "recent", 20);
+        bounded.cursors.clear();
+        writer.commit_antigravity_snapshot(vec![bounded], false)?;
+        assert_eq!(
+            source_total(&store, SourceKind::Antigravity, "local")?,
+            (2, 60)
+        );
+        let cursors = store
+            .cursors()
+            .load_file_cursors(SourceKind::Antigravity, "local")?;
+        assert_eq!(cursors.len(), 1);
+        assert!(cursors.contains_key("cursor:old"));
+        assert_eq!(
+            store
+                .source_files()
+                .tracked_paths(SourceKind::Antigravity, "local")?,
+            vec!["/tmp/old.jsonl", "/tmp/recent.jsonl"]
+        );
+        assert_eq!(
+            store.token_accounting_version(SourceKind::Antigravity)?,
+            Some(3)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn antigravity_remote_legacy_rows_do_not_block_empty_local_source() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let store = Store::new(&build_paths(temp.path()))?;
+        store.bootstrap()?;
+        let mut writer = store.begin_sync_run()?;
+        let mut remote = antigravity_shard(SourceKind::Antigravity, "remote-history", 10);
+        remote.host_id = "remote".to_string();
+        writer.commit_shard(remote)?;
+        store.set_meta_value("token_accounting_version.remote.antigravity", "2")?;
+        assert_eq!(
+            store.token_accounting_version(SourceKind::Antigravity)?,
+            Some(2)
+        );
+        assert!(!store.has_legacy_token_accounting(SourceKind::Antigravity)?);
+        writer.commit_antigravity_snapshot(
+            vec![antigravity_shard(
+                SourceKind::Antigravity,
+                "local-first",
+                20,
+            )],
+            false,
+        )?;
+        assert_eq!(
+            store.token_accounting_version(SourceKind::Antigravity)?,
+            Some(3)
+        );
+        assert_eq!(
+            store.token_accounting_version_for_host("remote", SourceKind::Antigravity)?,
+            Some(2)
+        );
+        assert_eq!(
+            source_total(&store, SourceKind::Antigravity, "remote")?,
+            (1, 20)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn antigravity_collect_snapshot_has_no_local_rebuild_effects() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let store = Store::new(&build_paths(temp.path()))?;
+        store.bootstrap()?;
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = captured.clone();
+        let mut writer = store.begin_collect_run(move |shard| {
+            sink.lock().expect("capture lock").push(shard);
+            Ok(())
+        })?;
+        writer.commit_antigravity_snapshot(
+            vec![antigravity_shard(SourceKind::Antigravity, "emitted", 10)],
+            true,
+        )?;
+        assert_eq!(
+            source_total(&store, SourceKind::Antigravity, "local")?,
+            (0, 0)
+        );
+        assert_eq!(
+            store.token_accounting_version(SourceKind::Antigravity)?,
+            Some(2)
+        );
+        assert!(
+            store
+                .cursors()
+                .load_file_cursors(SourceKind::Antigravity, "local")?
+                .is_empty()
+        );
+        let shards = captured.lock().expect("capture lock");
+        assert_eq!(shards.len(), 1);
+        assert_eq!(
+            shards[0].events[0].event_key,
+            "antigravity:emitted:generation"
+        );
+        assert!(shards[0].reset_path_hashes.is_empty());
+        Ok(())
+    }
+
     fn build_tool_call(event: &UsageEvent, tool_name: &str) -> UsageToolCall {
         UsageToolCall {
             tool_call_key: format!("tool:{}:{tool_name}", event.event_key),
@@ -1604,6 +2154,25 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(persisted, 0, "stale shard must not commit any event");
+        let error = writer
+            .commit_antigravity_snapshot(
+                vec![antigravity_shard(
+                    SourceKind::Antigravity,
+                    "stale-snapshot",
+                    10,
+                )],
+                true,
+            )
+            .expect_err("a stolen generation must fence snapshots too");
+        assert!(matches!(error, LlmusageError::LockLost));
+        assert_eq!(
+            source_total(&second_store, SourceKind::Antigravity, "local")?,
+            (0, 0)
+        );
+        assert_eq!(
+            second_store.token_accounting_version(SourceKind::Antigravity)?,
+            Some(2)
+        );
         drop(second);
         drop(first);
         Ok(())

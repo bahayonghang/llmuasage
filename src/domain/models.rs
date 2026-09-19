@@ -18,6 +18,9 @@ pub enum SourceKind {
     /// Google Antigravity usage source: hook-era history plus the CLI
     /// `conversations/*.db` passive parser.
     Antigravity,
+    /// Google Antigravity IDE local `conversations/*.db` artifacts.
+    #[value(name = "antigravity_ide")]
+    AntigravityIde,
     /// Kimi Code local `wire.jsonl` session artifacts.
     #[value(name = "kimi_code")]
     KimiCode,
@@ -46,6 +49,7 @@ impl SourceKind {
             Self::Claude => "claude",
             Self::Opencode => "opencode",
             Self::Antigravity => "antigravity",
+            Self::AntigravityIde => "antigravity_ide",
             Self::KimiCode => "kimi_code",
             Self::Pi => "pi",
             Self::Omp => "omp",
@@ -579,6 +583,21 @@ pub struct UsageToolCall {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn antigravity_ide_stable_id_round_trips_across_consumers() {
+        let source = SourceKind::AntigravityIde;
+        assert_eq!(source.as_str(), "antigravity_ide");
+        assert_eq!(SourceKind::parse_id("antigravity_ide"), Some(source));
+        assert_eq!(SourceKind::from_str("antigravity_ide", false), Ok(source));
+        let json = serde_json::to_string(&source).expect("serialize source");
+        assert_eq!(json, "\"antigravity_ide\"");
+        assert_eq!(
+            serde_json::from_str::<SourceKind>(&json).expect("deserialize source"),
+            source
+        );
+        assert_ne!(source, SourceKind::Antigravity);
+    }
 
     #[test]
     fn source_kind_antigravity_is_stable_id() {

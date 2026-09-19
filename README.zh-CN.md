@@ -4,7 +4,7 @@
 
 > **命名说明：** crate 与二进制文件名为 `llmusage`；GitHub 仓库名为 `llmuasage`（多一个 `a`）。托管文档的链接使用仓库拼写。
 
-本地优先的 AI CLI 用量分析工具。`llmusage` 会被动读取本机 Codex、Claude Code、OpenCode、Kimi Code、Pi、Oh My Pi、Grok Build、ZCode、Antigravity CLI 和 DeepSeek Harness 的本地记录，并写入本地 SQLite；随后提供命令行报表、终端 Dashboard、浏览器 Dashboard 和离线 HTML 导出，默认不上传本地用量。`dash` 的 Usage 页会用本机已有 CLI 凭证读取订阅额度。
+本地优先的 AI CLI 用量分析工具。`llmusage` 会被动读取本机 Codex、Claude Code、OpenCode、Kimi Code、Pi、Oh My Pi、Grok Build、ZCode、Antigravity CLI/IDE 和 DeepSeek Harness 的本地记录，并写入本地 SQLite；随后提供命令行报表、终端 Dashboard、浏览器 Dashboard 和离线 HTML 导出，默认不上传本地用量。`dash` 的 Usage 页会用本机已有 CLI 凭证读取订阅额度。
 
 > 当前 crate 版本：`1.3.0`。
 
@@ -70,7 +70,7 @@ llmusage serve
 | Codex | OpenAI Codex rollout/session JSONL |
 | Claude | Claude Code project JSONL |
 | OpenCode | OpenCode 本地 SQLite 用量库 |
-| Antigravity | `~/.gemini/antigravity-cli/conversations/*.db`（或 `GEMINI_CLI_HOME`）；hook 时代的历史行继续可查，存在未归属历史时拒绝 rebuild |
+| Antigravity CLI / IDE | `~/.gemini/antigravity-cli/conversations/*.db` / `~/.gemini/antigravity-ide/conversations/*.db`（可用 `GEMINI_CLI_HOME` 指定 `.gemini` 根）；分别使用 `antigravity` / `antigravity_ide`，被动读取 SQLite，保留 hook 历史 |
 | Kimi Code | `~/.kimi-code/sessions/**/wire.jsonl`（或 `KIMI_CODE_HOME`），只读取 turn-scoped `usage.record` |
 | Pi | `~/.pi/agent/sessions/**/*.jsonl`（或 `PI_AGENT_DIR`），来源 id 为 `pi` |
 | Oh My Pi | `~/.omp/agent/sessions/**/*.jsonl`，来源 id 为 `omp`。路径重叠时归 `pi`。普通 `sync` 会保留存量 `pi` 行并跳过 `pi` 写入；修复入口是 `sync --rebuild --source pi`。后续 provider/project/成本/行为回填使用 `sync --rebuild --source omp`。 |
@@ -110,7 +110,7 @@ llmusage export html --out .\llmusage-report
 
 报表日期筛选同时接受 `YYYYMMDD` 和 `YYYY-MM-DD`。`--sections daily,weekly,monthly,session` 可以在一次输出中组合多个周期段（当前命令周期始终排在最前）；`--no-cost` 会隐藏成本列与 JSON 成本字段，但不会改变 token 总量。
 
-单来源视图使用 `llmusage <source> <period>`，例如 `llmusage claude daily` 或 `llmusage codex monthly`。支持的 source host 是 `claude`、`codex`、`opencode` 和 `antigravity`，每个都支持 `daily`、`weekly`、`monthly`、`session`。它与 `<period> --source <source>` 的数据相同，但会从文本和 JSON 移除 Agent 对比层。`blocks` 有意继续作为顶层命令。这个均匀来源 surface 是 llmusage 的扩展，不表示每个来源都复刻 ccusage 的逐来源能力矩阵。
+单来源视图使用 `llmusage <source> <period>`，例如 `llmusage claude daily` 或 `llmusage codex monthly`。支持的 source host 是 `claude`、`codex`、`opencode` 、`antigravity` 和 `antigravity-ide`，每个都支持 `daily`、`weekly`、`monthly`、`session`。它与 `<period> --source <source>` 的数据相同，但会从文本和 JSON 移除 Agent 对比层。`blocks` 有意继续作为顶层命令。这个均匀来源 surface 是 llmusage 的扩展，不表示每个来源都复刻 ccusage 的逐来源能力矩阵。
 
 `llmusage dash` 使用 tokscale 风格的终端 Dashboard。快捷键：`tab`/`shift-tab` 或 `1`-`9` 切换视图；`j`/`k`、方向键、Page Up/Page Down、Home/End 或鼠标滚轮选择行；`o` 循环可排序列，`O` 反转排序方向；`s` 打开来源选择器；`r` 刷新 Dashboard 数据；`R` 切换自动刷新；`x` 按当前来源筛选运行 sync；`?` 打开帮助/设置；`q` 退出。
 
@@ -165,7 +165,7 @@ llmusage codex-tracer --rebuild
 - `llmusage sync --recent-days N` 只导入最近的 UTC 事件窗口（`1..=3650`），且不推进全历史 cursor；`--parallelism` 合法范围为 `1..=32`。
 - bounded 普通 sync 同样对 legacy 来源 skip+warn，不得清空全历史。
 - `llmusage sync --rebuild` 默认拒绝有损重建，除非同时传入 `--allow-lossy-rebuild`。
-- 无 source 的 `llmusage sync --rebuild` 会重置 parser-backed 来源。若重建会删除未归属的 hook 时代 Antigravity 行，即使带 `--allow-lossy-rebuild` 也会拒绝。
+- `llmusage sync --rebuild --source antigravity` 会先完整解析，再在一次事务中修复 CLI parser 历史；旧 hook 行保留并显示历史语义提示。IDE 使用 `--source antigravity_ide`。普通 sync 遇到旧计数版本会保留历史并提示显式修复。
 - `llmusage serve` 会保留并展示已有数据和 accounting 警告，不会隐式 rebuild。损坏的 legacy 来源不得阻止看板启动。
 - 普通 sync 会忽略 `--allow-lossy-rebuild`，因为它不再重建。请显式执行 `llmusage sync --rebuild --source <source>`；只有在接受清空不可重建历史时才加 `--allow-lossy-rebuild`。
 - `llmusage diagnostics --forget-file <PATH> --source <SOURCE>` 是显式忽略源文件的写入入口。

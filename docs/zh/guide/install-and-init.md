@@ -56,7 +56,7 @@ llmusage init
 | Pi | `~/.pi/agent/sessions` 或 `PI_AGENT_DIR` 中的 session JSONL | 被动 parser |
 | Oh My Pi | `~/.omp/agent/sessions` 中的 session JSONL | 被动 parser |
 | Grok Build | 会话根目录 sidecar | 被动 parser（`precise`，`unpriced`） |
-| Antigravity | CLI `conversations/*.db`，并保留 hook 时代历史行 | 被动 parser；存在未归属历史时拒绝 rebuild |
+| Antigravity CLI / IDE | `~/.gemini/antigravity-cli/conversations/*.db` / `~/.gemini/antigravity-ide/conversations/*.db`（`GEMINI_CLI_HOME` 指定 `.gemini` 根） | 独立 `antigravity` / `antigravity_ide` 被动来源；保留 hook 历史 |
 | ZCode | `cli/db/db.sqlite` 的 `model_usage` completed 行 | 被动 parser |
 | DeepSeek Harness | `sessions/**/session.jsonl(.zstd)` | 被动 parser |
 

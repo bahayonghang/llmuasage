@@ -100,6 +100,7 @@ fn local_flow_bootstraps_and_syncs_without_installing_integrations() -> Result<(
             "claude.svg",
             "opencode.svg",
             "antigravity.svg",
+            "antigravity_ide.svg",
             "kimi_code.svg",
             "pi.svg",
             "omp.svg",

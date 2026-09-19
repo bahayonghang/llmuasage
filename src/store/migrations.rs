@@ -1266,9 +1266,10 @@ fn m_024_optimize_top_sessions_identity_order(tx: &Transaction<'_>) -> Result<()
 /// contract but carry no `source_path_hash` attribution, so the automatic
 /// legacy-repair paths (unbounded sync, serve startup) would reset the source
 /// and delete unreconstructable history the moment a parser registers. This
-/// migration presets the current marker so both repair paths treat existing
-/// rows as current from day one. Explicit `--rebuild --source antigravity`
-/// is separately guarded against unattributed history.
+/// migration therefore preset version 2 when it was introduced. Keep that
+/// historical value fixed: a later parser contract must not certify old rows
+/// during bootstrap. Version 3 requires explicit staged repair, which retains
+/// unattributed hook history instead of deleting it.
 fn m_021_preset_antigravity_token_accounting(tx: &Transaction<'_>) -> Result<()> {
     tx.execute(
         r#"
@@ -1276,10 +1277,7 @@ fn m_021_preset_antigravity_token_accounting(tx: &Transaction<'_>) -> Result<()>
         VALUES ('token_accounting_version.antigravity', ?1)
         ON CONFLICT(key) DO NOTHING
         "#,
-        [
-            super::expected_token_accounting_version(crate::models::SourceKind::Antigravity)
-                .to_string(),
-        ],
+        [2_u32.to_string()],
     )?;
     Ok(())
 }
@@ -2115,10 +2113,8 @@ mod tests {
             marker
                 .as_deref()
                 .and_then(|value| value.parse::<u32>().ok()),
-            Some(crate::store::expected_token_accounting_version(
-                crate::models::SourceKind::Antigravity
-            )),
-            "v21 must preset the marker so legacy auto-repair never resets antigravity"
+            Some(2),
+            "v21 records its historical contract; later parser versions require explicit repair"
         );
 
         // 幂等：重复应用不覆盖既有值。

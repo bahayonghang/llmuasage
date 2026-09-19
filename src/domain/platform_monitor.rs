@@ -224,7 +224,7 @@ pub const PLATFORM_MONITORS: &[PlatformMonitorDescriptor] = &[
     },
     PlatformMonitorDescriptor {
         platform_id: "antigravity",
-        display_name: "Antigravity",
+        display_name: "Antigravity CLI",
         source_kind: Some(SourceKind::Antigravity),
         roots: &[MonitorRoot::EnvOrHome {
             env: "GEMINI_CLI_HOME",
@@ -235,7 +235,22 @@ pub const PLATFORM_MONITORS: &[PlatformMonitorDescriptor] = &[
         parser_status: ParserSupportStatus::Registered,
         quality: Some(UsageQuality::Precise),
         privacy: PrivacyClass::LocalDatabase,
-        next_action: "parsed by the registered Antigravity CLI source parser (gen_metadata usage fields); the IDE-side conversations/*.pb family stays planned",
+        next_action: "passively reads CLI conversations/*.db usage metadata; encrypted .pb artifacts are unsupported",
+    },
+    PlatformMonitorDescriptor {
+        platform_id: "antigravity_ide",
+        display_name: "Antigravity IDE",
+        source_kind: Some(SourceKind::AntigravityIde),
+        roots: &[MonitorRoot::EnvOrHome {
+            env: "GEMINI_CLI_HOME",
+            env_relative: "antigravity-ide/conversations",
+            home_relative: ".gemini/antigravity-ide/conversations",
+        }],
+        artifact_patterns: &["*.db"],
+        parser_status: ParserSupportStatus::Registered,
+        quality: Some(UsageQuality::Precise),
+        privacy: PrivacyClass::LocalDatabase,
+        next_action: "passively reads IDE conversations/*.db usage metadata; encrypted .pb artifacts and unverified legacy roots are unsupported",
     },
     PlatformMonitorDescriptor {
         platform_id: "kimi_code",
@@ -734,6 +749,27 @@ mod tests {
             }]
         );
         assert_eq!(antigravity.parser_status, ParserSupportStatus::Registered);
+    }
+
+    #[test]
+    fn antigravity_ide_monitor_keeps_native_root_and_format_boundary() {
+        let ide = registered_platform_monitors()
+            .iter()
+            .find(|descriptor| descriptor.platform_id == "antigravity_ide")
+            .expect("Antigravity IDE monitor should exist");
+        assert_eq!(ide.source_kind, Some(SourceKind::AntigravityIde));
+        assert_eq!(
+            ide.roots,
+            &[MonitorRoot::EnvOrHome {
+                env: "GEMINI_CLI_HOME",
+                env_relative: "antigravity-ide/conversations",
+                home_relative: ".gemini/antigravity-ide/conversations",
+            }]
+        );
+        assert_eq!(ide.artifact_patterns, &["*.db"]);
+        assert_eq!(ide.parser_status, ParserSupportStatus::Registered);
+        assert!(ide.next_action.contains(".pb"));
+        assert!(ide.next_action.contains("unsupported"));
     }
 
     #[test]

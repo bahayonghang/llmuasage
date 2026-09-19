@@ -13,7 +13,7 @@ accounting. Safe sources are rebuilt one at a time in registry order. Sources
 with missing-file rebuild risk are left unchanged and reported as warnings, so
 their historical reports remain available and the dashboard can still start.
 Unexpected parser, SQLite, or commit failures stop startup. This automatic path
-never enables `--allow-lossy-rebuild` and never rebuilds parserless Antigravity.
+never enables `--allow-lossy-rebuild` or automatically repairs legacy accounting.
 
 Use a fixed port when you need a stable URL:
 
@@ -82,7 +82,7 @@ Dashboard filters map to the shared `QueryFilter` used by the Rust query layer.
 
 | Filter | Meaning |
 | --- | --- |
-| `source` | `codex`, `claude`, `opencode`, `antigravity`, `kimi_code`, `pi`, `omp`, or `grok` |
+| `source` | `codex`, `claude`, `opencode`, `antigravity`, `antigravity_ide`, `kimi_code`, `pi`, `omp`, or `grok` |
 | `model` | Exact model string from normalized events |
 | `since` / `until` | Date range for dashboard queries |
 | `window` | Quick window such as day/week/month/all |
@@ -90,7 +90,7 @@ Dashboard filters map to the shared `QueryFilter` used by the Rust query layer.
 
 The URL preserves filters so a refreshed page or shared local URL keeps the same view.
 
-Antigravity CLI conversations are imported by the registered parser. Hook-era Antigravity rows remain selectable in reports and dashboard filters. A rebuild is refused while those rows have no file attribution. The IDE-side `conversations/*.pb` family stays planned.
+Antigravity CLI and IDE passively read native `conversations/*.db` through separate `antigravity` and `antigravity_ide` sources and one shared decoder. Hook-era rows are retained with a historical-accounting warning. Ordinary sync does not mix old accounting; successful explicit rebuild replaces parser history. `.pb` files are unsupported.
 
 Usage analysis adds its own query controls on top of the shared filters:
 

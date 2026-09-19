@@ -1,0 +1,30 @@
+{
+  "id": "antigravity-ide-token-collection",
+  "name": "antigravity-ide-token-collection",
+  "title": "接入 Antigravity IDE 原生 SQLite Token 统计",
+  "description": "复用已验证现代解码，接入 IDE 原生数据库、产品归属和独立来源展示。",
+  "status": "in_progress",
+  "dev_type": "backend",
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-09-19",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "09-19-upstream-antigravity-token-statistics",
+  "relatedFiles": [
+    "src/domain/models.rs",
+    "src/registry.rs",
+    "src/commands/mod.rs"
+  ],
+  "notes": "Implementation and AC1-AC4 verified: native antigravity_ide and consumers. Native530DB/10063events/577564225tokens independently reconciled. All gates passed. Formal in_progress retained; no RPC, commit or archive.",
+  "meta": {}
+}

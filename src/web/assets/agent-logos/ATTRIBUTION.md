@@ -2,6 +2,8 @@
 
 Retrieved: 2026-08-23
 
+The `antigravity_ide` route (`antigravity_ide.svg`) reuses the embedded `antigravity.svg` product wordmark, with the same attribution and SHA-256 below. CLI and IDE badges use distinct registry-provided names.
+
 These marks identify the corresponding third-party source next to the registry-provided product name. They do not imply endorsement, sponsorship, partnership, or joint branding. Product and company names, logos, and trademarks remain the property of their respective owners.
 
 The upstream and local SHA-256 values differ where this repository adds one trailing LF for text-file consistency. The SVG element tree, paths, `viewBox`, colors, and proportions are otherwise unchanged. All entries were reviewed as static, self-contained SVG: no scripts, event attributes, `foreignObject`, external references, data URLs, or animation elements.

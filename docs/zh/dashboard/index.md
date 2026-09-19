@@ -11,7 +11,7 @@ llmusage serve
 绑定端口前，`serve` 会检查 parser-backed 来源是否仍使用旧版 token 统计口径，并按
 registry 顺序逐源安全重建。存在源文件缺失风险的来源会保持原状并输出告警，因此旧历史
 仍可读取，看板也会继续启动；意外的 parser、SQLite 或提交错误则会终止启动。
-自动路径永远不会启用 `--allow-lossy-rebuild`，也不会重建 parserless Antigravity。
+自动路径永远不会启用 `--allow-lossy-rebuild`，也不会自动修复旧计数语义。
 
 需要固定 URL 时指定端口：
 
@@ -80,7 +80,7 @@ SSH 会话会自动跳过浏览器启动。
 
 | 筛选 | 含义 |
 | --- | --- |
-| `source` | `codex`、`claude`、`opencode`、`antigravity`、`kimi_code`、`pi`、`omp` 或 `grok` |
+| `source` | `codex`、`claude`、`opencode`、`antigravity`、`antigravity_ide`、`kimi_code`、`pi`、`omp` 或 `grok` |
 | `model` | 标准化事件中的精确模型名 |
 | `since` / `until` | 看板查询日期范围 |
 | `window` | day/week/month/all 等快速窗口 |
@@ -88,7 +88,7 @@ SSH 会话会自动跳过浏览器启动。
 
 URL 会保留筛选，刷新页面或复制本地 URL 时仍保持同一视图。
 
-Antigravity CLI 会话由已注册解析器导入。hook 时代的 Antigravity 记录仍可在报表和看板筛选中查看。这些记录没有文件归属时，重建会被拒绝。IDE 侧 `conversations/*.pb` 仍为计划项。
+Antigravity CLI 与 IDE 分别通过 `antigravity`、`antigravity_ide` 被动读取原生 `conversations/*.db`，共享同一解析内核。旧 hook 行保留并提示其历史计数语义。普通 sync 不混入旧版本计数；显式 rebuild 成功后替换 parser 历史。`.pb` 文件不在支持范围内。
 
 用量分析会在共享筛选之上追加自己的查询控件：
 

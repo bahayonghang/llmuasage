@@ -36,7 +36,7 @@
   comma-separated `PI_AGENT_DIR`), and `omp` for `~/.omp/agent/sessions`.
   Overlapping canonical paths belong to `pi`. Grok Build uses `grok`
   for direct sidecars under `~/.grok/sessions/*/*/` or `GROK_HOME/sessions`.
-- Registered passive parsers are Codex, Claude, OpenCode, Antigravity, Kimi
+- Registered passive parsers are Codex, Claude, OpenCode, Antigravity CLI/IDE, Kimi
   Code, Pi, Oh My Pi, Grok Build, ZCode, and DeepSeek Harness.
 - Monitor descriptors live outside parser promotion and report detection status,
   candidate roots, and parser availability.
@@ -120,15 +120,32 @@
   `historical_only`, never `passive_ready` or `passive_no_data`. Historical
   events remain queryable and dashboard filters remain valid, but sync writes
   no new events.
-- Antigravity is parser-backed for CLI `conversations/*.db`. Hook-era rows
-  with an empty `source_path_hash` stay queryable. `sync --rebuild` that
-  includes Antigravity must refuse when any such unattributed row exists, even
-  when `--allow-lossy-rebuild` is present. Conversation DB open failures,
-  `sqlite_master` probe failures, and `gen_metadata` prepare or query failures
-  other than a missing table count as malformed, must not emit
-  `reset_path_hashes`, and must not write a success cursor. A missing `gen_metadata` table is an
-  empty session: skip without a parse issue; a changed file may still reset
-  that path.
+- Antigravity CLI (`antigravity`) and IDE (`antigravity_ide`) share a native
+  SQLite decoder. Discover only `.gemini/antigravity-cli/conversations/*.db`
+  and `.gemini/antigravity-ide/conversations/*.db`, under `GEMINI_CLI_HOME`
+  when set. `.pb`, old/backup roots, credentials, RPC and transcript bodies
+  are outside this reader. Verified trajectory source metadata determines
+  product ownership (17 CLI, 1 IDE), even when a DB is copied across roots.
+  Resolve identities across both roots before applying source filters.
+- Native generation usage can aggregate all `retry_infos`: prefer usable
+  attempt records and deduplicate generation/step mirrors. Do not sum the
+  aggregate with attempts or merge unrelated requests by token amounts/time.
+  Only typed generation/step timestamps are request time; file mtime and
+  ChatStartMetadata context-window bytes are never time fallbacks.
+- Antigravity replays one group per product. Read SQLite in read-only
+  transactions, observe DB and WAL changes, and stage complete group output
+  before a fenced commit. Missing/unreadable/malformed members or cancellation
+  preserve prior group events and cursors. Cross-product ownership changes
+  require an unbounded run selecting both products, committed together.
+  Bounded imports never reset historical groups or advance full cursors.
+- Antigravity explicit rebuild skips the engine's pre-reset. One writer
+  transaction replaces selected host/source attributed parser rows, cursors
+  and accounting markers. Empty/NULL-path hook rows remain queryable and
+  counted, with a retained-history warning. Missing-file loss requires
+  `--allow-lossy-rebuild`; unreadable input never becomes an accepted empty
+  snapshot. Empty recognized usage tables form an empty session; a database
+  with neither `gen_metadata` nor `steps` fails. Steps
+  alone remain usable when `gen_metadata` is absent.
 - ZCode reads `~/.zcode/cli/db/db.sqlite` `model_usage` completed rows with a
   `completed_at` high-water cursor. Unfinished `error`/`cancelled` rows are
   counted as `skipped` against both that completed watermark and a separate
@@ -334,11 +351,11 @@
   terminal panels.
 - Registry/monitor tests proving monitored platforms do not accidentally become
   parser-backed sources.
-- Descriptor/status tests proving parser capabilities match the registry and
-  Antigravity remains `historical_only` plus monitor-only
-  `blocked_no_samples`.
-- Behavior-level rebuild coverage proving a targeted Antigravity rebuild is
-  rejected and existing historical rows remain intact.
+- Descriptor/status tests proving CLI and IDE have distinct passive parser
+  capabilities, filters and coverage; CLI readiness never implies IDE readiness.
+- Behavior-level rebuild coverage proving explicit Antigravity repair replaces
+  attributed parser history atomically and retains unattributed hook facts,
+  including failed reads, rollback and reopened retained-history warnings.
 - Report and dashboard projection coverage proving historical Antigravity rows
   remain aggregated and selectable.
 - Kimi, Pi, Oh My Pi, and Grok fixture tests covering normalized fields, raw/future model ids,
@@ -502,8 +519,11 @@ pub use crate::sync::DefaultSyncExecutor as CommandSyncExecutor;
   still store.
 - Antigravity open/decode/missing timestamp stay malformed. Open failures and
   `gen_metadata` prepare failures other than a missing table must not reset
-  imported events or advance the file cursor. Checksum mismatch and missing
-  `response_id` with a fallback key are accounting anomalies.
+  imported events or advance the file cursor. An output checksum mismatch or
+  conflicting observations fails the complete product snapshot with a durable
+  malformed diagnostic; conflicting observations also record an accounting
+  anomaly. Missing all request identities uses a file+location fallback with
+  an accounting anomaly; a missing response ID alone can use message/provider ID.
 - Grok sidecars over the size cap stay oversized; bad sidecar JSON stays
   malformed. OpenCode records malformed tool-part JSON as `malformed_lines`
   and continues other parts; non-usage message rows stay silent.
@@ -542,8 +562,10 @@ pub use crate::sync::DefaultSyncExecutor as CommandSyncExecutor;
 - Antigravity conversation DB open failure, `sqlite_master` probe failure, or
   `gen_metadata` prepare failure other than a missing table -> `malformed_lines`,
   no `reset_path_hashes`, no success cursor, prior `usage_event` rows kept.
-- Antigravity missing `gen_metadata` table -> no parse issue; a changed file
-  may still reset that path.
+- Antigravity missing `gen_metadata` table -> read `steps` when present. Only
+  a complete successful product snapshot may reset its group. Empty recognized
+  usage tables are valid; a DB missing both tables or containing a malformed
+  usage table preserves history.
 
 ### 5. Good/Base/Bad Cases
 
@@ -588,8 +610,8 @@ pub use crate::sync::DefaultSyncExecutor as CommandSyncExecutor;
 - Migration/status tests: v17 default payload and `ParseIssues` round trip,
   including missing new fields deserializing as zero.
 - Antigravity: unreadable rewrite after a successful import keeps event count
-  and the previous cursor fingerprint; missing `gen_metadata` table skips
-  without malformed; prepare error on an existing table does not reset.
+  and the previous cursor fingerprint; missing `gen_metadata` retains steps
+  support; prepare error on an existing table does not reset the group.
 
 ### 7. Wrong vs Correct
 

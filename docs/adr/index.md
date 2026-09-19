@@ -22,6 +22,7 @@ ADRs are engineering records, not end-user tutorials. Start with [Architecture](
 - [0014 — SSH remote-host import](./0014-ssh-remote-host-import)
 - [0015 — Oh My Pi source split](./0015-omp-source-split)
 - [0016 — Source-reported cost for Pi / Oh My Pi](./0016-source-reported-cost)
+- [0017 — Antigravity CLI and IDE native accounting](./0017-antigravity-native-accounting)
 
 ## Companion docs
 

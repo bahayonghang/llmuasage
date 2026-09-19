@@ -69,8 +69,10 @@ pub enum Commands {
     Codex(focused::SourceReportArgs),
     /// Show OpenCode-only daily, weekly, monthly, or session usage.
     Opencode(focused::SourceReportArgs),
-    /// Show Antigravity-only daily, weekly, monthly, or session usage.
+    /// Show Antigravity CLI daily, weekly, monthly, or session usage.
     Antigravity(focused::SourceReportArgs),
+    /// Show Antigravity IDE daily, weekly, monthly, or session usage.
+    AntigravityIde(focused::SourceReportArgs),
     /// Print a single statusline-friendly usage summary.
     Statusline(report_args::StatuslineArgs),
     /// Bootstrap the local runtime and database.
@@ -358,6 +360,14 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
                 &app,
                 "antigravity",
                 focused::run(&app, SourceKind::Antigravity, args.command),
+            )
+            .await
+        }
+        Some(Commands::AntigravityIde(args)) => {
+            run_logged(
+                &app,
+                "antigravity-ide",
+                focused::run(&app, SourceKind::AntigravityIde, args.command),
             )
             .await
         }

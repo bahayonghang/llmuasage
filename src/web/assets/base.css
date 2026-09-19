@@ -33,6 +33,7 @@
   --source-pi: #4f46e5;
   --source-omp: #0f766e;
   --source-antigravity: #7c3aed;
+  --source-antigravity_ide: #4f46e5;
   --source-grok: var(--text-muted);
 
   --chart-cat-1: #2a78d6;
@@ -116,6 +117,7 @@
   --source-pi: #818cf8;
   --source-omp: #2dd4bf;
   --source-antigravity: #a78bfa;
+  --source-antigravity_ide: #a5b4fc;
   --source-grok: var(--text-muted);
 
   --chart-cat-1: #3987e5;

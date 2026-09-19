@@ -1,0 +1,686 @@
+{
+  "authority": "Installed native descriptor + task-authorized SQLite mode=ro/query_only/BEGIN metadata only; no prompts, responses, error_details, credentials, raw ids, or RPC",
+  "cli_version": "1.2.5",
+  "samples": [
+    {
+      "family": "antigravity-cli",
+      "category": "empty",
+      "database_hash": "33c0bcbe12af39278eba2ca941b380251d58364efe65affa7f98d3da130aec32",
+      "gen_metadata": [],
+      "steps": [],
+      "expected_unique_tokens": 0,
+      "native_source_enum": 17
+    },
+    {
+      "family": "antigravity-cli",
+      "category": "normal_gen",
+      "database_hash": "09a7d2f343113b57b9d215d5721c8143e426204ba7a59e4d26a2084b8d3a999a",
+      "time_sanitization": "whole-day offset to first observed day 2026-01-01 UTC; no time-of-day alteration",
+      "gen_metadata": [
+        {
+          "idx": 0,
+          "data_base64": "EgIBAgroAhimCiKjAQimChCFyQEYlQQwGDpHc2hhMjU2OjcwN2QxZmY1NDdkNjViZTdlMzVmZmQ5YWQwMTRlNTdjMTEzZTg5YjdiNTFjOThhODEzYjkwYTY2M2M2OTk3ZWZIygNQS1pHc2hhMjU2OjRlY2IwODk3ZDMzYThkYWM2ZTU5NzNiZWZhOTNhYjlhMDMwMzVkNjNiMGQ5Yjk0MmM4YzI4NTZjMDAxNWJmMDJKAIoBpgESowEIpgoQhckBGJUEMBg6R3NoYTI1Njo3MDdkMWZmNTQ3ZDY1YmU3ZTM1ZmZkOWFkMDE0ZTU3YzExM2U4OWI3YjUxYzk4YTgxM2I5MGE2NjNjNjk5N2VmSMoDUEtaR3NoYTI1Njo0ZWNiMDg5N2QzM2E4ZGFjNmU1OTczYmVmYTkzYWI5YTAzMDM1ZDYzYjBkOWI5NDJjOGMyODU2YzAwMTViZjAymgEQZ2VtaW5pLTMuOC1mbGFzaA=="
+        }
+      ],
+      "steps": [
+        {
+          "idx": 1,
+          "step_type": 15,
+          "status": 3,
+          "metadata_base64": "CgwIxtDYygYQsLWvswMyDAjK0NjKBhCg8crYAjoMCMrQ2MoGEPzQ3eoCQgwIytDYygYQ/NDd6gJKowEIpgoQhckBGJUEMBg6R3NoYTI1Njo3MDdkMWZmNTQ3ZDY1YmU3ZTM1ZmZkOWFkMDE0ZTU3YzExM2U4OWI3YjUxYzk4YTgxM2I5MGE2NjNjNjk5N2VmSMoDUEtaR3NoYTI1Njo0ZWNiMDg5N2QzM2E4ZGFjNmU1OTczYmVmYTkzYWI5YTAzMDM1ZDYzYjBkOWI5NDJjOGMyODU2YzAwMTViZjAyWKYKggIMCMrQ2MoGEPzQ3eoC"
+        }
+      ],
+      "oracle_usage_records": [
+        {
+          "lane": "direct",
+          "model_enum": 1318,
+          "fields_present": [
+            1,
+            2,
+            3,
+            6,
+            9,
+            10
+          ],
+          "input": 25733,
+          "output_total": 533,
+          "output_visible": 75,
+          "reasoning": 458,
+          "cache_read": 0,
+          "cache_write": 0,
+          "total_tokens": 26266,
+          "output_identity_holds": true,
+          "identity_hashes": [
+            "sha256:707d1ff547d65be7e35ffd9ad014e57c113e89b7b51c98a813b90a663c6997ef",
+            "sha256:4ecb0897d33a8dac6e5973befa93ab9a03035d63b0d9b942c8c2856c0015bf02"
+          ]
+        },
+        {
+          "lane": "retry_0",
+          "model_enum": 1318,
+          "fields_present": [
+            1,
+            2,
+            3,
+            6,
+            9,
+            10
+          ],
+          "input": 25733,
+          "output_total": 533,
+          "output_visible": 75,
+          "reasoning": 458,
+          "cache_read": 0,
+          "cache_write": 0,
+          "total_tokens": 26266,
+          "output_identity_holds": true,
+          "identity_hashes": [
+            "sha256:707d1ff547d65be7e35ffd9ad014e57c113e89b7b51c98a813b90a663c6997ef",
+            "sha256:4ecb0897d33a8dac6e5973befa93ab9a03035d63b0d9b942c8c2856c0015bf02"
+          ]
+        }
+      ],
+      "native_source_enum": 17
+    },
+    {
+      "family": "antigravity-cli",
+      "category": "retry",
+      "database_hash": "09a7d2f343113b57b9d215d5721c8143e426204ba7a59e4d26a2084b8d3a999a",
+      "time_sanitization": "whole-day offset to first observed day 2026-01-01 UTC; no time-of-day alteration",
+      "gen_metadata": [
+        {
+          "idx": 1,
+          "data_base64": "EgIDBArqAhimCiKkAQimChCGLhhwKIigATAYOkdzaGEyNTY6MWQ0MTU2YWJhYTBkZWQ4M2FhZmNhMDRmMGVmM2M5MDQ5M2ZlNGYxM2I1YjBiOWM0MzQyOTkwOGRkOTk3NTJjY0gcUFRaR3NoYTI1NjpkYTFkNTZkZTYyYzhkYWIyYmJmNDhiNjI1YjY1MjU1MzYyMDgwNWIwNDBlZTdiNTYyNzFkNGY4NjBjZGJhYzUzSgCKAacBEqQBCKYKEIYuGHAoiKABMBg6R3NoYTI1NjoxZDQxNTZhYmFhMGRlZDgzYWFmY2EwNGYwZWYzYzkwNDkzZmU0ZjEzYjViMGI5YzQzNDI5OTA4ZGQ5OTc1MmNjSBxQVFpHc2hhMjU2OmRhMWQ1NmRlNjJjOGRhYjJiYmY0OGI2MjViNjUyNTUzNjIwODA1YjA0MGVlN2I1NjI3MWQ0Zjg2MGNkYmFjNTOaARBnZW1pbmktMy44LWZsYXNo"
+        }
+      ],
+      "steps": [
+        {
+          "idx": 3,
+          "step_type": 15,
+          "status": 3,
+          "metadata_base64": "CgsIzNDYygYQ2MP/IjIMCM7Q2MoGENyFn7ADOgwIztDYygYQ4KzWwQNCDAjO0NjKBhDgrNbBA0qkAQimChCGLhhwKIigATAYOkdzaGEyNTY6MWQ0MTU2YWJhYTBkZWQ4M2FhZmNhMDRmMGVmM2M5MDQ5M2ZlNGYxM2I1YjBiOWM0MzQyOTkwOGRkOTk3NTJjY0gcUFRaR3NoYTI1NjpkYTFkNTZkZTYyYzhkYWIyYmJmNDhiNjI1YjY1MjU1MzYyMDgwNWIwNDBlZTdiNTYyNzFkNGY4NjBjZGJhYzUzWKYKggIMCM7Q2MoGEOCs1sED"
+        }
+      ],
+      "oracle_usage_records": [
+        {
+          "lane": "direct",
+          "model_enum": 1318,
+          "fields_present": [
+            1,
+            2,
+            3,
+            5,
+            6,
+            9,
+            10
+          ],
+          "input": 5894,
+          "output_total": 112,
+          "output_visible": 84,
+          "reasoning": 28,
+          "cache_read": 20488,
+          "cache_write": 0,
+          "total_tokens": 26494,
+          "output_identity_holds": true,
+          "identity_hashes": [
+            "sha256:1d4156abaa0ded83aafca04f0ef3c90493fe4f13b5b0b9c43429908dd99752cc",
+            "sha256:da1d56de62c8dab2bbf48b625b652553620805b040ee7b56271d4f860cdbac53"
+          ]
+        },
+        {
+          "lane": "retry_0",
+          "model_enum": 1318,
+          "fields_present": [
+            1,
+            2,
+            3,
+            5,
+            6,
+            9,
+            10
+          ],
+          "input": 5894,
+          "output_total": 112,
+          "output_visible": 84,
+          "reasoning": 28,
+          "cache_read": 20488,
+          "cache_write": 0,
+          "total_tokens": 26494,
+          "output_identity_holds": true,
+          "identity_hashes": [
+            "sha256:1d4156abaa0ded83aafca04f0ef3c90493fe4f13b5b0b9c43429908dd99752cc",
+            "sha256:da1d56de62c8dab2bbf48b625b652553620805b040ee7b56271d4f860cdbac53"
+          ]
+        }
+      ],
+      "native_source_enum": 17
+    },
+    {
+      "family": "antigravity-cli",
+      "category": "normal_step",
+      "database_hash": "09a7d2f343113b57b9d215d5721c8143e426204ba7a59e4d26a2084b8d3a999a",
+      "time_sanitization": "whole-day offset to first observed day 2026-01-01 UTC; no time-of-day alteration",
+      "gen_metadata": [],
+      "steps": [
+        {
+          "idx": 1,
+          "step_type": 15,
+          "status": 3,
+          "metadata_base64": "CgwIxtDYygYQsLWvswMyDAjK0NjKBhCg8crYAjoMCMrQ2MoGEPzQ3eoCQgwIytDYygYQ/NDd6gJKowEIpgoQhckBGJUEMBg6R3NoYTI1Njo3MDdkMWZmNTQ3ZDY1YmU3ZTM1ZmZkOWFkMDE0ZTU3YzExM2U4OWI3YjUxYzk4YTgxM2I5MGE2NjNjNjk5N2VmSMoDUEtaR3NoYTI1Njo0ZWNiMDg5N2QzM2E4ZGFjNmU1OTczYmVmYTkzYWI5YTAzMDM1ZDYzYjBkOWI5NDJjOGMyODU2YzAwMTViZjAyWKYKggIMCMrQ2MoGEPzQ3eoC"
+        }
+      ],
+      "oracle_usage_records": [
+        {
+          "lane": "direct",
+          "model_enum": 1318,
+          "fields_present": [
+            1,
+            2,
+            3,
+            6,
+            9,
+            10
+          ],
+          "input": 25733,
+          "output_total": 533,
+          "output_visible": 75,
+          "reasoning": 458,
+          "cache_read": 0,
+          "cache_write": 0,
+          "total_tokens": 26266,
+          "output_identity_holds": true,
+          "identity_hashes": [
+            "sha256:707d1ff547d65be7e35ffd9ad014e57c113e89b7b51c98a813b90a663c6997ef",
+            "sha256:4ecb0897d33a8dac6e5973befa93ab9a03035d63b0d9b942c8c2856c0015bf02"
+          ]
+        }
+      ],
+      "native_source_enum": 17
+    },
+    {
+      "family": "antigravity-cli",
+      "category": "error_step",
+      "database_hash": "6e0ef83f2a795854309e3fe28c3702354efcbab2d17e7f0c53138b7a63fb1a1a",
+      "time_sanitization": "whole-day offset to first observed day 2026-01-01 UTC; no time-of-day alteration",
+      "gen_metadata": [],
+      "steps": [
+        {
+          "idx": 52,
+          "step_type": 132,
+          "status": 7,
+          "metadata_base64": "CgsI3tPXygYQiL+uazILCN7T18oGEMjPzms6Cwje09fKBhDIz85rQgsI3tPXygYQmPTUb1imCoICCwje09fKBhDIz85r"
+        }
+      ],
+      "oracle_usage_records": [],
+      "native_source_enum": 17
+    },
+    {
+      "family": "antigravity-cli",
+      "category": "zero_usage",
+      "database_hash": "d7cc0879f3691efe5904954954c9599616d3baef826ee5bcc1bf543b2d235786",
+      "time_sanitization": "whole-day offset to first observed day 2026-01-01 UTC; no time-of-day alteration",
+      "gen_metadata": [
+        {
+          "idx": 1,
+          "data_base64": "EgIDBAoUGJIKIgMIkgpKAIoBBxIDCJIKKAE="
+        }
+      ],
+      "steps": [],
+      "oracle_usage_records": [
+        {
+          "lane": "direct",
+          "model_enum": 1298,
+          "fields_present": [
+            1
+          ],
+          "input": 0,
+          "output_total": 0,
+          "output_visible": 0,
+          "reasoning": 0,
+          "cache_read": 0,
+          "cache_write": 0,
+          "total_tokens": 0,
+          "output_identity_holds": true,
+          "identity_hashes": []
+        },
+        {
+          "lane": "retry_0",
+          "model_enum": 1298,
+          "fields_present": [
+            1
+          ],
+          "input": 0,
+          "output_total": 0,
+          "output_visible": 0,
+          "reasoning": 0,
+          "cache_read": 0,
+          "cache_write": 0,
+          "total_tokens": 0,
+          "output_identity_holds": true,
+          "identity_hashes": []
+        }
+      ],
+      "native_source_enum": 17
+    },
+    {
+      "family": "antigravity-ide",
+      "category": "normal_gen",
+      "database_hash": "9910c6a55cf8a54d7fcef007aaec368337c537bc9a5c88d69d19d308b13879ca",
+      "time_sanitization": "whole-day offset to first observed day 2026-01-01 UTC; no time-of-day alteration",
+      "gen_metadata": [
+        {
+          "idx": 0,
+          "data_base64": "EgIDBAr7ARimCiJaCKYKEL3IARjfBDAYSJUEUEpaR3NoYTI1Njo2NGUyMTNjZWIxZmIwYjAwMTFhYTlmZjRkZjdmMmRkODVmY2M1M2FiODlhZWU2MWQ1ZGJlMTY2MzhhOTliNzQxSg4iDAj9xtjKBhCMkPf0AooBXBJaCKYKEL3IARjfBDAYSJUEUEpaR3NoYTI1Njo2NGUyMTNjZWIxZmIwYjAwMTFhYTlmZjRkZjdmMmRkODVmY2M1M2FiODlhZWU2MWQ1ZGJlMTY2MzhhOTliNzQxmgEQZ2VtaW5pLTMuOC1mbGFzaKoBF0dlbWluaSAzLjggRmxhc2ggKEhpZ2gp"
+        }
+      ],
+      "steps": [
+        {
+          "idx": 3,
+          "step_type": 15,
+          "status": 3,
+          "metadata_base64": "CgwI/cbYygYQjJD39AIyDAiAx9jKBhDojIvaAToMCIDH2MoGEPSWxewBQgwIgMfYygYQ9JbF7AFKWgimChC9yAEY3wQwGEiVBFBKWkdzaGEyNTY6NjRlMjEzY2ViMWZiMGIwMDExYWE5ZmY0ZGY3ZjJkZDg1ZmNjNTNhYjg5YWVlNjFkNWRiZTE2NjM4YTk5Yjc0MVimCoICDAiAx9jKBhD0lsXsAQ=="
+        }
+      ],
+      "oracle_usage_records": [
+        {
+          "lane": "direct",
+          "model_enum": 1318,
+          "fields_present": [
+            1,
+            2,
+            3,
+            6,
+            9,
+            10
+          ],
+          "input": 25661,
+          "output_total": 607,
+          "output_visible": 74,
+          "reasoning": 533,
+          "cache_read": 0,
+          "cache_write": 0,
+          "total_tokens": 26268,
+          "output_identity_holds": true,
+          "identity_hashes": [
+            "sha256:64e213ceb1fb0b0011aa9ff4df7f2dd85fcc53ab89aee61d5dbe16638a99b741"
+          ]
+        },
+        {
+          "lane": "retry_0",
+          "model_enum": 1318,
+          "fields_present": [
+            1,
+            2,
+            3,
+            6,
+            9,
+            10
+          ],
+          "input": 25661,
+          "output_total": 607,
+          "output_visible": 74,
+          "reasoning": 533,
+          "cache_read": 0,
+          "cache_write": 0,
+          "total_tokens": 26268,
+          "output_identity_holds": true,
+          "identity_hashes": [
+            "sha256:64e213ceb1fb0b0011aa9ff4df7f2dd85fcc53ab89aee61d5dbe16638a99b741"
+          ]
+        }
+      ],
+      "native_source_enum": 1
+    },
+    {
+      "family": "antigravity-ide",
+      "category": "retry",
+      "database_hash": "9910c6a55cf8a54d7fcef007aaec368337c537bc9a5c88d69d19d308b13879ca",
+      "time_sanitization": "whole-day offset to first observed day 2026-01-01 UTC; no time-of-day alteration",
+      "gen_metadata": [
+        {
+          "idx": 1,
+          "data_base64": "EgIGBwr+ARimCiJcCKYKEPhnGNgBKIWgATAYSH9QWVpHc2hhMjU2OjE2NjRiYzE3N2Q2NzkyOTY4OTkzNjNhNTlkZDRlYTM4NDVhNTI0ZmI0OTNiMWMzNmMxODFiM2MwOTQ1YWNiY2FKDSILCIHH2MoGENiOkHGKAV4SXAimChD4ZxjYASiFoAEwGEh/UFlaR3NoYTI1NjoxNjY0YmMxNzdkNjc5Mjk2ODk5MzYzYTU5ZGQ0ZWEzODQ1YTUyNGZiNDkzYjFjMzZjMTgxYjNjMDk0NWFjYmNhmgEQZ2VtaW5pLTMuOC1mbGFzaKoBF0dlbWluaSAzLjggRmxhc2ggKEhpZ2gp"
+        }
+      ],
+      "steps": [
+        {
+          "idx": 6,
+          "step_type": 15,
+          "status": 3,
+          "metadata_base64": "CgsIgcfYygYQ2I6QcTIMCILH2MoGEMSX7aMCOgwIgsfYygYQkILArQJCDAiCx9jKBhCQgsCtAkpcCKYKEPhnGNgBKIWgATAYSH9QWVpHc2hhMjU2OjE2NjRiYzE3N2Q2NzkyOTY4OTkzNjNhNTlkZDRlYTM4NDVhNTI0ZmI0OTNiMWMzNmMxODFiM2MwOTQ1YWNiY2FYpgqCAgwIgsfYygYQkILArQI="
+        }
+      ],
+      "oracle_usage_records": [
+        {
+          "lane": "direct",
+          "model_enum": 1318,
+          "fields_present": [
+            1,
+            2,
+            3,
+            5,
+            6,
+            9,
+            10
+          ],
+          "input": 13304,
+          "output_total": 216,
+          "output_visible": 89,
+          "reasoning": 127,
+          "cache_read": 20485,
+          "cache_write": 0,
+          "total_tokens": 34005,
+          "output_identity_holds": true,
+          "identity_hashes": [
+            "sha256:1664bc177d679296899363a59dd4ea3845a524fb493b1c36c181b3c0945acbca"
+          ]
+        },
+        {
+          "lane": "retry_0",
+          "model_enum": 1318,
+          "fields_present": [
+            1,
+            2,
+            3,
+            5,
+            6,
+            9,
+            10
+          ],
+          "input": 13304,
+          "output_total": 216,
+          "output_visible": 89,
+          "reasoning": 127,
+          "cache_read": 20485,
+          "cache_write": 0,
+          "total_tokens": 34005,
+          "output_identity_holds": true,
+          "identity_hashes": [
+            "sha256:1664bc177d679296899363a59dd4ea3845a524fb493b1c36c181b3c0945acbca"
+          ]
+        }
+      ],
+      "native_source_enum": 1
+    },
+    {
+      "family": "antigravity-ide",
+      "category": "normal_step",
+      "database_hash": "9910c6a55cf8a54d7fcef007aaec368337c537bc9a5c88d69d19d308b13879ca",
+      "time_sanitization": "whole-day offset to first observed day 2026-01-01 UTC; no time-of-day alteration",
+      "gen_metadata": [],
+      "steps": [
+        {
+          "idx": 3,
+          "step_type": 15,
+          "status": 3,
+          "metadata_base64": "CgwI/cbYygYQjJD39AIyDAiAx9jKBhDojIvaAToMCIDH2MoGEPSWxewBQgwIgMfYygYQ9JbF7AFKWgimChC9yAEY3wQwGEiVBFBKWkdzaGEyNTY6NjRlMjEzY2ViMWZiMGIwMDExYWE5ZmY0ZGY3ZjJkZDg1ZmNjNTNhYjg5YWVlNjFkNWRiZTE2NjM4YTk5Yjc0MVimCoICDAiAx9jKBhD0lsXsAQ=="
+        }
+      ],
+      "oracle_usage_records": [
+        {
+          "lane": "direct",
+          "model_enum": 1318,
+          "fields_present": [
+            1,
+            2,
+            3,
+            6,
+            9,
+            10
+          ],
+          "input": 25661,
+          "output_total": 607,
+          "output_visible": 74,
+          "reasoning": 533,
+          "cache_read": 0,
+          "cache_write": 0,
+          "total_tokens": 26268,
+          "output_identity_holds": true,
+          "identity_hashes": [
+            "sha256:64e213ceb1fb0b0011aa9ff4df7f2dd85fcc53ab89aee61d5dbe16638a99b741"
+          ]
+        }
+      ],
+      "native_source_enum": 1
+    },
+    {
+      "family": "antigravity-ide",
+      "category": "error_step",
+      "database_hash": "0d7dfdf99efa3953005e37d63d608f3eae2aa41c6d15b9582eca1ab5d756a243",
+      "time_sanitization": "whole-day offset to first observed day 2026-01-01 UTC; no time-of-day alteration",
+      "gen_metadata": [],
+      "steps": [
+        {
+          "idx": 13,
+          "step_type": 9,
+          "status": 7,
+          "metadata_base64": "CgwInaHXygYQmO/swwIyDAidodfKBhCY3YvEAjoMCJ2h18oGEJjdi8QCQgwInaHXygYQyI2rxgJYpgqyAQwInaHXygYQmN2LxAKCAgwInaHXygYQ2NjLxAI="
+        }
+      ],
+      "oracle_usage_records": [],
+      "native_source_enum": 1
+    },
+    {
+      "family": "antigravity-ide",
+      "category": "empty",
+      "database_hash": "d5493cc49a4f31b1dd3f35d3195ff8cb093d6de542bae819fa39b57eca827ed9",
+      "gen_metadata": [],
+      "steps": [],
+      "expected_unique_tokens": 0,
+      "native_source_enum": 1
+    },
+    {
+      "family": "antigravity-cli",
+      "category": "multiple_attempts",
+      "database_hash": "1d61bbc233fd29492a2c001d2541fbb52232bd401fad72df79f6300d05ff3e31",
+      "time_sanitization": "whole-day offset to first selected observed day 2026-01-01 UTC",
+      "gen_metadata": [
+        {
+          "idx": 13,
+          "data_base64": "EgMeHyAK5wIYrwgiXwivCBC+zAIYvEkogf4CMBhItQVQh0RaR3NoYTI1Njo3YWQ1YjU1NDkzNGY1ZjYxYzFhODJhNTMyMTExMzQ2YTljY2ZlZmIxNTBhNDE4N2FhMTM1MTI2ODYzOGZmYTRlSg4iDAiftNrKBhC0vquvAXABigFeEloIrwgQ0boCGOA+MBhIEVDPPlpHc2hhMjU2OjdhZDViNTU0OTM0ZjVmNjFjMWE4MmE1MzIxMTEzNDZhOWNjZmVmYjE1MGE0MTg3YWExMzUxMjY4NjM4ZmZhNGUoAooBYBJeCK8IEO0RGNwKKIH+AjAYSKQFULgFWkdzaGEyNTY6Y2JkM2Q2MzczMGRiMGYzYzhiNDIxMjZjMTBiNGYxMWYzNTAyNDM1Mzc2YTE1YmU4NjJmMTEwZTJiYzNkOTA2NZoBEGdlbWluaS0zLjYtZmxhc2iqARdHZW1pbmkgMy42IEZsYXNoIChIaWdoKQ=="
+        }
+      ],
+      "steps": [
+        {
+          "idx": 30,
+          "step_type": 15,
+          "status": 3,
+          "metadata_base64": "CgwIj7TaygYQ6I3Z+gIyDAiQtNrKBhCMqPaWAjoMCJ+02soGEIytzKwBQgwIn7TaygYQjK3MrAFKWgivCBDRugIY4D4wGEgRUM8+WkdzaGEyNTY6N2FkNWI1NTQ5MzRmNWY2MWMxYTgyYTUzMjExMTM0NmE5Y2NmZWZiMTUwYTQxODdhYTEzNTEyNjg2MzhmZmE0ZVivCIICDAiftNrKBhCMrcysAQ=="
+        },
+        {
+          "idx": 32,
+          "step_type": 15,
+          "status": 3,
+          "metadata_base64": "CgwIn7TaygYQrOuMsAEyCwihtNrKBhD86MZcOgwIorTaygYQkNvJsQFCDAiitNrKBhCQ28mxAUpeCK8IEO0RGNwKKIH+AjAYSKQFULgFWkdzaGEyNTY6Y2JkM2Q2MzczMGRiMGYzYzhiNDIxMjZjMTBiNGYxMWYzNTAyNDM1Mzc2YTE1YmU4NjJmMTEwZTJiYzNkOTA2NVivCIICDAiitNrKBhCQ28mxAQ=="
+        }
+      ],
+      "oracle_usage_records": [
+        {
+          "lane": "direct",
+          "model_enum": 1071,
+          "fields_present": [
+            1,
+            2,
+            3,
+            5,
+            6,
+            9,
+            10
+          ],
+          "input": 42558,
+          "output_total": 9404,
+          "output_visible": 8711,
+          "reasoning": 693,
+          "cache_read": 48897,
+          "cache_write": 0,
+          "total_tokens": 100859,
+          "output_identity_holds": true,
+          "identity_hashes": [
+            "sha256:7ad5b554934f5f61c1a82a532111346a9ccfefb150a4187aa1351268638ffa4e"
+          ]
+        },
+        {
+          "lane": "retry_0",
+          "model_enum": 1071,
+          "fields_present": [
+            1,
+            2,
+            3,
+            6,
+            9,
+            10
+          ],
+          "input": 40273,
+          "output_total": 8032,
+          "output_visible": 8015,
+          "reasoning": 17,
+          "cache_read": 0,
+          "cache_write": 0,
+          "total_tokens": 48305,
+          "output_identity_holds": true,
+          "identity_hashes": [
+            "sha256:7ad5b554934f5f61c1a82a532111346a9ccfefb150a4187aa1351268638ffa4e"
+          ]
+        },
+        {
+          "lane": "retry_1",
+          "model_enum": 1071,
+          "fields_present": [
+            1,
+            2,
+            3,
+            5,
+            6,
+            9,
+            10
+          ],
+          "input": 2285,
+          "output_total": 1372,
+          "output_visible": 696,
+          "reasoning": 676,
+          "cache_read": 48897,
+          "cache_write": 0,
+          "total_tokens": 52554,
+          "output_identity_holds": true,
+          "identity_hashes": [
+            "sha256:cbd3d63730db0f3c8b42126c10b4f11f3502435376a15be862f110e2bc3d9065"
+          ]
+        }
+      ],
+      "retry_info_count": 2,
+      "retry_error_presence": [
+        true,
+        false
+      ],
+      "declared_retries": 1,
+      "native_source_enum": 17
+    },
+    {
+      "family": "antigravity-ide",
+      "category": "multiple_attempts",
+      "database_hash": "c53406a8798745c87895e26b1eb5f77d2d6cbd86742a4a2d97e753c2be4a0151",
+      "time_sanitization": "whole-day offset to first selected observed day 2026-01-01 UTC",
+      "gen_metadata": [
+        {
+          "idx": 21,
+          "data_base64": "EgQuLzAxCuYCGKYKIl4IpgoQxzEYhAooir0HMBhI2AhQrAFaR3NoYTI1NjphN2ZlNjEwMzY4ZWEyZjIzNmIyYmE3YzdiYTMwYWI4MzliMmU3Y2NhMmRmYzk2YmVkNGEzNjBjN2U1NmEzNmI3Sg4iDAjErtjKBhCQzP7TAXABigFhEl0IpgoQshMYkQkoyN4DMBhIqwhQZlpHc2hhMjU2OmE3ZmU2MTAzNjhlYTJmMjM2YjJiYTdjN2JhMzBhYjgzOWIyZTdjY2EyZGZjOTZiZWQ0YTM2MGM3ZTU2YTM2YjcoAooBXRJbCKYKEJUeGHMowt4DMBhILVBGWkdzaGEyNTY6OWZiNjYwMDcwNTNmM2QyMWE5MTU5ZDdiOTlkYzE2ZGViMzdhNWJkODQ3MDI5ZTkxMmQ4MmU4MmEwYjAwYzkxMZoBEGdlbWluaS0zLjgtZmxhc2iqARdHZW1pbmkgMy44IEZsYXNoIChIaWdoKQ=="
+        }
+      ],
+      "steps": [
+        {
+          "idx": 46,
+          "step_type": 15,
+          "status": 3,
+          "metadata_base64": "CgwIu67YygYQ0PmX9wIyDAjCrtjKBhCQg7GkAjoMCMSu2MoGEITF3tEBQgwIxK7YygYQhMXe0QFKXQimChCyExiRCSjI3gMwGEirCFBmWkdzaGEyNTY6YTdmZTYxMDM2OGVhMmYyMzZiMmJhN2M3YmEzMGFiODM5YjJlN2NjYTJkZmM5NmJlZDRhMzYwYzdlNTZhMzZiN1imCoICDAjErtjKBhCExd7RAQ=="
+        },
+        {
+          "idx": 48,
+          "step_type": 15,
+          "status": 3,
+          "metadata_base64": "CgwIxK7YygYQ/O+/1QEyDAjIrtjKBhCssMm7AjoMCMiu2MoGEOz80MUCQgwIyK7YygYQ7PzQxQJKWwimChCVHhhzKMLeAzAYSC1QRlpHc2hhMjU2OjlmYjY2MDA3MDUzZjNkMjFhOTE1OWQ3Yjk5ZGMxNmRlYjM3YTViZDg0NzAyOWU5MTJkODJlODJhMGIwMGM5MTFYpgqCAgwIyK7YygYQ7PzQxQI="
+        }
+      ],
+      "oracle_usage_records": [
+        {
+          "lane": "direct",
+          "model_enum": 1318,
+          "fields_present": [
+            1,
+            2,
+            3,
+            5,
+            6,
+            9,
+            10
+          ],
+          "input": 6343,
+          "output_total": 1284,
+          "output_visible": 172,
+          "reasoning": 1112,
+          "cache_read": 122506,
+          "cache_write": 0,
+          "total_tokens": 130133,
+          "output_identity_holds": true,
+          "identity_hashes": [
+            "sha256:a7fe610368ea2f236b2ba7c7ba30ab839b2e7cca2dfc96bed4a360c7e56a36b7"
+          ]
+        },
+        {
+          "lane": "retry_0",
+          "model_enum": 1318,
+          "fields_present": [
+            1,
+            2,
+            3,
+            5,
+            6,
+            9,
+            10
+          ],
+          "input": 2482,
+          "output_total": 1169,
+          "output_visible": 102,
+          "reasoning": 1067,
+          "cache_read": 61256,
+          "cache_write": 0,
+          "total_tokens": 64907,
+          "output_identity_holds": true,
+          "identity_hashes": [
+            "sha256:a7fe610368ea2f236b2ba7c7ba30ab839b2e7cca2dfc96bed4a360c7e56a36b7"
+          ]
+        },
+        {
+          "lane": "retry_1",
+          "model_enum": 1318,
+          "fields_present": [
+            1,
+            2,
+            3,
+            5,
+            6,
+            9,
+            10
+          ],
+          "input": 3861,
+          "output_total": 115,
+          "output_visible": 70,
+          "reasoning": 45,
+          "cache_read": 61250,
+          "cache_write": 0,
+          "total_tokens": 65226,
+          "output_identity_holds": true,
+          "identity_hashes": [
+            "sha256:9fb66007053f3d21a9159d7b99dc16deb37a5bd847029e912d82e82a0b00c911"
+          ]
+        }
+      ],
+      "retry_info_count": 2,
+      "retry_error_presence": [
+        true,
+        false
+      ],
+      "declared_retries": 1,
+      "native_source_enum": 1
+    }
+  ]
+}

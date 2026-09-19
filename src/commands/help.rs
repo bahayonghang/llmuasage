@@ -310,7 +310,7 @@ const ENGLISH_COMMANDS: &[(&str, &str)] = &[
         "Show 5-hour usage blocks and burn-rate projections.",
     ),
     (
-        "claude / codex / opencode / antigravity",
+        "claude / codex / opencode / antigravity / antigravity-ide",
         "Show focused daily, weekly, monthly, or session reports for one source.",
     ),
     (
@@ -411,7 +411,7 @@ const ENGLISH_REPORT_OPTIONS: &[(&str, &str)] = &[
     ),
     (
         "--source <SOURCE>",
-        "Restrict reports or sync to codex, claude, opencode, antigravity, kimi_code, pi, omp, or grok.",
+        "Restrict reports or sync to codex, claude, opencode, antigravity, antigravity_ide, kimi_code, pi, omp, grok, zcode, or deepseek_harness.",
     ),
     (
         "--host <LABEL>",
@@ -473,7 +473,7 @@ const CHINESE_COMMANDS: &[(&str, &str)] = &[
     ),
     ("blocks", "显示 5 小时用量窗口和 burn-rate 预测。"),
     (
-        "claude / codex / opencode / antigravity",
+        "claude / codex / opencode / antigravity / antigravity-ide",
         "显示单一来源的聚焦 daily、weekly、monthly 或 session 报表。",
     ),
     ("statusline", "输出一行适合 statusline 的用量摘要。"),
@@ -541,7 +541,7 @@ const CHINESE_REPORT_OPTIONS: &[(&str, &str)] = &[
     ("--no-cost", "从报表输出隐藏成本列和成本字段。"),
     (
         "--source <SOURCE>",
-        "报表或同步限制到 codex、claude、opencode、antigravity、kimi_code、pi、omp 或 grok。",
+        "报表或同步限制到 codex、claude、opencode、antigravity、antigravity_ide、kimi_code、pi、omp、grok、zcode 或 deepseek_harness。",
     ),
     ("--host <LABEL>", "报表限制到一个已注册主机 label。"),
     (

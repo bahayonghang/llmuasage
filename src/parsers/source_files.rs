@@ -273,14 +273,35 @@ fn is_ownership_skip_note(error: &str) -> bool {
 /// `~/.gemini/...`). `GEMINI_CLI_HOME` carries the same meaning as the gemini
 /// platform monitor (the Gemini root, not the conversations directory).
 pub(crate) fn list_antigravity_conversation_files() -> SourceFileListing {
+    list_antigravity_files(false)
+}
+
+/// IDE SQLite artifacts share the Gemini home but have independent ownership.
+pub(crate) fn list_antigravity_ide_conversation_files() -> SourceFileListing {
+    list_antigravity_files(true)
+}
+
+fn list_antigravity_files(ide: bool) -> SourceFileListing {
     let home_dir = resolve_home_dir();
     let conversations = std::env::var_os("GEMINI_CLI_HOME")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| home_dir.join(".gemini"))
-        .join("antigravity-cli")
+        .join(if ide {
+            "antigravity-ide"
+        } else {
+            "antigravity-cli"
+        })
         .join("conversations");
-    list_matching_files(conversations, |name, _path| name.ends_with(".db"))
+    let mut listing = list_matching_files(conversations, |name, _path| name.ends_with(".db"));
+    listing.paths = listing
+        .paths
+        .into_iter()
+        .map(|path| canonical_path(&path))
+        .collect();
+    listing.paths.sort();
+    listing.paths.dedup();
+    listing
 }
 
 /// Enumerates DeepSeek Harness session logs under `$DSH_HOME/sessions`

@@ -61,6 +61,7 @@ pub struct HomeOverviewSeriesItem {
     pub claude: HomeOverviewPlatformStats,
     pub codex: HomeOverviewPlatformStats,
     pub antigravity: HomeOverviewPlatformStats,
+    pub antigravity_ide: HomeOverviewPlatformStats,
     pub opencode: HomeOverviewPlatformStats,
 }
 
@@ -350,6 +351,7 @@ fn load_home_series(
             "claude" => item.claude = stats,
             "codex" => item.codex = stats,
             "antigravity" => item.antigravity = stats,
+            "antigravity_ide" => item.antigravity_ide = stats,
             "opencode" => item.opencode = stats,
             _ => {}
         }

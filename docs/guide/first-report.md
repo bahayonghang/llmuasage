@@ -69,9 +69,10 @@ llmusage claude daily
 llmusage codex monthly --json
 llmusage opencode weekly --no-cost
 llmusage antigravity session
+llmusage antigravity-ide session
 ```
 
-`claude`, `codex`, `opencode`, and `antigravity` are source hosts. Each supports `daily`, `weekly`, `monthly`, and `session`, with the same data as `<period> --source <source>`. Focused text and JSON remove the Agent comparison layer; JSON has no `agent` or `agents` fields. Passing the same `--source` is accepted, while a conflicting source is rejected. `blocks` is intentionally not available under a source host.
+`claude`, `codex`, `opencode`, `antigravity`, and `antigravity-ide` are source hosts. Each supports `daily`, `weekly`, `monthly`, and `session`, with the same data as `<period> --source <source>`. Focused text and JSON remove the Agent comparison layer; JSON has no `agent` or `agents` fields. Passing the same `--source` is accepted, while a conflicting source is rejected. `blocks` is intentionally not available under a source host.
 
 This is a uniform llmusage report surface, not a claim that every source has the same ccusage-specific capability matrix.
 

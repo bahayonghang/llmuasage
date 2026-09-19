@@ -31,7 +31,7 @@ Usage: llmusage [OPTIONS] [COMMAND]
 | `--locale <LOCALE>` | 标题和数字格式的轻量 locale 选择 |
 | `--compact` | 使用更窄的表格布局 |
 | `--no-cost` | 从报表输出隐藏成本列与成本字段 |
-| `--source codex\|claude\|opencode\|antigravity\|kimi_code\|pi\|omp\|grok` | 将顶层报表或同步命令限制到一个来源 |
+| `--source codex\|claude\|opencode\|antigravity\|antigravity_ide\|kimi_code\|pi\|omp\|grok` | 将顶层报表或同步命令限制到一个来源 |
 | `--host <LABEL>` | 将报表限制到一个已注册主机 label |
 | `-A, --by-agent` | 在统一报表 JSON 中加入嵌套来源行 |
 | `--sections daily\|weekly\|monthly\|session` | 在一次组合输出中加入报表周期 |
@@ -100,9 +100,10 @@ llmusage claude daily
 llmusage codex monthly --json
 llmusage opencode weekly --no-cost
 llmusage antigravity session
+llmusage antigravity-ide session
 ```
 
-`claude`、`codex`、`opencode`、`antigravity` 都挂载 `daily`、`weekly`、`monthly`、`session`。聚焦命令会注入对应来源筛选，数据与 `<period> --source <source>` 相同，并移除 `Agent`/`Detected` 对比层。其 JSON 不含 `agent` 或 `agents` 字段。重复传入同值 `--source` 可以接受；冲突值会被拒绝。`blocks` 有意不在这个命令树中。
+`claude`、`codex`、`opencode`、`antigravity`、`antigravity-ide` 都挂载 `daily`、`weekly`、`monthly`、`session`。聚焦命令会注入对应来源筛选，数据与 `<period> --source <source>` 相同，并移除 `Agent`/`Detected` 对比层。其 JSON 不含 `agent` 或 `agents` 字段。重复传入同值 `--source` 可以接受；冲突值会被拒绝。`blocks` 有意不在这个命令树中。
 
 这是 llmusage 的均匀扩展，不是逐来源复刻 ccusage 的能力矩阵。
 

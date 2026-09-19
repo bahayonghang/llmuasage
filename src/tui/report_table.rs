@@ -1379,6 +1379,7 @@ fn source_color(source: SourceKind) -> Color {
         SourceKind::Claude => Color::Magenta,
         SourceKind::Opencode => Color::Green,
         SourceKind::Antigravity => Color::Blue,
+        SourceKind::AntigravityIde => Color::DarkBlue,
         SourceKind::KimiCode => Color::Yellow,
         SourceKind::Pi => Color::Red,
         SourceKind::Omp => Color::DarkMagenta,

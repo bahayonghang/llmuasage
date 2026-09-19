@@ -476,6 +476,12 @@ fn focused_source_reports_match_source_filters_without_comparison_fields() -> Re
         ("codex:focused:1", "codex", "gpt-5", 10),
         ("opencode:focused:1", "opencode", "gpt-5-mini", 30),
         ("antigravity:focused:1", "antigravity", "gemini-2.5-pro", 40),
+        (
+            "antigravity_ide:focused:1",
+            "antigravity_ide",
+            "gemini-2.5-pro",
+            50,
+        ),
     ] {
         fixture.seed_event(SeedEvent {
             event_key,
@@ -529,6 +535,7 @@ fn focused_source_reports_match_source_filters_without_comparison_fields() -> Re
         ("codex", 10),
         ("opencode", 30),
         ("antigravity", 40),
+        ("antigravity-ide", 50),
     ] {
         for period in ["daily", "weekly", "monthly", "session"] {
             let json = fixture.json(&[

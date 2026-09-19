@@ -1,0 +1,29 @@
+{
+  "id": "antigravity-cli-accounting-refresh",
+  "name": "antigravity-cli-accounting-refresh",
+  "title": "校正 Antigravity CLI Token 语义与现代 SQLite 解析",
+  "description": "核实并校正模型编号、输出/推理、cache write 与 steps/retry，收敛历史修复和版本合同。",
+  "status": "in_progress",
+  "dev_type": "backend",
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-09-19",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "09-19-upstream-antigravity-token-statistics",
+  "relatedFiles": [
+    "src/parsers/antigravity.rs",
+    "tests/sync/sources/antigravity.rs"
+  ],
+  "notes": "Implementation and AC1-AC4 verified: descriptor channels, attempts, grouped replay, staged v3 repair preserving hooks. Native110DB/2395events/98333012tokens independently reconciled. All gates passed. Formal in_progress retained; no commit/archive.",
+  "meta": {}
+}

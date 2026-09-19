@@ -268,17 +268,21 @@ async fn run_once_locked_with_remote_source(
             .collect(),
     };
     let driver_started = Instant::now();
-    let drive_result = driver::drive_with_events(driver::DriveContext {
-        parsers: &parsers,
-        store,
-        writer: &mut writer,
-        parallelism,
-        lock_wait_ms,
-        recent_cutoff,
-        sender: sender.as_deref_mut(),
-        cancel,
-        sweep_host_ids: vec![LOCAL_HOST_ID.to_string()],
-    })
+    let drive_result = driver::drive_with_rebuild(
+        driver::DriveContext {
+            parsers: &parsers,
+            store,
+            writer: &mut writer,
+            parallelism,
+            lock_wait_ms,
+            recent_cutoff,
+            sender: sender.as_deref_mut(),
+            cancel,
+            sweep_host_ids: vec![LOCAL_HOST_ID.to_string()],
+        },
+        options.rebuild,
+        options.allow_lossy_rebuild,
+    )
     .await;
     let sources = drive_result?;
     tracing::debug!(
@@ -297,6 +301,19 @@ async fn run_once_locked_with_remote_source(
         total_inserted += source.events_inserted;
         source.stored_events = stored_events_for_source(store, source.source)?;
         stored_queries += 1;
+        let native_antigravity = matches!(
+            source.source,
+            SourceKind::Antigravity | SourceKind::AntigravityIde
+        );
+        let legacy_accounting =
+            native_antigravity && store.has_legacy_token_accounting(source.source)?;
+        let accounting_warning = if legacy_accounting {
+            Some(SyncStatusStore::legacy_repair_warning(source.source))
+        } else if source.source == SourceKind::Antigravity {
+            store.retained_antigravity_history_warning(LOCAL_HOST_ID)?
+        } else {
+            None
+        };
         sync_statuses.push(SourceSyncStatus {
             source: source.source.as_str().to_string(),
             files_processed: source.files_processed as i64,
@@ -306,11 +323,15 @@ async fn run_once_locked_with_remote_source(
             events_replayed: source.events_replayed as i64,
             events_inserted: source.events_inserted as i64,
             stored_events: source.stored_events as i64,
-            token_accounting_version: Some(crate::store::expected_token_accounting_version(
-                source.source,
-            )),
-            legacy_token_accounting: false,
-            token_accounting_warning: None,
+            token_accounting_version: if native_antigravity {
+                store.token_accounting_version(source.source)?
+            } else {
+                Some(crate::store::expected_token_accounting_version(
+                    source.source,
+                ))
+            },
+            legacy_token_accounting: legacy_accounting,
+            token_accounting_warning: accounting_warning,
             parse_ms: source.parse_ms as i64,
             write_ms: source.write_ms as i64,
             lock_wait_ms: source.lock_wait_ms as i64,
@@ -401,6 +422,14 @@ async fn run_once_locked_with_remote_source(
             if skipped_legacy.contains(&source.source) {
                 continue;
             }
+            // Native Antigravity certifies only a complete staged snapshot in
+            // the same transaction as its events, including explicit rebuilds.
+            if matches!(
+                source.source,
+                SourceKind::Antigravity | SourceKind::AntigravityIde
+            ) {
+                continue;
+            }
             if registry::source_descriptor(source.source)
                 .is_some_and(|descriptor| descriptor.capabilities.parser)
             {
@@ -414,6 +443,13 @@ async fn run_once_locked_with_remote_source(
     if recent_cutoff.is_some() && !cancel.is_cancelled() {
         for source in &source_stats {
             if skipped_legacy.contains(&source.source) {
+                continue;
+            }
+            if matches!(
+                source.source,
+                SourceKind::Antigravity | SourceKind::AntigravityIde
+            ) && source.last_error.is_some()
+            {
                 continue;
             }
             store.sync_status().mark_recent_completed(
@@ -471,33 +507,12 @@ fn reset_for_rebuild(
     contacted: &BTreeSet<String>,
 ) -> Result<()> {
     let rebuild_sources = rebuild_sources(options.source, parser_sources)?;
-    assert_no_unattributed_antigravity_history(store, &rebuild_sources)?;
     assert_lossless_rebuild(store, options, &rebuild_sources, contacted)?;
-    reset_sources_for_rebuild(store, &rebuild_sources)
-}
-
-/// Refuses any rebuild that would delete hook-era Antigravity history.
-///
-/// Those rows predate the passive parser, carry no `source_path_hash`
-/// attribution, and do not exist in `conversations/*.db`, so once deleted they
-/// are gone forever. The guard is absolute (not bypassed by
-/// `--allow-lossy-rebuild`): export a backup first if you truly need to clear
-/// them. Once no unattributed rows remain, rebuild behaves like any other
-/// parser-backed source.
-fn assert_no_unattributed_antigravity_history(
-    store: &Store,
-    rebuild_sources: &[SourceKind],
-) -> Result<()> {
-    if !rebuild_sources.contains(&SourceKind::Antigravity) {
-        return Ok(());
-    }
-    let unattributed = store.unattributed_event_count(SourceKind::Antigravity)?;
-    if unattributed == 0 {
-        return Ok(());
-    }
-    bail!(
-        "Refusing `sync --rebuild` for antigravity because {unattributed} stored event(s) are hook-era history without file attribution; they cannot be reconstructed from local artifacts and are not covered by --allow-lossy-rebuild. Export a backup first (e.g. `llmusage export`) if you intentionally want to drop them."
-    )
+    let pre_reset_sources = rebuild_sources
+        .into_iter()
+        .filter(|source| !matches!(source, SourceKind::Antigravity | SourceKind::AntigravityIde))
+        .collect::<Vec<_>>();
+    reset_sources_for_rebuild(store, &pre_reset_sources)
 }
 
 fn reset_sources_for_rebuild(store: &Store, sources: &[SourceKind]) -> Result<()> {

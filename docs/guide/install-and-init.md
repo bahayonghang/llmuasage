@@ -60,7 +60,7 @@ llmusage init
 | Pi | Session JSONL under `~/.pi/agent/sessions` or `PI_AGENT_DIR` | Passive parser |
 | Oh My Pi | Session JSONL under `~/.omp/agent/sessions` | Passive parser |
 | Grok Build | Direct session sidecars | Passive parser (`precise`, `unpriced`) |
-| Antigravity | CLI `conversations/*.db` plus retained hook-era rows | Passive parser; rebuild refused while unattributed history exists |
+| Antigravity CLI / IDE | `~/.gemini/antigravity-cli/conversations/*.db` / `~/.gemini/antigravity-ide/conversations/*.db` (`GEMINI_CLI_HOME` overrides `.gemini`) | Separate `antigravity` / `antigravity_ide` passive readers; hook history retained |
 | ZCode | `cli/db/db.sqlite` `model_usage` completed rows | Passive parser |
 | DeepSeek Harness | `sessions/**/session.jsonl(.zstd)` | Passive parser |
 

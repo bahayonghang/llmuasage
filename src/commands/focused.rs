@@ -310,7 +310,13 @@ mod tests {
 
     #[test]
     fn all_source_period_commands_parse() {
-        for command in ["claude", "codex", "opencode", "antigravity"] {
+        for command in [
+            "claude",
+            "codex",
+            "opencode",
+            "antigravity",
+            "antigravity-ide",
+        ] {
             for period in ["daily", "weekly", "monthly", "session"] {
                 assert!(
                     Cli::try_parse_from(["llmusage", command, period]).is_ok(),
@@ -331,5 +337,25 @@ mod tests {
         inject_source(&mut common, SourceKind::Codex).expect("same source should be accepted");
         let err = inject_source(&mut common, SourceKind::Claude).expect_err("should conflict");
         assert!(err.to_string().contains("--source codex"));
+    }
+
+    #[test]
+    fn ide_focused_command_uses_underscore_source_id() {
+        let mut common = ReportCommonArgs::default();
+        inject_source(&mut common, SourceKind::AntigravityIde).expect("IDE source injection");
+        assert_eq!(common.source, Some(SourceKind::AntigravityIde));
+        inject_source(&mut common, SourceKind::AntigravityIde).expect("same IDE source accepted");
+        let err = inject_source(&mut common, SourceKind::Antigravity).expect_err("CLI conflicts");
+        assert!(err.to_string().contains("--source antigravity_ide"));
+        assert!(
+            Cli::try_parse_from([
+                "llmusage",
+                "antigravity-ide",
+                "daily",
+                "--source",
+                "antigravity_ide"
+            ])
+            .is_ok()
+        );
     }
 }

@@ -69,6 +69,14 @@ describe("rangeToFilterDto", () => {
 });
 
 describe("syncOptionsFromState", () => {
+  it("keeps Antigravity CLI and IDE identities distinct in reports and sync", () => {
+    for (const source of ["antigravity", "antigravity_ide"]) {
+      const selection = state("all", { source });
+      expect(rangeToFilterDto(selection, NOW).source).toBe(source);
+      expect(syncOptionsFromState(selection)).toEqual({ source });
+    }
+  });
+
   it("maps five ranges and current source without rebuild", () => {
     expect(syncOptionsFromState(state("1d", { source: "codex" }))).toEqual({
       source: "codex",

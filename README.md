@@ -4,7 +4,7 @@
 
 > **Naming note:** the crate and binary are `llmusage`; the GitHub repository is `llmuasage` (extra `a`). Links to the hosted docs use the repo spelling.
 
-Local-first usage analytics for AI coding CLIs. `llmusage` passively reads local Codex, Claude Code, OpenCode, Kimi Code, Pi, Oh My Pi, Grok Build, ZCode, Antigravity CLI, and DeepSeek Harness artifacts into SQLite, then renders reports, terminal and browser dashboards, and offline HTML exports without upload. The `dash` Usage tab also reads already-present CLI credentials and requests provider quota APIs.
+Local-first usage analytics for AI coding CLIs. `llmusage` passively reads local Codex, Claude Code, OpenCode, Kimi Code, Pi, Oh My Pi, Grok Build, ZCode, Antigravity CLI and IDE, and DeepSeek Harness artifacts into SQLite, then renders reports, terminal and browser dashboards, and offline HTML exports without upload. The `dash` Usage tab also reads already-present CLI credentials and requests provider quota APIs.
 
 > Current crate version: `1.3.0`.
 
@@ -72,7 +72,7 @@ On the first sync after an embedded pricing catalog upgrade, `sync` reprices his
 | Codex         | OpenAI Codex rollout/session JSONL                                                                                                                                    |
 | Claude        | Claude Code project JSONL                                                                                                                                             |
 | OpenCode      | OpenCode local SQLite usage database                                                                                                                                  |
-| Antigravity   | `~/.gemini/antigravity-cli/conversations/*.db` (or `GEMINI_CLI_HOME`); hook-era rows stay queryable and a rebuild is refused while unattributed history exists       |
+| Antigravity CLI / IDE | `~/.gemini/antigravity-cli/conversations/*.db` / `~/.gemini/antigravity-ide/conversations/*.db` (`GEMINI_CLI_HOME` overrides the `.gemini` root); separate `antigravity` / `antigravity_ide` passive SQLite sources, with hook history retained |
 | Kimi Code     | `~/.kimi-code/sessions/**/wire.jsonl` (or `KIMI_CODE_HOME`), turn-scoped `usage.record` rows only                                                                    |
 | Pi            | `~/.pi/agent/sessions/**/*.jsonl` (or `PI_AGENT_DIR`) as source `pi`                                                                                                |
 | Oh My Pi      | `~/.omp/agent/sessions/**/*.jsonl` as source `omp`. Overlapping paths belong to `pi`. Ordinary `sync` keeps legacy `pi` rows and skips `pi` writes; repair is `sync --rebuild --source pi`. Later provider/project/cost/behavior backfill uses `sync --rebuild --source omp`. |
@@ -112,7 +112,7 @@ Report commands are read-only SQLite queries; run `llmusage sync` when the datab
 
 Report date filters accept either `YYYYMMDD` or `YYYY-MM-DD`. Use `--sections daily,weekly,monthly,session` to combine periods in one output (the requested command period stays first), and `--no-cost` to remove cost columns and JSON cost fields without changing token totals.
 
-For a single-source view, use `llmusage <source> <period>`, for example `llmusage claude daily` or `llmusage codex monthly`. The supported source hosts are `claude`, `codex`, `opencode`, and `antigravity`; each supports `daily`, `weekly`, `monthly`, and `session`. They return the same data as `<period> --source <source>`, but remove the Agent comparison layer from text and JSON. `blocks` intentionally remains a top-level command. This uniform source surface is an llmusage extension, not a claim that every source mirrors ccusage's per-source capability matrix.
+For a single-source view, use `llmusage <source> <period>`, for example `llmusage claude daily` or `llmusage codex monthly`. The supported source hosts are `claude`, `codex`, `opencode`, `antigravity`, and `antigravity-ide`; each supports `daily`, `weekly`, `monthly`, and `session`. They return the same data as `<period> --source <source>`, but remove the Agent comparison layer from text and JSON. `blocks` intentionally remains a top-level command. This uniform source surface is an llmusage extension, not a claim that every source mirrors ccusage's per-source capability matrix.
 
 `llmusage dash` uses a tokscale-style terminal dashboard. Keyboard controls: `tab`/`shift-tab` or `1`-`9` switch views; `j`/`k`, arrows, Page Up/Page Down, Home/End, or the mouse wheel select rows; `o` cycles sortable columns and `O` reverses direction; `s` opens the source picker; `r` refreshes dashboard data; `R` toggles auto-refresh; `x` runs sync for the current source filter; `?` opens help/settings; and `q` exits.
 
@@ -167,7 +167,7 @@ llmusage codex-tracer --rebuild
 - `llmusage sync --recent-days N` imports only the latest UTC event window (`1..=3650`) without advancing full-history cursors; `--parallelism` accepts `1..=32`.
 - Bounded ordinary sync also skips+warns for legacy sources. It must not reset full history.
 - `llmusage sync --rebuild` refuses lossy rebuilds unless you also pass `--allow-lossy-rebuild`.
-- A full `llmusage sync --rebuild` resets parser-backed sources. A rebuild that would delete unattributed hook-era Antigravity rows is refused even with `--allow-lossy-rebuild`.
+- `llmusage sync --rebuild --source antigravity` stages native input before atomically repairing CLI parser history; hook-era rows are retained with a historical-accounting warning. Use `--source antigravity_ide` for IDE. Ordinary sync preserves older accounting and asks for explicit repair.
 - `llmusage serve` keeps and shows existing data plus the accounting warning. It does not implicit-rebuild. A broken legacy source does not stop dashboard startup.
 - Ordinary sync ignores `--allow-lossy-rebuild` because it does not rebuild. Use `llmusage sync --rebuild --source <source>` explicitly; add `--allow-lossy-rebuild` only when you accept clearing unrebuildable history.
 - `llmusage diagnostics --forget-file <PATH> --source <SOURCE>` is the explicit write path for intentionally ignored source files.

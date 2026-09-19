@@ -136,6 +136,7 @@ fn remove(app: &AppContext, label: &str, delete_usage: bool, yes: bool) -> Resul
             SourceKind::Claude,
             SourceKind::Opencode,
             SourceKind::Antigravity,
+            SourceKind::AntigravityIde,
             SourceKind::KimiCode,
             SourceKind::Pi,
             SourceKind::Omp,

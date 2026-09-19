@@ -1,0 +1,8 @@
+{"file":".trellis/spec/llmusage/backend/index.md","reason":"Backend index; read linked source-sync-contracts directly in chunks (too large for automatic injection)"}
+{"file":".trellis/spec/llmusage/backend/token-accounting-contracts.md","reason":"Exact channels, parser-owned totals and historical guards"}
+{"file":"docs/agents/passive-parser-onboarding.md","reason":"Real sanitized sample and semantics gate"}
+{"file":".trellis/tasks/09-19-upstream-antigravity-token-statistics/research/upstream-checkpoint.md","reason":"Pinned upstream changes and adoption boundaries"}
+{"file":".trellis/tasks/09-19-upstream-antigravity-token-statistics/research/antigravity-evidence.md","reason":"Current CLI seams, IDE unknowns, sample and identity evidence"}
+{"file":".trellis/tasks/09-19-upstream-antigravity-token-statistics/research/native-semantic-validation.md","reason":"Accepted independent descriptor and native oracle evidence; supersedes initial schema uncertainty"}
+{"file":"docs/adr/0017-antigravity-native-accounting.md","reason":"Accepted source split, grouped replay, protected history and v3 contract"}
+{"file":".trellis/tasks/09-19-upstream-antigravity-token-statistics/research/implementation-validation.md","reason":"Executed implementation gates, native reconciliation and AC traceability"}

@@ -124,6 +124,7 @@ pub fn apply_token_accounting_statuses_for_host(
         {
             continue;
         }
+        status.token_accounting_warning = None;
         if host_id == LOCAL_HOST_ID {
             status.token_accounting_version = store.token_accounting_version(status.source)?;
             status.legacy_token_accounting = store.has_legacy_token_accounting(status.source)?;
@@ -133,30 +134,38 @@ pub fn apply_token_accounting_statuses_for_host(
                 );
             }
             status.accounting = local_accounting_label(status);
-            continue;
+        } else {
+            status.token_accounting_version =
+                store.token_accounting_version_for_host(host_id, status.source)?;
+            let expected = expected_token_accounting_version(status.source);
+            match status.token_accounting_version {
+                Some(version) if version == expected => {
+                    status.legacy_token_accounting = false;
+                    status.token_accounting_warning = None;
+                    status.accounting = "current";
+                }
+                Some(_) => {
+                    status.legacy_token_accounting = true;
+                    status.token_accounting_warning = Some(format!(
+                        "remote host {host_id} source {} token accounting is not current; a full restore is required",
+                        status.source.as_str()
+                    ));
+                    status.accounting = "legacy";
+                }
+                None => {
+                    status.legacy_token_accounting = false;
+                    status.token_accounting_warning = None;
+                    status.accounting = "unknown";
+                }
+            }
         }
-        status.token_accounting_version =
-            store.token_accounting_version_for_host(host_id, status.source)?;
-        let expected = expected_token_accounting_version(status.source);
-        match status.token_accounting_version {
-            Some(version) if version == expected => {
-                status.legacy_token_accounting = false;
-                status.token_accounting_warning = None;
-                status.accounting = "current";
-            }
-            Some(_) => {
-                status.legacy_token_accounting = true;
-                status.token_accounting_warning = Some(format!(
-                    "remote host {host_id} source {} token accounting is not current; a full restore is required",
-                    status.source.as_str()
-                ));
-                status.accounting = "legacy";
-            }
-            None => {
-                status.legacy_token_accounting = false;
-                status.token_accounting_warning = None;
-                status.accounting = "unknown";
-            }
+        if status.source == SourceKind::Antigravity
+            && let Some(retained) = store.retained_antigravity_history_warning(host_id)?
+        {
+            status.token_accounting_warning = Some(match status.token_accounting_warning.take() {
+                Some(warning) => format!("{warning} {retained}"),
+                None => retained,
+            });
         }
     }
     Ok(())
@@ -269,7 +278,13 @@ fn source_status_from_parts(
     let quality = quality_label(descriptor.quality);
     let total_tokens = usage.map(|usage| usage.total_tokens).unwrap_or_default();
     let last_event_at = usage.and_then(|usage| usage.last_event_at.clone());
-    let detail = if descriptor.capabilities.parser {
+    let detail = if descriptor.capabilities.parser
+        && matches!(
+            descriptor.kind,
+            SourceKind::Antigravity | SourceKind::AntigravityIde
+        ) {
+        "passive native SQLite usage reader; encrypted .pb artifacts and unverified legacy roots are unsupported".to_string()
+    } else if descriptor.capabilities.parser {
         "passive local artifact reader".to_string()
     } else {
         "historical usage is retained; no passive reader is available".to_string()
@@ -397,6 +412,73 @@ mod tests {
 
         assert_eq!(status.status, "passive_ready");
         assert_eq!(status.total_tokens, 42);
+    }
+
+    #[test]
+    fn antigravity_cli_history_does_not_mark_ide_ready() {
+        let statuses = super::build_source_capability_statuses(&[SourceBreakdown {
+            source: "antigravity".to_string(),
+            total_tokens: 42,
+            last_event_at: Some("2026-09-19T00:00:00Z".to_string()),
+            event_count: 1,
+        }]);
+        let cli = statuses
+            .iter()
+            .find(|s| s.source == SourceKind::Antigravity)
+            .unwrap();
+        let ide = statuses
+            .iter()
+            .find(|s| s.source == SourceKind::AntigravityIde)
+            .unwrap();
+        assert_eq!(cli.status, "passive_ready");
+        assert_eq!(cli.display_name, "Antigravity CLI");
+        assert_eq!(ide.status, "passive_no_data");
+        assert_eq!(ide.display_name, "Antigravity IDE");
+        assert_eq!(ide.total_tokens, 0);
+        assert!(ide.detail.contains(".pb"));
+        assert!(ide.detail.contains("unsupported"));
+    }
+
+    #[test]
+    fn antigravity_current_marker_still_discloses_retained_hook_history() -> anyhow::Result<()> {
+        let fixture = crate::testing::Fixture::new()?;
+        fixture.seed_event(crate::testing::SeedEvent {
+            event_key: "hook-history",
+            source: "antigravity",
+            source_path_hash: None,
+            ..Default::default()
+        })?;
+        let store = fixture.store();
+        store.mark_current_token_accounting(SourceKind::Antigravity)?;
+        let mut statuses = super::build_source_capability_statuses(&[]);
+        super::apply_token_accounting_statuses(store, &mut statuses)?;
+        let cli = statuses
+            .iter()
+            .find(|s| s.source == SourceKind::Antigravity)
+            .unwrap();
+        assert_eq!(cli.accounting, "current");
+        assert!(!cli.legacy_token_accounting);
+        let warning = cli
+            .token_accounting_warning
+            .clone()
+            .expect("retained history warning");
+        assert!(warning.contains("1"));
+        assert!(warning.contains("hook"));
+        super::apply_token_accounting_statuses(store, &mut statuses)?;
+        let cli = statuses
+            .iter()
+            .find(|s| s.source == SourceKind::Antigravity)
+            .unwrap();
+        assert_eq!(
+            cli.token_accounting_warning.as_deref(),
+            Some(warning.as_str())
+        );
+        let ide = statuses
+            .iter()
+            .find(|s| s.source == SourceKind::AntigravityIde)
+            .unwrap();
+        assert!(ide.token_accounting_warning.is_none());
+        Ok(())
     }
 
     #[test]

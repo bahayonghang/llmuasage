@@ -938,6 +938,221 @@ mod tests {
     }
 
     #[test]
+    fn antigravity_v3_fresh_host_imports_are_current_and_idempotent() -> anyhow::Result<()> {
+        for source in [SourceKind::Antigravity, SourceKind::AntigravityIde] {
+            let (_temp, store, _lock) = fenced_store()?;
+            store.hosts().upsert(&ssh_host(None))?;
+            let host = store.hosts().get_by_label("devbox")?.expect("host");
+            let mut shard = SyncShard::new(source);
+            shard.events.push(event_for(
+                source,
+                "antigravity:request",
+                "2026-08-20T01:00:00Z",
+            ));
+            let stdout = stream(
+                &[
+                    ShardRecord::header(
+                        "2026-08-20T02:00:00Z",
+                        BTreeMap::from([(source.as_str().to_string(), 3)]),
+                    ),
+                    ShardRecord::Shard { shard },
+                    trailer(vec![source_stats(source, 1)]),
+                ],
+                "",
+            );
+            let local_marker = store.token_accounting_version(source)?;
+            import_stream(&store, &host, stdout.clone())?;
+            import_stream(&store, &host, stdout)?;
+            assert_eq!(event_count(&store, "devbox", source)?, 1);
+            assert_eq!(event_count(&store, LOCAL_HOST_ID, source)?, 0);
+            assert_eq!(store.token_accounting_version(source)?, local_marker);
+
+            let reopened = Store::new(&store.paths)?;
+            assert_eq!(
+                reopened.token_accounting_version_for_host("devbox", source)?,
+                Some(3)
+            );
+            let refreshed = reopened.hosts().get_by_label("devbox")?.expect("host");
+            assert_eq!(
+                refreshed.import_watermark.as_deref(),
+                Some("2026-08-20T01:00:00Z")
+            );
+            let statuses = reopened.sync_status().load_source_sync_statuses("devbox")?;
+            let status = statuses
+                .iter()
+                .find(|status| status.source == source.as_str())
+                .expect("source status");
+            assert_eq!(status.token_accounting_version, Some(3));
+            assert!(!status.legacy_token_accounting);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn antigravity_informational_usage_anomalies_allow_v3_marker_and_replay() -> anyhow::Result<()>
+    {
+        for source in [SourceKind::Antigravity, SourceKind::AntigravityIde] {
+            let (_temp, store, _lock) = fenced_store()?;
+            store.hosts().upsert(&ssh_host(None))?;
+            let host = store.hosts().get_by_label("devbox")?.expect("host");
+            let mut shard = SyncShard::new(source);
+            shard.events.push(event_for(
+                source,
+                "antigravity:valid",
+                "2026-08-20T01:00:00Z",
+            ));
+            let mut stats = source_stats(source, 1);
+            // Native usage may retain an output checksum discrepancy or skip
+            // an empty usage record without invalidating successfully read data.
+            stats.parse_issues.accounting_anomaly_lines = 1;
+            stats.parse_issues.skipped_lines = 1;
+            let stdout = stream(
+                &[
+                    ShardRecord::header(
+                        "2026-08-20T02:00:00Z",
+                        BTreeMap::from([(source.as_str().to_string(), 3)]),
+                    ),
+                    ShardRecord::Shard { shard },
+                    trailer(vec![stats]),
+                ],
+                "",
+            );
+            import_stream(&store, &host, stdout.clone())?;
+            assert_eq!(
+                store.token_accounting_version_for_host("devbox", source)?,
+                Some(3)
+            );
+            let reopened = Store::new(&store.paths)?;
+            let refreshed = reopened.hosts().get_by_label("devbox")?.expect("host");
+            assert_eq!(
+                refreshed.import_watermark.as_deref(),
+                Some("2026-08-20T01:00:00Z")
+            );
+            import_stream(&store, &refreshed, stdout)?;
+            assert_eq!(event_count(&store, "devbox", source)?, 1);
+            assert_eq!(
+                store.token_accounting_version_for_host("devbox", source)?,
+                Some(3)
+            );
+            let statuses = reopened.sync_status().load_source_sync_statuses("devbox")?;
+            let status = statuses
+                .iter()
+                .find(|status| status.source == source.as_str())
+                .expect("source status");
+            assert_eq!(status.parse_issues.accounting_anomaly_lines, 1);
+            assert_eq!(status.parse_issues.skipped_lines, 1);
+            assert!(!status.legacy_token_accounting);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn antigravity_v2_headers_refuse_before_any_shard_commit() -> anyhow::Result<()> {
+        for source in [SourceKind::Antigravity, SourceKind::AntigravityIde] {
+            let (_temp, store, _lock) = fenced_store()?;
+            store
+                .hosts()
+                .upsert(&ssh_host(Some("2026-08-20T00:00:00Z")))?;
+            let host = store.hosts().get_by_label("devbox")?.expect("host");
+            let mut shard = SyncShard::new(source);
+            shard.events.push(event_for(
+                source,
+                "antigravity:request",
+                "2026-08-20T01:00:00Z",
+            ));
+            let stdout = stream(
+                &[
+                    ShardRecord::header(
+                        "2026-08-20T02:00:00Z",
+                        BTreeMap::from([(source.as_str().to_string(), 2)]),
+                    ),
+                    ShardRecord::Shard { shard },
+                    trailer(vec![source_stats(source, 1)]),
+                ],
+                "",
+            );
+            let error = import_stream(&store, &host, stdout).expect_err("old source accounting");
+            let message = error.to_string();
+            assert!(message.contains(source.as_str()), "{message}");
+            assert!(message.contains("local=3"), "{message}");
+            assert!(message.contains("remote=2"), "{message}");
+            assert_eq!(event_count(&store, "devbox", source)?, 0);
+            assert_eq!(
+                store.token_accounting_version_for_host("devbox", source)?,
+                None
+            );
+            let refreshed = store.hosts().get_by_label("devbox")?.expect("host");
+            assert_eq!(refreshed.import_watermark, host.import_watermark);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn antigravity_v3_import_refuses_existing_remote_v2_history() -> anyhow::Result<()> {
+        for source in [SourceKind::Antigravity, SourceKind::AntigravityIde] {
+            let (_temp, store, _lock) = fenced_store()?;
+            store
+                .hosts()
+                .upsert(&ssh_host(Some("2026-08-20T01:00:00Z")))?;
+            let host = store.hosts().get_by_label("devbox")?.expect("host");
+            let mut existing = SyncShard::new_for_host(source, "devbox");
+            existing
+                .events
+                .push(event_for(source, "antigravity:old", "2026-08-20T00:00:00Z"));
+            store.begin_sync_run()?.commit_shard(existing)?;
+            store.set_meta_value(
+                &format!("token_accounting_version.devbox.{}", source.as_str()),
+                "2",
+            )?;
+            let before = remote_usage_rows(&store, source)?;
+
+            let mut shard = SyncShard::new(source);
+            shard
+                .events
+                .push(event_for(source, "antigravity:new", "2026-08-20T03:00:00Z"));
+            let stdout = stream(
+                &[
+                    ShardRecord::header(
+                        "2026-08-20T04:00:00Z",
+                        BTreeMap::from([(source.as_str().to_string(), 3)]),
+                    ),
+                    ShardRecord::Shard { shard },
+                    trailer(vec![source_stats(source, 1)]),
+                ],
+                "",
+            );
+            let error = import_stream(&store, &host, stdout).expect_err("historical mix-in");
+            let message = error.to_string();
+            assert!(message.contains(source.as_str()), "{message}");
+            assert!(message.contains("historical=2, current=3"), "{message}");
+            assert!(message.contains("full restore"), "{message}");
+            assert_eq!(remote_usage_rows(&store, source)?, before);
+            assert_eq!(
+                store.token_accounting_version_for_host("devbox", source)?,
+                Some(2)
+            );
+            let refreshed = store.hosts().get_by_label("devbox")?.expect("host");
+            assert_eq!(refreshed.import_watermark, host.import_watermark);
+        }
+        Ok(())
+    }
+
+    fn remote_usage_rows(
+        store: &Store,
+        source: SourceKind,
+    ) -> anyhow::Result<Vec<(String, String, i64)>> {
+        let conn = store.open_connection()?;
+        let mut statement = conn.prepare(
+            "SELECT event_key, event_at, total_tokens FROM usage_event WHERE host_id = 'devbox' AND source = ?1 ORDER BY event_key",
+        )?;
+        Ok(statement
+            .query_map([source.as_str()], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    #[test]
     fn unlisted_shard_source_is_refused_before_that_commit() -> anyhow::Result<()> {
         let (_temp, store, _lock) = fenced_store()?;
         store.hosts().upsert(&ssh_host(None))?;

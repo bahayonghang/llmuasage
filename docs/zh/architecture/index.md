@@ -14,14 +14,14 @@
 
 ## Source Registry
 
-`SourceKind` 当前包含 Codex、Claude、OpenCode、Antigravity、Kimi Code、Pi、Oh My Pi 与 Grok Build。`antigravity`、`kimi_code`、`pi`、`omp`、`grok` 是稳定 CLI/API/SQLite 来源 id；`gemini-*` 字符串仍只是模型 id。
+`SourceKind` 当前包含 Codex、Claude、OpenCode、Antigravity CLI/IDE、Kimi Code、Pi、Oh My Pi 与 Grok Build。`antigravity`、`antigravity_ide`、`kimi_code`、`pi`、`omp`、`grok` 是稳定 CLI/API/SQLite 来源 id；`gemini-*` 字符串仍只是模型 id。
 
 `SourceDescriptor` 是来源能力注册表，声明每个来源的稳定 id、别名、parser/passive-probe 能力、token 质量标签和本地隐私边界。Registry 是 parser 与 descriptor 的唯一 fan-out 点：
 
 - `registered_parsers()` 驱动 `llmusage sync`。
 - `registered_source_descriptors()` 驱动 capability/status 语义，并用测试防止 parser 漂移。
 
-新增来源意味着新增 `SourceKind` variant 和 descriptor。只有 descriptor 的能力声明与测试证据支持时，才新增 parser。Passive reader 写入 usage 行之前还必须具备真实本地样本、fixture 覆盖、sync-twice 幂等、cursor/rebuild 行为、token 质量声明和隐私审查。Antigravity 已对 CLI `conversations/*.db` 注册 parser；hook 时代的历史行仍可查询，且在没有文件归属时拒绝 rebuild。
+新增来源意味着新增 `SourceKind` variant 和 descriptor。只有 descriptor 的能力声明与测试证据支持时，才新增 parser。Passive reader 写入 usage 行之前还必须具备真实本地样本、fixture 覆盖、sync-twice 幂等、cursor/rebuild 行为、token 质量声明和隐私审查。Antigravity CLI 与 IDE 共享 SQLite decoder，并使用独立 source id；显式分阶段重建保留 hook 历史，见 [ADR 0017](../../adr/0017-antigravity-native-accounting)。
 
 `PlatformMonitorDescriptor` 是更宽的监控目录：既描述 Kimi Code、Pi、Oh My Pi、Grok Build、ZCode、Antigravity CLI、DeepSeek Harness 这类已注册 passive 来源，也描述 Reasonix、Gemini CLI、Cursor、Copilot、Zed、Kiro、Goose、Kimi shell/Qwen、Roo/Kilo/Cline、Codebuff、Crush、Warp/Oz、Amp、Hermes 和 Trae 等 parserless 候选。Monitor descriptor 可以在 `source-status` 与 `dash` 中展示 detected/unavailable 根目录、parser 支持状态、隐私类别、token 质量和下一步动作；只有同时具备已注册 `SourceKind` 与 parser 的 descriptor 才能写入 usage 行。
 
@@ -29,7 +29,7 @@
 
 1. 用户或进程内 Dashboard job 运行 `llmusage sync`。
 2. 命令 bootstrap/migrate SQLite，并获取本地 `worker_lock`。
-3. sync 按来源顺序执行注册的被动 parser：Codex、Claude、OpenCode、Kimi Code、Pi、Oh My Pi、Grok Build。Antigravity 已对 CLI `conversations/*.db` 注册 parser；hook 时代的历史行继续可见。
+3. sync 按来源顺序执行注册的被动 parser：Codex、Claude、OpenCode、Kimi Code、Pi、Oh My Pi、Grok Build。Antigravity CLI/IDE 原生 SQLite 按来源族解析并提交；hook 历史继续可见。
 4. 每个 parser 产出 `SyncShard`。
 5. `SyncRunWriter::commit_shard` 执行 reset、event 写入、cursor 写入、raw archive 写入、行为事实写入和 source-file 标记。
 6. Store 保存 per-source sync status 与 run-log 记录。

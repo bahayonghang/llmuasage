@@ -81,7 +81,19 @@ pub const SOURCE_DESCRIPTORS: &[SourceDescriptor] = &[
         kind: SourceKind::Antigravity,
         stable_id: "antigravity",
         aliases: &[],
-        display_name: "Antigravity",
+        display_name: "Antigravity CLI",
+        capabilities: SourceCapabilities {
+            parser: true,
+            passive_probe: true,
+        },
+        quality: UsageQuality::Precise,
+        privacy: PrivacyClass::LocalDatabase,
+    },
+    SourceDescriptor {
+        kind: SourceKind::AntigravityIde,
+        stable_id: "antigravity_ide",
+        aliases: &[],
+        display_name: "Antigravity IDE",
         capabilities: SourceCapabilities {
             parser: true,
             passive_probe: true,

@@ -14,14 +14,14 @@ The runtime state lives under `~/.llmusage/` unless overridden by `--home <PATH>
 
 ## Source registry
 
-`SourceKind` currently includes Codex, Claude, OpenCode, Antigravity, Kimi Code, Pi, Oh My Pi, and Grok Build. `antigravity`, `kimi_code`, `pi`, `omp`, and `grok` are stable CLI/API/SQLite source ids; `gemini-*` strings remain model ids only.
+`SourceKind` currently includes Codex, Claude, OpenCode, Antigravity CLI/IDE, Kimi Code, Pi, Oh My Pi, and Grok Build. `antigravity`, `antigravity_ide`, `kimi_code`, `pi`, `omp`, and `grok` are stable CLI/API/SQLite source ids; `gemini-*` strings remain model ids only.
 
 `SourceDescriptor` is the source capability registry. It declares each source's stable id, aliases, parser/passive-probe capabilities, token-quality label, and local privacy boundary. The registry is the single fan-out point for parsers and source descriptors:
 
 - `registered_parsers()` powers `llmusage sync`.
 - `registered_source_descriptors()` powers capability/status semantics and guards parser drift.
 
-Adding a source means adding a `SourceKind` variant plus a descriptor. A parser is added only when the descriptor's capability declaration and tests justify it. Passive readers also require real local samples, fixture coverage, sync-twice idempotency, cursor/rebuild behavior, token-quality declaration, and privacy review before they can write usage rows. Antigravity is parser-backed for CLI `conversations/*.db`; hook-era rows remain queryable and a rebuild is refused while they have no file attribution.
+Adding a source means adding a `SourceKind` variant plus a descriptor. A parser is added only when the descriptor's capability declaration and tests justify it. Passive readers also require real local samples, fixture coverage, sync-twice idempotency, cursor/rebuild behavior, token-quality declaration, and privacy review before they can write usage rows. Antigravity CLI and IDE share a native SQLite decoder with distinct source ids. Explicit staged rebuild retains hook-era rows; see [ADR 0017](../adr/0017-antigravity-native-accounting).
 
 `PlatformMonitorDescriptor` is the wider monitoring catalog. It describes registered passive sources such as Kimi Code, Pi, Oh My Pi, Grok Build, ZCode, Antigravity CLI, and DeepSeek Harness alongside parserless candidates such as Reasonix, Gemini CLI, Cursor, Copilot, Zed, Kiro, Goose, Kimi shell/Qwen, Roo/Kilo/Cline, Codebuff, Crush, Warp/Oz, Amp, Hermes, and Trae. Monitor descriptors may surface detected/unavailable roots, parser support, privacy class, token quality, and next action in `source-status` and `dash`; only descriptors backed by a registered `SourceKind` and parser can write usage rows.
 
@@ -29,7 +29,7 @@ Adding a source means adding a `SourceKind` variant plus a descriptor. A parser 
 
 1. The user or an in-process dashboard job runs `llmusage sync`.
 2. The command bootstraps/migrates SQLite and acquires the local `worker_lock`.
-3. Sync walks registered passive parsers in source order: Codex, Claude, OpenCode, Kimi Code, Pi, Oh My Pi, and Grok Build. Antigravity is parser-backed for CLI `conversations/*.db`; hook-era rows remain visible.
+3. Sync walks registered passive parsers in source order: Codex, Claude, OpenCode, Kimi Code, Pi, Oh My Pi, and Grok Build. Antigravity CLI/IDE native SQLite is staged and committed as a source family; hook-era rows remain visible.
 4. Each parser emits `SyncShard` values.
 5. `SyncRunWriter::commit_shard` performs reset, event write, cursor write, raw archive write, behavior fact write, and source-file stamping as the commit protocol.
 6. The store saves per-source sync status and run-log records.

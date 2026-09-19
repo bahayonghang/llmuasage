@@ -5,7 +5,10 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use super::{SourceParser, SourceSyncStats, SyncEvent};
-use crate::store::{LOCAL_HOST_ID, Store, SyncRunWriter};
+use crate::{
+    models::SourceKind,
+    store::{LOCAL_HOST_ID, Store, SyncRunWriter},
+};
 
 /// Drives a fixed list of [`SourceParser`] implementations against the shared
 /// writer in registration order.
@@ -62,7 +65,17 @@ pub struct DriveContext<'a, 'b> {
 
 /// Same as [`drive`], but emits sync lifecycle events for JobRegistry and
 /// `llmusage sync --json-events`.
-pub async fn drive_with_events(mut ctx: DriveContext<'_, '_>) -> Result<Vec<SourceSyncStats>> {
+pub async fn drive_with_events(ctx: DriveContext<'_, '_>) -> Result<Vec<SourceSyncStats>> {
+    drive_with_rebuild(ctx, false, false).await
+}
+
+/// Antigravity rebuilds stage both native products before replacing history.
+/// Other parsers retain the engine's existing pre-reset behavior.
+pub(crate) async fn drive_with_rebuild(
+    mut ctx: DriveContext<'_, '_>,
+    rebuild: bool,
+    allow_lossy_rebuild: bool,
+) -> Result<Vec<SourceSyncStats>> {
     /*
      * ========================================================================
      * 步骤1：按注册顺序串行驱动每个 SourceParser
@@ -76,10 +89,24 @@ pub async fn drive_with_events(mut ctx: DriveContext<'_, '_>) -> Result<Vec<Sour
 
     let run_started_at = ctx.writer.run_started_at().to_string();
     let mut all_stats = Vec::with_capacity(ctx.parsers.len());
+    let antigravity_sources = ctx
+        .parsers
+        .iter()
+        .map(|parser| parser.source())
+        .filter(|source| matches!(source, SourceKind::Antigravity | SourceKind::AntigravityIde))
+        .collect::<Vec<_>>();
+    let mut antigravity_finished = false;
     for parser in ctx.parsers {
         if ctx.cancel.is_cancelled() {
             emit(ctx.sender.as_deref_mut(), SyncEvent::Cancelled).await?;
             break;
+        }
+        let is_antigravity = matches!(
+            parser.source(),
+            SourceKind::Antigravity | SourceKind::AntigravityIde
+        );
+        if is_antigravity && antigravity_finished {
+            continue;
         }
         // 1.1 调用 parser 的 parse 协议并注入锁等待耗时。
         //     进度事件经 try_send 非阻塞投递；通道满时丢弃并计数，
@@ -95,54 +122,77 @@ pub async fn drive_with_events(mut ctx: DriveContext<'_, '_>) -> Result<Vec<Sour
             }
         };
         let parse_started = std::time::Instant::now();
-        let mut stats = parser
-            .parse(
+        let results = if is_antigravity {
+            antigravity_finished = true;
+            super::sync_antigravity_family(
                 ctx.store,
                 ctx.writer,
+                &antigravity_sources,
+                rebuild,
+                allow_lossy_rebuild,
                 ctx.parallelism,
                 ctx.recent_cutoff,
                 ctx.cancel,
                 ctx.sender.as_ref().map(|_| &mut progress_sink as _),
             )
-            .await?;
-        stats.lock_wait_ms = ctx.lock_wait_ms;
-        emit_parse_issues_log(&stats);
-        let source = parser.source();
-        tracing::debug!(
-            source = %source,
-            parse_wall_ms = parse_started.elapsed().as_millis() as u64,
-            progress_dropped = progress_dropped.load(std::sync::atomic::Ordering::Relaxed),
-            "source parse finished"
-        );
-
-        // 1.2 Parser-owned source inventory marks every candidate file seen in
-        //     this run before parsing changed files. Driver only performs the
-        //     stale-live sweep. If enumeration reported a non-fatal error,
-        //     skip the sweep to avoid converting unreadable subtrees into
-        //     false `missing` history.
-        if stats.last_error.is_some() {
-            info!(source = %source, "source inventory incomplete; skipping missing sweep");
+            .await?
         } else {
-            for host_id in &ctx.sweep_host_ids {
-                let swept =
-                    ctx.store
-                        .source_files()
-                        .sweep_missing(source, host_id, &run_started_at)?;
-                if swept > 0 {
-                    info!(source = %source, host_id = %host_id, swept, "标记 missing 文件完成");
+            vec![
+                parser
+                    .parse(
+                        ctx.store,
+                        ctx.writer,
+                        ctx.parallelism,
+                        ctx.recent_cutoff,
+                        ctx.cancel,
+                        ctx.sender.as_ref().map(|_| &mut progress_sink as _),
+                    )
+                    .await?,
+            ]
+        };
+        for mut stats in results {
+            stats.lock_wait_ms = ctx.lock_wait_ms;
+            emit_parse_issues_log(&stats);
+            let source = stats.source;
+            tracing::debug!(
+                source = %source,
+                parse_wall_ms = parse_started.elapsed().as_millis() as u64,
+                progress_dropped = progress_dropped.load(std::sync::atomic::Ordering::Relaxed),
+                "source parse finished"
+            );
+
+            // 1.2 Parser-owned source inventory marks every candidate file seen in
+            //     this run before parsing changed files. Driver only performs the
+            //     stale-live sweep. If enumeration reported a non-fatal error,
+            //     skip the sweep to avoid converting unreadable subtrees into
+            //     false `missing` history.
+            if stats.last_error.is_some()
+                || ctx.cancel.is_cancelled()
+                || (is_antigravity && ctx.recent_cutoff.is_some())
+            {
+                info!(source = %source, "source inventory incomplete; skipping missing sweep");
+            } else {
+                for host_id in &ctx.sweep_host_ids {
+                    let swept =
+                        ctx.store
+                            .source_files()
+                            .sweep_missing(source, host_id, &run_started_at)?;
+                    if swept > 0 {
+                        info!(source = %source, host_id = %host_id, swept, "标记 missing 文件完成");
+                    }
                 }
             }
-        }
 
-        emit(
-            ctx.sender.as_deref_mut(),
-            SyncEvent::SourceFinished {
-                source,
-                stats: stats.clone(),
-            },
-        )
-        .await?;
-        all_stats.push(stats);
+            emit(
+                ctx.sender.as_deref_mut(),
+                SyncEvent::SourceFinished {
+                    source,
+                    stats: stats.clone(),
+                },
+            )
+            .await?;
+            all_stats.push(stats);
+        }
     }
 
     info!(sources = all_stats.len(), "完成 SourceParser 列表驱动");

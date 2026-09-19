@@ -1,7 +1,608 @@
 use super::super::*;
 
+fn seed_sanitized_native_antigravity(fixture: &Fixture, name: &str) -> Result<PathBuf> {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    let corpus: serde_json::Value =
+        serde_json::from_str(include_str!("../../fixtures/antigravity-native-usage.json"))?;
+    let sample = corpus["samples"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|sample| sample["family"] == "antigravity-cli" && sample["category"] == "normal_gen")
+        .unwrap();
+    let rows = sample["gen_metadata"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            Ok((
+                row["idx"].as_i64().unwrap(),
+                STANDARD.decode(row["data_base64"].as_str().unwrap())?,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let path = fixture.seed_antigravity(name, &rows)?;
+    let conn = Connection::open(&path)?;
+    conn.execute_batch(
+        "CREATE TABLE steps(idx INTEGER PRIMARY KEY, metadata BLOB);
+        CREATE TABLE trajectory_meta(source INTEGER);
+        INSERT INTO trajectory_meta VALUES (17);",
+    )?;
+    for row in sample["steps"].as_array().unwrap() {
+        conn.execute(
+            "INSERT INTO steps VALUES (?1, ?2)",
+            rusqlite::params![
+                row["idx"].as_i64().unwrap(),
+                STANDARD.decode(row["metadata_base64"].as_str().unwrap())?
+            ],
+        )?;
+    }
+    Ok(path)
+}
+
+fn antigravity_persisted_snapshot(store: &Store) -> Result<Vec<Vec<Vec<rusqlite::types::Value>>>> {
+    let conn = store.open_connection()?;
+    [
+        "SELECT * FROM usage_event WHERE source='antigravity' ORDER BY event_key",
+        "SELECT * FROM usage_bucket_30m WHERE source='antigravity' ORDER BY hour_start,model",
+        "SELECT * FROM source_cursor WHERE source='antigravity' ORDER BY cursor_key",
+        "SELECT * FROM source_file WHERE source='antigravity' ORDER BY file_path",
+    ]
+    .into_iter()
+    .map(|sql| {
+        let mut statement = conn.prepare(sql)?;
+        let columns = statement.column_count();
+        Ok(statement
+            .query_map([], |row| {
+                (0..columns)
+                    .map(|column| row.get::<_, rusqlite::types::Value>(column))
+                    .collect::<rusqlite::Result<Vec<_>>>()
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?)
+    })
+    .collect()
+}
+
 #[test]
-fn rebuild_rejects_unattributed_antigravity_history_and_preserves_rows() -> Result<()> {
+fn antigravity_busy_native_database_preserves_history_cursor_and_marker() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let path = seed_sanitized_native_antigravity(&fixture, "native-busy")?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let mut options = commands::sync::SyncRunOptions {
+            source: Some(SourceKind::Antigravity), ..Default::default()
+        };
+        commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(antigravity_event_count(&app.paths.db_path)?, 1);
+        store.set_meta_value("token_accounting_version.antigravity", "2")?;
+        let before = antigravity_persisted_snapshot(&store)?;
+
+        let mut blocker = Connection::open(&path)?;
+        let exclusive = blocker.transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive)?;
+        let probe = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        probe.busy_timeout(Duration::ZERO)?;
+        let error = probe.query_row("SELECT COUNT(*) FROM gen_metadata", [], |row| row.get::<_, i64>(0))
+            .expect_err("exclusive native DB lock must block a reader");
+        assert!(matches!(error, rusqlite::Error::SqliteFailure(ref sqlite, _) if sqlite.code == rusqlite::ErrorCode::DatabaseBusy));
+        drop(probe);
+
+        options.rebuild = true;
+        let blocked = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(blocked.total_inserted, 0);
+        assert!(blocked.sources[0].last_error.is_some());
+        assert!(blocked.sources[0].parse_issues.malformed_lines > 0);
+        assert_eq!(antigravity_persisted_snapshot(&store)?, before);
+        assert_eq!(store.token_accounting_version(SourceKind::Antigravity)?, Some(2));
+
+        drop(exclusive);
+        drop(blocker);
+        let recovered = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert!(recovered.sources[0].last_error.is_none());
+        assert_eq!(antigravity_event_count(&app.paths.db_path)?, 1);
+        assert_eq!(store.token_accounting_version(SourceKind::Antigravity)?, Some(3));
+        Ok::<_, anyhow::Error>(())
+    })?;
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn antigravity_cancel_during_native_staging_preserves_history_and_inventory() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let path = seed_sanitized_native_antigravity(&fixture, "native-cancel")?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let mut options = commands::sync::SyncRunOptions {
+            source: Some(SourceKind::Antigravity),
+            ..Default::default()
+        };
+        commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(antigravity_event_count(&app.paths.db_path)?, 1);
+        store.set_meta_value("token_accounting_version.antigravity", "2")?;
+        // If the driver sweeps this cancelled inventory, the sentinel becomes
+        // missing; comparing full rows detects that independently of token data.
+        store.open_connection()?.execute(
+            "UPDATE source_file SET last_seen_at='2000-01-01T00:00:00Z' WHERE source='antigravity'",
+            [],
+        )?;
+        let before = antigravity_persisted_snapshot(&store)?;
+
+        // Hold an actual native read boundary open while the SourceStarted
+        // event reaches the cancellation watcher; no timer or sleep is needed.
+        let mut blocker = Connection::open(&path)?;
+        let exclusive =
+            blocker.transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive)?;
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let watcher_cancel = cancel.clone();
+        let (mut sender, mut receiver) = tokio::sync::mpsc::channel(256);
+        let watcher = tokio::spawn(async move {
+            let mut events = Vec::new();
+            while let Some(event) = receiver.recv().await {
+                if matches!(
+                    event,
+                    SyncEvent::SourceStarted {
+                        source: SourceKind::Antigravity,
+                        ..
+                    }
+                ) {
+                    watcher_cancel.cancel();
+                }
+                events.push(event);
+            }
+            events
+        });
+        options.rebuild = true;
+        let cancelled = commands::sync::run_once_with_cancel(
+            &app,
+            &store,
+            0,
+            &options,
+            Some(&mut sender),
+            &cancel,
+        )
+        .await?;
+        drop(sender);
+        let events = watcher.await?;
+        drop(exclusive);
+        drop(blocker);
+
+        assert!(cancel.is_cancelled());
+        assert!(events.iter().any(|event| matches!(
+            event,
+            SyncEvent::SourceStarted {
+                source: SourceKind::Antigravity,
+                ..
+            }
+        )));
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, SyncEvent::TokenAccountingRepairFinished { .. }))
+        );
+        assert_eq!(cancelled.total_inserted, 0);
+        assert_eq!(
+            cancelled.sources[0].parse_issues.malformed_lines,
+            0,
+            "cancellation must take the staging exit before the held read is reported as a busy failure"
+        );
+        assert_eq!(antigravity_persisted_snapshot(&store)?, before);
+        assert_eq!(
+            store.token_accounting_version(SourceKind::Antigravity)?,
+            Some(2)
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn antigravity_full_sync_reconciles_stronger_identity_in_an_unselected_copy() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let timestamp = chrono::Utc::now().timestamp().unsigned_abs();
+    let blob = |response_id: &str| {
+        let mut usage = ag_usage_message(100, 20, 3, 0, response_id);
+        usage.extend(ag_string_field(7, "shared-message"));
+        let mut chat = ag_bytes_field(4, &usage);
+        chat.extend(ag_bytes_field(9, &ag_timestamp_message(timestamp, 0)));
+        chat.extend(ag_string_field(19, "gemini-3.8-flash"));
+        ag_bytes_field(1, &chat)
+    };
+    let original = fixture.seed_antigravity("identity-original", &[(1, blob(""))])?;
+    let conn = Connection::open(&original)?;
+    conn.execute_batch(
+        "CREATE TABLE trajectory_meta(source INTEGER); INSERT INTO trajectory_meta VALUES (17)",
+    )?;
+    drop(conn);
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let mut options = commands::sync::SyncRunOptions {
+            source: Some(SourceKind::Antigravity),
+            ..Default::default()
+        };
+        commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        let before: String = store.open_connection()?.query_row(
+            "SELECT event_key FROM usage_event WHERE source='antigravity'",
+            [],
+            |row| row.get(0),
+        )?;
+        let root = fixture.home.join(".gemini/antigravity-ide/conversations");
+        fs::create_dir_all(&root)?;
+        let copy = Connection::open(root.join("stronger-copy.db"))?;
+        copy.execute_batch("CREATE TABLE gen_metadata(idx INTEGER PRIMARY KEY, data BLOB)")?;
+        copy.execute(
+            "INSERT INTO gen_metadata VALUES (1, ?1)",
+            [blob("response-enriched")],
+        )?;
+        drop(copy);
+        commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        let after: String = store.open_connection()?.query_row(
+            "SELECT event_key FROM usage_event WHERE source='antigravity'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_ne!(
+            before, after,
+            "full sync must reconcile stronger identity even from an unselected root"
+        );
+        assert_eq!(antigravity_event_count(&app.paths.db_path)?, 1);
+        let unchanged =
+            commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(
+            unchanged.total_inserted, 0,
+            "unselected sibling files must not force replay"
+        );
+        options.recent_days = Some(1);
+        commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(antigravity_event_count(&app.paths.db_path)?, 1);
+        Ok::<_, anyhow::Error>(())
+    })?;
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn antigravity_missing_group_member_preserves_bounded_and_forgotten_history() -> Result<()> {
+    for bounded_first in [false, true] {
+        let fixture = Fixture::new()?;
+        let timestamp = chrono::Utc::now().timestamp().unsigned_abs();
+        let missing = fixture.seed_antigravity(
+            "member-a",
+            &[(
+                1,
+                ag_gen_metadata_blob(
+                    100,
+                    20,
+                    3,
+                    0,
+                    "member-a",
+                    Some("gemini-3.8-flash"),
+                    None,
+                    timestamp,
+                ),
+            )],
+        )?;
+        fixture.seed_antigravity(
+            "member-b",
+            &[(
+                1,
+                ag_gen_metadata_blob(
+                    200,
+                    40,
+                    6,
+                    0,
+                    "member-b",
+                    Some("gemini-3.8-flash"),
+                    None,
+                    timestamp,
+                ),
+            )],
+        )?;
+        let runtime = tokio::runtime::Runtime::new()?;
+        runtime.block_on(async {
+            let app = AppContext::discover()?;
+            let store = Store::new(&app.paths)?;
+            store.bootstrap()?;
+            let mut options = commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Antigravity),
+                recent_days: bounded_first.then_some(1),
+                ..Default::default()
+            };
+            commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+            assert_eq!(antigravity_event_count(&app.paths.db_path)?, 2);
+            let tracked = store
+                .source_files()
+                .tracked_paths(SourceKind::Antigravity, "local")?;
+            assert_eq!(tracked.len(), 2);
+            if bounded_first {
+                assert!(
+                    store
+                        .cursors()
+                        .load_file_cursors(SourceKind::Antigravity, "local")?
+                        .is_empty()
+                );
+            } else {
+                let tracked_missing = tracked
+                    .iter()
+                    .find(|path| path.ends_with("member-a.db"))
+                    .unwrap();
+                store.mark_source_file_deleted(
+                    SourceKind::Antigravity,
+                    "local",
+                    tracked_missing,
+                )?;
+            }
+            fs::remove_file(&missing)?;
+            fixture.seed_antigravity(
+                "member-b",
+                &[(
+                    1,
+                    ag_gen_metadata_blob(
+                        300,
+                        40,
+                        6,
+                        0,
+                        "member-b",
+                        Some("gemini-3.8-flash"),
+                        None,
+                        timestamp,
+                    ),
+                )],
+            )?;
+            options.recent_days = None;
+            let result =
+                commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+            assert!(
+                result.sources[0]
+                    .last_error
+                    .as_ref()
+                    .unwrap()
+                    .contains("missing")
+            );
+            assert_eq!(antigravity_event_count(&app.paths.db_path)?, 2);
+            let input: i64 = store.open_connection()?.query_row(
+                "SELECT SUM(input_tokens) FROM usage_event WHERE source='antigravity'",
+                [],
+                |row| row.get(0),
+            )?;
+            assert_eq!(input, 300, "snapshot must retain both original members");
+            options.rebuild = true;
+            options.allow_lossy_rebuild = true;
+            commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+            assert_eq!(antigravity_event_count(&app.paths.db_path)?, 1);
+            Ok::<_, anyhow::Error>(())
+        })?;
+        fixture.restore_env();
+    }
+    Ok(())
+}
+
+#[test]
+fn antigravity_native_product_survives_cross_root_copy_and_unreadable_file() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let original = fixture.seed_antigravity(
+        "copied-native",
+        &[(
+            1,
+            ag_gen_metadata_blob(
+                100,
+                20,
+                3,
+                0,
+                "native-copy",
+                Some("gemini-3.8-flash"),
+                None,
+                1_800_000_000,
+            ),
+        )],
+    )?;
+    let connection = Connection::open(&original)?;
+    connection.execute_batch(
+        "CREATE TABLE trajectory_meta(source INTEGER); INSERT INTO trajectory_meta VALUES (17);",
+    )?;
+    drop(connection);
+    let ide_root = fixture.home.join(".gemini/antigravity-ide/conversations");
+    fs::create_dir_all(&ide_root)?;
+    let copied = ide_root.join("copied-cli.db");
+    fs::copy(&original, &copied)?;
+    fs::remove_file(original)?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let options = commands::sync::SyncRunOptions {
+            source: Some(SourceKind::Antigravity),
+            ..Default::default()
+        };
+        commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(antigravity_event_count(&app.paths.db_path)?, 1);
+        let before = store
+            .cursors()
+            .load_file_cursors(SourceKind::Antigravity, "local")?;
+        assert_eq!(before.len(), 1);
+        fs::write(&copied, b"damaged copied database")?;
+        let result = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert!(result.sources[0].last_error.is_some());
+        assert_eq!(antigravity_event_count(&app.paths.db_path)?, 1);
+        let after = store
+            .cursors()
+            .load_file_cursors(SourceKind::Antigravity, "local")?;
+        assert_eq!(
+            before.values().next().unwrap().file_fingerprint,
+            after.values().next().unwrap().file_fingerprint
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn antigravity_wal_only_commit_replays_snapshot() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let path = fixture.seed_antigravity(
+        "wal-snapshot",
+        &[(
+            1,
+            ag_gen_metadata_blob(
+                100,
+                20,
+                3,
+                0,
+                "wal-first",
+                Some("gemini-3.8-flash"),
+                None,
+                1_800_000_000,
+            ),
+        )],
+    )?;
+    let connection = Connection::open(&path)?;
+    connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;")?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let options = commands::sync::SyncRunOptions {
+            source: Some(SourceKind::Antigravity),
+            ..Default::default()
+        };
+        commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        let main_before = fs::read(&path)?;
+        let blob = ag_gen_metadata_blob(
+            200,
+            40,
+            6,
+            0,
+            "wal-second",
+            Some("gemini-3.8-flash"),
+            None,
+            1_800_000_010,
+        );
+        connection.execute(
+            "INSERT INTO gen_metadata(idx, data, size) VALUES (77, ?1, ?2)",
+            rusqlite::params![&blob, blob.len() as i64],
+        )?;
+        assert_eq!(fs::read(&path)?, main_before);
+        commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(antigravity_event_count(&app.paths.db_path)?, 2);
+        let again = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(again.total_inserted, 0);
+        Ok::<_, anyhow::Error>(())
+    })?;
+    drop(connection);
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn antigravity_copied_request_conflict_preserves_previous_snapshot() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let path = fixture.seed_antigravity(
+        "conflict-a",
+        &[(
+            1,
+            ag_gen_metadata_blob(
+                100,
+                20,
+                3,
+                0,
+                "conflict-id",
+                Some("gemini-3.8-flash"),
+                None,
+                1_800_000_000,
+            ),
+        )],
+    )?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let options = commands::sync::SyncRunOptions { source: Some(SourceKind::Antigravity), ..Default::default() };
+        commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        fixture.seed_antigravity("conflict-b", &[(1, ag_gen_metadata_blob(200, 20, 3, 0,
+            "conflict-id", Some("gemini-3.8-flash"), None, 1_800_000_000))])?;
+        let result = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert!(result.sources[0].last_error.as_ref().unwrap().contains("conflicting"));
+        let input: i64 = store.open_connection()?.query_row("SELECT SUM(input_tokens) FROM usage_event WHERE source='antigravity'", [], |row| row.get(0))?;
+        assert_eq!(input, 100);
+        let connection = Connection::open(&path)?;
+        connection.execute_batch("DROP TABLE gen_metadata; DROP TABLE trajectory_metadata_blob; CREATE TABLE unrelated(value TEXT);")?;
+        drop(connection);
+        commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(antigravity_event_count(&app.paths.db_path)?, 1);
+        Ok::<_, anyhow::Error>(())
+    })?;
+    fixture.restore_env();
+    Ok(())
+}
+
+#[cfg(windows)]
+#[test]
+fn antigravity_rebuild_accepts_raw_windows_cursor_path_without_lossy_flag() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let path = fixture.seed_antigravity(
+        "raw-path",
+        &[(
+            1,
+            ag_gen_metadata_blob(
+                100,
+                20,
+                3,
+                0,
+                "raw-path-id",
+                Some("gemini-3.8-flash"),
+                None,
+                1_800_000_000,
+            ),
+        )],
+    )?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let mut options = commands::sync::SyncRunOptions {
+            source: Some(SourceKind::Antigravity),
+            ..Default::default()
+        };
+        commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        let raw = path
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .to_owned();
+        store.open_connection()?.execute(
+            "UPDATE source_cursor SET file_path=?1, cursor_key=?1 WHERE source='antigravity'",
+            [&raw],
+        )?;
+        store.set_meta_value("token_accounting_version.antigravity", "2")?;
+        options.rebuild = true;
+        let result = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert!(result.sources[0].last_error.is_none());
+        assert_eq!(antigravity_event_count(&app.paths.db_path)?, 1);
+        assert_eq!(
+            store.token_accounting_version(SourceKind::Antigravity)?,
+            Some(3)
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+    fixture.restore_env();
+    Ok(())
+}
+
+#[test]
+fn rebuild_preserves_unattributed_antigravity_history() -> Result<()> {
     let fixture = Fixture::new()?;
     fixture.seed_codex(
         "rollout-antigravity-history.jsonl",
@@ -31,7 +632,7 @@ fn rebuild_rejects_unattributed_antigravity_history_and_preserves_rows() -> Resu
         assert!(before > 0);
         drop(conn);
 
-        let error = commands::sync::run_with_options(
+        commands::sync::run_with_options(
             &app,
             commands::sync::SyncRunOptions {
                 rebuild: true,
@@ -40,9 +641,7 @@ fn rebuild_rejects_unattributed_antigravity_history_and_preserves_rows() -> Resu
                 ..Default::default()
             },
         )
-        .await
-        .expect_err("rebuild must refuse while unattributed antigravity history exists");
-        assert!(error.to_string().contains("hook-era history"));
+        .await?;
 
         let after: i64 = store.open_connection()?.query_row(
             "SELECT COUNT(*) FROM usage_event WHERE source = 'antigravity'",
@@ -184,12 +783,12 @@ fn antigravity_tokens_separate_output_from_reasoning() -> Result<()> {
                 ))
             },
         )?;
-        // input = #2 + #1（system prompt）；total 含 reasoning（#9/#10 不相交）。
-        assert_eq!(row.0, 500 + 1132);
+        // #1 is the model enum; #2 alone is fresh input.
+        assert_eq!(row.0, 500);
         assert_eq!(row.1, 1200);
         assert_eq!(row.2, 234);
         assert_eq!(row.3, 50);
-        assert_eq!(row.4, 1632 + 1200 + 234 + 50);
+        assert_eq!(row.4, 500 + 1200 + 234 + 50);
         assert_eq!(row.5, "gemini-3.6-flash");
         Ok::<_, anyhow::Error>(())
     })?;
@@ -353,7 +952,8 @@ fn antigravity_deleted_conversation_preserves_history() -> Result<()> {
         let counts = store
             .source_files()
             .counts(SourceKind::Antigravity, "local")?;
-        assert_eq!(counts.missing, 1);
+        // A blocked group preserves its inventory and cursors for a retry.
+        assert_eq!(counts.live + counts.missing, 1);
         Ok::<_, anyhow::Error>(())
     })?;
 
@@ -588,7 +1188,7 @@ fn antigravity_upgrade_from_historical_only_keeps_legacy_rows() -> Result<()> {
         store.bootstrap()?;
 
         // 预置 hook 时代存量行：真实旧 key 形状 + 无文件归属。
-        // v21 marker 预置后 has_legacy_token_accounting 必须为 false。
+        // The historical v21 marker remains version 2 until explicit repair.
         let conn = store.open_connection()?;
         conn.execute_batch(
             r#"
@@ -603,17 +1203,18 @@ fn antigravity_upgrade_from_historical_only_keeps_legacy_rows() -> Result<()> {
         )?;
         drop(conn);
         assert!(
-            !store.has_legacy_token_accounting(SourceKind::Antigravity)?,
-            "v21 marker must keep hook-era rows out of automatic legacy repair"
+            store.has_legacy_token_accounting(SourceKind::Antigravity)?,
+            "old accounting must require explicit repair"
         );
 
-        // 无界 sync：解析器导入新行，存量行不动、不重复。
+        // Explicit repair imports the current parser while retaining hook history.
         let summary = commands::sync::run_once_with_options(
             &app,
             &store,
             0,
             &commands::sync::SyncRunOptions {
                 source: Some(SourceKind::Antigravity),
+                rebuild: true,
                 ..Default::default()
             },
             None,

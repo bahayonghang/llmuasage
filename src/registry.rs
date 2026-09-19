@@ -8,8 +8,8 @@ use crate::{
         source_descriptor::{self, SourceDescriptor},
     },
     parsers::{
-        AntigravityParser, ClaudeParser, CodexParser, DeepseekHarnessParser, GrokParser,
-        KimiCodeParser, OpencodeParser, PiFormatParser, SourceParser, ZcodeParser,
+        AntigravityIdeParser, AntigravityParser, ClaudeParser, CodexParser, DeepseekHarnessParser,
+        GrokParser, KimiCodeParser, OpencodeParser, PiFormatParser, SourceParser, ZcodeParser,
     },
 };
 
@@ -20,6 +20,7 @@ pub fn registered_parsers() -> Vec<Box<dyn SourceParser>> {
         Box::new(ClaudeParser),
         Box::new(OpencodeParser),
         Box::new(AntigravityParser),
+        Box::new(AntigravityIdeParser),
         Box::new(KimiCodeParser),
         Box::new(PiFormatParser::pi()),
         Box::new(PiFormatParser::omp()),

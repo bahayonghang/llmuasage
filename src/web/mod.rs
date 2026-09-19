@@ -3291,6 +3291,7 @@ mod tests {
         assert!(components_css.contains(".nav-label::after"));
         assert!(components_css.contains(".agent-badge-list"));
         assert!(components_css.contains(".agent-badge[data-source='antigravity']"));
+        assert!(components_css.contains(".agent-badge[data-source='antigravity_ide']"));
         assert!(components_css.contains("[data-source='pi'], [data-source='omp']"));
         assert!(components_css.contains("overflow-wrap: anywhere"));
         assert!(layout_css.contains(".hero-meta-sources"));
@@ -3521,6 +3522,7 @@ mod tests {
                 "agent-logos/claude.svg",
                 "agent-logos/opencode.svg",
                 "agent-logos/antigravity.svg",
+                "agent-logos/antigravity_ide.svg",
                 "agent-logos/kimi_code.svg",
                 "agent-logos/pi.svg",
                 "agent-logos/omp.svg",
@@ -3581,6 +3583,10 @@ mod tests {
             ),
             (
                 "agent-logos/antigravity.svg",
+                "602ee69befdd1aa33902d5471a26d6b41c6da6ce7bd68994057cee23e3a35c19",
+            ),
+            (
+                "agent-logos/antigravity_ide.svg",
                 "602ee69befdd1aa33902d5471a26d6b41c6da6ce7bd68994057cee23e3a35c19",
             ),
             (
@@ -6730,6 +6736,7 @@ mod tests {
             "claude.svg",
             "opencode.svg",
             "antigravity.svg",
+            "antigravity_ide.svg",
             "kimi_code.svg",
             "pi.svg",
             "omp.svg",

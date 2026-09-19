@@ -43,7 +43,7 @@ llmusage sync
 
 `sync` parses local sources incrementally and writes normalized usage rows, 30-minute buckets, source-file diagnostics, and behavior facts.
 
-Sync is passive-only. Antigravity CLI conversations are imported by the registered parser. Hook-era Antigravity rows stay queryable, and a rebuild is refused while those rows have no file attribution.
+Antigravity CLI and IDE passively read native `conversations/*.db` through separate `antigravity` and `antigravity_ide` sources and one shared decoder. Hook-era rows are retained with a historical-accounting warning. Ordinary sync does not mix old accounting; successful explicit rebuild replaces parser history. `.pb` files are unsupported.
 
 If this machine previously used a hook-enabled llmusage release, run `llmusage uninstall` once to remove legacy llmusage-owned hooks, plugins, and wrappers without deleting usage data.
 

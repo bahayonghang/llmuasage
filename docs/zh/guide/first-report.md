@@ -69,9 +69,10 @@ llmusage claude daily
 llmusage codex monthly --json
 llmusage opencode weekly --no-cost
 llmusage antigravity session
+llmusage antigravity-ide session
 ```
 
-`claude`、`codex`、`opencode`、`antigravity` 是 source host。每个都支持 `daily`、`weekly`、`monthly`、`session`，数据与 `<period> --source <source>` 相同。聚焦文本与 JSON 会移除 Agent 对比层；JSON 不含 `agent` 或 `agents` 字段。传入同值 `--source` 可以接受，冲突来源会被拒绝。`blocks` 有意不挂在 source host 下。
+`claude`、`codex`、`opencode`、`antigravity`、`antigravity-ide` 是 source host。每个都支持 `daily`、`weekly`、`monthly`、`session`，数据与 `<period> --source <source>` 相同。聚焦文本与 JSON 会移除 Agent 对比层；JSON 不含 `agent` 或 `agents` 字段。传入同值 `--source` 可以接受，冲突来源会被拒绝。`blocks` 有意不挂在 source host 下。
 
 这是 llmusage 的均匀报表 surface，不表示各来源拥有相同的 ccusage 专属能力矩阵。
 

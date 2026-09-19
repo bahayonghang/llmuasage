@@ -13,6 +13,7 @@ const adrItems = [
   { text: "0009 — Antigravity source cutover", link: "/adr/0009-antigravity-source-cutover" },
   { text: "0010 — Provider label dimension", link: "/adr/0010-provider-label-dimension" },
   { text: "0011 — Passive-only synchronization", link: "/adr/0011-passive-only-synchronization" },
+  { text: "0017 — Antigravity native accounting", link: "/adr/0017-antigravity-native-accounting" },
 ];
 
 const enSidebar = [

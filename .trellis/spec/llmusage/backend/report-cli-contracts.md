@@ -15,7 +15,7 @@
 
 ```text
 llmusage daily|weekly|monthly|session [REPORT OPTIONS]
-llmusage <claude|codex|opencode|antigravity> <daily|weekly|monthly|session> [REPORT OPTIONS]
+llmusage <claude|codex|opencode|antigravity|antigravity-ide> <daily|weekly|monthly|session> [REPORT OPTIONS]
 
 ReportCommonArgs:
   --since/--until <YYYY-MM-DD|YYYYMMDD>
@@ -83,7 +83,7 @@ unified_report::{report_json, focused_report_json}(..., no_cost) -> JSON
 - `llmusage <source> <period>` injects the matching `ReportFilter.source` and
   uses the shared loader. Focused reports lift the matching source row after
   query loading, then render without `Agent`/`Detected`; focused JSON has no
-  `agent` or `agents` keys. All four hosts uniformly support daily, weekly,
+  `agent` or `agents` keys. All five hosts uniformly support daily, weekly,
   monthly, and session. This is an llmusage extension, not a claim of ccusage
   per-source capability parity.
 
@@ -127,7 +127,7 @@ unified_report::{report_json, focused_report_json}(..., no_cost) -> JSON
 
 - Unit-test `focused_report` and focused JSON: only the requested source is
   retained; `agent` and `agents` are absent; token totals match that source.
-- Parse all four source hosts with all four period subcommands and test same
+- Parse all five source hosts with all four period subcommands and test same
   versus conflicting `--source` injection.
 - Integration-test source/period totals against the matching top-level
   `--source` report. Cover focused text title without `Agent`/`Detected`,

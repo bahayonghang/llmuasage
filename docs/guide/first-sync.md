@@ -21,6 +21,7 @@ llmusage sync --source codex
 llmusage sync --source claude
 llmusage sync --source opencode
 llmusage sync --source antigravity
+llmusage sync --source antigravity_ide
 llmusage sync --source kimi_code
 llmusage sync --source pi
 llmusage sync --source omp
@@ -28,7 +29,7 @@ llmusage sync --source grok
 # gemini is no longer accepted as a source id; gemini-* model names are unchanged
 ```
 
-The accepted source values match `cargo run -- --help`: `codex`, `claude`, `opencode`, `antigravity`, `kimi_code`, `pi`, `omp`, and `grok`. `gemini` is intentionally not accepted as a source id; `gemini-*` remains a model-name prefix only.
+The accepted source values match `cargo run -- --help`: `codex`, `claude`, `opencode`, `antigravity`, `antigravity_ide`, `kimi_code`, `pi`, `omp`, and `grok`. `gemini` is intentionally not accepted as a source id; `gemini-*` remains a model-name prefix only.
 
 Kimi Code reads `~/.kimi-code/sessions/**/wire.jsonl` (or `KIMI_CODE_HOME/sessions`) and imports only explicit turn-scoped `usage.record` rows. It maps non-cached input, output, cache read, and cache creation independently, preserves raw models such as `kimi-code/k3`, and ignores aggregate, zero-token, non-turn, and malformed records.
 
@@ -64,44 +65,46 @@ llmusage sync --recent-days 1
 llmusage sync --rebuild
 ```
 
-`--rebuild` resets parser-backed usage state source by source before reparsing local sources. A rebuild that would delete unattributed hook-era Antigravity rows is refused. The rebuild is refused by default when file-backed imported history for a parser source depends on files that are now missing.
+`--rebuild` reparses selected sources. Antigravity first stages native SQLite, then atomically replaces attributed parser history while retaining unattributed hook rows. Missing source files block rebuild by default; `--allow-lossy-rebuild` accepts missing-file loss, never unreadable or failed database parsing.
 
 Token accounting is versioned per parser source. Databases containing rows
-from an older accounting contract remain readable. An unbounded normal
-`llmusage sync` detects legacy sources in the selected parser set, prints a
-warning, verifies that every target can be rebuilt without losing imported
-history, resets only those legacy sources, and parses the selected sources once.
-The accounting marker advances only after parser, Store, and status writes
-succeed.
+from an older accounting contract remain readable. Ordinary `llmusage sync`,
+with or without `--recent-days`, preserves each selected legacy source's
+history, cursors, and accounting marker, skips its imports, and warns that an
+explicit rebuild is required. Other current sources can still sync. Ordinary
+sync never repairs legacy accounting automatically.
 
-If any selected legacy source has missing inputs and protected events, normal
-sync refuses the automatic repair before resetting any target. Restore the
-source files and rerun `llmusage sync`. You can still rebuild a source
-explicitly when diagnosing or deliberately controlling the operation:
+Restore any missing source files, then explicitly rebuild the affected source:
 
 ```powershell
 llmusage sync --rebuild --source codex
 llmusage sync --rebuild --source claude
 llmusage sync --rebuild --source opencode
+llmusage sync --rebuild --source antigravity
+llmusage sync --rebuild --source antigravity_ide
 llmusage sync --rebuild --source kimi_code
 llmusage sync --rebuild --source pi
 llmusage sync --rebuild --source grok
 ```
 
-`sync --recent-days N` does not auto-repair legacy accounting. Resetting a
-source's full history and then importing only a bounded window would be lossy,
-so run unbounded `llmusage sync` first. `source-status` and diagnostics expose
-`legacy_token_accounting`, `token_accounting_version`, and an actionable
-warning while a source still needs rebuilding.
+Antigravity's version-2 history requires this explicit repair before version-3
+imports. CLI and IDE rebuilds first stage the complete native SQLite snapshot,
+then atomically replace attributed parser rows and advance their accounting
+markers. A staging or transaction failure preserves prior rows and markers.
+Unattributed hook-era rows remain in historical totals under their original
+accounting, with a retained-history warning; they are not converted to version 3.
 
-`llmusage serve` performs this repair automatically for safe legacy parser
-sources before it binds the dashboard port. A source with lossy rebuild risk is
-skipped with a warning: its historical reports remain readable, its normal
-writes remain blocked from mixing contracts, and the dashboard still starts.
-Unlike normal sync's all-or-nothing preflight, serve skips risky sources
-individually because read-only reports remain useful. Parser, SQLite, or commit
-failures for a source that passed the safety check stop dashboard startup.
-Neither automatic path enables `--allow-lossy-rebuild`.
+`source-status` and diagnostics expose `legacy_token_accounting`,
+`token_accounting_version`, and an actionable warning while a source still
+needs rebuilding. After successful explicit repair, ordinary full or bounded
+sync can import that source again.
+
+`llmusage serve` detects legacy parser sources before binding the dashboard
+port, preserves their history, and displays the accounting warning. It does
+not rebuild them, including sources whose original inputs are missing or
+unparseable. Historical reports remain available and the dashboard can start;
+ordinary imports for those sources stay skipped until explicit repair.
+`--allow-lossy-rebuild` is never enabled automatically.
 
 Only pass the lossy flag when you intentionally accept clearing unrebuildable history:
 

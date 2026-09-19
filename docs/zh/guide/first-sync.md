@@ -21,6 +21,7 @@ llmusage sync --source codex
 llmusage sync --source claude
 llmusage sync --source opencode
 llmusage sync --source antigravity
+llmusage sync --source antigravity_ide
 llmusage sync --source kimi_code
 llmusage sync --source pi
 llmusage sync --source omp
@@ -28,7 +29,7 @@ llmusage sync --source grok
 # gemini 不再作为来源 id；gemini-* 模型名保持不变
 ```
 
-合法来源与 `cargo run -- --help` 一致：`codex`、`claude`、`opencode`、`antigravity`、`kimi_code`、`pi`、`omp`、`grok`。`gemini` 不再作为来源 id；`gemini-*` 仍只是模型名前缀。
+合法来源与 `cargo run -- --help` 一致：`codex`、`claude`、`opencode`、`antigravity`、`antigravity_ide`、`kimi_code`、`pi`、`omp`、`grok`。`gemini` 不再作为来源 id；`gemini-*` 仍只是模型名前缀。
 
 Kimi Code 读取 `~/.kimi-code/sessions/**/wire.jsonl`（或 `KIMI_CODE_HOME/sessions`），只导入显式 turn-scoped `usage.record`。它分别映射非缓存输入、输出、cache read 与 cache creation，保留 `kimi-code/k3` 等原始模型名，并忽略聚合、零 token、非 turn 和损坏记录。
 
@@ -64,36 +65,39 @@ llmusage sync --recent-days 1
 llmusage sync --rebuild
 ```
 
-`--rebuild` 会按来源重置 parser-backed 用量状态，再重新解析本地真源。若重建会删除未归属的 hook 时代 Antigravity 行，操作会被拒绝。如果 parser 来源的已导入文件型历史依赖现在缺失的源文件，默认拒绝执行。
+`--rebuild` 重新解析所选来源。Antigravity 会先完整读取原生 SQLite，再原子替换有文件归属的 parser 历史，保留未归属的 hook 行。缺失真源默认拒绝重建；`--allow-lossy-rebuild` 只允许缺失文件造成的损失，不跳过不可读或解析失败的数据库。
 
-Token 统计口径按 parser 来源单独记录版本。含旧口径行的数据库仍可读取，但普通
-无界 `llmusage sync` 会检测本次所选 parser 集合中的旧版来源，先输出警告，再确认
-全部目标都能无损重建；预检通过后只 reset 这些 legacy 来源，并让本轮所选 parser
-各执行一次。只有 parser、Store 和状态写入全部成功后才会推进 accounting marker。
+Token 统计口径按 parser 来源单独记录版本。含旧口径行的数据库仍可读取。普通
+`llmusage sync` 无论是否指定 `--recent-days`，都会保留所选旧版来源的历史、cursor
+和 accounting marker，跳过该来源的导入，并提示需要显式重建。其他口径已更新的来源
+仍可同步。普通 sync 不会自动修复旧版统计口径。
 
-如果任一所选 legacy 来源同时存在缺失输入和受保护历史，普通 sync 会在 reset 任何
-自动目标前拒绝修复。恢复源文件后重新运行 `llmusage sync`。诊断或需要显式控制时，
-仍可逐源执行：
+恢复缺失的源文件后，显式重建受影响的来源：
 
 ```powershell
 llmusage sync --rebuild --source codex
 llmusage sync --rebuild --source claude
 llmusage sync --rebuild --source opencode
+llmusage sync --rebuild --source antigravity
+llmusage sync --rebuild --source antigravity_ide
 llmusage sync --rebuild --source kimi_code
 llmusage sync --rebuild --source pi
 llmusage sync --rebuild --source grok
 ```
 
-`sync --recent-days N` 不会自动修复旧版 accounting。清空来源全历史后只导入时间
-窗口会造成隐式丢失，因此请先运行无界 `llmusage sync`。来源仍需重建时，
-`source-status` 和 diagnostics 会返回 `legacy_token_accounting`、
-`token_accounting_version` 和可执行的警告信息。
+Antigravity 的版本 2 历史必须先完成上述显式修复，才能导入版本 3 数据。CLI 和 IDE
+重建会先完整读取并暂存原生 SQLite 快照，再原子替换有文件归属的 parser 行并推进
+accounting marker。暂存或事务失败时，原有记录和 marker 保持不变。未归属的 hook
+时代记录仍按原口径计入历史总量，并显示保留历史的警告；这些记录不会被转换为版本 3。
 
-`llmusage serve` 会在绑定 Dashboard 端口前自动修复可安全迁移的旧版 parser 来源。
-存在有损重建风险的来源会告警并跳过：历史报表仍可读取，普通写入继续被 guard 拒绝，
-Dashboard 仍会启动。与普通 sync 的全量预检不同，serve 会逐个跳过风险来源，因为只读
-报表仍有价值。已通过安全预检的来源若发生 parser、SQLite 或提交错误，Dashboard 会停止
-启动。两条自动路径都永远不会启用 `--allow-lossy-rebuild`。
+来源仍需重建时，`source-status` 和 diagnostics 会返回 `legacy_token_accounting`、
+`token_accounting_version` 和可执行的警告信息。显式修复成功后，普通全量同步或有界
+同步才能重新导入该来源。
+
+`llmusage serve` 会在绑定 Dashboard 端口前检测旧版 parser 来源，保留其历史并显示
+统计口径警告，不会重建这些来源，即使其原始输入缺失或无法解析。历史报表仍可读取，
+Dashboard 可以启动；这些来源的普通导入会继续跳过，直到完成显式修复。
+`--allow-lossy-rebuild` 永远不会自动启用。
 
 只有明确接受清掉不可重建历史时才使用：
 

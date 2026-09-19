@@ -533,8 +533,8 @@ fn ag_usage_message(
         usage.extend_from_slice(&ag_varint_field(5, cache_read));
     }
     usage.extend_from_slice(&ag_varint_field(6, 24));
-    usage.extend_from_slice(&ag_varint_field(9, output));
-    usage.extend_from_slice(&ag_varint_field(10, thinking));
+    usage.extend_from_slice(&ag_varint_field(9, thinking));
+    usage.extend_from_slice(&ag_varint_field(10, output));
     usage.extend_from_slice(&ag_string_field(11, response_id));
     usage
 }

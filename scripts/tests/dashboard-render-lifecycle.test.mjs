@@ -232,7 +232,8 @@ test('agent badge catalog preserves registry order and renders non-interactive i
     { id: 'codex', display_name: 'Codex', logo_url: 'assets/agent-logos/codex.svg' },
     { id: 'claude', display_name: 'Claude', logo_url: 'assets/agent-logos/claude.svg' },
     { id: 'opencode', display_name: 'OpenCode', logo_url: 'assets/agent-logos/opencode.svg' },
-    { id: 'antigravity', display_name: 'Antigravity', logo_url: 'assets/agent-logos/antigravity.svg' },
+    { id: 'antigravity', display_name: 'Antigravity CLI', logo_url: 'assets/agent-logos/antigravity.svg' },
+    { id: 'antigravity_ide', display_name: 'Antigravity IDE', logo_url: 'assets/agent-logos/antigravity_ide.svg' },
     { id: 'kimi_code', display_name: 'Kimi Code', logo_url: 'assets/agent-logos/kimi_code.svg' },
     { id: 'pi', display_name: 'Pi', logo_url: 'assets/agent-logos/pi.svg' },
     { id: 'omp', display_name: 'OMP', logo_url: 'assets/agent-logos/omp.svg' },
@@ -247,6 +248,7 @@ test('agent badge catalog preserves registry order and renders non-interactive i
     'claude',
     'opencode',
     'antigravity',
+    'antigravity_ide',
     'kimi_code',
     'pi',
     'omp',
@@ -257,8 +259,11 @@ test('agent badge catalog preserves registry order and renders non-interactive i
 
   const markup = hero.renderSourceBadgeList(catalog);
   assert.match(markup, /<ul class="agent-badge-list" role="list">/);
-  assert.equal((markup.match(/<li class="agent-badge"/g) || []).length, 10);
+  assert.equal((markup.match(/<li class="agent-badge"/g) || []).length, 11);
   assert.match(markup, /data-source="antigravity"/);
+  assert.match(markup, /data-source="antigravity_ide"/);
+  assert.match(markup, /Antigravity CLI/);
+  assert.match(markup, /Antigravity IDE/);
   assert.match(markup, /<img[^>]+alt="" aria-hidden="true"/);
   assert.doesNotMatch(markup, /<(?:button|a)\b|tabindex=|role="button"|onclick=/i);
 });

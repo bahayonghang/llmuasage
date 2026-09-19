@@ -216,6 +216,7 @@ fn ordinary_sync_skips_every_legacy_source_and_preserves_parserless_history() ->
             before.push(source_history_snapshot(&store, source)?);
         }
         seed_antigravity_history(&store)?;
+        let antigravity_before = source_history_snapshot(&store, SourceKind::Antigravity)?;
 
         let (mut tx, mut rx) = tokio::sync::mpsc::channel(256);
         commands::sync::run_once_with_options(
@@ -252,7 +253,17 @@ fn ordinary_sync_skips_every_legacy_source_and_preserves_parserless_history() ->
         );
         assert_eq!(
             store.token_accounting_version(SourceKind::Antigravity)?,
-            Some(expected_token_accounting_version(SourceKind::Antigravity))
+            Some(2)
+        );
+        assert_eq!(
+            source_history_snapshot(&store, SourceKind::Antigravity)?,
+            antigravity_before
+        );
+        let status = loaded_source_status(&store, "antigravity")?;
+        assert!(status.legacy_token_accounting);
+        assert_explicit_repair_warning(
+            status.token_accounting_warning.as_deref(),
+            SourceKind::Antigravity,
         );
         Ok::<_, anyhow::Error>(())
     })?;
@@ -577,6 +588,9 @@ fn empty_and_preset_current_sources_are_not_skipped_as_legacy() -> Result<()> {
         let store = Store::new(&app.paths)?;
         store.bootstrap()?;
         seed_antigravity_history(&store)?;
+        // This case deliberately exercises an explicitly current source;
+        // migration v21 still labels historical Antigravity data as version 2.
+        store.mark_current_token_accounting(SourceKind::Antigravity)?;
 
         for source in [SourceKind::Codex, SourceKind::Antigravity] {
             let (mut tx, rx) = tokio::sync::mpsc::channel(256);
@@ -831,6 +845,7 @@ fn serve_repair_records_every_legacy_source_as_not_rebuilt() -> Result<()> {
             before.push(source_history_snapshot(&store, source)?);
         }
         seed_antigravity_history(&store)?;
+        let antigravity_before = source_history_snapshot(&store, SourceKind::Antigravity)?;
 
         let report = commands::serve::repair_legacy_token_accounting(&app, &store).await?;
         assert!(report.rebuilt_sources.is_empty());
@@ -839,7 +854,9 @@ fn serve_repair_records_every_legacy_source_as_not_rebuilt() -> Result<()> {
             .iter()
             .map(|row| row.source)
             .collect::<Vec<_>>();
-        assert_eq!(blocked, legacy.to_vec());
+        let mut expected_blocked = legacy.to_vec();
+        expected_blocked.push(SourceKind::Antigravity);
+        assert_eq!(blocked, expected_blocked);
         for (index, source) in legacy.into_iter().enumerate() {
             assert_eq!(source_history_snapshot(&store, source)?, before[index]);
             assert!(store.has_legacy_token_accounting(source)?);
@@ -850,7 +867,17 @@ fn serve_repair_records_every_legacy_source_as_not_rebuilt() -> Result<()> {
         );
         assert_eq!(
             store.token_accounting_version(SourceKind::Antigravity)?,
-            Some(expected_token_accounting_version(SourceKind::Antigravity))
+            Some(2)
+        );
+        assert_eq!(
+            source_history_snapshot(&store, SourceKind::Antigravity)?,
+            antigravity_before
+        );
+        let status = loaded_source_status(&store, "antigravity")?;
+        assert!(status.legacy_token_accounting);
+        assert_explicit_repair_warning(
+            status.token_accounting_warning.as_deref(),
+            SourceKind::Antigravity,
         );
         Ok::<_, anyhow::Error>(())
     })?;
@@ -991,9 +1018,65 @@ fn explicit_rebuild_repairs_selected_legacy_source() -> Result<()> {
 }
 
 #[test]
-fn full_rebuild_refused_while_unattributed_antigravity_history_exists() -> Result<()> {
+fn ordinary_antigravity_v2_sync_preserves_history_without_importing_v3() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_antigravity_usage()?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        seed_antigravity_history(&store)?;
+        store.set_meta_value("token_accounting_version.antigravity", "2")?;
+        let before = source_history_snapshot(&store, SourceKind::Antigravity)?;
+
+        for recent_days in [0, 1] {
+            let (mut tx, mut rx) = tokio::sync::mpsc::channel(256);
+            commands::sync::run_once_with_options(
+                &app,
+                &store,
+                recent_days,
+                &commands::sync::SyncRunOptions {
+                    source: Some(SourceKind::Antigravity),
+                    ..Default::default()
+                },
+                Some(&mut tx),
+            )
+            .await?;
+            let events = drain_events(&mut rx);
+            assert_no_repair_claim(&events);
+            assert!(!events.iter().any(|event| matches!(
+                event,
+                SyncEvent::SourceStarted {
+                    source: SourceKind::Antigravity,
+                    ..
+                }
+            )));
+            assert_eq!(
+                source_history_snapshot(&store, SourceKind::Antigravity)?,
+                before
+            );
+            assert_eq!(
+                store.token_accounting_version(SourceKind::Antigravity)?,
+                Some(2)
+            );
+            let status = loaded_source_status(&store, "antigravity")?;
+            assert!(status.legacy_token_accounting);
+            assert_explicit_repair_warning(
+                status.token_accounting_warning.as_deref(),
+                SourceKind::Antigravity,
+            );
+        }
+        Ok::<_, anyhow::Error>(())
+    })?;
+    Ok(())
+}
+
+#[test]
+fn full_rebuild_repairs_antigravity_parser_rows_and_preserves_hook_history() -> Result<()> {
     let fixture = Fixture::new()?;
     fixture.seed_codex_copied_event()?;
+    fixture.seed_antigravity_usage()?;
 
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
@@ -1012,12 +1095,21 @@ fn full_rebuild_refused_while_unattributed_antigravity_history_exists() -> Resul
         )
         .await?;
         seed_antigravity_history(&store)?;
+        let hook_history = source_history_snapshot(&store, SourceKind::Antigravity)?;
+        store.open_connection()?.execute_batch(
+            "INSERT INTO usage_event(
+                event_key, source, source_path_hash, model, event_at, hour_start,
+                input_tokens, cache_read_tokens, cache_creation_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens, created_at
+             ) VALUES ('antigravity:old-parser', 'antigravity', 'old-parser-path',
+                       'gemini-2.5-pro', '2026-07-15T04:00:00Z', '2026-07-15T04:00:00Z',
+                       1232, 20, 0, 5, 10, 1267, '2026-07-15T04:00:00Z');",
+        )?;
+        store.set_meta_value("token_accounting_version.antigravity", "2")?;
 
-        // Hook-era rows carry no file attribution and cannot be reconstructed
-        // from conversations/*.db, so any rebuild that would delete them is
-        // refused — even with --allow-lossy-rebuild and even for a full
-        // no-source rebuild.
-        let error = commands::sync::run_once_with_options(
+        // A full rebuild may repair attributed parser rows, but its lossy
+        // opt-in never authorizes deletion of irreproducible hook-era facts.
+        commands::sync::run_once_with_options(
             &app,
             &store,
             0,
@@ -1028,33 +1120,39 @@ fn full_rebuild_refused_while_unattributed_antigravity_history_exists() -> Resul
             },
             None,
         )
-        .await
-        .expect_err("full rebuild must refuse while unattributed history exists");
-        assert!(
-            error
-                .to_string()
-                .contains("hook-era history without file attribution")
-        );
+        .await?;
 
-        for table in [
-            "usage_event",
-            "usage_bucket_30m",
-            "usage_turn",
-            "usage_tool_call",
-            "source_cursor",
-            "source_file",
-        ] {
-            assert_eq!(
-                source_row_count(&store, table, SourceKind::Antigravity)?,
-                1,
-                "refused rebuild must preserve Antigravity rows in {table}"
-            );
-        }
-        let risk = store
-            .source_files()
-            .lossy_rebuild_risk(SourceKind::Antigravity, "local")?;
-        assert_eq!(risk.missing_file_count, 1);
-        assert_eq!(risk.protected_event_count, 1);
+        let conn = store.open_connection()?;
+        assert_eq!(
+            dump_query(&conn, "SELECT * FROM usage_event WHERE source = ?1 AND event_key = 'antigravity:test:event'", "antigravity")?,
+            hook_history.events,
+        );
+        let repaired = source_history_snapshot(&store, SourceKind::Antigravity)?;
+        assert_eq!(repaired.turns, hook_history.turns);
+        assert_eq!(repaired.tools, hook_history.tools);
+        assert_eq!(repaired.events.len(), 2);
+        let parser_tokens: (i64, i64) = conn.query_row(
+            "SELECT input_tokens, total_tokens FROM usage_event WHERE source = 'antigravity' AND COALESCE(source_path_hash, '') <> ''",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(parser_tokens, (100, 135));
+        let bucket_total: i64 = conn.query_row(
+            "SELECT SUM(total_tokens) FROM usage_bucket_30m WHERE source = 'antigravity'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(bucket_total, 160);
+        assert_eq!(store.token_accounting_version(SourceKind::Antigravity)?, Some(3));
+        assert!(!store.has_legacy_token_accounting(SourceKind::Antigravity)?);
+
+        let reopened = Store::new(&app.paths)?;
+        let status = loaded_source_status(&reopened, "antigravity")?;
+        assert_eq!(status.token_accounting_version, Some(3));
+        assert!(!status.legacy_token_accounting);
+        let warning = status.token_accounting_warning.expect("retained hook warning");
+        assert!(warning.contains("hook-era"), "{warning}");
+        assert!(warning.contains("original accounting"), "{warning}");
         Ok::<_, anyhow::Error>(())
     })?;
 
@@ -1590,12 +1688,14 @@ impl Fixture {
             "USERPROFILE",
             "CODEX_HOME",
             "OPENCODE_HOME",
+            "GEMINI_CLI_HOME",
         ]);
         unsafe {
             std::env::set_var("HOME", &home);
             std::env::set_var("USERPROFILE", &home);
             std::env::set_var("CODEX_HOME", &codex_home);
             std::env::set_var("OPENCODE_HOME", &opencode_home);
+            std::env::set_var("GEMINI_CLI_HOME", home.join(".gemini"));
         }
 
         Ok(Self {
@@ -1605,6 +1705,30 @@ impl Fixture {
             opencode_home,
             _env: env,
         })
+    }
+
+    fn seed_antigravity_usage(&self) -> Result<()> {
+        let directory = self.home.join(".gemini/antigravity-cli/conversations");
+        fs::create_dir_all(&directory)?;
+        let conn = Connection::open(directory.join("accounting.db"))?;
+        conn.execute_batch(
+            "CREATE TABLE gen_metadata(idx INTEGER PRIMARY KEY, data BLOB, size INTEGER);",
+        )?;
+        let blob = crate::ag_gen_metadata_blob(
+            100,
+            10,
+            5,
+            20,
+            "accounting-response",
+            Some("gemini-2.5-pro"),
+            None,
+            1_784_089_800,
+        );
+        conn.execute(
+            "INSERT INTO gen_metadata(idx, data, size) VALUES (7, ?1, ?2)",
+            rusqlite::params![&blob, blob.len() as i64],
+        )?;
+        Ok(())
     }
 
     fn seed_codex_copied_event(&self) -> Result<()> {

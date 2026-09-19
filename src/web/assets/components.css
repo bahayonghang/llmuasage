@@ -182,7 +182,8 @@ nav a:hover .nav-icon {
   object-fit: contain;
 }
 
-.agent-badge[data-source='antigravity'] .agent-badge-logo-frame {
+.agent-badge[data-source='antigravity'] .agent-badge-logo-frame,
+.agent-badge[data-source='antigravity_ide'] .agent-badge-logo-frame {
   flex-basis: 52px;
   width: 52px;
   padding-inline: 3px;
@@ -1980,6 +1981,7 @@ nav a:hover .nav-icon {
 .source-row .src-name[data-source='pi'] { color: var(--source-pi); }
 .source-row .src-name[data-source='omp'] { color: var(--source-omp); }
 .source-row .src-name[data-source='antigravity'] { color: var(--source-antigravity); }
+.source-row .src-name[data-source='antigravity_ide'] { color: var(--source-antigravity_ide); }
 .source-row .src-name[data-source='grok'] { color: var(--source-grok); }
 
 .source-row .src-bar-track {

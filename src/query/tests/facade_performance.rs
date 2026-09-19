@@ -15,6 +15,7 @@ fn home_overview_includes_all_sources_in_by_platform() -> Result<()> {
         "claude",
         "codex",
         "antigravity",
+        "antigravity_ide",
         "opencode",
         "pi",
         "omp",
@@ -27,7 +28,43 @@ fn home_overview_includes_all_sources_in_by_platform() -> Result<()> {
     assert!(payload.by_platform["claude"].requests > 0);
     assert!(payload.by_platform["opencode"].requests > 0);
     assert_eq!(payload.by_platform["antigravity"].requests, 0);
+    assert_eq!(payload.by_platform["antigravity_ide"].requests, 0);
     assert!(!payload.series.is_empty());
+    Ok(())
+}
+
+#[test]
+fn home_overview_separates_antigravity_cli_and_ide_series() -> Result<()> {
+    let fixture = Fixture::new()?;
+    for (source, total_tokens) in [("antigravity", 11), ("antigravity_ide", 23)] {
+        fixture.seed_event(SeedEvent {
+            event_key: source,
+            source,
+            model: "gemini-2.5-pro",
+            event_at: "2026-09-19T12:00:00Z",
+            input_tokens: total_tokens,
+            total_tokens,
+            session_id: Some(source),
+            source_path_hash: Some(source),
+            ..SeedEvent::default()
+        })?;
+    }
+    let dashboard = Dashboard::open(fixture.store())?;
+    let payload = dashboard.home_overview(&QueryFilter::default())?;
+    assert_eq!(payload.summary.total_tokens, 34);
+    assert_eq!(payload.by_platform["antigravity"].tokens, 11);
+    assert_eq!(payload.by_platform["antigravity_ide"].tokens, 23);
+    assert_eq!(payload.series.len(), 1);
+    assert_eq!(payload.series[0].antigravity.tokens, 11);
+    assert_eq!(payload.series[0].antigravity_ide.tokens, 23);
+
+    let filtered = dashboard.home_overview(&QueryFilter {
+        source: Some(SourceKind::AntigravityIde),
+        ..Default::default()
+    })?;
+    assert_eq!(filtered.summary.total_tokens, 23);
+    assert_eq!(filtered.series[0].antigravity.tokens, 0);
+    assert_eq!(filtered.series[0].antigravity_ide.tokens, 23);
     Ok(())
 }
 

@@ -23,7 +23,8 @@ pub mod source_parser;
 pub mod zcode;
 
 pub use crate::models::{ParseIssueKind, ParseIssueSample, ParseIssues};
-pub use antigravity::AntigravityParser;
+pub(crate) use antigravity::sync_antigravity_family;
+pub use antigravity::{AntigravityIdeParser, AntigravityParser};
 pub use claude::ClaudeParser;
 pub use codex::CodexParser;
 pub use dsh::DeepseekHarnessParser;

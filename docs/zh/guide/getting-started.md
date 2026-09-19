@@ -43,7 +43,7 @@ llmusage sync
 
 `sync` 会增量解析本地真源，写入标准化 usage 行、30 分钟 bucket、source-file 诊断和行为事实。
 
-sync 只被动读取。Antigravity CLI conversations 由已注册 parser 导入。hook 时代的 Antigravity 行仍可查询；这些行没有文件归属时，rebuild 会被拒绝。
+Antigravity CLI 与 IDE 分别通过 `antigravity`、`antigravity_ide` 被动读取原生 `conversations/*.db`，共享同一解析内核。旧 hook 行保留并提示其历史计数语义。普通 sync 不混入旧版本计数；显式 rebuild 成功后替换 parser 历史。`.pb` 文件不在支持范围内。
 
 如果这台机器曾使用会安装 hook 的旧版 llmusage，请执行一次 `llmusage uninstall`，清理 llmusage 自有的遗留 hook、plugin 和 wrapper；已有用量数据不会被删除。
 

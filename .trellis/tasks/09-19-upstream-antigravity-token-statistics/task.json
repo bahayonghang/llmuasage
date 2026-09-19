@@ -1,0 +1,32 @@
+{
+  "id": "upstream-antigravity-token-statistics",
+  "name": "upstream-antigravity-token-statistics",
+  "title": "参考仓库更新检查与 Antigravity CLI IDE Token 统计",
+  "description": "固定 ccusage/tokscale 检查点，实施 Antigravity CLI 语义修复与 IDE 原生统计。",
+  "status": "in_progress",
+  "dev_type": "backend",
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-09-19",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "09-19-antigravity-cli-accounting-refresh",
+    "09-19-antigravity-ide-token-collection"
+  ],
+  "parent": null,
+  "relatedFiles": [
+    ".trellis/tasks/09-19-upstream-antigravity-token-statistics/research/upstream-checkpoint.md",
+    ".trellis/tasks/09-19-upstream-antigravity-token-statistics/research/antigravity-evidence.md"
+  ],
+  "notes": "Implementation and all ACs verified; CLI110DB/IDE530DB independently reconciled and idempotent. All cross-surface constituent gates passed, including final regressions. Journal/checkpoint recorded. Formal in_progress retained pending separate commit/archive request. See research/implementation-validation.md.",
+  "meta": {}
+}

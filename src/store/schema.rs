@@ -56,9 +56,9 @@ pub const fn expected_token_accounting_version(source: SourceKind) -> u32 {
         SourceKind::Codex => 3,
         SourceKind::Grok => 3,
         SourceKind::Pi => 3,
+        SourceKind::Antigravity | SourceKind::AntigravityIde => 3,
         SourceKind::Claude
         | SourceKind::Opencode
-        | SourceKind::Antigravity
         | SourceKind::KimiCode
         | SourceKind::Omp
         | SourceKind::Zcode
@@ -258,6 +258,9 @@ impl Store {
         {
             return Ok(false);
         }
+        if matches!(source, SourceKind::Antigravity | SourceKind::AntigravityIde) {
+            return Ok(self.host_source_event_count(super::LOCAL_HOST_ID, source)? > 0);
+        }
         let conn = self.open_connection()?;
         let rows: i64 = conn.query_row(
             "SELECT COUNT(*) FROM usage_event WHERE source = ?1",
@@ -313,6 +316,26 @@ impl Store {
             |row| row.get(0),
         )?;
         Ok(count)
+    }
+
+    /// Hook-era Antigravity rows retained for exactly one host. These rows are
+    /// queryable history, not evidence that the current parser rebuilt them.
+    pub fn retained_antigravity_history_count(&self, host_id: &str) -> Result<i64> {
+        let conn = self.open_connection()?;
+        Ok(conn.query_row(
+            "SELECT COUNT(*) FROM usage_event WHERE source = 'antigravity' AND host_id = ?1 AND COALESCE(source_path_hash, '') = ''",
+            [host_id],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// Disclosure independent of the parser accounting marker: explicit repair
+    /// certifies parser-attributed rows while preserving older hook semantics.
+    pub fn retained_antigravity_history_warning(&self, host_id: &str) -> Result<Option<String>> {
+        let count = self.retained_antigravity_history_count(host_id)?;
+        Ok((count > 0).then(|| format!(
+            "{count} hook-era Antigravity event(s) are retained in historical totals under their original accounting; the parser accounting version does not certify these records"
+        )))
     }
 
     /// Deletes rebuildable usage state for exactly one source on one host (D20 / F3.3).
@@ -471,7 +494,10 @@ fn token_accounting_key(source: crate::models::SourceKind) -> String {
     format!("token_accounting_version.{}", source.as_str())
 }
 
-fn token_accounting_key_for_host(host_id: &str, source: crate::models::SourceKind) -> String {
+pub(crate) fn token_accounting_key_for_host(
+    host_id: &str,
+    source: crate::models::SourceKind,
+) -> String {
     if host_id == super::LOCAL_HOST_ID {
         token_accounting_key(source)
     } else {

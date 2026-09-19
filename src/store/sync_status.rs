@@ -88,6 +88,7 @@ impl<'a> SyncStatusStore<'a> {
                 if status.legacy_token_accounting {
                     status.token_accounting_warning = Some(Self::legacy_repair_warning(source));
                 }
+                self.append_retained_antigravity_warning(host_id, source, status)?;
                 continue;
             }
             status.token_accounting_version = self
@@ -109,8 +110,26 @@ impl<'a> SyncStatusStore<'a> {
                     status.legacy_token_accounting = false;
                 }
             }
+            self.append_retained_antigravity_warning(host_id, source, status)?;
         }
         Ok(statuses)
+    }
+
+    fn append_retained_antigravity_warning(
+        &self,
+        host_id: &str,
+        source: crate::models::SourceKind,
+        status: &mut SourceSyncStatus,
+    ) -> Result<()> {
+        if source == crate::models::SourceKind::Antigravity
+            && let Some(retained) = self.store.retained_antigravity_history_warning(host_id)?
+        {
+            status.token_accounting_warning = Some(match status.token_accounting_warning.take() {
+                Some(warning) => format!("{warning} {retained}"),
+                None => retained,
+            });
+        }
+        Ok(())
     }
 
     pub fn save_source_sync_statuses(
