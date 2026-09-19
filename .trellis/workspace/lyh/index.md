@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 70
-- **Last Active**: 2026-09-05
+- **Total Sessions**: 73
+- **Last Active**: 2026-09-19
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~75 | Active |
+| `journal-2.md` | ~174 | Active |
 | `journal-1.md` | ~2011 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,9 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 73 | 2026-09-19 | 提交并归档 Antigravity CLI/IDE 原生统计 | `07221f7` | `dev` |
+| 72 | 2026-09-19 | Antigravity CLI/IDE 原生统计实施与全量对账 | - | `dev` |
+| 71 | 2026-09-19 | 参考更新检查与 Antigravity 原生 SQLite 统计规划 | - | `dev` |
 | 70 | 2026-09-05 | 添加 GPT-6 Astra 与 Claude Fable/Mythos 5.1 定价覆盖 | `8e9b6ae`, `5544175` | `dev` |
 | 69 | 2026-09-03 | 按业务风险补齐核心测试覆盖 | `b5234b4`, `c48f8a9`, `010f4dc` | `dev` |
 | 68 | 2026-09-03 | 依赖扫描与分批升级 | `437e62f`, `cd1b433`, `95c4288` | `dev` |
