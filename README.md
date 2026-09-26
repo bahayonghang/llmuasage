@@ -6,7 +6,7 @@
 
 Local-first usage analytics for AI coding CLIs. `llmusage` passively reads local Codex, Claude Code, OpenCode, Kimi Code, Pi, Oh My Pi, Grok Build, ZCode, Antigravity CLI and IDE, and DeepSeek Harness artifacts into SQLite, then renders reports, terminal and browser dashboards, and offline HTML exports without upload. The `dash` Usage tab also reads already-present CLI credentials and requests provider quota APIs.
 
-> Current crate version: `1.3.0`.
+> Current crate version: `1.4.0`.
 
 ![llmusage web dashboard overview](./docs/public/screenshots/web-dashboard-overview.png)
 
@@ -128,6 +128,7 @@ just tinstall
 ```
 
 `just tdev` starts the Tauri development shell from `desktop/` (same as `just desktop-dev`).
+The development server tries port `43173` first, skips occupied or denied ports, and passes the selected address to Tauri.
 `just tinstall` writes an unsigned NSIS installer and runs it.
 `just desktop-build` writes the installer to `desktop/src-tauri/target/release/bundle/nsis/` without running it.
 Windows SmartScreen may warn, because the installer is not code-signed.

@@ -6,7 +6,7 @@
 
 本地优先的 AI CLI 用量分析工具。`llmusage` 会被动读取本机 Codex、Claude Code、OpenCode、Kimi Code、Pi、Oh My Pi、Grok Build、ZCode、Antigravity CLI/IDE 和 DeepSeek Harness 的本地记录，并写入本地 SQLite；随后提供命令行报表、终端 Dashboard、浏览器 Dashboard 和离线 HTML 导出，默认不上传本地用量。`dash` 的 Usage 页会用本机已有 CLI 凭证读取订阅额度。
 
-> 当前 crate 版本：`1.3.0`。
+> 当前 crate 版本：`1.4.0`。
 
 ![llmusage 本地 Web Dashboard 概览](./docs/public/screenshots/web-dashboard-overview.png)
 
@@ -126,6 +126,7 @@ just tinstall
 ```
 
 `just tdev` 从 `desktop/` 启动 Tauri 开发壳（同 `just desktop-dev`）。
+开发服务器优先使用端口 `43173`，遇到占用或访问被拒绝时自动尝试后续端口，并将实际地址传给 Tauri。
 `just tinstall` 写出未签名 NSIS 安装包并运行它。
 `just desktop-build` 只在 `desktop/src-tauri/target/release/bundle/nsis/` 写出安装包，不运行。
 安装包未做代码签名，Windows SmartScreen 可能告警。

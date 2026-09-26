@@ -1,14 +1,48 @@
 # Changelog
 
-## Unreleased
+## 1.4.0 - 2026-09-26
 
 ### Added
 
-- Add GPT-6 Astra, Claude Fable 5.1, and Claude Mythos 5.1 static pricing and context-window coverage.
+- Add Antigravity IDE token collection (`antigravity_ide`) next to the corrected Antigravity CLI accounting. `ModelUsageStats` now covers all six token channels, deduplicates `steps` and retry rows by identity, and keeps hook-era history queryable (ADR 0017).
+- Add the Tauri desktop app: Tauri process and facade commands, the core dashboard shell with filter mapping, secondary panels and the six-card `home_overview`, the log CSV preference and quota pages, unsigned Windows NSIS bundling, and the `just tdev` and `just tinstall` recipes.
+- Add a dashboard development server that prefers port `43173`, skips occupied or refused ports, and passes the selected address to Tauri (`desktop/scripts/dev.mjs`).
+- Add static pricing and context-window coverage for GPT-6 Astra, Claude Fable 5.1, and Claude Mythos 5.1.
+- Add a separate `omp` source with full usage accounting, and account Grok Build usage from `turn_completed.usage`.
+- Add report and sync failures to `run_log`, and add independent dashboard runtime status and event-log blocks.
 
 ### Changed
 
+- Raise the crate version from `1.3.0` to `1.4.0`. The Tauri app version, `tauri.conf.json`, and both lockfiles move with it.
+- Schema v24 (`optimize_top_sessions_identity_order`) adds the identity-ordered covering index behind the session ranking queries. Older binaries refuse the newer database with `SchemaTooNew`.
 - Bump the embedded catalog identity from `static-v2` to `static-v3` so unpinned databases reprice on the next sync.
+- Ordinary `sync` keeps legacy token-accounting history, skips writing that source, and warns. Repair stays `sync --rebuild --source <source>`.
+- Remote shard writes verify the source accounting version before commit, so a matching wire version cannot mix different token semantics.
+- Cache provenance follows the real cache branch: `cache_hit` matches `fetched_at` and cache-hit evidence, not mtime.
+- Composite snapshots read one SQLite schema version, the dashboard and CLI reports share one query path, and `store` no longer depends on `query`.
+- Bound Codex tracer ingestion and make it incremental; move report period aggregation and project filtering into SQL.
+- Discover dashboard JS tests by directory so every `scripts/tests/*.test.mjs` file runs, and run the desktop Node launcher tests in the same gate.
+- Use the repository's own `v1.2.0` tag as the semver baseline.
+- Update Trellis to `0.7.0-beta.4` and keep plan reviews under `.trellis/reviews/`.
+
+### Fixed
+
+- A failed Antigravity conversation open no longer clears already imported usage.
+- `status` no longer takes the `run_log` lock; tracer refresh methods and query limits are bounded.
+- Loopback write routes validate `Origin`, and redirects, bind filtering, and export paths are constrained.
+- `reset` clears `source_file` and rebuilds atomically.
+- OpenCode opens read-only and commits its cursor atomically.
+- SSH targets that could be read as options are rejected.
+- Dashboard sync status and sidebar information are corrected, and the trend source table shows the full window share.
+
+### Security
+
+- Upgrade Rust dependencies (reqwest 0.13, tower-http 0.7.1) and cover the nanoid and postcss advisories.
+
+### Tests
+
+- Reorganize the suite into the eight explicit Cargo targets and add regression coverage for transaction, permission, and parameter-validation risks.
+
 
 ## 1.3.0 - 2026-08-21
 

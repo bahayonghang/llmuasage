@@ -31,6 +31,7 @@ just tinstall
 ```
 
 `just tdev` starts the Tauri development shell from `desktop/` (same as `just desktop-dev`).
+The development server tries port `43173` first, skips occupied or denied ports, and passes the selected address to Tauri.
 `just tinstall` writes an unsigned NSIS installer and runs it.
 `just desktop-build` writes the installer to `desktop/src-tauri/target/release/bundle/nsis/` without running it.
 Windows SmartScreen may warn, because the installer is not code-signed.

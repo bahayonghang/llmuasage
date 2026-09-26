@@ -29,6 +29,7 @@ just tinstall
 ```
 
 `just tdev` 从 `desktop/` 启动 Tauri 开发壳（同 `just desktop-dev`）。
+开发服务器优先使用端口 `43173`，遇到占用或访问被拒绝时自动尝试后续端口，并将实际地址传给 Tauri。
 `just tinstall` 写出未签名 NSIS 安装包并运行它。
 `just desktop-build` 只在 `desktop/src-tauri/target/release/bundle/nsis/` 写出安装包，不运行。
 安装包未做代码签名，Windows SmartScreen 可能告警。

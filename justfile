@@ -10,7 +10,7 @@ serve:
     cargo run -- serve
 
 desktop-dev:
-    cmd.exe /c 'desktop\node_modules\.bin\tauri.cmd dev'
+    npm --prefix desktop run dev:tauri
 
 alias tdev := desktop-dev
 

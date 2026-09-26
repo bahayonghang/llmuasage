@@ -1,12 +1,13 @@
 {
   "name": "llmusage-desktop",
   "private": true,
-  "version": "1.3.0",
+  "version": "1.4.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:tauri": "node scripts/dev.mjs",
     "build": "vite build",
-    "test": "vitest run",
+    "test": "vitest run && node --test scripts/*.node-test.mjs",
     "tauri": "tauri"
   },
   "dependencies": {
