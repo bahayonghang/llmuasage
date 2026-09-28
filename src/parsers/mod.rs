@@ -20,6 +20,8 @@ pub mod opencode;
 pub mod pi;
 pub(crate) mod source_files;
 pub mod source_parser;
+#[cfg(test)]
+mod writer_benchmark;
 pub mod zcode;
 
 pub use crate::models::{ParseIssueKind, ParseIssueSample, ParseIssues};

@@ -217,7 +217,12 @@ fn parse_issue_lines(
         styled(prefix_style, "  parse issues: ", color),
         class_parts.join(" ")
     )];
-    for sample in &issues.samples {
+    lines.push(format!("  {}", issues.sample_summary()));
+    for sample in issues
+        .samples
+        .iter()
+        .take(crate::domain::models::MAX_PARSE_ISSUE_SAMPLES)
+    {
         lines.push(styled(
             Style::new().dim(),
             &parse_issue_sample_line(sample, sample_basenames),
@@ -241,6 +246,30 @@ pub(crate) fn path_basename(raw: &str) -> Option<&str> {
     raw.rsplit(['/', '\\'])
         .map(str::trim)
         .find(|name| !name.is_empty())
+}
+
+pub(crate) fn sample_basenames(
+    store: &crate::store::Store,
+    host: &str,
+    sources: impl Iterator<Item = SourceKind>,
+) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for source in sources {
+        let Ok(cursors) = store.cursors().load_file_cursors(source, host) else {
+            continue;
+        };
+        for cursor in cursors.into_values() {
+            let raw = if cursor.file_path.is_empty() {
+                cursor.cursor_key
+            } else {
+                cursor.file_path
+            };
+            if let Some(name) = path_basename(&raw) {
+                map.insert(crate::util::hash_string(&raw), name.to_string());
+            }
+        }
+    }
+    map
 }
 
 struct Row {
@@ -405,6 +434,25 @@ mod tests {
     /// Wide terminal used by alignment assertions so natural widths are kept.
     const WIDE: usize = 200;
 
+    #[test]
+    fn parse_issue_samples_report_offsets_and_omitted_count() {
+        let mut summary = summary();
+        for offset in 1..=13 {
+            summary.sources[0].parse_issues.record(
+                SourceKind::Codex,
+                "private-hash",
+                offset,
+                crate::models::ParseIssueKind::Skipped,
+                "oversized_non_usage_record",
+            );
+        }
+        let text = format_summary_lines(&summary, false, false, WIDE).join("\n");
+        assert!(text.contains("oversized_non_usage_record @1"), "{text}");
+        assert!(text.contains("5 not shown"), "{text}");
+        assert!(!text.contains("@9"));
+        assert!(!text.contains("private-hash"));
+    }
+
     /// Strips ANSI SGR sequences so colored output can be compared to plain.
     fn strip_ansi(text: &str) -> String {
         let mut out = String::new();
@@ -524,7 +572,9 @@ mod tests {
             "  parse issues: malformed=2 oversized=1 skipped=3 accounting=4"
         );
         assert!(
-            lines.iter().any(|line| line.trim() == "malformed @42"),
+            lines
+                .iter()
+                .any(|line| line.trim() == "malformed @42 [location unavailable]"),
             "samples should show kind and offset: {lines:?}"
         );
         assert!(!lines.iter().any(|line| line.contains("safe-path-hash")));
@@ -581,9 +631,8 @@ mod tests {
 
         let lines = format_summary_lines(&summary, false, false, WIDE);
         assert!(
-            lines
-                .iter()
-                .any(|line| line.trim() == "skipped zcode_unfinished:error:invalid_request"),
+            lines.iter().any(|line| line.trim()
+                == "skipped zcode_unfinished:error:invalid_request [location unavailable]"),
             "reason samples should print kind + reason: {lines:?}"
         );
         assert!(!lines.iter().any(|line| line.contains("@0")));

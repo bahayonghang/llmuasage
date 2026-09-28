@@ -8,6 +8,7 @@ mod decode;
 mod tests;
 
 use crate::{
+    domain::source_diagnostics::{SourceIssue, SourceIssueCode, SourceIssues},
     models::{ParseIssueKind, ParseIssues, SourceKind},
     parsers::{ProgressSink, SourceParser, SourceSyncStats, SyncEvent, source_files},
     store::{FileCursor, Store, SyncRunWriter, SyncShard},
@@ -58,7 +59,7 @@ macro_rules! parser {
                         progress,
                     )
                     .await?;
-                    Ok(result.remove(0))
+                    Ok(result.stats.remove(0))
                 })
             }
         }
@@ -142,12 +143,35 @@ fn snapshot(path: &Path) -> Result<FileCursor> {
     })
 }
 
-fn record_failure(stats: &mut [SourceSyncStats], source: SourceKind, reason: &str) {
+fn record_failure(
+    stats: &mut [SourceSyncStats],
+    source_issues: &mut SourceIssues,
+    source: SourceKind,
+    code: SourceIssueCode,
+    count: u64,
+) {
     for stat in stats.iter_mut().filter(|stat| stat.source == source) {
-        stat.last_error = Some(reason.to_owned());
-        stat.parse_issues
-            .record(source, "", 0, ParseIssueKind::Malformed, reason);
+        let issues = source_issues.entry(source).or_default();
+        SourceIssue::record(issues, code, count);
+        stat.last_error = Some(
+            issues
+                .iter()
+                .map(|issue| issue.cli_line(source))
+                .collect::<Vec<_>>()
+                .join("; "),
+        );
     }
+}
+
+pub(crate) struct FamilySyncResult {
+    pub(crate) stats: Vec<SourceSyncStats>,
+    pub(crate) source_issues: SourceIssues,
+}
+
+struct FamilyInputs {
+    started: Instant,
+    listings: [(SourceKind, source_files::SourceFileListing); 2],
+    metadata: fn(&Path) -> std::io::Result<std::fs::Metadata>,
 }
 
 /// The driver invokes this once for the selected Antigravity family. Both
@@ -162,9 +186,50 @@ pub(crate) async fn sync_antigravity_family(
     _parallelism: usize,
     recent_cutoff: Option<DateTime<Utc>>,
     cancel: &CancellationToken,
-    mut progress: Option<ProgressSink<'_>>,
-) -> Result<Vec<SourceSyncStats>> {
+    progress: Option<ProgressSink<'_>>,
+) -> Result<FamilySyncResult> {
     let started = Instant::now();
+    sync_family_with_inputs(
+        store,
+        writer,
+        selected_sources,
+        rebuild,
+        allow_lossy_rebuild,
+        recent_cutoff,
+        cancel,
+        progress,
+        FamilyInputs {
+            started,
+            listings: [
+                (
+                    SourceKind::Antigravity,
+                    source_files::list_antigravity_conversation_files(),
+                ),
+                (
+                    SourceKind::AntigravityIde,
+                    source_files::list_antigravity_ide_conversation_files(),
+                ),
+            ],
+            metadata: |path| std::fs::metadata(path),
+        },
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn sync_family_with_inputs(
+    store: &Store,
+    writer: &mut SyncRunWriter,
+    selected_sources: &[SourceKind],
+    rebuild: bool,
+    allow_lossy_rebuild: bool,
+    recent_cutoff: Option<DateTime<Utc>>,
+    cancel: &CancellationToken,
+    mut progress: Option<ProgressSink<'_>>,
+    inputs: FamilyInputs,
+) -> Result<FamilySyncResult> {
+    let started = inputs.started;
+    let mut source_issues = SourceIssues::new();
     let mut stats: Vec<_> = selected_sources
         .iter()
         .map(|source| SourceSyncStats {
@@ -172,6 +237,12 @@ pub(crate) async fn sync_antigravity_family(
             ..Default::default()
         })
         .collect();
+    if selected_sources.is_empty() {
+        return Ok(FamilySyncResult {
+            stats,
+            source_issues,
+        });
+    }
     let mut cursors: HashMap<SourceKind, HashMap<String, FileCursor>> = HashMap::new();
     let mut tracked: HashMap<SourceKind, HashSet<PathBuf>> = HashMap::new();
     for source in FAMILY {
@@ -200,19 +271,26 @@ pub(crate) async fn sync_antigravity_family(
     let mut files = Vec::new();
     let mut discovered = HashSet::new();
     let mut failed = HashSet::new();
-    for (source, listing) in [
-        (
-            SourceKind::Antigravity,
-            source_files::list_antigravity_conversation_files(),
-        ),
-        (
-            SourceKind::AntigravityIde,
-            source_files::list_antigravity_ide_conversation_files(),
-        ),
-    ] {
-        if let Some(error) = listing.error_summary() {
-            record_failure(&mut stats, source, &error);
-            failed.insert(source);
+    for (source, listing) in inputs.listings {
+        // Shared discovery treats a missing root as empty. Check metadata here
+        // because Path::exists also hides access errors and non-directory roots.
+        let root_failed = match (inputs.metadata)(&listing.root) {
+            Ok(metadata) => !metadata.is_dir(),
+            Err(error) => error.kind() != std::io::ErrorKind::NotFound,
+        };
+        if listing.error_summary().is_some() || root_failed {
+            // An unseen database can belong to either product or carry a
+            // stronger identity. Root names do not prove product ownership.
+            for owner in FAMILY {
+                record_failure(
+                    &mut stats,
+                    &mut source_issues,
+                    owner,
+                    SourceIssueCode::DiscoveryIncomplete,
+                    1,
+                );
+                failed.insert(owner);
+            }
         }
         for path in listing.paths {
             if !discovered.insert(path.clone()) {
@@ -228,8 +306,10 @@ pub(crate) async fn sync_antigravity_family(
                     for owner in failed_file_owners(&path, source, &tracked) {
                         record_failure(
                             &mut stats,
+                            &mut source_issues,
                             owner,
-                            "Antigravity database fingerprint failed; history preserved",
+                            SourceIssueCode::FingerprintUnavailable,
+                            1,
                         );
                         failed.insert(owner);
                     }
@@ -237,19 +317,32 @@ pub(crate) async fn sync_antigravity_family(
             }
         }
     }
-    // A missing tracked member cannot silently remove its historical events.
+    // Only local membership is loaded above. A path absent from discovery may
+    // still exist outside the current roots or supported file extensions.
     for source in FAMILY {
-        if tracked[&source]
+        for path in tracked[&source]
             .iter()
-            .any(|path| !discovered.contains(path))
-            && !(rebuild && allow_lossy_rebuild && selected_sources.contains(&source))
+            .filter(|path| !discovered.contains(*path))
         {
-            record_failure(
-                &mut stats,
-                source,
-                "Antigravity tracked database missing; history preserved (restore it or use explicit --rebuild --allow-lossy-rebuild)",
-            );
-            failed.insert(source);
+            let code = match (inputs.metadata)(path) {
+                Ok(_) => SourceIssueCode::TrackedMemberOutOfScope,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    SourceIssueCode::TrackedMemberMissing
+                }
+                Err(_) => SourceIssueCode::TrackedMemberUnreadable,
+            };
+            let accepted_loss = rebuild
+                && allow_lossy_rebuild
+                && selected_sources.contains(&source)
+                && matches!(
+                    code,
+                    SourceIssueCode::TrackedMemberMissing
+                        | SourceIssueCode::TrackedMemberOutOfScope
+                );
+            if !accepted_loss {
+                record_failure(&mut stats, &mut source_issues, source, code, 1);
+                failed.insert(source);
+            }
         }
     }
     let any_changed = rebuild
@@ -272,15 +365,18 @@ pub(crate) async fn sync_antigravity_family(
             stat.files_processed = paths.len();
             stat.skipped_files = paths.len();
         }
-        return Ok(stats);
+        return Ok(FamilySyncResult {
+            stats,
+            source_issues,
+        });
     }
     if cancel.is_cancelled() {
-        return Ok(stats);
+        return Ok(FamilySyncResult {
+            stats,
+            source_issues,
+        });
     }
 
-    let mut decoded = Vec::new();
-    let mut new_cursors: HashMap<SourceKind, Vec<FileCursor>> = HashMap::new();
-    let mut issues: HashMap<SourceKind, ParseIssues> = HashMap::new();
     for source in selected_sources {
         if let Some(sink) = progress.as_mut() {
             sink(SyncEvent::SourceStarted {
@@ -289,11 +385,30 @@ pub(crate) async fn sync_antigravity_family(
             });
         }
     }
+    if selected_sources
+        .iter()
+        .all(|source| failed.contains(source))
+    {
+        let elapsed = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+        for stat in &mut stats {
+            stat.parse_ms = elapsed;
+        }
+        return Ok(FamilySyncResult {
+            stats,
+            source_issues,
+        });
+    }
+    let mut decoded = Vec::new();
+    let mut new_cursors: HashMap<SourceKind, Vec<FileCursor>> = HashMap::new();
+    let mut issues: HashMap<SourceKind, ParseIssues> = HashMap::new();
     // Do blocking SQLite reads off the async executor, one consistent transaction
     // per DB; no store mutation occurs until every selected snapshot is staged.
     for mut file in files {
         if cancel.is_cancelled() {
-            return Ok(stats);
+            return Ok(FamilySyncResult {
+                stats,
+                source_issues,
+            });
         }
         // Discovery can precede this read by many databases. Capture this
         // member immediately before its transaction, not at inventory time.
@@ -304,8 +419,10 @@ pub(crate) async fn sync_antigravity_family(
                     failed.insert(owner);
                     record_failure(
                         &mut stats,
+                        &mut source_issues,
                         owner,
-                        "Antigravity database fingerprint failed; history preserved",
+                        SourceIssueCode::FingerprintUnavailable,
+                        1,
                     );
                 }
                 continue;
@@ -319,22 +436,25 @@ pub(crate) async fn sync_antigravity_family(
         })
         .await?;
         if cancel.is_cancelled() {
-            return Ok(stats);
+            return Ok(FamilySyncResult {
+                stats,
+                source_issues,
+            });
         }
         match parsed {
             Ok(parsed) => {
                 let fingerprint_error = match snapshot(&file.path) {
                     Ok(after) if after.file_fingerprint == file.cursor.file_fingerprint => None,
-                    Ok(_) => Some("Antigravity database changed while reading; retry sync"),
+                    Ok(_) => Some(SourceIssueCode::SnapshotChanged),
                     Err(error) => {
                         tracing::warn!(error = %error, path_hash = hash_string(&file.path.to_string_lossy()), "Antigravity post-read fingerprint unavailable");
-                        Some("Antigravity post-read fingerprint unavailable; history preserved")
+                        Some(SourceIssueCode::FingerprintUnavailable)
                     }
                 };
-                if let Some(reason) = fingerprint_error {
+                if let Some(code) = fingerprint_error {
                     for owner in failed_file_owners(&file.path, parsed.source, &tracked) {
                         failed.insert(owner);
-                        record_failure(&mut stats, owner, reason);
+                        record_failure(&mut stats, &mut source_issues, owner, code, 1);
                     }
                     continue;
                 }
@@ -358,14 +478,24 @@ pub(crate) async fn sync_antigravity_family(
                     .or_default()
                     .push(file.cursor);
             }
-            Err(_) => {
-                for owner in failed_file_owners(&file.path, root_source, &tracked) {
-                    failed.insert(owner);
-                    record_failure(
-                        &mut stats,
-                        owner,
-                        "Antigravity SQLite metadata unreadable or malformed; history preserved",
+            Err(error) => {
+                let record_error = error.downcast_ref::<decode::RecordFailure>();
+                let source = record_error.map_or(root_source, |error| error.source_kind);
+                let code = if let Some(error) = record_error {
+                    issues.entry(source).or_default().record(
+                        source,
+                        &error.path_hash,
+                        0,
+                        ParseIssueKind::Malformed,
+                        error.reason,
                     );
+                    SourceIssueCode::IncompleteSnapshot
+                } else {
+                    SourceIssueCode::MetadataUnreadable
+                };
+                for owner in failed_file_owners(&file.path, source, &tracked) {
+                    failed.insert(owner);
+                    record_failure(&mut stats, &mut source_issues, owner, code, 1);
                 }
             }
         }
@@ -376,20 +506,24 @@ pub(crate) async fn sync_antigravity_family(
     // check below blocks that write as well.
     let events = match decode::normalize(decoded, &mut issues) {
         Ok(events) => events,
-        Err(error) => {
+        Err(_) => {
             for stat in &mut stats {
                 stat.parse_issues
                     .merge(issues.remove(&stat.source).unwrap_or_default());
-                stat.parse_issues.record(
-                    stat.source,
-                    "",
-                    0,
-                    ParseIssueKind::Malformed,
-                    "incomplete_antigravity_usage_snapshot",
-                );
-                stat.last_error = Some(error.to_string());
             }
-            return Ok(stats);
+            for source in selected_sources {
+                record_failure(
+                    &mut stats,
+                    &mut source_issues,
+                    *source,
+                    SourceIssueCode::IncompleteSnapshot,
+                    1,
+                );
+            }
+            return Ok(FamilySyncResult {
+                stats,
+                source_issues,
+            });
         }
     };
     let old_owners = if store.emit_only() {
@@ -507,7 +641,10 @@ pub(crate) async fn sync_antigravity_family(
         shards.push(shard);
     }
     if cancel.is_cancelled() {
-        return Ok(stats);
+        return Ok(FamilySyncResult {
+            stats,
+            source_issues,
+        });
     }
     if !shards.is_empty() {
         let sources: Vec<_> = shards.iter().map(|shard| shard.source).collect();
@@ -526,7 +663,10 @@ pub(crate) async fn sync_antigravity_family(
     for stat in &mut stats {
         stat.parse_ms = elapsed.saturating_sub(stat.write_ms);
     }
-    Ok(stats)
+    Ok(FamilySyncResult {
+        stats,
+        source_issues,
+    })
 }
 
 fn failed_file_owners(

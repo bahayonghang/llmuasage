@@ -5,3 +5,4 @@ pub mod pricing_catalog;
 pub mod project;
 pub mod provider_map;
 pub mod source_descriptor;
+pub(crate) mod source_diagnostics;

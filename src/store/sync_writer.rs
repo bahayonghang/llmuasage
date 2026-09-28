@@ -27,12 +27,88 @@ use crate::{
     util::now_utc,
 };
 
-/// Maximum events committed in a single `usage_event` transaction.
+// Tests can observe exclusive stages without changing the production protocol.
+macro_rules! writer_stage {
+    ($name:literal, $body:expr) => {{
+        #[cfg(test)]
+        let _stage = profiling::Stage::enter($name);
+        $body
+    }};
+}
+
+#[cfg(test)]
+pub(crate) mod profiling;
+
+fn audit_now() -> String {
+    #[cfg(test)]
+    if let Some(now) = profiling::audit_now() {
+        return now;
+    }
+    now_utc()
+}
+
+fn audit_run_started_at() -> String {
+    #[cfg(test)]
+    if let Some(now) = profiling::audit_now() {
+        return now;
+    }
+    crate::util::now_utc_millis()
+}
+
+/// Maximum events per insert batch within the shard's single transaction.
 ///
 /// Owned by the writer side of the protocol so parsers stay agnostic to
 /// SQLite batch sizing. Removing this constant is a deletion-test signal:
 /// each parser would have to reintroduce its own chunking constant.
 const EVENT_WRITE_BATCH_SIZE: usize = 1000;
+
+// Choose the smaller indexed candidate set without changing path or host
+// identity, aggregation order, or deletion order.
+const RESET_EVENT_AGGREGATE_SQL: &str = r#"
+                SELECT
+                    COALESCE(provider_label, ''),
+                    model,
+                    hour_start,
+                    COALESCE(project_hash, ''),
+                    SUM(input_tokens),
+                    SUM(cache_read_tokens),
+                    SUM(cache_creation_tokens),
+                    SUM(output_tokens),
+                    SUM(reasoning_output_tokens),
+                    SUM(total_tokens),
+                    SUM(cost_with_cache_usd),
+                    SUM(cost_without_cache_usd),
+                    COUNT(*)
+                FROM usage_event INDEXED BY idx_usage_event_source_path_hash
+                WHERE source = ?1 AND host_id = ?2 AND source_path_hash = ?3
+                GROUP BY COALESCE(provider_label, ''), model, hour_start, COALESCE(project_hash, '')
+                "#;
+const RESET_HOST_COUNT_SQL: &str = "SELECT COUNT(*) FROM usage_event INDEXED BY idx_usage_event_host_source_event_at WHERE host_id = ?1 AND source = ?2";
+const RESET_PATH_COUNT_SQL: &str = "SELECT COUNT(*) FROM (SELECT 1 FROM usage_event INDEXED BY idx_usage_event_source_path_hash WHERE source = ?1 AND source_path_hash = ?2 LIMIT ?3)";
+
+const RESET_EVENT_DELETE_SQL: &str = "DELETE FROM usage_event INDEXED BY idx_usage_event_source_path_hash WHERE source = ?1 AND host_id = ?2 AND source_path_hash = ?3";
+
+const RESET_EVENT_AGGREGATE_DEFAULT_SQL: &str = r#"
+                SELECT
+                    COALESCE(provider_label, ''),
+                    model,
+                    hour_start,
+                    COALESCE(project_hash, ''),
+                    SUM(input_tokens),
+                    SUM(cache_read_tokens),
+                    SUM(cache_creation_tokens),
+                    SUM(output_tokens),
+                    SUM(reasoning_output_tokens),
+                    SUM(total_tokens),
+                    SUM(cost_with_cache_usd),
+                    SUM(cost_without_cache_usd),
+                    COUNT(*)
+                FROM usage_event
+                WHERE source = ?1 AND host_id = ?2 AND source_path_hash = ?3
+                GROUP BY COALESCE(provider_label, ''), model, hour_start, COALESCE(project_hash, '')
+                "#;
+const RESET_EVENT_DELETE_DEFAULT_SQL: &str =
+    "DELETE FROM usage_event WHERE source = ?1 AND host_id = ?2 AND source_path_hash = ?3";
 
 const RESET_BUCKET_PRICING_SELECT_SQL: &str = r#"
     SELECT
@@ -145,7 +221,7 @@ impl Store {
             store: self.clone(),
             conn: Some(conn),
             permit: self.write_permit.clone(),
-            run_started_at: crate::util::now_utc_millis(),
+            run_started_at: audit_run_started_at(),
             raw_archive_enabled,
             pricing_catalog,
             provider_index,
@@ -165,7 +241,7 @@ impl Store {
             store: self.clone(),
             conn: None,
             permit: None,
-            run_started_at: crate::util::now_utc_millis(),
+            run_started_at: audit_run_started_at(),
             raw_archive_enabled: false,
             pricing_catalog: PricingCatalog::embedded().clone(),
             provider_index: None,
@@ -181,6 +257,10 @@ impl SyncRunWriter {
         host_id: &str,
         path_hashes: &[String],
     ) -> Result<()> {
+        #[cfg(test)]
+        if profiling::is_baseline() {
+            return profiling::reset_file_events_baseline_tx(tx, source, host_id, path_hashes);
+        }
         if path_hashes.is_empty() {
             return Ok(());
         }
@@ -197,29 +277,36 @@ impl SyncRunWriter {
         info!(source = %source, count = path_hashes.len(), "开始清理重放旧事件");
 
         // 4.1 在 shard 事务里扣减 bucket 并删除旧 event
+        #[cfg(test)]
+        profiling::record_reset("adaptive");
         let mut unique = HashSet::new();
+        let use_adaptive_plan = path_hashes
+            .iter()
+            .skip(1)
+            .any(|path| path != &path_hashes[0]);
         {
-            let mut aggregate_stmt = tx.prepare_cached(
-                r#"
-                SELECT
-                    COALESCE(provider_label, ''),
-                    model,
-                    hour_start,
-                    COALESCE(project_hash, ''),
-                    SUM(input_tokens),
-                    SUM(cache_read_tokens),
-                    SUM(cache_creation_tokens),
-                    SUM(output_tokens),
-                    SUM(reasoning_output_tokens),
-                    SUM(total_tokens),
-                    SUM(cost_with_cache_usd),
-                    SUM(cost_without_cache_usd),
-                    COUNT(*)
-                FROM usage_event
-                WHERE source = ?1 AND host_id = ?2 AND source_path_hash = ?3
-                GROUP BY COALESCE(provider_label, ''), model, hour_start, COALESCE(project_hash, '')
-                "#,
-            )?;
+            let mut aggregate_path_stmt = use_adaptive_plan
+                .then(|| tx.prepare_cached(RESET_EVENT_AGGREGATE_SQL))
+                .transpose()?;
+            let mut aggregate_default_stmt =
+                tx.prepare_cached(RESET_EVENT_AGGREGATE_DEFAULT_SQL)?;
+            // Keep the original plan for one distinct path. Multiple paths
+            // share one host/source count; deletions reduce each probe's bound.
+            let mut host_candidates: Option<i64> = if use_adaptive_plan {
+                Some(writer_stage!(
+                    "reset_selectivity",
+                    tx.query_row(
+                        RESET_HOST_COUNT_SQL,
+                        rusqlite::params![host_id, source.as_str()],
+                        |row| row.get(0),
+                    )
+                )?)
+            } else {
+                None
+            };
+            let mut path_count_stmt = use_adaptive_plan
+                .then(|| tx.prepare_cached(RESET_PATH_COUNT_SQL))
+                .transpose()?;
             let mut update_bucket_stmt = tx.prepare_cached(
                 r#"
                 UPDATE usage_bucket_30m
@@ -262,10 +349,11 @@ impl SyncRunWriter {
                   AND event_count <= 0
                 "#,
             )?;
-            let mut delete_event_stmt = tx.prepare_cached(
-                "DELETE FROM usage_event WHERE source = ?1 AND host_id = ?2 AND source_path_hash = ?3",
-            )?;
-            let updated_at = now_utc();
+            let mut delete_path_stmt = use_adaptive_plan
+                .then(|| tx.prepare_cached(RESET_EVENT_DELETE_SQL))
+                .transpose()?;
+            let mut delete_default_stmt = tx.prepare_cached(RESET_EVENT_DELETE_DEFAULT_SQL)?;
+            let updated_at = audit_now();
             let mut touched_buckets = Vec::new();
 
             for path_hash in path_hashes {
@@ -273,6 +361,47 @@ impl SyncRunWriter {
                     continue;
                 }
 
+                let prefer_path = match host_candidates {
+                    Some(bound) if bound > 0 => {
+                        let path_candidates: i64 = writer_stage!(
+                            "reset_selectivity",
+                            path_count_stmt
+                                .as_mut()
+                                .expect("adaptive reset owns a path count statement")
+                                .query_row(
+                                    rusqlite::params![source.as_str(), path_hash, bound],
+                                    |row| row.get(0),
+                                )
+                        )?;
+                        path_candidates < bound
+                    }
+                    _ => false,
+                };
+                #[cfg(test)]
+                profiling::count(
+                    if prefer_path {
+                        "reset_path_index_paths"
+                    } else {
+                        "reset_default_plan_paths"
+                    },
+                    1,
+                );
+                let aggregate_stmt = if prefer_path {
+                    aggregate_path_stmt
+                        .as_mut()
+                        .expect("adaptive reset owns a path aggregate statement")
+                } else {
+                    &mut aggregate_default_stmt
+                };
+                let delete_event_stmt = if prefer_path {
+                    delete_path_stmt
+                        .as_mut()
+                        .expect("adaptive reset owns a path delete statement")
+                } else {
+                    &mut delete_default_stmt
+                };
+                #[cfg(test)]
+                let aggregate_profile = profiling::Stage::enter("reset_aggregate");
                 let rows = aggregate_stmt.query_map(
                     rusqlite::params![source.as_str(), host_id, path_hash],
                     |row| {
@@ -302,6 +431,8 @@ impl SyncRunWriter {
                     },
                 )?;
                 let aggregates = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+                #[cfg(test)]
+                drop(aggregate_profile);
 
                 for (
                     provider_label,
@@ -314,6 +445,8 @@ impl SyncRunWriter {
                     event_count,
                 ) in aggregates
                 {
+                    #[cfg(test)]
+                    let _bucket_profile = profiling::Stage::enter("reset_bucket_update");
                     update_bucket_stmt.execute(rusqlite::params![
                         host_id,
                         source.as_str(),
@@ -345,20 +478,35 @@ impl SyncRunWriter {
                     }
                 }
 
-                delete_event_stmt.execute(rusqlite::params![
-                    source.as_str(),
-                    host_id,
-                    path_hash
-                ])?;
+                let deleted = writer_stage!(
+                    "reset_delete",
+                    delete_event_stmt.execute(rusqlite::params![
+                        source.as_str(),
+                        host_id,
+                        path_hash
+                    ])
+                )?;
+                if let Some(bound) = host_candidates.as_mut() {
+                    *bound -= deleted as i64;
+                }
+                #[cfg(test)]
+                profiling::count("events_deleted", deleted);
+                #[cfg(not(test))]
+                let _ = deleted;
             }
 
-            refresh_bucket_pricing_after_reset_tx(
-                tx,
-                source.as_str(),
-                host_id,
-                &touched_buckets,
-                &updated_at,
+            writer_stage!(
+                "reset_pricing",
+                refresh_bucket_pricing_after_reset_tx(
+                    tx,
+                    source.as_str(),
+                    host_id,
+                    &touched_buckets,
+                    &updated_at,
+                )
             )?;
+            #[cfg(test)]
+            profiling::count("touched_bucket_candidates", touched_buckets.len());
         }
         info!(source = %source, "完成重放旧事件清理");
         Ok(())
@@ -386,7 +534,7 @@ impl SyncRunWriter {
         info!(batch = events.len(), "开始批量写入 usage_event");
 
         // 5.1 在 shard 事务中插入 event，并为新 event 做内存聚合
-        let now = now_utc();
+        let now = audit_now();
         let inserted = {
             let mut event_stmt = tx.prepare_cached(
                 r#"
@@ -405,65 +553,71 @@ impl SyncRunWriter {
             let mut inserted = 0usize;
 
             for event in events {
-                let cost = pricing::cost_for_event(
-                    pricing_catalog,
-                    event.source.as_str(),
-                    &event.model,
-                    pricing::CostTokens {
-                        input: event.tokens.input_tokens,
-                        cache_read: event.tokens.cache_read_tokens,
-                        cache_creation: event.tokens.cache_creation_tokens,
-                        output: event.tokens.output_tokens,
-                        reasoning_output: event.tokens.reasoning_output_tokens,
-                    },
-                    event.source_cost.as_ref(),
+                let cost = writer_stage!(
+                    "pricing",
+                    pricing::cost_for_event(
+                        pricing_catalog,
+                        event.source.as_str(),
+                        &event.model,
+                        pricing::CostTokens {
+                            input: event.tokens.input_tokens,
+                            cache_read: event.tokens.cache_read_tokens,
+                            cache_creation: event.tokens.cache_creation_tokens,
+                            output: event.tokens.output_tokens,
+                            reasoning_output: event.tokens.reasoning_output_tokens,
+                        },
+                        event.source_cost.as_ref(),
+                    )
                 );
-                let changed = event_stmt.execute(rusqlite::params![
-                    event.event_key,
-                    host_id,
-                    event.source.as_str(),
-                    event.provider_label,
-                    event.model,
-                    event.event_at,
-                    event.hour_start,
-                    event.tokens.input_tokens,
-                    event.tokens.cache_read_tokens,
-                    event.tokens.cache_creation_tokens,
-                    event.tokens.output_tokens,
-                    event.tokens.reasoning_output_tokens,
-                    event.tokens.total_tokens,
-                    cost.cost_with_cache_usd,
-                    cost.cost_without_cache_usd,
-                    cost.pricing_status.as_str(),
-                    cost.pricing_source,
-                    cost.pricing_rate,
-                    event
-                        .project
-                        .as_ref()
-                        .map(|value| value.project_hash.as_str()),
-                    event
-                        .project
-                        .as_ref()
-                        .map(|value| value.project_label.as_str()),
-                    event
-                        .project
-                        .as_ref()
-                        .and_then(|value| value.project_ref.as_deref()),
-                    event.project.as_ref().map(|value| value.path_hash.as_str()),
-                    event
-                        .session
-                        .as_ref()
-                        .map(|value| value.session_id.as_str()),
-                    event
-                        .session
-                        .as_ref()
-                        .and_then(|value| value.session_label.as_deref()),
-                    event
-                        .session
-                        .as_ref()
-                        .and_then(|value| value.source_path_hash.as_deref()),
-                    now,
-                ])?;
+                let changed = writer_stage!(
+                    "event_insert",
+                    event_stmt.execute(rusqlite::params![
+                        event.event_key,
+                        host_id,
+                        event.source.as_str(),
+                        event.provider_label,
+                        event.model,
+                        event.event_at,
+                        event.hour_start,
+                        event.tokens.input_tokens,
+                        event.tokens.cache_read_tokens,
+                        event.tokens.cache_creation_tokens,
+                        event.tokens.output_tokens,
+                        event.tokens.reasoning_output_tokens,
+                        event.tokens.total_tokens,
+                        cost.cost_with_cache_usd,
+                        cost.cost_without_cache_usd,
+                        cost.pricing_status.as_str(),
+                        cost.pricing_source,
+                        cost.pricing_rate,
+                        event
+                            .project
+                            .as_ref()
+                            .map(|value| value.project_hash.as_str()),
+                        event
+                            .project
+                            .as_ref()
+                            .map(|value| value.project_label.as_str()),
+                        event
+                            .project
+                            .as_ref()
+                            .and_then(|value| value.project_ref.as_deref()),
+                        event.project.as_ref().map(|value| value.path_hash.as_str()),
+                        event
+                            .session
+                            .as_ref()
+                            .map(|value| value.session_id.as_str()),
+                        event
+                            .session
+                            .as_ref()
+                            .and_then(|value| value.session_label.as_deref()),
+                        event
+                            .session
+                            .as_ref()
+                            .and_then(|value| value.source_path_hash.as_deref()),
+                        now,
+                    ])
+                )?;
                 if changed == 0 {
                     continue;
                 }
@@ -477,8 +631,8 @@ impl SyncRunWriter {
             drop(event_stmt);
 
             // 5.2 将项目维表和 30 分钟桶一次性刷入
-            flush_projects_tx(tx, &projects)?;
-            flush_buckets_tx(tx, &buckets)?;
+            writer_stage!("projects", flush_projects_tx(tx, &projects))?;
+            writer_stage!("buckets", flush_buckets_tx(tx, &buckets))?;
             inserted
         };
         info!(batch = events.len(), inserted, "完成批量写入 usage_event");
@@ -537,6 +691,12 @@ impl SyncRunWriter {
                 "#,
             )?;
             for cursor in cursors {
+                #[cfg(test)]
+                let fixed_audit = profiling::audit_now();
+                #[cfg(test)]
+                let updated_at = fixed_audit.as_deref().unwrap_or(&cursor.updated_at);
+                #[cfg(not(test))]
+                let updated_at = &cursor.updated_at;
                 stmt.execute(rusqlite::params![
                     host_id,
                     source.as_str(),
@@ -557,7 +717,7 @@ impl SyncRunWriter {
                             source,
                         })?,
                     cursor.last_model,
-                    cursor.updated_at,
+                    updated_at,
                 ])?;
             }
         }
@@ -642,22 +802,34 @@ impl SyncRunWriter {
                 .collect();
         }
 
+        #[cfg(test)]
+        let profile = profiling::Scope::start(
+            "antigravity_transaction",
+            &shards.iter().collect::<Vec<_>>(),
+        );
         for shard in &mut shards {
-            apply_host_prefix(shard);
-            dedupe_behavior_facts(shard);
-            if let Some(index) = &self.provider_index {
-                for event in &mut shard.events {
-                    if event.provider_label.is_empty() {
-                        event.provider_label = index.label_for(event.source, &event.event_at);
+            writer_stage!("pre_host_prefix", apply_host_prefix(shard));
+            writer_stage!("pre_behavior_dedupe", dedupe_behavior_facts(shard));
+            writer_stage!("pre_provider", {
+                if let Some(index) = &self.provider_index {
+                    for event in &mut shard.events {
+                        if event.provider_label.is_empty() {
+                            event.provider_label = index.label_for(event.source, &event.event_at);
+                        }
                     }
                 }
-            }
+            });
         }
-        let operation = if self.permit.is_none() {
-            Some(self.store.write_operation(HolderKind::Library)?)
-        } else {
-            None
-        };
+        #[cfg(test)]
+        let transaction_started = Instant::now();
+        let operation = writer_stage!(
+            "operation",
+            if self.permit.is_none() {
+                Some(self.store.write_operation(HolderKind::Library)?)
+            } else {
+                None
+            }
+        );
         let permit = match self.permit.as_ref() {
             Some(permit) => permit.clone(),
             None => operation
@@ -667,35 +839,43 @@ impl SyncRunWriter {
                 .write_permit()?
                 .clone(),
         };
-        let tx = self
-            .conn
-            .as_mut()
-            .expect("persist writer has a connection")
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        permit.validate_in_transaction(&tx)?;
+        let tx = writer_stage!(
+            "begin",
+            self.conn
+                .as_mut()
+                .expect("persist writer has a connection")
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+        )?;
+        writer_stage!("fence_before", permit.validate_in_transaction(&tx))?;
         // Reset every selected owner before inserting any winners, so an event
         // moving between CLI and IDE cannot collide with its previous owner.
-        for shard in &shards {
-            if rebuild {
-                Self::reset_antigravity_attributed_history_tx(&tx, shard.source, &shard.host_id)?;
-            } else {
-                Self::reset_file_events_batch_tx(
-                    &tx,
-                    shard.source,
-                    &shard.host_id,
-                    &shard.reset_path_hashes,
-                )?;
-                Self::reset_behavior_facts_batch_tx(
-                    &tx,
-                    shard.source,
-                    &shard.host_id,
-                    &shard.reset_path_hashes,
-                )?;
+        writer_stage!("group_reset", {
+            for shard in &shards {
+                if rebuild {
+                    Self::reset_antigravity_attributed_history_tx(
+                        &tx,
+                        shard.source,
+                        &shard.host_id,
+                    )?;
+                } else {
+                    Self::reset_file_events_batch_tx(
+                        &tx,
+                        shard.source,
+                        &shard.host_id,
+                        &shard.reset_path_hashes,
+                    )?;
+                    Self::reset_behavior_facts_batch_tx(
+                        &tx,
+                        shard.source,
+                        &shard.host_id,
+                        &shard.reset_path_hashes,
+                    )?;
+                }
+                if rebuild || !shard.reset_path_hashes.is_empty() {
+                    Self::reset_antigravity_membership_tx(&tx, shard.source, &shard.host_id)?;
+                }
             }
-            if rebuild || !shard.reset_path_hashes.is_empty() {
-                Self::reset_antigravity_membership_tx(&tx, shard.source, &shard.host_id)?;
-            }
-        }
+        });
         let mut results = Vec::with_capacity(shards.len());
         for (index, shard) in shards.iter().enumerate() {
             let started = Instant::now();
@@ -711,17 +891,25 @@ impl SyncRunWriter {
                 active_failpoint,
                 false,
             )?;
-            write_meta_value(
-                &tx,
-                &token_accounting_key_for_host(&shard.host_id, shard.source),
-                &super::expected_token_accounting_version(shard.source).to_string(),
+            writer_stage!(
+                "marker",
+                write_meta_value(
+                    &tx,
+                    &token_accounting_key_for_host(&shard.host_id, shard.source),
+                    &super::expected_token_accounting_version(shard.source).to_string(),
+                )
             )?;
             stats.files_seen = shard.seen_file_paths.len();
-            stats.write_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+            let elapsed = started.elapsed();
+            stats.write_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
+            #[cfg(test)]
+            profiling::source_apply(elapsed);
             results.push(stats);
         }
-        permit.validate_in_transaction(&tx)?;
-        tx.commit()?;
+        writer_stage!("fence_after", permit.validate_in_transaction(&tx))?;
+        writer_stage!("commit", tx.commit())?;
+        #[cfg(test)]
+        profile.finish(transaction_started.elapsed());
         for shard in &shards {
             invoke_after_commit_shard(&self.store, shard);
         }
@@ -791,8 +979,15 @@ impl SyncRunWriter {
          * 2) 让 parser 不再关心写入顺序与 batch 大小
          * 3) 统一返回 inserted 数与本次提交耗时
          */
-        apply_host_prefix(&mut shard);
-        dedupe_behavior_facts(&mut shard);
+        #[cfg(test)]
+        let profile = profiling::Scope::start("shard", &[&shard]);
+        writer_stage!("pre_host_prefix", apply_host_prefix(&mut shard));
+        writer_stage!("pre_behavior_dedupe", dedupe_behavior_facts(&mut shard));
+        #[cfg(test)]
+        {
+            profiling::count("turns_deduped", shard.turns.len());
+            profiling::count("tools_deduped", shard.tool_calls.len());
+        }
         info!(
             source = %shard.source,
             resets = shard.reset_path_hashes.len(),
@@ -807,22 +1002,27 @@ impl SyncRunWriter {
 
         // 7.1 计时入口与累加器
         let started = Instant::now();
-        if let Some(index) = self.provider_index.as_ref() {
-            for event in &mut shard.events {
-                if event.provider_label.is_empty() {
-                    event.provider_label = index.label_for(event.source, &event.event_at);
+        writer_stage!("provider", {
+            if let Some(index) = self.provider_index.as_ref() {
+                for event in &mut shard.events {
+                    if event.provider_label.is_empty() {
+                        event.provider_label = index.label_for(event.source, &event.event_at);
+                    }
                 }
             }
-        }
+        });
         let pricing_catalog = &self.pricing_catalog;
         let raw_archive_enabled = self.raw_archive_enabled;
         let run_started_at = self.run_started_at.clone();
         let host_id = shard.host_id.clone();
-        let operation = if self.permit.is_none() {
-            Some(self.store.write_operation(HolderKind::Library)?)
-        } else {
-            None
-        };
+        let operation = writer_stage!(
+            "operation",
+            if self.permit.is_none() {
+                Some(self.store.write_operation(HolderKind::Library)?)
+            } else {
+                None
+            }
+        );
         let permit = match self.permit.as_ref() {
             Some(permit) => permit.clone(),
             None => operation
@@ -836,9 +1036,15 @@ impl SyncRunWriter {
             .conn
             .as_mut()
             .expect("persist writer keeps a SQLite connection");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        permit.validate_in_transaction(&tx)?;
-        Self::migrate_omp_split_if_needed_tx(&tx, shard.source, &host_id, &run_started_at)?;
+        let tx = writer_stage!(
+            "begin",
+            conn.transaction_with_behavior(TransactionBehavior::Immediate)
+        )?;
+        writer_stage!("fence_before", permit.validate_in_transaction(&tx))?;
+        writer_stage!(
+            "migration",
+            Self::migrate_omp_split_if_needed_tx(&tx, shard.source, &host_id, &run_started_at)
+        )?;
 
         let mut stats = Self::apply_shard_tx(
             &tx,
@@ -849,11 +1055,19 @@ impl SyncRunWriter {
             failpoint,
             true,
         )?;
-        permit.validate_in_transaction(&tx)?;
-        tx.commit()?;
+        writer_stage!("fence_after", permit.validate_in_transaction(&tx))?;
+        writer_stage!("commit", tx.commit())?;
 
         stats.files_seen = shard.seen_file_paths.len();
-        stats.write_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+        let elapsed = started.elapsed();
+        stats.write_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
+        #[cfg(test)]
+        {
+            profiling::count("events_inserted", stats.events_inserted);
+            profiling::count("turns_inserted", stats.turns_inserted);
+            profiling::count("tools_inserted", stats.tool_calls_inserted);
+            profile.finish(elapsed);
+        }
         info!(
             source = %shard.source,
             inserted = stats.events_inserted,
@@ -879,33 +1093,48 @@ impl SyncRunWriter {
 
         // 7.2 先清旧 event，再批写 event，最后落 cursor —— 顺序由协议保证
         if reset_paths && !shard.reset_path_hashes.is_empty() {
-            Self::reset_file_events_batch_tx(tx, shard.source, host_id, &shard.reset_path_hashes)?;
+            writer_stage!(
+                "reset_events",
+                Self::reset_file_events_batch_tx(
+                    tx,
+                    shard.source,
+                    host_id,
+                    &shard.reset_path_hashes
+                )
+            )?;
         }
         fail_shard_commit_at(failpoint, ShardCommitFailpoint::Reset)?;
         for batch in shard.events.chunks(EVENT_WRITE_BATCH_SIZE) {
-            stats.events_inserted +=
-                Self::write_event_batch_tx(tx, pricing_catalog, host_id, batch)?;
+            stats.events_inserted += writer_stage!(
+                "event_work",
+                Self::write_event_batch_tx(tx, pricing_catalog, host_id, batch)
+            )?;
         }
         fail_shard_commit_at(failpoint, ShardCommitFailpoint::Events)?;
-        if !shard.cursors.is_empty() {
-            Self::write_cursor_batch_tx(tx, shard.source, host_id, &shard.cursors)?;
-        }
-        if let Some(cursor) = shard.opencode_cursor.as_deref() {
-            persist_opencode_cursor_tx(tx, host_id, cursor)?;
-        }
-        if let Some(cursor) = shard.zcode_cursor.as_deref() {
-            persist_zcode_cursor_tx(tx, host_id, cursor)?;
-        }
+        writer_stage!("cursor", {
+            if !shard.cursors.is_empty() {
+                Self::write_cursor_batch_tx(tx, shard.source, host_id, &shard.cursors)?;
+            }
+            if let Some(cursor) = shard.opencode_cursor.as_deref() {
+                persist_opencode_cursor_tx(tx, host_id, cursor)?;
+            }
+            if let Some(cursor) = shard.zcode_cursor.as_deref() {
+                persist_zcode_cursor_tx(tx, host_id, cursor)?;
+            }
+        });
         fail_shard_commit_at(failpoint, ShardCommitFailpoint::Cursor)?;
         // 7.3 把本轮看到的候选文件登记为 source_file.state='live'
         //     （D15 / ADR 0006）。OpenCode 等无 file 身份的源传空 vec。
         if !shard.seen_file_paths.is_empty() {
-            Self::write_source_file_seen_tx(
-                tx,
-                shard.source,
-                host_id,
-                &shard.seen_file_paths,
-                run_started_at,
+            writer_stage!(
+                "inventory",
+                Self::write_source_file_seen_tx(
+                    tx,
+                    shard.source,
+                    host_id,
+                    &shard.seen_file_paths,
+                    run_started_at,
+                )
             )?;
         }
         fail_shard_commit_at(failpoint, ShardCommitFailpoint::SourceFile)?;
@@ -913,28 +1142,39 @@ impl SyncRunWriter {
         //     避免 parser 端必须同步判定开关；开关开时与 event 共享 commit
         //     周期落库（INSERT OR IGNORE 保证 event_key 重复时幂等）。
         if raw_archive_enabled && !shard.raw_records.is_empty() {
-            Self::write_raw_records_batch_tx(tx, &shard.raw_records)?;
+            writer_stage!(
+                "raw",
+                Self::write_raw_records_batch_tx(tx, &shard.raw_records)
+            )?;
         }
         fail_shard_commit_at(failpoint, ShardCommitFailpoint::Raw)?;
         // 7.5 行为事实是 usage_event/bucket 之外的独立 normalized 表。
         //     reset 同源文件时先清掉旧 path_hash 关联事实，随后 INSERT OR IGNORE
         //     新事实；未支持行为提取的 parser 可继续传空 vec。
         if reset_paths && !shard.reset_path_hashes.is_empty() {
-            Self::reset_behavior_facts_batch_tx(
-                tx,
-                shard.source,
-                host_id,
-                &shard.reset_path_hashes,
+            writer_stage!(
+                "behavior_reset",
+                Self::reset_behavior_facts_batch_tx(
+                    tx,
+                    shard.source,
+                    host_id,
+                    &shard.reset_path_hashes,
+                )
             )?;
         }
         fail_shard_commit_at(failpoint, ShardCommitFailpoint::BehaviorReset)?;
         if !shard.turns.is_empty() {
-            stats.turns_inserted += Self::write_turn_batch_tx(tx, host_id, &shard.turns)?;
+            stats.turns_inserted += writer_stage!(
+                "turns",
+                Self::write_turn_batch_tx(tx, host_id, &shard.turns)
+            )?;
         }
         fail_shard_commit_at(failpoint, ShardCommitFailpoint::Turns)?;
         if !shard.tool_calls.is_empty() {
-            stats.tool_calls_inserted +=
-                Self::write_tool_call_batch_tx(tx, host_id, &shard.tool_calls)?;
+            stats.tool_calls_inserted += writer_stage!(
+                "tools",
+                Self::write_tool_call_batch_tx(tx, host_id, &shard.tool_calls)
+            )?;
         }
         fail_shard_commit_at(failpoint, ShardCommitFailpoint::ToolCalls)?;
         Ok(stats)
@@ -1027,7 +1267,7 @@ impl SyncRunWriter {
                           ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
                 "#,
             )?;
-            let now = now_utc();
+            let now = audit_now();
             let mut inserted = 0usize;
             for turn in turns {
                 inserted += stmt.execute(rusqlite::params![
@@ -1075,7 +1315,7 @@ impl SyncRunWriter {
                           ?13, ?14, ?15, ?16, ?17)
                 "#,
             )?;
-            let now = now_utc();
+            let now = audit_now();
             let mut inserted = 0usize;
             for call in tool_calls {
                 inserted += stmt.execute(rusqlite::params![
@@ -1115,7 +1355,7 @@ impl SyncRunWriter {
                 ) VALUES (?1, ?2, ?3)
                 "#,
             )?;
-            let now = now_utc();
+            let now = audit_now();
             for record in records {
                 stmt.execute(rusqlite::params![record.event_key, record.raw_json, now])?;
             }
@@ -1257,7 +1497,7 @@ fn flush_projects_tx(
             updated_at = excluded.updated_at
         "#,
     )?;
-    let updated_at = now_utc();
+    let updated_at = audit_now();
     for project in projects.values() {
         stmt.execute(rusqlite::params![
             project.project_hash,
@@ -1333,7 +1573,7 @@ fn flush_buckets_tx(
             updated_at = excluded.updated_at
         "#,
     )?;
-    let updated_at = now_utc();
+    let updated_at = audit_now();
     for (key, rollup) in buckets {
         stmt.execute(rusqlite::params![
             key.host_id,

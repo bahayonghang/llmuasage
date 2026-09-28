@@ -34,6 +34,8 @@ mod source_file;
 pub(crate) mod sqlite_functions;
 mod sync_status;
 mod sync_writer;
+#[cfg(test)]
+pub(crate) use sync_writer::profiling as writer_test_support;
 
 pub use cursor::CursorStore;
 pub use host::{Host, HostStore, LOCAL_HOST_ID};

@@ -394,10 +394,18 @@ fn parse_grok_session(
 
     let mut sidecar_issues = ParseIssues::default();
     let summary = decisions.get("summary.json").and_then(|decision| {
-        read_json_sidecar(&decision.snapshot.path, &session_hash, &mut sidecar_issues)
+        read_json_sidecar(
+            &decision.snapshot.path,
+            &hash_string(&decision.snapshot.path.to_string_lossy()),
+            &mut sidecar_issues,
+        )
     });
     let signals = decisions.get("signals.json").and_then(|decision| {
-        read_json_sidecar(&decision.snapshot.path, &session_hash, &mut sidecar_issues)
+        read_json_sidecar(
+            &decision.snapshot.path,
+            &hash_string(&decision.snapshot.path.to_string_lossy()),
+            &mut sidecar_issues,
+        )
     });
     let summary_timestamp_ms = summary
         .as_ref()
@@ -414,7 +422,7 @@ fn parse_grok_session(
     let updates = if let Some(decision) = decisions.get("updates.jsonl") {
         let usage = parse_turn_usage(
             &decision.snapshot.path,
-            &session_hash,
+            &hash_string(&decision.snapshot.path.to_string_lossy()),
             &session_id,
             &session,
             project.as_ref(),
@@ -431,7 +439,7 @@ fn parse_grok_session(
         if usage.events.is_empty() {
             parse_updates_file(
                 &decision.snapshot.path,
-                &session_hash,
+                &hash_string(&decision.snapshot.path.to_string_lossy()),
                 &session_id,
                 &session,
                 project.as_ref(),
@@ -1509,6 +1517,39 @@ mod tests {
         assert_eq!(output.events.len(), 1);
         assert_eq!(output.events[0].tokens.total_tokens, 12);
         assert_eq!(output.parse_issues.accounting_anomaly_lines, 1);
+    }
+
+    #[tokio::test]
+    async fn incomplete_usage_samples_use_sidecar_identity_and_preserve_session_identity() {
+        let usage =
+            r#"{"inputTokens":10,"outputTokens":2,"totalTokens":12,"usageIsIncomplete":true}"#;
+        let prefix = "{\"type\":\"notice\"}\n";
+        let (_temp, session_dir) = write_session(
+            &format!(
+                "{prefix}{}",
+                turn_usage_line("p1", 1_700_000_001_000, usage)
+            ),
+            None,
+            Some(r#"{"contextTokensUsed":900}"#),
+        );
+        let session_hash = hash_string(&session_dir.to_string_lossy());
+        let file_hash = hash_string(&session_dir.join("updates.jsonl").to_string_lossy());
+        let output = parse_session(session_dir);
+        assert_eq!(output.events.len(), 1);
+        assert_eq!(output.events[0].tokens.total_tokens, 12);
+        assert_eq!(
+            output.events[0]
+                .session
+                .as_ref()
+                .unwrap()
+                .source_path_hash
+                .as_deref(),
+            Some(session_hash.as_str())
+        );
+        let sample = &output.parse_issues.samples[0];
+        assert_eq!(sample.path_hash, file_hash);
+        assert_eq!(sample.offset, prefix.len() as u64);
+        assert_eq!(sample.reason, "usage_incomplete");
     }
 
     #[tokio::test]

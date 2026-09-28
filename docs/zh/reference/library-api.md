@@ -4,6 +4,9 @@ crate 暴露了一组较小的适配层接口，用于本地桌面集成和测�
 
 ## 稳定性约定
 
+2.0 主版本声明 v1.2.0 之后已有的公开 API 变化。下游升级前请阅读
+[2.0 迁移说明](./migration-v2)。
+
 嵌入时优先使用 root façade：
 
 ```rust
@@ -21,7 +24,7 @@ use llmusage::{
 - Domain/error：`SourceKind`、`LlmusageError`、`Result`
 - 启用 `features = ["testing"]` 时的测试辅助：`Fixture`、`SeedEvent`
 
-`commands`、`parsers`、`integrations`、`runtime`、`web`、`tui` 等宽模块为兼容现有调用方仍保持 public，但它们是实现命名空间，不是推荐的适配层 API。下游迁移到上述 façade 后，后续 minor/major 版本可再把内部表面收窄。
+`commands`、`parsers`、`integrations`、`runtime`、`web`、`tui` 等实现命名空间仍保持 public。嵌入时优先使用上述适配层 API。移除公开项目需要相应的主版本边界。
 
 ## 打开 Store
 

@@ -48,6 +48,13 @@
 - `files_processed` counts source artifacts considered by the parser for that
   run, not rows committed to `usage_event`.
 - `changed_files` counts artifacts that produced new or refreshed parser work.
+- Public `write_ms` retains its existing elapsed-time boundary. Ordinary shards
+  start the timer after host-prefix preparation and behavior deduplication,
+  and stop after commit. Antigravity product `write_ms` covers apply plus
+  marker writes; shared group reset, BEGIN, and commit are outside those
+  per-product timers. Private profiling reports complete transaction time
+  separately. `parse_ms` is a residual elapsed value, not parser CPU time;
+  `scanned_bytes` is reader-specific logical input accounting, not disk I/O.
 - Claude logical dedupe is scoped to the first directory below
   `~/.claude/projects`. If any file in a project changes, replay every current
   JSONL in that project, but do not replay other projects or reset missing
@@ -91,6 +98,16 @@
   behavior deletes use a temporary path-key table, and reset bucket pricing is
   recomputed with one source-range event scan joined to a temporary bucket-key
   table. Never issue one source-range event scan per touched bucket.
+- An event reset with one distinct path keeps the original SQL plan and
+  statement preparation. Repeated entries of that path do not enable adaptive
+  selection. Skip selection counts and unused path-index statements.
+  A reset with multiple distinct paths counts host/source candidates once
+  per batch. Each path probe uses the existing covering source/path index and stops at
+  the remaining host/source row count. Force the path index only when that
+  probe finds fewer candidates; otherwise use the default SQL plan. Subtract
+  actual deleted rows after each path. A zero host count skips the probe but
+  retains the aggregate/delete protocol. All selection work stays in the
+  fenced transaction and inside WRITE; no durable index or cache is added.
 - `stored_events` is the committed event count after store dedupe and reset
   behavior; it can be lower than parser-emitted raw events.
 - Sync request validation has one owner: `ValidatedSyncRequest`. CLI, Web, and
@@ -138,6 +155,26 @@
   preserve prior group events and cursors. Cross-product ownership changes
   require an unbounded run selecting both products, committed together.
   Bounded imports never reset historical groups or advance full cursors.
+- Antigravity checks tracked-input coverage after both-root discovery and
+  bounded fingerprinting. If every selected product is blocked, return before
+  opening usage tables or decoding observations. Discovery and fingerprint
+  costs remain; do not claim zero I/O. Partial blocking retains cross-root
+  decoding and native ownership/identity resolution. A failure limited to an
+  unselected historical product is not sufficient to block selected products.
+  An inaccessible root with unknown contents may contain either product and
+  blocks both groups conservatively.
+- `source_files::list_matching_files` retains initial root metadata errors
+  in `SourceFileListing.errors`. Only `NotFound` produces an empty successful
+  listing; other errors and non-directory roots remain failures. A successful
+  post-discovery metadata probe cannot erase a discovery-time failure. New
+  root-error summaries do not include the private root path.
+- A tracked local path absent from discovery is not necessarily missing.
+  Distinguish physical absence, existing input outside current discovery, and
+  metadata/access failure. Existing legacy JSON and changed-root paths retain
+  their history. Do not probe remote paths on the local filesystem. Failed
+  coverage checks may persist source diagnostics with counts and observation
+  time, but do not advance usage cursors or successful source-file observations.
+  `--allow-lossy-rebuild` does not waive discovery or access failures.
 - Antigravity explicit rebuild skips the engine's pre-reset. One writer
   transaction replaces selected host/source attributed parser rows, cursors
   and accounting markers. Empty/NULL-path hook rows remain queryable and
@@ -312,6 +349,14 @@
   restore (not implemented); keep old rows and watermarks.
 - Remote `source-status` with no host/source marker -> `unknown`, never
   local-marker `current`.
+- Antigravity selected products all blocked by coverage -> zero usage decoder
+  calls and no committed/replayed usage; preserve events, buckets, inventory,
+  cursors, and accounting markers. Record actual preflight elapsed time.
+- Existing tracked input absent from current discovery -> explain the coverage
+  gap without claiming physical deletion; preserve the affected history.
+- Antigravity root discovery/access failure -> preserve both product groups,
+  including when only the other product was selected. Explicit lossy rebuild
+  must not turn access failure into an empty successful snapshot.
 
 ### 5. Good/Base/Bad Cases
 
@@ -341,6 +386,10 @@
   Header omits or disagrees on that source's token-accounting version.
 - Bad: printing remote `accounting=current` from the local global marker
   when that host/source has no certified evidence.
+- Good: all selected Antigravity groups fail coverage, so usage decoding is
+  skipped while persisted history remains available.
+- Bad: treating an existing tracked JSON file outside native DB discovery as
+  physically deleted, or ignoring an inaccessible unselected product root.
 
 ### 6. Tests Required
 
@@ -393,6 +442,28 @@
   OpenCode SQL lower-bound pruning, and `RecentReady` ordering.
 - Migration/query-plan tests proving behavior reset indexes exist; writer tests
   proving shard-local behavior dedupe and shared-bucket pricing recovery.
+- Writer performance comparisons restore the same immutable seed before every
+  measured run. Build the seed with the original algorithm. Keep fixture
+  generation, input cloning, database copying, and checkpointing outside the
+  timed operation; report writer open/finish separately from shard WRITE.
+  Keep detailed stage collection test-only and disable it for acceptance A/B.
+- Freeze fixtures, pair counts, alternating order, and acceptance metrics
+  before measuring a candidate. Keep all samples and failed controls. A ratio
+  of medians and a median of paired ratios are different statistics; do not
+  change the acceptance metric after a failure. Profile a failed control
+  separately before assigning a cause. Aggregate timing alone cannot assign
+  a regression to a query, cache behavior, or background load.
+- Compare all persistent tables and complete SQLite schema before accepting a
+  writer candidate. Only cost columns allow a documented absolute tolerance;
+  other values are exact. Include untouched source/host/status sentinels,
+  duplicate replay, shared buckets, failure rollback, and cancellation.
+  Path-index changes need a skewed multi-host control because source path
+  hashes are shared across hosts and the existing path index omits host_id.
+- Single-path reset tests assert no selectivity stage and only default-plan
+  selections, including repeated entries of the same path. Review the lazy
+  statement preparation to confirm unused path-index statements are skipped.
+  Multi-path tests assert the adaptive route, path/default-plan decisions,
+  and unchanged persistent state.
 - Human and subprocess tests covering pricing phase text, ordered additive
   NDJSON variants, stdout purity, and structured log phase fields.
 - A multi-thread `#[tokio::test]` covering the TUI sync action, duplicate-start
@@ -473,13 +544,19 @@ pub use crate::sync::DefaultSyncExecutor as CommandSyncExecutor;
   `SourceSyncStatus` with serde defaults for the two new counters. Parser
   modules may re-export it but storage must not depend on parser modules.
   `total()` is malformed + oversized (faults). `informational_total()` is
-  skipped + accounting_anomaly. Doctor warns only when `total() > 0`.
+  skipped + accounting_anomaly. Record diagnostics make doctor warn only when
+  `total() > 0`; a separate source failure also makes doctor warn.
 - `ParseIssueSample` includes `reason` (serde default empty). `record`
   sanitizes reason to at most 64 characters in `[A-Za-z0-9_:-]`.
 - `ParseIssueKind` is `malformed`, `oversized`, `skipped`, or
   `accounting_anomaly`. The four classes are mutually exclusive.
 - Schema v17 persists the latest bounded diagnostic payload in
   `source_sync_status.parse_issues_json TEXT NOT NULL`.
+- A crate-private persisted DTO flattens the existing `ParseIssues` fields and
+  adds optional `source_issues`. Each source issue has a closed-set code, count,
+  UTC observation time, and product-group scope. It contains no raw path,
+  record body, or free-text error. Keep public diagnostic and sync-status
+  struct literals compatible; no schema migration is required.
 
 ### 3. Contracts
 
@@ -500,16 +577,23 @@ pub use crate::sync::DefaultSyncExecutor as CommandSyncExecutor;
   closed-set reason. Raw JSON, prompts, assistant content, full paths,
   `error_message`, and raw row ids are forbidden in samples, human summaries,
   and logs. CLI sample lines print kind and reason when present. `@offset` is
-  printed only when `offset > 0` and reason is empty (JSONL). Optional
+  printed whenever `offset > 0` for JSONL, including samples with a reason.
+  ZCode's existing offset stores a millisecond timestamp, so print
+  `timestamp_ms=<offset>` instead. Do not change stored location values or label
+  a timestamp as a byte offset. OpenCode's offset is a private database rowid;
+  omit that value from human output. Optional
   basename may follow when a file cursor can resolve it. They never print
   `path_hash` or record text.
 - At most eight samples are retained per source run. Counters continue with
-  saturating arithmetic after the sample budget is exhausted.
+  saturating arithmetic after the sample budget is exhausted. The human summary
+  prints the combined diagnostic count and the omitted sample count. Each
+  diagnostic class counts separately; one record can produce multiple accounting
+  anomalies. These counters do not count distinct physical records.
 - Codex classifies an oversized prefix from the first 8 KiB of payload/msg
   type: other types are skipped; a complete `token_count` JSON prefix (trailing
   whitespace allowed) is recovered with no issue; a `token_count` prefix that
   cannot be parsed stays oversized. Peek-none (unclassified junk) stays
-  oversized, not skipped.
+  oversized, not skipped. The stable skip reason is `oversized_non_usage_record`.
 - ZCode `error`/`cancelled` rows are skipped. The unfinished reason is
   `zcode_unfinished:{status}:{error_type}` where status is
   `error`/`cancelled`/`other` and `error_type` comes from
@@ -517,13 +601,26 @@ pub use crate::sync::DefaultSyncExecutor as CommandSyncExecutor;
   `[A-Za-z0-9_-]`; otherwise `unknown`. Never read `error_message`. Cache
   overlap and `computed_total` mismatch are accounting anomalies; events
   still store.
-- Antigravity open/decode/missing timestamp stay malformed. Open failures and
-  `gen_metadata` prepare failures other than a missing table must not reset
-  imported events or advance the file cursor. An output checksum mismatch or
-  conflicting observations fails the complete product snapshot with a durable
-  malformed diagnostic; conflicting observations also record an accounting
-  anomaly. Missing all request identities uses a file+location fallback with
-  an accounting anomaly; a missing response ID alone can use message/provider ID.
+- Antigravity discovery, fingerprint, missing tracked member, snapshot-change,
+  database metadata access, and incomplete snapshot failures use source issues.
+  Coverage codes are `tracked_member_missing` for a confirmed absent local
+  path, `tracked_member_out_of_scope` for an existing path outside discovered
+  input, and `tracked_member_unreadable` for metadata/access failure. Each
+  code carries an affected-path count, UTC observation time, and product-group
+  scope. `discovery_incomplete` also covers inaccessible or invalid roots.
+  A metadata access error remains a blocker even with lossy rebuild consent.
+  A source failure must not create a fabricated malformed record. Actual row
+  decode and timestamp errors retain their record-level diagnostics. Neither
+  failure class may reset imported events or advance the file cursor. An output
+  checksum mismatch or conflicting observations fails the complete product
+  snapshot; conflicting observations also record an accounting anomaly. Missing
+  all request identities uses a file+location fallback with an accounting
+  anomaly; a missing response ID alone can use message/provider ID.
+- Source issues persist through status updates, query diagnostics, and remote
+  transport. All clean-success and accounting certification checks must examine
+  source issues as well as record faults. A successful new source run clears
+  prior source failures. A stored inventory state describes its completed
+  observation; it must not be presented as a current filesystem existence check.
 - Grok sidecars over the size cap stay oversized; bad sidecar JSON stays
   malformed. OpenCode records malformed tool-part JSON as `malformed_lines`
   and continues other parts; non-usage message rows stay silent.
@@ -557,15 +654,29 @@ pub use crate::sync::DefaultSyncExecutor as CommandSyncExecutor;
 - Old `parse_issues_json` without `skipped_lines` / `accounting_anomaly_lines`
   deserializes those counters as `0`. Old samples without `reason`
   deserialize `reason` as `""`.
+- Old diagnostic JSON without `source_issues` loads an empty source-failure list.
+  Every typed read/write path in the current binary preserves the optional
+  field. A source-only failure has zero record faults but still blocks clean
+  repair certification.
 - Doctor `parse.issues` is `ok` when every source `total() == 0`, even if
   skipped or accounting-anomaly counts are non-zero.
 - Antigravity conversation DB open failure, `sqlite_master` probe failure, or
-  `gen_metadata` prepare failure other than a missing table -> `malformed_lines`,
-  no `reset_path_hashes`, no success cursor, prior `usage_event` rows kept.
+  `gen_metadata` prepare failure other than a missing table -> a source issue,
+  no fabricated malformed record, no `reset_path_hashes`, no success cursor,
+  prior `usage_event` rows kept.
 - Antigravity missing `gen_metadata` table -> read `steps` when present. Only
   a complete successful product snapshot may reset its group. Empty recognized
   usage tables are valid; a DB missing both tables or containing a malformed
   usage table preserves history.
+- Antigravity row decode, wire-type, timestamp, and output-checksum faults
+  remain malformed record diagnostics with stable reasons. Attach private typed
+  row context before propagating decode errors; do not classify by matching
+  free-text error messages. Product-attribution and SQL access failures remain
+  source issues. Both classes block the affected product-group commit and keep
+  events, buckets, cursors, inventory, and accounting markers unchanged.
+  Attribute each row fault to the native product carried by typed row context.
+  Affected historical owners retain separate source blockers; the row-fault
+  count belongs to the native product only.
 
 ### 5. Good/Base/Bad Cases
 
@@ -575,6 +686,10 @@ pub use crate::sync::DefaultSyncExecutor as CommandSyncExecutor;
   same source events as before.
 - Good: a valid EOF record is visible immediately but is retried from the prior
   durable boundary; event keys/store dedupe keep the retry idempotent.
+- Good: a missing tracked Antigravity member records a source issue with count
+  and observation time, persists it across restart, and preserves prior usage.
+- Bad: converting a source-access error into a malformed sample or treating
+  zero record faults as sufficient evidence for clean accounting certification.
 - Bad: `BufRead::read_line`, `lines()`, or a source-local `serde_json::from_str`
   loop in a passive JSONL parser.
 - Bad: dropping `JoinHandle`s when cancellation is observed; blocking tasks
@@ -594,10 +709,27 @@ pub use crate::sync::DefaultSyncExecutor as CommandSyncExecutor;
   issues; unusable `token_count` prefix -> oversized + later rows parse.
 - Per-source partial-tail/append tests plus `tests/sync/sources/` for
   rewrite, retry, idempotency, and stored totals.
+- Antigravity row/source classification fixtures cover generation/step/trajectory
+  protobuf, invalid usage wire types, timestamp nanos, missing timestamps, output
+  checksum mismatch, and SQL prepare failure. Start from positive history; verify
+  all persisted usage/cursor/inventory state is preserved, clean certification
+  does not occur, diagnostics survive restart, and repaired input clears them.
+  Include a copied database whose native product differs from its historical
+  owner, with a source-limited sync, to verify row attribution and protection.
+- Antigravity preflight tests count actual decoder invocations for CLI-only,
+  IDE-only, and both-selected all-blocked runs. Compare persisted events,
+  buckets, inventory timestamps, cursors, and markers before and after the
+  failure. Verify diagnostics survive restart and restored input recovers.
+  Cover existing JSON, changed roots, metadata permission errors, non-directory
+  roots, incomplete discovery, and an inaccessible unselected root. Retain
+  partial blocking, copied product ownership, stronger unselected identity,
+  WAL-only changes, bounded/cancelled runs, hook history, and explicit rebuild
+  with and without lossy consent.
 - Sync-summary, doctor, and source-status tests covering four-class counters,
   warning color only for faults, CLI samples without `path_hash`/record text
-  or `@0` when a reason is present, JSONL `@offset` when reason is empty,
-  and doctor skipping skipped-only sources.
+  or `@0`, JSONL reason and `@offset` together, ZCode `timestamp_ms=`,
+  OpenCode rowid suppression, 13 diagnostics / 8 samples / 5 omitted, and
+  doctor skipping skipped-only sources while warning on source failures.
 - ZCode skip-watermark tests covering first-sighting reasons, a second
   unchanged sync with `skipped_lines == 0`, a newer unfinished row reported
   once, `--recent-days` not advancing the skip watermark, cancel after the
@@ -608,7 +740,9 @@ pub use crate::sync::DefaultSyncExecutor as CommandSyncExecutor;
 - JobRegistry test: status remains `cancelling` and `finished_at` stays absent
   until a blocking worker confirms drain.
 - Migration/status tests: v17 default payload and `ParseIssues` round trip,
-  including missing new fields deserializing as zero.
+  including missing new fields deserializing as zero. Source-only diagnostics
+  survive all status updates and remote transport; a successful new run clears
+  old source issues. Remote source failures block repair certification.
 - Antigravity: unreadable rewrite after a successful import keeps event count
   and the previous cursor fingerprint; missing `gen_metadata` retains steps
   support; prepare error on an existing table does not reset the group.

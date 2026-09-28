@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.0.0 - Unreleased
+
+### Changed
+
+- Declare the public Rust API changes since v1.2.0 through the 2.0 major version. Changes cover source identity, host-scoped storage and queries, source-reported cost, parser and command entry points, and subscription cache provenance. See the [English migration guide](docs/reference/migration-v2.md) or [中文迁移说明](docs/zh/reference/migration-v2.md).
+- Synchronize CLI, desktop, Tauri, and documentation version metadata. This version preparation does not change SQLite schema, accounting, or remote wire versions.
+
+### Fixed
+
+- Persist source-level sync blockers separately from malformed records. Show bounded issue samples with safe locations and omitted counts. Preserve history and accounting guards when a source is blocked.
+- Keep sync warnings and worker-lock progress on complete output lines.
+- Stop Antigravity usage decoding when coverage checks block every selected product. Distinguish missing tracked paths from existing paths outside discovery and access failures, while preserving imported history.
+- Reduce repeated event scans during multi-path replay by selecting an existing index with bounded row probes. Keep the original query plan for a single distinct path. Preserve host isolation, transaction order, accounting, and the existing database schema.
+- Align Local timezone regression tests with system IANA daylight-saving rules, and make UTC dashboard fixtures request UTC explicitly.
+
 ## 1.4.0 - 2026-09-26
 
 ### Added

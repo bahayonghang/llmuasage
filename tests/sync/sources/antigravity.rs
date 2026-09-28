@@ -47,6 +47,7 @@ fn antigravity_persisted_snapshot(store: &Store) -> Result<Vec<Vec<Vec<rusqlite:
         "SELECT * FROM usage_bucket_30m WHERE source='antigravity' ORDER BY hour_start,model",
         "SELECT * FROM source_cursor WHERE source='antigravity' ORDER BY cursor_key",
         "SELECT * FROM source_file WHERE source='antigravity' ORDER BY file_path",
+        "SELECT * FROM meta WHERE key='token_accounting_version.antigravity'",
     ]
     .into_iter()
     .map(|sql| {
@@ -61,6 +62,142 @@ fn antigravity_persisted_snapshot(store: &Store) -> Result<Vec<Vec<Vec<rusqlite:
             .collect::<rusqlite::Result<Vec<_>>>()?)
     })
     .collect()
+}
+
+#[test]
+fn antigravity_record_faults_and_source_failures_preserve_history() -> Result<()> {
+    for (case, reason) in [
+        ("generation_wire", Some("invalid_generation_metadata")),
+        ("usage_type", Some("invalid_generation_metadata")),
+        ("step_wire", Some("invalid_step_metadata")),
+        ("trajectory_wire", Some("invalid_trajectory_metadata")),
+        ("timestamp_nanos", Some("invalid_generation_metadata")),
+        ("missing_timestamp", Some("missing_usage_timestamp")),
+        ("output_checksum", Some("output_channel_mismatch")),
+        ("changed_product_wire", None),
+        ("prepare_failure", None),
+    ] {
+        let fixture = Fixture::new()?;
+        let blob = ag_gen_metadata_blob(
+            100,
+            20,
+            3,
+            0,
+            "preserved-request",
+            None,
+            None,
+            1_800_000_000,
+        );
+        let path = fixture.seed_antigravity(case, &[(1, blob.clone())])?;
+        Connection::open(&path)?.execute_batch(
+            "CREATE TABLE trajectory_meta(source INTEGER); INSERT INTO trajectory_meta VALUES (17)",
+        )?;
+        let runtime = tokio::runtime::Runtime::new()?;
+        runtime.block_on(async {
+            let app = AppContext::discover()?;
+            let store = Store::new(&app.paths)?;
+            store.bootstrap()?;
+            let mut options = commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Antigravity),
+                ..Default::default()
+            };
+            commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+            assert_eq!(antigravity_event_count(&app.paths.db_path)?, 1, "{case}");
+            store.set_meta_value("token_accounting_version.antigravity", "2")?;
+            let before = antigravity_persisted_snapshot(&store)?;
+            let connection = Connection::open(&path)?;
+            let mut usage = ag_usage_message(100, 20, 3, 0, "preserved-request");
+            match case {
+                "step_wire" => connection.execute_batch(
+                    "CREATE TABLE steps(idx INTEGER PRIMARY KEY, metadata BLOB);
+                     INSERT INTO steps VALUES (1, X'0A80')",
+                )?,
+                "trajectory_wire" => connection.execute_batch(
+                    "UPDATE trajectory_metadata_blob SET data=X'0A80'",
+                )?,
+                "prepare_failure" => connection.execute_batch(
+                    "DROP TABLE gen_metadata; CREATE TABLE gen_metadata(idx INTEGER)",
+                )?,
+                _ => {
+                    if case == "changed_product_wire" {
+                        connection.execute_batch("UPDATE trajectory_meta SET source=1")?;
+                    }
+                    let replacement = if matches!(case, "generation_wire" | "changed_product_wire") {
+                        vec![0x0a, 0x80]
+                    } else {
+                        if case == "usage_type" {
+                            usage.extend(ag_bytes_field(2, b"invalid-number"));
+                        } else if case == "output_checksum" {
+                            usage.extend(ag_varint_field(3, 999));
+                        }
+                        let mut chat = ag_bytes_field(4, &usage);
+                        if case == "missing_timestamp" {
+                            connection.execute_batch("DELETE FROM trajectory_metadata_blob")?;
+                        } else {
+                            let nanos = if case == "timestamp_nanos" { 1_000_000_000 } else { 0 };
+                            chat.extend(ag_bytes_field(9, &ag_timestamp_message(1_800_000_000, nanos)));
+                        }
+                        ag_bytes_field(1, &chat)
+                    };
+                    connection.execute("UPDATE gen_metadata SET data=?1", [replacement])?;
+                }
+            }
+            drop(connection);
+            options.rebuild = true;
+            let (mut sender, mut receiver) = tokio::sync::mpsc::channel(256);
+            let blocked = commands::sync::run_once_with_options(
+                &app, &store, 0, &options, Some(&mut sender),
+            ).await?;
+            drop(sender);
+            while let Some(event) = receiver.recv().await {
+                assert!(!matches!(event, SyncEvent::TokenAccountingRepairFinished { .. }), "{case}");
+            }
+            assert_eq!(blocked.total_inserted, 0, "{case}");
+            let issues = &blocked.sources[0].parse_issues;
+            assert_eq!(issues.malformed_lines, u64::from(reason.is_some()), "{case}: {issues:?}");
+            assert_eq!(issues.oversized_lines, 0, "{case}");
+            assert_eq!(issues.informational_total(), 0, "{case}");
+            if let Some(reason) = reason {
+                assert_eq!(issues.samples[0].reason, reason, "{case}");
+                assert_eq!(issues.samples[0].source, SourceKind::Antigravity, "{case}");
+                assert_eq!(issues.samples[0].path_hash, hash_string(&path.canonicalize()?.to_string_lossy()), "{case}");
+            } else {
+                assert!(issues.samples.is_empty(), "{case}");
+            }
+            let code = if reason.is_some() || case == "changed_product_wire" { "incomplete_snapshot" } else { "metadata_unreadable" };
+            assert!(blocked.sources[0].last_error.as_ref().unwrap().contains(code), "{case}");
+            assert_eq!(antigravity_persisted_snapshot(&store)?, before, "{case}");
+            assert_eq!(store.token_accounting_version(SourceKind::Antigravity)?, Some(2), "{case}");
+            let reopened = Store::new(&app.paths)?;
+            let raw: String = reopened.open_connection()?.query_row(
+                "SELECT parse_issues_json FROM source_sync_status WHERE host_id='local' AND source='antigravity'",
+                [], |row| row.get(0),
+            )?;
+            let persisted: serde_json::Value = serde_json::from_str(&raw)?;
+            assert_eq!(persisted["malformed_lines"], u64::from(reason.is_some()), "{case}");
+            assert_eq!(persisted["source_issues"][0]["code"], code, "{case}");
+            assert!(!raw.contains("invalid-number"), "{case}");
+
+            fixture.seed_antigravity(case, &[(1, blob)])?;
+            Connection::open(&path)?.execute_batch(
+                "CREATE TABLE trajectory_meta(source INTEGER); INSERT INTO trajectory_meta VALUES (17)",
+            )?;
+            let recovered = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+            assert!(recovered.sources[0].last_error.is_none(), "{case}");
+            assert_eq!(store.token_accounting_version(SourceKind::Antigravity)?, Some(3), "{case}");
+            assert_eq!(antigravity_event_count(&app.paths.db_path)?, 1, "{case}");
+            let raw: String = store.open_connection()?.query_row(
+                "SELECT parse_issues_json FROM source_sync_status WHERE host_id='local' AND source='antigravity'",
+                [], |row| row.get(0),
+            )?;
+            let cleared: serde_json::Value = serde_json::from_str(&raw)?;
+            assert!(cleared.get("source_issues").is_none(), "{case}");
+            assert_eq!(cleared["malformed_lines"], 0, "{case}");
+            Ok::<_, anyhow::Error>(())
+        })?;
+        fixture.restore_env();
+    }
+    Ok(())
 }
 
 #[test]
@@ -93,7 +230,8 @@ fn antigravity_busy_native_database_preserves_history_cursor_and_marker() -> Res
         let blocked = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
         assert_eq!(blocked.total_inserted, 0);
         assert!(blocked.sources[0].last_error.is_some());
-        assert!(blocked.sources[0].parse_issues.malformed_lines > 0);
+        assert_eq!(blocked.sources[0].parse_issues.malformed_lines, 0);
+        assert!(blocked.sources[0].last_error.as_ref().unwrap().contains("metadata_unreadable"));
         assert_eq!(antigravity_persisted_snapshot(&store)?, before);
         assert_eq!(store.token_accounting_version(SourceKind::Antigravity)?, Some(2));
 
@@ -358,6 +496,31 @@ fn antigravity_missing_group_member_preserves_bounded_and_forgotten_history() ->
                     ),
                 )],
             )?;
+            let before = antigravity_persisted_snapshot(&store)?;
+            let observed_before = chrono::Utc::now();
+            for recent_days in [None, Some(1)] {
+                options.recent_days = recent_days;
+                let (mut sender, mut receiver) = tokio::sync::mpsc::channel(256);
+                let blocked = commands::sync::run_once_with_options(&app, &store, 0, &options, Some(&mut sender)).await?;
+                drop(sender);
+                let mut started = 0;
+                let mut finished = 0;
+                while let Some(event) = receiver.recv().await {
+                    match event {
+                        SyncEvent::SourceStarted { source: SourceKind::Antigravity, .. } => started += 1,
+                        SyncEvent::SourceFinished { source: SourceKind::Antigravity, .. } => finished += 1,
+                        SyncEvent::TokenAccountingRepairFinished { .. } => panic!("blocked source cannot certify repair"),
+                        _ => {},
+                    }
+                }
+                assert_eq!((started, finished), (1, 1));
+                let stat = &blocked.sources[0];
+                assert_eq!((stat.files_processed, stat.changed_files, stat.skipped_files), (0, 0, 0));
+                assert_eq!((stat.events_seen, stat.events_replayed, stat.events_inserted), (0, 0, 0));
+                assert_eq!((stat.bytes_scanned, stat.write_ms), (0, 0));
+                assert_eq!(stat.stored_events, 2);
+                assert_eq!(antigravity_persisted_snapshot(&store)?, before);
+            }
             options.recent_days = None;
             let result =
                 commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
@@ -375,10 +538,118 @@ fn antigravity_missing_group_member_preserves_bounded_and_forgotten_history() ->
                 |row| row.get(0),
             )?;
             assert_eq!(input, 300, "snapshot must retain both original members");
+            assert_eq!(result.sources[0].parse_issues.malformed_lines, 0);
+            let reopened = Store::new(&app.paths)?;
+            let raw: String = reopened.open_connection()?.query_row(
+                "SELECT parse_issues_json FROM source_sync_status WHERE host_id='local' AND source='antigravity'",
+                [], |row| row.get(0),
+            )?;
+            let diagnostic: serde_json::Value = serde_json::from_str(&raw)?;
+            assert_eq!(diagnostic["source_issues"][0]["code"], "tracked_member_missing");
+            assert_eq!(diagnostic["source_issues"][0]["count"], 1);
+            assert_eq!(diagnostic["source_issues"][0]["scope"], "product_group");
+            assert!(diagnostic["source_issues"][0]["observed_at"].is_string());
+            let observed = chrono::DateTime::parse_from_rfc3339(diagnostic["source_issues"][0]["observed_at"].as_str().unwrap())?;
+            assert!(observed >= observed_before && observed <= chrono::Utc::now());
+            let dashboard = llmusage::query::Dashboard::open(&reopened)?;
+            let center = dashboard.sync_command_center(&Default::default())?;
+            assert_eq!(center.sources.iter().find(|row| row.source == "antigravity").unwrap().status, "error");
+            for args in [vec!["source-status"], vec!["doctor", "--json"], vec!["diagnostics"]] {
+                let output = crate::test_process::llmusage_command()
+                    .arg("--home").arg(&app.paths.root_dir).args(&args)
+                    .env("HOME", &fixture.home).env("USERPROFILE", &fixture.home)
+                    .env("RUST_LOG", "off").env("LLMUSAGE_LOG", "off").output()?;
+                assert!(output.status.success(), "{output:?}");
+                let text = String::from_utf8(output.stdout)?;
+                assert!(text.contains("tracked_member_missing"), "{args:?}: {text}");
+                if args[0] == "doctor" {
+                    let checks: serde_json::Value = serde_json::from_str(&text)?;
+                    assert!(checks.as_array().unwrap().iter().any(|check| check["id"] == "source.issues" && check["status"] == "warn"));
+                }
+                if args[0] == "source-status" {
+                    assert!(!text.contains(&fixture.home.to_string_lossy().to_string()));
+                }
+            }
+            options.rebuild = true;
+            assert!(commands::sync::run_once_with_options(&app, &store, 0, &options, None).await.is_err());
+            assert_eq!(antigravity_persisted_snapshot(&store)?, before);
+            fixture.seed_antigravity("member-a", &[(1, ag_gen_metadata_blob(100, 20, 3, 0, "member-a", Some("gemini-3.8-flash"), None, timestamp))])?;
+            options.rebuild = false;
+            let recovered = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+            assert!(recovered.sources[0].last_error.is_none());
+            assert_eq!(antigravity_event_count(&app.paths.db_path)?, 2);
+            let recovered_input: i64 = store.open_connection()?.query_row("SELECT SUM(input_tokens) FROM usage_event WHERE source='antigravity'", [], |row| row.get(0))?;
+            assert_eq!(recovered_input, 400);
+            let raw: String = store.open_connection()?.query_row("SELECT parse_issues_json FROM source_sync_status WHERE host_id='local' AND source='antigravity'", [], |row| row.get(0))?;
+            assert!(serde_json::from_str::<serde_json::Value>(&raw)?.get("source_issues").is_none());
+            fs::remove_file(&missing)?;
             options.rebuild = true;
             options.allow_lossy_rebuild = true;
             commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
             assert_eq!(antigravity_event_count(&app.paths.db_path)?, 1);
+            Ok::<_, anyhow::Error>(())
+        })?;
+        fixture.restore_env();
+    }
+    Ok(())
+}
+
+#[test]
+fn antigravity_preflight_existing_legacy_paths_and_changed_root_preserve_history() -> Result<()> {
+    for changed_root in [false, true] {
+        let fixture = Fixture::new()?;
+        let path = seed_sanitized_native_antigravity(&fixture, "coverage")?;
+        let runtime = tokio::runtime::Runtime::new()?;
+        runtime.block_on(async {
+            let app = AppContext::discover()?;
+            let store = Store::new(&app.paths)?;
+            store.bootstrap()?;
+            let mut options = commands::sync::SyncRunOptions { source: Some(SourceKind::Antigravity), ..Default::default() };
+            commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+            assert!(antigravity_event_count(&app.paths.db_path)? > 0);
+            let old_root = path.parent().unwrap();
+            let mut legacy_paths = Vec::new();
+            if changed_root {
+                unsafe { std::env::set_var("GEMINI_CLI_HOME", fixture.home.join("changed-gemini-root")); }
+            } else {
+                for name in ["old-a.json", "old-b.json"] {
+                    let legacy = old_root.join(name);
+                    fs::write(&legacy, b"{}")?;
+                    legacy_paths.push(legacy.canonicalize()?.to_string_lossy().into_owned());
+                }
+                store.source_files().mark_inventory_seen(SourceKind::Antigravity, "local", &legacy_paths, "2025-01-01T00:00:00Z")?;
+            }
+            let before = antigravity_persisted_snapshot(&store)?;
+            let observed_before = chrono::Utc::now();
+            for rebuild in [false, true] {
+                options.rebuild = rebuild;
+                let blocked = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+                assert_eq!(antigravity_persisted_snapshot(&store)?, before);
+                assert_eq!(blocked.total_inserted, 0);
+                assert_eq!(blocked.sources[0].changed_files, 0);
+                let error = blocked.sources[0].last_error.as_ref().unwrap();
+                assert!(error.contains("tracked_member_out_of_scope"));
+                assert!(!error.contains("tracked_member_missing"));
+                let reopened = Store::new(&app.paths)?;
+                let raw: String = reopened.open_connection()?.query_row("SELECT parse_issues_json FROM source_sync_status WHERE host_id='local' AND source='antigravity'", [], |row| row.get(0))?;
+                let diagnostic: serde_json::Value = serde_json::from_str(&raw)?;
+                let issue = &diagnostic["source_issues"][0];
+                assert_eq!(issue["code"], "tracked_member_out_of_scope");
+                assert_eq!(issue["count"], if changed_root { 1 } else { 2 });
+                assert_eq!(issue["scope"], "product_group");
+                let observed = chrono::DateTime::parse_from_rfc3339(issue["observed_at"].as_str().unwrap())?;
+                assert!(observed >= observed_before && observed <= chrono::Utc::now());
+                assert!(!raw.contains(&fixture.home.to_string_lossy().to_string()));
+            }
+            if changed_root {
+                unsafe { std::env::remove_var("GEMINI_CLI_HOME"); }
+            } else {
+                options.allow_lossy_rebuild = true;
+            }
+            let recovered = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+            assert!(recovered.sources[0].last_error.is_none());
+            assert!(antigravity_event_count(&app.paths.db_path)? > 0);
+            assert_eq!(store.token_accounting_version(SourceKind::Antigravity)?, Some(3));
             Ok::<_, anyhow::Error>(())
         })?;
         fixture.restore_env();
@@ -534,7 +805,7 @@ fn antigravity_copied_request_conflict_preserves_previous_snapshot() -> Result<(
         fixture.seed_antigravity("conflict-b", &[(1, ag_gen_metadata_blob(200, 20, 3, 0,
             "conflict-id", Some("gemini-3.8-flash"), None, 1_800_000_000))])?;
         let result = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
-        assert!(result.sources[0].last_error.as_ref().unwrap().contains("conflicting"));
+        assert!(result.sources[0].last_error.as_ref().unwrap().contains("incomplete_snapshot"));
         let input: i64 = store.open_connection()?.query_row("SELECT SUM(input_tokens) FROM usage_event WHERE source='antigravity'", [], |row| row.get(0))?;
         assert_eq!(input, 100);
         let connection = Connection::open(&path)?;
@@ -1029,7 +1300,14 @@ fn antigravity_unreadable_conversation_preserves_imported_events() -> Result<()>
             .iter()
             .find(|stats| stats.source == SourceKind::Antigravity)
             .expect("antigravity stats");
-        assert!(antigravity.parse_issues.malformed_lines >= 1);
+        assert_eq!(antigravity.parse_issues.malformed_lines, 0);
+        assert!(
+            antigravity
+                .last_error
+                .as_ref()
+                .unwrap()
+                .contains("metadata_unreadable")
+        );
         let after = store
             .cursors()
             .load_file_cursors(SourceKind::Antigravity, "local")?
@@ -1058,7 +1336,7 @@ fn antigravity_unreadable_conversation_preserves_imported_events() -> Result<()>
             .find(|stats| stats.source == SourceKind::Antigravity)
             .expect("antigravity stats");
         assert!(
-            antigravity.parse_issues.malformed_lines >= 1,
+            antigravity.last_error.is_some(),
             "unreadable file must stay eligible for retry"
         );
         Ok::<_, anyhow::Error>(())

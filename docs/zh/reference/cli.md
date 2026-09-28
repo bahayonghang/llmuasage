@@ -1,6 +1,6 @@
 # CLI 参考
 
-本页按版本 `1.4.0` 的 `cargo run -- --help`、`cargo run -- serve --help`、`cargo run -- export html --help` 对齐。顶层 help 使用紧凑表格；子命令 help 继续使用 clap 输出。
+本页按版本 `2.0.0` 的 `cargo run -- --help`、`cargo run -- serve --help`、`cargo run -- export html --help` 对齐。顶层 help 使用紧凑表格；子命令 help 继续使用 clap 输出。
 
 ## 顶层 help
 
@@ -27,7 +27,7 @@ Usage: llmusage [OPTIONS] [COMMAND]
 | `--json` | 支持的报表命令输出稳定 JSON |
 | `--breakdown` | 在支持处包含按模型拆分的行或 payload |
 | `--order asc\|desc` | 按周期/活动排序报表行 |
-| `--timezone UTC\|local\|+08:00` | 报表时区。`local` 使用本机当前固定本地偏移，不是 IANA/DST 感知时区。 |
+| `--timezone UTC\|local\|+08:00` | 报表时区。`local` 解析系统 IANA 时区，按各日期应用包含夏令时规则的偏移；解析失败时使用当前固定本地偏移。 |
 | `--locale <LOCALE>` | 标题和数字格式的轻量 locale 选择 |
 | `--compact` | 使用更窄的表格布局 |
 | `--no-cost` | 从报表输出隐藏成本列与成本字段 |
@@ -164,6 +164,18 @@ llmusage sync --rebuild --allow-lossy-rebuild
 设置 `LLMUSAGE_LOG=info` 可记录结构化的定价开始/对账/完成文件日志，`debug` 还会记录节流后的页进度。默认 `warn` 级别会在重算持续超过 30 秒时记录一次存活告警；终端进度不受文件日志级别影响。
 
 人读 stdout 摘要只输出一张对齐表格：每个来源一行，并以 `TOTAL` 收尾；已完成进度留在 stderr，不再成为重复的永久成功行。表格按来源显示 `files`、`changed`、`skipped`、`seen`、`committed`、`stored_events`、bytes 和 parse/write 耗时。`skipped` 对文件型来源来自现有 cursor/fingerprint 证据，对 OpenCode 这种 DB 来源来自 SQLite 高水位 cursor；`committed` 是 SQLite 去重后本次新增写入数。重定向输出不含 ANSI，窄终端使用紧凑表头且不截断数值。
+
+表格下方的记录诊断区分格式错误、超大记录、有意跳过和 accounting 异常。每个来源最多保留 8 个记录样本，摘要显示总数和未展示的样本数。同一个样本可以同时显示稳定原因码、定位值和安全文件名。JSONL 样本使用 `@` 标注非零字节偏移；ZCode 样本使用 `timestamp_ms=` 标注已有的毫秒时间戳定位值。不输出完整私有路径、路径哈希或记录正文。诊断中的 `skipped` 统计记录；表格中的 `SKIPPED` 统计文件。
+
+Codex 工具输出记录超过 4 MiB 上限时，可以使用 `oversized_non_usage_record` 原因码跳过；有界读取器继续处理后续 usage 记录。Grok 的 `usageIsIncomplete` 记录保留已报告的 token 数值和 accounting 警告，解析器不会用 fallback 估计值替换已报告数值。这些信息类诊断不表示整个来源失败。
+
+已跟踪的 Antigravity 数据库缺失等来源故障单独报告，不计入格式错误记录数。命令退出后，持久化来源状态仍保留故障。受阻来源保留已导入历史，不能被认证为无错误的 accounting 修复。文件库存反映最近一次完成的观察；持久化的 `live` 状态不保证路径当前仍存在。
+
+`WRITE` 表示已记录的 writer 经过时间。普通 shard 的计时包含 provider 映射、事务开始、reset、事实与 cursor 写入和 commit；host 前缀准备与内存中的 behavior 去重发生在该计时之前。Antigravity 分别记录每个产品的 apply 和 marker 写入时间，不含共享的组 reset、事务开始和 commit，因此分产品数值之和不能代表完整事务耗时。`PARSE` 是来源阶段总耗时扣除已记录 `WRITE` 后的余量，不能用来表示解析器 CPU 时间。`BYTES` 按各 reader 的输入口径统计，可能包含库存文件大小，不能用来表示物理磁盘读取量。
+
+Antigravity 在发现 CLI/IDE 根目录并计算 fingerprint 后，检查已跟踪输入的覆盖情况。所有选中产品均受阻时，同步在解码 usage 前返回；预检仍执行文件系统操作。仅部分产品受阻时，继续跨根目录解码，以确定复制数据库和原生产品归属。
+
+覆盖诊断区分物理缺失路径、存在但当前发现范围不包含的已跟踪路径（包括旧 JSON 输入或根目录变化），以及访问或发现失败。重试前应恢复受支持的原始输入，或修正根目录和访问配置。`--allow-lossy-rebuild` 仅与显式 rebuild 一起接受无法重建的历史损失；访问或发现失败仍阻止替换。覆盖检查失败不会推进 usage cursor 或最近一次成功库存观察。
 
 ### `llmusage remote`
 

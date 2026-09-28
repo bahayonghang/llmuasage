@@ -48,7 +48,7 @@ features:
 
 ## Current product surface
 
-- Version `1.4.0`.
+- Version `2.0.0`.
 - Sources: passive Codex, Claude Code, OpenCode, Kimi Code (`kimi_code`), Pi (`pi`), Oh My Pi (`omp`), Grok Build (`grok`), ZCode (`zcode`), Antigravity CLI (`antigravity`), and DeepSeek Harness (`deepseek_harness`).
 - Report commands: `daily`, `monthly`, `session`, `blocks`, `statusline`.
 - Local UI commands: `dash`, `serve`, `export html`.

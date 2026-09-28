@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 
 use crate::{
+    domain::source_diagnostics::SourceIssues,
     error::{LlmusageError, Result},
     models::SourceKind,
     parsers::SourceSyncStats,
@@ -46,6 +47,7 @@ impl RemoteImporter {
         let skipped_lines;
         let saw_header;
         let saw_trailer;
+        let mut source_issues;
         {
             let mut decoder = ShardDecoder::new(session.reader());
             let mut deferred_pi = Vec::new();
@@ -136,6 +138,7 @@ impl RemoteImporter {
             skipped_lines = decoder.skipped_lines();
             saw_header = decoder.saw_header();
             saw_trailer = decoder.saw_trailer();
+            source_issues = decoder.source_issues().clone();
         }
         let exit = session.finish()?;
         if !saw_header {
@@ -166,15 +169,29 @@ impl RemoteImporter {
             });
         }
 
+        for stats in &sources {
+            if stats.last_error.is_none() {
+                source_issues.entry(stats.source).or_default();
+            }
+        }
         let statuses = sources.iter().map(status_from_stats).collect::<Vec<_>>();
-        store
-            .sync_status()
-            .save_source_sync_statuses(&host.host_id, &statuses)?;
+        store.sync_status().save_source_sync_statuses_with_issues(
+            &host.host_id,
+            &statuses,
+            &source_issues,
+        )?;
         store.hosts().record_contact(&host.host_id, None)?;
         if since.is_none()
             && let Some(listed) = listed_sources.as_ref()
         {
-            establish_host_source_markers(store, &host.host_id, listed, &empty_sources, &sources)?;
+            establish_host_source_markers(
+                store,
+                &host.host_id,
+                listed,
+                &empty_sources,
+                &sources,
+                &source_issues,
+            )?;
         }
         if let Some(watermark) = max_event_at {
             store.hosts().set_watermark(
@@ -320,6 +337,7 @@ fn establish_host_source_markers(
     listed: &BTreeMap<SourceKind, u32>,
     empty_sources: &BTreeSet<SourceKind>,
     trailer_sources: &[SourceSyncStats],
+    source_issues: &SourceIssues,
 ) -> Result<()> {
     for source in listed.keys().copied() {
         if !empty_sources.contains(&source) {
@@ -328,7 +346,12 @@ fn establish_host_source_markers(
         let Some(stats) = trailer_sources.iter().find(|stats| stats.source == source) else {
             continue;
         };
-        if stats.parse_issues.total() > 0 || stats.last_error.is_some() {
+        if stats.parse_issues.total() > 0
+            || stats.last_error.is_some()
+            || source_issues
+                .get(&source)
+                .is_some_and(|issues| !issues.is_empty())
+        {
             continue;
         }
         store.mark_current_token_accounting_for_host(host_id, source)?;
@@ -530,6 +553,73 @@ mod tests {
             Some(crate::store::expected_token_accounting_version(
                 SourceKind::Codex
             ))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn remote_source_issue_survives_restart_and_prevents_marker_certification() -> anyhow::Result<()>
+    {
+        use crate::domain::source_diagnostics::{SourceIssue, SourceIssueCode};
+        let (_temp, store, _lock) = fenced_store()?;
+        store.hosts().upsert(&ssh_host(None))?;
+        let host = store.hosts().get_by_label("devbox")?.unwrap();
+        let kind = SourceKind::AntigravityIde;
+        let mut issues = SourceIssues::new();
+        SourceIssue::record(
+            issues.entry(kind).or_default(),
+            SourceIssueCode::TrackedMemberMissing,
+            3,
+        );
+        let mut stdout = stream(&[header(&[kind])], "");
+        stdout.push_str(&crate::remote::protocol::encode_trailer(
+            vec![source_stats(kind, 0)],
+            ParseIssues::default(),
+            &issues,
+        )?);
+        stdout.push('\n');
+        let source = MemoryShardSource {
+            stdout,
+            stderr: String::new(),
+            status: 0,
+        };
+        let mut writer = store.begin_sync_run()?;
+        RemoteImporter::import(&host, &store, &mut writer, &source)?;
+        assert_eq!(
+            store.token_accounting_version_for_host(&host.host_id, kind)?,
+            None
+        );
+        assert_eq!(
+            store.sync_status().load_source_issues(&host.host_id)?,
+            issues
+        );
+        let statuses = store
+            .sync_status()
+            .load_source_sync_statuses(&host.host_id)?;
+        assert_eq!(statuses[0].parse_issues.total(), 0);
+        store
+            .sync_status()
+            .save_source_sync_statuses(&host.host_id, &statuses)?;
+        assert_eq!(
+            store.sync_status().load_source_issues(&host.host_id)?,
+            issues
+        );
+        // A complete following run clears the failure and certifies the source.
+        let source = MemoryShardSource {
+            stdout: stream(&[header(&[kind]), trailer(vec![source_stats(kind, 0)])], ""),
+            stderr: String::new(),
+            status: 0,
+        };
+        RemoteImporter::import(&host, &store, &mut writer, &source)?;
+        assert!(
+            store
+                .sync_status()
+                .load_source_issues(&host.host_id)?
+                .is_empty()
+        );
+        assert_eq!(
+            store.token_accounting_version_for_host(&host.host_id, kind)?,
+            Some(expected_token_accounting_version(kind))
         );
         Ok(())
     }

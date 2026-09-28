@@ -337,7 +337,7 @@ impl<R: Read> BoundedJsonlReader<R> {
                             path_hash,
                             start_offset,
                             ParseIssueKind::Skipped,
-                            "",
+                            "oversized_non_usage_record",
                         ),
                         JsonlRecordDisposition::Malformed => issues.record(
                             source,

@@ -6,7 +6,7 @@
 
 本地优先的 AI CLI 用量分析工具。`llmusage` 会被动读取本机 Codex、Claude Code、OpenCode、Kimi Code、Pi、Oh My Pi、Grok Build、ZCode、Antigravity CLI/IDE 和 DeepSeek Harness 的本地记录，并写入本地 SQLite；随后提供命令行报表、终端 Dashboard、浏览器 Dashboard 和离线 HTML 导出，默认不上传本地用量。`dash` 的 Usage 页会用本机已有 CLI 凭证读取订阅额度。
 
-> 当前 crate 版本：`1.4.0`。
+> 当前 crate 版本：`2.0.0`。
 
 ![llmusage 本地 Web Dashboard 概览](./docs/public/screenshots/web-dashboard-overview.png)
 
@@ -163,6 +163,8 @@ llmusage codex-tracer --rebuild
 - 不需要账号登录、device token、上传队列或远端用量 API。SSH 远端导入是你触发的、从已注册主机拉取规范化字段，不会上传用量。
 - 普通 `llmusage sync`（有界或无界）不会重建旧版 token accounting 来源。它会保留该来源已有的 event、raw、bucket、turn、tool、cursor、source_file 数据，跳过该来源本轮写入，并提示修复入口是 `llmusage sync --rebuild --source <source>`。同一轮中的非 legacy 来源仍正常同步。Claude Code、Codex、Grok Build、Kimi Code、Oh My Pi（OMP）都按「普通同步 / 显式重建」区分。
 - 普通 `llmusage sync` 遇到原始源文件缺失时会保留已导入 usage。
+- sync 诊断分别显示来源故障、格式错误记录、跳过记录和不完整 token accounting。每个来源最多显示 8 个记录样本，并标明未展示数量。摘要表格的 `SKIPPED` 单独统计文件跳过数。
+- Antigravity 在解码 usage 前检查已跟踪输入的覆盖情况。所有选中产品均受阻时，同步保留历史并提前返回，不解码 usage；仍执行文件发现和 fingerprint。当前发现范围不包含的已跟踪路径与物理缺失文件分别报告。
 - `llmusage sync --recent-days N` 只导入最近的 UTC 事件窗口（`1..=3650`），且不推进全历史 cursor；`--parallelism` 合法范围为 `1..=32`。
 - bounded 普通 sync 同样对 legacy 来源 skip+warn，不得清空全历史。
 - `llmusage sync --rebuild` 默认拒绝有损重建，除非同时传入 `--allow-lossy-rebuild`。

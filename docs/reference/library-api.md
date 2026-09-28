@@ -4,6 +4,9 @@ The crate exposes a small adapter surface for local desktop integrations and tes
 
 ## Stability contract
 
+The 2.0 major version declares public API changes since v1.2.0. See the
+[2.0 migration guide](./migration-v2) before updating downstream crates.
+
 Prefer the root façade for embedding:
 
 ```rust
@@ -21,7 +24,7 @@ The compatible stable set is:
 - Domain/error: `SourceKind`, `LlmusageError`, `Result`
 - Test helpers when `features = ["testing"]`: `Fixture`, `SeedEvent`
 
-Broad modules such as `commands`, `parsers`, `integrations`, `runtime`, `web`, and `tui` remain public for compatibility, but they are implementation namespaces rather than the recommended adapter API. Future minor/major releases may move internals behind narrower modules after downstream callers migrate to the façade above.
+Broad modules such as `commands`, `parsers`, `integrations`, `runtime`, `web`, and `tui` remain public implementation namespaces. Prefer the adapter API above. Removing public items requires an appropriate major-version boundary.
 
 ## Open a store
 

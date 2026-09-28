@@ -239,7 +239,7 @@ async fn run_once_locked_with_remote_source(
                 "ordinary sync detected legacy token accounting; keeping existing data and skipping writes for this round"
             );
             for source in &legacy {
-                eprintln!("{}", SyncStatusStore::legacy_repair_warning(*source));
+                crate::logging::stderr_warning(&SyncStatusStore::legacy_repair_warning(*source));
             }
             exclude_legacy_sources_from_write_set(&mut parsers, &legacy);
         }
@@ -284,7 +284,14 @@ async fn run_once_locked_with_remote_source(
         options.allow_lossy_rebuild,
     )
     .await;
-    let sources = drive_result?;
+    let drive_result = drive_result?;
+    let mut source_issues = drive_result.source_issues;
+    let sources = drive_result.stats;
+    for source in &sources {
+        if !cancel.is_cancelled() && source.last_error.is_none() {
+            source_issues.entry(source.source).or_default();
+        }
+    }
     tracing::debug!(
         driver_ms = driver_started.elapsed().as_millis() as u64,
         "driver finished"
@@ -419,7 +426,13 @@ async fn run_once_locked_with_remote_source(
     );
     if !cancel.is_cancelled() {
         for source in &source_stats {
-            if skipped_legacy.contains(&source.source) {
+            if skipped_legacy.contains(&source.source)
+                || source.last_error.is_some()
+                || source.parse_issues.total() > 0
+                || source_issues
+                    .get(&source.source)
+                    .is_some_and(|issues| !issues.is_empty())
+            {
                 continue;
             }
             // Native Antigravity certifies only a complete staged snapshot in
@@ -437,9 +450,11 @@ async fn run_once_locked_with_remote_source(
             }
         }
     }
-    store
-        .sync_status()
-        .save_source_sync_statuses("local", &sync_statuses)?;
+    store.sync_status().save_source_sync_statuses_with_issues(
+        "local",
+        &sync_statuses,
+        &source_issues,
+    )?;
     if recent_cutoff.is_some() && !cancel.is_cancelled() {
         for source in &source_stats {
             if skipped_legacy.contains(&source.source) {
@@ -448,7 +463,10 @@ async fn run_once_locked_with_remote_source(
             if matches!(
                 source.source,
                 SourceKind::Antigravity | SourceKind::AntigravityIde
-            ) && source.last_error.is_some()
+            ) && (source.last_error.is_some()
+                || source_issues
+                    .get(&source.source)
+                    .is_some_and(|issues| !issues.is_empty()))
             {
                 continue;
             }

@@ -47,6 +47,7 @@ pub async fn run(
                 "host_id": host.host_id,
                 "label": host.label,
                 "sync_status": store.sync_status().load_source_sync_statuses(&host.host_id)?,
+                "source_issues": store.sync_status().load_source_issues(&host.host_id)?,
             }))
         })
         .collect::<Result<Vec<_>>>()?;
@@ -70,6 +71,8 @@ pub async fn run(
         "cursors": health.cursors,
         "sources": sources,
         "sync_status": sync_status,
+        "source_issues": store.sync_status().load_source_issues("local")?,
+        "archive_observed_at": crate::util::now_utc(),
         "hosts": host_status,
         "archive": archive,
         "logs": logs,

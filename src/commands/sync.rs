@@ -19,7 +19,7 @@ use crate::{
     registry,
     remote::protocol::{ShardRecord, encode_record, source_accounting_versions},
     store::{BootstrapProgressEvent, HolderKind, Store},
-    util::{hash_string, now_utc},
+    util::now_utc,
 };
 
 // These types belong to the sync domain layer. Re-exported here so callers that
@@ -110,30 +110,34 @@ pub async fn emit_shards_to(
         })
     })?;
     let cancel = CancellationToken::new();
-    let sources = driver::drive_with_events(driver::DriveContext {
-        parsers: &parsers,
-        store: &store,
-        writer: &mut writer,
-        parallelism: request.parallelism(),
-        lock_wait_ms: 0,
-        recent_cutoff,
-        sender: None,
-        cancel: &cancel,
-        sweep_host_ids: vec![crate::store::LOCAL_HOST_ID.to_string()],
-    })
+    let result = driver::drive_with_rebuild(
+        driver::DriveContext {
+            parsers: &parsers,
+            store: &store,
+            writer: &mut writer,
+            parallelism: request.parallelism(),
+            lock_wait_ms: 0,
+            recent_cutoff,
+            sender: None,
+            cancel: &cancel,
+            sweep_host_ids: vec![crate::store::LOCAL_HOST_ID.to_string()],
+        },
+        false,
+        false,
+    )
     .await?;
     writer.finish_sync_run()?;
     let mut parse_issues = ParseIssues::default();
+    let sources = result.stats;
     for stats in &sources {
         parse_issues.merge(stats.parse_issues.clone());
     }
-    write_record(
-        &out,
-        &ShardRecord::Trailer {
-            sources,
-            parse_issues,
-        },
-    )?;
+    let trailer =
+        crate::remote::protocol::encode_trailer(sources, parse_issues, &result.source_issues)?;
+    let mut output = out
+        .lock()
+        .map_err(|_| anyhow::anyhow!("shard output lock poisoned"))?;
+    writeln!(output, "{trailer}")?;
     Ok(())
 }
 
@@ -178,6 +182,13 @@ async fn run_with_human_events(
     // 提前返回同样经 Drop 完成终端清理，不依赖 reporter task 是否已 spawn。
     let renderer = Arc::new(Mutex::new(sync_progress::stderr_renderer()));
     let _guard = sync_progress::TerminalGuard::new(Arc::clone(&renderer));
+    let warning_renderer = Arc::clone(&renderer);
+    let _warning_guard = crate::logging::install_stderr_sink(Arc::new(move |bytes| {
+        warning_renderer
+            .lock()
+            .map_err(|_| io::Error::other("progress renderer lock poisoned"))?
+            .write_warning(bytes)
+    }));
     let render_stats = Arc::new(Mutex::new(sync_progress::RenderStats::default()));
     let bootstrap_started = Instant::now();
     sync_progress::render_shared_timed(&renderer, &render_stats, &SyncEvent::BootstrapStarted);
@@ -397,27 +408,15 @@ fn print_summary(summary: &SyncSummary, options: &SyncRunOptions, store: &Store)
 }
 
 fn sample_basenames(store: &Store, summary: &SyncSummary) -> HashMap<String, String> {
-    let mut map = HashMap::new();
-    for stats in &summary.sources {
-        if stats.parse_issues.samples.is_empty() {
-            continue;
-        }
-        let Ok(cursors) = store.cursors().load_file_cursors(stats.source, "local") else {
-            continue;
-        };
-        for cursor in cursors.into_values() {
-            let raw = if cursor.file_path.is_empty() {
-                cursor.cursor_key
-            } else {
-                cursor.file_path
-            };
-            let Some(name) = sync_summary::path_basename(&raw) else {
-                continue;
-            };
-            map.insert(hash_string(&raw), name.to_string());
-        }
-    }
-    map
+    sync_summary::sample_basenames(
+        store,
+        "local",
+        summary
+            .sources
+            .iter()
+            .filter(|stats| !stats.parse_issues.samples.is_empty())
+            .map(|stats| stats.source),
+    )
 }
 
 /// Terminal column budget for the summary table: `COLUMNS` when set, otherwise

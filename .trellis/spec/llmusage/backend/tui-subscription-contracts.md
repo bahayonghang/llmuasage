@@ -31,8 +31,10 @@ UsageFetchReport { outputs, diagnostics }
   `cache_hit=false`. Desktop `QuotaResponse.cache_hit` copies that field.
 - `fetch_all` in v1.2.0 returned `UsageFetchReport`. The `UsageFetchOutcome`
   return type is a public breaking change versus baseline tag `v1.2.0`
-  (`9b7a6f3dec12764222891c2d8f5aeb42db7bd490`). Recorded; crate version stays
-  1.3.0 until a separate release approval. Do not add a compatibility wrapper.
+  (`9b7a6f3dec12764222891c2d8f5aeb42db7bd490`). The user approved the 2.0.0
+  development version boundary on 2026-09-28. Downstream callers use `.report`
+  and `cache_hit` as documented in `docs/reference/migration-v2.md`. Do not add
+  a compatibility wrapper. Version preparation does not authorize publishing.
 - Applicable tools for cache provenance (`fetched_at`, `cache_hit`, no mtime
   signal): Claude Code, Codex, Grok Build, Kimi Code, OMP.
 - Cache documents store `UsageFetchReport` only. They must not store access or

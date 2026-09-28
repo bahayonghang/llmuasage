@@ -68,7 +68,7 @@ The remote host must have a compatible `llmusage` binary. Parsing stays on that 
 llmusage
 ```
 
-With no subcommand, `llmusage` is the `daily` report. It shows the last 7 calendar days in the selected timezone, including today. `--timezone local` uses the machine's current fixed local offset; pass a fixed offset such as `--timezone +08:00` for reproducible historical grouping.
+With no subcommand, `llmusage` is the `daily` report. It shows the last 7 calendar days in the selected timezone, including today. `--timezone local` resolves the system IANA timezone and applies historical DST rules. If resolution fails, it uses the current fixed local offset. Pass UTC or a fixed offset such as `--timezone +08:00` for historical grouping with the same offset across dates and machines.
 
 Use JSON for automation:
 

@@ -85,6 +85,13 @@ Kimi Code, OMP.
   do not fall back to the registry. If the comparison reports SemVer diffs,
   record them; do not silence, wrap, downgrade the failure, add a
   compatibility shim, or bump the crate version without a separate approval.
+- On 2026-09-28 the user approved the 2.0.0 development version boundary for
+  existing public API changes. Keep the v1.2.0 baseline and original command;
+  do not add `--release-type major` or lint suppression. A major-version pass
+  confirms the declared version permits the changes, not v1.2.0 source
+  compatibility. Document migration in `docs/reference/migration-v2.md` and
+  its Chinese counterpart. This approval does not publish a release or change
+  schema, accounting, or wire versions.
 - Architecture-checks checkout must fetch the release tag (`fetch-depth: 0`
   or an equivalent tag fetch) so `--baseline-rev v1.2.0` resolves in CI.
   The semver step runs on `pull_request`, `push` to `main`, and

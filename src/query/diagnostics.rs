@@ -29,9 +29,10 @@ fn load_sync_statuses_with_conn(
     )?;
     let rows = stmt.query_map([source], |row| {
         let parse_issues_raw = row.get::<_, String>(7)?;
-        let parse_issues = serde_json::from_str(&parse_issues_raw).map_err(|source| {
-            rusqlite::Error::FromSqlConversionFailure(7, Type::Text, Box::new(source))
-        })?;
+        let diagnostics: crate::domain::source_diagnostics::PersistedDiagnostics =
+            serde_json::from_str(&parse_issues_raw).map_err(|source| {
+                rusqlite::Error::FromSqlConversionFailure(7, Type::Text, Box::new(source))
+            })?;
         Ok(SyncStatusRow {
             source: row.get(0)?,
             files_processed: row.get(1)?,
@@ -40,8 +41,10 @@ fn load_sync_statuses_with_conn(
             events_inserted: row.get(4)?,
             stored_events: row.get(5)?,
             updated_at: row.get(6)?,
-            last_error: None,
-            parse_issues,
+            last_error: diagnostics
+                .has_source_errors()
+                .then(|| "source_unavailable".to_string()),
+            parse_issues: diagnostics.parse_issues,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -609,5 +612,58 @@ impl Dashboard {
                 },
             }],
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        domain::source_diagnostics::{PersistedDiagnostics, SourceIssue, SourceIssueCode},
+        models::{ParseIssueKind, SourceKind},
+        paths::AppPaths,
+    };
+    use tempfile::TempDir;
+
+    #[test]
+    fn source_failure_projects_warning_without_private_diagnostics() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = AppPaths::with_root(temp.path().to_path_buf())?;
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+        let mut diagnostics = PersistedDiagnostics::default();
+        diagnostics.parse_issues.record(
+            SourceKind::Codex,
+            "safe-path-hash",
+            7,
+            ParseIssueKind::Skipped,
+            "oversized_non_usage_record",
+        );
+        SourceIssue::record(
+            &mut diagnostics.source_issues,
+            SourceIssueCode::TrackedMemberMissing,
+            2,
+        );
+        store.open_connection()?.execute(
+            "INSERT INTO source_sync_status(
+                source, files_processed, changed_files, bytes_scanned,
+                events_seen, events_replayed, events_inserted, stored_events,
+                parse_ms, write_ms, lock_wait_ms, updated_at, parse_issues_json
+             ) VALUES ('codex', 1, 1, 10, 0, 0, 0, 0, 1, 0, 0, ?1, ?2)",
+            rusqlite::params![now_utc(), serde_json::to_string(&diagnostics)?],
+        )?;
+
+        let reopened = Store::new(&paths)?;
+        let dashboard = Dashboard::open(&reopened)?;
+        let payload = dashboard.sync_command_center(&Default::default())?;
+        assert_eq!(payload.sources[0].status, "error");
+        assert_eq!(payload.sources[0].tone, "warn");
+        assert_eq!(payload.sources[0].malformed_lines, 0);
+        assert_eq!(payload.sources[0].oversized_lines, 0);
+        assert_eq!(payload.sources[0].skipped_lines, 1);
+        let public_json = serde_json::to_string(&payload)?;
+        assert!(!public_json.contains("safe-path-hash"));
+        assert!(!public_json.contains("source_issues"));
+        Ok(())
     }
 }

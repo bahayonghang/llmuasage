@@ -151,6 +151,8 @@ async fn diagnostics(app: &AppContext, json: bool) -> Result<()> {
 
     let sync_statuses = store.sync_status().load_source_sync_statuses("local")?;
     checks.push(parse_issues_doctor_check(&sync_statuses));
+    let source_issues = store.sync_status().load_source_issues("local")?;
+    checks.push(source_issues_doctor_check(&source_issues));
 
     if json {
         println!("{}", serde_json::to_string_pretty(&checks)?);
@@ -163,6 +165,28 @@ async fn diagnostics(app: &AppContext, json: bool) -> Result<()> {
 
     info!("完成 doctor 健康检查");
     Ok(())
+}
+
+fn source_issues_doctor_check(
+    issues: &crate::domain::source_diagnostics::SourceIssues,
+) -> DoctorCheck {
+    let details = issues
+        .iter()
+        .flat_map(|(source, issues)| {
+            issues
+                .iter()
+                .map(move |issue| format!("{source}: {}", issue.cli_line(*source)))
+        })
+        .collect::<Vec<_>>();
+    DoctorCheck {
+        id: "source.issues",
+        status: if details.is_empty() { "ok" } else { "warn" },
+        detail: if details.is_empty() {
+            "no source blockers in the latest source observations".to_string()
+        } else {
+            details.join("; ")
+        },
+    }
 }
 
 fn parse_issues_doctor_check(statuses: &[SourceSyncStatus]) -> DoctorCheck {

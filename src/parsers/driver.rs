@@ -6,6 +6,7 @@ use tracing::info;
 
 use super::{SourceParser, SourceSyncStats, SyncEvent};
 use crate::{
+    domain::source_diagnostics::SourceIssues,
     models::SourceKind,
     store::{LOCAL_HOST_ID, Store, SyncRunWriter},
 };
@@ -66,7 +67,12 @@ pub struct DriveContext<'a, 'b> {
 /// Same as [`drive`], but emits sync lifecycle events for JobRegistry and
 /// `llmusage sync --json-events`.
 pub async fn drive_with_events(ctx: DriveContext<'_, '_>) -> Result<Vec<SourceSyncStats>> {
-    drive_with_rebuild(ctx, false, false).await
+    Ok(drive_with_rebuild(ctx, false, false).await?.stats)
+}
+
+pub(crate) struct DriveResult {
+    pub(crate) stats: Vec<SourceSyncStats>,
+    pub(crate) source_issues: SourceIssues,
 }
 
 /// Antigravity rebuilds stage both native products before replacing history.
@@ -75,7 +81,7 @@ pub(crate) async fn drive_with_rebuild(
     mut ctx: DriveContext<'_, '_>,
     rebuild: bool,
     allow_lossy_rebuild: bool,
-) -> Result<Vec<SourceSyncStats>> {
+) -> Result<DriveResult> {
     /*
      * ========================================================================
      * 步骤1：按注册顺序串行驱动每个 SourceParser
@@ -89,6 +95,7 @@ pub(crate) async fn drive_with_rebuild(
 
     let run_started_at = ctx.writer.run_started_at().to_string();
     let mut all_stats = Vec::with_capacity(ctx.parsers.len());
+    let mut source_issues = SourceIssues::new();
     let antigravity_sources = ctx
         .parsers
         .iter()
@@ -124,7 +131,7 @@ pub(crate) async fn drive_with_rebuild(
         let parse_started = std::time::Instant::now();
         let results = if is_antigravity {
             antigravity_finished = true;
-            super::sync_antigravity_family(
+            let result = super::sync_antigravity_family(
                 ctx.store,
                 ctx.writer,
                 &antigravity_sources,
@@ -135,7 +142,9 @@ pub(crate) async fn drive_with_rebuild(
                 ctx.cancel,
                 ctx.sender.as_ref().map(|_| &mut progress_sink as _),
             )
-            .await?
+            .await?;
+            source_issues.extend(result.source_issues);
+            result.stats
         } else {
             vec![
                 parser
@@ -196,7 +205,10 @@ pub(crate) async fn drive_with_rebuild(
     }
 
     info!(sources = all_stats.len(), "完成 SourceParser 列表驱动");
-    Ok(all_stats)
+    Ok(DriveResult {
+        stats: all_stats,
+        source_issues,
+    })
 }
 
 fn emit_parse_issues_log(stats: &SourceSyncStats) {

@@ -65,3 +65,62 @@ or diagnostics/doctor fields that describe structured runtime logging.
 - A unit test captures the driver parse-issue info event and asserts source,
   class counts, and sample reasons without depending on the default warn
   file level.
+
+## Scenario: Human Sync Console Routing
+
+### 1. Scope / Trigger
+
+Use this contract when changing human sync progress, console tracing output,
+or explicit sync warnings. Indicatif can pad a permanent line to terminal width
+without writing a newline; a subsequent raw stderr writer can join that line.
+
+### 2. Signatures
+
+- `install_stderr_sink(StderrSink) -> StderrSinkGuard` is crate-private.
+- `StderrSink` is an `Arc<dyn Fn(&[u8]) -> io::Result<()> + Send + Sync>`.
+- `HumanRenderer::write_warning(&mut self, &[u8]) -> io::Result<()>` routes
+  the complete console message through the active renderer.
+- `stderr_warning(&str)` uses the same destination as console tracing.
+
+### 3. Contracts
+
+The human command owns the sink guard and terminal guard. Console tracing
+buffers one event before routing it. A bar renderer suspends drawing, writes
+the complete newline-terminated message, and restores progress. Permanent
+progress lines also require a newline; width padding cannot establish the
+boundary. The line renderer ends any active progress line before the warning.
+
+The sink guard restores the previous destination on every return path. Outside
+human sync, console messages use normal stderr. Preserve logging filters,
+fields, NDJSON file output, and JSON-mode stdout.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Warning after `LockAcquired` | Warning starts on a separate complete line |
+| Warning while bars are active | Suspend, write, and restore without joining lines |
+| Plain or forced-line output | No ANSI; complete progress and warning lines |
+| Early failure or guard unwind | Restore the previous stderr destination |
+| JSON-events command with a legacy warning | Every stdout line remains valid NDJSON |
+
+### 5. Good/Base/Bad Cases
+
+- Good: the renderer serializes a complete warning with progress output.
+- Base: a command without human progress writes the same console event to stderr.
+- Bad: combining terminal-width padding with direct warning writes.
+
+### 6. Tests Required
+
+- `permanent_progress_lines_end_before_raw_warnings` uses a visible injected
+  terminal and tracing to reproduce and reject the original joined line.
+- `scoped_warning_sink_handles_interleaved_progress_and_restores_on_error`
+  covers interleaving, repeated warnings, and guard cleanup.
+- `legacy_warning_keeps_human_lines_and_json_stdout_separate` covers the
+  shipped command with an isolated legacy fixture and parses each stdout line.
+
+### 7. Wrong vs Correct
+
+Wrong: write a warning with an independent `eprintln!` while the human renderer
+owns terminal output. Correct: route the complete line with `stderr_warning`,
+and let the command-scoped sink coordinate with `HumanRenderer::write_warning`.

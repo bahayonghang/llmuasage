@@ -3,6 +3,7 @@ use std::{collections::BTreeMap, io::BufRead};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    domain::source_diagnostics::SourceIssues,
     error::{LlmusageError, Result},
     models::{ParseIssues, SourceKind},
     parsers::SourceSyncStats,
@@ -93,6 +94,24 @@ pub fn encode_record(record: &ShardRecord) -> Result<String> {
     })
 }
 
+/// Add source diagnostics without adding fields to the public wire enum.
+pub(crate) fn encode_trailer(
+    sources: Vec<SourceSyncStats>,
+    parse_issues: ParseIssues,
+    source_issues: &SourceIssues,
+) -> Result<String> {
+    serde_json::to_string(&serde_json::json!({
+        "kind": "trailer",
+        "sources": sources,
+        "parse_issues": parse_issues,
+        "source_issues": source_issues,
+    }))
+    .map_err(|source| LlmusageError::Parse {
+        context: "shard trailer",
+        source,
+    })
+}
+
 pub fn protocol_mismatch_error(remote_protocol: u32, remote_schema_version: u32) -> LlmusageError {
     LlmusageError::ConfigInvalid {
         detail: format!(
@@ -109,6 +128,7 @@ pub struct ShardDecoder<R> {
     skipped_lines: u64,
     header_seen: bool,
     trailer_seen: bool,
+    source_issues: SourceIssues,
 }
 
 impl<R: BufRead> ShardDecoder<R> {
@@ -118,6 +138,7 @@ impl<R: BufRead> ShardDecoder<R> {
             skipped_lines: 0,
             header_seen: false,
             trailer_seen: false,
+            source_issues: SourceIssues::new(),
         }
     }
 
@@ -131,6 +152,10 @@ impl<R: BufRead> ShardDecoder<R> {
 
     pub fn saw_trailer(&self) -> bool {
         self.trailer_seen
+    }
+
+    pub(crate) fn source_issues(&self) -> &SourceIssues {
+        &self.source_issues
     }
 
     pub fn next_record(&mut self) -> Result<Option<ShardRecord>> {
@@ -179,6 +204,17 @@ impl<R: BufRead> ShardDecoder<R> {
                         continue;
                     }
                     if matches!(record, ShardRecord::Trailer { .. }) {
+                        #[derive(Deserialize)]
+                        struct TrailerDiagnostics {
+                            #[serde(default)]
+                            source_issues: SourceIssues,
+                        }
+                        self.source_issues = serde_json::from_str::<TrailerDiagnostics>(trimmed)
+                            .map_err(|source| LlmusageError::Parse {
+                                context: "remote source diagnostics",
+                                source,
+                            })?
+                            .source_issues;
                         self.trailer_seen = true;
                     }
                     return Ok(Some(record));

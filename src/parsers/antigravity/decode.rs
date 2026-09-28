@@ -5,7 +5,7 @@ use crate::{
     project::ProjectResolver,
     util::{bucket_start_from_rfc3339, hash_string, normalize_model},
 };
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OpenFlags};
 use std::{
@@ -46,18 +46,28 @@ pub(super) struct DecodedFile {
     pub root_attribution: bool,
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("{reason}")]
+pub(super) struct RecordFailure {
+    pub source_kind: SourceKind,
+    pub path_hash: String,
+    pub reason: &'static str,
+}
+
 pub(super) fn read_file(
     path: &Path,
     source: SourceKind,
     cancel: &CancellationToken,
 ) -> Result<DecodedFile> {
+    #[cfg(test)]
+    test_reads::record(path);
     let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     connection.busy_timeout(std::time::Duration::from_millis(250))?;
     connection.execute_batch("PRAGMA query_only=ON; BEGIN")?;
     let product = product_source(&connection)?;
     let source = product.unwrap_or(source);
     let path_hash = hash_string(&path.to_string_lossy());
-    let (session_time, workspace) = trajectory(&connection)?;
+    let (session_time, workspace) = trajectory(&connection, source, &path_hash)?;
     if !table_exists(&connection, "gen_metadata")? && !table_exists(&connection, "steps")? {
         bail!("unrecognized Antigravity SQLite schema; history preserved");
     }
@@ -70,39 +80,47 @@ pub(super) fn read_file(
             if cancel.is_cancelled() {
                 bail!("Antigravity metadata read cancelled");
             }
-            let idx: i64 = row.get(0)?;
-            let blob: Vec<u8> = row.get(1)?;
-            let fields = decode_fields(&blob)?;
-            check_types(&fields, &[], &[1])?;
-            let Some(chat) = bytes(&fields, 1) else {
-                continue;
+            let mut parse_record = || -> Result<()> {
+                let idx: i64 = row.get(0)?;
+                let blob: Vec<u8> = row.get(1)?;
+                let fields = decode_fields(&blob)?;
+                check_types(&fields, &[], &[1])?;
+                let Some(chat) = bytes(&fields, 1) else {
+                    return Ok(());
+                };
+                let chat = decode_fields(chat)?;
+                let direct_time = bytes(&chat, 9)
+                    .map(decode_fields)
+                    .transpose()?
+                    .and_then(|generation| bytes(&generation, 4).map(Vec::from))
+                    .map(|timestamp| parse_timestamp(&timestamp))
+                    .transpose()?
+                    .flatten();
+                let time = direct_time
+                    .map(|time| (3, time))
+                    .or(session_time.map(|time| (0, time)));
+                let model = text(&chat, 22).or_else(|| text(&chat, 19));
+                let label = text(&chat, 21);
+                push_usage(
+                    &mut observations,
+                    &chat,
+                    4,
+                    17,
+                    source,
+                    &path_hash,
+                    &format!("gen:{idx}"),
+                    model,
+                    label,
+                    time,
+                    workspace.clone(),
+                )?;
+                Ok(())
             };
-            let chat = decode_fields(chat)?;
-            let direct_time = bytes(&chat, 9)
-                .map(decode_fields)
-                .transpose()?
-                .and_then(|generation| bytes(&generation, 4).map(Vec::from))
-                .map(|timestamp| parse_timestamp(&timestamp))
-                .transpose()?
-                .flatten();
-            let time = direct_time
-                .map(|time| (3, time))
-                .or(session_time.map(|time| (0, time)));
-            let model = text(&chat, 22).or_else(|| text(&chat, 19));
-            let label = text(&chat, 21);
-            push_usage(
-                &mut observations,
-                &chat,
-                4,
-                17,
-                source,
-                &path_hash,
-                &format!("gen:{idx}"),
-                model,
-                label,
-                time,
-                workspace.clone(),
-            )?;
+            parse_record().with_context(|| RecordFailure {
+                source_kind: source,
+                path_hash: path_hash.clone(),
+                reason: "invalid_generation_metadata",
+            })?;
         }
     }
     if table_exists(&connection, "steps")? {
@@ -114,36 +132,44 @@ pub(super) fn read_file(
             if cancel.is_cancelled() {
                 bail!("Antigravity metadata read cancelled");
             }
-            let idx: i64 = row.get(0)?;
-            let blob: Vec<u8> = row.get(1)?;
-            let fields = decode_fields(&blob)?;
-            let time = match bytes(&fields, 8) {
-                Some(value) => parse_timestamp(value)?.map(|time| (2, time)),
-                None => None,
-            }
-            .or(match bytes(&fields, 1) {
-                Some(value) => parse_timestamp(value)?.map(|time| (1, time)),
-                None => None,
-            })
-            .or(session_time.map(|time| (0, time)));
-            let model_info = bytes(&fields, 24)
-                .map(decode_fields)
-                .transpose()?
-                .unwrap_or_default();
-            let model = text(&model_info, 12).or_else(|| text(&model_info, 8));
-            push_usage(
-                &mut observations,
-                &fields,
-                9,
-                28,
-                source,
-                &path_hash,
-                &format!("step:{idx}"),
-                model,
-                None,
-                time,
-                workspace.clone(),
-            )?;
+            let mut parse_record = || -> Result<()> {
+                let idx: i64 = row.get(0)?;
+                let blob: Vec<u8> = row.get(1)?;
+                let fields = decode_fields(&blob)?;
+                let time = match bytes(&fields, 8) {
+                    Some(value) => parse_timestamp(value)?.map(|time| (2, time)),
+                    None => None,
+                }
+                .or(match bytes(&fields, 1) {
+                    Some(value) => parse_timestamp(value)?.map(|time| (1, time)),
+                    None => None,
+                })
+                .or(session_time.map(|time| (0, time)));
+                let model_info = bytes(&fields, 24)
+                    .map(decode_fields)
+                    .transpose()?
+                    .unwrap_or_default();
+                let model = text(&model_info, 12).or_else(|| text(&model_info, 8));
+                push_usage(
+                    &mut observations,
+                    &fields,
+                    9,
+                    28,
+                    source,
+                    &path_hash,
+                    &format!("step:{idx}"),
+                    model,
+                    None,
+                    time,
+                    workspace.clone(),
+                )?;
+                Ok(())
+            };
+            parse_record().with_context(|| RecordFailure {
+                source_kind: source,
+                path_hash: path_hash.clone(),
+                reason: "invalid_step_metadata",
+            })?;
         }
     }
     // Read transaction keeps gen_metadata, steps and trajectory at one SQLite snapshot.
@@ -194,6 +220,46 @@ pub(super) fn read_file(
         observations,
         root_attribution: product.is_none(),
     })
+}
+
+#[cfg(test)]
+pub(super) mod test_reads {
+    use std::{
+        collections::HashMap,
+        path::{Path, PathBuf},
+        sync::Mutex,
+    };
+
+    static COUNTS: Mutex<Option<HashMap<PathBuf, usize>>> = Mutex::new(None);
+
+    pub(super) fn record(path: &Path) {
+        if let Some(count) = COUNTS
+            .lock()
+            .unwrap()
+            .as_mut()
+            .and_then(|counts| counts.get_mut(path))
+        {
+            *count += 1;
+        }
+    }
+
+    pub(in crate::parsers::antigravity) fn reset(path: &Path) {
+        COUNTS
+            .lock()
+            .unwrap()
+            .get_or_insert_with(HashMap::new)
+            .insert(path.to_path_buf(), 0);
+    }
+
+    pub(in crate::parsers::antigravity) fn take(path: &Path) -> usize {
+        COUNTS
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .remove(path)
+            .unwrap()
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -311,7 +377,11 @@ fn product_source(connection: &Connection) -> Result<Option<SourceKind>> {
     }
 }
 
-fn trajectory(connection: &Connection) -> Result<(Option<i64>, Option<PathBuf>)> {
+fn trajectory(
+    connection: &Connection,
+    source: SourceKind,
+    path_hash: &str,
+) -> Result<(Option<i64>, Option<PathBuf>)> {
     if !table_exists(connection, "trajectory_metadata_blob")? {
         return Ok((None, None));
     }
@@ -320,27 +390,34 @@ fn trajectory(connection: &Connection) -> Result<(Option<i64>, Option<PathBuf>)>
     let Some(row) = rows.next()? else {
         return Ok((None, None));
     };
-    let blob: Vec<u8> = row.get(0)?;
-    let fields = decode_fields(&blob)?;
-    let time = bytes(&fields, 2)
-        .map(parse_timestamp)
-        .transpose()?
-        .flatten();
-    let metadata = bytes(&fields, 1)
-        .map(decode_fields)
-        .transpose()?
-        .unwrap_or_default();
-    let workspace = text(&metadata, 1).map(|uri| {
-        let raw = uri.strip_prefix("file://").unwrap_or(&uri);
-        #[cfg(windows)]
-        let raw = if raw.as_bytes().get(2) == Some(&b':') {
-            raw.strip_prefix('/').unwrap_or(raw)
-        } else {
-            raw
-        };
-        PathBuf::from(raw)
-    });
-    Ok((time, workspace))
+    let parse_record = || -> Result<_> {
+        let blob: Vec<u8> = row.get(0)?;
+        let fields = decode_fields(&blob)?;
+        let time = bytes(&fields, 2)
+            .map(parse_timestamp)
+            .transpose()?
+            .flatten();
+        let metadata = bytes(&fields, 1)
+            .map(decode_fields)
+            .transpose()?
+            .unwrap_or_default();
+        let workspace = text(&metadata, 1).map(|uri| {
+            let raw = uri.strip_prefix("file://").unwrap_or(&uri);
+            #[cfg(windows)]
+            let raw = if raw.as_bytes().get(2) == Some(&b':') {
+                raw.strip_prefix('/').unwrap_or(raw)
+            } else {
+                raw
+            };
+            PathBuf::from(raw)
+        });
+        Ok((time, workspace))
+    };
+    parse_record().with_context(|| RecordFailure {
+        source_kind: source,
+        path_hash: path_hash.to_owned(),
+        reason: "invalid_trajectory_metadata",
+    })
 }
 
 /// An identity can connect mirrored observations, but a reused message id
@@ -479,6 +556,13 @@ pub(super) fn normalize(
         let usage = &chosen.usage;
         if usage.output_total != usage.visible.saturating_add(usage.thinking) {
             // Partial/error usage lacks a trustworthy disjoint-channel breakdown.
+            issue.record(
+                source,
+                &chosen.path_hash,
+                0,
+                ParseIssueKind::Malformed,
+                "output_channel_mismatch",
+            );
             bail!("Antigravity output channel mismatch; history preserved");
         }
         let time = group
@@ -486,9 +570,23 @@ pub(super) fn normalize(
             .filter_map(|o| o.time)
             .max_by_key(|(rank, time)| (*rank, std::cmp::Reverse(*time)));
         let Some((_, time)) = time else {
+            issue.record(
+                source,
+                &chosen.path_hash,
+                0,
+                ParseIssueKind::Malformed,
+                "missing_usage_timestamp",
+            );
             bail!("Antigravity usage has no typed timestamp; history preserved");
         };
         let Some(timestamp) = DateTime::<Utc>::from_timestamp_millis(time) else {
+            issue.record(
+                source,
+                &chosen.path_hash,
+                0,
+                ParseIssueKind::Malformed,
+                "invalid_usage_timestamp",
+            );
             bail!("Antigravity invalid typed timestamp");
         };
         let event_at = timestamp.to_rfc3339();

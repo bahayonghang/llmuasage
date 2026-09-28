@@ -4,7 +4,7 @@ use std::{
     io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::{
-        OnceLock,
+        Arc, Mutex, OnceLock,
         atomic::{AtomicU64, Ordering},
     },
     time::{Duration, SystemTime},
@@ -32,6 +32,55 @@ const LOG_FILE_PREFIX: &str = "llmusage.ndjson";
 static LOG_GUARD: OnceLock<WorkerGuard> = OnceLock::new();
 static LOG_ERROR_COUNTER: OnceLock<ErrorCounter> = OnceLock::new();
 static LOG_MAINTENANCE_ERRORS: AtomicU64 = AtomicU64::new(0);
+
+type StderrSink = Arc<dyn Fn(&[u8]) -> io::Result<()> + Send + Sync>;
+static STDERR_SINK: Mutex<Option<StderrSink>> = Mutex::new(None);
+
+/// A human sync command routes complete warning lines through its renderer.
+/// The file layer and both logging filters retain their existing behavior.
+pub(crate) struct StderrSinkGuard(Option<StderrSink>);
+
+pub(crate) fn install_stderr_sink(sink: StderrSink) -> StderrSinkGuard {
+    let previous = STDERR_SINK.lock().expect("stderr sink").replace(sink);
+    StderrSinkGuard(previous)
+}
+
+impl Drop for StderrSinkGuard {
+    fn drop(&mut self) {
+        *STDERR_SINK.lock().expect("stderr sink") = self.0.take();
+    }
+}
+
+fn write_stderr(bytes: &[u8]) -> io::Result<()> {
+    let sink = STDERR_SINK.lock().expect("stderr sink").clone();
+    match sink {
+        Some(sink) => sink(bytes),
+        None => std::io::stderr().lock().write_all(bytes),
+    }
+}
+
+pub(crate) fn stderr_warning(message: &str) {
+    let _ = write_stderr(format!("{message}\n").as_bytes());
+}
+
+#[derive(Default)]
+pub(crate) struct StderrLogWriter(Vec<u8>);
+
+impl Write for StderrLogWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Drop for StderrLogWriter {
+    fn drop(&mut self) {
+        let _ = write_stderr(&self.0);
+    }
+}
 
 /// One structured entry read back from a retained runtime log shard.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -212,7 +261,7 @@ pub fn init_logging_for_paths(paths: &AppPaths) -> Result<()> {
     let console_filter =
         EnvFilter::try_from_env("RUST_LOG").unwrap_or_else(|_| EnvFilter::new(DEFAULT_FILE_LEVEL));
     let stderr_layer = fmt::layer()
-        .with_writer(std::io::stderr)
+        .with_writer(StderrLogWriter::default)
         .with_target(false)
         .with_filter(console_filter);
 

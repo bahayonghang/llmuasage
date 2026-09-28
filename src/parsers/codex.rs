@@ -1568,6 +1568,10 @@ mod tests {
             &CancellationToken::new(),
         )?;
         assert_eq!(result.parse_issues.skipped_lines, 1);
+        assert_eq!(
+            result.parse_issues.samples[0].reason,
+            "oversized_non_usage_record"
+        );
         assert_eq!(result.parse_issues.oversized_lines, 0);
         assert_eq!(result.parse_issues.malformed_lines, 0);
         assert_eq!(result.parse_issues.accounting_anomaly_lines, 0);

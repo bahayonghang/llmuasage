@@ -171,6 +171,7 @@ is the compatibility baseline when reference implementations disagree.
 | Rebuild has missing source files | Existing lossy-rebuild guard refuses it |
 | Ordinary pre-reset rebuild parser/store commit fails | Leave marker absent; do not claim parity |
 | Antigravity staging/transaction fails | Preserve prior rows and marker atomically; do not claim repair |
+| Persisted or remote source diagnostics contain a source failure and zero record faults | Retain the failure and refuse clean repair certification; `ParseIssues::total() == 0` alone is insufficient |
 | Parserless source | Do not invent a marker or token normalization |
 | Persisted Codex marker is `2` | Treat only Codex as legacy; ordinary sync skips it; explicit rebuild repairs it |
 | Persisted Grok marker is `2` | Treat Grok as legacy; ordinary sync skips it; explicit rebuild repairs it |

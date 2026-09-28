@@ -1,6 +1,6 @@
 # CLI reference
 
-This page is aligned with `cargo run -- --help`, `cargo run -- serve --help`, and `cargo run -- export html --help` for version `1.4.0`. Top-level help is rendered as a compact table; command-specific help still uses the clap output.
+This page is aligned with `cargo run -- --help`, `cargo run -- serve --help`, and `cargo run -- export html --help` for version `2.0.0`. Top-level help is rendered as a compact table; command-specific help still uses the clap output.
 
 ## Top-level help
 
@@ -27,7 +27,7 @@ Usage: llmusage [OPTIONS] [COMMAND]
 | `--json` | Emit stable JSON for supported report commands |
 | `--breakdown` | Include per-model breakdown rows or payloads where supported |
 | `--order asc\|desc` | Sort report rows by period/activity |
-| `--timezone UTC\|local\|+08:00` | Report timezone. `local` uses the machine's current fixed local offset; it is not an IANA/DST-aware timezone. |
+| `--timezone UTC\|local\|+08:00` | Report timezone. `local` resolves the system IANA timezone and applies the offset for each date, including DST. If resolution fails, it uses the current fixed local offset. |
 | `--locale <LOCALE>` | Lightweight locale selector for titles and number formatting |
 | `--compact` | Use a narrower table layout |
 | `--no-cost` | Hide cost columns and cost fields from report output |
@@ -164,6 +164,18 @@ Human stderr reports catalog versions, processed/total events, bucket reconcilia
 Set `LLMUSAGE_LOG=info` for structured pricing start/reconcile/finish file records, or `debug` for throttled page progress. The default `warn` file level records one liveness warning if repricing continues beyond 30 seconds; terminal progress remains visible at every file-log level.
 
 The human stdout summary is one aligned table with one row per source plus `TOTAL`; completed progress remains on stderr and is not repeated as permanent success lines. It includes `files`, `changed`, `skipped`, `seen`, `committed`, `stored_events`, bytes, and parse/write duration. `skipped` is derived from existing cursor/fingerprint evidence for file-backed sources and from the OpenCode SQLite high-water cursor for DB-backed sync. `committed` is the newly inserted event delta after SQLite dedupe. Redirected output has no ANSI escapes, and narrow terminals use compact headers without truncating numeric values.
+
+Record diagnostics below the table distinguish malformed records, oversized records, intentional skips, and accounting anomalies. Each source retains at most eight record samples. The summary states the total count and the number of samples omitted. A sample can show a stable reason, its location value, and a safe file basename together. JSONL samples use `@` for a nonzero byte offset. ZCode samples use `timestamp_ms=` for the existing millisecond timestamp locator. Full private paths, path hashes, and record bodies are not printed. The diagnostic `skipped` count refers to records; the table's `SKIPPED` column refers to files.
+
+Codex tool-output records above the 4 MiB limit can be skipped with `oversized_non_usage_record`; the bounded reader continues to later usage records. Grok records marked `usageIsIncomplete` retain their reported token values and an accounting warning. The parser does not replace those values with fallback estimates. These informational diagnostics do not mean that the entire source failed.
+
+Source failures, such as a missing tracked Antigravity database, are separate from malformed record counts. The stored source status retains the failure after the command exits. A blocked source keeps its imported history and cannot be certified as a clean accounting repair. File inventory reflects the most recent completed observation; a stored `live` state does not prove that a path exists now.
+
+`WRITE` reports recorded writer elapsed time. Ordinary shard timing includes provider mapping, transaction start, resets, persisted facts and cursors, and commit; host-prefix preparation and in-memory behavior deduplication occur before that timer. Antigravity records each product's apply and marker time separately, excluding the shared group reset, transaction start, and commit. Do not add those product values to estimate the entire transaction. `PARSE` is the remaining source-stage time after recorded `WRITE`, so it is not a measure of parser CPU time. `BYTES` follows each reader's input accounting, which can include inventoried file sizes; it is not a physical disk-I/O measurement.
+
+Antigravity checks coverage of tracked inputs after discovering and fingerprinting the CLI and IDE roots. When all selected products are blocked, sync returns before usage decoding. The check still performs filesystem work. A run with only some products blocked keeps cross-root decoding to resolve copied databases and native product ownership.
+
+Coverage diagnostics distinguish physically missing paths, existing tracked paths outside current discovery (including legacy JSON inputs or a changed root), and access or discovery failures. Restore the original supported input or correct the root/access configuration before retrying. `--allow-lossy-rebuild` accepts unrebuildable history loss only with an explicit rebuild; access and discovery failures still block replacement. Failed coverage checks do not advance usage cursors or the last successful inventory observation.
 
 ### `llmusage remote`
 

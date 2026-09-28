@@ -71,6 +71,502 @@ fn events(path: &Path) -> Vec<crate::models::UsageEvent> {
     normalize(file.observations, &mut HashMap::new()).unwrap()
 }
 
+fn preflight_listing(path: &Path, source: SourceKind) -> FamilyInputs {
+    FamilyInputs {
+        started: Instant::now(),
+        listings: FAMILY.map(|kind| {
+            (
+                kind,
+                source_files::SourceFileListing {
+                    root: path.parent().unwrap().to_path_buf(),
+                    paths: if kind == source {
+                        vec![path.to_path_buf()]
+                    } else {
+                        Vec::new()
+                    },
+                    errors: Vec::new(),
+                },
+            )
+        }),
+        metadata: |path| std::fs::metadata(path),
+    }
+}
+
+fn preflight_snapshot(store: &Store) -> Vec<Vec<Vec<rusqlite::types::Value>>> {
+    let connection = store.open_connection().unwrap();
+    [
+        "SELECT * FROM usage_event ORDER BY event_key",
+        "SELECT * FROM usage_bucket_30m ORDER BY host_id,source,hour_start,model",
+        "SELECT * FROM usage_event_raw ORDER BY event_key",
+        "SELECT * FROM usage_turn ORDER BY turn_key",
+        "SELECT * FROM usage_tool_call ORDER BY tool_call_key",
+        "SELECT * FROM source_cursor ORDER BY host_id,source,cursor_key",
+        "SELECT * FROM source_file ORDER BY host_id,source,file_path",
+        "SELECT * FROM meta WHERE key LIKE 'token_accounting_version.%' ORDER BY key",
+    ]
+    .into_iter()
+    .map(|sql| {
+        let mut statement = connection.prepare(sql).unwrap();
+        let count = statement.column_count();
+        statement
+            .query_map([], |row| {
+                (0..count)
+                    .map(|column| row.get(column))
+                    .collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    })
+    .collect()
+}
+
+fn preflight_database(dir: &TempDir, name: &str, source: SourceKind) -> PathBuf {
+    let (path, connection) = database(dir, name);
+    connection
+        .execute(
+            "INSERT INTO trajectory_meta VALUES (?1)",
+            [if source == FAMILY[0] { 17 } else { 1 }],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO gen_metadata VALUES (1, ?1)",
+            [generation(&usage(name, 10, 3, 2, 1), &[], 1_800_000_000)],
+        )
+        .unwrap();
+    drop(connection);
+    path.canonicalize().unwrap()
+}
+
+fn preflight_store(dir: &TempDir) -> Store {
+    let paths = crate::paths::AppPaths::with_root(dir.path().join("store")).unwrap();
+    let store = Store::new(&paths).unwrap();
+    store.bootstrap().unwrap();
+    store
+}
+
+fn permission_probe(path: &Path) -> std::io::Result<std::fs::Metadata> {
+    if path
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .starts_with("denied")
+    {
+        Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+    } else {
+        std::fs::metadata(path)
+    }
+}
+
+#[tokio::test]
+async fn preflight_all_selected_blocked_never_calls_usage_decoder() {
+    for selected in [vec![FAMILY[0]], vec![FAMILY[1]], FAMILY.to_vec()] {
+        let dir = TempDir::new().unwrap();
+        let (path, connection) = database(&dir, "remaining.db");
+        connection
+            .execute(
+                "INSERT INTO trajectory_meta VALUES (?1)",
+                [if selected[0] == FAMILY[0] { 17 } else { 1 }],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO gen_metadata VALUES (1, ?1)",
+                [generation(
+                    &usage("request", 10, 3, 2, 1),
+                    &[],
+                    1_800_000_000,
+                )],
+            )
+            .unwrap();
+        drop(connection);
+        let path = path.canonicalize().unwrap();
+        let paths = crate::paths::AppPaths::with_root(dir.path().join("store")).unwrap();
+        let store = Store::new(&paths).unwrap();
+        store.bootstrap().unwrap();
+        let mut writer = store.begin_sync_run().unwrap();
+        sync_family_with_inputs(
+            &store,
+            &mut writer,
+            &selected,
+            true,
+            false,
+            None,
+            &CancellationToken::new(),
+            None,
+            preflight_listing(&path, selected[0]),
+        )
+        .await
+        .unwrap();
+        for source in &selected {
+            let mut shard = SyncShard::new(*source);
+            shard.seen_file_paths.push(
+                dir.path()
+                    .join(format!("missing-{source}.db"))
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+            writer.commit_shard(shard).unwrap();
+        }
+        let before = preflight_snapshot(&store);
+        assert_eq!(before[0].len(), 1);
+        let mut inputs = preflight_listing(&path, selected[0]);
+        inputs.started -= std::time::Duration::from_millis(25);
+        let mut progress_events = Vec::new();
+        let mut sink = |event| progress_events.push(event);
+        let observed_before = Utc::now();
+        decode::test_reads::reset(&path);
+        let result = sync_family_with_inputs(
+            &store,
+            &mut writer,
+            &selected,
+            false,
+            false,
+            None,
+            &CancellationToken::new(),
+            Some(&mut sink),
+            inputs,
+        )
+        .await
+        .unwrap();
+        assert_eq!(decode::test_reads::take(&path), 0, "selected={selected:?}");
+        assert_eq!(preflight_snapshot(&store), before);
+        assert_eq!(progress_events.len(), selected.len());
+        for (event, source) in progress_events.iter().zip(&selected) {
+            assert!(
+                matches!(event, SyncEvent::SourceStarted { source: actual, .. } if actual == source)
+            );
+        }
+        for stat in result.stats {
+            assert_eq!(stat.files_processed, 0);
+            assert_eq!(stat.changed_files, 0);
+            assert_eq!(stat.events_seen, 0);
+            assert_eq!(stat.events_replayed, 0);
+            assert_eq!(stat.events_inserted, 0);
+            assert_eq!(stat.bytes_scanned, 0);
+            assert_eq!(stat.write_ms, 0);
+            assert!(stat.parse_ms >= 25);
+            assert!(stat.last_error.unwrap().contains("history preserved"));
+            let issue = &result.source_issues[&stat.source][0];
+            assert_eq!(issue.code, SourceIssueCode::TrackedMemberMissing);
+            assert_eq!(issue.count, 1);
+            assert!(issue.observed_at >= observed_before && issue.observed_at <= Utc::now());
+        }
+    }
+}
+
+#[tokio::test]
+async fn preflight_uncovered_members_distinguish_missing_scope_and_access() {
+    for (name, exists, expected) in [
+        ("gone.db", false, SourceIssueCode::TrackedMemberMissing),
+        (
+            "legacy.json",
+            true,
+            SourceIssueCode::TrackedMemberOutOfScope,
+        ),
+        (
+            "old-root.db",
+            true,
+            SourceIssueCode::TrackedMemberOutOfScope,
+        ),
+        ("denied.db", true, SourceIssueCode::TrackedMemberUnreadable),
+    ] {
+        for allow_loss in [false, true] {
+            let dir = TempDir::new().unwrap();
+            let path = preflight_database(&dir, "live.db", FAMILY[0]);
+            let store = preflight_store(&dir);
+            let mut writer = store.begin_sync_run().unwrap();
+            sync_family_with_inputs(
+                &store,
+                &mut writer,
+                &[FAMILY[0]],
+                true,
+                false,
+                None,
+                &CancellationToken::new(),
+                None,
+                preflight_listing(&path, FAMILY[0]),
+            )
+            .await
+            .unwrap();
+            let tracked = dir.path().join(name);
+            if exists {
+                std::fs::write(&tracked, b"old input").unwrap();
+            }
+            let mut shard = SyncShard::new(FAMILY[0]);
+            shard
+                .seen_file_paths
+                .push(tracked.to_string_lossy().into_owned());
+            writer.commit_shard(shard).unwrap();
+            let before = preflight_snapshot(&store);
+            let mut inputs = preflight_listing(&path, FAMILY[0]);
+            inputs.metadata = permission_probe;
+            decode::test_reads::reset(&path);
+            let result = sync_family_with_inputs(
+                &store,
+                &mut writer,
+                &[FAMILY[0]],
+                true,
+                allow_loss,
+                None,
+                &CancellationToken::new(),
+                None,
+                inputs,
+            )
+            .await
+            .unwrap();
+            if allow_loss && expected != SourceIssueCode::TrackedMemberUnreadable {
+                assert_eq!(decode::test_reads::take(&path), 1, "{name}");
+                assert!(result.source_issues.is_empty());
+                assert!(result.stats[0].last_error.is_none());
+            } else {
+                assert_eq!(decode::test_reads::take(&path), 0, "{name}");
+                assert_eq!(preflight_snapshot(&store), before, "{name}");
+                let issue = &result.source_issues[&FAMILY[0]][0];
+                assert_eq!(issue.code, expected, "{name}");
+                assert_eq!(issue.count, 1);
+                assert_eq!(result.stats[0].parse_issues.total(), 0);
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn preflight_unselected_root_failure_blocks_unknown_product_copies() {
+    for selected in FAMILY {
+        for case in ["permission", "not-directory", "walk-error", "missing-root"] {
+            let dir = TempDir::new().unwrap();
+            let path = preflight_database(&dir, "live.db", selected);
+            let store = preflight_store(&dir);
+            let mut writer = store.begin_sync_run().unwrap();
+            sync_family_with_inputs(
+                &store,
+                &mut writer,
+                &[selected],
+                true,
+                false,
+                None,
+                &CancellationToken::new(),
+                None,
+                preflight_listing(&path, selected),
+            )
+            .await
+            .unwrap();
+            let before = preflight_snapshot(&store);
+            let mut inputs = preflight_listing(&path, selected);
+            let (_, sibling) = inputs
+                .listings
+                .iter_mut()
+                .find(|(source, _)| *source != selected)
+                .unwrap();
+            match case {
+                "permission" => {
+                    sibling.root = dir.path().join("denied-root");
+                    inputs.metadata = permission_probe;
+                }
+                "not-directory" => sibling.root = path.clone(),
+                "walk-error" => sibling.errors.push("synthetic enumeration failure".into()),
+                "missing-root" => sibling.root = dir.path().join("absent-root"),
+                _ => unreachable!(),
+            }
+            decode::test_reads::reset(&path);
+            let result = sync_family_with_inputs(
+                &store,
+                &mut writer,
+                &[selected],
+                true,
+                true,
+                None,
+                &CancellationToken::new(),
+                None,
+                inputs,
+            )
+            .await
+            .unwrap();
+            if case == "missing-root" {
+                assert_eq!(decode::test_reads::take(&path), 1);
+                assert!(result.source_issues.is_empty());
+            } else {
+                assert_eq!(decode::test_reads::take(&path), 0, "{selected}: {case}");
+                assert_eq!(preflight_snapshot(&store), before);
+                let issue = &result.source_issues[&selected][0];
+                assert_eq!(issue.code, SourceIssueCode::DiscoveryIncomplete);
+                assert_eq!(issue.count, 1);
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn preflight_partial_blocking_keeps_cross_root_decode_and_selected_scope() {
+    for selected in [vec![FAMILY[0]], FAMILY.to_vec()] {
+        let dir = TempDir::new().unwrap();
+        let cli = preflight_database(&dir, "cli.db", FAMILY[0]);
+        let ide = preflight_database(&dir, "ide.db", FAMILY[1]);
+        let store = preflight_store(&dir);
+        let mut writer = store.begin_sync_run().unwrap();
+        let mut shard = SyncShard::new(FAMILY[1]);
+        shard.seen_file_paths.push(
+            dir.path()
+                .join("missing-ide.db")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        writer.commit_shard(shard).unwrap();
+        let mut inputs = preflight_listing(&cli, FAMILY[0]);
+        // Both native products are intentionally copied into the opposite roots.
+        inputs.listings[0].1.paths = vec![ide.clone()];
+        inputs.listings[1].1.paths = vec![cli.clone()];
+        decode::test_reads::reset(&cli);
+        decode::test_reads::reset(&ide);
+        let result = sync_family_with_inputs(
+            &store,
+            &mut writer,
+            &selected,
+            false,
+            false,
+            None,
+            &CancellationToken::new(),
+            None,
+            inputs,
+        )
+        .await
+        .unwrap();
+        assert_eq!(decode::test_reads::take(&cli), 1);
+        assert_eq!(decode::test_reads::take(&ide), 1);
+        assert_eq!(result.stats[0].source, FAMILY[0]);
+        assert_eq!(result.stats[0].events_inserted, 1);
+        assert!(result.stats[0].last_error.is_none());
+        if selected.len() == 2 {
+            assert_eq!(result.stats[1].events_inserted, 0);
+            assert!(result.stats[1].last_error.is_some());
+        }
+    }
+}
+
+#[tokio::test]
+async fn preflight_empty_selection_and_cancellation_do_not_decode_or_write() {
+    for selected in [Vec::new(), vec![FAMILY[0]]] {
+        let dir = TempDir::new().unwrap();
+        let path = preflight_database(&dir, "live.db", FAMILY[0]);
+        let store = preflight_store(&dir);
+        let mut writer = store.begin_sync_run().unwrap();
+        let before = preflight_snapshot(&store);
+        let cancel = CancellationToken::new();
+        if !selected.is_empty() {
+            cancel.cancel();
+        }
+        decode::test_reads::reset(&path);
+        let result = sync_family_with_inputs(
+            &store,
+            &mut writer,
+            &selected,
+            false,
+            false,
+            None,
+            &cancel,
+            None,
+            preflight_listing(&path, FAMILY[0]),
+        )
+        .await
+        .unwrap();
+        assert_eq!(decode::test_reads::take(&path), 0);
+        assert_eq!(result.stats.len(), selected.len());
+        assert_eq!(preflight_snapshot(&store), before);
+    }
+}
+
+#[tokio::test]
+async fn preflight_fingerprint_failure_does_not_accept_lossy_rebuild() {
+    let dir = TempDir::new().unwrap();
+    let path = preflight_database(&dir, "live.db", FAMILY[0]);
+    let store = preflight_store(&dir);
+    let mut writer = store.begin_sync_run().unwrap();
+    sync_family_with_inputs(
+        &store,
+        &mut writer,
+        &[FAMILY[0]],
+        true,
+        false,
+        None,
+        &CancellationToken::new(),
+        None,
+        preflight_listing(&path, FAMILY[0]),
+    )
+    .await
+    .unwrap();
+    let before = preflight_snapshot(&store);
+    let mut inputs = preflight_listing(&path, FAMILY[0]);
+    inputs.listings[1]
+        .1
+        .paths
+        .push(dir.path().join("disappeared-after-discovery.db"));
+    decode::test_reads::reset(&path);
+    let result = sync_family_with_inputs(
+        &store,
+        &mut writer,
+        &[FAMILY[0]],
+        true,
+        true,
+        None,
+        &CancellationToken::new(),
+        None,
+        inputs,
+    )
+    .await
+    .unwrap();
+    assert_eq!(decode::test_reads::take(&path), 0);
+    assert_eq!(preflight_snapshot(&store), before);
+    assert_eq!(
+        result.source_issues[&FAMILY[0]][0].code,
+        SourceIssueCode::FingerprintUnavailable
+    );
+}
+
+#[tokio::test]
+async fn preflight_remote_membership_never_probes_local_filesystem() {
+    let dir = TempDir::new().unwrap();
+    let path = preflight_database(&dir, "live.db", FAMILY[0]);
+    let store = preflight_store(&dir);
+    let mut writer = store.begin_sync_run().unwrap();
+    let mut shard = SyncShard::new_for_host(FAMILY[0], "remote");
+    shard
+        .seen_file_paths
+        .push("/remote-only/private/database.db".into());
+    writer.commit_shard(shard).unwrap();
+    let mut inputs = preflight_listing(&path, FAMILY[0]);
+    inputs.metadata = |path| {
+        assert!(
+            !path.to_string_lossy().contains("remote-only"),
+            "remote membership must not be probed locally"
+        );
+        std::fs::metadata(path)
+    };
+    let result = sync_family_with_inputs(
+        &store,
+        &mut writer,
+        &[FAMILY[0]],
+        false,
+        false,
+        None,
+        &CancellationToken::new(),
+        None,
+        inputs,
+    )
+    .await
+    .unwrap();
+    assert!(result.source_issues.is_empty());
+    assert_eq!(result.stats[0].events_inserted, 1);
+    assert_eq!(
+        store
+            .source_files()
+            .tracked_paths(FAMILY[0], "remote")
+            .unwrap(),
+        ["/remote-only/private/database.db"]
+    );
+}
+
 #[test]
 fn sanitized_native_samples_match_independent_six_channel_oracle() {
     let fixture: serde_json::Value = serde_json::from_str(include_str!(

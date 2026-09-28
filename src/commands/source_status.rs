@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use anyhow::Result;
 use serde::Serialize;
@@ -74,7 +74,21 @@ pub async fn run(app: &AppContext) -> Result<()> {
             .into_iter()
             .map(|status| (status.source, status.parse_issues))
             .collect::<BTreeMap<_, _>>();
-        print_human_statuses(&capability_statuses, &[], &parse_issues);
+        let issues = store.sync_status().load_source_issues(&host.host_id)?;
+        let basenames = crate::commands::sync_summary::sample_basenames(
+            &store,
+            &host.host_id,
+            parse_issues
+                .keys()
+                .filter_map(|source| SourceKind::parse_id(source)),
+        );
+        print_human_statuses_with_diagnostics(
+            &capability_statuses,
+            &[],
+            &parse_issues,
+            &issues,
+            &basenames,
+        );
     }
     print_human_statuses(&[], &platform_statuses, &BTreeMap::new());
     Ok(())
@@ -186,6 +200,22 @@ pub fn print_human_statuses(
     platform_statuses: &[PlatformMonitorStatus],
     parse_issues_by_source: &BTreeMap<String, ParseIssues>,
 ) {
+    print_human_statuses_with_diagnostics(
+        capability_statuses,
+        platform_statuses,
+        parse_issues_by_source,
+        &Default::default(),
+        &Default::default(),
+    );
+}
+
+fn print_human_statuses_with_diagnostics(
+    capability_statuses: &[SourceCapabilityStatus],
+    platform_statuses: &[PlatformMonitorStatus],
+    parse_issues_by_source: &BTreeMap<String, ParseIssues>,
+    source_issues: &crate::domain::source_diagnostics::SourceIssues,
+    basenames: &HashMap<String, String>,
+) {
     for status in capability_statuses {
         println!(
             "- Source status {}: status={} quality={} total={} last={} accounting={} ({})",
@@ -201,8 +231,13 @@ pub fn print_human_statuses(
             println!("  warning: {warning}");
         }
         if let Some(issues) = parse_issues_by_source.get(status.source.as_str()) {
-            for line in parse_issue_status_lines(issues) {
+            for line in parse_issue_status_lines_with_basenames(issues, basenames) {
                 println!("{line}");
+            }
+        }
+        if let Some(issues) = source_issues.get(&status.source) {
+            for issue in issues {
+                println!("  source issue: {}", issue.cli_line(status.source));
             }
         }
     }
@@ -235,13 +270,29 @@ pub fn host_lifecycle_status(host: &Host) -> &'static str {
     }
 }
 
+#[cfg(test)]
 fn parse_issue_status_lines(issues: &ParseIssues) -> Vec<String> {
+    parse_issue_status_lines_with_basenames(issues, &HashMap::new())
+}
+
+fn parse_issue_status_lines_with_basenames(
+    issues: &ParseIssues,
+    basenames: &HashMap<String, String>,
+) -> Vec<String> {
     let Some(summary) = issues.summary_text() else {
         return Vec::new();
     };
     let mut lines = vec![format!("  parse issues: {summary}")];
-    for sample in &issues.samples {
-        lines.push(format!("    {}", sample.cli_line(None)));
+    lines.push(format!("  {}", issues.sample_summary()));
+    for sample in issues
+        .samples
+        .iter()
+        .take(crate::domain::models::MAX_PARSE_ISSUE_SAMPLES)
+    {
+        lines.push(format!(
+            "    {}",
+            sample.cli_line(basenames.get(&sample.path_hash).map(String::as_str))
+        ));
     }
     lines
 }
@@ -570,8 +621,8 @@ mod tests {
         let lines = parse_issue_status_lines(&issues);
         assert_eq!(lines[0], "  parse issues: skipped=1");
         assert_eq!(
-            lines[1],
-            "    skipped zcode_unfinished:error:invalid_request"
+            lines[2],
+            "    skipped zcode_unfinished:error:invalid_request [location unavailable]"
         );
         assert!(lines.iter().all(|line| !line.contains("@0")));
         assert!(lines.iter().all(|line| !line.contains("zcode-hash")));

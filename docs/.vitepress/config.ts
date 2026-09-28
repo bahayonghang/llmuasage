@@ -33,6 +33,7 @@ const enSidebar = [
     items: [
       { text: "CLI commands", link: "/reference/cli" },
       { text: "Library API", link: "/reference/library-api" },
+      { text: "Migrate to 2.0", link: "/reference/migration-v2" },
       { text: "Release checklist", link: "/reference/release-checklist" },
       { text: "Legacy commands page", link: "/commands/" },
     ],
@@ -65,6 +66,7 @@ const zhSidebar = [
     items: [
       { text: "CLI 命令", link: "/zh/reference/cli" },
       { text: "库 API", link: "/zh/reference/library-api" },
+      { text: "迁移到 2.0", link: "/zh/reference/migration-v2" },
       { text: "发布检查清单", link: "/zh/reference/release-checklist" },
       { text: "旧命令页", link: "/zh/commands/" },
     ],

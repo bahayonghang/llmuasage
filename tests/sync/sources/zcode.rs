@@ -196,13 +196,13 @@ fn zcode_skips_error_and_cancelled_rows_and_counts_them() -> Result<()> {
         assert!(
             reasons
                 .iter()
-                .any(|line| line == "skipped zcode_unfinished:error:invalid_request"),
+                .any(|line| line == "skipped zcode_unfinished:error:invalid_request timestamp_ms=2000 [location unavailable]"),
             "{reasons:?}"
         );
         assert!(
             reasons
                 .iter()
-                .any(|line| line == "skipped zcode_unfinished:cancelled:unknown"),
+                .any(|line| line == "skipped zcode_unfinished:cancelled:unknown timestamp_ms=3000 [location unavailable]"),
             "{reasons:?}"
         );
         assert!(reasons.iter().all(|line| !line.contains("@0")));

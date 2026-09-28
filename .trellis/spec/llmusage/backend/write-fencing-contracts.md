@@ -47,6 +47,10 @@
   trigger-state write API; the table and old rows remain migration-compatible.
 - Read-only report/status/doctor/TUI/catalog-status commands call
   `require_initialized()` and must not run migration or pricing recomputation.
+- Writer profiling uses the same permit acquisition, validation, heartbeat, and
+  transaction protocol as production. A test-only fixed audit timestamp may
+  stabilize persisted row comparisons; it must not replace the worker lease
+  clock or prevent lease-expiry and stolen-generation checks.
 
 ### 4. Validation & Error Matrix
 
@@ -82,6 +86,10 @@
   `worker_lock` table completes without duplicate-column errors.
 - Stale writer test: construct A writer, steal with B, assert `commit_shard`
   fails and the event count remains zero.
+- Reset optimization tests begin with positive history. Inject a transaction
+  failure after reset and assert the original events, buckets, behavior facts,
+  cursor, raw records, and accounting marker remain unchanged. Compare an
+  unrelated host that shares the same source path hash.
 - JobRegistry test: executor asserts the received Store carries a valid permit.
 - Bootstrap/migration tests: fresh and legacy databases reach latest schema;
   isolated migration failure rolls back.

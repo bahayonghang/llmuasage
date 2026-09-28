@@ -85,7 +85,7 @@ SSH 会话会自动跳过浏览器启动。
 | `model` | 标准化事件中的精确模型名 |
 | `since` / `until` | 看板查询日期范围 |
 | `window` | day/week/month/all 等快速窗口 |
-| `timezone` | `UTC`、`local` 或 `+08:00` 这样的固定偏移；`local` 表示本机当前固定本地偏移，不是 IANA/DST 感知时区 |
+| `timezone` | `UTC`、`local`、IANA 时区名称或 `+08:00` 这样的固定偏移；`local` 解析系统 IANA 时区并应用历史夏令时规则，解析失败时回退到当前固定本地偏移 |
 
 URL 会保留筛选，刷新页面或复制本地 URL 时仍保持同一视图。
 

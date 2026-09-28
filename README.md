@@ -6,7 +6,7 @@
 
 Local-first usage analytics for AI coding CLIs. `llmusage` passively reads local Codex, Claude Code, OpenCode, Kimi Code, Pi, Oh My Pi, Grok Build, ZCode, Antigravity CLI and IDE, and DeepSeek Harness artifacts into SQLite, then renders reports, terminal and browser dashboards, and offline HTML exports without upload. The `dash` Usage tab also reads already-present CLI credentials and requests provider quota APIs.
 
-> Current crate version: `1.4.0`.
+> Current crate version: `2.0.0`.
 
 ![llmusage web dashboard overview](./docs/public/screenshots/web-dashboard-overview.png)
 
@@ -165,6 +165,8 @@ llmusage codex-tracer --rebuild
 - No account login, device token, upload queue, or remote usage API call. SSH remote import is a user-triggered pull of normalized fields from a host you register; it does not upload usage.
 - Ordinary `llmusage sync` (bounded or unbounded) never rebuilds legacy token-accounting sources. It keeps that source's existing event, raw, bucket, turn, tool, cursor, and source_file data, skips that source's writes for the round, and warns that repair is `llmusage sync --rebuild --source <source>`. Other current sources in the same run still sync. Claude Code, Codex, Grok Build, Kimi Code, and Oh My Pi (OMP) use this ordinary-sync vs explicit-rebuild split.
 - Normal `llmusage sync` keeps imported usage when original source files are missing.
+- Sync diagnostics distinguish source failures from malformed records, skipped records, and incomplete token accounting. Record diagnostics show at most eight samples per source and report the number omitted. File-level `SKIPPED` in the summary table has a separate meaning.
+- Antigravity checks tracked-input coverage before usage decoding. When every selected product is blocked, sync preserves history and returns without decoding usage. The check still discovers and fingerprints files. A tracked path outside current discovery is reported separately from a physically missing file.
 - `llmusage sync --recent-days N` imports only the latest UTC event window (`1..=3650`) without advancing full-history cursors; `--parallelism` accepts `1..=32`.
 - Bounded ordinary sync also skips+warns for legacy sources. It must not reset full history.
 - `llmusage sync --rebuild` refuses lossy rebuilds unless you also pass `--allow-lossy-rebuild`.

@@ -116,20 +116,29 @@ pub struct ParseIssueSample {
 }
 
 impl ParseIssueSample {
-    /// Privacy-safe CLI sample line: kind, optional reason, optional JSONL
-    /// offset, optional basename. Never includes `path_hash` or record text.
+    /// Privacy-safe CLI sample line: kind, optional reason, JSONL byte offset
+    /// or ZCode timestamp, and optional basename. Never includes `path_hash`,
+    /// OpenCode row ids, or record text.
     pub fn cli_line(&self, basename: Option<&str>) -> String {
         let mut line = self.kind.to_string();
         if !self.reason.is_empty() {
             line.push(' ');
-            line.push_str(&self.reason);
-        } else if self.offset > 0 {
-            line.push_str(" @");
+            line.push_str(&sanitize_parse_issue_reason(&self.reason));
+        }
+        if self.offset > 0 && self.source != SourceKind::Opencode {
+            line.push_str(if self.source == SourceKind::Zcode {
+                " timestamp_ms="
+            } else {
+                " @"
+            });
             line.push_str(&self.offset.to_string());
         }
         if let Some(name) = basename.filter(|name| !name.is_empty()) {
             line.push(' ');
-            line.push_str(name);
+            let name = name.rsplit(['/', '\\']).next().unwrap_or_default();
+            line.extend(name.chars().filter(|ch| !ch.is_control()).take(255));
+        } else {
+            line.push_str(" [location unavailable]");
         }
         line
     }
@@ -167,6 +176,15 @@ impl ParseIssues {
     pub fn informational_total(&self) -> u64 {
         self.skipped_lines
             .saturating_add(self.accounting_anomaly_lines)
+    }
+
+    pub(crate) fn sample_summary(&self) -> String {
+        let total = self.total().saturating_add(self.informational_total());
+        let shown = self.samples.len().min(MAX_PARSE_ISSUE_SAMPLES);
+        format!(
+            "samples: {shown}/{total}; {} not shown",
+            total.saturating_sub(shown as u64)
+        )
     }
 
     pub fn class_counts(&self) -> [(&'static str, u64); 4] {
@@ -645,7 +663,7 @@ mod tests {
         )
         .expect("legacy sample JSON");
         assert_eq!(sample.reason, "");
-        assert_eq!(sample.cli_line(None), "skipped");
+        assert_eq!(sample.cli_line(None), "skipped [location unavailable]");
 
         let mut issues = ParseIssues::default();
         issues.record(
@@ -669,12 +687,63 @@ mod tests {
         assert_eq!(issues.samples[1].reason.len(), MAX_PARSE_ISSUE_REASON_CHARS);
         assert_eq!(
             issues.samples[0].cli_line(None),
-            "skipped zcode_unfinished:error:invalid_requestplusextra"
+            "skipped zcode_unfinished:error:invalid_requestplusextra [location unavailable]"
         );
         assert!(
             !issues.samples[0].cli_line(None).contains("@0"),
             "reason samples must not print @0"
         );
+    }
+
+    #[test]
+    fn parse_issue_sample_location_units_and_privacy() {
+        for (source, expected) in [
+            (SourceKind::Codex, " @12345"),
+            (SourceKind::Grok, " @12345"),
+            (SourceKind::Zcode, " timestamp_ms=12345"),
+            (SourceKind::Opencode, ""),
+        ] {
+            let sample = ParseIssueSample {
+                source,
+                path_hash: "private-hash".into(),
+                offset: 12345,
+                kind: ParseIssueKind::Malformed,
+                reason: "invalid_json\n\u{1b}".into(),
+            };
+            let line = sample.cli_line(Some("C:/private/nested/safe\t.jsonl"));
+            assert_eq!(line, format!("malformed invalid_json{expected} safe.jsonl"));
+            assert!(!line.contains("private"));
+            assert!(!line.chars().any(char::is_control));
+            if source == SourceKind::Opencode {
+                assert!(!line.contains("12345"));
+            }
+        }
+    }
+
+    #[test]
+    fn parse_issues_sample_summary_retains_counts_after_merge() {
+        for count in [0_u64, 8, 9, 13] {
+            let mut issues = ParseIssues::default();
+            for offset in 0..count {
+                let mut shard = ParseIssues::default();
+                shard.record(
+                    SourceKind::Grok,
+                    "hash",
+                    offset,
+                    ParseIssueKind::AccountingAnomaly,
+                    "usage_incomplete",
+                );
+                issues.merge(shard);
+            }
+            let shown = count.min(8);
+            assert_eq!(issues.samples.len(), shown as usize);
+            assert_eq!(issues.total(), 0);
+            assert_eq!(issues.informational_total(), count);
+            assert_eq!(
+                issues.sample_summary(),
+                format!("samples: {shown}/{count}; {} not shown", count - shown)
+            );
+        }
     }
 
     #[test]

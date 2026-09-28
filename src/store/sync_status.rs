@@ -1,5 +1,7 @@
+use crate::domain::source_diagnostics::{PersistedDiagnostics, SourceIssues};
 use crate::error::{LlmusageError, Result};
-use rusqlite::{params, types::Type};
+use crate::models::SourceKind;
+use rusqlite::{OptionalExtension, params, types::Type};
 
 use super::{SourceSyncStatus, Store};
 
@@ -49,9 +51,10 @@ impl<'a> SyncStatusStore<'a> {
         )?;
         let rows = stmt.query_map([host_id], |row| {
             let parse_issues_raw = row.get::<_, String>(11)?;
-            let parse_issues = serde_json::from_str(&parse_issues_raw).map_err(|source| {
-                rusqlite::Error::FromSqlConversionFailure(11, Type::Text, Box::new(source))
-            })?;
+            let diagnostics: PersistedDiagnostics = serde_json::from_str(&parse_issues_raw)
+                .map_err(|source| {
+                    rusqlite::Error::FromSqlConversionFailure(11, Type::Text, Box::new(source))
+                })?;
             Ok(SourceSyncStatus {
                 source: row.get(0)?,
                 files_processed: row.get(1)?,
@@ -67,7 +70,7 @@ impl<'a> SyncStatusStore<'a> {
                 parse_ms: row.get(8)?,
                 write_ms: row.get(9)?,
                 lock_wait_ms: row.get(10)?,
-                parse_issues,
+                parse_issues: diagnostics.parse_issues,
                 updated_at: row.get(12)?,
             })
         })?;
@@ -137,6 +140,40 @@ impl<'a> SyncStatusStore<'a> {
         host_id: &str,
         statuses: &[SourceSyncStatus],
     ) -> Result<()> {
+        self.save_source_sync_statuses_with_issues(host_id, statuses, &SourceIssues::new())
+    }
+
+    pub(crate) fn load_source_issues(&self, host_id: &str) -> Result<SourceIssues> {
+        let conn = self.store.open_connection()?;
+        let mut stmt = conn
+            .prepare("SELECT source, parse_issues_json FROM source_sync_status WHERE host_id=?1")?;
+        let mut issues = SourceIssues::new();
+        for row in stmt.query_map([host_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })? {
+            let (source, json) = row?;
+            let diagnostics: PersistedDiagnostics =
+                serde_json::from_str(&json).map_err(|source| LlmusageError::Parse {
+                    context: "source sync diagnostics",
+                    source,
+                })?;
+            if let Some(source) = SourceKind::parse_id(&source)
+                && !diagnostics.source_issues.is_empty()
+            {
+                issues.insert(source, diagnostics.source_issues);
+            }
+        }
+        Ok(issues)
+    }
+
+    /// An explicit entry replaces source issues for that run, including an empty
+    /// entry on success. Compatibility callers preserve the previous issues.
+    pub(crate) fn save_source_sync_statuses_with_issues(
+        &self,
+        host_id: &str,
+        statuses: &[SourceSyncStatus],
+        source_issues: &SourceIssues,
+    ) -> Result<()> {
         if statuses.is_empty() {
             return Ok(());
         }
@@ -176,8 +213,21 @@ impl<'a> SyncStatusStore<'a> {
                 "#,
             )?;
             for status in statuses {
+                let issues = match SourceKind::parse_id(&status.source).and_then(|source| source_issues.get(&source)) {
+                    Some(issues) => issues.clone(),
+                    None => {
+                        let previous = tx.query_row(
+                            "SELECT parse_issues_json FROM source_sync_status WHERE host_id=?1 AND source=?2",
+                            params![host_id, status.source], |row| row.get::<_, String>(0),
+                        ).optional()?;
+                        previous.map(|json| serde_json::from_str::<PersistedDiagnostics>(&json)).transpose()
+                            .map_err(|source| LlmusageError::Parse { context: "source sync diagnostics", source })?
+                            .unwrap_or_default().source_issues
+                    }
+                };
+                let diagnostics = PersistedDiagnostics { parse_issues: status.parse_issues.clone(), source_issues: issues };
                 let parse_issues_json =
-                    serde_json::to_string(&status.parse_issues).map_err(|source| {
+                    serde_json::to_string(&diagnostics).map_err(|source| {
                         LlmusageError::Parse {
                             context: "source sync parse issues",
                             source,
@@ -302,6 +352,51 @@ mod tests {
         let encoded = serde_json::to_string(&loaded)?;
         assert!(encoded.contains("safe-path-hash"));
         assert!(!encoded.contains("prompt"));
+
+        use crate::domain::source_diagnostics::{SourceIssue, SourceIssueCode};
+        let mut source_issues = SourceIssues::new();
+        SourceIssue::record(
+            source_issues.entry(SourceKind::Codex).or_default(),
+            SourceIssueCode::TrackedMemberMissing,
+            2,
+        );
+        store.sync_status().save_source_sync_statuses_with_issues(
+            "local",
+            std::slice::from_ref(&status),
+            &source_issues,
+        )?;
+        let reopened = Store::new(&paths)?;
+        assert_eq!(
+            reopened.sync_status().load_source_issues("local")?,
+            source_issues
+        );
+        // A compatibility update or completion timestamp cannot discard blockers.
+        reopened
+            .sync_status()
+            .save_source_sync_statuses("local", &loaded)?;
+        reopened.sync_status().mark_recent_completed(
+            SourceKind::Codex,
+            "local",
+            crate::util::now_utc(),
+        )?;
+        assert_eq!(
+            reopened.sync_status().load_source_issues("local")?,
+            source_issues
+        );
+        let success = SourceIssues::from([(SourceKind::Codex, Vec::new())]);
+        reopened
+            .sync_status()
+            .save_source_sync_statuses_with_issues(
+                "local",
+                std::slice::from_ref(&status),
+                &success,
+            )?;
+        assert!(
+            reopened
+                .sync_status()
+                .load_source_issues("local")?
+                .is_empty()
+        );
 
         let conn = store.open_connection()?;
         conn.execute(

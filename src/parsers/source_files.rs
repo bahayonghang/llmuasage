@@ -330,12 +330,33 @@ fn list_matching_files(
     root: PathBuf,
     predicate: impl Fn(&str, &Path) -> bool,
 ) -> SourceFileListing {
+    list_matching_files_with_root_metadata(root, predicate, |path| std::fs::metadata(path))
+}
+
+fn list_matching_files_with_root_metadata(
+    root: PathBuf,
+    predicate: impl Fn(&str, &Path) -> bool,
+    root_metadata: impl FnOnce(&Path) -> std::io::Result<std::fs::Metadata>,
+) -> SourceFileListing {
     let mut listing = SourceFileListing {
         root: root.clone(),
         ..SourceFileListing::default()
     };
-    if !root.exists() {
-        return listing;
+    match root_metadata(&root) {
+        Ok(metadata) if metadata.is_dir() => {}
+        Ok(_) => {
+            listing
+                .errors
+                .push("source file inventory error: root is not a directory".to_string());
+            return listing;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return listing,
+        Err(error) => {
+            let message = format!("source file inventory error: {error}");
+            warn!(error = %message, "failed to enumerate source file inventory");
+            listing.errors.push(message);
+            return listing;
+        }
     }
 
     for entry in WalkDir::new(root).into_iter() {
@@ -372,8 +393,49 @@ mod tests {
 
     use super::{
         list_dsh_session_files_under, list_grok_session_files_under,
-        list_jsonl_session_files_from_roots, list_omp_session_files_from,
+        list_jsonl_session_files_from_roots, list_matching_files,
+        list_matching_files_with_root_metadata, list_omp_session_files_from,
     };
+
+    #[test]
+    fn list_matching_files_retains_root_error_after_access_recovers() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().join("conversations");
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("stronger-copy.db"), b"native input").unwrap();
+        let listing = list_matching_files_with_root_metadata(
+            root.clone(),
+            |name, _| name.ends_with(".db"),
+            |_| Err(std::io::ErrorKind::PermissionDenied.into()),
+        );
+        // A later successful probe must not erase the discovery-time failure.
+        assert!(fs::metadata(&root).unwrap().is_dir());
+        assert!(listing.paths.is_empty());
+        assert_eq!(listing.errors.len(), 1);
+        assert!(listing.error_summary().is_some());
+        let recovered = list_matching_files(root.clone(), |name, _| name.ends_with(".db"));
+        assert!(recovered.errors.is_empty());
+        assert_eq!(recovered.paths, [root.join("stronger-copy.db")]);
+    }
+
+    #[test]
+    fn list_matching_files_preserves_missing_root_as_empty() {
+        let dir = TempDir::new().unwrap();
+        let listing = list_matching_files(dir.path().join("missing"), |_, _| true);
+        assert!(listing.paths.is_empty());
+        assert!(listing.errors.is_empty());
+    }
+
+    #[test]
+    fn list_matching_files_rejects_non_directory_root() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().join("conversations");
+        fs::write(&root, b"not a directory").unwrap();
+        let listing = list_matching_files(root, |_, _| true);
+        assert!(listing.paths.is_empty());
+        assert_eq!(listing.errors.len(), 1);
+        assert!(listing.error_summary().is_some());
+    }
 
     fn write_session(root: &std::path::Path, project: &str, name: &str) -> PathBuf {
         let path = root.join(project).join(name);

@@ -69,6 +69,19 @@ pub(crate) enum HumanRenderer {
 }
 
 impl HumanRenderer {
+    pub(crate) fn write_warning(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        match self {
+            Self::Line(renderer) => {
+                if renderer.last_line_len > 0 {
+                    writeln!(renderer.stderr)?;
+                    renderer.last_line_len = 0;
+                }
+                renderer.stderr.write_all(bytes)
+            }
+            Self::Bar(renderer) => renderer.multi.suspend(|| renderer.stderr.write_all(bytes)),
+        }
+    }
+
     /// Injectable draw target: hidden (non-TTY) or `force_line` selects the
     /// line renderer; anything visible selects the bar renderer.
     pub(crate) fn new(draw: ProgressDrawTarget, force_line: bool) -> Self {
@@ -136,7 +149,7 @@ pub(crate) fn render_shared_timed(
 /// Legacy line-by-line stderr renderer (former `HumanProgress`), preserved
 /// verbatim for non-TTY output and the `LLMUSAGE_PROGRESS=off` fallback.
 pub(crate) struct LineRenderer {
-    stderr: std::io::Stderr,
+    stderr: Box<dyn Write + Send>,
     tty: bool,
     last_line_len: usize,
     terminated: bool,
@@ -147,7 +160,7 @@ impl LineRenderer {
         let stderr = std::io::stderr();
         let tty = stderr.is_terminal();
         Self {
-            stderr,
+            stderr: Box::new(stderr),
             tty,
             last_line_len: 0,
             terminated: false,
@@ -199,6 +212,10 @@ impl LineRenderer {
     }
 
     fn finish(&mut self) {
+        if self.last_line_len > 0 {
+            let _ = writeln!(self.stderr);
+            self.last_line_len = 0;
+        }
         let _ = self.stderr.flush();
     }
 }
@@ -218,6 +235,7 @@ struct ActiveBar {
 /// at a time; phase boundaries land as permanent lines above the bars.
 pub(crate) struct BarRenderer {
     multi: MultiProgress,
+    stderr: Box<dyn Write + Send>,
     active: Option<ActiveBar>,
     terminated: bool,
 }
@@ -226,6 +244,7 @@ impl BarRenderer {
     pub(crate) fn new(draw: ProgressDrawTarget) -> Self {
         Self {
             multi: MultiProgress::with_draw_target(draw),
+            stderr: Box::new(std::io::stderr()),
             active: None,
             terminated: false,
         }
@@ -416,8 +435,10 @@ impl BarRenderer {
         }
     }
 
-    fn permanent_text(&self, line: String) {
-        let _ = self.multi.println(line);
+    fn permanent_text(&mut self, line: String) {
+        // indicatif println pads to the terminal width instead of writing a
+        // newline. A following raw warning then shares the same output line.
+        let _ = self.multi.suspend(|| writeln!(self.stderr, "{line}"));
     }
 
     fn finish(&mut self) {
@@ -604,8 +625,174 @@ mod tests {
     use super::*;
     use crate::parsers::SourceSyncStats;
 
+    #[derive(Clone, Debug, Default)]
+    struct CaptureTerm(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for CaptureTerm {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl indicatif::TermLike for CaptureTerm {
+        fn width(&self) -> u16 {
+            120
+        }
+        fn move_cursor_up(&self, _: usize) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn move_cursor_down(&self, _: usize) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn move_cursor_right(&self, _: usize) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn move_cursor_left(&self, _: usize) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn write_line(&self, s: &str) -> std::io::Result<()> {
+            writeln!(self.clone(), "{s}")
+        }
+        fn write_str(&self, s: &str) -> std::io::Result<()> {
+            self.clone().write_all(s.as_bytes())
+        }
+        fn clear_line(&self) -> std::io::Result<()> {
+            self.clone().write_all(b"\r")
+        }
+        fn flush(&self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn permanent_progress_lines_end_before_raw_warnings() {
+        let terminal = CaptureTerm::default();
+        let mut renderer =
+            BarRenderer::new(ProgressDrawTarget::term_like(Box::new(terminal.clone())));
+        renderer.stderr = Box::new(terminal.clone());
+        renderer.render(&SyncEvent::LockAcquired { wait_ms: 58 });
+        let writer = terminal.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_target(false)
+            .with_writer(move || writer.clone())
+            .finish();
+        tracing::subscriber::with_default(subscriber, || tracing::warn!("legacy warning"));
+        let text = String::from_utf8(terminal.0.lock().unwrap().clone()).unwrap();
+        let warning = text.find("WARN").expect("warning");
+        assert!(
+            text[..warning].trim_end_matches(' ').ends_with('\n'),
+            "{text:?}"
+        );
+    }
+
+    #[test]
+    fn scoped_warning_sink_handles_interleaved_progress_and_restores_on_error() {
+        for mode in ["bar", "tty_line", "non_tty"] {
+            let terminal = CaptureTerm::default();
+            let renderer = if mode == "bar" {
+                let mut bar =
+                    BarRenderer::new(ProgressDrawTarget::term_like(Box::new(terminal.clone())));
+                bar.stderr = Box::new(terminal.clone());
+                HumanRenderer::Bar(bar)
+            } else {
+                HumanRenderer::Line(LineRenderer {
+                    stderr: Box::new(terminal.clone()),
+                    tty: mode == "tty_line",
+                    last_line_len: 0,
+                    terminated: false,
+                })
+            };
+            let renderer = Arc::new(Mutex::new(renderer));
+            let outside = CaptureTerm::default();
+            let outside_sink = outside.clone();
+            let _outer = crate::logging::install_stderr_sink(Arc::new(move |bytes| {
+                outside_sink.clone().write_all(bytes)
+            }));
+            let subscriber = tracing_subscriber::fmt()
+                .without_time()
+                .with_ansi(false)
+                .with_target(false)
+                .with_writer(crate::logging::StderrLogWriter::default)
+                .finish();
+            tracing::subscriber::with_default(subscriber, || {
+                let result: std::io::Result<()> = {
+                    let _terminal_guard = TerminalGuard::new(Arc::clone(&renderer));
+                    let sink_renderer = Arc::clone(&renderer);
+                    let _warning_guard =
+                        crate::logging::install_stderr_sink(Arc::new(move |bytes| {
+                            sink_renderer.lock().unwrap().write_warning(bytes)
+                        }));
+                    render_shared(&renderer, &SyncEvent::LockAcquired { wait_ms: 58 });
+                    tracing::warn!("first warning");
+                    crate::logging::stderr_warning("second warning");
+                    render_shared(
+                        &renderer,
+                        &SyncEvent::SourceStarted {
+                            source: SourceKind::Codex,
+                            files_total: 2,
+                        },
+                    );
+                    tracing::warn!("interleaved warning");
+                    render_shared(&renderer, &SyncEvent::LockAcquired { wait_ms: 0 });
+                    tracing::warn!("last warning");
+                    render_shared(
+                        &renderer,
+                        &SyncEvent::SourceStarted {
+                            source: SourceKind::Codex,
+                            files_total: 2,
+                        },
+                    );
+                    Err(std::io::Error::other("fixture error"))
+                };
+                assert!(result.is_err());
+                tracing::warn!("outside warning");
+            });
+            assert!(!renderer.lock().unwrap().has_active_bar());
+            let captured = String::from_utf8(terminal.0.lock().unwrap().clone()).unwrap();
+            for message in [
+                "first warning",
+                "second warning",
+                "interleaved warning",
+                "last warning",
+            ] {
+                assert!(
+                    captured.contains(&format!("{message}\n")),
+                    "{mode}: {captured:?}"
+                );
+            }
+            assert!(!captured.contains("outside warning"));
+            if mode == "tty_line" {
+                assert!(
+                    captured.ends_with('\n'),
+                    "unfinished TTY line: {captured:?}"
+                );
+            }
+            let external = String::from_utf8(outside.0.lock().unwrap().clone()).unwrap();
+            assert!(external.contains("outside warning"));
+            assert!(!external.contains("interleaved warning"));
+            if mode == "non_tty" {
+                assert!(!captured.contains('\r'));
+                assert_eq!(
+                    captured
+                        .lines()
+                        .filter(|line| line.contains("warning"))
+                        .count(),
+                    4
+                );
+            }
+        }
+    }
+
     fn hidden_bar_renderer() -> BarRenderer {
-        BarRenderer::new(ProgressDrawTarget::hidden())
+        let mut renderer = BarRenderer::new(ProgressDrawTarget::hidden());
+        renderer.stderr = Box::new(std::io::sink());
+        renderer
     }
 
     fn source_finished(source: SourceKind) -> SyncEvent {
