@@ -1,0 +1,31 @@
+{
+  "id": "antigravity-replay-preflight",
+  "name": "antigravity-replay-preflight",
+  "title": "Antigravity 重放预检与历史保护",
+  "description": "提前识别无法提交的产品组，减少无效解码并准确报告成员缺失及恢复条件。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-09-26",
+  "completedAt": "2026-09-28",
+  "branch": "dev",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": "6389cebb9a5f60e624da3122eb3ac18371e450eb",
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "09-26-sync-diagnostics-performance",
+  "relatedFiles": [],
+  "notes": "2026-09-28：A1–A5通过。全阻断实际decoder=0；missing/out-of-scope/access分类、持久状态保留与恢复、root discovery错误保留已验证。独立check通过，完整just ci exit0（251.635s），4 lock不变。未提交/归档或操作真实数据。\n2026-09-28 最终交付：全部验收与独立检查完成，just ci exit 0（244.4963957 秒）；两个工作提交为 cc7eed395b56d3c9ee524aa69cc8a3a1778046e0、6389cebb9a5f60e624da3122eb3ac18371e450eb。用户已确认本地提交和归档。当前记录随后由 task.py archive 更新完成状态；未运行真实数据 sync/rebuild/reset、安装或发布。",
+  "meta": {
+    "work_commits": [
+      "cc7eed395b56d3c9ee524aa69cc8a3a1778046e0",
+      "6389cebb9a5f60e624da3122eb3ac18371e450eb"
+    ]
+  }
+}

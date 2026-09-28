@@ -1,0 +1,30 @@
+   Compiling llmusage v2.0.0 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage-e066ade7a6809b1e.lib 和对象 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage-e066ade7a6809b1e.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 12.70s
+     Running unittests src\lib.rs (target\debug\deps\llmusage-e066ade7a6809b1e.exe)
+
+running 17 tests
+test parsers::antigravity::tests::preflight_all_selected_blocked_never_calls_usage_decoder ... ok
+test parsers::antigravity::tests::preflight_empty_selection_and_cancellation_do_not_decode_or_write ... ok
+test parsers::antigravity::tests::preflight_fingerprint_failure_does_not_accept_lossy_rebuild ... ok
+test parsers::antigravity::tests::preflight_partial_blocking_keeps_cross_root_decode_and_selected_scope ... ok
+test parsers::antigravity::tests::preflight_remote_membership_never_probes_local_filesystem ... ok
+test parsers::antigravity::tests::preflight_uncovered_members_distinguish_missing_scope_and_access ... ok
+test parsers::antigravity::tests::preflight_unselected_root_failure_blocks_unknown_product_copies ... ok
+test parsers::source_files::tests::dsh_listing_matches_exact_session_log_names_at_any_depth ... ok
+test parsers::source_files::tests::dsh_listing_returns_empty_when_root_is_missing ... ok
+test parsers::source_files::tests::grok_listing_only_returns_root_sidecars_from_two_directory_levels ... ok
+test parsers::source_files::tests::list_matching_files_preserves_missing_root_as_empty ... ok
+test parsers::source_files::tests::list_matching_files_rejects_non_directory_root ... ok
+test parsers::source_files::tests::list_matching_files_retains_root_error_after_access_recovers ... ok
+test parsers::source_files::tests::omp_keeps_unconflicted_files_when_omp_root_contains_pi_root ... ok
+test parsers::source_files::tests::omp_skips_files_when_pi_root_contains_omp_root ... ok
+test parsers::source_files::tests::omp_skips_files_when_roots_are_equal ... ok
+test parsers::source_files::tests::pi_and_omp_listings_are_disjoint_when_roots_do_not_overlap ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 910 filtered out; finished in 4.37s
+

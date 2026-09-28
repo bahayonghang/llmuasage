@@ -1,0 +1,26 @@
+[
+  {
+    "path": "src/parsers/source_files.rs",
+    "sha256": "0d80bd94aab69e42dd2a0bb9496a485cbd0b39956ff92a5c266d9c011d1ecf91"
+  },
+  {
+    "path": "src/parsers/antigravity.rs",
+    "sha256": "b2c021870533b712b2200663ca142de9eca16f736bf448dda068daa829879da9"
+  },
+  {
+    "path": "src/parsers/antigravity/tests.rs",
+    "sha256": "a70ebaf55839905adf8d1e33c041553e78a5fa6208f708713f0df3771c652237"
+  },
+  {
+    "path": "src/parsers/antigravity/decode.rs",
+    "sha256": "b046b4d196bea3bd620e5c5a1009a740cfc2f7e6fbadcbe66f1000e8aaaf271c"
+  },
+  {
+    "path": "src/domain/source_diagnostics.rs",
+    "sha256": "451525e8470839c0b1a7b8bde91da6e81960037e0ff0ed88f9325f7ae08269ac"
+  },
+  {
+    "path": "tests/sync/sources/antigravity.rs",
+    "sha256": "db50c5e4dae1b86d77b016eb49a8ca1975e64608791dbde2905d7167afaad5d7"
+  }
+]

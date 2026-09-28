@@ -1,0 +1,29 @@
+   Compiling llmusage v2.0.0 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage-e066ade7a6809b1e.lib 和对象 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage-e066ade7a6809b1e.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 23.91s
+     Running unittests src\lib.rs (target\debug\deps\llmusage-e066ade7a6809b1e.exe)
+
+running 1 test
+test parsers::antigravity::tests::preflight_all_selected_blocked_never_calls_usage_decoder ... FAILED
+
+failures:
+
+---- parsers::antigravity::tests::preflight_all_selected_blocked_never_calls_usage_decoder stdout ----
+
+thread 'parsers::antigravity::tests::preflight_all_selected_blocked_never_calls_usage_decoder' (50520) panicked at src\parsers\antigravity\tests.rs:102:9:
+assertion `left == right` failed: selected=[Antigravity]
+  left: 1
+ right: 0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    parsers::antigravity::tests::preflight_all_selected_blocked_never_calls_usage_decoder
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 917 filtered out; finished in 0.18s
+
+error: test failed, to rerun pass `--lib`

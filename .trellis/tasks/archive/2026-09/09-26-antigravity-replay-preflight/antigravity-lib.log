@@ -1,0 +1,36 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling llmusage v2.0.0 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage-e066ade7a6809b1e.lib 和对象 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage-e066ade7a6809b1e.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 37.83s
+     Running unittests src\lib.rs (target\debug\deps\llmusage-e066ade7a6809b1e.exe)
+
+running 21 tests
+test parsers::antigravity::tests::absent_and_empty_wal_have_the_same_usage_fingerprint ... ok
+test parsers::antigravity::tests::cache_metadata_is_never_used_as_timestamp ... ok
+test parsers::antigravity::tests::cache_write_and_model_enum_have_distinct_semantics ... ok
+test parsers::antigravity::tests::committed_wal_only_changes_update_fingerprint_and_usage ... ok
+test parsers::antigravity::tests::conflicting_identity_counts_fail_in_both_file_orders ... ok
+test parsers::antigravity::tests::constructed_descriptor_fixture_preserves_one_sided_output_channels ... ok
+test parsers::antigravity::tests::copied_databases_keep_native_product_and_count_once ... ok
+test parsers::antigravity::tests::independent_retries_share_message_but_not_response_identity ... ok
+test parsers::antigravity::tests::malformed_sqlite_and_protobuf_fail_without_partial_events ... ok
+test parsers::antigravity::tests::native_product_overrides_a_root_only_copy ... ok
+test parsers::antigravity::tests::preflight_all_selected_blocked_never_calls_usage_decoder ... ok
+test parsers::antigravity::tests::preflight_empty_selection_and_cancellation_do_not_decode_or_write ... ok
+test parsers::antigravity::tests::preflight_fingerprint_failure_does_not_accept_lossy_rebuild ... ok
+test parsers::antigravity::tests::preflight_partial_blocking_keeps_cross_root_decode_and_selected_scope ... ok
+test parsers::antigravity::tests::preflight_remote_membership_never_probes_local_filesystem ... ok
+test parsers::antigravity::tests::preflight_uncovered_members_distinguish_missing_scope_and_access ... ok
+test parsers::antigravity::tests::preflight_unselected_root_failure_blocks_unknown_product_copies ... ok
+test parsers::antigravity::tests::same_time_and_tokens_without_identity_remain_separate ... ok
+test parsers::antigravity::tests::sanitized_native_samples_match_independent_six_channel_oracle ... ok
+test parsers::antigravity::tests::unrelated_sqlite_schema_is_not_a_successful_empty_snapshot ... ok
+test parsers::antigravity::tests::wrong_usage_wire_type_cannot_reset_a_snapshot_to_zero ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 903 filtered out; finished in 5.46s
+

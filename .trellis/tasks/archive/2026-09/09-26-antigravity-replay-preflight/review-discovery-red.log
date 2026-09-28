@@ -1,0 +1,37 @@
+   Compiling llmusage v2.0.0 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage-e066ade7a6809b1e.lib 和对象 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage-e066ade7a6809b1e.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 24.32s
+     Running unittests src\lib.rs (target\debug\deps\llmusage-e066ade7a6809b1e.exe)
+
+running 3 tests
+test parsers::source_files::tests::list_matching_files_preserves_missing_root_as_empty ... ok
+test parsers::source_files::tests::list_matching_files_rejects_non_directory_root ... FAILED
+test parsers::source_files::tests::list_matching_files_retains_root_error_after_access_recovers ... FAILED
+
+failures:
+
+---- parsers::source_files::tests::list_matching_files_rejects_non_directory_root stdout ----
+
+thread 'parsers::source_files::tests::list_matching_files_rejects_non_directory_root' (70484) panicked at src\parsers\source_files.rs:422:9:
+assertion failed: listing.paths.is_empty()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- parsers::source_files::tests::list_matching_files_retains_root_error_after_access_recovers stdout ----
+
+thread 'parsers::source_files::tests::list_matching_files_retains_root_error_after_access_recovers' (52080) panicked at src\parsers\source_files.rs:401:9:
+assertion `left == right` failed
+  left: 0
+ right: 1
+
+
+failures:
+    parsers::source_files::tests::list_matching_files_rejects_non_directory_root
+    parsers::source_files::tests::list_matching_files_retains_root_error_after_access_recovers
+
+test result: FAILED. 1 passed; 2 failed; 0 ignored; 0 measured; 924 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `--lib`

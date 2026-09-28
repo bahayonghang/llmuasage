@@ -1,0 +1,18 @@
+   Compiling llmusage v2.0.0 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage-e066ade7a6809b1e.lib 和对象 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage-e066ade7a6809b1e.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 23.48s
+     Running unittests src\lib.rs (target\debug\deps\llmusage-e066ade7a6809b1e.exe)
+
+running 5 tests
+test parsers::antigravity::tests::preflight_all_selected_blocked_never_calls_usage_decoder ... ok
+test parsers::antigravity::tests::preflight_empty_selection_and_cancellation_do_not_decode_or_write ... ok
+test parsers::antigravity::tests::preflight_partial_blocking_keeps_cross_root_decode_and_selected_scope ... ok
+test parsers::antigravity::tests::preflight_uncovered_members_distinguish_missing_scope_and_access ... ok
+test parsers::antigravity::tests::preflight_unselected_root_failure_blocks_unknown_product_copies ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 917 filtered out; finished in 4.25s
+

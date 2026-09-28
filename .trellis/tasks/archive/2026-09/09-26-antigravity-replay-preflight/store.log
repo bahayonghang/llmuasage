@@ -1,0 +1,20 @@
+   Compiling llmusage v2.0.0 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage.lib 和对象 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (bin "llmusage") generated 1 warning
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\target\debug\deps\store-810bc9edf7f9a8c8.lib 和对象 D:\Documents\Code\CLI\llmusage\target\debug\deps\store-810bc9edf7f9a8c8.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (test "store") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.75s
+     Running tests\store\main.rs (target\debug\deps\store-810bc9edf7f9a8c8.exe)
+
+running 2 tests
+test source_file_state::deleted_then_seen_again_resurrects_to_live ... ok
+test source_file_state::three_entries_lead_to_consistent_state ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.38s
+

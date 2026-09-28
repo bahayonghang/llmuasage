@@ -1,0 +1,13 @@
+{
+  "cargo": "C:/Users/lyh/.cargo/bin\\cargo.exe",
+  "cargoVersion": "cargo 1.97.0 (c980f4866 2026-06-30)",
+  "just": "C:\\Users\\lyh\\scoop\\shims\\just.exe",
+  "gitHead": "29bde59e84e1149b1d9215e020352586fb0a0ed7",
+  "startedAt": "2026-09-28T01:43:50.0803397-05:00",
+  "locks": [
+    "Cargo.lock",
+    "desktop/src-tauri/Cargo.lock",
+    "desktop/package-lock.json",
+    "docs/package-lock.json"
+  ]
+}

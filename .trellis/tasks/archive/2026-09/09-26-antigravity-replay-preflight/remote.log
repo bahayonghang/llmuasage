@@ -1,0 +1,28 @@
+   Compiling llmusage v2.0.0 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage.lib 和对象 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (bin "llmusage") generated 1 warning
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\target\debug\deps\remote-a41f1e1449c6f33d.lib 和对象 D:\Documents\Code\CLI\llmusage\target\debug\deps\remote-a41f1e1449c6f33d.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (test "remote") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.42s
+     Running tests\remote\main.rs (target\debug\deps\remote-a41f1e1449c6f33d.exe)
+
+running 8 tests
+test lifecycle::json_events_emit_remote_host_started_finished_and_skipped ... ok
+test lifecycle::source_status_does_not_use_local_marker_for_remote_unknown ... ok
+test lifecycle::source_status_prints_legacy_for_old_remote_marker ... ok
+test lifecycle::source_status_reports_three_host_states_and_omits_live ... ok
+legacy token accounting; existing history was kept and this source was skipped for this round. Run `llmusage sync --rebuild --source codex` to repair. If source files are missing, restore them or add `--allow-lossy-rebuild` to that rebuild command to explicitly accept clearing unrebuildable history.
+test lifecycle::unreachable_remote_does_not_fail_sync_or_sweep_source_files ... ok
+legacy token accounting; existing history was kept and this source was skipped for this round. Run `llmusage sync --rebuild --source codex` to repair. If source files are missing, restore them or add `--allow-lossy-rebuild` to that rebuild command to explicitly accept clearing unrebuildable history.
+test lifecycle::unreachable_remote_missing_files_do_not_block_automatic_repair ... ok
+test lifecycle::unreachable_remote_missing_files_do_not_block_rebuild ... ok
+test shard_transport::emit_shards_cli_leaves_user_db_counts_and_lock_unchanged ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.87s
+
