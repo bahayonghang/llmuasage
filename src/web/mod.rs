@@ -5325,7 +5325,8 @@ mod tests {
         drop(conn);
 
         let addr = serve(store, Some(0)).await?;
-        let (status, payload) = route_json(addr, "GET", "/api/trends_daily", None).await?;
+        let (status, payload) =
+            route_json(addr, "GET", "/api/trends_daily?timezone=UTC", None).await?;
         assert_eq!(status, StatusCode::OK);
         let first = payload
             .as_array()
@@ -5696,7 +5697,8 @@ mod tests {
         );
         assert_eq!(dashboard["tools"]["breakdown"].as_array().unwrap().len(), 3);
 
-        let day_two_filter = "source=codex&model=gpt-5&since=2026-05-02&until=2026-05-02";
+        let day_two_filter =
+            "source=codex&model=gpt-5&since=2026-05-02&until=2026-05-02&timezone=UTC";
         let (status, tools_day_two) =
             route_json(addr, "GET", &format!("/api/tools?{day_two_filter}"), None).await?;
         assert_eq!(status, StatusCode::OK);

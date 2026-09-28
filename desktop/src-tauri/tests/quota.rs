@@ -11,7 +11,8 @@ use std::{
 };
 
 use llmusage::{
-    Fixture, SourceKind, Store, app::AppContext,
+    Fixture, SourceKind, Store,
+    app::AppContext,
     subscription::{UsageEndpoints, UsageFetchReport, UsageOutput},
 };
 use llmusage_desktop_lib::startup;
@@ -120,7 +121,8 @@ fn handle_conn(mut stream: TcpStream, hits: &AtomicUsize) {
     let _ = write_http(&mut stream, "200 OK", body);
 }
 
-fn spawn_local_quota_server() -> anyhow::Result<(String, Arc<AtomicUsize>, thread::JoinHandle<()>)> {
+fn spawn_local_quota_server() -> anyhow::Result<(String, Arc<AtomicUsize>, thread::JoinHandle<()>)>
+{
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let addr = listener.local_addr()?;
     let hits = Arc::new(AtomicUsize::new(0));
@@ -132,11 +134,7 @@ fn spawn_local_quota_server() -> anyhow::Result<(String, Arc<AtomicUsize>, threa
             }
         }
     });
-    Ok((
-        format!("http://127.0.0.1:{}", addr.port()),
-        hits,
-        handle,
-    ))
+    Ok((format!("http://127.0.0.1:{}", addr.port()), hits, handle))
 }
 
 fn unix_now() -> u64 {

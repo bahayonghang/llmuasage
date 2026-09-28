@@ -9,10 +9,10 @@ use crate::{models::SourceKind, query::timezone::ResolvedZone};
 pub enum ReportTimezone {
     /// Interpret dates as UTC calendar days.
     Utc,
-    /// Interpret dates with the machine's current local UTC offset.
+    /// Interpret dates with the machine's IANA timezone and its DST rules.
     ///
-    /// This is a fixed-offset snapshot taken when the query runs, not an
-    /// IANA/DST-aware timezone. Historical dates use the same current offset.
+    /// If the machine's zone cannot be resolved, use its current fixed UTC
+    /// offset for all dates in the query.
     Local,
     /// Interpret dates with a caller-provided fixed offset.
     Fixed(FixedOffset),
@@ -241,7 +241,8 @@ fn column(alias: Option<&str>, name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{QueryFilter, ReportTimezone};
-    use chrono::{FixedOffset, Local, NaiveDate, Offset, TimeZone, Utc, offset::LocalResult};
+    use chrono::{FixedOffset, Local, NaiveDate, Offset, TimeZone, Utc};
+    use chrono_tz::Tz;
     use rusqlite::types::Value;
 
     #[test]
@@ -288,7 +289,7 @@ mod tests {
     }
 
     #[test]
-    fn local_timezone_date_bounds_use_current_fixed_offset_snapshot() {
+    fn local_timezone_date_bounds_use_system_zone_rules() {
         let date = NaiveDate::from_ymd_opt(2026, 11, 1).unwrap();
         let filter = QueryFilter {
             since: Some(date),
@@ -296,27 +297,79 @@ mod tests {
             timezone: ReportTimezone::Local,
             ..QueryFilter::default()
         };
-        let current_offset = Local::now().offset().fix();
-        let expected_start = local_midnight_to_utc_text(date, current_offset);
-        let expected_end = local_midnight_to_utc_text(date.succ_opt().unwrap(), current_offset);
+        let next_date = date.succ_opt().unwrap();
+        let local_zone = iana_time_zone::get_timezone()
+            .ok()
+            .and_then(|name| name.parse::<Tz>().ok());
+        let (expected_start, expected_end) = match local_zone {
+            Some(zone) => (
+                local_midnight_to_utc_text(date, zone),
+                local_midnight_to_utc_text(next_date, zone),
+            ),
+            None => {
+                let offset = Local::now().offset().fix();
+                (
+                    local_midnight_to_utc_text(date, offset),
+                    local_midnight_to_utc_text(next_date, offset),
+                )
+            }
+        };
 
         let sql_filter = filter.event_filter(None);
 
         assert_eq!(
             sql_filter.params(),
             &[Value::Text(expected_start), Value::Text(expected_end)],
-            "`local` must use one current fixed offset for all date bounds"
+            "`local` must use system IANA rules, with a fixed-offset fallback"
         );
     }
 
-    fn local_midnight_to_utc_text(date: NaiveDate, offset: FixedOffset) -> String {
+    fn local_midnight_to_utc_text(date: NaiveDate, zone: impl TimeZone) -> String {
         let local_start = date.and_hms_opt(0, 0, 0).expect("midnight is always valid");
-        let utc = match offset.from_local_datetime(&local_start) {
-            LocalResult::Single(value) => value.with_timezone(&Utc),
-            LocalResult::Ambiguous(earliest, _) => earliest.with_timezone(&Utc),
-            LocalResult::None => offset.from_utc_datetime(&local_start).with_timezone(&Utc),
-        };
+        let utc = zone
+            .from_local_datetime(&local_start)
+            .earliest()
+            .expect("the fixture's local midnight exists")
+            .with_timezone(&Utc);
         utc.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    }
+
+    #[test]
+    fn iana_timezone_date_bounds_follow_short_and_long_dst_days() {
+        for (date, expected_start, expected_end) in [
+            (
+                NaiveDate::from_ymd_opt(2026, 3, 8).unwrap(),
+                "2026-03-08T06:00:00Z",
+                "2026-03-09T05:00:00Z",
+            ),
+            (
+                NaiveDate::from_ymd_opt(2026, 11, 1).unwrap(),
+                "2026-11-01T05:00:00Z",
+                "2026-11-02T06:00:00Z",
+            ),
+        ] {
+            let filter = QueryFilter {
+                since: Some(date),
+                until: Some(date),
+                timezone: ReportTimezone::Iana(chrono_tz::America::Chicago),
+                ..QueryFilter::default()
+            };
+
+            let sql_filter = filter.event_filter(None);
+
+            assert_eq!(
+                sql_filter.where_sql(),
+                " WHERE event_at >= ? AND event_at < ?"
+            );
+            assert_eq!(
+                sql_filter.params(),
+                &[
+                    Value::Text(expected_start.to_string()),
+                    Value::Text(expected_end.to_string()),
+                ],
+                "Chicago date bounds for {date} must use each midnight's offset"
+            );
+        }
     }
 
     #[test]

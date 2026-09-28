@@ -619,6 +619,10 @@ buildFilterQuery(state, options) -> query string
   already supplies a value. Static snapshots do not require a live timezone.
 - IANA date bounds, labels, heatmaps, and daily groupings use the historical
   offset for each instant, including daylight-saving transitions.
+- `Local` first resolves the system IANA timezone through `iana_time_zone`
+  and `chrono_tz`. When either resolution step fails, use the current fixed
+  local offset. A successful IANA resolution uses the offset for the queried
+  date; it must not reuse today's offset for every historical date.
 - Heatmap zero-fill windows end at an explicit `QueryFilter.until`; only an
   unbounded request ends at the current local date. This keeps historical
   custom ranges aligned with their rendered calendar cells.
@@ -633,6 +637,8 @@ buildFilterQuery(state, options) -> query string
 | Explicit browser timezone filter | Preserve it instead of auto-detecting |
 | `UTC`, `Z`, `local`, or fixed offset | Preserve the existing parse path |
 | Unknown or omitted HTTP value | Fall back to `Local` without a request error |
+| System IANA timezone resolves | `Local` applies historical DST boundaries |
+| System IANA resolution fails | `Local` uses the current fixed-offset fallback |
 | Browser cannot resolve a timezone | Omit the automatic parameter |
 
 ### 5. Good/Base/Bad Cases
@@ -649,6 +655,11 @@ buildFilterQuery(state, options) -> query string
   unknown-name fallback.
 - At least one HTTP date-grouping endpoint proves a no-DST boundary and a DST
   boundary.
+- Tests that expect UTC date labels or date filters must send `timezone=UTC`.
+  Do not depend on the host's default zone for UTC fixtures. Keep explicit
+  IANA coverage for both 23-hour and 25-hour SQL date ranges.
+- Local-zone tests follow the actual system IANA resolution or the documented
+  fixed-offset fallback. Do not change the process timezone during tests.
 - Node request tests prove automatic IANA propagation and explicit override.
 - Run `just ci` before completion.
 
