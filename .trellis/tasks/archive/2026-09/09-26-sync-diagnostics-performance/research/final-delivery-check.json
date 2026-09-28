@@ -1,0 +1,43 @@
+{
+  "checked_at_utc": "2026-09-28T09:50:06.463097+00:00",
+  "head": "29bde59e84e1149b1d9215e020352586fb0a0ed7",
+  "task_validation": [
+    {
+      "task": "09-26-sync-diagnostics-performance",
+      "exit_code": 0,
+      "output": "\u001b[0;34m=== Validating Context Files ===\u001b[0m\nTarget dir: D:\\Documents\\Code\\CLI\\llmusage\\.trellis\\tasks\\09-26-sync-diagnostics-performance\n\n  \u001b[0;32mimplement.jsonl: ✓ (8 entries)\u001b[0m\n  \u001b[0;32mcheck.jsonl: ✓ (8 entries)\u001b[0m\n\n\u001b[0;32m✓ All validations passed\u001b[0m\n"
+    },
+    {
+      "task": "09-26-sync-diagnostics-contracts",
+      "exit_code": 0,
+      "output": "\u001b[0;34m=== Validating Context Files ===\u001b[0m\nTarget dir: D:\\Documents\\Code\\CLI\\llmusage\\.trellis\\tasks\\09-26-sync-diagnostics-contracts\n\n  \u001b[0;32mimplement.jsonl: ✓ (9 entries)\u001b[0m\n  \u001b[0;32mcheck.jsonl: ✓ (9 entries)\u001b[0m\n\n\u001b[0;32m✓ All validations passed\u001b[0m\n"
+    },
+    {
+      "task": "09-26-antigravity-replay-preflight",
+      "exit_code": 0,
+      "output": "\u001b[0;34m=== Validating Context Files ===\u001b[0m\nTarget dir: D:\\Documents\\Code\\CLI\\llmusage\\.trellis\\tasks\\09-26-antigravity-replay-preflight\n\n  \u001b[0;32mimplement.jsonl: ✓ (6 entries)\u001b[0m\n  \u001b[0;32mcheck.jsonl: ✓ (6 entries)\u001b[0m\n\n\u001b[0;32m✓ All validations passed\u001b[0m\n"
+    },
+    {
+      "task": "09-26-sync-write-profiling",
+      "exit_code": 0,
+      "output": "\u001b[0;34m=== Validating Context Files ===\u001b[0m\nTarget dir: D:\\Documents\\Code\\CLI\\llmusage\\.trellis\\tasks\\09-26-sync-write-profiling\n\n  \u001b[0;32mimplement.jsonl: ✓ (8 entries)\u001b[0m\n  \u001b[0;32mcheck.jsonl: ✓ (8 entries)\u001b[0m\n\n\u001b[0;32m✓ All validations passed\u001b[0m\n"
+    }
+  ],
+  "all_acceptance_and_implementation_checkboxes_complete": true,
+  "task_statuses": "in_progress_pending_commit_and_archive",
+  "group_file_counts": [
+    4,
+    63
+  ],
+  "git_status_path_count_before_this_report": 281,
+  "unrecognized_paths": [],
+  "not_dirty_in_plan": [],
+  "risk_paths": [],
+  "largest_file": {
+    "path": ".trellis/tasks/09-26-sync-write-profiling/research/writer-candidate-2-ab.json",
+    "bytes": 327501
+  },
+  "staged_paths": [],
+  "tests_rerun": false,
+  "product_files_modified_in_closeout": false
+}

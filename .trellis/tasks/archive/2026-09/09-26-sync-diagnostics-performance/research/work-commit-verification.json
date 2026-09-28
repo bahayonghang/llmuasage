@@ -1,0 +1,23 @@
+{
+  "checked_at_utc": "2026-09-28T10:07:28.849286+00:00",
+  "work_commits": [
+    {
+      "sha": "cc7eed395b56d3c9ee524aa69cc8a3a1778046e0",
+      "subject": "fix(测试): 🐛 校正时区回归与桌面格式门禁",
+      "files": 4
+    },
+    {
+      "sha": "6389cebb9a5f60e624da3122eb3ac18371e450eb",
+      "subject": "feat(同步)!: ✨ 完善诊断与重放写入并准备 2.0 版本",
+      "files": 63
+    }
+  ],
+  "approved_file_counts": [
+    4,
+    63
+  ],
+  "product_bytes_unchanged": true,
+  "index_empty_after_each_commit": true,
+  "context_files_relocated_for_archive": 8,
+  "new_product_test_runs": false
+}

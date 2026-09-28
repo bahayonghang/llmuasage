@@ -1,0 +1,464 @@
+{
+  "observed_at_utc": "2026-09-26T09:02:00.713334+00:00",
+  "expected_sync_status_updated_at": "2026-09-26T08:33:53Z",
+  "sources": [
+    {
+      "source": "codex",
+      "status_updated_at": "2026-09-26T08:33:53Z",
+      "counts": {
+        "malformed_lines": 0,
+        "oversized_lines": 0,
+        "skipped_lines": 13,
+        "accounting_anomaly_lines": 0
+      },
+      "sample_count": 8,
+      "samples": [
+        {
+          "kind": "skipped",
+          "reason": "",
+          "offset": 10549661,
+          "path_mapping_found": true,
+          "basename": "rollout-2026-08-26T17-26-36-01a03d64-1390-7340-8a13-8a79973a0889_01a03d64-9455-75b3-a7ff-6eb62a233f83.jsonl",
+          "file_exists": true,
+          "current_file_matches_saved_cursor": true,
+          "record": {
+            "offset": 10549661,
+            "starts_after_newline": true,
+            "record_bytes_excluding_lf": 5561228,
+            "newline_terminated": true,
+            "over_4_mib": true,
+            "json_valid": true,
+            "outer_type": "response_item",
+            "payload_type": "custom_tool_call_output",
+            "payload_msg_type": null
+          },
+          "file_metadata_unchanged_during_probe": true
+        },
+        {
+          "kind": "skipped",
+          "reason": "",
+          "offset": 16668520,
+          "path_mapping_found": true,
+          "basename": "rollout-2026-08-26T17-26-36-01a03d64-1390-7340-8a13-8a79973a0889_01a03d64-9455-75b3-a7ff-6eb62a233f83.jsonl",
+          "file_exists": true,
+          "current_file_matches_saved_cursor": true,
+          "record": {
+            "offset": 16668520,
+            "starts_after_newline": true,
+            "record_bytes_excluding_lf": 6432396,
+            "newline_terminated": true,
+            "over_4_mib": true,
+            "json_valid": true,
+            "outer_type": "response_item",
+            "payload_type": "custom_tool_call_output",
+            "payload_msg_type": null
+          },
+          "file_metadata_unchanged_during_probe": true
+        },
+        {
+          "kind": "skipped",
+          "reason": "",
+          "offset": 1818223,
+          "path_mapping_found": true,
+          "basename": "rollout-2026-08-26T17-29-16-01a03d67-0137-7df1-b44c-63f66d305248.jsonl",
+          "file_exists": true,
+          "current_file_matches_saved_cursor": true,
+          "record": {
+            "offset": 1818223,
+            "starts_after_newline": true,
+            "record_bytes_excluding_lf": 7626824,
+            "newline_terminated": true,
+            "over_4_mib": true,
+            "json_valid": true,
+            "outer_type": "response_item",
+            "payload_type": "custom_tool_call_output",
+            "payload_msg_type": null
+          },
+          "file_metadata_unchanged_during_probe": true
+        },
+        {
+          "kind": "skipped",
+          "reason": "",
+          "offset": 8667420,
+          "path_mapping_found": true,
+          "basename": "rollout-2026-08-26T23-13-59-01a03ea2-9cef-7d93-b40d-b1e20bd6b7ce.jsonl",
+          "file_exists": true,
+          "current_file_matches_saved_cursor": true,
+          "record": {
+            "offset": 8667420,
+            "starts_after_newline": true,
+            "record_bytes_excluding_lf": 4830422,
+            "newline_terminated": true,
+            "over_4_mib": true,
+            "json_valid": true,
+            "outer_type": "response_item",
+            "payload_type": "custom_tool_call_output",
+            "payload_msg_type": null
+          },
+          "file_metadata_unchanged_during_probe": true
+        },
+        {
+          "kind": "skipped",
+          "reason": "",
+          "offset": 3416553,
+          "path_mapping_found": true,
+          "basename": "rollout-2026-08-27T00-05-02-01a03ed1-5942-7c13-b343-3758aab39fdd.jsonl",
+          "file_exists": true,
+          "current_file_matches_saved_cursor": true,
+          "record": {
+            "offset": 3416553,
+            "starts_after_newline": true,
+            "record_bytes_excluding_lf": 12220619,
+            "newline_terminated": true,
+            "over_4_mib": true,
+            "json_valid": true,
+            "outer_type": "response_item",
+            "payload_type": "custom_tool_call_output",
+            "payload_msg_type": null
+          },
+          "file_metadata_unchanged_during_probe": true
+        },
+        {
+          "kind": "skipped",
+          "reason": "",
+          "offset": 2820391,
+          "path_mapping_found": true,
+          "basename": "rollout-2026-08-27T00-37-55-01a03eef-73ec-7960-a552-c8dd26f747d3.jsonl",
+          "file_exists": true,
+          "current_file_matches_saved_cursor": true,
+          "record": {
+            "offset": 2820391,
+            "starts_after_newline": true,
+            "record_bytes_excluding_lf": 12221330,
+            "newline_terminated": true,
+            "over_4_mib": true,
+            "json_valid": true,
+            "outer_type": "response_item",
+            "payload_type": "custom_tool_call_output",
+            "payload_msg_type": null
+          },
+          "file_metadata_unchanged_during_probe": true
+        },
+        {
+          "kind": "skipped",
+          "reason": "",
+          "offset": 3765408,
+          "path_mapping_found": true,
+          "basename": "rollout-2026-08-29T23-18-59-01a04e1a-43d7-7021-a2db-baa1a128db64.jsonl",
+          "file_exists": true,
+          "current_file_matches_saved_cursor": true,
+          "record": {
+            "offset": 3765408,
+            "starts_after_newline": true,
+            "record_bytes_excluding_lf": 8107803,
+            "newline_terminated": true,
+            "over_4_mib": true,
+            "json_valid": true,
+            "outer_type": "response_item",
+            "payload_type": "custom_tool_call_output",
+            "payload_msg_type": null
+          },
+          "file_metadata_unchanged_during_probe": true
+        },
+        {
+          "kind": "skipped",
+          "reason": "",
+          "offset": 12455723,
+          "path_mapping_found": true,
+          "basename": "rollout-2026-08-29T23-18-59-01a04e1a-43d7-7021-a2db-baa1a128db64.jsonl",
+          "file_exists": true,
+          "current_file_matches_saved_cursor": true,
+          "record": {
+            "offset": 12455723,
+            "starts_after_newline": true,
+            "record_bytes_excluding_lf": 8057501,
+            "newline_terminated": true,
+            "over_4_mib": true,
+            "json_valid": true,
+            "outer_type": "response_item",
+            "payload_type": "custom_tool_call_output",
+            "payload_msg_type": null
+          },
+          "file_metadata_unchanged_during_probe": true
+        }
+      ]
+    },
+    {
+      "source": "grok",
+      "status_updated_at": "2026-09-26T08:33:53Z",
+      "counts": {
+        "malformed_lines": 0,
+        "oversized_lines": 0,
+        "skipped_lines": 0,
+        "accounting_anomaly_lines": 13
+      },
+      "sample_count": 8,
+      "samples": [
+        {
+          "kind": "accounting_anomaly",
+          "reason": "usage_incomplete",
+          "offset": 823619,
+          "path_mapping_found": true,
+          "basename": "updates.jsonl",
+          "file_exists": true,
+          "current_file_matches_saved_cursor": true,
+          "record": {
+            "offset": 823619,
+            "starts_after_newline": true,
+            "record_bytes_excluding_lf": 797,
+            "newline_terminated": true,
+            "over_4_mib": false,
+            "json_valid": true,
+            "outer_type": null,
+            "payload_type": null,
+            "payload_msg_type": null,
+            "session_update": "turn_completed",
+            "usage_object_present": true,
+            "usage_is_incomplete": true,
+            "usage_numbers": {
+              "inputTokens": 1064451,
+              "outputTokens": 13133,
+              "totalTokens": 1077584,
+              "cachedReadTokens": 804864,
+              "cacheCreationTokens": 0,
+              "reasoningTokens": 7877
+            }
+          },
+          "current_session_counts": {
+            "turn_usage_records": 14,
+            "usage_incomplete_records": 13,
+            "input_below_cache_records": 0,
+            "json_errors": 0
+          },
+          "file_metadata_unchanged_during_probe": true
+        },
+        {
+          "kind": "accounting_anomaly",
+          "reason": "usage_incomplete",
+          "offset": 1030747,
+          "path_mapping_found": true,
+          "basename": "updates.jsonl",
+          "file_exists": true,
+          "current_file_matches_saved_cursor": true,
+          "record": {
+            "offset": 1030747,
+            "starts_after_newline": true,
+            "record_bytes_excluding_lf": 804,
+            "newline_terminated": true,
+            "over_4_mib": false,
+            "json_valid": true,
+            "outer_type": null,
+            "payload_type": null,
+            "payload_msg_type": null,
+            "session_update": "turn_completed",
+            "usage_object_present": true,
+            "usage_is_incomplete": true,
+            "usage_numbers": {
+              "inputTokens": 463087,
+              "outputTokens": 4256,
+              "totalTokens": 467343,
+              "cachedReadTokens": 287488,
+              "cacheCreationTokens": 0,
+              "reasoningTokens": 2125
+            }
+          },
+          "file_metadata_unchanged_during_probe": true
+        },
+        {
+          "kind": "accounting_anomaly",
+          "reason": "usage_incomplete",
+          "offset": 1202976,
+          "path_mapping_found": true,
+          "basename": "updates.jsonl",
+          "file_exists": true,
+          "current_file_matches_saved_cursor": true,
+          "record": {
+            "offset": 1202976,
+            "starts_after_newline": true,
+            "record_bytes_excluding_lf": 805,
+            "newline_terminated": true,
+            "over_4_mib": false,
+            "json_valid": true,
+            "outer_type": null,
+            "payload_type": null,
+            "payload_msg_type": null,
+            "session_update": "turn_completed",
+            "usage_object_present": true,
+            "usage_is_incomplete": true,
+            "usage_numbers": {
+              "inputTokens": 833077,
+              "outputTokens": 5789,
+              "totalTokens": 838866,
+              "cachedReadTokens": 514304,
+              "cacheCreationTokens": 0,
+              "reasoningTokens": 2376
+            }
+          },
+          "file_metadata_unchanged_during_probe": true
+        },
+        {
+          "kind": "accounting_anomaly",
+          "reason": "usage_incomplete",
+          "offset": 1261814,
+          "path_mapping_found": true,
+          "basename": "updates.jsonl",
+          "file_exists": true,
+          "current_file_matches_saved_cursor": true,
+          "record": {
+            "offset": 1261814,
+            "starts_after_newline": true,
+            "record_bytes_excluding_lf": 793,
+            "newline_terminated": true,
+            "over_4_mib": false,
+            "json_valid": true,
+            "outer_type": null,
+            "payload_type": null,
+            "payload_msg_type": null,
+            "session_update": "turn_completed",
+            "usage_object_present": true,
+            "usage_is_incomplete": true,
+            "usage_numbers": {
+              "inputTokens": 228123,
+              "outputTokens": 2265,
+              "totalTokens": 230388,
+              "cachedReadTokens": 0,
+              "cacheCreationTokens": 0,
+              "reasoningTokens": 382
+            }
+          },
+          "file_metadata_unchanged_during_probe": true
+        },
+        {
+          "kind": "accounting_anomaly",
+          "reason": "usage_incomplete",
+          "offset": 1300892,
+          "path_mapping_found": true,
+          "basename": "updates.jsonl",
+          "file_exists": true,
+          "current_file_matches_saved_cursor": true,
+          "record": {
+            "offset": 1300892,
+            "starts_after_newline": true,
+            "record_bytes_excluding_lf": 805,
+            "newline_terminated": true,
+            "over_4_mib": false,
+            "json_valid": true,
+            "outer_type": null,
+            "payload_type": null,
+            "payload_msg_type": null,
+            "session_update": "turn_completed",
+            "usage_object_present": true,
+            "usage_is_incomplete": true,
+            "usage_numbers": {
+              "inputTokens": 357852,
+              "outputTokens": 3853,
+              "totalTokens": 361705,
+              "cachedReadTokens": 351104,
+              "cacheCreationTokens": 0,
+              "reasoningTokens": 2791
+            }
+          },
+          "file_metadata_unchanged_during_probe": true
+        },
+        {
+          "kind": "accounting_anomaly",
+          "reason": "usage_incomplete",
+          "offset": 1457303,
+          "path_mapping_found": true,
+          "basename": "updates.jsonl",
+          "file_exists": true,
+          "current_file_matches_saved_cursor": true,
+          "record": {
+            "offset": 1457303,
+            "starts_after_newline": true,
+            "record_bytes_excluding_lf": 805,
+            "newline_terminated": true,
+            "over_4_mib": false,
+            "json_valid": true,
+            "outer_type": null,
+            "payload_type": null,
+            "payload_msg_type": null,
+            "session_update": "turn_completed",
+            "usage_object_present": true,
+            "usage_is_incomplete": true,
+            "usage_numbers": {
+              "inputTokens": 756535,
+              "outputTokens": 5257,
+              "totalTokens": 761792,
+              "cachedReadTokens": 619264,
+              "cacheCreationTokens": 0,
+              "reasoningTokens": 1815
+            }
+          },
+          "file_metadata_unchanged_during_probe": true
+        },
+        {
+          "kind": "accounting_anomaly",
+          "reason": "usage_incomplete",
+          "offset": 1484856,
+          "path_mapping_found": true,
+          "basename": "updates.jsonl",
+          "file_exists": true,
+          "current_file_matches_saved_cursor": true,
+          "record": {
+            "offset": 1484856,
+            "starts_after_newline": true,
+            "record_bytes_excluding_lf": 803,
+            "newline_terminated": true,
+            "over_4_mib": false,
+            "json_valid": true,
+            "outer_type": null,
+            "payload_type": null,
+            "payload_msg_type": null,
+            "session_update": "turn_completed",
+            "usage_object_present": true,
+            "usage_is_incomplete": true,
+            "usage_numbers": {
+              "inputTokens": 268856,
+              "outputTokens": 1890,
+              "totalTokens": 270746,
+              "cachedReadTokens": 133504,
+              "cacheCreationTokens": 0,
+              "reasoningTokens": 367
+            }
+          },
+          "file_metadata_unchanged_during_probe": true
+        },
+        {
+          "kind": "accounting_anomaly",
+          "reason": "usage_incomplete",
+          "offset": 1617425,
+          "path_mapping_found": true,
+          "basename": "updates.jsonl",
+          "file_exists": true,
+          "current_file_matches_saved_cursor": true,
+          "record": {
+            "offset": 1617425,
+            "starts_after_newline": true,
+            "record_bytes_excluding_lf": 805,
+            "newline_terminated": true,
+            "over_4_mib": false,
+            "json_valid": true,
+            "outer_type": null,
+            "payload_type": null,
+            "payload_msg_type": null,
+            "session_update": "turn_completed",
+            "usage_object_present": true,
+            "usage_is_incomplete": true,
+            "usage_numbers": {
+              "inputTokens": 695977,
+              "outputTokens": 4276,
+              "totalTokens": 700253,
+              "cachedReadTokens": 685824,
+              "cacheCreationTokens": 0,
+              "reasoningTokens": 1222
+            }
+          },
+          "file_metadata_unchanged_during_probe": true
+        }
+      ]
+    }
+  ],
+  "db_metadata_unchanged": true,
+  "wal_absent_after_probe": true
+}

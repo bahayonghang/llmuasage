@@ -1,0 +1,126 @@
+{
+  "status": "work_commits_complete",
+  "base_head": "29bde59e84e1149b1d9215e020352586fb0a0ed7",
+  "index_modified": false,
+  "groups": [
+    {
+      "subject": "fix(测试): 🐛 校正时区回归与桌面格式门禁",
+      "files": [
+        ".trellis/spec/llmusage/backend/dashboard-performance-contracts.md",
+        "desktop/src-tauri/tests/quota.rs",
+        "src/query/filter.rs",
+        "src/web/mod.rs"
+      ]
+    },
+    {
+      "subject": "feat(同步)!: ✨ 完善诊断与重放写入并准备 2.0 版本",
+      "files": [
+        ".trellis/spec/llmusage/backend/ci-toolchain-contracts.md",
+        ".trellis/spec/llmusage/backend/runtime-log-contracts.md",
+        ".trellis/spec/llmusage/backend/source-sync-contracts.md",
+        ".trellis/spec/llmusage/backend/token-accounting-contracts.md",
+        ".trellis/spec/llmusage/backend/tui-subscription-contracts.md",
+        ".trellis/spec/llmusage/backend/write-fencing-contracts.md",
+        "CHANGELOG.md",
+        "Cargo.lock",
+        "Cargo.toml",
+        "README.md",
+        "README.zh-CN.md",
+        "desktop/package-lock.json",
+        "desktop/package.json",
+        "desktop/src-tauri/Cargo.lock",
+        "desktop/src-tauri/Cargo.toml",
+        "desktop/src-tauri/tauri.conf.json",
+        "docs/.vitepress/config.ts",
+        "docs/dashboard/index.md",
+        "docs/guide/first-report.md",
+        "docs/guide/getting-started.md",
+        "docs/index.md",
+        "docs/reference/cli.md",
+        "docs/reference/library-api.md",
+        "docs/reference/migration-v2.md",
+        "docs/zh/dashboard/index.md",
+        "docs/zh/guide/first-report.md",
+        "docs/zh/guide/getting-started.md",
+        "docs/zh/index.md",
+        "docs/zh/reference/cli.md",
+        "docs/zh/reference/library-api.md",
+        "docs/zh/reference/migration-v2.md",
+        "src/commands/diagnostics.rs",
+        "src/commands/doctor.rs",
+        "src/commands/source_status.rs",
+        "src/commands/sync.rs",
+        "src/commands/sync_progress.rs",
+        "src/commands/sync_summary.rs",
+        "src/domain/mod.rs",
+        "src/domain/models.rs",
+        "src/domain/source_diagnostics.rs",
+        "src/parsers/antigravity.rs",
+        "src/parsers/antigravity/decode.rs",
+        "src/parsers/antigravity/tests.rs",
+        "src/parsers/codex.rs",
+        "src/parsers/driver.rs",
+        "src/parsers/file_state.rs",
+        "src/parsers/grok.rs",
+        "src/parsers/mod.rs",
+        "src/parsers/source_files.rs",
+        "src/parsers/writer_benchmark.rs",
+        "src/query/diagnostics.rs",
+        "src/remote/importer.rs",
+        "src/remote/protocol.rs",
+        "src/runtime/logging.rs",
+        "src/store/mod.rs",
+        "src/store/sync_status.rs",
+        "src/store/sync_writer.rs",
+        "src/store/sync_writer/profiling.rs",
+        "src/store/sync_writer/profiling/tests.rs",
+        "src/sync/engine.rs",
+        "tests/sync/runtime/progress_io.rs",
+        "tests/sync/sources/antigravity.rs",
+        "tests/sync/sources/zcode.rs"
+      ]
+    }
+  ],
+  "unrecognized_paths": [],
+  "bookkeeping_scope": [
+    ".trellis/tasks/09-26-sync-diagnostics-contracts/",
+    ".trellis/tasks/09-26-antigravity-replay-preflight/",
+    ".trellis/tasks/09-26-sync-write-profiling/",
+    ".trellis/tasks/09-26-sync-diagnostics-performance/"
+  ],
+  "confirmed_at_utc": "2026-09-28T10:05:23.442845+00:00",
+  "confirmation": "User replied 确认 to both work commits and the child-first archive/journal sequence.",
+  "work_commits": [
+    {
+      "sha": "cc7eed395b56d3c9ee524aa69cc8a3a1778046e0",
+      "subject": "fix(测试): 🐛 校正时区回归与桌面格式门禁",
+      "files": 4
+    },
+    {
+      "sha": "6389cebb9a5f60e624da3122eb3ac18371e450eb",
+      "subject": "feat(同步)!: ✨ 完善诊断与重放写入并准备 2.0 版本",
+      "files": 63
+    }
+  ],
+  "child_archives": [
+    {
+      "task": "09-26-sync-diagnostics-contracts",
+      "sha": "82929bb32a39ec25c4de51d837923c91b8b8e190",
+      "files": 59,
+      "path": ".trellis/tasks/archive/2026-09/09-26-sync-diagnostics-contracts"
+    },
+    {
+      "task": "09-26-antigravity-replay-preflight",
+      "sha": "ef62682ce0971805d9725e26a39ac74c682c360c",
+      "files": 36,
+      "path": ".trellis/tasks/archive/2026-09/09-26-antigravity-replay-preflight"
+    },
+    {
+      "task": "09-26-sync-write-profiling",
+      "sha": "09e2944a28d76ca0093ba77d5796bb2addfcda39",
+      "files": 98,
+      "path": ".trellis/tasks/archive/2026-09/09-26-sync-write-profiling"
+    }
+  ],
+  "bookkeeping_evidence": "Completed task.json records and the final journal provide archive and session outcomes."
+}

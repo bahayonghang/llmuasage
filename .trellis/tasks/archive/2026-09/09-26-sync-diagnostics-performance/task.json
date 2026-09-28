@@ -1,0 +1,35 @@
+{
+  "id": "sync-diagnostics-performance",
+  "name": "sync-diagnostics-performance",
+  "title": "Sync 警告诊断与增量同步优化",
+  "description": "基于 2026-09-26 sync 日志和更新后的 ccusage、tokscale，规划可验证的数据保护、诊断与性能优化。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-09-26",
+  "completedAt": "2026-09-28",
+  "branch": "dev",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": "6389cebb9a5f60e624da3122eb3ac18371e450eb",
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "09-26-sync-diagnostics-contracts",
+    "09-26-antigravity-replay-preflight",
+    "09-26-sync-write-profiling"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "2026-09-28：diagnostics与preflight全部验收。2.0边界和迁移说明独立审查通过，正式SemVer通过；两轮完整just ci通过，最近251.635秒、lib915/integration247，锁文件不变。write-profiling已启动，当前只写测试私有计时和生成基准，尚无热点或性能收益结论。未提交/归档、安装/发布或真实数据操作。\n2026-09-28 最终交付：全部验收与独立检查完成，just ci exit 0（244.4963957 秒）；两个工作提交为 cc7eed395b56d3c9ee524aa69cc8a3a1778046e0、6389cebb9a5f60e624da3122eb3ac18371e450eb。用户已确认本地提交和归档。当前记录随后由 task.py archive 更新完成状态；未运行真实数据 sync/rebuild/reset、安装或发布。",
+  "meta": {
+    "work_commits": [
+      "cc7eed395b56d3c9ee524aa69cc8a3a1778046e0",
+      "6389cebb9a5f60e624da3122eb3ac18371e450eb"
+    ]
+  }
+}
