@@ -1,0 +1,20 @@
+   Compiling llmusage v1.4.0 (D:\Documents\Code\CLI\llmusage)
+error: cannot find macro `params` in this scope
+   --> src\query\diagnostics.rs:653:13
+    |
+653 |             params![now_utc(), serde_json::to_string(&diagnostics)?],
+    |             ^^^^^^
+
+error[E0433]: cannot find type `SourceKind` in this scope
+   --> src\query\diagnostics.rs:636:13
+    |
+636 |             SourceKind::Codex,
+    |             ^^^^^^^^^^ use of undeclared type `SourceKind`
+    |
+help: consider importing this enum through its public re-export
+    |
+620 +     use crate::SourceKind;
+    |
+
+For more information about this error, try `rustc --explain E0433`.
+error: could not compile `llmusage` (lib test) due to 2 previous errors

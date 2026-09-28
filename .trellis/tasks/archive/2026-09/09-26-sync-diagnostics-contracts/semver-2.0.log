@@ -1,0 +1,13 @@
+     Cloning v1.2.0
+    Building llmusage v2.0.0 (current)
+       Built [  36.071s] (current)
+     Parsing llmusage v2.0.0 (current)
+      Parsed [   0.094s] (current)
+    Building llmusage v1.2.0 (baseline)
+       Built [   5.475s] (baseline)
+     Parsing llmusage v1.2.0 (baseline)
+      Parsed [   0.088s] (baseline)
+    Checking llmusage v1.2.0 -> v2.0.0 (major change)
+     Checked [   0.000s] 0 checks: 0 pass, 254 skip
+     Summary no semver update required
+    Finished [  45.196s] llmusage

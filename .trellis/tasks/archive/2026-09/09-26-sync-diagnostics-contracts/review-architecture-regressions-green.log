@@ -1,0 +1,15 @@
+   Compiling llmusage v1.4.0 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage-6809b314868b42a0.lib 和对象 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage-6809b314868b42a0.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 16.38s
+     Running unittests src\lib.rs (target\debug\deps\llmusage-6809b314868b42a0.exe)
+
+running 2 tests
+test query::diagnostics::tests::source_failure_projects_warning_without_private_diagnostics ... ok
+test store::sync_status::tests::parse_issue_diagnostics_round_trip_and_reject_invalid_json ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 915 filtered out; finished in 0.37s
+

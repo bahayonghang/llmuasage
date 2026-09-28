@@ -1,0 +1,15 @@
+     Cloning HEAD
+    Building llmusage v1.4.0 (current)
+       Built [   6.402s] (current)
+     Parsing llmusage v1.4.0 (current)
+      Parsed [   0.118s] (current)
+    Building llmusage v1.4.0 (baseline)
+       Built [  67.420s] (baseline)
+     Parsing llmusage v1.4.0 (baseline)
+      Parsed [   0.110s] (baseline)
+    Checking llmusage v1.4.0 -> v1.4.0 (no change; assume patch)
+     Checked [   0.102s] 223 checks: 223 pass, 31 skip
+     Summary no semver update required
+    Finished [  81.617s] llmusage
+mbx[cache]: 0 hits, 0 misses, 309 not looked up, 2 bypassed; 0 B downloaded, 0 B uploaded, 98.0 MiB stored locally
+mbx[savings]: 725 compilations, and the box has forgotten none of them.

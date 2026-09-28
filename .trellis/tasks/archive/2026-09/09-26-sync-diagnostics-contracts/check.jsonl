@@ -1,0 +1,9 @@
+{"file": ".trellis/tasks/archive/2026-09/09-26-sync-diagnostics-performance/research/source-sync-core-excerpt.md", "reason": "有行号和源哈希的规范摘录；避免原文件注入截断，修改规范前读取权威源对应段"}
+{"file": ".trellis/tasks/archive/2026-09/09-26-sync-diagnostics-performance/research/source-sync-diagnostics-excerpt.md", "reason": "有行号和源哈希的规范摘录；避免原文件注入截断，修改规范前读取权威源对应段"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "informational usage 与认证守卫"}
+{"file": ".trellis/spec/llmusage/backend/runtime-log-contracts.md", "reason": "日志与进度输出边界"}
+{"file": ".trellis/tasks/archive/2026-09/09-26-sync-diagnostics-performance/research/parse-diagnostics.md", "reason": "本轮已定位证据、边界与可执行验收"}
+{"file": ".trellis/tasks/archive/2026-09/09-26-sync-diagnostics-performance/research/local-state-analysis.md", "reason": "本轮已定位证据、边界与可执行验收"}
+{"file": ".trellis/tasks/archive/2026-09/09-26-sync-diagnostics-performance/research/upstream-comparison.md", "reason": "本轮已定位证据、边界与可执行验收"}
+{"file": ".trellis/tasks/archive/2026-09/09-26-sync-diagnostics-contracts/research/timezone-gate-repair.md", "reason": "已批准门禁扩展：Local IANA 契约、UTC fixture 根因与定向验证"}
+{"file": ".trellis/tasks/archive/2026-09/09-26-sync-diagnostics-contracts/research/semver-remediation.md", "reason": "正式基线差异及待决 API 版本边界，不以增量比较替代正式门禁"}

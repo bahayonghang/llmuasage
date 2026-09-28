@@ -1,0 +1,8 @@
+{
+  "command": "just ci",
+  "exitCode": 0,
+  "elapsedSeconds": 276.111,
+  "endedAt": "2026-09-28T01:22:50.6273794-05:00",
+  "cargo": "C:/Users/lyh/.cargo/bin\\cargo.exe",
+  "locksUnchanged": true
+}

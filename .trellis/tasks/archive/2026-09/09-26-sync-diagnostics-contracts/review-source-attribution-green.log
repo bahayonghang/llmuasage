@@ -1,0 +1,19 @@
+   Compiling llmusage v1.4.0 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage.lib 和对象 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (bin "llmusage") generated 1 warning
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\target\debug\deps\sync-c7acfcc23bc77bb7.lib 和对象 D:\Documents\Code\CLI\llmusage\target\debug\deps\sync-c7acfcc23bc77bb7.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (test "sync") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 14.09s
+     Running tests\sync\main.rs (target\debug\deps\sync-c7acfcc23bc77bb7.exe)
+
+running 1 test
+test sources::antigravity::antigravity_record_faults_and_source_failures_preserve_history ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 142 filtered out; finished in 3.96s
+

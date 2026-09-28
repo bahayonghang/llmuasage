@@ -1,0 +1,31 @@
+{
+  "id": "sync-diagnostics-contracts",
+  "name": "sync-diagnostics-contracts",
+  "title": "Sync 诊断分类与定位契约",
+  "description": "区分源级阻断与记录解析问题，保留安全定位、样本总数和多输出通道边界。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-09-26",
+  "completedAt": "2026-09-28",
+  "branch": "dev",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": "6389cebb9a5f60e624da3122eb3ac18371e450eb",
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "09-26-sync-diagnostics-performance",
+  "relatedFiles": [],
+  "notes": "2026-09-28：D1–D5/G1–G3 已验证。2.0.0 13 文件/15 字段同步，第三方锁依赖不变；迁移说明由独立检查核对；正式 SemVer exit 0（major，0 checks/254 skip），完整 just ci exit 0（ci-v2-result.json，276.111 秒）。继续 preflight → writer profiling。未提交、归档、发布、安装或操作真实 usage 数据。\n2026-09-28 最终交付：全部验收与独立检查完成，just ci exit 0（244.4963957 秒）；两个工作提交为 cc7eed395b56d3c9ee524aa69cc8a3a1778046e0、6389cebb9a5f60e624da3122eb3ac18371e450eb。用户已确认本地提交和归档。当前记录随后由 task.py archive 更新完成状态；未运行真实数据 sync/rebuild/reset、安装或发布。",
+  "meta": {
+    "work_commits": [
+      "cc7eed395b56d3c9ee524aa69cc8a3a1778046e0",
+      "6389cebb9a5f60e624da3122eb3ac18371e450eb"
+    ]
+  }
+}

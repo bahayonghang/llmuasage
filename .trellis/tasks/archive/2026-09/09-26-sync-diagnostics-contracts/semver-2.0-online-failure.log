@@ -1,0 +1,127 @@
+     Cloning v1.2.0
+error: running 'cargo update' on crate 'llmusage' failed with output:
+-----
+    Updating crates.io index
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (3 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (2 tries remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+warning: spurious network error (1 try remaining): [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+error: failed to get `anyhow` as a dependency of package `llmusage v2.0.0 (D:\Documents\Code\CLI\llmusage)`
+    ... which satisfies path dependency `llmusage` of package `placeholder v0.0.0 (D:\Documents\Code\CLI\llmusage\target\semver-checks\local-llmusage-2_0_0-x86_64_pc_windows_msvc-0560cb070d6db9d0)`
+
+Caused by:
+  failed to load source for dependency `anyhow`
+
+Caused by:
+  unable to update registry `crates-io`
+
+Caused by:
+  download of config.json failed
+
+Caused by:
+  [35] SSL connect error (schannel: failed to receive handshake, SSL/TLS connection failed)
+
+-----
+error: failed to update dependencies for crate llmusage v2.0.0
+note: this is unlikely to be a bug in cargo-semver-checks,
+      and is probably an issue with the crate's Cargo.toml
+note: the following command can be used to reproduce the compilation error:
+      cargo new --lib example &&
+          cd example &&
+          echo '[workspace]' >> Cargo.toml &&
+          cargo add --path \\?\D:\Documents\Code\CLI\llmusage --features default,testing &&
+          cargo update
+
+error: aborting due to failure to run 'cargo update' for crate llmusage v2.0.0

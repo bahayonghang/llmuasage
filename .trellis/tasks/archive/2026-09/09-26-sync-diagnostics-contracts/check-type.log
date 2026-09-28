@@ -1,0 +1,15 @@
+   Compiling num-traits v0.2.19
+    Checking regex-syntax v0.8.11
+    Checking regex-automata v0.4.18
+    Checking chrono v0.4.45
+    Checking matchers v0.2.0
+    Checking tracing-subscriber v0.3.23
+    Checking rusqlite v0.40.2
+    Checking chrono-tz v0.10.4
+    Checking tracing-appender v0.2.5
+    Checking llmusage v1.4.0 (D:\Documents\Code\CLI\llmusage)
+mbx[progress]: 15s elapsed; 0 hits, 0 misses, 0 bypassed, 11 not looked up; ~0s compiler work saved
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 15.81s
+mbx[cache]: 0 hits, 0 misses, 12 not looked up; 0 B downloaded, 0 B uploaded, 36.5 MiB stored locally
+mbx[savings]: 725 compilations served. the monocle stays on.
+EXIT_CODE=0

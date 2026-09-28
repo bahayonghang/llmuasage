@@ -1,0 +1,21 @@
+   Compiling llmusage v2.0.0 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\target\debug\deps\api-21e6dbe631027b4c.lib 和对象 D:\Documents\Code\CLI\llmusage\target\debug\deps\api-21e6dbe631027b4c.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (test "api") generated 1 warning
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage.lib 和对象 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (bin "llmusage") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 28.33s
+     Running tests\api\main.rs (target\debug\deps\api-21e6dbe631027b4c.exe)
+
+running 3 tests
+test facade::cli_sync_uses_shared_stable_validation_codes ... ok
+test facade::root_facade_exposes_sync_job_types ... ok
+test facade::root_facade_opens_store_and_dashboard ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.01s
+

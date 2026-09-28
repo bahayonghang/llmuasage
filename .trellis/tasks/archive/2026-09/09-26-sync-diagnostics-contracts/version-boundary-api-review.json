@@ -1,0 +1,321 @@
+{
+  "struct_count": 14,
+  "method_count": 16,
+  "structs": [
+    {
+      "struct": "JsonlRecord",
+      "current_path": "src/parsers/file_state.rs",
+      "line": 142,
+      "added_fields": [
+        "durable",
+        "line_number"
+      ],
+      "removed_fields": [],
+      "baseline_path": "src/parsers/file_state.rs"
+    },
+    {
+      "struct": "DashboardSnapshot",
+      "current_path": "src/query/snapshot.rs",
+      "line": 16,
+      "added_fields": [
+        "hosts"
+      ],
+      "removed_fields": [],
+      "baseline_path": "src/query/mod.rs"
+    },
+    {
+      "struct": "DashboardCoreSnapshot",
+      "current_path": "src/query/snapshot.rs",
+      "line": 80,
+      "added_fields": [
+        "hosts"
+      ],
+      "removed_fields": [],
+      "baseline_path": "src/query/mod.rs"
+    },
+    {
+      "struct": "DashboardInteractiveSnapshot",
+      "current_path": "src/query/snapshot.rs",
+      "line": 111,
+      "added_fields": [
+        "hosts"
+      ],
+      "removed_fields": [],
+      "baseline_path": "src/query/mod.rs"
+    },
+    {
+      "struct": "SourceCapabilityStatus",
+      "current_path": "src/commands/source_status.rs",
+      "line": 19,
+      "added_fields": [
+        "accounting"
+      ],
+      "removed_fields": [],
+      "baseline_path": "src/commands/source_status.rs"
+    },
+    {
+      "struct": "ReportFilter",
+      "current_path": "src/query/reports.rs",
+      "line": 29,
+      "added_fields": [
+        "filter"
+      ],
+      "removed_fields": [
+        "since",
+        "source",
+        "timezone",
+        "until"
+      ],
+      "baseline_path": "src/query/reports.rs"
+    },
+    {
+      "struct": "SyncShard",
+      "current_path": "src/store/mod.rs",
+      "line": 796,
+      "added_fields": [
+        "host_id",
+        "host_prefix_applied",
+        "opencode_cursor",
+        "zcode_cursor"
+      ],
+      "removed_fields": [],
+      "baseline_path": "src/store/mod.rs"
+    },
+    {
+      "struct": "HomeOverviewSeriesItem",
+      "current_path": "src/query/home_overview.rs",
+      "line": 59,
+      "added_fields": [
+        "antigravity_ide"
+      ],
+      "removed_fields": [],
+      "baseline_path": "src/query/home_overview.rs"
+    },
+    {
+      "struct": "TopSessionRow",
+      "current_path": "src/query/top_sessions.rs",
+      "line": 68,
+      "added_fields": [
+        "first_event_at",
+        "last_event_at"
+      ],
+      "removed_fields": [],
+      "baseline_path": "src/query/top_sessions.rs"
+    },
+    {
+      "struct": "QueryFilter",
+      "current_path": "src/query/filter.rs",
+      "line": 29,
+      "added_fields": [
+        "host_id"
+      ],
+      "removed_fields": [],
+      "baseline_path": "src/query/filter.rs"
+    },
+    {
+      "struct": "ReportCommonArgs",
+      "current_path": "src/commands/report_args.rs",
+      "line": 19,
+      "added_fields": [
+        "host"
+      ],
+      "removed_fields": [],
+      "baseline_path": "src/commands/report_args.rs"
+    },
+    {
+      "struct": "UsageEvent",
+      "current_path": "src/domain/models.rs",
+      "line": 329,
+      "added_fields": [
+        "source_cost"
+      ],
+      "removed_fields": [],
+      "baseline_path": "src/domain/models.rs"
+    },
+    {
+      "struct": "DriveContext",
+      "current_path": "src/parsers/driver.rs",
+      "line": 52,
+      "added_fields": [
+        "sweep_host_ids"
+      ],
+      "removed_fields": [],
+      "baseline_path": "src/parsers/driver.rs"
+    },
+    {
+      "struct": "LossyRebuildRisk",
+      "current_path": "src/store/source_file.rs",
+      "line": 57,
+      "added_fields": [
+        "host_id"
+      ],
+      "removed_fields": [],
+      "baseline_path": "src/store/source_file.rs"
+    }
+  ],
+  "methods": [
+    {
+      "owner": "ReportCommonArgs",
+      "method": "to_filter",
+      "arguments": [
+        "store",
+        "project"
+      ],
+      "path": "src/commands/report_args.rs",
+      "line": 76
+    },
+    {
+      "owner": "SourceFileStore",
+      "method": "counts",
+      "arguments": [
+        "source",
+        "host_id"
+      ],
+      "path": "src/store/source_file.rs",
+      "line": 92
+    },
+    {
+      "owner": "SourceFileStore",
+      "method": "tracked_paths",
+      "arguments": [
+        "source",
+        "host_id"
+      ],
+      "path": "src/store/source_file.rs",
+      "line": 98
+    },
+    {
+      "owner": "SourceFileStore",
+      "method": "lossy_rebuild_risk",
+      "arguments": [
+        "source",
+        "host_id"
+      ],
+      "path": "src/store/source_file.rs",
+      "line": 157
+    },
+    {
+      "owner": "SourceFileStore",
+      "method": "sweep_missing",
+      "arguments": [
+        "source",
+        "host_id",
+        "run_started_at"
+      ],
+      "path": "src/store/source_file.rs",
+      "line": 118
+    },
+    {
+      "owner": "SourceFileStore",
+      "method": "mark_inventory_seen",
+      "arguments": [
+        "source",
+        "host_id",
+        "file_paths",
+        "seen_at"
+      ],
+      "path": "src/store/source_file.rs",
+      "line": 139
+    },
+    {
+      "owner": "SyncStatusStore",
+      "method": "load_source_sync_statuses",
+      "arguments": [
+        "host_id"
+      ],
+      "path": "src/store/sync_status.rs",
+      "line": 29
+    },
+    {
+      "owner": "SyncStatusStore",
+      "method": "save_source_sync_statuses",
+      "arguments": [
+        "host_id",
+        "statuses"
+      ],
+      "path": "src/store/sync_status.rs",
+      "line": 138
+    },
+    {
+      "owner": "SyncStatusStore",
+      "method": "mark_recent_completed",
+      "arguments": [
+        "source",
+        "host_id",
+        "at"
+      ],
+      "path": "src/store/sync_status.rs",
+      "line": 263
+    },
+    {
+      "owner": "Store",
+      "method": "reset_for_source",
+      "arguments": [
+        "source",
+        "host_id"
+      ],
+      "path": "src/store/schema.rs",
+      "line": 345
+    },
+    {
+      "owner": "Store",
+      "method": "mark_source_file_deleted",
+      "arguments": [
+        "source",
+        "host_id",
+        "file_path"
+      ],
+      "path": "src/store/source_file.rs",
+      "line": 364
+    },
+    {
+      "owner": "CursorStore",
+      "method": "load_file_cursors",
+      "arguments": [
+        "source",
+        "host_id"
+      ],
+      "path": "src/store/cursor.rs",
+      "line": 24
+    },
+    {
+      "owner": "CursorStore",
+      "method": "load_opencode_cursor",
+      "arguments": [
+        "host_id"
+      ],
+      "path": "src/store/cursor.rs",
+      "line": 76
+    },
+    {
+      "owner": "CursorStore",
+      "method": "load_zcode_cursor",
+      "arguments": [
+        "host_id"
+      ],
+      "path": "src/store/cursor.rs",
+      "line": 121
+    },
+    {
+      "owner": "CursorStore",
+      "method": "save_opencode_cursor",
+      "arguments": [
+        "host_id",
+        "cursor"
+      ],
+      "path": "src/store/cursor.rs",
+      "line": 112
+    },
+    {
+      "owner": "CursorStore",
+      "method": "save_zcode_cursor",
+      "arguments": [
+        "host_id",
+        "cursor"
+      ],
+      "path": "src/store/cursor.rs",
+      "line": 161
+    }
+  ],
+  "bilingual_tables_match_source": true
+}

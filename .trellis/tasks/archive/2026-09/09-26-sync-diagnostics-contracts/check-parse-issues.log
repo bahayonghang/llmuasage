@@ -1,0 +1,38 @@
+   Compiling llmusage v1.4.0 (D:\Documents\Code\CLI\llmusage)
+mbx[warning]: incremental state was not reused: absolute path has no stable cache mapping: C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Tools\MSVC\14.51.36231\atlmfc\lib\x64
+mbx[warning]: prediction was not restored: absolute path has no stable cache mapping: C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Tools\MSVC\14.51.36231\atlmfc\lib\x64
+mbx[progress]: 15s elapsed; 0 hits, 0 misses, 0 bypassed, 0 not looked up; ~0s compiler work saved
+mbx[progress]: 30s elapsed; 0 hits, 0 misses, 0 bypassed, 0 not looked up; ~0s compiler work saved
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage-11ade2aca729d383.lib 和对象 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage-11ade2aca729d383.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+mbx[warning]: result was not stored: rustc search path kind is not cacheable yet: native
+warning: `llmusage` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 42.19s
+     Running unittests src\lib.rs (target\debug\deps\llmusage-11ade2aca729d383.exe)
+
+running 18 tests
+test commands::source_status::tests::parse_issue_status_prints_reason_without_at_zero ... ok
+test commands::source_status::tests::parse_issue_summary_is_emitted_for_any_nonzero_class ... ok
+test commands::sync_summary::tests::parse_issue_counts_are_visible_without_sample_contents ... ok
+test commands::sync_summary::tests::parse_issue_samples_print_basename_never_full_path ... ok
+test commands::sync_summary::tests::parse_issue_samples_print_reason_without_at_zero ... ok
+test commands::sync_summary::tests::parse_issue_samples_report_offsets_and_omitted_count ... ok
+test commands::sync_summary::tests::skipped_only_parse_issues_are_not_warning_colored ... ok
+test domain::models::tests::parse_issue_kinds_round_trip_including_new_classes ... ok
+test domain::models::tests::parse_issue_sample_location_units_and_privacy ... ok
+test domain::models::tests::parse_issue_sample_reason_defaults_when_missing ... ok
+test domain::models::tests::parse_issues_old_json_deserializes_new_counters_as_zero ... ok
+test domain::models::tests::parse_issues_sample_summary_retains_counts_after_merge ... ok
+test domain::source_diagnostics::tests::parse_issues_legacy_json_and_source_failure_round_trip ... ok
+test parsers::driver::tests::parse_issue_info_event_includes_source_counts_and_reasons ... ok
+test parsers::dsh::tests::version_drift_is_counted_as_a_parse_issue ... ok
+test query::tests::sync_command_center_projects_parse_issue_counters_without_samples ... ok
+test store::migrations::tests::migration_v17_adds_bounded_parse_issue_diagnostics ... ok
+test store::sync_status::tests::parse_issue_diagnostics_round_trip_and_reject_invalid_json ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 897 filtered out; finished in 0.36s
+
+mbx[savings]: 725 compilations served. the monocle stays on.
+EXIT_CODE=0

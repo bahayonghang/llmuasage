@@ -1,0 +1,8 @@
+{
+  "command": "rustc --edition=2024 --crate-name migration_v2_example --emit=metadata <exact bilingual example in main> --extern llmusage=<current rlib> -L dependency=target/debug/deps",
+  "rlib": "C:\\Users\\lyh\\AppData\\Local\\mbx\\targets\\v1\\43c669ae3236467fb96e4cdb1508bad29c8d456ef750d3bc51128ed39f5dfa21\\debug\\deps\\libllmusage-d6976bad75a1136c.rlib",
+  "exitCode": 0,
+  "stdout": "",
+  "stderr": "",
+  "bilingual_examples_equal": true
+}

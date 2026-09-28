@@ -1,0 +1,19 @@
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\target\debug\deps\cli-bba970b06f6069db.lib 和对象 D:\Documents\Code\CLI\llmusage\target\debug\deps\cli-bba970b06f6069db.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage.lib 和对象 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (test "cli") generated 1 warning
+warning: `llmusage` (bin "llmusage") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.67s
+     Running tests\cli\main.rs (target\debug\deps\cli-bba970b06f6069db.exe)
+
+running 1 test
+test operations::status_failure_emits_error_without_run_log ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 33 filtered out; finished in 0.16s
+
+EXIT_CODE=0

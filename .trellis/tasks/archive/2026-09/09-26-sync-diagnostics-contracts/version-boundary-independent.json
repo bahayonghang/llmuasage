@@ -1,0 +1,112 @@
+{
+  "version_files": 13,
+  "version_fields": 15,
+  "entries": [
+    {
+      "path": "Cargo.toml",
+      "field": "package.version",
+      "value": "2.0.0"
+    },
+    {
+      "path": "desktop/src-tauri/Cargo.toml",
+      "field": "package.version",
+      "value": "2.0.0"
+    },
+    {
+      "path": "Cargo.lock",
+      "field": "llmusage.version",
+      "value": "2.0.0"
+    },
+    {
+      "path": "desktop/src-tauri/Cargo.lock",
+      "field": "llmusage.version",
+      "value": "2.0.0"
+    },
+    {
+      "path": "desktop/src-tauri/Cargo.lock",
+      "field": "llmusage-desktop.version",
+      "value": "2.0.0"
+    },
+    {
+      "path": "desktop/package.json",
+      "field": "version",
+      "value": "2.0.0"
+    },
+    {
+      "path": "desktop/package-lock.json",
+      "field": "version",
+      "value": "2.0.0"
+    },
+    {
+      "path": "desktop/package-lock.json",
+      "field": "packages[root].version",
+      "value": "2.0.0"
+    },
+    {
+      "path": "desktop/src-tauri/tauri.conf.json",
+      "field": "version",
+      "value": "2.0.0"
+    },
+    {
+      "path": "README.md",
+      "field": "line 9",
+      "value": "2.0.0"
+    },
+    {
+      "path": "README.zh-CN.md",
+      "field": "line 9",
+      "value": "2.0.0"
+    },
+    {
+      "path": "docs/index.md",
+      "field": "line 51",
+      "value": "2.0.0"
+    },
+    {
+      "path": "docs/zh/index.md",
+      "field": "line 51",
+      "value": "2.0.0"
+    },
+    {
+      "path": "docs/reference/cli.md",
+      "field": "line 3",
+      "value": "2.0.0"
+    },
+    {
+      "path": "docs/zh/reference/cli.md",
+      "field": "line 3",
+      "value": "2.0.0"
+    }
+  ],
+  "locks": [
+    {
+      "path": "Cargo.lock",
+      "third_party_count": 421,
+      "third_party_structure_unchanged_from_HEAD": true,
+      "only_approved_local_version_changes": true,
+      "third_party_sha256": "85a1394865e3af41eab56a48c91741512907be8dfcdac3a4919c914ba77e3faf"
+    },
+    {
+      "path": "desktop/src-tauri/Cargo.lock",
+      "third_party_count": 676,
+      "third_party_structure_unchanged_from_HEAD": true,
+      "only_approved_local_version_changes": true,
+      "third_party_sha256": "b58fc28b7832e7e2163de906f1fee93199a8dc46947d792011a8d3514887d1a1"
+    },
+    {
+      "path": "desktop/package-lock.json",
+      "third_party_count": 226,
+      "third_party_structure_unchanged_from_HEAD": true,
+      "only_approved_local_version_changes": true,
+      "third_party_sha256": "44187bfcd357a6d03142aa310d10f8dd4e2221b4b67ee98b59ee81b4f6b22467"
+    },
+    {
+      "path": "docs/package-lock.json",
+      "third_party_count": 173,
+      "third_party_structure_unchanged_from_HEAD": true,
+      "only_approved_local_version_changes": true,
+      "third_party_sha256": "0bb9020dcd1c5c4bb64f0bd04b47d76910fa3761322440373ac68dbae5d6a542"
+    }
+  ],
+  "semver_baseline_commit": "9b7a6f3dec12764222891c2d8f5aeb42db7bd490"
+}

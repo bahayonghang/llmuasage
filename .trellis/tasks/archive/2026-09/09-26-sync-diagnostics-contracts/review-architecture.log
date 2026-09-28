@@ -1,0 +1,25 @@
+   Compiling llmusage v1.4.0 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage.lib 和对象 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (bin "llmusage") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.02s
+     Running tests\architecture\main.rs (target\debug\deps\architecture_dependencies-bb0f7b80095de236.exe)
+
+running 12 tests
+test command_layer_does_not_implement_sync_owned_types_or_traits ... ok
+test fixtures_cover_supported_rust_path_forms ... ok
+test non_command_layers_do_not_depend_on_command_sync ... ok
+test ownership_fixtures_cover_non_adapter_dependencies_and_sync_impls ... ok
+test query_architecture_fixtures_cover_edges_and_canonical_ownership ... ok
+test query_layer_does_not_depend_on_commands_web_or_tui ... ok
+test query_vertical_module_ownership_is_canonical ... ok
+test query_vertical_modules_stay_within_navigation_budgets ... ok
+test remote_layer_does_not_depend_on_commands ... ok
+test store_does_not_depend_on_query ... ok
+test store_query_fixtures_cover_supported_path_forms ... ok
+test sync_layer_does_not_depend_on_commands ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.93s
+

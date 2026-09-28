@@ -1,0 +1,80 @@
+     Cloning 29bde59e84e1149b1d9215e020352586fb0a0ed7
+    Building llmusage v1.4.0 (current)
+       Built [   7.162s] (current)
+     Parsing llmusage v1.4.0 (current)
+      Parsed [   0.118s] (current)
+    Building llmusage v1.4.0 (baseline)
+error: running cargo-doc on crate 'llmusage' failed with output:
+-----
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.26
+   Compiling quote v1.0.47
+    Checking windows-link v0.2.1
+   Compiling getrandom v0.4.3
+   Compiling cfg-if v1.0.5
+   Compiling shlex v2.0.1
+   Compiling find-msvc-tools v0.1.14
+    Checking itoa v1.0.18
+    Checking once_cell v1.21.4
+    Checking foldhash v0.2.0
+    Checking smallvec v1.16.2
+    Checking pin-project-lite v0.2.17
+    Checking equivalent v1.0.2
+    Checking allocator-api2 v0.2.21
+    Checking bytes v1.12.1
+    Checking futures-core v0.3.34
+    Checking stable_deref_trait v1.2.1
+   Compiling serde_core v1.0.229
+    Checking log v0.4.34
+   Compiling version_check v0.9.5
+   Compiling fs_extra v1.3.0
+   Compiling dunce v1.0.5
+   Compiling serde v1.0.229
+    Checking tracing-core v0.1.36
+    Checking bitflags v2.13.2
+    Checking slab v0.4.12
+   Compiling pkg-config v0.3.34
+    Checking windows-sys v0.61.2
+   Compiling aws-lc-rs v1.18.1
+   Compiling uncased v0.9.10
+    Checking percent-encoding v2.3.2
+   Compiling heck v0.5.0
+    Checking writeable v0.6.4
+   Compiling thiserror v2.0.21
+   Compiling rustversion v1.0.23
+    Checking litemap v0.8.3
+    Checking hashbrown v0.17.1
+    Checking memchr v2.8.3
+    Checking futures-task v0.3.34
+   Compiling icu_normalizer_data v2.3.0
+    Checking ryu v1.0.23
+    Checking http v1.5.0
+    Checking utf8_iter v1.0.4
+   Compiling strsim v0.11.1
+error: linking with `link.exe` failed: exit code: 1104
+  |
+  = note: "C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise\\VC\\Tools\\MSVC\\14.51.36231\\bin\\HostX64\\x64\\link.exe" "/NOLOGO" "D:\\Documents\\Code\\CLI\\llmusage\\target\\semver-checks\\git-29bde59e84e1149b1d9215e020352586fb0a0ed7\\local-llmusage-1_4_0-x86_64_pc_windows_msvc-4d32e1615feb829f\\target\\debug\\build\\uncased-aae24b8555f36978\\rustcKcEdjC\\symbols.o" "<2 object files omitted>" "C:\\Users\\lyh\\AppData\\Local\\mbx\\targets\\v1\\43c669ae3236467fb96e4cdb1508bad29c8d456ef750d3bc51128ed39f5dfa21\\semver-checks\\git-29bde59e84e1149b1d9215e020352586fb0a0ed7\\local-llmusage-1_4_0-x86_64_pc_windows_msvc-4d32e1615feb829f\\target\\debug\\deps/libversion_check-7daf9b28234763b4.rlib" "<sysroot>\\lib\\rustlib\\x86_64-pc-windows-msvc\\lib/{libstd-*,libpanic_unwind-*,libcfg_if-*,libwindows_link-*,librustc_demangle-*,libstd_detect-*,libhashbrown-*,librustc_std_workspace_alloc-*,libunwind-*,librustc_std_workspace_core-*,liballoc-*,libcore-*,libcompiler_builtins-*}.rlib" "kernel32.lib" "kernel32.lib" "kernel32.lib" "ntdll.lib" "userenv.lib" "ws2_32.lib" "dbghelp.lib" "/defaultlib:msvcrt" "/NXCOMPAT" "/OUT:D:\\Documents\\Code\\CLI\\llmusage\\target\\semver-checks\\git-29bde59e84e1149b1d9215e020352586fb0a0ed7\\local-llmusage-1_4_0-x86_64_pc_windows_msvc-4d32e1615feb829f\\target\\debug\\build\\uncased-aae24b8555f36978\\build_script_build-aae24b8555f36978.exe" "/OPT:REF,NOICF" "/DEBUG" "/PDBALTPATH:%_PDB%" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\intrinsic.natvis" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\liballoc.natvis" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\libcore.natvis" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\libstd.natvis"
+  = note: some arguments are omitted. use `--verbose` to show all linker arguments
+  = note: LINK : fatal error LNK1104: 无法打开文件“C:\Users\lyh\AppData\Local\mbx\targets\v1\43c669ae3236467fb96e4cdb1508bad29c8d456ef750d3bc51128ed39f5dfa21\semver-checks\git-29bde59e84e1149b1d9215e020352586fb0a0ed7\local-llmusage-1_4_0-x86_64_pc_windows_msvc-4d32e1615feb829f\target\debug\deps\libversion_check-7daf9b28234763b4.rlib”
+          
+
+error: could not compile `uncased` (build script) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+
+-----
+
+error: failed to build rustdoc for crate llmusage v1.4.0
+note: this is usually due to a compilation error in the crate,
+      and is unlikely to be a bug in cargo-semver-checks
+note: the following command can be used to reproduce the error:
+      cargo new --lib example &&
+          cd example &&
+          echo '[workspace]' >> Cargo.toml &&
+          cargo add --path \\?\C:\Users\lyh\AppData\Local\mbx\targets\v1\43c669ae3236467fb96e4cdb1508bad29c8d456ef750d3bc51128ed39f5dfa21\semver-checks\git-29bde59e84e1149b1d9215e020352586fb0a0ed7\b6e8da813d6a22892eaacb07cd69f751f84ccfd9 --features default,testing &&
+          cargo check &&
+          cargo doc
+
+error: aborting due to failure to build rustdoc for crate llmusage v1.4.0
+mbx[cache]: 0 hits, 0 misses, 48 not looked up, 1 bypassed; 0 B downloaded, 0 B uploaded, 2.4 MiB stored locally
+mbx[gc]: evicted 0 objects and 0 action results (399.9 KiB logical); 22.1 GiB logical remain
+mbx[savings]: 725 compilations, and the box has forgotten none of them.
