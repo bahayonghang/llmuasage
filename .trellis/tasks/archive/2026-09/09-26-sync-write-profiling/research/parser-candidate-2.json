@@ -1,0 +1,5069 @@
+[
+  {
+    "changed_files": 0,
+    "environment": {
+      "cache_state": "warm OS cache; database copy and checkpoint outside timing",
+      "clock": "Instant Duration nanoseconds; resolution measured separately",
+      "minimum_observed_clock_interval_ns": 100,
+      "package": "2.0.0",
+      "pragmas": {
+        "busy_timeout": "Integer(30000)",
+        "cache_size": "Integer(-2000)",
+        "foreign_keys": "Integer(1)",
+        "journal_mode": "Text(\"wal\")",
+        "page_size": "Integer(4096)",
+        "synchronous": "Integer(1)",
+        "temp_store": "Integer(2)",
+        "user_version": "Integer(0)",
+        "wal_autocheckpoint": "Integer(1000)"
+      },
+      "profile": "release",
+      "schema_version": "24",
+      "sqlite": "3.53.2"
+    },
+    "expected_scanned_bytes": 0,
+    "files": 2,
+    "fine_profile": false,
+    "initial_events": 1000,
+    "kind": "parser_manifest",
+    "measured_pairs": 15,
+    "parallelism": 1,
+    "seed_sha256": "5579d81e8baef8f3c364d3fa7b3fbbeaa8526d8ce024b49067eb36a8e940e339",
+    "seed_variant": "Baseline",
+    "temp_volume": "D:",
+    "workload": "codex_hot"
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [],
+    "round": 0,
+    "total_ns": 18882800,
+    "variant": "Baseline",
+    "warmup": true,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 5464300,
+    "writer_finish_ns": 5530800
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [],
+    "round": 0,
+    "total_ns": 17432900,
+    "variant": "Candidate",
+    "warmup": true,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 5944600,
+    "writer_finish_ns": 4181300
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "candidate_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1000,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1000,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 0,
+    "workload": "codex_hot"
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [],
+    "round": 1,
+    "total_ns": 17952400,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 5380200,
+    "writer_finish_ns": 5351000
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [],
+    "round": 1,
+    "total_ns": 18887600,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 5994000,
+    "writer_finish_ns": 4966000
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "candidate_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1000,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1000,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 1,
+    "workload": "codex_hot"
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [],
+    "round": 2,
+    "total_ns": 20047300,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 6070700,
+    "writer_finish_ns": 5658400
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [],
+    "round": 2,
+    "total_ns": 21276500,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 6033200,
+    "writer_finish_ns": 7487900
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "candidate_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1000,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1000,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 2,
+    "workload": "codex_hot"
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [],
+    "round": 3,
+    "total_ns": 19643900,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 5811200,
+    "writer_finish_ns": 5818000
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [],
+    "round": 3,
+    "total_ns": 19826400,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 6691400,
+    "writer_finish_ns": 5457400
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "candidate_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1000,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1000,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 3,
+    "workload": "codex_hot"
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [],
+    "round": 4,
+    "total_ns": 18483900,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 5372300,
+    "writer_finish_ns": 5929100
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [],
+    "round": 4,
+    "total_ns": 19529000,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 5035100,
+    "writer_finish_ns": 6262400
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "candidate_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1000,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1000,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 4,
+    "workload": "codex_hot"
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [],
+    "round": 5,
+    "total_ns": 22891900,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 7691100,
+    "writer_finish_ns": 5747700
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [],
+    "round": 5,
+    "total_ns": 18596200,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 5843700,
+    "writer_finish_ns": 5103400
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "candidate_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1000,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1000,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 5,
+    "workload": "codex_hot"
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [],
+    "round": 6,
+    "total_ns": 19911500,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 5537600,
+    "writer_finish_ns": 5627800
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [],
+    "round": 6,
+    "total_ns": 18882600,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 5247100,
+    "writer_finish_ns": 5740500
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "candidate_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1000,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1000,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 6,
+    "workload": "codex_hot"
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [],
+    "round": 7,
+    "total_ns": 19091600,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 5476200,
+    "writer_finish_ns": 5409800
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [],
+    "round": 7,
+    "total_ns": 21345500,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 5699500,
+    "writer_finish_ns": 7051300
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "candidate_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1000,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1000,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 7,
+    "workload": "codex_hot"
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [],
+    "round": 8,
+    "total_ns": 17910900,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 5633700,
+    "writer_finish_ns": 4819800
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [],
+    "round": 8,
+    "total_ns": 19163200,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 5895100,
+    "writer_finish_ns": 5307400
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "candidate_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1000,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1000,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 8,
+    "workload": "codex_hot"
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [],
+    "round": 9,
+    "total_ns": 19193000,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 5661200,
+    "writer_finish_ns": 5381200
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [],
+    "round": 9,
+    "total_ns": 18881000,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 5304500,
+    "writer_finish_ns": 5030400
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "candidate_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1000,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1000,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 9,
+    "workload": "codex_hot"
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [],
+    "round": 10,
+    "total_ns": 21695400,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 6700000,
+    "writer_finish_ns": 5827100
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [],
+    "round": 10,
+    "total_ns": 23916000,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 7695500,
+    "writer_finish_ns": 6945800
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "candidate_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1000,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1000,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 10,
+    "workload": "codex_hot"
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [],
+    "round": 11,
+    "total_ns": 23872900,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 7997500,
+    "writer_finish_ns": 6026700
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [],
+    "round": 11,
+    "total_ns": 19318700,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 5811500,
+    "writer_finish_ns": 4919200
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "candidate_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1000,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1000,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 11,
+    "workload": "codex_hot"
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [],
+    "round": 12,
+    "total_ns": 19317700,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 7525500,
+    "writer_finish_ns": 3649300
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [],
+    "round": 12,
+    "total_ns": 19805400,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 6435300,
+    "writer_finish_ns": 5377600
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "candidate_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1000,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1000,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 12,
+    "workload": "codex_hot"
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [],
+    "round": 13,
+    "total_ns": 18879100,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 5683000,
+    "writer_finish_ns": 5085900
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [],
+    "round": 13,
+    "total_ns": 20028500,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 5689700,
+    "writer_finish_ns": 5330600
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "candidate_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1000,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1000,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 13,
+    "workload": "codex_hot"
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [],
+    "round": 14,
+    "total_ns": 21071300,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 7752200,
+    "writer_finish_ns": 5386100
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [],
+    "round": 14,
+    "total_ns": 20809700,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 6358400,
+    "writer_finish_ns": 5772000
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "candidate_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1000,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1000,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 14,
+    "workload": "codex_hot"
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [],
+    "round": 15,
+    "total_ns": 19916900,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 5668000,
+    "writer_finish_ns": 5217300
+  },
+  {
+    "bytes_scanned": 0,
+    "changed_files": 0,
+    "events_inserted": 0,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [],
+    "round": 15,
+    "total_ns": 18873300,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_hot",
+    "write_ns": 0,
+    "writer_begin_ns": 5885600,
+    "writer_finish_ns": 5002300
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "candidate_digest": "342120b6e606372ef37598bd23e607d8722b2a779650b538e91b2bcfb69c16ac",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1000,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1000,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 15,
+    "workload": "codex_hot"
+  },
+  {
+    "baseline_total": {
+      "iqr_ns": 1174000,
+      "mad_ns": 709800.0,
+      "max_ns": 21695400,
+      "median_ns": 19318700.0,
+      "min_ns": 17910900,
+      "quartile_method": "sorted indices n/4 and 3n/4"
+    },
+    "candidate_total": {
+      "iqr_ns": 2184900,
+      "mad_ns": 761300.0,
+      "max_ns": 23916000,
+      "median_ns": 19643900.0,
+      "min_ns": 17952400,
+      "quartile_method": "sorted indices n/4 and 3n/4"
+    },
+    "kind": "parser_summary",
+    "paired_total_ratios": [
+      0.9504860331646159,
+      1.0613149900485352,
+      0.9907951014808538,
+      1.0565410979284675,
+      1.23099880620772,
+      0.9483263440725209,
+      0.8944086575624839,
+      1.0699183178958065,
+      1.016524548487898,
+      1.102353494289112,
+      1.2357405001371728,
+      1.0252462767306667,
+      0.9426117782160421,
+      0.9875850089932752,
+      1.055295046441269
+    ],
+    "passed": true,
+    "total_ratio": 1.0168334308209144,
+    "workload": "codex_hot"
+  },
+  {
+    "changed_files": 1,
+    "environment": {
+      "cache_state": "warm OS cache; database copy and checkpoint outside timing",
+      "clock": "Instant Duration nanoseconds; resolution measured separately",
+      "minimum_observed_clock_interval_ns": 100,
+      "package": "2.0.0",
+      "pragmas": {
+        "busy_timeout": "Integer(30000)",
+        "cache_size": "Integer(-2000)",
+        "foreign_keys": "Integer(1)",
+        "journal_mode": "Text(\"wal\")",
+        "page_size": "Integer(4096)",
+        "synchronous": "Integer(1)",
+        "temp_store": "Integer(2)",
+        "user_version": "Integer(0)",
+        "wal_autocheckpoint": "Integer(1000)"
+      },
+      "profile": "release",
+      "schema_version": "24",
+      "sqlite": "3.53.2"
+    },
+    "expected_scanned_bytes": 9350,
+    "files": 2,
+    "fine_profile": false,
+    "initial_events": 1000,
+    "kind": "parser_manifest",
+    "measured_pairs": 15,
+    "parallelism": 1,
+    "seed_sha256": "3cc6e6bc01f43bb63b948a20f5d77066568c83ec23137da2f4baac4b787ac36f",
+    "seed_variant": "Baseline",
+    "temp_volume": "D:",
+    "workload": "codex_append"
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 4365200,
+        "write_ns": 4365200
+      }
+    ],
+    "round": 0,
+    "total_ns": 32318600,
+    "variant": "Baseline",
+    "warmup": true,
+    "workload": "codex_append",
+    "write_ns": 4365200,
+    "writer_begin_ns": 7195500,
+    "writer_finish_ns": 10805200
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 4153600,
+        "write_ns": 4153600
+      }
+    ],
+    "round": 0,
+    "total_ns": 35205500,
+    "variant": "Candidate",
+    "warmup": true,
+    "workload": "codex_append",
+    "write_ns": 4153600,
+    "writer_begin_ns": 7871100,
+    "writer_finish_ns": 11879400
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "candidate_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 0,
+    "workload": "codex_append"
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 4542300,
+        "write_ns": 4542300
+      }
+    ],
+    "round": 1,
+    "total_ns": 36016000,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 4542300,
+    "writer_begin_ns": 8033200,
+    "writer_finish_ns": 13215000
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 4420000,
+        "write_ns": 4420000
+      }
+    ],
+    "round": 1,
+    "total_ns": 32953400,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 4420000,
+    "writer_begin_ns": 7267100,
+    "writer_finish_ns": 10686600
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "candidate_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 1,
+    "workload": "codex_append"
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 4830900,
+        "write_ns": 4830900
+      }
+    ],
+    "round": 2,
+    "total_ns": 35024700,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 4830900,
+    "writer_begin_ns": 8127900,
+    "writer_finish_ns": 11781600
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 4920100,
+        "write_ns": 4920100
+      }
+    ],
+    "round": 2,
+    "total_ns": 35587500,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 4920100,
+    "writer_begin_ns": 7655300,
+    "writer_finish_ns": 10998200
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "candidate_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 2,
+    "workload": "codex_append"
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 4692100,
+        "write_ns": 4692100
+      }
+    ],
+    "round": 3,
+    "total_ns": 35208400,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 4692100,
+    "writer_begin_ns": 7478900,
+    "writer_finish_ns": 11617400
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 4282400,
+        "write_ns": 4282400
+      }
+    ],
+    "round": 3,
+    "total_ns": 38403500,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 4282400,
+    "writer_begin_ns": 9197900,
+    "writer_finish_ns": 13097900
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "candidate_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 3,
+    "workload": "codex_append"
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 4832900,
+        "write_ns": 4832900
+      }
+    ],
+    "round": 4,
+    "total_ns": 38197200,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 4832900,
+    "writer_begin_ns": 9427500,
+    "writer_finish_ns": 12362900
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 4467900,
+        "write_ns": 4467900
+      }
+    ],
+    "round": 4,
+    "total_ns": 34101100,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 4467900,
+    "writer_begin_ns": 7601900,
+    "writer_finish_ns": 11730100
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "candidate_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 4,
+    "workload": "codex_append"
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 4794200,
+        "write_ns": 4794200
+      }
+    ],
+    "round": 5,
+    "total_ns": 36384600,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 4794200,
+    "writer_begin_ns": 8117200,
+    "writer_finish_ns": 12703800
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 4958900,
+        "write_ns": 4958900
+      }
+    ],
+    "round": 5,
+    "total_ns": 34576800,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 4958900,
+    "writer_begin_ns": 7261800,
+    "writer_finish_ns": 11710700
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "candidate_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 5,
+    "workload": "codex_append"
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 5207100,
+        "write_ns": 5207100
+      }
+    ],
+    "round": 6,
+    "total_ns": 30665100,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 5207100,
+    "writer_begin_ns": 5606700,
+    "writer_finish_ns": 10412600
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 4639100,
+        "write_ns": 4639100
+      }
+    ],
+    "round": 6,
+    "total_ns": 35739800,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 4639100,
+    "writer_begin_ns": 8407300,
+    "writer_finish_ns": 11792100
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "candidate_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 6,
+    "workload": "codex_append"
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 3087300,
+        "write_ns": 3087300
+      }
+    ],
+    "round": 7,
+    "total_ns": 29832900,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 3087300,
+    "writer_begin_ns": 6245400,
+    "writer_finish_ns": 12047700
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 3177400,
+        "write_ns": 3177400
+      }
+    ],
+    "round": 7,
+    "total_ns": 30447000,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 3177400,
+    "writer_begin_ns": 6580800,
+    "writer_finish_ns": 10323100
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "candidate_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 7,
+    "workload": "codex_append"
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 3801300,
+        "write_ns": 3801300
+      }
+    ],
+    "round": 8,
+    "total_ns": 33469500,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 3801300,
+    "writer_begin_ns": 7442100,
+    "writer_finish_ns": 12286900
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 4199700,
+        "write_ns": 4199700
+      }
+    ],
+    "round": 8,
+    "total_ns": 34284400,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 4199700,
+    "writer_begin_ns": 7382000,
+    "writer_finish_ns": 11376200
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "candidate_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 8,
+    "workload": "codex_append"
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 4462900,
+        "write_ns": 4462900
+      }
+    ],
+    "round": 9,
+    "total_ns": 34151000,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 4462900,
+    "writer_begin_ns": 7860900,
+    "writer_finish_ns": 11558000
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 4534600,
+        "write_ns": 4534600
+      }
+    ],
+    "round": 9,
+    "total_ns": 35193400,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 4534600,
+    "writer_begin_ns": 7815600,
+    "writer_finish_ns": 12375900
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "candidate_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 9,
+    "workload": "codex_append"
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 4454300,
+        "write_ns": 4454300
+      }
+    ],
+    "round": 10,
+    "total_ns": 34266600,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 4454300,
+    "writer_begin_ns": 7728900,
+    "writer_finish_ns": 10942200
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 4891500,
+        "write_ns": 4891500
+      }
+    ],
+    "round": 10,
+    "total_ns": 35344500,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 4891500,
+    "writer_begin_ns": 8160800,
+    "writer_finish_ns": 11999000
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "candidate_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 10,
+    "workload": "codex_append"
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 4626700,
+        "write_ns": 4626700
+      }
+    ],
+    "round": 11,
+    "total_ns": 35136500,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 4626700,
+    "writer_begin_ns": 8661600,
+    "writer_finish_ns": 11051900
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 4616700,
+        "write_ns": 4616700
+      }
+    ],
+    "round": 11,
+    "total_ns": 36446200,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 4616700,
+    "writer_begin_ns": 8191600,
+    "writer_finish_ns": 12369200
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "candidate_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 11,
+    "workload": "codex_append"
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 5085100,
+        "write_ns": 5085100
+      }
+    ],
+    "round": 12,
+    "total_ns": 35968600,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 5085100,
+    "writer_begin_ns": 8701600,
+    "writer_finish_ns": 11371600
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 5292500,
+        "write_ns": 5292500
+      }
+    ],
+    "round": 12,
+    "total_ns": 41574400,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 5292500,
+    "writer_begin_ns": 9630600,
+    "writer_finish_ns": 14508300
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "candidate_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 12,
+    "workload": "codex_append"
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 4484200,
+        "write_ns": 4484200
+      }
+    ],
+    "round": 13,
+    "total_ns": 36199000,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 4484200,
+    "writer_begin_ns": 8563100,
+    "writer_finish_ns": 12300600
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 4405400,
+        "write_ns": 4405400
+      }
+    ],
+    "round": 13,
+    "total_ns": 36045400,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 4405400,
+    "writer_begin_ns": 8305600,
+    "writer_finish_ns": 11777000
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "candidate_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 13,
+    "workload": "codex_append"
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 4408900,
+        "write_ns": 4408900
+      }
+    ],
+    "round": 14,
+    "total_ns": 34980300,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 4408900,
+    "writer_begin_ns": 7915000,
+    "writer_finish_ns": 10803900
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 4904600,
+        "write_ns": 4904600
+      }
+    ],
+    "round": 14,
+    "total_ns": 35035200,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 4904600,
+    "writer_begin_ns": 8270400,
+    "writer_finish_ns": 10851100
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "candidate_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 14,
+    "workload": "codex_append"
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 5163200,
+        "write_ns": 5163200
+      }
+    ],
+    "round": 15,
+    "total_ns": 36182700,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 5163200,
+    "writer_begin_ns": 8557700,
+    "writer_finish_ns": 11192900
+  },
+  {
+    "bytes_scanned": 9350,
+    "changed_files": 1,
+    "events_inserted": 25,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 25,
+          "events_inserted": 25,
+          "raw": 0,
+          "reset_paths": 0,
+          "seen_paths": 1,
+          "tools_deduped": 0,
+          "tools_inserted": 0,
+          "tools_raw": 0,
+          "turns_deduped": 25,
+          "turns_inserted": 25,
+          "turns_raw": 25
+        },
+        "kind": "shard",
+        "reset_algorithms": {},
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 4702400,
+        "write_ns": 4702400
+      }
+    ],
+    "round": 15,
+    "total_ns": 55459000,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "codex_append",
+    "write_ns": 4702400,
+    "writer_begin_ns": 7852800,
+    "writer_finish_ns": 32500300
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "candidate_digest": "958b0038bba53969fa64ed2bbec422b5e01148f5e47db6e04f746d43a2d2a630",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 0,
+        "run_log": 0,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 1,
+        "usage_event": 1025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 0,
+        "usage_turn": 1025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 15,
+    "workload": "codex_append"
+  },
+  {
+    "baseline_total": {
+      "iqr_ns": 2976700,
+      "mad_ns": 1421500.0,
+      "max_ns": 55459000,
+      "median_ns": 35024700.0,
+      "min_ns": 30447000,
+      "quartile_method": "sorted indices n/4 and 3n/4"
+    },
+    "candidate_total": {
+      "iqr_ns": 1898300,
+      "mad_ns": 838200.0,
+      "max_ns": 41574400,
+      "median_ns": 35344500.0,
+      "min_ns": 29832900,
+      "quartile_method": "sorted indices n/4 and 3n/4"
+    },
+    "kind": "parser_summary",
+    "paired_total_ratios": [
+      1.0929372993378528,
+      1.0160686601170033,
+      0.9168018539976825,
+      0.8927643911072016,
+      1.0522836121329908,
+      1.1654878020942374,
+      0.9798305251748941,
+      1.0243475402978832,
+      0.9703808100382458,
+      1.0314562868799355,
+      0.9640648407790112,
+      1.15585260477194,
+      1.0042612927030912,
+      1.00156945480742,
+      0.6524225103229413
+    ],
+    "passed": true,
+    "total_ratio": 1.0091306991922844,
+    "workload": "codex_append"
+  },
+  {
+    "changed_files": 4,
+    "environment": {
+      "cache_state": "warm OS cache; database copy and checkpoint outside timing",
+      "clock": "Instant Duration nanoseconds; resolution measured separately",
+      "minimum_observed_clock_interval_ns": 100,
+      "package": "2.0.0",
+      "pragmas": {
+        "busy_timeout": "Integer(30000)",
+        "cache_size": "Integer(-2000)",
+        "foreign_keys": "Integer(1)",
+        "journal_mode": "Text(\"wal\")",
+        "page_size": "Integer(4096)",
+        "synchronous": "Integer(1)",
+        "temp_store": "Integer(2)",
+        "user_version": "Integer(0)",
+        "wal_autocheckpoint": "Integer(1000)"
+      },
+      "profile": "release",
+      "schema_version": "24",
+      "sqlite": "3.53.2"
+    },
+    "expected_scanned_bytes": 396380,
+    "files": 12,
+    "fine_profile": false,
+    "initial_events": 3000,
+    "kind": "parser_manifest",
+    "measured_pairs": 15,
+    "parallelism": 1,
+    "seed_sha256": "5a9f0c22f7b61f8770b5fa52147eb724678736293e0cde0e714bc394abddcce8",
+    "seed_variant": "Baseline",
+    "temp_volume": "D:",
+    "workload": "claude_project_replay"
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 183083900,
+        "write_ns": 183083900
+      }
+    ],
+    "round": 0,
+    "total_ns": 221279300,
+    "variant": "Baseline",
+    "warmup": true,
+    "workload": "claude_project_replay",
+    "write_ns": 183083900,
+    "writer_begin_ns": 7831900,
+    "writer_finish_ns": 3269900
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_path_index_paths": 4,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 152764100,
+        "write_ns": 152764100
+      }
+    ],
+    "round": 0,
+    "total_ns": 191112000,
+    "variant": "Candidate",
+    "warmup": true,
+    "workload": "claude_project_replay",
+    "write_ns": 152764100,
+    "writer_begin_ns": 7879400,
+    "writer_finish_ns": 2834400
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "candidate_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 1,
+        "run_log": 0,
+        "source_cursor": 12,
+        "source_file": 12,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 7,
+        "usage_event": 3025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 3025,
+        "usage_turn": 3025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 0,
+    "workload": "claude_project_replay"
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_path_index_paths": 4,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 161259100,
+        "write_ns": 161259100
+      }
+    ],
+    "round": 1,
+    "total_ns": 194731700,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 161259100,
+    "writer_begin_ns": 6157200,
+    "writer_finish_ns": 2911000
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 197456200,
+        "write_ns": 197456200
+      }
+    ],
+    "round": 1,
+    "total_ns": 235048900,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 197456200,
+    "writer_begin_ns": 7309500,
+    "writer_finish_ns": 2670500
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "candidate_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 1,
+        "run_log": 0,
+        "source_cursor": 12,
+        "source_file": 12,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 7,
+        "usage_event": 3025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 3025,
+        "usage_turn": 3025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 1,
+    "workload": "claude_project_replay"
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 203941600,
+        "write_ns": 203941600
+      }
+    ],
+    "round": 2,
+    "total_ns": 242445700,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 203941600,
+    "writer_begin_ns": 8216800,
+    "writer_finish_ns": 2938300
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_path_index_paths": 4,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 167098700,
+        "write_ns": 167098700
+      }
+    ],
+    "round": 2,
+    "total_ns": 204050500,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 167098700,
+    "writer_begin_ns": 8293600,
+    "writer_finish_ns": 2717500
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "candidate_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 1,
+        "run_log": 0,
+        "source_cursor": 12,
+        "source_file": 12,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 7,
+        "usage_event": 3025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 3025,
+        "usage_turn": 3025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 2,
+    "workload": "claude_project_replay"
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_path_index_paths": 4,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 180398100,
+        "write_ns": 180398100
+      }
+    ],
+    "round": 3,
+    "total_ns": 220178800,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 180398100,
+    "writer_begin_ns": 8802100,
+    "writer_finish_ns": 3338100
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 201390500,
+        "write_ns": 201390500
+      }
+    ],
+    "round": 3,
+    "total_ns": 239751400,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 201390500,
+    "writer_begin_ns": 7777300,
+    "writer_finish_ns": 3170100
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "candidate_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 1,
+        "run_log": 0,
+        "source_cursor": 12,
+        "source_file": 12,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 7,
+        "usage_event": 3025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 3025,
+        "usage_turn": 3025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 3,
+    "workload": "claude_project_replay"
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 209652600,
+        "write_ns": 209652600
+      }
+    ],
+    "round": 4,
+    "total_ns": 249648100,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 209652600,
+    "writer_begin_ns": 8142700,
+    "writer_finish_ns": 3137300
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_path_index_paths": 4,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 162676100,
+        "write_ns": 162676100
+      }
+    ],
+    "round": 4,
+    "total_ns": 199957900,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 162676100,
+    "writer_begin_ns": 8039400,
+    "writer_finish_ns": 3112300
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "candidate_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 1,
+        "run_log": 0,
+        "source_cursor": 12,
+        "source_file": 12,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 7,
+        "usage_event": 3025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 3025,
+        "usage_turn": 3025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 4,
+    "workload": "claude_project_replay"
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_path_index_paths": 4,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 168818600,
+        "write_ns": 168818600
+      }
+    ],
+    "round": 5,
+    "total_ns": 208885000,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 168818600,
+    "writer_begin_ns": 7660000,
+    "writer_finish_ns": 3308000
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 180780600,
+        "write_ns": 180780600
+      }
+    ],
+    "round": 5,
+    "total_ns": 221435400,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 180780600,
+    "writer_begin_ns": 7571400,
+    "writer_finish_ns": 2149200
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "candidate_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 1,
+        "run_log": 0,
+        "source_cursor": 12,
+        "source_file": 12,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 7,
+        "usage_event": 3025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 3025,
+        "usage_turn": 3025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 5,
+    "workload": "claude_project_replay"
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 171891300,
+        "write_ns": 171891300
+      }
+    ],
+    "round": 6,
+    "total_ns": 203254100,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 171891300,
+    "writer_begin_ns": 5970500,
+    "writer_finish_ns": 3252300
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_path_index_paths": 4,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 163628700,
+        "write_ns": 163628700
+      }
+    ],
+    "round": 6,
+    "total_ns": 199897300,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 163628700,
+    "writer_begin_ns": 7332500,
+    "writer_finish_ns": 3181900
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "candidate_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 1,
+        "run_log": 0,
+        "source_cursor": 12,
+        "source_file": 12,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 7,
+        "usage_event": 3025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 3025,
+        "usage_turn": 3025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 6,
+    "workload": "claude_project_replay"
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_path_index_paths": 4,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 162974000,
+        "write_ns": 162974000
+      }
+    ],
+    "round": 7,
+    "total_ns": 201186200,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 162974000,
+    "writer_begin_ns": 7692000,
+    "writer_finish_ns": 3313400
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 174987800,
+        "write_ns": 174987800
+      }
+    ],
+    "round": 7,
+    "total_ns": 211184700,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 174987800,
+    "writer_begin_ns": 7540800,
+    "writer_finish_ns": 2890900
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "candidate_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 1,
+        "run_log": 0,
+        "source_cursor": 12,
+        "source_file": 12,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 7,
+        "usage_event": 3025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 3025,
+        "usage_turn": 3025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 7,
+    "workload": "claude_project_replay"
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 223016000,
+        "write_ns": 223016000
+      }
+    ],
+    "round": 8,
+    "total_ns": 261751200,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 223016000,
+    "writer_begin_ns": 7852600,
+    "writer_finish_ns": 3158500
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_path_index_paths": 4,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 191030000,
+        "write_ns": 191030000
+      }
+    ],
+    "round": 8,
+    "total_ns": 230880000,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 191030000,
+    "writer_begin_ns": 8871900,
+    "writer_finish_ns": 3146100
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "candidate_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 1,
+        "run_log": 0,
+        "source_cursor": 12,
+        "source_file": 12,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 7,
+        "usage_event": 3025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 3025,
+        "usage_turn": 3025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 8,
+    "workload": "claude_project_replay"
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_path_index_paths": 4,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 173493200,
+        "write_ns": 173493200
+      }
+    ],
+    "round": 9,
+    "total_ns": 210824800,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 173493200,
+    "writer_begin_ns": 7367500,
+    "writer_finish_ns": 3164700
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 251037100,
+        "write_ns": 251037100
+      }
+    ],
+    "round": 9,
+    "total_ns": 293549600,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 251037100,
+    "writer_begin_ns": 8410800,
+    "writer_finish_ns": 3193200
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "candidate_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 1,
+        "run_log": 0,
+        "source_cursor": 12,
+        "source_file": 12,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 7,
+        "usage_event": 3025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 3025,
+        "usage_turn": 3025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 9,
+    "workload": "claude_project_replay"
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 212353300,
+        "write_ns": 212353300
+      }
+    ],
+    "round": 10,
+    "total_ns": 253572100,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 212353300,
+    "writer_begin_ns": 8998800,
+    "writer_finish_ns": 3324700
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_path_index_paths": 4,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 168068800,
+        "write_ns": 168068800
+      }
+    ],
+    "round": 10,
+    "total_ns": 205837200,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 168068800,
+    "writer_begin_ns": 7707300,
+    "writer_finish_ns": 3828600
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "candidate_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 1,
+        "run_log": 0,
+        "source_cursor": 12,
+        "source_file": 12,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 7,
+        "usage_event": 3025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 3025,
+        "usage_turn": 3025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 10,
+    "workload": "claude_project_replay"
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_path_index_paths": 4,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 165121700,
+        "write_ns": 165121700
+      }
+    ],
+    "round": 11,
+    "total_ns": 203122500,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 165121700,
+    "writer_begin_ns": 7929800,
+    "writer_finish_ns": 3214200
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 211157100,
+        "write_ns": 211157100
+      }
+    ],
+    "round": 11,
+    "total_ns": 248238200,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 211157100,
+    "writer_begin_ns": 7399300,
+    "writer_finish_ns": 3148600
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "candidate_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 1,
+        "run_log": 0,
+        "source_cursor": 12,
+        "source_file": 12,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 7,
+        "usage_event": 3025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 3025,
+        "usage_turn": 3025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 11,
+    "workload": "claude_project_replay"
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 203571200,
+        "write_ns": 203571200
+      }
+    ],
+    "round": 12,
+    "total_ns": 245734600,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 203571200,
+    "writer_begin_ns": 10187800,
+    "writer_finish_ns": 3273900
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_path_index_paths": 4,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 179057800,
+        "write_ns": 179057800
+      }
+    ],
+    "round": 12,
+    "total_ns": 218957400,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 179057800,
+    "writer_begin_ns": 8110700,
+    "writer_finish_ns": 2960400
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "candidate_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 1,
+        "run_log": 0,
+        "source_cursor": 12,
+        "source_file": 12,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 7,
+        "usage_event": 3025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 3025,
+        "usage_turn": 3025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 12,
+    "workload": "claude_project_replay"
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_path_index_paths": 4,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 175979400,
+        "write_ns": 175979400
+      }
+    ],
+    "round": 13,
+    "total_ns": 216326700,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 175979400,
+    "writer_begin_ns": 8200000,
+    "writer_finish_ns": 3080200
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 205720300,
+        "write_ns": 205720300
+      }
+    ],
+    "round": 13,
+    "total_ns": 245637000,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 205720300,
+    "writer_begin_ns": 8782500,
+    "writer_finish_ns": 3122600
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "candidate_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 1,
+        "run_log": 0,
+        "source_cursor": 12,
+        "source_file": 12,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 7,
+        "usage_event": 3025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 3025,
+        "usage_turn": 3025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 13,
+    "workload": "claude_project_replay"
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 224962600,
+        "write_ns": 224962600
+      }
+    ],
+    "round": 14,
+    "total_ns": 266908400,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 224962600,
+    "writer_begin_ns": 8592800,
+    "writer_finish_ns": 3249300
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_path_index_paths": 4,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 175293000,
+        "write_ns": 175293000
+      }
+    ],
+    "round": 14,
+    "total_ns": 218212200,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 175293000,
+    "writer_begin_ns": 9361000,
+    "writer_finish_ns": 3541900
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "candidate_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 1,
+        "run_log": 0,
+        "source_cursor": 12,
+        "source_file": 12,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 7,
+        "usage_event": 3025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 3025,
+        "usage_turn": 3025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 14,
+    "workload": "claude_project_replay"
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_path_index_paths": 4,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 181973700,
+        "write_ns": 181973700
+      }
+    ],
+    "round": 15,
+    "total_ns": 223752000,
+    "variant": "Candidate",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 181973700,
+    "writer_begin_ns": 8747300,
+    "writer_finish_ns": 3058100
+  },
+  {
+    "bytes_scanned": 396380,
+    "changed_files": 4,
+    "events_inserted": 1025,
+    "kind": "parser_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 4,
+          "event_batches": 2,
+          "events": 1025,
+          "events_deleted": 1000,
+          "events_inserted": 1025,
+          "raw": 0,
+          "reset_paths": 4,
+          "seen_paths": 4,
+          "tools_deduped": 1025,
+          "tools_inserted": 1025,
+          "tools_raw": 1025,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 1025,
+          "turns_inserted": 1025,
+          "turns_raw": 1025
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 205536900,
+        "write_ns": 205536900
+      }
+    ],
+    "round": 15,
+    "total_ns": 245463800,
+    "variant": "Baseline",
+    "warmup": false,
+    "workload": "claude_project_replay",
+    "write_ns": 205536900,
+    "writer_begin_ns": 8715700,
+    "writer_finish_ns": 2835600
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "candidate_digest": "c2e19c8d572f6a2c4c1d0bb2d847e7a9009d87ce44ac33f9888696180abd39fa",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 5,
+        "project_dim": 1,
+        "run_log": 0,
+        "source_cursor": 12,
+        "source_file": 12,
+        "source_sync_status": 0,
+        "sqlite_sequence": 0,
+        "trigger_state": 0,
+        "usage_bucket_30m": 7,
+        "usage_event": 3025,
+        "usage_event_raw": 0,
+        "usage_tool_call": 3025,
+        "usage_turn": 3025,
+        "worker_lock": 0
+      }
+    },
+    "kind": "parser_equivalence",
+    "round": 15,
+    "workload": "claude_project_replay"
+  },
+  {
+    "baseline_total": {
+      "iqr_ns": 18523200,
+      "mad_ns": 7935100.0,
+      "max_ns": 293549600,
+      "median_ns": 245637000.0,
+      "min_ns": 203254100,
+      "quartile_method": "sorted indices n/4 and 3n/4"
+    },
+    "candidate_total": {
+      "iqr_ns": 17771200,
+      "mad_ns": 8927100.0,
+      "max_ns": 230880000,
+      "median_ns": 208885000.0,
+      "min_ns": 194731700,
+      "quartile_method": "sorted indices n/4 and 3n/4"
+    },
+    "kind": "parser_summary",
+    "paired_total_ratios": [
+      0.8284731389936307,
+      0.8416338173867386,
+      0.9183629376095406,
+      0.8009590299305303,
+      0.943322522053836,
+      0.9834847119935096,
+      0.9526551876153907,
+      0.8820589934258181,
+      0.71819140615419,
+      0.8117501886051344,
+      0.8182564166191988,
+      0.891032032119205,
+      0.8806763639028322,
+      0.8175546367218117,
+      0.9115478534920424
+    ],
+    "passed": true,
+    "total_ratio": 0.8503808465337063,
+    "workload": "claude_project_replay"
+  }
+]

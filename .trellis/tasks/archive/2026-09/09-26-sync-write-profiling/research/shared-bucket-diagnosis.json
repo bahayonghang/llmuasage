@@ -1,0 +1,299 @@
+{
+  "created_at_utc": "2026-09-28T08:19:13.938237+00:00",
+  "method": "Read-only analysis of existing source and captured measurements. No new timing run and no product code change.",
+  "raw_log_sha256": "e6443ce9cf3cef5dd4a7664b839e0a566c5c34737216b9861d920093edd4352f",
+  "manifest": {
+    "environment": {
+      "cache_state": "warm OS cache; database copy and checkpoint outside timing",
+      "clock": "Instant Duration nanoseconds; resolution measured separately",
+      "minimum_observed_clock_interval_ns": 100,
+      "package": "2.0.0",
+      "pragmas": {
+        "busy_timeout": "Integer(30000)",
+        "cache_size": "Integer(-2000)",
+        "foreign_keys": "Integer(1)",
+        "journal_mode": "Text(\"wal\")",
+        "page_size": "Integer(4096)",
+        "synchronous": "Integer(1)",
+        "temp_store": "Integer(2)",
+        "user_version": "Integer(0)",
+        "wal_autocheckpoint": "Integer(1000)"
+      },
+      "profile": "release",
+      "schema_version": "24",
+      "sqlite": "3.53.2"
+    },
+    "fine_profile": false,
+    "fixture": {
+      "cache_or_batch_changed": false,
+      "event_batch_size": 1000,
+      "initial_events": 4000,
+      "initial_tools": 12000,
+      "initial_turns": 4000,
+      "input_events": 2050,
+      "input_retained_events": 2050,
+      "input_tools": 6150,
+      "input_turns": 2050,
+      "parallel_writers": 1,
+      "provider_index": false,
+      "raw": false,
+      "reset_paths": 1,
+      "seed": 539363624,
+      "seed_max_retained_events": 4000,
+      "seed_variant": "Baseline",
+      "source": "claude",
+      "temp_volume": "Prefix(PrefixComponent { raw: \"D:\", parsed: Disk(68) })",
+      "workload": "shared_bucket_reset"
+    },
+    "kind": "ab_manifest",
+    "query_plans": {
+      "aggregate": [
+        "SEARCH usage_event USING INDEX idx_usage_event_host_source_event_at (host_id=? AND source=?)",
+        "USE TEMP B-TREE FOR GROUP BY"
+      ],
+      "bounded_path_count_covering": [
+        "CO-ROUTINE (subquery-1)",
+        "SEARCH usage_event USING COVERING INDEX idx_usage_event_source_path_hash (source=? AND source_path_hash=?)",
+        "SCAN (subquery-1)"
+      ],
+      "candidate_default_aggregate": [
+        "SEARCH usage_event USING INDEX idx_usage_event_host_source_event_at (host_id=? AND source=?)",
+        "USE TEMP B-TREE FOR GROUP BY"
+      ],
+      "candidate_default_delete": [
+        "SEARCH usage_event USING INDEX idx_usage_event_host_source_event_at (host_id=? AND source=?)"
+      ],
+      "candidate_path_aggregate": [
+        "SEARCH usage_event USING INDEX idx_usage_event_source_path_hash (source=? AND source_path_hash=?)",
+        "USE TEMP B-TREE FOR GROUP BY"
+      ],
+      "candidate_path_delete": [
+        "SEARCH usage_event USING INDEX idx_usage_event_source_path_hash (source=? AND source_path_hash=?)"
+      ],
+      "delete": [
+        "SEARCH usage_event USING INDEX idx_usage_event_host_source_event_at (host_id=? AND source=?)"
+      ],
+      "host_count_covering": [
+        "SEARCH usage_event USING COVERING INDEX idx_usage_event_host_source_event_at (host_id=? AND source=?)"
+      ]
+    },
+    "rounds": 7,
+    "seed_sha256": "bcc69878ffee25bc47c781207f2914124e7d2942f3c04c42579cc1e273ca1f23",
+    "warmup_per_variant": 1
+  },
+  "summary": {
+    "baseline_total": {
+      "iqr_ns": 310786900,
+      "mad_ns": 24844100.0,
+      "max_ns": 1025546800,
+      "median_ns": 406731800.0,
+      "min_ns": 381887700,
+      "quartile_method": "sorted indices n/4 and 3n/4"
+    },
+    "baseline_write": {
+      "iqr_ns": 298258200,
+      "mad_ns": 22579900.0,
+      "max_ns": 963676400,
+      "median_ns": 383264900.0,
+      "min_ns": 360685000,
+      "quartile_method": "sorted indices n/4 and 3n/4"
+    },
+    "candidate_total": {
+      "iqr_ns": 442103600,
+      "mad_ns": 126048600.0,
+      "max_ns": 1219278200,
+      "median_ns": 471008100.0,
+      "min_ns": 333216600,
+      "quartile_method": "sorted indices n/4 and 3n/4"
+    },
+    "candidate_write": {
+      "iqr_ns": 426452100,
+      "mad_ns": 114692400.0,
+      "max_ns": 1160528400,
+      "median_ns": 436811800.0,
+      "min_ns": 312498900,
+      "quartile_method": "sorted indices n/4 and 3n/4"
+    },
+    "kind": "ab_summary",
+    "paired_total_ratios": [
+      1.7252605412148383,
+      1.2527428013253497,
+      0.4601328774074474,
+      1.1896117613452535,
+      1.0644761248742305,
+      0.8481252265006081,
+      0.8725512761997833
+    ],
+    "paired_write_ratios": [
+      1.7288875666603551,
+      1.2513506944374793,
+      0.45327643179806,
+      1.1981964567742924,
+      1.067972468089369,
+      0.8404615189128981,
+      0.866403925863288
+    ],
+    "passed": false,
+    "primary": false,
+    "total_ratio": 1.1580311645167651,
+    "workload": "shared_bucket_reset",
+    "write_ratio": 1.139712506937108
+  },
+  "counts_by_variant": {
+    "Baseline": {
+      "cursors": 1,
+      "event_batches": 3,
+      "events": 2050,
+      "events_deleted": 2000,
+      "events_inserted": 2050,
+      "raw": 0,
+      "reset_paths": 1,
+      "seen_paths": 1,
+      "tools_deduped": 6150,
+      "tools_inserted": 6150,
+      "tools_raw": 6150,
+      "touched_bucket_candidates": 4,
+      "turns_deduped": 2050,
+      "turns_inserted": 2050,
+      "turns_raw": 2050
+    },
+    "Candidate": {
+      "cursors": 1,
+      "event_batches": 3,
+      "events": 2050,
+      "events_deleted": 2000,
+      "events_inserted": 2050,
+      "raw": 0,
+      "reset_path_index_paths": 1,
+      "reset_paths": 1,
+      "seen_paths": 1,
+      "tools_deduped": 6150,
+      "tools_inserted": 6150,
+      "tools_raw": 6150,
+      "touched_bucket_candidates": 4,
+      "turns_deduped": 2050,
+      "turns_inserted": 2050,
+      "turns_raw": 2050
+    }
+  },
+  "outside_write_median_ns": {
+    "Baseline": 23466900,
+    "Candidate": 24081900
+  },
+  "samples": [
+    {
+      "round": 0,
+      "variant": "Baseline",
+      "write_ns": 671257300,
+      "total_ns": 706721200,
+      "writer_begin_ns": 19915700,
+      "writer_finish_ns": 7447700
+    },
+    {
+      "round": 0,
+      "variant": "Candidate",
+      "write_ns": 1160528400,
+      "total_ns": 1219278200,
+      "writer_begin_ns": 42948000,
+      "writer_finish_ns": 5822000
+    },
+    {
+      "round": 1,
+      "variant": "Candidate",
+      "write_ns": 748571500,
+      "total_ns": 787063100,
+      "writer_begin_ns": 20817800,
+      "writer_finish_ns": 5154800
+    },
+    {
+      "round": 1,
+      "variant": "Baseline",
+      "write_ns": 598210800,
+      "total_ns": 628271900,
+      "writer_begin_ns": 16923600,
+      "writer_finish_ns": 5365600
+    },
+    {
+      "round": 2,
+      "variant": "Baseline",
+      "write_ns": 963676400,
+      "total_ns": 1025546800,
+      "writer_begin_ns": 34051200,
+      "writer_finish_ns": 13827500
+    },
+    {
+      "round": 2,
+      "variant": "Candidate",
+      "write_ns": 436811800,
+      "total_ns": 471887800,
+      "writer_begin_ns": 22136600,
+      "writer_finish_ns": 4245500
+    },
+    {
+      "round": 3,
+      "variant": "Candidate",
+      "write_ns": 446926200,
+      "total_ns": 471008100,
+      "writer_begin_ns": 13617400,
+      "writer_finish_ns": 3602800
+    },
+    {
+      "round": 3,
+      "variant": "Baseline",
+      "write_ns": 372999100,
+      "total_ns": 395934300,
+      "writer_begin_ns": 13370300,
+      "writer_finish_ns": 3504600
+    },
+    {
+      "round": 4,
+      "variant": "Baseline",
+      "write_ns": 375360800,
+      "total_ns": 397055500,
+      "writer_begin_ns": 10971100,
+      "writer_finish_ns": 3335900
+    },
+    {
+      "round": 4,
+      "variant": "Candidate",
+      "write_ns": 400875000,
+      "total_ns": 422656100,
+      "writer_begin_ns": 11202800,
+      "writer_finish_ns": 4020700
+    },
+    {
+      "round": 5,
+      "variant": "Candidate",
+      "write_ns": 322119400,
+      "total_ns": 344959500,
+      "writer_begin_ns": 12458900,
+      "writer_finish_ns": 4066700
+    },
+    {
+      "round": 5,
+      "variant": "Baseline",
+      "write_ns": 383264900,
+      "total_ns": 406731800,
+      "writer_begin_ns": 11819500,
+      "writer_finish_ns": 3665700
+    },
+    {
+      "round": 6,
+      "variant": "Baseline",
+      "write_ns": 360685000,
+      "total_ns": 381887700,
+      "writer_begin_ns": 10782400,
+      "writer_finish_ns": 3804800
+    },
+    {
+      "round": 6,
+      "variant": "Candidate",
+      "write_ns": 312498900,
+      "total_ns": 333216600,
+      "writer_begin_ns": 11338400,
+      "writer_finish_ns": 2885200
+    }
+  ],
+  "paired_total_ratio_median_diagnostic_only": 1.0644761248742305,
+  "acceptance_status": "Failed. Ratio of total medians remains 1.1580311645167651. Paired median does not replace the predeclared metric."
+}

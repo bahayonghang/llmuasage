@@ -1,0 +1,1910 @@
+[
+  {
+    "environment": {
+      "cache_state": "warm OS cache; database copy and checkpoint outside timing",
+      "clock": "Instant Duration nanoseconds; resolution measured separately",
+      "minimum_observed_clock_interval_ns": 100,
+      "package": "2.0.0",
+      "pragmas": {
+        "busy_timeout": "Integer(30000)",
+        "cache_size": "Integer(-2000)",
+        "foreign_keys": "Integer(1)",
+        "journal_mode": "Text(\"wal\")",
+        "page_size": "Integer(4096)",
+        "synchronous": "Integer(1)",
+        "temp_store": "Integer(2)",
+        "user_version": "Integer(0)",
+        "wal_autocheckpoint": "Integer(1000)"
+      },
+      "profile": "release",
+      "schema_version": "24",
+      "sqlite": "3.53.2"
+    },
+    "fine_profile": false,
+    "fixture": {
+      "cache_or_batch_changed": false,
+      "event_batch_size": 1000,
+      "initial_events": 50500,
+      "initial_tools": 1500,
+      "initial_turns": 500,
+      "input_events": 525,
+      "input_retained_events": 525,
+      "input_tools": 1575,
+      "input_turns": 525,
+      "other_host_same_path_events": 50000,
+      "parallel_writers": 1,
+      "provider_index": false,
+      "raw": false,
+      "reset_paths": 1,
+      "seed": 539363624,
+      "seed_max_retained_events": 5000,
+      "seed_variant": "Baseline",
+      "selected_host_events": 500,
+      "source": "claude",
+      "temp_volume": "Prefix(PrefixComponent { raw: \"D:\", parsed: Disk(68) })",
+      "workload": "host_shared_path_skew"
+    },
+    "kind": "ab_manifest",
+    "query_plans": {
+      "aggregate": [
+        "SEARCH usage_event USING INDEX idx_usage_event_host_source_event_at (host_id=? AND source=?)",
+        "USE TEMP B-TREE FOR GROUP BY"
+      ],
+      "bounded_path_count_covering": [
+        "CO-ROUTINE (subquery-1)",
+        "SEARCH usage_event USING COVERING INDEX idx_usage_event_source_path_hash (source=? AND source_path_hash=?)",
+        "SCAN (subquery-1)"
+      ],
+      "candidate_default_aggregate": [
+        "SEARCH usage_event USING INDEX idx_usage_event_host_source_event_at (host_id=? AND source=?)",
+        "USE TEMP B-TREE FOR GROUP BY"
+      ],
+      "candidate_default_delete": [
+        "SEARCH usage_event USING INDEX idx_usage_event_host_source_event_at (host_id=? AND source=?)"
+      ],
+      "candidate_path_aggregate": [
+        "SEARCH usage_event USING INDEX idx_usage_event_source_path_hash (source=? AND source_path_hash=?)",
+        "USE TEMP B-TREE FOR GROUP BY"
+      ],
+      "candidate_path_delete": [
+        "SEARCH usage_event USING INDEX idx_usage_event_source_path_hash (source=? AND source_path_hash=?)"
+      ],
+      "delete": [
+        "SEARCH usage_event USING INDEX idx_usage_event_host_source_event_at (host_id=? AND source=?)"
+      ],
+      "host_count_covering": [
+        "SEARCH usage_event USING COVERING INDEX idx_usage_event_host_source_event_at (host_id=? AND source=?)"
+      ]
+    },
+    "rounds": 15,
+    "seed_sha256": "e744ea2807b5e2082548fe4574364ac49b8061c4e5ea73e8a66a1957f45ff36b",
+    "warmup_per_variant": 1
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "candidate_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 2,
+        "integration_install": 0,
+        "meta": 6,
+        "project_dim": 1,
+        "run_log": 1,
+        "source_cursor": 1,
+        "source_file": 1,
+        "source_sync_status": 1,
+        "sqlite_sequence": 1,
+        "trigger_state": 0,
+        "usage_bucket_30m": 8,
+        "usage_event": 50525,
+        "usage_event_raw": 0,
+        "usage_tool_call": 1575,
+        "usage_turn": 525,
+        "worker_lock": 0
+      }
+    },
+    "idempotent": true,
+    "kind": "warmup_equivalence",
+    "workload": "host_shared_path_skew"
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 291886500,
+        "write_ns": 291886500
+      }
+    ],
+    "round": 0,
+    "total_ns": 304624600,
+    "variant": "Baseline",
+    "workload": "host_shared_path_skew",
+    "write_ns": 291886500,
+    "writer_begin_ns": 7993100,
+    "writer_finish_ns": 3170700
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_default_plan_paths": 1,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 294178500,
+        "write_ns": 294178500
+      }
+    ],
+    "round": 0,
+    "total_ns": 307884200,
+    "variant": "Candidate",
+    "workload": "host_shared_path_skew",
+    "write_ns": 294178500,
+    "writer_begin_ns": 8727200,
+    "writer_finish_ns": 3324600
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "candidate_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 2,
+        "integration_install": 0,
+        "meta": 6,
+        "project_dim": 1,
+        "run_log": 1,
+        "source_cursor": 1,
+        "source_file": 1,
+        "source_sync_status": 1,
+        "sqlite_sequence": 1,
+        "trigger_state": 0,
+        "usage_bucket_30m": 8,
+        "usage_event": 50525,
+        "usage_event_raw": 0,
+        "usage_tool_call": 1575,
+        "usage_turn": 525,
+        "worker_lock": 0
+      }
+    },
+    "kind": "ab_equivalence",
+    "round": 0,
+    "workload": "host_shared_path_skew"
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_default_plan_paths": 1,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 284813200,
+        "write_ns": 284813200
+      }
+    ],
+    "round": 1,
+    "total_ns": 298650200,
+    "variant": "Candidate",
+    "workload": "host_shared_path_skew",
+    "write_ns": 284813200,
+    "writer_begin_ns": 8184400,
+    "writer_finish_ns": 3998600
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 280878200,
+        "write_ns": 280878200
+      }
+    ],
+    "round": 1,
+    "total_ns": 294783500,
+    "variant": "Baseline",
+    "workload": "host_shared_path_skew",
+    "write_ns": 280878200,
+    "writer_begin_ns": 8994500,
+    "writer_finish_ns": 3160100
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "candidate_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 2,
+        "integration_install": 0,
+        "meta": 6,
+        "project_dim": 1,
+        "run_log": 1,
+        "source_cursor": 1,
+        "source_file": 1,
+        "source_sync_status": 1,
+        "sqlite_sequence": 1,
+        "trigger_state": 0,
+        "usage_bucket_30m": 8,
+        "usage_event": 50525,
+        "usage_event_raw": 0,
+        "usage_tool_call": 1575,
+        "usage_turn": 525,
+        "worker_lock": 0
+      }
+    },
+    "kind": "ab_equivalence",
+    "round": 1,
+    "workload": "host_shared_path_skew"
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 280902400,
+        "write_ns": 280902400
+      }
+    ],
+    "round": 2,
+    "total_ns": 294725500,
+    "variant": "Baseline",
+    "workload": "host_shared_path_skew",
+    "write_ns": 280902400,
+    "writer_begin_ns": 8944800,
+    "writer_finish_ns": 3285800
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_default_plan_paths": 1,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 253131000,
+        "write_ns": 253131000
+      }
+    ],
+    "round": 2,
+    "total_ns": 267582100,
+    "variant": "Candidate",
+    "workload": "host_shared_path_skew",
+    "write_ns": 253131000,
+    "writer_begin_ns": 8549200,
+    "writer_finish_ns": 3481900
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "candidate_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 2,
+        "integration_install": 0,
+        "meta": 6,
+        "project_dim": 1,
+        "run_log": 1,
+        "source_cursor": 1,
+        "source_file": 1,
+        "source_sync_status": 1,
+        "sqlite_sequence": 1,
+        "trigger_state": 0,
+        "usage_bucket_30m": 8,
+        "usage_event": 50525,
+        "usage_event_raw": 0,
+        "usage_tool_call": 1575,
+        "usage_turn": 525,
+        "worker_lock": 0
+      }
+    },
+    "kind": "ab_equivalence",
+    "round": 2,
+    "workload": "host_shared_path_skew"
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_default_plan_paths": 1,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 224090300,
+        "write_ns": 224090300
+      }
+    ],
+    "round": 3,
+    "total_ns": 234013900,
+    "variant": "Candidate",
+    "workload": "host_shared_path_skew",
+    "write_ns": 224090300,
+    "writer_begin_ns": 5595500,
+    "writer_finish_ns": 2908500
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 263324600,
+        "write_ns": 263324600
+      }
+    ],
+    "round": 3,
+    "total_ns": 277672600,
+    "variant": "Baseline",
+    "workload": "host_shared_path_skew",
+    "write_ns": 263324600,
+    "writer_begin_ns": 8681400,
+    "writer_finish_ns": 3718100
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "candidate_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 2,
+        "integration_install": 0,
+        "meta": 6,
+        "project_dim": 1,
+        "run_log": 1,
+        "source_cursor": 1,
+        "source_file": 1,
+        "source_sync_status": 1,
+        "sqlite_sequence": 1,
+        "trigger_state": 0,
+        "usage_bucket_30m": 8,
+        "usage_event": 50525,
+        "usage_event_raw": 0,
+        "usage_tool_call": 1575,
+        "usage_turn": 525,
+        "worker_lock": 0
+      }
+    },
+    "kind": "ab_equivalence",
+    "round": 3,
+    "workload": "host_shared_path_skew"
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 267899800,
+        "write_ns": 267899800
+      }
+    ],
+    "round": 4,
+    "total_ns": 280647700,
+    "variant": "Baseline",
+    "workload": "host_shared_path_skew",
+    "write_ns": 267899800,
+    "writer_begin_ns": 8212300,
+    "writer_finish_ns": 2988300
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_default_plan_paths": 1,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 248727600,
+        "write_ns": 248727600
+      }
+    ],
+    "round": 4,
+    "total_ns": 262828000,
+    "variant": "Candidate",
+    "workload": "host_shared_path_skew",
+    "write_ns": 248727600,
+    "writer_begin_ns": 8997800,
+    "writer_finish_ns": 3419300
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "candidate_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 2,
+        "integration_install": 0,
+        "meta": 6,
+        "project_dim": 1,
+        "run_log": 1,
+        "source_cursor": 1,
+        "source_file": 1,
+        "source_sync_status": 1,
+        "sqlite_sequence": 1,
+        "trigger_state": 0,
+        "usage_bucket_30m": 8,
+        "usage_event": 50525,
+        "usage_event_raw": 0,
+        "usage_tool_call": 1575,
+        "usage_turn": 525,
+        "worker_lock": 0
+      }
+    },
+    "kind": "ab_equivalence",
+    "round": 4,
+    "workload": "host_shared_path_skew"
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_default_plan_paths": 1,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 284345600,
+        "write_ns": 284345600
+      }
+    ],
+    "round": 5,
+    "total_ns": 299593300,
+    "variant": "Candidate",
+    "workload": "host_shared_path_skew",
+    "write_ns": 284345600,
+    "writer_begin_ns": 10007200,
+    "writer_finish_ns": 3512000
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 253901300,
+        "write_ns": 253901300
+      }
+    ],
+    "round": 5,
+    "total_ns": 266284800,
+    "variant": "Baseline",
+    "workload": "host_shared_path_skew",
+    "write_ns": 253901300,
+    "writer_begin_ns": 7358000,
+    "writer_finish_ns": 3513300
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "candidate_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 2,
+        "integration_install": 0,
+        "meta": 6,
+        "project_dim": 1,
+        "run_log": 1,
+        "source_cursor": 1,
+        "source_file": 1,
+        "source_sync_status": 1,
+        "sqlite_sequence": 1,
+        "trigger_state": 0,
+        "usage_bucket_30m": 8,
+        "usage_event": 50525,
+        "usage_event_raw": 0,
+        "usage_tool_call": 1575,
+        "usage_turn": 525,
+        "worker_lock": 0
+      }
+    },
+    "kind": "ab_equivalence",
+    "round": 5,
+    "workload": "host_shared_path_skew"
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 235916600,
+        "write_ns": 235916600
+      }
+    ],
+    "round": 6,
+    "total_ns": 249155800,
+    "variant": "Baseline",
+    "workload": "host_shared_path_skew",
+    "write_ns": 235916600,
+    "writer_begin_ns": 8297400,
+    "writer_finish_ns": 2947900
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_default_plan_paths": 1,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 226755800,
+        "write_ns": 226755800
+      }
+    ],
+    "round": 6,
+    "total_ns": 236234600,
+    "variant": "Candidate",
+    "workload": "host_shared_path_skew",
+    "write_ns": 226755800,
+    "writer_begin_ns": 5992800,
+    "writer_finish_ns": 2133200
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "candidate_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 2,
+        "integration_install": 0,
+        "meta": 6,
+        "project_dim": 1,
+        "run_log": 1,
+        "source_cursor": 1,
+        "source_file": 1,
+        "source_sync_status": 1,
+        "sqlite_sequence": 1,
+        "trigger_state": 0,
+        "usage_bucket_30m": 8,
+        "usage_event": 50525,
+        "usage_event_raw": 0,
+        "usage_tool_call": 1575,
+        "usage_turn": 525,
+        "worker_lock": 0
+      }
+    },
+    "kind": "ab_equivalence",
+    "round": 6,
+    "workload": "host_shared_path_skew"
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_default_plan_paths": 1,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 230773200,
+        "write_ns": 230773200
+      }
+    ],
+    "round": 7,
+    "total_ns": 241835600,
+    "variant": "Candidate",
+    "workload": "host_shared_path_skew",
+    "write_ns": 230773200,
+    "writer_begin_ns": 6648300,
+    "writer_finish_ns": 2991500
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 215478600,
+        "write_ns": 215478600
+      }
+    ],
+    "round": 7,
+    "total_ns": 225478400,
+    "variant": "Baseline",
+    "workload": "host_shared_path_skew",
+    "write_ns": 215478600,
+    "writer_begin_ns": 6301200,
+    "writer_finish_ns": 2281900
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "candidate_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 2,
+        "integration_install": 0,
+        "meta": 6,
+        "project_dim": 1,
+        "run_log": 1,
+        "source_cursor": 1,
+        "source_file": 1,
+        "source_sync_status": 1,
+        "sqlite_sequence": 1,
+        "trigger_state": 0,
+        "usage_bucket_30m": 8,
+        "usage_event": 50525,
+        "usage_event_raw": 0,
+        "usage_tool_call": 1575,
+        "usage_turn": 525,
+        "worker_lock": 0
+      }
+    },
+    "kind": "ab_equivalence",
+    "round": 7,
+    "workload": "host_shared_path_skew"
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 284119900,
+        "write_ns": 284119900
+      }
+    ],
+    "round": 8,
+    "total_ns": 294587600,
+    "variant": "Baseline",
+    "workload": "host_shared_path_skew",
+    "write_ns": 284119900,
+    "writer_begin_ns": 5393500,
+    "writer_finish_ns": 3396100
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_default_plan_paths": 1,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 282318300,
+        "write_ns": 282318300
+      }
+    ],
+    "round": 8,
+    "total_ns": 295997200,
+    "variant": "Candidate",
+    "workload": "host_shared_path_skew",
+    "write_ns": 282318300,
+    "writer_begin_ns": 8703600,
+    "writer_finish_ns": 3413800
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "candidate_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 2,
+        "integration_install": 0,
+        "meta": 6,
+        "project_dim": 1,
+        "run_log": 1,
+        "source_cursor": 1,
+        "source_file": 1,
+        "source_sync_status": 1,
+        "sqlite_sequence": 1,
+        "trigger_state": 0,
+        "usage_bucket_30m": 8,
+        "usage_event": 50525,
+        "usage_event_raw": 0,
+        "usage_tool_call": 1575,
+        "usage_turn": 525,
+        "worker_lock": 0
+      }
+    },
+    "kind": "ab_equivalence",
+    "round": 8,
+    "workload": "host_shared_path_skew"
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_default_plan_paths": 1,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 266458500,
+        "write_ns": 266458500
+      }
+    ],
+    "round": 9,
+    "total_ns": 279647700,
+    "variant": "Candidate",
+    "workload": "host_shared_path_skew",
+    "write_ns": 266458500,
+    "writer_begin_ns": 8386600,
+    "writer_finish_ns": 3238200
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 275764600,
+        "write_ns": 275764600
+      }
+    ],
+    "round": 9,
+    "total_ns": 288931300,
+    "variant": "Baseline",
+    "workload": "host_shared_path_skew",
+    "write_ns": 275764600,
+    "writer_begin_ns": 8473800,
+    "writer_finish_ns": 3118100
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "candidate_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 2,
+        "integration_install": 0,
+        "meta": 6,
+        "project_dim": 1,
+        "run_log": 1,
+        "source_cursor": 1,
+        "source_file": 1,
+        "source_sync_status": 1,
+        "sqlite_sequence": 1,
+        "trigger_state": 0,
+        "usage_bucket_30m": 8,
+        "usage_event": 50525,
+        "usage_event_raw": 0,
+        "usage_tool_call": 1575,
+        "usage_turn": 525,
+        "worker_lock": 0
+      }
+    },
+    "kind": "ab_equivalence",
+    "round": 9,
+    "workload": "host_shared_path_skew"
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 268887700,
+        "write_ns": 268887700
+      }
+    ],
+    "round": 10,
+    "total_ns": 281070300,
+    "variant": "Baseline",
+    "workload": "host_shared_path_skew",
+    "write_ns": 268887700,
+    "writer_begin_ns": 7641000,
+    "writer_finish_ns": 2979500
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_default_plan_paths": 1,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 268623200,
+        "write_ns": 268623200
+      }
+    ],
+    "round": 10,
+    "total_ns": 281765800,
+    "variant": "Candidate",
+    "workload": "host_shared_path_skew",
+    "write_ns": 268623200,
+    "writer_begin_ns": 8081200,
+    "writer_finish_ns": 3388500
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "candidate_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 2,
+        "integration_install": 0,
+        "meta": 6,
+        "project_dim": 1,
+        "run_log": 1,
+        "source_cursor": 1,
+        "source_file": 1,
+        "source_sync_status": 1,
+        "sqlite_sequence": 1,
+        "trigger_state": 0,
+        "usage_bucket_30m": 8,
+        "usage_event": 50525,
+        "usage_event_raw": 0,
+        "usage_tool_call": 1575,
+        "usage_turn": 525,
+        "worker_lock": 0
+      }
+    },
+    "kind": "ab_equivalence",
+    "round": 10,
+    "workload": "host_shared_path_skew"
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_default_plan_paths": 1,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 245838800,
+        "write_ns": 245838800
+      }
+    ],
+    "round": 11,
+    "total_ns": 258525000,
+    "variant": "Candidate",
+    "workload": "host_shared_path_skew",
+    "write_ns": 245838800,
+    "writer_begin_ns": 8025200,
+    "writer_finish_ns": 3062500
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 249696100,
+        "write_ns": 249696100
+      }
+    ],
+    "round": 11,
+    "total_ns": 263155900,
+    "variant": "Baseline",
+    "workload": "host_shared_path_skew",
+    "write_ns": 249696100,
+    "writer_begin_ns": 9368100,
+    "writer_finish_ns": 2491300
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "candidate_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 2,
+        "integration_install": 0,
+        "meta": 6,
+        "project_dim": 1,
+        "run_log": 1,
+        "source_cursor": 1,
+        "source_file": 1,
+        "source_sync_status": 1,
+        "sqlite_sequence": 1,
+        "trigger_state": 0,
+        "usage_bucket_30m": 8,
+        "usage_event": 50525,
+        "usage_event_raw": 0,
+        "usage_tool_call": 1575,
+        "usage_turn": 525,
+        "worker_lock": 0
+      }
+    },
+    "kind": "ab_equivalence",
+    "round": 11,
+    "workload": "host_shared_path_skew"
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 275003500,
+        "write_ns": 275003500
+      }
+    ],
+    "round": 12,
+    "total_ns": 288303000,
+    "variant": "Baseline",
+    "workload": "host_shared_path_skew",
+    "write_ns": 275003500,
+    "writer_begin_ns": 8397400,
+    "writer_finish_ns": 3235300
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_default_plan_paths": 1,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 283118700,
+        "write_ns": 283118700
+      }
+    ],
+    "round": 12,
+    "total_ns": 295855500,
+    "variant": "Candidate",
+    "workload": "host_shared_path_skew",
+    "write_ns": 283118700,
+    "writer_begin_ns": 8604800,
+    "writer_finish_ns": 2538500
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "candidate_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 2,
+        "integration_install": 0,
+        "meta": 6,
+        "project_dim": 1,
+        "run_log": 1,
+        "source_cursor": 1,
+        "source_file": 1,
+        "source_sync_status": 1,
+        "sqlite_sequence": 1,
+        "trigger_state": 0,
+        "usage_bucket_30m": 8,
+        "usage_event": 50525,
+        "usage_event_raw": 0,
+        "usage_tool_call": 1575,
+        "usage_turn": 525,
+        "worker_lock": 0
+      }
+    },
+    "kind": "ab_equivalence",
+    "round": 12,
+    "workload": "host_shared_path_skew"
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_default_plan_paths": 1,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 297470500,
+        "write_ns": 297470500
+      }
+    ],
+    "round": 13,
+    "total_ns": 311231400,
+    "variant": "Candidate",
+    "workload": "host_shared_path_skew",
+    "write_ns": 297470500,
+    "writer_begin_ns": 8532700,
+    "writer_finish_ns": 3609600
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 298546600,
+        "write_ns": 298546600
+      }
+    ],
+    "round": 13,
+    "total_ns": 311801200,
+    "variant": "Baseline",
+    "workload": "host_shared_path_skew",
+    "write_ns": 298546600,
+    "writer_begin_ns": 8451500,
+    "writer_finish_ns": 3064800
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "candidate_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 2,
+        "integration_install": 0,
+        "meta": 6,
+        "project_dim": 1,
+        "run_log": 1,
+        "source_cursor": 1,
+        "source_file": 1,
+        "source_sync_status": 1,
+        "sqlite_sequence": 1,
+        "trigger_state": 0,
+        "usage_bucket_30m": 8,
+        "usage_event": 50525,
+        "usage_event_raw": 0,
+        "usage_tool_call": 1575,
+        "usage_turn": 525,
+        "worker_lock": 0
+      }
+    },
+    "kind": "ab_equivalence",
+    "round": 13,
+    "workload": "host_shared_path_skew"
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 272399500,
+        "write_ns": 272399500
+      }
+    ],
+    "round": 14,
+    "total_ns": 285707800,
+    "variant": "Baseline",
+    "workload": "host_shared_path_skew",
+    "write_ns": 272399500,
+    "writer_begin_ns": 8549000,
+    "writer_finish_ns": 3113500
+  },
+  {
+    "kind": "ab_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 1,
+          "events": 525,
+          "events_deleted": 500,
+          "events_inserted": 525,
+          "raw": 0,
+          "reset_default_plan_paths": 1,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 1575,
+          "tools_inserted": 1575,
+          "tools_raw": 1575,
+          "touched_bucket_candidates": 2,
+          "turns_deduped": 525,
+          "turns_inserted": 525,
+          "turns_raw": 525
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {},
+        "unclassified_ns": 325196400,
+        "write_ns": 325196400
+      }
+    ],
+    "round": 14,
+    "total_ns": 337995400,
+    "variant": "Candidate",
+    "workload": "host_shared_path_skew",
+    "write_ns": 325196400,
+    "writer_begin_ns": 8207400,
+    "writer_finish_ns": 3006600
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "candidate_digest": "54b8ddc66de53f078353506ab7a44f7cd59c0938be439b235b59474c7cb118f4",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 2,
+        "integration_install": 0,
+        "meta": 6,
+        "project_dim": 1,
+        "run_log": 1,
+        "source_cursor": 1,
+        "source_file": 1,
+        "source_sync_status": 1,
+        "sqlite_sequence": 1,
+        "trigger_state": 0,
+        "usage_bucket_30m": 8,
+        "usage_event": 50525,
+        "usage_event_raw": 0,
+        "usage_tool_call": 1575,
+        "usage_turn": 525,
+        "worker_lock": 0
+      }
+    },
+    "kind": "ab_equivalence",
+    "round": 14,
+    "workload": "host_shared_path_skew"
+  },
+  {
+    "baseline_total": {
+      "iqr_ns": 28440700,
+      "mad_ns": 9017700.0,
+      "max_ns": 311801200,
+      "median_ns": 285707800.0,
+      "min_ns": 225478400,
+      "quartile_method": "sorted indices n/4 and 3n/4"
+    },
+    "baseline_write": {
+      "iqr_ns": 27001100,
+      "mad_ns": 9074900.0,
+      "max_ns": 298546600,
+      "median_ns": 272399500.0,
+      "min_ns": 215478600,
+      "quartile_method": "sorted indices n/4 and 3n/4"
+    },
+    "candidate_total": {
+      "iqr_ns": 41068300,
+      "mad_ns": 18937800.0,
+      "max_ns": 337995400,
+      "median_ns": 281765800.0,
+      "min_ns": 234013900,
+      "quartile_method": "sorted indices n/4 and 3n/4"
+    },
+    "candidate_write": {
+      "iqr_ns": 38974400,
+      "mad_ns": 19895600.0,
+      "max_ns": 325196400,
+      "median_ns": 268623200.0,
+      "min_ns": 224090300,
+      "quartile_method": "sorted indices n/4 and 3n/4"
+    },
+    "kind": "ab_summary",
+    "paired_total_ratios": [
+      1.0107003833570893,
+      1.0131170842330048,
+      0.907902777330092,
+      0.842769146109483,
+      0.936505091614861,
+      1.12508599814935,
+      0.9481400794201861,
+      1.072544421106412,
+      1.0047849943446363,
+      0.9678691785902047,
+      1.0024744699101968,
+      0.9824024466105453,
+      1.026196397540088,
+      0.998172553537318,
+      1.1830107543441235
+    ],
+    "paired_write_ratios": [
+      1.0078523672728954,
+      1.014009631220935,
+      0.9011350561618555,
+      0.8510040459569672,
+      0.9284351836022274,
+      1.1199060422297955,
+      0.9611693284830317,
+      1.0709796703709789,
+      0.9936590150848287,
+      0.9662534640051696,
+      0.9990163179647117,
+      0.9845520214372592,
+      1.029509442607094,
+      0.9963955375810677,
+      1.1938215745623615
+    ],
+    "passed": true,
+    "primary": false,
+    "total_ratio": 0.9862026868009904,
+    "workload": "host_shared_path_skew",
+    "write_ratio": 0.9861369055376387
+  }
+]

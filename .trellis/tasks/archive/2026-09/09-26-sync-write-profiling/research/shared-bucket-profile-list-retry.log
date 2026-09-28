@@ -1,0 +1,5 @@
+store::sync_writer::profiling::tests::sync_writer_shared_bucket_profile: test
+
+1 test, 0 benchmarks
+
+EXIT_CODE=0

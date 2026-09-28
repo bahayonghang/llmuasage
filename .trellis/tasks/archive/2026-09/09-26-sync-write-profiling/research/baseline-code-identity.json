@@ -1,0 +1,13 @@
+{
+  "git_head": "29bde59e84e1149b1d9215e020352586fb0a0ed7",
+  "files": {
+    "src\\store\\sync_writer.rs": "4423e9be75d9896fa11da82a34929b84a32809e84d1aa9ed475adae9de85fc00",
+    "src\\store\\sync_writer\\profiling.rs": "6ba748778a8731c8e737c41025678a6922f2b08f12e48d3297088d99a3ca514d",
+    "src\\store\\sync_writer\\profiling\\tests.rs": "065988bfdea041305095c82249cee5c62cc892f21b053aac8d81d602145d827c"
+  },
+  "stage": "original algorithm plus private test instrumentation",
+  "private_data": "synthetic only",
+  "temporary_volume": "D:",
+  "media_type_independently_verified": false,
+  "identity_caveat": "Collected after the coarse profile completed, with later reset substage instrumentation. These hashes are not asserted to identify the first baseline-profile executable inputs."
+}

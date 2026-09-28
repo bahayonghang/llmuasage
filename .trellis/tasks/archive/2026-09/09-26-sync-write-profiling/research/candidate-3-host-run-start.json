@@ -1,0 +1,31 @@
+{
+  "name": "candidate-3-host",
+  "command": [
+    "D:\\Documents\\Code\\CLI\\llmusage\\target\\release\\deps\\llmusage-6ce3a266d569a958.exe",
+    "store::sync_writer::profiling::tests::sync_writer_host_skew_ab_acceptance",
+    "--exact",
+    "--ignored",
+    "--test-threads=1",
+    "--nocapture"
+  ],
+  "list_command": [
+    "D:\\Documents\\Code\\CLI\\llmusage\\target\\release\\deps\\llmusage-6ce3a266d569a958.exe",
+    "store::sync_writer::profiling::tests::sync_writer_host_skew_ab_acceptance",
+    "--list",
+    "--exact"
+  ],
+  "list_exit_code": 0,
+  "started_at_utc": "2026-09-28T09:28:12.338723+00:00",
+  "log": "candidate-3-host.log",
+  "executable_sha256": "427d7a7bbe0ca0b945611a0fd4b36706a4e6f04485b5c8639b20463b7809b385",
+  "identity_before": {
+    "at_utc": "2026-09-28T09:28:12.257591+00:00",
+    "raw_mismatches": [],
+    "lf_mismatches": [],
+    "file_set_match": true,
+    "patch_match": true,
+    "executable_match": true,
+    "head_match": true,
+    "passed": true
+  }
+}

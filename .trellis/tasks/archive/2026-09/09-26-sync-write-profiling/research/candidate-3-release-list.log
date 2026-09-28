@@ -1,0 +1,19 @@
+   Compiling llmusage v2.0.0 (D:\Documents\Code\CLI\llmusage)
+mbx[warning]: incremental state was not reused: absolute path has no stable cache mapping: C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Tools\MSVC\14.51.36231\atlmfc\lib\x64
+mbx[warning]: prediction was not restored: absolute path has no stable cache mapping: C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Tools\MSVC\14.51.36231\atlmfc\lib\x64
+mbx[progress]: 15s elapsed; 0 hits, 0 misses, 0 bypassed, 0 not looked up; ~0s compiler work saved
+mbx[progress]: 30s elapsed; 0 hits, 0 misses, 0 bypassed, 0 not looked up; ~0s compiler work saved
+mbx[progress]: 45s elapsed; 0 hits, 0 misses, 0 bypassed, 0 not looked up; ~0s compiler work saved
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\target\release\deps\llmusage-6ce3a266d569a958.lib 和对象 D:\Documents\Code\CLI\llmusage\target\release\deps\llmusage-6ce3a266d569a958.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+mbx[warning]: result was not stored: rustc search path kind is not cacheable yet: native
+warning: `llmusage` (lib test) generated 1 warning
+    Finished `release` profile [optimized] target(s) in 49.42s
+     Running unittests src\lib.rs (target\release\deps\llmusage-6ce3a266d569a958.exe)
+store::sync_writer::profiling::tests::sync_writer_shared_bucket_ab_acceptance: test
+
+1 test, 0 benchmarks
+mbx[savings]: 843 compilations on file. the box remembers.
+EXIT_CODE=0

@@ -1,0 +1,5 @@
+parsers::writer_benchmark::writer_parser_ab_acceptance: test
+
+1 test, 0 benchmarks
+
+EXIT_CODE=0

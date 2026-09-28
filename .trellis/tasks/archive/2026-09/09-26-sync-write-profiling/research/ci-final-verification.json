@@ -1,0 +1,49 @@
+{
+  "checked_at_utc": "2026-09-28T09:45:44.642081+00:00",
+  "ci_command": [
+    "just",
+    "ci"
+  ],
+  "ci_exit_code": 0,
+  "ci_log_sha256": "01c23956725f011ae4707b3bccb509f4bed47ce19c648bb1d3182fc2d2b95640",
+  "root_lib": {
+    "passed": 922,
+    "failed": 0,
+    "ignored": 19
+  },
+  "root_integrations": {
+    "api": 3,
+    "architecture_dependencies": 12,
+    "cli": 34,
+    "query": 9,
+    "remote": 8,
+    "store": 2,
+    "sync": 144,
+    "tui": 35
+  },
+  "dashboard_scripts_js_passed": 66,
+  "desktop_frontend": {
+    "files": 18,
+    "tests": 65
+  },
+  "desktop_dev_port_scripts_passed": 4,
+  "desktop_rust": {
+    "lib": 18,
+    "acceptance": 9,
+    "quota": 6
+  },
+  "four_locks_unchanged": true,
+  "candidate3_post_ci_source_raw_lf_matches": 324,
+  "candidate3_release_exe_unchanged": true,
+  "candidate3_summaries_recomputed": 12,
+  "candidate3_measured_pairs": 124,
+  "candidate3_ab_state_comparisons": 136,
+  "candidate3_additional_idempotence_assertions": 9,
+  "candidate3_final_logs_size_sha_matches": 35,
+  "candidate3_supporting_artifact_sha_matches": 7,
+  "notes": [
+    "No additional Cargo or benchmark command ran after just ci.",
+    "MSVC import-library linker_messages remain in successful compilation logs.",
+    "SemVer was not rerun; approved 2.0.0 boundary pass remains limited to version policy."
+  ]
+}

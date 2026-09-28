@@ -1,0 +1,11 @@
+   Compiling llmusage v2.0.0 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\target\release\deps\llmusage-6ce3a266d569a958.lib 和对象 D:\Documents\Code\CLI\llmusage\target\release\deps\llmusage-6ce3a266d569a958.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (lib test) generated 1 warning
+    Finished `release` profile [optimized] target(s) in 46.55s
+     Running unittests src\lib.rs (target\release\deps\llmusage-6ce3a266d569a958.exe)
+store::sync_writer::profiling::tests::sync_writer_reset_profile: test
+
+1 test, 0 benchmarks

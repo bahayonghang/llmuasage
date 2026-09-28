@@ -1,0 +1,4495 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index c395cbf..ca3a6ff 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1591,7 +1591,7 @@ checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
+ 
+ [[package]]
+ name = "llmusage"
+-version = "1.4.0"
++version = "2.0.0"
+ dependencies = [
+  "anyhow",
+  "axum",
+diff --git a/Cargo.toml b/Cargo.toml
+index 0011b4e..4a49e0c 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -1,6 +1,6 @@
+ [package]
+ name = "llmusage"
+-version = "1.4.0"
++version = "2.0.0"
+ edition = "2024"
+ rust-version = "1.95"
+ autotests = false
+diff --git a/src/commands/diagnostics.rs b/src/commands/diagnostics.rs
+index 8b4142e..c36c582 100644
+--- a/src/commands/diagnostics.rs
++++ b/src/commands/diagnostics.rs
+@@ -47,6 +47,7 @@ pub async fn run(
+                 "host_id": host.host_id,
+                 "label": host.label,
+                 "sync_status": store.sync_status().load_source_sync_statuses(&host.host_id)?,
++                "source_issues": store.sync_status().load_source_issues(&host.host_id)?,
+             }))
+         })
+         .collect::<Result<Vec<_>>>()?;
+@@ -70,6 +71,8 @@ pub async fn run(
+         "cursors": health.cursors,
+         "sources": sources,
+         "sync_status": sync_status,
++        "source_issues": store.sync_status().load_source_issues("local")?,
++        "archive_observed_at": crate::util::now_utc(),
+         "hosts": host_status,
+         "archive": archive,
+         "logs": logs,
+diff --git a/src/commands/doctor.rs b/src/commands/doctor.rs
+index faea798..d98555d 100644
+--- a/src/commands/doctor.rs
++++ b/src/commands/doctor.rs
+@@ -151,6 +151,8 @@ async fn diagnostics(app: &AppContext, json: bool) -> Result<()> {
+ 
+     let sync_statuses = store.sync_status().load_source_sync_statuses("local")?;
+     checks.push(parse_issues_doctor_check(&sync_statuses));
++    let source_issues = store.sync_status().load_source_issues("local")?;
++    checks.push(source_issues_doctor_check(&source_issues));
+ 
+     if json {
+         println!("{}", serde_json::to_string_pretty(&checks)?);
+@@ -165,6 +167,28 @@ async fn diagnostics(app: &AppContext, json: bool) -> Result<()> {
+     Ok(())
+ }
+ 
++fn source_issues_doctor_check(
++    issues: &crate::domain::source_diagnostics::SourceIssues,
++) -> DoctorCheck {
++    let details = issues
++        .iter()
++        .flat_map(|(source, issues)| {
++            issues
++                .iter()
++                .map(move |issue| format!("{source}: {}", issue.cli_line(*source)))
++        })
++        .collect::<Vec<_>>();
++    DoctorCheck {
++        id: "source.issues",
++        status: if details.is_empty() { "ok" } else { "warn" },
++        detail: if details.is_empty() {
++            "no source blockers in the latest source observations".to_string()
++        } else {
++            details.join("; ")
++        },
++    }
++}
++
+ fn parse_issues_doctor_check(statuses: &[SourceSyncStatus]) -> DoctorCheck {
+     let mut faults = Vec::new();
+     for status in statuses {
+diff --git a/src/commands/source_status.rs b/src/commands/source_status.rs
+index ac20a07..227761a 100644
+--- a/src/commands/source_status.rs
++++ b/src/commands/source_status.rs
+@@ -1,4 +1,4 @@
+-use std::collections::BTreeMap;
++use std::collections::{BTreeMap, HashMap};
+ 
+ use anyhow::Result;
+ use serde::Serialize;
+@@ -74,7 +74,21 @@ pub async fn run(app: &AppContext) -> Result<()> {
+             .into_iter()
+             .map(|status| (status.source, status.parse_issues))
+             .collect::<BTreeMap<_, _>>();
+-        print_human_statuses(&capability_statuses, &[], &parse_issues);
++        let issues = store.sync_status().load_source_issues(&host.host_id)?;
++        let basenames = crate::commands::sync_summary::sample_basenames(
++            &store,
++            &host.host_id,
++            parse_issues
++                .keys()
++                .filter_map(|source| SourceKind::parse_id(source)),
++        );
++        print_human_statuses_with_diagnostics(
++            &capability_statuses,
++            &[],
++            &parse_issues,
++            &issues,
++            &basenames,
++        );
+     }
+     print_human_statuses(&[], &platform_statuses, &BTreeMap::new());
+     Ok(())
+@@ -185,6 +199,22 @@ pub fn print_human_statuses(
+     capability_statuses: &[SourceCapabilityStatus],
+     platform_statuses: &[PlatformMonitorStatus],
+     parse_issues_by_source: &BTreeMap<String, ParseIssues>,
++) {
++    print_human_statuses_with_diagnostics(
++        capability_statuses,
++        platform_statuses,
++        parse_issues_by_source,
++        &Default::default(),
++        &Default::default(),
++    );
++}
++
++fn print_human_statuses_with_diagnostics(
++    capability_statuses: &[SourceCapabilityStatus],
++    platform_statuses: &[PlatformMonitorStatus],
++    parse_issues_by_source: &BTreeMap<String, ParseIssues>,
++    source_issues: &crate::domain::source_diagnostics::SourceIssues,
++    basenames: &HashMap<String, String>,
+ ) {
+     for status in capability_statuses {
+         println!(
+@@ -201,10 +231,15 @@ pub fn print_human_statuses(
+             println!("  warning: {warning}");
+         }
+         if let Some(issues) = parse_issues_by_source.get(status.source.as_str()) {
+-            for line in parse_issue_status_lines(issues) {
++            for line in parse_issue_status_lines_with_basenames(issues, basenames) {
+                 println!("{line}");
+             }
+         }
++        if let Some(issues) = source_issues.get(&status.source) {
++            for issue in issues {
++                println!("  source issue: {}", issue.cli_line(status.source));
++            }
++        }
+     }
+     for platform in platform_statuses {
+         println!(
+@@ -235,13 +270,29 @@ pub fn host_lifecycle_status(host: &Host) -> &'static str {
+     }
+ }
+ 
++#[cfg(test)]
+ fn parse_issue_status_lines(issues: &ParseIssues) -> Vec<String> {
++    parse_issue_status_lines_with_basenames(issues, &HashMap::new())
++}
++
++fn parse_issue_status_lines_with_basenames(
++    issues: &ParseIssues,
++    basenames: &HashMap<String, String>,
++) -> Vec<String> {
+     let Some(summary) = issues.summary_text() else {
+         return Vec::new();
+     };
+     let mut lines = vec![format!("  parse issues: {summary}")];
+-    for sample in &issues.samples {
+-        lines.push(format!("    {}", sample.cli_line(None)));
++    lines.push(format!("  {}", issues.sample_summary()));
++    for sample in issues
++        .samples
++        .iter()
++        .take(crate::domain::models::MAX_PARSE_ISSUE_SAMPLES)
++    {
++        lines.push(format!(
++            "    {}",
++            sample.cli_line(basenames.get(&sample.path_hash).map(String::as_str))
++        ));
+     }
+     lines
+ }
+@@ -570,8 +621,8 @@ mod tests {
+         let lines = parse_issue_status_lines(&issues);
+         assert_eq!(lines[0], "  parse issues: skipped=1");
+         assert_eq!(
+-            lines[1],
+-            "    skipped zcode_unfinished:error:invalid_request"
++            lines[2],
++            "    skipped zcode_unfinished:error:invalid_request [location unavailable]"
+         );
+         assert!(lines.iter().all(|line| !line.contains("@0")));
+         assert!(lines.iter().all(|line| !line.contains("zcode-hash")));
+diff --git a/src/commands/sync.rs b/src/commands/sync.rs
+index f059a9d..16f5212 100644
+--- a/src/commands/sync.rs
++++ b/src/commands/sync.rs
+@@ -19,7 +19,7 @@ use crate::{
+     registry,
+     remote::protocol::{ShardRecord, encode_record, source_accounting_versions},
+     store::{BootstrapProgressEvent, HolderKind, Store},
+-    util::{hash_string, now_utc},
++    util::now_utc,
+ };
+ 
+ // These types belong to the sync domain layer. Re-exported here so callers that
+@@ -110,30 +110,34 @@ pub async fn emit_shards_to(
+         })
+     })?;
+     let cancel = CancellationToken::new();
+-    let sources = driver::drive_with_events(driver::DriveContext {
+-        parsers: &parsers,
+-        store: &store,
+-        writer: &mut writer,
+-        parallelism: request.parallelism(),
+-        lock_wait_ms: 0,
+-        recent_cutoff,
+-        sender: None,
+-        cancel: &cancel,
+-        sweep_host_ids: vec![crate::store::LOCAL_HOST_ID.to_string()],
+-    })
++    let result = driver::drive_with_rebuild(
++        driver::DriveContext {
++            parsers: &parsers,
++            store: &store,
++            writer: &mut writer,
++            parallelism: request.parallelism(),
++            lock_wait_ms: 0,
++            recent_cutoff,
++            sender: None,
++            cancel: &cancel,
++            sweep_host_ids: vec![crate::store::LOCAL_HOST_ID.to_string()],
++        },
++        false,
++        false,
++    )
+     .await?;
+     writer.finish_sync_run()?;
+     let mut parse_issues = ParseIssues::default();
++    let sources = result.stats;
+     for stats in &sources {
+         parse_issues.merge(stats.parse_issues.clone());
+     }
+-    write_record(
+-        &out,
+-        &ShardRecord::Trailer {
+-            sources,
+-            parse_issues,
+-        },
+-    )?;
++    let trailer =
++        crate::remote::protocol::encode_trailer(sources, parse_issues, &result.source_issues)?;
++    let mut output = out
++        .lock()
++        .map_err(|_| anyhow::anyhow!("shard output lock poisoned"))?;
++    writeln!(output, "{trailer}")?;
+     Ok(())
+ }
+ 
+@@ -178,6 +182,13 @@ async fn run_with_human_events(
+     // 提前返回同样经 Drop 完成终端清理，不依赖 reporter task 是否已 spawn。
+     let renderer = Arc::new(Mutex::new(sync_progress::stderr_renderer()));
+     let _guard = sync_progress::TerminalGuard::new(Arc::clone(&renderer));
++    let warning_renderer = Arc::clone(&renderer);
++    let _warning_guard = crate::logging::install_stderr_sink(Arc::new(move |bytes| {
++        warning_renderer
++            .lock()
++            .map_err(|_| io::Error::other("progress renderer lock poisoned"))?
++            .write_warning(bytes)
++    }));
+     let render_stats = Arc::new(Mutex::new(sync_progress::RenderStats::default()));
+     let bootstrap_started = Instant::now();
+     sync_progress::render_shared_timed(&renderer, &render_stats, &SyncEvent::BootstrapStarted);
+@@ -397,27 +408,15 @@ fn print_summary(summary: &SyncSummary, options: &SyncRunOptions, store: &Store)
+ }
+ 
+ fn sample_basenames(store: &Store, summary: &SyncSummary) -> HashMap<String, String> {
+-    let mut map = HashMap::new();
+-    for stats in &summary.sources {
+-        if stats.parse_issues.samples.is_empty() {
+-            continue;
+-        }
+-        let Ok(cursors) = store.cursors().load_file_cursors(stats.source, "local") else {
+-            continue;
+-        };
+-        for cursor in cursors.into_values() {
+-            let raw = if cursor.file_path.is_empty() {
+-                cursor.cursor_key
+-            } else {
+-                cursor.file_path
+-            };
+-            let Some(name) = sync_summary::path_basename(&raw) else {
+-                continue;
+-            };
+-            map.insert(hash_string(&raw), name.to_string());
+-        }
+-    }
+-    map
++    sync_summary::sample_basenames(
++        store,
++        "local",
++        summary
++            .sources
++            .iter()
++            .filter(|stats| !stats.parse_issues.samples.is_empty())
++            .map(|stats| stats.source),
++    )
+ }
+ 
+ /// Terminal column budget for the summary table: `COLUMNS` when set, otherwise
+diff --git a/src/commands/sync_progress.rs b/src/commands/sync_progress.rs
+index d504ceb..9548d14 100644
+--- a/src/commands/sync_progress.rs
++++ b/src/commands/sync_progress.rs
+@@ -69,6 +69,19 @@ pub(crate) enum HumanRenderer {
+ }
+ 
+ impl HumanRenderer {
++    pub(crate) fn write_warning(&mut self, bytes: &[u8]) -> std::io::Result<()> {
++        match self {
++            Self::Line(renderer) => {
++                if renderer.last_line_len > 0 {
++                    writeln!(renderer.stderr)?;
++                    renderer.last_line_len = 0;
++                }
++                renderer.stderr.write_all(bytes)
++            }
++            Self::Bar(renderer) => renderer.multi.suspend(|| renderer.stderr.write_all(bytes)),
++        }
++    }
++
+     /// Injectable draw target: hidden (non-TTY) or `force_line` selects the
+     /// line renderer; anything visible selects the bar renderer.
+     pub(crate) fn new(draw: ProgressDrawTarget, force_line: bool) -> Self {
+@@ -136,7 +149,7 @@ pub(crate) fn render_shared_timed(
+ /// Legacy line-by-line stderr renderer (former `HumanProgress`), preserved
+ /// verbatim for non-TTY output and the `LLMUSAGE_PROGRESS=off` fallback.
+ pub(crate) struct LineRenderer {
+-    stderr: std::io::Stderr,
++    stderr: Box<dyn Write + Send>,
+     tty: bool,
+     last_line_len: usize,
+     terminated: bool,
+@@ -147,7 +160,7 @@ impl LineRenderer {
+         let stderr = std::io::stderr();
+         let tty = stderr.is_terminal();
+         Self {
+-            stderr,
++            stderr: Box::new(stderr),
+             tty,
+             last_line_len: 0,
+             terminated: false,
+@@ -199,6 +212,10 @@ impl LineRenderer {
+     }
+ 
+     fn finish(&mut self) {
++        if self.last_line_len > 0 {
++            let _ = writeln!(self.stderr);
++            self.last_line_len = 0;
++        }
+         let _ = self.stderr.flush();
+     }
+ }
+@@ -218,6 +235,7 @@ struct ActiveBar {
+ /// at a time; phase boundaries land as permanent lines above the bars.
+ pub(crate) struct BarRenderer {
+     multi: MultiProgress,
++    stderr: Box<dyn Write + Send>,
+     active: Option<ActiveBar>,
+     terminated: bool,
+ }
+@@ -226,6 +244,7 @@ impl BarRenderer {
+     pub(crate) fn new(draw: ProgressDrawTarget) -> Self {
+         Self {
+             multi: MultiProgress::with_draw_target(draw),
++            stderr: Box::new(std::io::stderr()),
+             active: None,
+             terminated: false,
+         }
+@@ -416,8 +435,10 @@ impl BarRenderer {
+         }
+     }
+ 
+-    fn permanent_text(&self, line: String) {
+-        let _ = self.multi.println(line);
++    fn permanent_text(&mut self, line: String) {
++        // indicatif println pads to the terminal width instead of writing a
++        // newline. A following raw warning then shares the same output line.
++        let _ = self.multi.suspend(|| writeln!(self.stderr, "{line}"));
+     }
+ 
+     fn finish(&mut self) {
+@@ -604,8 +625,174 @@ mod tests {
+     use super::*;
+     use crate::parsers::SourceSyncStats;
+ 
++    #[derive(Clone, Debug, Default)]
++    struct CaptureTerm(Arc<Mutex<Vec<u8>>>);
++
++    impl Write for CaptureTerm {
++        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
++            self.0.lock().unwrap().extend_from_slice(bytes);
++            Ok(bytes.len())
++        }
++        fn flush(&mut self) -> std::io::Result<()> {
++            Ok(())
++        }
++    }
++
++    impl indicatif::TermLike for CaptureTerm {
++        fn width(&self) -> u16 {
++            120
++        }
++        fn move_cursor_up(&self, _: usize) -> std::io::Result<()> {
++            Ok(())
++        }
++        fn move_cursor_down(&self, _: usize) -> std::io::Result<()> {
++            Ok(())
++        }
++        fn move_cursor_right(&self, _: usize) -> std::io::Result<()> {
++            Ok(())
++        }
++        fn move_cursor_left(&self, _: usize) -> std::io::Result<()> {
++            Ok(())
++        }
++        fn write_line(&self, s: &str) -> std::io::Result<()> {
++            writeln!(self.clone(), "{s}")
++        }
++        fn write_str(&self, s: &str) -> std::io::Result<()> {
++            self.clone().write_all(s.as_bytes())
++        }
++        fn clear_line(&self) -> std::io::Result<()> {
++            self.clone().write_all(b"\r")
++        }
++        fn flush(&self) -> std::io::Result<()> {
++            Ok(())
++        }
++    }
++
++    #[test]
++    fn permanent_progress_lines_end_before_raw_warnings() {
++        let terminal = CaptureTerm::default();
++        let mut renderer =
++            BarRenderer::new(ProgressDrawTarget::term_like(Box::new(terminal.clone())));
++        renderer.stderr = Box::new(terminal.clone());
++        renderer.render(&SyncEvent::LockAcquired { wait_ms: 58 });
++        let writer = terminal.clone();
++        let subscriber = tracing_subscriber::fmt()
++            .without_time()
++            .with_ansi(false)
++            .with_target(false)
++            .with_writer(move || writer.clone())
++            .finish();
++        tracing::subscriber::with_default(subscriber, || tracing::warn!("legacy warning"));
++        let text = String::from_utf8(terminal.0.lock().unwrap().clone()).unwrap();
++        let warning = text.find("WARN").expect("warning");
++        assert!(
++            text[..warning].trim_end_matches(' ').ends_with('\n'),
++            "{text:?}"
++        );
++    }
++
++    #[test]
++    fn scoped_warning_sink_handles_interleaved_progress_and_restores_on_error() {
++        for mode in ["bar", "tty_line", "non_tty"] {
++            let terminal = CaptureTerm::default();
++            let renderer = if mode == "bar" {
++                let mut bar =
++                    BarRenderer::new(ProgressDrawTarget::term_like(Box::new(terminal.clone())));
++                bar.stderr = Box::new(terminal.clone());
++                HumanRenderer::Bar(bar)
++            } else {
++                HumanRenderer::Line(LineRenderer {
++                    stderr: Box::new(terminal.clone()),
++                    tty: mode == "tty_line",
++                    last_line_len: 0,
++                    terminated: false,
++                })
++            };
++            let renderer = Arc::new(Mutex::new(renderer));
++            let outside = CaptureTerm::default();
++            let outside_sink = outside.clone();
++            let _outer = crate::logging::install_stderr_sink(Arc::new(move |bytes| {
++                outside_sink.clone().write_all(bytes)
++            }));
++            let subscriber = tracing_subscriber::fmt()
++                .without_time()
++                .with_ansi(false)
++                .with_target(false)
++                .with_writer(crate::logging::StderrLogWriter::default)
++                .finish();
++            tracing::subscriber::with_default(subscriber, || {
++                let result: std::io::Result<()> = {
++                    let _terminal_guard = TerminalGuard::new(Arc::clone(&renderer));
++                    let sink_renderer = Arc::clone(&renderer);
++                    let _warning_guard =
++                        crate::logging::install_stderr_sink(Arc::new(move |bytes| {
++                            sink_renderer.lock().unwrap().write_warning(bytes)
++                        }));
++                    render_shared(&renderer, &SyncEvent::LockAcquired { wait_ms: 58 });
++                    tracing::warn!("first warning");
++                    crate::logging::stderr_warning("second warning");
++                    render_shared(
++                        &renderer,
++                        &SyncEvent::SourceStarted {
++                            source: SourceKind::Codex,
++                            files_total: 2,
++                        },
++                    );
++                    tracing::warn!("interleaved warning");
++                    render_shared(&renderer, &SyncEvent::LockAcquired { wait_ms: 0 });
++                    tracing::warn!("last warning");
++                    render_shared(
++                        &renderer,
++                        &SyncEvent::SourceStarted {
++                            source: SourceKind::Codex,
++                            files_total: 2,
++                        },
++                    );
++                    Err(std::io::Error::other("fixture error"))
++                };
++                assert!(result.is_err());
++                tracing::warn!("outside warning");
++            });
++            assert!(!renderer.lock().unwrap().has_active_bar());
++            let captured = String::from_utf8(terminal.0.lock().unwrap().clone()).unwrap();
++            for message in [
++                "first warning",
++                "second warning",
++                "interleaved warning",
++                "last warning",
++            ] {
++                assert!(
++                    captured.contains(&format!("{message}\n")),
++                    "{mode}: {captured:?}"
++                );
++            }
++            assert!(!captured.contains("outside warning"));
++            if mode == "tty_line" {
++                assert!(
++                    captured.ends_with('\n'),
++                    "unfinished TTY line: {captured:?}"
++                );
++            }
++            let external = String::from_utf8(outside.0.lock().unwrap().clone()).unwrap();
++            assert!(external.contains("outside warning"));
++            assert!(!external.contains("interleaved warning"));
++            if mode == "non_tty" {
++                assert!(!captured.contains('\r'));
++                assert_eq!(
++                    captured
++                        .lines()
++                        .filter(|line| line.contains("warning"))
++                        .count(),
++                    4
++                );
++            }
++        }
++    }
++
+     fn hidden_bar_renderer() -> BarRenderer {
+-        BarRenderer::new(ProgressDrawTarget::hidden())
++        let mut renderer = BarRenderer::new(ProgressDrawTarget::hidden());
++        renderer.stderr = Box::new(std::io::sink());
++        renderer
+     }
+ 
+     fn source_finished(source: SourceKind) -> SyncEvent {
+diff --git a/src/commands/sync_summary.rs b/src/commands/sync_summary.rs
+index cb2ff50..e10bcee 100644
+--- a/src/commands/sync_summary.rs
++++ b/src/commands/sync_summary.rs
+@@ -217,7 +217,12 @@ fn parse_issue_lines(
+         styled(prefix_style, "  parse issues: ", color),
+         class_parts.join(" ")
+     )];
+-    for sample in &issues.samples {
++    lines.push(format!("  {}", issues.sample_summary()));
++    for sample in issues
++        .samples
++        .iter()
++        .take(crate::domain::models::MAX_PARSE_ISSUE_SAMPLES)
++    {
+         lines.push(styled(
+             Style::new().dim(),
+             &parse_issue_sample_line(sample, sample_basenames),
+@@ -243,6 +248,30 @@ pub(crate) fn path_basename(raw: &str) -> Option<&str> {
+         .find(|name| !name.is_empty())
+ }
+ 
++pub(crate) fn sample_basenames(
++    store: &crate::store::Store,
++    host: &str,
++    sources: impl Iterator<Item = SourceKind>,
++) -> HashMap<String, String> {
++    let mut map = HashMap::new();
++    for source in sources {
++        let Ok(cursors) = store.cursors().load_file_cursors(source, host) else {
++            continue;
++        };
++        for cursor in cursors.into_values() {
++            let raw = if cursor.file_path.is_empty() {
++                cursor.cursor_key
++            } else {
++                cursor.file_path
++            };
++            if let Some(name) = path_basename(&raw) {
++                map.insert(crate::util::hash_string(&raw), name.to_string());
++            }
++        }
++    }
++    map
++}
++
+ struct Row {
+     cells: [String; HEADERS.len()],
+ }
+@@ -405,6 +434,25 @@ mod tests {
+     /// Wide terminal used by alignment assertions so natural widths are kept.
+     const WIDE: usize = 200;
+ 
++    #[test]
++    fn parse_issue_samples_report_offsets_and_omitted_count() {
++        let mut summary = summary();
++        for offset in 1..=13 {
++            summary.sources[0].parse_issues.record(
++                SourceKind::Codex,
++                "private-hash",
++                offset,
++                crate::models::ParseIssueKind::Skipped,
++                "oversized_non_usage_record",
++            );
++        }
++        let text = format_summary_lines(&summary, false, false, WIDE).join("\n");
++        assert!(text.contains("oversized_non_usage_record @1"), "{text}");
++        assert!(text.contains("5 not shown"), "{text}");
++        assert!(!text.contains("@9"));
++        assert!(!text.contains("private-hash"));
++    }
++
+     /// Strips ANSI SGR sequences so colored output can be compared to plain.
+     fn strip_ansi(text: &str) -> String {
+         let mut out = String::new();
+@@ -524,7 +572,9 @@ mod tests {
+             "  parse issues: malformed=2 oversized=1 skipped=3 accounting=4"
+         );
+         assert!(
+-            lines.iter().any(|line| line.trim() == "malformed @42"),
++            lines
++                .iter()
++                .any(|line| line.trim() == "malformed @42 [location unavailable]"),
+             "samples should show kind and offset: {lines:?}"
+         );
+         assert!(!lines.iter().any(|line| line.contains("safe-path-hash")));
+@@ -581,9 +631,8 @@ mod tests {
+ 
+         let lines = format_summary_lines(&summary, false, false, WIDE);
+         assert!(
+-            lines
+-                .iter()
+-                .any(|line| line.trim() == "skipped zcode_unfinished:error:invalid_request"),
++            lines.iter().any(|line| line.trim()
++                == "skipped zcode_unfinished:error:invalid_request [location unavailable]"),
+             "reason samples should print kind + reason: {lines:?}"
+         );
+         assert!(!lines.iter().any(|line| line.contains("@0")));
+diff --git a/src/domain/mod.rs b/src/domain/mod.rs
+index 9004ac4..bfd35ee 100644
+--- a/src/domain/mod.rs
++++ b/src/domain/mod.rs
+@@ -5,3 +5,4 @@ pub mod pricing_catalog;
+ pub mod project;
+ pub mod provider_map;
+ pub mod source_descriptor;
++pub(crate) mod source_diagnostics;
+diff --git a/src/domain/models.rs b/src/domain/models.rs
+index 55ba7a9..0bcb324 100644
+--- a/src/domain/models.rs
++++ b/src/domain/models.rs
+@@ -116,20 +116,29 @@ pub struct ParseIssueSample {
+ }
+ 
+ impl ParseIssueSample {
+-    /// Privacy-safe CLI sample line: kind, optional reason, optional JSONL
+-    /// offset, optional basename. Never includes `path_hash` or record text.
++    /// Privacy-safe CLI sample line: kind, optional reason, JSONL byte offset
++    /// or ZCode timestamp, and optional basename. Never includes `path_hash`,
++    /// OpenCode row ids, or record text.
+     pub fn cli_line(&self, basename: Option<&str>) -> String {
+         let mut line = self.kind.to_string();
+         if !self.reason.is_empty() {
+             line.push(' ');
+-            line.push_str(&self.reason);
+-        } else if self.offset > 0 {
+-            line.push_str(" @");
++            line.push_str(&sanitize_parse_issue_reason(&self.reason));
++        }
++        if self.offset > 0 && self.source != SourceKind::Opencode {
++            line.push_str(if self.source == SourceKind::Zcode {
++                " timestamp_ms="
++            } else {
++                " @"
++            });
+             line.push_str(&self.offset.to_string());
+         }
+         if let Some(name) = basename.filter(|name| !name.is_empty()) {
+             line.push(' ');
+-            line.push_str(name);
++            let name = name.rsplit(['/', '\\']).next().unwrap_or_default();
++            line.extend(name.chars().filter(|ch| !ch.is_control()).take(255));
++        } else {
++            line.push_str(" [location unavailable]");
+         }
+         line
+     }
+@@ -169,6 +178,15 @@ impl ParseIssues {
+             .saturating_add(self.accounting_anomaly_lines)
+     }
+ 
++    pub(crate) fn sample_summary(&self) -> String {
++        let total = self.total().saturating_add(self.informational_total());
++        let shown = self.samples.len().min(MAX_PARSE_ISSUE_SAMPLES);
++        format!(
++            "samples: {shown}/{total}; {} not shown",
++            total.saturating_sub(shown as u64)
++        )
++    }
++
+     pub fn class_counts(&self) -> [(&'static str, u64); 4] {
+         [
+             ("malformed", self.malformed_lines),
+@@ -645,7 +663,7 @@ mod tests {
+         )
+         .expect("legacy sample JSON");
+         assert_eq!(sample.reason, "");
+-        assert_eq!(sample.cli_line(None), "skipped");
++        assert_eq!(sample.cli_line(None), "skipped [location unavailable]");
+ 
+         let mut issues = ParseIssues::default();
+         issues.record(
+@@ -669,7 +687,7 @@ mod tests {
+         assert_eq!(issues.samples[1].reason.len(), MAX_PARSE_ISSUE_REASON_CHARS);
+         assert_eq!(
+             issues.samples[0].cli_line(None),
+-            "skipped zcode_unfinished:error:invalid_requestplusextra"
++            "skipped zcode_unfinished:error:invalid_requestplusextra [location unavailable]"
+         );
+         assert!(
+             !issues.samples[0].cli_line(None).contains("@0"),
+@@ -677,6 +695,57 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn parse_issue_sample_location_units_and_privacy() {
++        for (source, expected) in [
++            (SourceKind::Codex, " @12345"),
++            (SourceKind::Grok, " @12345"),
++            (SourceKind::Zcode, " timestamp_ms=12345"),
++            (SourceKind::Opencode, ""),
++        ] {
++            let sample = ParseIssueSample {
++                source,
++                path_hash: "private-hash".into(),
++                offset: 12345,
++                kind: ParseIssueKind::Malformed,
++                reason: "invalid_json\n\u{1b}".into(),
++            };
++            let line = sample.cli_line(Some("C:/private/nested/safe\t.jsonl"));
++            assert_eq!(line, format!("malformed invalid_json{expected} safe.jsonl"));
++            assert!(!line.contains("private"));
++            assert!(!line.chars().any(char::is_control));
++            if source == SourceKind::Opencode {
++                assert!(!line.contains("12345"));
++            }
++        }
++    }
++
++    #[test]
++    fn parse_issues_sample_summary_retains_counts_after_merge() {
++        for count in [0_u64, 8, 9, 13] {
++            let mut issues = ParseIssues::default();
++            for offset in 0..count {
++                let mut shard = ParseIssues::default();
++                shard.record(
++                    SourceKind::Grok,
++                    "hash",
++                    offset,
++                    ParseIssueKind::AccountingAnomaly,
++                    "usage_incomplete",
++                );
++                issues.merge(shard);
++            }
++            let shown = count.min(8);
++            assert_eq!(issues.samples.len(), shown as usize);
++            assert_eq!(issues.total(), 0);
++            assert_eq!(issues.informational_total(), count);
++            assert_eq!(
++                issues.sample_summary(),
++                format!("samples: {shown}/{count}; {} not shown", count - shown)
++            );
++        }
++    }
++
+     #[test]
+     fn parse_issue_kinds_round_trip_including_new_classes() {
+         for kind in [
+diff --git a/src/parsers/antigravity.rs b/src/parsers/antigravity.rs
+index 55b7e68..010febb 100644
+--- a/src/parsers/antigravity.rs
++++ b/src/parsers/antigravity.rs
+@@ -8,6 +8,7 @@ mod decode;
+ mod tests;
+ 
+ use crate::{
++    domain::source_diagnostics::{SourceIssue, SourceIssueCode, SourceIssues},
+     models::{ParseIssueKind, ParseIssues, SourceKind},
+     parsers::{ProgressSink, SourceParser, SourceSyncStats, SyncEvent, source_files},
+     store::{FileCursor, Store, SyncRunWriter, SyncShard},
+@@ -58,7 +59,7 @@ macro_rules! parser {
+                         progress,
+                     )
+                     .await?;
+-                    Ok(result.remove(0))
++                    Ok(result.stats.remove(0))
+                 })
+             }
+         }
+@@ -142,14 +143,37 @@ fn snapshot(path: &Path) -> Result<FileCursor> {
+     })
+ }
+ 
+-fn record_failure(stats: &mut [SourceSyncStats], source: SourceKind, reason: &str) {
++fn record_failure(
++    stats: &mut [SourceSyncStats],
++    source_issues: &mut SourceIssues,
++    source: SourceKind,
++    code: SourceIssueCode,
++    count: u64,
++) {
+     for stat in stats.iter_mut().filter(|stat| stat.source == source) {
+-        stat.last_error = Some(reason.to_owned());
+-        stat.parse_issues
+-            .record(source, "", 0, ParseIssueKind::Malformed, reason);
++        let issues = source_issues.entry(source).or_default();
++        SourceIssue::record(issues, code, count);
++        stat.last_error = Some(
++            issues
++                .iter()
++                .map(|issue| issue.cli_line(source))
++                .collect::<Vec<_>>()
++                .join("; "),
++        );
+     }
+ }
+ 
++pub(crate) struct FamilySyncResult {
++    pub(crate) stats: Vec<SourceSyncStats>,
++    pub(crate) source_issues: SourceIssues,
++}
++
++struct FamilyInputs {
++    started: Instant,
++    listings: [(SourceKind, source_files::SourceFileListing); 2],
++    metadata: fn(&Path) -> std::io::Result<std::fs::Metadata>,
++}
++
+ /// The driver invokes this once for the selected Antigravity family. Both
+ /// roots are inspected before filtering so copied artifacts retain ownership.
+ #[allow(clippy::too_many_arguments)]
+@@ -162,9 +186,50 @@ pub(crate) async fn sync_antigravity_family(
+     _parallelism: usize,
+     recent_cutoff: Option<DateTime<Utc>>,
+     cancel: &CancellationToken,
+-    mut progress: Option<ProgressSink<'_>>,
+-) -> Result<Vec<SourceSyncStats>> {
++    progress: Option<ProgressSink<'_>>,
++) -> Result<FamilySyncResult> {
+     let started = Instant::now();
++    sync_family_with_inputs(
++        store,
++        writer,
++        selected_sources,
++        rebuild,
++        allow_lossy_rebuild,
++        recent_cutoff,
++        cancel,
++        progress,
++        FamilyInputs {
++            started,
++            listings: [
++                (
++                    SourceKind::Antigravity,
++                    source_files::list_antigravity_conversation_files(),
++                ),
++                (
++                    SourceKind::AntigravityIde,
++                    source_files::list_antigravity_ide_conversation_files(),
++                ),
++            ],
++            metadata: |path| std::fs::metadata(path),
++        },
++    )
++    .await
++}
++
++#[allow(clippy::too_many_arguments)]
++async fn sync_family_with_inputs(
++    store: &Store,
++    writer: &mut SyncRunWriter,
++    selected_sources: &[SourceKind],
++    rebuild: bool,
++    allow_lossy_rebuild: bool,
++    recent_cutoff: Option<DateTime<Utc>>,
++    cancel: &CancellationToken,
++    mut progress: Option<ProgressSink<'_>>,
++    inputs: FamilyInputs,
++) -> Result<FamilySyncResult> {
++    let started = inputs.started;
++    let mut source_issues = SourceIssues::new();
+     let mut stats: Vec<_> = selected_sources
+         .iter()
+         .map(|source| SourceSyncStats {
+@@ -172,6 +237,12 @@ pub(crate) async fn sync_antigravity_family(
+             ..Default::default()
+         })
+         .collect();
++    if selected_sources.is_empty() {
++        return Ok(FamilySyncResult {
++            stats,
++            source_issues,
++        });
++    }
+     let mut cursors: HashMap<SourceKind, HashMap<String, FileCursor>> = HashMap::new();
+     let mut tracked: HashMap<SourceKind, HashSet<PathBuf>> = HashMap::new();
+     for source in FAMILY {
+@@ -200,19 +271,26 @@ pub(crate) async fn sync_antigravity_family(
+     let mut files = Vec::new();
+     let mut discovered = HashSet::new();
+     let mut failed = HashSet::new();
+-    for (source, listing) in [
+-        (
+-            SourceKind::Antigravity,
+-            source_files::list_antigravity_conversation_files(),
+-        ),
+-        (
+-            SourceKind::AntigravityIde,
+-            source_files::list_antigravity_ide_conversation_files(),
+-        ),
+-    ] {
+-        if let Some(error) = listing.error_summary() {
+-            record_failure(&mut stats, source, &error);
+-            failed.insert(source);
++    for (source, listing) in inputs.listings {
++        // Shared discovery treats a missing root as empty. Check metadata here
++        // because Path::exists also hides access errors and non-directory roots.
++        let root_failed = match (inputs.metadata)(&listing.root) {
++            Ok(metadata) => !metadata.is_dir(),
++            Err(error) => error.kind() != std::io::ErrorKind::NotFound,
++        };
++        if listing.error_summary().is_some() || root_failed {
++            // An unseen database can belong to either product or carry a
++            // stronger identity. Root names do not prove product ownership.
++            for owner in FAMILY {
++                record_failure(
++                    &mut stats,
++                    &mut source_issues,
++                    owner,
++                    SourceIssueCode::DiscoveryIncomplete,
++                    1,
++                );
++                failed.insert(owner);
++            }
+         }
+         for path in listing.paths {
+             if !discovered.insert(path.clone()) {
+@@ -228,8 +306,10 @@ pub(crate) async fn sync_antigravity_family(
+                     for owner in failed_file_owners(&path, source, &tracked) {
+                         record_failure(
+                             &mut stats,
++                            &mut source_issues,
+                             owner,
+-                            "Antigravity database fingerprint failed; history preserved",
++                            SourceIssueCode::FingerprintUnavailable,
++                            1,
+                         );
+                         failed.insert(owner);
+                     }
+@@ -237,19 +317,32 @@ pub(crate) async fn sync_antigravity_family(
+             }
+         }
+     }
+-    // A missing tracked member cannot silently remove its historical events.
++    // Only local membership is loaded above. A path absent from discovery may
++    // still exist outside the current roots or supported file extensions.
+     for source in FAMILY {
+-        if tracked[&source]
++        for path in tracked[&source]
+             .iter()
+-            .any(|path| !discovered.contains(path))
+-            && !(rebuild && allow_lossy_rebuild && selected_sources.contains(&source))
++            .filter(|path| !discovered.contains(*path))
+         {
+-            record_failure(
+-                &mut stats,
+-                source,
+-                "Antigravity tracked database missing; history preserved (restore it or use explicit --rebuild --allow-lossy-rebuild)",
+-            );
+-            failed.insert(source);
++            let code = match (inputs.metadata)(path) {
++                Ok(_) => SourceIssueCode::TrackedMemberOutOfScope,
++                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
++                    SourceIssueCode::TrackedMemberMissing
++                }
++                Err(_) => SourceIssueCode::TrackedMemberUnreadable,
++            };
++            let accepted_loss = rebuild
++                && allow_lossy_rebuild
++                && selected_sources.contains(&source)
++                && matches!(
++                    code,
++                    SourceIssueCode::TrackedMemberMissing
++                        | SourceIssueCode::TrackedMemberOutOfScope
++                );
++            if !accepted_loss {
++                record_failure(&mut stats, &mut source_issues, source, code, 1);
++                failed.insert(source);
++            }
+         }
+     }
+     let any_changed = rebuild
+@@ -272,15 +365,18 @@ pub(crate) async fn sync_antigravity_family(
+             stat.files_processed = paths.len();
+             stat.skipped_files = paths.len();
+         }
+-        return Ok(stats);
++        return Ok(FamilySyncResult {
++            stats,
++            source_issues,
++        });
+     }
+     if cancel.is_cancelled() {
+-        return Ok(stats);
++        return Ok(FamilySyncResult {
++            stats,
++            source_issues,
++        });
+     }
+ 
+-    let mut decoded = Vec::new();
+-    let mut new_cursors: HashMap<SourceKind, Vec<FileCursor>> = HashMap::new();
+-    let mut issues: HashMap<SourceKind, ParseIssues> = HashMap::new();
+     for source in selected_sources {
+         if let Some(sink) = progress.as_mut() {
+             sink(SyncEvent::SourceStarted {
+@@ -289,11 +385,30 @@ pub(crate) async fn sync_antigravity_family(
+             });
+         }
+     }
++    if selected_sources
++        .iter()
++        .all(|source| failed.contains(source))
++    {
++        let elapsed = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
++        for stat in &mut stats {
++            stat.parse_ms = elapsed;
++        }
++        return Ok(FamilySyncResult {
++            stats,
++            source_issues,
++        });
++    }
++    let mut decoded = Vec::new();
++    let mut new_cursors: HashMap<SourceKind, Vec<FileCursor>> = HashMap::new();
++    let mut issues: HashMap<SourceKind, ParseIssues> = HashMap::new();
+     // Do blocking SQLite reads off the async executor, one consistent transaction
+     // per DB; no store mutation occurs until every selected snapshot is staged.
+     for mut file in files {
+         if cancel.is_cancelled() {
+-            return Ok(stats);
++            return Ok(FamilySyncResult {
++                stats,
++                source_issues,
++            });
+         }
+         // Discovery can precede this read by many databases. Capture this
+         // member immediately before its transaction, not at inventory time.
+@@ -304,8 +419,10 @@ pub(crate) async fn sync_antigravity_family(
+                     failed.insert(owner);
+                     record_failure(
+                         &mut stats,
++                        &mut source_issues,
+                         owner,
+-                        "Antigravity database fingerprint failed; history preserved",
++                        SourceIssueCode::FingerprintUnavailable,
++                        1,
+                     );
+                 }
+                 continue;
+@@ -319,22 +436,25 @@ pub(crate) async fn sync_antigravity_family(
+         })
+         .await?;
+         if cancel.is_cancelled() {
+-            return Ok(stats);
++            return Ok(FamilySyncResult {
++                stats,
++                source_issues,
++            });
+         }
+         match parsed {
+             Ok(parsed) => {
+                 let fingerprint_error = match snapshot(&file.path) {
+                     Ok(after) if after.file_fingerprint == file.cursor.file_fingerprint => None,
+-                    Ok(_) => Some("Antigravity database changed while reading; retry sync"),
++                    Ok(_) => Some(SourceIssueCode::SnapshotChanged),
+                     Err(error) => {
+                         tracing::warn!(error = %error, path_hash = hash_string(&file.path.to_string_lossy()), "Antigravity post-read fingerprint unavailable");
+-                        Some("Antigravity post-read fingerprint unavailable; history preserved")
++                        Some(SourceIssueCode::FingerprintUnavailable)
+                     }
+                 };
+-                if let Some(reason) = fingerprint_error {
++                if let Some(code) = fingerprint_error {
+                     for owner in failed_file_owners(&file.path, parsed.source, &tracked) {
+                         failed.insert(owner);
+-                        record_failure(&mut stats, owner, reason);
++                        record_failure(&mut stats, &mut source_issues, owner, code, 1);
+                     }
+                     continue;
+                 }
+@@ -358,14 +478,24 @@ pub(crate) async fn sync_antigravity_family(
+                     .or_default()
+                     .push(file.cursor);
+             }
+-            Err(_) => {
+-                for owner in failed_file_owners(&file.path, root_source, &tracked) {
+-                    failed.insert(owner);
+-                    record_failure(
+-                        &mut stats,
+-                        owner,
+-                        "Antigravity SQLite metadata unreadable or malformed; history preserved",
++            Err(error) => {
++                let record_error = error.downcast_ref::<decode::RecordFailure>();
++                let source = record_error.map_or(root_source, |error| error.source_kind);
++                let code = if let Some(error) = record_error {
++                    issues.entry(source).or_default().record(
++                        source,
++                        &error.path_hash,
++                        0,
++                        ParseIssueKind::Malformed,
++                        error.reason,
+                     );
++                    SourceIssueCode::IncompleteSnapshot
++                } else {
++                    SourceIssueCode::MetadataUnreadable
++                };
++                for owner in failed_file_owners(&file.path, source, &tracked) {
++                    failed.insert(owner);
++                    record_failure(&mut stats, &mut source_issues, owner, code, 1);
+                 }
+             }
+         }
+@@ -376,20 +506,24 @@ pub(crate) async fn sync_antigravity_family(
+     // check below blocks that write as well.
+     let events = match decode::normalize(decoded, &mut issues) {
+         Ok(events) => events,
+-        Err(error) => {
++        Err(_) => {
+             for stat in &mut stats {
+                 stat.parse_issues
+                     .merge(issues.remove(&stat.source).unwrap_or_default());
+-                stat.parse_issues.record(
+-                    stat.source,
+-                    "",
+-                    0,
+-                    ParseIssueKind::Malformed,
+-                    "incomplete_antigravity_usage_snapshot",
++            }
++            for source in selected_sources {
++                record_failure(
++                    &mut stats,
++                    &mut source_issues,
++                    *source,
++                    SourceIssueCode::IncompleteSnapshot,
++                    1,
+                 );
+-                stat.last_error = Some(error.to_string());
+             }
+-            return Ok(stats);
++            return Ok(FamilySyncResult {
++                stats,
++                source_issues,
++            });
+         }
+     };
+     let old_owners = if store.emit_only() {
+@@ -507,7 +641,10 @@ pub(crate) async fn sync_antigravity_family(
+         shards.push(shard);
+     }
+     if cancel.is_cancelled() {
+-        return Ok(stats);
++        return Ok(FamilySyncResult {
++            stats,
++            source_issues,
++        });
+     }
+     if !shards.is_empty() {
+         let sources: Vec<_> = shards.iter().map(|shard| shard.source).collect();
+@@ -526,7 +663,10 @@ pub(crate) async fn sync_antigravity_family(
+     for stat in &mut stats {
+         stat.parse_ms = elapsed.saturating_sub(stat.write_ms);
+     }
+-    Ok(stats)
++    Ok(FamilySyncResult {
++        stats,
++        source_issues,
++    })
+ }
+ 
+ fn failed_file_owners(
+diff --git a/src/parsers/antigravity/decode.rs b/src/parsers/antigravity/decode.rs
+index c890b32..57d4a0c 100644
+--- a/src/parsers/antigravity/decode.rs
++++ b/src/parsers/antigravity/decode.rs
+@@ -5,7 +5,7 @@ use crate::{
+     project::ProjectResolver,
+     util::{bucket_start_from_rfc3339, hash_string, normalize_model},
+ };
+-use anyhow::{Result, bail};
++use anyhow::{Context, Result, bail};
+ use chrono::{DateTime, Utc};
+ use rusqlite::{Connection, OpenFlags};
+ use std::{
+@@ -46,18 +46,28 @@ pub(super) struct DecodedFile {
+     pub root_attribution: bool,
+ }
+ 
++#[derive(Debug, thiserror::Error)]
++#[error("{reason}")]
++pub(super) struct RecordFailure {
++    pub source_kind: SourceKind,
++    pub path_hash: String,
++    pub reason: &'static str,
++}
++
+ pub(super) fn read_file(
+     path: &Path,
+     source: SourceKind,
+     cancel: &CancellationToken,
+ ) -> Result<DecodedFile> {
++    #[cfg(test)]
++    test_reads::record(path);
+     let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+     connection.busy_timeout(std::time::Duration::from_millis(250))?;
+     connection.execute_batch("PRAGMA query_only=ON; BEGIN")?;
+     let product = product_source(&connection)?;
+     let source = product.unwrap_or(source);
+     let path_hash = hash_string(&path.to_string_lossy());
+-    let (session_time, workspace) = trajectory(&connection)?;
++    let (session_time, workspace) = trajectory(&connection, source, &path_hash)?;
+     if !table_exists(&connection, "gen_metadata")? && !table_exists(&connection, "steps")? {
+         bail!("unrecognized Antigravity SQLite schema; history preserved");
+     }
+@@ -70,39 +80,47 @@ pub(super) fn read_file(
+             if cancel.is_cancelled() {
+                 bail!("Antigravity metadata read cancelled");
+             }
+-            let idx: i64 = row.get(0)?;
+-            let blob: Vec<u8> = row.get(1)?;
+-            let fields = decode_fields(&blob)?;
+-            check_types(&fields, &[], &[1])?;
+-            let Some(chat) = bytes(&fields, 1) else {
+-                continue;
++            let mut parse_record = || -> Result<()> {
++                let idx: i64 = row.get(0)?;
++                let blob: Vec<u8> = row.get(1)?;
++                let fields = decode_fields(&blob)?;
++                check_types(&fields, &[], &[1])?;
++                let Some(chat) = bytes(&fields, 1) else {
++                    return Ok(());
++                };
++                let chat = decode_fields(chat)?;
++                let direct_time = bytes(&chat, 9)
++                    .map(decode_fields)
++                    .transpose()?
++                    .and_then(|generation| bytes(&generation, 4).map(Vec::from))
++                    .map(|timestamp| parse_timestamp(&timestamp))
++                    .transpose()?
++                    .flatten();
++                let time = direct_time
++                    .map(|time| (3, time))
++                    .or(session_time.map(|time| (0, time)));
++                let model = text(&chat, 22).or_else(|| text(&chat, 19));
++                let label = text(&chat, 21);
++                push_usage(
++                    &mut observations,
++                    &chat,
++                    4,
++                    17,
++                    source,
++                    &path_hash,
++                    &format!("gen:{idx}"),
++                    model,
++                    label,
++                    time,
++                    workspace.clone(),
++                )?;
++                Ok(())
+             };
+-            let chat = decode_fields(chat)?;
+-            let direct_time = bytes(&chat, 9)
+-                .map(decode_fields)
+-                .transpose()?
+-                .and_then(|generation| bytes(&generation, 4).map(Vec::from))
+-                .map(|timestamp| parse_timestamp(&timestamp))
+-                .transpose()?
+-                .flatten();
+-            let time = direct_time
+-                .map(|time| (3, time))
+-                .or(session_time.map(|time| (0, time)));
+-            let model = text(&chat, 22).or_else(|| text(&chat, 19));
+-            let label = text(&chat, 21);
+-            push_usage(
+-                &mut observations,
+-                &chat,
+-                4,
+-                17,
+-                source,
+-                &path_hash,
+-                &format!("gen:{idx}"),
+-                model,
+-                label,
+-                time,
+-                workspace.clone(),
+-            )?;
++            parse_record().with_context(|| RecordFailure {
++                source_kind: source,
++                path_hash: path_hash.clone(),
++                reason: "invalid_generation_metadata",
++            })?;
+         }
+     }
+     if table_exists(&connection, "steps")? {
+@@ -114,36 +132,44 @@ pub(super) fn read_file(
+             if cancel.is_cancelled() {
+                 bail!("Antigravity metadata read cancelled");
+             }
+-            let idx: i64 = row.get(0)?;
+-            let blob: Vec<u8> = row.get(1)?;
+-            let fields = decode_fields(&blob)?;
+-            let time = match bytes(&fields, 8) {
+-                Some(value) => parse_timestamp(value)?.map(|time| (2, time)),
+-                None => None,
+-            }
+-            .or(match bytes(&fields, 1) {
+-                Some(value) => parse_timestamp(value)?.map(|time| (1, time)),
+-                None => None,
+-            })
+-            .or(session_time.map(|time| (0, time)));
+-            let model_info = bytes(&fields, 24)
+-                .map(decode_fields)
+-                .transpose()?
+-                .unwrap_or_default();
+-            let model = text(&model_info, 12).or_else(|| text(&model_info, 8));
+-            push_usage(
+-                &mut observations,
+-                &fields,
+-                9,
+-                28,
+-                source,
+-                &path_hash,
+-                &format!("step:{idx}"),
+-                model,
+-                None,
+-                time,
+-                workspace.clone(),
+-            )?;
++            let mut parse_record = || -> Result<()> {
++                let idx: i64 = row.get(0)?;
++                let blob: Vec<u8> = row.get(1)?;
++                let fields = decode_fields(&blob)?;
++                let time = match bytes(&fields, 8) {
++                    Some(value) => parse_timestamp(value)?.map(|time| (2, time)),
++                    None => None,
++                }
++                .or(match bytes(&fields, 1) {
++                    Some(value) => parse_timestamp(value)?.map(|time| (1, time)),
++                    None => None,
++                })
++                .or(session_time.map(|time| (0, time)));
++                let model_info = bytes(&fields, 24)
++                    .map(decode_fields)
++                    .transpose()?
++                    .unwrap_or_default();
++                let model = text(&model_info, 12).or_else(|| text(&model_info, 8));
++                push_usage(
++                    &mut observations,
++                    &fields,
++                    9,
++                    28,
++                    source,
++                    &path_hash,
++                    &format!("step:{idx}"),
++                    model,
++                    None,
++                    time,
++                    workspace.clone(),
++                )?;
++                Ok(())
++            };
++            parse_record().with_context(|| RecordFailure {
++                source_kind: source,
++                path_hash: path_hash.clone(),
++                reason: "invalid_step_metadata",
++            })?;
+         }
+     }
+     // Read transaction keeps gen_metadata, steps and trajectory at one SQLite snapshot.
+@@ -196,6 +222,46 @@ pub(super) fn read_file(
+     })
+ }
+ 
++#[cfg(test)]
++pub(super) mod test_reads {
++    use std::{
++        collections::HashMap,
++        path::{Path, PathBuf},
++        sync::Mutex,
++    };
++
++    static COUNTS: Mutex<Option<HashMap<PathBuf, usize>>> = Mutex::new(None);
++
++    pub(super) fn record(path: &Path) {
++        if let Some(count) = COUNTS
++            .lock()
++            .unwrap()
++            .as_mut()
++            .and_then(|counts| counts.get_mut(path))
++        {
++            *count += 1;
++        }
++    }
++
++    pub(in crate::parsers::antigravity) fn reset(path: &Path) {
++        COUNTS
++            .lock()
++            .unwrap()
++            .get_or_insert_with(HashMap::new)
++            .insert(path.to_path_buf(), 0);
++    }
++
++    pub(in crate::parsers::antigravity) fn take(path: &Path) -> usize {
++        COUNTS
++            .lock()
++            .unwrap()
++            .as_mut()
++            .unwrap()
++            .remove(path)
++            .unwrap()
++    }
++}
++
+ #[allow(clippy::too_many_arguments)]
+ fn push_usage(
+     output: &mut Vec<Observation>,
+@@ -311,7 +377,11 @@ fn product_source(connection: &Connection) -> Result<Option<SourceKind>> {
+     }
+ }
+ 
+-fn trajectory(connection: &Connection) -> Result<(Option<i64>, Option<PathBuf>)> {
++fn trajectory(
++    connection: &Connection,
++    source: SourceKind,
++    path_hash: &str,
++) -> Result<(Option<i64>, Option<PathBuf>)> {
+     if !table_exists(connection, "trajectory_metadata_blob")? {
+         return Ok((None, None));
+     }
+@@ -320,27 +390,34 @@ fn trajectory(connection: &Connection) -> Result<(Option<i64>, Option<PathBuf>)>
+     let Some(row) = rows.next()? else {
+         return Ok((None, None));
+     };
+-    let blob: Vec<u8> = row.get(0)?;
+-    let fields = decode_fields(&blob)?;
+-    let time = bytes(&fields, 2)
+-        .map(parse_timestamp)
+-        .transpose()?
+-        .flatten();
+-    let metadata = bytes(&fields, 1)
+-        .map(decode_fields)
+-        .transpose()?
+-        .unwrap_or_default();
+-    let workspace = text(&metadata, 1).map(|uri| {
+-        let raw = uri.strip_prefix("file://").unwrap_or(&uri);
+-        #[cfg(windows)]
+-        let raw = if raw.as_bytes().get(2) == Some(&b':') {
+-            raw.strip_prefix('/').unwrap_or(raw)
+-        } else {
+-            raw
+-        };
+-        PathBuf::from(raw)
+-    });
+-    Ok((time, workspace))
++    let parse_record = || -> Result<_> {
++        let blob: Vec<u8> = row.get(0)?;
++        let fields = decode_fields(&blob)?;
++        let time = bytes(&fields, 2)
++            .map(parse_timestamp)
++            .transpose()?
++            .flatten();
++        let metadata = bytes(&fields, 1)
++            .map(decode_fields)
++            .transpose()?
++            .unwrap_or_default();
++        let workspace = text(&metadata, 1).map(|uri| {
++            let raw = uri.strip_prefix("file://").unwrap_or(&uri);
++            #[cfg(windows)]
++            let raw = if raw.as_bytes().get(2) == Some(&b':') {
++                raw.strip_prefix('/').unwrap_or(raw)
++            } else {
++                raw
++            };
++            PathBuf::from(raw)
++        });
++        Ok((time, workspace))
++    };
++    parse_record().with_context(|| RecordFailure {
++        source_kind: source,
++        path_hash: path_hash.to_owned(),
++        reason: "invalid_trajectory_metadata",
++    })
+ }
+ 
+ /// An identity can connect mirrored observations, but a reused message id
+@@ -479,6 +556,13 @@ pub(super) fn normalize(
+         let usage = &chosen.usage;
+         if usage.output_total != usage.visible.saturating_add(usage.thinking) {
+             // Partial/error usage lacks a trustworthy disjoint-channel breakdown.
++            issue.record(
++                source,
++                &chosen.path_hash,
++                0,
++                ParseIssueKind::Malformed,
++                "output_channel_mismatch",
++            );
+             bail!("Antigravity output channel mismatch; history preserved");
+         }
+         let time = group
+@@ -486,9 +570,23 @@ pub(super) fn normalize(
+             .filter_map(|o| o.time)
+             .max_by_key(|(rank, time)| (*rank, std::cmp::Reverse(*time)));
+         let Some((_, time)) = time else {
++            issue.record(
++                source,
++                &chosen.path_hash,
++                0,
++                ParseIssueKind::Malformed,
++                "missing_usage_timestamp",
++            );
+             bail!("Antigravity usage has no typed timestamp; history preserved");
+         };
+         let Some(timestamp) = DateTime::<Utc>::from_timestamp_millis(time) else {
++            issue.record(
++                source,
++                &chosen.path_hash,
++                0,
++                ParseIssueKind::Malformed,
++                "invalid_usage_timestamp",
++            );
+             bail!("Antigravity invalid typed timestamp");
+         };
+         let event_at = timestamp.to_rfc3339();
+diff --git a/src/parsers/antigravity/tests.rs b/src/parsers/antigravity/tests.rs
+index cf0d32f..79019dc 100644
+--- a/src/parsers/antigravity/tests.rs
++++ b/src/parsers/antigravity/tests.rs
+@@ -71,6 +71,502 @@ fn events(path: &Path) -> Vec<crate::models::UsageEvent> {
+     normalize(file.observations, &mut HashMap::new()).unwrap()
+ }
+ 
++fn preflight_listing(path: &Path, source: SourceKind) -> FamilyInputs {
++    FamilyInputs {
++        started: Instant::now(),
++        listings: FAMILY.map(|kind| {
++            (
++                kind,
++                source_files::SourceFileListing {
++                    root: path.parent().unwrap().to_path_buf(),
++                    paths: if kind == source {
++                        vec![path.to_path_buf()]
++                    } else {
++                        Vec::new()
++                    },
++                    errors: Vec::new(),
++                },
++            )
++        }),
++        metadata: |path| std::fs::metadata(path),
++    }
++}
++
++fn preflight_snapshot(store: &Store) -> Vec<Vec<Vec<rusqlite::types::Value>>> {
++    let connection = store.open_connection().unwrap();
++    [
++        "SELECT * FROM usage_event ORDER BY event_key",
++        "SELECT * FROM usage_bucket_30m ORDER BY host_id,source,hour_start,model",
++        "SELECT * FROM usage_event_raw ORDER BY event_key",
++        "SELECT * FROM usage_turn ORDER BY turn_key",
++        "SELECT * FROM usage_tool_call ORDER BY tool_call_key",
++        "SELECT * FROM source_cursor ORDER BY host_id,source,cursor_key",
++        "SELECT * FROM source_file ORDER BY host_id,source,file_path",
++        "SELECT * FROM meta WHERE key LIKE 'token_accounting_version.%' ORDER BY key",
++    ]
++    .into_iter()
++    .map(|sql| {
++        let mut statement = connection.prepare(sql).unwrap();
++        let count = statement.column_count();
++        statement
++            .query_map([], |row| {
++                (0..count)
++                    .map(|column| row.get(column))
++                    .collect::<rusqlite::Result<Vec<_>>>()
++            })
++            .unwrap()
++            .collect::<rusqlite::Result<Vec<_>>>()
++            .unwrap()
++    })
++    .collect()
++}
++
++fn preflight_database(dir: &TempDir, name: &str, source: SourceKind) -> PathBuf {
++    let (path, connection) = database(dir, name);
++    connection
++        .execute(
++            "INSERT INTO trajectory_meta VALUES (?1)",
++            [if source == FAMILY[0] { 17 } else { 1 }],
++        )
++        .unwrap();
++    connection
++        .execute(
++            "INSERT INTO gen_metadata VALUES (1, ?1)",
++            [generation(&usage(name, 10, 3, 2, 1), &[], 1_800_000_000)],
++        )
++        .unwrap();
++    drop(connection);
++    path.canonicalize().unwrap()
++}
++
++fn preflight_store(dir: &TempDir) -> Store {
++    let paths = crate::paths::AppPaths::with_root(dir.path().join("store")).unwrap();
++    let store = Store::new(&paths).unwrap();
++    store.bootstrap().unwrap();
++    store
++}
++
++fn permission_probe(path: &Path) -> std::io::Result<std::fs::Metadata> {
++    if path
++        .file_name()
++        .unwrap()
++        .to_string_lossy()
++        .starts_with("denied")
++    {
++        Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
++    } else {
++        std::fs::metadata(path)
++    }
++}
++
++#[tokio::test]
++async fn preflight_all_selected_blocked_never_calls_usage_decoder() {
++    for selected in [vec![FAMILY[0]], vec![FAMILY[1]], FAMILY.to_vec()] {
++        let dir = TempDir::new().unwrap();
++        let (path, connection) = database(&dir, "remaining.db");
++        connection
++            .execute(
++                "INSERT INTO trajectory_meta VALUES (?1)",
++                [if selected[0] == FAMILY[0] { 17 } else { 1 }],
++            )
++            .unwrap();
++        connection
++            .execute(
++                "INSERT INTO gen_metadata VALUES (1, ?1)",
++                [generation(
++                    &usage("request", 10, 3, 2, 1),
++                    &[],
++                    1_800_000_000,
++                )],
++            )
++            .unwrap();
++        drop(connection);
++        let path = path.canonicalize().unwrap();
++        let paths = crate::paths::AppPaths::with_root(dir.path().join("store")).unwrap();
++        let store = Store::new(&paths).unwrap();
++        store.bootstrap().unwrap();
++        let mut writer = store.begin_sync_run().unwrap();
++        sync_family_with_inputs(
++            &store,
++            &mut writer,
++            &selected,
++            true,
++            false,
++            None,
++            &CancellationToken::new(),
++            None,
++            preflight_listing(&path, selected[0]),
++        )
++        .await
++        .unwrap();
++        for source in &selected {
++            let mut shard = SyncShard::new(*source);
++            shard.seen_file_paths.push(
++                dir.path()
++                    .join(format!("missing-{source}.db"))
++                    .to_string_lossy()
++                    .into_owned(),
++            );
++            writer.commit_shard(shard).unwrap();
++        }
++        let before = preflight_snapshot(&store);
++        assert_eq!(before[0].len(), 1);
++        let mut inputs = preflight_listing(&path, selected[0]);
++        inputs.started -= std::time::Duration::from_millis(25);
++        let mut progress_events = Vec::new();
++        let mut sink = |event| progress_events.push(event);
++        let observed_before = Utc::now();
++        decode::test_reads::reset(&path);
++        let result = sync_family_with_inputs(
++            &store,
++            &mut writer,
++            &selected,
++            false,
++            false,
++            None,
++            &CancellationToken::new(),
++            Some(&mut sink),
++            inputs,
++        )
++        .await
++        .unwrap();
++        assert_eq!(decode::test_reads::take(&path), 0, "selected={selected:?}");
++        assert_eq!(preflight_snapshot(&store), before);
++        assert_eq!(progress_events.len(), selected.len());
++        for (event, source) in progress_events.iter().zip(&selected) {
++            assert!(
++                matches!(event, SyncEvent::SourceStarted { source: actual, .. } if actual == source)
++            );
++        }
++        for stat in result.stats {
++            assert_eq!(stat.files_processed, 0);
++            assert_eq!(stat.changed_files, 0);
++            assert_eq!(stat.events_seen, 0);
++            assert_eq!(stat.events_replayed, 0);
++            assert_eq!(stat.events_inserted, 0);
++            assert_eq!(stat.bytes_scanned, 0);
++            assert_eq!(stat.write_ms, 0);
++            assert!(stat.parse_ms >= 25);
++            assert!(stat.last_error.unwrap().contains("history preserved"));
++            let issue = &result.source_issues[&stat.source][0];
++            assert_eq!(issue.code, SourceIssueCode::TrackedMemberMissing);
++            assert_eq!(issue.count, 1);
++            assert!(issue.observed_at >= observed_before && issue.observed_at <= Utc::now());
++        }
++    }
++}
++
++#[tokio::test]
++async fn preflight_uncovered_members_distinguish_missing_scope_and_access() {
++    for (name, exists, expected) in [
++        ("gone.db", false, SourceIssueCode::TrackedMemberMissing),
++        (
++            "legacy.json",
++            true,
++            SourceIssueCode::TrackedMemberOutOfScope,
++        ),
++        (
++            "old-root.db",
++            true,
++            SourceIssueCode::TrackedMemberOutOfScope,
++        ),
++        ("denied.db", true, SourceIssueCode::TrackedMemberUnreadable),
++    ] {
++        for allow_loss in [false, true] {
++            let dir = TempDir::new().unwrap();
++            let path = preflight_database(&dir, "live.db", FAMILY[0]);
++            let store = preflight_store(&dir);
++            let mut writer = store.begin_sync_run().unwrap();
++            sync_family_with_inputs(
++                &store,
++                &mut writer,
++                &[FAMILY[0]],
++                true,
++                false,
++                None,
++                &CancellationToken::new(),
++                None,
++                preflight_listing(&path, FAMILY[0]),
++            )
++            .await
++            .unwrap();
++            let tracked = dir.path().join(name);
++            if exists {
++                std::fs::write(&tracked, b"old input").unwrap();
++            }
++            let mut shard = SyncShard::new(FAMILY[0]);
++            shard
++                .seen_file_paths
++                .push(tracked.to_string_lossy().into_owned());
++            writer.commit_shard(shard).unwrap();
++            let before = preflight_snapshot(&store);
++            let mut inputs = preflight_listing(&path, FAMILY[0]);
++            inputs.metadata = permission_probe;
++            decode::test_reads::reset(&path);
++            let result = sync_family_with_inputs(
++                &store,
++                &mut writer,
++                &[FAMILY[0]],
++                true,
++                allow_loss,
++                None,
++                &CancellationToken::new(),
++                None,
++                inputs,
++            )
++            .await
++            .unwrap();
++            if allow_loss && expected != SourceIssueCode::TrackedMemberUnreadable {
++                assert_eq!(decode::test_reads::take(&path), 1, "{name}");
++                assert!(result.source_issues.is_empty());
++                assert!(result.stats[0].last_error.is_none());
++            } else {
++                assert_eq!(decode::test_reads::take(&path), 0, "{name}");
++                assert_eq!(preflight_snapshot(&store), before, "{name}");
++                let issue = &result.source_issues[&FAMILY[0]][0];
++                assert_eq!(issue.code, expected, "{name}");
++                assert_eq!(issue.count, 1);
++                assert_eq!(result.stats[0].parse_issues.total(), 0);
++            }
++        }
++    }
++}
++
++#[tokio::test]
++async fn preflight_unselected_root_failure_blocks_unknown_product_copies() {
++    for selected in FAMILY {
++        for case in ["permission", "not-directory", "walk-error", "missing-root"] {
++            let dir = TempDir::new().unwrap();
++            let path = preflight_database(&dir, "live.db", selected);
++            let store = preflight_store(&dir);
++            let mut writer = store.begin_sync_run().unwrap();
++            sync_family_with_inputs(
++                &store,
++                &mut writer,
++                &[selected],
++                true,
++                false,
++                None,
++                &CancellationToken::new(),
++                None,
++                preflight_listing(&path, selected),
++            )
++            .await
++            .unwrap();
++            let before = preflight_snapshot(&store);
++            let mut inputs = preflight_listing(&path, selected);
++            let (_, sibling) = inputs
++                .listings
++                .iter_mut()
++                .find(|(source, _)| *source != selected)
++                .unwrap();
++            match case {
++                "permission" => {
++                    sibling.root = dir.path().join("denied-root");
++                    inputs.metadata = permission_probe;
++                }
++                "not-directory" => sibling.root = path.clone(),
++                "walk-error" => sibling.errors.push("synthetic enumeration failure".into()),
++                "missing-root" => sibling.root = dir.path().join("absent-root"),
++                _ => unreachable!(),
++            }
++            decode::test_reads::reset(&path);
++            let result = sync_family_with_inputs(
++                &store,
++                &mut writer,
++                &[selected],
++                true,
++                true,
++                None,
++                &CancellationToken::new(),
++                None,
++                inputs,
++            )
++            .await
++            .unwrap();
++            if case == "missing-root" {
++                assert_eq!(decode::test_reads::take(&path), 1);
++                assert!(result.source_issues.is_empty());
++            } else {
++                assert_eq!(decode::test_reads::take(&path), 0, "{selected}: {case}");
++                assert_eq!(preflight_snapshot(&store), before);
++                let issue = &result.source_issues[&selected][0];
++                assert_eq!(issue.code, SourceIssueCode::DiscoveryIncomplete);
++                assert_eq!(issue.count, 1);
++            }
++        }
++    }
++}
++
++#[tokio::test]
++async fn preflight_partial_blocking_keeps_cross_root_decode_and_selected_scope() {
++    for selected in [vec![FAMILY[0]], FAMILY.to_vec()] {
++        let dir = TempDir::new().unwrap();
++        let cli = preflight_database(&dir, "cli.db", FAMILY[0]);
++        let ide = preflight_database(&dir, "ide.db", FAMILY[1]);
++        let store = preflight_store(&dir);
++        let mut writer = store.begin_sync_run().unwrap();
++        let mut shard = SyncShard::new(FAMILY[1]);
++        shard.seen_file_paths.push(
++            dir.path()
++                .join("missing-ide.db")
++                .to_string_lossy()
++                .into_owned(),
++        );
++        writer.commit_shard(shard).unwrap();
++        let mut inputs = preflight_listing(&cli, FAMILY[0]);
++        // Both native products are intentionally copied into the opposite roots.
++        inputs.listings[0].1.paths = vec![ide.clone()];
++        inputs.listings[1].1.paths = vec![cli.clone()];
++        decode::test_reads::reset(&cli);
++        decode::test_reads::reset(&ide);
++        let result = sync_family_with_inputs(
++            &store,
++            &mut writer,
++            &selected,
++            false,
++            false,
++            None,
++            &CancellationToken::new(),
++            None,
++            inputs,
++        )
++        .await
++        .unwrap();
++        assert_eq!(decode::test_reads::take(&cli), 1);
++        assert_eq!(decode::test_reads::take(&ide), 1);
++        assert_eq!(result.stats[0].source, FAMILY[0]);
++        assert_eq!(result.stats[0].events_inserted, 1);
++        assert!(result.stats[0].last_error.is_none());
++        if selected.len() == 2 {
++            assert_eq!(result.stats[1].events_inserted, 0);
++            assert!(result.stats[1].last_error.is_some());
++        }
++    }
++}
++
++#[tokio::test]
++async fn preflight_empty_selection_and_cancellation_do_not_decode_or_write() {
++    for selected in [Vec::new(), vec![FAMILY[0]]] {
++        let dir = TempDir::new().unwrap();
++        let path = preflight_database(&dir, "live.db", FAMILY[0]);
++        let store = preflight_store(&dir);
++        let mut writer = store.begin_sync_run().unwrap();
++        let before = preflight_snapshot(&store);
++        let cancel = CancellationToken::new();
++        if !selected.is_empty() {
++            cancel.cancel();
++        }
++        decode::test_reads::reset(&path);
++        let result = sync_family_with_inputs(
++            &store,
++            &mut writer,
++            &selected,
++            false,
++            false,
++            None,
++            &cancel,
++            None,
++            preflight_listing(&path, FAMILY[0]),
++        )
++        .await
++        .unwrap();
++        assert_eq!(decode::test_reads::take(&path), 0);
++        assert_eq!(result.stats.len(), selected.len());
++        assert_eq!(preflight_snapshot(&store), before);
++    }
++}
++
++#[tokio::test]
++async fn preflight_fingerprint_failure_does_not_accept_lossy_rebuild() {
++    let dir = TempDir::new().unwrap();
++    let path = preflight_database(&dir, "live.db", FAMILY[0]);
++    let store = preflight_store(&dir);
++    let mut writer = store.begin_sync_run().unwrap();
++    sync_family_with_inputs(
++        &store,
++        &mut writer,
++        &[FAMILY[0]],
++        true,
++        false,
++        None,
++        &CancellationToken::new(),
++        None,
++        preflight_listing(&path, FAMILY[0]),
++    )
++    .await
++    .unwrap();
++    let before = preflight_snapshot(&store);
++    let mut inputs = preflight_listing(&path, FAMILY[0]);
++    inputs.listings[1]
++        .1
++        .paths
++        .push(dir.path().join("disappeared-after-discovery.db"));
++    decode::test_reads::reset(&path);
++    let result = sync_family_with_inputs(
++        &store,
++        &mut writer,
++        &[FAMILY[0]],
++        true,
++        true,
++        None,
++        &CancellationToken::new(),
++        None,
++        inputs,
++    )
++    .await
++    .unwrap();
++    assert_eq!(decode::test_reads::take(&path), 0);
++    assert_eq!(preflight_snapshot(&store), before);
++    assert_eq!(
++        result.source_issues[&FAMILY[0]][0].code,
++        SourceIssueCode::FingerprintUnavailable
++    );
++}
++
++#[tokio::test]
++async fn preflight_remote_membership_never_probes_local_filesystem() {
++    let dir = TempDir::new().unwrap();
++    let path = preflight_database(&dir, "live.db", FAMILY[0]);
++    let store = preflight_store(&dir);
++    let mut writer = store.begin_sync_run().unwrap();
++    let mut shard = SyncShard::new_for_host(FAMILY[0], "remote");
++    shard
++        .seen_file_paths
++        .push("/remote-only/private/database.db".into());
++    writer.commit_shard(shard).unwrap();
++    let mut inputs = preflight_listing(&path, FAMILY[0]);
++    inputs.metadata = |path| {
++        assert!(
++            !path.to_string_lossy().contains("remote-only"),
++            "remote membership must not be probed locally"
++        );
++        std::fs::metadata(path)
++    };
++    let result = sync_family_with_inputs(
++        &store,
++        &mut writer,
++        &[FAMILY[0]],
++        false,
++        false,
++        None,
++        &CancellationToken::new(),
++        None,
++        inputs,
++    )
++    .await
++    .unwrap();
++    assert!(result.source_issues.is_empty());
++    assert_eq!(result.stats[0].events_inserted, 1);
++    assert_eq!(
++        store
++            .source_files()
++            .tracked_paths(FAMILY[0], "remote")
++            .unwrap(),
++        ["/remote-only/private/database.db"]
++    );
++}
++
+ #[test]
+ fn sanitized_native_samples_match_independent_six_channel_oracle() {
+     let fixture: serde_json::Value = serde_json::from_str(include_str!(
+diff --git a/src/parsers/codex.rs b/src/parsers/codex.rs
+index 5598a43..dfd14fd 100644
+--- a/src/parsers/codex.rs
++++ b/src/parsers/codex.rs
+@@ -1568,6 +1568,10 @@ mod tests {
+             &CancellationToken::new(),
+         )?;
+         assert_eq!(result.parse_issues.skipped_lines, 1);
++        assert_eq!(
++            result.parse_issues.samples[0].reason,
++            "oversized_non_usage_record"
++        );
+         assert_eq!(result.parse_issues.oversized_lines, 0);
+         assert_eq!(result.parse_issues.malformed_lines, 0);
+         assert_eq!(result.parse_issues.accounting_anomaly_lines, 0);
+diff --git a/src/parsers/driver.rs b/src/parsers/driver.rs
+index 962824c..b331564 100644
+--- a/src/parsers/driver.rs
++++ b/src/parsers/driver.rs
+@@ -6,6 +6,7 @@ use tracing::info;
+ 
+ use super::{SourceParser, SourceSyncStats, SyncEvent};
+ use crate::{
++    domain::source_diagnostics::SourceIssues,
+     models::SourceKind,
+     store::{LOCAL_HOST_ID, Store, SyncRunWriter},
+ };
+@@ -66,7 +67,12 @@ pub struct DriveContext<'a, 'b> {
+ /// Same as [`drive`], but emits sync lifecycle events for JobRegistry and
+ /// `llmusage sync --json-events`.
+ pub async fn drive_with_events(ctx: DriveContext<'_, '_>) -> Result<Vec<SourceSyncStats>> {
+-    drive_with_rebuild(ctx, false, false).await
++    Ok(drive_with_rebuild(ctx, false, false).await?.stats)
++}
++
++pub(crate) struct DriveResult {
++    pub(crate) stats: Vec<SourceSyncStats>,
++    pub(crate) source_issues: SourceIssues,
+ }
+ 
+ /// Antigravity rebuilds stage both native products before replacing history.
+@@ -75,7 +81,7 @@ pub(crate) async fn drive_with_rebuild(
+     mut ctx: DriveContext<'_, '_>,
+     rebuild: bool,
+     allow_lossy_rebuild: bool,
+-) -> Result<Vec<SourceSyncStats>> {
++) -> Result<DriveResult> {
+     /*
+      * ========================================================================
+      * 步骤1：按注册顺序串行驱动每个 SourceParser
+@@ -89,6 +95,7 @@ pub(crate) async fn drive_with_rebuild(
+ 
+     let run_started_at = ctx.writer.run_started_at().to_string();
+     let mut all_stats = Vec::with_capacity(ctx.parsers.len());
++    let mut source_issues = SourceIssues::new();
+     let antigravity_sources = ctx
+         .parsers
+         .iter()
+@@ -124,7 +131,7 @@ pub(crate) async fn drive_with_rebuild(
+         let parse_started = std::time::Instant::now();
+         let results = if is_antigravity {
+             antigravity_finished = true;
+-            super::sync_antigravity_family(
++            let result = super::sync_antigravity_family(
+                 ctx.store,
+                 ctx.writer,
+                 &antigravity_sources,
+@@ -135,7 +142,9 @@ pub(crate) async fn drive_with_rebuild(
+                 ctx.cancel,
+                 ctx.sender.as_ref().map(|_| &mut progress_sink as _),
+             )
+-            .await?
++            .await?;
++            source_issues.extend(result.source_issues);
++            result.stats
+         } else {
+             vec![
+                 parser
+@@ -196,7 +205,10 @@ pub(crate) async fn drive_with_rebuild(
+     }
+ 
+     info!(sources = all_stats.len(), "完成 SourceParser 列表驱动");
+-    Ok(all_stats)
++    Ok(DriveResult {
++        stats: all_stats,
++        source_issues,
++    })
+ }
+ 
+ fn emit_parse_issues_log(stats: &SourceSyncStats) {
+diff --git a/src/parsers/file_state.rs b/src/parsers/file_state.rs
+index 0e41ec9..c2b819c 100644
+--- a/src/parsers/file_state.rs
++++ b/src/parsers/file_state.rs
+@@ -337,7 +337,7 @@ impl<R: Read> BoundedJsonlReader<R> {
+                             path_hash,
+                             start_offset,
+                             ParseIssueKind::Skipped,
+-                            "",
++                            "oversized_non_usage_record",
+                         ),
+                         JsonlRecordDisposition::Malformed => issues.record(
+                             source,
+diff --git a/src/parsers/grok.rs b/src/parsers/grok.rs
+index 3bde9ad..a2d0f9e 100644
+--- a/src/parsers/grok.rs
++++ b/src/parsers/grok.rs
+@@ -394,10 +394,18 @@ fn parse_grok_session(
+ 
+     let mut sidecar_issues = ParseIssues::default();
+     let summary = decisions.get("summary.json").and_then(|decision| {
+-        read_json_sidecar(&decision.snapshot.path, &session_hash, &mut sidecar_issues)
++        read_json_sidecar(
++            &decision.snapshot.path,
++            &hash_string(&decision.snapshot.path.to_string_lossy()),
++            &mut sidecar_issues,
++        )
+     });
+     let signals = decisions.get("signals.json").and_then(|decision| {
+-        read_json_sidecar(&decision.snapshot.path, &session_hash, &mut sidecar_issues)
++        read_json_sidecar(
++            &decision.snapshot.path,
++            &hash_string(&decision.snapshot.path.to_string_lossy()),
++            &mut sidecar_issues,
++        )
+     });
+     let summary_timestamp_ms = summary
+         .as_ref()
+@@ -414,7 +422,7 @@ fn parse_grok_session(
+     let updates = if let Some(decision) = decisions.get("updates.jsonl") {
+         let usage = parse_turn_usage(
+             &decision.snapshot.path,
+-            &session_hash,
++            &hash_string(&decision.snapshot.path.to_string_lossy()),
+             &session_id,
+             &session,
+             project.as_ref(),
+@@ -431,7 +439,7 @@ fn parse_grok_session(
+         if usage.events.is_empty() {
+             parse_updates_file(
+                 &decision.snapshot.path,
+-                &session_hash,
++                &hash_string(&decision.snapshot.path.to_string_lossy()),
+                 &session_id,
+                 &session,
+                 project.as_ref(),
+@@ -1511,6 +1519,39 @@ mod tests {
+         assert_eq!(output.parse_issues.accounting_anomaly_lines, 1);
+     }
+ 
++    #[tokio::test]
++    async fn incomplete_usage_samples_use_sidecar_identity_and_preserve_session_identity() {
++        let usage =
++            r#"{"inputTokens":10,"outputTokens":2,"totalTokens":12,"usageIsIncomplete":true}"#;
++        let prefix = "{\"type\":\"notice\"}\n";
++        let (_temp, session_dir) = write_session(
++            &format!(
++                "{prefix}{}",
++                turn_usage_line("p1", 1_700_000_001_000, usage)
++            ),
++            None,
++            Some(r#"{"contextTokensUsed":900}"#),
++        );
++        let session_hash = hash_string(&session_dir.to_string_lossy());
++        let file_hash = hash_string(&session_dir.join("updates.jsonl").to_string_lossy());
++        let output = parse_session(session_dir);
++        assert_eq!(output.events.len(), 1);
++        assert_eq!(output.events[0].tokens.total_tokens, 12);
++        assert_eq!(
++            output.events[0]
++                .session
++                .as_ref()
++                .unwrap()
++                .source_path_hash
++                .as_deref(),
++            Some(session_hash.as_str())
++        );
++        let sample = &output.parse_issues.samples[0];
++        assert_eq!(sample.path_hash, file_hash);
++        assert_eq!(sample.offset, prefix.len() as u64);
++        assert_eq!(sample.reason, "usage_incomplete");
++    }
++
+     #[tokio::test]
+     async fn all_zero_usage_is_skipped() {
+         let usage = r#"{"inputTokens":0,"outputTokens":0,"totalTokens":0,"cachedReadTokens":0,"cacheCreationTokens":0,"reasoningTokens":0}"#;
+diff --git a/src/parsers/mod.rs b/src/parsers/mod.rs
+index d1e0fa0..fb42902 100644
+--- a/src/parsers/mod.rs
++++ b/src/parsers/mod.rs
+@@ -20,6 +20,8 @@ pub mod opencode;
+ pub mod pi;
+ pub(crate) mod source_files;
+ pub mod source_parser;
++#[cfg(test)]
++mod writer_benchmark;
+ pub mod zcode;
+ 
+ pub use crate::models::{ParseIssueKind, ParseIssueSample, ParseIssues};
+diff --git a/src/parsers/source_files.rs b/src/parsers/source_files.rs
+index e2f2382..51afc6a 100644
+--- a/src/parsers/source_files.rs
++++ b/src/parsers/source_files.rs
+@@ -329,13 +329,34 @@ fn list_dsh_session_files_under(root: PathBuf) -> SourceFileListing {
+ fn list_matching_files(
+     root: PathBuf,
+     predicate: impl Fn(&str, &Path) -> bool,
++) -> SourceFileListing {
++    list_matching_files_with_root_metadata(root, predicate, |path| std::fs::metadata(path))
++}
++
++fn list_matching_files_with_root_metadata(
++    root: PathBuf,
++    predicate: impl Fn(&str, &Path) -> bool,
++    root_metadata: impl FnOnce(&Path) -> std::io::Result<std::fs::Metadata>,
+ ) -> SourceFileListing {
+     let mut listing = SourceFileListing {
+         root: root.clone(),
+         ..SourceFileListing::default()
+     };
+-    if !root.exists() {
+-        return listing;
++    match root_metadata(&root) {
++        Ok(metadata) if metadata.is_dir() => {}
++        Ok(_) => {
++            listing
++                .errors
++                .push("source file inventory error: root is not a directory".to_string());
++            return listing;
++        }
++        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return listing,
++        Err(error) => {
++            let message = format!("source file inventory error: {error}");
++            warn!(error = %message, "failed to enumerate source file inventory");
++            listing.errors.push(message);
++            return listing;
++        }
+     }
+ 
+     for entry in WalkDir::new(root).into_iter() {
+@@ -372,9 +393,50 @@ mod tests {
+ 
+     use super::{
+         list_dsh_session_files_under, list_grok_session_files_under,
+-        list_jsonl_session_files_from_roots, list_omp_session_files_from,
++        list_jsonl_session_files_from_roots, list_matching_files,
++        list_matching_files_with_root_metadata, list_omp_session_files_from,
+     };
+ 
++    #[test]
++    fn list_matching_files_retains_root_error_after_access_recovers() {
++        let dir = TempDir::new().unwrap();
++        let root = dir.path().join("conversations");
++        fs::create_dir(&root).unwrap();
++        fs::write(root.join("stronger-copy.db"), b"native input").unwrap();
++        let listing = list_matching_files_with_root_metadata(
++            root.clone(),
++            |name, _| name.ends_with(".db"),
++            |_| Err(std::io::ErrorKind::PermissionDenied.into()),
++        );
++        // A later successful probe must not erase the discovery-time failure.
++        assert!(fs::metadata(&root).unwrap().is_dir());
++        assert!(listing.paths.is_empty());
++        assert_eq!(listing.errors.len(), 1);
++        assert!(listing.error_summary().is_some());
++        let recovered = list_matching_files(root.clone(), |name, _| name.ends_with(".db"));
++        assert!(recovered.errors.is_empty());
++        assert_eq!(recovered.paths, [root.join("stronger-copy.db")]);
++    }
++
++    #[test]
++    fn list_matching_files_preserves_missing_root_as_empty() {
++        let dir = TempDir::new().unwrap();
++        let listing = list_matching_files(dir.path().join("missing"), |_, _| true);
++        assert!(listing.paths.is_empty());
++        assert!(listing.errors.is_empty());
++    }
++
++    #[test]
++    fn list_matching_files_rejects_non_directory_root() {
++        let dir = TempDir::new().unwrap();
++        let root = dir.path().join("conversations");
++        fs::write(&root, b"not a directory").unwrap();
++        let listing = list_matching_files(root, |_, _| true);
++        assert!(listing.paths.is_empty());
++        assert_eq!(listing.errors.len(), 1);
++        assert!(listing.error_summary().is_some());
++    }
++
+     fn write_session(root: &std::path::Path, project: &str, name: &str) -> PathBuf {
+         let path = root.join(project).join(name);
+         fs::create_dir_all(path.parent().unwrap()).expect("create session dir");
+diff --git a/src/query/diagnostics.rs b/src/query/diagnostics.rs
+index 1150f82..23fc862 100644
+--- a/src/query/diagnostics.rs
++++ b/src/query/diagnostics.rs
+@@ -29,9 +29,10 @@ fn load_sync_statuses_with_conn(
+     )?;
+     let rows = stmt.query_map([source], |row| {
+         let parse_issues_raw = row.get::<_, String>(7)?;
+-        let parse_issues = serde_json::from_str(&parse_issues_raw).map_err(|source| {
+-            rusqlite::Error::FromSqlConversionFailure(7, Type::Text, Box::new(source))
+-        })?;
++        let diagnostics: crate::domain::source_diagnostics::PersistedDiagnostics =
++            serde_json::from_str(&parse_issues_raw).map_err(|source| {
++                rusqlite::Error::FromSqlConversionFailure(7, Type::Text, Box::new(source))
++            })?;
+         Ok(SyncStatusRow {
+             source: row.get(0)?,
+             files_processed: row.get(1)?,
+@@ -40,8 +41,10 @@ fn load_sync_statuses_with_conn(
+             events_inserted: row.get(4)?,
+             stored_events: row.get(5)?,
+             updated_at: row.get(6)?,
+-            last_error: None,
+-            parse_issues,
++            last_error: diagnostics
++                .has_source_errors()
++                .then(|| "source_unavailable".to_string()),
++            parse_issues: diagnostics.parse_issues,
+         })
+     })?;
+     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+@@ -611,3 +614,56 @@ impl Dashboard {
+         })
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::{
++        domain::source_diagnostics::{PersistedDiagnostics, SourceIssue, SourceIssueCode},
++        models::{ParseIssueKind, SourceKind},
++        paths::AppPaths,
++    };
++    use tempfile::TempDir;
++
++    #[test]
++    fn source_failure_projects_warning_without_private_diagnostics() -> anyhow::Result<()> {
++        let temp = TempDir::new()?;
++        let paths = AppPaths::with_root(temp.path().to_path_buf())?;
++        let store = Store::new(&paths)?;
++        store.bootstrap()?;
++        let mut diagnostics = PersistedDiagnostics::default();
++        diagnostics.parse_issues.record(
++            SourceKind::Codex,
++            "safe-path-hash",
++            7,
++            ParseIssueKind::Skipped,
++            "oversized_non_usage_record",
++        );
++        SourceIssue::record(
++            &mut diagnostics.source_issues,
++            SourceIssueCode::TrackedMemberMissing,
++            2,
++        );
++        store.open_connection()?.execute(
++            "INSERT INTO source_sync_status(
++                source, files_processed, changed_files, bytes_scanned,
++                events_seen, events_replayed, events_inserted, stored_events,
++                parse_ms, write_ms, lock_wait_ms, updated_at, parse_issues_json
++             ) VALUES ('codex', 1, 1, 10, 0, 0, 0, 0, 1, 0, 0, ?1, ?2)",
++            rusqlite::params![now_utc(), serde_json::to_string(&diagnostics)?],
++        )?;
++
++        let reopened = Store::new(&paths)?;
++        let dashboard = Dashboard::open(&reopened)?;
++        let payload = dashboard.sync_command_center(&Default::default())?;
++        assert_eq!(payload.sources[0].status, "error");
++        assert_eq!(payload.sources[0].tone, "warn");
++        assert_eq!(payload.sources[0].malformed_lines, 0);
++        assert_eq!(payload.sources[0].oversized_lines, 0);
++        assert_eq!(payload.sources[0].skipped_lines, 1);
++        let public_json = serde_json::to_string(&payload)?;
++        assert!(!public_json.contains("safe-path-hash"));
++        assert!(!public_json.contains("source_issues"));
++        Ok(())
++    }
++}
+diff --git a/src/query/filter.rs b/src/query/filter.rs
+index 20ed9de..715289a 100644
+--- a/src/query/filter.rs
++++ b/src/query/filter.rs
+@@ -9,10 +9,10 @@ use crate::{models::SourceKind, query::timezone::ResolvedZone};
+ pub enum ReportTimezone {
+     /// Interpret dates as UTC calendar days.
+     Utc,
+-    /// Interpret dates with the machine's current local UTC offset.
++    /// Interpret dates with the machine's IANA timezone and its DST rules.
+     ///
+-    /// This is a fixed-offset snapshot taken when the query runs, not an
+-    /// IANA/DST-aware timezone. Historical dates use the same current offset.
++    /// If the machine's zone cannot be resolved, use its current fixed UTC
++    /// offset for all dates in the query.
+     Local,
+     /// Interpret dates with a caller-provided fixed offset.
+     Fixed(FixedOffset),
+@@ -241,7 +241,8 @@ fn column(alias: Option<&str>, name: &str) -> String {
+ #[cfg(test)]
+ mod tests {
+     use super::{QueryFilter, ReportTimezone};
+-    use chrono::{FixedOffset, Local, NaiveDate, Offset, TimeZone, Utc, offset::LocalResult};
++    use chrono::{FixedOffset, Local, NaiveDate, Offset, TimeZone, Utc};
++    use chrono_tz::Tz;
+     use rusqlite::types::Value;
+ 
+     #[test]
+@@ -288,7 +289,7 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn local_timezone_date_bounds_use_current_fixed_offset_snapshot() {
++    fn local_timezone_date_bounds_use_system_zone_rules() {
+         let date = NaiveDate::from_ymd_opt(2026, 11, 1).unwrap();
+         let filter = QueryFilter {
+             since: Some(date),
+@@ -296,29 +297,81 @@ mod tests {
+             timezone: ReportTimezone::Local,
+             ..QueryFilter::default()
+         };
+-        let current_offset = Local::now().offset().fix();
+-        let expected_start = local_midnight_to_utc_text(date, current_offset);
+-        let expected_end = local_midnight_to_utc_text(date.succ_opt().unwrap(), current_offset);
++        let next_date = date.succ_opt().unwrap();
++        let local_zone = iana_time_zone::get_timezone()
++            .ok()
++            .and_then(|name| name.parse::<Tz>().ok());
++        let (expected_start, expected_end) = match local_zone {
++            Some(zone) => (
++                local_midnight_to_utc_text(date, zone),
++                local_midnight_to_utc_text(next_date, zone),
++            ),
++            None => {
++                let offset = Local::now().offset().fix();
++                (
++                    local_midnight_to_utc_text(date, offset),
++                    local_midnight_to_utc_text(next_date, offset),
++                )
++            }
++        };
+ 
+         let sql_filter = filter.event_filter(None);
+ 
+         assert_eq!(
+             sql_filter.params(),
+             &[Value::Text(expected_start), Value::Text(expected_end)],
+-            "`local` must use one current fixed offset for all date bounds"
++            "`local` must use system IANA rules, with a fixed-offset fallback"
+         );
+     }
+ 
+-    fn local_midnight_to_utc_text(date: NaiveDate, offset: FixedOffset) -> String {
++    fn local_midnight_to_utc_text(date: NaiveDate, zone: impl TimeZone) -> String {
+         let local_start = date.and_hms_opt(0, 0, 0).expect("midnight is always valid");
+-        let utc = match offset.from_local_datetime(&local_start) {
+-            LocalResult::Single(value) => value.with_timezone(&Utc),
+-            LocalResult::Ambiguous(earliest, _) => earliest.with_timezone(&Utc),
+-            LocalResult::None => offset.from_utc_datetime(&local_start).with_timezone(&Utc),
+-        };
++        let utc = zone
++            .from_local_datetime(&local_start)
++            .earliest()
++            .expect("the fixture's local midnight exists")
++            .with_timezone(&Utc);
+         utc.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+     }
+ 
++    #[test]
++    fn iana_timezone_date_bounds_follow_short_and_long_dst_days() {
++        for (date, expected_start, expected_end) in [
++            (
++                NaiveDate::from_ymd_opt(2026, 3, 8).unwrap(),
++                "2026-03-08T06:00:00Z",
++                "2026-03-09T05:00:00Z",
++            ),
++            (
++                NaiveDate::from_ymd_opt(2026, 11, 1).unwrap(),
++                "2026-11-01T05:00:00Z",
++                "2026-11-02T06:00:00Z",
++            ),
++        ] {
++            let filter = QueryFilter {
++                since: Some(date),
++                until: Some(date),
++                timezone: ReportTimezone::Iana(chrono_tz::America::Chicago),
++                ..QueryFilter::default()
++            };
++
++            let sql_filter = filter.event_filter(None);
++
++            assert_eq!(
++                sql_filter.where_sql(),
++                " WHERE event_at >= ? AND event_at < ?"
++            );
++            assert_eq!(
++                sql_filter.params(),
++                &[
++                    Value::Text(expected_start.to_string()),
++                    Value::Text(expected_end.to_string()),
++                ],
++                "Chicago date bounds for {date} must use each midnight's offset"
++            );
++        }
++    }
++
+     #[test]
+     fn sql_filter_with_model_column_applies_host_id_to_turns() {
+         let filter = QueryFilter {
+diff --git a/src/remote/importer.rs b/src/remote/importer.rs
+index d86f429..487851a 100644
+--- a/src/remote/importer.rs
++++ b/src/remote/importer.rs
+@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
+ use chrono::{DateTime, Duration, SecondsFormat, Utc};
+ 
+ use crate::{
++    domain::source_diagnostics::SourceIssues,
+     error::{LlmusageError, Result},
+     models::SourceKind,
+     parsers::SourceSyncStats,
+@@ -46,6 +47,7 @@ impl RemoteImporter {
+         let skipped_lines;
+         let saw_header;
+         let saw_trailer;
++        let mut source_issues;
+         {
+             let mut decoder = ShardDecoder::new(session.reader());
+             let mut deferred_pi = Vec::new();
+@@ -136,6 +138,7 @@ impl RemoteImporter {
+             skipped_lines = decoder.skipped_lines();
+             saw_header = decoder.saw_header();
+             saw_trailer = decoder.saw_trailer();
++            source_issues = decoder.source_issues().clone();
+         }
+         let exit = session.finish()?;
+         if !saw_header {
+@@ -166,15 +169,29 @@ impl RemoteImporter {
+             });
+         }
+ 
++        for stats in &sources {
++            if stats.last_error.is_none() {
++                source_issues.entry(stats.source).or_default();
++            }
++        }
+         let statuses = sources.iter().map(status_from_stats).collect::<Vec<_>>();
+-        store
+-            .sync_status()
+-            .save_source_sync_statuses(&host.host_id, &statuses)?;
++        store.sync_status().save_source_sync_statuses_with_issues(
++            &host.host_id,
++            &statuses,
++            &source_issues,
++        )?;
+         store.hosts().record_contact(&host.host_id, None)?;
+         if since.is_none()
+             && let Some(listed) = listed_sources.as_ref()
+         {
+-            establish_host_source_markers(store, &host.host_id, listed, &empty_sources, &sources)?;
++            establish_host_source_markers(
++                store,
++                &host.host_id,
++                listed,
++                &empty_sources,
++                &sources,
++                &source_issues,
++            )?;
+         }
+         if let Some(watermark) = max_event_at {
+             store.hosts().set_watermark(
+@@ -320,6 +337,7 @@ fn establish_host_source_markers(
+     listed: &BTreeMap<SourceKind, u32>,
+     empty_sources: &BTreeSet<SourceKind>,
+     trailer_sources: &[SourceSyncStats],
++    source_issues: &SourceIssues,
+ ) -> Result<()> {
+     for source in listed.keys().copied() {
+         if !empty_sources.contains(&source) {
+@@ -328,7 +346,12 @@ fn establish_host_source_markers(
+         let Some(stats) = trailer_sources.iter().find(|stats| stats.source == source) else {
+             continue;
+         };
+-        if stats.parse_issues.total() > 0 || stats.last_error.is_some() {
++        if stats.parse_issues.total() > 0
++            || stats.last_error.is_some()
++            || source_issues
++                .get(&source)
++                .is_some_and(|issues| !issues.is_empty())
++        {
+             continue;
+         }
+         store.mark_current_token_accounting_for_host(host_id, source)?;
+@@ -534,6 +557,73 @@ mod tests {
+         Ok(())
+     }
+ 
++    #[test]
++    fn remote_source_issue_survives_restart_and_prevents_marker_certification() -> anyhow::Result<()>
++    {
++        use crate::domain::source_diagnostics::{SourceIssue, SourceIssueCode};
++        let (_temp, store, _lock) = fenced_store()?;
++        store.hosts().upsert(&ssh_host(None))?;
++        let host = store.hosts().get_by_label("devbox")?.unwrap();
++        let kind = SourceKind::AntigravityIde;
++        let mut issues = SourceIssues::new();
++        SourceIssue::record(
++            issues.entry(kind).or_default(),
++            SourceIssueCode::TrackedMemberMissing,
++            3,
++        );
++        let mut stdout = stream(&[header(&[kind])], "");
++        stdout.push_str(&crate::remote::protocol::encode_trailer(
++            vec![source_stats(kind, 0)],
++            ParseIssues::default(),
++            &issues,
++        )?);
++        stdout.push('\n');
++        let source = MemoryShardSource {
++            stdout,
++            stderr: String::new(),
++            status: 0,
++        };
++        let mut writer = store.begin_sync_run()?;
++        RemoteImporter::import(&host, &store, &mut writer, &source)?;
++        assert_eq!(
++            store.token_accounting_version_for_host(&host.host_id, kind)?,
++            None
++        );
++        assert_eq!(
++            store.sync_status().load_source_issues(&host.host_id)?,
++            issues
++        );
++        let statuses = store
++            .sync_status()
++            .load_source_sync_statuses(&host.host_id)?;
++        assert_eq!(statuses[0].parse_issues.total(), 0);
++        store
++            .sync_status()
++            .save_source_sync_statuses(&host.host_id, &statuses)?;
++        assert_eq!(
++            store.sync_status().load_source_issues(&host.host_id)?,
++            issues
++        );
++        // A complete following run clears the failure and certifies the source.
++        let source = MemoryShardSource {
++            stdout: stream(&[header(&[kind]), trailer(vec![source_stats(kind, 0)])], ""),
++            stderr: String::new(),
++            status: 0,
++        };
++        RemoteImporter::import(&host, &store, &mut writer, &source)?;
++        assert!(
++            store
++                .sync_status()
++                .load_source_issues(&host.host_id)?
++                .is_empty()
++        );
++        assert_eq!(
++            store.token_accounting_version_for_host(&host.host_id, kind)?,
++            Some(expected_token_accounting_version(kind))
++        );
++        Ok(())
++    }
++
+     #[test]
+     fn missing_trailer_keeps_shards_and_does_not_advance_watermark() -> anyhow::Result<()> {
+         let (_temp, store, _lock) = fenced_store()?;
+diff --git a/src/remote/protocol.rs b/src/remote/protocol.rs
+index 3ce5ad6..c0f7a9f 100644
+--- a/src/remote/protocol.rs
++++ b/src/remote/protocol.rs
+@@ -3,6 +3,7 @@ use std::{collections::BTreeMap, io::BufRead};
+ use serde::{Deserialize, Serialize};
+ 
+ use crate::{
++    domain::source_diagnostics::SourceIssues,
+     error::{LlmusageError, Result},
+     models::{ParseIssues, SourceKind},
+     parsers::SourceSyncStats,
+@@ -93,6 +94,24 @@ pub fn encode_record(record: &ShardRecord) -> Result<String> {
+     })
+ }
+ 
++/// Add source diagnostics without adding fields to the public wire enum.
++pub(crate) fn encode_trailer(
++    sources: Vec<SourceSyncStats>,
++    parse_issues: ParseIssues,
++    source_issues: &SourceIssues,
++) -> Result<String> {
++    serde_json::to_string(&serde_json::json!({
++        "kind": "trailer",
++        "sources": sources,
++        "parse_issues": parse_issues,
++        "source_issues": source_issues,
++    }))
++    .map_err(|source| LlmusageError::Parse {
++        context: "shard trailer",
++        source,
++    })
++}
++
+ pub fn protocol_mismatch_error(remote_protocol: u32, remote_schema_version: u32) -> LlmusageError {
+     LlmusageError::ConfigInvalid {
+         detail: format!(
+@@ -109,6 +128,7 @@ pub struct ShardDecoder<R> {
+     skipped_lines: u64,
+     header_seen: bool,
+     trailer_seen: bool,
++    source_issues: SourceIssues,
+ }
+ 
+ impl<R: BufRead> ShardDecoder<R> {
+@@ -118,6 +138,7 @@ impl<R: BufRead> ShardDecoder<R> {
+             skipped_lines: 0,
+             header_seen: false,
+             trailer_seen: false,
++            source_issues: SourceIssues::new(),
+         }
+     }
+ 
+@@ -133,6 +154,10 @@ impl<R: BufRead> ShardDecoder<R> {
+         self.trailer_seen
+     }
+ 
++    pub(crate) fn source_issues(&self) -> &SourceIssues {
++        &self.source_issues
++    }
++
+     pub fn next_record(&mut self) -> Result<Option<ShardRecord>> {
+         let mut line = String::new();
+         loop {
+@@ -179,6 +204,17 @@ impl<R: BufRead> ShardDecoder<R> {
+                         continue;
+                     }
+                     if matches!(record, ShardRecord::Trailer { .. }) {
++                        #[derive(Deserialize)]
++                        struct TrailerDiagnostics {
++                            #[serde(default)]
++                            source_issues: SourceIssues,
++                        }
++                        self.source_issues = serde_json::from_str::<TrailerDiagnostics>(trimmed)
++                            .map_err(|source| LlmusageError::Parse {
++                                context: "remote source diagnostics",
++                                source,
++                            })?
++                            .source_issues;
+                         self.trailer_seen = true;
+                     }
+                     return Ok(Some(record));
+diff --git a/src/runtime/logging.rs b/src/runtime/logging.rs
+index 3020b50..62f6adc 100644
+--- a/src/runtime/logging.rs
++++ b/src/runtime/logging.rs
+@@ -4,7 +4,7 @@ use std::{
+     io::{self, Read, Seek, SeekFrom, Write},
+     path::{Path, PathBuf},
+     sync::{
+-        OnceLock,
++        Arc, Mutex, OnceLock,
+         atomic::{AtomicU64, Ordering},
+     },
+     time::{Duration, SystemTime},
+@@ -33,6 +33,55 @@ static LOG_GUARD: OnceLock<WorkerGuard> = OnceLock::new();
+ static LOG_ERROR_COUNTER: OnceLock<ErrorCounter> = OnceLock::new();
+ static LOG_MAINTENANCE_ERRORS: AtomicU64 = AtomicU64::new(0);
+ 
++type StderrSink = Arc<dyn Fn(&[u8]) -> io::Result<()> + Send + Sync>;
++static STDERR_SINK: Mutex<Option<StderrSink>> = Mutex::new(None);
++
++/// A human sync command routes complete warning lines through its renderer.
++/// The file layer and both logging filters retain their existing behavior.
++pub(crate) struct StderrSinkGuard(Option<StderrSink>);
++
++pub(crate) fn install_stderr_sink(sink: StderrSink) -> StderrSinkGuard {
++    let previous = STDERR_SINK.lock().expect("stderr sink").replace(sink);
++    StderrSinkGuard(previous)
++}
++
++impl Drop for StderrSinkGuard {
++    fn drop(&mut self) {
++        *STDERR_SINK.lock().expect("stderr sink") = self.0.take();
++    }
++}
++
++fn write_stderr(bytes: &[u8]) -> io::Result<()> {
++    let sink = STDERR_SINK.lock().expect("stderr sink").clone();
++    match sink {
++        Some(sink) => sink(bytes),
++        None => std::io::stderr().lock().write_all(bytes),
++    }
++}
++
++pub(crate) fn stderr_warning(message: &str) {
++    let _ = write_stderr(format!("{message}\n").as_bytes());
++}
++
++#[derive(Default)]
++pub(crate) struct StderrLogWriter(Vec<u8>);
++
++impl Write for StderrLogWriter {
++    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
++        self.0.extend_from_slice(bytes);
++        Ok(bytes.len())
++    }
++    fn flush(&mut self) -> io::Result<()> {
++        Ok(())
++    }
++}
++
++impl Drop for StderrLogWriter {
++    fn drop(&mut self) {
++        let _ = write_stderr(&self.0);
++    }
++}
++
+ /// One structured entry read back from a retained runtime log shard.
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ pub struct LogEntry {
+@@ -212,7 +261,7 @@ pub fn init_logging_for_paths(paths: &AppPaths) -> Result<()> {
+     let console_filter =
+         EnvFilter::try_from_env("RUST_LOG").unwrap_or_else(|_| EnvFilter::new(DEFAULT_FILE_LEVEL));
+     let stderr_layer = fmt::layer()
+-        .with_writer(std::io::stderr)
++        .with_writer(StderrLogWriter::default)
+         .with_target(false)
+         .with_filter(console_filter);
+ 
+diff --git a/src/store/mod.rs b/src/store/mod.rs
+index b481bd3..6a49855 100644
+--- a/src/store/mod.rs
++++ b/src/store/mod.rs
+@@ -34,6 +34,8 @@ mod source_file;
+ pub(crate) mod sqlite_functions;
+ mod sync_status;
+ mod sync_writer;
++#[cfg(test)]
++pub(crate) use sync_writer::profiling as writer_test_support;
+ 
+ pub use cursor::CursorStore;
+ pub use host::{Host, HostStore, LOCAL_HOST_ID};
+diff --git a/src/store/sync_status.rs b/src/store/sync_status.rs
+index cbe2f0f..b1adc1f 100644
+--- a/src/store/sync_status.rs
++++ b/src/store/sync_status.rs
+@@ -1,5 +1,7 @@
++use crate::domain::source_diagnostics::{PersistedDiagnostics, SourceIssues};
+ use crate::error::{LlmusageError, Result};
+-use rusqlite::{params, types::Type};
++use crate::models::SourceKind;
++use rusqlite::{OptionalExtension, params, types::Type};
+ 
+ use super::{SourceSyncStatus, Store};
+ 
+@@ -49,9 +51,10 @@ impl<'a> SyncStatusStore<'a> {
+         )?;
+         let rows = stmt.query_map([host_id], |row| {
+             let parse_issues_raw = row.get::<_, String>(11)?;
+-            let parse_issues = serde_json::from_str(&parse_issues_raw).map_err(|source| {
+-                rusqlite::Error::FromSqlConversionFailure(11, Type::Text, Box::new(source))
+-            })?;
++            let diagnostics: PersistedDiagnostics = serde_json::from_str(&parse_issues_raw)
++                .map_err(|source| {
++                    rusqlite::Error::FromSqlConversionFailure(11, Type::Text, Box::new(source))
++                })?;
+             Ok(SourceSyncStatus {
+                 source: row.get(0)?,
+                 files_processed: row.get(1)?,
+@@ -67,7 +70,7 @@ impl<'a> SyncStatusStore<'a> {
+                 parse_ms: row.get(8)?,
+                 write_ms: row.get(9)?,
+                 lock_wait_ms: row.get(10)?,
+-                parse_issues,
++                parse_issues: diagnostics.parse_issues,
+                 updated_at: row.get(12)?,
+             })
+         })?;
+@@ -136,6 +139,40 @@ impl<'a> SyncStatusStore<'a> {
+         &self,
+         host_id: &str,
+         statuses: &[SourceSyncStatus],
++    ) -> Result<()> {
++        self.save_source_sync_statuses_with_issues(host_id, statuses, &SourceIssues::new())
++    }
++
++    pub(crate) fn load_source_issues(&self, host_id: &str) -> Result<SourceIssues> {
++        let conn = self.store.open_connection()?;
++        let mut stmt = conn
++            .prepare("SELECT source, parse_issues_json FROM source_sync_status WHERE host_id=?1")?;
++        let mut issues = SourceIssues::new();
++        for row in stmt.query_map([host_id], |row| {
++            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
++        })? {
++            let (source, json) = row?;
++            let diagnostics: PersistedDiagnostics =
++                serde_json::from_str(&json).map_err(|source| LlmusageError::Parse {
++                    context: "source sync diagnostics",
++                    source,
++                })?;
++            if let Some(source) = SourceKind::parse_id(&source)
++                && !diagnostics.source_issues.is_empty()
++            {
++                issues.insert(source, diagnostics.source_issues);
++            }
++        }
++        Ok(issues)
++    }
++
++    /// An explicit entry replaces source issues for that run, including an empty
++    /// entry on success. Compatibility callers preserve the previous issues.
++    pub(crate) fn save_source_sync_statuses_with_issues(
++        &self,
++        host_id: &str,
++        statuses: &[SourceSyncStatus],
++        source_issues: &SourceIssues,
+     ) -> Result<()> {
+         if statuses.is_empty() {
+             return Ok(());
+@@ -176,8 +213,21 @@ impl<'a> SyncStatusStore<'a> {
+                 "#,
+             )?;
+             for status in statuses {
++                let issues = match SourceKind::parse_id(&status.source).and_then(|source| source_issues.get(&source)) {
++                    Some(issues) => issues.clone(),
++                    None => {
++                        let previous = tx.query_row(
++                            "SELECT parse_issues_json FROM source_sync_status WHERE host_id=?1 AND source=?2",
++                            params![host_id, status.source], |row| row.get::<_, String>(0),
++                        ).optional()?;
++                        previous.map(|json| serde_json::from_str::<PersistedDiagnostics>(&json)).transpose()
++                            .map_err(|source| LlmusageError::Parse { context: "source sync diagnostics", source })?
++                            .unwrap_or_default().source_issues
++                    }
++                };
++                let diagnostics = PersistedDiagnostics { parse_issues: status.parse_issues.clone(), source_issues: issues };
+                 let parse_issues_json =
+-                    serde_json::to_string(&status.parse_issues).map_err(|source| {
++                    serde_json::to_string(&diagnostics).map_err(|source| {
+                         LlmusageError::Parse {
+                             context: "source sync parse issues",
+                             source,
+@@ -303,6 +353,51 @@ mod tests {
+         assert!(encoded.contains("safe-path-hash"));
+         assert!(!encoded.contains("prompt"));
+ 
++        use crate::domain::source_diagnostics::{SourceIssue, SourceIssueCode};
++        let mut source_issues = SourceIssues::new();
++        SourceIssue::record(
++            source_issues.entry(SourceKind::Codex).or_default(),
++            SourceIssueCode::TrackedMemberMissing,
++            2,
++        );
++        store.sync_status().save_source_sync_statuses_with_issues(
++            "local",
++            std::slice::from_ref(&status),
++            &source_issues,
++        )?;
++        let reopened = Store::new(&paths)?;
++        assert_eq!(
++            reopened.sync_status().load_source_issues("local")?,
++            source_issues
++        );
++        // A compatibility update or completion timestamp cannot discard blockers.
++        reopened
++            .sync_status()
++            .save_source_sync_statuses("local", &loaded)?;
++        reopened.sync_status().mark_recent_completed(
++            SourceKind::Codex,
++            "local",
++            crate::util::now_utc(),
++        )?;
++        assert_eq!(
++            reopened.sync_status().load_source_issues("local")?,
++            source_issues
++        );
++        let success = SourceIssues::from([(SourceKind::Codex, Vec::new())]);
++        reopened
++            .sync_status()
++            .save_source_sync_statuses_with_issues(
++                "local",
++                std::slice::from_ref(&status),
++                &success,
++            )?;
++        assert!(
++            reopened
++                .sync_status()
++                .load_source_issues("local")?
++                .is_empty()
++        );
++
+         let conn = store.open_connection()?;
+         conn.execute(
+             "UPDATE source_sync_status SET parse_issues_json = 'not-json' WHERE source = 'codex'",
+diff --git a/src/store/sync_writer.rs b/src/store/sync_writer.rs
+index d628980..9b30690 100644
+--- a/src/store/sync_writer.rs
++++ b/src/store/sync_writer.rs
+@@ -27,13 +27,89 @@ use crate::{
+     util::now_utc,
+ };
+ 
+-/// Maximum events committed in a single `usage_event` transaction.
++// Tests can observe exclusive stages without changing the production protocol.
++macro_rules! writer_stage {
++    ($name:literal, $body:expr) => {{
++        #[cfg(test)]
++        let _stage = profiling::Stage::enter($name);
++        $body
++    }};
++}
++
++#[cfg(test)]
++pub(crate) mod profiling;
++
++fn audit_now() -> String {
++    #[cfg(test)]
++    if let Some(now) = profiling::audit_now() {
++        return now;
++    }
++    now_utc()
++}
++
++fn audit_run_started_at() -> String {
++    #[cfg(test)]
++    if let Some(now) = profiling::audit_now() {
++        return now;
++    }
++    crate::util::now_utc_millis()
++}
++
++/// Maximum events per insert batch within the shard's single transaction.
+ ///
+ /// Owned by the writer side of the protocol so parsers stay agnostic to
+ /// SQLite batch sizing. Removing this constant is a deletion-test signal:
+ /// each parser would have to reintroduce its own chunking constant.
+ const EVENT_WRITE_BATCH_SIZE: usize = 1000;
+ 
++// Choose the smaller indexed candidate set without changing path or host
++// identity, aggregation order, or deletion order.
++const RESET_EVENT_AGGREGATE_SQL: &str = r#"
++                SELECT
++                    COALESCE(provider_label, ''),
++                    model,
++                    hour_start,
++                    COALESCE(project_hash, ''),
++                    SUM(input_tokens),
++                    SUM(cache_read_tokens),
++                    SUM(cache_creation_tokens),
++                    SUM(output_tokens),
++                    SUM(reasoning_output_tokens),
++                    SUM(total_tokens),
++                    SUM(cost_with_cache_usd),
++                    SUM(cost_without_cache_usd),
++                    COUNT(*)
++                FROM usage_event INDEXED BY idx_usage_event_source_path_hash
++                WHERE source = ?1 AND host_id = ?2 AND source_path_hash = ?3
++                GROUP BY COALESCE(provider_label, ''), model, hour_start, COALESCE(project_hash, '')
++                "#;
++const RESET_HOST_COUNT_SQL: &str = "SELECT COUNT(*) FROM usage_event INDEXED BY idx_usage_event_host_source_event_at WHERE host_id = ?1 AND source = ?2";
++const RESET_PATH_COUNT_SQL: &str = "SELECT COUNT(*) FROM (SELECT 1 FROM usage_event INDEXED BY idx_usage_event_source_path_hash WHERE source = ?1 AND source_path_hash = ?2 LIMIT ?3)";
++
++const RESET_EVENT_DELETE_SQL: &str = "DELETE FROM usage_event INDEXED BY idx_usage_event_source_path_hash WHERE source = ?1 AND host_id = ?2 AND source_path_hash = ?3";
++
++const RESET_EVENT_AGGREGATE_DEFAULT_SQL: &str = r#"
++                SELECT
++                    COALESCE(provider_label, ''),
++                    model,
++                    hour_start,
++                    COALESCE(project_hash, ''),
++                    SUM(input_tokens),
++                    SUM(cache_read_tokens),
++                    SUM(cache_creation_tokens),
++                    SUM(output_tokens),
++                    SUM(reasoning_output_tokens),
++                    SUM(total_tokens),
++                    SUM(cost_with_cache_usd),
++                    SUM(cost_without_cache_usd),
++                    COUNT(*)
++                FROM usage_event
++                WHERE source = ?1 AND host_id = ?2 AND source_path_hash = ?3
++                GROUP BY COALESCE(provider_label, ''), model, hour_start, COALESCE(project_hash, '')
++                "#;
++const RESET_EVENT_DELETE_DEFAULT_SQL: &str =
++    "DELETE FROM usage_event WHERE source = ?1 AND host_id = ?2 AND source_path_hash = ?3";
++
+ const RESET_BUCKET_PRICING_SELECT_SQL: &str = r#"
+     SELECT
+         b.provider_label,
+@@ -145,7 +221,7 @@ impl Store {
+             store: self.clone(),
+             conn: Some(conn),
+             permit: self.write_permit.clone(),
+-            run_started_at: crate::util::now_utc_millis(),
++            run_started_at: audit_run_started_at(),
+             raw_archive_enabled,
+             pricing_catalog,
+             provider_index,
+@@ -165,7 +241,7 @@ impl Store {
+             store: self.clone(),
+             conn: None,
+             permit: None,
+-            run_started_at: crate::util::now_utc_millis(),
++            run_started_at: audit_run_started_at(),
+             raw_archive_enabled: false,
+             pricing_catalog: PricingCatalog::embedded().clone(),
+             provider_index: None,
+@@ -181,6 +257,10 @@ impl SyncRunWriter {
+         host_id: &str,
+         path_hashes: &[String],
+     ) -> Result<()> {
++        #[cfg(test)]
++        if profiling::is_baseline() {
++            return profiling::reset_file_events_baseline_tx(tx, source, host_id, path_hashes);
++        }
+         if path_hashes.is_empty() {
+             return Ok(());
+         }
+@@ -197,29 +277,23 @@ impl SyncRunWriter {
+         info!(source = %source, count = path_hashes.len(), "开始清理重放旧事件");
+ 
+         // 4.1 在 shard 事务里扣减 bucket 并删除旧 event
++        #[cfg(test)]
++        profiling::record_reset("adaptive");
+         let mut unique = HashSet::new();
+         {
+-            let mut aggregate_stmt = tx.prepare_cached(
+-                r#"
+-                SELECT
+-                    COALESCE(provider_label, ''),
+-                    model,
+-                    hour_start,
+-                    COALESCE(project_hash, ''),
+-                    SUM(input_tokens),
+-                    SUM(cache_read_tokens),
+-                    SUM(cache_creation_tokens),
+-                    SUM(output_tokens),
+-                    SUM(reasoning_output_tokens),
+-                    SUM(total_tokens),
+-                    SUM(cost_with_cache_usd),
+-                    SUM(cost_without_cache_usd),
+-                    COUNT(*)
+-                FROM usage_event
+-                WHERE source = ?1 AND host_id = ?2 AND source_path_hash = ?3
+-                GROUP BY COALESCE(provider_label, ''), model, hour_start, COALESCE(project_hash, '')
+-                "#,
++            let mut aggregate_path_stmt = tx.prepare_cached(RESET_EVENT_AGGREGATE_SQL)?;
++            let mut aggregate_host_stmt = tx.prepare_cached(RESET_EVENT_AGGREGATE_DEFAULT_SQL)?;
++            // One covering host/source count per reset batch. Each path probe
++            // stops at that count; deletions reduce the next probe's bound.
++            let mut host_candidates: i64 = writer_stage!(
++                "reset_selectivity",
++                tx.query_row(
++                    RESET_HOST_COUNT_SQL,
++                    rusqlite::params![host_id, source.as_str()],
++                    |row| row.get(0),
++                )
+             )?;
++            let mut path_count_stmt = tx.prepare_cached(RESET_PATH_COUNT_SQL)?;
+             let mut update_bucket_stmt = tx.prepare_cached(
+                 r#"
+                 UPDATE usage_bucket_30m
+@@ -262,10 +336,9 @@ impl SyncRunWriter {
+                   AND event_count <= 0
+                 "#,
+             )?;
+-            let mut delete_event_stmt = tx.prepare_cached(
+-                "DELETE FROM usage_event WHERE source = ?1 AND host_id = ?2 AND source_path_hash = ?3",
+-            )?;
+-            let updated_at = now_utc();
++            let mut delete_path_stmt = tx.prepare_cached(RESET_EVENT_DELETE_SQL)?;
++            let mut delete_host_stmt = tx.prepare_cached(RESET_EVENT_DELETE_DEFAULT_SQL)?;
++            let updated_at = audit_now();
+             let mut touched_buckets = Vec::new();
+ 
+             for path_hash in path_hashes {
+@@ -273,6 +346,39 @@ impl SyncRunWriter {
+                     continue;
+                 }
+ 
++                let prefer_path = if host_candidates == 0 {
++                    false
++                } else {
++                    let path_candidates: i64 = writer_stage!(
++                        "reset_selectivity",
++                        path_count_stmt.query_row(
++                            rusqlite::params![source.as_str(), path_hash, host_candidates],
++                            |row| row.get(0),
++                        )
++                    )?;
++                    path_candidates < host_candidates
++                };
++                #[cfg(test)]
++                profiling::count(
++                    if prefer_path {
++                        "reset_path_index_paths"
++                    } else {
++                        "reset_default_plan_paths"
++                    },
++                    1,
++                );
++                let aggregate_stmt = if prefer_path {
++                    &mut aggregate_path_stmt
++                } else {
++                    &mut aggregate_host_stmt
++                };
++                let delete_event_stmt = if prefer_path {
++                    &mut delete_path_stmt
++                } else {
++                    &mut delete_host_stmt
++                };
++                #[cfg(test)]
++                let aggregate_profile = profiling::Stage::enter("reset_aggregate");
+                 let rows = aggregate_stmt.query_map(
+                     rusqlite::params![source.as_str(), host_id, path_hash],
+                     |row| {
+@@ -302,6 +408,8 @@ impl SyncRunWriter {
+                     },
+                 )?;
+                 let aggregates = rows.collect::<rusqlite::Result<Vec<_>>>()?;
++                #[cfg(test)]
++                drop(aggregate_profile);
+ 
+                 for (
+                     provider_label,
+@@ -314,6 +422,8 @@ impl SyncRunWriter {
+                     event_count,
+                 ) in aggregates
+                 {
++                    #[cfg(test)]
++                    let _bucket_profile = profiling::Stage::enter("reset_bucket_update");
+                     update_bucket_stmt.execute(rusqlite::params![
+                         host_id,
+                         source.as_str(),
+@@ -345,20 +455,33 @@ impl SyncRunWriter {
+                     }
+                 }
+ 
+-                delete_event_stmt.execute(rusqlite::params![
+-                    source.as_str(),
+-                    host_id,
+-                    path_hash
+-                ])?;
++                let deleted = writer_stage!(
++                    "reset_delete",
++                    delete_event_stmt.execute(rusqlite::params![
++                        source.as_str(),
++                        host_id,
++                        path_hash
++                    ])
++                )?;
++                host_candidates -= deleted as i64;
++                #[cfg(test)]
++                profiling::count("events_deleted", deleted);
++                #[cfg(not(test))]
++                let _ = deleted;
+             }
+ 
+-            refresh_bucket_pricing_after_reset_tx(
+-                tx,
+-                source.as_str(),
+-                host_id,
+-                &touched_buckets,
+-                &updated_at,
++            writer_stage!(
++                "reset_pricing",
++                refresh_bucket_pricing_after_reset_tx(
++                    tx,
++                    source.as_str(),
++                    host_id,
++                    &touched_buckets,
++                    &updated_at,
++                )
+             )?;
++            #[cfg(test)]
++            profiling::count("touched_bucket_candidates", touched_buckets.len());
+         }
+         info!(source = %source, "完成重放旧事件清理");
+         Ok(())
+@@ -386,7 +509,7 @@ impl SyncRunWriter {
+         info!(batch = events.len(), "开始批量写入 usage_event");
+ 
+         // 5.1 在 shard 事务中插入 event，并为新 event 做内存聚合
+-        let now = now_utc();
++        let now = audit_now();
+         let inserted = {
+             let mut event_stmt = tx.prepare_cached(
+                 r#"
+@@ -405,65 +528,71 @@ impl SyncRunWriter {
+             let mut inserted = 0usize;
+ 
+             for event in events {
+-                let cost = pricing::cost_for_event(
+-                    pricing_catalog,
+-                    event.source.as_str(),
+-                    &event.model,
+-                    pricing::CostTokens {
+-                        input: event.tokens.input_tokens,
+-                        cache_read: event.tokens.cache_read_tokens,
+-                        cache_creation: event.tokens.cache_creation_tokens,
+-                        output: event.tokens.output_tokens,
+-                        reasoning_output: event.tokens.reasoning_output_tokens,
+-                    },
+-                    event.source_cost.as_ref(),
++                let cost = writer_stage!(
++                    "pricing",
++                    pricing::cost_for_event(
++                        pricing_catalog,
++                        event.source.as_str(),
++                        &event.model,
++                        pricing::CostTokens {
++                            input: event.tokens.input_tokens,
++                            cache_read: event.tokens.cache_read_tokens,
++                            cache_creation: event.tokens.cache_creation_tokens,
++                            output: event.tokens.output_tokens,
++                            reasoning_output: event.tokens.reasoning_output_tokens,
++                        },
++                        event.source_cost.as_ref(),
++                    )
+                 );
+-                let changed = event_stmt.execute(rusqlite::params![
+-                    event.event_key,
+-                    host_id,
+-                    event.source.as_str(),
+-                    event.provider_label,
+-                    event.model,
+-                    event.event_at,
+-                    event.hour_start,
+-                    event.tokens.input_tokens,
+-                    event.tokens.cache_read_tokens,
+-                    event.tokens.cache_creation_tokens,
+-                    event.tokens.output_tokens,
+-                    event.tokens.reasoning_output_tokens,
+-                    event.tokens.total_tokens,
+-                    cost.cost_with_cache_usd,
+-                    cost.cost_without_cache_usd,
+-                    cost.pricing_status.as_str(),
+-                    cost.pricing_source,
+-                    cost.pricing_rate,
+-                    event
+-                        .project
+-                        .as_ref()
+-                        .map(|value| value.project_hash.as_str()),
+-                    event
+-                        .project
+-                        .as_ref()
+-                        .map(|value| value.project_label.as_str()),
+-                    event
+-                        .project
+-                        .as_ref()
+-                        .and_then(|value| value.project_ref.as_deref()),
+-                    event.project.as_ref().map(|value| value.path_hash.as_str()),
+-                    event
+-                        .session
+-                        .as_ref()
+-                        .map(|value| value.session_id.as_str()),
+-                    event
+-                        .session
+-                        .as_ref()
+-                        .and_then(|value| value.session_label.as_deref()),
+-                    event
+-                        .session
+-                        .as_ref()
+-                        .and_then(|value| value.source_path_hash.as_deref()),
+-                    now,
+-                ])?;
++                let changed = writer_stage!(
++                    "event_insert",
++                    event_stmt.execute(rusqlite::params![
++                        event.event_key,
++                        host_id,
++                        event.source.as_str(),
++                        event.provider_label,
++                        event.model,
++                        event.event_at,
++                        event.hour_start,
++                        event.tokens.input_tokens,
++                        event.tokens.cache_read_tokens,
++                        event.tokens.cache_creation_tokens,
++                        event.tokens.output_tokens,
++                        event.tokens.reasoning_output_tokens,
++                        event.tokens.total_tokens,
++                        cost.cost_with_cache_usd,
++                        cost.cost_without_cache_usd,
++                        cost.pricing_status.as_str(),
++                        cost.pricing_source,
++                        cost.pricing_rate,
++                        event
++                            .project
++                            .as_ref()
++                            .map(|value| value.project_hash.as_str()),
++                        event
++                            .project
++                            .as_ref()
++                            .map(|value| value.project_label.as_str()),
++                        event
++                            .project
++                            .as_ref()
++                            .and_then(|value| value.project_ref.as_deref()),
++                        event.project.as_ref().map(|value| value.path_hash.as_str()),
++                        event
++                            .session
++                            .as_ref()
++                            .map(|value| value.session_id.as_str()),
++                        event
++                            .session
++                            .as_ref()
++                            .and_then(|value| value.session_label.as_deref()),
++                        event
++                            .session
++                            .as_ref()
++                            .and_then(|value| value.source_path_hash.as_deref()),
++                        now,
++                    ])
++                )?;
+                 if changed == 0 {
+                     continue;
+                 }
+@@ -477,8 +606,8 @@ impl SyncRunWriter {
+             drop(event_stmt);
+ 
+             // 5.2 将项目维表和 30 分钟桶一次性刷入
+-            flush_projects_tx(tx, &projects)?;
+-            flush_buckets_tx(tx, &buckets)?;
++            writer_stage!("projects", flush_projects_tx(tx, &projects))?;
++            writer_stage!("buckets", flush_buckets_tx(tx, &buckets))?;
+             inserted
+         };
+         info!(batch = events.len(), inserted, "完成批量写入 usage_event");
+@@ -537,6 +666,12 @@ impl SyncRunWriter {
+                 "#,
+             )?;
+             for cursor in cursors {
++                #[cfg(test)]
++                let fixed_audit = profiling::audit_now();
++                #[cfg(test)]
++                let updated_at = fixed_audit.as_deref().unwrap_or(&cursor.updated_at);
++                #[cfg(not(test))]
++                let updated_at = &cursor.updated_at;
+                 stmt.execute(rusqlite::params![
+                     host_id,
+                     source.as_str(),
+@@ -557,7 +692,7 @@ impl SyncRunWriter {
+                             source,
+                         })?,
+                     cursor.last_model,
+-                    cursor.updated_at,
++                    updated_at,
+                 ])?;
+             }
+         }
+@@ -642,22 +777,34 @@ impl SyncRunWriter {
+                 .collect();
+         }
+ 
++        #[cfg(test)]
++        let profile = profiling::Scope::start(
++            "antigravity_transaction",
++            &shards.iter().collect::<Vec<_>>(),
++        );
+         for shard in &mut shards {
+-            apply_host_prefix(shard);
+-            dedupe_behavior_facts(shard);
+-            if let Some(index) = &self.provider_index {
+-                for event in &mut shard.events {
+-                    if event.provider_label.is_empty() {
+-                        event.provider_label = index.label_for(event.source, &event.event_at);
++            writer_stage!("pre_host_prefix", apply_host_prefix(shard));
++            writer_stage!("pre_behavior_dedupe", dedupe_behavior_facts(shard));
++            writer_stage!("pre_provider", {
++                if let Some(index) = &self.provider_index {
++                    for event in &mut shard.events {
++                        if event.provider_label.is_empty() {
++                            event.provider_label = index.label_for(event.source, &event.event_at);
++                        }
+                     }
+                 }
+-            }
++            });
+         }
+-        let operation = if self.permit.is_none() {
+-            Some(self.store.write_operation(HolderKind::Library)?)
+-        } else {
+-            None
+-        };
++        #[cfg(test)]
++        let transaction_started = Instant::now();
++        let operation = writer_stage!(
++            "operation",
++            if self.permit.is_none() {
++                Some(self.store.write_operation(HolderKind::Library)?)
++            } else {
++                None
++            }
++        );
+         let permit = match self.permit.as_ref() {
+             Some(permit) => permit.clone(),
+             None => operation
+@@ -667,35 +814,43 @@ impl SyncRunWriter {
+                 .write_permit()?
+                 .clone(),
+         };
+-        let tx = self
+-            .conn
+-            .as_mut()
+-            .expect("persist writer has a connection")
+-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+-        permit.validate_in_transaction(&tx)?;
++        let tx = writer_stage!(
++            "begin",
++            self.conn
++                .as_mut()
++                .expect("persist writer has a connection")
++                .transaction_with_behavior(TransactionBehavior::Immediate)
++        )?;
++        writer_stage!("fence_before", permit.validate_in_transaction(&tx))?;
+         // Reset every selected owner before inserting any winners, so an event
+         // moving between CLI and IDE cannot collide with its previous owner.
+-        for shard in &shards {
+-            if rebuild {
+-                Self::reset_antigravity_attributed_history_tx(&tx, shard.source, &shard.host_id)?;
+-            } else {
+-                Self::reset_file_events_batch_tx(
+-                    &tx,
+-                    shard.source,
+-                    &shard.host_id,
+-                    &shard.reset_path_hashes,
+-                )?;
+-                Self::reset_behavior_facts_batch_tx(
+-                    &tx,
+-                    shard.source,
+-                    &shard.host_id,
+-                    &shard.reset_path_hashes,
+-                )?;
+-            }
+-            if rebuild || !shard.reset_path_hashes.is_empty() {
+-                Self::reset_antigravity_membership_tx(&tx, shard.source, &shard.host_id)?;
++        writer_stage!("group_reset", {
++            for shard in &shards {
++                if rebuild {
++                    Self::reset_antigravity_attributed_history_tx(
++                        &tx,
++                        shard.source,
++                        &shard.host_id,
++                    )?;
++                } else {
++                    Self::reset_file_events_batch_tx(
++                        &tx,
++                        shard.source,
++                        &shard.host_id,
++                        &shard.reset_path_hashes,
++                    )?;
++                    Self::reset_behavior_facts_batch_tx(
++                        &tx,
++                        shard.source,
++                        &shard.host_id,
++                        &shard.reset_path_hashes,
++                    )?;
++                }
++                if rebuild || !shard.reset_path_hashes.is_empty() {
++                    Self::reset_antigravity_membership_tx(&tx, shard.source, &shard.host_id)?;
++                }
+             }
+-        }
++        });
+         let mut results = Vec::with_capacity(shards.len());
+         for (index, shard) in shards.iter().enumerate() {
+             let started = Instant::now();
+@@ -711,17 +866,25 @@ impl SyncRunWriter {
+                 active_failpoint,
+                 false,
+             )?;
+-            write_meta_value(
+-                &tx,
+-                &token_accounting_key_for_host(&shard.host_id, shard.source),
+-                &super::expected_token_accounting_version(shard.source).to_string(),
++            writer_stage!(
++                "marker",
++                write_meta_value(
++                    &tx,
++                    &token_accounting_key_for_host(&shard.host_id, shard.source),
++                    &super::expected_token_accounting_version(shard.source).to_string(),
++                )
+             )?;
+             stats.files_seen = shard.seen_file_paths.len();
+-            stats.write_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
++            let elapsed = started.elapsed();
++            stats.write_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
++            #[cfg(test)]
++            profiling::source_apply(elapsed);
+             results.push(stats);
+         }
+-        permit.validate_in_transaction(&tx)?;
+-        tx.commit()?;
++        writer_stage!("fence_after", permit.validate_in_transaction(&tx))?;
++        writer_stage!("commit", tx.commit())?;
++        #[cfg(test)]
++        profile.finish(transaction_started.elapsed());
+         for shard in &shards {
+             invoke_after_commit_shard(&self.store, shard);
+         }
+@@ -791,8 +954,15 @@ impl SyncRunWriter {
+          * 2) 让 parser 不再关心写入顺序与 batch 大小
+          * 3) 统一返回 inserted 数与本次提交耗时
+          */
+-        apply_host_prefix(&mut shard);
+-        dedupe_behavior_facts(&mut shard);
++        #[cfg(test)]
++        let profile = profiling::Scope::start("shard", &[&shard]);
++        writer_stage!("pre_host_prefix", apply_host_prefix(&mut shard));
++        writer_stage!("pre_behavior_dedupe", dedupe_behavior_facts(&mut shard));
++        #[cfg(test)]
++        {
++            profiling::count("turns_deduped", shard.turns.len());
++            profiling::count("tools_deduped", shard.tool_calls.len());
++        }
+         info!(
+             source = %shard.source,
+             resets = shard.reset_path_hashes.len(),
+@@ -807,22 +977,27 @@ impl SyncRunWriter {
+ 
+         // 7.1 计时入口与累加器
+         let started = Instant::now();
+-        if let Some(index) = self.provider_index.as_ref() {
+-            for event in &mut shard.events {
+-                if event.provider_label.is_empty() {
+-                    event.provider_label = index.label_for(event.source, &event.event_at);
++        writer_stage!("provider", {
++            if let Some(index) = self.provider_index.as_ref() {
++                for event in &mut shard.events {
++                    if event.provider_label.is_empty() {
++                        event.provider_label = index.label_for(event.source, &event.event_at);
++                    }
+                 }
+             }
+-        }
++        });
+         let pricing_catalog = &self.pricing_catalog;
+         let raw_archive_enabled = self.raw_archive_enabled;
+         let run_started_at = self.run_started_at.clone();
+         let host_id = shard.host_id.clone();
+-        let operation = if self.permit.is_none() {
+-            Some(self.store.write_operation(HolderKind::Library)?)
+-        } else {
+-            None
+-        };
++        let operation = writer_stage!(
++            "operation",
++            if self.permit.is_none() {
++                Some(self.store.write_operation(HolderKind::Library)?)
++            } else {
++                None
++            }
++        );
+         let permit = match self.permit.as_ref() {
+             Some(permit) => permit.clone(),
+             None => operation
+@@ -836,9 +1011,15 @@ impl SyncRunWriter {
+             .conn
+             .as_mut()
+             .expect("persist writer keeps a SQLite connection");
+-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+-        permit.validate_in_transaction(&tx)?;
+-        Self::migrate_omp_split_if_needed_tx(&tx, shard.source, &host_id, &run_started_at)?;
++        let tx = writer_stage!(
++            "begin",
++            conn.transaction_with_behavior(TransactionBehavior::Immediate)
++        )?;
++        writer_stage!("fence_before", permit.validate_in_transaction(&tx))?;
++        writer_stage!(
++            "migration",
++            Self::migrate_omp_split_if_needed_tx(&tx, shard.source, &host_id, &run_started_at)
++        )?;
+ 
+         let mut stats = Self::apply_shard_tx(
+             &tx,
+@@ -849,11 +1030,19 @@ impl SyncRunWriter {
+             failpoint,
+             true,
+         )?;
+-        permit.validate_in_transaction(&tx)?;
+-        tx.commit()?;
++        writer_stage!("fence_after", permit.validate_in_transaction(&tx))?;
++        writer_stage!("commit", tx.commit())?;
+ 
+         stats.files_seen = shard.seen_file_paths.len();
+-        stats.write_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
++        let elapsed = started.elapsed();
++        stats.write_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
++        #[cfg(test)]
++        {
++            profiling::count("events_inserted", stats.events_inserted);
++            profiling::count("turns_inserted", stats.turns_inserted);
++            profiling::count("tools_inserted", stats.tool_calls_inserted);
++            profile.finish(elapsed);
++        }
+         info!(
+             source = %shard.source,
+             inserted = stats.events_inserted,
+@@ -879,33 +1068,48 @@ impl SyncRunWriter {
+ 
+         // 7.2 先清旧 event，再批写 event，最后落 cursor —— 顺序由协议保证
+         if reset_paths && !shard.reset_path_hashes.is_empty() {
+-            Self::reset_file_events_batch_tx(tx, shard.source, host_id, &shard.reset_path_hashes)?;
++            writer_stage!(
++                "reset_events",
++                Self::reset_file_events_batch_tx(
++                    tx,
++                    shard.source,
++                    host_id,
++                    &shard.reset_path_hashes
++                )
++            )?;
+         }
+         fail_shard_commit_at(failpoint, ShardCommitFailpoint::Reset)?;
+         for batch in shard.events.chunks(EVENT_WRITE_BATCH_SIZE) {
+-            stats.events_inserted +=
+-                Self::write_event_batch_tx(tx, pricing_catalog, host_id, batch)?;
++            stats.events_inserted += writer_stage!(
++                "event_work",
++                Self::write_event_batch_tx(tx, pricing_catalog, host_id, batch)
++            )?;
+         }
+         fail_shard_commit_at(failpoint, ShardCommitFailpoint::Events)?;
+-        if !shard.cursors.is_empty() {
+-            Self::write_cursor_batch_tx(tx, shard.source, host_id, &shard.cursors)?;
+-        }
+-        if let Some(cursor) = shard.opencode_cursor.as_deref() {
+-            persist_opencode_cursor_tx(tx, host_id, cursor)?;
+-        }
+-        if let Some(cursor) = shard.zcode_cursor.as_deref() {
+-            persist_zcode_cursor_tx(tx, host_id, cursor)?;
+-        }
++        writer_stage!("cursor", {
++            if !shard.cursors.is_empty() {
++                Self::write_cursor_batch_tx(tx, shard.source, host_id, &shard.cursors)?;
++            }
++            if let Some(cursor) = shard.opencode_cursor.as_deref() {
++                persist_opencode_cursor_tx(tx, host_id, cursor)?;
++            }
++            if let Some(cursor) = shard.zcode_cursor.as_deref() {
++                persist_zcode_cursor_tx(tx, host_id, cursor)?;
++            }
++        });
+         fail_shard_commit_at(failpoint, ShardCommitFailpoint::Cursor)?;
+         // 7.3 把本轮看到的候选文件登记为 source_file.state='live'
+         //     （D15 / ADR 0006）。OpenCode 等无 file 身份的源传空 vec。
+         if !shard.seen_file_paths.is_empty() {
+-            Self::write_source_file_seen_tx(
+-                tx,
+-                shard.source,
+-                host_id,
+-                &shard.seen_file_paths,
+-                run_started_at,
++            writer_stage!(
++                "inventory",
++                Self::write_source_file_seen_tx(
++                    tx,
++                    shard.source,
++                    host_id,
++                    &shard.seen_file_paths,
++                    run_started_at,
++                )
+             )?;
+         }
+         fail_shard_commit_at(failpoint, ShardCommitFailpoint::SourceFile)?;
+@@ -913,28 +1117,39 @@ impl SyncRunWriter {
+         //     避免 parser 端必须同步判定开关；开关开时与 event 共享 commit
+         //     周期落库（INSERT OR IGNORE 保证 event_key 重复时幂等）。
+         if raw_archive_enabled && !shard.raw_records.is_empty() {
+-            Self::write_raw_records_batch_tx(tx, &shard.raw_records)?;
++            writer_stage!(
++                "raw",
++                Self::write_raw_records_batch_tx(tx, &shard.raw_records)
++            )?;
+         }
+         fail_shard_commit_at(failpoint, ShardCommitFailpoint::Raw)?;
+         // 7.5 行为事实是 usage_event/bucket 之外的独立 normalized 表。
+         //     reset 同源文件时先清掉旧 path_hash 关联事实，随后 INSERT OR IGNORE
+         //     新事实；未支持行为提取的 parser 可继续传空 vec。
+         if reset_paths && !shard.reset_path_hashes.is_empty() {
+-            Self::reset_behavior_facts_batch_tx(
+-                tx,
+-                shard.source,
+-                host_id,
+-                &shard.reset_path_hashes,
++            writer_stage!(
++                "behavior_reset",
++                Self::reset_behavior_facts_batch_tx(
++                    tx,
++                    shard.source,
++                    host_id,
++                    &shard.reset_path_hashes,
++                )
+             )?;
+         }
+         fail_shard_commit_at(failpoint, ShardCommitFailpoint::BehaviorReset)?;
+         if !shard.turns.is_empty() {
+-            stats.turns_inserted += Self::write_turn_batch_tx(tx, host_id, &shard.turns)?;
++            stats.turns_inserted += writer_stage!(
++                "turns",
++                Self::write_turn_batch_tx(tx, host_id, &shard.turns)
++            )?;
+         }
+         fail_shard_commit_at(failpoint, ShardCommitFailpoint::Turns)?;
+         if !shard.tool_calls.is_empty() {
+-            stats.tool_calls_inserted +=
+-                Self::write_tool_call_batch_tx(tx, host_id, &shard.tool_calls)?;
++            stats.tool_calls_inserted += writer_stage!(
++                "tools",
++                Self::write_tool_call_batch_tx(tx, host_id, &shard.tool_calls)
++            )?;
+         }
+         fail_shard_commit_at(failpoint, ShardCommitFailpoint::ToolCalls)?;
+         Ok(stats)
+@@ -1027,7 +1242,7 @@ impl SyncRunWriter {
+                           ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
+                 "#,
+             )?;
+-            let now = now_utc();
++            let now = audit_now();
+             let mut inserted = 0usize;
+             for turn in turns {
+                 inserted += stmt.execute(rusqlite::params![
+@@ -1075,7 +1290,7 @@ impl SyncRunWriter {
+                           ?13, ?14, ?15, ?16, ?17)
+                 "#,
+             )?;
+-            let now = now_utc();
++            let now = audit_now();
+             let mut inserted = 0usize;
+             for call in tool_calls {
+                 inserted += stmt.execute(rusqlite::params![
+@@ -1115,7 +1330,7 @@ impl SyncRunWriter {
+                 ) VALUES (?1, ?2, ?3)
+                 "#,
+             )?;
+-            let now = now_utc();
++            let now = audit_now();
+             for record in records {
+                 stmt.execute(rusqlite::params![record.event_key, record.raw_json, now])?;
+             }
+@@ -1257,7 +1472,7 @@ fn flush_projects_tx(
+             updated_at = excluded.updated_at
+         "#,
+     )?;
+-    let updated_at = now_utc();
++    let updated_at = audit_now();
+     for project in projects.values() {
+         stmt.execute(rusqlite::params![
+             project.project_hash,
+@@ -1333,7 +1548,7 @@ fn flush_buckets_tx(
+             updated_at = excluded.updated_at
+         "#,
+     )?;
+-    let updated_at = now_utc();
++    let updated_at = audit_now();
+     for (key, rollup) in buckets {
+         stmt.execute(rusqlite::params![
+             key.host_id,
+diff --git a/src/sync/engine.rs b/src/sync/engine.rs
+index 7a449ed..1dd657f 100644
+--- a/src/sync/engine.rs
++++ b/src/sync/engine.rs
+@@ -239,7 +239,7 @@ async fn run_once_locked_with_remote_source(
+                 "ordinary sync detected legacy token accounting; keeping existing data and skipping writes for this round"
+             );
+             for source in &legacy {
+-                eprintln!("{}", SyncStatusStore::legacy_repair_warning(*source));
++                crate::logging::stderr_warning(&SyncStatusStore::legacy_repair_warning(*source));
+             }
+             exclude_legacy_sources_from_write_set(&mut parsers, &legacy);
+         }
+@@ -284,7 +284,14 @@ async fn run_once_locked_with_remote_source(
+         options.allow_lossy_rebuild,
+     )
+     .await;
+-    let sources = drive_result?;
++    let drive_result = drive_result?;
++    let mut source_issues = drive_result.source_issues;
++    let sources = drive_result.stats;
++    for source in &sources {
++        if !cancel.is_cancelled() && source.last_error.is_none() {
++            source_issues.entry(source.source).or_default();
++        }
++    }
+     tracing::debug!(
+         driver_ms = driver_started.elapsed().as_millis() as u64,
+         "driver finished"
+@@ -419,7 +426,13 @@ async fn run_once_locked_with_remote_source(
+     );
+     if !cancel.is_cancelled() {
+         for source in &source_stats {
+-            if skipped_legacy.contains(&source.source) {
++            if skipped_legacy.contains(&source.source)
++                || source.last_error.is_some()
++                || source.parse_issues.total() > 0
++                || source_issues
++                    .get(&source.source)
++                    .is_some_and(|issues| !issues.is_empty())
++            {
+                 continue;
+             }
+             // Native Antigravity certifies only a complete staged snapshot in
+@@ -437,9 +450,11 @@ async fn run_once_locked_with_remote_source(
+             }
+         }
+     }
+-    store
+-        .sync_status()
+-        .save_source_sync_statuses("local", &sync_statuses)?;
++    store.sync_status().save_source_sync_statuses_with_issues(
++        "local",
++        &sync_statuses,
++        &source_issues,
++    )?;
+     if recent_cutoff.is_some() && !cancel.is_cancelled() {
+         for source in &source_stats {
+             if skipped_legacy.contains(&source.source) {
+@@ -448,7 +463,10 @@ async fn run_once_locked_with_remote_source(
+             if matches!(
+                 source.source,
+                 SourceKind::Antigravity | SourceKind::AntigravityIde
+-            ) && source.last_error.is_some()
++            ) && (source.last_error.is_some()
++                || source_issues
++                    .get(&source.source)
++                    .is_some_and(|issues| !issues.is_empty()))
+             {
+                 continue;
+             }
+diff --git a/src/web/mod.rs b/src/web/mod.rs
+index 84813b7..11e2593 100644
+--- a/src/web/mod.rs
++++ b/src/web/mod.rs
+@@ -5325,7 +5325,8 @@ mod tests {
+         drop(conn);
+ 
+         let addr = serve(store, Some(0)).await?;
+-        let (status, payload) = route_json(addr, "GET", "/api/trends_daily", None).await?;
++        let (status, payload) =
++            route_json(addr, "GET", "/api/trends_daily?timezone=UTC", None).await?;
+         assert_eq!(status, StatusCode::OK);
+         let first = payload
+             .as_array()
+@@ -5696,7 +5697,8 @@ mod tests {
+         );
+         assert_eq!(dashboard["tools"]["breakdown"].as_array().unwrap().len(), 3);
+ 
+-        let day_two_filter = "source=codex&model=gpt-5&since=2026-05-02&until=2026-05-02";
++        let day_two_filter =
++            "source=codex&model=gpt-5&since=2026-05-02&until=2026-05-02&timezone=UTC";
+         let (status, tools_day_two) =
+             route_json(addr, "GET", &format!("/api/tools?{day_two_filter}"), None).await?;
+         assert_eq!(status, StatusCode::OK);
+diff --git a/tests/sync/runtime/progress_io.rs b/tests/sync/runtime/progress_io.rs
+index 4eea230..086ba3d 100644
+--- a/tests/sync/runtime/progress_io.rs
++++ b/tests/sync/runtime/progress_io.rs
+@@ -1,5 +1,74 @@
+ use super::*;
+ 
++#[test]
++fn legacy_warning_keeps_human_lines_and_json_stdout_separate() -> Result<()> {
++    let temp = TempDir::new()?;
++    let home = temp.path().join("home");
++    fs::create_dir_all(&home)?;
++    let root = temp.path().join("data");
++    let paths = AppPaths::with_root(root.clone())?;
++    let store = Store::new(&paths)?;
++    store.bootstrap()?;
++    store.open_connection()?.execute(
++        "INSERT INTO usage_event(event_key, source, model, event_at, hour_start, input_tokens, cache_read_tokens, cache_creation_tokens, output_tokens, reasoning_output_tokens, total_tokens, created_at)
++         VALUES ('legacy-warning', 'codex', 'gpt-5', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', 10, 0, 0, 0, 0, 10, '2026-09-01T00:00:00Z')",
++        [],
++    )?;
++    store.set_meta_value("token_accounting_version.codex", "2")?;
++    for json in [false, true] {
++        let mut command = crate::test_process::llmusage_command();
++        command
++            .arg("--home")
++            .arg(&root)
++            .args(["sync", "--source", "codex"])
++            .env("HOME", &home)
++            .env("USERPROFILE", &home)
++            .env("CODEX_HOME", home.join(".codex"))
++            .env("RUST_LOG", "warn")
++            .env("LLMUSAGE_LOG", "warn");
++        if json {
++            command.arg("--json-events");
++        }
++        let output = command.output()?;
++        assert!(output.status.success(), "{output:?}");
++        let stdout = String::from_utf8(output.stdout)?;
++        let stderr = String::from_utf8(output.stderr)?;
++        assert!(
++            stderr.contains("ordinary sync detected legacy token accounting"),
++            "{stderr}"
++        );
++        assert!(
++            stderr.contains("llmusage sync --rebuild --source codex"),
++            "{stderr}"
++        );
++        if json {
++            let events = stdout
++                .lines()
++                .map(serde_json::from_str::<serde_json::Value>)
++                .collect::<serde_json::Result<Vec<_>>>()?;
++            assert!(events.iter().any(|event| event["event"] == "finished"));
++        } else {
++            assert!(stdout.starts_with("Sync finished:"), "{stdout}");
++            assert!(
++                stderr
++                    .lines()
++                    .filter(|line| line.contains("已获取 SQLite sync worker 锁"))
++                    .all(|line| !line.contains("WARN")),
++                "{stderr}"
++            );
++        }
++    }
++    assert_eq!(store.token_accounting_version(SourceKind::Codex)?, Some(2));
++    assert!(
++        read_recent_log_entries(&paths, 100, Some("warn"), None)?
++            .iter()
++            .any(|entry| entry.message.as_deref().is_some_and(
++                |message| message.contains("ordinary sync detected legacy token accounting")
++            ))
++    );
++    Ok(())
++}
++
+ #[test]
+ fn json_events_subprocess_emits_ndjson_per_event() -> Result<()> {
+     let temp = TempDir::new()?;
+diff --git a/tests/sync/sources/antigravity.rs b/tests/sync/sources/antigravity.rs
+index 884c49b..a9a9d3b 100644
+--- a/tests/sync/sources/antigravity.rs
++++ b/tests/sync/sources/antigravity.rs
+@@ -47,6 +47,7 @@ fn antigravity_persisted_snapshot(store: &Store) -> Result<Vec<Vec<Vec<rusqlite:
+         "SELECT * FROM usage_bucket_30m WHERE source='antigravity' ORDER BY hour_start,model",
+         "SELECT * FROM source_cursor WHERE source='antigravity' ORDER BY cursor_key",
+         "SELECT * FROM source_file WHERE source='antigravity' ORDER BY file_path",
++        "SELECT * FROM meta WHERE key='token_accounting_version.antigravity'",
+     ]
+     .into_iter()
+     .map(|sql| {
+@@ -63,6 +64,142 @@ fn antigravity_persisted_snapshot(store: &Store) -> Result<Vec<Vec<Vec<rusqlite:
+     .collect()
+ }
+ 
++#[test]
++fn antigravity_record_faults_and_source_failures_preserve_history() -> Result<()> {
++    for (case, reason) in [
++        ("generation_wire", Some("invalid_generation_metadata")),
++        ("usage_type", Some("invalid_generation_metadata")),
++        ("step_wire", Some("invalid_step_metadata")),
++        ("trajectory_wire", Some("invalid_trajectory_metadata")),
++        ("timestamp_nanos", Some("invalid_generation_metadata")),
++        ("missing_timestamp", Some("missing_usage_timestamp")),
++        ("output_checksum", Some("output_channel_mismatch")),
++        ("changed_product_wire", None),
++        ("prepare_failure", None),
++    ] {
++        let fixture = Fixture::new()?;
++        let blob = ag_gen_metadata_blob(
++            100,
++            20,
++            3,
++            0,
++            "preserved-request",
++            None,
++            None,
++            1_800_000_000,
++        );
++        let path = fixture.seed_antigravity(case, &[(1, blob.clone())])?;
++        Connection::open(&path)?.execute_batch(
++            "CREATE TABLE trajectory_meta(source INTEGER); INSERT INTO trajectory_meta VALUES (17)",
++        )?;
++        let runtime = tokio::runtime::Runtime::new()?;
++        runtime.block_on(async {
++            let app = AppContext::discover()?;
++            let store = Store::new(&app.paths)?;
++            store.bootstrap()?;
++            let mut options = commands::sync::SyncRunOptions {
++                source: Some(SourceKind::Antigravity),
++                ..Default::default()
++            };
++            commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
++            assert_eq!(antigravity_event_count(&app.paths.db_path)?, 1, "{case}");
++            store.set_meta_value("token_accounting_version.antigravity", "2")?;
++            let before = antigravity_persisted_snapshot(&store)?;
++            let connection = Connection::open(&path)?;
++            let mut usage = ag_usage_message(100, 20, 3, 0, "preserved-request");
++            match case {
++                "step_wire" => connection.execute_batch(
++                    "CREATE TABLE steps(idx INTEGER PRIMARY KEY, metadata BLOB);
++                     INSERT INTO steps VALUES (1, X'0A80')",
++                )?,
++                "trajectory_wire" => connection.execute_batch(
++                    "UPDATE trajectory_metadata_blob SET data=X'0A80'",
++                )?,
++                "prepare_failure" => connection.execute_batch(
++                    "DROP TABLE gen_metadata; CREATE TABLE gen_metadata(idx INTEGER)",
++                )?,
++                _ => {
++                    if case == "changed_product_wire" {
++                        connection.execute_batch("UPDATE trajectory_meta SET source=1")?;
++                    }
++                    let replacement = if matches!(case, "generation_wire" | "changed_product_wire") {
++                        vec![0x0a, 0x80]
++                    } else {
++                        if case == "usage_type" {
++                            usage.extend(ag_bytes_field(2, b"invalid-number"));
++                        } else if case == "output_checksum" {
++                            usage.extend(ag_varint_field(3, 999));
++                        }
++                        let mut chat = ag_bytes_field(4, &usage);
++                        if case == "missing_timestamp" {
++                            connection.execute_batch("DELETE FROM trajectory_metadata_blob")?;
++                        } else {
++                            let nanos = if case == "timestamp_nanos" { 1_000_000_000 } else { 0 };
++                            chat.extend(ag_bytes_field(9, &ag_timestamp_message(1_800_000_000, nanos)));
++                        }
++                        ag_bytes_field(1, &chat)
++                    };
++                    connection.execute("UPDATE gen_metadata SET data=?1", [replacement])?;
++                }
++            }
++            drop(connection);
++            options.rebuild = true;
++            let (mut sender, mut receiver) = tokio::sync::mpsc::channel(256);
++            let blocked = commands::sync::run_once_with_options(
++                &app, &store, 0, &options, Some(&mut sender),
++            ).await?;
++            drop(sender);
++            while let Some(event) = receiver.recv().await {
++                assert!(!matches!(event, SyncEvent::TokenAccountingRepairFinished { .. }), "{case}");
++            }
++            assert_eq!(blocked.total_inserted, 0, "{case}");
++            let issues = &blocked.sources[0].parse_issues;
++            assert_eq!(issues.malformed_lines, u64::from(reason.is_some()), "{case}: {issues:?}");
++            assert_eq!(issues.oversized_lines, 0, "{case}");
++            assert_eq!(issues.informational_total(), 0, "{case}");
++            if let Some(reason) = reason {
++                assert_eq!(issues.samples[0].reason, reason, "{case}");
++                assert_eq!(issues.samples[0].source, SourceKind::Antigravity, "{case}");
++                assert_eq!(issues.samples[0].path_hash, hash_string(&path.canonicalize()?.to_string_lossy()), "{case}");
++            } else {
++                assert!(issues.samples.is_empty(), "{case}");
++            }
++            let code = if reason.is_some() || case == "changed_product_wire" { "incomplete_snapshot" } else { "metadata_unreadable" };
++            assert!(blocked.sources[0].last_error.as_ref().unwrap().contains(code), "{case}");
++            assert_eq!(antigravity_persisted_snapshot(&store)?, before, "{case}");
++            assert_eq!(store.token_accounting_version(SourceKind::Antigravity)?, Some(2), "{case}");
++            let reopened = Store::new(&app.paths)?;
++            let raw: String = reopened.open_connection()?.query_row(
++                "SELECT parse_issues_json FROM source_sync_status WHERE host_id='local' AND source='antigravity'",
++                [], |row| row.get(0),
++            )?;
++            let persisted: serde_json::Value = serde_json::from_str(&raw)?;
++            assert_eq!(persisted["malformed_lines"], u64::from(reason.is_some()), "{case}");
++            assert_eq!(persisted["source_issues"][0]["code"], code, "{case}");
++            assert!(!raw.contains("invalid-number"), "{case}");
++
++            fixture.seed_antigravity(case, &[(1, blob)])?;
++            Connection::open(&path)?.execute_batch(
++                "CREATE TABLE trajectory_meta(source INTEGER); INSERT INTO trajectory_meta VALUES (17)",
++            )?;
++            let recovered = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
++            assert!(recovered.sources[0].last_error.is_none(), "{case}");
++            assert_eq!(store.token_accounting_version(SourceKind::Antigravity)?, Some(3), "{case}");
++            assert_eq!(antigravity_event_count(&app.paths.db_path)?, 1, "{case}");
++            let raw: String = store.open_connection()?.query_row(
++                "SELECT parse_issues_json FROM source_sync_status WHERE host_id='local' AND source='antigravity'",
++                [], |row| row.get(0),
++            )?;
++            let cleared: serde_json::Value = serde_json::from_str(&raw)?;
++            assert!(cleared.get("source_issues").is_none(), "{case}");
++            assert_eq!(cleared["malformed_lines"], 0, "{case}");
++            Ok::<_, anyhow::Error>(())
++        })?;
++        fixture.restore_env();
++    }
++    Ok(())
++}
++
+ #[test]
+ fn antigravity_busy_native_database_preserves_history_cursor_and_marker() -> Result<()> {
+     let fixture = Fixture::new()?;
+@@ -93,7 +230,8 @@ fn antigravity_busy_native_database_preserves_history_cursor_and_marker() -> Res
+         let blocked = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+         assert_eq!(blocked.total_inserted, 0);
+         assert!(blocked.sources[0].last_error.is_some());
+-        assert!(blocked.sources[0].parse_issues.malformed_lines > 0);
++        assert_eq!(blocked.sources[0].parse_issues.malformed_lines, 0);
++        assert!(blocked.sources[0].last_error.as_ref().unwrap().contains("metadata_unreadable"));
+         assert_eq!(antigravity_persisted_snapshot(&store)?, before);
+         assert_eq!(store.token_accounting_version(SourceKind::Antigravity)?, Some(2));
+ 
+@@ -358,6 +496,31 @@ fn antigravity_missing_group_member_preserves_bounded_and_forgotten_history() ->
+                     ),
+                 )],
+             )?;
++            let before = antigravity_persisted_snapshot(&store)?;
++            let observed_before = chrono::Utc::now();
++            for recent_days in [None, Some(1)] {
++                options.recent_days = recent_days;
++                let (mut sender, mut receiver) = tokio::sync::mpsc::channel(256);
++                let blocked = commands::sync::run_once_with_options(&app, &store, 0, &options, Some(&mut sender)).await?;
++                drop(sender);
++                let mut started = 0;
++                let mut finished = 0;
++                while let Some(event) = receiver.recv().await {
++                    match event {
++                        SyncEvent::SourceStarted { source: SourceKind::Antigravity, .. } => started += 1,
++                        SyncEvent::SourceFinished { source: SourceKind::Antigravity, .. } => finished += 1,
++                        SyncEvent::TokenAccountingRepairFinished { .. } => panic!("blocked source cannot certify repair"),
++                        _ => {},
++                    }
++                }
++                assert_eq!((started, finished), (1, 1));
++                let stat = &blocked.sources[0];
++                assert_eq!((stat.files_processed, stat.changed_files, stat.skipped_files), (0, 0, 0));
++                assert_eq!((stat.events_seen, stat.events_replayed, stat.events_inserted), (0, 0, 0));
++                assert_eq!((stat.bytes_scanned, stat.write_ms), (0, 0));
++                assert_eq!(stat.stored_events, 2);
++                assert_eq!(antigravity_persisted_snapshot(&store)?, before);
++            }
+             options.recent_days = None;
+             let result =
+                 commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+@@ -375,6 +538,51 @@ fn antigravity_missing_group_member_preserves_bounded_and_forgotten_history() ->
+                 |row| row.get(0),
+             )?;
+             assert_eq!(input, 300, "snapshot must retain both original members");
++            assert_eq!(result.sources[0].parse_issues.malformed_lines, 0);
++            let reopened = Store::new(&app.paths)?;
++            let raw: String = reopened.open_connection()?.query_row(
++                "SELECT parse_issues_json FROM source_sync_status WHERE host_id='local' AND source='antigravity'",
++                [], |row| row.get(0),
++            )?;
++            let diagnostic: serde_json::Value = serde_json::from_str(&raw)?;
++            assert_eq!(diagnostic["source_issues"][0]["code"], "tracked_member_missing");
++            assert_eq!(diagnostic["source_issues"][0]["count"], 1);
++            assert_eq!(diagnostic["source_issues"][0]["scope"], "product_group");
++            assert!(diagnostic["source_issues"][0]["observed_at"].is_string());
++            let observed = chrono::DateTime::parse_from_rfc3339(diagnostic["source_issues"][0]["observed_at"].as_str().unwrap())?;
++            assert!(observed >= observed_before && observed <= chrono::Utc::now());
++            let dashboard = llmusage::query::Dashboard::open(&reopened)?;
++            let center = dashboard.sync_command_center(&Default::default())?;
++            assert_eq!(center.sources.iter().find(|row| row.source == "antigravity").unwrap().status, "error");
++            for args in [vec!["source-status"], vec!["doctor", "--json"], vec!["diagnostics"]] {
++                let output = crate::test_process::llmusage_command()
++                    .arg("--home").arg(&app.paths.root_dir).args(&args)
++                    .env("HOME", &fixture.home).env("USERPROFILE", &fixture.home)
++                    .env("RUST_LOG", "off").env("LLMUSAGE_LOG", "off").output()?;
++                assert!(output.status.success(), "{output:?}");
++                let text = String::from_utf8(output.stdout)?;
++                assert!(text.contains("tracked_member_missing"), "{args:?}: {text}");
++                if args[0] == "doctor" {
++                    let checks: serde_json::Value = serde_json::from_str(&text)?;
++                    assert!(checks.as_array().unwrap().iter().any(|check| check["id"] == "source.issues" && check["status"] == "warn"));
++                }
++                if args[0] == "source-status" {
++                    assert!(!text.contains(&fixture.home.to_string_lossy().to_string()));
++                }
++            }
++            options.rebuild = true;
++            assert!(commands::sync::run_once_with_options(&app, &store, 0, &options, None).await.is_err());
++            assert_eq!(antigravity_persisted_snapshot(&store)?, before);
++            fixture.seed_antigravity("member-a", &[(1, ag_gen_metadata_blob(100, 20, 3, 0, "member-a", Some("gemini-3.8-flash"), None, timestamp))])?;
++            options.rebuild = false;
++            let recovered = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
++            assert!(recovered.sources[0].last_error.is_none());
++            assert_eq!(antigravity_event_count(&app.paths.db_path)?, 2);
++            let recovered_input: i64 = store.open_connection()?.query_row("SELECT SUM(input_tokens) FROM usage_event WHERE source='antigravity'", [], |row| row.get(0))?;
++            assert_eq!(recovered_input, 400);
++            let raw: String = store.open_connection()?.query_row("SELECT parse_issues_json FROM source_sync_status WHERE host_id='local' AND source='antigravity'", [], |row| row.get(0))?;
++            assert!(serde_json::from_str::<serde_json::Value>(&raw)?.get("source_issues").is_none());
++            fs::remove_file(&missing)?;
+             options.rebuild = true;
+             options.allow_lossy_rebuild = true;
+             commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+@@ -386,6 +594,69 @@ fn antigravity_missing_group_member_preserves_bounded_and_forgotten_history() ->
+     Ok(())
+ }
+ 
++#[test]
++fn antigravity_preflight_existing_legacy_paths_and_changed_root_preserve_history() -> Result<()> {
++    for changed_root in [false, true] {
++        let fixture = Fixture::new()?;
++        let path = seed_sanitized_native_antigravity(&fixture, "coverage")?;
++        let runtime = tokio::runtime::Runtime::new()?;
++        runtime.block_on(async {
++            let app = AppContext::discover()?;
++            let store = Store::new(&app.paths)?;
++            store.bootstrap()?;
++            let mut options = commands::sync::SyncRunOptions { source: Some(SourceKind::Antigravity), ..Default::default() };
++            commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
++            assert!(antigravity_event_count(&app.paths.db_path)? > 0);
++            let old_root = path.parent().unwrap();
++            let mut legacy_paths = Vec::new();
++            if changed_root {
++                unsafe { std::env::set_var("GEMINI_CLI_HOME", fixture.home.join("changed-gemini-root")); }
++            } else {
++                for name in ["old-a.json", "old-b.json"] {
++                    let legacy = old_root.join(name);
++                    fs::write(&legacy, b"{}")?;
++                    legacy_paths.push(legacy.canonicalize()?.to_string_lossy().into_owned());
++                }
++                store.source_files().mark_inventory_seen(SourceKind::Antigravity, "local", &legacy_paths, "2025-01-01T00:00:00Z")?;
++            }
++            let before = antigravity_persisted_snapshot(&store)?;
++            let observed_before = chrono::Utc::now();
++            for rebuild in [false, true] {
++                options.rebuild = rebuild;
++                let blocked = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
++                assert_eq!(antigravity_persisted_snapshot(&store)?, before);
++                assert_eq!(blocked.total_inserted, 0);
++                assert_eq!(blocked.sources[0].changed_files, 0);
++                let error = blocked.sources[0].last_error.as_ref().unwrap();
++                assert!(error.contains("tracked_member_out_of_scope"));
++                assert!(!error.contains("tracked_member_missing"));
++                let reopened = Store::new(&app.paths)?;
++                let raw: String = reopened.open_connection()?.query_row("SELECT parse_issues_json FROM source_sync_status WHERE host_id='local' AND source='antigravity'", [], |row| row.get(0))?;
++                let diagnostic: serde_json::Value = serde_json::from_str(&raw)?;
++                let issue = &diagnostic["source_issues"][0];
++                assert_eq!(issue["code"], "tracked_member_out_of_scope");
++                assert_eq!(issue["count"], if changed_root { 1 } else { 2 });
++                assert_eq!(issue["scope"], "product_group");
++                let observed = chrono::DateTime::parse_from_rfc3339(issue["observed_at"].as_str().unwrap())?;
++                assert!(observed >= observed_before && observed <= chrono::Utc::now());
++                assert!(!raw.contains(&fixture.home.to_string_lossy().to_string()));
++            }
++            if changed_root {
++                unsafe { std::env::remove_var("GEMINI_CLI_HOME"); }
++            } else {
++                options.allow_lossy_rebuild = true;
++            }
++            let recovered = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
++            assert!(recovered.sources[0].last_error.is_none());
++            assert!(antigravity_event_count(&app.paths.db_path)? > 0);
++            assert_eq!(store.token_accounting_version(SourceKind::Antigravity)?, Some(3));
++            Ok::<_, anyhow::Error>(())
++        })?;
++        fixture.restore_env();
++    }
++    Ok(())
++}
++
+ #[test]
+ fn antigravity_native_product_survives_cross_root_copy_and_unreadable_file() -> Result<()> {
+     let fixture = Fixture::new()?;
+@@ -534,7 +805,7 @@ fn antigravity_copied_request_conflict_preserves_previous_snapshot() -> Result<(
+         fixture.seed_antigravity("conflict-b", &[(1, ag_gen_metadata_blob(200, 20, 3, 0,
+             "conflict-id", Some("gemini-3.8-flash"), None, 1_800_000_000))])?;
+         let result = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+-        assert!(result.sources[0].last_error.as_ref().unwrap().contains("conflicting"));
++        assert!(result.sources[0].last_error.as_ref().unwrap().contains("incomplete_snapshot"));
+         let input: i64 = store.open_connection()?.query_row("SELECT SUM(input_tokens) FROM usage_event WHERE source='antigravity'", [], |row| row.get(0))?;
+         assert_eq!(input, 100);
+         let connection = Connection::open(&path)?;
+@@ -1029,7 +1300,14 @@ fn antigravity_unreadable_conversation_preserves_imported_events() -> Result<()>
+             .iter()
+             .find(|stats| stats.source == SourceKind::Antigravity)
+             .expect("antigravity stats");
+-        assert!(antigravity.parse_issues.malformed_lines >= 1);
++        assert_eq!(antigravity.parse_issues.malformed_lines, 0);
++        assert!(
++            antigravity
++                .last_error
++                .as_ref()
++                .unwrap()
++                .contains("metadata_unreadable")
++        );
+         let after = store
+             .cursors()
+             .load_file_cursors(SourceKind::Antigravity, "local")?
+@@ -1058,7 +1336,7 @@ fn antigravity_unreadable_conversation_preserves_imported_events() -> Result<()>
+             .find(|stats| stats.source == SourceKind::Antigravity)
+             .expect("antigravity stats");
+         assert!(
+-            antigravity.parse_issues.malformed_lines >= 1,
++            antigravity.last_error.is_some(),
+             "unreadable file must stay eligible for retry"
+         );
+         Ok::<_, anyhow::Error>(())
+diff --git a/tests/sync/sources/zcode.rs b/tests/sync/sources/zcode.rs
+index 9100476..58068c5 100644
+--- a/tests/sync/sources/zcode.rs
++++ b/tests/sync/sources/zcode.rs
+@@ -196,13 +196,13 @@ fn zcode_skips_error_and_cancelled_rows_and_counts_them() -> Result<()> {
+         assert!(
+             reasons
+                 .iter()
+-                .any(|line| line == "skipped zcode_unfinished:error:invalid_request"),
++                .any(|line| line == "skipped zcode_unfinished:error:invalid_request timestamp_ms=2000 [location unavailable]"),
+             "{reasons:?}"
+         );
+         assert!(
+             reasons
+                 .iter()
+-                .any(|line| line == "skipped zcode_unfinished:cancelled:unknown"),
++                .any(|line| line == "skipped zcode_unfinished:cancelled:unknown timestamp_ms=3000 [location unavailable]"),
+             "{reasons:?}"
+         );
+         assert!(reasons.iter().all(|line| !line.contains("@0")));

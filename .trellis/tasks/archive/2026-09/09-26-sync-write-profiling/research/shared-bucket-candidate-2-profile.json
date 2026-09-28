@@ -1,0 +1,597 @@
+[
+  {
+    "acceptance_run": false,
+    "environment": {
+      "cache_state": "warm OS cache; database copy and checkpoint outside timing",
+      "clock": "Instant Duration nanoseconds; resolution measured separately",
+      "minimum_observed_clock_interval_ns": 100,
+      "package": "2.0.0",
+      "pragmas": {
+        "busy_timeout": "Integer(30000)",
+        "cache_size": "Integer(-2000)",
+        "foreign_keys": "Integer(1)",
+        "journal_mode": "Text(\"wal\")",
+        "page_size": "Integer(4096)",
+        "synchronous": "Integer(1)",
+        "temp_store": "Integer(2)",
+        "user_version": "Integer(0)",
+        "wal_autocheckpoint": "Integer(1000)"
+      },
+      "profile": "release",
+      "schema_version": "24",
+      "sqlite": "3.53.2"
+    },
+    "fine_profile": true,
+    "fixture": {
+      "cache_or_batch_changed": false,
+      "event_batch_size": 1000,
+      "initial_events": 4000,
+      "initial_tools": 12000,
+      "initial_turns": 4000,
+      "input_events": 2050,
+      "input_retained_events": 2050,
+      "input_tools": 6150,
+      "input_turns": 2050,
+      "parallel_writers": 1,
+      "provider_index": false,
+      "raw": false,
+      "reset_paths": 1,
+      "seed": 539363624,
+      "seed_max_retained_events": 4000,
+      "seed_variant": "Baseline",
+      "source": "claude",
+      "temp_volume": "Prefix(PrefixComponent { raw: \"D:\", parsed: Disk(68) })",
+      "workload": "shared_bucket_reset"
+    },
+    "kind": "shared_bucket_profile_manifest",
+    "query_plans": {
+      "aggregate": [
+        "SEARCH usage_event USING INDEX idx_usage_event_host_source_event_at (host_id=? AND source=?)",
+        "USE TEMP B-TREE FOR GROUP BY"
+      ],
+      "bounded_path_count_covering": [
+        "CO-ROUTINE (subquery-1)",
+        "SEARCH usage_event USING COVERING INDEX idx_usage_event_source_path_hash (source=? AND source_path_hash=?)",
+        "SCAN (subquery-1)"
+      ],
+      "candidate_default_aggregate": [
+        "SEARCH usage_event USING INDEX idx_usage_event_host_source_event_at (host_id=? AND source=?)",
+        "USE TEMP B-TREE FOR GROUP BY"
+      ],
+      "candidate_default_delete": [
+        "SEARCH usage_event USING INDEX idx_usage_event_host_source_event_at (host_id=? AND source=?)"
+      ],
+      "candidate_path_aggregate": [
+        "SEARCH usage_event USING INDEX idx_usage_event_source_path_hash (source=? AND source_path_hash=?)",
+        "USE TEMP B-TREE FOR GROUP BY"
+      ],
+      "candidate_path_delete": [
+        "SEARCH usage_event USING INDEX idx_usage_event_source_path_hash (source=? AND source_path_hash=?)"
+      ],
+      "delete": [
+        "SEARCH usage_event USING INDEX idx_usage_event_host_source_event_at (host_id=? AND source=?)"
+      ],
+      "host_count_covering": [
+        "SEARCH usage_event USING COVERING INDEX idx_usage_event_host_source_event_at (host_id=? AND source=?)"
+      ]
+    },
+    "rounds": 3,
+    "seed_sha256": "3ec509f71c8c2fca4efc44b6e7aec22f683dcd6e3ca3258f70bdbeba1f7b384c",
+    "warmup_per_variant": 1
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "d915406ed747489e0f05135c5503313182e883ea54e950a1da6e1bf9baa52e54",
+      "candidate_digest": "d915406ed747489e0f05135c5503313182e883ea54e950a1da6e1bf9baa52e54",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 6,
+        "project_dim": 1,
+        "run_log": 1,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 1,
+        "sqlite_sequence": 1,
+        "trigger_state": 0,
+        "usage_bucket_30m": 4,
+        "usage_event": 4050,
+        "usage_event_raw": 0,
+        "usage_tool_call": 12150,
+        "usage_turn": 4050,
+        "worker_lock": 0
+      }
+    },
+    "kind": "shared_bucket_profile_warmup"
+  },
+  {
+    "kind": "shared_bucket_profile_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 3,
+          "events": 2050,
+          "events_deleted": 2000,
+          "events_inserted": 2050,
+          "raw": 0,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 6150,
+          "tools_inserted": 6150,
+          "tools_raw": 6150,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 2050,
+          "turns_inserted": 2050,
+          "turns_raw": 2050
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {
+          "begin": 18200,
+          "behavior_reset": 57270300,
+          "buckets": 175900,
+          "commit": 82123700,
+          "cursor": 91700,
+          "event_insert": 30311100,
+          "event_work": 1749800,
+          "fence_after": 66200,
+          "fence_before": 49600,
+          "inventory": 77000,
+          "migration": 0,
+          "operation": 0,
+          "pre_behavior_dedupe": 949700,
+          "pre_host_prefix": 2303100,
+          "pricing": 13466400,
+          "projects": 153100,
+          "provider": 100,
+          "reset_aggregate": 19751500,
+          "reset_bucket_update": 62400,
+          "reset_delete": 39610100,
+          "reset_events": 155300,
+          "reset_pricing": 4153900,
+          "tools": 51180100,
+          "turns": 12227100
+        },
+        "unclassified_ns": 10900,
+        "write_ns": 312704400
+      }
+    ],
+    "round": 0,
+    "total_ns": 328918600,
+    "variant": "Baseline",
+    "write_ns": 312704400,
+    "writer_begin_ns": 7900700,
+    "writer_finish_ns": 2720500
+  },
+  {
+    "kind": "shared_bucket_profile_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 3,
+          "events": 2050,
+          "events_deleted": 2000,
+          "events_inserted": 2050,
+          "raw": 0,
+          "reset_path_index_paths": 1,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 6150,
+          "tools_inserted": 6150,
+          "tools_raw": 6150,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 2050,
+          "turns_inserted": 2050,
+          "turns_raw": 2050
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {
+          "begin": 17400,
+          "behavior_reset": 52253800,
+          "buckets": 157000,
+          "commit": 102683300,
+          "cursor": 107700,
+          "event_insert": 29834000,
+          "event_work": 1736900,
+          "fence_after": 101900,
+          "fence_before": 63500,
+          "inventory": 110300,
+          "migration": 100,
+          "operation": 0,
+          "pre_behavior_dedupe": 1153500,
+          "pre_host_prefix": 2671100,
+          "pricing": 13534600,
+          "projects": 149600,
+          "provider": 200,
+          "reset_aggregate": 4083800,
+          "reset_bucket_update": 49800,
+          "reset_delete": 23633500,
+          "reset_events": 261500,
+          "reset_pricing": 4417300,
+          "reset_selectivity": 918600,
+          "tools": 55096800,
+          "turns": 16562100
+        },
+        "unclassified_ns": 10100,
+        "write_ns": 305783800
+      }
+    ],
+    "round": 0,
+    "total_ns": 322406700,
+    "variant": "Candidate",
+    "write_ns": 305783800,
+    "writer_begin_ns": 7855000,
+    "writer_finish_ns": 2746500
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "d915406ed747489e0f05135c5503313182e883ea54e950a1da6e1bf9baa52e54",
+      "candidate_digest": "d915406ed747489e0f05135c5503313182e883ea54e950a1da6e1bf9baa52e54",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 6,
+        "project_dim": 1,
+        "run_log": 1,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 1,
+        "sqlite_sequence": 1,
+        "trigger_state": 0,
+        "usage_bucket_30m": 4,
+        "usage_event": 4050,
+        "usage_event_raw": 0,
+        "usage_tool_call": 12150,
+        "usage_turn": 4050,
+        "worker_lock": 0
+      }
+    },
+    "kind": "shared_bucket_profile_equivalence",
+    "round": 0
+  },
+  {
+    "kind": "shared_bucket_profile_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 3,
+          "events": 2050,
+          "events_deleted": 2000,
+          "events_inserted": 2050,
+          "raw": 0,
+          "reset_path_index_paths": 1,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 6150,
+          "tools_inserted": 6150,
+          "tools_raw": 6150,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 2050,
+          "turns_inserted": 2050,
+          "turns_raw": 2050
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {
+          "begin": 37600,
+          "behavior_reset": 64111600,
+          "buckets": 215300,
+          "commit": 100226200,
+          "cursor": 133700,
+          "event_insert": 39934600,
+          "event_work": 2108900,
+          "fence_after": 88200,
+          "fence_before": 121300,
+          "inventory": 100200,
+          "migration": 200,
+          "operation": 0,
+          "pre_behavior_dedupe": 1720500,
+          "pre_host_prefix": 2894300,
+          "pricing": 15433600,
+          "projects": 245700,
+          "provider": 100,
+          "reset_aggregate": 9083800,
+          "reset_bucket_update": 113100,
+          "reset_delete": 33186100,
+          "reset_events": 369300,
+          "reset_pricing": 6592400,
+          "reset_selectivity": 1784100,
+          "tools": 59707100,
+          "turns": 13613700
+        },
+        "unclassified_ns": 13200,
+        "write_ns": 347220000
+      }
+    ],
+    "round": 1,
+    "total_ns": 373293400,
+    "variant": "Candidate",
+    "write_ns": 347220000,
+    "writer_begin_ns": 15348200,
+    "writer_finish_ns": 3725500
+  },
+  {
+    "kind": "shared_bucket_profile_sample",
+    "order": [
+      "Candidate",
+      "Baseline"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 3,
+          "events": 2050,
+          "events_deleted": 2000,
+          "events_inserted": 2050,
+          "raw": 0,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 6150,
+          "tools_inserted": 6150,
+          "tools_raw": 6150,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 2050,
+          "turns_inserted": 2050,
+          "turns_raw": 2050
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {
+          "begin": 28600,
+          "behavior_reset": 66177900,
+          "buckets": 143800,
+          "commit": 108089600,
+          "cursor": 102700,
+          "event_insert": 38310300,
+          "event_work": 2118500,
+          "fence_after": 90700,
+          "fence_before": 72700,
+          "inventory": 87500,
+          "migration": 200,
+          "operation": 0,
+          "pre_behavior_dedupe": 1385800,
+          "pre_host_prefix": 2772400,
+          "pricing": 15508300,
+          "projects": 130300,
+          "provider": 100,
+          "reset_aggregate": 27175500,
+          "reset_bucket_update": 63800,
+          "reset_delete": 48886400,
+          "reset_events": 178500,
+          "reset_pricing": 5786000,
+          "tools": 60652900,
+          "turns": 12507100
+        },
+        "unclassified_ns": 12000,
+        "write_ns": 386123400
+      }
+    ],
+    "round": 1,
+    "total_ns": 408084300,
+    "variant": "Baseline",
+    "write_ns": 386123400,
+    "writer_begin_ns": 10495600,
+    "writer_finish_ns": 3687500
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "d915406ed747489e0f05135c5503313182e883ea54e950a1da6e1bf9baa52e54",
+      "candidate_digest": "d915406ed747489e0f05135c5503313182e883ea54e950a1da6e1bf9baa52e54",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 6,
+        "project_dim": 1,
+        "run_log": 1,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 1,
+        "sqlite_sequence": 1,
+        "trigger_state": 0,
+        "usage_bucket_30m": 4,
+        "usage_event": 4050,
+        "usage_event_raw": 0,
+        "usage_tool_call": 12150,
+        "usage_turn": 4050,
+        "worker_lock": 0
+      }
+    },
+    "kind": "shared_bucket_profile_equivalence",
+    "round": 1
+  },
+  {
+    "kind": "shared_bucket_profile_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 3,
+          "events": 2050,
+          "events_deleted": 2000,
+          "events_inserted": 2050,
+          "raw": 0,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 6150,
+          "tools_inserted": 6150,
+          "tools_raw": 6150,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 2050,
+          "turns_inserted": 2050,
+          "turns_raw": 2050
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "baseline": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {
+          "begin": 28500,
+          "behavior_reset": 63001400,
+          "buckets": 190800,
+          "commit": 114823100,
+          "cursor": 118100,
+          "event_insert": 36204800,
+          "event_work": 2010700,
+          "fence_after": 120600,
+          "fence_before": 73700,
+          "inventory": 92700,
+          "migration": 100,
+          "operation": 0,
+          "pre_behavior_dedupe": 884000,
+          "pre_host_prefix": 2614000,
+          "pricing": 15350700,
+          "projects": 183200,
+          "provider": 0,
+          "reset_aggregate": 26043700,
+          "reset_bucket_update": 84300,
+          "reset_delete": 50811100,
+          "reset_events": 153300,
+          "reset_pricing": 4795600,
+          "tools": 66550300,
+          "turns": 13040100
+        },
+        "unclassified_ns": 14800,
+        "write_ns": 393691600
+      }
+    ],
+    "round": 2,
+    "total_ns": 418330100,
+    "variant": "Baseline",
+    "write_ns": 393691600,
+    "writer_begin_ns": 10256100,
+    "writer_finish_ns": 6179900
+  },
+  {
+    "kind": "shared_bucket_profile_sample",
+    "order": [
+      "Baseline",
+      "Candidate"
+    ],
+    "records": [
+      {
+        "counts": {
+          "cursors": 1,
+          "event_batches": 3,
+          "events": 2050,
+          "events_deleted": 2000,
+          "events_inserted": 2050,
+          "raw": 0,
+          "reset_path_index_paths": 1,
+          "reset_paths": 1,
+          "seen_paths": 1,
+          "tools_deduped": 6150,
+          "tools_inserted": 6150,
+          "tools_raw": 6150,
+          "touched_bucket_candidates": 4,
+          "turns_deduped": 2050,
+          "turns_inserted": 2050,
+          "turns_raw": 2050
+        },
+        "kind": "shard",
+        "reset_algorithms": {
+          "adaptive": 1
+        },
+        "source_apply_ns": [],
+        "stages_ns": {
+          "begin": 26600,
+          "behavior_reset": 64118000,
+          "buckets": 208200,
+          "commit": 95622600,
+          "cursor": 123000,
+          "event_insert": 35875400,
+          "event_work": 2067300,
+          "fence_after": 83700,
+          "fence_before": 73300,
+          "inventory": 105900,
+          "migration": 200,
+          "operation": 100,
+          "pre_behavior_dedupe": 1450200,
+          "pre_host_prefix": 2773600,
+          "pricing": 15751700,
+          "projects": 197700,
+          "provider": 100,
+          "reset_aggregate": 4916400,
+          "reset_bucket_update": 60100,
+          "reset_delete": 31022600,
+          "reset_events": 254300,
+          "reset_pricing": 5002200,
+          "reset_selectivity": 878900,
+          "tools": 60180700,
+          "turns": 13211000
+        },
+        "unclassified_ns": 17800,
+        "write_ns": 329797800
+      }
+    ],
+    "round": 2,
+    "total_ns": 352242100,
+    "variant": "Candidate",
+    "write_ns": 329797800,
+    "writer_begin_ns": 10696200,
+    "writer_finish_ns": 5393100
+  },
+  {
+    "equivalence": {
+      "baseline_digest": "d915406ed747489e0f05135c5503313182e883ea54e950a1da6e1bf9baa52e54",
+      "candidate_digest": "d915406ed747489e0f05135c5503313182e883ea54e950a1da6e1bf9baa52e54",
+      "maximum_cost_error": 0.0,
+      "rows": {
+        "host": 1,
+        "integration_install": 0,
+        "meta": 6,
+        "project_dim": 1,
+        "run_log": 1,
+        "source_cursor": 2,
+        "source_file": 2,
+        "source_sync_status": 1,
+        "sqlite_sequence": 1,
+        "trigger_state": 0,
+        "usage_bucket_30m": 4,
+        "usage_event": 4050,
+        "usage_event_raw": 0,
+        "usage_tool_call": 12150,
+        "usage_turn": 4050,
+        "worker_lock": 0
+      }
+    },
+    "kind": "shared_bucket_profile_equivalence",
+    "round": 2
+  }
+]

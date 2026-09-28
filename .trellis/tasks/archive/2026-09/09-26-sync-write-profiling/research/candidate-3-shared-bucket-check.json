@@ -1,0 +1,41 @@
+{
+  "measured_pairs": 7,
+  "warmup_per_variant": 1,
+  "distributions": {
+    "baseline_write": {
+      "min_ns": 242367600,
+      "max_ns": 1140856000,
+      "median_ns": 323185800,
+      "iqr_ns": 30929300,
+      "mad_ns": 4321000
+    },
+    "baseline_total": {
+      "min_ns": 256512700,
+      "max_ns": 1156338000,
+      "median_ns": 341673500,
+      "iqr_ns": 32354700,
+      "mad_ns": 5455500
+    },
+    "candidate_write": {
+      "min_ns": 234821600,
+      "max_ns": 330041500,
+      "median_ns": 317833100,
+      "iqr_ns": 19937200,
+      "mad_ns": 11057400
+    },
+    "candidate_total": {
+      "min_ns": 248576600,
+      "max_ns": 347982500,
+      "median_ns": 338268500,
+      "iqr_ns": 20526800,
+      "mad_ns": 9477800
+    }
+  },
+  "total_ratio": 0.9900343456545503,
+  "state_comparisons_including_warmup": 8,
+  "all_state_digests_equal": true,
+  "maximum_cost_error": 0,
+  "all_rounds_retained": true,
+  "passed": true,
+  "note": "The Baseline total maximum is 1156338000 ns and is retained."
+}

@@ -1,0 +1,34 @@
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\store\sync_writer\profiling\tests.rs:899:
+ #[test]
+ fn reset_plan_depends_on_distinct_paths_and_preserves_complete_state() -> Result<()> {
+     for (distinct_paths, duplicate_paths) in [(1, false), (1, true), (2, false), (2, true)] {
+-        let mut fixture =
+-            sized_fixture(3, distinct_paths, 5, 1, 1, SourceKind::Claude, true)?;
++        let mut fixture = sized_fixture(3, distinct_paths, 5, 1, 1, SourceKind::Claude, true)?;
+         if duplicate_paths {
+             let paths = &mut fixture.input[0].reset_path_hashes;
+             let original = paths.clone();
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\store\sync_writer\profiling\tests.rs:932:
+                 .get("reset_path_index_paths")
+                 .copied()
+                 .unwrap_or_default(),
+-            if distinct_paths > 1 { distinct_paths } else { 0 }
++            if distinct_paths > 1 {
++                distinct_paths
++            } else {
++                0
++            }
+         );
+     }
+     Ok(())
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\store\sync_writer.rs:288:
+             let mut aggregate_path_stmt = use_adaptive_plan
+                 .then(|| tx.prepare_cached(RESET_EVENT_AGGREGATE_SQL))
+                 .transpose()?;
+-            let mut aggregate_default_stmt = tx.prepare_cached(RESET_EVENT_AGGREGATE_DEFAULT_SQL)?;
++            let mut aggregate_default_stmt =
++                tx.prepare_cached(RESET_EVENT_AGGREGATE_DEFAULT_SQL)?;
+             // Keep the original plan for one distinct path. Multiple paths
+             // share one host/source count; deletions reduce each probe's bound.
+             let mut host_candidates: Option<i64> = if use_adaptive_plan {
+EXIT_CODE=1

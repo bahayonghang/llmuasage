@@ -1,0 +1,22 @@
+[
+  {
+    "path": "Cargo.lock",
+    "sha256": "f88651176c1d0f1b64b949f697217a95e23b3cdb18cef7b1c0b09401a7dce9ba",
+    "bytes": 103508
+  },
+  {
+    "path": "desktop/src-tauri/Cargo.lock",
+    "sha256": "93dd2b3a506284617486806b5a0e375362c396bd77545cf1ab506b5e5e64b358",
+    "bytes": 175564
+  },
+  {
+    "path": "desktop/package-lock.json",
+    "sha256": "95378d7b1409b56b957d325f78ad2ba2b879766ef2fa31ab42a5de72ef312ad5",
+    "bytes": 113097
+  },
+  {
+    "path": "docs/package-lock.json",
+    "sha256": "9a4fe421531cda95ffe058f3a66b7b917ab519bea194881818f62a9ba2bf7173",
+    "bytes": 88365
+  }
+]

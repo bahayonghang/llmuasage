@@ -1,0 +1,68 @@
+{
+  "medians": {
+    "Baseline": {
+      "write_ms": 386.1234,
+      "total_ms": 408.0843,
+      "stages_ms": {
+        "begin": 0.0285,
+        "behavior_reset": 63.0014,
+        "buckets": 0.1759,
+        "commit": 108.0896,
+        "cursor": 0.1027,
+        "event_insert": 36.2048,
+        "event_work": 2.0107,
+        "fence_after": 0.0907,
+        "fence_before": 0.0727,
+        "inventory": 0.0875,
+        "migration": 0.0001,
+        "operation": 0.0,
+        "pre_behavior_dedupe": 0.9497,
+        "pre_host_prefix": 2.614,
+        "pricing": 15.3507,
+        "projects": 0.1531,
+        "provider": 0.0001,
+        "reset_aggregate": 26.0437,
+        "reset_bucket_update": 0.0638,
+        "reset_delete": 48.8864,
+        "reset_events": 0.1553,
+        "reset_pricing": 4.7956,
+        "tools": 60.6529,
+        "turns": 12.5071
+      }
+    },
+    "Candidate": {
+      "write_ms": 329.7978,
+      "total_ms": 352.2421,
+      "stages_ms": {
+        "begin": 0.0266,
+        "behavior_reset": 64.1116,
+        "buckets": 0.2082,
+        "commit": 100.2262,
+        "cursor": 0.123,
+        "event_insert": 35.8754,
+        "event_work": 2.0673,
+        "fence_after": 0.0882,
+        "fence_before": 0.0733,
+        "inventory": 0.1059,
+        "migration": 0.0002,
+        "operation": 0.0,
+        "pre_behavior_dedupe": 1.4502,
+        "pre_host_prefix": 2.7736,
+        "pricing": 15.4336,
+        "projects": 0.1977,
+        "provider": 0.0001,
+        "reset_aggregate": 4.9164,
+        "reset_bucket_update": 0.0601,
+        "reset_delete": 31.0226,
+        "reset_events": 0.2615,
+        "reset_pricing": 5.0022,
+        "reset_selectivity": 0.9186,
+        "tools": 59.7071,
+        "turns": 13.6137
+      }
+    }
+  },
+  "phase_sum_closure_error_ns": 0,
+  "log_sha256": "e6b44a184aeb963acfd9ea66327939b98f38f1ce9f818d149afaf137693a4fee",
+  "acceptance_run": false
+}

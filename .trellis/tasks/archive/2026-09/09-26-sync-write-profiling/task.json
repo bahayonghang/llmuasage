@@ -1,0 +1,31 @@
+{
+  "id": "sync-write-profiling",
+  "name": "sync-write-profiling",
+  "title": "Sync 写入测量与定向优化",
+  "description": "分解主要写入阶段，建立同输入基准并优化实测热点，保持存储与去重契约。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-09-26",
+  "completedAt": "2026-09-28",
+  "branch": "dev",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": "6389cebb9a5f60e624da3122eb3ac18371e450eb",
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "09-26-sync-diagnostics-performance",
+  "relatedFiles": [],
+  "notes": "2026-09-28：原算法合成主场景WRITE 19.725/20.025s，reset_events占87.35%/84.44%。固定path索引候选已被多host共享path控制拒绝：7组全状态等价通过，但median total 351.501→713.743ms，退化103.06%。继续在同一reset热点内验证有界covering行数探测后选择现有索引；不改schema/cache/batch、主场景或20%/10%阈值。M1身份时间说明和M2偶数median/MAD修复已核实。P5参考适配报告已独立核查。正式A/B与最终gate未完成，无真实usage数据操作。\n2026-09-28 最终交付：全部验收与独立检查完成，just ci exit 0（244.4963957 秒）；两个工作提交为 cc7eed395b56d3c9ee524aa69cc8a3a1778046e0、6389cebb9a5f60e624da3122eb3ac18371e450eb。用户已确认本地提交和归档。当前记录随后由 task.py archive 更新完成状态；未运行真实数据 sync/rebuild/reset、安装或发布。",
+  "meta": {
+    "work_commits": [
+      "cc7eed395b56d3c9ee524aa69cc8a3a1778046e0",
+      "6389cebb9a5f60e624da3122eb3ac18371e450eb"
+    ]
+  }
+}

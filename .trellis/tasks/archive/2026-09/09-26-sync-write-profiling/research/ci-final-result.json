@@ -1,0 +1,18 @@
+{
+  "command": [
+    "just",
+    "ci"
+  ],
+  "cwd": "D:\\Documents\\Code\\CLI\\llmusage",
+  "started_at_utc": "2026-09-28T09:35:09.197594+00:00",
+  "cargo_executable": "C:\\Users\\lyh\\.cargo\\bin\\cargo.EXE",
+  "log": "ci-final.log",
+  "cargo_version_exit_code": 0,
+  "pid": 81068,
+  "finished_at_utc": "2026-09-28T09:39:13.693987+00:00",
+  "duration_seconds": 244.4963957,
+  "exit_code": 0,
+  "error": null,
+  "locks_unchanged": true,
+  "lock_mismatches": []
+}

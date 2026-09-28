@@ -1,0 +1,15 @@
+{
+  "observed_at_utc": "2026-09-28T08:35:42.337090+00:00",
+  "exe_sha256": "e013c980eeede5c850981de6fe6ba6d47928ba4e5b82b554985eb36229379ef1",
+  "product_sync_writer_sha256": "b924120ac44c6cdef6a10072b9c516795798e49bf3aaa158acb73a3e74c96ca9",
+  "product_matches_candidate_2": true,
+  "test_source_sha256": "05cd736fd35f63c7c3ca964d3efbb36669b43076ef8a6b50eadeaf7e03e8b718",
+  "retry_command": [
+    "D:\\Documents\\Code\\CLI\\llmusage\\target\\release\\deps\\llmusage-6ce3a266d569a958.exe",
+    "store::sync_writer::profiling::tests::sync_writer_shared_bucket_profile",
+    "--list",
+    "--exact"
+  ],
+  "retry_exit_code": 0,
+  "note": "Release compilation completed. First Cargo test-list launch reported STATUS_ACCESS_VIOLATION; this direct retry uses the same executable without rebuilding. Cause unknown."
+}

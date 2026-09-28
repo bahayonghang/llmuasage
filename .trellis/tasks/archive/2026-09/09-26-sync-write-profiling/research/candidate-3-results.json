@@ -1,0 +1,553 @@
+{
+  "generated_at_utc": "2026-09-28T09:31:29.332040+00:00",
+  "status": "passed",
+  "runs": [
+    {
+      "name": "shared-bucket",
+      "exit_code": 0,
+      "kinds": {
+        "ab_manifest": 1,
+        "warmup_equivalence": 1,
+        "ab_sample": 14,
+        "ab_equivalence": 7,
+        "ab_summary": 1
+      },
+      "log_sha256": "fe247b007c08becba2347e8f9f342f69a29fe99b0c470031aede16eb609bd902"
+    },
+    {
+      "name": "writer",
+      "exit_code": 0,
+      "kinds": {
+        "ab_manifest": 7,
+        "warmup_equivalence": 7,
+        "ab_sample": 114,
+        "ab_equivalence": 57,
+        "ab_summary": 7
+      },
+      "log_sha256": "556d4e8c9d0b25218031f90589653d03b04a40916dab060ff9c506613a7b22b6"
+    },
+    {
+      "name": "host",
+      "exit_code": 0,
+      "kinds": {
+        "ab_manifest": 1,
+        "warmup_equivalence": 1,
+        "ab_sample": 30,
+        "ab_equivalence": 15,
+        "ab_summary": 1
+      },
+      "log_sha256": "921cc8c590bc4343a41f979ff6223aba1afa76c11411b62406ee47a713eb6534"
+    },
+    {
+      "name": "parser",
+      "exit_code": 0,
+      "kinds": {
+        "parser_manifest": 3,
+        "parser_sample": 96,
+        "parser_equivalence": 48,
+        "parser_summary": 3
+      },
+      "log_sha256": "57fa770a817b2a4da38e7bb1cd29f92bb6582f8fd089a88fd9565acb2af8c823"
+    }
+  ],
+  "summaries": [
+    {
+      "run": "shared-bucket",
+      "workload": "shared_bucket_reset",
+      "measured_pairs": 7,
+      "baseline_write": {
+        "min_ns": 242367600,
+        "max_ns": 1140856000,
+        "median_ns": 323185800,
+        "iqr_ns": 30929300,
+        "mad_ns": 4321000,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "baseline_total": {
+        "min_ns": 256512700,
+        "max_ns": 1156338000,
+        "median_ns": 341673500,
+        "iqr_ns": 32354700,
+        "mad_ns": 5455500,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "candidate_write": {
+        "min_ns": 234821600,
+        "max_ns": 330041500,
+        "median_ns": 317833100,
+        "iqr_ns": 19937200,
+        "mad_ns": 11057400,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "candidate_total": {
+        "min_ns": 248576600,
+        "max_ns": 347982500,
+        "median_ns": 338268500,
+        "iqr_ns": 20526800,
+        "mad_ns": 9477800,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "write_ratio": 0.9834377005425362,
+      "total_ratio": 0.9900343456545503,
+      "primary": false,
+      "passed": true
+    },
+    {
+      "run": "writer",
+      "workload": "claude_replay_primary",
+      "measured_pairs": 7,
+      "baseline_write": {
+        "min_ns": 17547888500,
+        "max_ns": 19439637200,
+        "median_ns": 19108299600,
+        "iqr_ns": 1232792500,
+        "mad_ns": 331337600,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "baseline_total": {
+        "min_ns": 17634716300,
+        "max_ns": 19520133500,
+        "median_ns": 19193789400,
+        "iqr_ns": 1239208800,
+        "mad_ns": 326344100,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "candidate_write": {
+        "min_ns": 2456966000,
+        "max_ns": 2791352900,
+        "median_ns": 2582638100,
+        "iqr_ns": 202201000,
+        "mad_ns": 83736500,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "candidate_total": {
+        "min_ns": 2534356800,
+        "max_ns": 2871902400,
+        "median_ns": 2668897900,
+        "iqr_ns": 204119200,
+        "mad_ns": 84191300,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "write_ratio": 0.13515792373278468,
+      "total_ratio": 0.13905007731302918,
+      "primary": true,
+      "passed": true
+    },
+    {
+      "run": "writer",
+      "workload": "claude_replay_history",
+      "measured_pairs": 7,
+      "baseline_write": {
+        "min_ns": 71225292600,
+        "max_ns": 81323592800,
+        "median_ns": 73396802100,
+        "iqr_ns": 9322082200,
+        "mad_ns": 2171509500,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "baseline_total": {
+        "min_ns": 71298899000,
+        "max_ns": 81404082700,
+        "median_ns": 73470974700,
+        "iqr_ns": 9324763300,
+        "mad_ns": 2172075700,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "candidate_write": {
+        "min_ns": 2245608800,
+        "max_ns": 2691098000,
+        "median_ns": 2407812000,
+        "iqr_ns": 285040200,
+        "mad_ns": 136206600,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "candidate_total": {
+        "min_ns": 2314426900,
+        "max_ns": 2772070500,
+        "median_ns": 2481680700,
+        "iqr_ns": 291902800,
+        "mad_ns": 145910200,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "write_ratio": 0.032805407471560674,
+      "total_ratio": 0.033777702148818776,
+      "primary": false,
+      "passed": true
+    },
+    {
+      "run": "writer",
+      "workload": "host_shared_path_skew",
+      "measured_pairs": 15,
+      "baseline_write": {
+        "min_ns": 186084000,
+        "max_ns": 250538800,
+        "median_ns": 204510500,
+        "iqr_ns": 24640000,
+        "mad_ns": 12040300,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "baseline_total": {
+        "min_ns": 195224500,
+        "max_ns": 262553000,
+        "median_ns": 216620500,
+        "iqr_ns": 24555000,
+        "mad_ns": 13440000,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "candidate_write": {
+        "min_ns": 181594100,
+        "max_ns": 244353800,
+        "median_ns": 201865300,
+        "iqr_ns": 19890700,
+        "mad_ns": 8688000,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "candidate_total": {
+        "min_ns": 192424300,
+        "max_ns": 254858300,
+        "median_ns": 211839800,
+        "iqr_ns": 20417200,
+        "mad_ns": 9610900,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "write_ratio": 0.9870657007830894,
+      "total_ratio": 0.9779305282741014,
+      "primary": false,
+      "passed": true
+    },
+    {
+      "run": "writer",
+      "workload": "insertion",
+      "measured_pairs": 7,
+      "baseline_write": {
+        "min_ns": 71435800,
+        "max_ns": 84551400,
+        "median_ns": 77785800,
+        "iqr_ns": 9868900,
+        "mad_ns": 4452500,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "baseline_total": {
+        "min_ns": 90909800,
+        "max_ns": 112483400,
+        "median_ns": 98322700,
+        "iqr_ns": 17287000,
+        "mad_ns": 7412900,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "candidate_write": {
+        "min_ns": 72111800,
+        "max_ns": 79464600,
+        "median_ns": 74270800,
+        "iqr_ns": 5371600,
+        "mad_ns": 2159000,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "candidate_total": {
+        "min_ns": 93922600,
+        "max_ns": 106716100,
+        "median_ns": 96414200,
+        "iqr_ns": 8030400,
+        "mad_ns": 2491600,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "write_ratio": 0.9548118036968187,
+      "total_ratio": 0.9805894264498433,
+      "primary": false,
+      "passed": true
+    },
+    {
+      "run": "writer",
+      "workload": "codex_append",
+      "measured_pairs": 7,
+      "baseline_write": {
+        "min_ns": 312851100,
+        "max_ns": 635576200,
+        "median_ns": 410339000,
+        "iqr_ns": 112497600,
+        "mad_ns": 58309700,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "baseline_total": {
+        "min_ns": 331353200,
+        "max_ns": 655712400,
+        "median_ns": 430742100,
+        "iqr_ns": 118694000,
+        "mad_ns": 61458300,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "candidate_write": {
+        "min_ns": 314315400,
+        "max_ns": 440662800,
+        "median_ns": 414915000,
+        "iqr_ns": 105810800,
+        "mad_ns": 25747800,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "candidate_total": {
+        "min_ns": 331029000,
+        "max_ns": 461910900,
+        "median_ns": 436033500,
+        "iqr_ns": 109654000,
+        "mad_ns": 25877400,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "write_ratio": 1.011151755012319,
+      "total_ratio": 1.0122843808394861,
+      "primary": false,
+      "passed": true
+    },
+    {
+      "run": "writer",
+      "workload": "duplicate_behavior",
+      "measured_pairs": 7,
+      "baseline_write": {
+        "min_ns": 395496100,
+        "max_ns": 508901700,
+        "median_ns": 459365400,
+        "iqr_ns": 48153700,
+        "mad_ns": 18119100,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "baseline_total": {
+        "min_ns": 467871300,
+        "max_ns": 590204500,
+        "median_ns": 544485500,
+        "iqr_ns": 46731100,
+        "mad_ns": 17036600,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "candidate_write": {
+        "min_ns": 391959000,
+        "max_ns": 489446200,
+        "median_ns": 482313200,
+        "iqr_ns": 18957300,
+        "mad_ns": 7133000,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "candidate_total": {
+        "min_ns": 465101800,
+        "max_ns": 573038700,
+        "median_ns": 563562500,
+        "iqr_ns": 23411500,
+        "mad_ns": 8821800,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "write_ratio": 1.0499554385245384,
+      "total_ratio": 1.0350367456984622,
+      "primary": false,
+      "passed": true
+    },
+    {
+      "run": "writer",
+      "workload": "shared_bucket_reset",
+      "measured_pairs": 7,
+      "baseline_write": {
+        "min_ns": 240142500,
+        "max_ns": 306300500,
+        "median_ns": 267050800,
+        "iqr_ns": 37868400,
+        "mad_ns": 19643500,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "baseline_total": {
+        "min_ns": 254453100,
+        "max_ns": 322222900,
+        "median_ns": 281784400,
+        "iqr_ns": 38752300,
+        "mad_ns": 22483200,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "candidate_write": {
+        "min_ns": 257231100,
+        "max_ns": 306958800,
+        "median_ns": 283326100,
+        "iqr_ns": 19219700,
+        "mad_ns": 10219700,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "candidate_total": {
+        "min_ns": 273342300,
+        "max_ns": 324129800,
+        "median_ns": 301080400,
+        "iqr_ns": 18160900,
+        "mad_ns": 8702700,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "write_ratio": 1.060944584326278,
+      "total_ratio": 1.06847788592981,
+      "primary": false,
+      "passed": true
+    },
+    {
+      "run": "host",
+      "workload": "host_shared_path_skew",
+      "measured_pairs": 15,
+      "baseline_write": {
+        "min_ns": 185571200,
+        "max_ns": 273426200,
+        "median_ns": 261779100,
+        "iqr_ns": 36619100,
+        "mad_ns": 11647100,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "baseline_total": {
+        "min_ns": 197338600,
+        "max_ns": 287038200,
+        "median_ns": 274327900,
+        "iqr_ns": 39583800,
+        "mad_ns": 12710300,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "candidate_write": {
+        "min_ns": 217295100,
+        "max_ns": 303880100,
+        "median_ns": 259082000,
+        "iqr_ns": 19031500,
+        "mad_ns": 10032100,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "candidate_total": {
+        "min_ns": 228743100,
+        "max_ns": 318495500,
+        "median_ns": 271810500,
+        "iqr_ns": 21422700,
+        "mad_ns": 10402500,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "write_ratio": 0.9896970384572336,
+      "total_ratio": 0.9908233905483183,
+      "primary": false,
+      "passed": true
+    },
+    {
+      "run": "parser",
+      "workload": "codex_hot",
+      "measured_pairs": 15,
+      "baseline_write": {
+        "min_ns": 0,
+        "max_ns": 0,
+        "median_ns": 0,
+        "iqr_ns": 0,
+        "mad_ns": 0,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "baseline_total": {
+        "min_ns": 16859400,
+        "max_ns": 19870800,
+        "median_ns": 18821500,
+        "iqr_ns": 1192400,
+        "mad_ns": 448400,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "candidate_write": {
+        "min_ns": 0,
+        "max_ns": 0,
+        "median_ns": 0,
+        "iqr_ns": 0,
+        "mad_ns": 0,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "candidate_total": {
+        "min_ns": 16799900,
+        "max_ns": 21683700,
+        "median_ns": 18719100,
+        "iqr_ns": 2003600,
+        "mad_ns": 875600,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "write_ratio": null,
+      "total_ratio": 0.9945594134367611,
+      "primary": false,
+      "passed": true
+    },
+    {
+      "run": "parser",
+      "workload": "codex_append",
+      "measured_pairs": 15,
+      "baseline_write": {
+        "min_ns": 2860500,
+        "max_ns": 5430100,
+        "median_ns": 4440700,
+        "iqr_ns": 741100,
+        "mad_ns": 302400,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "baseline_total": {
+        "min_ns": 25847000,
+        "max_ns": 43326300,
+        "median_ns": 34654600,
+        "iqr_ns": 4086600,
+        "mad_ns": 1791500,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "candidate_write": {
+        "min_ns": 2798500,
+        "max_ns": 6003300,
+        "median_ns": 4464900,
+        "iqr_ns": 1502000,
+        "mad_ns": 409900,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "candidate_total": {
+        "min_ns": 26650100,
+        "max_ns": 43118100,
+        "median_ns": 34347300,
+        "iqr_ns": 7499100,
+        "mad_ns": 2051600,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "write_ratio": 1.005449591280654,
+      "total_ratio": 0.9911324903476018,
+      "primary": false,
+      "passed": true
+    },
+    {
+      "run": "parser",
+      "workload": "claude_project_replay",
+      "measured_pairs": 15,
+      "baseline_write": {
+        "min_ns": 151291000,
+        "max_ns": 213755300,
+        "median_ns": 182273800,
+        "iqr_ns": 28283900,
+        "mad_ns": 13200600,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "baseline_total": {
+        "min_ns": 180974000,
+        "max_ns": 251857800,
+        "median_ns": 223197400,
+        "iqr_ns": 30158400,
+        "mad_ns": 14874700,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "candidate_write": {
+        "min_ns": 120081400,
+        "max_ns": 176491200,
+        "median_ns": 154004000,
+        "iqr_ns": 34426700,
+        "mad_ns": 14033300,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "candidate_total": {
+        "min_ns": 151429300,
+        "max_ns": 215851300,
+        "median_ns": 190308000,
+        "iqr_ns": 39912700,
+        "mad_ns": 15427200,
+        "quartile_method": "sorted indices n/4 and 3n/4"
+      },
+      "write_ratio": 0.8449047531790087,
+      "total_ratio": 0.8526443408390958,
+      "primary": false,
+      "passed": true
+    }
+  ],
+  "state_comparisons_including_warmups": 136,
+  "all_state_digests_equal": true,
+  "maximum_cost_error": 0.0,
+  "distribution_recomputed_from_every_measured_sample": true,
+  "original_fixture_rounds_environment_matched": true,
+  "note": "Shared and host standalone gates are separate from their full-writer controls. All samples, including outliers, are retained. The acceptance statistic is the ratio of medians. Fine stage clocks are off; structural counts and reset provenance remain on."
+}

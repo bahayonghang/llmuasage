@@ -1,0 +1,51 @@
+   Compiling llmusage v2.0.0 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage-e066ade7a6809b1e.lib 和对象 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage-e066ade7a6809b1e.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 23.73s
+     Running unittests src\lib.rs (target\debug\deps\llmusage-e066ade7a6809b1e.exe)
+
+running 37 tests
+test store::sync_writer::profiling::tests::distribution_uses_average_of_middle_pair ... ok
+test store::sync_writer::profiling::tests::reset_candidate_matches_complete_state_and_is_idempotent ... ok
+test store::sync_writer::profiling::tests::reset_path_index_is_selected_for_both_statements ... ok
+test store::sync_writer::profiling::tests::sync_writer_host_skew_ab_acceptance ... ignored, release host-skew acceptance for the reset candidate
+test store::sync_writer::profiling::tests::sync_writer_replay_ab_acceptance ... ignored, release-only seven alternating pairs with full database equivalence
+test store::sync_writer::profiling::tests::sync_writer_replay_profile ... ignored, explicit single-thread original writer stage profile
+test store::sync_writer::profiling::tests::sync_writer_reset_profile ... ignored, explicit single-thread original reset SQL profile
+test store::sync_writer::tests::active_pricing_catalog_rejects_version_mismatch ... ok
+test store::sync_writer::tests::activity_cost_index_sync_throughput_regression_stays_within_ten_percent ... ignored, explicit single-thread production D1 throughput acceptance benchmark
+test store::sync_writer::tests::antigravity_bounded_snapshot_keeps_full_history_cursor ... ok
+test store::sync_writer::tests::antigravity_collect_snapshot_has_no_local_rebuild_effects ... ok
+test store::sync_writer::tests::antigravity_remote_legacy_rows_do_not_block_empty_local_source ... ok
+test store::sync_writer::tests::antigravity_snapshot_failure_rolls_back_every_source_and_marker ... ok
+test store::sync_writer::tests::antigravity_snapshot_rebuild_preserves_hooks_and_other_hosts ... ok
+test store::sync_writer::tests::antigravity_snapshot_resets_all_owners_before_inserting_a_transfer ... ok
+test store::sync_writer::tests::apply_host_prefix_rewrites_keys_once_and_keeps_null_turn_key ... ok
+test store::sync_writer::tests::apply_host_prefix_skips_when_already_applied ... ok
+test store::sync_writer::tests::begin_sync_run_propagates_invalid_snapshot_error ... ok
+test store::sync_writer::tests::collect_only_commit_does_not_write_sqlite ... ok
+test store::sync_writer::tests::commit_shard_fills_empty_provider_label_without_overwriting ... ok
+test store::sync_writer::tests::commit_shard_persists_costs_and_recomputes_bucket_pricing_after_reset ... ok
+test store::sync_writer::tests::commit_shard_persists_sqlite_cursors_with_events_in_one_transaction ... ok
+test store::sync_writer::tests::commit_shard_prices_claude_cache_creation_and_read_channels ... ok
+test store::sync_writer::tests::commit_shard_rolls_back_every_stage_on_failure ... ok
+test store::sync_writer::tests::commit_shard_runs_reset_then_events_then_cursor ... ok
+test store::sync_writer::tests::commit_shard_splits_buckets_by_provider_label ... ok
+test store::sync_writer::tests::commit_shard_uses_active_local_pricing_snapshot ... ok
+test store::sync_writer::tests::commit_shard_writes_behavior_facts_and_resets_them_by_source_path ... ok
+test store::sync_writer::tests::missing_zero_and_non_object_source_cost_use_catalog_and_keep_event ... ok
+test store::sync_writer::tests::overlay_omp_row_prices_zero_total_as_snapshot ... ok
+test store::sync_writer::tests::path_reset_keeps_source_reported_bucket_status ... ok
+test store::sync_writer::tests::reset_refreshes_shared_bucket_pricing_without_per_bucket_event_scans ... ok
+test store::sync_writer::tests::shard_behavior_facts_are_deduped_before_sql ... ok
+test store::sync_writer::tests::source_reported_cost_wins_when_total_positive ... ok
+test store::sync_writer::tests::stale_generation_cannot_commit_next_shard_transaction ... ok
+test store::sync_writer::tests::sync_shard_serde_skips_raw_records ... ok
+test store::sync_writer::tests::top_sessions_cover_index_sync_throughput_regression_stays_within_ten_percent ... ignored, explicit single-thread production D2 write-throughput acceptance benchmark
+
+test result: ok. 31 passed; 0 failed; 6 ignored; 0 measured; 898 filtered out; finished in 4.96s
+
+EXIT_CODE=0

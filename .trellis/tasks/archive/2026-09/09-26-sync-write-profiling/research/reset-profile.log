@@ -1,0 +1,16 @@
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\target\release\deps\llmusage-6ce3a266d569a958.lib 和对象 D:\Documents\Code\CLI\llmusage\target\release\deps\llmusage-6ce3a266d569a958.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (lib test) generated 1 warning
+    Finished `release` profile [optimized] target(s) in 0.63s
+     Running unittests src\lib.rs (target\release\deps\llmusage-6ce3a266d569a958.exe)
+
+running 1 test
+{"fixture":{"initial_events":50000,"initial_tools":150000,"initial_turns":50000,"input_events":21000,"input_tools":63000,"input_turns":21000,"parallel_writers":1,"provider_index":false,"raw":false,"reset_paths":40,"seed":539363624,"temp_volume":"Prefix(PrefixComponent { raw: \"D:\", parsed: Disk(68) })","workload":"claude_replay_primary"},"kind":"reset_manifest","plans":{"aggregate":["SEARCH usage_event USING INDEX idx_usage_event_host_source_event_at (host_id=? AND source=?)","USE TEMP B-TREE FOR GROUP BY"],"delete":["SEARCH usage_event USING INDEX idx_usage_event_host_source_event_at (host_id=? AND source=?)"]},"seed_sha256":"47801d710d26843abf0a024ec62a6744209149509eea04ab87c24e83704d0fd6"}
+{"equivalence":{"baseline_digest":"97540336e029621f894e5f12b1f6d20a03555eb73214f338f2f78a1d5d061944","candidate_digest":"97540336e029621f894e5f12b1f6d20a03555eb73214f338f2f78a1d5d061944","maximum_cost_error":0.0,"rows":{"host":1,"integration_install":0,"meta":5,"project_dim":10,"run_log":0,"source_cursor":100,"source_file":100,"source_sync_status":0,"sqlite_sequence":0,"trigger_state":0,"usage_bucket_30m":40,"usage_event":51000,"usage_event_raw":0,"usage_tool_call":153000,"usage_turn":51000,"worker_lock":0}},"kind":"reset_profile","profile_pair":{"iqr_ns":237134600,"mad_ns":237134600,"max_ns":15107858200,"median_ns":15107858200,"min_ns":14870723600},"records":[{"counts":{"cursors":40,"event_batches":21,"events":21000,"events_deleted":20000,"events_inserted":21000,"raw":0,"reset_paths":40,"seen_paths":40,"tools_deduped":63000,"tools_inserted":63000,"tools_raw":63000,"touched_bucket_candidates":152,"turns_deduped":21000,"turns_inserted":21000,"turns_raw":21000},"kind":"shard","source_apply_ns":[],"stages_ns":{"begin":41900,"behavior_reset":474564900,"buckets":1047800,"commit":615410100,"cursor":261000,"event_insert":301586500,"event_work":15257800,"fence_after":135500,"fence_before":198300,"inventory":227400,"migration":0,"operation":100,"pre_behavior_dedupe":19628600,"pre_host_prefix":27819100,"pricing":127679100,"projects":798700,"provider":200,"reset_aggregate":6273557000,"reset_bucket_update":1397300,"reset_delete":6197745300,"reset_events":493400,"reset_pricing":35372800,"tools":477276400,"turns":155482400},"unclassified_ns":27600,"write_ns":14678561500}],"total_ns":14870723600,"write_ns":14678561500}
+test store::sync_writer::profiling::tests::sync_writer_reset_profile ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 928 filtered out; finished in 40.73s
+
+EXIT_CODE=0

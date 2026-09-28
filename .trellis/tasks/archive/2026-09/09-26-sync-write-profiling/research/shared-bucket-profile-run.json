@@ -1,0 +1,16 @@
+{
+  "started_at_utc": "2026-09-28T08:36:07.578152+00:00",
+  "finished_at_utc": "2026-09-28T08:36:13.590825+00:00",
+  "command": [
+    "D:\\Documents\\Code\\CLI\\llmusage\\target\\release\\deps\\llmusage-6ce3a266d569a958.exe",
+    "store::sync_writer::profiling::tests::sync_writer_shared_bucket_profile",
+    "--exact",
+    "--ignored",
+    "--test-threads=1",
+    "--nocapture"
+  ],
+  "exe_sha256": "e013c980eeede5c850981de6fe6ba6d47928ba4e5b82b554985eb36229379ef1",
+  "exit_code": 0,
+  "acceptance_run": false,
+  "log": "shared-bucket-candidate-2-profile.log"
+}

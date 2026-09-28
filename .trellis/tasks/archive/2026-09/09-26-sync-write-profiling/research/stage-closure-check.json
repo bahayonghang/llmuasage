@@ -1,0 +1,38 @@
+[
+  {
+    "log": "baseline-profile.log",
+    "round": 0,
+    "write_ns": 19724992000,
+    "classified_ns": 19724971400,
+    "unclassified_ns": 20600,
+    "pre_write_ns": 48836700,
+    "closure_error_ns": 0
+  },
+  {
+    "log": "baseline-profile.log",
+    "round": 1,
+    "write_ns": 20025302400,
+    "classified_ns": 20025281800,
+    "unclassified_ns": 20600,
+    "pre_write_ns": 45824700,
+    "closure_error_ns": 0
+  },
+  {
+    "log": "baseline-profile.log",
+    "round": 2,
+    "write_ns": 19379482900,
+    "classified_ns": 19379465500,
+    "unclassified_ns": 17400,
+    "pre_write_ns": 40528300,
+    "closure_error_ns": 0
+  },
+  {
+    "log": "reset-profile.log",
+    "round": null,
+    "write_ns": 14678561500,
+    "classified_ns": 14678533900,
+    "unclassified_ns": 27600,
+    "pre_write_ns": 47447700,
+    "closure_error_ns": 0
+  }
+]

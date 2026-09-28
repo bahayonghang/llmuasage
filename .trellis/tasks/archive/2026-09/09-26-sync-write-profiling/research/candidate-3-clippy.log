@@ -1,0 +1,7 @@
+    Checking llmusage v2.0.0 (D:\Documents\Code\CLI\llmusage)
+mbx[progress]: 15s elapsed; 0 hits, 0 misses, 0 bypassed, 13 not looked up; ~0s compiler work saved
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 17.35s
+mbx[cache]: 0 hits, 0 misses, 13 not looked up; 0 B downloaded, 0 B uploaded, 13.0 MiB stored locally
+mbx[savings]: 843 compilations on file. the box remembers.
+
+EXIT_CODE=0
