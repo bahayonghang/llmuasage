@@ -172,3 +172,42 @@
 ### Next Steps
 
 - 无后续；未推送。
+
+
+## Session 74: Sync 诊断优化与门禁修复交付
+<!-- trellis-session: v=2 fp=b5ace43437165f7e -->
+
+**Date**: 2026-09-28
+**Task**: Sync 诊断优化与门禁修复交付
+**Branch**: `dev`
+
+### Summary
+
+完成来源诊断、Antigravity 阻断预检、多路径重放写入优化与 2.0.0 版本边界；按确认方案完成两个工作提交、四个任务归档和最终验证。
+
+### Main Changes
+
+- 工作提交：cc7eed3（时区及桌面格式门禁，4 文件）、6389ceb（同步诊断、预检、写入优化及 2.0，63 文件）。
+- 三个子任务及父任务均 completed，归档至 .trellis/tasks/archive/2026-09/；归档提交顺序：82929bb, ef62682, 09e2944, 3f6b59d。
+- 归档脚本自动提交引用未跟踪旧路径而失败，已限定到各归档目录完成本地提交；未修改工具脚本或绕过 hooks。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cc7eed395b56d3c9ee524aa69cc8a3a1778046e0` | fix(测试): 🐛 校正时区回归与桌面格式门禁 |
+| `6389cebb9a5f60e624da3122eb3ac18371e450eb` | feat(同步)!: ✨ 完善诊断与重放写入并准备 2.0 版本 |
+
+### Testing
+
+- [OK] 最终 just ci 于 2026-09-28 通过，244.4963957 秒；Rust lib 922 passed/19 ignored，集成 247，Dashboard JS 66、Desktop frontend 65、端口脚本 4、Desktop Rust 33 通过；四个锁文件字节不变。
+- [OK] 正式 SemVer v1.2.0 到 2.0.0 通过，仅验证主版本边界；124 对合成 A/B，136 次完整状态比较一致，9 项幂等断言通过。主 WRITE 减少 86.4842%，最大控制 total 退化 6.8478%。
+- [OK] 提交前后 67 个工作文件字节不变；四个归档任务 context validate 全部通过；提交收尾期间未重复 Cargo、CI 或性能测试。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 本次授权交付已完成。未执行真实数据 sync/rebuild/reset、安装、发布、tag 或 push。原始缺失文件原因与候选 2 退化原因未查明，合成基准不能推算原始 sync 的真实节省秒数。

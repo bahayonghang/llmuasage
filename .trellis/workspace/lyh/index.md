@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 73
-- **Last Active**: 2026-09-19
+- **Total Sessions**: 74
+- **Last Active**: 2026-09-28
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~174 | Active |
+| `journal-2.md` | ~213 | Active |
 | `journal-1.md` | ~2011 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 74 | 2026-09-28 | Sync 诊断优化与门禁修复交付 | `cc7eed395b56d3c9ee524aa69cc8a3a1778046e0`, `6389cebb9a5f60e624da3122eb3ac18371e450eb` | `dev` |
 | 73 | 2026-09-19 | 提交并归档 Antigravity CLI/IDE 原生统计 | `07221f7` | `dev` |
 | 72 | 2026-09-19 | Antigravity CLI/IDE 原生统计实施与全量对账 | - | `dev` |
 | 71 | 2026-09-19 | 参考更新检查与 Antigravity 原生 SQLite 统计规划 | - | `dev` |
