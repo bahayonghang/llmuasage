@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/llmusage/backend/index.md", "reason": "Backend checklist and which contracts apply to a new CLI command."}
+{"file": ".trellis/spec/llmusage/backend/integration-file-contracts.md", "reason": "Hook and uninstall must still keep backups/*.bak and llmusage.db.pre-0.5.0; clean --yes is a separate explicit path."}
+{"file": ".trellis/spec/llmusage/backend/write-fencing-contracts.md", "reason": "clean must not open Store, bootstrap, or take the worker lock."}
+{"file": ".trellis/spec/llmusage/backend/runtime-log-contracts.md", "reason": "Skipping file logging for clean must not change rotation bounds or log retention."}
+{"file": ".trellis/spec/llmusage/backend/ci-toolchain-contracts.md", "reason": "Shared Rust gate is python scripts/ci-rust.py; CLI tests live in the lib and tests/cli."}
+{"file": ".trellis/tasks/10-08-llmusage-clean/research/cli-command-surface.md", "reason": "Where to register clean, bilingual help, and the --yes precedent."}
+{"file": ".trellis/tasks/10-08-llmusage-clean/research/runtime-home-layout.md", "reason": "Which home paths are live, regenerable, or one-shot copies."}
+{"file": ".trellis/tasks/10-08-llmusage-clean/research/local-home-inventory.md", "reason": "On-disk sizes the overview must be able to display."}

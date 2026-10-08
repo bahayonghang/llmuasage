@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/llmusage/backend/index.md", "reason": "Quality gate and the backend contracts a CLI change must respect."}
+{"file": ".trellis/spec/llmusage/backend/integration-file-contracts.md", "reason": "Check that uninstall and hook cleanup still refuse bulk deletion of backups/*.bak and pre-0.5.0."}
+{"file": ".trellis/spec/llmusage/backend/write-fencing-contracts.md", "reason": "clean must not become a Store mutation or migration entrypoint."}
+{"file": ".trellis/spec/llmusage/backend/runtime-log-contracts.md", "reason": "File-log skip for clean must not weaken rotation, retention, or doctor/logs counters."}
+{"file": ".trellis/spec/llmusage/backend/ci-toolchain-contracts.md", "reason": "Verification command for the Rust change."}
+{"file": ".trellis/tasks/10-08-llmusage-clean/research/cli-command-surface.md", "reason": "Help registration and dry-run versus --yes behavior."}
+{"file": ".trellis/tasks/10-08-llmusage-clean/research/runtime-home-layout.md", "reason": "Live files that must survive --yes."}
+{"file": ".trellis/tasks/10-08-llmusage-clean/research/local-home-inventory.md", "reason": "Expected category sizes for the overview."}
