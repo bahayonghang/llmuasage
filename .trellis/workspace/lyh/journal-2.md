@@ -246,3 +246,40 @@
 ### Next Steps
 
 - 未推送。规划审阅 .trellis/reviews/10-07-sync-summary-recovery.md 仍未跟踪。
+
+
+## Session 76: 自动刷新公开价表并发布 2.0.1
+<!-- trellis-session: v=2 fp=e674f0d53f9685f5 -->
+
+**Date**: 2026-10-08
+**Task**: 自动刷新公开价表并发布 2.0.1
+**Branch**: `dev`
+
+### Summary
+
+sync 在解析前按来源刷新 LiteLLM 与 models.dev 价表：一小时内跳过请求，失败时保留上次成功缓存或回退内置目录。版本面从 2.0.0 升到 2.0.1。另将本地规划评审移出版本库。
+
+### Main Changes
+
+- ee6e9a7：公开价表自动刷新、新模型精确匹配，以及 2.0.1 版本面。
+- e76b8c9：.trellis/reviews/ 改为本地忽略，并删除已跟踪的两份评审。
+- 任务 10-08-auto-pricing-catalog 已完成并移到 archive/2026-10/。归档脚本因未跟踪旧路径提交失败，已只提交归档目录。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e76b8c9` | chore(trellis): 将本地规划评审移出版本库 |
+| `ee6e9a7` | feat(定价): 同步时自动刷新公开价表并发布 2.0.1 |
+
+### Testing
+
+- [OK] 实施阶段已通过 clippy、定价相关测试和文档构建。本次收尾没有重跑 just ci。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 未推送。
