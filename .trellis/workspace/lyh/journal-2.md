@@ -211,3 +211,38 @@
 ### Next Steps
 
 - 本次授权交付已完成。未执行真实数据 sync/rebuild/reset、安装、发布、tag 或 push。原始缺失文件原因与候选 2 退化原因未查明，合成基准不能推算原始 sync 的真实节省秒数。
+
+
+## Session 75: Sync 结果表与来源恢复提示
+<!-- trellis-session: v=2 fp=edcbc33065e6edd9 -->
+
+**Date**: 2026-10-08
+**Task**: Sync 结果表与来源恢复提示
+**Branch**: `dev`
+
+### Summary
+
+普通 sync 的人读结果收成一张连续来源表，警告和错误放在 TOTAL 之后。只有 stdin、stdout、stderr 都是终端，且没有 --json-events、--rebuild 或 --recent-days 时，才对 Antigravity CLI/IDE 询问丢失；回车保留历史。带时间窗口不读 stdin。
+
+### Main Changes
+
+- 工作提交 50e0398：表后说明、交互例外，以及对应契约和用户文档。
+- 任务已完成并归档到 .trellis/tasks/archive/2026-10/。归档脚本因未跟踪旧路径提交失败，已只提交归档目录。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `50e039810b4f3f00e289a79eade3479b3b06721c` | feat(同步): ✨ 人读同步在表后说明恢复，并仅对 Antigravity 询问丢失 |
+
+### Testing
+
+- [OK] just ci 通过：Rust、前端、桌面测试和文档构建均为 0 失败。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 未推送。规划审阅 .trellis/reviews/10-07-sync-summary-recovery.md 仍未跟踪。
