@@ -1,6 +1,11 @@
 # Changelog
 
-## 2.0.0 - Unreleased
+## 2.0.1 - Unreleased
+
+### Added
+
+- Automatically refresh public pricing catalogs from LiteLLM and models.dev on `llmusage sync` before parsing logs. Caches per source beside the database with a 1-hour TTL, preserving user overlays and falling back to previous successful caches or the embedded catalog on network errors.
+- Support request-scoped long-context tiers and exact model matching for new models such as `claude-sonnet-5-5`, `claude-haiku-5-5`, and `gpt-6.1-sol`.
 
 ### Changed
 

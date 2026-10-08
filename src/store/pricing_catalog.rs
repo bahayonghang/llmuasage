@@ -408,6 +408,72 @@ impl Store {
             removed_overlay: false,
         })
     }
+    /// Updates the sync-managed base catalog if its assembled canonical
+    /// representation has changed. Re-applies any existing overlay by id,
+    /// persists catalog files, and recomputes event costs and bucket aggregates.
+    /// Returns `Ok(Some(updated_count))` if the base changed, or `Ok(None)` if
+    /// unchanged.
+    pub fn update_refreshed_base_catalog(&self, new_base: PricingCatalog) -> Result<Option<usize>> {
+        let operation = self.write_operation(HolderKind::Library)?;
+        operation
+            .store
+            .update_refreshed_base_catalog_fenced(new_base)
+    }
+
+    fn update_refreshed_base_catalog_fenced(
+        &self,
+        mut new_base: PricingCatalog,
+    ) -> Result<Option<usize>> {
+        let new_base_identity = new_base.declared_version().to_string();
+        if !new_base_identity.starts_with("public-") {
+            return Err(config_invalid(format!(
+                "refreshed pricing catalog identity `{new_base_identity}` is not a public catalog"
+            )));
+        }
+        let canonical = new_base.document().canonical_json()?;
+        let digest = hash_string(&canonical);
+        let new_base_file = format!("base-{digest}.json");
+
+        let meta = self.pricing_meta()?;
+        if meta.has_overlay() {
+            if meta.base_version.as_deref() == Some(&new_base_identity) {
+                return Ok(None);
+            }
+        } else if meta.active_version.as_deref() == Some(&new_base_identity) {
+            return Ok(None);
+        }
+
+        self.persist_catalog_file(&new_base_file, &canonical)?;
+        new_base.set_runtime_identity(new_base_identity.clone(), PricingStatus::Snapshot);
+
+        if meta.has_overlay() {
+            let (overlay_identity, overlay_file) =
+                CatalogMeta::require_pair(&meta.overlay_version, &meta.overlay_file, "overlay")?;
+            let overlay_document = self.load_overlay_layer(overlay_identity, overlay_file)?;
+            let mut effective = new_base.merge_overlay(overlay_document)?;
+            let effective_json = effective.document().canonical_json()?;
+            let effective_digest = hash_string(&effective_json);
+            let effective_identity = format!("effective-{effective_digest}");
+            let effective_file = format!("{effective_identity}.json");
+            effective.set_runtime_identity(effective_identity.clone(), PricingStatus::Snapshot);
+
+            self.persist_catalog_file(&effective_file, &effective_json)?;
+            let activation = PricingMetaChange::overlay(
+                &effective_identity,
+                &effective_file,
+                &new_base_identity,
+                &new_base_file,
+                overlay_identity,
+                overlay_file,
+            );
+            let updated = self.recompute_costs_with_meta(&effective, &activation)?;
+            Ok(Some(updated))
+        } else {
+            let activation = PricingMetaChange::active(&new_base_identity, Some(&new_base_file));
+            let updated = self.recompute_costs_with_meta(&new_base, &activation)?;
+            Ok(Some(updated))
+        }
+    }
 
     pub fn pricing_catalog_status(&self) -> Result<PricingCatalogStatus> {
         let meta = self.pricing_meta()?;

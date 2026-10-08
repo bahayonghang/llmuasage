@@ -4,7 +4,7 @@
 //! layer (`sync::`) does not need to import CLI-adapter code — fixing the
 //! ARCH-002 reverse dependency.
 
-use std::{error::Error, fmt, path::PathBuf, sync::Arc};
+use std::{error::Error, fmt, future::Future, path::PathBuf, pin::Pin, sync::Arc};
 
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -182,6 +182,12 @@ pub type AntigravityPromptFn = Arc<
         + Sync,
 >;
 
+pub type PricingFetcherFn = Arc<
+    dyn Fn(&str) -> Pin<Box<dyn Future<Output = std::result::Result<String, String>> + Send>>
+        + Send
+        + Sync,
+>;
+
 /// Options accepted by a sync run.
 #[derive(Clone, Default)]
 pub struct SyncRunOptions {
@@ -198,6 +204,7 @@ pub struct SyncRunOptions {
     /// unwindowed sync. A prompt callback is not this signal.
     pub interactive_terminal: bool,
     pub recovery_prompt: Option<AntigravityPromptFn>,
+    pub pricing_fetcher: Option<PricingFetcherFn>,
 }
 
 impl fmt::Debug for SyncRunOptions {
@@ -214,6 +221,10 @@ impl fmt::Debug for SyncRunOptions {
             .field(
                 "recovery_prompt",
                 &self.recovery_prompt.as_ref().map(|_| "<callback>"),
+            )
+            .field(
+                "pricing_fetcher",
+                &self.pricing_fetcher.as_ref().map(|_| "<callback>"),
             )
             .finish()
     }

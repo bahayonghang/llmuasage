@@ -2,6 +2,7 @@ mod default;
 pub(crate) mod engine;
 pub mod executor;
 pub mod job_registry;
+pub(crate) mod pricing_refresh;
 pub mod types;
 
 pub use default::DefaultSyncExecutor;
@@ -15,6 +16,7 @@ pub use job_registry::{
     JobEvent, JobId, JobRegistry, JobSnapshot, JobStartError, JobStartRejected, JobStatus,
     SyncOptions,
 };
+pub use pricing_refresh::enable_live_pricing_refresh;
 pub use types::{
     MAX_RECENT_DAYS, MAX_SYNC_PARALLELISM, SyncRequestError, SyncRequestErrorCode,
     SyncRequestInput, SyncRunOptions, SyncSourceSelection, SyncSummary, ValidatedSyncRequest,

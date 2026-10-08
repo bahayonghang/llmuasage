@@ -109,5 +109,5 @@ Schema migrations are explicit and versioned. The current line includes:
 - No upload queue.
 - Usage events, reports, the browser dashboard, and HTML export stay on local SQLite. llmusage does not upload usage data.
 - TUI Usage (`llmusage dash`) may read-only fetch vendor quota with credentials already stored on the machine. That path is quota display only. It is not an account login and not a usage-upload API.
-- Pricing catalog activation reads user-provided local JSON files and never fetches remote pricing.
+- Pricing catalog sync refreshes public price tables without uploading usage; manual catalog activation (`catalog apply`/`doctor`) reads user-provided local JSON files.
 - Browser dashboard binds to `127.0.0.1` by default; `serve --public` explicitly changes the listener to `0.0.0.0` without adding authentication or TLS.

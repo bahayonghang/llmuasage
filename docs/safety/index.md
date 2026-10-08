@@ -106,7 +106,7 @@ llmusage catalog reset
 llmusage doctor --refresh-pricing .\litellm-prices.json
 ```
 
-`catalog apply` activates an incremental v2 overlay. `doctor --refresh-pricing` activates a complete base snapshot and clears any overlay. Both commands accept only existing local files; URLs and remote fetching are refused.
+`catalog apply` activates an incremental v2 overlay. `doctor --refresh-pricing` activates a complete base snapshot and clears any overlay. Both manual catalog commands accept only existing local files; URLs and remote fetching are refused. Default `sync` separately refreshes the public LiteLLM and models.dev price tables and does not upload usage.
 
 Activation writes SHA-256-addressed files under `~/.llmusage/pricing/`, recomputes local event and bucket costs, and then switches SQLite catalog metadata. A missing, modified, or invalid selected file is an explicit error; llmusage does not silently fall back to embedded prices. `catalog reset` removes an overlay and recomputes costs with its recorded base. Unreferenced digest files may remain as local audit artifacts and are removed by `uninstall --purge` with the rest of the runtime root.
 

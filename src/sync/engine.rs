@@ -193,6 +193,7 @@ async fn run_once_locked_with_remote_source(
     remote_source: &dyn ShardSource,
 ) -> Result<SyncSummary> {
     let request = options.validate()?;
+    crate::sync::pricing_refresh::refresh_pricing_if_needed(store, options).await?;
     /*
      * ========================================================================
      * 步骤2：执行三阶段同步流水线

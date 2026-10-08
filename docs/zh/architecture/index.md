@@ -109,5 +109,5 @@ Schema migration 显式按版本推进。当前线包含：
 - 不建立上传队列。
 - 用量事件、报表、浏览器 Dashboard 和 HTML 导出都留在本地 SQLite。llmusage 不上传用量数据。
 - TUI Usage（`llmusage dash`）可以用本机已有凭证只读拉取供应商配额。该路径只用于配额展示，不是账号登录，也不是用量上传 API。
-- 价格目录激活只读取用户提供的本地 JSON 文件，不会联网拉取价格。
+- 价格目录同步会自动拉取公开价表而绝不上传用量；手动价格目录激活（`catalog apply`/`doctor`）只读取用户提供的本地 JSON 文件。
 - 浏览器 Dashboard 默认绑定 `127.0.0.1`；`serve --public` 会显式改为监听 `0.0.0.0`，但不会添加认证或 TLS。

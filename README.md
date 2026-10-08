@@ -6,7 +6,7 @@
 
 Local-first usage analytics for AI coding CLIs. `llmusage` passively reads local Codex, Claude Code, OpenCode, Kimi Code, Pi, Oh My Pi, Grok Build, ZCode, Antigravity CLI and IDE, and DeepSeek Harness artifacts into SQLite, then renders reports, terminal and browser dashboards, and offline HTML exports without upload. The `dash` Usage tab also reads already-present CLI credentials and requests provider quota APIs.
 
-> Current crate version: `2.0.0`.
+> Current crate version: `2.0.1`.
 
 ![llmusage web dashboard overview](./docs/public/screenshots/web-dashboard-overview.png)
 
@@ -135,7 +135,7 @@ Windows SmartScreen may warn, because the installer is not code-signed.
 
 ## Pricing catalog
 
-Model pricing and context windows come from the embedded `static-v3` catalog. It includes `gpt-6-astra` for Codex and OpenCode, `claude-fable-5-1` and `claude-mythos-5-1` for Claude and OpenCode, and `gpt-5.6-luna`, `gpt-5.6-terra`, and `gpt-5.6-sol` for Codex and OpenCode, including the exact `gpt-5.6` alias for Sol. Astra and GPT-5.6 use request-scoped long-context pricing above 272,000 prompt tokens.
+Model pricing and context windows default to the embedded `static-v3` catalog. `llmusage sync` automatically refreshes public price tables from LiteLLM and models.dev without uploading usage, caching them locally with a 1-hour TTL. It includes `gpt-6-astra` for Codex and OpenCode, `claude-fable-5-1` and `claude-mythos-5-1` for Claude and OpenCode, and `gpt-5.6-luna`, `gpt-5.6-terra`, and `gpt-5.6-sol` for Codex and OpenCode, including the exact `gpt-5.6` alias for Sol. Astra and GPT-5.6 use request-scoped long-context pricing above 272,000 prompt tokens.
 
 Apply a local incremental overlay without copying the embedded catalog:
 
@@ -145,7 +145,7 @@ llmusage catalog status --json
 llmusage catalog reset
 ```
 
-An overlay adds, replaces, or removes complete model definitions by stable model id. Applying or resetting a catalog recomputes persisted event costs and 30-minute bucket pricing. `doctor --refresh-pricing <PATH>` remains the compatibility entrypoint for a complete base snapshot, not an overlay. All catalog inputs are local files; llmusage does not fetch pricing from the network.
+An overlay adds, replaces, or removes complete model definitions by stable model id. Applying or resetting a catalog recomputes persisted event costs and 30-minute bucket pricing. `doctor --refresh-pricing <PATH>` remains the compatibility entrypoint for a complete base snapshot, not an overlay. `llmusage sync` automatically refreshes the two public price tables (LiteLLM and models.dev); usage is never uploaded, and if a source cannot be refreshed, the last good cache or the embedded catalog is used. Catalog apply/reset commands remain local files.
 
 Pricing recompute start/reconcile/finish diagnostics are available in the local file log at `LLMUSAGE_LOG=info`; page-level records require `debug`. Human sync progress is shown independently of the file-log level, and a recompute still running after 30 seconds emits one `warn` record at the default level.
 

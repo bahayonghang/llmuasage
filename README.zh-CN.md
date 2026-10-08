@@ -6,7 +6,7 @@
 
 本地优先的 AI CLI 用量分析工具。`llmusage` 会被动读取本机 Codex、Claude Code、OpenCode、Kimi Code、Pi、Oh My Pi、Grok Build、ZCode、Antigravity CLI/IDE 和 DeepSeek Harness 的本地记录，并写入本地 SQLite；随后提供命令行报表、终端 Dashboard、浏览器 Dashboard 和离线 HTML 导出，默认不上传本地用量。`dash` 的 Usage 页会用本机已有 CLI 凭证读取订阅额度。
 
-> 当前 crate 版本：`2.0.0`。
+> 当前 crate 版本：`2.0.1`。
 
 ![llmusage 本地 Web Dashboard 概览](./docs/public/screenshots/web-dashboard-overview.png)
 
@@ -133,7 +133,7 @@ just tinstall
 
 ## 模型价格目录
 
-模型价格和上下文窗口来自内置 `static-v3` 目录。该目录已为 Codex 和 OpenCode 加入 `gpt-6-astra`，为 Claude 和 OpenCode 加入 `claude-fable-5-1` 与 `claude-mythos-5-1`，并为 Codex 和 OpenCode 保留 `gpt-5.6-luna`、`gpt-5.6-terra`、`gpt-5.6-sol`（`gpt-5.6` 是 Sol 的精确别名）。Astra 和 GPT-5.6 在单请求提示 token 超过 272,000 时使用长上下文费率。
+模型价格和上下文窗口默认来自内置 `static-v3` 目录；`llmusage sync` 会在本地自动拉取并刷新公开价表（LiteLLM 与 models.dev），不会上传任何用量，并有 1 小时本地缓存。该目录已为 Codex 和 OpenCode 加入 `gpt-6-astra`，为 Claude 和 OpenCode 加入 `claude-fable-5-1` 与 `claude-mythos-5-1`，并为 Codex 和 OpenCode 保留 `gpt-5.6-luna`、`gpt-5.6-terra`、`gpt-5.6-sol`（`gpt-5.6` 是 Sol 的精确别名）。Astra 和 GPT-5.6 在单请求提示 token 超过 272,000 时使用长上下文费率。
 
 可以只写增量覆盖，不需要复制整份内置目录：
 
@@ -143,7 +143,7 @@ llmusage catalog status --json
 llmusage catalog reset
 ```
 
-覆盖层按稳定模型 id 新增、完整替换或删除模型定义。apply/reset 会重算已落库 event 成本和 30 分钟 bucket 定价。`doctor --refresh-pricing <PATH>` 继续作为完整 base snapshot 的兼容入口，不是增量覆盖。所有目录输入都必须是本地文件，llmusage 不会联网拉取价格。
+覆盖层按稳定模型 id 新增、完整替换或删除模型定义。apply/reset 会重算已落库 event 成本和 30 分钟 bucket 定价。`doctor --refresh-pricing <PATH>` 继续作为完整 base snapshot 的兼容入口，不是增量覆盖。`llmusage sync` 会自动刷新两份公开价表（LiteLLM 与 models.dev），不会上传任何用量数据；拉取失败或离线时使用上一份成功缓存或内置目录。catalog apply/reset 继续使用本地文件。
 
 将 `LLMUSAGE_LOG` 设为 `info` 可在本地文件日志中记录定价重算的开始、对账和完成；页级记录需要 `debug`。终端人读进度不依赖文件日志级别；重算超过 30 秒后会按默认 `warn` 级别记录一次仍在推进的告警。
 

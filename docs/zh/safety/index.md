@@ -103,7 +103,7 @@ llmusage diagnostics --forget-file <PATH> --source codex
 
 这会把该行标记为 `deleted_by_user`，并移除 cursor 行。
 
-## 价格目录变更只读本地文件
+## 手动价格目录只读本地文件
 
 ```powershell
 llmusage catalog apply .\pricing-overlay.json
@@ -112,7 +112,7 @@ llmusage catalog reset
 llmusage doctor --refresh-pricing .\litellm-prices.json
 ```
 
-`catalog apply` 激活增量 v2 overlay；`doctor --refresh-pricing` 激活完整 base snapshot 并清除已有 overlay。两者只接受已存在的本地文件，拒绝 URL，也不会联网拉取。
+`catalog apply` 激活增量 v2 overlay；`doctor --refresh-pricing` 激活完整 base snapshot 并清除已有 overlay。两者作为手动命令只接受已存在的本地文件，拒绝 URL，也不会联网拉取（默认 `sync` 则独立拉取公开 LiteLLM 与 models.dev 价表，不上传用量）。
 
 激活会在 `~/.llmusage/pricing/` 下写入 SHA-256 内容寻址文件，重算本地 event 和 bucket 成本，随后切换 SQLite catalog metadata。已选择文件缺失、被修改或无效时会显式报错，不会静默回退内置价格。`catalog reset` 移除 overlay，并用它记录的 base 重算。未被引用的 digest 文件可以作为本地审计材料保留；`uninstall --purge` 会随整个运行时根目录一起删除。
 

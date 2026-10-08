@@ -387,6 +387,7 @@ async fn run_job(
         allow_lossy_rebuild: false,
         interactive_terminal: false,
         recovery_prompt: None,
+        pricing_fetcher: None,
     };
     let app = AppContext {
         paths: store.paths.clone(),

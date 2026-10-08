@@ -413,6 +413,7 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
                     allow_lossy_rebuild,
                     interactive_terminal: false,
                     recovery_prompt: None,
+                    pricing_fetcher: None,
                 },
             )
             .await

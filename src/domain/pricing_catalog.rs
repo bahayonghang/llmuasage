@@ -400,7 +400,10 @@ impl PricingCatalog {
             .filter(|window| *window > 0)
     }
 
-    fn from_document(document: CatalogDocument, status: PricingStatus) -> Result<PricingCatalog> {
+    pub(crate) fn from_document(
+        document: CatalogDocument,
+        status: PricingStatus,
+    ) -> Result<PricingCatalog> {
         validate_document(&document)?;
         if document.kind != CatalogKind::Base {
             return Err(config_invalid("only a base catalog can be compiled"));
@@ -630,7 +633,7 @@ fn native_litellm_model(model_id: &str, raw_entry: &Value) -> Option<ModelDefini
     })
 }
 
-fn read_reasoning_policy(value: &Value) -> ReasoningPolicy {
+pub(crate) fn read_reasoning_policy(value: &Value) -> ReasoningPolicy {
     let raw = value
         .get("reasoning_policy")
         .or_else(|| value.get("llmusage_reasoning_policy"))
@@ -685,7 +688,7 @@ fn push_normalized_matcher(values: &mut Vec<String>, raw: &str) {
     }
 }
 
-fn native_sources(model_id: &str, provider: Option<&str>) -> Vec<String> {
+pub(crate) fn native_sources(model_id: &str, provider: Option<&str>) -> Vec<String> {
     let model = model_id.to_ascii_lowercase();
     let provider = provider.unwrap_or_default().to_ascii_lowercase();
     if provider.contains("anthropic") || model.contains("claude") {
@@ -709,7 +712,7 @@ fn native_sources(model_id: &str, provider: Option<&str>) -> Vec<String> {
     Vec::new()
 }
 
-fn read_f64(value: &Value, key: &str) -> Option<f64> {
+pub(crate) fn read_f64(value: &Value, key: &str) -> Option<f64> {
     value.get(key).and_then(|value| {
         value
             .as_f64()
@@ -717,7 +720,7 @@ fn read_f64(value: &Value, key: &str) -> Option<f64> {
     })
 }
 
-fn read_u64(value: &Value, key: &str) -> Option<u64> {
+pub(crate) fn read_u64(value: &Value, key: &str) -> Option<u64> {
     value.get(key).and_then(|value| {
         value
             .as_u64()
@@ -740,7 +743,7 @@ fn matcher_matches(matcher: &PricingMatcher, normalized_model: &str) -> bool {
     }
 }
 
-fn normalize_model_candidate(model: &str) -> String {
+pub(crate) fn normalize_model_candidate(model: &str) -> String {
     let stripped = model
         .trim()
         .to_ascii_lowercase()
@@ -936,7 +939,7 @@ fn document_from_entries(version: &str, entries: &[PricingEntry]) -> Result<Cata
     Ok(document)
 }
 
-fn stable_identifier(raw: &str) -> String {
+pub(crate) fn stable_identifier(raw: &str) -> String {
     let mut value = raw
         .trim()
         .to_ascii_lowercase()

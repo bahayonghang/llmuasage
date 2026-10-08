@@ -181,3 +181,26 @@
   (Fable/Mythos 5.1 cache read `0.25`; Astra `10 / 1 / 12.5 / 50` plus 272K
   tier) and the old row (Fable/Mythos 5 cache read `1.0`; OpenCode GPT-5
   family still owns `gpt-5`).
+
+### 10. Sync Public Price Refresh
+
+- `llmusage sync` refreshes LiteLLM `model_prices_and_context_window.json` and
+  models.dev `api.json` once, before parsers run. No other price URL is fetched.
+  Usage is not uploaded.
+- Each source has its own cache under the runtime root. A successful cache no
+  older than 3600 seconds is not requested. A missing cache, an older cache, or
+  a future timestamp is fetched once with a bounded timeout.
+- Failure, timeout, or an unusable document leaves that source's previous cache
+  untouched. If both sources have no usable cache, keep the active catalog,
+  which is the embedded catalog on a cold start. Do not fail the sync.
+- A changed assembled base is stored as content-addressed `public-<digest>` and
+  recomputes catalog-priced events. An unchanged base, including a fresh-cache
+  skip, does not recompute. Positive `source_reported` totals stay unchanged.
+- Re-apply an existing overlay by model id after the refreshed base is chosen.
+- Fetched rows use exact matchers. Merging into an existing model id updates
+  that row's default rate and keeps its other matchers, including families and
+  aliases. Do not drop a family such as `gpt-6-astra` when the fetched row is
+  exact. An empty fetched tier list keeps the tiers already stored for that id.
+- Library and `cargo test` runs do not contact the price network. Production
+  CLI and desktop binaries enable live refresh unless
+  `LLMUSAGE_PRICING_REFRESH` is `off` or `0`. Tests inject a fixture fetcher.
