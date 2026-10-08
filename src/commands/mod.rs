@@ -8,6 +8,7 @@ use crate::{app::AppContext, models::SourceKind, store::Store};
 
 pub mod blocks;
 pub mod catalog;
+pub mod clean;
 pub mod codex_tracer;
 pub mod daily;
 pub mod dash;
@@ -153,6 +154,12 @@ pub enum Commands {
     Catalog {
         #[command(subcommand)]
         command: CatalogCommand,
+    },
+    /// Show a disk overview of the runtime root. `--yes` deletes expired copies.
+    Clean {
+        /// Delete expired migration copies and research baselines.
+        #[arg(long)]
+        yes: bool,
     },
     /// Query local structured runtime logs and recent run records.
     Logs {
@@ -438,6 +445,7 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
             json,
             refresh_pricing,
         }) => run_untracked("doctor", doctor::run(&app, json, refresh_pricing)).await,
+        Some(Commands::Clean { yes }) => run_untracked("clean", clean::run(&app, yes)).await,
         Some(Commands::Catalog { command }) => match command {
             CatalogCommand::Apply { path } => {
                 run_logged(&app, "catalog apply", catalog::apply(&app, &path)).await
@@ -587,6 +595,33 @@ mod tests {
             Some(Commands::Catalog {
                 command: super::CatalogCommand::Reset
             })
+        ));
+    }
+
+    #[test]
+    fn clean_parses_yes_and_global_home() {
+        let plain = Cli::try_parse_from(["llmusage", "clean"]).expect("clean should parse");
+        assert!(plain.home.is_none());
+        assert!(matches!(
+            plain.command,
+            Some(Commands::Clean { yes: false })
+        ));
+
+        let deleting = Cli::try_parse_from([
+            "llmusage",
+            "--home",
+            "D:/tmp/llmusage-home",
+            "clean",
+            "--yes",
+        ])
+        .expect("clean --yes should parse");
+        assert_eq!(
+            deleting.home.as_deref(),
+            Some(std::path::Path::new("D:/tmp/llmusage-home"))
+        );
+        assert!(matches!(
+            deleting.command,
+            Some(Commands::Clean { yes: true })
         ));
     }
 

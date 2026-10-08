@@ -257,6 +257,21 @@ pub fn init_logging() -> Result<()> {
     init_logging_for_paths(&paths)
 }
 
+/// Initializes stderr tracing without creating the runtime log directory.
+///
+/// `llmusage clean` uses this so a missing `--home` is not created just to
+/// open the rotating log writer.
+pub fn init_stderr_logging() -> Result<()> {
+    let console_filter =
+        EnvFilter::try_from_env("RUST_LOG").unwrap_or_else(|_| EnvFilter::new(DEFAULT_FILE_LEVEL));
+    let stderr_layer = fmt::layer()
+        .with_writer(StderrLogWriter::default)
+        .with_target(false)
+        .with_filter(console_filter);
+    let _ = tracing_subscriber::registry().with(stderr_layer).try_init();
+    Ok(())
+}
+
 pub fn init_logging_for_paths(paths: &AppPaths) -> Result<()> {
     let console_filter =
         EnvFilter::try_from_env("RUST_LOG").unwrap_or_else(|_| EnvFilter::new(DEFAULT_FILE_LEVEL));

@@ -102,7 +102,16 @@ pub async fn run() -> AnyhowResult<()> {
         return Ok(());
     }
     let cli = commands::Cli::parse();
-    let app = runtime::app::AppContext::with_cli_home(cli.home.clone())?;
-    runtime::logging::init_logging_for_paths(&app.paths)?;
+    // `clean` must not create `logs/` and must not read `LLMUSAGE_HOME`.
+    // `AppContext::with_cli_home(None)` still calls `AppPaths::discover()`.
+    let app = if matches!(cli.command, Some(commands::Commands::Clean { .. })) {
+        let paths = crate::paths::AppPaths::with_cli_home(cli.home.clone())?;
+        runtime::logging::init_stderr_logging()?;
+        runtime::app::AppContext::from_paths(paths)?
+    } else {
+        let app = runtime::app::AppContext::with_cli_home(cli.home.clone())?;
+        runtime::logging::init_logging_for_paths(&app.paths)?;
+        app
+    };
     commands::dispatch(app, cli).await
 }

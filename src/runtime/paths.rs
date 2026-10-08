@@ -142,6 +142,21 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn with_cli_home_none_ignores_env() -> anyhow::Result<()> {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let temp = TempDir::new()?;
+        let saved = std::env::var_os("LLMUSAGE_HOME");
+        unsafe { std::env::set_var("LLMUSAGE_HOME", temp.path()) };
+
+        let paths = AppPaths::with_cli_home(None)?;
+        assert_ne!(paths.root_dir, temp.path());
+        assert!(paths.root_dir.ends_with(".llmusage"));
+
+        restore_env("LLMUSAGE_HOME", saved);
+        Ok(())
+    }
+
     fn restore_env(key: &str, value: Option<std::ffi::OsString>) {
         unsafe {
             if let Some(value) = value {

@@ -350,6 +350,10 @@ const ENGLISH_COMMANDS: &[(&str, &str)] = &[
         "logs",
         "Query local structured runtime logs and recent run records.",
     ),
+    (
+        "clean",
+        "Show runtime disk usage; --yes deletes expired database copies.",
+    ),
     ("dash", "Open the interactive terminal dashboard."),
     (
         "serve",
@@ -489,6 +493,10 @@ const CHINESE_COMMANDS: &[(&str, &str)] = &[
     ("doctor", "运行健康检查，也可从本地文件刷新价格。"),
     ("catalog", "应用、查看或重置本地价格目录覆盖。"),
     ("logs", "查询本地结构化运行日志与最近命令记录。"),
+    (
+        "clean",
+        "以表格总览运行时占用；--yes 才删除过期数据库副本。",
+    ),
     ("dash", "打开交互式终端 Dashboard。"),
     ("serve", "启动浏览器 Dashboard；默认绑定 127.0.0.1。"),
     ("export html", "写入离线 Dashboard bundle。"),
@@ -612,6 +620,7 @@ mod tests {
         assert!(help.contains("┌"));
         assert!(help.contains("│ Command"));
         assert!(help.contains("source-status"));
+        assert!(help.contains("clean"));
         assert!(help.contains("remote"));
         assert!(help.contains("catalog"));
         assert!(help.contains("claude"));
@@ -627,6 +636,7 @@ mod tests {
         let zh = top_level_help_with_width(HelpLanguage::Chinese, 70);
         assert!(zh.contains("│ 命令"));
         assert!(zh.contains("source-status"));
+        assert!(zh.contains("clean"));
         assert!(zh.contains("remote"));
         assert!(zh.contains("catalog"));
         assert!(zh.contains("claude"));

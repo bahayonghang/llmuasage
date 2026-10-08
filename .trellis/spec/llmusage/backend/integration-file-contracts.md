@@ -53,6 +53,11 @@ third-party integrations.
 - Cleanup owns only exact wrappers and sibling atomic residue. Never scan or
   bulk-delete `backups/*.bak`; historical integration backups and
   `llmusage.db.pre-0.5.0` remain available.
+- That keep rule applies to hook cleanup and `uninstall` only. `llmusage clean`
+  without `--yes` deletes nothing. `llmusage clean --yes` may delete direct
+  children of `backups/` named `llmusage.db.pre-*`, including their sqlite
+  wal/shm sidecars, and regular files in the non-product `baselines/` directory.
+  It still must not delete `backups/*.bak` or `backups/codex_notify_original.json`.
 - `integration_install` records only an actual cleanup change or a cleanup
   failure. A no-op must not modify third-party config, create a backup, or
   write an integration action row. A second successful cleanup is a no-op.

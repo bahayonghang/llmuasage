@@ -25,6 +25,13 @@ impl AppContext {
             Some(root) => AppPaths::with_root(root)?,
             None => AppPaths::discover()?,
         };
+        Self::from_paths(paths)
+    }
+
+    /// Builds context from a layout that has already been resolved.
+    ///
+    /// Unlike [`Self::with_cli_home`], this does not read `LLMUSAGE_HOME`.
+    pub(crate) fn from_paths(paths: AppPaths) -> Result<Self> {
         Ok(Self {
             paths,
             current_exe: std::env::current_exe()?,

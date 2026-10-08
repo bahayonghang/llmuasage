@@ -124,3 +124,65 @@ fields, NDJSON file output, and JSON-mode stdout.
 Wrong: write a warning with an independent `eprintln!` while the human renderer
 owns terminal output. Correct: route the complete line with `stderr_warning`,
 and let the command-scoped sink coordinate with `HumanRenderer::write_warning`.
+
+## Scenario: Commands That Must Not Create The Runtime Home
+
+### 1. Scope / Trigger
+
+Use this contract when a command must succeed against a missing runtime root.
+`llmusage clean` is the current case: printing an overview, or reporting that
+there is nothing to clean, must not create `logs/` or any other home directory.
+
+### 2. Signatures
+
+- `AppPaths::with_cli_home(home: Option<PathBuf>) -> Result<AppPaths>` resolves
+  an explicit root, or `~/.llmusage` when `home` is `None`. It does not read
+  `LLMUSAGE_HOME`.
+- `AppContext::with_cli_home(None)` is not the same call. It uses
+  `AppPaths::discover()`, which does read `LLMUSAGE_HOME`.
+- `AppContext::from_paths(AppPaths) -> Result<AppContext>` only attaches the
+  current executable. It does not discover paths or create directories.
+- `init_stderr_logging() -> Result<()>` installs the stderr tracing layer and
+  does not open the rotating file writer.
+- `init_logging_for_paths(&AppPaths) -> Result<()>` may create `logs/` when the
+  file layer is enabled.
+
+### 3. Contracts
+
+`llmusage clean` parses first, then calls `AppPaths::with_cli_home(cli.home)`,
+`init_stderr_logging()`, and `AppContext::from_paths`. It must not call
+`AppContext::with_cli_home`, `AppPaths::discover`, or
+`init_logging_for_paths`. Other commands keep file logging. Do not change the
+10 MiB / 30 MiB / seven-file / seven-day limits for this entrypoint. Deletion
+scope stays in `integration-file-contracts.md`; this scenario only covers home
+and log creation.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| `clean` and the resolved root does not exist | Exit 0, print `没有可清理内容`, create nothing |
+| `clean` without `--home` while `LLMUSAGE_HOME` is set | Ignore the variable and use `~/.llmusage` |
+| `clean` with `--home <path>` | Use that path and do not create it when it is missing |
+| Any other command | Keep `init_logging_for_paths` and existing `LLMUSAGE_HOME` discovery |
+| File-log filter disabled | `init_logging_for_paths` still must not be the `clean` path |
+
+### 5. Good/Base/Bad Cases
+
+- Good: a missing `--home` stays missing after `llmusage clean` and `llmusage clean --yes`.
+- Base: an existing home is only read, and `--yes` deletes just the reviewed migration and baseline set.
+- Bad: routing `clean` through `AppContext::with_cli_home(None)` or `init_logging_for_paths`, which creates `logs/` under the discovered home.
+
+### 6. Tests Required
+
+- `with_cli_home_none_ignores_env` sets `LLMUSAGE_HOME` and asserts
+  `AppPaths::with_cli_home(None)` still ends in `.llmusage` and is not the env root.
+- `missing_root_is_empty_and_not_created` runs the clean plan with `--yes`
+  against a path that does not exist and asserts the path still does not exist.
+- Do not point either test at the real user home.
+
+### 7. Wrong vs Correct
+
+Wrong: `let app = AppContext::with_cli_home(cli.home)?; init_logging_for_paths(&app.paths)?;`
+for `clean`. Correct: resolve `AppPaths::with_cli_home(cli.home)`, call
+`init_stderr_logging()`, then `AppContext::from_paths`.
