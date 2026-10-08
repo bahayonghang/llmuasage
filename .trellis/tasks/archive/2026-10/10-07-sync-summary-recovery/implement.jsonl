@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/10-07-sync-summary-recovery/research/recovery-decision.md", "reason": "2026-10-08 确认只恢复 Antigravity CLI/IDE，有窗口的普通 sync 不询问也不扩大重建"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "实施第一步先写入无窗口交互例外；未同意、有窗口、非交互、serve 和其他来源仍禁止普通 sync 重建"}
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "人读摘要改到 TOTAL 之后，询问条件包含 stdout 终端，阻断仍不解码 usage"}
+{"file": ".trellis/tasks/10-07-sync-summary-recovery/research/contract-excerpt.md", "reason": "摘要、旧记账跳过和 Antigravity 有损重建里本任务会碰到的现行条款"}
+{"file": ".trellis/tasks/10-07-sync-summary-recovery/research/current-sync-output.md", "reason": "本机 CLI 旧 JSON 与 IDE 缺失库的数量和版本观察，用来核对提示口径"}

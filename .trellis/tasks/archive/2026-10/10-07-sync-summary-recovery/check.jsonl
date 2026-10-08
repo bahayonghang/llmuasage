@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/10-07-sync-summary-recovery/research/recovery-decision.md", "reason": "验收时核对恢复范围没有扩到其他旧记账来源，也没有在有窗口命令里重建"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "确认交互例外已写入契约；未同意来源的 marker、serve 和预删除边界没有放宽"}
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "确认表后说明、三流终端判定和 Antigravity 阻断保护与契约一致"}
+{"file": ".trellis/tasks/10-07-sync-summary-recovery/research/contract-excerpt.md", "reason": "摘要、诊断分类和历史保护的验收边界"}
+{"file": ".trellis/tasks/10-07-sync-summary-recovery/research/current-sync-output.md", "reason": "用已观察的 CLI/IDE 缺口核对提示数量的种类，不把观察记录当成现测"}
