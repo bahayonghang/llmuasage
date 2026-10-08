@@ -411,6 +411,8 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
                     provider_map,
                     json_events,
                     allow_lossy_rebuild,
+                    interactive_terminal: false,
+                    recovery_prompt: None,
                 },
             )
             .await

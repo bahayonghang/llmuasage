@@ -22,9 +22,16 @@ is the compatibility baseline when reference implementations disagree.
   `expected_token_accounting_version(SourceKind) -> u32` owns this source-aware
   contract.
 - Legacy repair: explicit `llmusage sync --rebuild --source <source>`. Ordinary
-  `llmusage sync` does not rebuild. Claude Code, Codex, Grok Build, Kimi Code,
-  and Oh My Pi (OMP) must treat ordinary sync and explicit rebuild as different
-  commands.
+  `llmusage sync` does not rebuild, with exactly one interactive exception: when
+  stdin, stdout, and stderr are all terminals, the command is not
+  `--json-events`, does not specify `--rebuild`, and does not specify
+  `--recent-days`, and the user explicitly accepts data loss for `antigravity` or
+  `antigravity_ide`. In that case only, the confirmed product is rebuilt using
+  the unbounded lossy Antigravity family snapshot in the same process and worker
+  lock. Unconfirmed products, runs with `--recent-days`, non-interactive runs,
+  `serve`, and every other legacy source keep the existing skip/warn behavior.
+  Claude Code, Codex, Grok Build, Kimi Code, and Oh My Pi (OMP) must treat
+  ordinary sync and explicit rebuild as different commands.
 - Ordinary-sync skip: `legacy_token_accounting_sources_for` detects selected
   parser sources, `exclude_legacy_sources_from_write_set` removes them from the
   parser/write set before the driver runs, and
@@ -32,7 +39,9 @@ is the compatibility baseline when reference implementations disagree.
   `llmusage sync --rebuild --source <source>` plus the existing
   `--allow-lossy-rebuild` path. Do not emit
   `SyncEvent::TokenAccountingRepairFinished`. Do not claim the source was
-  repaired. Do not advance that source's token-accounting marker.
+  repaired. Do not advance that source's token-accounting marker, unless
+  specifically confirmed and rebuilt under the interactive Antigravity
+  exception above.
 - Serve startup:
   `commands::serve::repair_legacy_token_accounting(&AppContext, &Store) -> Result<TokenAccountingRepairReport>`.
   It detects legacy sources, records them as not rebuilt, warns, and does not
@@ -137,7 +146,15 @@ is the compatibility baseline when reference implementations disagree.
   and does not reset, parse, or mix new accounting into old rows. Non-legacy
   sources in the same run still sync and remain idempotent on a second run.
   Cancel after legacy detect still preserves the skip/keep invariants.
-- Ordinary sync ignores `allow_lossy_rebuild` because it no longer rebuilds.
+  The sole exception to skipping legacy repair during ordinary sync is
+  confirmed interactive acceptance: when stdin, stdout, and stderr are all
+  terminals, without `--json-events`, `--rebuild`, or `--recent-days`, the user
+  may explicitly accept data loss for `antigravity` or `antigravity_ide`. Only
+  confirmed products are rebuilt via staged unbounded snapshot in the same
+  process, without calling `reset_sources_for_rebuild`.
+- Ordinary sync ignores `--allow-lossy-rebuild` passed on the CLI; only explicit
+  `--rebuild` or the interactive Antigravity prompt confirmation can enable
+  lossy rebuild.
 - Ordinary sync must not emit `TokenAccountingRepairFinished` as success and
   must not advance a skipped source's token-accounting marker.
 - `llmusage serve` detects legacy parser sources after store bootstrap and
@@ -165,8 +182,9 @@ is the compatibility baseline when reference implementations disagree.
 | Condition | Required behavior |
 | --- | --- |
 | Source has rows and its expected source-specific marker | Normal incremental writes are allowed |
-| Source has rows and no/currently different marker; ordinary sync (bounded or unbounded) | Keep existing data, skip that source's writes, warn for explicit `llmusage sync --rebuild --source <source>`, do not advance the marker |
-| Ordinary sync caller sets `allow_lossy_rebuild=true` | Ignore it; still skip+warn and do not rebuild |
+| Source has rows and no/currently different marker; ordinary sync (unconfirmed, non-terminal, with `--recent-days`, or non-Antigravity source) | Keep existing data, skip that source's writes, warn for explicit `llmusage sync --rebuild --source <source>`, do not advance the marker |
+| Confirmed no-window interactive Antigravity CLI/IDE acceptance during ordinary sync | Rebuild confirmed product via lossy unbounded staged snapshot; on failure rollback events, cursors, inventory, and marker; advance marker only on success |
+| Ordinary sync caller sets `allow_lossy_rebuild=true` | Ignore it; still skip+warn and do not rebuild unless interactively confirmed for Antigravity or explicit `--rebuild` |
 | Source has no rows and no marker | Allow first sync; write marker only after success |
 | Rebuild has missing source files | Existing lossy-rebuild guard refuses it |
 | Ordinary pre-reset rebuild parser/store commit fails | Leave marker absent; do not claim parity |
@@ -178,7 +196,7 @@ is the compatibility baseline when reference implementations disagree.
 | Persisted Claude/OpenCode marker is `2` | Treat it as current |
 | Persisted Pi marker is `2` | Treat Pi as legacy; ordinary sync skips it; explicit `sync --rebuild --source pi` repairs it |
 | Persisted Kimi Code/Omp/ZCode/DeepSeek Harness marker is `2` | Treat it as current |
-| Persisted Antigravity CLI/IDE marker is `2` | Keep history and skip ordinary writes; require explicit staged rebuild |
+| Persisted Antigravity CLI/IDE marker is `2` | Keep history and skip ordinary writes, unless confirmed in no-window interactive ordinary sync prompt; require explicit staged rebuild otherwise |
 | `sync --source omp` while Pi is legacy | Refuse before any omp writes; direct the caller to `llmusage sync --rebuild --source pi` |
 | Replay marker exists and first two token snapshots share a second | Skip that second's prefix while retaining the latest cumulative baseline |
 | Two ordinary Codex requests share a second without a replay marker | Keep both events |
@@ -213,6 +231,9 @@ Never enable `--allow-lossy-rebuild` automatically.
   current Claude. A second ordinary run stays idempotent.
 - Good: ordinary sync with a missing marker and an unparseable source fixture
   leaves event/raw/bucket/turn/tool/cursor/source_file content unchanged.
+- Good: confirmed interactive ordinary sync accepts Antigravity CLI loss, rebuilding only Antigravity CLI via staged snapshot while preserving skipped Codex.
+- Bad: ordinary sync with `--recent-days` prompts or drops its window to perform a rebuild.
+- Bad: ordinary sync prompts or rebuilds Codex/Grok/Pi or rebuilds when stdout, stderr, or stdin is redirected.
 - Bad: ordinary sync resets a legacy source, parses it, or emits
   TokenAccountingRepairFinished as success.
 - Bad: bounded sync resets a legacy source and advances its marker after
@@ -261,8 +282,8 @@ Never enable `--allow-lossy-rebuild` automatically.
 - Ordinary-sync skip tests cover unparseable keep, mixed sources, second-run
   idempotence, lossy opt-in isolation, and no repair-finished claim.
 - `tests/sync/lifecycle.rs` plus `tests/sync/sources/` keep hot sync, append,
-  replacement, and rebuild
-  behavior idempotent.
+  replacement, and rebuild behavior idempotent.
+- Interactive recovery tests assert that only confirmed Antigravity CLI/IDE products rebuild, direct enter keeps all, rebuild failure rolls back events and marker together, other legacy sources (e.g. Codex) are not prompted, windowed sync never prompts, and redirected streams or stdin pipes do not read stdin.
 - Serve repair tests assert no reset, query-visible old totals, visible
   warning, lossy and safe history preserved, and unparseable legacy not
   blocking the function. Do not start a real user server.

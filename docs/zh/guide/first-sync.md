@@ -68,10 +68,11 @@ llmusage sync --rebuild
 `--rebuild` 重新解析所选来源。Antigravity 会先完整读取原生 SQLite，再原子替换有文件归属的 parser 历史，保留未归属的 hook 行。缺失真源默认拒绝重建；`--allow-lossy-rebuild` 只允许缺失文件造成的损失，不跳过不可读或解析失败的数据库。
 
 Token 统计口径按 parser 来源单独记录版本。含旧口径行的数据库仍可读取。普通
-`llmusage sync` 无论是否指定 `--recent-days`，都会保留所选旧版来源的历史、cursor
-和 accounting marker，跳过该来源的导入，并提示需要显式重建。其他口径已更新的来源
-仍可同步。普通 sync 不会自动修复旧版统计口径。
-
+`llmusage sync` 默认会保留所选旧版来源的历史、cursor 和 accounting marker，
+跳过该来源的导入，并提示需要显式重建。只有 stdin、stdout、stderr 都是终端，且没有
+`--json-events`、`--rebuild` 或 `--recent-days` 时，才能确认接受 `antigravity` 或
+`antigravity_ide` 的丢失并在本轮重建；其他旧记账来源
+保持跳过。其他口径已更新的来源仍可同步。
 恢复缺失的源文件后，显式重建受影响的来源：
 
 ```powershell
@@ -85,8 +86,8 @@ llmusage sync --rebuild --source pi
 llmusage sync --rebuild --source grok
 ```
 
-Antigravity 的版本 2 历史必须先完成上述显式修复，才能导入版本 3 数据。CLI 和 IDE
-重建会先完整读取并暂存原生 SQLite 快照，再原子替换有文件归属的 parser 行并推进
+Antigravity 的版本 2 历史必须先完成修复（通过交互提示或显式命令），才能导入版本 3 数据。
+CLI 和 IDE 重建会先完整读取并暂存原生 SQLite 快照，再原子替换有文件归属的 parser 行并推进
 accounting marker。暂存或事务失败时，原有记录和 marker 保持不变。未归属的 hook
 时代记录仍按原口径计入历史总量，并显示保留历史的警告；这些记录不会被转换为版本 3。
 

@@ -162,10 +162,310 @@ fn record_failure(
         );
     }
 }
-
 pub(crate) struct FamilySyncResult {
     pub(crate) stats: Vec<SourceSyncStats>,
     pub(crate) source_issues: SourceIssues,
+}
+
+/// Read-only preflight coverage facts for one Antigravity product.
+///
+/// Discovered counts are partitioned across product roots by first appearance.
+/// Missing and out-of-scope counts are derived purely from filesystem metadata
+/// of tracked paths without decoding usage or writing cursors/inventory/markers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AntigravityProductCoverage {
+    pub source: SourceKind,
+    pub discovered_count: usize,
+    pub new_files_count: usize,
+    pub tracked_count: usize,
+    pub stored_events: usize,
+    pub missing_count: usize,
+    pub out_of_scope_count: usize,
+    pub unreadable_count: usize,
+    pub discovery_incomplete: bool,
+}
+
+impl AntigravityProductCoverage {
+    /// True when the product has recoverable loss (missing or out of scope)
+    /// and has no unreadable files or incomplete discovery.
+    pub(crate) fn can_prompt_for_loss(&self) -> bool {
+        (self.missing_count > 0 || self.out_of_scope_count > 0)
+            && self.unreadable_count == 0
+            && !self.discovery_incomplete
+    }
+}
+
+pub(crate) fn check_antigravity_coverage(
+    store: &Store,
+) -> Result<HashMap<SourceKind, AntigravityProductCoverage>> {
+    check_antigravity_coverage_with_inputs(
+        store,
+        [
+            (
+                SourceKind::Antigravity,
+                source_files::list_antigravity_conversation_files(),
+            ),
+            (
+                SourceKind::AntigravityIde,
+                source_files::list_antigravity_ide_conversation_files(),
+            ),
+        ],
+        |path| std::fs::metadata(path),
+    )
+}
+
+pub(crate) fn check_antigravity_coverage_with_inputs(
+    store: &Store,
+    listings: [(SourceKind, source_files::SourceFileListing); 2],
+    metadata: impl Fn(&Path) -> std::io::Result<std::fs::Metadata>,
+) -> Result<HashMap<SourceKind, AntigravityProductCoverage>> {
+    let mut cursors: HashMap<SourceKind, HashMap<String, FileCursor>> = HashMap::new();
+    let mut tracked: HashMap<SourceKind, HashSet<PathBuf>> = HashMap::new();
+    for source in FAMILY {
+        let normalized = store
+            .cursors()
+            .load_file_cursors(source, "local")?
+            .into_values()
+            .map(|mut cursor| {
+                cursor.file_path = std::fs::canonicalize(&cursor.file_path)
+                    .unwrap_or_else(|_| PathBuf::from(&cursor.file_path))
+                    .to_string_lossy()
+                    .into_owned();
+                (cursor.file_path.clone(), cursor)
+            })
+            .collect();
+        cursors.insert(source, normalized);
+        let mut paths: HashSet<_> = store
+            .source_files()
+            .tracked_paths(source, "local")?
+            .into_iter()
+            .map(|path| std::fs::canonicalize(&path).unwrap_or_else(|_| PathBuf::from(path)))
+            .collect();
+        paths.extend(cursors[&source].keys().map(PathBuf::from));
+        tracked.insert(source, paths);
+    }
+
+    let mut discovery_incomplete = false;
+    for (_source, listing) in &listings {
+        let root_failed = match metadata(&listing.root) {
+            Ok(meta) => !meta.is_dir(),
+            Err(error) => error.kind() != std::io::ErrorKind::NotFound,
+        };
+        if listing.error_summary().is_some() || root_failed {
+            discovery_incomplete = true;
+        }
+    }
+
+    let mut discovered = HashSet::new();
+    let mut discovered_by_root: HashMap<SourceKind, Vec<PathBuf>> = HashMap::new();
+    for (source, listing) in listings {
+        for path in listing.paths {
+            let path = std::fs::canonicalize(&path).unwrap_or(path);
+            if discovered.insert(path.clone()) {
+                discovered_by_root.entry(source).or_default().push(path);
+            }
+        }
+    }
+
+    let mut result = HashMap::new();
+    for source in FAMILY {
+        let discovered_paths = discovered_by_root.remove(&source).unwrap_or_default();
+        let discovered_count = discovered_paths.len();
+        let source_tracked = &tracked[&source];
+        let new_files_count = discovered_paths
+            .iter()
+            .filter(|path| !source_tracked.contains(*path))
+            .count();
+        let tracked_count = source_tracked.len();
+
+        let mut missing_count = 0;
+        let mut out_of_scope_count = 0;
+        let mut unreadable_count = 0;
+
+        for path in source_tracked
+            .iter()
+            .filter(|path| !discovered.contains(*path))
+        {
+            match metadata(path) {
+                Ok(_) => out_of_scope_count += 1,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => missing_count += 1,
+                Err(_) => unreadable_count += 1,
+            }
+        }
+
+        let stored_events = {
+            let conn = store.open_connection()?;
+            let count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM usage_event WHERE source = ?1",
+                [source.as_str()],
+                |row| row.get(0),
+            )?;
+            count.max(0) as usize
+        };
+
+        result.insert(
+            source,
+            AntigravityProductCoverage {
+                source,
+                discovered_count,
+                new_files_count,
+                tracked_count,
+                stored_events,
+                missing_count,
+                out_of_scope_count,
+                unreadable_count,
+                discovery_incomplete,
+            },
+        );
+    }
+
+    Ok(result)
+}
+
+pub(crate) fn format_antigravity_notice(
+    source: SourceKind,
+    coverage: &AntigravityProductCoverage,
+    is_interactive: bool,
+    has_window: bool,
+    user_chose_keep: bool,
+) -> String {
+    let mut gap_parts = Vec::new();
+    if coverage.missing_count > 0 {
+        gap_parts.push(format!(
+            "{} tracked database(s) missing",
+            coverage.missing_count
+        ));
+    }
+    if coverage.out_of_scope_count > 0 {
+        gap_parts.push(format!(
+            "{} tracked input(s) out of scope",
+            coverage.out_of_scope_count
+        ));
+    }
+    let gap_text = if gap_parts.is_empty() {
+        "tracked inputs incomplete".to_string()
+    } else {
+        gap_parts.join(", ")
+    };
+
+    let action = if has_window {
+        if is_interactive {
+            "run `llmusage sync` without `--recent-days` to choose recovery".to_string()
+        } else {
+            format!(
+                "run `llmusage sync --rebuild --source {} --allow-lossy-rebuild` (do not pass `--recent-days`) to repair",
+                source.as_str()
+            )
+        }
+    } else if user_chose_keep {
+        "run `llmusage sync` again and accept loss to repair".to_string()
+    } else {
+        format!(
+            "run `llmusage sync --rebuild --source {} --allow-lossy-rebuild` to repair",
+            source.as_str()
+        )
+    };
+
+    format!("history preserved; {gap_text}; {action}")
+}
+
+/// Notice for a gap that this rebuild would still refuse.
+///
+/// Unreadable files and incomplete discovery must not offer `--allow-lossy-rebuild`.
+pub(crate) fn format_antigravity_blocked_notice(coverage: &AntigravityProductCoverage) -> String {
+    let mut parts = Vec::new();
+    if coverage.unreadable_count > 0 {
+        parts.push(format!(
+            "{} tracked database(s) unreadable",
+            coverage.unreadable_count
+        ));
+    }
+    if coverage.discovery_incomplete {
+        parts.push("discovery incomplete".to_string());
+    }
+    if coverage.missing_count > 0 {
+        parts.push(format!(
+            "{} tracked database(s) missing",
+            coverage.missing_count
+        ));
+    }
+    if coverage.out_of_scope_count > 0 {
+        parts.push(format!(
+            "{} tracked input(s) out of scope",
+            coverage.out_of_scope_count
+        ));
+    }
+    let detail = if parts.is_empty() {
+        "source blocked".to_string()
+    } else {
+        parts.join(", ")
+    };
+    format!("group writes skipped; {detail}; restore access and retry sync")
+}
+
+pub(crate) fn format_prompt_question(
+    source: SourceKind,
+    coverage: &AntigravityProductCoverage,
+) -> String {
+    let mut parts = Vec::new();
+    if coverage.missing_count > 0 {
+        parts.push(format!(
+            "{} tracked database(s) are missing from disk ({} new file(s) found); rebuilding will discard events from missing files",
+            coverage.missing_count, coverage.new_files_count
+        ));
+    }
+    if coverage.out_of_scope_count > 0 {
+        parts.push(format!(
+            "{} tracked input(s) exist outside current discovery coverage; rebuilding will only keep currently parseable files",
+            coverage.out_of_scope_count
+        ));
+    }
+    format!(
+        "\nSource '{}' has {} preserved events.\n{}\nAccept data loss and rebuild now? [k]eep / [r]ebuild (default: keep): ",
+        source.as_str(),
+        coverage.stored_events,
+        parts.join("\n")
+    )
+}
+
+pub(crate) fn prompt_recovery_choice<R: std::io::BufRead, W: std::io::Write>(
+    reader: &mut R,
+    writer: &mut W,
+    source: SourceKind,
+    coverage: &AntigravityProductCoverage,
+) -> crate::sync::types::AntigravityRecoveryChoice {
+    let question = format_prompt_question(source, coverage);
+    let _ = write!(writer, "{question}");
+    let _ = writer.flush();
+
+    let mut line = String::new();
+    if reader.read_line(&mut line).is_err() {
+        return crate::sync::types::AntigravityRecoveryChoice::Keep;
+    }
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("k") {
+        return crate::sync::types::AntigravityRecoveryChoice::Keep;
+    }
+    if trimmed.eq_ignore_ascii_case("r") {
+        return crate::sync::types::AntigravityRecoveryChoice::AcceptLoss;
+    }
+
+    // Invalid input: prompt once more
+    let _ = write!(
+        writer,
+        "Please enter 'k' to keep or 'r' to rebuild (default: keep): "
+    );
+    let _ = writer.flush();
+    line.clear();
+    if reader.read_line(&mut line).is_err() {
+        return crate::sync::types::AntigravityRecoveryChoice::Keep;
+    }
+    let trimmed = line.trim();
+    if trimmed.eq_ignore_ascii_case("r") {
+        crate::sync::types::AntigravityRecoveryChoice::AcceptLoss
+    } else {
+        crate::sync::types::AntigravityRecoveryChoice::Keep
+    }
 }
 
 struct FamilyInputs {
@@ -270,6 +570,7 @@ async fn sync_family_with_inputs(
     }
     let mut files = Vec::new();
     let mut discovered = HashSet::new();
+    let mut discovered_by_root: HashMap<SourceKind, usize> = HashMap::new();
     let mut failed = HashSet::new();
     for (source, listing) in inputs.listings {
         // Shared discovery treats a missing root as empty. Check metadata here
@@ -296,6 +597,7 @@ async fn sync_family_with_inputs(
             if !discovered.insert(path.clone()) {
                 continue;
             }
+            *discovered_by_root.entry(source).or_default() += 1;
             match snapshot(&path) {
                 Ok(cursor) => files.push(FamilyFile {
                     path,
@@ -392,6 +694,13 @@ async fn sync_family_with_inputs(
         let elapsed = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
         for stat in &mut stats {
             stat.parse_ms = elapsed;
+            stat.files_processed = discovered_by_root.get(&stat.source).copied().unwrap_or(0);
+            stat.changed_files = 0;
+            stat.bytes_scanned = 0;
+            stat.write_ms = 0;
+            stat.events_seen = 0;
+            stat.events_replayed = 0;
+            stat.events_inserted = 0;
         }
         return Ok(FamilySyncResult {
             stats,

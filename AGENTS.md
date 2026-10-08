@@ -7,7 +7,7 @@
 ## Build, Test, and Development Commands
 
 - `cargo run -- <command>`: run the CLI locally, e.g. `cargo run -- sync` or `cargo run -- serve`.
-- Ordinary `llmusage sync` (bounded or unbounded) skips legacy token-accounting sources, keeps that source's history, and warns. Repair is `llmusage sync --rebuild --source <source>`.
+- Ordinary `llmusage sync` skips legacy token-accounting sources, keeps that source's history, and warns (repair is explicit `llmusage sync --rebuild --source <source>`), unless the user accepts loss for `antigravity` or `antigravity_ide` on a sync whose stdin, stdout, and stderr are all terminals and which passes neither `--json-events`, `--rebuild`, nor `--recent-days`.
 - `just serve`: start the local web dashboard.
 - `just tdev`: start the Tauri desktop development shell (`desktop-dev`).
 - `just tinstall`: build the unsigned Windows NSIS installer and run it.

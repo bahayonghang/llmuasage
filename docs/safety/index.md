@@ -53,18 +53,11 @@ source and protected-event counts remain visible in sync details. A completed
 foreground sync writes a `run_log` row before releasing the worker lock, so the
 latest command and `finished_at` update with the same run shown by the panel.
 
-## Normal sync repairs safe legacy accounting
+## Normal sync preserves legacy accounting
 
-An unbounded normal `llmusage sync` detects selected parser sources that still
-use an older token-accounting contract. It warns before changing data, checks
-every automatic target for missing inputs and protected history, then resets
-only the legacy subset and parses each selected source once.
+Ordinary `llmusage sync` detects selected parser sources that still use an older token-accounting contract. By default, it preserves that source's existing history, cursors, and accounting marker, skips that source's writes for the round, and warns that explicit repair is required (`llmusage sync --rebuild --source <source>`). Other current sources in the same run still sync.
 
-If any target is lossy, no automatic target is reset. Restore the source files
-and rerun normal sync, or use explicit rebuild flags only when you intentionally
-accept the documented deletion. `sync --recent-days N` never auto-repairs
-legacy accounting because a full reset followed by a bounded import would
-discard history outside the window.
+The sole exception is a run where stdin, stdout, and stderr are all terminals, with no `--recent-days` and no `--json-events`: when read-only coverage detects recoverable loss for `antigravity` or `antigravity_ide`, users can explicitly accept data loss for that product to rebuild it in the same run. All other legacy sources remain skipped. Ordinary sync with `--recent-days` never prompts or rebuilds because a bounded run must not reset full history.
 
 ## Rebuild can be destructive
 
@@ -82,17 +75,11 @@ llmusage sync --rebuild --allow-lossy-rebuild
 
 Use it only when you accept clearing unrebuildable imported history.
 
-## Dashboard startup migration
+## Dashboard startup preserves legacy history
 
-`llmusage serve` checks for legacy parser-backed token accounting before it
-binds a local port. It automatically rebuilds only sources whose tracked input
-files are still available. A source with lossy rebuild risk is skipped with a
-warning; its history remains readable, normal writes remain guarded, and the
-dashboard continues to start. Unexpected failures after a source passes the
-safety check stop startup.
+`llmusage serve` checks for legacy parser-backed token accounting before it binds a local port. It preserves existing data and displays the accounting warning; it does not rebuild legacy sources. The dashboard continues to start and existing history remains readable, while normal writes remain guarded until explicit repair.
 
-Neither normal-sync nor startup automatic repair enables
-`--allow-lossy-rebuild`. Parserless sources are not migration targets.
+`llmusage serve` never enables `--allow-lossy-rebuild`. Parserless sources are not migration targets.
 
 ## Diagnose missing source files
 

@@ -25,8 +25,11 @@ mod writer_benchmark;
 pub mod zcode;
 
 pub use crate::models::{ParseIssueKind, ParseIssueSample, ParseIssues};
-pub(crate) use antigravity::sync_antigravity_family;
 pub use antigravity::{AntigravityIdeParser, AntigravityParser};
+pub(crate) use antigravity::{
+    check_antigravity_coverage, format_antigravity_blocked_notice, format_antigravity_notice,
+    sync_antigravity_family,
+};
 pub use claude::ClaudeParser;
 pub use codex::CodexParser;
 pub use dsh::DeepseekHarnessParser;

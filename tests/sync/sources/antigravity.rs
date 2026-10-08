@@ -515,7 +515,7 @@ fn antigravity_missing_group_member_preserves_bounded_and_forgotten_history() ->
                 }
                 assert_eq!((started, finished), (1, 1));
                 let stat = &blocked.sources[0];
-                assert_eq!((stat.files_processed, stat.changed_files, stat.skipped_files), (0, 0, 0));
+                assert_eq!((stat.files_processed, stat.changed_files, stat.skipped_files), (1, 0, 0));
                 assert_eq!((stat.events_seen, stat.events_replayed, stat.events_inserted), (0, 0, 0));
                 assert_eq!((stat.bytes_scanned, stat.write_ms), (0, 0));
                 assert_eq!(stat.stored_events, 2);
@@ -628,7 +628,18 @@ fn antigravity_preflight_existing_legacy_paths_and_changed_root_preserve_history
                 assert_eq!(blocked.total_inserted, 0);
                 assert_eq!(blocked.sources[0].changed_files, 0);
                 let error = blocked.sources[0].last_error.as_ref().unwrap();
-                assert!(error.contains("tracked_member_out_of_scope"));
+                // Rebuild keeps the family classification code. Ordinary sync
+                // replaces that line with the coverage notice, and the code
+                // stays on the persisted source issue below.
+                let expected = if rebuild {
+                    "tracked_member_out_of_scope"
+                } else {
+                    "tracked input(s) out of scope"
+                };
+                assert!(
+                    error.contains(expected),
+                    "rebuild={rebuild}: {error}"
+                );
                 assert!(!error.contains("tracked_member_missing"));
                 let reopened = Store::new(&app.paths)?;
                 let raw: String = reopened.open_connection()?.query_row("SELECT parse_issues_json FROM source_sync_status WHERE host_id='local' AND source='antigravity'", [], |row| row.get(0))?;

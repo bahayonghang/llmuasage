@@ -1,5 +1,6 @@
 use super::decode::{normalize, read_file};
 use super::*;
+use crate::domain::source_diagnostics::{SourceIssue, SourceIssueCode, SourceIssues};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use rusqlite::Connection;
 use tempfile::TempDir;
@@ -239,7 +240,8 @@ async fn preflight_all_selected_blocked_never_calls_usage_decoder() {
             );
         }
         for stat in result.stats {
-            assert_eq!(stat.files_processed, 0);
+            let expected_files = if stat.source == selected[0] { 1 } else { 0 };
+            assert_eq!(stat.files_processed, expected_files);
             assert_eq!(stat.changed_files, 0);
             assert_eq!(stat.events_seen, 0);
             assert_eq!(stat.events_replayed, 0);
@@ -952,4 +954,163 @@ fn native_product_overrides_a_root_only_copy() {
     let parsed = normalize(observations, &mut HashMap::new()).unwrap();
     assert_eq!(parsed.len(), 1);
     assert_eq!(parsed[0].source, SourceKind::AntigravityIde);
+}
+
+#[tokio::test]
+async fn coverage_without_prior_diagnostics_reports_actual_disk_gaps() {
+    let dir = TempDir::new().unwrap();
+    let live_path = preflight_database(&dir, "live.db", FAMILY[0]);
+    let store = preflight_store(&dir);
+    let mut writer = store.begin_sync_run().unwrap();
+
+    // Seed live.db as tracked
+    sync_family_with_inputs(
+        &store,
+        &mut writer,
+        &[FAMILY[0]],
+        true,
+        false,
+        None,
+        &CancellationToken::new(),
+        None,
+        preflight_listing(&live_path, FAMILY[0]),
+    )
+    .await
+    .unwrap();
+
+    // Add a missing tracked path and an out-of-scope tracked path
+    let missing_path = dir.path().join("missing.db");
+    let out_of_scope_path = dir.path().join("out_of_scope.json");
+    std::fs::write(&out_of_scope_path, b"out of scope file content").unwrap();
+
+    let mut shard = SyncShard::new(FAMILY[0]);
+    shard
+        .seen_file_paths
+        .push(missing_path.to_string_lossy().into_owned());
+    shard
+        .seen_file_paths
+        .push(out_of_scope_path.to_string_lossy().into_owned());
+    writer.commit_shard(shard).unwrap();
+
+    // Snapshot before coverage check
+    let before = preflight_snapshot(&store);
+
+    // Run read-only coverage with inputs containing only live.db
+    let coverage = super::check_antigravity_coverage_with_inputs(
+        &store,
+        FAMILY.map(|kind| {
+            (
+                kind,
+                source_files::SourceFileListing {
+                    root: dir.path().to_path_buf(),
+                    paths: if kind == FAMILY[0] {
+                        vec![live_path.clone()]
+                    } else {
+                        Vec::new()
+                    },
+                    errors: Vec::new(),
+                },
+            )
+        }),
+        |path| std::fs::metadata(path),
+    )
+    .unwrap();
+
+    let cli_cov = &coverage[&FAMILY[0]];
+    assert_eq!(cli_cov.discovered_count, 1);
+    assert_eq!(cli_cov.missing_count, 1);
+    assert_eq!(cli_cov.out_of_scope_count, 1);
+    assert_eq!(cli_cov.unreadable_count, 0);
+    assert!(!cli_cov.discovery_incomplete);
+    assert!(cli_cov.can_prompt_for_loss());
+
+    // No changes were written to store, cursors, inventory, or marker
+    assert_eq!(preflight_snapshot(&store), before);
+}
+
+#[tokio::test]
+async fn coverage_ignores_stale_diagnostics_and_derives_from_current_disk() {
+    let dir = TempDir::new().unwrap();
+    let live_path = preflight_database(&dir, "live.db", FAMILY[0]);
+    let store = preflight_store(&dir);
+    let mut writer = store.begin_sync_run().unwrap();
+
+    sync_family_with_inputs(
+        &store,
+        &mut writer,
+        &[FAMILY[0]],
+        true,
+        false,
+        None,
+        &CancellationToken::new(),
+        None,
+        preflight_listing(&live_path, FAMILY[0]),
+    )
+    .await
+    .unwrap();
+
+    // Track 1 missing path on disk
+    let missing_path = dir.path().join("missing.db");
+    let mut shard = SyncShard::new(FAMILY[0]);
+    shard
+        .seen_file_paths
+        .push(missing_path.to_string_lossy().into_owned());
+    writer.commit_shard(shard).unwrap();
+
+    // Deliberately write STALE source_issues into sync_status with missing = 999
+    let mut stale_issues = SourceIssues::new();
+    SourceIssue::record(
+        stale_issues.entry(FAMILY[0]).or_default(),
+        SourceIssueCode::TrackedMemberMissing,
+        999,
+    );
+    let dummy_status = crate::store::SourceSyncStatus {
+        source: FAMILY[0].as_str().to_string(),
+        files_processed: 10,
+        changed_files: 5,
+        bytes_scanned: 1000,
+        events_seen: 50,
+        events_replayed: 0,
+        events_inserted: 20,
+        stored_events: 100,
+        token_accounting_version: Some(2),
+        legacy_token_accounting: true,
+        token_accounting_warning: None,
+        parse_ms: 10,
+        write_ms: 5,
+        lock_wait_ms: 0,
+        parse_issues: Default::default(),
+        updated_at: crate::util::now_utc(),
+    };
+    store
+        .sync_status()
+        .save_source_sync_statuses_with_issues("local", &[dummy_status], &stale_issues)
+        .unwrap();
+
+    // Check coverage: it must ignore the stale 999 and reflect disk (1 missing)
+    let coverage = super::check_antigravity_coverage_with_inputs(
+        &store,
+        FAMILY.map(|kind| {
+            (
+                kind,
+                source_files::SourceFileListing {
+                    root: dir.path().to_path_buf(),
+                    paths: if kind == FAMILY[0] {
+                        vec![live_path.clone()]
+                    } else {
+                        Vec::new()
+                    },
+                    errors: Vec::new(),
+                },
+            )
+        }),
+        |path| std::fs::metadata(path),
+    )
+    .unwrap();
+
+    let cli_cov = &coverage[&FAMILY[0]];
+    assert_eq!(
+        cli_cov.missing_count, 1,
+        "must be 1 from disk, not 999 from stale json"
+    );
 }

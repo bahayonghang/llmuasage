@@ -68,12 +68,12 @@ llmusage sync --rebuild
 `--rebuild` reparses selected sources. Antigravity first stages native SQLite, then atomically replaces attributed parser history while retaining unattributed hook rows. Missing source files block rebuild by default; `--allow-lossy-rebuild` accepts missing-file loss, never unreadable or failed database parsing.
 
 Token accounting is versioned per parser source. Databases containing rows
-from an older accounting contract remain readable. Ordinary `llmusage sync`,
-with or without `--recent-days`, preserves each selected legacy source's
-history, cursors, and accounting marker, skips its imports, and warns that an
-explicit rebuild is required. Other current sources can still sync. Ordinary
-sync never repairs legacy accounting automatically.
-
+from an older accounting contract remain readable. Ordinary `llmusage sync`
+preserves each selected legacy source's history, cursors, and accounting marker,
+skips its imports, and warns that an explicit rebuild is required. When stdin, stdout, and stderr are all terminals, with no `--json-events`,
+`--rebuild`, or `--recent-days`, you can explicitly accept loss for
+`antigravity` or `antigravity_ide` to rebuild that product in the same run;
+all other legacy sources remain skipped. Other current sources can still sync.
 Restore any missing source files, then explicitly rebuild the affected source:
 
 ```powershell
@@ -87,12 +87,13 @@ llmusage sync --rebuild --source pi
 llmusage sync --rebuild --source grok
 ```
 
-Antigravity's version-2 history requires this explicit repair before version-3
-imports. CLI and IDE rebuilds first stage the complete native SQLite snapshot,
-then atomically replace attributed parser rows and advance their accounting
-markers. A staging or transaction failure preserves prior rows and markers.
-Unattributed hook-era rows remain in historical totals under their original
-accounting, with a retained-history warning; they are not converted to version 3.
+Antigravity's version-2 history requires repair before version-3 imports (via
+the interactive terminal prompt or explicit rebuild). CLI and IDE rebuilds first
+stage the complete native SQLite snapshot, then atomically replace attributed
+parser rows and advance their accounting markers. A staging or transaction failure
+preserves prior rows and markers. Unattributed hook-era rows remain in historical
+totals under their original accounting, with a retained-history warning; they
+are not converted to version 3.
 
 `source-status` and diagnostics expose `legacy_token_accounting`,
 `token_accounting_version`, and an actionable warning while a source still

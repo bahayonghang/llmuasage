@@ -1158,6 +1158,311 @@ fn full_rebuild_repairs_antigravity_parser_rows_and_preserves_hook_history() -> 
 
     Ok(())
 }
+#[test]
+fn interactive_antigravity_acceptance_rebuilds_in_ordinary_sync() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_antigravity_usage()?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        seed_antigravity_history(&store)?;
+        store.set_meta_value("token_accounting_version.antigravity", "2")?;
+
+        let options = commands::sync::SyncRunOptions {
+            source: Some(SourceKind::Antigravity),
+            recovery_prompt: Some(std::sync::Arc::new(|source, cov| {
+                assert_eq!(source, SourceKind::Antigravity);
+                assert!(cov.missing_count > 0);
+                llmusage::sync::types::AntigravityRecoveryChoice::AcceptLoss
+            })),
+            ..Default::default()
+        };
+
+        let summary =
+            commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(summary.sources.len(), 1);
+        let ag_stat = &summary.sources[0];
+        assert_eq!(ag_stat.source, SourceKind::Antigravity);
+        assert!(ag_stat.last_error.is_none());
+        assert!(ag_stat.events_inserted > 0);
+        assert_eq!(
+            store.token_accounting_version(SourceKind::Antigravity)?,
+            Some(3)
+        );
+        assert!(!store.has_legacy_token_accounting(SourceKind::Antigravity)?);
+
+        let status = loaded_source_status(&store, "antigravity")?;
+        assert!(!status.legacy_token_accounting);
+        assert_eq!(status.token_accounting_version, Some(3));
+        Ok::<_, anyhow::Error>(())
+    })?;
+    Ok(())
+}
+
+#[test]
+fn interactive_prompt_accepts_one_product_and_keeps_other() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_antigravity_usage()?;
+    fixture.seed_antigravity_ide_usage()?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        seed_antigravity_history(&store)?;
+        seed_antigravity_ide_history(&store)?;
+        store.set_meta_value("token_accounting_version.antigravity", "2")?;
+        store.set_meta_value("token_accounting_version.antigravity_ide", "2")?;
+
+        let options = commands::sync::SyncRunOptions {
+            recovery_prompt: Some(std::sync::Arc::new(|source, _cov| {
+                if source == SourceKind::Antigravity {
+                    llmusage::sync::types::AntigravityRecoveryChoice::AcceptLoss
+                } else {
+                    llmusage::sync::types::AntigravityRecoveryChoice::Keep
+                }
+            })),
+            ..Default::default()
+        };
+
+        let summary =
+            commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        let cli_stat = summary
+            .sources
+            .iter()
+            .find(|s| s.source == SourceKind::Antigravity)
+            .unwrap();
+        let ide_stat = summary
+            .sources
+            .iter()
+            .find(|s| s.source == SourceKind::AntigravityIde)
+            .unwrap();
+
+        // CLI was accepted and rebuilt
+        assert!(cli_stat.last_error.is_none());
+        assert_eq!(
+            store.token_accounting_version(SourceKind::Antigravity)?,
+            Some(3)
+        );
+        assert!(!store.has_legacy_token_accounting(SourceKind::Antigravity)?);
+
+        // IDE was kept, not rebuilt
+        assert!(ide_stat.last_error.is_some());
+        assert_eq!(ide_stat.events_inserted, 0);
+        assert_eq!(
+            store.token_accounting_version(SourceKind::AntigravityIde)?,
+            Some(2)
+        );
+        assert!(store.has_legacy_token_accounting(SourceKind::AntigravityIde)?);
+        Ok::<_, anyhow::Error>(())
+    })?;
+    Ok(())
+}
+
+#[test]
+fn interactive_prompt_enter_keeps_all() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_antigravity_usage()?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        seed_antigravity_history(&store)?;
+        store.set_meta_value("token_accounting_version.antigravity", "2")?;
+        let before_events = source_row_count(&store, "usage_event", SourceKind::Antigravity)?;
+
+        let options = commands::sync::SyncRunOptions {
+            source: Some(SourceKind::Antigravity),
+            recovery_prompt: Some(std::sync::Arc::new(|_, _| {
+                // Simulating Enter: Keep
+                llmusage::sync::types::AntigravityRecoveryChoice::Keep
+            })),
+            ..Default::default()
+        };
+
+        let summary =
+            commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        let ag_stat = &summary.sources[0];
+        assert_eq!(ag_stat.events_inserted, 0);
+        assert!(ag_stat.last_error.is_some());
+        assert_eq!(
+            store.token_accounting_version(SourceKind::Antigravity)?,
+            Some(2)
+        );
+        assert!(store.has_legacy_token_accounting(SourceKind::Antigravity)?);
+        assert_eq!(
+            source_row_count(&store, "usage_event", SourceKind::Antigravity)?,
+            before_events
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+    Ok(())
+}
+
+#[test]
+fn failed_rebuild_rolls_back_events_and_marker_together() -> Result<()> {
+    let fixture = Fixture::new()?;
+    // Seed unparseable / corrupt database to force rebuild failure
+    let directory = fixture.home.join(".gemini/antigravity-cli/conversations");
+    fs::create_dir_all(&directory)?;
+    let corrupt_db = directory.join("corrupt.db");
+    fs::write(&corrupt_db, b"not a sqlite db")?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        seed_antigravity_history(&store)?;
+        store.set_meta_value("token_accounting_version.antigravity", "2")?;
+        let before_events = source_row_count(&store, "usage_event", SourceKind::Antigravity)?;
+
+        let (mut tx, mut rx) = tokio::sync::mpsc::channel(256);
+        let options = commands::sync::SyncRunOptions {
+            source: Some(SourceKind::Antigravity),
+            recovery_prompt: Some(std::sync::Arc::new(|_, _| {
+                llmusage::sync::types::AntigravityRecoveryChoice::AcceptLoss
+            })),
+            ..Default::default()
+        };
+
+        let summary =
+            commands::sync::run_once_with_options(&app, &store, 0, &options, Some(&mut tx)).await?;
+        let events = drain_events(&mut rx);
+        assert_no_repair_claim(&events);
+
+        let ag_stat = &summary.sources[0];
+        assert!(ag_stat.last_error.is_some());
+        assert_eq!(ag_stat.events_inserted, 0);
+        assert_eq!(
+            store.token_accounting_version(SourceKind::Antigravity)?,
+            Some(2)
+        );
+        assert!(store.has_legacy_token_accounting(SourceKind::Antigravity)?);
+        assert_eq!(
+            source_row_count(&store, "usage_event", SourceKind::Antigravity)?,
+            before_events
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+    Ok(())
+}
+
+#[test]
+fn codex_legacy_has_no_prompt_choice_in_ordinary_sync() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_codex_copied_event()?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Codex),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        store.set_meta_value("token_accounting_version.codex", "2")?;
+        assert!(store.has_legacy_token_accounting(SourceKind::Codex)?);
+
+        let options = commands::sync::SyncRunOptions {
+            source: Some(SourceKind::Codex),
+            recovery_prompt: Some(std::sync::Arc::new(|source, _| {
+                panic!("prompt must NEVER be called for {source}");
+            })),
+            ..Default::default()
+        };
+
+        let summary =
+            commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        let codex_stat = &summary.sources[0];
+        assert_eq!(codex_stat.events_inserted, 0);
+        assert!(codex_stat.last_error.is_some());
+        assert_eq!(store.token_accounting_version(SourceKind::Codex)?, Some(2));
+        assert!(store.has_legacy_token_accounting(SourceKind::Codex)?);
+        Ok::<_, anyhow::Error>(())
+    })?;
+    Ok(())
+}
+
+#[test]
+fn windowed_ordinary_sync_never_prompts_or_rebuilds_legacy() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.seed_antigravity_usage()?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        seed_antigravity_history(&store)?;
+        store.set_meta_value("token_accounting_version.antigravity", "2")?;
+
+        let options = commands::sync::SyncRunOptions {
+            source: Some(SourceKind::Antigravity),
+            recent_days: Some(7),
+            recovery_prompt: Some(std::sync::Arc::new(|source, _| {
+                panic!("windowed sync must NEVER prompt for {source}");
+            })),
+            ..Default::default()
+        };
+
+        let summary =
+            commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        let ag_stat = &summary.sources[0];
+        assert_eq!(ag_stat.events_inserted, 0);
+        let error = ag_stat.last_error.as_deref().expect("windowed notice");
+        assert!(
+            error.contains("do not pass `--recent-days`"),
+            "a callback must not turn a non-terminal window into the interactive notice: {error}"
+        );
+        assert!(!error.contains("to choose recovery"), "{error}");
+        assert_eq!(
+            store.token_accounting_version(SourceKind::Antigravity)?,
+            Some(2)
+        );
+        assert!(store.has_legacy_token_accounting(SourceKind::Antigravity)?);
+
+        let interactive = commands::sync::SyncRunOptions {
+            source: Some(SourceKind::Antigravity),
+            recent_days: Some(7),
+            interactive_terminal: true,
+            recovery_prompt: Some(std::sync::Arc::new(|source, _| {
+                panic!("windowed sync must NEVER prompt for {source}");
+            })),
+            ..Default::default()
+        };
+        let interactive_summary =
+            commands::sync::run_once_with_options(&app, &store, 0, &interactive, None).await?;
+        let interactive_error = interactive_summary.sources[0]
+            .last_error
+            .as_deref()
+            .expect("interactive window notice");
+        assert!(
+            interactive_error.contains("without `--recent-days` to choose recovery"),
+            "{interactive_error}"
+        );
+        assert!(
+            !interactive_error.contains("--allow-lossy-rebuild"),
+            "{interactive_error}"
+        );
+        assert_eq!(interactive_summary.sources[0].events_inserted, 0);
+        assert_eq!(
+            store.token_accounting_version(SourceKind::Antigravity)?,
+            Some(2)
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+    Ok(())
+}
 
 #[test]
 fn full_rebuild_preserves_parserless_rows_across_all_owned_tables() -> Result<()> {
@@ -1615,6 +1920,26 @@ fn seed_antigravity_history(store: &Store) -> Result<()> {
     Ok(())
 }
 
+fn seed_antigravity_ide_history(store: &Store) -> Result<()> {
+    let conn = store.open_connection()?;
+    let timestamp = "2026-07-15T03:00:00Z";
+    conn.execute_batch(&format!(
+        r#"
+        INSERT INTO usage_event(
+            event_key, source, model, event_at, hour_start,
+            input_tokens, cache_read_tokens, cache_creation_tokens,
+            output_tokens, reasoning_output_tokens, total_tokens, created_at
+        ) VALUES ('antigravity_ide:test:event', 'antigravity_ide', 'gemini-2.5-pro', '{timestamp}', '{timestamp}',
+                  30, 0, 0, 10, 0, 40, '{timestamp}');
+        INSERT INTO source_cursor(source, cursor_key, file_path, updated_at)
+        VALUES ('antigravity_ide', 'antigravity_ide:test', '/missing/antigravity-ide-history.jsonl', '{timestamp}');
+        INSERT INTO source_file(source, file_path, state, last_state_change_at)
+        VALUES ('antigravity_ide', '/missing/antigravity-ide-history.jsonl', 'missing', '{timestamp}');
+        "#
+    ))?;
+    Ok(())
+}
+
 fn seed_parserless_history(store: &Store) -> Result<()> {
     let conn = store.open_connection()?;
     let timestamp = "2026-01-02T03:00:00Z";
@@ -1726,6 +2051,29 @@ impl Fixture {
         );
         conn.execute(
             "INSERT INTO gen_metadata(idx, data, size) VALUES (7, ?1, ?2)",
+            rusqlite::params![&blob, blob.len() as i64],
+        )?;
+        Ok(())
+    }
+    fn seed_antigravity_ide_usage(&self) -> Result<()> {
+        let directory = self.home.join(".gemini/antigravity-ide/conversations");
+        fs::create_dir_all(&directory)?;
+        let conn = Connection::open(directory.join("ide-accounting.db"))?;
+        conn.execute_batch(
+            "CREATE TABLE gen_metadata(idx INTEGER PRIMARY KEY, data BLOB, size INTEGER);",
+        )?;
+        let blob = crate::ag_gen_metadata_blob(
+            150,
+            15,
+            5,
+            30,
+            "ide-accounting-response",
+            Some("gemini-2.5-pro"),
+            None,
+            1_784_089_800,
+        );
+        conn.execute(
+            "INSERT INTO gen_metadata(idx, data, size) VALUES (8, ?1, ?2)",
             rusqlite::params![&blob, blob.len() as i64],
         )?;
         Ok(())

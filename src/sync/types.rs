@@ -4,7 +4,7 @@
 //! layer (`sync::`) does not need to import CLI-adapter code — fixing the
 //! ARCH-002 reverse dependency.
 
-use std::{error::Error, fmt, path::PathBuf};
+use std::{error::Error, fmt, path::PathBuf, sync::Arc};
 
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -165,8 +165,25 @@ impl SyncSummary {
     }
 }
 
+/// Decision returned by an interactive prompt for Antigravity recovery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AntigravityRecoveryChoice {
+    Keep,
+    AcceptLoss,
+}
+
+/// Callback invoked when an Antigravity product has recoverable loss and may be rebuilt.
+pub type AntigravityPromptFn = Arc<
+    dyn Fn(
+            SourceKind,
+            &crate::parsers::antigravity::AntigravityProductCoverage,
+        ) -> AntigravityRecoveryChoice
+        + Send
+        + Sync,
+>;
+
 /// Options accepted by a sync run.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct SyncRunOptions {
     pub rebuild: bool,
     pub source: Option<SourceKind>,
@@ -175,8 +192,32 @@ pub struct SyncRunOptions {
     pub provider_map: Option<PathBuf>,
     pub json_events: bool,
     pub allow_lossy_rebuild: bool,
+    /// Human sync whose stdin, stdout, and stderr are all terminals and which
+    /// is not `--json-events`. This stays set for `--recent-days`: that run
+    /// must not read stdin, but its post-table notice still points at an
+    /// unwindowed sync. A prompt callback is not this signal.
+    pub interactive_terminal: bool,
+    pub recovery_prompt: Option<AntigravityPromptFn>,
 }
 
+impl fmt::Debug for SyncRunOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SyncRunOptions")
+            .field("rebuild", &self.rebuild)
+            .field("source", &self.source)
+            .field("recent_days", &self.recent_days)
+            .field("parallelism", &self.parallelism)
+            .field("provider_map", &self.provider_map)
+            .field("json_events", &self.json_events)
+            .field("allow_lossy_rebuild", &self.allow_lossy_rebuild)
+            .field("interactive_terminal", &self.interactive_terminal)
+            .field(
+                "recovery_prompt",
+                &self.recovery_prompt.as_ref().map(|_| "<callback>"),
+            )
+            .finish()
+    }
+}
 impl SyncRunOptions {
     pub fn validate(&self) -> Result<ValidatedSyncRequest, SyncRequestError> {
         ValidatedSyncRequest::new(SyncRequestInput {

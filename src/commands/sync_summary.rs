@@ -83,13 +83,25 @@ pub(crate) fn format_summary_lines_with_basenames(
 
     for (row, stats) in rows.iter().zip(summary.sources.iter()) {
         lines.push(render_row(row, stats, &widths, &separator, color));
+    }
+
+    lines.push(render_total_row(&total, &widths, &separator, color));
+
+    for stats in &summary.sources {
         if let Some(error) = &stats.last_error {
-            lines.push(styled(Style::new().red(), &format!("  ↳ {error}"), color));
+            let is_warning = error.contains("legacy token accounting")
+                || error.contains("history preserved")
+                || error.contains("warning:");
+            let style = if is_warning {
+                Style::new().yellow()
+            } else {
+                Style::new().red()
+            };
+            lines.push(styled(style, &format!("  ↳ {error}"), color));
         }
         lines.extend(parse_issue_lines(stats, color, sample_basenames));
     }
 
-    lines.push(render_total_row(&total, &widths, &separator, color));
     lines
 }
 
@@ -806,5 +818,48 @@ mod tests {
         assert_eq!(human_ms(0), "0ms");
         assert_eq!(human_ms(999), "999ms");
         assert_eq!(human_ms(102_100), "102.1s");
+    }
+
+    #[test]
+    fn diagnostics_and_samples_are_strictly_after_total() {
+        let mut summary = summary();
+        summary.sources[0].parse_issues = crate::parsers::ParseIssues {
+            malformed_lines: 1,
+            samples: vec![crate::parsers::ParseIssueSample {
+                source: SourceKind::Codex,
+                path_hash: "safe-hash".to_string(),
+                offset: 12,
+                kind: crate::parsers::ParseIssueKind::Malformed,
+                reason: String::new(),
+            }],
+            ..Default::default()
+        };
+        let lines = format_summary_lines(&summary, false, false, WIDE);
+        let header_idx = lines
+            .iter()
+            .position(|l| l.contains("SOURCE"))
+            .expect("header");
+        let total_idx = lines
+            .iter()
+            .position(|l| l.starts_with("TOTAL"))
+            .expect("total");
+
+        // Between header and TOTAL, there are only the source table rows.
+        let table_data_lines = &lines[header_idx + 1..total_idx];
+        assert_eq!(table_data_lines.len(), summary.sources.len());
+        for line in table_data_lines {
+            assert!(!line.contains('↳'));
+            assert!(!line.contains("parse issues:"));
+        }
+
+        // Diagnostics appear after TOTAL.
+        let post_total_lines = &lines[total_idx + 1..];
+        assert!(
+            post_total_lines
+                .iter()
+                .any(|l| l.contains("OpenCode SQLite DB 缺失"))
+        );
+        assert!(post_total_lines.iter().any(|l| l.contains("parse issues:")));
+        assert!(post_total_lines.iter().any(|l| l.contains("malformed @12")));
     }
 }

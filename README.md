@@ -59,7 +59,7 @@ llmusage serve
 What this does:
 
 1. `init` creates `~/.llmusage/` and bootstraps `llmusage.db`; it does not modify third-party tool configuration.
-2. `sync` passively parses local sources incrementally and writes usage rows, 30-minute buckets, source-file diagnostics, and behavior facts. After the local driver it also pulls registered SSH remotes. Ordinary sync (bounded or unbounded) keeps legacy token-accounting history, skips that source's writes, and warns that repair is explicit `llmusage sync --rebuild --source <source>`.
+2. `sync` passively parses local sources incrementally and writes usage rows, 30-minute buckets, source-file diagnostics, and behavior facts. After the local driver it also pulls registered SSH remotes. Ordinary sync keeps legacy token-accounting history, skips that source's writes, and warns that repair is explicit `llmusage sync --rebuild --source <source>`. When stdin, stdout, and stderr are all terminals, with no `--json-events`, `--rebuild`, or `--recent-days`, it asks before rebuilding `antigravity` or `antigravity_ide`.
 3. `llmusage` shows the default daily report for the last 7 calendar days.
 4. `serve` keeps existing usage plus any token-accounting warning and starts the dashboard on `127.0.0.1` by default. It does not implicit-rebuild. Use `serve --public` only when you intentionally need remote access: it exposes an unauthenticated, non-TLS aggregate dashboard, but keeps project labels, logs, diagnostics, job state, and all write routes local-only.
 
@@ -163,16 +163,16 @@ llmusage codex-tracer --rebuild
 ## Safety defaults
 
 - No account login, device token, upload queue, or remote usage API call. SSH remote import is a user-triggered pull of normalized fields from a host you register; it does not upload usage.
-- Ordinary `llmusage sync` (bounded or unbounded) never rebuilds legacy token-accounting sources. It keeps that source's existing event, raw, bucket, turn, tool, cursor, and source_file data, skips that source's writes for the round, and warns that repair is `llmusage sync --rebuild --source <source>`. Other current sources in the same run still sync. Claude Code, Codex, Grok Build, Kimi Code, and Oh My Pi (OMP) use this ordinary-sync vs explicit-rebuild split.
+- Ordinary `llmusage sync` defaults to keeping legacy token-accounting history, skipping writes, and warning that repair is explicit `llmusage sync --rebuild --source <source>`. When stdin, stdout, and stderr are all terminals, with no `--json-events`, `--rebuild`, or `--recent-days`, users can explicitly accept loss for `antigravity` or `antigravity_ide` to rebuild that product in the same run; all other legacy sources remain skipped. Claude Code, Codex, Grok Build, Kimi Code, and Oh My Pi (OMP) use this ordinary-sync vs explicit-rebuild split.
 - Normal `llmusage sync` keeps imported usage when original source files are missing.
 - Sync diagnostics distinguish source failures from malformed records, skipped records, and incomplete token accounting. Record diagnostics show at most eight samples per source and report the number omitted. File-level `SKIPPED` in the summary table has a separate meaning.
 - Antigravity checks tracked-input coverage before usage decoding. When every selected product is blocked, sync preserves history and returns without decoding usage. The check still discovers and fingerprints files. A tracked path outside current discovery is reported separately from a physically missing file.
 - `llmusage sync --recent-days N` imports only the latest UTC event window (`1..=3650`) without advancing full-history cursors; `--parallelism` accepts `1..=32`.
 - Bounded ordinary sync also skips+warns for legacy sources. It must not reset full history.
 - `llmusage sync --rebuild` refuses lossy rebuilds unless you also pass `--allow-lossy-rebuild`.
-- `llmusage sync --rebuild --source antigravity` stages native input before atomically repairing CLI parser history; hook-era rows are retained with a historical-accounting warning. Use `--source antigravity_ide` for IDE. Ordinary sync preserves older accounting and asks for explicit repair.
+- `llmusage sync --rebuild --source antigravity` stages native input before atomically repairing CLI parser history; hook-era rows are retained with a historical-accounting warning. Use `--source antigravity_ide` for IDE. Ordinary sync preserves older accounting and asks for explicit repair, unless confirmed via the interactive terminal prompt.
 - `llmusage serve` keeps and shows existing data plus the accounting warning. It does not implicit-rebuild. A broken legacy source does not stop dashboard startup.
-- Ordinary sync ignores `--allow-lossy-rebuild` because it does not rebuild. Use `llmusage sync --rebuild --source <source>` explicitly; add `--allow-lossy-rebuild` only when you accept clearing unrebuildable history.
+- Ordinary sync ignores CLI `--allow-lossy-rebuild` because it does not rebuild automatically. Use the interactive prompt for Antigravity or `llmusage sync --rebuild --source <source>` explicitly; add `--allow-lossy-rebuild` only when you accept clearing unrebuildable history.
 - `llmusage diagnostics --forget-file <PATH> --source <SOURCE>` is the explicit write path for intentionally ignored source files.
 - `llmusage logs` queries local runtime logs and recent command audit rows without changing report stdout or `sync --json-events` stdout contracts.
 - `llmusage serve --public` exposes only aggregate dashboard totals/trends/models/sources/costs plus a minimal health response. Use the default loopback listener, normally through an SSH tunnel, for projects, logs, diagnostics, jobs, behavior detail, Usage analysis, and writes.

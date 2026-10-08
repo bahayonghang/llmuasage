@@ -34,11 +34,7 @@ fn legacy_warning_keeps_human_lines_and_json_stdout_separate() -> Result<()> {
         let stdout = String::from_utf8(output.stdout)?;
         let stderr = String::from_utf8(output.stderr)?;
         assert!(
-            stderr.contains("ordinary sync detected legacy token accounting"),
-            "{stderr}"
-        );
-        assert!(
-            stderr.contains("llmusage sync --rebuild --source codex"),
+            stderr.contains("skipped legacy token accounting sources"),
             "{stderr}"
         );
         if json {
@@ -49,6 +45,10 @@ fn legacy_warning_keeps_human_lines_and_json_stdout_separate() -> Result<()> {
             assert!(events.iter().any(|event| event["event"] == "finished"));
         } else {
             assert!(stdout.starts_with("Sync finished:"), "{stdout}");
+            assert!(
+                stdout.contains("llmusage sync --rebuild --source codex"),
+                "{stdout}"
+            );
             assert!(
                 stderr
                     .lines()
@@ -62,9 +62,11 @@ fn legacy_warning_keeps_human_lines_and_json_stdout_separate() -> Result<()> {
     assert!(
         read_recent_log_entries(&paths, 100, Some("warn"), None)?
             .iter()
-            .any(|entry| entry.message.as_deref().is_some_and(
-                |message| message.contains("ordinary sync detected legacy token accounting")
-            ))
+            .any(|entry| {
+                entry.message.as_deref().is_some_and(|message| {
+                    message.contains("skipped legacy token accounting sources")
+                })
+            })
     );
     Ok(())
 }

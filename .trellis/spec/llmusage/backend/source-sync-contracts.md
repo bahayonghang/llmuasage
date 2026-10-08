@@ -310,12 +310,26 @@
   seen/committed/stored plus human-readable bytes and parse/write durations)
   rendered by the pure `format_summary_lines_with_basenames` (tests may call
   `format_summary_lines`, which is the same formatter with an empty path map);
-  coloring is stdout-TTY-only and applied after width computation. It ends with a `TOTAL` row aggregated from
-  per-source stats. `SourceFinished` closes live stderr progress without
-  emitting a second permanent success sentence; failures and cancellation
-  remain diagnostic lines. Narrow rendering may truncate only the display
-  label, never numeric cells. `SyncEvent`/`SourceSyncStats` wire shapes are
-  unaffected by display changes.
+  coloring is stdout-TTY-only and applied after width computation. The table
+  contains only the header, aligned data rows, and an aggregated `TOTAL` row;
+  diagnostic lines (`↳`, parse issues, samples, warnings, and errors) appear
+  strictly after `TOTAL`, never between table data rows. Post-`TOTAL` notices
+  are grouped by source in table order, omitting private paths, path hashes,
+  and duplicate tracing text. Protected or blocked sources show `COMMITTED = 0`,
+  retained `STORED`, `CHANGED = 0`, `BYTES = 0`, and `WRITE = 0`; `FILES` shows
+  the discovered file count from read-only coverage. `SourceFinished` closes
+  live stderr progress without emitting a second permanent success sentence;
+  failures and cancellation remain diagnostic lines. Narrow rendering may
+  truncate only the display label, never numeric cells. `SyncEvent`/`SourceSyncStats`
+  wire shapes are unaffected by display changes.
+- Interactive recovery prompting: when stdin, stdout, and stderr are all
+  terminals, without `--json-events`, `--rebuild`, or `--recent-days`, and read-only
+  coverage detects recoverable loss for `antigravity` or `antigravity_ide`, the user
+  may interactively accept loss (`r`) or keep history (`k` or empty input/Enter).
+  Accepted products are rebuilt in the same worker lock and process via lossy
+  unbounded staged snapshot without pre-reset. Non-interactive runs, windowed runs,
+  redirected streams (stdout or stderr redirected, or stdin pipe), and non-Antigravity
+  legacy sources never prompt and never read stdin.
 
 ### 4. Validation & Error Matrix
 
@@ -349,9 +363,22 @@
   restore (not implemented); keep old rows and watermarks.
 - Remote `source-status` with no host/source marker -> `unknown`, never
   local-marker `current`.
+- Antigravity read-only coverage derives discovered, missing, and out-of-scope
+  counts purely from filesystem metadata without decoding usage or writing
+  cursors/inventory/marker; it ignores stale stored diagnostics.
 - Antigravity selected products all blocked by coverage -> zero usage decoder
   calls and no committed/replayed usage; preserve events, buckets, inventory,
-  cursors, and accounting markers. Record actual preflight elapsed time.
+  cursors, and accounting markers. Record actual preflight elapsed time;
+  set `FILES` to discovered file count, and leave `changed_files`, `bytes_scanned`,
+  and `write_ms` at 0.
+- Stream capabilities: stdin, stdout, or stderr redirected, stdin pipe, or
+  `--json-events` -> never prompts, never reads stdin.
+- Windowed ordinary sync discovers Antigravity gap -> does not prompt or rebuild;
+  post-table notice advises running `llmusage sync` without `--recent-days`
+  (interactive) or explicit rebuild without `--recent-days` (non-interactive).
+  Interactive wording follows the three terminal streams, not whether a prompt
+  callback is installed. `--recent-days` must not install a callback, and an
+  injected callback must not be called or flip the notice.
 - Existing tracked input absent from current discovery -> explain the coverage
   gap without claiming physical deletion; preserve the affected history.
 - Antigravity root discovery/access failure -> preserve both product groups,
@@ -390,6 +417,9 @@
   skipped while persisted history remains available.
 - Bad: treating an existing tracked JSON file outside native DB discovery as
   physically deleted, or ignoring an inaccessible unselected product root.
+- Good: interactive ordinary sync prompts for Antigravity loss, user enters 'r', rebuilding Antigravity in the same run while keeping skipped Codex.
+- Bad: ordinary sync prompts when stdout or stderr is redirected, stdin is a pipe, or `--recent-days` is specified.
+- Bad: treating an installed prompt callback as an interactive terminal, so a windowed terminal prints the explicit lossy command, or a windowed non-terminal run with a callback prints the choice notice.
 
 ### 6. Tests Required
 
@@ -414,6 +444,7 @@
 - Sync-summary unit/subprocess tests covering the `TOTAL` row, absent and empty
   sources, ANSI-free redirected output, stderr/stdout separation, removed
   completion sentences, and narrow/wide column budgets.
+- Interactive recovery tests assert that only confirmed Antigravity CLI/IDE products rebuild, direct enter keeps all, rebuild failure rolls back events and marker together, other legacy sources (e.g. Codex) are not prompted, windowed sync never prompts, and redirected streams or stdin pipes do not read stdin. Windowed notice tests cover both sentences: three terminals say to run `llmusage sync` without `--recent-days`; a redirected stream gives `llmusage sync --rebuild --source <source> --allow-lossy-rebuild` without `--recent-days`. An injected callback must neither be called nor change that wording.
 - Claude multi-project tests proving unchanged projects remain skipped while
   cross-file streaming/sidechain dedupe inside the changed project is stable.
 - Codex append tests asserting only the changed file and appended byte range are

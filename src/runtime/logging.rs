@@ -58,7 +58,7 @@ fn write_stderr(bytes: &[u8]) -> io::Result<()> {
         None => std::io::stderr().lock().write_all(bytes),
     }
 }
-
+#[cfg(test)]
 pub(crate) fn stderr_warning(message: &str) {
     let _ = write_stderr(format!("{message}\n").as_bytes());
 }

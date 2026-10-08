@@ -57,7 +57,7 @@ llmusage serve
 含义：
 
 1. `init` 创建 `~/.llmusage/` 并初始化 `llmusage.db`，不会修改第三方工具配置。
-2. `sync` 被动、增量解析本地真源，写入 usage 行、30 分钟 bucket、source-file 诊断和行为事实；本地 driver 之后还会拉取已注册的 SSH 远端。普通 sync（有界或无界）会保留旧版 token accounting 历史、跳过该来源本轮写入，并提示修复入口是显式 `llmusage sync --rebuild --source <source>`。
+2. `sync` 被动、增量解析本地真源，写入 usage 行、30 分钟 bucket、source-file 诊断和行为事实；本地 driver 之后还会拉取已注册的 SSH 远端。普通 sync 默认保留旧版 token accounting 历史、跳过该来源本轮写入，并提示显式修复；只有 stdin、stdout、stderr 都是终端，且没有 `--json-events`、`--rebuild` 或 `--recent-days` 时，才会询问并同轮重建 Antigravity CLI/IDE。
 3. `llmusage` 显示默认 daily 报表：所选时区下最近 7 个自然日。
 4. `serve` 会保留已有用量和 token-accounting 警告，然后默认在 `127.0.0.1` 启动浏览器 Dashboard。它不会隐式 rebuild。只有明确需要远程访问时才使用 `serve --public`：它会暴露不带认证和 TLS 的聚合 Dashboard，但 project label、日志、诊断、job 状态和所有写路由仍只允许本地访问。
 
@@ -161,16 +161,16 @@ llmusage codex-tracer --rebuild
 ## 安全默认值
 
 - 不需要账号登录、device token、上传队列或远端用量 API。SSH 远端导入是你触发的、从已注册主机拉取规范化字段，不会上传用量。
-- 普通 `llmusage sync`（有界或无界）不会重建旧版 token accounting 来源。它会保留该来源已有的 event、raw、bucket、turn、tool、cursor、source_file 数据，跳过该来源本轮写入，并提示修复入口是 `llmusage sync --rebuild --source <source>`。同一轮中的非 legacy 来源仍正常同步。Claude Code、Codex、Grok Build、Kimi Code、Oh My Pi（OMP）都按「普通同步 / 显式重建」区分。
+- 普通 `llmusage sync` 默认不会重建旧版 token accounting 来源。它会保留该来源已有的 event、raw、bucket、turn、tool、cursor、source_file 数据，跳过该来源本轮写入，并在表后提示修复入口是 `llmusage sync --rebuild --source <source>`。唯一例外是 stdin、stdout、stderr 都是终端，且没有 `--json-events`、`--rebuild` 或 `--recent-days` 时，用户可明确接受 `antigravity` 或 `antigravity_ide` 丢失并在本轮重建；其余旧记账来源保持跳过。Claude Code、Codex、Grok Build、Kimi Code、Oh My Pi（OMP）均按普通同步与显式重建隔离。
 - 普通 `llmusage sync` 遇到原始源文件缺失时会保留已导入 usage。
 - sync 诊断分别显示来源故障、格式错误记录、跳过记录和不完整 token accounting。每个来源最多显示 8 个记录样本，并标明未展示数量。摘要表格的 `SKIPPED` 单独统计文件跳过数。
 - Antigravity 在解码 usage 前检查已跟踪输入的覆盖情况。所有选中产品均受阻时，同步保留历史并提前返回，不解码 usage；仍执行文件发现和 fingerprint。当前发现范围不包含的已跟踪路径与物理缺失文件分别报告。
 - `llmusage sync --recent-days N` 只导入最近的 UTC 事件窗口（`1..=3650`），且不推进全历史 cursor；`--parallelism` 合法范围为 `1..=32`。
 - bounded 普通 sync 同样对 legacy 来源 skip+warn，不得清空全历史。
 - `llmusage sync --rebuild` 默认拒绝有损重建，除非同时传入 `--allow-lossy-rebuild`。
-- `llmusage sync --rebuild --source antigravity` 会先完整解析，再在一次事务中修复 CLI parser 历史；旧 hook 行保留并显示历史语义提示。IDE 使用 `--source antigravity_ide`。普通 sync 遇到旧计数版本会保留历史并提示显式修复。
+- `llmusage sync --rebuild --source antigravity` 会先完整解析，再在一次事务中修复 CLI parser 历史；旧 hook 行保留并显示历史语义提示。IDE 使用 `--source antigravity_ide`。普通 sync 遇到旧计数版本默认保留历史并提示显式修复，除非在人读交互终端中选择接受重建。
 - `llmusage serve` 会保留并展示已有数据和 accounting 警告，不会隐式 rebuild。损坏的 legacy 来源不得阻止看板启动。
-- 普通 sync 会忽略 `--allow-lossy-rebuild`，因为它不再重建。请显式执行 `llmusage sync --rebuild --source <source>`；只有在接受清空不可重建历史时才加 `--allow-lossy-rebuild`。
+- 普通 sync 忽略命令行传入的 `--allow-lossy-rebuild`。请通过交互提示或显式执行 `llmusage sync --rebuild --source <source>`；只有在接受清空不可重建历史时才确认或传入 `--allow-lossy-rebuild`。
 - `llmusage diagnostics --forget-file <PATH> --source <SOURCE>` 是显式忽略源文件的写入入口。
 - `llmusage logs` 查询本地运行日志和最近命令审计记录，不改变报表 stdout 或 `sync --json-events` stdout 合同。
 - `llmusage serve --public` 只暴露聚合看板的总量、趋势、模型、来源、成本和最小健康状态响应。项目、日志、诊断、任务状态、行为明细、用量分析和写操作必须使用默认回环地址监听，远程场景通常通过 SSH 隧道访问。

@@ -2,7 +2,7 @@
 //! status persistence, and summary construction.
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     future::Future,
     time::{Duration, Instant},
 };
@@ -227,7 +227,7 @@ async fn run_once_locked_with_remote_source(
 
     // Ordinary sync must not reset or parse legacy sources: mixing new
     // accounting into kept rows is forbidden. Cancel after detect still skips.
-    let skipped_legacy = if options.rebuild {
+    let mut skipped_legacy = if options.rebuild {
         reset_for_rebuild(store, options, &parser_sources, &remote_outcome.contacted)?;
         BTreeSet::new()
     } else {
@@ -236,15 +236,53 @@ async fn run_once_locked_with_remote_source(
             let source_names = source_names(&legacy);
             tracing::warn!(
                 sources = %source_names,
-                "ordinary sync detected legacy token accounting; keeping existing data and skipping writes for this round"
+                "skipped legacy token accounting sources"
             );
-            for source in &legacy {
-                crate::logging::stderr_warning(&SyncStatusStore::legacy_repair_warning(*source));
-            }
             exclude_legacy_sources_from_write_set(&mut parsers, &legacy);
         }
         legacy.into_iter().collect()
     };
+
+    let antigravity_selected = options
+        .source
+        .is_none_or(|s| s == SourceKind::Antigravity || s == SourceKind::AntigravityIde);
+
+    let antigravity_coverage = if antigravity_selected && !options.rebuild {
+        Some(crate::parsers::check_antigravity_coverage(store)?)
+    } else {
+        None
+    };
+
+    let mut accepted_antigravity = BTreeSet::new();
+    let mut prompt_attempted = false;
+    let can_prompt = !options.rebuild
+        && !options.json_events
+        && options.recent_days.is_none()
+        && !cancel.is_cancelled();
+
+    if let (true, Some(prompt), Some(coverage_map)) =
+        (can_prompt, &options.recovery_prompt, &antigravity_coverage)
+    {
+        for source in [SourceKind::Antigravity, SourceKind::AntigravityIde] {
+            if let Some(cov) = coverage_map
+                .get(&source)
+                .filter(|c| options.source.is_none_or(|s| s == source) && c.can_prompt_for_loss())
+            {
+                prompt_attempted = true;
+                let choice = prompt(source, cov);
+                if choice == crate::sync::types::AntigravityRecoveryChoice::AcceptLoss {
+                    accepted_antigravity.insert(source);
+                }
+            }
+        }
+    }
+
+    if !accepted_antigravity.is_empty() {
+        parsers.retain(|p| !accepted_antigravity.contains(&p.source()));
+        for source in &accepted_antigravity {
+            skipped_legacy.remove(source);
+        }
+    }
 
     // 2.1 计算并发度并按 source 顺序解析 + 即时写入
     let parallelism = request.parallelism();
@@ -286,7 +324,103 @@ async fn run_once_locked_with_remote_source(
     .await;
     let drive_result = drive_result?;
     let mut source_issues = drive_result.source_issues;
-    let sources = drive_result.stats;
+    let mut sources = drive_result.stats;
+
+    // Rebuild accepted Antigravity sources in the same worker lock and process
+    let rebuild_sources: Vec<SourceKind> = [SourceKind::Antigravity, SourceKind::AntigravityIde]
+        .into_iter()
+        .filter(|s| accepted_antigravity.contains(s))
+        .collect();
+
+    if !rebuild_sources.is_empty() && !cancel.is_cancelled() {
+        let progress_sender = sender.as_deref().cloned();
+        let mut progress_sink = move |event: SyncEvent| {
+            if let Some(sender) = &progress_sender {
+                let _ = sender.try_send(event);
+            }
+        };
+        let rebuild_result = crate::parsers::sync_antigravity_family(
+            store,
+            &mut writer,
+            &rebuild_sources,
+            true, // rebuild
+            true, // allow_lossy_rebuild
+            parallelism,
+            None, // recent_cutoff = None (unbounded)
+            cancel,
+            Some(&mut progress_sink),
+        )
+        .await;
+        let run_started_at = writer.run_started_at().to_string();
+
+        match rebuild_result {
+            Ok(result) => {
+                for mut stat in result.stats {
+                    stat.lock_wait_ms = lock_wait_ms;
+                    let source = stat.source;
+                    if stat.last_error.is_none() && !cancel.is_cancelled() {
+                        store.mark_current_token_accounting(source)?;
+                        let swept = store.source_files().sweep_missing(
+                            source,
+                            LOCAL_HOST_ID,
+                            &run_started_at,
+                        )?;
+                        if swept > 0 {
+                            info!(source = %source, swept, "标记 missing 文件完成");
+                        }
+                    } else {
+                        info!(
+                            source = %source,
+                            "source inventory incomplete; skipping missing sweep"
+                        );
+                    }
+                    emit_sync_event(
+                        sender.as_deref_mut(),
+                        SyncEvent::SourceFinished {
+                            source,
+                            stats: stat.clone(),
+                        },
+                    )
+                    .await?;
+                    sources.push(stat);
+                }
+                for (source, issues) in result.source_issues {
+                    source_issues.entry(source).or_default().extend(issues);
+                }
+            }
+            Err(err) => {
+                tracing::error!(error = %err, "Antigravity lossy rebuild failed");
+                for source in &rebuild_sources {
+                    let stored_events = stored_events_for_source(store, *source)?;
+                    let stat = SourceSyncStats {
+                        source: *source,
+                        stored_events,
+                        lock_wait_ms,
+                        last_error: Some(format!("rebuild failed: {err}")),
+                        ..Default::default()
+                    };
+                    info!(
+                        source = %source,
+                        "source inventory incomplete; skipping missing sweep"
+                    );
+                    emit_sync_event(
+                        sender.as_deref_mut(),
+                        SyncEvent::SourceFinished {
+                            source: *source,
+                            stats: stat.clone(),
+                        },
+                    )
+                    .await?;
+                    sources.push(stat);
+                }
+            }
+        }
+    } else {
+        for source in &rebuild_sources {
+            skipped_legacy.insert(*source);
+        }
+    }
+
     for source in &sources {
         if !cancel.is_cancelled() && source.last_error.is_none() {
             source_issues.entry(source.source).or_default();
@@ -312,15 +446,56 @@ async fn run_once_locked_with_remote_source(
             source.source,
             SourceKind::Antigravity | SourceKind::AntigravityIde
         );
-        let legacy_accounting =
+        let mut legacy_accounting =
             native_antigravity && store.has_legacy_token_accounting(source.source)?;
-        let accounting_warning = if legacy_accounting {
+        let mut accounting_warning = if legacy_accounting {
             Some(SyncStatusStore::legacy_repair_warning(source.source))
         } else if source.source == SourceKind::Antigravity {
             store.retained_antigravity_history_warning(LOCAL_HOST_ID)?
         } else {
             None
         };
+
+        if native_antigravity {
+            if accepted_antigravity.contains(&source.source) {
+                if source.last_error.is_none() {
+                    legacy_accounting = false;
+                    accounting_warning = None;
+                }
+            } else if let Some(cov) = antigravity_coverage
+                .as_ref()
+                .and_then(|m| m.get(&source.source))
+                .filter(|cov| {
+                    cov.can_prompt_for_loss()
+                        || cov.unreadable_count > 0
+                        || cov.discovery_incomplete
+                })
+            {
+                let notice = if cov.can_prompt_for_loss() {
+                    let is_interactive = options.interactive_terminal;
+                    let has_window = options.recent_days.is_some();
+                    let user_chose_keep =
+                        prompt_attempted && !accepted_antigravity.contains(&source.source);
+                    crate::parsers::format_antigravity_notice(
+                        source.source,
+                        cov,
+                        is_interactive,
+                        has_window,
+                        user_chose_keep,
+                    )
+                } else {
+                    crate::parsers::format_antigravity_blocked_notice(cov)
+                };
+                source.last_error = Some(notice.clone());
+                source.files_processed = cov.discovered_count;
+                source.changed_files = 0;
+                source.bytes_scanned = 0;
+                source.write_ms = 0;
+                source.events_seen = 0;
+                source.events_inserted = 0;
+                accounting_warning = Some(notice);
+            }
+        }
         sync_statuses.push(SourceSyncStatus {
             source: source.source.as_str().to_string(),
             files_processed: source.files_processed as i64,
@@ -350,9 +525,79 @@ async fn run_once_locked_with_remote_source(
     for source in &skipped_legacy {
         let stored_events = stored_events_for_source(store, *source)?;
         stored_queries += 1;
+        let native_antigravity = matches!(
+            *source,
+            SourceKind::Antigravity | SourceKind::AntigravityIde
+        );
+        let (files_processed, notice) = if native_antigravity {
+            if let Some(coverage_map) = &antigravity_coverage {
+                if let Some(cov) = coverage_map.get(source) {
+                    let recoverable = cov.can_prompt_for_loss();
+                    let blocked = cov.unreadable_count > 0 || cov.discovery_incomplete;
+                    if recoverable || blocked {
+                        let notice = if recoverable {
+                            let is_interactive = options.interactive_terminal;
+                            let has_window = options.recent_days.is_some();
+                            let user_chose_keep =
+                                prompt_attempted && !accepted_antigravity.contains(source);
+                            crate::parsers::format_antigravity_notice(
+                                *source,
+                                cov,
+                                is_interactive,
+                                has_window,
+                                user_chose_keep,
+                            )
+                        } else {
+                            crate::parsers::format_antigravity_blocked_notice(cov)
+                        };
+                        if !cancel.is_cancelled() {
+                            let issues = source_issues.entry(*source).or_default();
+                            if cov.missing_count > 0 {
+                                crate::domain::source_diagnostics::SourceIssue::record(
+                                    issues,
+                                    crate::domain::source_diagnostics::SourceIssueCode::TrackedMemberMissing,
+                                    cov.missing_count as u64,
+                                );
+                            }
+                            if cov.out_of_scope_count > 0 {
+                                crate::domain::source_diagnostics::SourceIssue::record(
+                                    issues,
+                                    crate::domain::source_diagnostics::SourceIssueCode::TrackedMemberOutOfScope,
+                                    cov.out_of_scope_count as u64,
+                                );
+                            }
+                            if cov.unreadable_count > 0 {
+                                crate::domain::source_diagnostics::SourceIssue::record(
+                                    issues,
+                                    crate::domain::source_diagnostics::SourceIssueCode::TrackedMemberUnreadable,
+                                    cov.unreadable_count as u64,
+                                );
+                            }
+                            if cov.discovery_incomplete {
+                                crate::domain::source_diagnostics::SourceIssue::record(
+                                    issues,
+                                    crate::domain::source_diagnostics::SourceIssueCode::DiscoveryIncomplete,
+                                    1,
+                                );
+                            }
+                        }
+                        (cov.discovered_count, notice)
+                    } else {
+                        (0, SyncStatusStore::legacy_repair_warning(*source))
+                    }
+                } else {
+                    (0, SyncStatusStore::legacy_repair_warning(*source))
+                }
+            } else {
+                (0, SyncStatusStore::legacy_repair_warning(*source))
+            }
+        } else {
+            (0, SyncStatusStore::legacy_repair_warning(*source))
+        };
+
         sync_statuses.push(SourceSyncStatus {
             source: source.as_str().to_string(),
-            files_processed: 0,
+            files_processed: files_processed as i64,
             changed_files: 0,
             bytes_scanned: 0,
             events_seen: 0,
@@ -361,17 +606,21 @@ async fn run_once_locked_with_remote_source(
             stored_events: stored_events as i64,
             token_accounting_version: store.token_accounting_version(*source)?,
             legacy_token_accounting: true,
-            token_accounting_warning: Some(SyncStatusStore::legacy_repair_warning(*source)),
+            token_accounting_warning: Some(notice.clone()),
             parse_ms: 0,
             write_ms: 0,
             lock_wait_ms: lock_wait_ms as i64,
-            parse_issues: Default::default(),
+            parse_issues: store
+                .sync_status()
+                .load_parse_issues(LOCAL_HOST_ID, *source)?,
             updated_at: crate::util::now_utc(),
         });
         source_stats.push(SourceSyncStats {
             source: *source,
+            files_processed,
             stored_events,
             lock_wait_ms,
+            last_error: Some(notice),
             ..SourceSyncStats::default()
         });
     }
@@ -403,6 +652,23 @@ async fn run_once_locked_with_remote_source(
             ..SourceSyncStats::default()
         });
     }
+    let descriptor_order: HashMap<&'static str, usize> = registry::registered_source_descriptors()
+        .iter()
+        .enumerate()
+        .map(|(i, d)| (d.kind.as_str(), i))
+        .collect();
+    source_stats.sort_by_key(|s| {
+        descriptor_order
+            .get(s.source.as_str())
+            .copied()
+            .unwrap_or(usize::MAX)
+    });
+    sync_statuses.sort_by_key(|s| {
+        descriptor_order
+            .get(s.source.as_str())
+            .copied()
+            .unwrap_or(usize::MAX)
+    });
     import_registered_remotes(
         store,
         &mut writer,

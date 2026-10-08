@@ -157,13 +157,13 @@ llmusage sync --rebuild --allow-lossy-rebuild
 
 先导入本地来源，再拉取已注册的 SSH 远端。单台不可达主机会被跳过并告警；本地 sync 成功时进程退出码仍为成功。未联系成功的远端不会被扫成 `missing`，也不会阻断 `--rebuild`。`--json-events` 还会发出 `remote_host_started`、`remote_host_finished` 和 `remote_host_skipped`。
 
-扫描来源前，bootstrap 可能升级未固定的内置定价目录并重算历史事件价格。普通 sync（有界或无界）会检测所选的旧版 token-accounting 来源，保留该来源已有数据，跳过该来源本轮写入，并提示修复入口是 `llmusage sync --rebuild --source <source>`。它不会 reset、不会解析被跳过的来源，也不会提升其 marker。同一轮中的非 legacy 来源仍正常同步。Claude Code、Codex、Grok Build、Kimi Code、Oh My Pi（OMP）都按「普通同步 / 显式重建」区分。
+扫描来源前，bootstrap 可能升级未固定的内置定价目录并重算历史事件价格。普通 sync 会检测所选的旧版 token-accounting 来源，保留该来源已有数据，跳过该来源本轮写入，并提示修复入口是 `llmusage sync --rebuild --source <source>`。只有 stdin、stdout、stderr 都是终端，且没有 `--json-events`、`--rebuild` 或 `--recent-days` 时，才能确认接受 `antigravity` 或 `antigravity_ide` 的丢失并在本轮重建；其他旧记账来源保持跳过。Claude Code、Codex、Grok Build、Kimi Code、Oh My Pi（OMP）都按「普通同步 / 显式重建」区分。
 
-人读 stderr 会显示目录版本、已处理/总事件数、汇总桶对账、被跳过 legacy 来源的显式修复警告、远端主机跳过告警和完成耗时。`--json-events` 在纯 NDJSON stdout 写同一生命周期，包括远端主机事件和既有 pricing 事件。普通 sync 不会把 `token_accounting_repair_finished` 当作修复成功发出。目录已是最新或固定了 snapshot/overlay 时不会输出 pricing 事件。`--allow-lossy-rebuild` 必须显式配合 `--rebuild`；普通 sync 会忽略该授权。
+人读 stderr 会显示目录版本、已处理/总事件数、汇总桶对账、远端主机跳过告警和完成耗时。`--json-events` 在纯 NDJSON stdout 写同一生命周期，包括远端主机事件和既有 pricing 事件。普通 sync 不会把 `token_accounting_repair_finished` 当作修复成功发出。目录已是最新或固定了 snapshot/overlay 时不会输出 pricing 事件。命令行上的 `--allow-lossy-rebuild` 必须显式配合 `--rebuild`；普通 sync 会忽略该命令行参数（在人读终端交互提示中可确认接受损失重建）。
 
 设置 `LLMUSAGE_LOG=info` 可记录结构化的定价开始/对账/完成文件日志，`debug` 还会记录节流后的页进度。默认 `warn` 级别会在重算持续超过 30 秒时记录一次存活告警；终端进度不受文件日志级别影响。
 
-人读 stdout 摘要只输出一张对齐表格：每个来源一行，并以 `TOTAL` 收尾；已完成进度留在 stderr，不再成为重复的永久成功行。表格按来源显示 `files`、`changed`、`skipped`、`seen`、`committed`、`stored_events`、bytes 和 parse/write 耗时。`skipped` 对文件型来源来自现有 cursor/fingerprint 证据，对 OpenCode 这种 DB 来源来自 SQLite 高水位 cursor；`committed` 是 SQLite 去重后本次新增写入数。重定向输出不含 ANSI，窄终端使用紧凑表头且不截断数值。
+人读 stdout 摘要只输出一张对齐表格：每个来源一行，并以 `TOTAL` 收尾；已完成进度留在 stderr，不再成为重复的永久成功行。诊断行、警告、错误和样本只在 `TOTAL` 之后按来源输出，不插入表格行之间。表格按来源显示 `files`、`changed`、`skipped`、`seen`、`committed`、`stored_events`、bytes 和 parse/write 耗时。被保护或阻断的来源显示 `COMMITTED 0`、保留的 `STORED`、`CHANGED 0`、`BYTES 0`、`WRITE 0`，`FILES` 为只读覆盖发现的文件数。`skipped` 对文件型来源来自现有 cursor/fingerprint 证据，对 OpenCode 这种 DB 来源来自 SQLite 高水位 cursor；`committed` 是 SQLite 去重后本次新增写入数。重定向输出不含 ANSI，窄终端使用紧凑表头且不截断数值。
 
 表格下方的记录诊断区分格式错误、超大记录、有意跳过和 accounting 异常。每个来源最多保留 8 个记录样本，摘要显示总数和未展示的样本数。同一个样本可以同时显示稳定原因码、定位值和安全文件名。JSONL 样本使用 `@` 标注非零字节偏移；ZCode 样本使用 `timestamp_ms=` 标注已有的毫秒时间戳定位值。不输出完整私有路径、路径哈希或记录正文。诊断中的 `skipped` 统计记录；表格中的 `SKIPPED` 统计文件。
 

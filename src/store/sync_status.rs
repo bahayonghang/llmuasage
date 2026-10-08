@@ -143,6 +143,34 @@ impl<'a> SyncStatusStore<'a> {
         self.save_source_sync_statuses_with_issues(host_id, statuses, &SourceIssues::new())
     }
 
+    /// Record-level parse samples already stored for one source.
+    ///
+    /// Missing rows and empty JSON yield an empty sample list. Callers that
+    /// rewrite source-level coverage keep these samples instead of clearing them.
+    pub(crate) fn load_parse_issues(
+        &self,
+        host_id: &str,
+        source: SourceKind,
+    ) -> Result<crate::models::ParseIssues> {
+        let conn = self.store.open_connection()?;
+        let json: Option<String> = conn
+            .query_row(
+                "SELECT parse_issues_json FROM source_sync_status WHERE host_id=?1 AND source=?2",
+                params![host_id, source.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(json) = json else {
+            return Ok(crate::models::ParseIssues::default());
+        };
+        let diagnostics: PersistedDiagnostics =
+            serde_json::from_str(&json).map_err(|source| LlmusageError::Parse {
+                context: "source sync diagnostics",
+                source,
+            })?;
+        Ok(diagnostics.parse_issues)
+    }
+
     pub(crate) fn load_source_issues(&self, host_id: &str) -> Result<SourceIssues> {
         let conn = self.store.open_connection()?;
         let mut stmt = conn

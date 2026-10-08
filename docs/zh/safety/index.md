@@ -51,15 +51,17 @@ sync 失败。标题只反映锁占用、最近一次 usage-import 失败、空�
 本地库保留事件数仍在同步详情中可追溯。前台同步会在释放 worker lock 前写入 `run_log`，
 因此看板中的最近命令与 `finished_at` 会跟随本次运行一起更新。
 
-## 普通 sync 自动修复安全的旧版 accounting
+## 普通 sync 默认保留旧版 accounting
 
-普通无界 `llmusage sync` 会检测本次所选 parser 来源是否仍使用旧版 token-accounting
-合约。修改数据前先告警，并对全部自动目标检查缺失输入和受保护历史；全部安全时，只
-reset legacy 子集，且每个所选来源只解析一次。
+普通 `llmusage sync` 会检测本次所选 parser 来源是否仍使用旧版 token-accounting
+合约。默认情况下，它保留该来源已有的历史、cursor 和 accounting marker，跳过该来源
+本轮写入，并提示需要显式修复（`llmusage sync --rebuild --source <source>`）。同一轮
+中的其他口径已更新来源仍可正常同步。
 
-任一目标存在有损风险时，不会 reset 任何自动目标。请恢复源文件后重新运行普通 sync；
-只有明确接受文档所述删除时才使用显式 rebuild 参数。`sync --recent-days N` 永远不会
-自动修复旧版 accounting，因为全量 reset 后只做 bounded import 会丢掉窗口外历史。
+唯一例外是 stdin、stdout、stderr 都是终端，且没有 `--recent-days` 和 `--json-events` 的运行：当只读覆盖检测到
+`antigravity` 或 `antigravity_ide` 存在可恢复缺口时，用户可明确接受丢失并在本轮同
+步中重建该产品。其余旧记账来源保持跳过。带 `--recent-days` 的普通 sync 永远不会询问
+或重建，因为有界同步不得清空或重置全量历史。
 
 ## rebuild 可能有破坏性
 
@@ -77,15 +79,13 @@ llmusage sync --rebuild --allow-lossy-rebuild
 
 只有当你接受清掉不可重建历史时才使用。
 
-## Dashboard 启动迁移
+## Dashboard 启动保留旧版历史
 
 `llmusage serve` 会在绑定本地端口前检查 parser-backed 来源是否使用旧版 token 统计
-口径。只有追踪的输入文件仍然可用时，才会自动逐源重建。存在有损重建风险的来源会告警并
-跳过：历史仍可读取，普通写入继续被 guard 拒绝，Dashboard 也会继续启动。来源通过安全
-预检后若发生意外错误，则会终止启动。
+口径。它保留已有数据并展示统计口径警告，不会自动重建 legacy 来源。历史仍可读取，普通
+写入继续被 guard 拒绝，Dashboard 也会继续启动。
 
-普通 sync 与启动迁移两条自动路径都永远不会启用 `--allow-lossy-rebuild`，
-parserless 来源也不是迁移目标。
+`llmusage serve` 永远不会启用 `--allow-lossy-rebuild`，parserless 来源也不是迁移目标。
 
 ## 诊断缺失源文件
 

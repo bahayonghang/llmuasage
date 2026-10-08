@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    io::{self, IsTerminal, Write},
+    io::{self, BufRead, BufReader, IsTerminal, Write},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -151,20 +151,96 @@ fn write_record<W: Write>(out: &Arc<Mutex<W>>, record: &ShardRecord) -> Result<(
     Ok(())
 }
 
-pub async fn run_with_options(app: &AppContext, options: SyncRunOptions) -> Result<()> {
-    options.validate()?;
-    /*
-     * ========================================================================
-     * 步骤1：执行全量本地真源同步
-     * ========================================================================
-     * 目标：
-     * 1) 拿 SQLite 租约锁，避免多个 sync worker 并发
-     * 2) 并行解析已注册的本地真源
-     * 3) 用单 writer 批量落库并记录 run_log
-     */
-    info!("开始执行全量本地真源同步");
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SyncStreamCapabilities {
+    pub stdin_is_terminal: bool,
+    pub stdout_is_terminal: bool,
+    pub stderr_is_terminal: bool,
+}
 
-    // 1.1 建立 store、申请租约锁、回收脏 run
+impl SyncStreamCapabilities {
+    pub fn detect() -> Self {
+        Self {
+            stdin_is_terminal: io::stdin().is_terminal(),
+            stdout_is_terminal: io::stdout().is_terminal(),
+            stderr_is_terminal: io::stderr().is_terminal(),
+        }
+    }
+
+    pub fn can_prompt(&self, options: &SyncRunOptions) -> bool {
+        !options.json_events
+            && !options.rebuild
+            && options.recent_days.is_none()
+            && self.stdin_is_terminal
+            && self.stdout_is_terminal
+            && self.stderr_is_terminal
+    }
+
+    /// True when the human post-table notice should speak to a person at a terminal.
+    ///
+    /// `--recent-days` still counts: that run must not prompt, but it should
+    /// tell the operator to rerun without the window. `--json-events` does not.
+    pub fn interactive_terminal(&self, options: &SyncRunOptions) -> bool {
+        !options.json_events
+            && self.stdin_is_terminal
+            && self.stdout_is_terminal
+            && self.stderr_is_terminal
+    }
+}
+
+pub async fn run_with_options(app: &AppContext, options: SyncRunOptions) -> Result<()> {
+    run_with_options_and_streams(app, options, SyncStreamCapabilities::detect())
+        .await
+        .map(|_| ())
+}
+
+pub(crate) async fn run_with_options_and_streams(
+    app: &AppContext,
+    options: SyncRunOptions,
+    streams: SyncStreamCapabilities,
+) -> Result<SyncSummary> {
+    run_with_prompt_io(
+        app,
+        options,
+        streams,
+        BufReader::new(io::stdin()),
+        io::stderr(),
+    )
+    .await
+}
+
+/// Production sync entry with an explicit prompt reader.
+///
+/// The reader is touched only when `streams.can_prompt` is true and no choice
+/// callback is already installed. Redirected or JSON runs drop it unread.
+pub(crate) async fn run_with_prompt_io<R, W>(
+    app: &AppContext,
+    mut options: SyncRunOptions,
+    streams: SyncStreamCapabilities,
+    reader: R,
+    writer: W,
+) -> Result<SyncSummary>
+where
+    R: BufRead + Send + 'static,
+    W: Write + Send + 'static,
+{
+    options.interactive_terminal = streams.interactive_terminal(&options);
+    if streams.can_prompt(&options) && options.recovery_prompt.is_none() {
+        let reader = Arc::new(Mutex::new(reader));
+        let writer = Arc::new(Mutex::new(writer));
+        options.recovery_prompt = Some(Arc::new(move |source, coverage| {
+            let mut reader = reader.lock().expect("prompt stdin lock");
+            let mut writer = writer.lock().expect("prompt stderr lock");
+            crate::parsers::antigravity::prompt_recovery_choice(
+                &mut *reader,
+                &mut *writer,
+                source,
+                coverage,
+            )
+        }));
+    }
+    options.validate()?;
+    info!("开始执行全量本地真源同步");
     let store = Store::new(&app.paths)?;
     if options.json_events {
         run_with_json_events(app, &store, &options).await
@@ -177,7 +253,7 @@ async fn run_with_human_events(
     app: &AppContext,
     store: &Store,
     options: &SyncRunOptions,
-) -> Result<()> {
+) -> Result<SyncSummary> {
     // 渲染器与 guard 的生命周期属于命令函数本身：bootstrap/锁阶段的 `?`
     // 提前返回同样经 Drop 完成终端清理，不依赖 reporter task 是否已 spawn。
     let renderer = Arc::new(Mutex::new(sync_progress::stderr_renderer()));
@@ -286,14 +362,14 @@ async fn run_with_human_events(
     print_summary(&summary, options, store);
 
     info!("完成全量本地真源同步");
-    Ok(())
+    Ok(summary)
 }
 
 async fn run_with_json_events(
     app: &AppContext,
     store: &Store,
     options: &SyncRunOptions,
-) -> Result<()> {
+) -> Result<SyncSummary> {
     let (mut tx, mut rx) = mpsc::channel(128);
     // JSON 路径只接取消 token，不挂渲染器；driver 在多 parser 的取消边界自行
     // 发 Cancelled，单 parser（--source）取消时 NDJSON 以 finished 收尾。
@@ -390,7 +466,7 @@ async fn run_with_json_events(
     // human 路径对称、确保任务资源已释放。
     ctrl_c_task.abort();
     let _ = ctrl_c_task.await;
-    result.map(|_| ())
+    result
 }
 
 fn print_summary(summary: &SyncSummary, options: &SyncRunOptions, store: &Store) {
@@ -657,6 +733,480 @@ mod tests {
         assert!(files_before > 0);
         assert!(cursors_before > 0);
         assert!(store.current_worker_lock()?.is_none());
+        Ok(())
+    }
+
+    struct SpyReader {
+        seen: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        data: Vec<u8>,
+        pos: usize,
+    }
+
+    impl std::io::Read for SpyReader {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.seen.store(true, std::sync::atomic::Ordering::SeqCst);
+            let rest = &self.data[self.pos..];
+            let n = rest.len().min(buf.len());
+            buf[..n].copy_from_slice(&rest[..n]);
+            self.pos += n;
+            Ok(n)
+        }
+    }
+
+    impl std::io::BufRead for SpyReader {
+        fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+            self.seen.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(&self.data[self.pos..])
+        }
+
+        fn consume(&mut self, amt: usize) {
+            self.pos += amt;
+        }
+    }
+
+    struct FailingReader;
+
+    impl std::io::Read for FailingReader {
+        fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("failing reader was read"))
+        }
+    }
+
+    impl std::io::BufRead for FailingReader {
+        fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+            Err(std::io::Error::other("failing reader was read"))
+        }
+
+        fn consume(&mut self, _: usize) {}
+    }
+
+    struct EnvGuard {
+        key: &'static str,
+        prev: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: impl AsRef<std::path::Path>) -> Self {
+            let prev = std::env::var(key).ok();
+            unsafe { std::env::set_var(key, value.as_ref()) };
+            Self { key, prev }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.prev {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
+    fn seed_promptable_antigravity(store: &Store) -> Result<()> {
+        store.open_connection()?.execute_batch(
+            "INSERT INTO usage_event(
+                event_key, source, model, event_at, hour_start,
+                input_tokens, cache_read_tokens, cache_creation_tokens,
+                output_tokens, reasoning_output_tokens, total_tokens, created_at
+             ) VALUES (
+                'antigravity:test:event', 'antigravity', 'gemini-2.5-pro',
+                '2026-07-15T03:00:00Z', '2026-07-15T03:00:00Z',
+                20, 0, 0, 5, 0, 25, '2026-07-15T03:00:00Z'
+             );
+             INSERT INTO source_cursor(source, cursor_key, file_path, updated_at)
+             VALUES ('antigravity', 'antigravity:test', '/missing/antigravity-history.jsonl', '2026-07-15T03:00:00Z');
+             INSERT INTO source_file(source, file_path, state, last_state_change_at)
+             VALUES ('antigravity', '/missing/antigravity-history.jsonl', 'missing', '2026-07-15T03:00:00Z');",
+        )?;
+        store.set_meta_value("token_accounting_version.antigravity", "2")?;
+        Ok(())
+    }
+
+    #[test]
+    fn stream_capabilities_decision_matrix() {
+        let all_terminals = SyncStreamCapabilities {
+            stdin_is_terminal: true,
+            stdout_is_terminal: true,
+            stderr_is_terminal: true,
+        };
+        let default_opts = SyncRunOptions::default();
+        assert!(all_terminals.can_prompt(&default_opts));
+        assert!(all_terminals.interactive_terminal(&default_opts));
+
+        // stdout-only redirected
+        let stdout_redirect = SyncStreamCapabilities {
+            stdin_is_terminal: true,
+            stdout_is_terminal: false,
+            stderr_is_terminal: true,
+        };
+        assert!(!stdout_redirect.can_prompt(&default_opts));
+        assert!(!stdout_redirect.interactive_terminal(&default_opts));
+
+        // stderr-only redirected
+        let stderr_redirect = SyncStreamCapabilities {
+            stdin_is_terminal: true,
+            stdout_is_terminal: true,
+            stderr_is_terminal: false,
+        };
+        assert!(!stderr_redirect.can_prompt(&default_opts));
+        assert!(!stderr_redirect.interactive_terminal(&default_opts));
+
+        // stdin pipe
+        let stdin_pipe = SyncStreamCapabilities {
+            stdin_is_terminal: false,
+            stdout_is_terminal: true,
+            stderr_is_terminal: true,
+        };
+        assert!(!stdin_pipe.can_prompt(&default_opts));
+        assert!(!stdin_pipe.interactive_terminal(&default_opts));
+
+        // --json-events never prompts
+        let json_opts = SyncRunOptions {
+            json_events: true,
+            ..Default::default()
+        };
+        assert!(!all_terminals.can_prompt(&json_opts));
+        assert!(!all_terminals.interactive_terminal(&json_opts));
+
+        // --rebuild never prompts
+        let rebuild_opts = SyncRunOptions {
+            rebuild: true,
+            ..Default::default()
+        };
+        assert!(!all_terminals.can_prompt(&rebuild_opts));
+
+        // --recent-days never prompts
+        let window_opts = SyncRunOptions {
+            recent_days: Some(7),
+            ..Default::default()
+        };
+        assert!(!all_terminals.can_prompt(&window_opts));
+        assert!(all_terminals.interactive_terminal(&window_opts));
+    }
+
+    #[test]
+    fn prompt_recovery_choice_parsing_and_retry() {
+        let coverage = crate::parsers::antigravity::AntigravityProductCoverage {
+            source: SourceKind::Antigravity,
+            discovered_count: 10,
+            new_files_count: 2,
+            tracked_count: 5,
+            stored_events: 100,
+            missing_count: 1,
+            out_of_scope_count: 1,
+            unreadable_count: 0,
+            discovery_incomplete: false,
+        };
+
+        // Empty input -> Keep
+        let mut out = Vec::new();
+        let mut reader = std::io::Cursor::new(b"\n");
+        assert_eq!(
+            crate::parsers::antigravity::prompt_recovery_choice(
+                &mut reader,
+                &mut out,
+                SourceKind::Antigravity,
+                &coverage
+            ),
+            crate::sync::types::AntigravityRecoveryChoice::Keep
+        );
+
+        // 'k' -> Keep
+        let mut out = Vec::new();
+        let mut reader = std::io::Cursor::new(b"k\n");
+        assert_eq!(
+            crate::parsers::antigravity::prompt_recovery_choice(
+                &mut reader,
+                &mut out,
+                SourceKind::Antigravity,
+                &coverage
+            ),
+            crate::sync::types::AntigravityRecoveryChoice::Keep
+        );
+
+        // 'r' -> AcceptLoss
+        let mut out = Vec::new();
+        let mut reader = std::io::Cursor::new(b"r\n");
+        assert_eq!(
+            crate::parsers::antigravity::prompt_recovery_choice(
+                &mut reader,
+                &mut out,
+                SourceKind::Antigravity,
+                &coverage
+            ),
+            crate::sync::types::AntigravityRecoveryChoice::AcceptLoss
+        );
+
+        // Invalid input then 'r' -> AcceptLoss
+        let mut out = Vec::new();
+        let mut reader = std::io::Cursor::new(b"invalid\nr\n");
+        assert_eq!(
+            crate::parsers::antigravity::prompt_recovery_choice(
+                &mut reader,
+                &mut out,
+                SourceKind::Antigravity,
+                &coverage
+            ),
+            crate::sync::types::AntigravityRecoveryChoice::AcceptLoss
+        );
+
+        // Invalid input then 'x' -> Keep
+        let mut out = Vec::new();
+        let mut reader = std::io::Cursor::new(b"invalid\nx\n");
+        assert_eq!(
+            crate::parsers::antigravity::prompt_recovery_choice(
+                &mut reader,
+                &mut out,
+                SourceKind::Antigravity,
+                &coverage
+            ),
+            crate::sync::types::AntigravityRecoveryChoice::Keep
+        );
+    }
+
+    #[tokio::test]
+    async fn stdin_pipe_with_choice_text_and_failing_stdin_skips_without_reading() -> Result<()> {
+        let temp = tempfile::TempDir::new()?;
+        let home = temp.path().join("home");
+        std::fs::create_dir_all(&home)?;
+        let _gemini = EnvGuard::set("GEMINI_CLI_HOME", home.join(".gemini"));
+        let _home = EnvGuard::set("HOME", &home);
+        let _profile = EnvGuard::set("USERPROFILE", &home);
+        let paths = crate::paths::AppPaths::with_root(temp.path().join(".llmusage"))?;
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+        seed_promptable_antigravity(&store)?;
+        let events_before: i64 = store.open_connection()?.query_row(
+            "SELECT COUNT(*) FROM usage_event WHERE source = 'antigravity'",
+            [],
+            |row| row.get(0),
+        )?;
+        let app = AppContext {
+            paths,
+            current_exe: std::env::current_exe()?,
+        };
+        let forbidden = [
+            (
+                "stdout redirect",
+                SyncStreamCapabilities {
+                    stdin_is_terminal: true,
+                    stdout_is_terminal: false,
+                    stderr_is_terminal: true,
+                },
+                SyncRunOptions {
+                    source: Some(SourceKind::Antigravity),
+                    ..Default::default()
+                },
+            ),
+            (
+                "stderr redirect",
+                SyncStreamCapabilities {
+                    stdin_is_terminal: true,
+                    stdout_is_terminal: true,
+                    stderr_is_terminal: false,
+                },
+                SyncRunOptions {
+                    source: Some(SourceKind::Antigravity),
+                    ..Default::default()
+                },
+            ),
+            (
+                "stdin pipe",
+                SyncStreamCapabilities {
+                    stdin_is_terminal: false,
+                    stdout_is_terminal: true,
+                    stderr_is_terminal: true,
+                },
+                SyncRunOptions {
+                    source: Some(SourceKind::Antigravity),
+                    ..Default::default()
+                },
+            ),
+            (
+                "json events",
+                SyncStreamCapabilities {
+                    stdin_is_terminal: true,
+                    stdout_is_terminal: true,
+                    stderr_is_terminal: true,
+                },
+                SyncRunOptions {
+                    source: Some(SourceKind::Antigravity),
+                    json_events: true,
+                    ..Default::default()
+                },
+            ),
+        ];
+        for (name, streams, options) in forbidden {
+            let seen = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let reader = SpyReader {
+                seen: std::sync::Arc::clone(&seen),
+                data: b"r\n".to_vec(),
+                pos: 0,
+            };
+            let result =
+                run_with_prompt_io(&app, options.clone(), streams, reader, Vec::<u8>::new()).await;
+            assert!(
+                result.is_ok(),
+                "{name} must skip without reading stdin: {result:?}"
+            );
+            assert!(
+                !seen.load(std::sync::atomic::Ordering::SeqCst),
+                "{name} read stdin"
+            );
+            let failing_res =
+                run_with_prompt_io(&app, options, streams, FailingReader, Vec::<u8>::new()).await;
+            assert!(
+                failing_res.is_ok(),
+                "{name} must not call a stdin that fails on first read: {failing_res:?}"
+            );
+        }
+        assert_eq!(
+            store.token_accounting_version(SourceKind::Antigravity)?,
+            Some(2)
+        );
+        let events_after: i64 = store.open_connection()?.query_row(
+            "SELECT COUNT(*) FROM usage_event WHERE source = 'antigravity'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(events_before, events_after);
+
+        let seen = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let reader = SpyReader {
+            seen: std::sync::Arc::clone(&seen),
+            data: b"k\n".to_vec(),
+            pos: 0,
+        };
+        let prompted = run_with_prompt_io(
+            &app,
+            SyncRunOptions {
+                source: Some(SourceKind::Antigravity),
+                ..Default::default()
+            },
+            SyncStreamCapabilities {
+                stdin_is_terminal: true,
+                stdout_is_terminal: true,
+                stderr_is_terminal: true,
+            },
+            reader,
+            Vec::<u8>::new(),
+        )
+        .await;
+        assert!(prompted.is_ok(), "{prompted:?}");
+        assert!(
+            seen.load(std::sync::atomic::Ordering::SeqCst),
+            "a fully interactive gap must read the prompt stdin"
+        );
+        assert_eq!(
+            store.token_accounting_version(SourceKind::Antigravity)?,
+            Some(2),
+            "keep must not rebuild"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn windowed_terminal_notice_does_not_read_stdin() -> Result<()> {
+        let temp = tempfile::TempDir::new()?;
+        let home = temp.path().join("home");
+        std::fs::create_dir_all(&home)?;
+        let _gemini = EnvGuard::set("GEMINI_CLI_HOME", home.join(".gemini"));
+        let _home = EnvGuard::set("HOME", &home);
+        let _profile = EnvGuard::set("USERPROFILE", &home);
+        let paths = crate::paths::AppPaths::with_root(temp.path().join(".llmusage"))?;
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+        seed_promptable_antigravity(&store)?;
+        let events_before: i64 = store.open_connection()?.query_row(
+            "SELECT COUNT(*) FROM usage_event WHERE source = 'antigravity'",
+            [],
+            |row| row.get(0),
+        )?;
+        let app = AppContext {
+            paths,
+            current_exe: std::env::current_exe()?,
+        };
+        let cases = [
+            (
+                "interactive window",
+                SyncStreamCapabilities {
+                    stdin_is_terminal: true,
+                    stdout_is_terminal: true,
+                    stderr_is_terminal: true,
+                },
+                "without `--recent-days` to choose recovery",
+                "--allow-lossy-rebuild",
+            ),
+            (
+                "redirected window",
+                SyncStreamCapabilities {
+                    stdin_is_terminal: true,
+                    stdout_is_terminal: false,
+                    stderr_is_terminal: true,
+                },
+                "do not pass `--recent-days`",
+                "to choose recovery",
+            ),
+        ];
+        for (name, streams, present, absent) in cases {
+            let seen = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let reader = SpyReader {
+                seen: std::sync::Arc::clone(&seen),
+                data: b"r\n".to_vec(),
+                pos: 0,
+            };
+            let summary = run_with_prompt_io(
+                &app,
+                SyncRunOptions {
+                    source: Some(SourceKind::Antigravity),
+                    recent_days: Some(7),
+                    ..Default::default()
+                },
+                streams,
+                reader,
+                Vec::<u8>::new(),
+            )
+            .await
+            .unwrap_or_else(|err| panic!("{name} failed: {err}"));
+            assert!(
+                !seen.load(std::sync::atomic::Ordering::SeqCst),
+                "{name} read stdin"
+            );
+            let notice = summary.sources[0]
+                .last_error
+                .as_deref()
+                .unwrap_or_else(|| panic!("{name} missing notice"));
+            assert!(notice.contains(present), "{name}: {notice}");
+            assert!(!notice.contains(absent), "{name}: {notice}");
+            let failing = run_with_prompt_io(
+                &app,
+                SyncRunOptions {
+                    source: Some(SourceKind::Antigravity),
+                    recent_days: Some(7),
+                    ..Default::default()
+                },
+                streams,
+                FailingReader,
+                Vec::<u8>::new(),
+            )
+            .await;
+            assert!(
+                failing.is_ok(),
+                "{name} must not call a stdin that fails on first read: {failing:?}"
+            );
+        }
+        assert_eq!(
+            store.token_accounting_version(SourceKind::Antigravity)?,
+            Some(2)
+        );
+        let events_after: i64 = store.open_connection()?.query_row(
+            "SELECT COUNT(*) FROM usage_event WHERE source = 'antigravity'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(events_before, events_after);
         Ok(())
     }
 }

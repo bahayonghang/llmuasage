@@ -385,6 +385,8 @@ async fn run_job(
         provider_map: None,
         json_events: false,
         allow_lossy_rebuild: false,
+        interactive_terminal: false,
+        recovery_prompt: None,
     };
     let app = AppContext {
         paths: store.paths.clone(),
