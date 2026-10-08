@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/llmusage/backend/pricing-catalog-contracts.md", "reason": "Acceptance rules for rates, tiers, and pinned catalogs"}
+{"file": ".trellis/tasks/10-08-auto-pricing-catalog/research/current-update-path.md", "reason": "Current gaps the check must still see closed"}
+{"file": ".trellis/tasks/10-08-auto-pricing-catalog/research/upstream-pricing-sources.md", "reason": "Upstream fetch and fallback behavior the change must match"}

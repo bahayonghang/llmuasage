@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/llmusage/backend/pricing-catalog-contracts.md", "reason": "Matcher, tier, pin, and embedded upgrade rules"}
+{"file": ".trellis/spec/llmusage/backend/index.md", "reason": "Backend checklist before catalog changes"}
+{"file": ".trellis/tasks/10-08-auto-pricing-catalog/research/current-update-path.md", "reason": "Why manual rows are the wrong fix and what import already does"}
+{"file": ".trellis/tasks/10-08-auto-pricing-catalog/research/upstream-pricing-sources.md", "reason": "LiteLLM and models.dev sources, and the cache rule this task follows"}
