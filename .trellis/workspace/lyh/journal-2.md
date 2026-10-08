@@ -283,3 +283,38 @@ sync 在解析前按来源刷新 LiteLLM 与 models.dev 价表：一小时内跳
 ### Next Steps
 
 - 未推送。
+
+
+## Session 77: 增加 llmusage clean 命令
+<!-- trellis-session: v=2 fp=4a06c75359c484e1 -->
+
+**Date**: 2026-10-08
+**Task**: 增加 llmusage clean 命令
+**Branch**: `dev`
+
+### Summary
+
+llmusage clean 默认用表格总览运行时目录。只有 --yes 才删除 backups 下的迁移副本和 baselines 里的普通文件；活库、配置备份、日志和价表保留。命令只写 stderr，不创建 logs/，也不读取 LLMUSAGE_HOME。
+
+### Main Changes
+
+- 9679131：新增 clean 命令、双语帮助，以及清理范围和日志初始化契约。
+- 任务 10-08-llmusage-clean 已完成并移到 archive/2026-10/。归档脚本因未跟踪旧路径提交失败，已只提交归档目录。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9679131524b8843e58015d07f928836f7405f567` | feat(清理): 增加 llmusage clean，用表格总览并可确认删除迁移副本 |
+
+### Testing
+
+- [OK] python scripts/ci-rust.py 通过：格式、clippy、测试和文档均为 0 失败。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 未推送。
