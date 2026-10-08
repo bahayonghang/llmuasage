@@ -76,4 +76,4 @@ windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
 tempfile = "3.27.0"
 proptest = "1.11.0"
 proc-macro2 = { version = "1.0.107", features = ["span-locations"] }
-syn = { version = "2.0.107", features = ["full", "visit"] }
+syn = { version = "3.0.3", features = ["full", "visit"] }
