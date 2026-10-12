@@ -1,19 +1,24 @@
+# Version-update pull requests are paused.
+# Dependabot was opening unreviewed bumps, including major upgrades
+# (for example syn 2 -> 3) and GitHub Action SHA pin moves.
+# Automated security fixes are a separate repository setting and are already off.
+# Raise open-pull-requests-limit above 0 to allow update PRs again.
 version: 2
 updates:
   - package-ecosystem: cargo
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 0
 
   - package-ecosystem: npm
     directory: /docs
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
