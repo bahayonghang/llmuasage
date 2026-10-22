@@ -390,3 +390,28 @@ llmusage clean 默认用表格总览运行时目录。只有 --yes 才删除 bac
 ### Next Steps
 
 - 原生普通窗口 CLI/TUI 验收为 NOT_RUN；未推送、安装或发布。
+
+
+## Session 80: sync 日志改为 token/费用汇总并折叠启动输出
+<!-- trellis-session: v=2 fp=c68dc07aa058a20f -->
+
+**Date**: 2026-10-21
+**Task**: sync 日志改为 token/费用汇总并折叠启动输出
+**Branch**: `dev`
+
+### Summary
+
+写入层累加本轮新增 token 与 cost_with_cache_usd（InsertedUsage）；sync 默认输出 ccusage 风格用量表，--verbose 保留十列管线表；schema 迁移折叠为一行、快速取锁不输出；中英文档与 source-sync 规范更新。真实数据核对 TOTAL 与 daily --json 一致。已知：web::tests::api_dashboard_applies_window_to_snapshot_sections 在 UTC 凌晨前后失败（干净代码同样失败）；新库第二次 sync 将 grok 判为 legacy token accounting，待单独排查。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `29dc6c2` | feat(同步): [AI] ✨ 写入时累加本轮新增 token 与估算费用 |
+| `eb97a03` | feat(终端): [AI] ✨ sync 汇总改为 token/费用视角并折叠启动日志 |
+| `187f77a` | docs(同步): [AI] 📝 更新 sync 用量汇总、--verbose 与输出契约 |
+| `6d93308` | chore(task): [AI] 📦 新增 sync 日志 token/费用汇总任务规划与实施记录 |
+
+### Status
+
+[OK] **Completed**
