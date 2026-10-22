@@ -352,7 +352,7 @@ pub(crate) fn notice_lines(
     let text = |english, chinese| language.select(english, chinese);
     let zh = language == Language::Chinese;
     let line = match notice {
-        RunNotice::LegacySkipped { source, retained } => if zh { format!("  保留历史：{retained} 条事件；跳过旧版 token 计数来源。修复：`llmusage sync --rebuild --source {source}`。") } else { format!("  History kept: {retained} events; legacy token accounting source skipped. Repair: `llmusage sync --rebuild --source {source}`.") },
+        RunNotice::LegacySkipped { source, retained } => if zh { format!("  保留历史：{retained} 条事件；跳过旧版 token 计数来源。修复：llmusage sync --rebuild --source {source}") } else { format!("  History kept: {retained} events; legacy token accounting source skipped. Repair: llmusage sync --rebuild --source {source}") },
         RunNotice::RecoveryOffered { coverage, .. } => if zh { format!("  已提供恢复选择：保留的历史 {} 条事件。", coverage.stored_events) } else { format!("  Recovery choice offered for {} preserved events.", coverage.stored_events) },
         RunNotice::RecoveryChoice { accepted, .. } => match (zh, accepted) {
             (true, true) => "  已明确接受有损重建；下列库存数不代表精确丢失数。".into(),
@@ -372,7 +372,7 @@ pub(crate) fn notice_lines(
                 lines.push(format!("  {}", text("Rebuilding discards missing/out-of-scope history and retains only currently parseable inputs.", "重建会丢弃缺失或范围外输入的历史，只保留当前可解析输入的重建结果。")));
                 if *windowed { lines.push(format!("  {}", text("Run sync without --recent-days to choose recovery interactively.", "去掉 --recent-days 后运行同步，可交互选择恢复方案。"))); }
                 else if !interactive && !kept { lines.push(format!("  {}", text("Run sync in a terminal to choose recovery; this noninteractive run kept history.", "在终端中运行同步以选择恢复方案；本轮非交互同步已保留历史。"))); }
-                lines.push(if zh { format!("  先恢复输入，或明确接受历史丢失：`llmusage sync --rebuild --source {source} --allow-lossy-rebuild`。") } else { format!("  Restore inputs, or explicitly accept history loss: `llmusage sync --rebuild --source {source} --allow-lossy-rebuild`.") });
+                lines.push(if zh { format!("  先恢复输入，或明确接受历史丢失：llmusage sync --rebuild --source {source} --allow-lossy-rebuild") } else { format!("  Restore inputs, or explicitly accept history loss: llmusage sync --rebuild --source {source} --allow-lossy-rebuild") });
             }
             return lines;
         },

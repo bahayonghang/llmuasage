@@ -5,7 +5,9 @@
 //! terminal. Widths are computed on plain text first; ANSI styles are applied
 //! only after alignment so escape sequences never skew column widths.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+
+use chrono::NaiveDate;
 
 use crate::common::i18n::{self, Language, text};
 use crate::sync::notices::RunNotice;
@@ -16,6 +18,10 @@ use crate::{
     commands::sync::SyncSummary,
     models::{ParseIssueSample, SourceKind},
     parsers::SourceSyncStats,
+    query::{
+        ReportTimezone,
+        reports::{self, TokenTotals},
+    },
 };
 
 const HEADERS: [&str; 10] = [
@@ -261,7 +267,7 @@ fn diagnostic_lines(
 /// Which table the final summary shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SummaryDetail {
-    /// Default: tokens and estimated cost of newly imported usage per source.
+    /// Default: last-7-days usage by date and source, read from the database.
     Usage,
     /// `--verbose`: the per-source pipeline table (files/events/bytes/timings).
     Pipeline,
@@ -269,9 +275,90 @@ pub enum SummaryDetail {
 
 /// Columns of the usage table; the two cache columns are dropped first when
 /// the terminal is too narrow.
-const USAGE_COLUMNS: usize = 7;
-const CACHE_COLUMNS: [usize; 2] = [3, 4];
+const USAGE_COLUMNS: usize = 8;
+const SOURCE_COLUMN: usize = 1;
+const CACHE_COLUMNS: [usize; 2] = [4, 5];
 
+/// One source's totals on one day of the usage window.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SourceUsage {
+    pub(crate) source: &'static str,
+    pub(crate) totals: TokenTotals,
+    pub(crate) unpriced: bool,
+}
+
+/// One calendar day of the usage window.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DayUsage {
+    pub(crate) date: String,
+    /// Sorted by estimated cost, highest first.
+    pub(crate) rows: Vec<SourceUsage>,
+}
+
+/// Usage of the last seven local days (today included), newest day first.
+/// Uses the same query, window and timezone as `llmusage daily`.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct WindowUsage {
+    pub(crate) since: NaiveDate,
+    pub(crate) until: NaiveDate,
+    pub(crate) days: Vec<DayUsage>,
+}
+
+/// Reads the summary window after the sync released its worker lock.
+pub(crate) fn load_window_usage(
+    store: &crate::store::Store,
+    source: Option<SourceKind>,
+) -> anyhow::Result<WindowUsage> {
+    let dashboard = crate::query::Dashboard::open(store)?;
+    let mut filter = reports::ReportFilter {
+        filter: crate::query::QueryFilter {
+            source,
+            timezone: ReportTimezone::Local,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    super::unified_report::apply_daily_default(&mut filter);
+    let (Some(since), Some(until)) = (filter.since, filter.until) else {
+        anyhow::bail!("daily default window was not applied");
+    };
+    let per_source = reports::load_daily_reports_by_source(dashboard.connection(), &filter)?;
+    Ok(pivot_window(since, until, per_source))
+}
+
+fn pivot_window(
+    since: NaiveDate,
+    until: NaiveDate,
+    per_source: Vec<(SourceKind, reports::DailyReport)>,
+) -> WindowUsage {
+    let mut by_date: BTreeMap<String, Vec<SourceUsage>> = BTreeMap::new();
+    for (source, report) in per_source {
+        for row in report.daily {
+            by_date.entry(row.date).or_default().push(SourceUsage {
+                source: source_label(source),
+                totals: row.totals,
+                unpriced: row.notes.unpriced,
+            });
+        }
+    }
+    let days = by_date
+        .into_iter()
+        .rev()
+        .map(|(date, mut rows)| {
+            rows.sort_by(|left, right| {
+                right
+                    .totals
+                    .estimated_cost_usd
+                    .total_cmp(&left.totals.estimated_cost_usd)
+                    .then(right.totals.total_tokens.cmp(&left.totals.total_tokens))
+            });
+            DayUsage { date, rows }
+        })
+        .collect();
+    WindowUsage { since, until, days }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn format_sync_report(
     summary: &SyncSummary,
     rebuild: bool,
@@ -280,6 +367,7 @@ pub(crate) fn format_sync_report(
     sample_basenames: &HashMap<String, String>,
     notices: &[RunNotice],
     detail: SummaryDetail,
+    window: Option<&WindowUsage>,
 ) -> Vec<String> {
     match detail {
         SummaryDetail::Pipeline => format_summary_lines_with_notices(
@@ -291,7 +379,24 @@ pub(crate) fn format_sync_report(
             notices,
         ),
         SummaryDetail::Usage => {
-            let mut lines = usage_summary_lines(summary, rebuild, color, terminal_width);
+            let mut lines = vec![styled(
+                Style::new().bold(),
+                text("Sync finished:", "同步完成："),
+                color,
+            )];
+            if rebuild {
+                lines.push(
+                    text(
+                        "- rebuild: reset parser-backed usage state source by source before sync",
+                        "- 重建：同步前按来源重置可重建的用量状态",
+                    )
+                    .into(),
+                );
+            }
+            if let Some(window) = window {
+                lines.extend(window_lines(window, color, terminal_width));
+            }
+            lines.push(styled(Style::new().dim(), &pipeline_line(summary), color));
             lines.extend(diagnostic_lines(
                 summary,
                 color,
@@ -304,122 +409,131 @@ pub(crate) fn format_sync_report(
     }
 }
 
-/// ccusage-style table of the tokens and cost this run imported, followed by
-/// one pipeline line. Sources without new usage are listed on one line.
-fn usage_summary_lines(
-    summary: &SyncSummary,
-    rebuild: bool,
-    color: bool,
-    terminal_width: usize,
-) -> Vec<String> {
+/// Title, date × source table (or the empty-window line), and footnotes.
+fn window_lines(window: &WindowUsage, color: bool, terminal_width: usize) -> Vec<String> {
+    let (since, until) = (window.since.to_string(), window.until.to_string());
     let mut lines = vec![styled(
         Style::new().bold(),
-        text("Sync finished:", "同步完成："),
+        &if i18n::current() == Language::Chinese {
+            format!("用量 · 最近 7 天（{since} → {until}，本地时间）")
+        } else {
+            format!("Usage · last 7 days ({since} → {until}, local time)")
+        },
         color,
     )];
-    if rebuild {
-        lines.push(
-            text(
-                "- rebuild: reset parser-backed usage state source by source before sync",
-                "- 重建：同步前按来源重置可重建的用量状态",
-            )
-            .into(),
-        );
-    }
-
-    let imported: Vec<&SourceSyncStats> = summary
-        .sources
-        .iter()
-        .filter(|stats| !stats.absent && has_new_usage(stats))
-        .collect();
-    let idle: Vec<&str> = summary
-        .sources
-        .iter()
-        .filter(|stats| !stats.absent && !has_new_usage(stats))
-        .map(|stats| source_label(stats.source))
-        .collect();
-
-    if imported.is_empty() {
-        lines.push(styled(
-            Style::new().green(),
-            text(
-                "✓ Up to date — no new usage imported.",
-                "✓ 已是最新：本轮没有导入新用量。",
-            ),
-            color,
-        ));
+    if window.days.is_empty() {
+        lines.push(text("No usage in the last 7 days.", "最近 7 天没有用量。").into());
     } else {
-        let mut total = crate::models::InsertedUsage::default();
-        for stats in &imported {
-            total.absorb(stats.inserted_usage);
+        let mut rows = Vec::new();
+        let mut total = TokenTotals::default();
+        let mut any_unpriced = false;
+        for (index, day) in window.days.iter().enumerate() {
+            if index > 0 {
+                rows.push(TableRow::Rule);
+            }
+            let mut subtotal = TokenTotals::default();
+            let mut day_unpriced = false;
+            for (position, usage) in day.rows.iter().enumerate() {
+                let date = if position == 0 { day.date.as_str() } else { "" };
+                rows.push(TableRow::Data(usage_cells(
+                    date,
+                    usage.source,
+                    &usage.totals,
+                    usage.unpriced,
+                )));
+                add_totals(&mut subtotal, &usage.totals);
+                day_unpriced |= usage.unpriced;
+            }
+            if day.rows.len() > 1 {
+                rows.push(TableRow::Subtotal(usage_cells(
+                    "",
+                    text("(total)", "（小计）"),
+                    &subtotal,
+                    day_unpriced,
+                )));
+            }
+            add_totals(&mut total, &subtotal);
+            any_unpriced |= day_unpriced;
         }
-        let rows: Vec<[String; USAGE_COLUMNS]> = imported
-            .iter()
-            .map(|stats| usage_cells(source_label(stats.source), &stats.inserted_usage))
-            .collect();
-        let total_row = usage_cells(text("TOTAL", "合计"), &total);
-        lines.extend(usage_table(&rows, &total_row, color, terminal_width));
-        if total.unpriced_events > 0 {
+        rows.push(TableRow::Rule);
+        rows.push(TableRow::Total(usage_cells(
+            text("TOTAL", "合计"),
+            "",
+            &total,
+            any_unpriced,
+        )));
+        lines.extend(usage_table(&rows, color, terminal_width));
+        if any_unpriced {
             lines.push(styled(
                 Style::new().dim(),
-                &if i18n::current() == Language::Chinese {
-                    format!(
-                        "* {} 条事件不在定价目录中，费用为下限。",
-                        group_digits(total.unpriced_events as i64)
-                    )
-                } else {
-                    format!(
-                        "* {} events have no catalog price; cost is a lower bound.",
-                        group_digits(total.unpriced_events as i64)
-                    )
-                },
+                text(
+                    "* Includes unpriced events; cost is a lower bound.",
+                    "* 含未定价事件，费用为下限。",
+                ),
                 color,
             ));
         }
     }
-    if !idle.is_empty() {
-        lines.push(styled(
-            Style::new().dim(),
-            &format!(
-                "{}{}",
-                text("No new usage: ", "无新增用量："),
-                idle.join(", ")
-            ),
-            color,
-        ));
-    }
-    lines.push(styled(Style::new().dim(), &pipeline_line(summary), color));
+    lines.push(styled(
+        Style::new().dim(),
+        text(
+            "Other ranges: llmusage daily --since YYYYMMDD --until YYYYMMDD",
+            "其他时间范围：llmusage daily --since YYYYMMDD --until YYYYMMDD",
+        ),
+        color,
+    ));
     lines
 }
 
-fn has_new_usage(stats: &SourceSyncStats) -> bool {
-    stats.events_inserted > 0 || stats.inserted_usage.total_tokens > 0
+fn add_totals(sum: &mut TokenTotals, add: &TokenTotals) {
+    sum.input_tokens = sum.input_tokens.saturating_add(add.input_tokens);
+    sum.cache_creation_tokens = sum
+        .cache_creation_tokens
+        .saturating_add(add.cache_creation_tokens);
+    sum.cache_read_tokens = sum.cache_read_tokens.saturating_add(add.cache_read_tokens);
+    sum.output_tokens = sum.output_tokens.saturating_add(add.output_tokens);
+    sum.reasoning_output_tokens = sum
+        .reasoning_output_tokens
+        .saturating_add(add.reasoning_output_tokens);
+    sum.total_tokens = sum.total_tokens.saturating_add(add.total_tokens);
+    sum.estimated_cost_usd += add.estimated_cost_usd;
 }
 
-fn usage_cells(label: &str, usage: &crate::models::InsertedUsage) -> [String; USAGE_COLUMNS] {
-    let mut cost = format_usd(usage.cost_usd());
-    if usage.unpriced_events > 0 {
+fn usage_cells(
+    date: &str,
+    source: &str,
+    totals: &TokenTotals,
+    unpriced: bool,
+) -> [String; USAGE_COLUMNS] {
+    let mut cost = format_usd(totals.estimated_cost_usd);
+    if unpriced {
         cost.push('*');
     }
     [
-        label.to_string(),
-        group_digits(usage.input_tokens),
-        group_digits(usage.output_tokens),
-        group_digits(usage.cache_creation_tokens),
-        group_digits(usage.cache_read_tokens),
-        group_digits(usage.total_tokens),
+        date.to_string(),
+        source.to_string(),
+        group_digits(totals.input_tokens),
+        group_digits(totals.output_tokens),
+        group_digits(totals.cache_creation_tokens),
+        group_digits(totals.cache_read_tokens),
+        group_digits(totals.total_tokens),
         cost,
     ]
 }
 
-fn usage_table(
-    rows: &[[String; USAGE_COLUMNS]],
-    total: &[String; USAGE_COLUMNS],
-    color: bool,
-    terminal_width: usize,
-) -> Vec<String> {
+enum TableRow {
+    Data([String; USAGE_COLUMNS]),
+    /// Per-day subtotal, shown only when a day has more than one source.
+    Subtotal([String; USAGE_COLUMNS]),
+    /// Separator between days and before the total.
+    Rule,
+    Total([String; USAGE_COLUMNS]),
+}
+
+fn usage_table(rows: &[TableRow], color: bool, terminal_width: usize) -> Vec<String> {
     let headers: [&str; USAGE_COLUMNS] = if i18n::current() == Language::Chinese {
         [
+            "日期",
             "来源",
             "输入",
             "输出",
@@ -430,6 +544,7 @@ fn usage_table(
         ]
     } else {
         [
+            "Date",
             "Source",
             "Input",
             "Output",
@@ -441,9 +556,11 @@ fn usage_table(
     };
     let mut widths: [usize; USAGE_COLUMNS] =
         std::array::from_fn(|index| display_width(headers[index]));
-    for cells in rows.iter().chain(std::iter::once(total)) {
-        for (index, cell) in cells.iter().enumerate() {
-            widths[index] = widths[index].max(display_width(cell));
+    for row in rows {
+        if let TableRow::Data(cells) | TableRow::Subtotal(cells) | TableRow::Total(cells) = row {
+            for (index, cell) in cells.iter().enumerate() {
+                widths[index] = widths[index].max(display_width(cell));
+            }
         }
     }
     let table_width = |columns: &[usize], widths: &[usize; USAGE_COLUMNS]| {
@@ -454,12 +571,11 @@ fn usage_table(
             + 1
     };
     let mut columns: Vec<usize> = (0..USAGE_COLUMNS).collect();
-    let min_source = display_width(headers[0]).max(display_width(&total[0]));
     let natural = table_width(&columns, &widths);
     if natural > terminal_width {
-        widths[0] = widths[0]
+        widths[SOURCE_COLUMN] = widths[SOURCE_COLUMN]
             .saturating_sub(natural - terminal_width)
-            .max(min_source);
+            .max(display_width(headers[SOURCE_COLUMN]));
     }
     let cache_hidden = table_width(&columns, &widths) > terminal_width;
     if cache_hidden {
@@ -481,10 +597,14 @@ fn usage_table(
             columns
                 .iter()
                 .map(|index| {
-                    let padded = if *index == 0 {
-                        pad(&fit_label(&cells[0], widths[0]), widths[0], Align::Left)
-                    } else {
-                        pad(&cells[*index], widths[*index], Align::Right)
+                    let padded = match *index {
+                        0 => pad(&cells[0], widths[0], Align::Left),
+                        SOURCE_COLUMN => pad(
+                            &fit_label(&cells[SOURCE_COLUMN], widths[SOURCE_COLUMN]),
+                            widths[SOURCE_COLUMN],
+                            Align::Left,
+                        ),
+                        _ => pad(&cells[*index], widths[*index], Align::Right),
                     };
                     match &style {
                         Some(style) => styled(style.clone(), &padded, color),
@@ -500,7 +620,7 @@ fn usage_table(
         columns
             .iter()
             .map(|index| {
-                let align = if *index == 0 {
+                let align = if *index <= SOURCE_COLUMN {
                     Align::Left
                 } else {
                     Align::Right
@@ -515,17 +635,20 @@ fn usage_table(
     ));
     lines.push(rule('├', '┼', '┤'));
     for row in rows {
-        lines.push(render(row, None));
+        lines.push(match row {
+            TableRow::Data(cells) => render(cells, None),
+            TableRow::Subtotal(cells) => render(cells, Some(Style::new().dim())),
+            TableRow::Rule => rule('├', '┼', '┤'),
+            TableRow::Total(cells) => render(cells, Some(Style::new().yellow().bold())),
+        });
     }
-    lines.push(rule('├', '┼', '┤'));
-    lines.push(render(total, Some(Style::new().yellow().bold())));
     lines.push(rule('└', '┴', '┘'));
     if cache_hidden {
         lines.push(styled(
             Style::new().dim(),
             text(
-                "Cache columns hidden on this narrow terminal; widen it or use --json-events.",
-                "终端过窄，已隐藏缓存列；可加宽终端或使用 --json-events。",
+                "Cache columns hidden on this narrow terminal; widen it or use llmusage daily.",
+                "终端过窄，已隐藏缓存列；可加宽终端或使用 llmusage daily。",
             ),
             color,
         ));
@@ -552,7 +675,7 @@ fn pipeline_line(summary: &SyncSummary) -> String {
     let write = human_ms(sum(|stats| stats.write_ms));
     if i18n::current() == Language::Chinese {
         format!(
-            "扫描 {} 个文件（变更 {}，跳过 {}）· 读取 {} 条事件 · 新增 {} 条 · {bytes} · 解析 {parse} · 写入 {write} · 明细：--verbose",
+            "扫描 {} 个文件（变更 {}，跳过 {}）· 读取 {} 条事件 · 写入 {} 条 · {bytes} · 解析 {parse} · 写库 {write} · 明细：--verbose",
             group_digits(files),
             group_digits(changed),
             group_digits(skipped),
@@ -568,7 +691,7 @@ fn pipeline_line(summary: &SyncSummary) -> String {
             )
         };
         format!(
-            "{} scanned ({} changed, {} skipped) · {} seen · {} new · {bytes} · parse {parse} · write {write} · details: --verbose",
+            "{} scanned ({} changed, {} skipped) · {} seen · {} written · {bytes} · parse {parse} · write {write} · details: --verbose",
             plural(files, "file"),
             group_digits(changed),
             group_digits(skipped),
@@ -1670,57 +1793,106 @@ mod tests {
         }
     }
 
-    fn usage(input: i64, output: i64, cost_micro_usd: i64) -> crate::models::InsertedUsage {
-        crate::models::InsertedUsage {
+    fn totals(input: i64, output: i64, cost: f64) -> TokenTotals {
+        TokenTotals {
             input_tokens: input,
             output_tokens: output,
             cache_read_tokens: 1_000_000,
             total_tokens: input + output + 1_000_000,
-            cost_micro_usd,
-            ..Default::default()
+            estimated_cost_usd: cost,
+            ..TokenTotals::default()
         }
     }
 
-    fn usage_summary() -> SyncSummary {
-        let mut summary = summary();
-        summary.sources[0].inserted_usage = usage(5_987_789, 973_655, 113_960_000);
-        summary
+    fn day(date: &str, rows: Vec<(&'static str, TokenTotals, bool)>) -> DayUsage {
+        DayUsage {
+            date: date.to_string(),
+            rows: rows
+                .into_iter()
+                .map(|(source, totals, unpriced)| SourceUsage {
+                    source,
+                    totals,
+                    unpriced,
+                })
+                .collect(),
+        }
     }
 
-    fn usage_report(summary: &SyncSummary, color: bool, width: usize) -> Vec<String> {
+    fn window(days: Vec<DayUsage>) -> WindowUsage {
+        WindowUsage {
+            since: NaiveDate::from_ymd_opt(2026, 10, 16).unwrap(),
+            until: NaiveDate::from_ymd_opt(2026, 10, 22).unwrap(),
+            days,
+        }
+    }
+
+    fn sample_window() -> WindowUsage {
+        window(vec![
+            day(
+                "2026-10-22",
+                vec![
+                    ("claude", totals(6_282, 2_407_747, 21.10), false),
+                    ("codex", totals(12_000, 1_500, 4.20), false),
+                ],
+            ),
+            day("2026-10-21", vec![("grok", totals(3_900, 800, 0.0), true)]),
+        ])
+    }
+
+    fn usage_report(window: Option<&WindowUsage>, color: bool, width: usize) -> Vec<String> {
         format_sync_report(
-            summary,
+            &summary(),
             false,
             color,
             width,
             &HashMap::new(),
             &[],
             SummaryDetail::Usage,
+            window,
         )
     }
 
     #[test]
-    fn usage_table_shows_grouped_tokens_cost_and_total() {
+    fn window_table_groups_days_with_subtotals_and_total() {
         i18n::with_language(Language::English, || {
-            let lines = usage_report(&usage_summary(), false, WIDE);
+            let lines = usage_report(Some(&sample_window()), false, WIDE);
             let text = lines.join("\n");
-            assert!(text.contains("Total Tokens"), "{text}");
-            assert!(text.contains("5,987,789"), "{text}");
-            assert!(text.contains("$113.96"), "{text}");
-            let total = lines.iter().find(|line| line.contains("TOTAL")).unwrap();
             assert!(
-                total.contains("7,961,444") && total.contains("$113.96"),
-                "{total}"
+                text.contains("Usage · last 7 days (2026-10-16 → 2026-10-22, local time)"),
+                "{text}"
             );
-            // claude committed nothing; opencode is absent.
-            assert!(text.contains("No new usage: claude"), "{text}");
+            let rows: Vec<&String> = lines.iter().filter(|line| line.starts_with('│')).collect();
+            // header, claude, codex, subtotal, grok (no subtotal), TOTAL
+            assert_eq!(rows.len(), 6, "{text}");
+            assert!(
+                rows[1].contains("2026-10-22") && rows[1].contains("claude"),
+                "{text}"
+            );
+            assert!(
+                !rows[2].contains("2026-10-22") && rows[2].contains("codex"),
+                "{text}"
+            );
+            assert!(
+                rows[3].contains("(total)") && rows[3].contains("$25.30"),
+                "{text}"
+            );
+            assert!(
+                rows[4].contains("2026-10-21") && rows[4].contains("$0.00*"),
+                "{text}"
+            );
+            assert!(
+                rows[5].contains("TOTAL") && rows[5].contains("$25.30*"),
+                "{text}"
+            );
+            assert!(rows[5].contains("2,410,047"), "{text}");
+            assert!(text.contains("* Includes unpriced events"), "{text}");
+            assert!(text.contains("llmusage daily --since"), "{text}");
+            assert!(text.contains("2,461 written"), "{text}");
+            assert!(!text.contains("No new usage"), "{text}");
             assert!(text.contains("Not detected: opencode"), "{text}");
-            assert!(!text.contains("│ claude"), "{text}");
-            assert!(text.contains("2,461 new"), "{text}");
-            assert!(!text.contains("FILES"), "{text}");
             let widths: Vec<_> = lines
                 .iter()
-                .filter(|line| line.starts_with('│') || line.starts_with('┌'))
+                .filter(|line| line.starts_with(['│', '┌', '├', '└']))
                 .map(|line| display_width(line))
                 .collect();
             assert!(widths.windows(2).all(|pair| pair[0] == pair[1]), "{text}");
@@ -1728,11 +1900,11 @@ mod tests {
     }
 
     #[test]
-    fn usage_table_is_bilingual_and_colored_output_strips_to_plain() {
+    fn window_table_is_bilingual_and_colored_output_strips_to_plain() {
         for language in [Language::English, Language::Chinese] {
             i18n::with_language(language, || {
-                let plain = usage_report(&usage_summary(), false, WIDE);
-                let colored = usage_report(&usage_summary(), true, WIDE);
+                let plain = usage_report(Some(&sample_window()), false, WIDE);
+                let colored = usage_report(Some(&sample_window()), true, WIDE);
                 assert!(plain.iter().all(|line| !line.contains('\u{1b}')));
                 assert!(colored.iter().any(|line| line.contains('\u{1b}')));
                 assert_eq!(
@@ -1743,8 +1915,9 @@ mod tests {
                     plain
                 );
                 let text = plain.join("\n");
+                assert!(text.contains(language.select("Date", "日期")), "{text}");
                 assert!(
-                    text.contains(language.select("Cost (USD)", "费用 (USD)")),
+                    text.contains(language.select("(total)", "（小计）")),
                     "{text}"
                 );
                 assert!(text.contains(language.select("TOTAL", "合计")), "{text}");
@@ -1753,67 +1926,107 @@ mod tests {
     }
 
     #[test]
-    fn usage_table_marks_unpriced_cost_as_lower_bound() {
+    fn empty_window_prints_no_table() {
         i18n::with_language(Language::English, || {
-            let mut summary = usage_summary();
-            summary.sources[0].inserted_usage.unpriced_events = 1_204;
-            let text = usage_report(&summary, false, WIDE).join("\n");
-            assert!(text.contains("$113.96*"), "{text}");
-            assert!(
-                text.contains("* 1,204 events have no catalog price"),
-                "{text}"
-            );
-        });
-    }
-
-    #[test]
-    fn up_to_date_run_prints_no_table() {
-        i18n::with_language(Language::English, || {
-            let mut summary = summary();
-            summary.sources[0].events_inserted = 0;
-            let text = usage_report(&summary, false, WIDE).join("\n");
-            assert!(text.contains("Up to date"), "{text}");
+            let text = usage_report(Some(&window(Vec::new())), false, WIDE).join("\n");
+            assert!(text.contains("No usage in the last 7 days."), "{text}");
             assert!(!text.contains('┌'), "{text}");
-            assert!(text.contains("No new usage: codex, claude"), "{text}");
         });
     }
 
     #[test]
-    fn narrow_usage_table_hides_cache_columns_but_keeps_numbers() {
+    fn failed_window_query_keeps_digest_and_diagnostics() {
         i18n::with_language(Language::English, || {
-            let lines = usage_report(&usage_summary(), false, 60);
+            let text = usage_report(None, false, WIDE).join("\n");
+            assert!(text.starts_with("Sync finished:"), "{text}");
+            assert!(!text.contains("Usage ·") && !text.contains('┌'), "{text}");
+            assert!(text.contains("written"), "{text}");
+            assert!(text.contains("Not detected: opencode"), "{text}");
+        });
+    }
+
+    #[test]
+    fn narrow_window_table_hides_cache_columns_but_keeps_numbers() {
+        i18n::with_language(Language::English, || {
+            let lines = usage_report(Some(&sample_window()), false, 80);
             let text = lines.join("\n");
             assert!(!text.contains("Cache Read"), "{text}");
             assert!(text.contains("Cache columns hidden"), "{text}");
             assert!(
-                text.contains("5,987,789") && text.contains("$113.96"),
+                text.contains("2,407,747") && text.contains("$25.30"),
                 "{text}"
             );
             assert!(
                 lines
                     .iter()
                     .filter(|line| line.starts_with('│'))
-                    .all(|line| display_width(line) <= 60),
+                    .all(|line| display_width(line) <= 80),
                 "{text}"
             );
         });
     }
 
     #[test]
+    fn pivot_orders_days_newest_first_and_sources_by_cost() {
+        let report = |date: &str, cost: f64| reports::DailyReport {
+            daily: vec![reports::DailyReportRow {
+                date: date.to_string(),
+                source: None,
+                project: None,
+                totals: totals(1, 1, cost),
+                models_used: Vec::new(),
+                model_breakdowns: Vec::new(),
+                conversation_count: 0,
+                notes: reports::ReportNotes::default(),
+            }],
+            totals: TokenTotals::default(),
+        };
+        let since = NaiveDate::from_ymd_opt(2026, 10, 16).unwrap();
+        let until = NaiveDate::from_ymd_opt(2026, 10, 22).unwrap();
+        let window = pivot_window(
+            since,
+            until,
+            vec![
+                (SourceKind::Codex, report("2026-10-20", 1.0)),
+                (SourceKind::Claude, report("2026-10-20", 3.0)),
+                (SourceKind::Grok, report("2026-10-22", 0.5)),
+            ],
+        );
+        let order: Vec<(&str, Vec<&str>)> = window
+            .days
+            .iter()
+            .map(|day| {
+                (
+                    day.date.as_str(),
+                    day.rows.iter().map(|row| row.source).collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            order,
+            vec![
+                ("2026-10-22", vec!["grok"]),
+                ("2026-10-20", vec!["claude", "codex"]),
+            ]
+        );
+    }
+
+    #[test]
     fn verbose_detail_keeps_the_pipeline_table() {
         i18n::with_language(Language::English, || {
             let verbose = format_sync_report(
-                &usage_summary(),
+                &summary(),
                 false,
                 false,
                 WIDE,
                 &HashMap::new(),
                 &[],
                 SummaryDetail::Pipeline,
+                Some(&sample_window()),
             );
             assert_eq!(
                 verbose,
-                format_summary_lines(&usage_summary(), false, false, WIDE)
+                format_summary_lines(&summary(), false, false, WIDE)
             );
         });
     }

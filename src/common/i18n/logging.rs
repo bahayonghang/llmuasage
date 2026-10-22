@@ -325,6 +325,11 @@ pub const EVENTS: &[EventTemplate] = &[
         chinese: "完成全量本地真源同步",
     },
     EventTemplate {
+        code: "commands.sync.05",
+        english: "Sync usage summary query failed",
+        chinese: "sync 用量汇总查询失败",
+    },
+    EventTemplate {
         code: "commands.uninstall.01",
         english: "Starting legacy integration cleanup",
         chinese: "开始执行本地卸载",

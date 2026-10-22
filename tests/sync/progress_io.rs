@@ -108,13 +108,15 @@ fn status_renders_lock_holder() -> Result<()> {
 #[test]
 fn sync_summary_table_is_stdout_only_without_ansi_or_completion_sentence() -> Result<()> {
     let fixture = Fixture::new()?;
-    fixture.seed_codex("rollout-table.jsonl", 123, "2026-04-22T01:12:00Z")?;
+    // Inside the summary's last-7-days window whatever the local timezone.
+    let recent = (chrono::Utc::now() - chrono::Duration::hours(1))
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    fixture.seed_codex("rollout-table.jsonl", 123, &recent)?;
 
-    let run = |columns: &str, verbose: bool| -> Result<std::process::Output> {
+    let run_args = |args: &[&str], columns: &str| -> Result<std::process::Output> {
         test_process::llmusage_command()
             .current_dir(env!("CARGO_MANIFEST_DIR"))
-            .arg("sync")
-            .args(verbose.then_some("--verbose"))
+            .args(args)
             .env("HOME", &fixture.home)
             .env("USERPROFILE", &fixture.home)
             .env("CODEX_HOME", &fixture.codex_home)
@@ -126,6 +128,13 @@ fn sync_summary_table_is_stdout_only_without_ansi_or_completion_sentence() -> Re
             .output()
             .context("spawn llmusage sync summary subprocess")
     };
+    let run = |columns: &str, verbose: bool| {
+        if verbose {
+            run_args(&["sync", "--verbose"], columns)
+        } else {
+            run_args(&["sync"], columns)
+        }
+    };
 
     // Wide terminal: the source parses and finishes with data on this first run.
     let wide = run("120", false)?;
@@ -134,7 +143,12 @@ fn sync_summary_table_is_stdout_only_without_ansi_or_completion_sentence() -> Re
     let wide_err = String::from_utf8_lossy(&wide.stderr);
     // stdout carries the usage summary and its one-line pipeline digest.
     assert!(wide_out.contains("Sync finished:"), "stdout={wide_out}");
-    assert!(wide_out.contains("codex"), "stdout={wide_out}");
+    assert!(
+        wide_out.contains("Usage · last 7 days"),
+        "stdout={wide_out}"
+    );
+    assert!(wide_out.contains("│ codex"), "stdout={wide_out}");
+    assert!(wide_out.contains("TOTAL"), "stdout={wide_out}");
     assert!(wide_out.contains("details: --verbose"), "stdout={wide_out}");
     // Non-TTY stdout has no ANSI control sequences.
     assert!(!wide_out.contains('\u{1b}'), "stdout={wide_out}");
@@ -153,6 +167,51 @@ fn sync_summary_table_is_stdout_only_without_ansi_or_completion_sentence() -> Re
     assert!(narrow_out.contains("Sync finished:"), "stdout={narrow_out}");
     assert!(narrow_out.contains("TOTAL"), "stdout={narrow_out}");
     assert!(!narrow_out.contains('\u{1b}'), "stdout={narrow_out}");
+
+    // A repeat sync imports nothing new but still reports the week's usage,
+    // and its TOTAL matches `llmusage daily --json` for the same window.
+    let repeat = run("200", false)?;
+    assert!(repeat.status.success(), "{repeat:?}");
+    let repeat_out = String::from_utf8_lossy(&repeat.stdout);
+    assert!(repeat_out.contains("0 written"), "stdout={repeat_out}");
+    let total_line = repeat_out
+        .lines()
+        .find(|line| line.contains("TOTAL"))
+        .unwrap_or_else(|| panic!("TOTAL row missing: {repeat_out}"));
+    let daily = run_args(&["daily", "--json"], "200")?;
+    assert!(daily.status.success(), "{daily:?}");
+    let daily_json: serde_json::Value = serde_json::from_slice(&daily.stdout)?;
+    let total_tokens = daily_json["totals"]["totalTokens"]
+        .as_i64()
+        .context("daily totals.totalTokens")?;
+    assert!(total_tokens > 0, "{daily_json}");
+    let digits = total_tokens.to_string();
+    let grouped = digits
+        .as_bytes()
+        .rchunks(3)
+        .rev()
+        .map(|chunk| std::str::from_utf8(chunk).unwrap())
+        .collect::<Vec<_>>()
+        .join(",");
+    assert!(total_line.contains(&grouped), "{total_line} vs {grouped}");
+    let cost = daily_json["totals"]["totalCost"]
+        .as_f64()
+        .context("daily totals.totalCost")?;
+    assert!(
+        total_line.contains(&format!("${cost:.2}")),
+        "{total_line} vs {cost}"
+    );
+
+    // `--source` narrows the window to that source: codex usage is stored,
+    // but an OpenCode-only sync reports none.
+    let filtered = run_args(&["sync", "--source", "opencode"], "200")?;
+    assert!(filtered.status.success(), "{filtered:?}");
+    let filtered_out = String::from_utf8_lossy(&filtered.stdout);
+    assert!(
+        filtered_out.contains("No usage in the last 7 days."),
+        "stdout={filtered_out}"
+    );
+    assert!(!filtered_out.contains("│ codex"), "stdout={filtered_out}");
 
     fixture.restore_env();
     Ok(())

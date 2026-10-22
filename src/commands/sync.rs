@@ -550,6 +550,27 @@ fn print_summary(
         && std::env::var_os("NO_COLOR").is_none()
         && std::env::var_os("LLMUSAGE_NO_COLOR").is_none();
     let basenames = sample_basenames(store, summary);
+    // Read-only query after the worker lock is released; a failure only drops
+    // the usage table, never the sync result.
+    let window = match detail {
+        SummaryDetail::Usage => match sync_summary::load_window_usage(store, options.source) {
+            Ok(window) => Some(window),
+            Err(error) => {
+                tracing::warn!(
+                    event_code = "commands.sync.05",
+                    error = %error,
+                    "sync 用量汇总查询失败"
+                );
+                eprintln!(
+                    "{}: {}",
+                    crate::common::i18n::text("Usage summary unavailable", "用量汇总不可用"),
+                    crate::common::i18n::logging::safe_text(&error.to_string())
+                );
+                None
+            }
+        },
+        SummaryDetail::Pipeline => None,
+    };
     for line in sync_summary::format_sync_report(
         summary,
         options.rebuild,
@@ -558,6 +579,7 @@ fn print_summary(
         &basenames,
         notices,
         detail,
+        window.as_ref(),
     ) {
         println!("{line}");
     }
