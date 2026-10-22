@@ -421,7 +421,31 @@ unchanged, and let the human adapter choose its language.
   thread. A second sync action requests cancellation instead of spawning a
   second job. TUI exit cancels an active job and waits only for a documented,
   bounded interval before restoring the terminal.
-- The human `Sync finished` block is a closed ten-column table (files/changed/skipped/
+- The default human `Sync finished` block (`SummaryDetail::Usage`, rendered by
+  the pure `format_sync_report`) is a ccusage-style usage table: Source / Input /
+  Output / Cache Create / Cache Read / Total Tokens / Cost (USD) for each
+  non-absent source with `events_inserted > 0`, then a `TOTAL` row. Its numbers
+  come only from `SourceSyncStats.inserted_usage`, which the writer accumulates
+  in `write_event_batch_tx` for rows `INSERT OR IGNORE` actually inserted, using
+  the same `cost_with_cache_usd` it persists (integer `cost_micro_usd`, plus
+  `unpriced_events` → trailing `*` and a lower-bound note). Never query the DB
+  afterwards to build it; a first sync's TOTAL equals `daily --json` totals.
+  `--emit-shards` collect mode leaves `inserted_usage` zero. Idle sources share
+  one `No new usage:` line, absent-only sources one `Not detected:` line before
+  diagnostics, a run with no new usage prints `Up to date` and no table, and a
+  final dim line digests files/events/bytes/parse/write. Narrow terminals shrink
+  only the label, then hide both cache columns with a note; numbers are never
+  cut. `inserted_usage` is an additive `#[serde(default)]` wire field.
+- Startup stderr is folded by `StartupDigest` in `sync_progress.rs` for both
+  renderers: `BootstrapStarted`/`LockWaiting`/`MigrationStarted` are live TTY
+  status only, `MigrationFinished` lines collapse into one
+  `✓ Database schema upgraded to vN (k migrations, Xms)` line flushed at the next
+  non-migration event or teardown, and `LockAcquired` stays permanent only when
+  `wait_ms >= 1000` (the engine emits `LockWaiting` on every run, so it is not a
+  contention signal). Permanent success phase lines carry a `✓` mark; warning
+  copy already starts with "Warning:"/"警告：" and gets no extra mark.
+- `sync --verbose` (`SummaryDetail::Pipeline`, conflicts with `--json-events`)
+  keeps the previous pipeline table: a closed ten-column table (files/changed/skipped/
   seen/committed/stored plus human-readable bytes and parse/write durations)
   rendered by the pure `format_summary_lines_with_basenames` (tests may call
   `format_summary_lines`, which is the same formatter with an empty path map);

@@ -171,6 +171,7 @@ llmusage sync --source grok
 llmusage sync --recent-days 1
 llmusage sync --recent-days 30 --parallelism 4
 llmusage sync --json-events
+llmusage sync --verbose
 llmusage sync --rebuild
 llmusage sync --rebuild --allow-lossy-rebuild
 ```
@@ -185,7 +186,9 @@ llmusage sync --rebuild --allow-lossy-rebuild
 
 设置 `LLMUSAGE_LOG=info` 可记录结构化的定价开始/对账/完成文件日志，`debug` 还会记录节流后的页进度。默认 `warn` 级别会在重算持续超过 30 秒时记录一次存活告警；终端进度不受文件日志级别影响。
 
-人读 stdout 摘要是一张十列闭合线框表：来源、文件、变更、跳过、读取事件、新增事件、库存事件、读取量、解析、写入（英语为 `SOURCE`、`FILES`、`CHANGED`、`SKIPPED`、`SEEN`、`COMMITTED`、`STORED`、`BYTES`、`PARSE`、`WRITE`）。它有外框、竖线、表头分隔和合计前分隔，每个来源一行；标签跟随 `lang`。已完成进度留在 stderr，不再成为重复的永久成功行。诊断只在底边框后按来源输出，来源故障与记录/accounting 信息分开。被保护或阻断的来源显示新增事件 0、保留的库存事件、变更 0、读取量 0、写入 0，文件列为只读覆盖发现的文件数。`skipped` 对文件型来源来自现有 cursor/fingerprint 证据，对 OpenCode 这种 DB 来源来自 SQLite 高水位 cursor；`committed` 是 SQLite 去重后本次新增写入数。重定向输出不含 ANSI，窄终端使用紧凑表头且不截断数值；完整数值仍可能超出极窄终端。参见[实际夹具输出示例](../guide/first-sync#导入所有来源)。
+默认的人读 stdout 摘要是 ccusage 风格的本轮导入表：对每个有新增事件的来源列出来源、输入、输出、缓存写入、缓存读取、总 Token、费用 (USD)，并附合计行。数值只统计 SQLite 去重后本轮新插入的事件；费用与报表同样使用 `cost_with_cache_usd`，部分事件不在定价目录时费用后带 `*` 表示下限。无新增的来源合并为一行 `无新增用量：`，未检测到的来源合并为一行 `未检测到：`；没有任何新增时输出 `✓ 已是最新：本轮没有导入新用量。`；最后一行概要文件、事件、读取量与解析/写入耗时。启动阶段的 stderr 会把 schema 迁移合并为一行 `✓ 数据库 schema 已升级到 vN（…）`，获取锁不足 1 秒时不输出。窄终端会先隐藏缓存列，绝不截断数字。
+
+加 `--verbose`（不可与 `--json-events` 同用）时，摘要改为一张十列闭合线框表：来源、文件、变更、跳过、读取事件、新增事件、库存事件、读取量、解析、写入（英语为 `SOURCE`、`FILES`、`CHANGED`、`SKIPPED`、`SEEN`、`COMMITTED`、`STORED`、`BYTES`、`PARSE`、`WRITE`）。它有外框、竖线、表头分隔和合计前分隔，每个来源一行；标签跟随 `lang`。已完成进度留在 stderr，不再成为重复的永久成功行。诊断只在底边框后按来源输出，来源故障与记录/accounting 信息分开。被保护或阻断的来源显示新增事件 0、保留的库存事件、变更 0、读取量 0、写入 0，文件列为只读覆盖发现的文件数。`skipped` 对文件型来源来自现有 cursor/fingerprint 证据，对 OpenCode 这种 DB 来源来自 SQLite 高水位 cursor；`committed` 是 SQLite 去重后本次新增写入数。重定向输出不含 ANSI，窄终端使用紧凑表头且不截断数值；完整数值仍可能超出极窄终端。参见[实际夹具输出示例](../guide/first-sync#导入所有来源)。
 
 表格下方的记录诊断区分格式错误、超大记录、有意跳过和 accounting 异常。每个来源最多保留 8 个记录样本，摘要显示总数和未展示的样本数。同一个样本可以同时显示稳定原因码、定位值和安全文件名。JSONL 样本使用 `@` 标注非零字节偏移；ZCode 样本使用 `timestamp_ms=` 标注已有的毫秒时间戳定位值。不输出完整私有路径、路径哈希或记录正文。诊断中的 `skipped` 统计记录；表格中的 `SKIPPED` 统计文件。
 

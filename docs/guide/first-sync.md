@@ -10,28 +10,50 @@ The interface defaults to English. Optionally run `llmusage lang zh` (`zh-CN` is
 llmusage sync
 ```
 
-Human progress is written to stderr. The final stdout summary is a closed ten-column grid with an outer frame, vertical borders, and separators after the header and before the total row. Source order, counts, units, and precision are unchanged between languages. Completed progress lines are cleared instead of being repeated above it. Redirected output contains no ANSI control sequences, and narrow terminals use compact headers without truncating numeric values; full numbers can still exceed a very narrow terminal.
+Human progress is written to stderr. Startup is condensed: schema migrations collapse into one `✓ Database schema upgraded to vN (…)` line, and the worker-lock line appears only when acquiring it took at least one second. Completed progress lines are cleared instead of being repeated above the summary.
 
-This is actual stdout from an isolated Codex fixture imported with `llmusage --home <temporary-profile> sync --source codex` in an English profile. It contains one 482-byte file and one event; it is not real user usage. The Chinese guide shows the same fixture in a separate Chinese profile. Measured timings vary between runs:
+The final stdout summary shows what this run imported: tokens and estimated cost per source, in the style of `npx ccusage`. Values count only events newly written after SQLite dedupe, priced with the same `cost_with_cache_usd` the reports use, so the `TOTAL` row of a first sync matches `llmusage daily --json` totals. A `*` after a cost means some events had no catalog price and the cost is a lower bound. Sources that imported nothing share one `No new usage:` line, undetected sources share one `Not detected:` line, and a run with nothing new prints `✓ Up to date — no new usage imported.` instead of a table. The last line is a one-line pipeline digest (files, events, bytes read, parse and write time).
+
+This is actual stdout from an isolated Codex fixture imported with `llmusage --home <temporary-profile> sync --source codex` in an English profile. It contains one file and one event; it is not real user usage. The Chinese guide shows the same fixture in a separate Chinese profile. Measured timings vary between runs:
+
+```text
+Sync finished:
+┌────────┬───────┬────────┬──────────────┬────────────┬──────────────┬────────────┐
+│ Source │ Input │ Output │ Cache Create │ Cache Read │ Total Tokens │ Cost (USD) │
+├────────┼───────┼────────┼──────────────┼────────────┼──────────────┼────────────┤
+│ codex  │ 4,000 │  1,500 │            0 │      8,000 │       13,500 │      $0.02 │
+├────────┼───────┼────────┼──────────────┼────────────┼──────────────┼────────────┤
+│ TOTAL  │ 4,000 │  1,500 │            0 │      8,000 │       13,500 │      $0.02 │
+└────────┴───────┴────────┴──────────────┴────────────┴──────────────┴────────────┘
+1 file scanned (1 changed, 0 skipped) · 1 event seen · 1 new · 431 B · parse 9ms · write 1ms · details: --verbose
+```
+
+Redirected output contains no ANSI control sequences. On a narrow terminal only the source label shrinks; if the table still does not fit, the two cache columns are hidden with a note, and numeric cells are never truncated.
+
+### Pipeline details (`--verbose`)
+
+`llmusage sync --verbose` replaces the usage table with the per-source pipeline grid: a closed ten-column table with the same source order, counts, units, and precision in both languages:
 
 ```text
 Sync finished:
 ┌────────┬───────┬─────────┬─────────┬──────┬───────────┬────────┬───────┬───────┬───────┐
 │ SOURCE │ FILES │ CHANGED │ SKIPPED │ SEEN │ COMMITTED │ STORED │ BYTES │ PARSE │ WRITE │
 ├────────┼───────┼─────────┼─────────┼──────┼───────────┼────────┼───────┼───────┼───────┤
-│ codex  │     1 │       1 │       0 │    1 │         1 │      1 │ 482 B │   8ms │   1ms │
+│ codex  │     1 │       1 │       0 │    1 │         1 │      1 │ 431 B │   8ms │   1ms │
 ├────────┼───────┼─────────┼─────────┼──────┼───────────┼────────┼───────┼───────┼───────┤
-│ TOTAL  │     1 │       1 │       0 │    1 │         1 │      1 │ 482 B │   8ms │   1ms │
+│ TOTAL  │     1 │       1 │       0 │    1 │         1 │      1 │ 431 B │   8ms │   1ms │
 └────────┴───────┴─────────┴─────────┴──────┴───────────┴────────┴───────┴───────┴───────┘
 ```
 
+`--verbose` conflicts with `--json-events`; NDJSON consumers read `source_finished.stats` instead, which now also carries `inserted_usage` (token fields, `cost_micro_usd`, `unpriced_events`).
+
 If the embedded pricing catalog changed since the previous run, bootstrap reprices historical events before source scanning. Progress shows the old/new catalog versions, processed and total event counts, bucket reconciliation, and final elapsed time. This is a one-time upgrade for an unpinned embedded catalog; a current or pinned catalog skips the phase.
 
-The summary includes `files`, `changed`, `skipped`, `seen`, `committed`, and `stored_events` per source. For file-backed sources, `skipped` means the stored cursor, size, mtime, head fingerprint, tail signature, and offset show the artifact is unchanged. For OpenCode, `skipped` means the SQLite high-water cursor found no newer rows. `committed` is the newly inserted event delta after SQLite dedupe; `stored_events` is the durable total currently in the database.
+The `--verbose` grid includes `files`, `changed`, `skipped`, `seen`, `committed`, and `stored_events` per source. For file-backed sources, `skipped` means the stored cursor, size, mtime, head fingerprint, tail signature, and offset show the artifact is unchanged. For OpenCode, `skipped` means the SQLite high-water cursor found no newer rows. `committed` is the newly inserted event delta after SQLite dedupe; `stored_events` is the durable total currently in the database.
 
 The other columns identify the source, reader-accounted bytes, and recorded parse/write time. `BYTES` is not physical disk I/O, `PARSE` is not parser CPU time, and adding source `PARSE`/`WRITE` values does not give whole-command wall-clock time. See the [metric boundaries](../reference/cli#llmusage-sync).
 
-Diagnostics follow the bottom border, grouped by source. Source faults are separate from malformed/oversized records, intentional record skips, and accounting information. Each source shows at most eight record samples and an omitted-sample count, with stable reason codes and safe locations rather than private paths or record bodies. These counts are not a count of failed sources or necessarily distinct records; the table's skipped count refers to files.
+Diagnostics follow the summary, grouped by source. Source faults are separate from malformed/oversized records, intentional record skips, and accounting information. Each source shows at most eight record samples and an omitted-sample count, with stable reason codes and safe locations rather than private paths or record bodies. These counts are not a count of failed sources or necessarily distinct records; the table's skipped count refers to files.
 
 ## Import one source
 
