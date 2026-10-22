@@ -169,7 +169,7 @@ llmusage codex-tracer --rebuild
 - 普通 `llmusage sync` 默认不会重建旧版 token accounting 来源。它会保留该来源已有的 event、raw、bucket、turn、tool、cursor、source_file 数据，跳过该来源本轮写入，并在表后提示修复入口是 `llmusage sync --rebuild --source <source>`。唯一例外是 stdin、stdout、stderr 都是终端，且没有 `--json-events`、`--rebuild` 或 `--recent-days` 时，用户可明确接受 `antigravity` 或 `antigravity_ide` 丢失并在本轮重建；其余旧记账来源保持跳过。Claude Code、Codex、Grok Build、Kimi Code、Oh My Pi（OMP）均按普通同步与显式重建隔离。
 - 普通 `llmusage sync` 遇到原始源文件缺失时会保留已导入 usage。
 - sync 诊断分别显示来源故障、格式错误记录、跳过记录和不完整 token accounting。每个来源最多显示 8 个记录样本，并标明未展示数量。`sync --verbose` 管线明细表的 `SKIPPED` 单独统计文件跳过数。
-- `llmusage sync` 结束时输出 ccusage 风格的表格，按来源列出本轮导入的 token 与估算费用；`llmusage sync --verbose` 改为显示按来源的管线明细（文件、事件、字节、耗时）。
+- `llmusage sync` 结束时输出最近 7 天的 token 与估算费用，按日期分组、每个来源一行（与 `llmusage daily` 数字一致）；`llmusage sync --verbose` 改为显示按来源的管线明细（文件、事件、字节、耗时）。
 - Antigravity 在解码 usage 前检查已跟踪输入的覆盖情况。所有选中产品均受阻时，同步保留历史并提前返回，不解码 usage；仍执行文件发现和 fingerprint。当前发现范围不包含的已跟踪路径与物理缺失文件分别报告。
 - `llmusage sync --recent-days N` 只导入最近的 UTC 事件窗口（`1..=3650`），且不推进全历史 cursor；`--parallelism` 合法范围为 `1..=32`。
 - bounded 普通 sync 同样对 legacy 来源 skip+warn，不得清空全历史。

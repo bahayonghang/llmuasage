@@ -12,20 +12,26 @@ llmusage sync
 
 Human progress is written to stderr. Startup is condensed: schema migrations collapse into one `✓ Database schema upgraded to vN (…)` line, and the worker-lock line appears only when acquiring it took at least one second. Completed progress lines are cleared instead of being repeated above the summary.
 
-The final stdout summary shows what this run imported: tokens and estimated cost per source, in the style of `npx ccusage`. Values count only events newly written after SQLite dedupe, priced with the same `cost_with_cache_usd` the reports use, so the `TOTAL` row of a first sync matches `llmusage daily --json` totals. A `*` after a cost means some events had no catalog price and the cost is a lower bound. Sources that imported nothing share one `No new usage:` line, undetected sources share one `Not detected:` line, and a run with nothing new prints `✓ Up to date — no new usage imported.` instead of a table. The last line is a one-line pipeline digest (files, events, bytes read, parse and write time).
+The final stdout summary shows the last seven local days of usage (today included), read from the database after the sync, with the same query, window, and timezone as `llmusage daily`. A repeat sync with nothing new still shows the whole week. The date is in the left column, newest first; under each date there is one row per source, sorted by cost, and a `(total)` row when the date has more than one source. A divider separates the dates, and `TOTAL` covers the window. `sync --source X` limits the table to that source. A `*` after a cost means the row includes events without a catalog price, so the cost is a lower bound. A week without usage prints `No usage in the last 7 days.` instead of a table. For other ranges, use `llmusage daily --since/--until`.
 
-This is actual stdout from an isolated Codex fixture imported with `llmusage --home <temporary-profile> sync --source codex` in an English profile. It contains one file and one event; it is not real user usage. The Chinese guide shows the same fixture in a separate Chinese profile. Measured timings vary between runs:
+Below the table, one line digests this run: files, events seen, events written, bytes read, and parse/write time. "Written" includes events re-imported from changed files. Undetected sources share one `Not detected:` line before the diagnostics. If the usage query fails, the sync still succeeds: stderr gets one `Usage summary unavailable` line and stdout keeps the digest and diagnostics.
+
+This is actual stdout from an isolated Codex fixture with one event on each of two days, imported with `llmusage --home <temporary-profile> sync --source codex` in an English profile. It is not real user usage. The Chinese guide shows the same fixture in a separate Chinese profile. Dates and timings vary between runs:
 
 ```text
 Sync finished:
-┌────────┬───────┬────────┬──────────────┬────────────┬──────────────┬────────────┐
-│ Source │ Input │ Output │ Cache Create │ Cache Read │ Total Tokens │ Cost (USD) │
-├────────┼───────┼────────┼──────────────┼────────────┼──────────────┼────────────┤
-│ codex  │ 4,000 │  1,500 │            0 │      8,000 │       13,500 │      $0.02 │
-├────────┼───────┼────────┼──────────────┼────────────┼──────────────┼────────────┤
-│ TOTAL  │ 4,000 │  1,500 │            0 │      8,000 │       13,500 │      $0.02 │
-└────────┴───────┴────────┴──────────────┴────────────┴──────────────┴────────────┘
-1 file scanned (1 changed, 0 skipped) · 1 event seen · 1 new · 431 B · parse 9ms · write 1ms · details: --verbose
+Usage · last 7 days (2026-10-15 → 2026-10-21, local time)
+┌────────────┬────────┬────────┬────────┬──────────────┬────────────┬──────────────┬────────────┐
+│ Date       │ Source │  Input │ Output │ Cache Create │ Cache Read │ Total Tokens │ Cost (USD) │
+├────────────┼────────┼────────┼────────┼──────────────┼────────────┼──────────────┼────────────┤
+│ 2026-10-21 │ codex  │  4,000 │  1,500 │            0 │      8,000 │       13,500 │      $0.02 │
+├────────────┼────────┼────────┼────────┼──────────────┼────────────┼──────────────┼────────────┤
+│ 2026-10-20 │ codex  │ 10,000 │  4,200 │            0 │     20,000 │       34,200 │      $0.06 │
+├────────────┼────────┼────────┼────────┼──────────────┼────────────┼──────────────┼────────────┤
+│ TOTAL      │        │ 14,000 │  5,700 │            0 │     28,000 │       47,700 │      $0.08 │
+└────────────┴────────┴────────┴────────┴──────────────┴────────────┴──────────────┴────────────┘
+Other ranges: llmusage daily --since YYYYMMDD --until YYYYMMDD
+2 files scanned (2 changed, 0 skipped) · 2 events seen · 2 written · 868 B · parse 13ms · write 1ms · details: --verbose
 ```
 
 Redirected output contains no ANSI control sequences. On a narrow terminal only the source label shrinks; if the table still does not fit, the two cache columns are hidden with a note, and numeric cells are never truncated.
@@ -45,7 +51,7 @@ Sync finished:
 └────────┴───────┴─────────┴─────────┴──────┴───────────┴────────┴───────┴───────┴───────┘
 ```
 
-`--verbose` conflicts with `--json-events`; NDJSON consumers read `source_finished.stats` instead, which now also carries `inserted_usage` (token fields, `cost_micro_usd`, `unpriced_events`).
+`--verbose` conflicts with `--json-events`; NDJSON consumers read `source_finished.stats` instead, which also carries `inserted_usage` (token fields, `cost_micro_usd`, `unpriced_events` of the events this run wrote).
 
 If the embedded pricing catalog changed since the previous run, bootstrap reprices historical events before source scanning. Progress shows the old/new catalog versions, processed and total event counts, bucket reconciliation, and final elapsed time. This is a one-time upgrade for an unpinned embedded catalog; a current or pinned catalog skips the phase.
 

@@ -422,20 +422,27 @@ unchanged, and let the human adapter choose its language.
   second job. TUI exit cancels an active job and waits only for a documented,
   bounded interval before restoring the terminal.
 - The default human `Sync finished` block (`SummaryDetail::Usage`, rendered by
-  the pure `format_sync_report`) is a ccusage-style usage table: Source / Input /
-  Output / Cache Create / Cache Read / Total Tokens / Cost (USD) for each
-  non-absent source with `events_inserted > 0`, then a `TOTAL` row. Its numbers
-  come only from `SourceSyncStats.inserted_usage`, which the writer accumulates
-  in `write_event_batch_tx` for rows `INSERT OR IGNORE` actually inserted, using
-  the same `cost_with_cache_usd` it persists (integer `cost_micro_usd`, plus
-  `unpriced_events` → trailing `*` and a lower-bound note). Never query the DB
-  afterwards to build it; a first sync's TOTAL equals `daily --json` totals.
-  `--emit-shards` collect mode leaves `inserted_usage` zero. Idle sources share
-  one `No new usage:` line, absent-only sources one `Not detected:` line before
-  diagnostics, a run with no new usage prints `Up to date` and no table, and a
-  final dim line digests files/events/bytes/parse/write. Narrow terminals shrink
-  only the label, then hide both cache columns with a note; numbers are never
-  cut. `inserted_usage` is an additive `#[serde(default)]` wire field.
+  the pure `format_sync_report`) is a last-7-days window read after the worker
+  lock is released: `sync_summary::load_window_usage` builds a `ReportFilter`
+  with local timezone, `unified_report::apply_daily_default`, and the sync's
+  `--source`, calls `reports::load_daily_reports_by_source`, and pivots into
+  `WindowUsage { since, until, days }` (newest day first, sources by cost
+  desc). Its `TOTAL` must equal `llmusage daily --json` totals at that moment;
+  never build it from `inserted_usage`, which double-counts replayed files.
+  Columns: Date / Source / Input / Output / Cache Create / Cache Read / Total
+  Tokens / Cost (USD); date only on a day's first row, a `(total)` row only for
+  days with 2+ sources, `├┼┤` between days and before `TOTAL`, `*` for rows with
+  `notes.unpriced`. Empty window → `No usage in the last 7 days.` and no table.
+  A query failure must not fail sync: warn (`commands.sync.04`), print
+  `Usage summary unavailable` on stderr, and keep the digest and diagnostics.
+  The dim digest line reports this run (files, seen, written, bytes,
+  parse/write); absent-only sources share one `Not detected:` line. Narrow
+  terminals shrink only the Source label, then hide both cache columns with a
+  note; numbers are never cut. `SourceSyncStats.inserted_usage` stays an
+  additive `#[serde(default)]` wire field accumulated by the writer for rows
+  `INSERT OR IGNORE` actually inserted (`--emit-shards` leaves it zero).
+- Human repair hints print the command bare (no backticks, no trailing
+  punctuation) so a copied line runs as-is.
 - Startup stderr is folded by `StartupDigest` in `sync_progress.rs` for both
   renderers: `BootstrapStarted`/`LockWaiting`/`MigrationStarted` are live TTY
   status only, `MigrationFinished` lines collapse into one
