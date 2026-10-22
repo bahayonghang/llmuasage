@@ -433,3 +433,53 @@ fn grok_legacy_marker_2_is_skipped_on_ordinary_sync_until_explicit_rebuild() -> 
     fixture.restore_env();
     Ok(())
 }
+
+#[test]
+fn grok_fresh_import_with_record_fault_stamps_current_accounting() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let updates = concat!(
+        "{\"params\":{\"update\":{\"sessionUpdate\":\"user_message_chunk\",\"_meta\":{\"modelId\":\"grok-4.5\"}},\"_meta\":{\"agentTimestampMs\":1700000001000}}}\n",
+        "not json\n",
+        "{\"params\":{\"update\":{\"sessionUpdate\":\"agent_message_chunk\"},\"_meta\":{\"totalTokens\":300,\"agentTimestampMs\":1700000003000}}}\n"
+    );
+    fixture.seed_grok("session-fault", updates, None, None)?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let options = commands::sync::SyncRunOptions {
+            source: Some(SourceKind::Grok),
+            ..Default::default()
+        };
+
+        let first = commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert_eq!(first.sources[0].events_inserted, 1);
+        assert!(first.sources[0].parse_issues.total() > 0);
+        // A skipped line must not leave freshly imported rows uncertified.
+        assert_eq!(
+            store.token_accounting_version(SourceKind::Grok)?,
+            Some(expected_token_accounting_version(SourceKind::Grok))
+        );
+        assert!(!store.has_legacy_token_accounting(SourceKind::Grok)?);
+
+        fixture.append_grok_updates(
+            "session-fault",
+            concat!(
+                "{\"params\":{\"update\":{\"sessionUpdate\":\"user_message_chunk\"},\"_meta\":{\"agentTimestampMs\":1700000004000}}}\n",
+                "{\"params\":{\"update\":{\"sessionUpdate\":\"agent_message_chunk\"},\"_meta\":{\"totalTokens\":500,\"agentTimestampMs\":1700000005000}}}\n"
+            ),
+        )?;
+        let second =
+            commands::sync::run_once_with_options(&app, &store, 0, &options, None).await?;
+        assert!(!store.has_legacy_token_accounting(SourceKind::Grok)?);
+        assert_eq!(second.sources[0].source, SourceKind::Grok);
+        assert!(second.sources[0].changed_files > 0, "grok writes were skipped as legacy");
+        assert_grok_totals(&app.paths.db_path, 2, 500)?;
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}

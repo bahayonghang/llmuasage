@@ -799,9 +799,12 @@ async fn run_once_locked_with_remote_source(
     );
     if !cancel.is_cancelled() {
         for source in &source_stats {
+            // Record-level faults (malformed/oversized lines) skip single lines;
+            // every row this run wrote still follows the current contract.
+            // Withholding the marker for them turned fresh imports into
+            // permanent "legacy" sources that even `--rebuild` could not clear.
             if skipped_legacy.contains(&source.source)
                 || source.last_error.is_some()
-                || source.parse_issues.total() > 0
                 || source_issues
                     .get(&source.source)
                     .is_some_and(|issues| !issues.is_empty())
