@@ -1,0 +1,52 @@
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+   Compiling llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+warning: `llmusage` (bin "llmusage") generated 1 warning
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\sync-676d5d4146244a26.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\sync-676d5d4146244a26.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (test "sync") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.97s
+     Running tests\sync\main.rs (output\s-language-rust-target\debug\deps\sync-676d5d4146244a26.exe)
+
+running 3 tests
+test runtime::progress_io::bilingual_lossy_refusal_translates_all_human_sinks_and_keeps_canonical_wire_error ... FAILED
+test runtime::progress_io::bilingual_sqlite_open_failure_keeps_success_exit_and_canonical_stats_and_shards ... FAILED
+test runtime::progress_io::bilingual_sync_keeps_human_and_machine_streams_separate_in_plain_modes ... ok
+
+failures:
+
+---- runtime::progress_io::bilingual_lossy_refusal_translates_all_human_sinks_and_keeps_canonical_wire_error stdout ----
+Error: NOT NULL constraint failed: usage_event.cache_read_tokens
+
+Caused by:
+    Error code 1299: constraint failed
+
+---- runtime::progress_io::bilingual_sqlite_open_failure_keeps_success_exit_and_canonical_stats_and_shards stdout ----
+
+thread 'runtime::progress_io::bilingual_sqlite_open_failure_keeps_success_exit_and_canonical_stats_and_shards' (58124) panicked at tests\sync\runtime\progress_io.rs:404:13:
+Sync finished:
+┌──────────┬───────┬─────────┬─────────┬──────┬───────────┬────────┬───────┬───────┬───────┐
+│ SOURCE   │ FILES │ CHANGED │ SKIPPED │ SEEN │ COMMITTED │ STORED │ BYTES │ PARSE │ WRITE │
+├──────────┼───────┼─────────┼─────────┼──────┼───────────┼────────┼───────┼───────┼───────┤
+│ opencode │     0 │       0 │       0 │    0 │         0 │      0 │   0 B │   0ms │   0ms │
+├──────────┼───────┼─────────┼─────────┼──────┼───────────┼────────┼───────┼───────┼───────┤
+│ TOTAL    │     0 │       0 │       0 │    0 │         0 │      0 │   0 B │   0ms │   0ms │
+└──────────┴───────┴─────────┴─────────┴──────┴───────────┴────────┴───────┴───────┴───────┘
+
+Diagnostics · opencode
+  Source failed; original detail: OpenCode SQLite DB 打开失败
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    runtime::progress_io::bilingual_lossy_refusal_translates_all_human_sinks_and_keeps_canonical_wire_error
+    runtime::progress_io::bilingual_sqlite_open_failure_keeps_success_exit_and_canonical_stats_and_shards
+
+test result: FAILED. 1 passed; 2 failed; 0 ignored; 0 measured; 150 filtered out; finished in 3.12s
+
+error: test failed, to rerun pass `--test sync`

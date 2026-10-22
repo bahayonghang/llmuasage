@@ -1,0 +1,36 @@
+{
+  "local_clock_source": "Windows .NET DateTimeOffset (not Python astimezone wrapper)",
+  "utc_now": "2026-10-21T00:47:33Z",
+  "local_now": "2026-10-20T20:47:33.493456-04:00",
+  "local_today": "2026-10-20",
+  "since_utc": "2026-10-14T00:00:00Z",
+  "exclusive_until_utc": "2026-10-21T00:00:00Z",
+  "exact_predicate": "hour_start >= since_utc AND hour_start < exclusive_until_utc",
+  "results": {
+    "raw_same_second": {
+      "seed": "2026-10-21T00:47:33Z",
+      "tokens": 0
+    },
+    "raw_next_second": {
+      "seed": "2026-10-21T00:47:34Z",
+      "tokens": 0
+    },
+    "current_canonical_bucket": {
+      "seed": "2026-10-21T00:30:00Z",
+      "tokens": 0
+    },
+    "past_canonical_bucket": {
+      "seed": "2026-10-20T00:30:00Z",
+      "tokens": 10
+    },
+    "before_exclusive_bound": {
+      "seed": "2026-10-20T23:59:59Z",
+      "tokens": 10
+    },
+    "at_exclusive_bound": {
+      "seed": "2026-10-21T00:00:00Z",
+      "tokens": 0
+    }
+  },
+  "conclusion": "Local versus UTC calendar-date boundary; not a same-second or bucket-rounding issue"
+}

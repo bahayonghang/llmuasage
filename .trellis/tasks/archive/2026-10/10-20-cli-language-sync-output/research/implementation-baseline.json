@@ -1,0 +1,10 @@
+{
+  "revision": "2b70e3f",
+  "branch": "dev",
+  "lockfiles_sha256": {
+    "Cargo.lock": "aca460864a5354c9324c676a40944c939200f4e92b24457d918328d2324c6b46",
+    "desktop/src-tauri/Cargo.lock": "3e67a3b138d895b78c8e7bdc787f084fbbd9b8032ce0b071fea95452e180d32c",
+    "docs/package-lock.json": "d09ad374ecd3b78d1a741742e5d77432cdcafe8461dfe3288cd466672d64adf7",
+    "desktop/package-lock.json": "92d45817340a867e4723c0ed5191c8c481122b7e5543e8e99604c4e9ba48a80a"
+  }
+}

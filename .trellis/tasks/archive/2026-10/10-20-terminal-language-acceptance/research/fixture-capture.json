@@ -1,0 +1,18 @@
+[
+  {
+    "language": "en",
+    "exit_code": 0,
+    "command": "llmusage --home <TEMP_PROFILE> sync --source codex",
+    "fixture_bytes": 482,
+    "tokens": 123,
+    "mode": "headless subprocess; not native terminal"
+  },
+  {
+    "language": "zh",
+    "exit_code": 0,
+    "command": "llmusage --home <TEMP_PROFILE> sync --source codex",
+    "fixture_bytes": 482,
+    "tokens": 123,
+    "mode": "headless subprocess; not native terminal"
+  }
+]

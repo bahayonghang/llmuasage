@@ -1,0 +1,26 @@
+    Blocking waiting for file lock on build directory
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.00s
+     Running unittests src\lib.rs (output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exe)
+
+running 13 tests
+test store::sync_writer::profiling::tests::antigravity_profile_keeps_transaction_and_source_apply_boundaries ... ok
+test store::sync_writer::profiling::tests::complete_state_covers_raw_pricing_hosts_and_all_rollback_stages ... ok
+test store::sync_writer::profiling::tests::distribution_uses_average_of_middle_pair ... ok
+test store::sync_writer::profiling::tests::host_skew_selects_the_smaller_host_range_and_preserves_other_host ... ok
+test store::sync_writer::profiling::tests::reset_candidate_matches_complete_state_and_is_idempotent ... ok
+test store::sync_writer::profiling::tests::reset_path_index_is_selected_for_both_statements ... ok
+test store::sync_writer::profiling::tests::reset_plan_depends_on_distinct_paths_and_preserves_complete_state ... ok
+test store::sync_writer::profiling::tests::sync_writer_host_skew_ab_acceptance ... ignored, release host-skew acceptance for the reset candidate
+test store::sync_writer::profiling::tests::sync_writer_replay_ab_acceptance ... ignored, release-only seven alternating pairs with full database equivalence
+test store::sync_writer::profiling::tests::sync_writer_replay_profile ... ignored, explicit single-thread original writer stage profile
+test store::sync_writer::profiling::tests::sync_writer_reset_profile ... ignored, explicit single-thread original reset SQL profile
+test store::sync_writer::profiling::tests::sync_writer_shared_bucket_ab_acceptance ... ignored, release-only shared-bucket seven-pair acceptance control
+test store::sync_writer::profiling::tests::sync_writer_shared_bucket_profile ... ignored, release-only shared-bucket stage diagnosis; not performance acceptance
+
+test result: ok. 7 passed; 0 failed; 6 ignored; 0 measured; 981 filtered out; finished in 7.05s
+

@@ -1,0 +1,83 @@
+   Compiling llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 23.70s
+     Running unittests src\lib.rs (output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exe)
+
+running 70 tests
+test api::error::tests::pricing_missing_variant_identifies_source_and_model ... ok
+test commands::catalog::tests::pricing_adapter_preserves_original_display_variant_and_external_source ... ok
+test commands::sync_progress::tests::bar_renderer_pricing_upgrade_sequence_converges ... ok
+test commands::sync_progress::tests::human_progress_describes_pricing_upgrade_phases ... ok
+test commands::sync_progress::tests::pricing_sync_event_serializes_as_additive_snake_case_ndjson ... ok
+test common::i18n::commands::pricing::tests::nested_pricing_metadata_only_hides_original_error_when_complete ... ok
+test common::i18n::logging::tests::pricing_projection_keeps_warning_level_counts_and_omits_default_hashes ... ok
+test domain::pricing::tests::pricing_can_bill_reasoning_separately_when_catalog_requests_it ... ok
+test domain::pricing::tests::pricing_counts_cache_creation_and_keeps_reasoning_included_by_default ... ok
+test domain::pricing::tests::pricing_gpt_5_6_alias_resolves_to_sol ... ok
+test domain::pricing::tests::pricing_gpt_5_6_uses_request_scoped_short_and_long_tiers ... ok
+test domain::pricing::tests::pricing_gpt_6_astra_uses_request_scoped_short_and_long_tiers ... ok
+test domain::pricing::tests::pricing_rate_preserves_low_precision_rates ... ok
+test domain::pricing::tests::pricing_static_v2_hits_claude_fable_and_mythos_5 ... ok
+test domain::pricing::tests::pricing_static_v2_hits_current_gpt5_dotted_variants ... ok
+test domain::pricing::tests::pricing_static_v2_hits_known_model ... ok
+test domain::pricing::tests::pricing_static_v3_hits_claude_fable_and_mythos_5_1 ... ok
+test domain::pricing::tests::pricing_status_source_reported_as_str ... ok
+test domain::pricing::tests::pricing_unpriced_when_no_match ... ok
+test domain::pricing::tests::source_reported_cost_wins_over_catalog_when_total_positive ... ok
+test domain::pricing::tests::source_reported_derives_without_cache_from_input_rate ... ok
+test domain::pricing::tests::source_reported_without_cache_falls_back_to_total ... ok
+test domain::pricing::tests::zero_or_missing_source_cost_uses_catalog ... ok
+test domain::pricing_catalog::tests::pricing_catalog_covers_gpt_5_6_exact_models_and_alias ... ok
+test domain::pricing_catalog::tests::pricing_catalog_covers_gpt_6_astra_and_claude_5_1 ... ok
+test domain::pricing_catalog::tests::pricing_catalog_duplicate_matchers_rejected ... ok
+test domain::pricing_catalog::tests::pricing_catalog_exposes_context_window ... ok
+test domain::pricing_catalog::tests::pricing_catalog_honors_explicit_native_reasoning_policy ... ok
+test domain::pricing_catalog::tests::pricing_catalog_loads_litellm_snapshot ... ok
+test domain::pricing_catalog::tests::pricing_catalog_loads_native_litellm_models_object ... ok
+test domain::pricing_catalog::tests::pricing_catalog_loads_native_litellm_snapshot ... ok
+test domain::pricing_catalog::tests::pricing_catalog_loads_static_v2 ... ok
+test domain::pricing_catalog::tests::pricing_catalog_matches_known_provider_aliases ... ok
+test domain::pricing_catalog::tests::pricing_catalog_prefix_matches_minor_variants ... ok
+test domain::pricing_catalog::tests::pricing_catalog_reads_native_context_window ... ok
+test domain::pricing_catalog::tests::pricing_catalog_rejects_invalid_v2_tiers ... ok
+test domain::pricing_catalog::tests::pricing_overlay_removal_is_strict_and_replacement_is_whole_model ... ok
+test query::tests::dashboard_ccr_ui_contract_exposes_cost_cache_and_pricing_fields ... ok
+test query::tests::recompute_costs_uses_active_pricing_catalog ... ok
+test query::tests::refresh_pricing_recomputes_all_costs ... ok
+test store::migrations::tests::migration_v10_seeds_pricing_catalog_version ... ok
+test store::pricing_catalog::tests::activating_snapshot_clears_existing_overlay_metadata ... ok
+test store::pricing_catalog::tests::bootstrap_fails_closed_when_in_progress_catalog_target_is_missing ... ok
+test store::pricing_catalog::tests::bootstrap_recovers_from_interrupted_recompute ... ok
+test store::pricing_catalog::tests::bootstrap_recovers_overlay_when_files_exist_and_meta_is_stale ... ok
+test store::pricing_catalog::tests::bootstrap_upgrades_unpinned_old_static_catalog ... ok
+test store::pricing_catalog::tests::catalog_overlay_apply_survives_restart_and_reset_restores_embedded ... ok
+test store::pricing_catalog::tests::overlay_on_snapshot_resets_to_pinned_snapshot ... ok
+test store::pricing_catalog::tests::paged_recompute_can_retry_after_a_later_page_fails ... ok
+test store::pricing_catalog::tests::pricing_progress_reports_ordered_upgrade_lifecycle_and_noop_is_silent ... ok
+test store::pricing_catalog::tests::recompute_with_custom_static_catalog_persists_catalog_for_restart ... ok
+test store::pricing_catalog::tests::recompute_with_snapshot_persists_catalog_for_restart ... ok
+test store::pricing_catalog::tests::repeated_overlay_apply_uses_recorded_base_not_previous_effective ... ok
+test store::pricing_catalog::tests::selected_catalog_digest_mismatch_fails_closed ... ok
+test store::pricing_reconcile_tests::pricing_bucket_reconcile_does_not_require_usage_event ... ok
+test store::pricing_reconcile_tests::pricing_slow_warning_threshold_is_one_shot ... ok
+test store::sync_writer::profiling::tests::complete_state_covers_raw_pricing_hosts_and_all_rollback_stages ... ok
+test store::sync_writer::tests::active_pricing_catalog_rejects_version_mismatch ... ok
+test store::sync_writer::tests::commit_shard_persists_costs_and_recomputes_bucket_pricing_after_reset ... ok
+test store::sync_writer::tests::commit_shard_uses_active_local_pricing_snapshot ... ok
+test store::sync_writer::tests::reset_refreshes_shared_bucket_pricing_without_per_bucket_event_scans ... ok
+test sync::pricing_refresh::tests::ac1_and_ac2_per_source_caching_and_recompute ... ok
+test sync::pricing_refresh::tests::ac2_rate_change_recomputes_and_fresh_cache_does_not ... ok
+test sync::pricing_refresh::tests::ac3_source_failure_preserves_previous_cache ... ok
+test sync::pricing_refresh::tests::ac4_no_cache_and_both_fail_keeps_embedded ... ok
+test sync::pricing_refresh::tests::ac5_named_example_models_hit_exact_rates ... ok
+test sync::pricing_refresh::tests::ac6_long_context_threshold_boundary ... ok
+test sync::pricing_refresh::tests::ac7_raw_model_and_positive_source_reported_cost_unchanged ... ok
+test sync::pricing_refresh::tests::ac8_overlay_model_id_wins_after_refresh ... ok
+test sync::pricing_refresh::tests::ac9_and_ac10_offline_default_and_no_json_events_warnings ... ok
+
+test result: ok. 70 passed; 0 failed; 0 ignored; 0 measured; 937 filtered out; finished in 8.07s
+

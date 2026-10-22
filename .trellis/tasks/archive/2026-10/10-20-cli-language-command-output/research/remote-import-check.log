@@ -1,0 +1,19 @@
+    Checking llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\incremental\llmusage-1l80lsjwihhxr\s-hnf0y6bi92-14v4zpt-working`
+
+warning: method `bootstrap_with_progress` is never used
+   --> src\store\schema.rs:112:19
+    |
+ 69 | impl Store {
+    | ---------- method in this implementation
+...
+112 |     pub(crate) fn bootstrap_with_progress(
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `llmusage` (lib) generated 2 warnings
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\incremental\llmusage-3sn0k2ciwo2j1\s-hnf0yetilm-0bnrx4d-working`
+
+warning: `llmusage` (bin "llmusage") generated 1 warning
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 16.58s

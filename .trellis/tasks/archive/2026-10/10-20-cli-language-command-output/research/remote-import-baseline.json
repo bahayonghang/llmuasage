@@ -1,0 +1,6 @@
+{
+  "src/remote/importer.rs": "df2d09706ae4ecdc82807e623bdf828debd1cd1dca7d066b41e0df5ad4854466",
+  "src/remote/protocol.rs": "3396ef6a401d27c36a8abbffbff9cc65202b41cadca9dfa1ce876d3fb4f2582e",
+  "src/remote/mod.rs": "4e7bd1dcc2d8d45c01b50319cfff68306eca7900c30ecb5493f81cf41a81341e",
+  "src/commands/remote.rs": "9cfa24a773a1ea57b0b66073894f60f8f00dae9da3889bc03deee2c983b3858a"
+}

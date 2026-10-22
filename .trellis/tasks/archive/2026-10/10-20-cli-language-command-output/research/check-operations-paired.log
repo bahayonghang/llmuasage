@@ -1,0 +1,28 @@
+    Blocking waiting for file lock on build directory
+   Compiling llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (bin "llmusage") generated 1 warning
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\cli-f318ae356368252a.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\cli-f318ae356368252a.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (test "cli") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 12s
+     Running tests\cli\main.rs (output\s-language-rust-target\debug\deps\cli-f318ae356368252a.exe)
+
+running 9 tests
+test language_commands::clean_preview_and_confirmation_preserve_the_same_owned_set_in_both_languages ... ok
+test language_commands::diagnostics_default_and_out_are_canonical_while_forget_rejections_are_bilingual ... ok
+test language_commands::export_and_tracer_shells_follow_language_without_translating_web_assets ... ok
+test language_commands::logs_replay_uses_ids_and_preserves_unknown_detail_and_disk_bytes ... ok
+test language_commands::operational_human_results_follow_language_without_changing_fixed_json ... ok
+test language_commands::remote_remove_requires_yes_and_preserves_local_identity ... ok
+test language_commands::source_and_doctor_human_diagnostics_follow_language_while_machine_checks_stay_canonical ... ok
+test language_commands::uninstall_failure_is_bilingual_but_audit_and_run_error_remain_canonical ... ok
+test language_commands::uninstall_translates_private_outcomes_without_changing_cleanup_audits_or_user_files ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 64 filtered out; finished in 28.96s
+

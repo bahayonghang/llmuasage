@@ -1,0 +1,28 @@
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.61s
+     Running unittests src\lib.rs (output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exe)
+
+running 1 test
+test web::tests::api_dashboard_interactive_scope_is_lean_and_selected_window_only ... FAILED
+
+failures:
+
+---- web::tests::api_dashboard_interactive_scope_is_lean_and_selected_window_only stdout ----
+
+thread 'web::tests::api_dashboard_interactive_scope_is_lean_and_selected_window_only' (49108) panicked at src\web\mod.rs:6248:9:
+assertion `left == right` failed
+  left: Number(0)
+ right: 10
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    web::tests::api_dashboard_interactive_scope_is_lean_and_selected_window_only
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 993 filtered out; finished in 0.15s
+
+error: test failed, to rerun pass `--lib`

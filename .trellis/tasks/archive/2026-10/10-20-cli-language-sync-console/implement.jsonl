@@ -1,0 +1,10 @@
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/prd.md", "reason": "Confirmed full CLI plus TUI scope, acceptance IDs and explicit no-implementation authorization boundary."}
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/design.md", "reason": "Shared architecture: startup, language scopes, console/file split, private sync/quota metadata and compatibility."}
+{"file": ".trellis/spec/llmusage/backend/runtime-log-contracts.md", "reason": "S ownership contract: preserve existing behavior while localizing presentation."}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "S ownership contract: preserve existing behavior while localizing presentation."}
+{"file": ".trellis/spec/llmusage/backend/write-fencing-contracts.md", "reason": "S ownership contract: preserve existing behavior while localizing presentation."}
+{"file": ".trellis/spec/llmusage/backend/ci-toolchain-contracts.md", "reason": "S ownership contract: preserve existing behavior while localizing presentation."}
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/research/source-sync-contract-excerpt.md", "reason": "S evidence and exact ownership/acceptance mechanisms."}
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/research/output-proposal.md", "reason": "S evidence and exact ownership/acceptance mechanisms."}
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/research/repository-analysis.md", "reason": "S evidence and exact ownership/acceptance mechanisms."}
+{"file": ".trellis/spec/llmusage/backend/cli-language-contracts.md", "reason": "Verified shared language/preferences/startup contract and typed diagnostic API for this implementation."}

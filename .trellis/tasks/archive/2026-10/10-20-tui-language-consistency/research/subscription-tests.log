@@ -1,0 +1,30 @@
+   Compiling llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 56.13s
+     Running unittests src\lib.rs (output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exe)
+
+running 17 tests
+test subscription::cache::tests::expired_cache_is_ignored ... ok
+test subscription::cache::tests::fresh_cache_round_trips ... ok
+test subscription::grok::tests::presentation_keeps_original_rounded_quantity_and_nested_metric_order ... ok
+test subscription::http::tests::client_builder_uses_visible_no_redirect_policy ... ok
+test subscription::http::tests::cross_host_redirect_does_not_forward_authorization ... ok
+test subscription::http::tests::status_error_internal_error_is_generic_failure ... ok
+test subscription::http::tests::status_error_unauthorized_mentions_rejected_token ... ok
+test subscription::kimi::tests::presentation_keeps_original_integer_quantity_when_percentage_is_clamped ... ok
+test subscription::tests::bypass_cache_is_live_miss ... ok
+test subscription::tests::corrupt_cache_is_not_reported_as_hit ... ok
+test subscription::tests::expired_fetched_at_is_live_cache_miss ... ok
+test subscription::tests::fetch_all_reads_four_providers_without_writing_credentials ... ok
+test subscription::tests::fresh_fetched_at_with_old_mtime_is_cache_hit ... ok
+test subscription::tests::missing_credentials_are_skipped ... ok
+test subscription::tests::one_provider_failure_keeps_other_rows ... ok
+test subscription::tests::presentation_known_credentials_error_is_captured_before_string_erasure ... ok
+test subscription::tests::presentation_live_cache_and_legacy_readers_preserve_report_and_requests ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 1013 filtered out; finished in 0.12s
+

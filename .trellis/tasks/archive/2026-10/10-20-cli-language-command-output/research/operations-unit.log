@@ -1,0 +1,219 @@
+   Compiling llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 58.19s
+     Running unittests src\lib.rs (output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exe)
+
+running 173 tests
+test commands::catalog::tests::pricing_adapter_preserves_original_display_variant_and_external_source ... ok
+test commands::clean::tests::canonical_path_outside_root_is_not_a_failed_delete ... ok
+test commands::clean::tests::command_uses_the_app_runtime_root ... ok
+test commands::clean::tests::config_backup_wins_over_migration_prefix ... ok
+test commands::clean::tests::dry_run_prints_categories_without_changing_bytes ... ok
+test commands::clean::tests::formats_decimal_gigabytes ... ok
+test commands::clean::tests::migration_copies_and_sidecars_are_deletable ... ok
+test commands::clean::tests::missing_root_is_empty_and_not_created ... ok
+test commands::clean::tests::protected_root_files_are_kept ... ok
+test commands::clean::tests::renders_inventory_scale_sizes ... ok
+test commands::clean::tests::symlink_kind_is_never_deletable ... ok
+test commands::clean::tests::yes_deletes_only_the_confirmed_set ... ok
+test commands::cli_errors::tests::canonical_detail_skips_only_marked_context_and_preserves_original_nested_causes ... ok
+test commands::cli_errors::tests::validation_context_preserves_the_original_typed_source ... ok
+test commands::codex_tracer::dashboard::tests::test_escape_html ... ok
+test commands::codex_tracer::dashboard::tests::test_generate_dashboard_basic ... ok
+test commands::codex_tracer::ingest::tests::cancelled_run_leaves_prior_boundary_retryable ... ok
+test commands::codex_tracer::ingest::tests::codex_tracer_100k_collector_baseline ... ignored, explicit synthetic 100k performance harness
+test commands::codex_tracer::ingest::tests::codex_tracer_100k_streaming ... ignored, explicit synthetic 100k performance harness
+test commands::codex_tracer::ingest::tests::fresh_unchanged_append_and_replace_match_clean_rebuilds ... ok
+test commands::codex_tracer::ingest::tests::oversized_record_stays_bounded_and_does_not_hide_later_usage ... ok
+test commands::codex_tracer::ingest::tests::thread_links_converge_across_files_and_batches ... ok
+test commands::codex_tracer::models::tests::test_codex_tracer_event_computed_fields ... ok
+test commands::codex_tracer::models::tests::test_recompute_derived_fields ... ok
+test commands::codex_tracer::models::tests::test_zero_token_edge_cases ... ok
+test commands::codex_tracer::parser::tests::partial_eof_event_retries_from_the_prior_durable_boundary ... ok
+test commands::codex_tracer::parser::tests::test_compute_thread_key ... ok
+test commands::codex_tracer::parser::tests::test_extract_session_id_from_path ... ok
+test commands::codex_tracer::parser::tests::test_file_parse_state ... ok
+test commands::codex_tracer::parser::tests::test_generate_record_id ... ok
+test commands::codex_tracer::parser::tests::test_is_archived_path ... ok
+test commands::codex_tracer::parser::tests::test_link_previous_next_records ... ok
+test commands::codex_tracer::server::tests::failure_json_omits_filesystem_paths_and_rusqlite_text ... ok
+test commands::codex_tracer::server::tests::get_api_refresh_does_not_ingest ... ok
+test commands::codex_tracer::server::tests::list_api_clamps_oversized_limit_below_index_budget ... ok
+test commands::codex_tracer::server::tests::list_query_limit_clamps_to_list_cap ... ok
+test commands::codex_tracer::store::tests::failed_batch_rolls_back_file_reset_events_and_checkpoint ... ok
+test commands::codex_tracer::store::tests::query_calls_binds_and_clamps_oversized_limit ... ok
+test commands::codex_tracer::store::tests::query_limit_constants_are_bounded ... ok
+test commands::codex_tracer::store::tests::test_idempotent_upsert ... ok
+test commands::codex_tracer::store::tests::test_query_with_filters ... ok
+test commands::codex_tracer::store::tests::test_store_open_and_init ... ok
+test commands::codex_tracer::store::tests::test_upsert_and_query_events ... ok
+test commands::codex_tracer::store::tests::tracer_file_state_upgrade_is_additive_and_idempotent ... ok
+test commands::dash::tests::dash_parses_from_args ... ok
+test commands::dash::tests::dash_visible_in_help_text ... ok
+test commands::dash::tests::deprecated_alias_copy_obeys_scope_without_changing_command_or_ansi_policy ... ok
+test commands::dash::tests::deprecation_emitted_for_tui_variant ... ok
+test commands::dash::tests::deprecation_warning_can_disable_ansi_styles ... ok
+test commands::dash::tests::deprecation_warning_can_force_ansi_styles ... ok
+test commands::dash::tests::no_deprecation_for_dash_variant ... ok
+test commands::dash::tests::tui_hidden_from_help_text ... ok
+test commands::dash::tests::tui_parses_from_args_hidden_but_functional ... ok
+test commands::doctor::tests::doctor_warns_only_on_malformed_or_oversized ... ok
+test commands::focused::tests::all_source_period_commands_parse ... ok
+test commands::focused::tests::ide_focused_command_uses_underscore_source_id ... ok
+test commands::focused::tests::localized_conflict_preserves_canonical_error_display ... ok
+test commands::focused::tests::source_injection_accepts_the_same_value_and_rejects_a_conflict ... ok
+test commands::help::tests::detects_only_top_level_help_requests ... ok
+test commands::help::tests::renders_chinese_with_unicode_width_wrapping ... ok
+test commands::help::tests::renders_terminal_tables_without_markdown_separator_rows ... ok
+test commands::remote::tests::registration_rejections_preserve_public_errors_and_translate_typed_private_facts ... ok
+test commands::remote::tests::remote_remove_keeps_usage_rows_by_default ... ok
+test commands::remote::tests::remote_sync_host_filter_imports_only_that_host_without_local_driver ... ok
+test commands::report_args::tests::report_dates_accept_compact_and_iso_forms ... ok
+test commands::report_args::tests::report_dates_reject_other_forms_with_actionable_error ... ok
+test commands::serve::tests::browser_open_decision_skips_no_open_and_ssh_sessions ... ok
+test commands::serve::tests::macos_browser_launch_plan_uses_open ... ok
+test commands::serve::tests::public_listener_uses_loopback_for_browser_and_a_remote_placeholder ... ok
+test commands::serve::tests::ssh_session_detection_accepts_connection_or_tty ... ok
+test commands::serve::tests::stale_serve_run_is_recovered_as_aborted ... ok
+test commands::serve::tests::supervisor_localizes_owned_failures_and_preserves_original_signal_error ... ok
+test commands::serve::tests::supervisor_rejects_early_server_completion_and_panic ... ok
+test commands::serve::tests::tracked_bind_and_server_failures_finish_as_failed ... ok
+test commands::serve::tests::tracked_serve_stays_running_until_clean_shutdown ... ok
+test commands::serve::tests::unix_browser_launch_plan_uses_xdg_open ... ok
+test commands::serve::tests::windows_browser_launch_plan_uses_start_command ... ok
+test commands::source_status::tests::antigravity_cli_history_does_not_mark_ide_ready ... ok
+test commands::source_status::tests::antigravity_current_marker_still_discloses_retained_hook_history ... ok
+test commands::source_status::tests::host_lifecycle_status_is_idle_unreachable_or_never_contacted ... ok
+test commands::source_status::tests::parse_issue_status_prints_reason_without_at_zero ... ok
+test commands::source_status::tests::parse_issue_summary_is_emitted_for_any_nonzero_class ... ok
+test commands::source_status::tests::parserless_antigravity_is_historical_only ... ok
+test commands::source_status::tests::platform_status_keeps_monitor_only_platform_out_of_source_kind ... ok
+test commands::source_status::tests::status_reports_passive_no_data_without_history ... ok
+test commands::source_status::tests::status_reports_passive_ready_when_data_exists ... ok
+test commands::statusline::tests::statusline_io_preserves_original_display_and_typed_source_with_paired_context ... ok
+test commands::sync::tests::cancellation_notice_uses_observed_outcome_and_early_error_emits_none ... ok
+test commands::sync::tests::emit_shards_does_not_open_or_lock_the_user_database ... ok
+test commands::sync::tests::optional_feedback_preserves_imports_cursors_accounting_and_kept_history ... ok
+test commands::sync::tests::parallelism_above_max_is_rejected ... ok
+test commands::sync::tests::parallelism_max_is_accepted ... ok
+test commands::sync::tests::parallelism_none_resolves_to_sensible_default ... ok
+test commands::sync::tests::parallelism_one_is_accepted ... ok
+test commands::sync::tests::parallelism_usize_max_is_rejected ... ok
+test commands::sync::tests::parallelism_zero_is_rejected ... ok
+test commands::sync::tests::prompt_recovery_choice_parsing_and_retry ... ok
+test commands::sync::tests::rebuild_sources_rejects_parserless_historical_source ... ok
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 33ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 29ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 33ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 21ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 18ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 23ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 20ms)
+test commands::sync::tests::stdin_pipe_with_choice_text_and_failing_stdin_skips_without_reading ... ok
+test commands::sync::tests::stream_capabilities_decision_matrix ... ok
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 20ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 25ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 19ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 20ms)
+test commands::sync::tests::windowed_terminal_notice_does_not_read_stdin ... ok
+test commands::sync_progress::tests::bar_renderer_cancelled_abandons_active_bar ... ok
+test commands::sync_progress::tests::bar_renderer_failed_abandons_and_ignores_followups ... ok
+test commands::sync_progress::tests::bar_renderer_opencode_progress_never_overflows ... ok
+test commands::sync_progress::tests::bar_renderer_pricing_upgrade_sequence_converges ... ok
+test commands::sync_progress::tests::bar_renderer_success_sequence_converges ... ok
+test commands::sync_progress::tests::bilingual_progress_preserves_counts_shortens_only_version_identity_and_wire_is_unchanged ... ok
+test commands::sync_progress::tests::determinate_source_progress_reports_replay_and_commit_phases ... ok
+test commands::sync_progress::tests::dynamic_progress_detail_is_escaped_for_lines_and_bars_without_changing_events ... ok
+test commands::sync_progress::tests::forced_line_requires_non_empty_env_value ... ok
+test commands::sync_progress::tests::human_lines_never_contain_ansi_escapes ... ok
+test commands::sync_progress::tests::human_progress_describes_pricing_upgrade_phases ... ok
+test commands::sync_progress::tests::permanent_progress_lines_end_before_raw_warnings ... ok
+test commands::sync_progress::tests::pricing_sync_event_serializes_as_additive_snake_case_ndjson ... ok
+test commands::sync_progress::tests::remote_host_events_render_skip_warnings ... ok
+test commands::sync_progress::tests::reporter_keeps_the_renderer_language_snapshot_across_spawn ... ok
+test commands::sync_progress::tests::scoped_warning_sink_handles_interleaved_progress_and_restores_on_error ... ok
+test commands::sync_progress::tests::selection_falls_back_to_line_renderer ... ok
+test commands::sync_progress::tests::short_file_label_uses_last_segment_and_truncates ... ok
+test commands::sync_progress::tests::source_finished_emits_no_permanent_human_line ... ok
+test commands::sync_progress::tests::terminal_guard_finishes_renderer_on_drop ... ok
+test commands::sync_progress::tests::token_accounting_repair_events_have_actionable_copy_and_ndjson_shape ... ok
+test commands::sync_recovery::tests::recovery_choices_retry_and_safe_defaults_match_in_both_languages ... ok
+test commands::sync_recovery::tests::unreadable_or_incomplete_discovery_never_offer_acceptance_or_read ... ok
+test commands::sync_summary::tests::absent_source_uses_placeholders_and_error_line ... ok
+test commands::sync_summary::tests::bilingual_diagnostics_are_source_grouped_capped_and_separate_faults_from_information ... ok
+test commands::sync_summary::tests::bilingual_table_has_closed_equal_width_borders_and_exact_numeric_cells ... ok
+test commands::sync_summary::tests::colored_output_wraps_but_preserves_alignment_math ... ok
+test commands::sync_summary::tests::colored_total_row_matches_plain_after_strip ... ok
+test commands::sync_summary::tests::colorless_output_contains_no_ansi_and_aligns_columns ... ok
+test commands::sync_summary::tests::diagnostics_and_samples_are_strictly_after_total ... ok
+test commands::sync_summary::tests::empty_summary_still_renders_zero_total_row ... ok
+test commands::sync_summary::tests::narrow_width_truncates_only_source_label ... ok
+test commands::sync_summary::tests::paired_inventory_diagnostics_keep_cap_counts_and_additional_unknown_detail ... ok
+test commands::sync_summary::tests::parse_issue_counts_are_visible_without_sample_contents ... ok
+test commands::sync_summary::tests::parse_issue_samples_print_basename_never_full_path ... ok
+test commands::sync_summary::tests::parse_issue_samples_print_reason_without_at_zero ... ok
+test commands::sync_summary::tests::parse_issue_samples_report_offsets_and_omitted_count ... ok
+test commands::sync_summary::tests::skipped_only_parse_issues_are_not_warning_colored ... ok
+test commands::sync_summary::tests::table_shows_human_bytes_and_durations ... ok
+test commands::sync_summary::tests::total_row_aggregates_source_stats ... ok
+test commands::sync_summary::tests::total_row_replaces_legacy_totals_line ... ok
+test commands::sync_summary::tests::typed_coverage_preserves_fault_protection_and_never_guesses_from_last_error ... ok
+test commands::sync_summary::tests::zero_and_large_values_format_safely ... ok
+test commands::tests::catalog_subcommands_parse ... ok
+test commands::tests::clean_parses_yes_and_global_home ... ok
+test commands::tests::remote_subcommands_parse ... ok
+test commands::tests::serve_parses_public_and_no_open_flags ... ok
+test commands::tests::source_filter_parses_transport_text_and_shared_validator_rejects_unknown ... ok
+test commands::tests::source_status_parses_from_args ... ok
+test commands::tests::source_status_visible_in_help_text ... ok
+test commands::tests::sync_emit_shards_parses_and_conflicts_with_rebuild ... ok
+test commands::tests::update_help_documents_channels_and_check_mode ... ok
+test commands::tests::update_parses_supported_channels_and_rejects_others ... ok
+test commands::unified_report::tests::focused_projection_removes_the_agent_comparison_layer ... ok
+test commands::unified_report::tests::requested_sections_keeps_current_first_and_uses_fixed_order ... ok
+test commands::update::tests::cancellation_never_revalidates_or_calls_executor ... ok
+test commands::update::tests::changed_target_after_confirmation_fails_before_executor ... ok
+test commands::update::tests::check_only_resolves_once_and_never_calls_executor ... ok
+test commands::update::tests::confirmation_accepts_default_yes_and_no ... ok
+test commands::update::tests::confirmation_read_failure_never_calls_executor ... ok
+test commands::update::tests::confirmation_reprompts_invalid_input_and_refuses_eof ... ok
+test commands::update::tests::dev_resolver_rejects_invalid_conflicting_and_missing_refs ... ok
+test commands::update::tests::executor_success_and_failures_are_propagated ... ok
+test commands::update::tests::paired_confirmation_and_executor_paths_keep_defaults_and_failure_policy ... ok
+test commands::update::tests::provider_failure_after_confirmation_never_calls_executor ... ok
+test commands::update::tests::provider_failure_is_fail_closed ... ok
+test commands::update::tests::resolver_rejects_invalid_ambiguous_and_missing_release_targets ... ok
+test commands::update::tests::stable_plan_uses_resolved_release_commit_and_dev_remains_explicitly_mutable ... ok
+test commands::update::tests::stable_resolver_accepts_lightweight_tags_and_sha256_object_ids ... ok
+test commands::update::tests::stable_resolver_excludes_prerelease_build_and_noncanonical_versions ... ok
+test common::i18n::commands::pricing::tests::nested_pricing_metadata_only_hides_original_error_when_complete ... ok
+test common::i18n::commands::reports::tests::report_diagnostic_facts_round_trip_without_translated_copy_and_reject_unknown_shapes ... ok
+
+test result: ok. 171 passed; 0 failed; 2 ignored; 0 measured; 836 filtered out; finished in 10.44s
+

@@ -1,0 +1,140 @@
+    Blocking waiting for file lock on build directory
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.72s
+     Running unittests src\lib.rs (output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exe)
+
+running 94 tests
+test commands::sync::tests::cancellation_notice_uses_observed_outcome_and_early_error_emits_none ... ok
+test commands::sync::tests::emit_shards_does_not_open_or_lock_the_user_database ... ok
+test commands::sync::tests::optional_feedback_preserves_imports_cursors_accounting_and_kept_history ... ok
+test commands::sync::tests::parallelism_above_max_is_rejected ... ok
+test commands::sync::tests::parallelism_max_is_accepted ... ok
+test commands::sync::tests::parallelism_none_resolves_to_sensible_default ... ok
+test commands::sync::tests::parallelism_one_is_accepted ... ok
+test commands::sync::tests::parallelism_usize_max_is_rejected ... ok
+test commands::sync::tests::parallelism_zero_is_rejected ... ok
+test commands::sync::tests::prompt_recovery_choice_parsing_and_retry ... ok
+test commands::sync::tests::rebuild_sources_rejects_parserless_historical_source ... ok
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 17ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 20ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 17ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 18ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 17ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 14ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 14ms)
+test commands::sync::tests::stdin_pipe_with_choice_text_and_failing_stdin_skips_without_reading ... ok
+test commands::sync::tests::stream_capabilities_decision_matrix ... ok
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 16ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 25ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 18ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 22ms)
+test commands::sync::tests::windowed_terminal_notice_does_not_read_stdin ... ok
+test commands::sync_progress::tests::bar_renderer_cancelled_abandons_active_bar ... ok
+test commands::sync_progress::tests::bar_renderer_failed_abandons_and_ignores_followups ... ok
+test commands::sync_progress::tests::bar_renderer_opencode_progress_never_overflows ... ok
+test commands::sync_progress::tests::bar_renderer_pricing_upgrade_sequence_converges ... ok
+test commands::sync_progress::tests::bar_renderer_success_sequence_converges ... ok
+test commands::sync_progress::tests::bilingual_progress_preserves_counts_shortens_only_version_identity_and_wire_is_unchanged ... ok
+test commands::sync_progress::tests::determinate_source_progress_reports_replay_and_commit_phases ... ok
+test commands::sync_progress::tests::dynamic_progress_detail_is_escaped_for_lines_and_bars_without_changing_events ... ok
+test commands::sync_progress::tests::forced_line_requires_non_empty_env_value ... ok
+test commands::sync_progress::tests::human_lines_never_contain_ansi_escapes ... ok
+test commands::sync_progress::tests::human_progress_describes_pricing_upgrade_phases ... ok
+test commands::sync_progress::tests::permanent_progress_lines_end_before_raw_warnings ... ok
+test commands::sync_progress::tests::pricing_sync_event_serializes_as_additive_snake_case_ndjson ... ok
+test commands::sync_progress::tests::remote_host_events_render_skip_warnings ... ok
+test commands::sync_progress::tests::reporter_keeps_the_renderer_language_snapshot_across_spawn ... ok
+test commands::sync_progress::tests::scoped_warning_sink_handles_interleaved_progress_and_restores_on_error ... ok
+test commands::sync_progress::tests::selection_falls_back_to_line_renderer ... ok
+test commands::sync_progress::tests::short_file_label_uses_last_segment_and_truncates ... ok
+test commands::sync_progress::tests::source_finished_emits_no_permanent_human_line ... ok
+test commands::sync_progress::tests::terminal_guard_finishes_renderer_on_drop ... ok
+test commands::sync_progress::tests::token_accounting_repair_events_have_actionable_copy_and_ndjson_shape ... ok
+test commands::sync_recovery::tests::recovery_choices_retry_and_safe_defaults_match_in_both_languages ... ok
+test commands::sync_recovery::tests::unreadable_or_incomplete_discovery_never_offer_acceptance_or_read ... ok
+test commands::sync_summary::tests::absent_source_uses_placeholders_and_error_line ... ok
+test commands::sync_summary::tests::bilingual_diagnostics_are_source_grouped_capped_and_separate_faults_from_information ... ok
+test commands::sync_summary::tests::bilingual_table_has_closed_equal_width_borders_and_exact_numeric_cells ... ok
+test commands::sync_summary::tests::colored_output_wraps_but_preserves_alignment_math ... ok
+test commands::sync_summary::tests::colored_total_row_matches_plain_after_strip ... ok
+test commands::sync_summary::tests::colorless_output_contains_no_ansi_and_aligns_columns ... ok
+test commands::sync_summary::tests::diagnostics_and_samples_are_strictly_after_total ... ok
+test commands::sync_summary::tests::empty_summary_still_renders_zero_total_row ... ok
+test commands::sync_summary::tests::narrow_width_truncates_only_source_label ... ok
+test commands::sync_summary::tests::paired_inventory_diagnostics_keep_cap_counts_and_additional_unknown_detail ... ok
+test commands::sync_summary::tests::parse_issue_counts_are_visible_without_sample_contents ... ok
+test commands::sync_summary::tests::parse_issue_samples_print_basename_never_full_path ... ok
+test commands::sync_summary::tests::parse_issue_samples_print_reason_without_at_zero ... ok
+test commands::sync_summary::tests::parse_issue_samples_report_offsets_and_omitted_count ... ok
+test commands::sync_summary::tests::skipped_only_parse_issues_are_not_warning_colored ... ok
+test commands::sync_summary::tests::table_shows_human_bytes_and_durations ... ok
+test commands::sync_summary::tests::total_row_aggregates_source_stats ... ok
+test commands::sync_summary::tests::total_row_replaces_legacy_totals_line ... ok
+test commands::sync_summary::tests::typed_coverage_preserves_fault_protection_and_never_guesses_from_last_error ... ok
+test commands::sync_summary::tests::zero_and_large_values_format_safely ... ok
+test common::i18n::logging::tests::default_known_events_keep_source_and_protection_counts_visible ... ok
+test common::i18n::logging::tests::inventory_log_uses_neutral_detail_and_keeps_original_file_payload ... ok
+test common::i18n::logging::tests::known_remote_warning_uses_neutral_counts_and_legacy_logs_keep_original_detail ... ok
+test common::i18n::logging::tests::pricing_projection_keeps_warning_level_counts_and_omits_default_hashes ... ok
+test common::i18n::logging::tests::production_tracing_sites_have_unique_paired_catalog_entries ... ok
+test common::i18n::logging::tests::typed_failure_log_projection_preserves_host_counts_and_canonical_file_detail ... ok
+test common::i18n::logging::tests::unknown_or_mismatched_failure_metadata_remains_available_as_original_detail ... ok
+test parsers::feedback::tests::dropped_or_failed_collection_restores_scope_and_direct_emit_is_noop ... ok
+test parsers::feedback::tests::nested_collectors_and_concurrent_tasks_are_isolated_and_restored ... ok
+test parsers::source_files::tests::consumed_inventory_summary_has_typed_provenance_cap_and_unknown_details ... ok
+test parsers::source_files::tests::dsh_listing_matches_exact_session_log_names_at_any_depth ... ok
+test parsers::source_files::tests::dsh_listing_returns_empty_when_root_is_missing ... ok
+test parsers::source_files::tests::grok_listing_only_returns_root_sidecars_from_two_directory_levels ... ok
+test parsers::source_files::tests::list_matching_files_preserves_missing_root_as_empty ... ok
+test parsers::source_files::tests::list_matching_files_rejects_non_directory_root ... ok
+test parsers::source_files::tests::list_matching_files_retains_root_error_after_access_recovers ... ok
+test parsers::source_files::tests::omp_keeps_unconflicted_files_when_omp_root_contains_pi_root ... ok
+test parsers::source_files::tests::omp_skips_files_when_pi_root_contains_omp_root ... ok
+test parsers::source_files::tests::omp_skips_files_when_roots_are_equal ... ok
+test parsers::source_files::tests::pi_and_omp_listings_are_disjoint_when_roots_do_not_overlap ... ok
+test parsers::source_files::tests::walk_inventory_fact_retains_os_detail_without_embedded_private_path ... ok
+test runtime::logging::tests::cleanup_failure_is_counted_and_retried_without_panicking ... ok
+test runtime::logging::tests::cli_console_captures_language_while_file_events_keep_original_message_level_and_fields ... ok
+test runtime::logging::tests::full_non_blocking_queue_increments_dropped_counter ... ok
+test runtime::logging::tests::occupied_windows_file_is_counted_then_removed_after_release ... ok
+test runtime::logging::tests::one_process_rotates_repeatedly_and_enforces_total_budget ... ok
+test runtime::logging::tests::one_process_rotates_when_the_utc_day_changes ... ok
+test runtime::logging::tests::open_current_shard_is_included_in_runtime_totals ... ok
+test runtime::logging::tests::production_tracing_pipeline_rotates_complete_json_events ... ok
+test runtime::logging::tests::retention_enforces_file_count_and_age ... ok
+test runtime::logging::tests::reverse_tail_reads_only_requested_tail_blocks ... ok
+test runtime::logging::tests::rotation_creation_failure_keeps_current_shard_and_retries ... ok
+test runtime::logging::tests::rotation_never_splits_one_ndjson_record ... ok
+test runtime::logging::tests::tail_handles_utf8_and_partial_final_line ... ok
+test runtime::logging::tests::tail_reads_across_shards_in_chronological_order ... ok
+test runtime::logging::tests::total_budget_is_enforced_before_periodic_maintenance ... ok
+test runtime::logging::tests::vanished_log_entry_is_ignored_during_scan ... ok
+
+test result: ok. 94 passed; 0 failed; 0 ignored; 0 measured; 900 filtered out; finished in 7.23s
+

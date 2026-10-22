@@ -1,0 +1,128 @@
+   Compiling llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 20.46s
+     Running unittests src\lib.rs (output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exe)
+
+running 115 tests
+test tui::app::period_detail_tests::reopening_period_detail_keeps_list_scroll_backup ... ok
+test tui::app::tests::app_state_defaults_to_all_time ... ok
+test tui::app::tests::idle_ticks_do_not_request_redraw_but_active_animation_does ... ok
+test tui::app::tests::prop_panel_navigation_produces_correct_index ... ok
+test tui::app::tests::prop_time_window_next_follows_clamped_order ... ok
+test tui::app::tests::prop_time_window_prev_follows_clamped_order ... ok
+test tui::app::tests::row_movement_wraps_while_paging_clamps ... ok
+test tui::app::tests::selection_and_window_stay_within_bounds ... ok
+test tui::app::tests::sort_state_is_remembered_per_panel ... ok
+test tui::app::tests::stable_sort_preserves_ties_and_collection ... ok
+test tui::app::tests::time_windows_map_to_inclusive_local_calendar_dates ... ok
+test tui::data_loader::tests::cancelling_slow_query_interrupts_without_hanging ... ok
+test tui::data_loader::tests::context_pressure_parts_merge_with_weighted_average ... ok
+test tui::data_loader::tests::measure_local_parallel_panel_loading ... ignored, reads the local usage database for release-mode performance evidence
+test tui::data_loader::tests::parallel_stats_and_behavior_match_serial_queries ... ok
+test tui::data_loader::tests::unset_source_context_pressure_opens_one_dashboard ... ok
+test tui::event::tests::coalesces_ticks_without_dropping_following_input ... ok
+test tui::event::tests::forwards_press_and_repeat_but_not_release ... ok
+test tui::footer::tests::spinner_only_renders_during_background_activity ... ok
+test tui::format::tests::analytical_panels_use_compact_stats_while_sync_counts_stay_exact ... ok
+test tui::format::tests::cache_multiplier_handles_zero_and_ratio ... ok
+test tui::format::tests::cost_compact_uses_dollar_and_thousands_suffix ... ok
+test tui::format::tests::cost_per_million_handles_zero_total ... ok
+test tui::format::tests::preserves_existing_terminal_formats ... ok
+test tui::format::tests::stat_compact_promotes_rounded_values_and_handles_signed_extremes ... ok
+test tui::format::tests::stat_compact_uses_one_decimal_uppercase_units ... ok
+test tui::input::tests::dialog_keys_map_to_source_picker_actions ... ok
+test tui::input::tests::digits_one_through_panel_count_switch_panels ... ok
+test tui::input::tests::digits_outside_panel_count_do_not_switch_panels ... ok
+test tui::input::tests::enter_opens_detail_and_esc_is_not_quit ... ok
+test tui::input::tests::paging_and_sort_keys_map_to_actions ... ok
+test tui::input::tests::source_picker_shortcut_opens_dialog ... ok
+test tui::model_vendor::tests::fable_outranks_higher_cost_opus ... ok
+test tui::model_vendor::tests::gateway_names_follow_model_vendor ... ok
+test tui::model_vendor::tests::gpt_4o_version_outranks_older_numeric ... ok
+test tui::model_vendor::tests::unfabled_is_not_anthropic ... ok
+test tui::nav_bar::tests::header_hit_test_uses_rendered_tab_positions ... ok
+test tui::nav_bar::tests::narrow_header_uses_short_labels_for_hit_testing ... ok
+test tui::panels::blocks::tests::renders_empty_and_error_states ... ok
+test tui::panels::blocks::tests::renders_rows_without_panicking ... ok
+test tui::panels::daily::tests::cost_sort_marks_header ... ok
+test tui::panels::daily::tests::enter_detail_renders_model_and_source ... ok
+test tui::panels::daily::tests::turn_column_hides_when_all_zero ... ok
+test tui::panels::daily::tests::wide_table_uses_tokscale_columns ... ok
+test tui::panels::hourly::tests::compact_time_with_day_separators ... ok
+test tui::panels::hourly::tests::tight_viewport_keeps_selected_hour_visible ... ok
+test tui::panels::monthly::tests::wide_table_uses_month_and_tokscale_columns ... ok
+test tui::panels::overview::tests::cost_sort_lists_expensive_model_first ... ok
+test tui::panels::overview::tests::tokens_sort_changes_list_title ... ok
+test tui::panels::stats::tests::breakdown_scroll_total_counts_header_and_model_lines ... ok
+test tui::panels::stats::tests::contribution_bucket_partitions_by_quantile ... ok
+test tui::panels::stats::tests::contribution_thresholds_empty_is_zero ... ok
+test tui::panels::stats::tests::day_at_matches_painted_cells ... ok
+test tui::panels::stats::tests::empty_day_breakdown_shows_no_data_copy ... ok
+test tui::panels::stats::tests::empty_heatmap_has_no_hit_target ... ok
+test tui::panels::stats::tests::empty_heatmap_render_keeps_graph_title ... ok
+test tui::panels::stats::tests::graph_layout_aligns_thursday_start_to_sunday_week ... ok
+test tui::panels::stats::tests::graph_layout_clips_left_and_keeps_recent_weeks ... ok
+test tui::panels::stats::tests::graph_layout_uses_wide_weekday_gutter_at_80 ... ok
+test tui::panels::stats::tests::longest_streak_all_zero_is_zero ... ok
+test tui::panels::stats::tests::longest_streak_picks_max_of_multiple_segments ... ok
+test tui::panels::stats::tests::longest_streak_single_segment ... ok
+test tui::panels::stats::tests::longest_streak_trailing_run_counts ... ok
+test tui::panels::stats::tests::selected_short_layout_hides_stats_card ... ok
+test tui::panels::stats::tests::weekday_index_maps_known_dates ... ok
+test tui::panels::usage::tests::quota_all_layouts_localize_without_reconstructing_absolute_quantities ... ok
+test tui::panels::usage::tests::quota_chinese_preserves_nocolor_and_selection_styles ... ok
+test tui::panels::usage::tests::quota_loading_empty_diagnostics_and_legacy_detail_are_explicit ... ok
+test tui::quota::tests::presentation_scope_is_bound_nested_and_unwind_safe ... ok
+test tui::quota::tests::superseded_and_cancelled_queued_results_do_not_clear_current_request ... ok
+test tui::report_table::tests::cache_cell_renders_placeholder_for_zero_and_compact_otherwise ... ok
+test tui::report_table::tests::cost_format_uses_two_decimals ... ok
+test tui::report_table::tests::count_format_uses_grouping ... ok
+test tui::report_table::tests::daily_source_table_can_force_ansi_styles ... ok
+test tui::report_table::tests::daily_source_table_uses_lightweight_daily_columns ... ok
+test tui::report_table::tests::daily_summary_table_uses_ccusage_style_columns_and_grouped_counts ... ok
+test tui::report_table::tests::focused_table_ansi_styles_follow_color_mode ... ok
+test tui::report_table::tests::paired_notes_model_overflow_and_empty_labels_preserve_external_values ... ok
+test tui::report_table::tests::paired_tables_use_display_width_and_never_shorten_numeric_cells ... ok
+test tui::report_table::tests::render_empty_table_is_actionable ... ok
+test tui::report_table::tests::token_compact_format_uses_short_units ... ok
+test tui::report_table::tests::unified_table_always_color_bolds_header_total_and_dims_placeholders ... ok
+test tui::report_table::tests::unified_table_renders_all_agent_rows_and_detected_title ... ok
+test tui::report_table::tests::unified_table_uses_visible_token_total_compact_units_and_total_separator ... ok
+test tui::report_table::tests::unified_zero_cache_cells_render_placeholder_and_nonzero_stay_compact ... ok
+test tui::report_table::tests::usage_table_uses_box_borders_and_total_row ... ok
+test tui::stacked_bar::tests::empty_chart_still_writes_title ... ok
+test tui::stacked_bar::tests::single_bar_writes_axis_and_date ... ok
+test tui::sync_control::tests::progress_message_distinguishes_replay_files_from_stream_rows ... ok
+test tui::sync_control::tests::progress_message_reports_source_counts ... ok
+test tui::sync_control::tests::progress_message_reports_token_accounting_repair_boundaries ... ok
+test tui::sync_control::tests::sync_action_inside_runtime_starts_once_and_second_trigger_cancels ... ok
+test tui::sync_control::tests::terminal_updates_are_identified ... ok
+test tui::tests::dashboard_shell_matches_draw_split ... ok
+test tui::tests::every_scrolled_table_bounds_row_construction_to_the_viewport ... ok
+test tui::tests::every_theme_reaches_all_panel_shells_and_dialogs ... ok
+test tui::tests::heavy_panels_render_loading_before_results_arrive ... ok
+test tui::tests::idle_ticks_produce_zero_draws_after_the_initial_frame ... ok
+test tui::tests::measure_local_render_thread_first_visit ... ignored, reads the local usage database for release-mode performance evidence
+test tui::tests::mouse_wheel_maps_to_selection_actions ... ok
+test tui::tests::no_color_dashboard_buffers_have_no_styles ... ok
+test tui::tests::stale_generation_and_filter_results_are_rejected ... ok
+test tui::tests::stats_click_maps_graph_cell_to_heatmap_date ... ok
+test tui::tests::stats_enter_selects_last_heatmap_date ... ok
+test tui::tests::window_mismatch_is_rejected_only_for_managed_panels ... ok
+test tui::theme::tests::bar_color_thresholds ... ok
+test tui::theme::tests::cycle_theme_wraps_and_set_by_name_round_trips ... ok
+test tui::theme::tests::default_theme_matches_historical_palette ... ok
+test tui::theme::tests::detects_no_color_truecolor_and_limited_terminals ... ok
+test tui::theme::tests::interactive_tui_copy_uses_the_shared_language_scope ... ok
+test tui::theme::tests::new_themes_and_color_adaptation_cover_all_slots ... ok
+test tui::theme::tests::render_snapshot_is_stable_until_the_frame_finishes ... ok
+test tui::theme::tests::truecolor_style_helpers_preserve_stage_one_styles ... ok
+test tui::theme::tests::tui_panels_do_not_bypass_semantic_theme_slots ... ok
+test tui::theme::tests::vendor_style_adapts_and_respects_no_color ... ok
+
+test result: ok. 113 passed; 0 failed; 2 ignored; 0 measured; 915 filtered out; finished in 0.80s
+

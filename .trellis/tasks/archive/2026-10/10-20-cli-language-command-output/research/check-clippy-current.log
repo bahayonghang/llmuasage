@@ -1,0 +1,41 @@
+    Checking llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\incremental\llmusage-139hhcyjk2zgv\s-hnf147exru-1wixtk7-working`
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\incremental\llmusage-05sbnbne2pp54\s-hnf147dmqr-0f09b5m-working`
+
+warning: `llmusage` (lib test) generated 1 warning
+warning: `llmusage` (lib) generated 1 warning
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\incremental\docs_dashboard_serve-11kx86jz9amgb\s-hnf14h15ad-0auxox5-working`
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\incremental\sync-1jp73eo74oerg\s-hnf14h296v-04gp2ef-working`
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\incremental\llmusage-3gas47wx769o1\s-hnf14h39qb-1g0kkd0-working`
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\incremental\api-1u7ls3nlunc9w\s-hnf14h4ie9-0q2l5co-working`
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\incremental\tui-1r5utm6zia780\s-hnf14h5q66-0ejjyp6-working`
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\incremental\architecture_dependencies-0121so1grxndl\s-hnf14h6sp5-11apltj-working`
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\incremental\store-2x8ttvrlgcbqe\s-hnf14h7xo1-18tsj8j-working`
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\incremental\cli-362rfom4jrrdr\s-hnf14h9xe1-1m6vfda-working`
+
+warning: `llmusage` (test "architecture_dependencies") generated 1 warning
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\incremental\llmusage-2dna3otwv7pjg\s-hnf14hb1er-0u81lo7-working`
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\incremental\remote-07vug4ylsyvvm\s-hnf14hcere-0yg0rqh-working`
+
+warning: `llmusage` (example "docs_dashboard_serve") generated 1 warning
+warning: `llmusage` (bin "llmusage") generated 1 warning
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\incremental\query-0dra3uzi7wa2q\s-hnf14hd73o-133lx27-working`
+
+warning: `llmusage` (test "api") generated 1 warning
+warning: `llmusage` (test "store") generated 1 warning
+warning: `llmusage` (bin "llmusage" test) generated 1 warning
+warning: `llmusage` (test "tui") generated 1 warning
+warning: `llmusage` (test "query") generated 1 warning
+warning: `llmusage` (test "remote") generated 1 warning
+warning: `llmusage` (test "cli") generated 1 warning
+warning: `llmusage` (test "sync") generated 1 warning
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 21.15s

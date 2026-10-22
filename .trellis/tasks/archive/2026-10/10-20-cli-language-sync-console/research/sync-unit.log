@@ -1,0 +1,92 @@
+   Compiling llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage-61a60d7c236ae2f9.lib 和对象 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage-61a60d7c236ae2f9.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 34.80s
+     Running unittests src\lib.rs (target\debug\deps\llmusage-61a60d7c236ae2f9.exe)
+
+running 46 tests
+test commands::sync::tests::emit_shards_does_not_open_or_lock_the_user_database ... ok
+test commands::sync::tests::parallelism_above_max_is_rejected ... ok
+test commands::sync::tests::parallelism_max_is_accepted ... ok
+test commands::sync::tests::parallelism_none_resolves_to_sensible_default ... ok
+test commands::sync::tests::parallelism_one_is_accepted ... ok
+test commands::sync::tests::parallelism_usize_max_is_rejected ... ok
+test commands::sync::tests::parallelism_zero_is_rejected ... ok
+test commands::sync::tests::prompt_recovery_choice_parsing_and_retry ... ok
+test commands::sync::tests::rebuild_sources_rejects_parserless_historical_source ... ok
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 14ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 15ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 16ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 14ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 15ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 14ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 13ms)
+test commands::sync::tests::stdin_pipe_with_choice_text_and_failing_stdin_skips_without_reading ... ok
+test commands::sync::tests::stream_capabilities_decision_matrix ... ok
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 16ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 14ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 14ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 14ms)
+test commands::sync::tests::windowed_terminal_notice_does_not_read_stdin ... ok
+test commands::sync_progress::tests::bar_renderer_cancelled_abandons_active_bar ... ok
+test commands::sync_progress::tests::bar_renderer_failed_abandons_and_ignores_followups ... ok
+test commands::sync_progress::tests::bar_renderer_opencode_progress_never_overflows ... ok
+test commands::sync_progress::tests::bar_renderer_pricing_upgrade_sequence_converges ... ok
+test commands::sync_progress::tests::bar_renderer_success_sequence_converges ... ok
+test commands::sync_progress::tests::determinate_source_progress_reports_replay_and_commit_phases ... ok
+test commands::sync_progress::tests::forced_line_requires_non_empty_env_value ... ok
+test commands::sync_progress::tests::human_lines_never_contain_ansi_escapes ... ok
+test commands::sync_progress::tests::human_progress_describes_pricing_upgrade_phases ... ok
+test commands::sync_progress::tests::permanent_progress_lines_end_before_raw_warnings ... ok
+test commands::sync_progress::tests::pricing_sync_event_serializes_as_additive_snake_case_ndjson ... ok
+test commands::sync_progress::tests::remote_host_events_render_skip_warnings ... ok
+test commands::sync_progress::tests::scoped_warning_sink_handles_interleaved_progress_and_restores_on_error ... ok
+test commands::sync_progress::tests::selection_falls_back_to_line_renderer ... ok
+test commands::sync_progress::tests::short_file_label_uses_last_segment_and_truncates ... ok
+test commands::sync_progress::tests::source_finished_emits_no_permanent_human_line ... ok
+test commands::sync_progress::tests::terminal_guard_finishes_renderer_on_drop ... ok
+test commands::sync_progress::tests::token_accounting_repair_events_have_actionable_copy_and_ndjson_shape ... ok
+test commands::sync_summary::tests::absent_source_uses_placeholders_and_error_line ... ok
+test commands::sync_summary::tests::colored_output_wraps_but_preserves_alignment_math ... ok
+test commands::sync_summary::tests::colored_total_row_matches_plain_after_strip ... ok
+test commands::sync_summary::tests::colorless_output_contains_no_ansi_and_aligns_columns ... ok
+test commands::sync_summary::tests::diagnostics_and_samples_are_strictly_after_total ... ok
+test commands::sync_summary::tests::empty_summary_still_renders_zero_total_row ... ok
+test commands::sync_summary::tests::narrow_width_truncates_only_source_label ... ok
+test commands::sync_summary::tests::parse_issue_counts_are_visible_without_sample_contents ... ok
+test commands::sync_summary::tests::parse_issue_samples_print_basename_never_full_path ... ok
+test commands::sync_summary::tests::parse_issue_samples_print_reason_without_at_zero ... ok
+test commands::sync_summary::tests::parse_issue_samples_report_offsets_and_omitted_count ... ok
+test commands::sync_summary::tests::skipped_only_parse_issues_are_not_warning_colored ... ok
+test commands::sync_summary::tests::table_shows_human_bytes_and_durations ... ok
+test commands::sync_summary::tests::total_row_aggregates_source_stats ... ok
+test commands::sync_summary::tests::total_row_replaces_legacy_totals_line ... ok
+test commands::sync_summary::tests::zero_and_large_values_format_safely ... ok
+
+test result: ok. 46 passed; 0 failed; 0 ignored; 0 measured; 925 filtered out; finished in 1.94s
+

@@ -1,0 +1,15 @@
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/prd.md", "reason": "Confirmed full CLI plus TUI scope, acceptance IDs and explicit no-implementation authorization boundary."}
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/design.md", "reason": "Shared architecture: startup, language scopes, console/file split, private sync/quota metadata and compatibility."}
+{"file": ".trellis/spec/llmusage/backend/report-cli-contracts.md", "reason": "C ownership contract: preserve existing behavior while localizing presentation."}
+{"file": ".trellis/spec/llmusage/backend/self-update-contracts.md", "reason": "C ownership contract: preserve existing behavior while localizing presentation."}
+{"file": ".trellis/spec/llmusage/backend/integration-file-contracts.md", "reason": "C ownership contract: preserve existing behavior while localizing presentation."}
+{"file": ".trellis/spec/llmusage/backend/web-server-contracts.md", "reason": "C ownership contract: preserve existing behavior while localizing presentation."}
+{"file": ".trellis/spec/llmusage/backend/runtime-log-contracts.md", "reason": "C ownership contract: preserve existing behavior while localizing presentation."}
+{"file": ".trellis/spec/llmusage/backend/ci-toolchain-contracts.md", "reason": "C ownership contract: preserve existing behavior while localizing presentation."}
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/research/surface-coverage.md", "reason": "C evidence and exact ownership/acceptance mechanisms."}
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/research/cli-startup-errors.md", "reason": "C evidence and exact ownership/acceptance mechanisms."}
+{"file": ".trellis/spec/llmusage/backend/cli-language-contracts.md", "reason": "Verified shared language/preferences/startup contract and typed diagnostic API for this implementation."}
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-command-output/research/implementation-handoff.md", "reason": "Prepared F/S API handoff, canonical-data traps and isolated build environment; S acceptance must still be confirmed by coordinator."}
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-console/research/evidence.md", "reason": "Verified S APIs and final Rust gate1253 PASS; canonical feedback/projection boundaries."}
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-console/research/check-evidence.md", "reason": "Independent S PASS including private failure/inventory metadata and preserved machine/file data."}
+{"file": ".trellis/spec/llmusage/backend/pricing-catalog-contracts.md", "reason": "Private pricing validation/bootstrap facts, unchanged public errors, IO/order and canonical run details."}

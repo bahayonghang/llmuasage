@@ -1,0 +1,186 @@
+src\common\util.rs:145:        compile_error!("metadata_inode is not implemented for this platform");
+src\commands\blocks.rs:14:    debug!("starting blocks report output");
+src\commands\blocks.rs:40:    debug!("finished blocks report output");
+src\remote\importer.rs:209:            tracing::warn!(
+src\commands\diagnostics.rs:32:    info!("开始导出 diagnostics JSON");
+src\commands\diagnostics.rs:93:    info!("完成 diagnostics JSON 导出");
+src\commands\diagnostics.rs:107:    info!(?file_path, ?source, "开始登记 forget-file");
+src\commands\diagnostics.rs:120:    info!(source = %target_source, "完成 forget-file 登记");
+src\commands\dash.rs:36:    info!("开始启动本地 TUI");
+src\commands\dash.rs:42:    info!("完成本地 TUI 会话");
+src\commands\daily.rs:14:    debug!("starting daily report output");
+src\commands\daily.rs:45:        debug!("finished daily report output");
+src\commands\daily.rs:122:    debug!("finished daily report output");
+src\sync\engine.rs:36:    info!(command, run_id, "run started");
+src\sync\engine.rs:43:            info!(
+src\sync\engine.rs:62:            error!(
+src\sync\engine.rs:207:    info!("开始执行 sync 三阶段流水线");
+src\sync\engine.rs:238:            tracing::warn!(
+src\sync\engine.rs:370:                            info!(source = %source, swept, "标记 missing 文件完成");
+src\sync\engine.rs:373:                        info!(
+src\sync\engine.rs:393:                tracing::error!(error = %err, "Antigravity lossy rebuild failed");
+src\sync\engine.rs:403:                    info!(
+src\sync\engine.rs:430:    tracing::debug!(
+src\sync\engine.rs:683:        tracing::warn!(
+src\sync\engine.rs:689:    tracing::debug!(
+src\sync\engine.rs:757:    tracing::debug!(
+src\sync\engine.rs:761:    info!("完成 sync 三阶段流水线");
+src\sync\engine.rs:896:                    tracing::warn!(host_id = %host.host_id, "{warning}");
+src\sync\engine.rs:937:            info!(
+src\sync\engine.rs:948:            info!(
+src\domain\provider_map.rs:99:                debug!(
+src\domain\provider_map.rs:106:                warn!(
+src\domain\provider_map.rs:152:            debug!(
+src\domain\provider_map.rs:166:            debug!(
+src\domain\provider_map.rs:183:            debug!(
+src\domain\provider_map.rs:203:            debug!(
+src\runtime\logging.rs:764:                tracing::warn!(event_index, %payload, "production boundary");
+src\web\mod.rs:199:            debug!(
+src\web\mod.rs:394:                    error!(%addr, error = %err, "detached Web server stopped unexpectedly");
+src\web\mod.rs:457:    info!("开始绑定本地 Web UI 监听端口");
+src\web\mod.rs:471:                info!("开始组装本地 Web UI 路由");
+src\web\mod.rs:479:                info!(
+src\web\mod.rs:493:                info!(%addr, "完成本地 Web UI 监听端口绑定");
+src\web\mod.rs:1264:            error!(endpoint = "/api/diagnostics/forget", error = %err, "forget failed");
+src\web\mod.rs:1639:            debug!(
+src\web\mod.rs:1693:            debug!(
+src\web\mod.rs:1710:        debug!(
+src\web\mod.rs:1726:            debug!(
+src\web\mod.rs:1739:    debug!(
+src\web\mod.rs:2177:                    debug!(
+src\web\mod.rs:2191:                    error!(endpoint, error = %err, "Web API response serialization failed");
+src\web\mod.rs:2197:            error!(endpoint, error = %err, "Web API handler failed");
+src\sync\pricing_refresh.rs:668:    tracing::warn!(
+src\store\migrations.rs:210:        info!(
+src\store\migrations.rs:240:                info!(
+src\store\lock.rs:69:                                tracing::error!(
+src\store\lock.rs:77:                                warn!(error = %err, "SQLite worker 锁 heartbeat 续租失败");
+src\store\lock.rs:216:        info!(holder_kind = %kind, timeout_ms = timeout.as_millis(), "开始等待 SQLite worker 锁");
+src\store\lock.rs:220:                info!(
+src\store\lock.rs:278:                info!(holder_kind = %kind, "SQLite worker 锁协调表正被并发更新");
+src\store\lock.rs:286:        info!(holder_kind = %kind, "尝试申请 SQLite worker 锁");
+src\store\lock.rs:372:            info!("SQLite worker 锁已被占用");
+src\store\pricing_catalog.rs:547:            tracing::warn!(
+src\store\mod.rs:1008:        info!(
+src\store\mod.rs:1027:            warn!(
+src\store\mod.rs:1047:        debug!(
+src\store\mod.rs:1069:        info!(
+src\store\mod.rs:1089:            warn!(
+src\store\mod.rs:1101:        info!(
+src\store\mod.rs:1130:        error!(
+src\store\schema.rs:153:        info!("开始初始化本地目录与 SQLite schema");
+src\store\schema.rs:190:        info!(
+src\store\schema.rs:346:        info!(source = %source, host_id, "开始按源清空可重建用量数据");
+src\store\schema.rs:348:        info!(source = %source, host_id, "完成按源清空可重建用量数据");
+src\store\schema.rs:359:        info!(
+src\store\schema.rs:371:        info!(
+src\store\schema.rs:389:        info!("开始清空可重建用量数据");
+src\store\schema.rs:408:        info!("完成清空可重建用量数据");
+src\store\sync_writer.rs:215:        info!("开始建立 sync 单写入端");
+src\store\sync_writer.rs:219:        info!(raw_archive_enabled, "完成 sync 单写入端建立");
+src\store\sync_writer.rs:277:        info!(source = %source, count = path_hashes.len(), "开始清理重放旧事件");
+src\store\sync_writer.rs:511:        info!(source = %source, "完成重放旧事件清理");
+src\store\sync_writer.rs:534:        info!(batch = events.len(), "开始批量写入 usage_event");
+src\store\sync_writer.rs:638:        info!(batch = events.len(), inserted, "完成批量写入 usage_event");
+src\store\sync_writer.rs:661:        info!(source = %source, count = cursors.len(), "开始批量刷新 cursor");
+src\store\sync_writer.rs:724:        info!(source = %source, "完成批量刷新 cursor");
+src\store\sync_writer.rs:729:        info!("完成 sync 单写入端收尾");
+src\store\sync_writer.rs:991:        info!(
+src\store\sync_writer.rs:1071:        info!(
+src\store\sync_writer.rs:1196:        info!(
+src\commands\codex_tracer\server.rs:49:    info!("Codex Tracer dashboard listening on {}", actual_addr);
+src\commands\codex_tracer\server.rs:174:            error!(error = %err, "Failed to query calls");
+src\commands\codex_tracer\server.rs:196:            error!(error = %err, "Failed to serialize payload");
+src\commands\codex_tracer\server.rs:256:            error!(error = %err, "Failed to query calls");
+src\commands\codex_tracer\server.rs:267:    info!("Refresh requested");
+src\commands\codex_tracer\server.rs:281:        error!(path = %rollout_dir.display(), "Codex rollout directory not found");
+src\commands\codex_tracer\server.rs:298:            error!(error = %err, "Failed to refresh Codex tracer events");
+src\commands\codex_tracer\server.rs:307:    info!(
+src\commands\codex_tracer\server.rs:336:            error!(error = %err, "Failed to count events");
+src\store\sync_writer\profiling.rs:309:    info!(source = %source, count = path_hashes.len(), "开始清理重放旧事件");
+src\store\sync_writer\profiling.rs:466:    info!(source = %source, "完成重放旧事件清理");
+src\commands\weekly.rs:14:    debug!("starting weekly report output");
+src\commands\weekly.rs:38:        debug!("finished weekly report output");
+src\commands\weekly.rs:72:    debug!("finished weekly report output");
+src\commands\codex_tracer\mod.rs:31:    info!(port, open_browser, rebuild, "Starting codex-tracer");
+src\commands\codex_tracer\mod.rs:38:        info!("Rebuild requested, removing existing database");
+src\commands\codex_tracer\mod.rs:49:        info!("Parsing Codex JSONL files");
+src\commands\codex_tracer\mod.rs:78:        info!(
+src\commands\codex_tracer\mod.rs:104:        info!(events = event_count, "Database already contains events");
+src\commands\codex_tracer\ingest.rs:102:                tracing::warn!(path_hash, error = %error, "Failed to ingest Codex tracer file");
+src\commands\uninstall.rs:16:    info!("开始执行本地卸载");
+src\commands\uninstall.rs:38:    info!("完成本地卸载");
+src\commands\remote.rs:203:        info!(host_id = %host.host_id, "importing remote shards");
+src\commands\monthly.rs:14:    debug!("starting monthly report output");
+src\commands\monthly.rs:38:        debug!("finished monthly report output");
+src\commands\monthly.rs:72:    debug!("finished monthly report output");
+src\commands\sync_progress.rs:685:        tracing::subscriber::with_default(subscriber, || tracing::warn!("legacy warning"));
+src\commands\sync_progress.rs:732:                    tracing::warn!("first warning");
+src\commands\sync_progress.rs:741:                    tracing::warn!("interleaved warning");
+src\commands\sync_progress.rs:743:                    tracing::warn!("last warning");
+src\commands\sync_progress.rs:754:                tracing::warn!("outside warning");
+src\commands\mod.rs:269:    info!(command, run_id, "run started");
+src\commands\mod.rs:276:            info!(
+src\commands\mod.rs:295:            error!(
+src\commands\mod.rs:307:/// Records `run_log` plus `error!` for report and catalog commands that do not
+src\commands\mod.rs:309:/// write `run_log`; those failures still emit `error!`.
+src\commands\mod.rs:321:/// Emits `error!` when `body` fails. Does not open Store or write `run_log`,
+src\commands\mod.rs:330:            error!(command, error = %err, "run failed");
+src\commands\mod.rs:488:                    error!(command = "update", error = %err, "run failed");
+src\commands\sync.rs:243:    info!("开始执行全量本地真源同步");
+src\commands\sync.rs:293:    tracing::debug!(
+src\commands\sync.rs:352:        tracing::debug!(
+src\commands\sync.rs:364:    info!("完成全量本地真源同步");
+src\commands\statusline.rs:23:    debug!("starting statusline output");
+src\commands\statusline.rs:73:    debug!("finished statusline output");
+src\commands\status.rs:16:    info!("开始输出状态摘要");
+src\commands\status.rs:74:    info!("完成状态摘要输出");
+src\commands\init.rs:7:    info!("bootstrapping local runtime");
+src\commands\init.rs:16:    info!("local runtime bootstrap completed");
+src\commands\doctor.rs:29:    info!(path = %source_path.display(), "刷新定价快照");
+src\commands\doctor.rs:33:    info!(
+src\commands\doctor.rs:58:    info!("开始执行 doctor 健康检查");
+src\commands\doctor.rs:166:    info!("完成 doctor 健康检查");
+src\commands\session.rs:14:    debug!("starting session report output");
+src\commands\session.rs:42:        debug!("finished session report output");
+src\commands\session.rs:70:    debug!("finished session report output");
+src\commands\export.rs:18:    info!("开始导出静态 HTML 报告");
+src\commands\export.rs:35:    info!("完成静态 HTML 报告导出");
+src\commands\focused.rs:84:    debug!(
+src\commands\focused.rs:141:    debug!(
+src\commands\focused.rs:183:    debug!(
+src\commands\serve.rs:51:    info!("开始启动本地 Web UI 服务");
+src\commands\serve.rs:121:                warn!(
+src\commands\serve.rs:129:            info!("serve 已通过 --no-open 跳过浏览器启动");
+src\commands\serve.rs:135:            info!("serve 在 SSH 会话中跳过浏览器启动");
+src\commands\serve.rs:162:            info!(%addr, "收到 Ctrl+C，准备停止本地 Web UI 服务");
+src\commands\serve.rs:221:        warn!(
+src\query\reports.rs:1667:    debug!(
+src\parsers\antigravity.rs:759:                        tracing::warn!(error = %error, path_hash = hash_string(&file.path.to_string_lossy()), "Antigravity post-read fingerprint unavailable");
+src\parsers\claude.rs:121:    info!("开始同步 Claude 项目真源");
+src\parsers\claude.rs:308:    info!(
+src\parsers\codex.rs:261:    info!("开始同步 Codex rollout 真源");
+src\parsers\codex.rs:431:    info!(
+src\parsers\driver.rs:94:    info!(parsers = ctx.parsers.len(), "开始驱动 SourceParser 列表");
+src\parsers\driver.rs:166:            tracing::debug!(
+src\parsers\driver.rs:182:                info!(source = %source, "source inventory incomplete; skipping missing sweep");
+src\parsers\driver.rs:190:                        info!(source = %source, host_id = %host_id, swept, "标记 missing 文件完成");
+src\parsers\driver.rs:207:    info!(sources = all_stats.len(), "完成 SourceParser 列表驱动");
+src\parsers\driver.rs:226:    info!(
+src\parsers\dsh.rs:151:    info!("开始同步 DeepSeek Harness 会话日志真源");
+src\parsers\dsh.rs:309:    info!(
+src\parsers\grok.rs:159:    info!("starting Grok Build passive session sync");
+src\parsers\grok.rs:208:            warn!(
+src\parsers\grok.rs:326:    info!(
+src\parsers\kimi_code.rs:117:    info!("开始同步 Kimi Code wire.jsonl 真源");
+src\parsers\kimi_code.rs:281:    info!(
+src\parsers\opencode.rs:96:    info!("开始同步 OpenCode SQLite 真源");
+src\parsers\opencode.rs:137:        info!(
+src\parsers\opencode.rs:344:    info!(
+src\parsers\pi.rs:158:    info!(source = %source, "开始同步 Pi 格式会话真源");
+src\parsers\pi.rs:320:    info!(
+src\parsers\source_files.rs:356:            warn!(error = %message, "failed to enumerate source file inventory");
+src\parsers\source_files.rs:367:                warn!(error = %message, "failed to enumerate source file inventory");
+src\parsers\zcode.rs:108:    info!("开始同步 ZCode SQLite 真源");
+src\parsers\zcode.rs:150:        info!(
+src\parsers\zcode.rs:292:    info!(

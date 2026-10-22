@@ -1,0 +1,547 @@
++ cargo fmt --check
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\clean.rs:1:
+-use crate::common::i18n::{commands::{message, OperationDiagnostic as Fact}, text};
+ use super::cli_errors::Diagnostic;
++use crate::common::i18n::{
++    commands::{OperationDiagnostic as Fact, message},
++    text,
++};
+ use std::{
+     collections::BTreeMap,
+     fs,
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\clean.rs:120:
+             error: None,
+         });
+     }
+-    let plan = scan(root).with_context(|| Diagnostic::with_facts(format!("读取 {} 失败", root.display()), Fact::CleanRead { path: root.display().to_string() }))?;
++    let plan = scan(root).with_context(|| {
++        Diagnostic::with_facts(
++            format!("读取 {} 失败", root.display()),
++            Fact::CleanRead {
++                path: root.display().to_string(),
++            },
++        )
++    })?;
+     let rows = rows_from(&plan);
+     if rows.is_empty() {
+         return Ok(CleanOutcome {
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\clean.rs:143:
+     let error = if report.failures.is_empty() {
+         None
+     } else {
+-        Some(Diagnostic::with_facts(format!("{} 个路径删除失败", report.failures.len()), Fact::CleanDelete { count: report.failures.len() }))
++        Some(Diagnostic::with_facts(
++            format!("{} 个路径删除失败", report.failures.len()),
++            Fact::CleanDelete {
++                count: report.failures.len(),
++            },
++        ))
+     };
+     CleanOutcome { text, error }
+ }
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\clean.rs:150:
+ 
+ fn append_delete_summary(text: &mut String, report: &DeleteReport) {
+-    text.push_str(&message!(CleanDeleted,
++    text.push_str(&message!(
++        CleanDeleted,
+         report.files,
+         format_byte_size(report.bytes)
+     ));
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\clean.rs:458:
+ }
+ 
+ fn render_table(rows: &[DisplayRow]) -> String {
+-    let headers = [text("Category", "类别"), text("Path", "路径"), text("Files", "文件数"), text("Size", "大小"), text("Modified", "最近修改"), text("Action", "动作")];
++    let headers = [
++        text("Category", "类别"),
++        text("Path", "路径"),
++        text("Files", "文件数"),
++        text("Size", "大小"),
++        text("Modified", "最近修改"),
++        text("Action", "动作"),
++    ];
+     let body: Vec<[String; 6]> = rows
+         .iter()
+         .map(|row| {
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\clean.rs:716:
+             Self::Settings => "cli-settings.json / cli-settings.lock",
+         }
+     }
+-
+ }
+ 
+ impl Action {
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\clean.rs:805:
+ 
+     #[test]
+     fn formats_decimal_gigabytes() {
+-        assert_eq!(format_byte_size(1_596_936_192), "1596936192 bytes / 1.60 GB");
+-        assert_eq!(format_byte_size(4_846_220_884), "4846220884 bytes / 4.85 GB");
+-        assert_eq!(format_byte_size(1_160_123_446), "1160123446 bytes / 1.16 GB");
++        assert_eq!(
++            format_byte_size(1_596_936_192),
++            "1596936192 bytes / 1.60 GB"
++        );
++        assert_eq!(
++            format_byte_size(4_846_220_884),
++            "4846220884 bytes / 4.85 GB"
++        );
++        assert_eq!(
++            format_byte_size(1_160_123_446),
++            "1160123446 bytes / 1.16 GB"
++        );
+     }
+ 
+     #[test]
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\clean.rs:849:
+         assert_eq!(before, list_files(temp.path()));
+         assert!(outcome.error.is_none());
+         assert!(outcome.text.contains("Live database"), "{}", outcome.text);
+-        assert!(outcome.text.contains("Migration copies"), "{}", outcome.text);
+-        assert!(outcome.text.contains("Research baselines"), "{}", outcome.text);
++        assert!(
++            outcome.text.contains("Migration copies"),
++            "{}",
++            outcome.text
++        );
++        assert!(
++            outcome.text.contains("Research baselines"),
++            "{}",
++            outcome.text
++        );
+         assert!(outcome.text.contains("Disk unchanged"), "{}", outcome.text);
+         assert!(!outcome.text.contains("Deleted"), "{}", outcome.text);
+     }
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\clean.rs:940:
+         assert!(temp.path().join("backups/llmusage.db.pre-0.5.0").is_file());
+     }
+ 
+-    fn row(
+-        category: &str,
+-        path: &str,
+-        files: usize,
+-        bytes: u64,
+-        action: Action,
+-    ) -> DisplayRow {
++    fn row(category: &str, path: &str, files: usize, bytes: u64, action: Action) -> DisplayRow {
+         DisplayRow {
+             category: category.to_string(),
+             path: path.to_string(),
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\codex_tracer\mod.rs:3:
+ //! This module provides enhanced tracking for Codex usage with fine-grained
+ //! token accounting, thread tracking, and a dedicated dashboard.
+ 
+-use crate::common::i18n::commands::{message, OperationDiagnostic as Fact};
+ use super::cli_errors::Diagnostic;
++use crate::common::i18n::commands::{OperationDiagnostic as Fact, message};
+ use std::path::PathBuf;
+ 
+ use anyhow::{Context, Result};
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\codex_tracer\mod.rs:44:
+             event_code = "commands.codex_tracer.mod.02",
+             "Rebuild requested, removing existing database"
+         );
+-        std::fs::remove_file(&db_path).context(Diagnostic::with_facts("Failed to remove existing database", Fact::TracerRemove))?;
++        std::fs::remove_file(&db_path).context(Diagnostic::with_facts(
++            "Failed to remove existing database",
++            Fact::TracerRemove,
++        ))?;
+     }
+ 
+     // Open or create the database
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\codex_tracer\mod.rs:51:
+-    let mut store =
+-        CodexTracerStore::open(&db_path).context(Diagnostic::with_facts("Failed to open codex-tracer database", Fact::TracerOpen))?;
++    let mut store = CodexTracerStore::open(&db_path).context(Diagnostic::with_facts(
++        "Failed to open codex-tracer database",
++        Fact::TracerOpen,
++    ))?;
+ 
+     // Parse JSONL files if database is empty or rebuild was requested
+     let event_count = store.count_events()?;
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\codex_tracer\mod.rs:93:
+         );
+ 
+         if store.count_events()? == 0 {
+-            return Err(Diagnostic::with_facts(format!("No events found in {}\nPlease ensure you have used Codex at least once.", rollout_dir.display()), Fact::TracerNoEvents { path: rollout_dir.display().to_string() }).into());
++            return Err(Diagnostic::with_facts(
++                format!(
++                    "No events found in {}\nPlease ensure you have used Codex at least once.",
++                    rollout_dir.display()
++                ),
++                Fact::TracerNoEvents {
++                    path: rollout_dir.display().to_string(),
++                },
++            )
++            .into());
+         }
+ 
+         println!(
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\codex_tracer\mod.rs:100:
+-            "{}", message!(TracerParsed, stats.files_seen, stats.events_found)
++            "{}",
++            message!(TracerParsed, stats.files_seen, stats.events_found)
+         );
+         if stats.errors > 0 {
+             println!("{}", message!(TracerErrors, stats.errors));
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\codex_tracer\server.rs:1:
+ //! Web server for codex-tracer dashboard.
+ 
+-use crate::common::i18n::commands::{message, OperationDiagnostic as Fact};
+ use super::super::cli_errors::Diagnostic;
++use crate::common::i18n::commands::{OperationDiagnostic as Fact, message};
+ use std::net::SocketAddr;
+ use std::path::PathBuf;
+ use std::sync::Arc;
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\codex_tracer\server.rs:31:
+ 
+ /// Serve the codex-tracer dashboard.
+ pub async fn serve_dashboard(db_path: PathBuf, port: u16, open_browser: bool) -> Result<()> {
+-    let store = CodexTracerStore::open(&db_path).context(Diagnostic::with_facts("Failed to open codex-tracer database", Fact::TracerOpen))?;
++    let store = CodexTracerStore::open(&db_path).context(Diagnostic::with_facts(
++        "Failed to open codex-tracer database",
++        Fact::TracerOpen,
++    ))?;
+ 
+     let state = ServerState {
+         store: Arc::new(Mutex::new(store)),
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\codex_tracer\server.rs:40:
+     let app = dashboard_router(state);
+ 
+     let addr = SocketAddr::from(([127, 0, 0, 1], port));
+-    let listener = TcpListener::bind(&addr)
+-        .await
+-        .with_context(|| Diagnostic::with_facts(format!("Failed to bind to {}", addr), Fact::TracerBind { address: addr.to_string() }))?;
++    let listener = TcpListener::bind(&addr).await.with_context(|| {
++        Diagnostic::with_facts(
++            format!("Failed to bind to {}", addr),
++            Fact::TracerBind {
++                address: addr.to_string(),
++            },
++        )
++    })?;
+ 
+     let actual_addr = listener.local_addr()?;
+     let dashboard_url = format!("http://{}", actual_addr);
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\codex_tracer\server.rs:51:
+     info!(event_code = "commands.codex_tracer.server.01", addr = %actual_addr, "Codex Tracer dashboard listening on {}", actual_addr);
+ 
+     if open_browser && open_browser_to_url(&dashboard_url).is_err() {
+-        println!(
+-            "{}", message!(TracerBrowser, dashboard_url)
+-        );
++        println!("{}", message!(TracerBrowser, dashboard_url));
+     }
+ 
+-    axum::serve(listener, app).await.context(Diagnostic::with_facts("Server error", Fact::TracerServer))?;
++    axum::serve(listener, app)
++        .await
++        .context(Diagnostic::with_facts("Server error", Fact::TracerServer))?;
+ 
+     Ok(())
+ }
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\doctor.rs:21:
+ 
+ #[derive(Debug, Clone)]
+ enum DoctorFact {
+-    OpenCode { path: String },
+-    Logs { disabled: bool, path: String, size: u64 },
++    OpenCode {
++        path: String,
++    },
++    Logs {
++        disabled: bool,
++        path: String,
++        size: u64,
++    },
+     Errors(usize),
+     Dropped(u64),
+     Maintenance(u64),
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\doctor.rs:29:
+-    RecentRuns { failed: bool },
++    RecentRuns {
++        failed: bool,
++    },
+     ParseIssues(Vec<(String, u64, u64)>),
+     SourceIssues(crate::domain::source_diagnostics::SourceIssues),
+ }
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\doctor.rs:34:
+     fn render(&self) -> String {
+         match self {
+             Self::OpenCode { path } => message!(DoctorDb, path),
+-            Self::Logs { disabled: true, path, .. } => message!(DoctorLogsDisabled, path),
++            Self::Logs {
++                disabled: true,
++                path,
++                ..
++            } => message!(DoctorLogsDisabled, path),
+             Self::Logs { path, size, .. } => message!(DoctorLogs, path, size),
+             Self::Errors(count) => message!(DoctorErrors, count),
+             Self::Dropped(count) => message!(DoctorDropped, count),
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\doctor.rs:42:
+             Self::RecentRuns { failed: true } => message!(DoctorRunsFailed),
+             Self::RecentRuns { failed: false } => message!(DoctorRunsOk),
+             Self::ParseIssues(faults) if faults.is_empty() => message!(DoctorNoParse),
+-            Self::ParseIssues(faults) => faults.iter().map(|(source, malformed, oversized)| message!(DoctorParse, source, malformed, oversized)).collect::<Vec<_>>().join("; "),
++            Self::ParseIssues(faults) => faults
++                .iter()
++                .map(|(source, malformed, oversized)| {
++                    message!(DoctorParse, source, malformed, oversized)
++                })
++                .collect::<Vec<_>>()
++                .join("; "),
+             Self::SourceIssues(issues) if issues.is_empty() => message!(DoctorNoSources),
+-            Self::SourceIssues(issues) => issues.iter().flat_map(|(source, issues)| issues.iter().flat_map(move |issue| super::sync_summary::notice_lines(&crate::sync::notices::RunNotice::SourceIssue { source: *source, issue: issue.clone() }, false))).collect::<Vec<_>>().join("; "),
++            Self::SourceIssues(issues) => issues
++                .iter()
++                .flat_map(|(source, issues)| {
++                    issues.iter().flat_map(move |issue| {
++                        super::sync_summary::notice_lines(
++                            &crate::sync::notices::RunNotice::SourceIssue {
++                                source: *source,
++                                issue: issue.clone(),
++                            },
++                            false,
++                        )
++                    })
++                })
++                .collect::<Vec<_>>()
++                .join("; "),
+         }
+     }
+ }
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\doctor.rs:62:
+     info!(event_code = "commands.doctor.01", path = %source_path.display(), "刷新定价快照");
+     let store = Store::new(&app.paths)?;
+     super::cli_errors::pricing_result(store.bootstrap_with_pricing_facts())?;
+-    let result = super::cli_errors::pricing_result(store.activate_pricing_snapshot_with_facts(source_path))?;
++    let result =
++        super::cli_errors::pricing_result(store.activate_pricing_snapshot_with_facts(source_path))?;
+     info!(
+         event_code = "commands.doctor.02",
+         updated = result.updated_events,
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\doctor.rs:71:
+         "定价快照已落盘并重算"
+     );
+     println!(
+-        "{}", message!(DoctorPricing,
+-        result.effective.version,
+-        result.effective.file.as_deref().unwrap_or("embedded"),
+-        result.updated_events)
++        "{}",
++        message!(
++            DoctorPricing,
++            result.effective.version,
++            result.effective.file.as_deref().unwrap_or("embedded"),
++            result.updated_events
++        )
+     );
+     Ok(())
+ }
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\doctor.rs:111:
+             "warn"
+         },
+         detail: format!("OpenCode DB: {}", opencode_db_path.display()),
+-        presentation: DoctorFact::OpenCode { path: opencode_db_path.display().to_string() },
++        presentation: DoctorFact::OpenCode {
++            path: opencode_db_path.display().to_string(),
++        },
+     }];
+ 
+     checks.push(DoctorCheck {
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\doctor.rs:118:
+         id: "logs.file",
+-        presentation: DoctorFact::Logs { disabled: logging_disabled, path: logs.path.clone(), size: logs.size_bytes },
++        presentation: DoctorFact::Logs {
++            disabled: logging_disabled,
++            path: logs.path.clone(),
++            size: logs.size_bytes,
++        },
+         status: if logging_disabled || logs.exists {
+             "ok"
+         } else {
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\doctor.rs:203:
+     } else {
+         println!("{}", message!(DoctorTitle));
+         for check in checks {
+-            println!("- [{}] {} {}", crate::common::i18n::commands::status_label(check.status), check.id, check.presentation.render());
++            println!(
++                "- [{}] {} {}",
++                crate::common::i18n::commands::status_label(check.status),
++                check.id,
++                check.presentation.render()
++            );
+         }
+     }
+ 
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\doctor.rs:248:
+     if faults.is_empty() {
+         DoctorCheck {
+             id: "parse.issues",
+-            presentation: DoctorFact::ParseIssues(statuses.iter().filter(|s| s.parse_issues.total() > 0).map(|s| (s.source.clone(), s.parse_issues.malformed_lines, s.parse_issues.oversized_lines)).collect()),
++            presentation: DoctorFact::ParseIssues(
++                statuses
++                    .iter()
++                    .filter(|s| s.parse_issues.total() > 0)
++                    .map(|s| {
++                        (
++                            s.source.clone(),
++                            s.parse_issues.malformed_lines,
++                            s.parse_issues.oversized_lines,
++                        )
++                    })
++                    .collect(),
++            ),
+             status: "ok",
+             detail: "no malformed or oversized parse issues".to_string(),
+         }
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\doctor.rs:255:
+     } else {
+         DoctorCheck {
+             id: "parse.issues",
+-            presentation: DoctorFact::ParseIssues(statuses.iter().filter(|s| s.parse_issues.total() > 0).map(|s| (s.source.clone(), s.parse_issues.malformed_lines, s.parse_issues.oversized_lines)).collect()),
++            presentation: DoctorFact::ParseIssues(
++                statuses
++                    .iter()
++                    .filter(|s| s.parse_issues.total() > 0)
++                    .map(|s| {
++                        (
++                            s.source.clone(),
++                            s.parse_issues.malformed_lines,
++                            s.parse_issues.oversized_lines,
++                        )
++                    })
++                    .collect(),
++            ),
+             status: "warn",
+             detail: faults.join("; "),
+         }
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\logs.rs:1:
+-use crate::common::i18n::{commands::message, logging::{project, safe_text}, current, text};
++use crate::common::i18n::{
++    commands::message,
++    current,
++    logging::{project, safe_text},
++    text,
++};
+ use anyhow::Result;
+ use serde::Serialize;
+ 
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\logs.rs:65:
+ fn print_human(payload: &LogsPayload) {
+     println!("{}", message!(LogsTitle));
+     println!("{}", message!(LogFile, payload.logs.path));
+-    println!("{}", message!(LogExists, if payload.logs.exists {text("yes", "是")} else {text("no", "否")}));
++    println!(
++        "{}",
++        message!(
++            LogExists,
++            if payload.logs.exists {
++                text("yes", "是")
++            } else {
++                text("no", "否")
++            }
++        )
++    );
+     println!("{}", message!(LogSize, payload.logs.size_bytes));
+-    println!("{}", message!(LogRetained, payload.logs.retained_files, payload.logs.total_size_bytes));
++    println!(
++        "{}",
++        message!(
++            LogRetained,
++            payload.logs.retained_files,
++            payload.logs.total_size_bytes
++        )
++    );
+     println!("{}", message!(LogErrors, payload.logs.recent_error_count));
+     println!("{}", message!(LogDropped, payload.logs.dropped_event_count));
+-    println!("{}", message!(LogMaintenance, payload.logs.maintenance_error_count));
++    println!(
++        "{}",
++        message!(LogMaintenance, payload.logs.maintenance_error_count)
++    );
+     println!("{}", message!(LogEntries));
+     if payload.entries.is_empty() {
+         println!("{}", message!(LogNone));
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\logs.rs:77:
+     } else {
+         for entry in &payload.entries {
+             let timestamp = safe_text(entry.timestamp.as_deref().unwrap_or("-"));
+-            println!("- {timestamp} {}", project(current(), &entry.level, entry.message.as_deref(), &entry.fields, matches!(entry.level.as_str(), "DEBUG" | "TRACE")));
++            println!(
++                "- {timestamp} {}",
++                project(
++                    current(),
++                    &entry.level,
++                    entry.message.as_deref(),
++                    &entry.fields,
++                    matches!(entry.level.as_str(), "DEBUG" | "TRACE")
++                )
++            );
+         }
+     }
+     println!("{}", message!(RunLog));
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\logs.rs:85:
+         println!("{}", message!(LogNone));
+     } else {
+         for run in &payload.recent_runs {
+-            let finished = run.finished_at.as_deref().unwrap_or(text("running", "运行中"));
++            let finished = run
++                .finished_at
++                .as_deref()
++                .unwrap_or(text("running", "运行中"));
+             let status = match run.status.as_str() {
+                 "running" => text("running", "运行中"),
+                 "success" => text("success", "成功"),
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\logs.rs:93:
+                 "aborted" => text("aborted", "已中止"),
+                 other => other,
+             };
+-            println!("- #{} [{}] {} {} -> {} {}: {} {}", run.id, status, safe_text(&run.command), run.started_at, finished, message!(OriginalRun), safe_text(run.summary.as_deref().unwrap_or("")), safe_text(run.error.as_deref().unwrap_or("")));
++            println!(
++                "- #{} [{}] {} {} -> {} {}: {} {}",
++                run.id,
++                status,
++                safe_text(&run.command),
++                run.started_at,
++                finished,
++                message!(OriginalRun),
++                safe_text(run.summary.as_deref().unwrap_or("")),
++                safe_text(run.error.as_deref().unwrap_or(""))
++            );
+         }
+     }
+ }
+Diff in \\?\D:\Documents\Code\CLI\llmusage\src\commands\mod.rs:288:
+             Ok(value)
+         }
+         Err(err) => {
+-            if let Err(finish_err) =
+-                store
+-                    .run_log()
+-                    .finish_run(run_id, "failed", None, Some(&cli_errors::canonical_detail(&err)))
+-            {
++            if let Err(finish_err) = store.run_log().finish_run(
++                run_id,
++                "failed",
++                None,
++                Some(&cli_errors::canonical_detail(&err)),
++            ) {
+                 return Err(err.context(format!(
+                     "记录 {command} 失败 run_log 时也失败: {finish_err}"
+                 )));
+Traceback (most recent call last):
+  File "D:\Documents\Code\CLI\llmusage\scripts\ci-rust.py", line 44, in <module>
+    main()
+    ~~~~^^
+  File "D:\Documents\Code\CLI\llmusage\scripts\ci-rust.py", line 15, in main
+    run(["cargo", "fmt", "--check"])
+    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Documents\Code\CLI\llmusage\scripts\ci-rust.py", line 11, in run
+    subprocess.run(args, check=True, env=env)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python314\Lib\subprocess.py", line 578, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['cargo', 'fmt', '--check']' returned non-zero exit status 1.

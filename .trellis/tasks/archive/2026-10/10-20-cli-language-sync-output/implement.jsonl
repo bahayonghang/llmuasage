@@ -1,0 +1,11 @@
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/prd.md", "reason": "Confirmed full CLI plus TUI scope, all requirements and acceptance IDs; user explicitly forbids implementation this turn."}
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/design.md", "reason": "Authoritative shared language/settings/startup/logs/sync/TUI design and compatibility decisions."}
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/research/surface-coverage.md", "reason": "Complete C01-C22 and T01-T10 ownership/coverage inventory and protected machine-data branches."}
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/research/source-sync-contract-excerpt.md", "reason": "Exact canonical source-sync ranges within injection byte limit; streams/recovery/privacy remain binding."}
+{"file": ".trellis/spec/llmusage/backend/runtime-log-contracts.md", "reason": "Scoped stderr and console/file invariants."}
+{"file": ".trellis/spec/llmusage/backend/report-cli-contracts.md", "reason": "Report/JSON/locale compatibility during confirmed full CLI migration."}
+{"file": ".trellis/spec/llmusage/backend/tui-presentation-contracts.md", "reason": "Preserve themes/formatters; English-only clause is explicitly superseded by current user scope."}
+{"file": ".trellis/spec/llmusage/backend/tui-runtime-contracts.md", "reason": "Keep dirty redraw, selection, sort and visible-row behavior."}
+{"file": ".trellis/spec/llmusage/backend/tui-subscription-contracts.md", "reason": "Keep quota credentials/read/cache provenance; plan documents compatible optional private presentation metadata."}
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/research/validation-plan.md", "reason": "Requirement-to-evidence matrix; all product tests/native checks remain NOT_RUN."}
+{"file": ".trellis/spec/llmusage/backend/cli-language-contracts.md", "reason": "Verified shared language/preferences/startup contract and typed diagnostic API for this implementation."}

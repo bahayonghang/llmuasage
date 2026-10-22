@@ -1,0 +1,37 @@
+   Compiling llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (bin "llmusage") generated 1 warning
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\cli-f318ae356368252a.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\cli-f318ae356368252a.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (test "cli") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.82s
+     Running tests\cli\main.rs (output\s-language-rust-target\debug\deps\cli-f318ae356368252a.exe)
+
+running 4 tests
+test language_catalog::catalog_local_path_rejections_and_doctor_snapshot_reasons_are_paired ... ok
+test language_catalog::catalog_validation_families_translate_without_changing_canonical_errors_or_data ... FAILED
+test language_catalog::corrupt_recompute_marker_keeps_public_bootstrap_error_and_pairs_cli_reason ... ok
+test language_catalog::paired_catalog_apply_reset_keeps_identical_status_and_token_values ... ok
+
+failures:
+
+---- language_catalog::catalog_validation_families_translate_without_changing_canonical_errors_or_data stdout ----
+
+thread 'language_catalog::catalog_validation_families_translate_without_changing_canonical_errors_or_data' (30284) panicked at tests\cli\language_catalog.rs:117:13:
+assertion `left == right` failed: 0
+  left: Some("invalid config: pricing snapshot did not contain any LiteLLM rows with input_cost_per_token: invalid config: pricing snapshot did not contain any LiteLLM rows with input_cost_per_token")
+ right: Some("invalid config: pricing snapshot did not contain any LiteLLM rows with input_cost_per_token")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    language_catalog::catalog_validation_families_translate_without_changing_canonical_errors_or_data
+
+test result: FAILED. 3 passed; 1 failed; 0 ignored; 0 measured; 68 filtered out; finished in 4.24s
+
+error: test failed, to rerun pass `--test cli`

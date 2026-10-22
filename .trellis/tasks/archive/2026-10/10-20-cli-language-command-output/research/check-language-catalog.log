@@ -1,0 +1,22 @@
+   Compiling llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (bin "llmusage") generated 1 warning
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\cli-f318ae356368252a.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\cli-f318ae356368252a.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (test "cli") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 38.13s
+     Running tests\cli\main.rs (output\s-language-rust-target\debug\deps\cli-f318ae356368252a.exe)
+
+running 4 tests
+test language_catalog::catalog_local_path_rejections_and_doctor_snapshot_reasons_are_paired ... ok
+test language_catalog::catalog_validation_families_translate_without_changing_canonical_errors_or_data ... ok
+test language_catalog::corrupt_recompute_marker_keeps_public_bootstrap_error_and_pairs_cli_reason ... ok
+test language_catalog::paired_catalog_apply_reset_keeps_identical_status_and_token_values ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 68 filtered out; finished in 35.83s
+

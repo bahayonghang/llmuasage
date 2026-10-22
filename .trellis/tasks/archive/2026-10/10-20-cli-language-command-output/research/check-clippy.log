@@ -1,0 +1,248 @@
+    Checking llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:364:45
+    |
+364 |                 super::Language::English => format!("git ls-remote returned non-UTF-8 output"),
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"git ls-remote returned non-UTF-8 output".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+    = note: `-D clippy::useless-format` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::useless_format)]`
+
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:365:45
+    |
+365 |                 super::Language::Chinese => format!("git ls-remote 返回的输出不是 UTF-8"),
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"git ls-remote 返回的输出不是 UTF-8".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:397:21
+    |
+397 |                     format!("no stable semantic-version release tag was found")
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"no stable semantic-version release tag was found".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:399:45
+    |
+399 |                 super::Language::Chinese => format!("未找到稳定语义版本的发布标签"),
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"未找到稳定语义版本的发布标签".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:414:45
+    |
+414 |                 super::Language::English => format!("dev branch resolved to an invalid commit SHA"),
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"dev branch resolved to an invalid commit SHA".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:415:45
+    |
+415 |                 super::Language::Chinese => format!("dev 分支解析出的提交 SHA 无效"),
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"dev 分支解析出的提交 SHA 无效".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:418:45
+    |
+418 |                 super::Language::English => format!("dev branch resolved inconsistently"),
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"dev branch resolved inconsistently".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:419:45
+    |
+419 |                 super::Language::Chinese => format!("dev 分支解析结果不一致"),
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"dev 分支解析结果不一致".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:422:45
+    |
+422 |                 super::Language::English => format!("official dev branch was not found"),
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"official dev branch was not found".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:423:45
+    |
+423 |                 super::Language::Chinese => format!("未找到官方 dev 分支"),
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"未找到官方 dev 分支".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:426:45
+    |
+426 |                 super::Language::English => format!("missing SHA in git ref output"),
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"missing SHA in git ref output".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:427:45
+    |
+427 |                 super::Language::Chinese => format!("git 引用输出缺少 SHA"),
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"git 引用输出缺少 SHA".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:430:45
+    |
+430 |                 super::Language::English => format!("missing ref name in git ref output"),
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"missing ref name in git ref output".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:431:45
+    |
+431 |                 super::Language::Chinese => format!("git 引用输出缺少引用名称"),
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"git 引用输出缺少引用名称".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:434:45
+    |
+434 |                 super::Language::English => format!("unexpected fields in git ref output"),
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"unexpected fields in git ref output".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:435:45
+    |
+435 |                 super::Language::Chinese => format!("git 引用输出包含多余字段"),
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"git 引用输出包含多余字段".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:438:45
+    |
+438 |                 super::Language::English => format!("invalid SHA in git ref output"),
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"invalid SHA in git ref output".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:439:45
+    |
+439 |                 super::Language::Chinese => format!("git 引用输出中的 SHA 无效"),
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"git 引用输出中的 SHA 无效".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:443:21
+    |
+443 |                     format!("confirmation input reached EOF; update was not started")
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"confirmation input reached EOF; update was not started".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:445:45
+    |
+445 |                 super::Language::Chinese => format!("确认输入已到 EOF；未开始更新"),
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"确认输入已到 EOF；未开始更新".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:448:45
+    |
+448 |                 super::Language::English => format!("Failed to wait for Ctrl+C"),
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"Failed to wait for Ctrl+C".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:449:45
+    |
+449 |                 super::Language::Chinese => format!("等待 Ctrl+C 失败"),
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"等待 Ctrl+C 失败".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:464:45
+    |
+464 |                 super::Language::English => format!("Failed to remove existing database"),
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"Failed to remove existing database".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:465:45
+    |
+465 |                 super::Language::Chinese => format!("无法移除现有数据库"),
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"无法移除现有数据库".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:468:45
+    |
+468 |                 super::Language::English => format!("Failed to open codex-tracer database"),
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"Failed to open codex-tracer database".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:469:45
+    |
+469 |                 super::Language::Chinese => format!("无法打开 codex-tracer 数据库"),
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"无法打开 codex-tracer 数据库".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:492:45
+    |
+492 |                 super::Language::English => format!("Server error"),
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"Server error".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+
+error: useless use of `format!`
+   --> src\common\i18n\commands.rs:493:45
+    |
+493 |                 super::Language::Chinese => format!("服务错误"),
+    |                                             ^^^^^^^^^^^^^^^^^^^ help: consider using `.to_string()`: `"服务错误".to_string()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#useless_format
+
+error: redundant closure
+   --> src\common\i18n\logging.rs:912:19
+    |
+912 |         .and_then(|facts| complete_facts::<crate::sync::failure::FailureKind>(facts))
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: replace the closure with the function itself: `complete_facts::<crate::sync::failure::FailureKind>`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#redundant_closure
+    = note: `-D clippy::redundant-closure` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::redundant_closure)]`
+
+error: redundant closure
+   --> src\common\i18n\logging.rs:921:19
+    |
+921 |         .and_then(|facts| complete_facts::<super::commands::DiagnosticFacts>(facts))
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: replace the closure with the function itself: `complete_facts::<super::commands::DiagnosticFacts>`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#redundant_closure
+
+error: could not compile `llmusage` (lib) due to 30 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `llmusage` (lib test) due to 30 previous errors

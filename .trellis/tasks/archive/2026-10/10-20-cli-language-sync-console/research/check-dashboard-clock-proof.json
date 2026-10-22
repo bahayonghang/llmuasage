@@ -1,0 +1,62 @@
+[
+  {
+    "clock": "2026-10-20T23:46:00Z",
+    "local_today": "2026-10-20",
+    "query_timezone": "UTC",
+    "since_inclusive": "2026-10-14T00:00:00Z",
+    "until_exclusive": "2026-10-21T00:00:00Z",
+    "fixture": "raw_now",
+    "hour_start": "2026-10-20T23:46:00Z",
+    "total": 10
+  },
+  {
+    "clock": "2026-10-20T23:46:00Z",
+    "local_today": "2026-10-20",
+    "query_timezone": "UTC",
+    "since_inclusive": "2026-10-14T00:00:00Z",
+    "until_exclusive": "2026-10-21T00:00:00Z",
+    "fixture": "floor_now",
+    "hour_start": "2026-10-20T23:30:00Z",
+    "total": 10
+  },
+  {
+    "clock": "2026-10-20T23:46:00Z",
+    "local_today": "2026-10-20",
+    "query_timezone": "UTC",
+    "since_inclusive": "2026-10-14T00:00:00Z",
+    "until_exclusive": "2026-10-21T00:00:00Z",
+    "fixture": "safe_previous_utc_day",
+    "hour_start": "2026-10-19T12:00:00Z",
+    "total": 10
+  },
+  {
+    "clock": "2026-10-21T00:46:00Z",
+    "local_today": "2026-10-20",
+    "query_timezone": "UTC",
+    "since_inclusive": "2026-10-14T00:00:00Z",
+    "until_exclusive": "2026-10-21T00:00:00Z",
+    "fixture": "raw_now",
+    "hour_start": "2026-10-21T00:46:00Z",
+    "total": 0
+  },
+  {
+    "clock": "2026-10-21T00:46:00Z",
+    "local_today": "2026-10-20",
+    "query_timezone": "UTC",
+    "since_inclusive": "2026-10-14T00:00:00Z",
+    "until_exclusive": "2026-10-21T00:00:00Z",
+    "fixture": "floor_now",
+    "hour_start": "2026-10-21T00:30:00Z",
+    "total": 0
+  },
+  {
+    "clock": "2026-10-21T00:46:00Z",
+    "local_today": "2026-10-20",
+    "query_timezone": "UTC",
+    "since_inclusive": "2026-10-14T00:00:00Z",
+    "until_exclusive": "2026-10-21T00:00:00Z",
+    "fixture": "safe_previous_utc_day",
+    "hour_start": "2026-10-20T12:00:00Z",
+    "total": 10
+  }
+]

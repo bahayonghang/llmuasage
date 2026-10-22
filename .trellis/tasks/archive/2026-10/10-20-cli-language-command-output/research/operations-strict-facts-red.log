@@ -1,0 +1,28 @@
+    Blocking waiting for file lock on build directory
+   Compiling llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 35.82s
+     Running unittests src\lib.rs (output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exe)
+
+running 1 test
+test common::i18n::logging::command_projection_tests::incomplete_fact_shapes_keep_original_metadata_in_normal_and_detailed_logs ... FAILED
+
+failures:
+
+---- common::i18n::logging::command_projection_tests::incomplete_fact_shapes_keep_original_metadata_in_normal_and_detailed_logs stdout ----
+
+thread 'common::i18n::logging::command_projection_tests::incomplete_fact_shapes_keep_original_metadata_in_normal_and_detailed_logs' (46640) panicked at src\common\i18n\logging.rs:1413:21:
+[ERROR] run failed: Refusing lossy sync --rebuild because imported usage has missing source files (codex@remote: missing_files=1 protected_events=12). Regular `llmusage sync` marks missing files without deleting history. Rebuilding deletes rebuildable usage first and cannot recover records whose original files are gone. Restore source files or pass --allow-lossy-rebuild to explicitly accept clearing unrebuildable history.
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    common::i18n::logging::command_projection_tests::incomplete_fact_shapes_keep_original_metadata_in_normal_and_detailed_logs
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 999 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`

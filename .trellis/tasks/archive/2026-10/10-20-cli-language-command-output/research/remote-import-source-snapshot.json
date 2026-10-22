@@ -1,0 +1,8 @@
+{
+  "src/remote/diagnostic.rs": "3ae302dc977c10051817b6bff4e3602bd30b10b760e34781ebd12eab4b650069",
+  "src/remote/importer.rs": "eb47bd0f4220fd6265e956bbc2d62889975171eed79ed96b44a33413eb3a3615",
+  "src/remote/protocol.rs": "6dfceb345ab90e398932f1175de8257a1cf5578468d05a003a1a9686d84a0d4f",
+  "src/remote/mod.rs": "dd40524f6012419ee041e7c9045a7797047838b3594354981a8dca8bfb7f07f4",
+  "src/common/i18n/commands/remote_import.rs": "e7db5cdabbce2421af8593973514aeeebe40227fe083261d74f88c81b38d68ae",
+  "src/commands/remote.rs": "b57cfb15e53d263bd54010241f1d41b5855f69649fa1e0ceffbfb7859e6e65f0"
+}

@@ -1,0 +1,43 @@
+   Compiling llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 48.95s
+     Running unittests src\lib.rs (output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exe)
+
+running 30 tests
+test domain::pricing_catalog::tests::pricing_catalog_covers_gpt_5_6_exact_models_and_alias ... ok
+test domain::pricing_catalog::tests::pricing_catalog_covers_gpt_6_astra_and_claude_5_1 ... ok
+test domain::pricing_catalog::tests::pricing_catalog_duplicate_matchers_rejected ... ok
+test domain::pricing_catalog::tests::pricing_catalog_exposes_context_window ... ok
+test domain::pricing_catalog::tests::pricing_catalog_honors_explicit_native_reasoning_policy ... ok
+test domain::pricing_catalog::tests::pricing_catalog_loads_litellm_snapshot ... ok
+test domain::pricing_catalog::tests::pricing_catalog_loads_native_litellm_models_object ... ok
+test domain::pricing_catalog::tests::pricing_catalog_loads_native_litellm_snapshot ... ok
+test domain::pricing_catalog::tests::pricing_catalog_loads_static_v2 ... ok
+test domain::pricing_catalog::tests::pricing_catalog_matches_known_provider_aliases ... ok
+test domain::pricing_catalog::tests::pricing_catalog_prefix_matches_minor_variants ... ok
+test domain::pricing_catalog::tests::pricing_catalog_reads_native_context_window ... ok
+test domain::pricing_catalog::tests::pricing_catalog_rejects_invalid_v2_tiers ... ok
+test domain::pricing_catalog::tests::pricing_overlay_removal_is_strict_and_replacement_is_whole_model ... ok
+test query::tests::recompute_costs_uses_active_pricing_catalog ... ok
+test store::migrations::tests::migration_v10_seeds_pricing_catalog_version ... ok
+test store::pricing_catalog::tests::activating_snapshot_clears_existing_overlay_metadata ... ok
+test store::pricing_catalog::tests::bootstrap_fails_closed_when_in_progress_catalog_target_is_missing ... ok
+test store::pricing_catalog::tests::bootstrap_recovers_from_interrupted_recompute ... ok
+test store::pricing_catalog::tests::bootstrap_recovers_overlay_when_files_exist_and_meta_is_stale ... ok
+test store::pricing_catalog::tests::bootstrap_upgrades_unpinned_old_static_catalog ... ok
+test store::pricing_catalog::tests::catalog_overlay_apply_survives_restart_and_reset_restores_embedded ... ok
+test store::pricing_catalog::tests::overlay_on_snapshot_resets_to_pinned_snapshot ... ok
+test store::pricing_catalog::tests::paged_recompute_can_retry_after_a_later_page_fails ... ok
+test store::pricing_catalog::tests::pricing_progress_reports_ordered_upgrade_lifecycle_and_noop_is_silent ... ok
+test store::pricing_catalog::tests::recompute_with_custom_static_catalog_persists_catalog_for_restart ... ok
+test store::pricing_catalog::tests::recompute_with_snapshot_persists_catalog_for_restart ... ok
+test store::pricing_catalog::tests::repeated_overlay_apply_uses_recorded_base_not_previous_effective ... ok
+test store::pricing_catalog::tests::selected_catalog_digest_mismatch_fails_closed ... ok
+test store::sync_writer::tests::active_pricing_catalog_rejects_version_mismatch ... ok
+
+test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 975 filtered out; finished in 4.75s
+

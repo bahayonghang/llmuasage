@@ -1,0 +1,71 @@
+{
+  "id": "cli-language-sync-output",
+  "name": "cli-language-sync-output",
+  "title": "CLI/TUI 双语设置与同步输出优化",
+  "description": "实施全 CLI 和 dash/tui 统一英中语言、默认英语、lang 设置、结构化终端日志与十列线框同步统计；Web 独立。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "terminal",
+  "package": null,
+  "priority": "P2",
+  "creator": "lyh",
+  "assignee": "lyh",
+  "createdAt": "2026-10-20",
+  "completedAt": "2026-10-22",
+  "branch": "dev",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": "7b92ac3966c7a892e796aa7593347ec2ef747eea",
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "10-20-cli-language-foundation",
+    "10-20-cli-language-sync-console",
+    "10-20-cli-language-command-output",
+    "10-20-tui-language-consistency",
+    "10-20-terminal-language-acceptance"
+  ],
+  "parent": null,
+  "relatedFiles": [
+    ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/prd.md",
+    ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/design.md",
+    ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/implement.md",
+    ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/research/surface-coverage.md",
+    ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/research/validation-plan.md"
+  ],
+  "notes": "2026-10-20: user confirmed all CLI human output and then added TUI consistency; explicitly planning only, no implementation.\n2026-10-20: implementation authorized by user; execute F -> S -> C -> T -> A with independent checks.\n2026-10-21: user explicitly authorized splitting and committing all changes and archiving these existing tasks. Push, installation and release remain unauthorized.",
+  "meta": {
+    "planning_status": "approved_2026-10-20",
+    "implementation_authorized": true,
+    "role": "parent_integration",
+    "scope_decision": "full_cli_and_tui_web_excluded",
+    "execution_order": [
+      "10-20-cli-language-foundation",
+      "10-20-cli-language-sync-console",
+      "10-20-cli-language-command-output",
+      "10-20-tui-language-consistency",
+      "10-20-terminal-language-acceptance"
+    ],
+    "planning_validation": "passed_2026-10-20",
+    "product_validation": "PASS_original_just_ci_2026-10-21",
+    "audit": "research/planning-audit.md",
+    "authorization_note": "2026-10-20: user explicitly requested implementation of the existing Trellis parent and children; supersedes prior planning-only restriction. No commit/push/install/rebuild/release authorization.",
+    "execution_status": "verified_complete_native_not_run",
+    "verified_children": [
+      "10-20-cli-language-foundation",
+      "10-20-cli-language-sync-console",
+      "10-20-cli-language-command-output",
+      "10-20-tui-language-consistency",
+      "10-20-terminal-language-acceptance"
+    ],
+    "native_smoke": "NOT_RUN_native_APIs_disabled",
+    "acceptance_evidence": "research/acceptance-index.md",
+    "implementation_commits": [
+      "35186161ff6ffbe1b90e58c486eeab5f14d5f53d",
+      "67397ecb813369826ed6a65db908f11e735e1862",
+      "86c91b5a87983dfd638f4fa10d35afabff7034a4",
+      "7b92ac3966c7a892e796aa7593347ec2ef747eea"
+    ],
+    "commit_and_archive_authorized": true
+  }
+}

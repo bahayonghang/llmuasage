@@ -1,0 +1,295 @@
+
+START cargo test --locked --offline --all-features --lib parsers::feedback -- --test-threads=1
+   Compiling llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 20.58s
+     Running unittests src\lib.rs (output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exe)
+
+running 2 tests
+test parsers::feedback::tests::dropped_or_failed_collection_restores_scope_and_direct_emit_is_noop ... ok
+test parsers::feedback::tests::nested_collectors_and_concurrent_tasks_are_isolated_and_restored ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 992 filtered out; finished in 0.00s
+
+EXIT 0
+
+START cargo test --locked --offline --all-features --lib parsers::source_files -- --test-threads=1
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.63s
+     Running unittests src\lib.rs (output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exe)
+
+running 12 tests
+test parsers::source_files::tests::consumed_inventory_summary_has_typed_provenance_cap_and_unknown_details ... ok
+test parsers::source_files::tests::dsh_listing_matches_exact_session_log_names_at_any_depth ... ok
+test parsers::source_files::tests::dsh_listing_returns_empty_when_root_is_missing ... ok
+test parsers::source_files::tests::grok_listing_only_returns_root_sidecars_from_two_directory_levels ... ok
+test parsers::source_files::tests::list_matching_files_preserves_missing_root_as_empty ... ok
+test parsers::source_files::tests::list_matching_files_rejects_non_directory_root ... ok
+test parsers::source_files::tests::list_matching_files_retains_root_error_after_access_recovers ... ok
+test parsers::source_files::tests::omp_keeps_unconflicted_files_when_omp_root_contains_pi_root ... ok
+test parsers::source_files::tests::omp_skips_files_when_pi_root_contains_omp_root ... ok
+test parsers::source_files::tests::omp_skips_files_when_roots_are_equal ... ok
+test parsers::source_files::tests::pi_and_omp_listings_are_disjoint_when_roots_do_not_overlap ... ok
+test parsers::source_files::tests::walk_inventory_fact_retains_os_detail_without_embedded_private_path ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 982 filtered out; finished in 0.05s
+
+EXIT 0
+
+START cargo test --locked --offline --all-features --lib commands::sync -- --test-threads=1
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.63s
+     Running unittests src\lib.rs (output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exe)
+
+running 57 tests
+test commands::sync::tests::cancellation_notice_uses_observed_outcome_and_early_error_emits_none ... ok
+test commands::sync::tests::emit_shards_does_not_open_or_lock_the_user_database ... ok
+test commands::sync::tests::optional_feedback_preserves_imports_cursors_accounting_and_kept_history ... ok
+test commands::sync::tests::parallelism_above_max_is_rejected ... ok
+test commands::sync::tests::parallelism_max_is_accepted ... ok
+test commands::sync::tests::parallelism_none_resolves_to_sensible_default ... ok
+test commands::sync::tests::parallelism_one_is_accepted ... ok
+test commands::sync::tests::parallelism_usize_max_is_rejected ... ok
+test commands::sync::tests::parallelism_zero_is_rejected ... ok
+test commands::sync::tests::prompt_recovery_choice_parsing_and_retry ... ok
+test commands::sync::tests::rebuild_sources_rejects_parserless_historical_source ... ok
+test commands::sync::tests::stdin_pipe_with_choice_text_and_failing_stdin_skips_without_reading ... Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 16ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 17ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 17ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 20ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 15ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 15ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 15ms)
+ok
+test commands::sync::tests::stream_capabilities_decision_matrix ... ok
+test commands::sync::tests::windowed_terminal_notice_does_not_read_stdin ... Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 18ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 18ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 17ms)
+Checking database schema and pricing catalog...
+Waiting for the SQLite sync worker lock...
+SQLite sync worker lock acquired (waited 17ms)
+ok
+test commands::sync_progress::tests::bar_renderer_cancelled_abandons_active_bar ... ok
+test commands::sync_progress::tests::bar_renderer_failed_abandons_and_ignores_followups ... ok
+test commands::sync_progress::tests::bar_renderer_opencode_progress_never_overflows ... ok
+test commands::sync_progress::tests::bar_renderer_pricing_upgrade_sequence_converges ... ok
+test commands::sync_progress::tests::bar_renderer_success_sequence_converges ... ok
+test commands::sync_progress::tests::bilingual_progress_preserves_counts_shortens_only_version_identity_and_wire_is_unchanged ... ok
+test commands::sync_progress::tests::determinate_source_progress_reports_replay_and_commit_phases ... ok
+test commands::sync_progress::tests::dynamic_progress_detail_is_escaped_for_lines_and_bars_without_changing_events ... ok
+test commands::sync_progress::tests::forced_line_requires_non_empty_env_value ... ok
+test commands::sync_progress::tests::human_lines_never_contain_ansi_escapes ... ok
+test commands::sync_progress::tests::human_progress_describes_pricing_upgrade_phases ... ok
+test commands::sync_progress::tests::permanent_progress_lines_end_before_raw_warnings ... ok
+test commands::sync_progress::tests::pricing_sync_event_serializes_as_additive_snake_case_ndjson ... ok
+test commands::sync_progress::tests::remote_host_events_render_skip_warnings ... ok
+test commands::sync_progress::tests::reporter_keeps_the_renderer_language_snapshot_across_spawn ... ok
+test commands::sync_progress::tests::scoped_warning_sink_handles_interleaved_progress_and_restores_on_error ... ok
+test commands::sync_progress::tests::selection_falls_back_to_line_renderer ... ok
+test commands::sync_progress::tests::short_file_label_uses_last_segment_and_truncates ... ok
+test commands::sync_progress::tests::source_finished_emits_no_permanent_human_line ... ok
+test commands::sync_progress::tests::terminal_guard_finishes_renderer_on_drop ... ok
+test commands::sync_progress::tests::token_accounting_repair_events_have_actionable_copy_and_ndjson_shape ... ok
+test commands::sync_recovery::tests::recovery_choices_retry_and_safe_defaults_match_in_both_languages ... ok
+test commands::sync_recovery::tests::unreadable_or_incomplete_discovery_never_offer_acceptance_or_read ... ok
+test commands::sync_summary::tests::absent_source_uses_placeholders_and_error_line ... ok
+test commands::sync_summary::tests::bilingual_diagnostics_are_source_grouped_capped_and_separate_faults_from_information ... ok
+test commands::sync_summary::tests::bilingual_table_has_closed_equal_width_borders_and_exact_numeric_cells ... ok
+test commands::sync_summary::tests::colored_output_wraps_but_preserves_alignment_math ... ok
+test commands::sync_summary::tests::colored_total_row_matches_plain_after_strip ... ok
+test commands::sync_summary::tests::colorless_output_contains_no_ansi_and_aligns_columns ... ok
+test commands::sync_summary::tests::diagnostics_and_samples_are_strictly_after_total ... ok
+test commands::sync_summary::tests::empty_summary_still_renders_zero_total_row ... ok
+test commands::sync_summary::tests::narrow_width_truncates_only_source_label ... ok
+test commands::sync_summary::tests::paired_inventory_diagnostics_keep_cap_counts_and_additional_unknown_detail ... ok
+test commands::sync_summary::tests::parse_issue_counts_are_visible_without_sample_contents ... ok
+test commands::sync_summary::tests::parse_issue_samples_print_basename_never_full_path ... ok
+test commands::sync_summary::tests::parse_issue_samples_print_reason_without_at_zero ... ok
+test commands::sync_summary::tests::parse_issue_samples_report_offsets_and_omitted_count ... ok
+test commands::sync_summary::tests::skipped_only_parse_issues_are_not_warning_colored ... ok
+test commands::sync_summary::tests::table_shows_human_bytes_and_durations ... ok
+test commands::sync_summary::tests::total_row_aggregates_source_stats ... ok
+test commands::sync_summary::tests::total_row_replaces_legacy_totals_line ... ok
+test commands::sync_summary::tests::typed_coverage_preserves_fault_protection_and_never_guesses_from_last_error ... ok
+test commands::sync_summary::tests::zero_and_large_values_format_safely ... ok
+
+test result: ok. 57 passed; 0 failed; 0 ignored; 0 measured; 937 filtered out; finished in 3.76s
+
+EXIT 0
+
+START cargo test --locked --offline --all-features --lib common::i18n::logging -- --test-threads=1
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.62s
+     Running unittests src\lib.rs (output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exe)
+
+running 7 tests
+test common::i18n::logging::tests::default_known_events_keep_source_and_protection_counts_visible ... ok
+test common::i18n::logging::tests::inventory_log_uses_neutral_detail_and_keeps_original_file_payload ... ok
+test common::i18n::logging::tests::known_remote_warning_uses_neutral_counts_and_legacy_logs_keep_original_detail ... ok
+test common::i18n::logging::tests::pricing_projection_keeps_warning_level_counts_and_omits_default_hashes ... ok
+test common::i18n::logging::tests::production_tracing_sites_have_unique_paired_catalog_entries ... ok
+test common::i18n::logging::tests::typed_failure_log_projection_preserves_host_counts_and_canonical_file_detail ... ok
+test common::i18n::logging::tests::unknown_or_mismatched_failure_metadata_remains_available_as_original_detail ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 987 filtered out; finished in 1.20s
+
+EXIT 0
+
+START cargo test --locked --offline --all-features --test sync bilingual_ -- --test-threads=1
+   Compiling llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (bin "llmusage") generated 1 warning
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\sync-676d5d4146244a26.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\sync-676d5d4146244a26.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (test "sync") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 15.67s
+     Running tests\sync\main.rs (output\s-language-rust-target\debug\deps\sync-676d5d4146244a26.exe)
+
+running 5 tests
+test runtime::progress_io::bilingual_inventory_root_fault_is_localized_without_private_path_or_wire_changes ... ok
+test runtime::progress_io::bilingual_lossy_refusal_translates_all_human_sinks_and_keeps_canonical_wire_error ... ok
+test runtime::progress_io::bilingual_omp_preflight_and_invalid_since_preserve_exit_and_safe_ordering ... ok
+test runtime::progress_io::bilingual_sqlite_open_failure_keeps_success_exit_and_canonical_stats_and_shards ... ok
+test runtime::progress_io::bilingual_sync_keeps_human_and_machine_streams_separate_in_plain_modes ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 150 filtered out; finished in 7.81s
+
+EXIT 0
+
+START cargo test --locked --offline --all-features --test cli language:: -- --test-threads=1
+    Blocking waiting for file lock on build directory
+   Compiling llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (bin "llmusage") generated 1 warning
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\cli-f318ae356368252a.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\cli-f318ae356368252a.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (test "cli") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 13.03s
+     Running tests\cli\main.rs (output\s-language-rust-target\debug\deps\cli-f318ae356368252a.exe)
+
+running 20 tests
+test language::application_error_is_printed_once_with_typed_reason_and_source ... ok
+test language::async_interleaving_nested_sync_scopes_and_unwind_do_not_leak ... ok
+test language::bootstrap_selector_uses_schema_arity_and_short_attached_values ... ok
+test language::concurrent_settings_writers_are_serialized_without_worker_lock ... ok
+test language::denied_atomic_replace_preserves_old_settings_then_recovers ... ok
+test language::every_command_and_argument_has_bilingual_help_and_supported_arity ... ok
+test language::explicit_home_environment_home_and_clean_exception_are_isolated ... ok
+test language::failed_settings_lock_keeps_old_document_and_reports_no_success ... ok
+test language::forced_chinese_help_localizes_preference_repairs_without_writing ... ok
+test language::generated_help_commands_can_themselves_be_help_targets ... ok
+test language::help_version_parser_and_noninteractive_lang_never_create_root ... ok
+test language::language_is_persistent_normalized_and_profile_isolated ... ok
+test language::language_menu_never_reads_non_tty_and_cancels_empty_eof_or_q ... ok
+test language::malformed_preferences_warn_once_without_overwriting_and_unknown_code_does_not_write ... ok
+test language::nested_and_hidden_help_follow_preferences_and_preserve_exit_channels ... ok
+test language::parser_error_kinds_and_constraints_have_bilingual_projection ... ok
+test language::settings_writer_preserves_unknown_fields_and_recovers_before_reading ... ok
+test language::sync_failure_finishes_run_log_through_process_adapter ... ok
+test language::sync_validation_retains_invalid_input_and_code_in_both_languages ... ok
+test language::unreadable_settings_fall_back_without_creating_other_files ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 34 filtered out; finished in 3.85s
+
+EXIT 0
+
+START cargo test --locked --offline --all-features --test api --test architecture_dependencies -- --test-threads=1
+   Compiling llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (bin "llmusage") generated 1 warning
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\api-553ccfd515b3c2ab.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\api-553ccfd515b3c2ab.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (test "api") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.36s
+     Running tests\api\main.rs (output\s-language-rust-target\debug\deps\api-553ccfd515b3c2ab.exe)
+
+running 3 tests
+test facade::cli_sync_uses_shared_stable_validation_codes ... ok
+test facade::root_facade_exposes_sync_job_types ... ok
+test facade::root_facade_opens_store_and_dashboard ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+
+     Running tests\architecture\main.rs (output\s-language-rust-target\debug\deps\architecture_dependencies-8b471ea13ccfdddb.exe)
+
+running 12 tests
+test command_layer_does_not_implement_sync_owned_types_or_traits ... ok
+test fixtures_cover_supported_rust_path_forms ... ok
+test non_command_layers_do_not_depend_on_command_sync ... ok
+test ownership_fixtures_cover_non_adapter_dependencies_and_sync_impls ... ok
+test query_architecture_fixtures_cover_edges_and_canonical_ownership ... ok
+test query_layer_does_not_depend_on_commands_web_or_tui ... ok
+test query_vertical_module_ownership_is_canonical ... ok
+test query_vertical_modules_stay_within_navigation_budgets ... ok
+test remote_layer_does_not_depend_on_commands ... ok
+test store_does_not_depend_on_query ... ok
+test store_query_fixtures_cover_supported_path_forms ... ok
+test sync_layer_does_not_depend_on_commands ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.18s
+
+EXIT 0
+
+START cargo fmt --check
+EXIT 0
+
+START cargo clippy --locked --offline --all-targets --all-features -- -D warnings
+    Checking llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 16.86s
+EXIT 0
+
+START cargo check --locked --offline --all-features
+    Checking llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.47s
+EXIT 0

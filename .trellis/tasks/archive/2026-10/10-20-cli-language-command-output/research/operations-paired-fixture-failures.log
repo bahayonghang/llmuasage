@@ -1,0 +1,53 @@
+   Compiling llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (bin "llmusage") generated 1 warning
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\cli-f318ae356368252a.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\cli-f318ae356368252a.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (test "cli") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 31.35s
+     Running tests\cli\main.rs (output\s-language-rust-target\debug\deps\cli-f318ae356368252a.exe)
+
+running 8 tests
+test language_commands::clean_preview_and_confirmation_preserve_the_same_owned_set_in_both_languages ... FAILED
+test language_commands::diagnostics_default_and_out_are_canonical_while_forget_rejections_are_bilingual ... ok
+test language_commands::logs_replay_uses_ids_and_preserves_unknown_detail_and_disk_bytes ... ok
+test language_commands::operational_human_results_follow_language_without_changing_fixed_json ... ok
+test language_commands::remote_remove_requires_yes_and_preserves_local_identity ... FAILED
+test language_commands::source_and_doctor_human_diagnostics_follow_language_while_machine_checks_stay_canonical ... ok
+test language_commands::uninstall_failure_is_bilingual_but_audit_and_run_error_remain_canonical ... ok
+test language_commands::uninstall_translates_private_outcomes_without_changing_cleanup_audits_or_user_files ... FAILED
+
+failures:
+
+---- language_commands::clean_preview_and_confirmation_preserve_the_same_owned_set_in_both_languages stdout ----
+
+thread 'language_commands::clean_preview_and_confirmation_preserve_the_same_owned_set_in_both_languages' (65072) panicked at tests\cli\language_commands.rs:276:9:
+Output { status: ExitStatus(ExitStatus(0)), stdout: "┌───────────────────────┬───────────────────────────────────────┬───────┬────────────────────────┬──────────────────┬───────────┐\n│ Category              │ Path                                  │ Files │ Size                   │ Modified         │ Action    │\n├───────────────────────┼───────────────────────────────────────┼───────┼────────────────────────┼──────────────────┼───────────┤\n│ Live database         │ llmusage.db                           │ 1     │ 258048 bytes / 0.00 GB │ 2026-10-21 02:16 │ Keep      │\n│ Migration copies      │ backups/llmusage.db.pre-*             │ 2     │ 12295 bytes / 0.00 GB  │ 2026-10-21 02:16 │ Deletable │\n│ Config backups        │ backups/*.bak                         │ 2     │ 14 bytes / 0.00 GB     │ 2026-10-21 02:16 │ Keep      │\n│ Research baselines    │ baselines/                            │ 1     │ 7 bytes / 0.00 GB      │ 2026-10-21 02:16 │ Deletable │\n│ Logs                  │ logs/                                 │ 0     │ 0 bytes / 0.00 GB      │ -                │ Keep      │\n│ Wrapper scripts       │ bin/                                  │ 0     │ 0 bytes / 0.00 GB      │ -                │ Keep      │\n│ Exports               │ exports/                              │ 0     │ 0 bytes / 0.00 GB      │ -                │ Keep      │\n│ CLI language settings │ cli-settings.json / cli-settings.lock │ 2     │ 29 bytes / 0.00 GB     │ 2026-10-21 02:16 │ Keep      │\n│ Unknown               │ unknown.txt                           │ 1     │ 7 bytes / 0.00 GB      │ 2026-10-21 02:16 │ Unknown   │\n└───────────────────────┴───────────────────────────────────────┴───────┴────────────────────────┴──────────────────┴───────────┘\nTotal 270400 bytes / 0.00 GB\nDeletable 12302 bytes / 0.00 GB\nDeleted 3 files, freed 12302 bytes / 0.00 GB.\nRemoved 2 empty directories.\n", stderr: "" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- language_commands::remote_remove_requires_yes_and_preserves_local_identity stdout ----
+
+thread 'language_commands::remote_remove_requires_yes_and_preserves_local_identity' (54400) panicked at tests\cli\language_commands.rs:348:13:
+assertion `left == right` failed
+  left: Some(2)
+ right: Some(1)
+
+---- language_commands::uninstall_translates_private_outcomes_without_changing_cleanup_audits_or_user_files stdout ----
+
+thread 'language_commands::uninstall_translates_private_outcomes_without_changing_cleanup_audits_or_user_files' (71404) panicked at tests\cli\language_commands.rs:56:5:
+Output { status: ExitStatus(ExitStatus(1)), stdout: "Legacy cleanup finished:\n- codex: skipped (no legacy Codex notify found)\n- claude: skipped (no legacy Claude hooks found)\n- opencode: skipped (preserved unowned OpenCode plugin)\n- antigravity: skipped (no legacy Antigravity/Gemini hooks found)\n", stderr: "Error: Original detail: 另一个程序正在使用此文件，进程无法访问。 (os error 32)\n" }
+
+
+failures:
+    language_commands::clean_preview_and_confirmation_preserve_the_same_owned_set_in_both_languages
+    language_commands::remote_remove_requires_yes_and_preserves_local_identity
+    language_commands::uninstall_translates_private_outcomes_without_changing_cleanup_audits_or_user_files
+
+test result: FAILED. 5 passed; 3 failed; 0 ignored; 0 measured; 63 filtered out; finished in 8.21s
+
+error: test failed, to rerun pass `--test cli`

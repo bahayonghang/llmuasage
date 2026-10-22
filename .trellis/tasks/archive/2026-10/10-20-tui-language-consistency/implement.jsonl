@@ -1,0 +1,11 @@
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/prd.md", "reason": "Confirmed full CLI plus TUI scope, acceptance IDs and explicit no-implementation authorization boundary."}
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/design.md", "reason": "Shared architecture: startup, language scopes, console/file split, private sync/quota metadata and compatibility."}
+{"file": ".trellis/spec/llmusage/backend/tui-presentation-contracts.md", "reason": "T ownership contract: preserve existing behavior while localizing presentation."}
+{"file": ".trellis/spec/llmusage/backend/tui-runtime-contracts.md", "reason": "T ownership contract: preserve existing behavior while localizing presentation."}
+{"file": ".trellis/spec/llmusage/backend/tui-subscription-contracts.md", "reason": "T ownership contract: preserve existing behavior while localizing presentation."}
+{"file": ".trellis/spec/llmusage/backend/ci-toolchain-contracts.md", "reason": "T ownership contract: preserve existing behavior while localizing presentation."}
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/research/surface-coverage.md", "reason": "T evidence and exact ownership/acceptance mechanisms."}
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/research/tui-localization.md", "reason": "T evidence and exact ownership/acceptance mechanisms."}
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/research/source-sync-contract-excerpt.md", "reason": "Untruncated source-sync metrics, recovery/stream and privacy contract excerpt."}
+{"file": ".trellis/spec/llmusage/backend/cli-language-contracts.md", "reason": "Verified shared language/preferences/startup contract and typed diagnostic API for this implementation."}
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-command-output/research/tui-implementation-handoff.md", "reason": "Current-source T01-T10 ownership, quota association guard and approved private Optimize facts extension."}

@@ -1,0 +1,1822 @@
+[
+  {
+    "path": "src/commands/blocks.rs",
+    "start": 288,
+    "line": 14,
+    "code": "commands.blocks.01",
+    "level": "debug",
+    "message": "starting blocks report output",
+    "body": "\"starting blocks report output\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/blocks.rs",
+    "start": 1152,
+    "line": 40,
+    "code": "commands.blocks.02",
+    "level": "debug",
+    "message": "finished blocks report output",
+    "body": "\"finished blocks report output\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/codex_tracer/ingest.rs",
+    "start": 3340,
+    "line": 102,
+    "code": "commands.codex_tracer.ingest.01",
+    "level": "warn",
+    "message": "Failed to ingest Codex tracer file",
+    "body": "path_hash, error = %error, \"Failed to ingest Codex tracer file\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/codex_tracer/mod.rs",
+    "start": 937,
+    "line": 31,
+    "code": "commands.codex_tracer.mod.01",
+    "level": "info",
+    "message": "Starting codex-tracer",
+    "body": "port, open_browser, rebuild, \"Starting codex-tracer\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/codex_tracer/mod.rs",
+    "start": 1189,
+    "line": 38,
+    "code": "commands.codex_tracer.mod.02",
+    "level": "info",
+    "message": "Rebuild requested, removing existing database",
+    "body": "\"Rebuild requested, removing existing database\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/codex_tracer/mod.rs",
+    "start": 1647,
+    "line": 49,
+    "code": "commands.codex_tracer.mod.03",
+    "level": "info",
+    "message": "Parsing Codex JSONL files",
+    "body": "\"Parsing Codex JSONL files\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/codex_tracer/mod.rs",
+    "start": 2600,
+    "line": 78,
+    "code": "commands.codex_tracer.mod.04",
+    "level": "info",
+    "message": "Finished parsing JSONL files",
+    "body": "files = stats.files_seen,\n            records = stats.records_read,\n            events = stats.events_found,\n            rows_written = stats.rows_written,\n            batch_peak = stats.batch_peak,\n            errors = stats.errors,\n            \"Finished parsing JSONL files\"\n        ",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/codex_tracer/mod.rs",
+    "start": 3396,
+    "line": 103,
+    "code": "commands.codex_tracer.mod.05",
+    "level": "info",
+    "message": "Database already contains events",
+    "body": "events = event_count, \"Database already contains events\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/codex_tracer/server.rs",
+    "start": 1427,
+    "line": 49,
+    "code": "commands.codex_tracer.server.01",
+    "level": "info",
+    "message": "Codex Tracer dashboard listening on {}",
+    "body": "\"Codex Tracer dashboard listening on {}\", actual_addr",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/codex_tracer/server.rs",
+    "start": 5307,
+    "line": 174,
+    "code": "commands.codex_tracer.server.02",
+    "level": "error",
+    "message": "Failed to query calls",
+    "body": "error = %err, \"Failed to query calls\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/codex_tracer/server.rs",
+    "start": 5925,
+    "line": 196,
+    "code": "commands.codex_tracer.server.03",
+    "level": "error",
+    "message": "Failed to serialize payload",
+    "body": "error = %err, \"Failed to serialize payload\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/codex_tracer/server.rs",
+    "start": 7672,
+    "line": 256,
+    "code": "commands.codex_tracer.server.04",
+    "level": "error",
+    "message": "Failed to query calls",
+    "body": "error = %err, \"Failed to query calls\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/codex_tracer/server.rs",
+    "start": 7977,
+    "line": 267,
+    "code": "commands.codex_tracer.server.05",
+    "level": "info",
+    "message": "Refresh requested",
+    "body": "\"Refresh requested\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/codex_tracer/server.rs",
+    "start": 8385,
+    "line": 281,
+    "code": "commands.codex_tracer.server.06",
+    "level": "error",
+    "message": "Codex rollout directory not found",
+    "body": "path = %rollout_dir.display(), \"Codex rollout directory not found\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/codex_tracer/server.rs",
+    "start": 8901,
+    "line": 298,
+    "code": "commands.codex_tracer.server.07",
+    "level": "error",
+    "message": "Failed to refresh Codex tracer events",
+    "body": "error = %err, \"Failed to refresh Codex tracer events\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/codex_tracer/server.rs",
+    "start": 9160,
+    "line": 307,
+    "code": "commands.codex_tracer.server.08",
+    "level": "info",
+    "message": "Refresh completed",
+    "body": "files = stats.files_seen,\n        records = stats.records_read,\n        events = stats.events_found,\n        inserted = stats.rows_written,\n        batch_peak = stats.batch_peak,\n        errors = stats.errors,\n        \"Refresh completed\"\n    ",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/codex_tracer/server.rs",
+    "start": 9934,
+    "line": 335,
+    "code": "commands.codex_tracer.server.09",
+    "level": "error",
+    "message": "Failed to count events",
+    "body": "error = %err, \"Failed to count events\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/daily.rs",
+    "start": 294,
+    "line": 14,
+    "code": "commands.daily.01",
+    "level": "debug",
+    "message": "starting daily report output",
+    "body": "\"starting daily report output\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/daily.rs",
+    "start": 1403,
+    "line": 45,
+    "code": "commands.daily.02",
+    "level": "debug",
+    "message": "finished daily report output",
+    "body": "\"finished daily report output\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/daily.rs",
+    "start": 4062,
+    "line": 122,
+    "code": "commands.daily.03",
+    "level": "debug",
+    "message": "finished daily report output",
+    "body": "\"finished daily report output\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/dash.rs",
+    "start": 1154,
+    "line": 36,
+    "code": "commands.dash.01",
+    "level": "info",
+    "message": "开始启动本地 TUI",
+    "body": "\"开始启动本地 TUI\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/dash.rs",
+    "start": 1288,
+    "line": 42,
+    "code": "commands.dash.02",
+    "level": "info",
+    "message": "完成本地 TUI 会话",
+    "body": "\"完成本地 TUI 会话\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/diagnostics.rs",
+    "start": 898,
+    "line": 32,
+    "code": "commands.diagnostics.01",
+    "level": "info",
+    "message": "开始导出 diagnostics JSON",
+    "body": "\"开始导出 diagnostics JSON\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/diagnostics.rs",
+    "start": 3126,
+    "line": 93,
+    "code": "commands.diagnostics.02",
+    "level": "info",
+    "message": "完成 diagnostics JSON 导出",
+    "body": "\"完成 diagnostics JSON 导出\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/diagnostics.rs",
+    "start": 3621,
+    "line": 107,
+    "code": "commands.diagnostics.03",
+    "level": "info",
+    "message": "开始登记 forget-file",
+    "body": "?file_path, ?source, \"开始登记 forget-file\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/diagnostics.rs",
+    "start": 4044,
+    "line": 120,
+    "code": "commands.diagnostics.04",
+    "level": "info",
+    "message": "完成 forget-file 登记",
+    "body": "source = %target_source, \"完成 forget-file 登记\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/doctor.rs",
+    "start": 796,
+    "line": 29,
+    "code": "commands.doctor.01",
+    "level": "info",
+    "message": "刷新定价快照",
+    "body": "path = %source_path.display(), \"刷新定价快照\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/doctor.rs",
+    "start": 977,
+    "line": 33,
+    "code": "commands.doctor.02",
+    "level": "info",
+    "message": "定价快照已落盘并重算",
+    "body": "updated = result.updated_events,\n        catalog = result.effective.identity,\n        snapshot = result.effective.file.as_deref().unwrap_or(\"embedded\"),\n        \"定价快照已落盘并重算\"\n    ",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/doctor.rs",
+    "start": 1756,
+    "line": 57,
+    "code": "commands.doctor.03",
+    "level": "info",
+    "message": "开始执行 doctor 健康检查",
+    "body": "\"开始执行 doctor 健康检查\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/doctor.rs",
+    "start": 4888,
+    "line": 165,
+    "code": "commands.doctor.04",
+    "level": "info",
+    "message": "完成 doctor 健康检查",
+    "body": "\"完成 doctor 健康检查\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/export.rs",
+    "start": 530,
+    "line": 18,
+    "code": "commands.export.01",
+    "level": "info",
+    "message": "开始导出静态 HTML 报告",
+    "body": "\"开始导出静态 HTML 报告\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/export.rs",
+    "start": 1057,
+    "line": 35,
+    "code": "commands.export.02",
+    "level": "info",
+    "message": "完成静态 HTML 报告导出",
+    "body": "\"完成静态 HTML 报告导出\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/focused.rs",
+    "start": 2444,
+    "line": 84,
+    "code": "commands.focused.01",
+    "level": "debug",
+    "message": "starting focused daily report output",
+    "body": "source = source.as_str(),\n        \"starting focused daily report output\"\n    ",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/focused.rs",
+    "start": 3990,
+    "line": 140,
+    "code": "commands.focused.02",
+    "level": "debug",
+    "message": "starting focused report output",
+    "body": "source = source.as_str(),\n        period = kind.rows_key(),\n        \"starting focused report output\"\n    ",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/focused.rs",
+    "start": 5183,
+    "line": 181,
+    "code": "commands.focused.03",
+    "level": "debug",
+    "message": "starting focused session report output",
+    "body": "source = source.as_str(),\n        \"starting focused session report output\"\n    ",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/init.rs",
+    "start": 146,
+    "line": 7,
+    "code": "commands.init.01",
+    "level": "info",
+    "message": "bootstrapping local runtime",
+    "body": "\"bootstrapping local runtime\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/init.rs",
+    "start": 476,
+    "line": 16,
+    "code": "commands.init.02",
+    "level": "info",
+    "message": "local runtime bootstrap completed",
+    "body": "\"local runtime bootstrap completed\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/mod.rs",
+    "start": 8746,
+    "line": 269,
+    "code": "commands.mod.01",
+    "level": "info",
+    "message": "run started",
+    "body": "command, run_id, \"run started\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/mod.rs",
+    "start": 9014,
+    "line": 276,
+    "code": "commands.mod.02",
+    "level": "info",
+    "message": "run finished",
+    "body": "command,\n                run_id,\n                status = \"success\",\n                summary = summary.as_deref().unwrap_or(\"\"),\n                \"run finished\"\n            ",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/mod.rs",
+    "start": 9597,
+    "line": 294,
+    "code": "commands.mod.03",
+    "level": "error",
+    "message": "run failed",
+    "body": "command,\n                run_id,\n                status = \"failed\",\n                error = %err,\n                \"run failed\"\n            ",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/mod.rs",
+    "start": 10697,
+    "line": 328,
+    "code": "commands.mod.04",
+    "level": "error",
+    "message": "run failed",
+    "body": "command, error = %err, \"run failed\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/mod.rs",
+    "start": 16658,
+    "line": 486,
+    "code": "commands.mod.05",
+    "level": "error",
+    "message": "run failed",
+    "body": "command = \"update\", error = %err, \"run failed\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/monthly.rs",
+    "start": 290,
+    "line": 14,
+    "code": "commands.monthly.01",
+    "level": "debug",
+    "message": "starting monthly report output",
+    "body": "\"starting monthly report output\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/monthly.rs",
+    "start": 1085,
+    "line": 38,
+    "code": "commands.monthly.02",
+    "level": "debug",
+    "message": "finished monthly report output",
+    "body": "\"finished monthly report output\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/monthly.rs",
+    "start": 2048,
+    "line": 72,
+    "code": "commands.monthly.03",
+    "level": "debug",
+    "message": "finished monthly report output",
+    "body": "\"finished monthly report output\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/remote.rs",
+    "start": 6271,
+    "line": 203,
+    "code": "commands.remote.01",
+    "level": "info",
+    "message": "importing remote shards",
+    "body": "host_id = %host.host_id, \"importing remote shards\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/serve.rs",
+    "start": 1261,
+    "line": 51,
+    "code": "commands.serve.01",
+    "level": "info",
+    "message": "开始启动本地 Web UI 服务",
+    "body": "\"开始启动本地 Web UI 服务\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/serve.rs",
+    "start": 3421,
+    "line": 121,
+    "code": "commands.serve.02",
+    "level": "warn",
+    "message": "打开本地 dashboard 浏览器失败，服务将继续运行",
+    "body": "url = %dashboard_url,\n                    error = %err,\n                    \"打开本地 dashboard 浏览器失败，服务将继续运行\"\n                ",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/serve.rs",
+    "start": 3632,
+    "line": 128,
+    "code": "commands.serve.03",
+    "level": "info",
+    "message": "serve 已通过 --no-open 跳过浏览器启动",
+    "body": "\"serve 已通过 --no-open 跳过浏览器启动\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/serve.rs",
+    "start": 3852,
+    "line": 134,
+    "code": "commands.serve.04",
+    "level": "info",
+    "message": "serve 在 SSH 会话中跳过浏览器启动",
+    "body": "\"serve 在 SSH 会话中跳过浏览器启动\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/serve.rs",
+    "start": 4565,
+    "line": 161,
+    "code": "commands.serve.05",
+    "level": "info",
+    "message": "收到 Ctrl+C，准备停止本地 Web UI 服务",
+    "body": "%addr, \"收到 Ctrl+C，准备停止本地 Web UI 服务\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/serve.rs",
+    "start": 6227,
+    "line": 220,
+    "code": "commands.serve.06",
+    "level": "warn",
+    "message": "serve 检测到 legacy token accounting，已保留历史并跳过该来源",
+    "body": "source = %source,\n            missing_files = risk.missing_file_count,\n            protected_events = risk.protected_event_count,\n            \"serve 检测到 legacy token accounting，已保留历史并跳过该来源\"\n        ",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/session.rs",
+    "start": 290,
+    "line": 14,
+    "code": "commands.session.01",
+    "level": "debug",
+    "message": "starting session report output",
+    "body": "\"starting session report output\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/session.rs",
+    "start": 1238,
+    "line": 42,
+    "code": "commands.session.02",
+    "level": "debug",
+    "message": "finished session report output",
+    "body": "\"finished session report output\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/session.rs",
+    "start": 2072,
+    "line": 70,
+    "code": "commands.session.03",
+    "level": "debug",
+    "message": "finished session report output",
+    "body": "\"finished session report output\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/status.rs",
+    "start": 480,
+    "line": 16,
+    "code": "commands.status.01",
+    "level": "info",
+    "message": "开始输出状态摘要",
+    "body": "\"开始输出状态摘要\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/status.rs",
+    "start": 2497,
+    "line": 74,
+    "code": "commands.status.02",
+    "level": "info",
+    "message": "完成状态摘要输出",
+    "body": "\"完成状态摘要输出\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/statusline.rs",
+    "start": 422,
+    "line": 23,
+    "code": "commands.statusline.01",
+    "level": "debug",
+    "message": "starting statusline output",
+    "body": "\"starting statusline output\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/statusline.rs",
+    "start": 2206,
+    "line": 73,
+    "code": "commands.statusline.02",
+    "level": "debug",
+    "message": "finished statusline output",
+    "body": "\"finished statusline output\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/sync.rs",
+    "start": 8120,
+    "line": 243,
+    "code": "commands.sync.01",
+    "level": "info",
+    "message": "开始执行全量本地真源同步",
+    "body": "\"开始执行全量本地真源同步\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/sync.rs",
+    "start": 10231,
+    "line": 293,
+    "code": "commands.sync.02",
+    "level": "debug",
+    "message": "bootstrap finished",
+    "body": "bootstrap_ms = bootstrap_started.elapsed().as_millis() as u64,\n        \"bootstrap finished\"\n    ",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/sync.rs",
+    "start": 12033,
+    "line": 351,
+    "code": "commands.sync.03",
+    "level": "debug",
+    "message": "progress render cost",
+    "body": "render_calls = stats.calls,\n            render_nanos = stats.nanos,\n            render_ms = stats.nanos / 1_000_000,\n            \"progress render cost\"\n        ",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/sync.rs",
+    "start": 12330,
+    "line": 362,
+    "code": "commands.sync.04",
+    "level": "info",
+    "message": "完成全量本地真源同步",
+    "body": "\"完成全量本地真源同步\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/sync_progress.rs",
+    "start": 23663,
+    "line": 685,
+    "code": "commands.sync_progress.01",
+    "level": "warn",
+    "message": "legacy warning",
+    "body": "\"legacy warning\"",
+    "test_only": true
+  },
+  {
+    "path": "src/commands/sync_progress.rs",
+    "start": 25889,
+    "line": 732,
+    "code": "commands.sync_progress.02",
+    "level": "warn",
+    "message": "first warning",
+    "body": "\"first warning\"",
+    "test_only": true
+  },
+  {
+    "path": "src/commands/sync_progress.rs",
+    "start": 26283,
+    "line": 741,
+    "code": "commands.sync_progress.03",
+    "level": "warn",
+    "message": "interleaved warning",
+    "body": "\"interleaved warning\"",
+    "test_only": true
+  },
+  {
+    "path": "src/commands/sync_progress.rs",
+    "start": 26429,
+    "line": 743,
+    "code": "commands.sync_progress.04",
+    "level": "warn",
+    "message": "last warning",
+    "body": "\"last warning\"",
+    "test_only": true
+  },
+  {
+    "path": "src/commands/sync_progress.rs",
+    "start": 26873,
+    "line": 754,
+    "code": "commands.sync_progress.05",
+    "level": "warn",
+    "message": "outside warning",
+    "body": "\"outside warning\"",
+    "test_only": true
+  },
+  {
+    "path": "src/commands/uninstall.rs",
+    "start": 556,
+    "line": 16,
+    "code": "commands.uninstall.01",
+    "level": "info",
+    "message": "开始执行本地卸载",
+    "body": "\"开始执行本地卸载\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/uninstall.rs",
+    "start": 1187,
+    "line": 38,
+    "code": "commands.uninstall.02",
+    "level": "info",
+    "message": "完成本地卸载",
+    "body": "\"完成本地卸载\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/weekly.rs",
+    "start": 288,
+    "line": 14,
+    "code": "commands.weekly.01",
+    "level": "debug",
+    "message": "starting weekly report output",
+    "body": "\"starting weekly report output\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/weekly.rs",
+    "start": 1080,
+    "line": 38,
+    "code": "commands.weekly.02",
+    "level": "debug",
+    "message": "finished weekly report output",
+    "body": "\"finished weekly report output\"",
+    "test_only": false
+  },
+  {
+    "path": "src/commands/weekly.rs",
+    "start": 2040,
+    "line": 72,
+    "code": "commands.weekly.03",
+    "level": "debug",
+    "message": "finished weekly report output",
+    "body": "\"finished weekly report output\"",
+    "test_only": false
+  },
+  {
+    "path": "src/domain/provider_map.rs",
+    "start": 3094,
+    "line": 99,
+    "code": "domain.provider_map.01",
+    "level": "debug",
+    "message": "CCR provider activation log not found; syncing without provider labels",
+    "body": "path = %path.display(),\n                    \"CCR provider activation log not found; syncing without provider labels\"\n                ",
+    "test_only": false
+  },
+  {
+    "path": "src/domain/provider_map.rs",
+    "start": 3317,
+    "line": 105,
+    "code": "domain.provider_map.02",
+    "level": "warn",
+    "message": "failed to load default CCR provider activation log; syncing without provider labels",
+    "body": "path = %path.display(),\n                    error = %err,\n                    \"failed to load default CCR provider activation log; syncing without provider labels\"\n                ",
+    "test_only": false
+  },
+  {
+    "path": "src/domain/provider_map.rs",
+    "start": 4890,
+    "line": 150,
+    "code": "domain.provider_map.03",
+    "level": "debug",
+    "message": "skipping malformed provider activation line",
+    "body": "path = %path.display(),\n                line = line_number,\n                error = %error,\n                \"skipping malformed provider activation line\"\n            ",
+    "test_only": false
+  },
+  {
+    "path": "src/domain/provider_map.rs",
+    "start": 5282,
+    "line": 163,
+    "code": "domain.provider_map.04",
+    "level": "debug",
+    "message": "skipping provider activation for unknown platform",
+    "body": "path = %path.display(),\n                line = line_number,\n                platform,\n                \"skipping provider activation for unknown platform\"\n            ",
+    "test_only": false
+  },
+  {
+    "path": "src/domain/provider_map.rs",
+    "start": 5740,
+    "line": 179,
+    "code": "domain.provider_map.05",
+    "level": "debug",
+    "message": "skipping provider activation with invalid timestamp",
+    "body": "path = %path.display(),\n                line = line_number,\n                \"skipping provider activation with invalid timestamp\"\n            ",
+    "test_only": false
+  },
+  {
+    "path": "src/domain/provider_map.rs",
+    "start": 6316,
+    "line": 198,
+    "code": "domain.provider_map.06",
+    "level": "debug",
+    "message": "skipping provider activation with unknown event",
+    "body": "path = %path.display(),\n                line = line_number,\n                event,\n                \"skipping provider activation with unknown event\"\n            ",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/antigravity.rs",
+    "start": 26335,
+    "line": 759,
+    "code": "parsers.antigravity.01",
+    "level": "warn",
+    "message": "Antigravity post-read fingerprint unavailable",
+    "body": "error = %error, path_hash = hash_string(&file.path.to_string_lossy()), \"Antigravity post-read fingerprint unavailable\"",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/claude.rs",
+    "start": 3288,
+    "line": 121,
+    "code": "parsers.claude.01",
+    "level": "info",
+    "message": "开始同步 Claude 项目真源",
+    "body": "\"开始同步 Claude 项目真源\"",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/claude.rs",
+    "start": 10067,
+    "line": 308,
+    "code": "parsers.claude.02",
+    "level": "info",
+    "message": "完成 Claude 项目真源解析",
+    "body": "files_processed = stats.files_processed,\n        trigger_files,\n        changed_files = stats.changed_files,\n        skipped_files = stats.skipped_files,\n        events_seen = stats.events_seen,\n        bytes_scanned = stats.bytes_scanned,\n        malformed_lines = stats.parse_issues.malformed_lines,\n        oversized_lines = stats.parse_issues.oversized_lines,\n        \"完成 Claude 项目真源解析\"\n    ",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/codex.rs",
+    "start": 8838,
+    "line": 261,
+    "code": "parsers.codex.01",
+    "level": "info",
+    "message": "开始同步 Codex rollout 真源",
+    "body": "\"开始同步 Codex rollout 真源\"",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/codex.rs",
+    "start": 14937,
+    "line": 431,
+    "code": "parsers.codex.02",
+    "level": "info",
+    "message": "完成 Codex rollout 真源解析",
+    "body": "files_processed = stats.files_processed,\n        changed_files = stats.changed_files,\n        skipped_files = stats.skipped_files,\n        events_seen = stats.events_seen,\n        bytes_scanned = stats.bytes_scanned,\n        malformed_lines = stats.parse_issues.malformed_lines,\n        oversized_lines = stats.parse_issues.oversized_lines,\n        \"完成 Codex rollout 真源解析\"\n    ",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/driver.rs",
+    "start": 3500,
+    "line": 94,
+    "code": "parsers.driver.01",
+    "level": "info",
+    "message": "开始驱动 SourceParser 列表",
+    "body": "parsers = ctx.parsers.len(), \"开始驱动 SourceParser 列表\"",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/driver.rs",
+    "start": 6309,
+    "line": 166,
+    "code": "parsers.driver.02",
+    "level": "debug",
+    "message": "source parse finished",
+    "body": "source = %source,\n                parse_wall_ms = parse_started.elapsed().as_millis() as u64,\n                progress_dropped = progress_dropped.load(std::sync::atomic::Ordering::Relaxed),\n                \"source parse finished\"\n            ",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/driver.rs",
+    "start": 7115,
+    "line": 181,
+    "code": "parsers.driver.03",
+    "level": "info",
+    "message": "source inventory incomplete; skipping missing sweep",
+    "body": "source = %source, \"source inventory incomplete; skipping missing sweep\"",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/driver.rs",
+    "start": 7517,
+    "line": 189,
+    "code": "parsers.driver.04",
+    "level": "info",
+    "message": "标记 missing 文件完成",
+    "body": "source = %source, host_id = %host_id, swept, \"标记 missing 文件完成\"",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/driver.rs",
+    "start": 7928,
+    "line": 206,
+    "code": "parsers.driver.05",
+    "level": "info",
+    "message": "完成 SourceParser 列表驱动",
+    "body": "sources = all_stats.len(), \"完成 SourceParser 列表驱动\"",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/driver.rs",
+    "start": 8416,
+    "line": 225,
+    "code": "parsers.driver.06",
+    "level": "info",
+    "message": "parse issues",
+    "body": "source = %stats.source,\n        malformed = stats.parse_issues.malformed_lines,\n        oversized = stats.parse_issues.oversized_lines,\n        skipped = stats.parse_issues.skipped_lines,\n        accounting = stats.parse_issues.accounting_anomaly_lines,\n        reasons = reasons.as_str(),\n        \"parse issues\"\n    ",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/dsh.rs",
+    "start": 4634,
+    "line": 151,
+    "code": "parsers.dsh.01",
+    "level": "info",
+    "message": "开始同步 DeepSeek Harness 会话日志真源",
+    "body": "\"开始同步 DeepSeek Harness 会话日志真源\"",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/dsh.rs",
+    "start": 10275,
+    "line": 309,
+    "code": "parsers.dsh.02",
+    "level": "info",
+    "message": "完成 DeepSeek Harness 会话日志真源解析",
+    "body": "files_processed = stats.files_processed,\n        changed_files = stats.changed_files,\n        skipped_files = stats.skipped_files,\n        events_seen = stats.events_seen,\n        malformed_lines = stats.parse_issues.malformed_lines,\n        \"完成 DeepSeek Harness 会话日志真源解析\"\n    ",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/grok.rs",
+    "start": 4210,
+    "line": 159,
+    "code": "parsers.grok.01",
+    "level": "info",
+    "message": "starting Grok Build passive session sync",
+    "body": "\"starting Grok Build passive session sync\"",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/grok.rs",
+    "start": 5981,
+    "line": 208,
+    "code": "parsers.grok.02",
+    "level": "warn",
+    "message": "Grok session has a missing tracked sidecar; preserving prior usage",
+    "body": "session_hash = %hash_string(&session_dir.to_string_lossy()),\n                \"Grok session has a missing tracked sidecar; preserving prior usage\"\n            ",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/grok.rs",
+    "start": 10219,
+    "line": 325,
+    "code": "parsers.grok.03",
+    "level": "info",
+    "message": "finished Grok Build passive session sync",
+    "body": "files_processed = stats.files_processed,\n        changed_files = stats.changed_files,\n        skipped_files = stats.skipped_files,\n        events_seen = stats.events_seen,\n        \"finished Grok Build passive session sync\"\n    ",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/kimi_code.rs",
+    "start": 3577,
+    "line": 117,
+    "code": "parsers.kimi_code.01",
+    "level": "info",
+    "message": "开始同步 Kimi Code wire.jsonl 真源",
+    "body": "\"开始同步 Kimi Code wire.jsonl 真源\"",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/kimi_code.rs",
+    "start": 9360,
+    "line": 281,
+    "code": "parsers.kimi_code.02",
+    "level": "info",
+    "message": "完成 Kimi Code wire.jsonl 真源解析",
+    "body": "files_processed = stats.files_processed,\n        changed_files = stats.changed_files,\n        skipped_files = stats.skipped_files,\n        events_seen = stats.events_seen,\n        bytes_scanned = stats.bytes_scanned,\n        malformed_lines = stats.parse_issues.malformed_lines,\n        oversized_lines = stats.parse_issues.oversized_lines,\n        \"完成 Kimi Code wire.jsonl 真源解析\"\n    ",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/opencode.rs",
+    "start": 2636,
+    "line": 96,
+    "code": "parsers.opencode.01",
+    "level": "info",
+    "message": "开始同步 OpenCode SQLite 真源",
+    "body": "\"开始同步 OpenCode SQLite 真源\"",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/opencode.rs",
+    "start": 4027,
+    "line": 137,
+    "code": "parsers.opencode.02",
+    "level": "info",
+    "message": "检测到 OpenCode DB cursor 锚点缺失，重置高水位",
+    "body": "last_time_created = cursor.last_time_created,\n            anchor_ids = cursor.last_processed_ids.len(),\n            \"检测到 OpenCode DB cursor 锚点缺失，重置高水位\"\n        ",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/opencode.rs",
+    "start": 11433,
+    "line": 343,
+    "code": "parsers.opencode.03",
+    "level": "info",
+    "message": "完成 OpenCode SQLite 真源解析",
+    "body": "rows_seen = seen_rows,\n        part_rows_seen,\n        events_seen = stats.events_seen,\n        bytes_scanned = stats.bytes_scanned,\n        \"完成 OpenCode SQLite 真源解析\"\n    ",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/pi.rs",
+    "start": 4654,
+    "line": 158,
+    "code": "parsers.pi.01",
+    "level": "info",
+    "message": "开始同步 Pi 格式会话真源",
+    "body": "source = %source, \"开始同步 Pi 格式会话真源\"",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/pi.rs",
+    "start": 10207,
+    "line": 320,
+    "code": "parsers.pi.02",
+    "level": "info",
+    "message": "完成 Pi 格式会话真源解析",
+    "body": "files_processed = stats.files_processed,\n        changed_files = stats.changed_files,\n        skipped_files = stats.skipped_files,\n        events_seen = stats.events_seen,\n        bytes_scanned = stats.bytes_scanned,\n        malformed_lines = stats.parse_issues.malformed_lines,\n        oversized_lines = stats.parse_issues.oversized_lines,\n        \"完成 Pi 格式会话真源解析\"\n    ",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/source_files.rs",
+    "start": 11998,
+    "line": 356,
+    "code": "parsers.source_files.01",
+    "level": "warn",
+    "message": "failed to enumerate source file inventory",
+    "body": "error = %message, \"failed to enumerate source file inventory\"",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/source_files.rs",
+    "start": 12394,
+    "line": 367,
+    "code": "parsers.source_files.02",
+    "level": "warn",
+    "message": "failed to enumerate source file inventory",
+    "body": "error = %message, \"failed to enumerate source file inventory\"",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/zcode.rs",
+    "start": 3963,
+    "line": 108,
+    "code": "parsers.zcode.01",
+    "level": "info",
+    "message": "开始同步 ZCode SQLite 真源",
+    "body": "\"开始同步 ZCode SQLite 真源\"",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/zcode.rs",
+    "start": 5406,
+    "line": 150,
+    "code": "parsers.zcode.02",
+    "level": "info",
+    "message": "检测到 ZCode DB cursor 锚点缺失，重置高水位",
+    "body": "last_completed_at = cursor.last_completed_at,\n            anchor_ids = cursor.last_processed_ids.len(),\n            \"检测到 ZCode DB cursor 锚点缺失，重置高水位\"\n        ",
+    "test_only": false
+  },
+  {
+    "path": "src/parsers/zcode.rs",
+    "start": 10071,
+    "line": 291,
+    "code": "parsers.zcode.03",
+    "level": "info",
+    "message": "完成 ZCode SQLite 真源解析",
+    "body": "rows_seen = seen_rows,\n        events_seen = stats.events_seen,\n        \"完成 ZCode SQLite 真源解析\"\n    ",
+    "test_only": false
+  },
+  {
+    "path": "src/query/reports.rs",
+    "start": 51532,
+    "line": 1667,
+    "code": "query.reports.01",
+    "level": "debug",
+    "message": "loaded usage blocks",
+    "body": "operation = \"blocks_report\",\n        anchor_probe_events = scan.anchor_probe_events,\n        scanned_events = scan.scanned_events,\n        scan_start = scan.scan_start.as_deref(),\n        fell_back_to_full_scan = scan.fell_back_to_full_scan,\n        \"loaded usage blocks\"\n    ",
+    "test_only": false
+  },
+  {
+    "path": "src/remote/importer.rs",
+    "start": 8467,
+    "line": 209,
+    "code": "remote.importer.01",
+    "level": "warn",
+    "message": "skipped non-JSON remote shard lines",
+    "body": "host_id = %host.host_id,\n                skipped_lines,\n                \"skipped non-JSON remote shard lines\"\n            ",
+    "test_only": false
+  },
+  {
+    "path": "src/runtime/logging.rs",
+    "start": 24672,
+    "line": 764,
+    "code": "runtime.logging.01",
+    "level": "warn",
+    "message": "production boundary",
+    "body": "event_index, %payload, \"production boundary\"",
+    "test_only": true
+  },
+  {
+    "path": "src/store/lock.rs",
+    "start": 2576,
+    "line": 69,
+    "code": "store.lock.01",
+    "level": "error",
+    "message": "SQLite worker 锁已被其他进程抢占（fencing generation 不匹配），当前 worker 应停止写入",
+    "body": "\"SQLite worker 锁已被其他进程抢占（fencing generation \\\n                                     不匹配），当前 worker 应停止写入\"\n                                ",
+    "test_only": false
+  },
+  {
+    "path": "src/store/lock.rs",
+    "start": 2917,
+    "line": 76,
+    "code": "store.lock.02",
+    "level": "warn",
+    "message": "SQLite worker 锁 heartbeat 续租失败",
+    "body": "error = %err, \"SQLite worker 锁 heartbeat 续租失败\"",
+    "test_only": false
+  },
+  {
+    "path": "src/store/lock.rs",
+    "start": 7604,
+    "line": 215,
+    "code": "store.lock.03",
+    "level": "info",
+    "message": "开始等待 SQLite worker 锁",
+    "body": "holder_kind = %kind, timeout_ms = timeout.as_millis(), \"开始等待 SQLite worker 锁\"",
+    "test_only": false
+  },
+  {
+    "path": "src/store/lock.rs",
+    "start": 7829,
+    "line": 219,
+    "code": "store.lock.04",
+    "level": "info",
+    "message": "完成 SQLite worker 锁申请",
+    "body": "holder = %lock.meta().holder_identity(),\n                    wait_ms = started.elapsed().as_millis(),\n                    \"完成 SQLite worker 锁申请\"\n                ",
+    "test_only": false
+  },
+  {
+    "path": "src/store/lock.rs",
+    "start": 9962,
+    "line": 276,
+    "code": "store.lock.05",
+    "level": "info",
+    "message": "SQLite worker 锁协调表正被并发更新",
+    "body": "holder_kind = %kind, \"SQLite worker 锁协调表正被并发更新\"",
+    "test_only": false
+  },
+  {
+    "path": "src/store/lock.rs",
+    "start": 10206,
+    "line": 284,
+    "code": "store.lock.06",
+    "level": "info",
+    "message": "尝试申请 SQLite worker 锁",
+    "body": "holder_kind = %kind, \"尝试申请 SQLite worker 锁\"",
+    "test_only": false
+  },
+  {
+    "path": "src/store/lock.rs",
+    "start": 13241,
+    "line": 370,
+    "code": "store.lock.07",
+    "level": "info",
+    "message": "SQLite worker 锁已被占用",
+    "body": "\"SQLite worker 锁已被占用\"",
+    "test_only": false
+  },
+  {
+    "path": "src/store/migrations.rs",
+    "start": 6615,
+    "line": 210,
+    "code": "store.migrations.01",
+    "level": "info",
+    "message": "开始执行 schema migration",
+    "body": "version = *version,\n            name = *name,\n            \"开始执行 schema migration\"\n        ",
+    "test_only": false
+  },
+  {
+    "path": "src/store/migrations.rs",
+    "start": 7665,
+    "line": 239,
+    "code": "store.migrations.02",
+    "level": "info",
+    "message": "完成 schema migration",
+    "body": "version = *version,\n                    name = *name,\n                    elapsed_ms,\n                    \"完成 schema migration\"\n                ",
+    "test_only": false
+  },
+  {
+    "path": "src/store/mod.rs",
+    "start": 38364,
+    "line": 1008,
+    "code": "store.mod.01",
+    "level": "info",
+    "message": "开始重算定价目录",
+    "body": "operation = \"pricing_recompute\",\n            phase = \"started\",\n            from_version = %self.from_version,\n            to_version = %self.to_version,\n            total_events = self.total_events,\n            \"开始重算定价目录\"\n        ",
+    "test_only": false
+  },
+  {
+    "path": "src/store/mod.rs",
+    "start": 39046,
+    "line": 1026,
+    "code": "store.mod.02",
+    "level": "warn",
+    "message": "定价重算仍在进行",
+    "body": "operation = \"pricing_recompute\",\n                phase = \"events\",\n                from_version = %self.from_version,\n                to_version = %self.to_version,\n                processed_events,\n                total_events = self.total_events,\n                elapsed_ms = elapsed.as_millis().min(u64::MAX as u128) as u64,\n                \"定价重算仍在进行\"\n            ",
+    "test_only": false
+  },
+  {
+    "path": "src/store/mod.rs",
+    "start": 39809,
+    "line": 1045,
+    "code": "store.mod.03",
+    "level": "debug",
+    "message": "定价重算页已提交",
+    "body": "operation = \"pricing_recompute\",\n            phase = \"events\",\n            from_version = %self.from_version,\n            to_version = %self.to_version,\n            processed_events,\n            total_events = self.total_events,\n            elapsed_ms,\n            \"定价重算页已提交\"\n        ",
+    "test_only": false
+  },
+  {
+    "path": "src/store/mod.rs",
+    "start": 40552,
+    "line": 1066,
+    "code": "store.mod.04",
+    "level": "info",
+    "message": "开始对账定价汇总桶",
+    "body": "operation = \"pricing_recompute\",\n            phase = \"bucket_reconcile\",\n            from_version = %self.from_version,\n            to_version = %self.to_version,\n            processed_events = self.total_events,\n            total_events = self.total_events,\n            bucket_count,\n            elapsed_ms = self.elapsed_ms(),\n            \"开始对账定价汇总桶\"\n        ",
+    "test_only": false
+  },
+  {
+    "path": "src/store/mod.rs",
+    "start": 41260,
+    "line": 1085,
+    "code": "store.mod.05",
+    "level": "warn",
+    "message": "定价汇总桶对账耗时超过预期",
+    "body": "operation = \"pricing_recompute\",\n                phase = \"bucket_reconcile\",\n                from_version = %self.from_version,\n                to_version = %self.to_version,\n                processed_events = summary.updated_events,\n                total_events = self.total_events,\n                bucket_count = summary.bucket_count,\n                elapsed_ms = summary.elapsed_ms,\n                \"定价汇总桶对账耗时超过预期\"\n            ",
+    "test_only": false
+  },
+  {
+    "path": "src/store/mod.rs",
+    "start": 41717,
+    "line": 1096,
+    "code": "store.mod.06",
+    "level": "info",
+    "message": "完成定价目录重算",
+    "body": "operation = \"pricing_recompute\",\n            phase = \"finished\",\n            from_version = %self.from_version,\n            to_version = %self.to_version,\n            processed_events = summary.updated_events,\n            total_events = self.total_events,\n            bucket_count = summary.bucket_count,\n            deleted_orphan_buckets = summary.deleted_orphan_buckets,\n            elapsed_ms = summary.elapsed_ms,\n            \"完成定价目录重算\"\n        ",
+    "test_only": false
+  },
+  {
+    "path": "src/store/mod.rs",
+    "start": 42757,
+    "line": 1124,
+    "code": "store.mod.07",
+    "level": "error",
+    "message": "定价目录重算失败",
+    "body": "operation = \"pricing_recompute\",\n            phase,\n            from_version = %self.from_version,\n            to_version = %self.to_version,\n            processed_events,\n            total_events = self.total_events,\n            bucket_count,\n            elapsed_ms = self.elapsed_ms(),\n            error = %err,\n            \"定价目录重算失败\"\n        ",
+    "test_only": false
+  },
+  {
+    "path": "src/store/pricing_catalog.rs",
+    "start": 21065,
+    "line": 547,
+    "code": "store.pricing_catalog.01",
+    "level": "warn",
+    "message": "发现定价重算未完成标记，正在恢复一致性重算",
+    "body": "target_version = %catalog.version,\n                \"发现定价重算未完成标记，正在恢复一致性重算\"\n            ",
+    "test_only": false
+  },
+  {
+    "path": "src/store/schema.rs",
+    "start": 5236,
+    "line": 153,
+    "code": "store.schema.01",
+    "level": "info",
+    "message": "开始初始化本地目录与 SQLite schema",
+    "body": "\"开始初始化本地目录与 SQLite schema\"",
+    "test_only": false
+  },
+  {
+    "path": "src/store/schema.rs",
+    "start": 6691,
+    "line": 190,
+    "code": "store.schema.02",
+    "level": "info",
+    "message": "完成本地目录与 SQLite schema 初始化",
+    "body": "version = migrations::latest_schema_version(),\n            \"完成本地目录与 SQLite schema 初始化\"\n        ",
+    "test_only": false
+  },
+  {
+    "path": "src/store/schema.rs",
+    "start": 13098,
+    "line": 345,
+    "code": "store.schema.03",
+    "level": "info",
+    "message": "开始按源清空可重建用量数据",
+    "body": "source = %source, host_id, \"开始按源清空可重建用量数据\"",
+    "test_only": false
+  },
+  {
+    "path": "src/store/schema.rs",
+    "start": 13237,
+    "line": 347,
+    "code": "store.schema.04",
+    "level": "info",
+    "message": "完成按源清空可重建用量数据",
+    "body": "source = %source, host_id, \"完成按源清空可重建用量数据\"",
+    "test_only": false
+  },
+  {
+    "path": "src/store/schema.rs",
+    "start": 13700,
+    "line": 358,
+    "code": "store.schema.05",
+    "level": "info",
+    "message": "开始按源批量清空可重建用量数据",
+    "body": "source_count = sources.len(),\n            host_id, \"开始按源批量清空可重建用量数据\"\n        ",
+    "test_only": false
+  },
+  {
+    "path": "src/store/schema.rs",
+    "start": 14088,
+    "line": 369,
+    "code": "store.schema.06",
+    "level": "info",
+    "message": "完成按源批量清空可重建用量数据",
+    "body": "source_count = sources.len(),\n            host_id, \"完成按源批量清空可重建用量数据\"\n        ",
+    "test_only": false
+  },
+  {
+    "path": "src/store/schema.rs",
+    "start": 14727,
+    "line": 386,
+    "code": "store.schema.07",
+    "level": "info",
+    "message": "开始清空可重建用量数据",
+    "body": "\"开始清空可重建用量数据\"",
+    "test_only": false
+  },
+  {
+    "path": "src/store/schema.rs",
+    "start": 15265,
+    "line": 405,
+    "code": "store.schema.08",
+    "level": "info",
+    "message": "完成清空可重建用量数据",
+    "body": "\"完成清空可重建用量数据\"",
+    "test_only": false
+  },
+  {
+    "path": "src/store/sync_writer/profiling.rs",
+    "start": 9035,
+    "line": 309,
+    "code": "store.sync_writer.profiling.01",
+    "level": "info",
+    "message": "开始清理重放旧事件",
+    "body": "source = %source, count = path_hashes.len(), \"开始清理重放旧事件\"",
+    "test_only": true
+  },
+  {
+    "path": "src/store/sync_writer/profiling.rs",
+    "start": 15247,
+    "line": 466,
+    "code": "store.sync_writer.profiling.02",
+    "level": "info",
+    "message": "完成重放旧事件清理",
+    "body": "source = %source, \"完成重放旧事件清理\"",
+    "test_only": true
+  },
+  {
+    "path": "src/store/sync_writer.rs",
+    "start": 7277,
+    "line": 215,
+    "code": "store.sync_writer.01",
+    "level": "info",
+    "message": "开始建立 sync 单写入端",
+    "body": "\"开始建立 sync 单写入端\"",
+    "test_only": false
+  },
+  {
+    "path": "src/store/sync_writer.rs",
+    "start": 7479,
+    "line": 219,
+    "code": "store.sync_writer.02",
+    "level": "info",
+    "message": "完成 sync 单写入端建立",
+    "body": "raw_archive_enabled, \"完成 sync 单写入端建立\"",
+    "test_only": false
+  },
+  {
+    "path": "src/store/sync_writer.rs",
+    "start": 9386,
+    "line": 277,
+    "code": "store.sync_writer.03",
+    "level": "info",
+    "message": "开始清理重放旧事件",
+    "body": "source = %source, count = path_hashes.len(), \"开始清理重放旧事件\"",
+    "test_only": false
+  },
+  {
+    "path": "src/store/sync_writer.rs",
+    "start": 19409,
+    "line": 511,
+    "code": "store.sync_writer.04",
+    "level": "info",
+    "message": "完成重放旧事件清理",
+    "body": "source = %source, \"完成重放旧事件清理\"",
+    "test_only": false
+  },
+  {
+    "path": "src/store/sync_writer.rs",
+    "start": 20086,
+    "line": 534,
+    "code": "store.sync_writer.05",
+    "level": "info",
+    "message": "开始批量写入 usage_event",
+    "body": "batch = events.len(), \"开始批量写入 usage_event\"",
+    "test_only": false
+  },
+  {
+    "path": "src/store/sync_writer.rs",
+    "start": 24842,
+    "line": 638,
+    "code": "store.sync_writer.06",
+    "level": "info",
+    "message": "完成批量写入 usage_event",
+    "body": "batch = events.len(), inserted, \"完成批量写入 usage_event\"",
+    "test_only": false
+  },
+  {
+    "path": "src/store/sync_writer.rs",
+    "start": 25513,
+    "line": 661,
+    "code": "store.sync_writer.07",
+    "level": "info",
+    "message": "开始批量刷新 cursor",
+    "body": "source = %source, count = cursors.len(), \"开始批量刷新 cursor\"",
+    "test_only": false
+  },
+  {
+    "path": "src/store/sync_writer.rs",
+    "start": 28068,
+    "line": 724,
+    "code": "store.sync_writer.08",
+    "level": "info",
+    "message": "完成批量刷新 cursor",
+    "body": "source = %source, \"完成批量刷新 cursor\"",
+    "test_only": false
+  },
+  {
+    "path": "src/store/sync_writer.rs",
+    "start": 28189,
+    "line": 729,
+    "code": "store.sync_writer.09",
+    "level": "info",
+    "message": "完成 sync 单写入端收尾",
+    "body": "\"完成 sync 单写入端收尾\"",
+    "test_only": false
+  },
+  {
+    "path": "src/store/sync_writer.rs",
+    "start": 38408,
+    "line": 991,
+    "code": "store.sync_writer.10",
+    "level": "info",
+    "message": "开始提交 shard",
+    "body": "source = %shard.source,\n            resets = shard.reset_path_hashes.len(),\n            events = shard.events.len(),\n            cursors = shard.cursors.len(),\n            seen_files = shard.seen_file_paths.len(),\n            raw_records = shard.raw_records.len(),\n            turns = shard.turns.len(),\n            tool_calls = shard.tool_calls.len(),\n            \"开始提交 shard\"\n        ",
+    "test_only": false
+  },
+  {
+    "path": "src/store/sync_writer.rs",
+    "start": 41335,
+    "line": 1070,
+    "code": "store.sync_writer.11",
+    "level": "info",
+    "message": "完成 shard 提交",
+    "body": "source = %shard.source,\n            inserted = stats.events_inserted,\n            turns_inserted = stats.turns_inserted,\n            tool_calls_inserted = stats.tool_calls_inserted,\n            write_ms = stats.write_ms,\n            \"完成 shard 提交\"\n        ",
+    "test_only": false
+  },
+  {
+    "path": "src/store/sync_writer.rs",
+    "start": 46029,
+    "line": 1194,
+    "code": "store.sync_writer.12",
+    "level": "info",
+    "message": "resetting pre-split pi rows before first omp shard",
+    "body": "host_id,\n            \"resetting pre-split pi rows before first omp shard\"\n        ",
+    "test_only": false
+  },
+  {
+    "path": "src/sync/engine.rs",
+    "start": 958,
+    "line": 36,
+    "code": "sync.engine.01",
+    "level": "info",
+    "message": "run started",
+    "body": "command, run_id, \"run started\"",
+    "test_only": false
+  },
+  {
+    "path": "src/sync/engine.rs",
+    "start": 1226,
+    "line": 43,
+    "code": "sync.engine.02",
+    "level": "info",
+    "message": "run finished",
+    "body": "command,\n                run_id,\n                status = \"success\",\n                summary = summary.as_deref().unwrap_or(\"\"),\n                \"run finished\"\n            ",
+    "test_only": false
+  },
+  {
+    "path": "src/sync/engine.rs",
+    "start": 1809,
+    "line": 61,
+    "code": "sync.engine.03",
+    "level": "error",
+    "message": "run failed",
+    "body": "command,\n                run_id,\n                status = \"failed\",\n                error = %err,\n                \"run failed\"\n            ",
+    "test_only": false
+  },
+  {
+    "path": "src/sync/engine.rs",
+    "start": 6047,
+    "line": 205,
+    "code": "sync.engine.04",
+    "level": "info",
+    "message": "开始执行 sync 三阶段流水线",
+    "body": "\"开始执行 sync 三阶段流水线\"",
+    "test_only": false
+  },
+  {
+    "path": "src/sync/engine.rs",
+    "start": 7225,
+    "line": 236,
+    "code": "sync.engine.05",
+    "level": "warn",
+    "message": "skipped legacy token accounting sources",
+    "body": "sources = %source_names,\n                \"skipped legacy token accounting sources\"\n            ",
+    "test_only": false
+  },
+  {
+    "path": "src/sync/engine.rs",
+    "start": 12087,
+    "line": 367,
+    "code": "sync.engine.06",
+    "level": "info",
+    "message": "标记 missing 文件完成",
+    "body": "source = %source, swept, \"标记 missing 文件完成\"",
+    "test_only": false
+  },
+  {
+    "path": "src/sync/engine.rs",
+    "start": 12217,
+    "line": 370,
+    "code": "sync.engine.07",
+    "level": "info",
+    "message": "source inventory incomplete; skipping missing sweep",
+    "body": "source = %source,\n                            \"source inventory incomplete; skipping missing sweep\"\n                        ",
+    "test_only": false
+  },
+  {
+    "path": "src/sync/engine.rs",
+    "start": 12953,
+    "line": 389,
+    "code": "sync.engine.08",
+    "level": "error",
+    "message": "Antigravity lossy rebuild failed",
+    "body": "error = %err, \"Antigravity lossy rebuild failed\"",
+    "test_only": false
+  },
+  {
+    "path": "src/sync/engine.rs",
+    "start": 13473,
+    "line": 399,
+    "code": "sync.engine.09",
+    "level": "info",
+    "message": "source inventory incomplete; skipping missing sweep",
+    "body": "source = %source,\n                        \"source inventory incomplete; skipping missing sweep\"\n                    ",
+    "test_only": false
+  },
+  {
+    "path": "src/sync/engine.rs",
+    "start": 14290,
+    "line": 425,
+    "code": "sync.engine.10",
+    "level": "debug",
+    "message": "driver finished",
+    "body": "driver_ms = driver_started.elapsed().as_millis() as u64,\n        \"driver finished\"\n    ",
+    "test_only": false
+  },
+  {
+    "path": "src/sync/engine.rs",
+    "start": 25106,
+    "line": 677,
+    "code": "sync.engine.11",
+    "level": "warn",
+    "message": "skipped unreachable remote hosts",
+    "body": "skipped = remote_outcome.skipped.len(),\n            \"skipped unreachable remote hosts\"\n        ",
+    "test_only": false
+  },
+  {
+    "path": "src/sync/engine.rs",
+    "start": 25261,
+    "line": 682,
+    "code": "sync.engine.12",
+    "level": "debug",
+    "message": "stored_events queries finished",
+    "body": "stored_query_ms = stored_query_started.elapsed().as_millis() as u64,\n        stored_queries,\n        \"stored_events queries finished\"\n    ",
+    "test_only": false
+  },
+  {
+    "path": "src/sync/engine.rs",
+    "start": 27639,
+    "line": 749,
+    "code": "sync.engine.13",
+    "level": "debug",
+    "message": "sync pipeline finished",
+    "body": "pipeline_ms = pipeline_started.elapsed().as_millis() as u64,\n        \"sync pipeline finished\"\n    ",
+    "test_only": false
+  },
+  {
+    "path": "src/sync/engine.rs",
+    "start": 27750,
+    "line": 752,
+    "code": "sync.engine.14",
+    "level": "info",
+    "message": "完成 sync 三阶段流水线",
+    "body": "\"完成 sync 三阶段流水线\"",
+    "test_only": false
+  },
+  {
+    "path": "src/sync/engine.rs",
+    "start": 32028,
+    "line": 887,
+    "code": "sync.engine.15",
+    "level": "warn",
+    "message": "{warning}",
+    "body": "host_id = %host.host_id, \"{warning}\"",
+    "test_only": false
+  },
+  {
+    "path": "src/sync/engine.rs",
+    "start": 33441,
+    "line": 928,
+    "code": "sync.engine.16",
+    "level": "info",
+    "message": "source inventory incomplete; skipping missing sweep",
+    "body": "source = %stats.source,\n                host_id,\n                \"source inventory incomplete; skipping missing sweep\"\n            ",
+    "test_only": false
+  },
+  {
+    "path": "src/sync/engine.rs",
+    "start": 33770,
+    "line": 938,
+    "code": "sync.engine.17",
+    "level": "info",
+    "message": "标记 missing 文件完成",
+    "body": "source = %stats.source,\n                host_id,\n                swept,\n                \"标记 missing 文件完成\"\n            ",
+    "test_only": false
+  },
+  {
+    "path": "src/sync/pricing_refresh.rs",
+    "start": 22406,
+    "line": 668,
+    "code": "sync.pricing_refresh.01",
+    "level": "warn",
+    "message": "pricing source refresh failed; using fallback catalog",
+    "body": "source = source,\n        detail = detail,\n        \"pricing source refresh failed; using fallback catalog\"\n    ",
+    "test_only": false
+  },
+  {
+    "path": "src/web/mod.rs",
+    "start": 6963,
+    "line": 199,
+    "code": "web.mod.01",
+    "level": "debug",
+    "message": "Dashboard query orphan settled",
+    "body": "query_id,\n                section,\n                orphan_duration_ms = elapsed_ms,\n                join_outcome = outcome,\n                \"Dashboard query orphan settled\"\n            ",
+    "test_only": false
+  },
+  {
+    "path": "src/web/mod.rs",
+    "start": 12720,
+    "line": 393,
+    "code": "web.mod.02",
+    "level": "error",
+    "message": "detached Web server stopped unexpectedly",
+    "body": "%addr, error = %err, \"detached Web server stopped unexpectedly\"",
+    "test_only": false
+  },
+  {
+    "path": "src/web/mod.rs",
+    "start": 14502,
+    "line": 456,
+    "code": "web.mod.03",
+    "level": "info",
+    "message": "开始绑定本地 Web UI 监听端口",
+    "body": "\"开始绑定本地 Web UI 监听端口\"",
+    "test_only": false
+  },
+  {
+    "path": "src/web/mod.rs",
+    "start": 14938,
+    "line": 470,
+    "code": "web.mod.04",
+    "level": "info",
+    "message": "开始组装本地 Web UI 路由",
+    "body": "\"开始组装本地 Web UI 路由\"",
+    "test_only": false
+  },
+  {
+    "path": "src/web/mod.rs",
+    "start": 15435,
+    "line": 478,
+    "code": "web.mod.05",
+    "level": "info",
+    "message": "完成本地 Web UI 路由组装",
+    "body": "exposure = ?write_exposure,\n                    \"完成本地 Web UI 路由组装\"\n                ",
+    "test_only": false
+  },
+  {
+    "path": "src/web/mod.rs",
+    "start": 16005,
+    "line": 491,
+    "code": "web.mod.06",
+    "level": "info",
+    "message": "完成本地 Web UI 监听端口绑定",
+    "body": "%addr, \"完成本地 Web UI 监听端口绑定\"",
+    "test_only": false
+  },
+  {
+    "path": "src/web/mod.rs",
+    "start": 38439,
+    "line": 1262,
+    "code": "web.mod.07",
+    "level": "error",
+    "message": "forget failed",
+    "body": "endpoint = \"/api/diagnostics/forget\", error = %err, \"forget failed\"",
+    "test_only": false
+  },
+  {
+    "path": "src/web/mod.rs",
+    "start": 49557,
+    "line": 1637,
+    "code": "web.mod.08",
+    "level": "debug",
+    "message": "Dashboard query timed out waiting for a permit",
+    "body": "section,\n                semaphore_wait_ms = started.elapsed().as_millis(),\n                query_ms = 0_u128,\n                cancelled = true,\n                \"Dashboard query timed out waiting for a permit\"\n            ",
+    "test_only": false
+  },
+  {
+    "path": "src/web/mod.rs",
+    "start": 51707,
+    "line": 1690,
+    "code": "web.mod.09",
+    "level": "debug",
+    "message": "Dashboard query timed out before SQLite became interruptible",
+    "body": "query_id,\n                section,\n                semaphore_wait_ms = semaphore_wait.as_millis(),\n                query_ms = query_started.elapsed().as_millis(),\n                cancelled = true,\n                \"Dashboard query timed out before SQLite became interruptible\"\n            ",
+    "test_only": false
+  },
+  {
+    "path": "src/web/mod.rs",
+    "start": 52302,
+    "line": 1706,
+    "code": "web.mod.10",
+    "level": "debug",
+    "message": "Dashboard query timed out before awaiting blocking work",
+    "body": "query_id,\n            section,\n            semaphore_wait_ms = semaphore_wait.as_millis(),\n            query_ms = query_started.elapsed().as_millis(),\n            cancelled = true,\n            \"Dashboard query timed out before awaiting blocking work\"\n        ",
+    "test_only": false
+  },
+  {
+    "path": "src/web/mod.rs",
+    "start": 52892,
+    "line": 1721,
+    "code": "web.mod.11",
+    "level": "debug",
+    "message": "Dashboard query timed out",
+    "body": "query_id,\n                section,\n                semaphore_wait_ms = semaphore_wait.as_millis(),\n                query_ms = query_started.elapsed().as_millis(),\n                cancelled = true,\n                \"Dashboard query timed out\"\n            ",
+    "test_only": false
+  },
+  {
+    "path": "src/web/mod.rs",
+    "start": 53302,
+    "line": 1733,
+    "code": "web.mod.12",
+    "level": "debug",
+    "message": "Dashboard query completed",
+    "body": "query_id,\n        section,\n        semaphore_wait_ms = semaphore_wait.as_millis(),\n        query_ms = query_started.elapsed().as_millis(),\n        cancelled = result\n            .as_ref()\n            .is_err_and(|error| matches!(error, LlmusageError::Cancelled { .. })),\n        \"Dashboard query completed\"\n    ",
+    "test_only": false
+  },
+  {
+    "path": "src/web/mod.rs",
+    "start": 67145,
+    "line": 2170,
+    "code": "web.mod.13",
+    "level": "debug",
+    "message": "Web API response serialized",
+    "body": "endpoint,\n                        serialization_ms = started.elapsed().as_millis(),\n                        payload_bytes = body.len(),\n                        \"Web API response serialized\"\n                    ",
+    "test_only": false
+  },
+  {
+    "path": "src/web/mod.rs",
+    "start": 67658,
+    "line": 2183,
+    "code": "web.mod.14",
+    "level": "error",
+    "message": "Web API response serialization failed",
+    "body": "endpoint, error = %err, \"Web API response serialization failed\"",
+    "test_only": false
+  },
+  {
+    "path": "src/web/mod.rs",
+    "start": 67877,
+    "line": 2189,
+    "code": "web.mod.15",
+    "level": "error",
+    "message": "Web API handler failed",
+    "body": "endpoint, error = %err, \"Web API handler failed\"",
+    "test_only": false
+  }
+]

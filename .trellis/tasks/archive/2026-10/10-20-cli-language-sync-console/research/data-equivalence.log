@@ -1,0 +1,28 @@
+   Compiling llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+warning: function `format_prompt_question` is never used
+   --> src\parsers\antigravity.rs:407:15
+    |
+407 | pub(crate) fn format_prompt_question(
+    |               ^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `prompt_recovery_choice` is never used
+   --> src\parsers\antigravity.rs:433:15
+    |
+433 | pub(crate) fn prompt_recovery_choice<R: std::io::BufRead, W: std::io::Write>(
+    |               ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage-61a60d7c236ae2f9.lib 和对象 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage-61a60d7c236ae2f9.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (lib test) generated 3 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 27.57s
+     Running unittests src\lib.rs (target\debug\deps\llmusage-61a60d7c236ae2f9.exe)
+
+running 1 test
+test commands::sync::tests::optional_feedback_preserves_imports_cursors_accounting_and_kept_history ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 982 filtered out; finished in 0.99s
+

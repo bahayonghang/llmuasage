@@ -1,0 +1,85 @@
+   Compiling llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 20.49s
+     Running unittests src\lib.rs (output\s-language-rust-target\debug\deps\llmusage-61a60d7c236ae2f9.exe)
+
+running 72 tests
+test commands::report_args::tests::report_dates_accept_compact_and_iso_forms ... ok
+test commands::report_args::tests::report_dates_reject_other_forms_with_actionable_error ... ok
+test commands::source_status::tests::status_reports_passive_no_data_without_history ... ok
+test commands::source_status::tests::status_reports_passive_ready_when_data_exists ... ok
+test commands::sync_progress::tests::determinate_source_progress_reports_replay_and_commit_phases ... ok
+test commands::sync_progress::tests::reporter_keeps_the_renderer_language_snapshot_across_spawn ... ok
+test commands::sync_summary::tests::parse_issue_samples_report_offsets_and_omitted_count ... ok
+test commands::unified_report::tests::focused_projection_removes_the_agent_comparison_layer ... ok
+test commands::unified_report::tests::requested_sections_keeps_current_first_and_uses_fixed_order ... ok
+test common::i18n::commands::reports::tests::report_diagnostic_facts_round_trip_without_translated_copy_and_reject_unknown_shapes ... ok
+test domain::platform_monitor::tests::probe_reports_detected_when_candidate_root_exists ... ok
+test domain::platform_monitor::tests::probe_reports_unavailable_without_candidate_roots ... ok
+test domain::pricing::tests::pricing_status_source_reported_as_str ... ok
+test domain::pricing::tests::source_reported_cost_wins_over_catalog_when_total_positive ... ok
+test domain::pricing::tests::source_reported_derives_without_cache_from_input_rate ... ok
+test domain::pricing::tests::source_reported_without_cache_falls_back_to_total ... ok
+test parsers::antigravity::tests::coverage_without_prior_diagnostics_reports_actual_disk_gaps ... ok
+test parsers::file_progress::tests::reports_progress_while_blocking_work_is_running ... ok
+test query::reports::tests::bounded_blocks_fall_back_when_continuous_history_has_no_gap ... ok
+test query::reports::tests::bounded_blocks_match_full_scan_for_a_cross_cutoff_block ... ok
+test query::reports::tests::bounded_blocks_preserve_active_block_detection ... ok
+test query::reports::tests::bounded_blocks_reanchor_after_the_latest_qualifying_gap ... ok
+test query::reports::tests::daily_monthly_reports_read_bucket_rows_without_events ... ok
+test query::reports::tests::daily_report_filters_and_groups_by_local_date ... ok
+test query::reports::tests::daily_report_fixed_offset_filter_includes_exact_local_day_from_buckets ... ok
+test query::reports::tests::daily_report_iana_timezone_groups_buckets_with_per_date_dst_offsets ... ok
+test query::reports::tests::local_report_timezone_uses_current_fixed_offset_snapshot ... ok
+test query::reports::tests::measure_local_blocks_bounding ... ignored, reads the local usage database for release-mode performance evidence
+test query::reports::tests::measure_project_filtered_period_bundle_performance ... ignored, explicit release-mode 100k/500k report performance acceptance harness
+test query::reports::tests::period_bundle_executes_one_totals_query_and_only_one_narrow_conversation_query ... ok
+test query::reports::tests::period_reports_ignore_event_only_backlog_with_and_without_project_filter ... ok
+test query::reports::tests::project_selector_preserves_fuzzy_semantics_and_uses_current_bucket_truth ... ok
+test query::reports::tests::reports_keep_historical_antigravity_usage ... ok
+test query::reports::tests::reports_production_does_not_open_store_connections ... ok
+test query::reports::tests::session_report_falls_back_to_event_key_when_metadata_missing ... ok
+test query::reports::tests::session_time_span_caps_idle_gaps ... ok
+test query::reports::tests::session_time_span_handles_single_and_empty ... ok
+test query::reports::tests::session_time_span_sorts_unordered_input ... ok
+test query::reports::tests::single_session_report_sql_contains_session_predicate ... ok
+test query::reports::tests::unified_daily_rows_preserve_all_agent_invariants_and_internal_payloads ... ok
+test query::reports::tests::weekly_period_key_uses_the_filtered_local_date ... ok
+test query::reports::tests::weekly_reports_use_monday_start_across_years_and_match_daily_totals ... ok
+test query::tests::blocks_report_reuses_dashboard_connection ... ok
+test query::tests::dashboard_and_daily_report_share_dst_date_bounds ... ok
+test query::tests::recompute_costs_leaves_source_reported_event_amounts_unchanged ... ok
+test query::tests::recompute_keeps_source_reported_buckets_and_mixes_with_unpriced ... ok
+test query::tests::source_reported_events_are_not_counted_as_unpriced ... ok
+test query::tests::zombie_report_diffs_installed_against_used ... ok
+test store::pricing_catalog::tests::pricing_progress_reports_ordered_upgrade_lifecycle_and_noop_is_silent ... ok
+test store::sync_writer::tests::path_reset_keeps_source_reported_bucket_status ... ok
+test store::sync_writer::tests::source_reported_cost_wins_when_total_positive ... ok
+test subscription::tests::corrupt_cache_is_not_reported_as_hit ... ok
+test sync::job_registry::tests::finish_run_lock_loss_reports_failed_instead_of_completed ... ok
+test sync::pricing_refresh::tests::ac7_raw_model_and_positive_source_reported_cost_unchanged ... ok
+test tui::report_table::tests::cache_cell_renders_placeholder_for_zero_and_compact_otherwise ... ok
+test tui::report_table::tests::cost_format_uses_two_decimals ... ok
+test tui::report_table::tests::count_format_uses_grouping ... ok
+test tui::report_table::tests::daily_source_table_can_force_ansi_styles ... ok
+test tui::report_table::tests::daily_source_table_uses_lightweight_daily_columns ... ok
+test tui::report_table::tests::daily_summary_table_uses_ccusage_style_columns_and_grouped_counts ... ok
+test tui::report_table::tests::focused_table_ansi_styles_follow_color_mode ... ok
+test tui::report_table::tests::paired_notes_model_overflow_and_empty_labels_preserve_external_values ... ok
+test tui::report_table::tests::paired_tables_use_display_width_and_never_shorten_numeric_cells ... ok
+test tui::report_table::tests::render_empty_table_is_actionable ... ok
+test tui::report_table::tests::token_compact_format_uses_short_units ... ok
+test tui::report_table::tests::unified_table_always_color_bolds_header_total_and_dims_placeholders ... ok
+test tui::report_table::tests::unified_table_renders_all_agent_rows_and_detected_title ... ok
+test tui::report_table::tests::unified_table_uses_visible_token_total_compact_units_and_total_separator ... ok
+test tui::report_table::tests::unified_zero_cache_cells_render_placeholder_and_nonzero_stay_compact ... ok
+test tui::report_table::tests::usage_table_uses_box_borders_and_total_row ... ok
+test tui::sync_control::tests::progress_message_reports_source_counts ... ok
+test tui::sync_control::tests::progress_message_reports_token_accounting_repair_boundaries ... ok
+
+test result: ok. 70 passed; 0 failed; 2 ignored; 0 measured; 929 filtered out; finished in 33.54s
+

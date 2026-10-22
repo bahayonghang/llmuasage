@@ -1,0 +1,24 @@
+   Compiling llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (bin "llmusage") generated 1 warning
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\cli-f318ae356368252a.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\cli-f318ae356368252a.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (test "cli") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 16.16s
+     Running tests\cli\main.rs (output\s-language-rust-target\debug\deps\cli-f318ae356368252a.exe)
+
+running 6 tests
+test language_reports::rejected_report_logs_project_paired_facts_and_keep_canonical_file_and_run_data ... ok
+test language_reports::report_uninitialized_failures_keep_exit_code_and_pair_own_context ... ok
+test language_reports::report_variants_localize_text_and_preserve_json_locale_cost_and_sections ... ok
+test language_reports::schema_focused_leaves_have_paired_success_empty_rejection_and_stable_json ... ok
+test language_reports::statusline_active_labels_and_io_failures_are_paired ... ok
+test language_reports::statusline_keeps_cost_policy_single_line_and_language_cache_isolation ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 58 filtered out; finished in 43.74s
+

@@ -1,0 +1,15 @@
+{
+  "captured_at": "2026-10-21T01:15:40.586837+00:00",
+  "files": {
+    "src/commands/blocks.rs": "3e56410d9e25112fa7db588fe3e0b3aa53ae8e246bcdce8478546c5ed924c536",
+    "src/commands/daily.rs": "7db31c5795c2e57b7edab89858a1ca7015e655a93962c37a34d13ba56e9c3b0e",
+    "src/commands/focused.rs": "a996c0ab29e8f0a7b80c73433509df5f40f4cf9b777f0a07d60e23e0578ef20d",
+    "src/commands/report_args.rs": "e7ebe46c21016c7e9d4d90715b95931dd916f2b854c9317998743b2700ded77e",
+    "src/commands/session.rs": "2829c97c1a95ca72c404eb11df824f08d338dd579be8056a71fed19905b4b41d",
+    "src/commands/statusline.rs": "8a528b788719f418015e4a84ca2a520979b137e83f26f6f20999bd51a28ddc4e",
+    "src/commands/unified_report.rs": "eb42971a10e5c6127ef8a3ef9a05959b5eac47a9d09f03288d72eae950ac4c46",
+    "src/tui/report_table.rs": "a5d99f3a98e80f8433c4e49753378e6bf820b3e078534a6b0fb57a8c7e2f2c48",
+    "src/common/i18n/commands/reports.rs": "d17558d867024dba04a22e5c6051ad33396775d208cc0a9e1307bc8abfe91530",
+    "tests/cli/language_reports.rs": "59fe3cd84d1a3fc8d34497fa9ff47e5fa0a982cbfb6d9de70b5fec993d77a4fa"
+  }
+}

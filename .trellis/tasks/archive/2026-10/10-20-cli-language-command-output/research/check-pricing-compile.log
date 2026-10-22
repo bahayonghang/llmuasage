@@ -1,0 +1,11 @@
+    Checking llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+warning: unused import: `LlmusageError`
+  --> src\store\pricing_catalog.rs:16:13
+   |
+16 |     error::{LlmusageError, Result},
+   |             ^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `llmusage` (lib) generated 1 warning (run `cargo fix --lib -p llmusage` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 10.02s

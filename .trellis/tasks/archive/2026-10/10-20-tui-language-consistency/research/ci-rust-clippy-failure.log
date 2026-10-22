@@ -1,0 +1,42 @@
++ cargo fmt --check
++ cargo clippy --locked --all-targets --all-features -- -D warnings
+    Checking llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+error: redundant guard
+   --> src\common\i18n\quota.rs:139:41
+    |
+139 |         WindowHint::Seconds(seconds) if seconds == 604800 => text("Weekly", "每周").to_string(),
+    |                                         ^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#redundant_guards
+    = note: `-D clippy::redundant-guards` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::redundant_guards)]`
+help: try
+    |
+139 -         WindowHint::Seconds(seconds) if seconds == 604800 => text("Weekly", "每周").to_string(),
+139 +         WindowHint::Seconds(604800) => text("Weekly", "每周").to_string(),
+    |
+
+error: could not compile `llmusage` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `llmusage` (lib test) due to 1 previous error
+Traceback (most recent call last):
+  File "D:\Documents\Code\CLI\llmusage\scripts\ci-rust.py", line 44, in <module>
+    main()
+    ~~~~^^
+  File "D:\Documents\Code\CLI\llmusage\scripts\ci-rust.py", line 16, in main
+    run(
+    ~~~^
+        [
+        ^
+    ...<8 lines>...
+        ]
+        ^
+    )
+    ^
+  File "D:\Documents\Code\CLI\llmusage\scripts\ci-rust.py", line 11, in run
+    subprocess.run(args, check=True, env=env)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python314\Lib\subprocess.py", line 578, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['cargo', 'clippy', '--locked', '--all-targets', '--all-features', '--', '-D', 'warnings']' returned non-zero exit status 101.

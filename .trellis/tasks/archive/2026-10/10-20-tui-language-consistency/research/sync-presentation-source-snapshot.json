@@ -1,0 +1,9 @@
+{
+  "src/sync/engine.rs": "7db338ba962829ee2e62ba6ed973ce17a52f94e07659fb2a28fde4b49b0db57c",
+  "src/sync/notices.rs": "f0ca0f34a5ffffde052cb99ca96f44d98ab62a855bfc3b46d6488e02f28592f9",
+  "src/sync/job_registry.rs": "4b3e5d5a00e2fa9ad85669101b5e3245b45e432955c287f569727ae953766e58",
+  "src/common/i18n/sync.rs": "0d73eaacf9367baa201d9c01015dfaee05f19d9f5e16ef9d82256389b1c22ea8",
+  "src/commands/sync.rs": "bc2e80e3d4cec8c9e555479ca60eec18e379dd0eadcde9b9bb028b8258a07345",
+  "src/commands/sync_progress.rs": "c17f18fe5e170446fcaf4b95eecab0d6a3423a9ec5913f8b630366f4776ba140",
+  "src/commands/sync_summary.rs": "aba0242dfa34b39dddcc7ced184b3f22450b899c04ff99410042a0bdf0a24eb5"
+}

@@ -1,0 +1,16 @@
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/prd.md", "reason": "Confirmed full CLI plus TUI scope and current implementation authorization; preserve ungranted side-effect boundaries."}
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/design.md", "reason": "Shared architecture: startup, language scopes, console/file split, private sync/quota metadata and compatibility."}
+{"file": ".trellis/spec/llmusage/backend/runtime-log-contracts.md", "reason": "A ownership contract: preserve existing behavior while localizing presentation."}
+{"file": ".trellis/spec/llmusage/backend/report-cli-contracts.md", "reason": "A ownership contract: preserve existing behavior while localizing presentation."}
+{"file": ".trellis/spec/llmusage/backend/tui-presentation-contracts.md", "reason": "A ownership contract: preserve existing behavior while localizing presentation."}
+{"file": ".trellis/spec/llmusage/backend/tui-runtime-contracts.md", "reason": "A ownership contract: preserve existing behavior while localizing presentation."}
+{"file": ".trellis/spec/llmusage/backend/tui-subscription-contracts.md", "reason": "A ownership contract: preserve existing behavior while localizing presentation."}
+{"file": ".trellis/spec/llmusage/backend/ci-toolchain-contracts.md", "reason": "A ownership contract: preserve existing behavior while localizing presentation."}
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/research/surface-coverage.md", "reason": "A evidence and exact ownership/acceptance mechanisms."}
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/research/validation-plan.md", "reason": "A evidence and exact ownership/acceptance mechanisms."}
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/research/output-proposal.md", "reason": "A evidence and exact ownership/acceptance mechanisms."}
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-sync-output/research/source-sync-contract-excerpt.md", "reason": "Untruncated source-sync metrics, recovery/stream and privacy contract excerpt."}
+{"file": ".trellis/spec/llmusage/backend/cli-language-contracts.md", "reason": "Verified shared language/preferences/startup contract and typed diagnostic API for this implementation."}
+{"file": ".trellis/tasks/archive/2026-10/10-20-cli-language-command-output/research/docs-implementation-handoff.md", "reason": "Current bilingual doc anchors, retained locale semantics, real fixture examples and final acceptance boundaries."}
+{"file": ".trellis/tasks/archive/2026-10/10-20-terminal-language-acceptance/research/source-sync-presentation-excerpt.md", "reason": "Exact current private human feedback scenario without injection truncation; canonical source hash and path retained."}
+{"file": ".trellis/tasks/archive/2026-10/10-20-tui-language-consistency/research/check-evidence.md", "reason": "Independently reviewed T source and coordinator full Rust gate confirmation."}

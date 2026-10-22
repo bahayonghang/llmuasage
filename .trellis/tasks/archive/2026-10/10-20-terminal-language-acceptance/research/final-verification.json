@@ -1,0 +1,24 @@
+{
+  "just_ci_exit": 0,
+  "snapshot_files": 500,
+  "snapshot_mismatches": [],
+  "root_rust_pass": 1320,
+  "root_rust_ignored": 19,
+  "desktop_rust_pass": 33,
+  "js_summary": [
+    "ℹ tests 66",
+    "ℹ pass 66",
+    "ℹ fail 0",
+    "ℹ skipped 0",
+    " Test Files  18 passed (18)",
+    "ℹ tests 4",
+    "ℹ pass 4",
+    "ℹ fail 0",
+    "ℹ skipped 0",
+    "build complete in 6.49s."
+  ],
+  "native_smoke": "NOT_RUN",
+  "dashboard_js_pass": 66,
+  "desktop_frontend_pass": 65,
+  "desktop_node_checks_pass": 4
+}

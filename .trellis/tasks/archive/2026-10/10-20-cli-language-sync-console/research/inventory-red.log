@@ -1,0 +1,47 @@
+   Compiling llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (bin "llmusage") generated 1 warning
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\sync-676d5d4146244a26.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\sync-676d5d4146244a26.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (test "sync") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.14s
+     Running tests\sync\main.rs (output\s-language-rust-target\debug\deps\sync-676d5d4146244a26.exe)
+
+running 5 tests
+test runtime::progress_io::bilingual_inventory_root_fault_is_localized_without_private_path_or_wire_changes ... FAILED
+test runtime::progress_io::bilingual_lossy_refusal_translates_all_human_sinks_and_keeps_canonical_wire_error ... ok
+test runtime::progress_io::bilingual_omp_preflight_and_invalid_since_preserve_exit_and_safe_ordering ... ok
+test runtime::progress_io::bilingual_sqlite_open_failure_keeps_success_exit_and_canonical_stats_and_shards ... ok
+test runtime::progress_io::bilingual_sync_keeps_human_and_machine_streams_separate_in_plain_modes ... ok
+
+failures:
+
+---- runtime::progress_io::bilingual_inventory_root_fault_is_localized_without_private_path_or_wire_changes stdout ----
+
+thread 'runtime::progress_io::bilingual_inventory_root_fault_is_localized_without_private_path_or_wire_changes' (52048) panicked at tests\sync\runtime\progress_io.rs:608:9:
+Sync finished:
+┌────────┬───────┬─────────┬─────────┬──────┬───────────┬────────┬───────┬───────┬───────┐
+│ SOURCE │ FILES │ CHANGED │ SKIPPED │ SEEN │ COMMITTED │ STORED │ BYTES │ PARSE │ WRITE │
+├────────┼───────┼─────────┼─────────┼──────┼───────────┼────────┼───────┼───────┼───────┤
+│ codex  │     0 │       0 │       0 │    0 │         0 │      0 │   0 B │   1ms │   0ms │
+├────────┼───────┼─────────┼─────────┼──────┼───────────┼────────┼───────┼───────┼───────┤
+│ TOTAL  │     0 │       0 │       0 │    0 │         0 │      0 │   0 B │   1ms │   0ms │
+└────────┴───────┴─────────┴─────────┴──────┴───────────┴────────┴───────┴───────┴───────┘
+
+Diagnostics · codex
+  Source failed; original detail: source file inventory error: root is not a directory
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    runtime::progress_io::bilingual_inventory_root_fault_is_localized_without_private_path_or_wire_changes
+
+test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 150 filtered out; finished in 7.03s
+
+error: test failed, to rerun pass `--test sync`

@@ -1,0 +1,72 @@
+   Compiling llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\tui-69a932fe5df06b37.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\tui-69a932fe5df06b37.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (test "tui") generated 1 warning
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage.lib 和对象 D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\deps\llmusage.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (bin "llmusage") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 40.89s
+     Running tests\tui\main.rs (output\s-language-rust-target\debug\deps\tui-69a932fe5df06b37.exe)
+
+running 41 tests
+test language::all_nine_panels_render_paired_loading_data_and_empty_states ... ok
+test language::chinese_nav_paint_and_hit_ranges_share_display_width_including_clipping ... ok
+test language::chinese_rendering_preserves_no_color_across_panels_and_dialogs ... ok
+test language::dialog_footer_and_sync_overlay_branches_are_paired ... ok
+test language::every_analytics_error_keeps_original_detail_with_paired_context ... ok
+test language::language_changes_labels_while_hotkeys_sort_and_selection_stay_identical ... FAILED
+test panels::behavior::behavior_panel_compacts_large_analytics_counts ... ok
+test panels::behavior::behavior_panel_renders_all_behavior_sections_and_sample_rows ... ok
+test panels::behavior::behavior_panel_renders_no_data_degraded_and_compare_warnings ... ok
+test panels::models::models_narrow_and_very_narrow_drop_identity_columns ... ok
+test panels::models::models_nocolor_has_no_styles ... ok
+test panels::models::models_visible_window_matches_full_dataset_buffer ... ok
+test panels::models::models_wide_headers_default_cost_sort_and_no_long_tail_fold ... ok
+test panels::models::models_wide_paints_inferred_provider_and_joined_sources ... ok
+test panels::overview::overview_panel_compacts_screenshot_scale_statistics_in_wide_and_narrow_layouts ... ok
+test panels::overview::overview_panel_empty_models_and_no_long_tail ... ok
+test panels::overview::overview_panel_nocolor_has_no_styles ... ok
+test panels::overview::overview_panel_renders_chart_and_cost_list ... ok
+test panels::period::daily_panel_renders_tokscale_style_token_channels ... ok
+test panels::period::daily_panel_uses_compact_columns_on_narrow_widths ... ok
+test panels::period::hourly_panel_renders_tokscale_table_and_day_separators ... ok
+test panels::period::monthly_visible_window_matches_full_dataset_buffer ... ok
+test panels::stats::stats_panel_day_breakdown_and_empty_day ... ok
+test panels::stats::stats_panel_enter_today_and_esc_close ... ok
+test panels::stats::stats_panel_favorite_na_and_context_na ... ok
+test panels::stats::stats_panel_nocolor_has_no_styles ... ok
+test panels::stats::stats_panel_renders_year_calendar_and_two_column_stats ... ok
+test panels::stats::stats_panel_uses_narrow_labels ... ok
+test panels::stats::stats_panel_uses_wide_labels_at_80 ... ok
+test panels::usage::usage_overlay_keeps_rebuild_protection_facts_neutral ... ok
+test panels::usage::usage_overlay_renders_sync_status_and_platform_monitor_summary ... ok
+test panels::usage::usage_overlay_uses_compact_columns_on_narrow_widths ... ok
+test panels::usage::usage_panel_can_reveal_emails ... ok
+test panels::usage::usage_panel_empty_state ... ok
+test panels::usage::usage_panel_renders_quota_accounts_and_hides_emails ... ok
+test prop_model_table_renders_all_required_columns ... ok
+test prop_overview_panel_renders_all_required_fields ... ok
+test shell::dashboard_shell_renders_tokscale_style_header_and_footer ... ok
+test shell::dashboard_shell_uses_short_labels_on_narrow_widths ... ok
+test shell::nav_bar_renders_agents_panel_shortcut ... ok
+test shell::source_picker_overlay_lists_monitor_only_platforms ... ok
+
+failures:
+
+---- language::language_changes_labels_while_hotkeys_sort_and_selection_stay_identical stdout ----
+
+thread 'language::language_changes_labels_while_hotkeys_sort_and_selection_stay_identical' (72584) panicked at tests\tui\language.rs:172:13:
+┌ llmusage ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── local usage ┐│ 1 Overview  │  2 Usage  │  3 Models  │  4 Daily  │  5 Hourly  │  6 Monthly  │  7 Stats  │  8 Agents  │  9 Blocks                                                                 │└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘┌ Models ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐│#   Model                                                         Provider   Source             Input    Output   Cache R  Cache W  Cache×   Total ▲  Events   Cost      Cost/1M  ││                                                                                                                                                                                  ││1   MODEL_SENTINEL                                                Unknown    codex              6.2K     6.2K     0        0        0.0x     12.3K    1        $1.25     $101.26  ││                                                                                                                                                                                  ││                                                                                                                                                                                  ││                                                                                                                                                                                  ││                                                                                                                                                                                  ││                                                                                                                                                                                  ││                                                                                                                                                                                  ││                                                                                                                                                                                  ││                                                                                                                                                                                  ││                                                                                                                                                                                  ││                                                                                                                                                                                  ││                                                                                                                                                                                  ││                                                                                                                                                                                  ││                                                                                                                                                                                  ││                                                                                                                                                                                  ││                                                                                                                                                                                  ││                                                                                                                                                                                  ││                                                                                                                                                                                  ││                                                                                                                                                                                  ││                                                                                                                                                                                  ││                                                                                                                                                                                  ││                                                                                                                                                                                  ││                                                                                                                                                                                  ││                                                                                                                                                                                  ││                                                                                                                                                                                  ││                                                                                                                                                                                  ││                                                                                                                                                                                  ││                                                                                                                                                                                  ││                                                                                                                                                                                  │└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐│tab/shift-tab or 1-9 view • [j/k/Pg:select] • [o/O:sort] • [s:source] • [r:refresh] [x:sync] [R:auto off] • [?] q                                                                 ││source all • window All • 22K tokens • $3.50                                                                                                                                      │└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    language::language_changes_labels_while_hotkeys_sort_and_selection_stay_identical
+
+test result: FAILED. 40 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.97s
+
+error: test failed, to rerun pass `--test tui`

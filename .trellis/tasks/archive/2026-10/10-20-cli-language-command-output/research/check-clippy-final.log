@@ -1,0 +1,22 @@
+    Blocking waiting for file lock on build directory
+    Checking llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\incremental\llmusage-05sbnbne2pp54\s-hnf0yfbtoq-1gyozj7-working`
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\D:\Documents\Code\CLI\llmusage\output\s-language-rust-target\debug\incremental\llmusage-139hhcyjk2zgv\s-hnf0yfd153-0lqyjpr-working`
+
+error: method `bootstrap_with_progress` is never used
+   --> src\store\schema.rs:112:19
+    |
+ 69 | impl Store {
+    | ---------- method in this implementation
+...
+112 |     pub(crate) fn bootstrap_with_progress(
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `-D dead-code` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[expect(dead_code)]` or `#[allow(dead_code)]`
+
+warning: `llmusage` (lib) generated 1 warning
+error: could not compile `llmusage` (lib) due to 1 previous error; 1 warning emitted
+warning: build failed, waiting for other jobs to finish...
+warning: `llmusage` (lib test) generated 1 warning

@@ -1,0 +1,22 @@
+   Compiling llmusage v2.0.1 (D:\Documents\Code\CLI\llmusage)
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage.lib 和对象 D:\Documents\Code\CLI\llmusage\target\debug\deps\llmusage.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (bin "llmusage") generated 1 warning
+warning: linker stdout: 正在创建库 D:\Documents\Code\CLI\llmusage\target\debug\deps\sync-676d5d4146244a26.lib 和对象 D:\Documents\Code\CLI\llmusage\target\debug\deps\sync-676d5d4146244a26.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `llmusage` (test "sync") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.90s
+     Running tests\sync\main.rs (target\debug\deps\sync-676d5d4146244a26.exe)
+
+running 4 tests
+test runtime::progress_io::bilingual_sync_keeps_human_and_machine_streams_separate_in_plain_modes ... ok
+test runtime::progress_io::human_sync_subprocess_stderr_contains_no_ansi_escapes ... ok
+test runtime::progress_io::json_events_subprocess_emits_ndjson_per_event ... ok
+test runtime::progress_io::legacy_warning_keeps_human_lines_and_json_stdout_separate ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 147 filtered out; finished in 4.10s
+
