@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "SyncEvent/SourceSyncStats 与 sync 输出契约"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "token 各项口径"}
+{"file": ".trellis/spec/llmusage/backend/pricing-catalog-contracts.md", "reason": "cost_with_cache_usd 与未定价语义"}
+{"file": ".trellis/spec/llmusage/backend/cli-language-contracts.md", "reason": "中英双语输出约束"}
+{"file": ".trellis/spec/llmusage/backend/runtime-log-contracts.md", "reason": "进度/结构化日志边界"}
+{"file": "docs/adr/0002-sync-shard-as-commit-protocol.md", "reason": "shard 提交统计来源"}
+{"file": "docs/adr/0016-source-reported-cost.md", "reason": "来源自报费用优先规则"}
+{"file": ".trellis/spec/llmusage/backend/report-cli-contracts.md", "reason": "与 daily 报表口径一致性"}
