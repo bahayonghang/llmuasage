@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 80
-- **Last Active**: 2026-10-21
+- **Total Sessions**: 81
+- **Last Active**: 2026-10-22
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~417 | Active |
+| `journal-2.md` | ~441 | Active |
 | `journal-1.md` | ~2011 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 81 | 2026-10-22 | sync 汇总改为近 7 天按日期×来源聚合 | `ea9e998`, `1cca90d`, `b41f187` | `dev` |
 | 80 | 2026-10-21 | sync 日志改为 token/费用汇总并折叠启动输出 | `29dc6c2`, `eb97a03`, `187f77a`, `6d93308` | `dev` |
 | 79 | 2026-10-22 | 拆分提交并归档 CLI/TUI 双语任务 | `35186161ff6ffbe1b90e58c486eeab5f14d5f53d`, `67397ecb813369826ed6a65db908f11e735e1862`, `86c91b5a87983dfd638f4fa10d35afabff7034a4`, `7b92ac3966c7a892e796aa7593347ec2ef747eea` | `dev` |
 | 78 | 2026-10-21 | CLI 与 TUI 双语交付及最终验收 | - | `dev` |

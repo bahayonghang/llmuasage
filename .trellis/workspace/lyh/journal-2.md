@@ -415,3 +415,27 @@ llmusage clean 默认用表格总览运行时目录。只有 --yes 才删除 bac
 ### Status
 
 [OK] **Completed**
+
+
+## Session 81: sync 汇总改为近 7 天按日期×来源聚合
+<!-- trellis-session: v=2 fp=1e705520c39ac798 -->
+
+**Date**: 2026-10-22
+**Task**: sync 汇总改为近 7 天按日期×来源聚合
+**Branch**: `dev`
+
+### Summary
+
+sync 默认汇总改为从数据库读取最近 7 天（本地时间）用量，按日期×来源分组并带小计与 TOTAL，与 llmusage daily 口径一致；--source 限定窗口，查询失败降级为一行提示；修复提示改为可直接复制的裸命令；合并 grok token accounting 标记修复（7605399）。验证：fmt/clippy/rustdoc、8 个集成目标、JS、docs 构建通过；lib 仅既有的时间相关 web 测试失败。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ea9e998` | feat(终端): [AI] ✨ sync 汇总改为近 7 天按日期×来源聚合 |
+| `1cca90d` | docs(同步): [AI] 📝 更新 sync 近 7 天用量汇总说明与输出契约 |
+| `b41f187` | chore(task): [AI] 📦 新增 sync 汇总近 7 天窗口任务规划与实施记录 |
+
+### Status
+
+[OK] **Completed**
