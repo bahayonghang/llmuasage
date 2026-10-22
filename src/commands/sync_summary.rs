@@ -158,16 +158,46 @@ pub(crate) fn format_summary_lines_with_notices(
         render_total_row(&total, &widths, separator, color)
     ));
     lines.push(border(&widths, '└', '┴', '┘'));
+    lines.extend(diagnostic_lines(
+        summary,
+        color,
+        sample_basenames,
+        notices,
+        false,
+    ));
+    lines
+}
 
+/// Per-source diagnostics in table order, then run-level notices.
+///
+/// With `merge_absent`, sources that are only "not detected" collapse into one
+/// leading information line instead of one section each.
+fn diagnostic_lines(
+    summary: &SyncSummary,
+    color: bool,
+    sample_basenames: &HashMap<String, String>,
+    notices: &[RunNotice],
+    merge_absent: bool,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut not_detected = Vec::new();
     for stats in &summary.sources {
         let source_notices: Vec<_> = notices
             .iter()
             .filter(|notice| notice.source() == Some(stats.source))
             .collect();
-        if !source_notices.is_empty()
+        let has_detail = !source_notices.is_empty()
             || stats.last_error.is_some()
-            || stats.parse_issues.summary_text().is_some()
+            || stats.parse_issues.summary_text().is_some();
+        if merge_absent
+            && stats.absent
+            && source_notices.is_empty()
+            && stats.parse_issues.summary_text().is_none()
         {
+            not_detected.push(source_label(stats.source));
+            continue;
+        }
+        if has_detail {
             lines.push(format!(
                 "\n{} · {}",
                 text("Diagnostics", "诊断"),
@@ -210,8 +240,363 @@ pub(crate) fn format_summary_lines_with_notices(
     for notice in notices.iter().filter(|notice| notice.source().is_none()) {
         lines.extend(notice_lines(notice, color));
     }
-
+    if !not_detected.is_empty() {
+        lines.insert(
+            0,
+            styled(
+                Style::new().dim(),
+                &format!(
+                    "
+{}{}",
+                    text("Not detected: ", "未检测到："),
+                    not_detected.join(", ")
+                ),
+                color,
+            ),
+        );
+    }
     lines
+}
+
+/// Which table the final summary shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SummaryDetail {
+    /// Default: tokens and estimated cost of newly imported usage per source.
+    Usage,
+    /// `--verbose`: the per-source pipeline table (files/events/bytes/timings).
+    Pipeline,
+}
+
+/// Columns of the usage table; the two cache columns are dropped first when
+/// the terminal is too narrow.
+const USAGE_COLUMNS: usize = 7;
+const CACHE_COLUMNS: [usize; 2] = [3, 4];
+
+pub(crate) fn format_sync_report(
+    summary: &SyncSummary,
+    rebuild: bool,
+    color: bool,
+    terminal_width: usize,
+    sample_basenames: &HashMap<String, String>,
+    notices: &[RunNotice],
+    detail: SummaryDetail,
+) -> Vec<String> {
+    match detail {
+        SummaryDetail::Pipeline => format_summary_lines_with_notices(
+            summary,
+            rebuild,
+            color,
+            terminal_width,
+            sample_basenames,
+            notices,
+        ),
+        SummaryDetail::Usage => {
+            let mut lines = usage_summary_lines(summary, rebuild, color, terminal_width);
+            lines.extend(diagnostic_lines(
+                summary,
+                color,
+                sample_basenames,
+                notices,
+                true,
+            ));
+            lines
+        }
+    }
+}
+
+/// ccusage-style table of the tokens and cost this run imported, followed by
+/// one pipeline line. Sources without new usage are listed on one line.
+fn usage_summary_lines(
+    summary: &SyncSummary,
+    rebuild: bool,
+    color: bool,
+    terminal_width: usize,
+) -> Vec<String> {
+    let mut lines = vec![styled(
+        Style::new().bold(),
+        text("Sync finished:", "同步完成："),
+        color,
+    )];
+    if rebuild {
+        lines.push(
+            text(
+                "- rebuild: reset parser-backed usage state source by source before sync",
+                "- 重建：同步前按来源重置可重建的用量状态",
+            )
+            .into(),
+        );
+    }
+
+    let imported: Vec<&SourceSyncStats> = summary
+        .sources
+        .iter()
+        .filter(|stats| !stats.absent && has_new_usage(stats))
+        .collect();
+    let idle: Vec<&str> = summary
+        .sources
+        .iter()
+        .filter(|stats| !stats.absent && !has_new_usage(stats))
+        .map(|stats| source_label(stats.source))
+        .collect();
+
+    if imported.is_empty() {
+        lines.push(styled(
+            Style::new().green(),
+            text(
+                "✓ Up to date — no new usage imported.",
+                "✓ 已是最新：本轮没有导入新用量。",
+            ),
+            color,
+        ));
+    } else {
+        let mut total = crate::models::InsertedUsage::default();
+        for stats in &imported {
+            total.absorb(stats.inserted_usage);
+        }
+        let rows: Vec<[String; USAGE_COLUMNS]> = imported
+            .iter()
+            .map(|stats| usage_cells(source_label(stats.source), &stats.inserted_usage))
+            .collect();
+        let total_row = usage_cells(text("TOTAL", "合计"), &total);
+        lines.extend(usage_table(&rows, &total_row, color, terminal_width));
+        if total.unpriced_events > 0 {
+            lines.push(styled(
+                Style::new().dim(),
+                &if i18n::current() == Language::Chinese {
+                    format!(
+                        "* {} 条事件不在定价目录中，费用为下限。",
+                        group_digits(total.unpriced_events as i64)
+                    )
+                } else {
+                    format!(
+                        "* {} events have no catalog price; cost is a lower bound.",
+                        group_digits(total.unpriced_events as i64)
+                    )
+                },
+                color,
+            ));
+        }
+    }
+    if !idle.is_empty() {
+        lines.push(styled(
+            Style::new().dim(),
+            &format!(
+                "{}{}",
+                text("No new usage: ", "无新增用量："),
+                idle.join(", ")
+            ),
+            color,
+        ));
+    }
+    lines.push(styled(Style::new().dim(), &pipeline_line(summary), color));
+    lines
+}
+
+fn has_new_usage(stats: &SourceSyncStats) -> bool {
+    stats.events_inserted > 0 || stats.inserted_usage.total_tokens > 0
+}
+
+fn usage_cells(label: &str, usage: &crate::models::InsertedUsage) -> [String; USAGE_COLUMNS] {
+    let mut cost = format_usd(usage.cost_usd());
+    if usage.unpriced_events > 0 {
+        cost.push('*');
+    }
+    [
+        label.to_string(),
+        group_digits(usage.input_tokens),
+        group_digits(usage.output_tokens),
+        group_digits(usage.cache_creation_tokens),
+        group_digits(usage.cache_read_tokens),
+        group_digits(usage.total_tokens),
+        cost,
+    ]
+}
+
+fn usage_table(
+    rows: &[[String; USAGE_COLUMNS]],
+    total: &[String; USAGE_COLUMNS],
+    color: bool,
+    terminal_width: usize,
+) -> Vec<String> {
+    let headers: [&str; USAGE_COLUMNS] = if i18n::current() == Language::Chinese {
+        [
+            "来源",
+            "输入",
+            "输出",
+            "缓存写入",
+            "缓存读取",
+            "总 Token",
+            "费用 (USD)",
+        ]
+    } else {
+        [
+            "Source",
+            "Input",
+            "Output",
+            "Cache Create",
+            "Cache Read",
+            "Total Tokens",
+            "Cost (USD)",
+        ]
+    };
+    let mut widths: [usize; USAGE_COLUMNS] =
+        std::array::from_fn(|index| display_width(headers[index]));
+    for cells in rows.iter().chain(std::iter::once(total)) {
+        for (index, cell) in cells.iter().enumerate() {
+            widths[index] = widths[index].max(display_width(cell));
+        }
+    }
+    let table_width = |columns: &[usize], widths: &[usize; USAGE_COLUMNS]| {
+        columns
+            .iter()
+            .map(|index| widths[*index] + 3)
+            .sum::<usize>()
+            + 1
+    };
+    let mut columns: Vec<usize> = (0..USAGE_COLUMNS).collect();
+    let min_source = display_width(headers[0]).max(display_width(&total[0]));
+    let natural = table_width(&columns, &widths);
+    if natural > terminal_width {
+        widths[0] = widths[0]
+            .saturating_sub(natural - terminal_width)
+            .max(min_source);
+    }
+    let cache_hidden = table_width(&columns, &widths) > terminal_width;
+    if cache_hidden {
+        columns.retain(|index| !CACHE_COLUMNS.contains(index));
+    }
+
+    let visible: Vec<usize> = columns.iter().map(|index| widths[*index]).collect();
+    let rule = |left: char, middle: char, right: char| {
+        styled(
+            Style::new().dim(),
+            &border(&visible, left, middle, right),
+            color,
+        )
+    };
+    let bar = styled(Style::new().dim(), "│", color);
+    let line = |cells: Vec<String>| format!("{bar} {} {bar}", cells.join(&format!(" {bar} ")));
+    let render = |cells: &[String; USAGE_COLUMNS], style: Option<Style>| {
+        line(
+            columns
+                .iter()
+                .map(|index| {
+                    let padded = if *index == 0 {
+                        pad(&fit_label(&cells[0], widths[0]), widths[0], Align::Left)
+                    } else {
+                        pad(&cells[*index], widths[*index], Align::Right)
+                    };
+                    match &style {
+                        Some(style) => styled(style.clone(), &padded, color),
+                        None => padded,
+                    }
+                })
+                .collect(),
+        )
+    };
+
+    let mut lines = vec![rule('┌', '┬', '┐')];
+    lines.push(line(
+        columns
+            .iter()
+            .map(|index| {
+                let align = if *index == 0 {
+                    Align::Left
+                } else {
+                    Align::Right
+                };
+                styled(
+                    Style::new().cyan().bold(),
+                    &pad(headers[*index], widths[*index], align),
+                    color,
+                )
+            })
+            .collect(),
+    ));
+    lines.push(rule('├', '┼', '┤'));
+    for row in rows {
+        lines.push(render(row, None));
+    }
+    lines.push(rule('├', '┼', '┤'));
+    lines.push(render(total, Some(Style::new().yellow().bold())));
+    lines.push(rule('└', '┴', '┘'));
+    if cache_hidden {
+        lines.push(styled(
+            Style::new().dim(),
+            text(
+                "Cache columns hidden on this narrow terminal; widen it or use --json-events.",
+                "终端过窄，已隐藏缓存列；可加宽终端或使用 --json-events。",
+            ),
+            color,
+        ));
+    }
+    lines
+}
+
+/// One-line pipeline digest under the usage table; `--verbose` shows the
+/// per-source breakdown.
+fn pipeline_line(summary: &SyncSummary) -> String {
+    let sum = |value: fn(&SourceSyncStats) -> u64| {
+        summary
+            .sources
+            .iter()
+            .fold(0u64, |total, stats| total.saturating_add(value(stats)))
+    };
+    let files = sum(|stats| stats.files_processed as u64) as i64;
+    let changed = sum(|stats| stats.changed_files as u64) as i64;
+    let skipped = sum(|stats| stats.skipped_files as u64) as i64;
+    let seen = sum(|stats| stats.events_seen as u64) as i64;
+    let inserted = sum(|stats| stats.events_inserted as u64) as i64;
+    let bytes = human_bytes(sum(|stats| stats.bytes_scanned));
+    let parse = human_ms(sum(|stats| stats.parse_ms));
+    let write = human_ms(sum(|stats| stats.write_ms));
+    if i18n::current() == Language::Chinese {
+        format!(
+            "扫描 {} 个文件（变更 {}，跳过 {}）· 读取 {} 条事件 · 新增 {} 条 · {bytes} · 解析 {parse} · 写入 {write} · 明细：--verbose",
+            group_digits(files),
+            group_digits(changed),
+            group_digits(skipped),
+            group_digits(seen),
+            group_digits(inserted),
+        )
+    } else {
+        let plural = |count: i64, noun: &str| {
+            format!(
+                "{} {noun}{}",
+                group_digits(count),
+                if count == 1 { "" } else { "s" }
+            )
+        };
+        format!(
+            "{} scanned ({} changed, {} skipped) · {} seen · {} new · {bytes} · parse {parse} · write {write} · details: --verbose",
+            plural(files, "file"),
+            group_digits(changed),
+            group_digits(skipped),
+            plural(seen, "event"),
+            group_digits(inserted),
+        )
+    }
+}
+
+/// `1234567` → `1,234,567`.
+fn group_digits(value: i64) -> String {
+    let digits = value.unsigned_abs().to_string();
+    let mut grouped = String::with_capacity(digits.len() + digits.len() / 3 + 1);
+    if value < 0 {
+        grouped.push('-');
+    }
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            grouped.push(',');
+        }
+        grouped.push(digit);
+    }
+    grouped
+}
+
+fn format_usd(value: f64) -> String {
+    let cents = (value * 100.0).round() as i64;
+    format!("${}.{:02}", group_digits(cents / 100), (cents % 100).abs())
 }
 
 fn column_widths(
@@ -1283,5 +1668,165 @@ mod tests {
                 assert!(!text.contains("--allow-lossy-rebuild"));
             });
         }
+    }
+
+    fn usage(input: i64, output: i64, cost_micro_usd: i64) -> crate::models::InsertedUsage {
+        crate::models::InsertedUsage {
+            input_tokens: input,
+            output_tokens: output,
+            cache_read_tokens: 1_000_000,
+            total_tokens: input + output + 1_000_000,
+            cost_micro_usd,
+            ..Default::default()
+        }
+    }
+
+    fn usage_summary() -> SyncSummary {
+        let mut summary = summary();
+        summary.sources[0].inserted_usage = usage(5_987_789, 973_655, 113_960_000);
+        summary
+    }
+
+    fn usage_report(summary: &SyncSummary, color: bool, width: usize) -> Vec<String> {
+        format_sync_report(
+            summary,
+            false,
+            color,
+            width,
+            &HashMap::new(),
+            &[],
+            SummaryDetail::Usage,
+        )
+    }
+
+    #[test]
+    fn usage_table_shows_grouped_tokens_cost_and_total() {
+        i18n::with_language(Language::English, || {
+            let lines = usage_report(&usage_summary(), false, WIDE);
+            let text = lines.join("\n");
+            assert!(text.contains("Total Tokens"), "{text}");
+            assert!(text.contains("5,987,789"), "{text}");
+            assert!(text.contains("$113.96"), "{text}");
+            let total = lines.iter().find(|line| line.contains("TOTAL")).unwrap();
+            assert!(
+                total.contains("7,961,444") && total.contains("$113.96"),
+                "{total}"
+            );
+            // claude committed nothing; opencode is absent.
+            assert!(text.contains("No new usage: claude"), "{text}");
+            assert!(text.contains("Not detected: opencode"), "{text}");
+            assert!(!text.contains("│ claude"), "{text}");
+            assert!(text.contains("2,461 new"), "{text}");
+            assert!(!text.contains("FILES"), "{text}");
+            let widths: Vec<_> = lines
+                .iter()
+                .filter(|line| line.starts_with('│') || line.starts_with('┌'))
+                .map(|line| display_width(line))
+                .collect();
+            assert!(widths.windows(2).all(|pair| pair[0] == pair[1]), "{text}");
+        });
+    }
+
+    #[test]
+    fn usage_table_is_bilingual_and_colored_output_strips_to_plain() {
+        for language in [Language::English, Language::Chinese] {
+            i18n::with_language(language, || {
+                let plain = usage_report(&usage_summary(), false, WIDE);
+                let colored = usage_report(&usage_summary(), true, WIDE);
+                assert!(plain.iter().all(|line| !line.contains('\u{1b}')));
+                assert!(colored.iter().any(|line| line.contains('\u{1b}')));
+                assert_eq!(
+                    colored
+                        .iter()
+                        .map(|line| strip_ansi(line))
+                        .collect::<Vec<_>>(),
+                    plain
+                );
+                let text = plain.join("\n");
+                assert!(
+                    text.contains(language.select("Cost (USD)", "费用 (USD)")),
+                    "{text}"
+                );
+                assert!(text.contains(language.select("TOTAL", "合计")), "{text}");
+            });
+        }
+    }
+
+    #[test]
+    fn usage_table_marks_unpriced_cost_as_lower_bound() {
+        i18n::with_language(Language::English, || {
+            let mut summary = usage_summary();
+            summary.sources[0].inserted_usage.unpriced_events = 1_204;
+            let text = usage_report(&summary, false, WIDE).join("\n");
+            assert!(text.contains("$113.96*"), "{text}");
+            assert!(
+                text.contains("* 1,204 events have no catalog price"),
+                "{text}"
+            );
+        });
+    }
+
+    #[test]
+    fn up_to_date_run_prints_no_table() {
+        i18n::with_language(Language::English, || {
+            let mut summary = summary();
+            summary.sources[0].events_inserted = 0;
+            let text = usage_report(&summary, false, WIDE).join("\n");
+            assert!(text.contains("Up to date"), "{text}");
+            assert!(!text.contains('┌'), "{text}");
+            assert!(text.contains("No new usage: codex, claude"), "{text}");
+        });
+    }
+
+    #[test]
+    fn narrow_usage_table_hides_cache_columns_but_keeps_numbers() {
+        i18n::with_language(Language::English, || {
+            let lines = usage_report(&usage_summary(), false, 60);
+            let text = lines.join("\n");
+            assert!(!text.contains("Cache Read"), "{text}");
+            assert!(text.contains("Cache columns hidden"), "{text}");
+            assert!(
+                text.contains("5,987,789") && text.contains("$113.96"),
+                "{text}"
+            );
+            assert!(
+                lines
+                    .iter()
+                    .filter(|line| line.starts_with('│'))
+                    .all(|line| display_width(line) <= 60),
+                "{text}"
+            );
+        });
+    }
+
+    #[test]
+    fn verbose_detail_keeps_the_pipeline_table() {
+        i18n::with_language(Language::English, || {
+            let verbose = format_sync_report(
+                &usage_summary(),
+                false,
+                false,
+                WIDE,
+                &HashMap::new(),
+                &[],
+                SummaryDetail::Pipeline,
+            );
+            assert_eq!(
+                verbose,
+                format_summary_lines(&usage_summary(), false, false, WIDE)
+            );
+        });
+    }
+
+    #[test]
+    fn digits_and_dollars_group_thousands() {
+        assert_eq!(group_digits(0), "0");
+        assert_eq!(group_digits(999), "999");
+        assert_eq!(group_digits(1_000), "1,000");
+        assert_eq!(group_digits(1_242_330_919), "1,242,330,919");
+        assert_eq!(group_digits(-12_345), "-12,345");
+        assert_eq!(format_usd(0.0), "$0.00");
+        assert_eq!(format_usd(330.717_217), "$330.72");
+        assert_eq!(format_usd(12_345.6), "$12,345.60");
     }
 }

@@ -110,12 +110,17 @@ pub enum Commands {
         /// Emit sync lifecycle events as NDJSON on stdout.
         #[arg(long)]
         json_events: bool,
+        /// Show the per-source pipeline table (files, events, bytes, timings)
+        /// instead of the token and cost summary.
+        #[arg(long, conflicts_with = "json_events")]
+        verbose: bool,
         /// Emit normalized shards as NDJSON on stdout without opening the user database.
         #[arg(
             long,
             conflicts_with_all = [
                 "rebuild",
                 "json_events",
+                "verbose",
                 "recent_days",
                 "allow_lossy_rebuild",
                 "provider_map"
@@ -414,6 +419,7 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
             parallelism,
             provider_map,
             json_events,
+            verbose,
             emit_shards,
             since,
         }) => {
@@ -434,7 +440,7 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
                 recent_days,
                 parallelism,
             })?;
-            sync::run_with_options(
+            sync::run_with_summary_detail(
                 &app,
                 sync::SyncRunOptions {
                     rebuild: request.rebuild(),
@@ -447,6 +453,11 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
                     interactive_terminal: false,
                     recovery_prompt: None,
                     pricing_fetcher: None,
+                },
+                if verbose {
+                    sync_summary::SummaryDetail::Pipeline
+                } else {
+                    sync_summary::SummaryDetail::Usage
                 },
             )
             .await

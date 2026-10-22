@@ -16,6 +16,23 @@ fn version_label(version: &str) -> String {
     }
 }
 
+/// One permanent line replacing the per-migration `Schema vN … completed` lines.
+pub(crate) fn migration_summary(
+    count: u32,
+    latest_version: u32,
+    elapsed_ms: u64,
+    language: Language,
+) -> String {
+    if language == Language::Chinese {
+        format!("数据库 schema 已升级到 v{latest_version}（{count} 个迁移，{elapsed_ms}ms）")
+    } else {
+        let plural = if count == 1 { "" } else { "s" };
+        format!(
+            "Database schema upgraded to v{latest_version} ({count} migration{plural}, {elapsed_ms}ms)"
+        )
+    }
+}
+
 pub(crate) fn progress(event: &SyncEvent, language: Language) -> Option<String> {
     let zh = language == Language::Chinese;
     Some(match event {

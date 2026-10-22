@@ -13,7 +13,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     app::AppContext,
-    commands::{sync_progress, sync_summary},
+    commands::{sync_progress, sync_summary, sync_summary::SummaryDetail},
     models::{ParseIssues, SourceKind},
     parsers::{SyncEvent, SyncSummaryEvent, driver},
     registry,
@@ -200,6 +200,25 @@ pub async fn run_with_options(app: &AppContext, options: SyncRunOptions) -> Resu
         .map(|_| ())
 }
 
+/// CLI entry: like [`run_with_options`], choosing which human summary table
+/// to print (`--verbose` selects the per-source pipeline table).
+pub async fn run_with_summary_detail(
+    app: &AppContext,
+    options: SyncRunOptions,
+    detail: SummaryDetail,
+) -> Result<()> {
+    run_with_prompt_io_detail(
+        app,
+        options,
+        SyncStreamCapabilities::detect(),
+        BufReader::new(io::stdin()),
+        io::stderr(),
+        detail,
+    )
+    .await
+    .map(|_| ())
+}
+
 pub(crate) async fn run_with_options_and_streams(
     app: &AppContext,
     options: SyncRunOptions,
@@ -221,10 +240,25 @@ pub(crate) async fn run_with_options_and_streams(
 /// callback is already installed. Redirected or JSON runs drop it unread.
 pub(crate) async fn run_with_prompt_io<R, W>(
     app: &AppContext,
+    options: SyncRunOptions,
+    streams: SyncStreamCapabilities,
+    reader: R,
+    writer: W,
+) -> Result<SyncSummary>
+where
+    R: BufRead + Send + 'static,
+    W: Write + Send + 'static,
+{
+    run_with_prompt_io_detail(app, options, streams, reader, writer, SummaryDetail::Usage).await
+}
+
+async fn run_with_prompt_io_detail<R, W>(
+    app: &AppContext,
     mut options: SyncRunOptions,
     streams: SyncStreamCapabilities,
     reader: R,
     writer: W,
+    detail: SummaryDetail,
 ) -> Result<SyncSummary>
 where
     R: BufRead + Send + 'static,
@@ -260,7 +294,7 @@ where
     if options.json_events {
         run_with_json_events(app, &store, &options).await
     } else {
-        run_with_human_events(app, &store, &options, renderer).await
+        run_with_human_events(app, &store, &options, renderer, detail).await
     }
 }
 
@@ -269,6 +303,7 @@ async fn run_with_human_events(
     store: &Store,
     options: &SyncRunOptions,
     renderer: Arc<Mutex<sync_progress::HumanRenderer>>,
+    detail: SummaryDetail,
 ) -> Result<SyncSummary> {
     // 渲染器与 guard 的生命周期属于命令函数本身：bootstrap/锁阶段的 `?`
     // 提前返回同样经 Drop 完成终端清理，不依赖 reporter task 是否已 spawn。
@@ -391,6 +426,7 @@ async fn run_with_human_events(
         options,
         store,
         &notices.lock().expect("sync notices"),
+        detail,
     );
 
     info!(event_code = "commands.sync.04", "完成全量本地真源同步");
@@ -508,18 +544,20 @@ fn print_summary(
     options: &SyncRunOptions,
     store: &Store,
     notices: &[crate::sync::notices::RunNotice],
+    detail: SummaryDetail,
 ) {
     let color = std::io::stdout().is_terminal()
         && std::env::var_os("NO_COLOR").is_none()
         && std::env::var_os("LLMUSAGE_NO_COLOR").is_none();
     let basenames = sample_basenames(store, summary);
-    for line in sync_summary::format_summary_lines_with_notices(
+    for line in sync_summary::format_sync_report(
         summary,
         options.rebuild,
         color,
         terminal_width(),
         &basenames,
         notices,
+        detail,
     ) {
         println!("{line}");
     }

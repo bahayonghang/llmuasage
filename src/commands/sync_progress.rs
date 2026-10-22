@@ -23,6 +23,8 @@ use crate::{models::SourceKind, parsers::SyncEvent};
 const SPINNER_TICK: Duration = Duration::from_millis(100);
 const DRAW_HZ: u8 = 10;
 const MAX_FILE_LABEL_CHARS: usize = 40;
+/// An uncontended lock acquisition shorter than this prints no permanent line.
+const LOCK_WAIT_NOTICE_MS: u64 = 1_000;
 
 /// Production renderer for the CLI: indicatif bars when stderr is a TTY and
 /// `LLMUSAGE_PROGRESS` is unset/empty, plain lines otherwise.
@@ -217,6 +219,98 @@ pub(crate) fn render_shared_timed(
     }
 }
 
+/// How a startup event reaches the terminal after [`StartupDigest::fold`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Fold {
+    /// Normal rendering.
+    Pass,
+    /// Live TTY status only; never a permanent or non-TTY line.
+    Transient,
+    /// Not rendered at all.
+    Hidden,
+}
+
+/// Folds startup chatter shared by both renderers: bootstrap and lock waits
+/// are live status only, per-migration lines become one summary line, and a
+/// lock acquired in under [`LOCK_WAIT_NOTICE_MS`] prints nothing. The engine
+/// emits `LockWaiting` on every run, so it does not mean contention.
+#[derive(Debug, Default)]
+struct StartupDigest {
+    migrations: u32,
+    latest_version: u32,
+    elapsed_ms: u64,
+}
+
+impl StartupDigest {
+    fn fold(&mut self, event: &SyncEvent) -> Fold {
+        match event {
+            SyncEvent::MigrationStarted { latest_version, .. } => {
+                self.latest_version = *latest_version;
+                Fold::Transient
+            }
+            SyncEvent::MigrationFinished { elapsed_ms, .. } => {
+                self.migrations = self.migrations.saturating_add(1);
+                self.elapsed_ms = self.elapsed_ms.saturating_add(*elapsed_ms);
+                Fold::Hidden
+            }
+            SyncEvent::BootstrapStarted | SyncEvent::LockWaiting { .. } => Fold::Transient,
+            SyncEvent::LockAcquired { wait_ms } => {
+                if *wait_ms >= LOCK_WAIT_NOTICE_MS {
+                    Fold::Pass
+                } else {
+                    Fold::Hidden
+                }
+            }
+            _ => Fold::Pass,
+        }
+    }
+
+    /// Takes the pending migration summary once the migration phase is over.
+    fn take_summary(&mut self, event: Option<&SyncEvent>, language: Language) -> Option<String> {
+        let migrating = matches!(
+            event,
+            Some(SyncEvent::MigrationStarted { .. } | SyncEvent::MigrationFinished { .. })
+        );
+        if migrating || self.migrations == 0 {
+            return None;
+        }
+        let line = crate::common::i18n::sync::migration_summary(
+            self.migrations,
+            self.latest_version,
+            self.elapsed_ms,
+            language,
+        );
+        self.migrations = 0;
+        self.elapsed_ms = 0;
+        Some(line)
+    }
+}
+
+/// Success mark for permanent phase lines. Warning copy already starts with
+/// "Warning:" / "警告：", so it carries no extra mark.
+fn is_done_line(event: &SyncEvent) -> bool {
+    matches!(
+        event,
+        SyncEvent::PricingBucketReconcileStarted { .. }
+            | SyncEvent::PricingUpgradeFinished { .. }
+            | SyncEvent::LockAcquired { .. }
+            | SyncEvent::TokenAccountingRepairFinished { .. }
+            | SyncEvent::RemoteHostFinished { .. }
+    )
+}
+
+fn done_mark(line: &str, color: bool) -> String {
+    if color {
+        let mark = console::Style::new()
+            .green()
+            .force_styling(true)
+            .apply_to("✓");
+        format!("{mark} {line}")
+    } else {
+        format!("✓ {line}")
+    }
+}
+
 /// Legacy line-by-line stderr renderer (former `HumanProgress`), preserved
 /// verbatim for non-TTY output and the `LLMUSAGE_PROGRESS=off` fallback.
 pub(crate) struct LineRenderer {
@@ -226,6 +320,7 @@ pub(crate) struct LineRenderer {
     last_line_len: usize,
     terminated: bool,
     remote_facts: HashMap<String, crate::remote::diagnostic::DiagnosticFacts>,
+    digest: StartupDigest,
 }
 
 impl LineRenderer {
@@ -239,11 +334,19 @@ impl LineRenderer {
             last_line_len: 0,
             terminated: false,
             remote_facts: HashMap::new(),
+            digest: StartupDigest::default(),
         }
     }
 
     fn render(&mut self, event: &SyncEvent) {
         if self.terminated {
+            return;
+        }
+        let fold = self.digest.fold(event);
+        if let Some(summary) = self.digest.take_summary(Some(event), self.language) {
+            self.write_permanent(&done_mark(&summary, false));
+        }
+        if fold == Fold::Hidden || (fold == Fold::Transient && !self.tty) {
             return;
         }
         if matches!(event, SyncEvent::Failed { .. } | SyncEvent::Cancelled) {
@@ -259,9 +362,12 @@ impl LineRenderer {
             }
             return;
         }
-        let Some(line) = self.progress_line(event) else {
+        let Some(mut line) = self.progress_line(event) else {
             return;
         };
+        if is_done_line(event) {
+            line = done_mark(&line, false);
+        }
         if self.tty {
             let padding = self
                 .last_line_len
@@ -271,8 +377,7 @@ impl LineRenderer {
             self.last_line_len = unicode_width::UnicodeWidthStr::width(line.as_str());
             if matches!(
                 event,
-                SyncEvent::MigrationFinished { .. }
-                    | SyncEvent::PricingBucketReconcileStarted { .. }
+                SyncEvent::PricingBucketReconcileStarted { .. }
                     | SyncEvent::PricingUpgradeFinished { .. }
                     | SyncEvent::LockAcquired { .. }
                     | SyncEvent::TokenAccountingRepairStarted { .. }
@@ -288,7 +393,24 @@ impl LineRenderer {
         }
     }
 
+    /// Lands one permanent line, overwriting any live TTY status line.
+    fn write_permanent(&mut self, line: &str) {
+        if self.tty && self.last_line_len > 0 {
+            let padding = self
+                .last_line_len
+                .saturating_sub(unicode_width::UnicodeWidthStr::width(line));
+            let _ = writeln!(self.stderr, "\r{line}{}", " ".repeat(padding));
+            self.last_line_len = 0;
+        } else {
+            let _ = writeln!(self.stderr, "{line}");
+        }
+        let _ = self.stderr.flush();
+    }
+
     fn finish(&mut self) {
+        if let Some(summary) = self.digest.take_summary(None, self.language) {
+            self.write_permanent(&done_mark(&summary, false));
+        }
         if self.last_line_len > 0 {
             let _ = writeln!(self.stderr);
             self.last_line_len = 0;
@@ -326,6 +448,7 @@ pub(crate) struct BarRenderer {
     active: Option<ActiveBar>,
     terminated: bool,
     remote_facts: HashMap<String, crate::remote::diagnostic::DiagnosticFacts>,
+    digest: StartupDigest,
 }
 
 impl BarRenderer {
@@ -337,11 +460,20 @@ impl BarRenderer {
             active: None,
             terminated: false,
             remote_facts: HashMap::new(),
+            digest: StartupDigest::default(),
         }
     }
 
     fn render(&mut self, event: &SyncEvent) {
         if self.terminated {
+            return;
+        }
+        let fold = self.digest.fold(event);
+        if let Some(summary) = self.digest.take_summary(Some(event), self.language) {
+            self.complete_active();
+            self.permanent_text(done_mark(&summary, true));
+        }
+        if fold == Fold::Hidden {
             return;
         }
         match event {
@@ -377,8 +509,9 @@ impl BarRenderer {
                 self.permanent_line(event);
                 self.start_spinner(self.progress_line(event).unwrap_or_default());
             }
-            SyncEvent::MigrationFinished { .. }
-            | SyncEvent::PricingUpgradeFinished { .. }
+            // Folded by `StartupDigest` above; never reaches here.
+            SyncEvent::MigrationFinished { .. } => {}
+            SyncEvent::PricingUpgradeFinished { .. }
             | SyncEvent::LockAcquired { .. }
             | SyncEvent::TokenAccountingRepairStarted { .. }
             | SyncEvent::TokenAccountingRepairFinished { .. } => {
@@ -525,6 +658,11 @@ impl BarRenderer {
     fn permanent_line(&mut self, event: &SyncEvent) {
         self.complete_active();
         if let Some(line) = self.progress_line(event) {
+            let line = if is_done_line(event) {
+                done_mark(&line, true)
+            } else {
+                line
+            };
             self.permanent_text(line);
         }
     }
@@ -536,6 +674,10 @@ impl BarRenderer {
     }
 
     fn finish(&mut self) {
+        if let Some(summary) = self.digest.take_summary(None, self.language) {
+            self.complete_active();
+            self.permanent_text(done_mark(&summary, true));
+        }
         if let Some(active) = self.active.take() {
             active.bar.abandon();
         }
@@ -635,6 +777,7 @@ mod tests {
                             last_line_len: 0,
                             terminated: false,
                             remote_facts: HashMap::new(),
+                            digest: StartupDigest::default(),
                         })
                     };
                     renderer.observe_notice(&notice);
@@ -671,10 +814,12 @@ mod tests {
             Arc::new(Mutex::new(HumanRenderer::Line(LineRenderer {
                 language: i18n::current(),
                 stderr: Box::new(bytes.clone()),
-                tty: false,
+                // Bootstrap status is live TTY output only.
+                tty: true,
                 last_line_len: 0,
                 terminated: false,
                 remote_facts: HashMap::new(),
+                digest: StartupDigest::default(),
             })))
         });
         tokio::spawn(async move {
@@ -772,7 +917,7 @@ mod tests {
             let mut renderer =
                 BarRenderer::new(ProgressDrawTarget::term_like(Box::new(terminal.clone())));
             renderer.stderr = Box::new(terminal.clone());
-            renderer.render(&SyncEvent::LockAcquired { wait_ms: 58 });
+            renderer.render(&SyncEvent::LockAcquired { wait_ms: 1_500 });
             let writer = terminal.clone();
             let subscriber = tracing_subscriber::fmt()
                 .without_time()
@@ -808,6 +953,7 @@ mod tests {
                         last_line_len: 0,
                         terminated: false,
                         remote_facts: HashMap::new(),
+                        digest: StartupDigest::default(),
                     })
                 };
                 let renderer = Arc::new(Mutex::new(renderer));
@@ -960,11 +1106,13 @@ mod tests {
                 name: "add_part_cursor".to_string(),
                 elapsed_ms: 12,
             });
-            assert!(!renderer.has_active());
+            // The migration spinner stays live; its summary lands at the next phase.
+            assert!(renderer.has_active());
             renderer.render(&SyncEvent::LockWaiting { timeout_ms: 30_000 });
             assert!(renderer.has_active());
+            // A fast acquisition prints nothing; the next phase replaces the spinner.
             renderer.render(&SyncEvent::LockAcquired { wait_ms: 3 });
-            assert!(!renderer.has_active());
+            assert!(renderer.has_active());
 
             renderer.render(&SyncEvent::SourceStarted {
                 source: SourceKind::Codex,
@@ -1293,6 +1441,7 @@ mod tests {
                         last_line_len: 0,
                         terminated: false,
                         remote_facts: HashMap::new(),
+                        digest: StartupDigest::default(),
                     };
                     line.render(event);
                     assert_eq!(
@@ -1414,5 +1563,73 @@ mod tests {
             );
             Ok(())
         })
+    }
+
+    #[test]
+    fn startup_migrations_fold_into_one_summary_and_fast_lock_is_silent() {
+        for (language, expected) in [
+            (
+                Language::English,
+                "✓ Database schema upgraded to v3 (3 migrations, 6ms)
+",
+            ),
+            (
+                Language::Chinese,
+                "✓ 数据库 schema 已升级到 v3（3 个迁移，6ms）
+",
+            ),
+        ] {
+            let output = CaptureTerm::default();
+            let mut line = LineRenderer {
+                language,
+                stderr: Box::new(output.clone()),
+                tty: false,
+                last_line_len: 0,
+                terminated: false,
+                remote_facts: HashMap::new(),
+                digest: StartupDigest::default(),
+            };
+            for version in 1..=3 {
+                line.render(&SyncEvent::MigrationStarted {
+                    version,
+                    name: format!("m{version}"),
+                    latest_version: 3,
+                });
+                line.render(&SyncEvent::MigrationFinished {
+                    version,
+                    name: format!("m{version}"),
+                    elapsed_ms: 2,
+                });
+            }
+            line.render(&SyncEvent::LockAcquired { wait_ms: 35 });
+            line.finish();
+            assert_eq!(
+                String::from_utf8(output.0.lock().unwrap().clone()).unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn slow_lock_keeps_a_permanent_line() {
+        let output = CaptureTerm::default();
+        let mut line = LineRenderer {
+            language: Language::English,
+            stderr: Box::new(output.clone()),
+            tty: false,
+            last_line_len: 0,
+            terminated: false,
+            remote_facts: HashMap::new(),
+            digest: StartupDigest::default(),
+        };
+        line.render(&SyncEvent::BootstrapStarted);
+        line.render(&SyncEvent::LockWaiting { timeout_ms: 30_000 });
+        line.render(&SyncEvent::LockAcquired { wait_ms: 40 });
+        line.render(&SyncEvent::LockAcquired { wait_ms: 1_200 });
+        assert_eq!(
+            String::from_utf8(output.0.lock().unwrap().clone()).unwrap(),
+            "✓ SQLite sync worker lock acquired (waited 1200ms)
+"
+        );
     }
 }

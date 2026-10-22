@@ -284,6 +284,7 @@ pub fn argument_description(
         "parallelism" => "解析工作线程并发数（1 到 32）。",
         "provider_map" => "用于中继提供商归属的 CCR 激活 JSONL 路径。",
         "json_events" => "在 stdout 输出同步生命周期 NDJSON。",
+        "verbose" => "显示按来源的管线明细表（文件、事件、字节、耗时），替代 token 与费用汇总。",
         "emit_shards" => "在 stdout 输出标准分片 NDJSON，不打开用户数据库。",
         "out" => "写入的输出路径。",
         "forget_file" => "将绝对路径标记为 deleted_by_user 并删除其游标；来源有歧义时需 --source。",

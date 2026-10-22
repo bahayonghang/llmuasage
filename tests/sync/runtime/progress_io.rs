@@ -240,17 +240,11 @@ fn bilingual_sync_keeps_human_and_machine_streams_separate_in_plain_modes() -> R
         (
             "en",
             "Sync finished:",
-            "SQLite sync worker lock acquired",
+            "Database schema upgraded to",
             "SOURCE",
             "TOTAL",
         ),
-        (
-            "zh",
-            "同步完成：",
-            "已获取 SQLite sync worker 锁",
-            "来源",
-            "合计",
-        ),
+        ("zh", "同步完成：", "数据库 schema 已升级到", "来源", "合计"),
     ] {
         for plain_mode in ["NO_COLOR", "LLMUSAGE_NO_COLOR", "LLMUSAGE_PROGRESS"] {
             let temp = TempDir::new()?;
@@ -280,7 +274,9 @@ fn bilingual_sync_keeps_human_and_machine_streams_separate_in_plain_modes() -> R
                 }
                 Ok(command.output()?)
             };
-            let human = run(None)?;
+            // `--verbose` keeps the closed ten-column pipeline table; the
+            // fresh home's migration summary is the one permanent stderr line.
+            let human = run(Some("--verbose"))?;
             assert!(human.status.success(), "{human:?}");
             let stdout = String::from_utf8(human.stdout)?;
             let stderr = String::from_utf8(human.stderr)?;

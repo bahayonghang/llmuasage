@@ -110,10 +110,11 @@ fn sync_summary_table_is_stdout_only_without_ansi_or_completion_sentence() -> Re
     let fixture = Fixture::new()?;
     fixture.seed_codex("rollout-table.jsonl", 123, "2026-04-22T01:12:00Z")?;
 
-    let run = |columns: &str| -> Result<std::process::Output> {
+    let run = |columns: &str, verbose: bool| -> Result<std::process::Output> {
         test_process::llmusage_command()
             .current_dir(env!("CARGO_MANIFEST_DIR"))
             .arg("sync")
+            .args(verbose.then_some("--verbose"))
             .env("HOME", &fixture.home)
             .env("USERPROFILE", &fixture.home)
             .env("CODEX_HOME", &fixture.codex_home)
@@ -127,14 +128,14 @@ fn sync_summary_table_is_stdout_only_without_ansi_or_completion_sentence() -> Re
     };
 
     // Wide terminal: the source parses and finishes with data on this first run.
-    let wide = run("120")?;
+    let wide = run("120", false)?;
     assert!(wide.status.success(), "{wide:?}");
     let wide_out = String::from_utf8_lossy(&wide.stdout);
     let wide_err = String::from_utf8_lossy(&wide.stderr);
-    // stdout carries the summary table and its aggregated TOTAL row.
+    // stdout carries the usage summary and its one-line pipeline digest.
     assert!(wide_out.contains("Sync finished:"), "stdout={wide_out}");
-    assert!(wide_out.contains("TOTAL"), "stdout={wide_out}");
     assert!(wide_out.contains("codex"), "stdout={wide_out}");
+    assert!(wide_out.contains("details: --verbose"), "stdout={wide_out}");
     // Non-TTY stdout has no ANSI control sequences.
     assert!(!wide_out.contains('\u{1b}'), "stdout={wide_out}");
     // The legacy standalone totals line is gone (replaced by the TOTAL row).
@@ -145,8 +146,8 @@ fn sync_summary_table_is_stdout_only_without_ansi_or_completion_sentence() -> Re
     assert!(!wide_out.contains("完成，文件"), "stdout={wide_out}");
     assert!(!wide_err.contains("完成，文件"), "stderr={wide_err}");
 
-    // Narrow terminal: the table still renders and stays ANSI-free end to end.
-    let narrow = run("60")?;
+    // Narrow `--verbose`: the pipeline table and its TOTAL row stay ANSI-free.
+    let narrow = run("60", true)?;
     assert!(narrow.status.success(), "{narrow:?}");
     let narrow_out = String::from_utf8_lossy(&narrow.stdout);
     assert!(narrow_out.contains("Sync finished:"), "stdout={narrow_out}");
