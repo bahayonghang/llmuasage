@@ -159,6 +159,7 @@ async fn sync_opencode(
     let mut normalized_events_seen = 0usize;
     let mut scanned_bytes = 0u64;
     let mut inserted = 0usize;
+    let mut inserted_usage = crate::models::InsertedUsage::default();
     let mut write_ms = 0u64;
     let initial_part_rowid = cursor.last_part_rowid;
     let mut part_rows_seen = 0usize;
@@ -248,6 +249,7 @@ async fn sync_opencode(
                 ..SyncShard::new(SourceKind::Opencode)
             })?;
             inserted += commit.events_inserted;
+            inserted_usage.absorb(commit.inserted_usage);
             write_ms += commit.write_ms;
         }
         emit_progress(
@@ -343,6 +345,7 @@ async fn sync_opencode(
     stats.bytes_scanned = scanned_bytes;
     stats.events_seen = normalized_events_seen;
     stats.events_inserted = inserted;
+    stats.inserted_usage = inserted_usage;
     stats.write_ms = write_ms;
     stats.parse_issues = parse_issues;
     let total_elapsed = parse_started.elapsed().as_millis().min(u64::MAX as u128) as u64;

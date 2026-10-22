@@ -636,6 +636,7 @@ async fn sync_family_with_inputs(
             stat.events_seen = 0;
             stat.events_replayed = 0;
             stat.events_inserted = 0;
+            stat.inserted_usage = Default::default();
         }
         return Ok(FamilySyncResult {
             stats,
@@ -900,6 +901,7 @@ async fn sync_family_with_inputs(
                 .find(|stat| stat.source == source)
                 .expect("selected source");
             stat.events_inserted = committed.events_inserted;
+            stat.inserted_usage = committed.inserted_usage;
             stat.write_ms = committed.write_ms;
         }
     }

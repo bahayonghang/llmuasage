@@ -171,6 +171,7 @@ async fn sync_zcode(
     let mut seen_rows = 0usize;
     let mut normalized_events_seen = 0usize;
     let mut inserted = 0usize;
+    let mut inserted_usage = crate::models::InsertedUsage::default();
     let mut write_ms = 0u64;
     let mut parse_issues = ParseIssues::default();
     let recent_cutoff_ms = recent_cutoff.as_ref().map(DateTime::timestamp_millis);
@@ -261,6 +262,7 @@ async fn sync_zcode(
                 ..SyncShard::new(SourceKind::Zcode)
             })?;
             inserted += commit.events_inserted;
+            inserted_usage.absorb(commit.inserted_usage);
             write_ms += commit.write_ms;
         }
         emit_progress(
@@ -291,6 +293,7 @@ async fn sync_zcode(
     stats.skipped_files = usize::from(!changed);
     stats.events_seen = normalized_events_seen;
     stats.events_inserted = inserted;
+    stats.inserted_usage = inserted_usage;
     stats.write_ms = write_ms;
     stats.parse_issues = parse_issues;
     let total_elapsed = parse_started.elapsed().as_millis().min(u64::MAX as u128) as u64;

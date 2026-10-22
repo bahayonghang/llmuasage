@@ -25,7 +25,7 @@ pub mod source_parser;
 mod writer_benchmark;
 pub mod zcode;
 
-pub use crate::models::{ParseIssueKind, ParseIssueSample, ParseIssues};
+pub use crate::models::{InsertedUsage, ParseIssueKind, ParseIssueSample, ParseIssues};
 pub use antigravity::{AntigravityIdeParser, AntigravityParser};
 pub(crate) use antigravity::{
     check_antigravity_coverage, format_antigravity_blocked_notice, format_antigravity_notice,
@@ -285,6 +285,9 @@ pub struct SourceSyncStats {
     /// Privacy-safe parse-issue counters and bounded samples.
     #[serde(default)]
     pub parse_issues: ParseIssues,
+    /// Tokens and estimated cost of the events this run newly committed.
+    #[serde(default)]
+    pub inserted_usage: InsertedUsage,
 }
 
 impl Default for SourceSyncStats {
@@ -305,6 +308,7 @@ impl Default for SourceSyncStats {
             absent: false,
             last_error: None,
             parse_issues: ParseIssues::default(),
+            inserted_usage: InsertedUsage::default(),
         }
     }
 }

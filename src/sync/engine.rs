@@ -579,6 +579,7 @@ async fn run_once_locked_with_remote_source(
                 source.write_ms = 0;
                 source.events_seen = 0;
                 source.events_inserted = 0;
+                source.inserted_usage = Default::default();
                 accounting_warning = Some(notice);
             }
         }

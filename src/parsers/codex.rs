@@ -304,6 +304,7 @@ async fn sync_codex(
     let mut events_replayed = 0usize;
     let mut bytes_scanned = 0u64;
     let mut inserted = 0usize;
+    let mut inserted_usage = crate::models::InsertedUsage::default();
     let mut write_ms = 0u64;
     let mut parse_issues = ParseIssues::default();
     let mut plans = shards
@@ -401,6 +402,7 @@ async fn sync_codex(
                 ..SyncShard::new(SourceKind::Codex)
             })?;
             inserted += commit.events_inserted;
+            inserted_usage.absorb(commit.inserted_usage);
             write_ms += commit.write_ms;
             emit_progress(
                 &mut progress,
@@ -423,6 +425,7 @@ async fn sync_codex(
         events_seen,
         events_replayed,
         events_inserted: inserted,
+        inserted_usage,
         write_ms,
         last_error: inventory_error,
         parse_issues,

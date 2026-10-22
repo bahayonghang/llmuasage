@@ -16,7 +16,9 @@ use crate::{
         pricing::{self, CostBreakdown, PRICING_MIXED, PRICING_UNPRICED, PricingStatus},
         pricing_catalog::PricingCatalog,
     },
-    models::{ParseIssues, SourceKind, UsageEvent, UsageTokens, UsageToolCall, UsageTurn},
+    models::{
+        InsertedUsage, ParseIssues, SourceKind, UsageEvent, UsageTokens, UsageToolCall, UsageTurn,
+    },
     paths::AppPaths,
 };
 
@@ -1166,6 +1168,8 @@ pub struct ShardCommitStats {
     pub turns_inserted: usize,
     /// Newly inserted normalized tool/action rows.
     pub tool_calls_inserted: usize,
+    /// Tokens and estimated cost of the newly inserted events.
+    pub inserted_usage: InsertedUsage,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]

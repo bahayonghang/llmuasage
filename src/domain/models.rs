@@ -277,6 +277,81 @@ pub struct UsageTokens {
     pub total_tokens: i64,
 }
 
+/// Token and estimated-cost totals of the events a sync run newly wrote.
+///
+/// Accumulated in the writer only for rows that `INSERT OR IGNORE` actually
+/// inserted, using the same `cost_with_cache_usd` the reports read. Cost is
+/// kept in integer micro-USD so the stats stay `Eq` and sum without drift.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InsertedUsage {
+    #[serde(default)]
+    pub input_tokens: i64,
+    #[serde(default)]
+    pub cache_read_tokens: i64,
+    #[serde(default)]
+    pub cache_creation_tokens: i64,
+    #[serde(default)]
+    pub output_tokens: i64,
+    #[serde(default)]
+    pub reasoning_output_tokens: i64,
+    #[serde(default)]
+    pub total_tokens: i64,
+    /// Estimated `cost_with_cache_usd` in micro-USD.
+    #[serde(default)]
+    pub cost_micro_usd: i64,
+    /// Inserted events the pricing catalog could not price.
+    #[serde(default)]
+    pub unpriced_events: u64,
+}
+
+impl InsertedUsage {
+    /// Adds one inserted event.
+    pub fn add_event(&mut self, tokens: &UsageTokens, cost_usd: f64, unpriced: bool) {
+        self.input_tokens = self.input_tokens.saturating_add(tokens.input_tokens);
+        self.cache_read_tokens = self
+            .cache_read_tokens
+            .saturating_add(tokens.cache_read_tokens);
+        self.cache_creation_tokens = self
+            .cache_creation_tokens
+            .saturating_add(tokens.cache_creation_tokens);
+        self.output_tokens = self.output_tokens.saturating_add(tokens.output_tokens);
+        self.reasoning_output_tokens = self
+            .reasoning_output_tokens
+            .saturating_add(tokens.reasoning_output_tokens);
+        self.total_tokens = self.total_tokens.saturating_add(tokens.total_tokens);
+        if cost_usd.is_finite() && cost_usd > 0.0 {
+            self.cost_micro_usd = self
+                .cost_micro_usd
+                .saturating_add((cost_usd * 1_000_000.0).round() as i64);
+        }
+        if unpriced {
+            self.unpriced_events = self.unpriced_events.saturating_add(1);
+        }
+    }
+
+    /// Adds another total, e.g. one shard commit into a source's run total.
+    pub fn absorb(&mut self, other: InsertedUsage) {
+        self.input_tokens = self.input_tokens.saturating_add(other.input_tokens);
+        self.cache_read_tokens = self
+            .cache_read_tokens
+            .saturating_add(other.cache_read_tokens);
+        self.cache_creation_tokens = self
+            .cache_creation_tokens
+            .saturating_add(other.cache_creation_tokens);
+        self.output_tokens = self.output_tokens.saturating_add(other.output_tokens);
+        self.reasoning_output_tokens = self
+            .reasoning_output_tokens
+            .saturating_add(other.reasoning_output_tokens);
+        self.total_tokens = self.total_tokens.saturating_add(other.total_tokens);
+        self.cost_micro_usd = self.cost_micro_usd.saturating_add(other.cost_micro_usd);
+        self.unpriced_events = self.unpriced_events.saturating_add(other.unpriced_events);
+    }
+
+    pub fn cost_usd(&self) -> f64 {
+        self.cost_micro_usd as f64 / 1_000_000.0
+    }
+}
+
 /// Optional conversation/session metadata attached to one normalized usage event.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionInfo {

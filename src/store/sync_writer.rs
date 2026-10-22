@@ -23,9 +23,27 @@ use crate::{
         provider_map::ProviderIndex,
     },
     error::LlmusageError,
-    models::{ProjectInfo, SourceKind, UsageEvent, UsageTokens, UsageToolCall, UsageTurn},
+    models::{
+        InsertedUsage, ProjectInfo, SourceKind, UsageEvent, UsageTokens, UsageToolCall, UsageTurn,
+    },
     util::now_utc,
 };
+
+fn event_cost(pricing_catalog: &PricingCatalog, event: &UsageEvent) -> CostBreakdown {
+    pricing::cost_for_event(
+        pricing_catalog,
+        event.source.as_str(),
+        &event.model,
+        pricing::CostTokens {
+            input: event.tokens.input_tokens,
+            cache_read: event.tokens.cache_read_tokens,
+            cache_creation: event.tokens.cache_creation_tokens,
+            output: event.tokens.output_tokens,
+            reasoning_output: event.tokens.reasoning_output_tokens,
+        },
+        event.source_cost.as_ref(),
+    )
+}
 
 // Tests can observe exclusive stages without changing the production protocol.
 macro_rules! writer_stage {
@@ -523,6 +541,7 @@ impl SyncRunWriter {
         pricing_catalog: &PricingCatalog,
         host_id: &str,
         events: &[UsageEvent],
+        inserted_usage: &mut InsertedUsage,
     ) -> Result<usize> {
         if events.is_empty() {
             return Ok(0);
@@ -563,22 +582,7 @@ impl SyncRunWriter {
             let mut inserted = 0usize;
 
             for event in events {
-                let cost = writer_stage!(
-                    "pricing",
-                    pricing::cost_for_event(
-                        pricing_catalog,
-                        event.source.as_str(),
-                        &event.model,
-                        pricing::CostTokens {
-                            input: event.tokens.input_tokens,
-                            cache_read: event.tokens.cache_read_tokens,
-                            cache_creation: event.tokens.cache_creation_tokens,
-                            output: event.tokens.output_tokens,
-                            reasoning_output: event.tokens.reasoning_output_tokens,
-                        },
-                        event.source_cost.as_ref(),
-                    )
-                );
+                let cost = writer_stage!("pricing", event_cost(pricing_catalog, event));
                 let changed = writer_stage!(
                     "event_insert",
                     event_stmt.execute(rusqlite::params![
@@ -633,6 +637,11 @@ impl SyncRunWriter {
                 }
 
                 inserted += 1;
+                inserted_usage.add_event(
+                    &event.tokens,
+                    cost.cost_with_cache_usd,
+                    matches!(cost.pricing_status, pricing::PricingStatus::Unpriced),
+                );
                 if let Some(project) = &event.project {
                     projects.insert(project.project_hash.clone(), project.clone());
                 }
@@ -756,6 +765,8 @@ impl SyncRunWriter {
                 files_seen: shard.seen_file_paths.len(),
                 turns_inserted: shard.turns.len(),
                 tool_calls_inserted: shard.tool_calls.len(),
+                // `--emit-shards` prints no human summary; skip pricing here.
+                inserted_usage: InsertedUsage::default(),
             };
             if let Some(sink) = self.collect_sink.as_mut() {
                 sink(shard)?;
@@ -1123,7 +1134,13 @@ impl SyncRunWriter {
         for batch in shard.events.chunks(EVENT_WRITE_BATCH_SIZE) {
             stats.events_inserted += writer_stage!(
                 "event_work",
-                Self::write_event_batch_tx(tx, pricing_catalog, host_id, batch)
+                Self::write_event_batch_tx(
+                    tx,
+                    pricing_catalog,
+                    host_id,
+                    batch,
+                    &mut stats.inserted_usage
+                )
             )?;
         }
         fail_shard_commit_at(failpoint, ShardCommitFailpoint::Events)?;
@@ -2556,6 +2573,50 @@ mod tests {
                 .map_err(|err| err.context(format!("failpoint {failpoint:?}")))?;
         }
 
+        Ok(())
+    }
+
+    /// `inserted_usage` counts only rows `INSERT OR IGNORE` wrote, and its cost
+    /// equals the persisted `cost_with_cache_usd` the reports read.
+    #[test]
+    fn commit_shard_reports_inserted_usage_once() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = build_paths(temp.path());
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+        let mut writer = store.begin_sync_run()?;
+        let mut reported = build_event("reported", "pathA", 7);
+        reported.source_cost = Some(SourceCost {
+            total: 1.25,
+            input: None,
+            output: None,
+            cache_read: None,
+            cache_write: None,
+        });
+        let shard = || SyncShard {
+            events: vec![build_event("priced", "pathA", 100), reported.clone()],
+            ..SyncShard::new(SourceKind::Codex)
+        };
+
+        let first = writer.commit_shard(shard())?;
+        assert_eq!(first.inserted_usage.input_tokens, 107);
+        assert_eq!(first.inserted_usage.output_tokens, 107);
+        assert_eq!(first.inserted_usage.total_tokens, 214);
+        let persisted: f64 = store.open_connection()?.query_row(
+            "SELECT SUM(cost_with_cache_usd) FROM usage_event",
+            [],
+            |row| row.get(0),
+        )?;
+        assert!(persisted >= 1.25);
+        assert_eq!(
+            first.inserted_usage.cost_micro_usd,
+            (persisted * 1_000_000.0).round() as i64
+        );
+
+        let replay = writer.commit_shard(shard())?;
+        assert_eq!(replay.events_inserted, 0);
+        assert_eq!(replay.inserted_usage, InsertedUsage::default());
+        writer.finish_sync_run()?;
         Ok(())
     }
 
