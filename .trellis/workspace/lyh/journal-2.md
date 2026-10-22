@@ -318,3 +318,75 @@ llmusage clean 默认用表格总览运行时目录。只有 --yes 才删除 bac
 ### Next Steps
 
 - 未推送。
+
+
+## Session 78: CLI 与 TUI 双语交付及最终验收
+<!-- trellis-session: v=2 fp=064172d169183196 -->
+
+**Date**: 2026-10-21
+**Task**: CLI 与 TUI 双语交付及最终验收
+**Branch**: `dev`
+
+### Summary
+
+完成 F/S/C/T/A 父子任务实施、独立审查、双语文档和最终 just ci；代码保留未提交，原生终端验收单独记录 NOT_RUN。
+
+### Main Changes
+
+- TUI 九面板、弹窗、同步及额度展示读取共享语言；保留公开 DTO 和机器数据。
+- 补齐双语指南及父 AC1-AC16 证据；任务原位完成以保持引用。
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] just ci EXIT0: root Rust1320 PASS/19 existing ignored; desktop Rust33; dashboard JS66; desktop frontend65 plus4 checks; builds PASS.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Native ordinary-window CLI/TUI smoke remains NOT_RUN because native APIs are disabled; no commit, installation, push or release performed.
+
+
+## Session 79: 拆分提交并归档 CLI/TUI 双语任务
+<!-- trellis-session: v=2 fp=31af2fbc4fe25430 -->
+
+**Date**: 2026-10-22
+**Task**: 拆分提交并归档 CLI/TUI 双语任务
+**Branch**: `dev`
+
+### Summary
+
+按用户新授权完成四批工作提交、六个父子任务归档及引用迁移；原生终端验收仍为 NOT_RUN。
+
+### Main Changes
+
+- 分离测试夹具、语言偏好基础、终端双语集成和文档规范；归档与 journal 单独提交。
+- 六个任务归档到 archive/2026-10，保留父子关系，修复归档后上下文和 fixture 脚本定位。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `35186161ff6ffbe1b90e58c486eeab5f14d5f53d` | test(ci): [AI] 🧪 稳定临时目录与时间窗口夹具 |
+| `67397ecb813369826ed6a65db908f11e735e1862` | feat(i18n): [AI] ✨ 增加独立语言偏好与隔离作用域 |
+| `86c91b5a87983dfd638f4fa10d35afabff7034a4` | feat(终端): [AI] ✨ 贯通 CLI、同步日志与 TUI 双语展示 |
+| `7b92ac3966c7a892e796aa7593347ec2ef747eea` | docs(终端): [AI] 📝 补齐双语指南与展示兼容契约 |
+
+### Testing
+
+- [OK] 最终产品与通过 just ci 的500份源码快照一致；语言基础暂存副本 cargo check --locked --offline --all-features --tests PASS。
+- [OK] 归档文档/代码/元数据空白检查 PASS；原始执行日志保持原样；四份依赖锁文件不变。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 原生普通窗口 CLI/TUI 验收为 NOT_RUN；未推送、安装或发布。

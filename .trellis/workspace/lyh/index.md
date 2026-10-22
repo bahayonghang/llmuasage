@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 77
-- **Last Active**: 2026-10-08
+- **Total Sessions**: 79
+- **Last Active**: 2026-10-22
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~320 | Active |
+| `journal-2.md` | ~392 | Active |
 | `journal-1.md` | ~2011 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,8 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 79 | 2026-10-22 | 拆分提交并归档 CLI/TUI 双语任务 | `35186161ff6ffbe1b90e58c486eeab5f14d5f53d`, `67397ecb813369826ed6a65db908f11e735e1862`, `86c91b5a87983dfd638f4fa10d35afabff7034a4`, `7b92ac3966c7a892e796aa7593347ec2ef747eea` | `dev` |
+| 78 | 2026-10-21 | CLI 与 TUI 双语交付及最终验收 | - | `dev` |
 | 77 | 2026-10-08 | 增加 llmusage clean 命令 | `9679131524b8843e58015d07f928836f7405f567` | `dev` |
 | 76 | 2026-10-08 | 自动刷新公开价表并发布 2.0.1 | `e76b8c9`, `ee6e9a7` | `dev` |
 | 75 | 2026-10-08 | Sync 结果表与来源恢复提示 | `50e039810b4f3f00e289a79eade3479b3b06721c` | `dev` |
