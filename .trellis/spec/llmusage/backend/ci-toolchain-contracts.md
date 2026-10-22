@@ -131,6 +131,17 @@ Kimi Code, OMP.
   stable because CI addresses it by name. Before adding coverage during a
   layout migration, compare the old and new integration-test leaf-name
   multisets so newly added tests cannot hide a silently lost old test.
+- Test helpers that place temporary fixtures under a Cargo target directory
+  honor nonempty `CARGO_TARGET_DIR` before falling back to `<manifest>/target`.
+  `store::sync_writer::profiling::tests::temp_root` keeps its existing
+  `writer-benchmark` child and generated TempDir cleanup. Do not repair a managed
+  target symlink or skip correctness assertions to work around its failure.
+- A live-window payload-shape fixture uses an interior canonical bucket, not raw
+  `Utc::now()` on a cutoff. The Web interactive-scope test uses
+  `bucket_start(Utc::now() - ChronoDuration::days(1))`, retaining its token,
+  cursor-count, selected-section and payload-size assertions. Test local-date
+  versus requested-timezone boundary policy explicitly when that is the subject;
+  a fixture correction does not establish a production timezone-policy fix.
 
 ## 4. Validation & Error Matrix
 
@@ -148,6 +159,7 @@ Kimi Code, OMP.
 | Desktop frontend tests, `tsc --noEmit`, Vite production build, or desktop `--locked` tests omitted from local or CI gates | Block; keep them in `just desktop-check` and the Windows `desktop` job |
 | `ci-gate` is skipped after a leaf job fails | Block; keep `if: always()` so the required check still reports |
 | Subprocess test reports an OS error | Locate the exact failing operation; do not label it an environment failure without context |
+| Build uses a valid `CARGO_TARGET_DIR` but a fixture hits a broken repository target link | Fix the test helper's directory selection; rerun affected assertions and the unchanged gate |
 | A test-layout change drops or duplicates an existing leaf name | Block before adding new tests; repair target/module wiring |
 | `cargo audit` reports unsound/yanked that `cargo update` can absorb (e.g. lru via ratatui-core) | Absorb in the lockfile batch; do not leave a fixable warning |
 | `cargo semver-checks --locked` | Block; that flag is unexpected. Use `--baseline-rev v1.2.0` |

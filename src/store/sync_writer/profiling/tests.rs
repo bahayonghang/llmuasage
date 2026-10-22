@@ -42,7 +42,11 @@ struct Sample {
 }
 
 pub(crate) fn temp_root() -> Result<TempDir> {
-    let parent = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/writer-benchmark");
+    let target = std::env::var_os("CARGO_TARGET_DIR")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("target"));
+    let parent = target.join("writer-benchmark");
     fs::create_dir_all(&parent)?;
     Ok(tempfile::Builder::new()
         .prefix("generated-")

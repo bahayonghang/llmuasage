@@ -6205,7 +6205,9 @@ mod tests {
     {
         let (_temp, store) = make_store()?;
         let conn = store.open_connection()?;
-        let now = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+        // This checks payload shape/scope; keep the bucket inside the window,
+        // away from the live Local-date versus requested-UTC cutoff.
+        let now = crate::util::bucket_start(Utc::now() - ChronoDuration::days(1));
         conn.execute(
             r#"
             INSERT INTO usage_bucket_30m(
