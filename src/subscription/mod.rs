@@ -6,7 +6,12 @@ mod codex;
 mod grok;
 mod http;
 mod kimi;
+mod presentation;
 mod types;
+
+pub(crate) use presentation::{
+    DiagnosticHint, MetricHint, QuotaPresentationHints, RemainingHint, WindowHint,
+};
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -65,27 +70,45 @@ pub struct UsageFetchOutcome {
 
 /// Fetch quota for enabled providers. `cache_hit` follows `cache::load`, not mtime.
 pub async fn fetch_all(ctx: &FetchContext, bypass_cache: bool) -> UsageFetchOutcome {
+    fetch_all_with_presentation(ctx, bypass_cache).await.outcome
+}
+
+pub(crate) struct QuotaFetchOutcome {
+    pub outcome: UsageFetchOutcome,
+    pub presentation: QuotaPresentationHints,
+}
+
+pub(crate) async fn fetch_all_with_presentation(
+    ctx: &FetchContext,
+    bypass_cache: bool,
+) -> QuotaFetchOutcome {
     if !bypass_cache
         && let Some(path) = &ctx.cache_path
-        && let Some(report) = cache::load(path)
+        && let Some((report, presentation)) = cache::load_with_presentation(path)
     {
-        return UsageFetchOutcome {
-            report,
-            cache_hit: true,
+        return QuotaFetchOutcome {
+            outcome: UsageFetchOutcome {
+                report,
+                cache_hit: true,
+            },
+            presentation,
         };
     }
 
-    let report = fetch_live(ctx).await;
+    let (report, presentation) = fetch_live(ctx).await;
     if let Some(path) = &ctx.cache_path {
-        cache::save(path, &report);
+        cache::save_with_presentation(path, &report, &presentation);
     }
-    UsageFetchOutcome {
-        report,
-        cache_hit: false,
+    QuotaFetchOutcome {
+        outcome: UsageFetchOutcome {
+            report,
+            cache_hit: false,
+        },
+        presentation,
     }
 }
 
-async fn fetch_live(ctx: &FetchContext) -> UsageFetchReport {
+async fn fetch_live(ctx: &FetchContext) -> (UsageFetchReport, QuotaPresentationHints) {
     let home = ctx.user_home.clone();
     let endpoints = ctx.endpoints.clone();
     let timeout = ctx.timeout;
@@ -114,29 +137,50 @@ async fn fetch_live(ctx: &FetchContext) -> UsageFetchReport {
 
     let (claude, kimi, grok, codex) = tokio::join!(claude, kimi, grok, codex);
     let mut report = UsageFetchReport::default();
-    for part in [claude, kimi, grok, codex] {
+    let mut presentation = QuotaPresentationHints::default();
+    for (part, hints) in [claude, kimi, grok, codex] {
         report.extend(part);
+        presentation.metrics.extend(hints.metrics);
+        presentation.diagnostics.extend(hints.diagnostics);
     }
-    report
+    presentation.bind(&report);
+    (report, presentation)
 }
 
-async fn maybe_fetch<Fut>(provider: &'static str, enabled: bool, fetch: Fut) -> UsageFetchReport
+async fn maybe_fetch<Fut>(
+    provider: &'static str,
+    enabled: bool,
+    fetch: Fut,
+) -> (UsageFetchReport, QuotaPresentationHints)
 where
-    Fut: std::future::Future<Output = anyhow::Result<UsageOutput>>,
+    Fut: std::future::Future<Output = anyhow::Result<presentation::PresentedOutput>>,
 {
     if !enabled {
-        return UsageFetchReport::default();
+        return (
+            UsageFetchReport::default(),
+            QuotaPresentationHints::default(),
+        );
     }
-    match fetch.await {
-        Ok(output) => UsageFetchReport {
-            outputs: vec![output],
-            diagnostics: Vec::new(),
-        },
-        Err(error) => UsageFetchReport {
-            outputs: Vec::new(),
-            diagnostics: vec![UsageFetchDiagnostic::error(provider, error.to_string())],
-        },
-    }
+    let mut hints = QuotaPresentationHints::default();
+    let report = match fetch.await {
+        Ok((output, metrics)) => {
+            hints.metrics.push(metrics);
+            UsageFetchReport {
+                outputs: vec![output],
+                diagnostics: Vec::new(),
+            }
+        }
+        Err(error) => {
+            hints
+                .diagnostics
+                .push(presentation::diagnostic_hint(&error));
+            UsageFetchReport {
+                outputs: Vec::new(),
+                diagnostics: vec![UsageFetchDiagnostic::error(provider, error.to_string())],
+            }
+        }
+    };
+    (report, hints)
 }
 
 #[cfg(test)]
@@ -371,6 +415,144 @@ mod tests {
             (path, bytes)
         })
         .collect()
+    }
+
+    #[tokio::test]
+    async fn presentation_live_cache_and_legacy_readers_preserve_report_and_requests() {
+        let _lock = ENV_LOCK.lock().await;
+        let _env = isolate_credential_env();
+        let dir = tempfile::tempdir().unwrap();
+        write_creds(dir.path());
+        let before = read_creds(dir.path());
+        let (base, hits, server) = spawn_server(StatusCode::TOO_MANY_REQUESTS).await;
+        let ctx = ctx(dir.path(), &base);
+        let live = fetch_all_with_presentation(&ctx, true).await;
+        assert!(!live.outcome.cache_hit);
+        assert_eq!(hits.load(Ordering::SeqCst), 5);
+        assert!(live.presentation.matches(&live.outcome.report));
+        assert_eq!(
+            live.presentation.diagnostics,
+            vec![Some(DiagnosticHint::Http { status: 429 })]
+        );
+        assert_eq!(
+            live.presentation.metrics[0][0].remaining,
+            Some(RemainingHint::Integer {
+                remaining: 34,
+                limit: 100
+            })
+        );
+        assert_eq!(
+            live.presentation.metrics[1][0].remaining,
+            Some(RemainingHint::Rounded {
+                remaining: 70.0,
+                limit: 100.0
+            })
+        );
+        let cached = fetch_all_with_presentation(&ctx, false).await;
+        assert!(cached.outcome.cache_hit);
+        assert_eq!(cached.outcome.report, live.outcome.report);
+        assert_eq!(cached.presentation, live.presentation);
+        assert_eq!(hits.load(Ordering::SeqCst), 5);
+
+        #[derive(serde::Deserialize)]
+        struct OldReader {
+            fetched_at: u64,
+            report: UsageFetchReport,
+        }
+        let path = ctx.cache_path.as_ref().unwrap();
+        let bytes = std::fs::read(path).unwrap();
+        let old: OldReader = serde_json::from_slice(&bytes).unwrap();
+        assert!(old.fetched_at > 0);
+        assert_eq!(old.report, live.outcome.report);
+        let metadata = serde_json::to_string(&live.presentation).unwrap();
+        for forbidden in [
+            "claude-token",
+            "kimi-token",
+            "grok-token",
+            "codex-token",
+            "@",
+            "language",
+            "usage unavailable",
+        ] {
+            assert!(!metadata.contains(forbidden), "metadata leaked {forbidden}");
+        }
+
+        let original: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let mut unknown_window = original["presentation"].clone();
+        unknown_window["metrics"][0][0]["window"] = serde_json::json!("future_window");
+        let mut invalid_quantity = original["presentation"].clone();
+        invalid_quantity["metrics"][0][0]["remaining"] =
+            serde_json::json!({"Integer":{"remaining":34}});
+        let mut wrong_shape = original["presentation"].clone();
+        wrong_shape["metrics"] = serde_json::json!([]);
+        let mut extra_field = original["presentation"].clone();
+        extra_field["diagnostics"][0]["Http"]["language"] = serde_json::json!("zh");
+        for malformed in [
+            serde_json::json!("broken"),
+            serde_json::json!({"fingerprint":"wrong","metrics":[],"diagnostics":[]}),
+            serde_json::json!(null),
+            unknown_window,
+            invalid_quantity,
+            wrong_shape,
+            extra_field,
+        ] {
+            let mut doc = original.clone();
+            doc["presentation"] = malformed;
+            std::fs::write(path, serde_json::to_vec(&doc).unwrap()).unwrap();
+            let loaded = fetch_all_with_presentation(&ctx, false).await;
+            assert!(loaded.outcome.cache_hit);
+            assert_eq!(loaded.outcome.report, live.outcome.report);
+            assert!(!loaded.presentation.matches(&loaded.outcome.report));
+        }
+        let mut old_doc = original.clone();
+        old_doc.as_object_mut().unwrap().remove("presentation");
+        std::fs::write(path, serde_json::to_vec(&old_doc).unwrap()).unwrap();
+        let old = fetch_all(&ctx, false).await;
+        assert!(old.cache_hit);
+        assert_eq!(old.report, live.outcome.report);
+        let mut mismatched = original;
+        mismatched["report"]["outputs"][0]["plan"] = serde_json::json!("changed");
+        std::fs::write(path, serde_json::to_vec(&mismatched).unwrap()).unwrap();
+        let loaded = fetch_all_with_presentation(&ctx, false).await;
+        assert!(loaded.outcome.cache_hit);
+        assert!(!loaded.presentation.matches(&loaded.outcome.report));
+        assert_eq!(hits.load(Ordering::SeqCst), 5);
+        assert_eq!(read_creds(dir.path()), before);
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn presentation_known_credentials_error_is_captured_before_string_erasure() {
+        let _lock = ENV_LOCK.lock().await;
+        let _env = isolate_credential_env();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".claude")).unwrap();
+        let path = dir.path().join(".claude/.credentials.json");
+        std::fs::write(&path, "{}").unwrap();
+        std::fs::create_dir_all(dir.path().join(".codex")).unwrap();
+        let codex_path = dir.path().join(".codex/auth.json");
+        std::fs::write(&codex_path, "{}").unwrap();
+        let (base, hits, server) = spawn_server(StatusCode::OK).await;
+        let result = fetch_all_with_presentation(&ctx(dir.path(), &base), true).await;
+        assert_eq!(
+            result.outcome.report.diagnostics[0].message,
+            "No Claude OAuth credentials. Run 'claude' to log in."
+        );
+        assert_eq!(
+            result.presentation.diagnostics,
+            vec![
+                Some(DiagnosticHint::MissingOauth),
+                Some(DiagnosticHint::MissingCredentials)
+            ]
+        );
+        assert_eq!(
+            result.outcome.report.diagnostics[1].message,
+            "No Codex credentials found. Run 'codex' to log in."
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), b"{}");
+        assert_eq!(std::fs::read(&codex_path).unwrap(), b"{}");
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
+        server.abort();
     }
 
     #[tokio::test]

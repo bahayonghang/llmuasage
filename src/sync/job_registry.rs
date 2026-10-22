@@ -6,7 +6,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::anyhow;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
@@ -23,6 +22,44 @@ use crate::{
 
 /// In-process identifier for one usage import job.
 pub type JobId = String;
+
+/// Synchronous borrowed feedback, before canonical errors lose their typed causes.
+/// Consumers may clone neutral facts; they must not render or block here.
+pub(crate) enum JobPresentation<'a> {
+    Notice(&'a crate::sync::notices::RunNotice),
+    Failed {
+        error: &'a anyhow::Error,
+        pricing: Option<&'a crate::domain::pricing_catalog::diagnostic::DiagnosticFacts>,
+    },
+}
+
+pub(crate) type JobPresentationObserver =
+    Arc<dyn for<'a> Fn(&str, JobPresentation<'a>) + Send + Sync>;
+
+/// The existing registry terminal-write error, with its original typed inputs.
+/// Display is complete already, so exposing a source would duplicate canonical detail.
+#[derive(Debug)]
+pub(crate) struct RegistryFailure {
+    pub(crate) command: &'static str,
+    pub(crate) status: &'static str,
+    pub(crate) finish_error: crate::LlmusageError,
+    pub(crate) original_error: Option<anyhow::Error>,
+    canonical: String,
+}
+
+impl fmt::Display for RegistryFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.canonical)
+    }
+}
+
+impl Error for RegistryFailure {}
+
+#[derive(Clone)]
+enum JobExecutor {
+    Standard(Arc<dyn crate::sync::executor::SyncExecutor>),
+    PresentationDefault,
+}
 
 pub use crate::parsers::SyncEvent as JobEvent;
 
@@ -88,7 +125,8 @@ pub struct JobRegistry {
     terminal_order: Arc<Mutex<VecDeque<JobId>>>,
     /// Executes the actual sync work. The default is sync-owned; adapters and
     /// tests may inject another implementation through [`JobRegistry::new`].
-    executor: Arc<dyn crate::sync::executor::SyncExecutor>,
+    executor: JobExecutor,
+    observer: Option<JobPresentationObserver>,
 }
 
 impl fmt::Debug for JobRegistry {
@@ -100,6 +138,13 @@ impl fmt::Debug for JobRegistry {
 }
 
 impl JobRegistry {
+    pub(crate) fn with_presentation_observer(observer: JobPresentationObserver) -> Self {
+        let mut registry = Self::new(Arc::new(crate::sync::default::DefaultSyncExecutor));
+        registry.executor = JobExecutor::PresentationDefault;
+        registry.observer = Some(observer);
+        registry
+    }
+
     /// Creates a `JobRegistry` with a caller-provided executor.
     pub fn new(executor: Arc<dyn crate::sync::executor::SyncExecutor>) -> Self {
         Self {
@@ -107,7 +152,8 @@ impl JobRegistry {
             admission: Arc::default(),
             terminal_hooks: TerminalHooks::default(),
             terminal_order: Arc::default(),
-            executor,
+            executor: JobExecutor::Standard(executor),
+            observer: None,
         }
     }
 }
@@ -254,7 +300,8 @@ impl JobRegistry {
             hooks: self.terminal_hooks.clone(),
             jobs: Arc::clone(&self.inner),
             order: Arc::clone(&self.terminal_order),
-            executor: Arc::clone(&self.executor),
+            executor: self.executor.clone(),
+            observer: self.observer.clone(),
         };
         tokio::spawn(async move {
             run_job(job_id_for_task, store, request, cancel, tx, state, ctx).await;
@@ -349,7 +396,8 @@ struct JobContext {
     hooks: TerminalHooks,
     jobs: Arc<DashMap<JobId, Arc<Mutex<JobState>>>>,
     order: Arc<Mutex<VecDeque<JobId>>>,
-    executor: Arc<dyn crate::sync::executor::SyncExecutor>,
+    executor: JobExecutor,
+    observer: Option<JobPresentationObserver>,
 }
 
 enum JobRunOutcome {
@@ -412,6 +460,7 @@ async fn run_job(
         .send(SyncEvent::LockWaiting { timeout_ms: 30_000 })
         .await;
     let lock_started = Instant::now();
+    let mut pricing_failure = None;
     let outcome = match acquire_worker_lock_for_job(&store, Duration::from_secs(30), &cancel).await
     {
         Ok(Some(lock)) => {
@@ -423,8 +472,11 @@ async fn run_job(
                     wait_ms: lock_wait_ms,
                 })
                 .await;
-            let outcome = match fenced_store.bootstrap() {
-                Err(err) => JobRunOutcome::Failed(anyhow::Error::new(err)),
+            let outcome = match fenced_store.bootstrap_with_pricing_facts() {
+                Err(failure) => {
+                    pricing_failure = failure.facts;
+                    JobRunOutcome::Failed(anyhow::Error::new(failure.error))
+                }
                 Ok(()) if cancel.is_cancelled() => JobRunOutcome::CancelledBeforeStart,
                 Ok(()) => {
                     let command_name = if request.rebuild() {
@@ -437,17 +489,36 @@ async fn run_job(
                         Ok(_) if cancel.is_cancelled() => JobRunOutcome::CancelledBeforeStart,
                         Ok(_) => match run_log.record_run_start(command_name) {
                             Ok(run_id) => {
-                                let execution = ctx
-                                    .executor
-                                    .run_once(
-                                        &app,
-                                        &fenced_store,
-                                        lock_wait_ms,
-                                        &sync_options,
-                                        Some(&mut internal_tx),
-                                        &cancel,
-                                    )
-                                    .await;
+                                let notice = |notice| {
+                                    if let Some(observer) = &ctx.observer {
+                                        observer(&job_id, JobPresentation::Notice(&notice));
+                                    }
+                                };
+                                let execution = match &ctx.executor {
+                                    JobExecutor::Standard(executor) => {
+                                        executor
+                                            .run_once(
+                                                &app,
+                                                &fenced_store,
+                                                lock_wait_ms,
+                                                &sync_options,
+                                                Some(&mut internal_tx),
+                                                &cancel,
+                                            )
+                                            .await
+                                    }
+                                    JobExecutor::PresentationDefault => {
+                                        crate::sync::engine::run_once_locked_with_feedback(
+                                            &fenced_store,
+                                            lock_wait_ms,
+                                            &sync_options,
+                                            Some(&mut internal_tx),
+                                            &cancel,
+                                            Some(&notice),
+                                        )
+                                        .await
+                                    }
+                                };
                                 let (status, summary, error, outcome) = match execution {
                                     Ok(summary) if cancel.is_cancelled() => (
                                         "cancelled",
@@ -463,12 +534,7 @@ async fn run_job(
                                     ),
                                     Err(err) => {
                                         let message = format!("{err:#}");
-                                        (
-                                            "failed",
-                                            None,
-                                            Some(message.clone()),
-                                            JobRunOutcome::Failed(anyhow::Error::msg(message)),
-                                        )
+                                        ("failed", None, Some(message), JobRunOutcome::Failed(err))
                                     }
                                 };
                                 match run_log.finish_run(
@@ -478,10 +544,23 @@ async fn run_job(
                                     error.as_deref(),
                                 ) {
                                     Ok(()) => outcome,
-                                    Err(finish_err) => JobRunOutcome::Failed(anyhow!(
-                                        "记录 {command_name} 的 run_log 收尾失败: {finish_err}; 原始终态={status}; 原始错误={}",
-                                        error.as_deref().unwrap_or("none")
-                                    )),
+                                    Err(finish_error) => {
+                                        let canonical = format!(
+                                            "记录 {command_name} 的 run_log 收尾失败: {finish_error}; 原始终态={status}; 原始错误={}",
+                                            error.as_deref().unwrap_or("none")
+                                        );
+                                        let original_error = match outcome {
+                                            JobRunOutcome::Failed(error) => Some(error),
+                                            _ => None,
+                                        };
+                                        JobRunOutcome::Failed(anyhow::Error::new(RegistryFailure {
+                                            command: command_name,
+                                            status,
+                                            finish_error,
+                                            original_error,
+                                            canonical,
+                                        }))
+                                    }
                                 }
                             }
                             Err(err) => JobRunOutcome::Failed(anyhow::Error::new(err)),
@@ -497,7 +576,16 @@ async fn run_job(
         Ok(None) => JobRunOutcome::CancelledBeforeStart,
         Err(err) => JobRunOutcome::Failed(anyhow::Error::new(err)),
     };
-    finish_job(job_id, internal_tx, event_forwarder, state, ctx, outcome).await;
+    finish_job(
+        job_id,
+        internal_tx,
+        event_forwarder,
+        state,
+        ctx,
+        outcome,
+        pricing_failure.as_deref(),
+    )
+    .await;
 }
 
 async fn finish_job(
@@ -507,6 +595,7 @@ async fn finish_job(
     state: Arc<Mutex<JobState>>,
     ctx: JobContext,
     outcome: JobRunOutcome,
+    pricing: Option<&crate::domain::pricing_catalog::diagnostic::DiagnosticFacts>,
 ) {
     match outcome {
         JobRunOutcome::CancelledBeforeStart => {
@@ -545,6 +634,15 @@ async fn finish_job(
             );
         }
         JobRunOutcome::Failed(err) => {
+            if let Some(observer) = &ctx.observer {
+                observer(
+                    &job_id,
+                    JobPresentation::Failed {
+                        error: &err,
+                        pricing,
+                    },
+                );
+            }
             let message = format!("{err:#}");
             let _ = internal_tx
                 .send(SyncEvent::Failed {
@@ -639,6 +737,254 @@ mod tests {
     use super::*;
     use crate::paths::AppPaths;
     use tempfile::TempDir;
+
+    struct PresentationFailureExecutor;
+
+    impl crate::sync::executor::SyncExecutor for PresentationFailureExecutor {
+        fn run_once<'a>(
+            &'a self,
+            _app: &'a AppContext,
+            _store: &'a Store,
+            _wait: u64,
+            _options: &'a SyncRunOptions,
+            _sender: Option<&'a mut mpsc::Sender<SyncEvent>>,
+            _cancel: &'a CancellationToken,
+        ) -> crate::sync::executor::BoxFuture<'a, anyhow::Result<SyncSummary>> {
+            Box::pin(async {
+                Err(anyhow::Error::new(crate::sync::failure::SyncFailure::new(
+                    crate::sync::failure::FailureKind::OmpBeforePiSplit,
+                    "CANONICAL_REFUSAL".into(),
+                ))
+                .context("outer canonical context"))
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn presentation_observer_sees_typed_failure_before_unchanged_events_and_run_log()
+    -> anyhow::Result<()> {
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let mut results = Vec::new();
+        for enabled in [false, true] {
+            let temp = TempDir::new()?;
+            let paths = AppPaths::with_root(temp.path().to_path_buf())?;
+            let store = Store::new(&paths)?;
+            let mut registry = JobRegistry::new(Arc::new(PresentationFailureExecutor));
+            if enabled {
+                let captured = captured.clone();
+                registry.observer = Some(Arc::new(move |id, payload| {
+                    if let JobPresentation::Failed { error, pricing } = payload {
+                        assert!(pricing.is_none());
+                        let typed = error
+                            .downcast_ref::<crate::sync::failure::SyncFailure>()
+                            .expect("original typed cause survives run-log formatting");
+                        captured
+                            .lock()
+                            .unwrap()
+                            .push((id.to_string(), typed.kind.clone()));
+                    }
+                }));
+            }
+            let (id, mut rx) = registry.try_start(&store, SyncOptions::default()).unwrap();
+            let mut events = Vec::new();
+            while let Some(mut event) = rx.recv().await {
+                match &mut event {
+                    SyncEvent::Started { job_id, .. } => *job_id = "DYNAMIC_JOB_ID".into(),
+                    SyncEvent::LockAcquired { wait_ms } => *wait_ms = 0,
+                    _ => {}
+                }
+                events.push(event);
+            }
+            let snapshot = registry.snapshot(&id).unwrap();
+            assert_eq!(snapshot.status, JobStatus::Failed);
+            let expected = "outer canonical context: CANONICAL_REFUSAL";
+            assert_eq!(snapshot.error.as_deref(), Some(expected));
+            let run = store.run_log().recent_runs(1)?.remove(0);
+            assert_eq!(run.error.as_deref(), Some(expected));
+            assert_eq!(run.status, "failed");
+            if enabled {
+                let captured = captured.lock().unwrap();
+                assert_eq!(captured.len(), 1);
+                assert_eq!(captured[0].0, id);
+                assert_eq!(
+                    captured[0].1,
+                    crate::sync::failure::FailureKind::OmpBeforePiSplit
+                );
+            }
+            results.push((
+                events,
+                snapshot.error,
+                snapshot.summary,
+                snapshot.status,
+                run.error,
+            ));
+        }
+        assert_eq!(results[0], results[1]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn presentation_observer_keeps_bootstrap_pricing_facts_beside_original_error()
+    -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let paths = AppPaths::with_root(temp.path().to_path_buf())?;
+        let store = Store::new(&paths)?;
+        store.bootstrap()?;
+        store.open_connection()?.execute(
+            "INSERT OR REPLACE INTO meta(key, value) VALUES ('pricing_recompute_in_progress', '{')",
+            [],
+        )?;
+        let canonical = store.bootstrap().unwrap_err().to_string();
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let sink = captured.clone();
+        let registry = JobRegistry::with_presentation_observer(Arc::new(move |id, payload| {
+            if let JobPresentation::Failed { error, pricing } = payload {
+                assert!(error.downcast_ref::<crate::LlmusageError>().is_some());
+                let facts = pricing.expect("same bootstrap call retains pricing facts");
+                assert!(matches!(
+                    facts,
+                    crate::domain::pricing_catalog::diagnostic::DiagnosticFacts::MarkerParse { .. }
+                ));
+                sink.lock()
+                    .unwrap()
+                    .push((id.to_string(), format!("{error:#}"), facts.clone()));
+            }
+        }));
+        let (id, mut rx) = registry.try_start(&store, SyncOptions::default()).unwrap();
+        while rx.recv().await.is_some() {}
+        let snapshot = registry.snapshot(&id).unwrap();
+        assert_eq!(snapshot.error.as_deref(), Some(canonical.as_str()));
+        assert!(
+            store.run_log().recent_runs(10)?.is_empty(),
+            "bootstrap still fails before run start"
+        );
+        let observed = captured.lock().unwrap();
+        assert_eq!(observed.len(), 1);
+        assert_eq!(observed[0].0, id);
+        assert_eq!(
+            observed[0].1, canonical,
+            "no duplicate presentation source in canonical chain"
+        );
+        for language in [
+            crate::common::i18n::Language::English,
+            crate::common::i18n::Language::Chinese,
+        ] {
+            let rendered = observed[0].2.render(language).unwrap();
+            assert!(
+                rendered.contains(language.select("marker is invalid", "标记无效")),
+                "{rendered}"
+            );
+        }
+        Ok(())
+    }
+
+    struct FinishFailureExecutor;
+
+    impl crate::sync::executor::SyncExecutor for FinishFailureExecutor {
+        fn run_once<'a>(
+            &'a self,
+            app: &'a AppContext,
+            store: &'a Store,
+            wait: u64,
+            options: &'a SyncRunOptions,
+            sender: Option<&'a mut mpsc::Sender<SyncEvent>>,
+            cancel: &'a CancellationToken,
+        ) -> crate::sync::executor::BoxFuture<'a, anyhow::Result<SyncSummary>> {
+            Box::pin(async move {
+                store.write_transaction(|tx| {
+                    tx.execute_batch("CREATE TRIGGER reject_run_finish BEFORE UPDATE ON run_log BEGIN SELECT RAISE(ABORT, 'FINISH_DETAIL'); END;")?;
+                    Ok(())
+                })?;
+                PresentationFailureExecutor
+                    .run_once(app, store, wait, options, sender, cancel)
+                    .await
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn presentation_observer_keeps_terminal_write_and_original_typed_failure()
+    -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let store = Store::new(&AppPaths::with_root(temp.path().to_path_buf())?)?;
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let sink = captured.clone();
+        let mut registry = JobRegistry::new(Arc::new(FinishFailureExecutor));
+        registry.observer = Some(Arc::new(move |id, payload| {
+            if let JobPresentation::Failed { error, pricing } = payload {
+                assert!(pricing.is_none());
+                let failure = error
+                    .downcast_ref::<RegistryFailure>()
+                    .expect("typed terminal-write context");
+                assert_eq!(failure.command, "sync");
+                assert_eq!(failure.status, "failed");
+                assert!(matches!(failure.finish_error, crate::LlmusageError::Db(_)));
+                let original = failure.original_error.as_ref().unwrap();
+                let refusal = original
+                    .downcast_ref::<crate::sync::failure::SyncFailure>()
+                    .unwrap();
+                assert_eq!(
+                    refusal.kind,
+                    crate::sync::failure::FailureKind::OmpBeforePiSplit
+                );
+                let canonical = format!(
+                    "记录 sync 的 run_log 收尾失败: {}; 原始终态=failed; 原始错误=outer canonical context: CANONICAL_REFUSAL",
+                    failure.finish_error
+                );
+                assert_eq!(
+                    format!("{error:#}"),
+                    canonical,
+                    "no duplicated source chain"
+                );
+                let mut paired = Vec::new();
+                for language in [
+                    crate::common::i18n::Language::English,
+                    crate::common::i18n::Language::Chinese,
+                ] {
+                    paired.push(crate::common::i18n::sync::registry_failure(
+                        failure.command,
+                        failure.status,
+                        &failure.finish_error.to_string(),
+                        Some(&crate::common::i18n::sync::failure(&refusal.kind, language)),
+                        language,
+                    ));
+                }
+                sink.lock()
+                    .unwrap()
+                    .push((id.to_string(), canonical, paired));
+            }
+        }));
+        let (id, mut rx) = registry.try_start(&store, SyncOptions::default()).unwrap();
+        let mut event_error = None;
+        while let Some(event) = rx.recv().await {
+            if let SyncEvent::Failed { error } = event {
+                event_error = Some(error);
+            }
+        }
+        let snapshot = registry.snapshot(&id).unwrap();
+        let captured = captured.lock().unwrap();
+        assert_eq!(captured.len(), 1);
+        assert_eq!(captured[0].0, id);
+        assert_eq!(snapshot.error.as_deref(), Some(captured[0].1.as_str()));
+        assert_eq!(event_error, snapshot.error);
+        assert!(captured[0].2[0].contains("Could not finish sync run log"));
+        assert!(captured[0].2[0].contains("Refusing --source omp"));
+        assert!(captured[0].2[1].contains("运行日志收尾失败"));
+        assert!(captured[0].2[1].contains("拒绝同步 --source omp"));
+        assert!(
+            captured[0]
+                .2
+                .iter()
+                .all(|text| text.contains("FINISH_DETAIL"))
+        );
+        let run = store.run_log().recent_runs(1)?.remove(0);
+        assert_eq!(
+            run.status, "running",
+            "failed terminal write does not invent a persisted terminal state"
+        );
+        assert!(run.error.is_none());
+        Ok(())
+    }
 
     struct FencedAssertionExecutor;
 

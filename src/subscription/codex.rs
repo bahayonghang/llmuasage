@@ -6,6 +6,7 @@ use chrono::{TimeZone, Utc};
 use serde::Deserialize;
 
 use super::http::{client, status_error};
+use super::presentation::{self, DiagnosticHint, MetricHint, PresentedOutput, WindowHint};
 use super::types::{UsageMetric, UsageOutput, capitalize};
 
 #[derive(Debug, Deserialize)]
@@ -83,7 +84,11 @@ pub fn has_credentials(user_home: &Path) -> bool {
         || opencode_auth_path(user_home).exists()
 }
 
-pub async fn fetch(user_home: &Path, usage_url: &str, timeout: Duration) -> Result<UsageOutput> {
+pub async fn fetch(
+    user_home: &Path,
+    usage_url: &str,
+    timeout: Duration,
+) -> Result<PresentedOutput> {
     let auth = read_auth(user_home)?;
     let before = std::fs::read(&auth.path)?;
     let http = client(timeout)?;
@@ -98,7 +103,10 @@ pub async fn fetch(user_home: &Path, usage_url: &str, timeout: Duration) -> Resu
     let status = response.status();
     let after = std::fs::read(&auth.path).unwrap_or_default();
     if after != before {
-        anyhow::bail!("Codex credentials were modified during fetch");
+        return Err(presentation::error(
+            "Codex credentials were modified during fetch",
+            DiagnosticHint::CredentialsModified,
+        ));
     }
     if !status.is_success() {
         return Err(status_error("Codex", status));
@@ -106,8 +114,9 @@ pub async fn fetch(user_home: &Path, usage_url: &str, timeout: Duration) -> Resu
     let body: Usage = response.json().await?;
     let plan = body.plan_type.as_deref().map(capitalize);
     let mut metrics = Vec::new();
+    let mut hints = Vec::new();
     if let Some(rate_limit) = &body.rate_limit {
-        push_rate_limit_metrics(&mut metrics, None, rate_limit);
+        push_rate_limit_metrics(&mut metrics, &mut hints, None, rate_limit);
     }
     for limit in &body.additional_rate_limits {
         if let Some(rate_limit) = &limit.rate_limit {
@@ -116,18 +125,21 @@ pub async fn fetch(user_home: &Path, usage_url: &str, timeout: Duration) -> Resu
                 .as_deref()
                 .or(limit.metered_feature.as_deref())
                 .map(capitalize);
-            push_rate_limit_metrics(&mut metrics, label.as_deref(), rate_limit);
+            push_rate_limit_metrics(&mut metrics, &mut hints, label.as_deref(), rate_limit);
         }
     }
 
-    Ok(UsageOutput {
-        provider: "Codex".into(),
-        account: None,
-        credential_source: auth.credential_source,
-        plan,
-        email: body.email,
-        metrics,
-    })
+    Ok((
+        UsageOutput {
+            provider: "Codex".into(),
+            account: None,
+            credential_source: auth.credential_source,
+            plan,
+            email: body.email,
+            metrics,
+        },
+        hints,
+    ))
 }
 
 fn auth_candidates(user_home: &Path) -> Vec<PathBuf> {
@@ -185,7 +197,10 @@ fn read_auth(user_home: &Path) -> Result<CodexAuth> {
         }
     }
 
-    anyhow::bail!("No Codex credentials found. Run 'codex' to log in.")
+    Err(presentation::error(
+        "No Codex credentials found. Run 'codex' to log in.",
+        DiagnosticHint::MissingCredentials,
+    ))
 }
 
 fn metric_from_window(label: &str, window: &Window) -> UsageMetric {
@@ -231,19 +246,34 @@ fn metric_label(prefix: Option<&str>, window: &Window, fallback: &str) -> String
 
 fn push_rate_limit_metrics(
     metrics: &mut Vec<UsageMetric>,
+    hints: &mut Vec<MetricHint>,
     prefix: Option<&str>,
     rate_limit: &RateLimit,
 ) {
     if let Some(window) = &rate_limit.primary_window {
+        hints.push(window_hint(prefix, window, WindowHint::Seconds(18000)));
         metrics.push(metric_from_window(
             &metric_label(prefix, window, "5h"),
             window,
         ));
     }
     if let Some(window) = &rate_limit.secondary_window {
+        hints.push(window_hint(prefix, window, WindowHint::Weekly));
         metrics.push(metric_from_window(
             &metric_label(prefix, window, "Weekly"),
             window,
         ));
+    }
+}
+
+fn window_hint(prefix: Option<&str>, window: &Window, fallback: WindowHint) -> MetricHint {
+    MetricHint {
+        window: window
+            .limit_window_seconds
+            .filter(|seconds| *seconds > 0)
+            .map(WindowHint::Seconds)
+            .unwrap_or(fallback),
+        prefix: prefix.map(str::to_owned),
+        remaining: None,
     }
 }

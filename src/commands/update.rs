@@ -1,3 +1,5 @@
+use super::cli_errors::Diagnostic;
+use crate::common::i18n::commands::{OperationDiagnostic as Fact, message};
 use std::{
     collections::BTreeMap,
     fmt,
@@ -5,7 +7,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-use anyhow::{Context, Result, anyhow, bail, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use clap::ValueEnum;
 
 const GITHUB_REPOSITORY: &str = "https://github.com/bahayonghang/llmuasage";
@@ -100,21 +102,35 @@ impl RefProvider for GitRefProvider {
                 command.args(["--heads", GITHUB_REPOSITORY, DEV_REF]);
             }
         }
-        let output = command
-            .output()
-            .with_context(|| format!("failed to resolve update refs for `{channel}`"))?;
+        let output = command.output().with_context(|| {
+            Diagnostic::with_facts(
+                format!("failed to resolve update refs for `{channel}`"),
+                Fact::UpdateRefs {
+                    channel: channel.to_string(),
+                    detail: String::new(),
+                },
+            )
+        })?;
         if !output.status.success() {
             let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            bail!(
-                "failed to resolve update refs for `{channel}`{}",
-                if detail.is_empty() {
-                    String::new()
-                } else {
-                    format!(": {detail}")
-                }
-            );
+            let suffix = if detail.is_empty() {
+                String::new()
+            } else {
+                format!(": {detail}")
+            };
+            return Err(Diagnostic::with_facts(
+                format!("failed to resolve update refs for `{channel}`{suffix}"),
+                Fact::UpdateRefs {
+                    channel: channel.to_string(),
+                    detail: suffix,
+                },
+            )
+            .into());
         }
-        String::from_utf8(output.stdout).context("git ls-remote returned non-UTF-8 output")
+        String::from_utf8(output.stdout).context(Diagnostic::with_facts(
+            "git ls-remote returned non-UTF-8 output",
+            Fact::UpdateEncoding,
+        ))
     }
 }
 
@@ -150,37 +166,47 @@ where
     print_header(writer, &plan)?;
 
     if check_only {
-        writeln!(writer, "Check only: no update was performed.")?;
+        writeln!(writer, "{}", message!(UpdateCheck))?;
         return Ok(());
     }
 
     if !confirm_update(reader, writer)? {
-        writeln!(writer, "Update cancelled.")?;
+        writeln!(writer, "{}", message!(UpdateCancelled))?;
         return Ok(());
     }
 
     let verified = resolve_update(channel, provider)?;
     ensure!(
         verified == target,
-        "resolved update target changed after confirmation; rerun `llmusage update {channel}` to review the new target"
+        Diagnostic::with_facts(
+            format!(
+                "resolved update target changed after confirmation; rerun `llmusage update {channel}` to review the new target"
+            ),
+            Fact::UpdateChanged {
+                channel: channel.to_string()
+            }
+        )
     );
 
-    writeln!(writer, "Starting update...")?;
+    writeln!(writer, "{}", message!(UpdateStarting))?;
     writer.flush()?;
     let outcome = executor(&plan).map_err(|error| {
-        anyhow!(
+        let canonical = format!(
             "failed to start Cargo update from `{channel}`: {error:#}\nManual command: {}",
             plan.command_line()
-        )
+        );
+        let facts = Fact::UpdateStart {
+            channel: channel.to_string(),
+            detail: format!("{error:#}"),
+            command: plan.command_line(),
+        };
+        error.context(Diagnostic::with_facts(canonical, facts))
     })?;
 
     match outcome {
         InstallOutcome::Success => {
-            writeln!(writer, "Update completed successfully.")?;
-            writeln!(
-                writer,
-                "Run `llmusage --version` to verify the installed version."
-            )?;
+            writeln!(writer, "{}", message!(UpdateCompleted))?;
+            writeln!(writer, "{}", message!(UpdateVerify))?;
             Ok(())
         }
         InstallOutcome::Failed(exit_code) => {
@@ -188,10 +214,19 @@ where
                 || "terminated without an exit code".to_string(),
                 |code| format!("exit code {code}"),
             );
-            bail!(
+            let canonical = format!(
                 "Cargo update from `{channel}` failed with {detail}.\nManual command: {}",
                 plan.command_line()
+            );
+            Err(Diagnostic::with_facts(
+                canonical,
+                Fact::UpdateFailed {
+                    channel: channel.to_string(),
+                    exit_code,
+                    command: plan.command_line(),
+                },
             )
+            .into())
         }
     }
 }
@@ -230,7 +265,12 @@ fn resolve_stable_refs(raw: &str) -> Result<ResolvedUpdate> {
             .or_insert_with(|| (tag.to_string(), TagTarget::default()));
         ensure!(
             entry.0 == tag,
-            "ambiguous stable release tags for {version:?}"
+            Diagnostic::with_facts(
+                format!("ambiguous stable release tags for {version:?}"),
+                Fact::UpdateAmbiguous {
+                    version: format!("{version:?}")
+                }
+            )
         );
         let slot = if peeled {
             &mut entry.1.peeled
@@ -240,7 +280,12 @@ fn resolve_stable_refs(raw: &str) -> Result<ResolvedUpdate> {
         if let Some(existing) = slot.as_ref() {
             ensure!(
                 existing == &sha,
-                "release tag `{tag}` resolved inconsistently"
+                Diagnostic::with_facts(
+                    format!("release tag `{tag}` resolved inconsistently"),
+                    Fact::UpdateInconsistentTag {
+                        tag: tag.to_string()
+                    }
+                )
             );
         } else {
             *slot = Some(sha);
@@ -250,15 +295,28 @@ fn resolve_stable_refs(raw: &str) -> Result<ResolvedUpdate> {
     let (_, (tag, target)) = tags
         .into_iter()
         .next_back()
-        .context("no stable semantic-version release tag was found")?;
+        .context(Diagnostic::with_facts(
+            "no stable semantic-version release tag was found",
+            Fact::UpdateNoStable,
+        ))?;
     ensure!(
         target.direct.is_some(),
-        "release tag `{tag}` has a peeled commit without a tag ref"
+        Diagnostic::with_facts(
+            format!("release tag `{tag}` has a peeled commit without a tag ref"),
+            Fact::UpdateNoDirect {
+                tag: tag.to_string()
+            }
+        )
     );
     let commit_sha = target.peeled.or(target.direct).expect("direct tag checked");
     ensure!(
         is_full_commit_sha(&commit_sha),
-        "release tag `{tag}` resolved to an invalid commit SHA"
+        Diagnostic::with_facts(
+            format!("release tag `{tag}` resolved to an invalid commit SHA"),
+            Fact::UpdateInvalidTag {
+                tag: tag.to_string()
+            }
+        )
     );
     Ok(ResolvedUpdate {
         channel: UpdateChannel::Main,
@@ -276,10 +334,19 @@ fn resolve_dev_ref(raw: &str) -> Result<ResolvedUpdate> {
         }
         ensure!(
             is_full_commit_sha(&sha),
-            "dev branch resolved to an invalid commit SHA"
+            Diagnostic::with_facts(
+                "dev branch resolved to an invalid commit SHA",
+                Fact::UpdateInvalidDev
+            )
         );
         if let Some(existing) = commit.as_ref() {
-            ensure!(existing == &sha, "dev branch resolved inconsistently");
+            ensure!(
+                existing == &sha,
+                Diagnostic::with_facts(
+                    "dev branch resolved inconsistently",
+                    Fact::UpdateInconsistentDev
+                )
+            );
         } else {
             commit = Some(sha);
         }
@@ -287,7 +354,10 @@ fn resolve_dev_ref(raw: &str) -> Result<ResolvedUpdate> {
     Ok(ResolvedUpdate {
         channel: UpdateChannel::Dev,
         tag: None,
-        commit_sha: commit.context("official dev branch was not found")?,
+        commit_sha: commit.context(Diagnostic::with_facts(
+            "official dev branch was not found",
+            Fact::UpdateNoDev,
+        ))?,
         mutable_channel: true,
     })
 }
@@ -297,15 +367,25 @@ fn parse_ref_lines(raw: &str) -> Result<Vec<(String, String)>> {
         .filter(|line| !line.trim().is_empty())
         .map(|line| {
             let mut fields = line.split_whitespace();
-            let sha = fields.next().context("missing SHA in git ref output")?;
-            let reference = fields
-                .next()
-                .context("missing ref name in git ref output")?;
+            let sha = fields.next().context(Diagnostic::with_facts(
+                "missing SHA in git ref output",
+                Fact::UpdateMissingSha,
+            ))?;
+            let reference = fields.next().context(Diagnostic::with_facts(
+                "missing ref name in git ref output",
+                Fact::UpdateMissingRef,
+            ))?;
             ensure!(
                 fields.next().is_none(),
-                "unexpected fields in git ref output"
+                Diagnostic::with_facts(
+                    "unexpected fields in git ref output",
+                    Fact::UpdateExtraFields
+                )
             );
-            ensure!(is_full_commit_sha(sha), "invalid SHA in git ref output");
+            ensure!(
+                is_full_commit_sha(sha),
+                Diagnostic::with_facts("invalid SHA in git ref output", Fact::UpdateInvalidSha)
+            );
             Ok((sha.to_ascii_lowercase(), reference.to_string()))
         })
         .collect()
@@ -338,45 +418,46 @@ fn is_full_commit_sha(value: &str) -> bool {
 
 fn print_header(writer: &mut impl Write, plan: &InstallPlan) -> Result<()> {
     writeln!(writer, "llmusage update")?;
-    writeln!(writer, "Current version: {}", env!("CARGO_PKG_VERSION"))?;
-    writeln!(writer, "Repository: {GITHUB_REPOSITORY}")?;
-    writeln!(writer, "Channel: {}", plan.target.channel)?;
+    writeln!(
+        writer,
+        "{}",
+        message!(UpdateVersion, env!("CARGO_PKG_VERSION"))
+    )?;
+    writeln!(writer, "{}", message!(UpdateRepo, GITHUB_REPOSITORY))?;
+    writeln!(writer, "{}", message!(UpdateChannel, plan.target.channel))?;
     if let Some(tag) = &plan.target.tag {
-        writeln!(writer, "Release tag: {tag}")?;
+        writeln!(writer, "{}", message!(UpdateTag, tag))?;
     }
-    writeln!(writer, "Resolved commit: {}", plan.target.commit_sha)?;
+    writeln!(writer, "{}", message!(UpdateCommit, plan.target.commit_sha))?;
     if plan.target.mutable_channel {
         writeln!(writer)?;
-        writeln!(
-            writer,
-            "WARNING: dev follows the mutable 'dev' branch and is not a verified stable release."
-        )?;
-        writeln!(
-            writer,
-            "The resolved commit is shown for review, but the branch can change in the future."
-        )?;
+        writeln!(writer, "{}", message!(UpdateDevWarning))?;
+        writeln!(writer, "{}", message!(UpdateDevReview))?;
     }
     writeln!(writer)?;
-    writeln!(writer, "Command: {}", plan.command_line())?;
+    writeln!(writer, "{}", message!(UpdateCommand, plan.command_line()))?;
     writeln!(writer)?;
     Ok(())
 }
 
 fn confirm_update(reader: &mut impl BufRead, writer: &mut impl Write) -> Result<bool> {
     loop {
-        write!(writer, "Continue with the update? [Y/n]: ")?;
+        write!(writer, "{}", message!(UpdateConfirm))?;
         writer.flush()?;
 
         let mut input = String::new();
         let bytes_read = reader.read_line(&mut input)?;
         if bytes_read == 0 {
-            bail!("confirmation input reached EOF; update was not started");
+            bail!(Diagnostic::with_facts(
+                "confirmation input reached EOF; update was not started",
+                Fact::UpdateEof
+            ));
         }
 
         match input.trim().to_ascii_lowercase().as_str() {
             "" | "y" | "yes" => return Ok(true),
             "n" | "no" => return Ok(false),
-            _ => writeln!(writer, "Please answer `y` or `n`.")?,
+            _ => writeln!(writer, "{}", message!(UpdateRetry))?,
         }
     }
 }
@@ -453,6 +534,97 @@ mod tests {
 
     fn repeated_refs(raw: String) -> FakeRefProvider {
         FakeRefProvider::new([raw.clone(), raw])
+    }
+
+    #[test]
+    fn paired_confirmation_and_executor_paths_keep_defaults_and_failure_policy() -> Result<()> {
+        use crate::commands::cli_errors::application_error;
+        use crate::common::i18n::{Language, with_language};
+        for language in [Language::English, Language::Chinese] {
+            with_language(language, || -> Result<()> {
+                for answer in ["\n", "y\n", "Y\n", "yes\n", "YES\n", "invalid\ny\n"] {
+                    let mut output = Vec::new();
+                    assert!(confirm_update(&mut Cursor::new(answer), &mut output)?);
+                    let output = String::from_utf8(output)?;
+                    assert!(
+                        output
+                            .contains(language.select("Continue with the update?", "是否继续更新"))
+                    );
+                    if answer.starts_with("invalid") {
+                        assert!(output.contains(language.select("Please answer", "请输入")));
+                    }
+                }
+                for answer in ["n\n", "N\n", "no\n", "NO\n"] {
+                    assert!(!confirm_update(&mut Cursor::new(answer), &mut Vec::new())?);
+                }
+                for (input, changed, expected_en, expected_zh) in [
+                    (
+                        "",
+                        false,
+                        "confirmation input reached EOF",
+                        "确认输入已到 EOF",
+                    ),
+                    (
+                        "y\n",
+                        true,
+                        "changed after confirmation",
+                        "确认后更新目标发生变化",
+                    ),
+                ] {
+                    let called = Cell::new(false);
+                    let mut provider = FakeRefProvider::new([
+                        stable_refs("v1.0.2", SHA_A),
+                        stable_refs("v1.0.2", if changed { SHA_B } else { SHA_A }),
+                    ]);
+                    let error = run_with(
+                        UpdateChannel::Main,
+                        false,
+                        &mut Cursor::new(input),
+                        &mut Vec::new(),
+                        &mut provider,
+                        |_| {
+                            called.set(true);
+                            Ok(InstallOutcome::Success)
+                        },
+                    )
+                    .expect_err("rejected before executor");
+                    assert!(!called.get());
+                    assert!(
+                        application_error(&error, language)
+                            .contains(language.select(expected_en, expected_zh))
+                    );
+                }
+                for outcome in [
+                    InstallOutcome::Success,
+                    InstallOutcome::Failed(Some(101)),
+                    InstallOutcome::Failed(None),
+                ] {
+                    let success = matches!(outcome, InstallOutcome::Success);
+                    let mut output = Vec::new();
+                    let result = run_with(
+                        UpdateChannel::Dev,
+                        false,
+                        &mut Cursor::new("\n"),
+                        &mut output,
+                        &mut repeated_refs(dev_refs(SHA_A)),
+                        |_| Ok(outcome),
+                    );
+                    assert_eq!(result.is_ok(), success);
+                    if let Err(error) = result {
+                        assert!(
+                            application_error(&error, language)
+                                .contains(language.select("Cargo update", "Cargo 更新"))
+                        );
+                    } else {
+                        assert!(String::from_utf8(output)?.contains(
+                            language.select("Update completed successfully", "更新成功完成")
+                        ));
+                    }
+                }
+                Ok(())
+            })?;
+        }
+        Ok(())
     }
 
     #[test]

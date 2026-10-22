@@ -212,11 +212,17 @@ impl Store {
          * 2) 把 event / bucket / project / cursor 写入收敛到一个出口
          * 3) 避免每条 event 单独开连接和事务
          */
-        info!("开始建立 sync 单写入端");
+        info!(
+            event_code = "store.sync_writer.01",
+            "开始建立 sync 单写入端"
+        );
         let conn = self.open_connection()?;
         let raw_archive_enabled = self.raw_archive_enabled()?;
         let pricing_catalog = self.active_pricing_catalog()?;
-        info!(raw_archive_enabled, "完成 sync 单写入端建立");
+        info!(
+            event_code = "store.sync_writer.02",
+            raw_archive_enabled, "完成 sync 单写入端建立"
+        );
         Ok(SyncRunWriter {
             store: self.clone(),
             conn: Some(conn),
@@ -274,7 +280,7 @@ impl SyncRunWriter {
          * 2) 同步回滚 bucket 聚合，避免双计
          * 3) 保持 path 级别重放的幂等
          */
-        info!(source = %source, count = path_hashes.len(), "开始清理重放旧事件");
+        info!(event_code = "store.sync_writer.03", source = %source, count = path_hashes.len(), "开始清理重放旧事件");
 
         // 4.1 在 shard 事务里扣减 bucket 并删除旧 event
         #[cfg(test)]
@@ -508,7 +514,7 @@ impl SyncRunWriter {
             #[cfg(test)]
             profiling::count("touched_bucket_candidates", touched_buckets.len());
         }
-        info!(source = %source, "完成重放旧事件清理");
+        info!(event_code = "store.sync_writer.04", source = %source, "完成重放旧事件清理");
         Ok(())
     }
 
@@ -531,7 +537,11 @@ impl SyncRunWriter {
          * 2) 仅对新插入事件更新 project_dim 与 bucket
          * 3) 把每批写入保持在单事务内
          */
-        info!(batch = events.len(), "开始批量写入 usage_event");
+        info!(
+            event_code = "store.sync_writer.05",
+            batch = events.len(),
+            "开始批量写入 usage_event"
+        );
 
         // 5.1 在 shard 事务中插入 event，并为新 event 做内存聚合
         let now = audit_now();
@@ -635,7 +645,12 @@ impl SyncRunWriter {
             writer_stage!("buckets", flush_buckets_tx(tx, &buckets))?;
             inserted
         };
-        info!(batch = events.len(), inserted, "完成批量写入 usage_event");
+        info!(
+            event_code = "store.sync_writer.06",
+            batch = events.len(),
+            inserted,
+            "完成批量写入 usage_event"
+        );
         Ok(inserted)
     }
 
@@ -658,7 +673,7 @@ impl SyncRunWriter {
          * 2) 把文件签名、offset、累计 token 状态一并持久化
          * 3) 保持每批 cursor 写入在单事务内
          */
-        info!(source = %source, count = cursors.len(), "开始批量刷新 cursor");
+        info!(event_code = "store.sync_writer.07", source = %source, count = cursors.len(), "开始批量刷新 cursor");
 
         // 6.1 用 shard 事务 upsert 本轮发生变化的 cursor
         {
@@ -721,12 +736,15 @@ impl SyncRunWriter {
                 ])?;
             }
         }
-        info!(source = %source, "完成批量刷新 cursor");
+        info!(event_code = "store.sync_writer.08", source = %source, "完成批量刷新 cursor");
         Ok(())
     }
 
     pub fn finish_sync_run(self) -> Result<()> {
-        info!("完成 sync 单写入端收尾");
+        info!(
+            event_code = "store.sync_writer.09",
+            "完成 sync 单写入端收尾"
+        );
         Ok(())
     }
 
@@ -988,8 +1006,7 @@ impl SyncRunWriter {
             profiling::count("turns_deduped", shard.turns.len());
             profiling::count("tools_deduped", shard.tool_calls.len());
         }
-        info!(
-            source = %shard.source,
+        info!(event_code = "store.sync_writer.10", source = %shard.source,
             resets = shard.reset_path_hashes.len(),
             events = shard.events.len(),
             cursors = shard.cursors.len(),
@@ -1068,8 +1085,7 @@ impl SyncRunWriter {
             profiling::count("tools_inserted", stats.tool_calls_inserted);
             profile.finish(elapsed);
         }
-        info!(
-            source = %shard.source,
+        info!(event_code = "store.sync_writer.11", source = %shard.source,
             inserted = stats.events_inserted,
             turns_inserted = stats.turns_inserted,
             tool_calls_inserted = stats.tool_calls_inserted,
@@ -1194,8 +1210,8 @@ impl SyncRunWriter {
             return Ok(());
         }
         info!(
-            host_id,
-            "resetting pre-split pi rows before first omp shard"
+            event_code = "store.sync_writer.12",
+            host_id, "resetting pre-split pi rows before first omp shard"
         );
         reset_for_source_tx(tx, SourceKind::Pi, host_id)?;
         write_meta_value(tx, &key, run_started_at)?;

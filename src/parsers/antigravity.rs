@@ -403,71 +403,6 @@ pub(crate) fn format_antigravity_blocked_notice(coverage: &AntigravityProductCov
     format!("group writes skipped; {detail}; restore access and retry sync")
 }
 
-pub(crate) fn format_prompt_question(
-    source: SourceKind,
-    coverage: &AntigravityProductCoverage,
-) -> String {
-    let mut parts = Vec::new();
-    if coverage.missing_count > 0 {
-        parts.push(format!(
-            "{} tracked database(s) are missing from disk ({} new file(s) found); rebuilding will discard events from missing files",
-            coverage.missing_count, coverage.new_files_count
-        ));
-    }
-    if coverage.out_of_scope_count > 0 {
-        parts.push(format!(
-            "{} tracked input(s) exist outside current discovery coverage; rebuilding will only keep currently parseable files",
-            coverage.out_of_scope_count
-        ));
-    }
-    format!(
-        "\nSource '{}' has {} preserved events.\n{}\nAccept data loss and rebuild now? [k]eep / [r]ebuild (default: keep): ",
-        source.as_str(),
-        coverage.stored_events,
-        parts.join("\n")
-    )
-}
-
-pub(crate) fn prompt_recovery_choice<R: std::io::BufRead, W: std::io::Write>(
-    reader: &mut R,
-    writer: &mut W,
-    source: SourceKind,
-    coverage: &AntigravityProductCoverage,
-) -> crate::sync::types::AntigravityRecoveryChoice {
-    let question = format_prompt_question(source, coverage);
-    let _ = write!(writer, "{question}");
-    let _ = writer.flush();
-
-    let mut line = String::new();
-    if reader.read_line(&mut line).is_err() {
-        return crate::sync::types::AntigravityRecoveryChoice::Keep;
-    }
-    let trimmed = line.trim();
-    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("k") {
-        return crate::sync::types::AntigravityRecoveryChoice::Keep;
-    }
-    if trimmed.eq_ignore_ascii_case("r") {
-        return crate::sync::types::AntigravityRecoveryChoice::AcceptLoss;
-    }
-
-    // Invalid input: prompt once more
-    let _ = write!(
-        writer,
-        "Please enter 'k' to keep or 'r' to rebuild (default: keep): "
-    );
-    let _ = writer.flush();
-    line.clear();
-    if reader.read_line(&mut line).is_err() {
-        return crate::sync::types::AntigravityRecoveryChoice::Keep;
-    }
-    let trimmed = line.trim();
-    if trimmed.eq_ignore_ascii_case("r") {
-        crate::sync::types::AntigravityRecoveryChoice::AcceptLoss
-    } else {
-        crate::sync::types::AntigravityRecoveryChoice::Keep
-    }
-}
-
 struct FamilyInputs {
     started: Instant,
     listings: [(SourceKind, source_files::SourceFileListing); 2],
@@ -756,7 +691,7 @@ async fn sync_family_with_inputs(
                     Ok(after) if after.file_fingerprint == file.cursor.file_fingerprint => None,
                     Ok(_) => Some(SourceIssueCode::SnapshotChanged),
                     Err(error) => {
-                        tracing::warn!(error = %error, path_hash = hash_string(&file.path.to_string_lossy()), "Antigravity post-read fingerprint unavailable");
+                        tracing::warn!(event_code = "parsers.antigravity.01", error = %error, path_hash = hash_string(&file.path.to_string_lossy()), "Antigravity post-read fingerprint unavailable");
                         Some(SourceIssueCode::FingerprintUnavailable)
                     }
                 };

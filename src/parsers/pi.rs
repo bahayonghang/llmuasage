@@ -155,7 +155,7 @@ async fn sync_pi_format(
      * 2) 只把缺失、追加或改写的文件送去解析
      * 3) 返回 event / cursor / reset 指令给单 writer 统一落库
      */
-    info!(source = %source, "开始同步 Pi 格式会话真源");
+    info!(event_code = "parsers.pi.01", source = %source, "开始同步 Pi 格式会话真源");
 
     // 1.1 构建按 project 目录分片的候选文件计划
     let parse_started = Instant::now();
@@ -167,7 +167,7 @@ async fn sync_pi_format(
         &inventory_paths,
         writer.run_started_at(),
     )?;
-    let inventory_error = listing.error_summary();
+    let inventory_error = listing.error_summary_with_feedback(source);
     let files = listing.paths;
     let total_files = files.len();
     let discovery_roots = match source {
@@ -318,6 +318,7 @@ async fn sync_pi_format(
     stats.parse_ms = total_elapsed.saturating_sub(write_ms);
 
     info!(
+        event_code = "parsers.pi.02",
         files_processed = stats.files_processed,
         changed_files = stats.changed_files,
         skipped_files = stats.skipped_files,

@@ -815,5 +815,6 @@ fn render_models_text(items: Vec<ModelBreakdown>, width: u16, height: u16) -> St
     buffer_text(&terminal)
 }
 
+mod language;
 mod panels;
 mod shell;

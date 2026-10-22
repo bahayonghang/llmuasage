@@ -1,3 +1,5 @@
+use crate::common::i18n::tui::format as tr_format;
+use crate::common::i18n::tui::text as tr;
 use std::collections::BTreeMap;
 
 use ratatui::{
@@ -38,15 +40,15 @@ pub(crate) fn render_with_plan(
 ) {
     match data {
         None => {
-            let widget = Paragraph::new("Loading...")
+            let widget = Paragraph::new(tr("loading"))
                 .style(theme::muted_style())
-                .block(styled_block("Overview"));
+                .block(styled_block(tr("overview")));
             frame.render_widget(widget, area);
         }
         Some(Err(e)) => {
-            let widget = Paragraph::new(format!("Data load failed: {e}"))
+            let widget = Paragraph::new(tr_format!(data_load_failed_e, e = e))
                 .style(theme::error_style())
-                .block(styled_block("Overview"));
+                .block(styled_block(tr("overview")));
             frame.render_widget(widget, area);
         }
         Some(Ok(payload)) => render_payload(frame, area, payload, scroll, sort),
@@ -78,9 +80,9 @@ fn render_payload(
         chart_area,
         &chart_series(&payload.daily_models, &shade_map),
         if area.width < 60 {
-            "Tokens"
+            tr("tokens_3")
         } else {
-            "Tokens per Day"
+            tr("tokens_per_day")
         },
     );
     render_legend(frame, legend_area, &payload.models, sort, &shade_map);
@@ -171,16 +173,16 @@ fn render_model_list(
         .map(|item| finite_cost(item.cost_with_cache_usd))
         .sum::<f64>();
     let title = if very_narrow {
-        "Top Models".to_string()
+        tr("top_models").to_string()
     } else if sort.key == Some(TableSortKey::Tokens) {
-        "Models by Tokens".to_string()
+        tr("models_by_tokens").to_string()
     } else {
-        "Models by Cost".to_string()
+        tr("models_by_cost").to_string()
     };
     let title_right = if very_narrow {
         cost_compact(window_cost)
     } else {
-        format!("Total: {}", cost_compact(window_cost))
+        tr_format!(total_2, cost_compact(window_cost))
     };
 
     let block = Block::default()
@@ -204,7 +206,7 @@ fn render_model_list(
     }
     if ordered.is_empty() {
         frame.render_widget(
-            Paragraph::new("No model data found.").style(theme::muted_style()),
+            Paragraph::new(tr("no_model_data_found")).style(theme::muted_style()),
             inner,
         );
         return;
@@ -268,22 +270,22 @@ fn render_model_list(
             ])
         } else {
             Line::from(vec![
-                Span::styled("  In: ", theme::muted_style()),
+                Span::styled(tr("in"), theme::muted_style()),
                 Span::styled(
                     stat_compact(item.input_tokens),
                     theme::fg_style(theme::metric_input()),
                 ),
-                Span::styled(" · Out: ", theme::muted_style()),
+                Span::styled(tr("out"), theme::muted_style()),
                 Span::styled(
                     stat_compact(item.output_tokens),
                     theme::fg_style(theme::metric_output()),
                 ),
-                Span::styled(" · CR: ", theme::muted_style()),
+                Span::styled(tr("cr"), theme::muted_style()),
                 Span::styled(
                     stat_compact(item.cache_read_tokens),
                     theme::fg_style(theme::metric_cache_read()),
                 ),
-                Span::styled(" · CW: ", theme::muted_style()),
+                Span::styled(tr("cw"), theme::muted_style()),
                 Span::styled(
                     stat_compact(item.cache_creation_tokens),
                     theme::fg_style(theme::metric_cache_write()),

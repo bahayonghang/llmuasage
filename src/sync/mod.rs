@@ -1,7 +1,9 @@
 mod default;
 pub(crate) mod engine;
 pub mod executor;
+pub(crate) mod failure;
 pub mod job_registry;
+pub(crate) mod notices;
 pub(crate) mod pricing_refresh;
 pub mod types;
 

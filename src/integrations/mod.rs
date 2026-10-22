@@ -28,25 +28,123 @@ pub struct IntegrationAction {
     pub detail: String,
 }
 
-type CleanupFn = fn(&AppContext, &Store) -> Result<IntegrationAction>;
+#[derive(Debug, Clone)]
+pub(crate) enum CleanupFact {
+    CodexNotify,
+    CodexResidue,
+    CodexAbsent,
+    ClaudeHooks,
+    ClaudeResidue,
+    ClaudeAbsent,
+    OpenCodeAbsent { residue: bool },
+    OpenCodeUnowned { residue: bool },
+    OpenCodePlugin,
+    Antigravity { hooks: bool, residue: bool },
+}
+
+pub(crate) struct CleanupOutcome {
+    pub(crate) action: IntegrationAction,
+    pub(crate) fact: CleanupFact,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum CleanupFailureDetail {
+    Original {
+        detail: String,
+    },
+    MissingCodexConfig {
+        backup: String,
+        config: String,
+    },
+    ConfigShape {
+        label: String,
+        field: String,
+        array: bool,
+    },
+    Wrappers {
+        removed: Vec<String>,
+        failures: Vec<String>,
+    },
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{canonical}")]
+pub(crate) struct CleanupInputError {
+    canonical: String,
+    fact: CleanupFailureDetail,
+}
+impl CleanupInputError {
+    fn new(canonical: String, fact: CleanupFailureDetail) -> Self {
+        Self { canonical, fact }
+    }
+    fn config_shape(label: &str, field: &str, array: bool) -> Self {
+        let canonical = if field.is_empty() {
+            format!("{label} top level must be an object")
+        } else if array {
+            format!("{label} {field} must be an array")
+        } else {
+            format!("{label} {field} field must be an object")
+        };
+        Self::new(
+            canonical,
+            CleanupFailureDetail::ConfigShape {
+                label: label.into(),
+                field: field.into(),
+                array,
+            },
+        )
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CleanupFailureFact {
+    pub(crate) source: Option<SourceKind>,
+    pub(crate) detail: CleanupFailureDetail,
+    pub(crate) audit_error: Option<String>,
+}
+#[derive(Debug, thiserror::Error)]
+#[error("{canonical}")]
+pub(crate) struct CleanupFailure {
+    canonical: String,
+    pub(crate) facts: Vec<CleanupFailureFact>,
+}
+
+type CleanupFn = fn(&AppContext, &Store) -> Result<CleanupOutcome>;
 const LEGACY_HOOK_WRAPPERS_AUDIT_KEY: &str = "legacy_hook_wrappers";
 
 /// Removes hook/plugin artifacts installed by older llmusage releases.
 pub fn cleanup_all(app: &AppContext, store: &Store) -> Result<Vec<IntegrationAction>> {
+    cleanup_all_with_facts(app, store)
+        .map(|outcomes| outcomes.into_iter().map(|outcome| outcome.action).collect())
+}
+
+pub(crate) fn cleanup_all_with_facts(
+    app: &AppContext,
+    store: &Store,
+) -> Result<Vec<CleanupOutcome>> {
     let cleanups: [(SourceKind, CleanupFn); 4] = [
-        (SourceKind::Codex, codex::cleanup),
-        (SourceKind::Claude, claude::cleanup),
-        (SourceKind::Opencode, opencode::cleanup),
-        (SourceKind::Antigravity, antigravity::cleanup),
+        (SourceKind::Codex, codex::cleanup_with_facts),
+        (SourceKind::Claude, claude::cleanup_with_facts),
+        (SourceKind::Opencode, opencode::cleanup_with_facts),
+        (SourceKind::Antigravity, antigravity::cleanup_with_facts),
     ];
     let mut actions = Vec::with_capacity(cleanups.len());
     let mut failures = Vec::new();
+    let mut failure_facts = Vec::new();
 
     for (source, cleanup) in cleanups {
         match cleanup(app, store) {
             Ok(action) => actions.push(action),
             Err(error) => {
                 let detail = format!("{error:#}");
+                let fact = error
+                    .downcast_ref::<CleanupInputError>()
+                    .map(|error| error.fact.clone())
+                    .unwrap_or_else(|| CleanupFailureDetail::Original {
+                        detail: detail.clone(),
+                    });
                 if let Err(audit_error) = record_action(
                     store,
                     source,
@@ -56,21 +154,45 @@ pub fn cleanup_all(app: &AppContext, store: &Store) -> Result<Vec<IntegrationAct
                     None,
                     None,
                 ) {
+                    failure_facts.push(CleanupFailureFact {
+                        source: Some(source),
+                        detail: fact,
+                        audit_error: Some(format!("{audit_error:#}")),
+                    });
                     failures.push(format!(
                         "{source}: {detail}; cleanup failure audit also failed: {audit_error:#}"
                     ));
                     continue;
                 }
+                failure_facts.push(CleanupFailureFact {
+                    source: Some(source),
+                    detail: fact,
+                    audit_error: None,
+                });
                 failures.push(format!("{source}: {detail}"));
             }
         }
     }
 
     if let Err(error) = cleanup_hook_wrappers(app, store) {
+        failure_facts.push(CleanupFailureFact {
+            source: None,
+            detail: error
+                .downcast_ref::<CleanupInputError>()
+                .map(|error| error.fact.clone())
+                .unwrap_or_else(|| CleanupFailureDetail::Original {
+                    detail: format!("{error:#}"),
+                }),
+            audit_error: None,
+        });
         failures.push(format!("legacy hook wrappers: {error:#}"));
     }
     if !failures.is_empty() {
-        bail!("legacy hook cleanup failed: {}", failures.join("; "));
+        return Err(CleanupFailure {
+            canonical: format!("legacy hook cleanup failed: {}", failures.join("; ")),
+            facts: failure_facts,
+        }
+        .into());
     }
     Ok(actions)
 }
@@ -132,7 +254,7 @@ fn cleanup_hook_wrappers(app: &AppContext, store: &Store) -> Result<()> {
         Some(&app.paths.bin_dir),
         None,
     )?;
-    bail!(detail)
+    Err(CleanupInputError::new(detail, CleanupFailureDetail::Wrappers { removed, failures }).into())
 }
 
 /// Copies `original` into `backups_dir` without overwriting an older backup.

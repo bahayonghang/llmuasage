@@ -1005,8 +1005,7 @@ impl<'a> PricingRecomputeProgress<'a> {
     }
 
     fn started(&mut self) {
-        info!(
-            operation = "pricing_recompute",
+        info!(event_code = "store.mod.01", operation = "pricing_recompute",
             phase = "started",
             from_version = %self.from_version,
             to_version = %self.to_version,
@@ -1024,8 +1023,7 @@ impl<'a> PricingRecomputeProgress<'a> {
         let now = Instant::now();
         let elapsed = now.duration_since(self.started_at);
         if self.take_slow_warning(elapsed) {
-            warn!(
-                operation = "pricing_recompute",
+            warn!(event_code = "store.mod.02", operation = "pricing_recompute",
                 phase = "events",
                 from_version = %self.from_version,
                 to_version = %self.to_version,
@@ -1044,8 +1042,7 @@ impl<'a> PricingRecomputeProgress<'a> {
         }
 
         let elapsed_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
-        debug!(
-            operation = "pricing_recompute",
+        debug!(event_code = "store.mod.03", operation = "pricing_recompute",
             phase = "events",
             from_version = %self.from_version,
             to_version = %self.to_version,
@@ -1066,8 +1063,7 @@ impl<'a> PricingRecomputeProgress<'a> {
     }
 
     fn bucket_reconcile_started(&mut self, bucket_count: usize) {
-        info!(
-            operation = "pricing_recompute",
+        info!(event_code = "store.mod.04", operation = "pricing_recompute",
             phase = "bucket_reconcile",
             from_version = %self.from_version,
             to_version = %self.to_version,
@@ -1086,8 +1082,7 @@ impl<'a> PricingRecomputeProgress<'a> {
     fn finished(&mut self, summary: &PricingRecomputeSummary) {
         let elapsed = self.started_at.elapsed();
         if self.take_slow_warning(elapsed) {
-            warn!(
-                operation = "pricing_recompute",
+            warn!(event_code = "store.mod.05", operation = "pricing_recompute",
                 phase = "bucket_reconcile",
                 from_version = %self.from_version,
                 to_version = %self.to_version,
@@ -1098,8 +1093,7 @@ impl<'a> PricingRecomputeProgress<'a> {
                 "定价汇总桶对账耗时超过预期"
             );
         }
-        info!(
-            operation = "pricing_recompute",
+        info!(event_code = "store.mod.06", operation = "pricing_recompute",
             phase = "finished",
             from_version = %self.from_version,
             to_version = %self.to_version,
@@ -1127,8 +1121,7 @@ impl<'a> PricingRecomputeProgress<'a> {
         bucket_count: usize,
         err: &crate::error::LlmusageError,
     ) {
-        error!(
-            operation = "pricing_recompute",
+        error!(event_code = "store.mod.07", operation = "pricing_recompute",
             phase,
             from_version = %self.from_version,
             to_version = %self.to_version,

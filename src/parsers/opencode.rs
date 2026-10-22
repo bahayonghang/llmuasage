@@ -93,7 +93,10 @@ async fn sync_opencode(
      * 2) 只依赖 last_time_created + last_processed_ids 续跑
      * 3) 返回 event 和新 cursor 给单 writer 统一落库
      */
-    info!("开始同步 OpenCode SQLite 真源");
+    info!(
+        event_code = "parsers.opencode.01",
+        "开始同步 OpenCode SQLite 真源"
+    );
 
     // 1.1 定位本地 DB 并读取当前 cursor
     let parse_started = Instant::now();
@@ -127,6 +130,9 @@ async fn sync_opencode(
     let connection = match open_source_db(&db_path) {
         Ok(connection) => connection,
         Err(_) => {
+            super::feedback::emit(super::feedback::ParserFeedback::SqliteOpenFailed {
+                source: SourceKind::Opencode,
+            });
             stats.last_error = Some("OpenCode SQLite DB 打开失败".to_string());
             return Ok(stats);
         }
@@ -135,6 +141,7 @@ async fn sync_opencode(
     let mut parse_issues = ParseIssues::default();
     if !opencode_cursor_anchor_exists(&connection, &cursor)? {
         info!(
+            event_code = "parsers.opencode.02",
             last_time_created = cursor.last_time_created,
             anchor_ids = cursor.last_processed_ids.len(),
             "检测到 OpenCode DB cursor 锚点缺失，重置高水位"
@@ -342,6 +349,7 @@ async fn sync_opencode(
     stats.parse_ms = total_elapsed.saturating_sub(write_ms);
 
     info!(
+        event_code = "parsers.opencode.03",
         rows_seen = seen_rows,
         part_rows_seen,
         events_seen = stats.events_seen,

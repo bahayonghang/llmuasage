@@ -114,7 +114,10 @@ async fn sync_kimi_code(
      * 2) 只把缺失、追加或改写的文件送去解析
      * 3) 返回 event / cursor / reset 指令给单 writer 统一落库
      */
-    info!("开始同步 Kimi Code wire.jsonl 真源");
+    info!(
+        event_code = "parsers.kimi_code.01",
+        "开始同步 Kimi Code wire.jsonl 真源"
+    );
 
     // 1.1 构建按 agent 目录分片的候选文件计划
     let parse_started = Instant::now();
@@ -126,7 +129,7 @@ async fn sync_kimi_code(
         &inventory_paths,
         writer.run_started_at(),
     )?;
-    let inventory_error = listing.error_summary();
+    let inventory_error = listing.error_summary_with_feedback(SourceKind::KimiCode);
     let files = listing.paths;
     let total_files = files.len();
     let cursor_map = store
@@ -279,6 +282,7 @@ async fn sync_kimi_code(
     stats.parse_ms = total_elapsed.saturating_sub(write_ms);
 
     info!(
+        event_code = "parsers.kimi_code.02",
         files_processed = stats.files_processed,
         changed_files = stats.changed_files,
         skipped_files = stats.skipped_files,

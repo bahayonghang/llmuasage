@@ -71,7 +71,7 @@ pub async fn emit_shards_to(
     options: EmitShardOptions,
     out: impl Write + Send + 'static,
 ) -> Result<()> {
-    let request = crate::sync::ValidatedSyncRequest::new(crate::sync::SyncRequestInput {
+    let request = super::cli_errors::validate_sync_request(crate::sync::SyncRequestInput {
         source: options.source,
         parallelism: options.parallelism,
         ..Default::default()
@@ -80,7 +80,13 @@ pub async fn emit_shards_to(
         None => None,
         Some(raw) => Some(
             chrono::DateTime::parse_from_rfc3339(raw)
-                .map_err(|err| anyhow::anyhow!("invalid --since RFC3339 timestamp: {err}"))?
+                .map_err(|err| {
+                    let diagnostic = super::cli_errors::Diagnostic::new(
+                        format!("invalid --since RFC3339 timestamp: {err}"),
+                        "--since 不是有效的 RFC3339 时间戳。",
+                    );
+                    anyhow::Error::new(err).context(diagnostic)
+                })?
                 .with_timezone(&chrono::Utc),
         ),
     };
@@ -225,27 +231,36 @@ where
     W: Write + Send + 'static,
 {
     options.interactive_terminal = streams.interactive_terminal(&options);
+    let renderer = Arc::new(Mutex::new(sync_progress::stderr_renderer()));
     if streams.can_prompt(&options) && options.recovery_prompt.is_none() {
+        let prompt_renderer = Arc::clone(&renderer);
+        let language = crate::common::i18n::current();
         let reader = Arc::new(Mutex::new(reader));
         let writer = Arc::new(Mutex::new(writer));
         options.recovery_prompt = Some(Arc::new(move |source, coverage| {
             let mut reader = reader.lock().expect("prompt stdin lock");
             let mut writer = writer.lock().expect("prompt stderr lock");
-            crate::parsers::antigravity::prompt_recovery_choice(
-                &mut *reader,
-                &mut *writer,
-                source,
-                coverage,
-            )
+            prompt_renderer
+                .lock()
+                .expect("recovery renderer")
+                .suspend(|| {
+                    crate::commands::sync_recovery::prompt(
+                        language,
+                        &mut *reader,
+                        &mut *writer,
+                        source,
+                        coverage,
+                    )
+                })
         }));
     }
     options.validate()?;
-    info!("开始执行全量本地真源同步");
+    info!(event_code = "commands.sync.01", "开始执行全量本地真源同步");
     let store = Store::new(&app.paths)?;
     if options.json_events {
         run_with_json_events(app, &store, &options).await
     } else {
-        run_with_human_events(app, &store, &options).await
+        run_with_human_events(app, &store, &options, renderer).await
     }
 }
 
@@ -253,10 +268,10 @@ async fn run_with_human_events(
     app: &AppContext,
     store: &Store,
     options: &SyncRunOptions,
+    renderer: Arc<Mutex<sync_progress::HumanRenderer>>,
 ) -> Result<SyncSummary> {
     // 渲染器与 guard 的生命周期属于命令函数本身：bootstrap/锁阶段的 `?`
     // 提前返回同样经 Drop 完成终端清理，不依赖 reporter task 是否已 spawn。
-    let renderer = Arc::new(Mutex::new(sync_progress::stderr_renderer()));
     let _guard = sync_progress::TerminalGuard::new(Arc::clone(&renderer));
     let warning_renderer = Arc::clone(&renderer);
     let _warning_guard = crate::logging::install_stderr_sink(Arc::new(move |bytes| {
@@ -289,8 +304,11 @@ async fn run_with_human_events(
             &SyncEvent::from(event),
         );
     };
-    fenced_store.bootstrap_with_progress(Some(&mut bootstrap_sink))?;
+    super::cli_errors::pricing_result(
+        fenced_store.bootstrap_with_progress_and_pricing_facts(Some(&mut bootstrap_sink)),
+    )?;
     tracing::debug!(
+        event_code = "commands.sync.02",
         bootstrap_ms = bootstrap_started.elapsed().as_millis() as u64,
         "bootstrap finished"
     );
@@ -318,38 +336,47 @@ async fn run_with_human_events(
     } else {
         "sync"
     };
+    let notices = Arc::new(Mutex::new(Vec::new()));
+    let captured = Arc::clone(&notices);
+    let feedback_renderer = Arc::clone(&renderer);
+    let feedback = move |notice| {
+        if let Ok(mut renderer) = feedback_renderer.lock() {
+            renderer.observe_notice(&notice);
+        }
+        captured.lock().expect("sync notices").push(notice);
+    };
     let summary_result = super::run_tracked(
         &fenced_store,
         command_name,
         async {
-            run_once_with_cancel(
+            crate::sync::engine::run_once_with_feedback(
                 app,
                 &fenced_store,
                 lock_wait_ms,
                 options,
                 Some(&mut tx),
                 &cancel,
+                Some(&feedback),
             )
             .await
         },
         |item| Some(item.summary_text()),
     )
     .await;
-    if let Err(err) = &summary_result {
-        let _ = tx
-            .send(SyncEvent::Failed {
-                error: err.to_string(),
-            })
-            .await;
-    }
     // 先停掉 Ctrl-C 监听并等其资源释放：它持有的 tx 克隆随任务结束而 drop，
     // 否则 channel 永不关闭、reporter 永不退出（死锁）。
     ctrl_c_task.abort();
     let _ = ctrl_c_task.await;
     drop(tx);
     let _ = reporter.await;
+    if let Err(error) = &summary_result
+        && let Ok(mut renderer) = renderer.lock()
+    {
+        renderer.render_failure(error);
+    }
     if let Ok(stats) = render_stats.lock() {
         tracing::debug!(
+            event_code = "commands.sync.03",
             render_calls = stats.calls,
             render_nanos = stats.nanos,
             render_ms = stats.nanos / 1_000_000,
@@ -359,9 +386,14 @@ async fn run_with_human_events(
     let summary = summary_result?;
     drop(heartbeat);
     drop(lock);
-    print_summary(&summary, options, store);
+    print_summary(
+        &summary,
+        options,
+        store,
+        &notices.lock().expect("sync notices"),
+    );
 
-    info!("完成全量本地真源同步");
+    info!(event_code = "commands.sync.04", "完成全量本地真源同步");
     Ok(summary)
 }
 
@@ -410,7 +442,9 @@ async fn run_with_json_events(
             let mut bootstrap_sink = move |event: BootstrapProgressEvent| {
                 let _ = bootstrap_tx.try_send(SyncEvent::from(event));
             };
-            fenced_store.bootstrap_with_progress(Some(&mut bootstrap_sink))?;
+            super::cli_errors::pricing_result(
+                fenced_store.bootstrap_with_progress_and_pricing_facts(Some(&mut bootstrap_sink)),
+            )?;
         }
         fenced_store.run_log().recover_running_usage_import_runs()?;
         let command_name = if options.rebuild {
@@ -469,15 +503,23 @@ async fn run_with_json_events(
     result
 }
 
-fn print_summary(summary: &SyncSummary, options: &SyncRunOptions, store: &Store) {
-    let color = std::io::stdout().is_terminal();
+fn print_summary(
+    summary: &SyncSummary,
+    options: &SyncRunOptions,
+    store: &Store,
+    notices: &[crate::sync::notices::RunNotice],
+) {
+    let color = std::io::stdout().is_terminal()
+        && std::env::var_os("NO_COLOR").is_none()
+        && std::env::var_os("LLMUSAGE_NO_COLOR").is_none();
     let basenames = sample_basenames(store, summary);
-    for line in sync_summary::format_summary_lines_with_basenames(
+    for line in sync_summary::format_summary_lines_with_notices(
         summary,
         options.rebuild,
         color,
         terminal_width(),
         &basenames,
+        notices,
     ) {
         println!("{line}");
     }
@@ -626,6 +668,21 @@ mod tests {
         .expect_err("parserless history must never be selected for rebuild");
 
         assert!(error.to_string().contains("no passive parser"));
+        assert!(matches!(
+            error
+                .downcast_ref::<crate::sync::failure::SyncFailure>()
+                .map(|error| &error.kind),
+            Some(crate::sync::failure::FailureKind::UnsupportedRebuild {
+                source: SourceKind::Antigravity
+            })
+        ));
+        for language in [
+            crate::common::i18n::Language::English,
+            crate::common::i18n::Language::Chinese,
+        ] {
+            let line = crate::commands::cli_errors::application_error(&error, language);
+            assert!(line.contains(language.select("no passive parser", "没有被动解析器")));
+        }
     }
 
     #[tokio::test]
@@ -886,6 +943,253 @@ mod tests {
         assert!(all_terminals.interactive_terminal(&window_opts));
     }
 
+    fn feedback_snapshot(
+        store: &Store,
+    ) -> Result<std::collections::BTreeMap<String, Vec<Vec<String>>>> {
+        let connection = store.open_connection()?;
+        let mut snapshot = std::collections::BTreeMap::new();
+        for table in [
+            "usage_event",
+            "usage_bucket_30m",
+            "usage_turn",
+            "usage_tool_call",
+            "source_cursor",
+            "source_file",
+        ] {
+            let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+            let columns = statement
+                .query_map([], |row| row.get::<_, String>(1))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            // Only audit/inventory wall times are normalized. Event times, counters,
+            // cursor offsets/fingerprints, ownership and accounting remain exact.
+            let columns: Vec<_> = columns
+                .into_iter()
+                .filter(|column| {
+                    !matches!(
+                        column.as_str(),
+                        "created_at"
+                            | "updated_at"
+                            | "last_seen_at"
+                            | "last_state_change_at"
+                            | "first_seen_at"
+                    )
+                })
+                .collect();
+            let mut statement =
+                connection.prepare(&format!("SELECT {} FROM {table}", columns.join(", ")))?;
+            let mut rows = statement
+                .query_map([], |row| {
+                    (0..columns.len())
+                        .map(|index| Ok(format!("{:?}", row.get_ref(index)?)))
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            rows.sort();
+            snapshot.insert(table.into(), rows);
+        }
+        let mut statement = connection.prepare(
+            "SELECT key, value FROM meta WHERE key LIKE 'token_accounting_version.%' ORDER BY key",
+        )?;
+        snapshot.insert(
+            "accounting".into(),
+            statement
+                .query_map([], |row| Ok(vec![row.get(0)?, row.get(1)?]))?
+                .collect::<rusqlite::Result<Vec<_>>>()?,
+        );
+        Ok(snapshot)
+    }
+
+    #[tokio::test]
+    async fn optional_feedback_preserves_imports_cursors_accounting_and_kept_history() -> Result<()>
+    {
+        use crate::sync::notices::RunNotice;
+        let temp = tempfile::TempDir::new()?;
+        let codex = temp.path().join("codex");
+        std::fs::create_dir_all(codex.join("sessions"))?;
+        let _codex = EnvGuard::set("CODEX_HOME", &codex);
+        let _gemini = EnvGuard::set("GEMINI_CLI_HOME", temp.path().join("gemini-empty"));
+        let _pricing = EnvGuard::set("LLMUSAGE_PRICING_REFRESH", "off");
+        let records = [
+            serde_json::json!({"type":"session_meta", "payload":{"model":"gpt-5", "cwd":temp.path().join("project")}}),
+            serde_json::json!({"timestamp":"2026-08-20T00:00:00Z", "payload":{"type":"token_count", "info":{"last_token_usage":{"input_tokens":12,"total_tokens":12},"total_token_usage":{"input_tokens":12,"total_tokens":12}}}}),
+        ];
+        std::fs::write(
+            codex.join("sessions/rollout-feedback.jsonl"),
+            records
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n",
+        )?;
+        for source in [SourceKind::Codex, SourceKind::Antigravity] {
+            let mut snapshots = Vec::new();
+            let captured = Arc::new(Mutex::new(Vec::new()));
+            for enabled in [false, true] {
+                let paths =
+                    crate::AppPaths::with_root(temp.path().join(format!("{source}-{enabled}")))?;
+                let store = Store::new(&paths)?;
+                store.bootstrap()?;
+                if source == SourceKind::Antigravity {
+                    seed_promptable_antigravity(&store)?;
+                    let missing = temp
+                        .path()
+                        .join("missing-history.db")
+                        .to_string_lossy()
+                        .into_owned();
+                    let connection = store.open_connection()?;
+                    for table in ["source_cursor", "source_file"] {
+                        connection
+                            .execute(&format!("UPDATE {table} SET file_path = ?1"), [&missing])?;
+                    }
+                } else {
+                    store.mark_current_token_accounting(source)?;
+                }
+                let app = AppContext {
+                    paths,
+                    current_exe: std::env::current_exe()?,
+                };
+                let notices = Arc::clone(&captured);
+                let callback = move |notice| notices.lock().unwrap().push(notice);
+                let options = SyncRunOptions {
+                    source: Some(source),
+                    interactive_terminal: true,
+                    recovery_prompt: Some(Arc::new(|_, _| {
+                        crate::sync::types::AntigravityRecoveryChoice::Keep
+                    })),
+                    ..Default::default()
+                };
+                let summary = crate::sync::engine::run_once_with_feedback(
+                    &app,
+                    &store,
+                    0,
+                    &options,
+                    None,
+                    &CancellationToken::new(),
+                    if enabled { Some(&callback) } else { None },
+                )
+                .await?;
+                if source == SourceKind::Codex {
+                    assert_eq!(summary.total_inserted, 1);
+                    assert_eq!(summary.sources[0].events_seen, 1);
+                } else {
+                    assert_eq!(summary.total_inserted, 0);
+                    assert_eq!(store.token_accounting_version(source)?, Some(2));
+                }
+                snapshots.push(feedback_snapshot(&store)?);
+            }
+            assert_eq!(
+                snapshots[0], snapshots[1],
+                "feedback changed source {source}"
+            );
+            if source == SourceKind::Codex {
+                assert!(
+                    !snapshots[0]["usage_event"].is_empty()
+                        && !snapshots[0]["source_cursor"].is_empty()
+                );
+            } else {
+                let notices = captured.lock().unwrap();
+                assert!(
+                    notices
+                        .iter()
+                        .any(|notice| matches!(notice, RunNotice::RecoveryOffered { .. }))
+                );
+                assert!(notices.iter().any(|notice| matches!(
+                    notice,
+                    RunNotice::RecoveryChoice {
+                        accepted: false,
+                        ..
+                    }
+                )));
+                assert!(
+                    notices
+                        .iter()
+                        .any(|notice| matches!(notice, RunNotice::Coverage { kept: true, .. }))
+                );
+                assert!(
+                    notices
+                        .iter()
+                        .any(|notice| matches!(notice, RunNotice::LegacySkipped { .. }))
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cancellation_notice_uses_observed_outcome_and_early_error_emits_none() -> Result<()> {
+        use crate::sync::notices::RunNotice;
+        let temp = tempfile::TempDir::new()?;
+        let opencode = temp.path().join("opencode");
+        std::fs::create_dir_all(&opencode)?;
+        std::fs::write(opencode.join("opencode.db"), b"not a sqlite database")?;
+        let _source = EnvGuard::set("OPENCODE_HOME", &opencode);
+        let _pricing = EnvGuard::set("LLMUSAGE_PRICING_REFRESH", "off");
+        for mode in ["cancelled", "late", "invalid"] {
+            let paths = crate::AppPaths::with_root(temp.path().join(mode))?;
+            let store = Store::new(&paths)?;
+            store.bootstrap()?;
+            store.mark_current_token_accounting(SourceKind::Opencode)?;
+            let app = AppContext {
+                paths,
+                current_exe: std::env::current_exe()?,
+            };
+            let cancel = CancellationToken::new();
+            if mode != "late" {
+                cancel.cancel();
+            }
+            let captured = Mutex::new(Vec::new());
+            let callback = |notice| {
+                // SourceFailed is emitted after the existing accounting decision.
+                // Cancelling at this late boundary must not rewrite that outcome.
+                if matches!(notice, RunNotice::SourceFailed { .. }) {
+                    cancel.cancel();
+                }
+                captured.lock().unwrap().push(notice);
+            };
+            let options = SyncRunOptions {
+                source: Some(SourceKind::Opencode),
+                parallelism: if mode == "invalid" { Some(0) } else { None },
+                ..Default::default()
+            };
+            let result = crate::sync::engine::run_once_with_feedback(
+                &app,
+                &store,
+                0,
+                &options,
+                None,
+                &cancel,
+                Some(&callback),
+            )
+            .await;
+            let notices = captured.lock().unwrap();
+            if mode == "invalid" {
+                assert!(result.is_err());
+                assert!(notices.is_empty());
+            } else {
+                result?;
+                assert_eq!(
+                    notices
+                        .iter()
+                        .filter(|notice| matches!(notice, RunNotice::Cancelled))
+                        .count(),
+                    usize::from(mode == "cancelled")
+                );
+                if mode == "late" {
+                    assert!(cancel.is_cancelled());
+                    assert!(notices.iter().any(|notice| matches!(
+                        notice,
+                        RunNotice::SourceFailed {
+                            source: SourceKind::Opencode,
+                            ..
+                        }
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
     #[test]
     fn prompt_recovery_choice_parsing_and_retry() {
         let coverage = crate::parsers::antigravity::AntigravityProductCoverage {
@@ -904,7 +1208,8 @@ mod tests {
         let mut out = Vec::new();
         let mut reader = std::io::Cursor::new(b"\n");
         assert_eq!(
-            crate::parsers::antigravity::prompt_recovery_choice(
+            crate::commands::sync_recovery::prompt(
+                crate::common::i18n::Language::English,
                 &mut reader,
                 &mut out,
                 SourceKind::Antigravity,
@@ -917,7 +1222,8 @@ mod tests {
         let mut out = Vec::new();
         let mut reader = std::io::Cursor::new(b"k\n");
         assert_eq!(
-            crate::parsers::antigravity::prompt_recovery_choice(
+            crate::commands::sync_recovery::prompt(
+                crate::common::i18n::Language::English,
                 &mut reader,
                 &mut out,
                 SourceKind::Antigravity,
@@ -930,7 +1236,8 @@ mod tests {
         let mut out = Vec::new();
         let mut reader = std::io::Cursor::new(b"r\n");
         assert_eq!(
-            crate::parsers::antigravity::prompt_recovery_choice(
+            crate::commands::sync_recovery::prompt(
+                crate::common::i18n::Language::English,
                 &mut reader,
                 &mut out,
                 SourceKind::Antigravity,
@@ -943,7 +1250,8 @@ mod tests {
         let mut out = Vec::new();
         let mut reader = std::io::Cursor::new(b"invalid\nr\n");
         assert_eq!(
-            crate::parsers::antigravity::prompt_recovery_choice(
+            crate::commands::sync_recovery::prompt(
+                crate::common::i18n::Language::English,
                 &mut reader,
                 &mut out,
                 SourceKind::Antigravity,
@@ -956,7 +1264,8 @@ mod tests {
         let mut out = Vec::new();
         let mut reader = std::io::Cursor::new(b"invalid\nx\n");
         assert_eq!(
-            crate::parsers::antigravity::prompt_recovery_choice(
+            crate::commands::sync_recovery::prompt(
+                crate::common::i18n::Language::English,
                 &mut reader,
                 &mut out,
                 SourceKind::Antigravity,

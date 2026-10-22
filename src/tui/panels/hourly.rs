@@ -1,3 +1,5 @@
+use crate::common::i18n::tui::format as tr_format;
+use crate::common::i18n::tui::text as tr;
 use chrono::Local;
 use ratatui::{
     Frame,
@@ -33,21 +35,21 @@ pub(crate) fn render_sorted(
 ) {
     match data {
         None => {
-            let widget = Paragraph::new("Loading...")
+            let widget = Paragraph::new(tr("loading"))
                 .style(theme::muted_style())
-                .block(styled_block("Hourly Usage"));
+                .block(styled_block(tr("hourly_usage")));
             frame.render_widget(widget, area);
         }
         Some(Err(e)) => {
-            let widget = Paragraph::new(format!("Data load failed: {e}"))
+            let widget = Paragraph::new(tr_format!(data_load_failed_e, e = e))
                 .style(theme::error_style())
-                .block(styled_block("Hourly Usage"));
+                .block(styled_block(tr("hourly_usage")));
             frame.render_widget(widget, area);
         }
         Some(Ok(items)) if items.is_empty() => {
-            let widget = Paragraph::new("No hourly usage data found. Press r to refresh.")
+            let widget = Paragraph::new(tr("no_hourly_usage_data_found_press_r_to_refresh"))
                 .style(theme::muted_style())
-                .block(styled_block("Hourly Usage"));
+                .block(styled_block(tr("hourly_usage")));
             frame.render_widget(widget, area);
         }
         Some(Ok(items)) => render_table(frame, area, items, scroll, sort),
@@ -61,7 +63,7 @@ fn render_table(
     scroll: &ScrollState,
     sort: SortState,
 ) {
-    let block = styled_block("Hourly Usage");
+    let block = styled_block(tr("hourly_usage"));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.width == 0 || inner.height == 0 {
@@ -70,7 +72,7 @@ fn render_table(
 
     let tier = width_tier(inner.width);
     let has_turns = period_has_turns(items.iter().map(|hour| hour.turn_count));
-    let header = period_header_row("Hour", &["Source"], has_turns, tier, sort);
+    let header = period_header_row(tr("hour"), &[tr("source_3")], has_turns, tier, sort);
     let ordered = stable_sort_refs(items.iter().collect(), sort, |left, right, key| match key {
         TableSortKey::Date => left.hour_start.cmp(&right.hour_start),
         TableSortKey::Tokens => left.total_tokens.cmp(&right.total_tokens),

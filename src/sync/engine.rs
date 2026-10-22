@@ -7,7 +7,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{Result, bail};
+use super::failure::{FailureKind, RebuildRisk, SyncFailure};
+use super::notices::{self, NoticeSink, RunNotice};
+use anyhow::Result;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
@@ -33,7 +35,10 @@ where
     S: FnOnce(&T) -> Option<String>,
 {
     let run_id = store.run_log().record_run_start(command)?;
-    info!(command, run_id, "run started");
+    info!(
+        event_code = "sync.engine.01",
+        command, run_id, "run started"
+    );
     match body.await {
         Ok(value) => {
             let summary = success_summary(&value);
@@ -41,6 +46,7 @@ where
                 .run_log()
                 .finish_run(run_id, "success", summary.as_deref(), None)?;
             info!(
+                event_code = "sync.engine.02",
                 command,
                 run_id,
                 status = "success",
@@ -59,8 +65,10 @@ where
                     "记录 {command} 失败 run_log 时也失败: {finish_err}"
                 )));
             }
-            error!(
-                command,
+            let failure = crate::sync::failure::log_facts(&err);
+            error!(event_code = "sync.engine.03", command,
+                failure_code = failure.as_ref().map(|(code, _)| *code),
+                failure_facts = failure.as_ref().map(|(_, facts)| facts.as_str()),
                 run_id,
                 status = "failed",
                 error = %err,
@@ -114,6 +122,7 @@ pub async fn run_store_once_with_remote_source(
                 sender,
                 &cancel,
                 remote_source,
+                None,
             )
             .await
         },
@@ -151,8 +160,29 @@ pub async fn run_once_with_cancel(
     sender: Option<&mut mpsc::Sender<SyncEvent>>,
     cancel: &CancellationToken,
 ) -> Result<SyncSummary> {
+    run_once_with_feedback(_app, store, lock_wait_ms, options, sender, cancel, None).await
+}
+
+pub(crate) async fn run_once_with_feedback(
+    _app: &AppContext,
+    store: &Store,
+    lock_wait_ms: u64,
+    options: &SyncRunOptions,
+    sender: Option<&mut mpsc::Sender<SyncEvent>>,
+    cancel: &CancellationToken,
+    feedback: Option<NoticeSink<'_>>,
+) -> Result<SyncSummary> {
     let operation = store.write_operation(HolderKind::Library)?;
-    run_once_locked(&operation.store, lock_wait_ms, options, sender, cancel).await
+    run_once_locked_with_remote_source(
+        &operation.store,
+        lock_wait_ms,
+        options,
+        sender,
+        cancel,
+        &SshShardSource::default(),
+        feedback,
+    )
+    .await
 }
 
 /// Hosts that this `llmusage sync` run actually reached.
@@ -173,6 +203,17 @@ pub(super) async fn run_once_locked(
     sender: Option<&mut mpsc::Sender<SyncEvent>>,
     cancel: &CancellationToken,
 ) -> Result<SyncSummary> {
+    run_once_locked_with_feedback(store, lock_wait_ms, options, sender, cancel, None).await
+}
+
+pub(super) async fn run_once_locked_with_feedback(
+    store: &Store,
+    lock_wait_ms: u64,
+    options: &SyncRunOptions,
+    sender: Option<&mut mpsc::Sender<SyncEvent>>,
+    cancel: &CancellationToken,
+    feedback: Option<NoticeSink<'_>>,
+) -> Result<SyncSummary> {
     run_once_locked_with_remote_source(
         store,
         lock_wait_ms,
@@ -180,6 +221,7 @@ pub(super) async fn run_once_locked(
         sender,
         cancel,
         &SshShardSource::default(),
+        feedback,
     )
     .await
 }
@@ -191,6 +233,7 @@ async fn run_once_locked_with_remote_source(
     mut sender: Option<&mut mpsc::Sender<SyncEvent>>,
     cancel: &CancellationToken,
     remote_source: &dyn ShardSource,
+    feedback: Option<NoticeSink<'_>>,
 ) -> Result<SyncSummary> {
     let request = options.validate()?;
     crate::sync::pricing_refresh::refresh_pricing_if_needed(store, options).await?;
@@ -204,7 +247,7 @@ async fn run_once_locked_with_remote_source(
      * 3) 单 writer 顺序提交 reset / event / cursor
      * 4) 最后刷新每源诊断状态
      */
-    info!("开始执行 sync 三阶段流水线");
+    info!(event_code = "sync.engine.04", "开始执行 sync 三阶段流水线");
     let pipeline_started = Instant::now();
 
     let mut parsers = registry::registered_parsers()
@@ -235,8 +278,7 @@ async fn run_once_locked_with_remote_source(
         let legacy = legacy_token_accounting_sources_for(store, &parser_sources)?;
         if !legacy.is_empty() {
             let source_names = source_names(&legacy);
-            tracing::warn!(
-                sources = %source_names,
+            tracing::warn!(event_code = "sync.engine.05", sources = %source_names,
                 "skipped legacy token accounting sources"
             );
             exclude_legacy_sources_from_write_set(&mut parsers, &legacy);
@@ -270,7 +312,22 @@ async fn run_once_locked_with_remote_source(
                 .filter(|c| options.source.is_none_or(|s| s == source) && c.can_prompt_for_loss())
             {
                 prompt_attempted = true;
+                notices::emit(
+                    feedback,
+                    RunNotice::RecoveryOffered {
+                        source,
+                        coverage: cov.clone(),
+                    },
+                );
                 let choice = prompt(source, cov);
+                notices::emit(
+                    feedback,
+                    RunNotice::RecoveryChoice {
+                        source,
+                        accepted: choice
+                            == crate::sync::types::AntigravityRecoveryChoice::AcceptLoss,
+                    },
+                );
                 if choice == crate::sync::types::AntigravityRecoveryChoice::AcceptLoss {
                     accepted_antigravity.insert(source);
                 }
@@ -325,6 +382,7 @@ async fn run_once_locked_with_remote_source(
     .await;
     let drive_result = drive_result?;
     let mut source_issues = drive_result.source_issues;
+    let parser_feedback = drive_result.feedback;
     let mut sources = drive_result.stats;
 
     // Rebuild accepted Antigravity sources in the same worker lock and process
@@ -367,11 +425,10 @@ async fn run_once_locked_with_remote_source(
                             &run_started_at,
                         )?;
                         if swept > 0 {
-                            info!(source = %source, swept, "标记 missing 文件完成");
+                            info!(event_code = "sync.engine.06", source = %source, swept, "标记 missing 文件完成");
                         }
                     } else {
-                        info!(
-                            source = %source,
+                        info!(event_code = "sync.engine.07", source = %source,
                             "source inventory incomplete; skipping missing sweep"
                         );
                     }
@@ -390,8 +447,17 @@ async fn run_once_locked_with_remote_source(
                 }
             }
             Err(err) => {
-                tracing::error!(error = %err, "Antigravity lossy rebuild failed");
+                tracing::error!(event_code = "sync.engine.08", error = %err, "Antigravity lossy rebuild failed");
                 for source in &rebuild_sources {
+                    notices::emit(
+                        feedback,
+                        RunNotice::SourceFailed {
+                            source: *source,
+                            failure: notices::SourceFailure::Other {
+                                detail: err.to_string(),
+                            },
+                        },
+                    );
                     let stored_events = stored_events_for_source(store, *source)?;
                     let stat = SourceSyncStats {
                         source: *source,
@@ -400,8 +466,7 @@ async fn run_once_locked_with_remote_source(
                         last_error: Some(format!("rebuild failed: {err}")),
                         ..Default::default()
                     };
-                    info!(
-                        source = %source,
+                    info!(event_code = "sync.engine.09", source = %source,
                         "source inventory incomplete; skipping missing sweep"
                     );
                     emit_sync_event(
@@ -428,6 +493,7 @@ async fn run_once_locked_with_remote_source(
         }
     }
     tracing::debug!(
+        event_code = "sync.engine.10",
         driver_ms = driver_started.elapsed().as_millis() as u64,
         "driver finished"
     );
@@ -456,6 +522,15 @@ async fn run_once_locked_with_remote_source(
         } else {
             None
         };
+        if accounting_warning.is_some() && !legacy_accounting {
+            notices::emit(
+                feedback,
+                RunNotice::RetainedHistory {
+                    source: source.source,
+                    retained: source.stored_events,
+                },
+            );
+        }
 
         if native_antigravity {
             if accepted_antigravity.contains(&source.source) {
@@ -472,6 +547,16 @@ async fn run_once_locked_with_remote_source(
                         || cov.discovery_incomplete
                 })
             {
+                notices::emit(
+                    feedback,
+                    RunNotice::Coverage {
+                        source: source.source,
+                        coverage: cov.clone(),
+                        interactive: options.interactive_terminal,
+                        windowed: options.recent_days.is_some(),
+                        kept: prompt_attempted && !accepted_antigravity.contains(&source.source),
+                    },
+                );
                 let notice = if cov.can_prompt_for_loss() {
                     let is_interactive = options.interactive_terminal;
                     let has_window = options.recent_days.is_some();
@@ -526,6 +611,13 @@ async fn run_once_locked_with_remote_source(
     for source in &skipped_legacy {
         let stored_events = stored_events_for_source(store, *source)?;
         stored_queries += 1;
+        notices::emit(
+            feedback,
+            RunNotice::LegacySkipped {
+                source: *source,
+                retained: stored_events,
+            },
+        );
         let native_antigravity = matches!(
             *source,
             SourceKind::Antigravity | SourceKind::AntigravityIde
@@ -536,6 +628,16 @@ async fn run_once_locked_with_remote_source(
                     let recoverable = cov.can_prompt_for_loss();
                     let blocked = cov.unreadable_count > 0 || cov.discovery_incomplete;
                     if recoverable || blocked {
+                        notices::emit(
+                            feedback,
+                            RunNotice::Coverage {
+                                source: *source,
+                                coverage: cov.clone(),
+                                interactive: options.interactive_terminal,
+                                windowed: options.recent_days.is_some(),
+                                kept: prompt_attempted && !accepted_antigravity.contains(source),
+                            },
+                        );
                         let notice = if recoverable {
                             let is_interactive = options.interactive_terminal;
                             let has_window = options.recent_days.is_some();
@@ -677,16 +779,19 @@ async fn run_once_locked_with_remote_source(
         cancel,
         remote_source,
         &mut remote_outcome,
+        feedback,
     )
     .await?;
     if !remote_outcome.skipped.is_empty() {
         tracing::warn!(
+            event_code = "sync.engine.11",
             skipped = remote_outcome.skipped.len(),
             "skipped unreachable remote hosts"
         );
     }
     writer.finish_sync_run()?;
     tracing::debug!(
+        event_code = "sync.engine.12",
         stored_query_ms = stored_query_started.elapsed().as_millis() as u64,
         stored_queries,
         "stored_events queries finished"
@@ -716,6 +821,10 @@ async fn run_once_locked_with_remote_source(
                 store.mark_current_token_accounting(source.source)?;
             }
         }
+    } else {
+        // The existing outcome branch withheld accounting certification because
+        // cancellation was observed here. A later token flip is not this outcome.
+        notices::emit(feedback, RunNotice::Cancelled);
     }
     store.sync_status().save_source_sync_statuses_with_issues(
         "local",
@@ -754,11 +863,77 @@ async fn run_once_locked_with_remote_source(
 
     let stored_events = stored_event_count(store, options.source)?;
     let stats = source_stats;
+    for (source, issues) in &source_issues {
+        for issue in issues {
+            notices::emit(
+                feedback,
+                RunNotice::SourceIssue {
+                    source: *source,
+                    issue: issue.clone(),
+                },
+            );
+        }
+    }
+    let mut described_failures = BTreeSet::new();
+    for hint in parser_feedback {
+        match hint {
+            crate::parsers::feedback::ParserFeedback::Inventory { source, diagnostic } => {
+                described_failures.insert(source);
+                notices::emit(
+                    feedback,
+                    RunNotice::SourceFailed {
+                        source,
+                        failure: notices::SourceFailure::Inventory { diagnostic },
+                    },
+                );
+            }
+            crate::parsers::feedback::ParserFeedback::SqliteOpenFailed { source } => {
+                described_failures.insert(source);
+                notices::emit(
+                    feedback,
+                    RunNotice::SourceFailed {
+                        source,
+                        failure: notices::SourceFailure::SqliteOpen,
+                    },
+                );
+            }
+        }
+    }
+    for stat in &stats {
+        let described = described_failures.contains(&stat.source)
+            || skipped_legacy.contains(&stat.source)
+            || source_issues
+                .get(&stat.source)
+                .is_some_and(|issues| !issues.is_empty())
+            || antigravity_coverage
+                .as_ref()
+                .and_then(|coverage| coverage.get(&stat.source))
+                .is_some_and(|coverage| {
+                    coverage.can_prompt_for_loss()
+                        || coverage.unreadable_count > 0
+                        || coverage.discovery_incomplete
+                });
+        if !described
+            && !stat.absent
+            && let Some(detail) = &stat.last_error
+        {
+            notices::emit(
+                feedback,
+                RunNotice::SourceFailed {
+                    source: stat.source,
+                    failure: notices::SourceFailure::Other {
+                        detail: detail.clone(),
+                    },
+                },
+            );
+        }
+    }
     tracing::debug!(
+        event_code = "sync.engine.13",
         pipeline_ms = pipeline_started.elapsed().as_millis() as u64,
         "sync pipeline finished"
     );
-    info!("完成 sync 三阶段流水线");
+    info!(event_code = "sync.engine.14", "完成 sync 三阶段流水线");
     Ok(SyncSummary {
         sources: stats,
         total_seen,
@@ -828,12 +1003,12 @@ fn assert_lossless_rebuild(
     }
 
     let details = format_lossy_rebuild_risks(&risks);
-    bail!(
+    Err(SyncFailure::new(FailureKind::LossyRebuild { risks: risks.iter().map(|risk| RebuildRisk { host_id: risk.host_id.clone(), source: risk.source, missing_files: risk.missing_file_count, protected_events: risk.protected_event_count }).collect() }, format!(
         "Refusing lossy sync --rebuild because imported usage has missing source files ({details}). \
 Regular `llmusage sync` is safe: it marks missing source files for diagnostics but does not delete usage history. \
 `llmusage sync --rebuild` first deletes rebuildable usage rows and cannot reconstruct records whose original source files are gone. \
 Restore the source files or pass --allow-lossy-rebuild to explicitly accept clearing unrebuildable history."
-    );
+    )).into())
 }
 
 fn lossy_rebuild_risks(
@@ -864,6 +1039,7 @@ async fn import_registered_remotes(
     cancel: &CancellationToken,
     remote_source: &dyn ShardSource,
     outcome: &mut RemoteRunOutcome,
+    feedback: Option<NoticeSink<'_>>,
 ) -> Result<()> {
     if cancel.is_cancelled() {
         return Ok(());
@@ -890,10 +1066,11 @@ async fn import_registered_remotes(
             },
         )
         .await?;
-        match RemoteImporter::import(&host, store, writer, remote_source) {
+        match RemoteImporter::import_with_facts(&host, store, writer, remote_source) {
             Ok(imported) => {
+                let imported = imported.outcome;
                 for warning in &imported.warnings {
-                    tracing::warn!(host_id = %host.host_id, "{warning}");
+                    tracing::warn!(event_code = "sync.engine.15", skipped_lines = imported.skipped_lines, label = %host.label, host_id = %host.host_id, "{warning}");
                 }
                 sweep_imported_host(store, &host.host_id, &imported.sources, &run_started_at)?;
                 outcome.contacted.insert(host.host_id.clone());
@@ -908,7 +1085,16 @@ async fn import_registered_remotes(
                 .await?;
             }
             Err(err) => {
-                let reason = err.to_string();
+                let reason = err.error.to_string();
+                notices::emit(
+                    feedback,
+                    RunNotice::RemoteSkipped {
+                        host_id: host.host_id.clone(),
+                        facts: err.facts,
+                        label: host.label.clone(),
+                        detail: reason.clone(),
+                    },
+                );
                 let _ = store.hosts().record_contact(&host.host_id, Some(&reason));
                 outcome.skipped.insert(host.host_id.clone(), reason.clone());
                 emit_sync_event(
@@ -934,8 +1120,7 @@ fn sweep_imported_host(
 ) -> Result<()> {
     for stats in sources {
         if stats.last_error.is_some() {
-            info!(
-                source = %stats.source,
+            info!(event_code = "sync.engine.16", source = %stats.source,
                 host_id,
                 "source inventory incomplete; skipping missing sweep"
             );
@@ -945,8 +1130,7 @@ fn sweep_imported_host(
             .source_files()
             .sweep_missing(stats.source, host_id, run_started_at)?;
         if swept > 0 {
-            info!(
-                source = %stats.source,
+            info!(event_code = "sync.engine.17", source = %stats.source,
                 host_id,
                 swept,
                 "标记 missing 文件完成"
@@ -1015,9 +1199,9 @@ fn refuse_omp_before_pi_split_migration(
     let selecting_omp_without_pi =
         parser_sources.contains(&SourceKind::Omp) && !parser_sources.contains(&SourceKind::Pi);
     if selecting_omp_without_pi && store.has_legacy_token_accounting(SourceKind::Pi)? {
-        bail!(
+        return Err(SyncFailure::new(FailureKind::OmpBeforePiSplit, String::from(
             "Refusing `--source omp` because stored pi rows still use the pre-split token-accounting contract. Run `llmusage sync --rebuild --source pi` first so those rows can migrate, then retry `llmusage sync --source omp`."
-        );
+        )).into());
     }
     Ok(())
 }
@@ -1028,11 +1212,168 @@ pub(crate) fn rebuild_sources(
 ) -> Result<Vec<SourceKind>> {
     if let Some(source) = selected_source {
         if !parser_sources.contains(&source) {
-            bail!(
+            return Err(SyncFailure::new(FailureKind::UnsupportedRebuild { source }, format!(
                 "Cannot rebuild source `{source}` because it has no passive parser; historical usage was preserved."
-            );
+            )).into());
         }
         return Ok(vec![source]);
     }
     Ok(parser_sources.to_vec())
+}
+
+#[cfg(test)]
+mod presentation_tests {
+    use super::*;
+    use crate::{
+        models::{UsageEvent, UsageTokens},
+        remote::{MemoryShardSource, ShardRecord, encode_record},
+        store::{Host, SyncShard},
+    };
+    use std::sync::Mutex;
+
+    #[tokio::test]
+    async fn remote_skip_facts_preserve_events_contacts_partial_commits_and_watermarks()
+    -> anyhow::Result<()> {
+        let header = ShardRecord::header(
+            "2026-08-20T02:00:00Z",
+            crate::remote::source_accounting_versions([SourceKind::Codex]),
+        );
+        let mut shard = SyncShard::new(SourceKind::Codex);
+        shard.events.push(UsageEvent {
+            event_key: "codex:partial:1".into(),
+            source: SourceKind::Codex,
+            provider_label: String::new(),
+            model: "gpt-5".into(),
+            event_at: "2026-08-20T00:00:00Z".into(),
+            hour_start: "2026-08-20T00:00:00Z".into(),
+            tokens: UsageTokens {
+                input_tokens: 1,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                output_tokens: 1,
+                reasoning_output_tokens: 0,
+                total_tokens: 2,
+            },
+            project: None,
+            session: None,
+            source_cost: None,
+        });
+        let shard = ShardRecord::Shard { shard };
+        let trailer = ShardRecord::Trailer {
+            sources: Vec::new(),
+            parse_issues: Default::default(),
+        };
+        for (records, expected_rows, succeeds) in [
+            (Vec::new(), 0, false),
+            (vec![trailer.clone()], 0, false),
+            (vec![header.clone(), shard.clone()], 1, false),
+            (
+                vec![header.clone(), shard.clone(), trailer.clone()],
+                1,
+                true,
+            ),
+        ] {
+            let mut baseline = Vec::new();
+            for enabled in [false, true] {
+                let temp = tempfile::TempDir::new()?;
+                let app = AppContext::with_cli_home(Some(temp.path().join("home")))?;
+                let store = Store::new(&app.paths)?;
+                let lock =
+                    store.acquire_worker_lock_with(Duration::from_secs(1), HolderKind::Library)?;
+                let store = lock.fenced_store();
+                store.bootstrap()?;
+                store.hosts().upsert(&Host {
+                    host_id: "devbox".into(),
+                    label: "My host".into(),
+                    transport: "ssh".into(),
+                    ssh_target: Some("unused".into()),
+                    command: "unused".into(),
+                    added_at: "2026-08-20T00:00:00Z".into(),
+                    last_contacted_at: None,
+                    last_error: None,
+                    import_watermark: None,
+                })?;
+                let source = MemoryShardSource {
+                    stdout: records
+                        .iter()
+                        .map(encode_record)
+                        .collect::<crate::error::Result<Vec<_>>>()?
+                        .join("\n"),
+                    stderr: "EXTERNAL_DETAIL".into(),
+                    status: if succeeds { 0 } else { 1 },
+                };
+                let notices = Mutex::new(Vec::new());
+                let feedback = |notice| notices.lock().unwrap().push(notice);
+                let (mut tx, mut rx) = mpsc::channel(16);
+                let mut writer = store.begin_sync_run()?;
+                let mut outcome = RemoteRunOutcome {
+                    contacted: BTreeSet::new(),
+                    skipped: BTreeMap::new(),
+                };
+                import_registered_remotes(
+                    &store,
+                    &mut writer,
+                    Some(&mut tx),
+                    &CancellationToken::new(),
+                    &source,
+                    &mut outcome,
+                    enabled.then_some(&feedback as NoticeSink<'_>),
+                )
+                .await?;
+                drop(tx);
+                let mut events = Vec::new();
+                while let Some(event) = rx.recv().await {
+                    events.push(event);
+                }
+                let host = store.hosts().get_by_label("My host")?.unwrap();
+                let rows: i64 = store.open_connection()?.query_row(
+                    "SELECT COUNT(*) FROM usage_event",
+                    [],
+                    |row| row.get(0),
+                )?;
+                assert_eq!(rows, expected_rows);
+                assert_eq!(outcome.contacted.contains("devbox"), succeeds);
+                if !succeeds {
+                    assert!(host.import_watermark.is_none());
+                    assert_eq!(outcome.skipped.get("devbox"), host.last_error.as_ref());
+                    assert_eq!(
+                        store.token_accounting_version_for_host("devbox", SourceKind::Codex)?,
+                        None
+                    );
+                    if enabled {
+                        let notices = notices.lock().unwrap();
+                        assert_eq!(notices.len(), 1);
+                        let RunNotice::RemoteSkipped {
+                            host_id,
+                            detail,
+                            facts,
+                            ..
+                        } = &notices[0]
+                        else {
+                            panic!("remote notice")
+                        };
+                        assert_eq!(host_id, "devbox");
+                        assert_eq!(Some(detail), host.last_error.as_ref());
+                        assert!(facts.is_some());
+                    }
+                } else {
+                    assert_eq!(
+                        host.import_watermark.as_deref(),
+                        Some("2026-08-20T00:00:00Z")
+                    );
+                    assert!(host.last_error.is_none());
+                }
+                baseline.push((
+                    events,
+                    rows,
+                    host.last_error,
+                    host.import_watermark,
+                    outcome.contacted,
+                    outcome.skipped,
+                ));
+            }
+            assert_eq!(baseline[0], baseline[1]);
+        }
+        Ok(())
+    }
 }

@@ -1,5 +1,7 @@
 //! Web server for codex-tracer dashboard.
 
+use super::super::cli_errors::Diagnostic;
+use crate::common::i18n::commands::{OperationDiagnostic as Fact, message};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -29,7 +31,10 @@ struct ServerState {
 
 /// Serve the codex-tracer dashboard.
 pub async fn serve_dashboard(db_path: PathBuf, port: u16, open_browser: bool) -> Result<()> {
-    let store = CodexTracerStore::open(&db_path).context("Failed to open codex-tracer database")?;
+    let store = CodexTracerStore::open(&db_path).context(Diagnostic::with_facts(
+        "Failed to open codex-tracer database",
+        Fact::TracerOpen,
+    ))?;
 
     let state = ServerState {
         store: Arc::new(Mutex::new(store)),
@@ -38,24 +43,28 @@ pub async fn serve_dashboard(db_path: PathBuf, port: u16, open_browser: bool) ->
     let app = dashboard_router(state);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    let listener = TcpListener::bind(&addr)
-        .await
-        .with_context(|| format!("Failed to bind to {}", addr))?;
+    let listener = TcpListener::bind(&addr).await.with_context(|| {
+        Diagnostic::with_facts(
+            format!("Failed to bind to {}", addr),
+            Fact::TracerBind {
+                address: addr.to_string(),
+            },
+        )
+    })?;
 
     let actual_addr = listener.local_addr()?;
     let dashboard_url = format!("http://{}", actual_addr);
 
-    println!("🚀 Codex Tracer Dashboard: {}", dashboard_url);
-    info!("Codex Tracer dashboard listening on {}", actual_addr);
+    println!("{}", message!(TracerDashboard, dashboard_url));
+    info!(event_code = "commands.codex_tracer.server.01", addr = %actual_addr, "Codex Tracer dashboard listening on {}", actual_addr);
 
     if open_browser && open_browser_to_url(&dashboard_url).is_err() {
-        println!(
-            "Failed to open browser automatically. Please open manually: {}",
-            dashboard_url
-        );
+        println!("{}", message!(TracerBrowser, dashboard_url));
     }
 
-    axum::serve(listener, app).await.context("Server error")?;
+    axum::serve(listener, app)
+        .await
+        .context(Diagnostic::with_facts("Server error", Fact::TracerServer))?;
 
     Ok(())
 }
@@ -171,7 +180,7 @@ async fn handle_index(State(state): State<ServerState>) -> Response {
     }) {
         Ok(calls) => calls,
         Err(err) => {
-            error!(error = %err, "Failed to query calls");
+            error!(event_code = "commands.codex_tracer.server.02", error = %err, "Failed to query calls");
             return html_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal_error",
@@ -193,7 +202,7 @@ async fn handle_index(State(state): State<ServerState>) -> Response {
     let payload_json = match serde_json::to_string(&payload) {
         Ok(json) => json,
         Err(err) => {
-            error!(error = %err, "Failed to serialize payload");
+            error!(event_code = "commands.codex_tracer.server.03", error = %err, "Failed to serialize payload");
             return html_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal_error",
@@ -253,7 +262,7 @@ async fn handle_calls_query(
         }))
         .into_response(),
         Err(err) => {
-            error!(error = %err, "Failed to query calls");
+            error!(event_code = "commands.codex_tracer.server.04", error = %err, "Failed to query calls");
             json_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal_error",
@@ -264,7 +273,10 @@ async fn handle_calls_query(
 }
 
 async fn handle_refresh(State(state): State<ServerState>) -> Response {
-    info!("Refresh requested");
+    info!(
+        event_code = "commands.codex_tracer.server.05",
+        "Refresh requested"
+    );
 
     // Determine Codex rollout directory
     let codex_home = match std::env::var("CODEX_HOME") {
@@ -278,7 +290,7 @@ async fn handle_refresh(State(state): State<ServerState>) -> Response {
     let rollout_dir = codex_home.join("rollout");
 
     if !rollout_dir.exists() {
-        error!(path = %rollout_dir.display(), "Codex rollout directory not found");
+        error!(event_code = "commands.codex_tracer.server.06", path = %rollout_dir.display(), "Codex rollout directory not found");
         return json_error(
             StatusCode::NOT_FOUND,
             "codex_not_found",
@@ -295,7 +307,7 @@ async fn handle_refresh(State(state): State<ServerState>) -> Response {
     ) {
         Ok(stats) => stats,
         Err(err) => {
-            error!(error = %err, "Failed to refresh Codex tracer events");
+            error!(event_code = "commands.codex_tracer.server.07", error = %err, "Failed to refresh Codex tracer events");
             return json_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal_error",
@@ -305,6 +317,7 @@ async fn handle_refresh(State(state): State<ServerState>) -> Response {
     };
 
     info!(
+        event_code = "commands.codex_tracer.server.08",
         files = stats.files_seen,
         records = stats.records_read,
         events = stats.events_found,
@@ -333,7 +346,7 @@ async fn handle_stats(State(state): State<ServerState>) -> Response {
         }))
         .into_response(),
         Err(err) => {
-            error!(error = %err, "Failed to count events");
+            error!(event_code = "commands.codex_tracer.server.09", error = %err, "Failed to count events");
             json_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal_error",

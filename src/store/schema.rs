@@ -109,11 +109,19 @@ impl Store {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn bootstrap_with_progress(
         &self,
         sink: Option<BootstrapProgressSink<'_>>,
     ) -> Result<()> {
         self.bootstrap_with_events(BootstrapOptions::default(), sink)
+    }
+
+    pub(crate) fn bootstrap_with_progress_and_pricing_facts(
+        &self,
+        sink: Option<BootstrapProgressSink<'_>>,
+    ) -> crate::domain::pricing_catalog::diagnostic::Result<()> {
+        self.bootstrap_with_events_and_pricing_facts(BootstrapOptions::default(), sink)
     }
 
     /// Bootstraps the store and applies optional configuration via
@@ -129,6 +137,21 @@ impl Store {
         options: BootstrapOptions,
         progress_sink: Option<BootstrapProgressSink<'_>>,
     ) -> Result<()> {
+        self.bootstrap_with_events_and_pricing_facts(options, progress_sink)
+            .map_err(Into::into)
+    }
+
+    pub(crate) fn bootstrap_with_pricing_facts(
+        &self,
+    ) -> crate::domain::pricing_catalog::diagnostic::Result<()> {
+        self.bootstrap_with_events_and_pricing_facts(BootstrapOptions::default(), None)
+    }
+
+    fn bootstrap_with_events_and_pricing_facts(
+        &self,
+        options: BootstrapOptions,
+        progress_sink: Option<BootstrapProgressSink<'_>>,
+    ) -> crate::domain::pricing_catalog::diagnostic::Result<()> {
         let operation = self.write_operation(HolderKind::Library)?;
         operation
             .store
@@ -139,7 +162,7 @@ impl Store {
         &self,
         options: BootstrapOptions,
         mut progress_sink: Option<BootstrapProgressSink<'_>>,
-    ) -> Result<()> {
+    ) -> crate::domain::pricing_catalog::diagnostic::Result<()> {
         /*
          * ========================================================================
          * 步骤1：初始化本地目录与 SQLite schema
@@ -150,7 +173,10 @@ impl Store {
          * 3) 0.4.x v0 老库升级前保留一次自动备份
          * 4) 按 BootstrapOptions 落实 raw archive 开关（默认保持当前值）
          */
-        info!("开始初始化本地目录与 SQLite schema");
+        info!(
+            event_code = "store.schema.01",
+            "开始初始化本地目录与 SQLite schema"
+        );
 
         fs::create_dir_all(&self.paths.root_dir)?;
         fs::create_dir_all(&self.paths.bin_dir)?;
@@ -188,6 +214,7 @@ impl Store {
         self.upgrade_embedded_pricing_if_needed(progress_sink)?;
 
         info!(
+            event_code = "store.schema.02",
             version = migrations::latest_schema_version(),
             "完成本地目录与 SQLite schema 初始化"
         );
@@ -343,9 +370,9 @@ impl Store {
     /// `project_dim` is intentionally preserved because projects can be shared
     /// by multiple sources and are cheap stale metadata until the next full GC.
     pub fn reset_for_source(&self, source: crate::models::SourceKind, host_id: &str) -> Result<()> {
-        info!(source = %source, host_id, "开始按源清空可重建用量数据");
+        info!(event_code = "store.schema.03", source = %source, host_id, "开始按源清空可重建用量数据");
         self.write_transaction(|tx| reset_for_source_tx(tx, source, host_id))?;
-        info!(source = %source, host_id, "完成按源清空可重建用量数据");
+        info!(event_code = "store.schema.04", source = %source, host_id, "完成按源清空可重建用量数据");
         Ok(())
     }
 
@@ -357,8 +384,10 @@ impl Store {
             return Ok(());
         }
         info!(
+            event_code = "store.schema.05",
             source_count = sources.len(),
-            host_id, "开始按源批量清空可重建用量数据"
+            host_id,
+            "开始按源批量清空可重建用量数据"
         );
         self.write_transaction(|tx| {
             for source in sources {
@@ -369,8 +398,10 @@ impl Store {
             Ok(())
         })?;
         info!(
+            event_code = "store.schema.06",
             source_count = sources.len(),
-            host_id, "完成按源批量清空可重建用量数据"
+            host_id,
+            "完成按源批量清空可重建用量数据"
         );
         Ok(())
     }
@@ -386,7 +417,7 @@ impl Store {
          * 3) command-level `sync --rebuild` 不得调用；它必须按 parser registry 逐源 reset
          * 4) 保留 run_log / integration_install / trigger_state 等运维记录
          */
-        info!("开始清空可重建用量数据");
+        info!(event_code = "store.schema.07", "开始清空可重建用量数据");
 
         self.write_transaction(|tx| {
             tx.execute_batch(
@@ -405,7 +436,7 @@ impl Store {
             Ok(())
         })?;
 
-        info!("完成清空可重建用量数据");
+        info!(event_code = "store.schema.08", "完成清空可重建用量数据");
         Ok(())
     }
 

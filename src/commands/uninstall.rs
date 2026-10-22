@@ -1,3 +1,5 @@
+use super::cli_errors::Diagnostic;
+use crate::common::i18n::commands::{OperationDiagnostic, cleanup_detail, message, status_label};
 use anyhow::Result;
 use tracing::info;
 
@@ -13,28 +15,47 @@ pub async fn run(app: &AppContext, purge: bool) -> Result<()> {
      * 2) 仅在实际清理或失败时记录 integration_install 审计
      * 3) 只有 --purge 才删除 ~/.llmusage
      */
-    info!("开始执行本地卸载");
+    info!(event_code = "commands.uninstall.01", "开始执行本地卸载");
 
     let store = Store::new(&app.paths)?;
-    store.bootstrap()?;
+    super::cli_errors::pricing_result(store.bootstrap_with_pricing_facts())?;
     let actions = super::run_tracked(
         &store,
         "uninstall",
-        async { integrations::cleanup_all(app, &store) },
+        async {
+            integrations::cleanup_all_with_facts(app, &store).map_err(|error| {
+                if let Some(failure) = error.downcast_ref::<integrations::CleanupFailure>() {
+                    Diagnostic::with_facts(
+                        error.to_string(),
+                        OperationDiagnostic::CleanupFailed {
+                            failures: failure.facts.clone(),
+                        },
+                    )
+                    .into()
+                } else {
+                    error
+                }
+            })
+        },
         |_| Some("legacy hook cleanup completed".to_string()),
     )
     .await?;
 
-    println!("Legacy cleanup finished:");
-    for action in actions {
-        println!("- {}: {} ({})", action.source, action.status, action.detail);
+    println!("{}", message!(CleanupFinished));
+    for outcome in actions {
+        println!(
+            "- {}: {} ({})",
+            outcome.action.source,
+            status_label(&outcome.action.status),
+            cleanup_detail(&outcome.fact)
+        );
     }
 
     if purge && app.paths.root_dir.exists() {
         std::fs::remove_dir_all(&app.paths.root_dir)?;
-        println!("Purged {}", app.paths.root_dir.display());
+        println!("{}", message!(Purged, app.paths.root_dir.display()));
     }
 
-    info!("完成本地卸载");
+    info!(event_code = "commands.uninstall.02", "完成本地卸载");
     Ok(())
 }

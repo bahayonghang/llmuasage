@@ -1,6 +1,12 @@
 //! Invocation-local presentation language. Domain and wire values stay language neutral.
 use std::{cell::Cell, future::Future};
 
+pub mod commands;
+pub mod logging;
+pub(crate) mod quota;
+pub mod sync;
+pub(crate) mod tui;
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Language {
     #[default]

@@ -5,6 +5,7 @@ use anyhow::Result;
 use serde::Deserialize;
 
 use super::http::{client, status_error};
+use super::presentation::{self, DiagnosticHint, MetricHint, PresentedOutput, WindowHint};
 use super::types::{UsageMetric, UsageOutput, capitalize};
 
 const BETA_HEADER: &str = "oauth-2025-04-20";
@@ -46,18 +47,24 @@ pub fn has_credentials(user_home: &Path) -> bool {
     credentials_path(user_home).exists()
 }
 
-pub async fn fetch(user_home: &Path, usage_url: &str, timeout: Duration) -> Result<UsageOutput> {
+pub async fn fetch(
+    user_home: &Path,
+    usage_url: &str,
+    timeout: Duration,
+) -> Result<PresentedOutput> {
     let path = credentials_path(user_home);
     let content = std::fs::read_to_string(&path)?;
     let before = content.clone();
     let creds: Credentials = serde_json::from_str(&content)?;
-    let oauth = creds
-        .claude_ai_oauth
-        .ok_or_else(|| anyhow::anyhow!("No Claude OAuth credentials. Run 'claude' to log in."))?;
-    let access_token = oauth
-        .access_token
-        .as_deref()
-        .ok_or_else(|| anyhow::anyhow!("No Claude access token."))?;
+    let oauth = creds.claude_ai_oauth.ok_or_else(|| {
+        presentation::error(
+            "No Claude OAuth credentials. Run 'claude' to log in.",
+            DiagnosticHint::MissingOauth,
+        )
+    })?;
+    let access_token = oauth.access_token.as_deref().ok_or_else(|| {
+        presentation::error("No Claude access token.", DiagnosticHint::MissingToken)
+    })?;
     let plan = oauth.subscription_type.as_ref().map(|kind| {
         let tier = oauth
             .rate_limit_tier
@@ -86,31 +93,42 @@ pub async fn fetch(user_home: &Path, usage_url: &str, timeout: Duration) -> Resu
     let body: UsageResponse = response.json().await?;
     let after = std::fs::read_to_string(&path).unwrap_or_default();
     if after != before {
-        anyhow::bail!("Claude credentials were modified during fetch");
+        return Err(presentation::error(
+            "Claude credentials were modified during fetch",
+            DiagnosticHint::CredentialsModified,
+        ));
     }
 
-    Ok(UsageOutput {
-        provider: "Claude".into(),
-        account: None,
-        credential_source: None,
-        plan,
-        email: None,
-        metrics: usage_metrics(&body),
-    })
+    let (metrics, hints) = usage_metrics(&body);
+    Ok((
+        UsageOutput {
+            provider: "Claude".into(),
+            account: None,
+            credential_source: None,
+            plan,
+            email: None,
+            metrics,
+        },
+        hints,
+    ))
 }
 
-fn usage_metrics(resp: &UsageResponse) -> Vec<UsageMetric> {
+fn usage_metrics(resp: &UsageResponse) -> (Vec<UsageMetric>, Vec<MetricHint>) {
     let mut metrics = Vec::new();
+    let mut hints = Vec::new();
     if let Some(window) = &resp.five_hour {
         metrics.push(window_metric("Session", window));
+        hints.push(MetricHint::window(WindowHint::Session));
     }
     if let Some(window) = &resp.seven_day {
         metrics.push(window_metric("Weekly", window));
+        hints.push(MetricHint::window(WindowHint::Weekly));
     }
     if let Some(window) = &resp.seven_day_opus {
         metrics.push(window_metric("Opus", window));
+        hints.push(MetricHint::window(WindowHint::Opus));
     }
-    metrics
+    (metrics, hints)
 }
 
 fn window_metric(label: &str, window: &Window) -> UsageMetric {

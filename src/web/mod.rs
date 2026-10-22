@@ -197,6 +197,7 @@ impl DashboardQuerySupervisor {
                 .store(true, Ordering::Release);
             supervisor.orphaned_tasks.fetch_sub(1, Ordering::AcqRel);
             debug!(
+                event_code = "web.mod.01",
                 query_id,
                 section,
                 orphan_duration_ms = elapsed_ms,
@@ -391,7 +392,7 @@ impl BoundWebServer {
         if let Some(task) = self.task.take() {
             tokio::spawn(async move {
                 if let Err(err) = server_task_result(task.await) {
-                    error!(%addr, error = %err, "detached Web server stopped unexpectedly");
+                    error!(event_code = "web.mod.02", %addr, error = %err, "detached Web server stopped unexpectedly");
                 }
             });
         }
@@ -454,7 +455,7 @@ pub(crate) async fn bind_server(
      * 2) 复用既有端口探测顺序
      * 3) 命中端口后再组装路由，把真实监听端口写入写守卫 allowlist
      */
-    info!("开始绑定本地 Web UI 监听端口");
+    info!(event_code = "web.mod.03", "开始绑定本地 Web UI 监听端口");
 
     let ports = if let Some(port) = preferred_port {
         vec![port]
@@ -468,7 +469,7 @@ pub(crate) async fn bind_server(
         match TcpListener::bind(attempted_addr).await {
             Ok(listener) => {
                 let addr = listener.local_addr()?;
-                info!("开始组装本地 Web UI 路由");
+                info!(event_code = "web.mod.04", "开始组装本地 Web UI 路由");
                 let state = WebState::new(store).with_listener_port(addr.port());
                 let app = match write_exposure {
                     WriteExposure::LocalOnly => loopback_router(),
@@ -476,8 +477,7 @@ pub(crate) async fn bind_server(
                 };
                 // 对 CSS/JS/SVG 与 JSON API 做 gzip/br 压缩协商；未发 Accept-Encoding 的客户端不受影响。
                 let app = app.layer(CompressionLayer::new()).with_state(state);
-                info!(
-                    exposure = ?write_exposure,
+                info!(event_code = "web.mod.05", exposure = ?write_exposure,
                     "完成本地 Web UI 路由组装"
                 );
                 let shutdown = CancellationToken::new();
@@ -490,7 +490,7 @@ pub(crate) async fn bind_server(
                     .with_graceful_shutdown(shutdown_signal.cancelled_owned())
                     .await
                 });
-                info!(%addr, "完成本地 Web UI 监听端口绑定");
+                info!(event_code = "web.mod.06", %addr, "完成本地 Web UI 监听端口绑定");
                 return Ok(BoundWebServer {
                     addr,
                     shutdown,
@@ -1261,7 +1261,7 @@ async fn api_diagnostics_forget(
             .into_response()
         }
         Err(err) => {
-            error!(endpoint = "/api/diagnostics/forget", error = %err, "forget failed");
+            error!(event_code = "web.mod.07", endpoint = "/api/diagnostics/forget", error = %err, "forget failed");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({
@@ -1637,6 +1637,7 @@ where
         }
         Err(_) => {
             debug!(
+                event_code = "web.mod.08",
                 section,
                 semaphore_wait_ms = started.elapsed().as_millis(),
                 query_ms = 0_u128,
@@ -1691,6 +1692,7 @@ where
             supervisor.supervise(task, query_id, section);
             guard.disarm();
             debug!(
+                event_code = "web.mod.09",
                 query_id,
                 section,
                 semaphore_wait_ms = semaphore_wait.as_millis(),
@@ -1708,6 +1710,7 @@ where
         supervisor.supervise(task, query_id, section);
         guard.disarm();
         debug!(
+            event_code = "web.mod.10",
             query_id,
             section,
             semaphore_wait_ms = semaphore_wait.as_millis(),
@@ -1724,6 +1727,7 @@ where
             supervisor.supervise(task, query_id, section);
             guard.disarm();
             debug!(
+                event_code = "web.mod.11",
                 query_id,
                 section,
                 semaphore_wait_ms = semaphore_wait.as_millis(),
@@ -1737,6 +1741,7 @@ where
     guard.disarm();
     let result = dashboard_join_result(joined);
     debug!(
+        event_code = "web.mod.12",
         query_id,
         section,
         semaphore_wait_ms = semaphore_wait.as_millis(),
@@ -2175,6 +2180,7 @@ where
             match serde_json::to_vec(&value) {
                 Ok(body) => {
                     debug!(
+                        event_code = "web.mod.13",
                         endpoint,
                         serialization_ms = started.elapsed().as_millis(),
                         payload_bytes = body.len(),
@@ -2188,13 +2194,13 @@ where
                         .into_response()
                 }
                 Err(err) => {
-                    error!(endpoint, error = %err, "Web API response serialization failed");
+                    error!(event_code = "web.mod.14", endpoint, error = %err, "Web API response serialization failed");
                     StatusCode::INTERNAL_SERVER_ERROR.into_response()
                 }
             }
         }
         Err(err) => {
-            error!(endpoint, error = %err, "Web API handler failed");
+            error!(event_code = "web.mod.15", endpoint, error = %err, "Web API handler failed");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({

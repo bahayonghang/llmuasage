@@ -1,3 +1,5 @@
+use crate::common::i18n::tui::format as tr_format;
+use crate::common::i18n::tui::text as tr;
 use ratatui::{
     Frame,
     layout::{Constraint, Rect},
@@ -39,24 +41,24 @@ pub(crate) fn render_sorted(
     }
     match data {
         None => {
-            let widget = Paragraph::new("Loading...")
+            let widget = Paragraph::new(tr("loading"))
                 .style(theme::muted_style())
-                .block(styled_block("Daily Usage"));
+                .block(styled_block(tr("daily_usage")));
             frame.render_widget(widget, area);
         }
         Some(Err(e)) => {
-            let widget = Paragraph::new(format!("Data load failed: {e}"))
+            let widget = Paragraph::new(tr_format!(data_load_failed_e, e = e))
                 .style(theme::error_style())
-                .block(styled_block("Daily Usage"));
+                .block(styled_block(tr("daily_usage")));
             frame.render_widget(widget, area);
         }
         Some(Ok(items)) if items.is_empty() => {
-            let widget = Paragraph::new("No daily usage data found. Press r to refresh.")
+            let widget = Paragraph::new(tr("no_daily_usage_data_found_press_r_to_refresh"))
                 .style(theme::muted_style())
-                .block(styled_block("Daily Usage"));
+                .block(styled_block(tr("daily_usage")));
             frame.render_widget(widget, area);
         }
-        Some(Ok(items)) => render_table(frame, area, "Daily Usage", items, scroll, sort),
+        Some(Ok(items)) => render_table(frame, area, tr("daily_usage"), items, scroll, sort),
     }
 }
 
@@ -79,7 +81,7 @@ fn render_table(
     let has_turns = period_has_turns(items.iter().map(|day| day.turn_count));
     let compact_date = matches!(tier, WidthTier::Wide) && inner.width < 112;
     let date_width = if compact_date { 7 } else { 12 };
-    let header = period_header_row("Date", &[], has_turns, tier, sort);
+    let header = period_header_row(tr("date_2"), &[], has_turns, tier, sort);
     let ordered = stable_sort_refs(items.iter().collect(), sort, compare_daily);
     let visible_height = super::visible_table_rows(area);
     let range = scroll.visible_range(ordered.len(), visible_height);
@@ -119,18 +121,22 @@ fn render_detail(
     sort: SortState,
 ) {
     let title = match &detail.kind {
-        crate::tui::app::PeriodDetailKind::Daily { date } => format!("Daily Detail: {date}"),
-        crate::tui::app::PeriodDetailKind::Monthly { month } => format!("Daily Breakdown: {month}"),
+        crate::tui::app::PeriodDetailKind::Daily { date } => {
+            tr_format!(daily_detail_date, date = date)
+        }
+        crate::tui::app::PeriodDetailKind::Monthly { month } => {
+            tr_format!(daily_breakdown_month, month = month)
+        }
     };
     match &detail.payload {
         None => {
-            let widget = Paragraph::new("Loading...")
+            let widget = Paragraph::new(tr("loading"))
                 .style(theme::muted_style())
                 .block(styled_block(&title));
             frame.render_widget(widget, area);
         }
         Some(Err(e)) => {
-            let widget = Paragraph::new(format!("Data load failed: {e}"))
+            let widget = Paragraph::new(tr_format!(data_load_failed_e, e = e))
                 .style(theme::error_style())
                 .block(styled_block(&title));
             frame.render_widget(widget, area);
@@ -159,8 +165,10 @@ fn render_model_detail(
         return;
     }
     if items.is_empty() {
-        let widget = Paragraph::new("No model details found for this day. Press Esc to go back.")
-            .style(theme::muted_style());
+        let widget = Paragraph::new(tr(
+            "no_model_details_found_for_this_day_press_esc_to_go_back",
+        ))
+        .style(theme::muted_style());
         frame.render_widget(widget, inner);
         return;
     }
@@ -168,28 +176,28 @@ fn render_model_detail(
     let tier = width_tier(inner.width);
     let header = match tier {
         WidthTier::VeryNarrow => Row::new(vec![
-            Cell::from("Model"),
-            Cell::from(sort.header("Cost", TableSortKey::Cost)),
+            Cell::from(tr("model")),
+            Cell::from(sort.header(tr("cost_2"), TableSortKey::Cost)),
         ]),
         WidthTier::Narrow => Row::new(vec![
-            Cell::from("Model"),
-            Cell::from("Source"),
-            Cell::from("Msgs"),
-            Cell::from(sort.header("Tokens", TableSortKey::Tokens)),
-            Cell::from(sort.header("Cost", TableSortKey::Cost)),
+            Cell::from(tr("model")),
+            Cell::from(tr("source_3")),
+            Cell::from(tr("msgs")),
+            Cell::from(sort.header(tr("tokens_3"), TableSortKey::Tokens)),
+            Cell::from(sort.header(tr("cost_2"), TableSortKey::Cost)),
         ]),
         WidthTier::Wide => Row::new(vec![
-            Cell::from("Model"),
-            Cell::from("Source"),
-            Cell::from("Msgs"),
-            Cell::from("Input"),
-            Cell::from("Output"),
-            Cell::from("Cache R"),
-            Cell::from("Cache W"),
-            Cell::from("Cache×"),
-            Cell::from(sort.header("Total", TableSortKey::Tokens)),
-            Cell::from(sort.header("Cost", TableSortKey::Cost)),
-            Cell::from("Cost/1M"),
+            Cell::from(tr("model")),
+            Cell::from(tr("source_3")),
+            Cell::from(tr("msgs")),
+            Cell::from(tr("input")),
+            Cell::from(tr("output")),
+            Cell::from(tr("cache_r")),
+            Cell::from(tr("cache_w")),
+            Cell::from(tr("cache")),
+            Cell::from(sort.header(tr("total"), TableSortKey::Tokens)),
+            Cell::from(sort.header(tr("cost_2"), TableSortKey::Cost)),
+            Cell::from(tr("cost_1m")),
         ]),
     }
     .style(theme::header_style())

@@ -1,3 +1,7 @@
+use super::cli_errors::Diagnostic;
+use crate::common::i18n::commands::{
+    DiagnosticFacts as Facts, reports::DiagnosticFacts as ReportFacts,
+};
 use anyhow::Result;
 use tracing::debug;
 
@@ -11,7 +15,10 @@ use crate::{
 use super::{report_args::SessionArgs, unified_report};
 
 pub async fn run(app: &AppContext, args: SessionArgs) -> Result<()> {
-    debug!("starting session report output");
+    debug!(
+        event_code = "commands.session.01",
+        "starting session report output"
+    );
     let store = Store::new(&app.paths)?;
     store.require_initialized()?;
     let dashboard = Dashboard::open(&store)?;
@@ -19,7 +26,10 @@ pub async fn run(app: &AppContext, args: SessionArgs) -> Result<()> {
     let filter = args.common.to_filter(&store, args.project.clone())?;
 
     if args.id.is_some() && !args.unified.sections.is_empty() {
-        anyhow::bail!("--sections cannot be combined with --id");
+        anyhow::bail!(Diagnostic::with_facts(
+            "--sections cannot be combined with --id",
+            Facts::Reports(ReportFacts::SectionsId {})
+        ));
     }
     if !args.unified.sections.is_empty() {
         let reports = unified_report::load_sections(
@@ -39,7 +49,10 @@ pub async fn run(app: &AppContext, args: SessionArgs) -> Result<()> {
             args.common.compact,
             args.common.no_cost,
         )?;
-        debug!("finished session report output");
+        debug!(
+            event_code = "commands.session.02",
+            "finished session report output"
+        );
         return Ok(());
     }
 
@@ -67,6 +80,9 @@ pub async fn run(app: &AppContext, args: SessionArgs) -> Result<()> {
         );
     }
 
-    debug!("finished session report output");
+    debug!(
+        event_code = "commands.session.03",
+        "finished session report output"
+    );
     Ok(())
 }

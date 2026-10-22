@@ -10,6 +10,38 @@ use super::transport::{
     RemoteCommandRequest, RemoteCommandRunner, split_remote_command, validate_ssh_target,
 };
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum RegistrationFact {
+    EmptyLabel {},
+    SourceCollision { host: String, source: String },
+    Duplicate { host: String },
+    SshTarget { target: String },
+    EmptyCommand {},
+    Version { status: i32, detail: String },
+    Handshake { status: i32, detail: String },
+    Protocol { remote: u32, schema: u32 },
+}
+
+#[derive(Debug)]
+pub(crate) struct RegistrationFailure {
+    pub(crate) error: LlmusageError,
+    pub(crate) fact: Option<RegistrationFact>,
+}
+impl RegistrationFailure {
+    fn known(error: LlmusageError, fact: RegistrationFact) -> Self {
+        Self {
+            error,
+            fact: Some(fact),
+        }
+    }
+}
+impl From<LlmusageError> for RegistrationFailure {
+    fn from(error: LlmusageError) -> Self {
+        Self { error, fact: None }
+    }
+}
+
 /// Lowercase the label and replace characters outside `[a-z0-9_-]` with `-`.
 pub fn normalize_host_id(label: &str) -> String {
     label
@@ -26,28 +58,49 @@ pub fn normalize_host_id(label: &str) -> String {
 }
 
 pub fn validate_new_host_id(store: &Store, host_id: &str) -> Result<()> {
+    validate_new_host_id_with_facts(store, host_id).map_err(|failure| failure.error)
+}
+
+fn validate_new_host_id_with_facts(
+    store: &Store,
+    host_id: &str,
+) -> std::result::Result<(), RegistrationFailure> {
     if host_id.is_empty() {
-        return Err(LlmusageError::ConfigInvalid {
-            detail: "host label normalizes to an empty host_id".to_string(),
-        });
+        return Err(RegistrationFailure::known(
+            LlmusageError::ConfigInvalid {
+                detail: "host label normalizes to an empty host_id".to_string(),
+            },
+            RegistrationFact::EmptyLabel {},
+        ));
     }
     for descriptor in registry::registered_source_descriptors() {
         if descriptor.kind.as_str() == host_id {
-            return Err(LlmusageError::ConfigInvalid {
-                detail: format!(
-                    "host_id '{host_id}' collides with source name '{}'; choose a different label",
-                    descriptor.kind.as_str()
-                ),
-            });
+            return Err(RegistrationFailure::known(
+                LlmusageError::ConfigInvalid {
+                    detail: format!(
+                        "host_id '{host_id}' collides with source name '{}'; choose a different label",
+                        descriptor.kind.as_str()
+                    ),
+                },
+                RegistrationFact::SourceCollision {
+                    host: host_id.into(),
+                    source: descriptor.kind.as_str().into(),
+                },
+            ));
         }
     }
     for host in store.hosts().list()? {
         if host.host_id == host_id {
-            return Err(LlmusageError::ConfigInvalid {
-                detail: format!(
-                    "host_id '{host_id}' is already registered; choose a different label"
-                ),
-            });
+            return Err(RegistrationFailure::known(
+                LlmusageError::ConfigInvalid {
+                    detail: format!(
+                        "host_id '{host_id}' is already registered; choose a different label"
+                    ),
+                },
+                RegistrationFact::Duplicate {
+                    host: host_id.into(),
+                },
+            ));
         }
     }
     Ok(())
@@ -76,9 +129,27 @@ pub fn register_remote_host(
     command: &str,
     runner: &dyn RemoteCommandRunner,
 ) -> Result<Host> {
+    register_remote_host_with_facts(store, label, ssh_target, command, runner)
+        .map_err(|failure| failure.error)
+}
+
+pub(crate) fn register_remote_host_with_facts(
+    store: &Store,
+    label: &str,
+    ssh_target: &str,
+    command: &str,
+    runner: &dyn RemoteCommandRunner,
+) -> std::result::Result<Host, RegistrationFailure> {
     let host_id = normalize_host_id(label);
-    validate_new_host_id(store, &host_id)?;
-    validate_ssh_target(ssh_target)?;
+    validate_new_host_id_with_facts(store, &host_id)?;
+    validate_ssh_target(ssh_target).map_err(|error| {
+        RegistrationFailure::known(
+            error,
+            RegistrationFact::SshTarget {
+                target: ssh_target.into(),
+            },
+        )
+    })?;
     let command = if command.trim().is_empty() {
         "llmusage"
     } else {
@@ -86,9 +157,12 @@ pub fn register_remote_host(
     };
     let command_argv = split_remote_command(command);
     if command_argv.is_empty() {
-        return Err(LlmusageError::ConfigInvalid {
-            detail: "remote command is empty".to_string(),
-        });
+        return Err(RegistrationFailure::known(
+            LlmusageError::ConfigInvalid {
+                detail: "remote command is empty".to_string(),
+            },
+            RegistrationFact::EmptyCommand {},
+        ));
     }
 
     let mut version_argv = command_argv.clone();
@@ -98,13 +172,19 @@ pub fn register_remote_host(
         argv: version_argv,
     })?;
     if version.status != 0 {
-        return Err(LlmusageError::ConfigInvalid {
-            detail: format!(
-                "remote llmusage was not found or --version failed (exit {}): {}",
-                version.status,
-                version.stderr.trim()
-            ),
-        });
+        return Err(RegistrationFailure::known(
+            LlmusageError::ConfigInvalid {
+                detail: format!(
+                    "remote llmusage was not found or --version failed (exit {}): {}",
+                    version.status,
+                    version.stderr.trim()
+                ),
+            },
+            RegistrationFact::Version {
+                status: version.status,
+                detail: version.stderr.trim().into(),
+            },
+        ));
     }
 
     let mut handshake_argv = command_argv;
@@ -115,19 +195,28 @@ pub fn register_remote_host(
         argv: handshake_argv,
     })?;
     if handshake_out.status != 0 {
-        return Err(LlmusageError::ConfigInvalid {
-            detail: format!(
-                "remote handshake failed (exit {}): {}",
-                handshake_out.status,
-                handshake_out.stderr.trim()
-            ),
-        });
+        return Err(RegistrationFailure::known(
+            LlmusageError::ConfigInvalid {
+                detail: format!(
+                    "remote handshake failed (exit {}): {}",
+                    handshake_out.status,
+                    handshake_out.stderr.trim()
+                ),
+            },
+            RegistrationFact::Handshake {
+                status: handshake_out.status,
+                detail: handshake_out.stderr.trim().into(),
+            },
+        ));
     }
     let handshake = parse_handshake_stdout(&handshake_out.stdout)?;
     if handshake.shard_protocol != SHARD_PROTOCOL_VERSION {
-        return Err(protocol_mismatch_error(
-            handshake.shard_protocol,
-            handshake.schema_version,
+        return Err(RegistrationFailure::known(
+            protocol_mismatch_error(handshake.shard_protocol, handshake.schema_version),
+            RegistrationFact::Protocol {
+                remote: handshake.shard_protocol,
+                schema: handshake.schema_version,
+            },
         ));
     }
 

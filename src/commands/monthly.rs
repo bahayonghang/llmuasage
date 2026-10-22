@@ -11,7 +11,10 @@ use crate::{
 use super::{report_args::MonthlyArgs, unified_report};
 
 pub async fn run(app: &AppContext, args: MonthlyArgs) -> Result<()> {
-    debug!("starting monthly report output");
+    debug!(
+        event_code = "commands.monthly.01",
+        "starting monthly report output"
+    );
     let store = Store::new(&app.paths)?;
     store.require_initialized()?;
     let dashboard = Dashboard::open(&store)?;
@@ -35,7 +38,10 @@ pub async fn run(app: &AppContext, args: MonthlyArgs) -> Result<()> {
             args.common.compact,
             args.common.no_cost,
         )?;
-        debug!("finished monthly report output");
+        debug!(
+            event_code = "commands.monthly.02",
+            "finished monthly report output"
+        );
         return Ok(());
     }
     let report = reports::load_unified_report(conn, &filter, reports::PeriodKind::Monthly)?;
@@ -69,6 +75,9 @@ pub async fn run(app: &AppContext, args: MonthlyArgs) -> Result<()> {
         )?;
     }
 
-    debug!("finished monthly report output");
+    debug!(
+        event_code = "commands.monthly.03",
+        "finished monthly report output"
+    );
     Ok(())
 }

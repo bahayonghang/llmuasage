@@ -1,3 +1,8 @@
+use super::cli_errors::Diagnostic;
+use crate::common::i18n::{
+    commands::{OperationDiagnostic as Fact, message},
+    text,
+};
 use std::{
     collections::BTreeMap,
     fs,
@@ -5,7 +10,7 @@ use std::{
     time::SystemTime,
 };
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use chrono::{DateTime, Local};
 use unicode_width::UnicodeWidthStr;
 
@@ -40,6 +45,7 @@ enum Category {
     Exports,
     Lock,
     Pricing,
+    Settings,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,7 +68,7 @@ struct DisplayRow {
     files: usize,
     bytes: u64,
     modified: String,
-    action: &'static str,
+    action: Action,
 }
 
 #[derive(Debug, Default)]
@@ -98,14 +104,14 @@ struct DeleteReport {
 
 struct CleanOutcome {
     text: String,
-    error: Option<String>,
+    error: Option<Diagnostic>,
 }
 
 pub async fn run(app: &AppContext, yes: bool) -> Result<()> {
     let outcome = clean_home(&app.paths.root_dir, yes)?;
     print!("{}", outcome.text);
     if let Some(error) = outcome.error {
-        bail!("{error}");
+        return Err(error.into());
     }
     Ok(())
 }
@@ -113,22 +119,29 @@ pub async fn run(app: &AppContext, yes: bool) -> Result<()> {
 fn clean_home(root: &Path, yes: bool) -> Result<CleanOutcome> {
     if !root.exists() {
         return Ok(CleanOutcome {
-            text: "没有可清理内容\n".to_string(),
+            text: message!(CleanEmpty),
             error: None,
         });
     }
-    let plan = scan(root).with_context(|| format!("读取 {} 失败", root.display()))?;
+    let plan = scan(root).with_context(|| {
+        Diagnostic::with_facts(
+            format!("读取 {} 失败", root.display()),
+            Fact::CleanRead {
+                path: root.display().to_string(),
+            },
+        )
+    })?;
     let rows = rows_from(&plan);
     if rows.is_empty() {
         return Ok(CleanOutcome {
-            text: "没有可清理内容\n".to_string(),
+            text: message!(CleanEmpty),
             error: None,
         });
     }
 
     let mut text = render_plan(&rows);
     if !yes {
-        text.push_str("未修改磁盘。要删除「可删除」项，请运行 llmusage clean --yes。\n");
+        text.push_str(&message!(CleanPreview));
         return Ok(CleanOutcome { text, error: None });
     }
     let report = apply_deletes(root, &plan);
@@ -140,22 +153,27 @@ fn outcome_from_report(text: String, report: DeleteReport) -> CleanOutcome {
     let error = if report.failures.is_empty() {
         None
     } else {
-        Some(format!("{} 个路径删除失败", report.failures.len()))
+        Some(Diagnostic::with_facts(
+            format!("{} 个路径删除失败", report.failures.len()),
+            Fact::CleanDelete {
+                count: report.failures.len(),
+            },
+        ))
     };
     CleanOutcome { text, error }
 }
 
 fn append_delete_summary(text: &mut String, report: &DeleteReport) {
-    text.push_str(&format!(
-        "已删除 {} 个文件，释放 {}。\n",
+    text.push_str(&message!(
+        CleanDeleted,
         report.files,
         format_byte_size(report.bytes)
     ));
     if report.directories > 0 {
-        text.push_str(&format!("已移除 {} 个空目录。\n", report.directories));
+        text.push_str(&message!(CleanDirs, report.directories));
     }
     if !report.failures.is_empty() {
-        text.push_str("删除失败：\n");
+        text.push_str(&message!(CleanFailures));
         for failure in &report.failures {
             text.push_str(&format!("- {failure}\n"));
         }
@@ -191,6 +209,17 @@ fn classify_entry(name: &str, kind: EntryKind, location: EntryLocation) -> (Clas
 }
 
 fn classify_root_name(name: &str, kind: EntryKind) -> (Class, Action) {
+    if kind == EntryKind::File
+        && (matches!(
+            name,
+            "cli-settings.json"
+                | "cli-settings.lock"
+                | ".cli-settings.json.llmusage-pending"
+                | ".cli-settings.json.llmusage-recovery"
+        ) || name.starts_with(".cli-settings.json.llmusage-tmp."))
+    {
+        return (Class::Known(Category::Settings), Action::Keep);
+    }
     let category = match (kind, name) {
         (EntryKind::File, "llmusage.db") => Some(Category::LiveDb),
         (EntryKind::File, "llmusage.db-wal" | "llmusage.db-shm") => Some(Category::LiveSidecar),
@@ -402,12 +431,12 @@ fn push_unknown(
         measured.files.max(1)
     };
     plan.unknowns.push(DisplayRow {
-        category: "未识别".to_string(),
+        category: text("Unknown", "未识别").to_string(),
         path: relative_path(root, path),
         files,
         bytes: measured.bytes,
         modified: format_modified(measured.latest),
-        action: "未识别",
+        action: Action::Unknown,
     });
     Ok(())
 }
@@ -424,7 +453,7 @@ fn rows_from(plan: &Plan) -> Vec<DisplayRow> {
             files: acc.files,
             bytes: acc.bytes,
             modified: format_modified(acc.latest),
-            action: category.action_label(),
+            action: action_for(*category),
         });
     }
     rows.extend(plan.unknowns.clone());
@@ -436,16 +465,23 @@ fn render_plan(rows: &[DisplayRow]) -> String {
     let total = rows.iter().map(|row| row.bytes).sum();
     let deletable = rows
         .iter()
-        .filter(|row| row.action == "可删除")
+        .filter(|row| row.action == Action::Delete)
         .map(|row| row.bytes)
         .sum();
-    out.push_str(&format!("合计 {}\n", format_byte_size(total)));
-    out.push_str(&format!("其中可删除 {}\n", format_byte_size(deletable)));
+    out.push_str(&message!(CleanTotal, format_byte_size(total)));
+    out.push_str(&message!(CleanDeletable, format_byte_size(deletable)));
     out
 }
 
 fn render_table(rows: &[DisplayRow]) -> String {
-    let headers = ["类别", "路径", "文件数", "大小", "最近修改", "动作"];
+    let headers = [
+        text("Category", "类别"),
+        text("Path", "路径"),
+        text("Files", "文件数"),
+        text("Size", "大小"),
+        text("Modified", "最近修改"),
+        text("Action", "动作"),
+    ];
     let body: Vec<[String; 6]> = rows
         .iter()
         .map(|row| {
@@ -455,7 +491,7 @@ fn render_table(rows: &[DisplayRow]) -> String {
                 row.files.to_string(),
                 format_byte_size(row.bytes),
                 row.modified.clone(),
-                row.action.to_string(),
+                row.action.label().to_string(),
             ]
         })
         .collect();
@@ -652,7 +688,7 @@ fn relative_path(root: &Path, path: &Path) -> String {
 
 fn format_byte_size(bytes: u64) -> String {
     let gigabytes = (bytes as f64) / 1_000_000_000.0;
-    format!("{bytes} 字节 / {gigabytes:.2} GB")
+    message!(CleanBytes, bytes, gigabytes)
 }
 
 fn format_modified(time: Option<SystemTime>) -> String {
@@ -670,18 +706,19 @@ fn display_width(value: &str) -> usize {
 impl Category {
     fn label(self) -> &'static str {
         match self {
-            Self::LiveDb => "活库",
-            Self::LiveSidecar => "活库伴随文件",
-            Self::Migration => "迁移副本",
-            Self::ConfigBackup => "配置备份",
-            Self::Baseline => "研究基线",
-            Self::Logs => "日志",
-            Self::Cache => "缓存",
-            Self::CodexTracer => "Codex tracer",
-            Self::Bin => "包装脚本",
-            Self::Exports => "导出",
-            Self::Lock => "锁",
-            Self::Pricing => "价表",
+            Self::LiveDb => text("Live database", "活库"),
+            Self::LiveSidecar => text("Database sidecars", "活库伴随文件"),
+            Self::Migration => text("Migration copies", "迁移副本"),
+            Self::ConfigBackup => text("Config backups", "配置备份"),
+            Self::Baseline => text("Research baselines", "研究基线"),
+            Self::Logs => text("Logs", "日志"),
+            Self::Cache => text("Cache", "缓存"),
+            Self::CodexTracer => text("Codex tracer", "Codex tracer"),
+            Self::Bin => text("Wrapper scripts", "包装脚本"),
+            Self::Exports => text("Exports", "导出"),
+            Self::Lock => text("Lock", "锁"),
+            Self::Pricing => text("Pricing", "价表"),
+            Self::Settings => text("CLI language settings", "CLI 语言设置"),
         }
     }
 
@@ -699,14 +736,17 @@ impl Category {
             Self::Exports => "exports/",
             Self::Lock => "worker.lock",
             Self::Pricing => "pricing/",
+            Self::Settings => "cli-settings.json / cli-settings.lock",
         }
     }
+}
 
-    fn action_label(self) -> &'static str {
-        match action_for(self) {
-            Action::Delete => "可删除",
-            Action::Keep => "保留",
-            Action::Unknown => "未识别",
+impl Action {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Delete => text("Deletable", "可删除"),
+            Self::Keep => text("Keep", "保留"),
+            Self::Unknown => text("Unknown", "未识别"),
         }
     }
 }
@@ -766,6 +806,11 @@ mod tests {
             ("codex-tracer.db", Category::CodexTracer),
             ("worker.lock", Category::Lock),
             ("pricing-cache-litellm.json", Category::Pricing),
+            ("cli-settings.json", Category::Settings),
+            ("cli-settings.lock", Category::Settings),
+            (".cli-settings.json.llmusage-pending", Category::Settings),
+            (".cli-settings.json.llmusage-recovery", Category::Settings),
+            (".cli-settings.json.llmusage-tmp.1.2.3", Category::Settings),
         ] {
             let (class, action) = classify_entry(name, EntryKind::File, EntryLocation::Root);
             assert_eq!(class, Class::Known(category), "{name}");
@@ -782,29 +827,38 @@ mod tests {
 
     #[test]
     fn formats_decimal_gigabytes() {
-        assert_eq!(format_byte_size(1_596_936_192), "1596936192 字节 / 1.60 GB");
-        assert_eq!(format_byte_size(4_846_220_884), "4846220884 字节 / 4.85 GB");
-        assert_eq!(format_byte_size(1_160_123_446), "1160123446 字节 / 1.16 GB");
+        assert_eq!(
+            format_byte_size(1_596_936_192),
+            "1596936192 bytes / 1.60 GB"
+        );
+        assert_eq!(
+            format_byte_size(4_846_220_884),
+            "4846220884 bytes / 4.85 GB"
+        );
+        assert_eq!(
+            format_byte_size(1_160_123_446),
+            "1160123446 bytes / 1.16 GB"
+        );
     }
 
     #[test]
     fn renders_inventory_scale_sizes() {
         let text = render_table(&[
-            row("活库", "llmusage.db", 1, 1_596_936_192, "保留"),
+            row("活库", "llmusage.db", 1, 1_596_936_192, Action::Keep),
             row(
                 "迁移副本",
                 "backups/llmusage.db.pre-*",
                 6,
                 4_846_220_884,
-                "可删除",
+                Action::Delete,
             ),
-            row("研究基线", "baselines/", 3, 1_160_123_446, "可删除"),
+            row("研究基线", "baselines/", 3, 1_160_123_446, Action::Delete),
         ]);
         assert!(text.contains("1.60 GB"), "{text}");
         assert!(text.contains("4.85 GB"), "{text}");
         assert!(text.contains("1.16 GB"), "{text}");
-        assert!(text.contains("类别"));
-        assert!(text.contains("动作"));
+        assert!(text.contains("Category"));
+        assert!(text.contains("Action"));
     }
 
     #[test]
@@ -812,7 +866,7 @@ mod tests {
         let temp = tempfile::TempDir::new().expect("tempdir");
         let root = temp.path().join("missing-home");
         let outcome = clean_home(&root, true).expect("clean missing home");
-        assert!(outcome.text.contains("没有可清理内容"));
+        assert!(outcome.text.contains("Nothing to clean"));
         assert!(outcome.error.is_none());
         assert!(!root.exists());
     }
@@ -825,11 +879,19 @@ mod tests {
         let outcome = clean_home(temp.path(), false).expect("dry run");
         assert_eq!(before, list_files(temp.path()));
         assert!(outcome.error.is_none());
-        assert!(outcome.text.contains("活库"), "{}", outcome.text);
-        assert!(outcome.text.contains("迁移副本"), "{}", outcome.text);
-        assert!(outcome.text.contains("研究基线"), "{}", outcome.text);
-        assert!(outcome.text.contains("未修改磁盘"), "{}", outcome.text);
-        assert!(!outcome.text.contains("已删除"), "{}", outcome.text);
+        assert!(outcome.text.contains("Live database"), "{}", outcome.text);
+        assert!(
+            outcome.text.contains("Migration copies"),
+            "{}",
+            outcome.text
+        );
+        assert!(
+            outcome.text.contains("Research baselines"),
+            "{}",
+            outcome.text
+        );
+        assert!(outcome.text.contains("Disk unchanged"), "{}", outcome.text);
+        assert!(!outcome.text.contains("Deleted"), "{}", outcome.text);
     }
 
     #[test]
@@ -838,7 +900,7 @@ mod tests {
         write_sample(temp.path());
         let outcome = clean_home(temp.path(), true).expect("clean --yes");
         assert!(outcome.error.is_none(), "{}", outcome.text);
-        assert!(outcome.text.contains("已删除"), "{}", outcome.text);
+        assert!(outcome.text.contains("Deleted"), "{}", outcome.text);
         assert!(temp.path().join("llmusage.db").is_file());
         assert!(temp.path().join("llmusage.db-wal").is_file());
         assert!(temp.path().join("llmusage.db-shm").is_file());
@@ -917,13 +979,7 @@ mod tests {
         assert!(temp.path().join("backups/llmusage.db.pre-0.5.0").is_file());
     }
 
-    fn row(
-        category: &str,
-        path: &str,
-        files: usize,
-        bytes: u64,
-        action: &'static str,
-    ) -> DisplayRow {
+    fn row(category: &str, path: &str, files: usize, bytes: u64, action: Action) -> DisplayRow {
         DisplayRow {
             category: category.to_string(),
             path: path.to_string(),

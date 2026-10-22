@@ -1,3 +1,5 @@
+use super::cli_errors::Diagnostic;
+use crate::common::i18n::commands::{OperationDiagnostic as Fact, message};
 use std::{
     future::Future,
     net::{IpAddr, Ipv4Addr},
@@ -7,12 +9,7 @@ use std::{
 use anyhow::{Context, Result, bail};
 use tracing::{info, warn};
 
-use crate::{
-    app::AppContext,
-    models::SourceKind,
-    store::{Store, SyncStatusStore},
-    web,
-};
+use crate::{app::AppContext, models::SourceKind, store::Store, web};
 
 use super::sync;
 
@@ -48,10 +45,10 @@ pub(crate) async fn run_with_options(
      * 2) 启动固定端口组探测后的本地服务
      * 3) 持续运行到 Ctrl+C；公开监听只能通过显式参数开启
      */
-    info!("开始启动本地 Web UI 服务");
+    info!(event_code = "commands.serve.01", "开始启动本地 Web UI 服务");
 
     let store = Store::new(&app.paths)?;
-    store.bootstrap()?;
+    super::cli_errors::pricing_result(store.bootstrap_with_pricing_facts())?;
     repair_legacy_token_accounting(app, &store).await?;
     store.run_log().recover_running_runs(&["serve"])?;
     let bind_ip = if public {
@@ -99,40 +96,43 @@ async fn serve_session(
      * 3) 浏览器启动失败时也不影响服务继续运行
      */
     let dashboard_url = local_dashboard_url(addr.port());
-    println!("Local dashboard: {dashboard_url}");
+    println!("{}", message!(LocalDashboard, dashboard_url));
     if public {
-        eprintln!("Remote dashboard: {}", public_dashboard_url(addr.port()));
         eprintln!(
-            "Warning: `--public` exposes the dashboard and JSON API without authentication or TLS. Restrict access with a firewall, SSH tunnel, or reverse proxy."
+            "{}",
+            message!(RemoteDashboard, public_dashboard_url(addr.port()))
         );
+        eprintln!("{}", message!(PublicWarning));
     }
 
     let ssh_session = is_ssh_session();
     if ssh_session && !public {
-        eprintln!(
-            "SSH session detected; browser opening skipped. To open locally, forward the port: ssh -L {port}:127.0.0.1:{port} <user>@<server>",
-            port = addr.port()
-        );
+        eprintln!("{}", message!(SshForward, addr.port()));
     }
 
     match browser_open_decision(no_open, ssh_session) {
         BrowserOpenDecision::Open => {
             if let Err(err) = open_dashboard_in_browser(&dashboard_url) {
-                warn!(
-                    url = %dashboard_url,
+                warn!(event_code = "commands.serve.02", url = %dashboard_url,
                     error = %err,
                     "打开本地 dashboard 浏览器失败，服务将继续运行"
                 );
             }
         }
         BrowserOpenDecision::Disabled => {
-            info!("serve 已通过 --no-open 跳过浏览器启动");
+            info!(
+                event_code = "commands.serve.03",
+                "serve 已通过 --no-open 跳过浏览器启动"
+            );
         }
         BrowserOpenDecision::SshSession => {
             if public {
-                eprintln!("SSH session detected; browser opening skipped.");
+                eprintln!("{}", message!(SshSkip));
             }
-            info!("serve 在 SSH 会话中跳过浏览器启动");
+            info!(
+                event_code = "commands.serve.04",
+                "serve 在 SSH 会话中跳过浏览器启动"
+            );
         }
     }
     supervise_server(server, tokio::signal::ctrl_c()).await
@@ -158,14 +158,22 @@ where
 
     match stop_reason {
         StopReason::Shutdown(result) => {
-            result.context("Failed to wait for Ctrl+C")?;
-            info!(%addr, "收到 Ctrl+C，准备停止本地 Web UI 服务");
+            result.context(Diagnostic::with_facts(
+                "Failed to wait for Ctrl+C",
+                Fact::ServeSignal,
+            ))?;
+            info!(event_code = "commands.serve.05", %addr, "收到 Ctrl+C，准备停止本地 Web UI 服务");
             server.shutdown().await?;
             Ok(addr)
         }
         StopReason::Server(result) => {
             result?;
-            bail!("Web server at {addr} stopped before a shutdown signal");
+            bail!(Diagnostic::with_facts(
+                format!("Web server at {addr} stopped before a shutdown signal"),
+                Fact::ServeStopped {
+                    address: addr.to_string()
+                }
+            ));
         }
     }
 }
@@ -218,13 +226,12 @@ pub async fn repair_legacy_token_accounting(
 
     for source in legacy_sources {
         let risk = store.source_files().lossy_rebuild_risk(source, "local")?;
-        warn!(
-            source = %source,
+        warn!(event_code = "commands.serve.06", source = %source,
             missing_files = risk.missing_file_count,
             protected_events = risk.protected_event_count,
             "serve 检测到 legacy token accounting，已保留历史并跳过该来源"
         );
-        let warning = SyncStatusStore::legacy_repair_warning(source);
+        let warning = message!(LegacySkipped, source);
         if risk.has_risk() {
             eprintln!(
                 "{warning} missing_files={} protected_events={}.",
@@ -254,7 +261,12 @@ fn open_dashboard_in_browser(url: &str) -> Result<()> {
     if status.success() {
         Ok(())
     } else {
-        bail!("browser launcher exited with status {status}");
+        bail!(Diagnostic::with_facts(
+            format!("browser launcher exited with status {status}"),
+            Fact::BrowserExit {
+                status: status.to_string()
+            }
+        ));
     }
 }
 
@@ -404,6 +416,43 @@ mod tests {
         let store = Store::new(&paths)?;
         store.bootstrap()?;
         Ok((temp, store))
+    }
+
+    #[tokio::test]
+    async fn supervisor_localizes_owned_failures_and_preserves_original_signal_error() {
+        use crate::commands::cli_errors::application_error;
+        use crate::common::i18n::Language;
+        for language in [Language::English, Language::Chinese] {
+            let completed = BoundWebServer::from_test_task(tokio::spawn(async { Ok(()) }));
+            let error = supervise_server(completed, pending())
+                .await
+                .expect_err("early completion");
+            assert!(application_error(&error, language).contains(
+                language.select("stopped before a shutdown signal", "在收到关闭信号前停止")
+            ));
+            assert!(
+                error
+                    .to_string()
+                    .contains("stopped before a shutdown signal")
+            );
+            let waiting = BoundWebServer::from_test_task(tokio::spawn(async {
+                pending::<std::io::Result<()>>().await
+            }));
+            let error = supervise_server(waiting, async {
+                Err(std::io::Error::other("SIGNAL_OS_DETAIL"))
+            })
+            .await
+            .expect_err("signal failure");
+            let rendered = application_error(&error, language);
+            assert!(
+                rendered.contains(language.select("Failed to wait for Ctrl+C", "等待 Ctrl+C 失败"))
+            );
+            assert!(rendered.contains("SIGNAL_OS_DETAIL"));
+            assert_eq!(
+                error.downcast_ref::<std::io::Error>().unwrap().kind(),
+                std::io::ErrorKind::Other
+            );
+        }
     }
 
     #[tokio::test]

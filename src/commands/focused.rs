@@ -1,3 +1,7 @@
+use super::cli_errors::Diagnostic;
+use crate::common::i18n::commands::{
+    DiagnosticFacts as Facts, reports::DiagnosticFacts as ReportFacts,
+};
 use anyhow::{Result, bail};
 use clap::{Args, Subcommand};
 use tracing::debug;
@@ -64,11 +68,14 @@ pub async fn run(app: &AppContext, source: SourceKind, command: SourceReportComm
 
 fn inject_source(common: &mut ReportCommonArgs, source: SourceKind) -> Result<()> {
     match common.source {
-        Some(explicit) if explicit != source => bail!(
-            "`{}` source command conflicts with `--source {}`",
-            source.as_str(),
-            explicit.as_str()
-        ),
+        Some(explicit) if explicit != source => bail!(Diagnostic::with_facts(
+            format!(
+                "`{}` source command conflicts with `--source {}`",
+                source.as_str(),
+                explicit.as_str()
+            ),
+            Facts::Reports(ReportFacts::SourceConflict { source, explicit }),
+        )),
         _ => {
             common.source = Some(source);
             Ok(())
@@ -78,10 +85,14 @@ fn inject_source(common: &mut ReportCommonArgs, source: SourceKind) -> Result<()
 
 async fn run_daily(app: &AppContext, source: SourceKind, args: DailyArgs) -> Result<()> {
     if args.instances {
-        bail!("--instances is not supported for focused source reports");
+        bail!(Diagnostic::with_facts(
+            "--instances is not supported for focused source reports",
+            Facts::Reports(ReportFacts::FocusedInstances {})
+        ));
     }
 
     debug!(
+        event_code = "commands.focused.01",
         source = source.as_str(),
         "starting focused daily report output"
     );
@@ -91,7 +102,10 @@ async fn run_daily(app: &AppContext, source: SourceKind, args: DailyArgs) -> Res
     let conn = dashboard.connection();
     let mut filter = args.common.to_filter(&store, args.project.clone())?;
     if args.all && (filter.since.is_some() || filter.until.is_some()) {
-        bail!("--all cannot be combined with --since or --until");
+        bail!(Diagnostic::with_facts(
+            "--all cannot be combined with --since or --until",
+            Facts::Reports(ReportFacts::AllDates {})
+        ));
     }
 
     if !args.unified.sections.is_empty() {
@@ -139,6 +153,7 @@ async fn run_period(
     kind: PeriodKind,
 ) -> Result<()> {
     debug!(
+        event_code = "commands.focused.02",
         source = source.as_str(),
         period = kind.rows_key(),
         "starting focused report output"
@@ -177,10 +192,14 @@ async fn run_period(
 
 async fn run_session(app: &AppContext, source: SourceKind, args: SessionArgs) -> Result<()> {
     if args.id.is_some() && !args.unified.sections.is_empty() {
-        bail!("--sections cannot be combined with --id");
+        bail!(Diagnostic::with_facts(
+            "--sections cannot be combined with --id",
+            Facts::Reports(ReportFacts::SectionsId {})
+        ));
     }
 
     debug!(
+        event_code = "commands.focused.03",
         source = source.as_str(),
         "starting focused session report output"
     );
@@ -337,6 +356,30 @@ mod tests {
         inject_source(&mut common, SourceKind::Codex).expect("same source should be accepted");
         let err = inject_source(&mut common, SourceKind::Claude).expect_err("should conflict");
         assert!(err.to_string().contains("--source codex"));
+    }
+
+    #[test]
+    fn localized_conflict_preserves_canonical_error_display() {
+        use crate::common::i18n::{Language, with_language};
+        for language in [Language::English, Language::Chinese] {
+            with_language(language, || {
+                let mut common = ReportCommonArgs {
+                    source: Some(SourceKind::Codex),
+                    ..Default::default()
+                };
+                let err = inject_source(&mut common, SourceKind::Claude).unwrap_err();
+                assert_eq!(
+                    err.to_string(),
+                    "`claude` source command conflicts with `--source codex`"
+                );
+                let human = crate::commands::cli_errors::application_error(&err, language);
+                assert!(
+                    human.contains(language.select("conflicts", "冲突")),
+                    "{human}"
+                );
+                assert!(human.contains("--source codex"));
+            });
+        }
     }
 
     #[test]

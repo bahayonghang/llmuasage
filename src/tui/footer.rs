@@ -1,3 +1,5 @@
+use crate::common::i18n::tui::format as tr_format;
+use crate::common::i18n::tui::text as tr;
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
@@ -58,7 +60,7 @@ fn render_controls(frame: &mut Frame, area: Rect, state: &AppState) {
         ]
     } else if state.is_narrow() {
         vec![Span::styled(
-            "tab/1-9 view  j/k row  Pg page  o/O sort  s source  r refresh  x sync  ? q",
+            tr("tab_1_9_view_j_k_row_pg_page_o_o_sort_s_source_r_refresh_x_sync_q"),
             theme::muted_style(),
         )]
     } else {
@@ -69,20 +71,20 @@ fn render_controls(frame: &mut Frame, area: Rect, state: &AppState) {
 
 fn wide_control_spans(state: &AppState) -> Vec<Span<'static>> {
     let mut spans = vec![
-        Span::styled("tab/shift-tab or 1-9 view", theme::muted_style()),
+        Span::styled(tr("tab_shift_tab_or_1_9_view"), theme::muted_style()),
         Span::styled(" • ", theme::muted_style()),
-        Span::styled("[j/k/Pg:select]", theme::fg_style(theme::accent())),
+        Span::styled(tr("j_k_pg_select"), theme::fg_style(theme::accent())),
         Span::styled(" • ", theme::muted_style()),
-        Span::styled("[o/O:sort]", theme::fg_style(theme::accent())),
+        Span::styled(tr("o_o_sort"), theme::fg_style(theme::accent())),
         Span::styled(" • ", theme::muted_style()),
     ];
     if matches!(state.active_panel, Panel::Sources | Panel::Monthly) {
         spans.extend([
             Span::styled(
                 if state.is_period_detail_active() {
-                    "[esc:back]"
+                    tr("esc_back")
                 } else {
-                    "[enter:detail]"
+                    tr("enter_detail")
                 },
                 theme::fg_style(theme::accent()),
             ),
@@ -90,27 +92,27 @@ fn wide_control_spans(state: &AppState) -> Vec<Span<'static>> {
         ]);
     }
     spans.extend([
-        Span::styled("[s:source]", theme::fg_style(theme::accent())),
+        Span::styled(tr("s_source"), theme::fg_style(theme::accent())),
         Span::styled(" • ", theme::muted_style()),
-        Span::styled("[r:refresh]", theme::fg_style(theme::trend_peak_fg())),
+        Span::styled(tr("r_refresh"), theme::fg_style(theme::trend_peak_fg())),
         Span::styled(" ", theme::muted_style()),
-        Span::styled("[x:sync]", theme::fg_style(theme::positive_fg())),
+        Span::styled(tr("x_sync"), theme::fg_style(theme::positive_fg())),
         Span::styled(" ", theme::muted_style()),
     ]);
     if state.active_panel == Panel::Trends {
         spans.extend([
-            Span::styled("[y:status]", theme::fg_style(theme::positive_fg())),
+            Span::styled(tr("y_status"), theme::fg_style(theme::positive_fg())),
             Span::styled(" ", theme::muted_style()),
-            Span::styled("[m:mail]", theme::fg_style(theme::accent())),
+            Span::styled(tr("m_mail"), theme::fg_style(theme::accent())),
             Span::styled(" ", theme::muted_style()),
         ]);
     }
     spans.extend([
         Span::styled(
             if state.auto_refresh {
-                "[R:auto on]"
+                tr("r_auto_on")
             } else {
-                "[R:auto off]"
+                tr("r_auto_off")
             },
             theme::fg_style(if state.auto_refresh {
                 theme::positive_fg()
@@ -129,13 +131,13 @@ fn render_status(frame: &mut Frame, area: Rect, state: &AppState) {
         spans.push(Span::styled(spinner, theme::bold_fg_style(theme::accent())));
     }
     spans.extend([
-        Span::styled("source ", theme::bold_fg_style(theme::accent())),
+        Span::styled(tr("source"), theme::bold_fg_style(theme::accent())),
         Span::styled(
             state.source_filter_label(),
             theme::fg_style(theme::accent()),
         ),
         Span::styled(" • ", theme::muted_style()),
-        Span::styled("window ", theme::muted_style()),
+        Span::styled(tr("window"), theme::muted_style()),
         Span::styled(state.time_window.label(), theme::fg_style(theme::accent())),
         Span::styled(" • ", theme::muted_style()),
     ]);
@@ -147,15 +149,18 @@ fn render_status(frame: &mut Frame, area: Rect, state: &AppState) {
         ));
     } else if let Some(Ok(overview)) = &state.overview {
         spans.push(Span::styled(
-            format!(
-                "{} tokens • ${:.2}",
+            tr_format!(
+                tokens_2,
                 stat_compact(overview.totals.total.total_tokens),
                 overview.totals.total_cost_usd
             ),
             theme::muted_style(),
         ));
     } else {
-        spans.push(Span::styled("local dashboard cache", theme::muted_style()));
+        spans.push(Span::styled(
+            tr("local_dashboard_cache"),
+            theme::muted_style(),
+        ));
     }
 
     frame.render_widget(Paragraph::new(Line::from(spans)), area);

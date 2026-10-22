@@ -17,14 +17,20 @@ pub fn client(timeout: Duration) -> Result<reqwest::Client> {
 }
 
 pub fn status_error(provider: &str, status: StatusCode) -> anyhow::Error {
-    if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
-        anyhow::anyhow!(
+    let canonical = if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+        format!(
             "{provider} usage unavailable: stored access token was rejected (HTTP {status}). \
              Run the provider CLI so it can refresh its own login, then retry."
         )
     } else {
-        anyhow::anyhow!("{provider} usage request failed (HTTP {status})")
-    }
+        format!("{provider} usage request failed (HTTP {status})")
+    };
+    super::presentation::error(
+        canonical,
+        super::DiagnosticHint::Http {
+            status: status.as_u16(),
+        },
+    )
 }
 
 #[cfg(test)]

@@ -7,7 +7,10 @@
 
 use std::collections::HashMap;
 
+use crate::common::i18n::{self, Language, text};
+use crate::sync::notices::RunNotice;
 use console::Style;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{
     commands::sync::SyncSummary,
@@ -50,6 +53,7 @@ pub(crate) fn format_summary_lines(
 /// Like [`format_summary_lines`], with optional `path_hash → path` labels for
 /// CLI samples. Only the basename is printed; full paths and path hashes stay
 /// out of the summary.
+#[cfg(test)]
 pub(crate) fn format_summary_lines_with_basenames(
     summary: &SyncSummary,
     rebuild: bool,
@@ -57,49 +61,154 @@ pub(crate) fn format_summary_lines_with_basenames(
     terminal_width: usize,
     sample_basenames: &HashMap<String, String>,
 ) -> Vec<String> {
+    format_summary_lines_with_notices(
+        summary,
+        rebuild,
+        color,
+        terminal_width,
+        sample_basenames,
+        &[],
+    )
+}
+
+pub(crate) fn format_summary_lines_with_notices(
+    summary: &SyncSummary,
+    rebuild: bool,
+    color: bool,
+    terminal_width: usize,
+    sample_basenames: &HashMap<String, String>,
+    notices: &[RunNotice],
+) -> Vec<String> {
     let rows: Vec<Row> = summary.sources.iter().map(Row::from_stats).collect();
     let total = total_cells(summary);
-    let full_widths = column_widths(&HEADERS, &rows, &total);
-    let compact = table_width(&full_widths, 2) > terminal_width;
-    let headers = if compact { &COMPACT_HEADERS } else { &HEADERS };
-    let gap = if compact { 1 } else { 2 };
-    let separator = " ".repeat(gap);
+    let zh_headers = [
+        "来源",
+        "文件",
+        "变更",
+        "跳过",
+        "读取事件",
+        "新增事件",
+        "库存事件",
+        "读取量",
+        "解析",
+        "写入",
+    ];
+    let full_headers = if i18n::current() == Language::Chinese {
+        &zh_headers
+    } else {
+        &HEADERS
+    };
+    let full_widths = column_widths(full_headers, &rows, &total);
+    let compact = table_width(&full_widths, 3) > terminal_width;
+    let headers = if compact && i18n::current() == Language::English {
+        &COMPACT_HEADERS
+    } else {
+        full_headers
+    };
+    let gap = 3;
+    let separator = " │ ";
     let mut widths = column_widths(headers, &rows, &total);
-    fit_source_column(&mut widths, headers[0].chars().count(), terminal_width, gap);
+    fit_source_column(
+        &mut widths,
+        display_width(headers[0]).max(display_width(&total[0])),
+        terminal_width,
+        gap,
+    );
 
-    let mut lines = vec![styled(Style::new().bold(), "Sync finished:", color)];
+    let mut lines = vec![styled(
+        Style::new().bold(),
+        text("Sync finished:", "同步完成："),
+        color,
+    )];
     if rebuild {
-        lines
-            .push("- rebuild: reset parser-backed usage state source by source before sync".into());
+        lines.push(
+            text(
+                "- rebuild: reset parser-backed usage state source by source before sync",
+                "- 重建：同步前按来源重置可重建的用量状态",
+            )
+            .into(),
+        );
     }
+
+    lines.push(border(&widths, '┌', '┬', '┐'));
 
     let header_line = headers
         .iter()
         .enumerate()
         .map(|(index, header)| pad(header, widths[index], Align::Left))
         .collect::<Vec<_>>()
-        .join(&separator);
-    lines.push(styled(Style::new().dim(), &header_line, color));
+        .join(separator);
+    lines.push(styled(
+        Style::new().dim(),
+        &format!("│ {header_line} │"),
+        color,
+    ));
+    lines.push(border(&widths, '├', '┼', '┤'));
 
     for (row, stats) in rows.iter().zip(summary.sources.iter()) {
-        lines.push(render_row(row, stats, &widths, &separator, color));
+        lines.push(format!(
+            "│ {} │",
+            render_row(row, stats, &widths, separator, color)
+        ));
     }
 
-    lines.push(render_total_row(&total, &widths, &separator, color));
+    lines.push(border(&widths, '├', '┼', '┤'));
+    lines.push(format!(
+        "│ {} │",
+        render_total_row(&total, &widths, separator, color)
+    ));
+    lines.push(border(&widths, '└', '┴', '┘'));
 
     for stats in &summary.sources {
-        if let Some(error) = &stats.last_error {
-            let is_warning = error.contains("legacy token accounting")
-                || error.contains("history preserved")
-                || error.contains("warning:");
-            let style = if is_warning {
-                Style::new().yellow()
-            } else {
-                Style::new().red()
-            };
-            lines.push(styled(style, &format!("  ↳ {error}"), color));
+        let source_notices: Vec<_> = notices
+            .iter()
+            .filter(|notice| notice.source() == Some(stats.source))
+            .collect();
+        if !source_notices.is_empty()
+            || stats.last_error.is_some()
+            || stats.parse_issues.summary_text().is_some()
+        {
+            lines.push(format!(
+                "\n{} · {}",
+                text("Diagnostics", "诊断"),
+                stats.source
+            ));
+        }
+        for notice in &source_notices {
+            if matches!(notice, RunNotice::LegacySkipped { .. })
+                && source_notices
+                    .iter()
+                    .any(|notice| matches!(notice, RunNotice::Coverage { .. }))
+            {
+                continue;
+            }
+            lines.extend(notice_lines(notice, color));
+        }
+        if stats.absent {
+            lines.push(format!(
+                "  {}",
+                text(
+                    "Information: source input is unavailable; no data imported.",
+                    "信息提示：来源输入不可用，本轮未导入数据。"
+                )
+            ));
+        } else if source_notices.is_empty()
+            && let Some(error) = &stats.last_error
+        {
+            lines.push(styled(
+                Style::new().dim(),
+                &format!(
+                    "  {}: {}",
+                    text("Original detail", "原始详情"),
+                    crate::common::i18n::logging::safe_text(error)
+                ),
+                color,
+            ));
         }
         lines.extend(parse_issue_lines(stats, color, sample_basenames));
+    }
+    for notice in notices.iter().filter(|notice| notice.source().is_none()) {
+        lines.extend(notice_lines(notice, color));
     }
 
     lines
@@ -110,21 +219,62 @@ fn column_widths(
     rows: &[Row],
     total: &[String; HEADERS.len()],
 ) -> [usize; HEADERS.len()] {
-    let mut widths = std::array::from_fn(|index| headers[index].chars().count());
+    let mut widths = std::array::from_fn(|index| display_width(headers[index]));
     for cells in rows
         .iter()
         .map(|row| &row.cells)
         .chain(std::iter::once(total))
     {
         for (index, cell) in cells.iter().enumerate() {
-            widths[index] = widths[index].max(cell.chars().count());
+            widths[index] = widths[index].max(display_width(cell));
         }
     }
     widths
 }
 
+fn display_width(value: &str) -> usize {
+    UnicodeWidthStr::width(value)
+}
+
+fn border(widths: &[usize], left: char, middle: char, right: char) -> String {
+    format!(
+        "{left}{}{right}",
+        widths
+            .iter()
+            .map(|width| "─".repeat(width + 2))
+            .collect::<Vec<_>>()
+            .join(&middle.to_string())
+    )
+}
+
+pub(crate) fn notice_lines(notice: &RunNotice, color: bool) -> Vec<String> {
+    let lines = crate::common::i18n::sync::notice_lines(notice, i18n::current());
+    if matches!(
+        notice,
+        RunNotice::Coverage { .. }
+            | RunNotice::SourceFailed {
+                failure: crate::sync::notices::SourceFailure::Inventory { .. },
+                ..
+            }
+    ) {
+        return lines;
+    }
+    let style = if matches!(
+        notice,
+        RunNotice::SourceFailed { .. } | RunNotice::SourceIssue { .. }
+    ) {
+        Style::new().red()
+    } else {
+        Style::new().yellow()
+    };
+    lines
+        .iter()
+        .map(|line| styled(style.clone(), line, color))
+        .collect()
+}
+
 fn table_width(widths: &[usize; HEADERS.len()], gap: usize) -> usize {
-    widths.iter().sum::<usize>() + gap * (HEADERS.len() - 1)
+    widths.iter().sum::<usize>() + gap * (HEADERS.len() - 1) + 4
 }
 
 /// Aggregates every `TOTAL` cell from the per-source stats. This keeps the
@@ -143,7 +293,7 @@ fn total_cells(summary: &SyncSummary) -> [String; HEADERS.len()] {
             .fold(0u64, |total, stats| total.saturating_add(value(stats)))
     };
     [
-        "TOTAL".to_string(),
+        text("TOTAL", "合计").to_string(),
         sum_usize(|stats| stats.files_processed).to_string(),
         sum_usize(|stats| stats.changed_files).to_string(),
         sum_usize(|stats| stats.skipped_files).to_string(),
@@ -179,7 +329,7 @@ enum Align {
 }
 
 fn pad(text: &str, width: usize, align: Align) -> String {
-    let len = text.chars().count();
+    let len = display_width(text);
     if len >= width {
         return text.to_string();
     }
@@ -198,7 +348,7 @@ fn styled(style: Style, text: &str, color: bool) -> String {
     }
 }
 
-fn parse_issue_lines(
+pub(crate) fn parse_issue_lines(
     stats: &SourceSyncStats,
     color: bool,
     sample_basenames: &HashMap<String, String>,
@@ -207,7 +357,8 @@ fn parse_issue_lines(
     if issues.summary_text().is_none() {
         return Vec::new();
     }
-    let mut class_parts = Vec::new();
+    let mut fault_parts = Vec::new();
+    let mut information_parts = Vec::new();
     for (label, count) in issues.class_counts() {
         if count == 0 {
             continue;
@@ -217,19 +368,55 @@ fn parse_issue_lines(
         } else {
             Style::new().dim()
         };
-        class_parts.push(styled(style, &format!("{label}={count}"), color));
+        let human = match label {
+            "malformed" => text("malformed", "格式错误"),
+            "oversized" => text("oversized", "超长"),
+            "skipped" => text("skipped", "跳过"),
+            "accounting" => text("accounting", "计数提示"),
+            _ => label,
+        };
+        let item = styled(style, &format!("{human}={count}"), color);
+        if matches!(label, "malformed" | "oversized") {
+            fault_parts.push(item);
+        } else {
+            information_parts.push(item);
+        }
     }
     let prefix_style = if issues.total() > 0 {
         Style::new().yellow()
     } else {
         Style::new().dim()
     };
-    let mut lines = vec![format!(
-        "{}{}",
-        styled(prefix_style, "  parse issues: ", color),
-        class_parts.join(" ")
-    )];
-    lines.push(format!("  {}", issues.sample_summary()));
+    let mut lines = Vec::new();
+    if !fault_parts.is_empty() {
+        lines.push(format!(
+            "{}{}",
+            styled(
+                prefix_style,
+                text("  Parse faults: ", "  解析故障："),
+                color
+            ),
+            fault_parts.join(" ")
+        ));
+    }
+    if !information_parts.is_empty() {
+        lines.push(format!(
+            "  {}{}",
+            text("Information: ", "信息提示："),
+            information_parts.join(" ")
+        ));
+    }
+    let total = issues.total().saturating_add(issues.informational_total());
+    let shown = issues
+        .samples
+        .len()
+        .min(crate::domain::models::MAX_PARSE_ISSUE_SAMPLES);
+    let omitted = total.saturating_sub(shown as u64);
+    lines.push(if i18n::current() == Language::Chinese {
+        format!("  展示样本：{shown}/{total}；另有 {omitted} 条未展示")
+    } else {
+        format!("  Samples shown: {shown}/{total}; {omitted} not shown")
+    });
     for sample in issues
         .samples
         .iter()
@@ -251,7 +438,44 @@ fn parse_issue_sample_line(
     let basename = sample_basenames
         .get(&sample.path_hash)
         .and_then(|raw| path_basename(raw));
-    format!("    {}", sample.cli_line(basename))
+    let kind = match sample.kind {
+        crate::models::ParseIssueKind::Malformed => text("malformed", "格式错误（malformed）"),
+        crate::models::ParseIssueKind::Oversized => text("oversized", "超长（oversized）"),
+        crate::models::ParseIssueKind::Skipped => text("skipped", "跳过（skipped）"),
+        crate::models::ParseIssueKind::AccountingAnomaly => {
+            text("accounting_anomaly", "计数提示（accounting_anomaly）")
+        }
+    };
+    let reason: String = sample
+        .reason
+        .chars()
+        .filter(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '_' | ':' | '-')
+        })
+        .take(64)
+        .collect();
+    let mut line = format!("    {kind}");
+    if !reason.is_empty() {
+        line.push_str(&format!(" {reason}"));
+    }
+    if sample.offset > 0 && sample.source != SourceKind::Opencode {
+        if sample.source == SourceKind::Zcode {
+            line.push_str(&format!(" timestamp_ms={}", sample.offset));
+        } else {
+            line.push_str(&format!(" @{}", sample.offset));
+        }
+    }
+    if let Some(name) = basename {
+        line.push(' ');
+        line.extend(
+            name.chars()
+                .filter(|character| !character.is_control())
+                .take(255),
+        );
+    } else {
+        line.push_str(text(" [location unavailable]", " [位置不可用]"));
+    }
+    line
 }
 
 pub(crate) fn path_basename(raw: &str) -> Option<&str> {
@@ -399,13 +623,20 @@ fn render_total_row(
 /// Truncates an over-long display label to `width`, ending with `…`. Applied
 /// only to the SOURCE column so numeric cells are never shortened.
 fn fit_label(label: &str, width: usize) -> String {
-    if label.chars().count() <= width {
+    if display_width(label) <= width {
         return label.to_string();
     }
     if width == 0 {
         return String::new();
     }
-    let mut truncated: String = label.chars().take(width - 1).collect();
+    let mut cells = 0;
+    let mut truncated: String = label
+        .chars()
+        .take_while(|character| {
+            cells += character.width().unwrap_or(0);
+            cells < width
+        })
+        .collect();
     truncated.push('…');
     truncated
 }
@@ -523,7 +754,10 @@ mod tests {
         let lines = format_summary_lines(&summary(), false, false, WIDE);
         assert!(lines.iter().all(|line| !line.contains('\u{1b}')));
         let header = lines.iter().find(|line| line.contains("SOURCE")).unwrap();
-        let codex = lines.iter().find(|line| line.starts_with("codex")).unwrap();
+        let codex = lines
+            .iter()
+            .find(|line| line.starts_with("│ codex"))
+            .unwrap();
         // 右对齐数字列：列尾位置在 header 与数据行对齐。
         let column = header.find("COMMITTED").unwrap();
         let end = column + "COMMITTED".len() - 1;
@@ -535,7 +769,10 @@ mod tests {
     #[test]
     fn table_shows_human_bytes_and_durations() {
         let lines = format_summary_lines(&summary(), false, false, WIDE);
-        let codex = lines.iter().find(|line| line.starts_with("codex")).unwrap();
+        let codex = lines
+            .iter()
+            .find(|line| line.starts_with("│ codex"))
+            .unwrap();
         assert!(codex.contains("7.4 MB"), "{codex}");
         assert!(codex.contains("4.1s"), "{codex}");
         assert!(codex.contains("350ms"), "{codex}");
@@ -546,14 +783,14 @@ mod tests {
         let lines = format_summary_lines(&summary(), false, false, WIDE);
         let opencode = lines
             .iter()
-            .find(|line| line.starts_with("opencode"))
+            .find(|line| line.starts_with("│ opencode"))
             .unwrap();
         assert!(opencode.contains('-'), "{opencode}");
         assert!(!opencode.contains("104070"), "{opencode}");
         assert!(
             lines
                 .iter()
-                .any(|line| line.contains("OpenCode SQLite DB 缺失"))
+                .any(|line| line.contains("Information: source input is unavailable"))
         );
     }
 
@@ -577,12 +814,9 @@ mod tests {
         let lines = format_summary_lines(&summary, false, false, WIDE);
         let issue_line = lines
             .iter()
-            .find(|line| line.contains("parse issues:"))
+            .find(|line| line.contains("Parse faults:"))
             .expect("parse issue summary line");
-        assert_eq!(
-            issue_line,
-            "  parse issues: malformed=2 oversized=1 skipped=3 accounting=4"
-        );
+        assert_eq!(issue_line, "  Parse faults: malformed=2 oversized=1");
         assert!(
             lines
                 .iter()
@@ -661,7 +895,7 @@ mod tests {
         let colored = format_summary_lines(&summary, false, true, WIDE);
         let issue_line = colored
             .iter()
-            .find(|line| strip_ansi(line).contains("parse issues:"))
+            .find(|line| strip_ansi(line).contains("Information:"))
             .expect("parse issue summary line");
         let skipped = styled(Style::new().dim(), "skipped=17", true);
         let yellow_skipped = styled(Style::new().yellow(), "skipped=17", true);
@@ -689,7 +923,7 @@ mod tests {
         assert!(!lines.iter().any(|line| line.starts_with("- totals:")));
         let total = lines
             .iter()
-            .find(|line| line.starts_with("TOTAL"))
+            .find(|line| line.starts_with("│ TOTAL"))
             .expect("TOTAL row present");
         assert!(total.contains("208140"), "{total}");
         assert!(total.contains("208100"), "{total}");
@@ -704,7 +938,7 @@ mod tests {
         let lines = format_summary_lines(&summary(), false, false, WIDE);
         let total = lines
             .iter()
-            .find(|line| line.starts_with("TOTAL"))
+            .find(|line| line.starts_with("│ TOTAL"))
             .expect("TOTAL row present");
         // BYTES / PARSE / WRITE aggregate the source rows.
         assert!(total.contains("14.9 MB"), "{total}"); // 7.8M + 7.8M bytes
@@ -738,21 +972,23 @@ mod tests {
             .iter()
             .find(|line| line.contains('…'))
             .expect("long source label truncates with an ellipsis");
-        assert!(row.starts_with("antig…"), "{row}");
+        assert!(row.starts_with("│ anti"), "{row}");
         // Numeric cells are never truncated even when the label is.
         assert!(row.contains("104070"), "{row}"); // events_seen
         assert!(row.contains("2461"), "{row}"); // events_inserted
         let total = lines
             .iter()
-            .find(|line| strip_ansi(line).starts_with("TOTAL"))
+            .find(|line| strip_ansi(line).starts_with("│ TOTAL"))
             .expect("TOTAL row present");
         assert!(total.contains("104070"), "{total}");
         assert!(total.contains("104050"), "{total}");
-        let table_lines = lines
-            .iter()
-            .filter(|line| line.contains("SRC") || line.contains('…') || line.starts_with("TOTAL"));
+        let table_lines = lines.iter().filter(|line| {
+            line.contains("SRC") || line.contains('…') || line.starts_with("│ TOTAL")
+        });
         assert!(
-            table_lines.clone().all(|line| line.chars().count() <= 60),
+            table_lines
+                .clone()
+                .all(|line| display_width(line) == display_width(row)),
             "{}",
             table_lines.cloned().collect::<Vec<_>>().join("\n")
         );
@@ -772,10 +1008,13 @@ mod tests {
         let lines = format_summary_lines(&summary, false, false, 60);
         let total = lines
             .iter()
-            .find(|line| line.starts_with("TOTAL"))
+            .find(|line| line.starts_with("│ TOTAL"))
             .expect("TOTAL row present");
         assert_eq!(
-            total.split_whitespace().collect::<Vec<_>>(),
+            total
+                .split('│')
+                .flat_map(str::split_whitespace)
+                .collect::<Vec<_>>(),
             vec![
                 "TOTAL", "0", "0", "0", "0", "0", "0", "0", "B", "0ms", "0ms"
             ]
@@ -799,11 +1038,11 @@ mod tests {
         let colored = format_summary_lines(&summary(), false, true, WIDE);
         let plain_total = plain
             .iter()
-            .find(|line| line.starts_with("TOTAL"))
+            .find(|line| line.starts_with("│ TOTAL"))
             .expect("plain TOTAL row");
         let colored_total = colored
             .iter()
-            .find(|line| strip_ansi(line).starts_with("TOTAL"))
+            .find(|line| strip_ansi(line).starts_with("│ TOTAL"))
             .expect("colored TOTAL row");
         assert!(colored_total.contains('\u{1b}'), "{colored_total}");
         assert_eq!(*plain_total, strip_ansi(colored_total));
@@ -841,15 +1080,15 @@ mod tests {
             .expect("header");
         let total_idx = lines
             .iter()
-            .position(|l| l.starts_with("TOTAL"))
+            .position(|l| l.starts_with("│ TOTAL"))
             .expect("total");
 
         // Between header and TOTAL, there are only the source table rows.
         let table_data_lines = &lines[header_idx + 1..total_idx];
-        assert_eq!(table_data_lines.len(), summary.sources.len());
+        assert_eq!(table_data_lines.len(), summary.sources.len() + 2);
         for line in table_data_lines {
             assert!(!line.contains('↳'));
-            assert!(!line.contains("parse issues:"));
+            assert!(!line.contains("Parse faults:"));
         }
 
         // Diagnostics appear after TOTAL.
@@ -857,9 +1096,192 @@ mod tests {
         assert!(
             post_total_lines
                 .iter()
-                .any(|l| l.contains("OpenCode SQLite DB 缺失"))
+                .any(|l| l.contains("Information: source input is unavailable"))
         );
-        assert!(post_total_lines.iter().any(|l| l.contains("parse issues:")));
+        assert!(post_total_lines.iter().any(|l| l.contains("Parse faults:")));
         assert!(post_total_lines.iter().any(|l| l.contains("malformed @12")));
+    }
+
+    #[test]
+    fn bilingual_table_has_closed_equal_width_borders_and_exact_numeric_cells() {
+        let mut fixture = summary();
+        fixture.sources[0].events_seen = usize::MAX;
+        fixture.sources[1].events_seen = usize::MAX;
+        fixture.sources[0].bytes_scanned = u64::MAX;
+        fixture.sources[1].bytes_scanned = u64::MAX;
+        for language in [Language::English, Language::Chinese] {
+            i18n::with_language(language, || {
+                let lines = format_summary_lines(&fixture, false, false, 60);
+                let top = lines.iter().position(|line| line.starts_with('┌')).unwrap();
+                let bottom = lines.iter().position(|line| line.starts_with('└')).unwrap();
+                let width = display_width(&lines[top]);
+                for line in &lines[top..=bottom] {
+                    assert_eq!(display_width(line), width, "{line}");
+                    assert!(!line.contains('\u{1b}'));
+                }
+                assert_eq!(lines.iter().filter(|line| line.starts_with('├')).count(), 2);
+                let data: Vec<_> = lines[top..=bottom]
+                    .iter()
+                    .filter(|line| line.starts_with('│'))
+                    .collect();
+                for row in &data {
+                    assert_eq!(row.matches('│').count(), 11);
+                }
+                let codex: Vec<_> = data[1].split('│').skip(1).take(10).map(str::trim).collect();
+                assert_eq!(codex[4], usize::MAX.to_string());
+                let total: Vec<_> = data
+                    .last()
+                    .unwrap()
+                    .split('│')
+                    .skip(1)
+                    .take(10)
+                    .map(str::trim)
+                    .collect();
+                assert_eq!(total[0], language.select("TOTAL", "合计"));
+                assert_eq!(total[4], usize::MAX.to_string());
+                assert_eq!(total[7], human_bytes(u64::MAX));
+                let absent: Vec<_> = data[3].split('│').skip(1).take(10).map(str::trim).collect();
+                assert!(absent[1..].iter().all(|value| *value == "-"));
+            });
+        }
+    }
+
+    #[test]
+    fn bilingual_diagnostics_are_source_grouped_capped_and_separate_faults_from_information() {
+        let mut fixture = summary();
+        fixture.sources[0].parse_issues.malformed_lines = 2;
+        for offset in 1..=14 {
+            fixture.sources[0].parse_issues.record(
+                SourceKind::Codex,
+                "private-path-hash",
+                offset,
+                crate::models::ParseIssueKind::AccountingAnomaly,
+                "usage_incomplete",
+            );
+        }
+        let mut basenames = HashMap::new();
+        basenames.insert(
+            "private-path-hash".into(),
+            "C:/private/source/updates.jsonl".into(),
+        );
+        for language in [Language::English, Language::Chinese] {
+            i18n::with_language(language, || {
+                let lines =
+                    format_summary_lines_with_basenames(&fixture, false, false, 160, &basenames);
+                let text = lines.join("\n");
+                let bottom = lines.iter().position(|line| line.starts_with('└')).unwrap();
+                let diagnostic = lines
+                    .iter()
+                    .position(|line| {
+                        line.contains(&format!(
+                            "{} · codex",
+                            language.select("Diagnostics", "诊断")
+                        ))
+                    })
+                    .unwrap();
+                assert!(diagnostic > bottom);
+                assert!(text.contains(
+                    language.select("Parse faults: malformed=2", "解析故障：格式错误=2")
+                ));
+                assert!(text.contains(
+                    language.select("Information: accounting=14", "信息提示：计数提示=14")
+                ));
+                assert!(text.contains("8/16"));
+                assert_eq!(text.matches("usage_incomplete").count(), 8);
+                assert!(
+                    !text.contains("private-path-hash")
+                        && !text.contains("C:/private")
+                        && !text.contains("@9")
+                );
+                assert!(text.contains("updates.jsonl"));
+            });
+        }
+    }
+
+    #[test]
+    fn paired_inventory_diagnostics_keep_cap_counts_and_additional_unknown_detail() {
+        use crate::parsers::feedback::{InventoryDiagnostic, InventoryIssue};
+        let mut fixture = summary();
+        fixture.sources[0].last_error = Some("canonical inventory error wrapper".into());
+        let notice = RunNotice::SourceFailed {
+            source: SourceKind::Codex,
+            failure: crate::sync::notices::SourceFailure::Inventory {
+                diagnostic: InventoryDiagnostic {
+                    samples: vec![
+                        InventoryIssue::RootNotDirectory,
+                        InventoryIssue::ExternalIo {
+                            detail: "Permission denied".into(),
+                        },
+                        InventoryIssue::Unknown {
+                            detail: "extra custom fact".into(),
+                        },
+                    ],
+                    total: 7,
+                    omitted: 4,
+                },
+            },
+        };
+        for language in [Language::English, Language::Chinese] {
+            i18n::with_language(language, || {
+                let lines = format_summary_lines_with_notices(
+                    &fixture,
+                    false,
+                    false,
+                    160,
+                    &HashMap::new(),
+                    std::slice::from_ref(&notice),
+                );
+                let text = lines.join("\n");
+                assert!(text.contains("3/7") && text.contains('4'));
+                assert!(text.contains(
+                    language.select("Source root is not a directory", "来源根路径不是目录")
+                ));
+                assert!(text.contains("Permission denied") && text.contains("extra custom fact"));
+                assert!(!text.contains("canonical inventory error wrapper"));
+                assert_eq!(
+                    fixture.sources[0].last_error.as_deref(),
+                    Some("canonical inventory error wrapper")
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn typed_coverage_preserves_fault_protection_and_never_guesses_from_last_error() {
+        let fixture = summary();
+        let coverage = crate::parsers::antigravity::AntigravityProductCoverage {
+            source: SourceKind::Codex,
+            discovered_count: 4,
+            new_files_count: 1,
+            tracked_count: 5,
+            stored_events: 99,
+            missing_count: 2,
+            out_of_scope_count: 3,
+            unreadable_count: 1,
+            discovery_incomplete: true,
+        };
+        for language in [Language::English, Language::Chinese] {
+            i18n::with_language(language, || {
+                let notices = [RunNotice::Coverage {
+                    source: SourceKind::Codex,
+                    coverage: coverage.clone(),
+                    interactive: true,
+                    windowed: false,
+                    kept: false,
+                }];
+                let lines = format_summary_lines_with_notices(
+                    &fixture,
+                    false,
+                    false,
+                    160,
+                    &HashMap::new(),
+                    &notices,
+                );
+                let text = lines.join("\n");
+                assert!(text.contains(language.select("still present outside", "仍存在但超出")));
+                assert!(text.contains(language.select("Unreadable tracked", "不可读的已跟踪")));
+                assert!(!text.contains("--allow-lossy-rebuild"));
+            });
+        }
     }
 }

@@ -1,7 +1,9 @@
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
+use crate::common::i18n::commands::reports::{self as copy, Message as Msg};
 use crossterm::style::{Color, Stylize, style};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::models::SourceKind;
 use crate::query::reports::{
@@ -24,7 +26,7 @@ enum Align {
 }
 
 struct Column {
-    header: &'static str,
+    header: Msg,
     align: Align,
 }
 
@@ -58,7 +60,7 @@ pub fn render_daily_table(
     if let Some(totals) = totals {
         table_rows.push(period_total_row(totals, compact, show_project, no_cost));
     }
-    let columns = period_columns("Date", compact, show_project, no_cost);
+    let columns = period_columns(Msg::Date, compact, show_project, no_cost);
     render_table(&columns, &table_rows)
 }
 
@@ -118,17 +120,16 @@ pub fn render_unified_table(
     }
 
     let detected = report.detected_labels();
-    let title = format!(
-        "Coding (Agent) CLI Usage Report - {}\nDetected: {}",
-        report.kind.title(),
-        if detected.is_empty() {
-            "None".to_string()
+    let title = copy::unified_title(
+        report.kind,
+        &if detected.is_empty() {
+            Msg::None.text().to_string()
         } else {
             detected.join(", ")
-        }
+        },
     );
     let table = render_table_styled(
-        &unified_columns(report.kind.first_column(), compact, no_cost),
+        &unified_columns(copy::period_column(report.kind), compact, no_cost),
         &table_rows,
         Some(TableStyle {
             color_mode,
@@ -162,17 +163,13 @@ pub fn render_focused_table(
 
     let title = render_source_title(
         source,
-        &format!(
-            "{} Usage Report - {}",
-            UnifiedAgent::Source(source).display_name(),
-            report.kind.title()
-        ),
+        &copy::focused_title(&UnifiedAgent::Source(source).display_name(), report.kind),
         color_mode,
     );
     format!(
         "{title}\n{}",
         render_table_styled(
-            &focused_columns(report.kind.first_column(), compact, no_cost),
+            &focused_columns(copy::period_column(report.kind), compact, no_cost),
             &table_rows,
             Some(TableStyle {
                 color_mode,
@@ -244,7 +241,7 @@ pub fn render_monthly_table(
     if let Some(totals) = totals {
         table_rows.push(period_total_row(totals, compact, false, false));
     }
-    let columns = period_columns("Month", compact, false, false);
+    let columns = period_columns(Msg::Month, compact, false, false);
     render_table(&columns, &table_rows)
 }
 
@@ -300,28 +297,28 @@ pub fn render_blocks_table(rows: &[BlockReportRow], compact: bool, no_cost: bool
     let compact = compact_mode(compact);
     let mut columns = if compact {
         vec![
-            column("Block", Align::Left),
-            column("Models", Align::Left),
-            column("Total Tokens", Align::Right),
-            column("Burn/h", Align::Right),
-            column("Projected", Align::Right),
-            column("Cost (USD)", Align::Right),
-            column("Active", Align::Left),
+            column(Msg::Block, Align::Left),
+            column(Msg::Models, Align::Left),
+            column(Msg::TotalTokens, Align::Right),
+            column(Msg::Burn, Align::Right),
+            column(Msg::Projected, Align::Right),
+            column(Msg::CostUsd, Align::Right),
+            column(Msg::Active, Align::Left),
         ]
     } else {
         vec![
-            column("Block", Align::Left),
-            column("Models", Align::Left),
-            column("Input", Align::Right),
-            column("Output", Align::Right),
-            column("Reasoning", Align::Right),
-            column("Cache Read", Align::Right),
-            column("Total Tokens", Align::Right),
-            column("Burn/h", Align::Right),
-            column("Projected", Align::Right),
-            column("Limit", Align::Right),
-            column("Cost (USD)", Align::Right),
-            column("Active", Align::Left),
+            column(Msg::Block, Align::Left),
+            column(Msg::Models, Align::Left),
+            column(Msg::Input, Align::Right),
+            column(Msg::Output, Align::Right),
+            column(Msg::Reasoning, Align::Right),
+            column(Msg::CacheRead, Align::Right),
+            column(Msg::TotalTokens, Align::Right),
+            column(Msg::Burn, Align::Right),
+            column(Msg::Projected, Align::Right),
+            column(Msg::Limit, Align::Right),
+            column(Msg::CostUsd, Align::Right),
+            column(Msg::Active, Align::Left),
         ]
     };
     if no_cost {
@@ -331,7 +328,12 @@ pub fn render_blocks_table(rows: &[BlockReportRow], compact: bool, no_cost: bool
         .iter()
         .map(|row| {
             let block = format!("{} -> {}", row.start_at, row.end_at);
-            let active = if row.is_active { "yes" } else { "no" }.to_string();
+            let active = if row.is_active {
+                Msg::Yes.text()
+            } else {
+                Msg::No.text()
+            }
+            .to_string();
             let mut cells = if compact {
                 vec![
                     block,
@@ -370,11 +372,14 @@ pub fn render_blocks_table(rows: &[BlockReportRow], compact: bool, no_cost: bool
 }
 
 pub fn format_totals(totals: &TokenTotals) -> String {
-    format!(
-        "Total: {} tokens, {} estimated",
-        format_count(totals.total_tokens),
-        format_cost(totals.estimated_cost_usd)
-    )
+    let tokens = format_count(totals.total_tokens);
+    let cost = format_cost(totals.estimated_cost_usd);
+    match crate::common::i18n::current() {
+        crate::common::i18n::Language::English => {
+            format!("Total: {tokens} tokens, {cost} estimated")
+        }
+        crate::common::i18n::Language::Chinese => format!("合计：{tokens} tokens，预估 {cost}"),
+    }
 }
 
 /// Formats `active/span` durations for the session table, e.g. `1.2h/3.5h`.
@@ -432,93 +437,93 @@ impl ColorMode {
 }
 
 fn period_columns(
-    first_header: &'static str,
+    first_header: Msg,
     compact: bool,
     show_project: bool,
     no_cost: bool,
 ) -> Vec<Column> {
     let mut columns = vec![column(first_header, Align::Left)];
     if show_project {
-        columns.push(column("Project", Align::Left));
+        columns.push(column(Msg::Project, Align::Left));
     }
-    columns.push(column("Models", Align::Left));
-    columns.push(column("Input", Align::Right));
-    columns.push(column("Output", Align::Right));
+    columns.push(column(Msg::Models, Align::Left));
+    columns.push(column(Msg::Input, Align::Right));
+    columns.push(column(Msg::Output, Align::Right));
     if !compact {
-        columns.push(column("Reasoning", Align::Right));
-        columns.push(column("Cache Read", Align::Right));
-        columns.push(column("Total Tokens", Align::Right));
+        columns.push(column(Msg::Reasoning, Align::Right));
+        columns.push(column(Msg::CacheRead, Align::Right));
+        columns.push(column(Msg::TotalTokens, Align::Right));
     }
     if !no_cost {
-        columns.push(column("Cost (USD)", Align::Right));
+        columns.push(column(Msg::CostUsd, Align::Right));
     }
     columns
 }
 
 fn daily_source_columns() -> Vec<Column> {
     vec![
-        column("Date", Align::Left),
-        column("Conv", Align::Right),
-        column("Models", Align::Left),
-        column("Input", Align::Right),
-        column("Cache", Align::Right),
-        column("Output", Align::Right),
-        column("Reason", Align::Right),
-        column("All", Align::Right),
-        column("Cost", Align::Right),
-        column("Notes", Align::Left),
+        column(Msg::Date, Align::Left),
+        column(Msg::Conv, Align::Right),
+        column(Msg::Models, Align::Left),
+        column(Msg::Input, Align::Right),
+        column(Msg::Cache, Align::Right),
+        column(Msg::Output, Align::Right),
+        column(Msg::Reason, Align::Right),
+        column(Msg::All, Align::Right),
+        column(Msg::Cost, Align::Right),
+        column(Msg::Notes, Align::Left),
     ]
 }
 
 fn daily_summary_columns(compact: bool) -> Vec<Column> {
     let mut columns = vec![
-        column("Date", Align::Left),
-        column("Models", Align::Left),
-        column("Input", Align::Right),
-        column("Output", Align::Right),
+        column(Msg::Date, Align::Left),
+        column(Msg::Models, Align::Left),
+        column(Msg::Input, Align::Right),
+        column(Msg::Output, Align::Right),
     ];
     if !compact {
-        columns.push(column("Cache Create", Align::Right));
-        columns.push(column("Cache Read", Align::Right));
-        columns.push(column("Total Tokens", Align::Right));
+        columns.push(column(Msg::CacheCreate, Align::Right));
+        columns.push(column(Msg::CacheRead, Align::Right));
+        columns.push(column(Msg::TotalTokens, Align::Right));
     }
-    columns.push(column("Cost (USD)", Align::Right));
+    columns.push(column(Msg::CostUsd, Align::Right));
     columns
 }
 
-fn unified_columns(first_column: &'static str, compact: bool, no_cost: bool) -> Vec<Column> {
+fn unified_columns(first_column: Msg, compact: bool, no_cost: bool) -> Vec<Column> {
     let mut columns = vec![
         column(first_column, Align::Left),
-        column("Agent", Align::Left),
-        column("Models", Align::Left),
-        column("Input", Align::Right),
-        column("Output", Align::Right),
+        column(Msg::Agent, Align::Left),
+        column(Msg::Models, Align::Left),
+        column(Msg::Input, Align::Right),
+        column(Msg::Output, Align::Right),
     ];
     if !compact {
-        columns.push(column("Cache Create", Align::Right));
-        columns.push(column("Cache Read", Align::Right));
-        columns.push(column("Total Tokens", Align::Right));
+        columns.push(column(Msg::CacheCreate, Align::Right));
+        columns.push(column(Msg::CacheRead, Align::Right));
+        columns.push(column(Msg::TotalTokens, Align::Right));
     }
     if !no_cost {
-        columns.push(column("Cost (USD)", Align::Right));
+        columns.push(column(Msg::CostUsd, Align::Right));
     }
     columns
 }
 
-fn focused_columns(first_column: &'static str, compact: bool, no_cost: bool) -> Vec<Column> {
+fn focused_columns(first_column: Msg, compact: bool, no_cost: bool) -> Vec<Column> {
     let mut columns = vec![
         column(first_column, Align::Left),
-        column("Models", Align::Left),
-        column("Input", Align::Right),
-        column("Output", Align::Right),
+        column(Msg::Models, Align::Left),
+        column(Msg::Input, Align::Right),
+        column(Msg::Output, Align::Right),
     ];
     if !compact {
-        columns.push(column("Cache Create", Align::Right));
-        columns.push(column("Cache Read", Align::Right));
-        columns.push(column("Total Tokens", Align::Right));
+        columns.push(column(Msg::CacheCreate, Align::Right));
+        columns.push(column(Msg::CacheRead, Align::Right));
+        columns.push(column(Msg::TotalTokens, Align::Right));
     }
     if !no_cost {
-        columns.push(column("Cost (USD)", Align::Right));
+        columns.push(column(Msg::CostUsd, Align::Right));
     }
     columns
 }
@@ -547,27 +552,27 @@ fn daily_source_table_rows(
 fn session_columns(compact: bool) -> Vec<Column> {
     if compact {
         vec![
-            column("Session", Align::Left),
-            column("Project", Align::Left),
-            column("Models", Align::Left),
-            column("Input", Align::Right),
-            column("Output", Align::Right),
-            column("Cost (USD)", Align::Right),
-            column("Last Activity", Align::Left),
+            column(Msg::Session, Align::Left),
+            column(Msg::Project, Align::Left),
+            column(Msg::Models, Align::Left),
+            column(Msg::Input, Align::Right),
+            column(Msg::Output, Align::Right),
+            column(Msg::CostUsd, Align::Right),
+            column(Msg::LastActivity, Align::Left),
         ]
     } else {
         vec![
-            column("Session", Align::Left),
-            column("Project", Align::Left),
-            column("Models", Align::Left),
-            column("Input", Align::Right),
-            column("Output", Align::Right),
-            column("Reasoning", Align::Right),
-            column("Cache Read", Align::Right),
-            column("Total Tokens", Align::Right),
-            column("Cost (USD)", Align::Right),
-            column("Last Activity", Align::Left),
-            column("Active/Span", Align::Right),
+            column(Msg::Session, Align::Left),
+            column(Msg::Project, Align::Left),
+            column(Msg::Models, Align::Left),
+            column(Msg::Input, Align::Right),
+            column(Msg::Output, Align::Right),
+            column(Msg::Reasoning, Align::Right),
+            column(Msg::CacheRead, Align::Right),
+            column(Msg::TotalTokens, Align::Right),
+            column(Msg::CostUsd, Align::Right),
+            column(Msg::LastActivity, Align::Left),
+            column(Msg::ActiveSpan, Align::Right),
         ]
     }
 }
@@ -641,10 +646,14 @@ fn unified_row(
     } else {
         row.period.clone()
     };
+    let agent_name = match row.agent {
+        UnifiedAgent::All => Msg::All.text().to_string(),
+        _ => row.agent.display_name(),
+    };
     let agent = if is_agent_breakdown {
-        format!("- {}", row.agent.display_name())
+        format!("- {agent_name}")
     } else {
-        row.agent.display_name()
+        agent_name
     };
     let models = if row.agent_breakdowns.is_empty() {
         format_models(&row.models_used)
@@ -676,7 +685,7 @@ fn unified_row(
 
 fn unified_total_row(totals: &TokenTotals, compact: bool, no_cost: bool) -> Vec<String> {
     let mut cells = vec![
-        "Total".to_string(),
+        Msg::Total.text().to_string(),
         String::new(),
         String::new(),
         format_token_compact(totals.input_tokens),
@@ -723,7 +732,7 @@ fn focused_row(row: &UnifiedRow, compact: bool, no_cost: bool) -> Vec<String> {
 
 fn focused_total_row(totals: &TokenTotals, compact: bool, no_cost: bool) -> Vec<String> {
     let mut cells = vec![
-        "Total".to_string(),
+        Msg::Total.text().to_string(),
         String::new(),
         format_token_compact(totals.input_tokens),
         format_token_compact(totals.output_tokens),
@@ -750,7 +759,7 @@ fn period_total_row(
     show_project: bool,
     no_cost: bool,
 ) -> Vec<String> {
-    let mut row = vec!["Total".to_string()];
+    let mut row = vec![Msg::Total.text().to_string()];
     if show_project {
         row.push(String::new());
     }
@@ -770,7 +779,7 @@ fn period_total_row(
 
 fn daily_summary_total_row(totals: &TokenTotals, compact: bool) -> Vec<String> {
     let mut cells = vec![
-        "Total".to_string(),
+        Msg::Total.text().to_string(),
         String::new(),
         format_count(totals.input_tokens),
         format_count(totals.output_tokens),
@@ -790,7 +799,7 @@ fn daily_source_total_row(
     notes: &ReportNotes,
 ) -> Vec<String> {
     vec![
-        "TOTAL".to_string(),
+        Msg::TotalUpper.text().to_string(),
         conversation_count.to_string(),
         String::new(),
         format_token_compact(totals.input_tokens),
@@ -806,7 +815,7 @@ fn daily_source_total_row(
 fn session_total_row(totals: &TokenTotals, compact: bool) -> Vec<String> {
     if compact {
         vec![
-            "Total".to_string(),
+            Msg::Total.text().to_string(),
             String::new(),
             String::new(),
             format_count(totals.input_tokens),
@@ -816,7 +825,7 @@ fn session_total_row(totals: &TokenTotals, compact: bool) -> Vec<String> {
         ]
     } else {
         vec![
-            "Total".to_string(),
+            Msg::Total.text().to_string(),
             String::new(),
             String::new(),
             format_count(totals.input_tokens),
@@ -996,19 +1005,19 @@ fn render_table_styled(
     style_options: Option<TableStyle>,
 ) -> String {
     if rows.is_empty() {
-        return "No usage data matched the report filters.".to_string();
+        return Msg::Empty.text().to_string();
     }
 
     let mut widths = columns
         .iter()
-        .map(|column| column.header.chars().count())
+        .map(|column| UnicodeWidthStr::width(column.header.text()))
         .collect::<Vec<_>>();
     for row in rows {
         for (idx, cell) in row.iter().enumerate() {
             if idx < widths.len() {
                 let max_line_width = cell_lines(cell)
                     .iter()
-                    .map(|line| line.chars().count())
+                    .map(|line| UnicodeWidthStr::width(line.as_str()))
                     .max()
                     .unwrap_or_default();
                 widths[idx] = widths[idx].max(max_line_width);
@@ -1026,7 +1035,7 @@ fn render_table_styled(
         columns,
         &columns
             .iter()
-            .map(|column| column.header.to_string())
+            .map(|column| column.header.text().to_string())
             .collect::<Vec<_>>(),
         &widths,
         style_options.and_then(|style| style.header_style()),
@@ -1077,7 +1086,7 @@ fn push_border_with(
 
 fn is_total_row(row: &[String]) -> bool {
     row.first()
-        .is_some_and(|cell| cell == "TOTAL" || cell == "Total")
+        .is_some_and(|cell| cell == Msg::TotalUpper.text() || cell == Msg::Total.text())
 }
 
 fn table_total_tokens(
@@ -1185,7 +1194,7 @@ fn push_styled_padded(
     column_idx: usize,
     dim_placeholder: bool,
 ) {
-    let len = value.chars().count();
+    let len = UnicodeWidthStr::width(value);
     let padding = width.saturating_sub(len);
     let (left, right) = match align {
         Align::Left => (String::new(), " ".repeat(padding)),
@@ -1220,7 +1229,7 @@ fn fit_widths(columns: &[Column], widths: &mut [usize], terminal_width: usize) {
         .iter()
         .enumerate()
         .map(|(idx, column)| match (idx, column.header, column.align) {
-            (_, "Models", _) => 12,
+            (_, Msg::Models, _) => 12,
             (0, _, _) => 8,
             (_, _, Align::Right) => 10,
             _ => 8,
@@ -1231,7 +1240,9 @@ fn fit_widths(columns: &[Column], widths: &mut [usize], terminal_width: usize) {
         let Some((idx, _)) = widths
             .iter()
             .enumerate()
-            .filter(|(idx, width)| **width > min_widths[*idx])
+            .filter(|(idx, width)| {
+                matches!(columns[*idx].align, Align::Left) && **width > min_widths[*idx]
+            })
             .max_by_key(|(_, width)| **width)
         else {
             break;
@@ -1256,15 +1267,15 @@ fn cell_lines(value: &str) -> Vec<String> {
 fn format_notes(notes: &ReportNotes) -> String {
     let mut labels = Vec::new();
     if notes.unpriced {
-        labels.push("unpriced");
+        labels.push(Msg::Unpriced.text());
     }
     if notes.reason_not_reported {
-        labels.push("reason not reported");
+        labels.push(Msg::ReasonNotReported.text());
     }
     labels.join("; ")
 }
 
-fn column(header: &'static str, align: Align) -> Column {
+fn column(header: Msg, align: Align) -> Column {
     Column { header, align }
 }
 
@@ -1288,7 +1299,7 @@ fn format_models(models: &[String]) -> String {
         .map(|model| format!("- {}", shorten(model, 30)))
         .collect::<Vec<_>>();
     if models.len() > MAX_MODELS_DISPLAYED {
-        lines.push(format!("- +{} more", models.len() - MAX_MODELS_DISPLAYED));
+        lines.push(copy::more_models(models.len() - MAX_MODELS_DISPLAYED));
     }
     lines.join("\n")
 }
@@ -1347,17 +1358,29 @@ fn project_name(project: &ProjectSummary) -> String {
         .unwrap_or_else(|| project.project_label.clone())
 }
 
-fn shorten(value: &str, max_chars: usize) -> String {
-    if value.chars().count() <= max_chars {
+fn shorten(value: &str, max_width: usize) -> String {
+    if UnicodeWidthStr::width(value) <= max_width {
         return value.to_string();
     }
-    if max_chars <= 3 {
-        return value.chars().take(max_chars).collect::<String>();
+    let content_width = if max_width <= 3 {
+        max_width
+    } else {
+        max_width - 3
+    };
+    let mut width = 0;
+    let mut clipped = String::new();
+    for ch in value.chars() {
+        let next_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if width + next_width > content_width {
+            break;
+        }
+        clipped.push(ch);
+        width += next_width;
     }
-    format!(
-        "{}...",
-        value.chars().take(max_chars - 3).collect::<String>()
-    )
+    if max_width > 3 {
+        clipped.push_str("...");
+    }
+    clipped
 }
 
 fn repeat_char(ch: char, count: usize) -> String {
@@ -1439,7 +1462,86 @@ fn detected_terminal_width() -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::i18n::{Language, with_language};
     use crate::query::reports::PeriodKind;
+
+    #[test]
+    fn paired_tables_use_display_width_and_never_shorten_numeric_cells() {
+        let mut numeric_rows = Vec::new();
+        for language in [Language::English, Language::Chinese] {
+            with_language(language, || {
+                let number = format_count(i64::MAX);
+                let columns = [
+                    column(Msg::Project, Align::Left),
+                    column(Msg::Input, Align::Right),
+                ];
+                let rows = vec![
+                    vec!["用户/中文项目 e\u{301}".to_string(), number.clone()],
+                    vec![Msg::Total.text().to_string(), number.clone()],
+                ];
+                let mut widths = [40, number.len()];
+                fit_widths(&columns, &mut widths, 20);
+                assert_eq!(widths[1], number.len());
+                let table = render_table(&columns, &rows);
+                assert_eq!(table.matches(&number).count(), 2, "{table}");
+                assert!(
+                    table.contains('╞') && table.contains('╪') && table.contains('╡'),
+                    "{table}"
+                );
+                let lines = table.lines().collect::<Vec<_>>();
+                let width = UnicodeWidthStr::width(lines[0]);
+                assert!(
+                    lines
+                        .iter()
+                        .all(|line| UnicodeWidthStr::width(*line) == width),
+                    "{table}"
+                );
+                assert_eq!(shorten("中文abcdef", 7), "中文...");
+                assert_eq!(shorten("中", 1), "");
+                numeric_rows.push(number);
+            });
+        }
+        assert_eq!(numeric_rows[0], numeric_rows[1]);
+    }
+
+    #[test]
+    fn paired_notes_model_overflow_and_empty_labels_preserve_external_values() {
+        for (language, empty, unpriced, reason, more) in [
+            (
+                Language::English,
+                "No usage data",
+                "unpriced",
+                "reason not reported",
+                "more",
+            ),
+            (
+                Language::Chinese,
+                "没有符合",
+                "未定价",
+                "未报告推理用量",
+                "个模型",
+            ),
+        ] {
+            with_language(language, || {
+                assert!(render_daily_table(&[], None, false, false, false).contains(empty));
+                let notes = format_notes(&ReportNotes {
+                    unpriced: true,
+                    reason_not_reported: true,
+                });
+                assert!(notes.contains(unpriced) && notes.contains(reason));
+                let models = format_models(&[
+                    "模型a".into(),
+                    "模型b".into(),
+                    "模型c".into(),
+                    "模型d".into(),
+                ]);
+                assert!(
+                    models.contains("模型a") && models.contains(more),
+                    "{models}"
+                );
+            });
+        }
+    }
 
     #[test]
     fn render_empty_table_is_actionable() {
@@ -1640,7 +1742,7 @@ mod tests {
             model_breakdowns: Vec::new(),
         };
         let table = render_table(
-            &unified_columns("Date", false, false),
+            &unified_columns(Msg::Date, false, false),
             &[
                 unified_row(&row, false, false, false),
                 unified_total_row(&totals, false, false),
@@ -1747,7 +1849,7 @@ mod tests {
         assert_eq!(cells[6], "134.61M");
 
         let table = render_table_styled(
-            &unified_columns("Date", false, false),
+            &unified_columns(Msg::Date, false, false),
             &[
                 unified_row(&zero, false, false, false),
                 unified_total_row(&zero.totals, false, false),
@@ -1767,7 +1869,7 @@ mod tests {
     fn unified_table_always_color_bolds_header_total_and_dims_placeholders() {
         let zero = unified_cache_row(0, 0);
         let table = render_table_styled(
-            &unified_columns("Date", false, false),
+            &unified_columns(Msg::Date, false, false),
             &[
                 unified_row(&zero, false, false, false),
                 unified_total_row(&zero.totals, false, false),

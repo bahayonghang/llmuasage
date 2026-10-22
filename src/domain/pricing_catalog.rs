@@ -6,6 +6,9 @@ use serde_json::Value;
 use super::pricing::PricingStatus;
 use crate::error::{LlmusageError, Result};
 
+pub(crate) mod diagnostic;
+use diagnostic::{DiagnosticFacts as Fact, Failure, Result as PricingResult};
+
 /// Embedded baseline catalog shipped with the binary.
 const STATIC_V2_JSON: &str = include_str!("../../pricing/static-v2.json");
 const CATALOG_SCHEMA_VERSION: u32 = 2;
@@ -273,6 +276,14 @@ impl PricingCatalog {
         status: PricingStatus,
         models: Vec<PricingEntry>,
     ) -> Result<Self> {
+        Self::new_with_facts(version, status, models).map_err(Into::into)
+    }
+
+    fn new_with_facts(
+        version: impl Into<String>,
+        status: PricingStatus,
+        models: Vec<PricingEntry>,
+    ) -> PricingResult<Self> {
         let version = version.into();
         let document = document_from_entries(&version, &models)?;
         let catalog = Self {
@@ -293,6 +304,10 @@ impl PricingCatalog {
     /// `model_prices_and_context_window.json` snapshot. Native LiteLLM
     /// per-token fields are converted to llmusage MTok rows on load.
     pub fn load_snapshot(path: &Path) -> Result<PricingCatalog> {
+        Self::load_snapshot_with_facts(path).map_err(Into::into)
+    }
+
+    pub(crate) fn load_snapshot_with_facts(path: &Path) -> PricingResult<PricingCatalog> {
         let raw = std::fs::read_to_string(path)?;
         let fallback_version = path
             .file_stem()
@@ -300,33 +315,45 @@ impl PricingCatalog {
             .unwrap_or("litellm-snapshot");
         let document = catalog_document_from_str(&raw, Some(fallback_version))?;
         if document.kind != CatalogKind::Base {
-            return Err(config_invalid("pricing snapshot must have kind `base`"));
+            return Err(config_invalid(
+                "pricing snapshot must have kind `base`",
+                Fact::SnapshotKind {},
+            ));
         }
-        PricingCatalog::from_document(document, PricingStatus::Snapshot)
+        PricingCatalog::from_document_with_facts(document, PricingStatus::Snapshot)
     }
 
-    pub(crate) fn load_overlay(path: &Path) -> Result<CatalogDocument> {
+    pub(crate) fn load_overlay(path: &Path) -> PricingResult<CatalogDocument> {
         let raw = std::fs::read_to_string(path)?;
         let document = catalog_document_from_str(&raw, None)?;
         if document.kind != CatalogKind::Overlay {
-            return Err(config_invalid("pricing overlay must have kind `overlay`"));
+            return Err(config_invalid(
+                "pricing overlay must have kind `overlay`",
+                Fact::OverlayKind {},
+            ));
         }
         validate_document(&document)?;
         Ok(document)
     }
 
-    pub(crate) fn merge_overlay(&self, overlay: CatalogDocument) -> Result<Self> {
+    pub(crate) fn merge_overlay(&self, overlay: CatalogDocument) -> PricingResult<Self> {
         if overlay.kind != CatalogKind::Overlay {
-            return Err(config_invalid("pricing overlay must have kind `overlay`"));
+            return Err(config_invalid(
+                "pricing overlay must have kind `overlay`",
+                Fact::OverlayKind {},
+            ));
         }
         validate_document(&overlay)?;
 
         let mut models = self.document.models.clone();
         for removed in &overlay.remove_models {
             let Some(index) = models.iter().position(|model| model.id == *removed) else {
-                return Err(config_invalid(format!(
-                    "pricing overlay removes unknown model id `{removed}`"
-                )));
+                return Err(config_invalid(
+                    format!("pricing overlay removes unknown model id `{removed}`"),
+                    Fact::UnknownRemoval {
+                        model: removed.clone(),
+                    },
+                ));
             };
             models.remove(index);
         }
@@ -345,7 +372,7 @@ impl PricingCatalog {
             models,
             remove_models: Vec::new(),
         };
-        Self::from_document(document, PricingStatus::Snapshot)
+        Self::from_document_with_facts(document, PricingStatus::Snapshot)
     }
 
     pub(crate) fn document(&self) -> &CatalogDocument {
@@ -404,9 +431,19 @@ impl PricingCatalog {
         document: CatalogDocument,
         status: PricingStatus,
     ) -> Result<PricingCatalog> {
+        Self::from_document_with_facts(document, status).map_err(Into::into)
+    }
+
+    fn from_document_with_facts(
+        document: CatalogDocument,
+        status: PricingStatus,
+    ) -> PricingResult<PricingCatalog> {
         validate_document(&document)?;
         if document.kind != CatalogKind::Base {
-            return Err(config_invalid("only a base catalog can be compiled"));
+            return Err(config_invalid(
+                "only a base catalog can be compiled",
+                Fact::CompileKind {},
+            ));
         }
 
         let mut models = Vec::new();
@@ -432,17 +469,25 @@ impl PricingCatalog {
         Ok(catalog)
     }
 
-    fn validate_compiled_matchers(&self) -> Result<()> {
+    fn validate_compiled_matchers(&self) -> PricingResult<()> {
         let mut seen = HashSet::new();
         for entry in &self.models {
             for matcher in &entry.matches {
                 let normalized = normalize_model_candidate(&matcher.value);
                 let key = (entry.source.to_ascii_lowercase(), matcher.mode, normalized);
                 if !seen.insert(key) {
-                    return Err(config_invalid(format!(
-                        "pricing catalog {} has duplicate {:?} matcher for source '{}': '{}'",
-                        self.version, matcher.mode, entry.source, matcher.value
-                    )));
+                    return Err(config_invalid(
+                        format!(
+                            "pricing catalog {} has duplicate {:?} matcher for source '{}': '{}'",
+                            self.version, matcher.mode, entry.source, matcher.value
+                        ),
+                        Fact::CompiledMatcher {
+                            version: self.version.clone(),
+                            mode: format!("{:?}", matcher.mode),
+                            source: entry.source.clone(),
+                            matcher: matcher.value.clone(),
+                        },
+                    ));
                 }
             }
         }
@@ -450,7 +495,10 @@ impl PricingCatalog {
     }
 }
 
-fn catalog_document_from_str(raw: &str, fallback_version: Option<&str>) -> Result<CatalogDocument> {
+fn catalog_document_from_str(
+    raw: &str,
+    fallback_version: Option<&str>,
+) -> PricingResult<CatalogDocument> {
     let value: Value = serde_json::from_str(raw).map_err(|source| LlmusageError::Parse {
         context: "pricing snapshot",
         source,
@@ -461,7 +509,7 @@ fn catalog_document_from_str(raw: &str, fallback_version: Option<&str>) -> Resul
 fn catalog_document_from_value(
     value: Value,
     fallback_version: Option<&str>,
-) -> Result<CatalogDocument> {
+) -> PricingResult<CatalogDocument> {
     if value.get("schema_version").is_some() {
         let document: CatalogDocument =
             serde_json::from_value(value).map_err(|source| LlmusageError::Parse {
@@ -495,7 +543,7 @@ fn catalog_document_from_value(
             .into_iter()
             .enumerate()
             .map(|(index, entry)| legacy_model_definition(index, entry))
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<PricingResult<Vec<_>>>()?;
         let document = CatalogDocument {
             schema_version: CATALOG_SCHEMA_VERSION,
             kind: CatalogKind::Base,
@@ -508,9 +556,10 @@ fn catalog_document_from_value(
     }
 
     let Some(root) = value.as_object() else {
-        return Err(LlmusageError::ConfigInvalid {
-            detail: "pricing snapshot must be a JSON object".to_string(),
-        });
+        return Err(config_invalid(
+            "pricing snapshot must be a JSON object",
+            Fact::RootObject {},
+        ));
     };
     let model_root = value
         .get("models")
@@ -532,10 +581,10 @@ fn catalog_document_from_value(
     }
 
     if models.is_empty() {
-        return Err(LlmusageError::ConfigInvalid {
-            detail: "pricing snapshot did not contain any LiteLLM rows with input_cost_per_token"
-                .to_string(),
-        });
+        return Err(config_invalid(
+            "pricing snapshot did not contain any LiteLLM rows with input_cost_per_token",
+            Fact::NoLiteRows {},
+        ));
     }
 
     let document = CatalogDocument {
@@ -549,13 +598,21 @@ fn catalog_document_from_value(
     Ok(document)
 }
 
-fn legacy_model_definition(index: usize, entry: LegacyPricingEntry) -> Result<ModelDefinition> {
+fn legacy_model_definition(
+    index: usize,
+    entry: LegacyPricingEntry,
+) -> PricingResult<ModelDefinition> {
     let first_matcher = entry
         .matchers
         .first()
         .map(|matcher| normalize_model_candidate(matcher))
         .filter(|matcher| !matcher.is_empty())
-        .ok_or_else(|| config_invalid(format!("legacy pricing entry {index} has no matcher")))?;
+        .ok_or_else(|| {
+            config_invalid(
+                format!("legacy pricing entry {index} has no matcher"),
+                Fact::LegacyMatcher { index },
+            )
+        })?;
     let mut matches = entry
         .matchers
         .into_iter()
@@ -769,65 +826,104 @@ fn normalize_litellm_model_id(model: &str) -> String {
         .collect()
 }
 
-fn validate_document(document: &CatalogDocument) -> Result<()> {
+fn validate_document(document: &CatalogDocument) -> PricingResult<()> {
     if document.schema_version != CATALOG_SCHEMA_VERSION {
-        return Err(config_invalid(format!(
-            "unsupported pricing catalog schema_version {}; expected {}",
-            document.schema_version, CATALOG_SCHEMA_VERSION
-        )));
+        return Err(config_invalid(
+            format!(
+                "unsupported pricing catalog schema_version {}; expected {}",
+                document.schema_version, CATALOG_SCHEMA_VERSION
+            ),
+            Fact::Schema {
+                actual: document.schema_version,
+                expected: CATALOG_SCHEMA_VERSION,
+            },
+        ));
     }
     if document.version.trim().is_empty() {
-        return Err(config_invalid("pricing catalog version must not be empty"));
+        return Err(config_invalid(
+            "pricing catalog version must not be empty",
+            Fact::EmptyVersion {},
+        ));
     }
     if document.kind == CatalogKind::Base && !document.remove_models.is_empty() {
-        return Err(config_invalid("base pricing catalog cannot remove models"));
+        return Err(config_invalid(
+            "base pricing catalog cannot remove models",
+            Fact::BaseRemovals {},
+        ));
     }
 
     let mut ids = HashSet::new();
     for model in &document.models {
         validate_identifier("model id", &model.id)?;
         if !ids.insert(model.id.to_ascii_lowercase()) {
-            return Err(config_invalid(format!(
-                "pricing catalog has duplicate model id `{}`",
-                model.id
-            )));
+            return Err(config_invalid(
+                format!("pricing catalog has duplicate model id `{}`", model.id),
+                Fact::DuplicateModel {
+                    model: model.id.clone(),
+                },
+            ));
         }
         if model.sources.is_empty() {
-            return Err(config_invalid(format!(
-                "pricing model `{}` must declare at least one source",
-                model.id
-            )));
+            return Err(config_invalid(
+                format!(
+                    "pricing model `{}` must declare at least one source",
+                    model.id
+                ),
+                Fact::NoSources {
+                    model: model.id.clone(),
+                },
+            ));
         }
         let mut sources = HashSet::new();
         for source in &model.sources {
             validate_identifier("source", source)?;
             if !sources.insert(source.to_ascii_lowercase()) {
-                return Err(config_invalid(format!(
-                    "pricing model `{}` has duplicate source `{source}`",
-                    model.id
-                )));
+                return Err(config_invalid(
+                    format!(
+                        "pricing model `{}` has duplicate source `{source}`",
+                        model.id
+                    ),
+                    Fact::DuplicateSource {
+                        model: model.id.clone(),
+                        source: source.clone(),
+                    },
+                ));
             }
         }
         if model.matches.is_empty() {
-            return Err(config_invalid(format!(
-                "pricing model `{}` must declare at least one matcher",
-                model.id
-            )));
+            return Err(config_invalid(
+                format!(
+                    "pricing model `{}` must declare at least one matcher",
+                    model.id
+                ),
+                Fact::NoMatchers {
+                    model: model.id.clone(),
+                },
+            ));
         }
         let mut matchers = HashSet::new();
         for matcher in &model.matches {
             let normalized = normalize_model_candidate(&matcher.value);
             if normalized.is_empty() {
-                return Err(config_invalid(format!(
-                    "pricing model `{}` contains an empty matcher",
-                    model.id
-                )));
+                return Err(config_invalid(
+                    format!("pricing model `{}` contains an empty matcher", model.id),
+                    Fact::EmptyMatcher {
+                        model: model.id.clone(),
+                    },
+                ));
             }
             if !matchers.insert((matcher.mode, normalized)) {
-                return Err(config_invalid(format!(
-                    "pricing model `{}` contains a duplicate {:?} matcher `{}`",
-                    model.id, matcher.mode, matcher.value
-                )));
+                return Err(config_invalid(
+                    format!(
+                        "pricing model `{}` contains a duplicate {:?} matcher `{}`",
+                        model.id, matcher.mode, matcher.value
+                    ),
+                    Fact::DuplicateMatcher {
+                        model: model.id.clone(),
+                        mode: format!("{:?}", matcher.mode),
+                        matcher: matcher.value.clone(),
+                    },
+                ));
             }
         }
         validate_rate(&model.id, "default", &model.rates.default)?;
@@ -835,25 +931,40 @@ fn validate_document(document: &CatalogDocument) -> Result<()> {
         let mut tier_names = HashSet::new();
         for tier in &model.rates.tiers {
             if tier.name.trim().is_empty() || !tier_names.insert(tier.name.to_ascii_lowercase()) {
-                return Err(config_invalid(format!(
-                    "pricing model `{}` has an empty or duplicate tier name",
-                    model.id
-                )));
+                return Err(config_invalid(
+                    format!(
+                        "pricing model `{}` has an empty or duplicate tier name",
+                        model.id
+                    ),
+                    Fact::TierName {
+                        model: model.id.clone(),
+                    },
+                ));
             }
             if tier.prompt_tokens_above == 0 || tier.prompt_tokens_above <= threshold {
-                return Err(config_invalid(format!(
-                    "pricing model `{}` tiers must use strictly increasing positive thresholds",
-                    model.id
-                )));
+                return Err(config_invalid(
+                    format!(
+                        "pricing model `{}` tiers must use strictly increasing positive thresholds",
+                        model.id
+                    ),
+                    Fact::TierThreshold {
+                        model: model.id.clone(),
+                    },
+                ));
             }
             threshold = tier.prompt_tokens_above;
             validate_rate(&model.id, &tier.name, &tier.rate)?;
         }
         if model.context_window == Some(0) {
-            return Err(config_invalid(format!(
-                "pricing model `{}` context_window must be positive",
-                model.id
-            )));
+            return Err(config_invalid(
+                format!(
+                    "pricing model `{}` context_window must be positive",
+                    model.id
+                ),
+                Fact::ContextWindow {
+                    model: model.id.clone(),
+                },
+            ));
         }
     }
 
@@ -861,29 +972,38 @@ fn validate_document(document: &CatalogDocument) -> Result<()> {
     for removed in &document.remove_models {
         validate_identifier("removed model id", removed)?;
         if !removals.insert(removed.to_ascii_lowercase()) {
-            return Err(config_invalid(format!(
-                "pricing overlay removes model `{removed}` more than once"
-            )));
+            return Err(config_invalid(
+                format!("pricing overlay removes model `{removed}` more than once"),
+                Fact::DuplicateRemoval {
+                    model: removed.clone(),
+                },
+            ));
         }
     }
     Ok(())
 }
 
-fn validate_identifier(label: &str, value: &str) -> Result<()> {
+fn validate_identifier(label: &str, value: &str) -> PricingResult<()> {
     if value.is_empty()
         || value != value.trim()
         || !value.chars().all(|ch| {
             ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '-' | '_' | '.')
         })
     {
-        return Err(config_invalid(format!(
-            "pricing catalog {label} `{value}` must use lowercase ASCII letters, digits, dot, dash, or underscore"
-        )));
+        return Err(config_invalid(
+            format!(
+                "pricing catalog {label} `{value}` must use lowercase ASCII letters, digits, dot, dash, or underscore"
+            ),
+            Fact::Identifier {
+                label: label.into(),
+                value: value.into(),
+            },
+        ));
     }
     Ok(())
 }
 
-fn validate_rate(model_id: &str, tier: &str, rate: &PricingRate) -> Result<()> {
+fn validate_rate(model_id: &str, tier: &str, rate: &PricingRate) -> PricingResult<()> {
     for (name, value) in [
         ("input_per_mtok", rate.input_per_mtok),
         ("cached_per_mtok", rate.cached_per_mtok),
@@ -892,15 +1012,23 @@ fn validate_rate(model_id: &str, tier: &str, rate: &PricingRate) -> Result<()> {
         ("reasoning_per_mtok", rate.reasoning_per_mtok()),
     ] {
         if !value.is_finite() || value < 0.0 {
-            return Err(config_invalid(format!(
-                "pricing model `{model_id}` tier `{tier}` has invalid {name}"
-            )));
+            return Err(config_invalid(
+                format!("pricing model `{model_id}` tier `{tier}` has invalid {name}"),
+                Fact::InvalidRate {
+                    model: model_id.into(),
+                    tier: tier.into(),
+                    channel: name.into(),
+                },
+            ));
         }
     }
     Ok(())
 }
 
-fn document_from_entries(version: &str, entries: &[PricingEntry]) -> Result<CatalogDocument> {
+fn document_from_entries(
+    version: &str,
+    entries: &[PricingEntry],
+) -> PricingResult<CatalogDocument> {
     let mut models: Vec<ModelDefinition> = Vec::new();
     for entry in entries {
         if let Some(model) = models.iter_mut().find(|model| model.id == entry.id) {
@@ -909,10 +1037,15 @@ fn document_from_entries(version: &str, entries: &[PricingEntry]) -> Result<Cata
                 || model.rates.tiers != entry.tiers
                 || model.context_window != entry.context_window
             {
-                return Err(config_invalid(format!(
-                    "pricing entries with id `{}` disagree across sources",
-                    entry.id
-                )));
+                return Err(config_invalid(
+                    format!(
+                        "pricing entries with id `{}` disagree across sources",
+                        entry.id
+                    ),
+                    Fact::Disagree {
+                        model: entry.id.clone(),
+                    },
+                ));
             }
             model.sources.push(entry.source.clone());
         } else {
@@ -958,10 +1091,8 @@ pub(crate) fn stable_identifier(raw: &str) -> String {
     value.trim_matches('-').to_string()
 }
 
-fn config_invalid(detail: impl Into<String>) -> LlmusageError {
-    LlmusageError::ConfigInvalid {
-        detail: detail.into(),
-    }
+fn config_invalid(detail: impl Into<String>, facts: Fact) -> Failure {
+    Failure::config(detail, facts)
 }
 
 #[cfg(test)]

@@ -1,3 +1,5 @@
+use crate::common::i18n::tui::format as tr_format;
+use crate::common::i18n::tui::text as tr;
 use std::{io, time::Duration};
 
 use anyhow::Result;
@@ -57,6 +59,18 @@ impl RedrawState {
 
 /// Main entry point for the interactive terminal dashboard.
 pub fn run_dashboard(store: &Store) -> Result<()> {
+    with_startup_language(&store.paths.root_dir, || run_dashboard_scoped(store))
+}
+
+fn with_startup_language<T>(root: &std::path::Path, run: impl FnOnce() -> T) -> T {
+    let preferences = crate::runtime::preferences::read(root);
+    if let Some(diagnostic) = &preferences.diagnostic {
+        eprintln!("{}", diagnostic.render(preferences.language));
+    }
+    crate::common::i18n::with_language(preferences.language, run)
+}
+
+fn run_dashboard_scoped(store: &Store) -> Result<()> {
     // 0. Resolve theme and terminal color capability before entering raw mode.
     theme::configure_from_env();
 
@@ -103,11 +117,20 @@ pub fn run_terminal(store: &Store) -> Result<()> {
     run_dashboard(store)
 }
 
+/// CLI dispatch already captured the root's preferences before parsing/logging.
+pub(crate) fn run_terminal_with_language(
+    store: &Store,
+    language: crate::common::i18n::Language,
+) -> Result<()> {
+    crate::common::i18n::with_language(language, || run_dashboard_scoped(store))
+}
+
 fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Store) -> Result<()> {
     let mut state = AppState::new();
     let mut sync = SyncController::new()?;
     let mut quota = QuotaController::new()?;
     let mut loader = PanelDataLoader::new(store)?;
+    let mut quota_presentation = None;
     let size = terminal.size()?;
     state.handle_resize(size.width, size.height);
     let mut events = EventHandler::new(std::time::Duration::from_millis(250));
@@ -118,7 +141,23 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
 
     loop {
         if redraw.take() {
-            terminal.draw(|frame| draw::draw(frame, &state))?;
+            terminal.draw(|frame| {
+                quota::with_presentation(
+                    state.quota_report.as_ref(),
+                    quota_presentation.as_ref(),
+                    || {
+                        panels::behavior::with_presentation(
+                            state
+                                .behavior
+                                .as_ref()
+                                .and_then(|result| result.as_ref().ok())
+                                .map(|payload| &payload.optimize),
+                            loader.behavior_presentation.as_ref(),
+                            || draw::draw(frame, &state),
+                        )
+                    },
+                )
+            })?;
             // Draw reads the backend size. Sync hit-test geometry to that frame
             // if a physical resize landed before the Resize event.
             if let Ok(size) = terminal.size()
@@ -134,7 +173,7 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
             TuiEvent::Tick => {
                 let mut tick_dirty = apply_panel_results(&mut loader, &mut state);
                 tick_dirty |= apply_sync_updates(&mut sync, &mut loader, &mut state);
-                tick_dirty |= apply_quota_updates(&mut quota, &mut state);
+                tick_dirty |= apply_quota_updates(&mut quota, &mut state, &mut quota_presentation);
                 state.sync_active = sync.is_active();
                 let animation_active = state.background_active();
                 tick_dirty |= state.on_tick(animation_active);
@@ -248,13 +287,13 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
                 if let Some((key, descending)) = state.cycle_sort() {
                     let panel = state.active_panel;
                     update_scroll_total(&mut state, panel);
-                    state.set_status(&format!(
-                        "Sort: {} {}",
+                    state.set_status(&tr_format!(
+                        sort,
                         key.label(),
                         if descending {
-                            "descending"
+                            tr("descending")
                         } else {
-                            "ascending"
+                            tr("ascending")
                         }
                     ));
                 }
@@ -263,13 +302,13 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
                 if let Some((key, descending)) = state.reverse_sort() {
                     let panel = state.active_panel;
                     update_scroll_total(&mut state, panel);
-                    state.set_status(&format!(
-                        "Sort: {} {}",
+                    state.set_status(&tr_format!(
+                        sort,
                         key.label(),
                         if descending {
-                            "descending"
+                            tr("descending")
                         } else {
-                            "ascending"
+                            tr("ascending")
                         }
                     ));
                 }
@@ -312,7 +351,7 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, store: &Sto
             Action::OpenHelp => state.open_help(),
             Action::CycleTheme => {
                 let name = theme::cycle_theme();
-                state.set_status(&format!("theme: {name}"));
+                state.set_status(&tr_format!(theme_name, name = name));
             }
             Action::None => {}
         }
@@ -335,12 +374,16 @@ fn apply_sync_updates(
             SyncUpdate::Completed { inserted, stored } => {
                 invalidate_inactive_panel_data(state);
                 request_panel_data(loader, state, state.active_panel, true);
-                state.set_status(&format!(
-                    "Sync complete: {inserted} inserted, {stored} stored"
+                state.set_status(&tr_format!(
+                    sync_complete_inserted_inserted_stored_stored,
+                    inserted = inserted,
+                    stored = stored
                 ));
             }
-            SyncUpdate::Failed(error) => state.set_status(&format!("Sync failed: {error}")),
-            SyncUpdate::Cancelled => state.set_status("Sync cancelled"),
+            SyncUpdate::Failed(error) => {
+                state.set_status(&tr_format!(sync_failed_error, error = error))
+            }
+            SyncUpdate::Cancelled => state.set_status(tr("sync_cancelled")),
         }
     }
     dirty
@@ -352,7 +395,7 @@ fn refresh_panel_data(loader: &mut PanelDataLoader, state: &mut AppState) {
     invalidate_inactive_panel_data(state);
     state.needs_refresh = false;
     request_panel_data(loader, state, panel, true);
-    state.set_status("Refreshing local dashboard cache");
+    state.set_status(tr("refreshing_local_dashboard_cache"));
 }
 
 fn maybe_fetch_quota(
@@ -374,8 +417,12 @@ fn maybe_fetch_quota(
     }
 }
 
-fn apply_quota_updates(quota: &mut QuotaController, state: &mut AppState) -> bool {
-    let Some(report) = quota.try_recv() else {
+fn apply_quota_updates(
+    quota: &mut QuotaController,
+    state: &mut AppState,
+    presentation: &mut Option<crate::subscription::QuotaPresentationHints>,
+) -> bool {
+    let Some(update) = quota.try_recv() else {
         let fetching = quota.is_fetching();
         if state.quota_fetching != fetching {
             state.quota_fetching = fetching;
@@ -383,15 +430,17 @@ fn apply_quota_updates(quota: &mut QuotaController, state: &mut AppState) -> boo
         }
         return false;
     };
+    let report = update.report;
+    *presentation = Some(update.presentation);
     state.quota_fetching = false;
     state.quota_fetch_attempted = true;
     let message = if report.outputs.is_empty() && report.diagnostics.is_empty() {
-        "No subscription credentials found".to_string()
+        tr("no_subscription_credentials_found").to_string()
     } else if report.diagnostics.is_empty() {
-        format!("Loaded {} quota account(s)", report.outputs.len())
+        tr_format!(loaded_quota_account_s, report.outputs.len())
     } else {
-        format!(
-            "Loaded {} quota account(s), {} issue(s)",
+        tr_format!(
+            loaded_quota_account_s_issue_s,
             report.outputs.len(),
             report.diagnostics.len()
         )
@@ -598,6 +647,15 @@ fn request_panel_data(
 fn apply_panel_results(loader: &mut PanelDataLoader, state: &mut AppState) -> bool {
     let mut dirty = false;
     while let Some(result) = loader.try_recv() {
+        if panel_result_matches(state, &result)
+            && let PanelPayload::Behavior(payload) = &result.payload
+        {
+            loader.behavior_presentation = payload
+                .as_ref()
+                .as_ref()
+                .ok()
+                .map(|(_, hints)| hints.clone());
+        }
         dirty |= apply_panel_result(state, result);
     }
     dirty
@@ -610,38 +668,62 @@ fn apply_panel_result(state: &mut AppState, result: PanelResult) -> bool {
     let panel = result.panel;
     let refreshing = result.refreshing;
     match result.payload {
-        PanelPayload::Overview(payload) => state.overview = Some(payload),
+        PanelPayload::Overview(payload) => {
+            state.overview = Some(payload.map_err(|error| error.render()))
+        }
         PanelPayload::SyncCenter(payload) => {
-            state.sync_center = Some(payload);
+            state.sync_center = Some(payload.map_err(|error| error.render()));
             update_overlay_scroll(state);
         }
-        PanelPayload::Models(payload) => state.models = Some(payload),
-        PanelPayload::Daily(payload) => state.daily = Some(payload),
-        PanelPayload::Hourly(payload) => state.hourly = Some(payload),
-        PanelPayload::Monthly(payload) => state.monthly = Some(payload),
+        PanelPayload::Models(payload) => {
+            state.models = Some(payload.map_err(|error| error.render()))
+        }
+        PanelPayload::Daily(payload) => state.daily = Some(payload.map_err(|error| error.render())),
+        PanelPayload::Hourly(payload) => {
+            state.hourly = Some(payload.map_err(|error| error.render()))
+        }
+        PanelPayload::Monthly(payload) => {
+            state.monthly = Some(payload.map_err(|error| error.render()))
+        }
         PanelPayload::DailyDetail(payload) => {
             if let Some(detail) = state.period_detail.as_mut()
                 && matches!(detail.kind, PeriodDetailKind::Daily { .. })
             {
-                detail.payload = Some(payload.map(PeriodDetailPayload::Daily));
+                detail.payload = Some(
+                    payload
+                        .map(PeriodDetailPayload::Daily)
+                        .map_err(|error| error.render()),
+                );
             }
         }
         PanelPayload::MonthlyDetail(payload) => {
             if let Some(detail) = state.period_detail.as_mut()
                 && matches!(detail.kind, PeriodDetailKind::Monthly { .. })
             {
-                detail.payload = Some(payload.map(PeriodDetailPayload::Monthly));
+                detail.payload = Some(
+                    payload
+                        .map(PeriodDetailPayload::Monthly)
+                        .map_err(|error| error.render()),
+                );
             }
         }
-        PanelPayload::Stats(payload) => state.stats = Some(payload),
-        PanelPayload::Behavior(payload) => state.behavior = Some(*payload),
-        PanelPayload::Blocks(payload) => state.blocks = Some(payload),
+        PanelPayload::Stats(payload) => state.stats = Some(payload.map_err(|error| error.render())),
+        PanelPayload::Behavior(payload) => {
+            state.behavior = Some(
+                payload
+                    .map(|(payload, _)| payload)
+                    .map_err(|error| error.render()),
+            )
+        }
+        PanelPayload::Blocks(payload) => {
+            state.blocks = Some(payload.map_err(|error| error.render()))
+        }
     }
     state.panel_loading[panel as usize] = false;
     update_scroll_total(state, panel);
     state.mark_refreshed();
     if refreshing {
-        state.set_status("Refreshed local dashboard cache");
+        state.set_status(tr("refreshed_local_dashboard_cache"));
     }
     true
 }
@@ -818,6 +900,34 @@ mod tests {
         style::{Color, Modifier},
     };
     use std::time::Instant;
+
+    #[test]
+    fn startup_language_is_one_root_snapshot_and_restores_on_unwind() -> Result<()> {
+        use crate::common::i18n::{Language, current};
+        use crate::runtime::preferences;
+        let temp = tempfile::TempDir::new()?;
+        let missing = temp.path().join("missing");
+        with_startup_language(&missing, || assert_eq!(current(), Language::English));
+        assert!(!missing.exists(), "reading settings must not create a root");
+        let root = temp.path().join("profile");
+        preferences::write(&root, Language::Chinese)?;
+        with_startup_language(&root, || {
+            assert_eq!(current(), Language::Chinese);
+            preferences::write(&root, Language::English).unwrap();
+            assert_eq!(
+                current(),
+                Language::Chinese,
+                "a running UI never polls preferences"
+            );
+        });
+        with_startup_language(&root, || assert_eq!(current(), Language::English));
+        preferences::write(&root, Language::Chinese)?;
+        let panic =
+            std::panic::catch_unwind(|| with_startup_language(&root, || panic!("scope fixture")));
+        assert!(panic.is_err());
+        assert_eq!(current(), Language::English);
+        Ok(())
+    }
 
     fn buffer_text(terminal: &Terminal<TestBackend>) -> String {
         terminal
@@ -1018,7 +1128,9 @@ mod tests {
             time_window: state.time_window,
             generation: 1,
             refreshing: false,
-            payload: PanelPayload::Models(Err("stale".to_string())),
+            payload: PanelPayload::Models(Err(data_loader::LoadError::External(
+                "stale".to_string(),
+            ))),
         };
         assert!(!panel_result_matches(&state, &stale));
 
@@ -1030,7 +1142,9 @@ mod tests {
             time_window: state.time_window,
             generation: 2,
             refreshing: false,
-            payload: PanelPayload::Models(Err("wrong filter".to_string())),
+            payload: PanelPayload::Models(Err(data_loader::LoadError::External(
+                "wrong filter".to_string(),
+            ))),
         };
         assert!(!panel_result_matches(&state, &wrong_filter));
     }
@@ -1044,11 +1158,11 @@ mod tests {
         for (panel, payload) in [
             (
                 Panel::Models,
-                PanelPayload::Models(Err("unused".to_string())),
+                PanelPayload::Models(Err(data_loader::LoadError::External("unused".to_string()))),
             ),
             (
                 Panel::Overview,
-                PanelPayload::Overview(Err("unused".to_string())),
+                PanelPayload::Overview(Err(data_loader::LoadError::External("unused".to_string()))),
             ),
         ] {
             state.active_panel = panel;
@@ -1066,11 +1180,13 @@ mod tests {
         for (panel, payload) in [
             (
                 Panel::Trends,
-                PanelPayload::SyncCenter(Err("unused".to_string())),
+                PanelPayload::SyncCenter(Err(data_loader::LoadError::External(
+                    "unused".to_string(),
+                ))),
             ),
             (
                 Panel::Blocks,
-                PanelPayload::Blocks(Err("unused".to_string())),
+                PanelPayload::Blocks(Err(data_loader::LoadError::External("unused".to_string()))),
             ),
         ] {
             state.active_panel = panel;
@@ -1236,11 +1352,13 @@ mod tests {
     fn assert_panel_result_ok(panel: Panel, result: &PanelResult) -> Result<()> {
         let error = match &result.payload {
             PanelPayload::Stats(Err(error)) | PanelPayload::Blocks(Err(error)) => {
-                Some(error.as_str())
+                Some(error.to_string())
             }
-            PanelPayload::Behavior(payload) => {
-                payload.as_ref().as_ref().err().map(|error| error.as_str())
-            }
+            PanelPayload::Behavior(payload) => payload
+                .as_ref()
+                .as_ref()
+                .err()
+                .map(|error| error.to_string()),
             _ => None,
         };
         anyhow::ensure!(result.panel == panel, "received unexpected panel result");

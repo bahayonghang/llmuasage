@@ -1,3 +1,4 @@
+use crate::common::i18n::tui::text as tr;
 use ratatui::{
     Frame,
     layout::{Alignment, Rect},
@@ -7,6 +8,16 @@ use ratatui::{
 
 use super::app::Panel;
 use super::theme;
+use unicode_width::UnicodeWidthStr;
+
+fn tab_label(index: usize, panel: Panel, very_narrow: bool) -> String {
+    let label = if very_narrow {
+        panel.short_label()
+    } else {
+        panel.label()
+    };
+    format!(" {} {} ", index + 1, label)
+}
 
 /// Render a tokscale-style header with tab labels and active highlight.
 pub fn render(frame: &mut Frame, area: Rect, active_panel: Panel) {
@@ -18,12 +29,7 @@ pub fn render(frame: &mut Frame, area: Rect, active_panel: Panel) {
             spans.push(Span::styled(" │ ", theme::fg_style(theme::border_normal())));
         }
 
-        let tab_label = if very_narrow {
-            panel.short_label()
-        } else {
-            panel.label()
-        };
-        let label = format!(" {} {} ", i + 1, tab_label);
+        let label = tab_label(i, *panel, very_narrow);
         let style = if *panel == active_panel {
             theme::nav_active_style()
         } else {
@@ -43,7 +49,7 @@ pub fn render(frame: &mut Frame, area: Rect, active_panel: Panel) {
         .title_alignment(Alignment::Left)
         .title_top(
             Line::from(Span::styled(
-                " local usage ",
+                tr("local_usage"),
                 theme::fg_style(theme::muted_fg()),
             ))
             .right_aligned(),
@@ -67,12 +73,7 @@ pub fn panel_at_position(area: Rect, column: u16, row: u16) -> Option<Panel> {
         if x >= right {
             return None;
         }
-        let label = if very_narrow {
-            panel.short_label()
-        } else {
-            panel.label()
-        };
-        let width = format!(" {} {} ", index + 1, label).chars().count() as u16;
+        let width = tab_label(index, panel, very_narrow).width() as u16;
         let end = x.saturating_add(width).min(right);
         if (x..end).contains(&column) {
             return Some(panel);

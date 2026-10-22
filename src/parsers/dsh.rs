@@ -148,7 +148,10 @@ async fn sync_dsh(
      * 2) 流式 zstd/明文分派 → assistant/message usage → UsageEvent
      * 3) 返回 event / cursor / reset 指令给单 writer 统一落库
      */
-    info!("开始同步 DeepSeek Harness 会话日志真源");
+    info!(
+        event_code = "parsers.dsh.01",
+        "开始同步 DeepSeek Harness 会话日志真源"
+    );
 
     let parse_started = Instant::now();
     let listing = source_files::list_dsh_session_files();
@@ -159,7 +162,7 @@ async fn sync_dsh(
         &inventory_paths,
         writer.run_started_at(),
     )?;
-    let inventory_error = listing.error_summary();
+    let inventory_error = listing.error_summary_with_feedback(SourceKind::DeepseekHarness);
     let files = listing.paths;
     let total_files = files.len();
     let cursor_map = store
@@ -307,6 +310,7 @@ async fn sync_dsh(
     stats.parse_ms = total_elapsed.saturating_sub(write_ms);
 
     info!(
+        event_code = "parsers.dsh.02",
         files_processed = stats.files_processed,
         changed_files = stats.changed_files,
         skipped_files = stats.skipped_files,

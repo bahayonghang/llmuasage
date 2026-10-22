@@ -8,6 +8,7 @@
 //! dangling bar behind.
 
 use std::{
+    collections::HashMap,
     ffi::OsString,
     io::{IsTerminal, Write},
     sync::{Arc, Mutex},
@@ -16,6 +17,7 @@ use std::{
 
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 
+use crate::common::i18n::{self, Language};
 use crate::{models::SourceKind, parsers::SyncEvent};
 
 const SPINNER_TICK: Duration = Duration::from_millis(100);
@@ -30,7 +32,11 @@ pub(crate) fn stderr_renderer() -> HumanRenderer {
     } else {
         ProgressDrawTarget::hidden()
     };
-    HumanRenderer::new(draw, progress_env_forces_line())
+    HumanRenderer::new(draw, progress_env_forces_line() || colors_disabled())
+}
+
+fn colors_disabled() -> bool {
+    std::env::var_os("NO_COLOR").is_some() || std::env::var_os("LLMUSAGE_NO_COLOR").is_some()
 }
 
 fn progress_env_forces_line() -> bool {
@@ -69,6 +75,57 @@ pub(crate) enum HumanRenderer {
 }
 
 impl HumanRenderer {
+    pub(crate) fn observe_notice(&mut self, notice: &crate::sync::notices::RunNotice) {
+        if let crate::sync::notices::RunNotice::RemoteSkipped {
+            host_id,
+            facts: Some(facts),
+            ..
+        } = notice
+        {
+            let pending = match self {
+                Self::Line(renderer) => &mut renderer.remote_facts,
+                Self::Bar(renderer) => &mut renderer.remote_facts,
+            };
+            pending.insert(host_id.clone(), facts.as_ref().clone());
+        }
+    }
+
+    pub(crate) fn suspend<T>(&mut self, operation: impl FnOnce() -> T) -> T {
+        match self {
+            Self::Line(renderer) => {
+                renderer.finish();
+                operation()
+            }
+            Self::Bar(renderer) => renderer.multi.suspend(operation),
+        }
+    }
+    pub(crate) fn render_failure(&mut self, error: &anyhow::Error) {
+        let language = match self {
+            Self::Line(renderer) => renderer.language,
+            Self::Bar(renderer) => renderer.language,
+        };
+        let detail = error
+            .downcast_ref::<crate::sync::failure::SyncFailure>()
+            .map(|failure| crate::common::i18n::sync::failure(&failure.kind, language))
+            .unwrap_or_else(|| error.to_string());
+        let line = crate::common::i18n::logging::safe_text(&format!(
+            "{}: {detail}",
+            language.select("Sync failed", "同步失败")
+        ));
+        match self {
+            Self::Line(renderer) => {
+                renderer.finish();
+                renderer.terminated = true;
+                let _ = writeln!(renderer.stderr, "{line}");
+            }
+            Self::Bar(renderer) => {
+                renderer.clear_active();
+                renderer.terminated = true;
+                renderer.permanent_text(line);
+            }
+        }
+    }
+
     pub(crate) fn write_warning(&mut self, bytes: &[u8]) -> std::io::Result<()> {
         match self {
             Self::Line(renderer) => {
@@ -93,9 +150,23 @@ impl HumanRenderer {
     }
 
     pub(crate) fn render(&mut self, event: &SyncEvent) {
-        match self {
+        let language = match self {
+            Self::Line(renderer) => renderer.language,
+            Self::Bar(renderer) => renderer.language,
+        };
+        i18n::with_language(language, || match self {
             Self::Line(renderer) => renderer.render(event),
             Self::Bar(renderer) => renderer.render(event),
+        });
+        if let SyncEvent::RemoteHostSkipped { host_id, .. } = event {
+            match self {
+                Self::Line(renderer) => {
+                    renderer.remote_facts.remove(host_id);
+                }
+                Self::Bar(renderer) => {
+                    renderer.remote_facts.remove(host_id);
+                }
+            }
         }
     }
 
@@ -149,21 +220,25 @@ pub(crate) fn render_shared_timed(
 /// Legacy line-by-line stderr renderer (former `HumanProgress`), preserved
 /// verbatim for non-TTY output and the `LLMUSAGE_PROGRESS=off` fallback.
 pub(crate) struct LineRenderer {
+    language: Language,
     stderr: Box<dyn Write + Send>,
     tty: bool,
     last_line_len: usize,
     terminated: bool,
+    remote_facts: HashMap<String, crate::remote::diagnostic::DiagnosticFacts>,
 }
 
 impl LineRenderer {
     pub(crate) fn new() -> Self {
         let stderr = std::io::stderr();
-        let tty = stderr.is_terminal();
+        let tty = stderr.is_terminal() && !progress_env_forces_line() && !colors_disabled();
         Self {
+            language: i18n::current(),
             stderr: Box::new(stderr),
             tty,
             last_line_len: 0,
             terminated: false,
+            remote_facts: HashMap::new(),
         }
     }
 
@@ -184,14 +259,16 @@ impl LineRenderer {
             }
             return;
         }
-        let Some(line) = human_progress_line(event) else {
+        let Some(line) = self.progress_line(event) else {
             return;
         };
         if self.tty {
-            let padding = self.last_line_len.saturating_sub(line.chars().count());
+            let padding = self
+                .last_line_len
+                .saturating_sub(unicode_width::UnicodeWidthStr::width(line.as_str()));
             let _ = write!(self.stderr, "\r{line}{}", " ".repeat(padding));
             let _ = self.stderr.flush();
-            self.last_line_len = line.chars().count();
+            self.last_line_len = unicode_width::UnicodeWidthStr::width(line.as_str());
             if matches!(
                 event,
                 SyncEvent::MigrationFinished { .. }
@@ -218,6 +295,15 @@ impl LineRenderer {
         }
         let _ = self.stderr.flush();
     }
+
+    fn progress_line(&self, event: &SyncEvent) -> Option<String> {
+        let facts = match event {
+            SyncEvent::RemoteHostSkipped { host_id, .. } => self.remote_facts.get(host_id),
+            _ => None,
+        };
+        crate::common::i18n::sync::progress_with_remote(event, facts, self.language)
+            .map(|line| crate::common::i18n::logging::safe_text(&line))
+    }
 }
 
 /// OpenCode reports row counts against `files_total = 1`, so a determinate
@@ -234,19 +320,23 @@ struct ActiveBar {
 /// TTY renderer backed by an indicatif [`MultiProgress`]. One bar is active
 /// at a time; phase boundaries land as permanent lines above the bars.
 pub(crate) struct BarRenderer {
+    language: Language,
     multi: MultiProgress,
     stderr: Box<dyn Write + Send>,
     active: Option<ActiveBar>,
     terminated: bool,
+    remote_facts: HashMap<String, crate::remote::diagnostic::DiagnosticFacts>,
 }
 
 impl BarRenderer {
     pub(crate) fn new(draw: ProgressDrawTarget) -> Self {
         Self {
+            language: i18n::current(),
             multi: MultiProgress::with_draw_target(draw),
             stderr: Box::new(std::io::stderr()),
             active: None,
             terminated: false,
+            remote_facts: HashMap::new(),
         }
     }
 
@@ -258,10 +348,10 @@ impl BarRenderer {
             SyncEvent::BootstrapStarted
             | SyncEvent::MigrationStarted { .. }
             | SyncEvent::LockWaiting { .. } => {
-                self.start_spinner(human_progress_line(event).unwrap_or_default());
+                self.start_spinner(self.progress_line(event).unwrap_or_default());
             }
             SyncEvent::PricingUpgradeStarted { total_events, .. } => {
-                let line = human_progress_line(event).unwrap_or_default();
+                let line = self.progress_line(event).unwrap_or_default();
                 if *total_events > 0 {
                     self.start_bar(*total_events as u64, line);
                 } else {
@@ -276,7 +366,7 @@ impl BarRenderer {
                 {
                     let len = active.bar.length().unwrap_or(0);
                     active.bar.set_position((*processed_events as u64).min(len));
-                    if let Some(line) = human_progress_line(event) {
+                    if let Some(line) = self.progress_line(event) {
                         active.bar.set_message(line);
                     }
                 }
@@ -285,7 +375,7 @@ impl BarRenderer {
                 // Boundary: close the repricing bar with a permanent line,
                 // then spin while buckets reconcile.
                 self.permanent_line(event);
-                self.start_spinner(human_progress_line(event).unwrap_or_default());
+                self.start_spinner(self.progress_line(event).unwrap_or_default());
             }
             SyncEvent::MigrationFinished { .. }
             | SyncEvent::PricingUpgradeFinished { .. }
@@ -303,7 +393,7 @@ impl BarRenderer {
                 source,
                 files_total,
             } => {
-                let line = human_progress_line(event).unwrap_or_default();
+                let line = self.progress_line(event).unwrap_or_default();
                 if uses_determinate_bar(*source) {
                     self.start_bar(*files_total, line);
                 } else {
@@ -325,14 +415,14 @@ impl BarRenderer {
             }
             SyncEvent::Failed { .. } | SyncEvent::Cancelled => {
                 self.terminated = true;
-                let line = human_progress_line(event).unwrap_or_default();
+                let line = self.progress_line(event).unwrap_or_default();
                 if let Some(active) = self.active.take() {
                     active.bar.abandon_with_message(line.clone());
                 }
                 self.permanent_text(line);
             }
             SyncEvent::RemoteHostStarted { .. } => {
-                self.start_spinner(human_progress_line(event).unwrap_or_default());
+                self.start_spinner(self.progress_line(event).unwrap_or_default());
             }
             SyncEvent::RemoteHostFinished { .. } | SyncEvent::RemoteHostSkipped { .. } => {
                 self.permanent_line(event);
@@ -359,26 +449,30 @@ impl BarRenderer {
             let len = active.bar.length().unwrap_or(0);
             let pos = files_scanned.min(len);
             active.bar.set_position(pos);
-            let message = if len > 0 && pos == len {
-                format!(
-                    "{}: 重放完成，正在提交... · 已导入 {records_imported} 条",
-                    source_label(source)
-                )
-            } else {
-                format!(
-                    "{}: 重放 {pos}/{len} · 导入 {records_imported} 条",
-                    source_label(source)
-                )
-            };
+            let message = crate::common::i18n::sync::replay_message(
+                source,
+                pos,
+                len,
+                records_imported,
+                i18n::current(),
+            );
             active.bar.set_message(message);
         } else {
             // OpenCode: the spinner position carries scanned row counts.
             active.bar.set_position(files_scanned);
             let file = current_file.map(short_file_label).unwrap_or_default();
             let message = if file.is_empty() {
-                format!("导入 {records_imported} 条")
+                format!(
+                    "{} {records_imported} {}",
+                    i18n::text("Imported", "导入"),
+                    i18n::text("records", "条")
+                )
             } else {
-                format!("导入 {records_imported} 条 · {file}")
+                format!(
+                    "{} {records_imported} {} · {file}",
+                    i18n::text("Imported", "导入"),
+                    i18n::text("records", "条")
+                )
             };
             active.bar.set_message(message);
         }
@@ -430,7 +524,7 @@ impl BarRenderer {
 
     fn permanent_line(&mut self, event: &SyncEvent) {
         self.complete_active();
-        if let Some(line) = human_progress_line(event) {
+        if let Some(line) = self.progress_line(event) {
             self.permanent_text(line);
         }
     }
@@ -462,6 +556,15 @@ impl BarRenderer {
     fn active_message(&self) -> Option<String> {
         self.active.as_ref().map(|active| active.bar.message())
     }
+
+    fn progress_line(&self, event: &SyncEvent) -> Option<String> {
+        let facts = match event {
+            SyncEvent::RemoteHostSkipped { host_id, .. } => self.remote_facts.get(host_id),
+            _ => None,
+        };
+        crate::common::i18n::sync::progress_with_remote(event, facts, self.language)
+            .map(|line| crate::common::i18n::logging::safe_text(&line))
+    }
 }
 
 fn spinner_style() -> ProgressStyle {
@@ -476,6 +579,7 @@ fn bar_style() -> ProgressStyle {
 
 fn short_file_label(path: &str) -> String {
     let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    let name = crate::common::i18n::logging::safe_text(name);
     if name.chars().count() > MAX_FILE_LABEL_CHARS {
         let mut shortened: String = name.chars().take(MAX_FILE_LABEL_CHARS - 1).collect();
         shortened.push('…');
@@ -485,144 +589,137 @@ fn short_file_label(path: &str) -> String {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn human_progress_line(event: &SyncEvent) -> Option<String> {
-    match event {
-        SyncEvent::BootstrapStarted => Some("检查数据库 schema 与定价目录...".to_string()),
-        SyncEvent::MigrationStarted {
-            version,
-            name,
-            latest_version,
-        } => Some(format!(
-            "升级数据库 schema v0 → v{latest_version}，正在执行 v{version} {name}..."
-        )),
-        SyncEvent::MigrationFinished {
-            version,
-            name,
-            elapsed_ms,
-        } => Some(format!(
-            "数据库 schema v{version} {name} 完成（{elapsed_ms}ms）"
-        )),
-        SyncEvent::PricingUpgradeStarted {
-            from_version,
-            to_version,
-            total_events,
-        } => Some(format!(
-            "升级定价目录 {from_version} → {to_version}：共 {total_events} 条事件..."
-        )),
-        SyncEvent::PricingUpgradeProgress {
-            from_version,
-            to_version,
-            processed_events,
-            total_events,
-            elapsed_ms,
-        } => {
-            let percentage = if *total_events == 0 {
-                100.0
-            } else {
-                *processed_events as f64 * 100.0 / *total_events as f64
-            };
-            Some(format!(
-                "升级定价目录 {from_version} → {to_version}：已处理 {processed_events}/{total_events} 条（{percentage:.1}%），已用 {elapsed_ms}ms"
-            ))
-        }
-        SyncEvent::PricingBucketReconcileStarted {
-            to_version,
-            bucket_count,
-        } => Some(format!(
-            "事件定价完成，正在对账 {bucket_count} 个 {to_version} 汇总桶..."
-        )),
-        SyncEvent::PricingUpgradeFinished {
-            to_version,
-            updated_events,
-            bucket_count,
-            deleted_orphan_buckets,
-            elapsed_ms,
-            ..
-        } => Some(format!(
-            "定价目录 {to_version} 升级完成：{updated_events} 条事件，{bucket_count} 个桶，清理 {deleted_orphan_buckets} 个孤立桶（{elapsed_ms}ms）"
-        )),
-        SyncEvent::LockWaiting { .. } => Some("等待 SQLite sync worker 锁...".to_string()),
-        SyncEvent::LockAcquired { wait_ms } => {
-            Some(format!("已获取 SQLite sync worker 锁（等待 {wait_ms}ms）"))
-        }
-        SyncEvent::TokenAccountingRepairStarted { sources } => {
-            let sources = sources
-                .iter()
-                .map(|source| source.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            Some(format!(
-                "警告：检测到旧版 token accounting（{sources}）；本轮将自动执行无损重建，不会自动启用 --allow-lossy-rebuild。"
-            ))
-        }
-        SyncEvent::TokenAccountingRepairFinished { sources } => {
-            let sources = sources
-                .iter()
-                .map(|source| source.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            Some(format!("Token accounting 自动修复完成：{sources}"))
-        }
-        SyncEvent::SourceStarted {
-            source,
-            files_total,
-        } => {
-            let action = if uses_determinate_bar(*source) {
-                "本轮重放"
-            } else {
-                "扫描"
-            };
-            Some(format!(
-                "{}: {action} {files_total} 个文件...",
-                source_label(*source)
-            ))
-        }
-        SyncEvent::Progress {
-            source,
-            files_scanned,
-            records_imported,
-            ..
-        } => {
-            let action = if uses_determinate_bar(*source) {
-                format!("已重放 {files_scanned} 个文件")
-            } else {
-                format!("已处理 {files_scanned}")
-            };
-            Some(format!(
-                "{}: {action}，导入 {records_imported} 条",
-                source_label(*source)
-            ))
-        }
-        // SourceFinished drives live progress (bar close / line refresh) but no
-        // longer prints a permanent success line; the final summary table owns
-        // the per-source success surface.
-        SyncEvent::SourceFinished { .. } => None,
-        SyncEvent::RemoteHostStarted { label, .. } => Some(format!("正在导入远端主机 {label}...")),
-        SyncEvent::RemoteHostFinished { label, stats, .. } => Some(format!(
-            "远端主机 {label} 导入完成（{} 个来源）",
-            stats.len()
-        )),
-        SyncEvent::RemoteHostSkipped { label, reason, .. } => {
-            Some(format!("警告：跳过远端主机 {label}：{reason}"))
-        }
-        SyncEvent::Failed { error } => Some(format!("同步失败：{error}")),
-        SyncEvent::Cancelled => Some("同步已取消".to_string()),
-        SyncEvent::Started { .. } | SyncEvent::Finished { .. } | SyncEvent::RecentReady { .. } => {
-            None
-        }
-    }
-}
-
-/// Capitalized progress label for a source, read from the static descriptor so
-/// a new `SourceKind` variant populates this display surface with no edit here.
-fn source_label(source: SourceKind) -> &'static str {
-    crate::registry::source_descriptor(source)
-        .map_or_else(|| source.as_str(), |descriptor| descriptor.display_name)
+    crate::common::i18n::sync::progress(event, i18n::current())
+        .map(|line| crate::common::i18n::logging::safe_text(&line))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paired_remote_facts_reach_line_bar_and_summary_without_changing_events() {
+        for language in [Language::English, Language::Chinese] {
+            i18n::with_language(language, || {
+                let facts = crate::remote::diagnostic::DiagnosticFacts::Protocol {
+                    remote: 99,
+                    schema: 42,
+                };
+                let notice = crate::sync::notices::RunNotice::RemoteSkipped {
+                    host_id: "devbox".into(),
+                    label: "My host".into(),
+                    detail: "CANONICAL_REASON".into(),
+                    facts: Some(Box::new(facts)),
+                };
+                let event = SyncEvent::RemoteHostSkipped {
+                    host_id: "devbox".into(),
+                    label: "My host".into(),
+                    reason: "CANONICAL_REASON".into(),
+                };
+                let canonical = serde_json::to_string(&event).unwrap();
+                for bar in [false, true] {
+                    let capture = CaptureTerm::default();
+                    let mut renderer = if bar {
+                        let mut renderer = BarRenderer::new(ProgressDrawTarget::term_like(
+                            Box::new(capture.clone()),
+                        ));
+                        renderer.stderr = Box::new(capture.clone());
+                        HumanRenderer::Bar(renderer)
+                    } else {
+                        HumanRenderer::Line(LineRenderer {
+                            language,
+                            stderr: Box::new(capture.clone()),
+                            tty: false,
+                            last_line_len: 0,
+                            terminated: false,
+                            remote_facts: HashMap::new(),
+                        })
+                    };
+                    renderer.observe_notice(&notice);
+                    renderer.render(&event);
+                    renderer.finish();
+                    let output = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();
+                    let expected = language.select("shard protocol mismatch", "分片协议不一致");
+                    assert!(output.contains(expected), "{output}");
+                    assert!(output.contains("99") && output.contains("42"));
+                    assert!(!output.contains("CANONICAL_REASON"));
+                    let pending = match renderer {
+                        HumanRenderer::Line(renderer) => renderer.remote_facts.len(),
+                        HumanRenderer::Bar(renderer) => renderer.remote_facts.len(),
+                    };
+                    assert_eq!(pending, 0, "facts are consumed with their own host event");
+                    let summary =
+                        crate::commands::sync_summary::notice_lines(&notice, false).join("\n");
+                    assert!(summary.contains(expected), "{summary}");
+                }
+                assert_eq!(serde_json::to_string(&event).unwrap(), canonical);
+                let unknown =
+                    crate::common::i18n::sync::progress_with_remote(&event, None, language)
+                        .unwrap();
+                assert!(unknown.contains("CANONICAL_REASON"));
+                assert!(unknown.contains(language.select("Original detail", "原始详情")));
+            });
+        }
+    }
+
+    #[tokio::test]
+    async fn reporter_keeps_the_renderer_language_snapshot_across_spawn() {
+        let bytes = CaptureTerm::default();
+        let renderer = i18n::with_language(Language::Chinese, || {
+            Arc::new(Mutex::new(HumanRenderer::Line(LineRenderer {
+                language: i18n::current(),
+                stderr: Box::new(bytes.clone()),
+                tty: false,
+                last_line_len: 0,
+                terminated: false,
+                remote_facts: HashMap::new(),
+            })))
+        });
+        tokio::spawn(async move {
+            assert_eq!(i18n::current(), Language::English);
+            render_shared(&renderer, &SyncEvent::BootstrapStarted);
+        })
+        .await
+        .unwrap();
+        let output = String::from_utf8(bytes.0.lock().unwrap().clone()).unwrap();
+        assert!(output.contains("检查数据库") && !output.contains("Checking"));
+    }
+
+    #[test]
+    fn bilingual_progress_preserves_counts_shortens_only_version_identity_and_wire_is_unchanged() {
+        let event = SyncEvent::PricingUpgradeProgress {
+            from_version: "public-0123456789abcdef0123456789abcdef".into(),
+            to_version: "public-fedcba9876543210fedcba9876543210".into(),
+            processed_events: 70000,
+            total_events: 399560,
+            elapsed_ms: 31100,
+        };
+        let before = serde_json::to_value(&event).unwrap();
+        for language in [Language::English, Language::Chinese] {
+            i18n::with_language(language, || {
+                let line = human_progress_line(&event).unwrap();
+                assert!(
+                    line.contains("70000/399560")
+                        && line.contains("17.5%")
+                        && line.contains("31100ms")
+                );
+                assert!(!line.contains("0123456789abcdef0123456789abcdef"));
+                assert_eq!(serde_json::to_value(&event).unwrap(), before);
+                assert_eq!(
+                    human_progress_line(&SyncEvent::Cancelled).unwrap(),
+                    language.select("Sync cancelled", "同步已取消")
+                );
+                let replay =
+                    crate::common::i18n::sync::replay_message(SourceKind::Codex, 2, 2, 5, language);
+                assert!(
+                    replay.contains(language.select("committing", "正在提交"))
+                        && replay.contains('5')
+                );
+            });
+        }
+    }
     use crate::parsers::SourceSyncStats;
 
     #[derive(Clone, Debug, Default)]
@@ -670,123 +767,129 @@ mod tests {
 
     #[test]
     fn permanent_progress_lines_end_before_raw_warnings() {
-        let terminal = CaptureTerm::default();
-        let mut renderer =
-            BarRenderer::new(ProgressDrawTarget::term_like(Box::new(terminal.clone())));
-        renderer.stderr = Box::new(terminal.clone());
-        renderer.render(&SyncEvent::LockAcquired { wait_ms: 58 });
-        let writer = terminal.clone();
-        let subscriber = tracing_subscriber::fmt()
-            .without_time()
-            .with_ansi(false)
-            .with_target(false)
-            .with_writer(move || writer.clone())
-            .finish();
-        tracing::subscriber::with_default(subscriber, || tracing::warn!("legacy warning"));
-        let text = String::from_utf8(terminal.0.lock().unwrap().clone()).unwrap();
-        let warning = text.find("WARN").expect("warning");
-        assert!(
-            text[..warning].trim_end_matches(' ').ends_with('\n'),
-            "{text:?}"
-        );
-    }
-
-    #[test]
-    fn scoped_warning_sink_handles_interleaved_progress_and_restores_on_error() {
-        for mode in ["bar", "tty_line", "non_tty"] {
+        i18n::with_language(Language::Chinese, || {
             let terminal = CaptureTerm::default();
-            let renderer = if mode == "bar" {
-                let mut bar =
-                    BarRenderer::new(ProgressDrawTarget::term_like(Box::new(terminal.clone())));
-                bar.stderr = Box::new(terminal.clone());
-                HumanRenderer::Bar(bar)
-            } else {
-                HumanRenderer::Line(LineRenderer {
-                    stderr: Box::new(terminal.clone()),
-                    tty: mode == "tty_line",
-                    last_line_len: 0,
-                    terminated: false,
-                })
-            };
-            let renderer = Arc::new(Mutex::new(renderer));
-            let outside = CaptureTerm::default();
-            let outside_sink = outside.clone();
-            let _outer = crate::logging::install_stderr_sink(Arc::new(move |bytes| {
-                outside_sink.clone().write_all(bytes)
-            }));
+            let mut renderer =
+                BarRenderer::new(ProgressDrawTarget::term_like(Box::new(terminal.clone())));
+            renderer.stderr = Box::new(terminal.clone());
+            renderer.render(&SyncEvent::LockAcquired { wait_ms: 58 });
+            let writer = terminal.clone();
             let subscriber = tracing_subscriber::fmt()
                 .without_time()
                 .with_ansi(false)
                 .with_target(false)
-                .with_writer(crate::logging::StderrLogWriter::default)
+                .with_writer(move || writer.clone())
                 .finish();
-            tracing::subscriber::with_default(subscriber, || {
-                let result: std::io::Result<()> = {
-                    let _terminal_guard = TerminalGuard::new(Arc::clone(&renderer));
-                    let sink_renderer = Arc::clone(&renderer);
-                    let _warning_guard =
-                        crate::logging::install_stderr_sink(Arc::new(move |bytes| {
-                            sink_renderer.lock().unwrap().write_warning(bytes)
-                        }));
-                    render_shared(&renderer, &SyncEvent::LockAcquired { wait_ms: 58 });
-                    tracing::warn!("first warning");
-                    crate::logging::stderr_warning("second warning");
-                    render_shared(
-                        &renderer,
-                        &SyncEvent::SourceStarted {
-                            source: SourceKind::Codex,
-                            files_total: 2,
-                        },
-                    );
-                    tracing::warn!("interleaved warning");
-                    render_shared(&renderer, &SyncEvent::LockAcquired { wait_ms: 0 });
-                    tracing::warn!("last warning");
-                    render_shared(
-                        &renderer,
-                        &SyncEvent::SourceStarted {
-                            source: SourceKind::Codex,
-                            files_total: 2,
-                        },
-                    );
-                    Err(std::io::Error::other("fixture error"))
+            tracing::subscriber::with_default(subscriber, || tracing::warn!("legacy warning"));
+            let text = String::from_utf8(terminal.0.lock().unwrap().clone()).unwrap();
+            let warning = text.find("WARN").expect("warning");
+            assert!(
+                text[..warning].trim_end_matches(' ').ends_with('\n'),
+                "{text:?}"
+            );
+        })
+    }
+
+    #[test]
+    fn scoped_warning_sink_handles_interleaved_progress_and_restores_on_error() {
+        i18n::with_language(Language::Chinese, || {
+            for mode in ["bar", "tty_line", "non_tty"] {
+                let terminal = CaptureTerm::default();
+                let renderer = if mode == "bar" {
+                    let mut bar =
+                        BarRenderer::new(ProgressDrawTarget::term_like(Box::new(terminal.clone())));
+                    bar.stderr = Box::new(terminal.clone());
+                    HumanRenderer::Bar(bar)
+                } else {
+                    HumanRenderer::Line(LineRenderer {
+                        language: i18n::current(),
+                        stderr: Box::new(terminal.clone()),
+                        tty: mode == "tty_line",
+                        last_line_len: 0,
+                        terminated: false,
+                        remote_facts: HashMap::new(),
+                    })
                 };
-                assert!(result.is_err());
-                tracing::warn!("outside warning");
-            });
-            assert!(!renderer.lock().unwrap().has_active_bar());
-            let captured = String::from_utf8(terminal.0.lock().unwrap().clone()).unwrap();
-            for message in [
-                "first warning",
-                "second warning",
-                "interleaved warning",
-                "last warning",
-            ] {
-                assert!(
-                    captured.contains(&format!("{message}\n")),
-                    "{mode}: {captured:?}"
-                );
+                let renderer = Arc::new(Mutex::new(renderer));
+                let outside = CaptureTerm::default();
+                let outside_sink = outside.clone();
+                let _outer = crate::logging::install_stderr_sink(Arc::new(move |bytes| {
+                    outside_sink.clone().write_all(bytes)
+                }));
+                let subscriber = tracing_subscriber::fmt()
+                    .without_time()
+                    .with_ansi(false)
+                    .with_target(false)
+                    .with_writer(crate::logging::StderrLogWriter::default)
+                    .finish();
+                tracing::subscriber::with_default(subscriber, || {
+                    let result: std::io::Result<()> = {
+                        let _terminal_guard = TerminalGuard::new(Arc::clone(&renderer));
+                        let sink_renderer = Arc::clone(&renderer);
+                        let _warning_guard =
+                            crate::logging::install_stderr_sink(Arc::new(move |bytes| {
+                                sink_renderer.lock().unwrap().write_warning(bytes)
+                            }));
+                        render_shared(&renderer, &SyncEvent::LockAcquired { wait_ms: 58 });
+                        tracing::warn!("first warning");
+                        crate::logging::stderr_warning("second warning");
+                        render_shared(
+                            &renderer,
+                            &SyncEvent::SourceStarted {
+                                source: SourceKind::Codex,
+                                files_total: 2,
+                            },
+                        );
+                        tracing::warn!("interleaved warning");
+                        render_shared(&renderer, &SyncEvent::LockAcquired { wait_ms: 0 });
+                        tracing::warn!("last warning");
+                        render_shared(
+                            &renderer,
+                            &SyncEvent::SourceStarted {
+                                source: SourceKind::Codex,
+                                files_total: 2,
+                            },
+                        );
+                        Err(std::io::Error::other("fixture error"))
+                    };
+                    assert!(result.is_err());
+                    tracing::warn!("outside warning");
+                });
+                assert!(!renderer.lock().unwrap().has_active_bar());
+                let captured = String::from_utf8(terminal.0.lock().unwrap().clone()).unwrap();
+                for message in [
+                    "first warning",
+                    "second warning",
+                    "interleaved warning",
+                    "last warning",
+                ] {
+                    assert!(
+                        captured.contains(&format!("{message}\n")),
+                        "{mode}: {captured:?}"
+                    );
+                }
+                assert!(!captured.contains("outside warning"));
+                if mode == "tty_line" {
+                    assert!(
+                        captured.ends_with('\n'),
+                        "unfinished TTY line: {captured:?}"
+                    );
+                }
+                let external = String::from_utf8(outside.0.lock().unwrap().clone()).unwrap();
+                assert!(external.contains("outside warning"));
+                assert!(!external.contains("interleaved warning"));
+                if mode == "non_tty" {
+                    assert!(!captured.contains('\r'));
+                    assert_eq!(
+                        captured
+                            .lines()
+                            .filter(|line| line.contains("warning"))
+                            .count(),
+                        4
+                    );
+                }
             }
-            assert!(!captured.contains("outside warning"));
-            if mode == "tty_line" {
-                assert!(
-                    captured.ends_with('\n'),
-                    "unfinished TTY line: {captured:?}"
-                );
-            }
-            let external = String::from_utf8(outside.0.lock().unwrap().clone()).unwrap();
-            assert!(external.contains("outside warning"));
-            assert!(!external.contains("interleaved warning"));
-            if mode == "non_tty" {
-                assert!(!captured.contains('\r'));
-                assert_eq!(
-                    captured
-                        .lines()
-                        .filter(|line| line.contains("warning"))
-                        .count(),
-                    4
-                );
-            }
-        }
+        })
     }
 
     fn hidden_bar_renderer() -> BarRenderer {
@@ -810,416 +913,506 @@ mod tests {
 
     #[test]
     fn source_finished_emits_no_permanent_human_line() {
-        // The duplicate per-source completion sentence is gone; the final
-        // summary table owns the per-source success surface.
-        assert!(human_progress_line(&source_finished(SourceKind::Codex)).is_none());
-        assert!(human_progress_line(&source_finished(SourceKind::Opencode)).is_none());
+        i18n::with_language(Language::Chinese, || {
+            // The duplicate per-source completion sentence is gone; the final
+            // summary table owns the per-source success surface.
+            assert!(human_progress_line(&source_finished(SourceKind::Codex)).is_none());
+            assert!(human_progress_line(&source_finished(SourceKind::Opencode)).is_none());
+        })
     }
 
     #[test]
     fn remote_host_events_render_skip_warnings() {
-        assert_eq!(
-            human_progress_line(&SyncEvent::RemoteHostStarted {
-                host_id: "devbox".to_string(),
-                label: "devbox".to_string(),
-            })
-            .as_deref(),
-            Some("正在导入远端主机 devbox...")
-        );
-        assert_eq!(
-            human_progress_line(&SyncEvent::RemoteHostSkipped {
-                host_id: "devbox".to_string(),
-                label: "devbox".to_string(),
-                reason: "ssh timed out".to_string(),
-            })
-            .as_deref(),
-            Some("警告：跳过远端主机 devbox：ssh timed out")
-        );
+        i18n::with_language(Language::Chinese, || {
+            assert_eq!(
+                human_progress_line(&SyncEvent::RemoteHostStarted {
+                    host_id: "devbox".to_string(),
+                    label: "devbox".to_string(),
+                })
+                .as_deref(),
+                Some("正在导入远端主机 devbox...")
+            );
+            assert_eq!(
+                human_progress_line(&SyncEvent::RemoteHostSkipped {
+                    host_id: "devbox".to_string(),
+                    label: "devbox".to_string(),
+                    reason: "ssh timed out".to_string(),
+                })
+                .as_deref(),
+                Some("警告：跳过远端主机 devbox：ssh timed out")
+            );
+        })
     }
 
     #[test]
     fn bar_renderer_success_sequence_converges() {
-        let mut renderer = hidden_bar_renderer();
-        renderer.render(&SyncEvent::BootstrapStarted);
-        assert!(renderer.has_active());
-        renderer.render(&SyncEvent::MigrationStarted {
-            version: 15,
-            name: "add_part_cursor".to_string(),
-            latest_version: 15,
-        });
-        renderer.render(&SyncEvent::MigrationFinished {
-            version: 15,
-            name: "add_part_cursor".to_string(),
-            elapsed_ms: 12,
-        });
-        assert!(!renderer.has_active());
-        renderer.render(&SyncEvent::LockWaiting { timeout_ms: 30_000 });
-        assert!(renderer.has_active());
-        renderer.render(&SyncEvent::LockAcquired { wait_ms: 3 });
-        assert!(!renderer.has_active());
+        i18n::with_language(Language::Chinese, || {
+            let mut renderer = hidden_bar_renderer();
+            renderer.render(&SyncEvent::BootstrapStarted);
+            assert!(renderer.has_active());
+            renderer.render(&SyncEvent::MigrationStarted {
+                version: 15,
+                name: "add_part_cursor".to_string(),
+                latest_version: 15,
+            });
+            renderer.render(&SyncEvent::MigrationFinished {
+                version: 15,
+                name: "add_part_cursor".to_string(),
+                elapsed_ms: 12,
+            });
+            assert!(!renderer.has_active());
+            renderer.render(&SyncEvent::LockWaiting { timeout_ms: 30_000 });
+            assert!(renderer.has_active());
+            renderer.render(&SyncEvent::LockAcquired { wait_ms: 3 });
+            assert!(!renderer.has_active());
 
-        renderer.render(&SyncEvent::SourceStarted {
-            source: SourceKind::Codex,
-            files_total: 10,
-        });
-        assert_eq!(renderer.active_is_determinate(), Some(true));
-        renderer.render(&SyncEvent::Progress {
-            source: SourceKind::Codex,
-            files_scanned: 2,
-            records_imported: 40,
-            current_file: None,
-        });
-        renderer.render(&source_finished(SourceKind::Codex));
-        assert!(!renderer.has_active(), "source finish must close the bar");
+            renderer.render(&SyncEvent::SourceStarted {
+                source: SourceKind::Codex,
+                files_total: 10,
+            });
+            assert_eq!(renderer.active_is_determinate(), Some(true));
+            renderer.render(&SyncEvent::Progress {
+                source: SourceKind::Codex,
+                files_scanned: 2,
+                records_imported: 40,
+                current_file: None,
+            });
+            renderer.render(&source_finished(SourceKind::Codex));
+            assert!(!renderer.has_active(), "source finish must close the bar");
 
-        renderer.finish();
-        renderer.finish();
-        assert!(!renderer.has_active(), "finish must be idempotent");
+            renderer.finish();
+            renderer.finish();
+            assert!(!renderer.has_active(), "finish must be idempotent");
+        })
     }
 
     #[test]
     fn determinate_source_progress_reports_replay_and_commit_phases() {
-        let mut renderer = hidden_bar_renderer();
-        let started = SyncEvent::SourceStarted {
-            source: SourceKind::Codex,
-            files_total: 3,
-        };
-        assert_eq!(
-            human_progress_line(&started).as_deref(),
-            Some("Codex: 本轮重放 3 个文件...")
-        );
-        assert_eq!(
-            human_progress_line(&SyncEvent::SourceStarted {
-                source: SourceKind::Opencode,
-                files_total: 1,
-            })
-            .as_deref(),
-            Some("OpenCode: 扫描 1 个文件...")
-        );
+        i18n::with_language(Language::Chinese, || {
+            let mut renderer = hidden_bar_renderer();
+            let started = SyncEvent::SourceStarted {
+                source: SourceKind::Codex,
+                files_total: 3,
+            };
+            assert_eq!(
+                human_progress_line(&started).as_deref(),
+                Some("Codex: 本轮重放 3 个文件...")
+            );
+            assert_eq!(
+                human_progress_line(&SyncEvent::SourceStarted {
+                    source: SourceKind::Opencode,
+                    files_total: 1,
+                })
+                .as_deref(),
+                Some("OpenCode: 扫描 1 个文件...")
+            );
 
-        renderer.render(&started);
-        renderer.render(&SyncEvent::Progress {
-            source: SourceKind::Codex,
-            files_scanned: 3,
-            records_imported: 40,
-            current_file: None,
-        });
-        assert_eq!(
-            renderer.active_message().as_deref(),
-            Some("Codex: 重放完成，正在提交... · 已导入 40 条")
-        );
+            renderer.render(&started);
+            renderer.render(&SyncEvent::Progress {
+                source: SourceKind::Codex,
+                files_scanned: 3,
+                records_imported: 40,
+                current_file: None,
+            });
+            assert_eq!(
+                renderer.active_message().as_deref(),
+                Some("Codex: 重放完成，正在提交... · 已导入 40 条")
+            );
+        })
     }
 
     #[test]
     fn bar_renderer_pricing_upgrade_sequence_converges() {
-        let mut renderer = hidden_bar_renderer();
-        renderer.render(&SyncEvent::PricingUpgradeStarted {
-            from_version: "static-v1".to_string(),
-            to_version: "static-v2".to_string(),
-            total_events: 100,
-        });
-        assert_eq!(renderer.active_is_determinate(), Some(true));
-        renderer.render(&SyncEvent::PricingUpgradeProgress {
-            from_version: "static-v1".to_string(),
-            to_version: "static-v2".to_string(),
-            processed_events: 50,
-            total_events: 100,
-            elapsed_ms: 10,
-        });
-        assert!(renderer.has_active());
-        renderer.render(&SyncEvent::PricingBucketReconcileStarted {
-            to_version: "static-v2".to_string(),
-            bucket_count: 7,
-        });
-        assert_eq!(
-            renderer.active_is_determinate(),
-            Some(false),
-            "reconcile phase spins"
-        );
-        renderer.render(&SyncEvent::PricingUpgradeFinished {
-            from_version: "static-v1".to_string(),
-            to_version: "static-v2".to_string(),
-            updated_events: 100,
-            bucket_count: 7,
-            deleted_orphan_buckets: 0,
-            elapsed_ms: 20,
-        });
-        assert!(!renderer.has_active());
-        renderer.finish();
+        i18n::with_language(Language::Chinese, || {
+            let mut renderer = hidden_bar_renderer();
+            renderer.render(&SyncEvent::PricingUpgradeStarted {
+                from_version: "static-v1".to_string(),
+                to_version: "static-v2".to_string(),
+                total_events: 100,
+            });
+            assert_eq!(renderer.active_is_determinate(), Some(true));
+            renderer.render(&SyncEvent::PricingUpgradeProgress {
+                from_version: "static-v1".to_string(),
+                to_version: "static-v2".to_string(),
+                processed_events: 50,
+                total_events: 100,
+                elapsed_ms: 10,
+            });
+            assert!(renderer.has_active());
+            renderer.render(&SyncEvent::PricingBucketReconcileStarted {
+                to_version: "static-v2".to_string(),
+                bucket_count: 7,
+            });
+            assert_eq!(
+                renderer.active_is_determinate(),
+                Some(false),
+                "reconcile phase spins"
+            );
+            renderer.render(&SyncEvent::PricingUpgradeFinished {
+                from_version: "static-v1".to_string(),
+                to_version: "static-v2".to_string(),
+                updated_events: 100,
+                bucket_count: 7,
+                deleted_orphan_buckets: 0,
+                elapsed_ms: 20,
+            });
+            assert!(!renderer.has_active());
+            renderer.finish();
+        })
     }
 
     #[test]
     fn bar_renderer_opencode_progress_never_overflows() {
-        let mut renderer = hidden_bar_renderer();
-        renderer.render(&SyncEvent::SourceStarted {
-            source: SourceKind::Opencode,
-            files_total: 1,
-        });
-        assert_eq!(
-            renderer.active_is_determinate(),
-            Some(false),
-            "OpenCode row counts must drive a spinner"
-        );
-        renderer.render(&SyncEvent::Progress {
-            source: SourceKind::Opencode,
-            files_scanned: 50_000,
-            records_imported: 12_345,
-            current_file: Some("C:/Users/x/.local/share/opencode/opencode.db".to_string()),
-        });
-        assert!(renderer.has_active());
-        renderer.render(&source_finished(SourceKind::Opencode));
-        assert!(!renderer.has_active());
-        renderer.finish();
+        i18n::with_language(Language::Chinese, || {
+            let mut renderer = hidden_bar_renderer();
+            renderer.render(&SyncEvent::SourceStarted {
+                source: SourceKind::Opencode,
+                files_total: 1,
+            });
+            assert_eq!(
+                renderer.active_is_determinate(),
+                Some(false),
+                "OpenCode row counts must drive a spinner"
+            );
+            renderer.render(&SyncEvent::Progress {
+                source: SourceKind::Opencode,
+                files_scanned: 50_000,
+                records_imported: 12_345,
+                current_file: Some("C:/Users/x/.local/share/opencode/opencode.db".to_string()),
+            });
+            assert!(renderer.has_active());
+            renderer.render(&source_finished(SourceKind::Opencode));
+            assert!(!renderer.has_active());
+            renderer.finish();
+        })
     }
 
     #[test]
     fn bar_renderer_failed_abandons_and_ignores_followups() {
-        let mut renderer = hidden_bar_renderer();
-        renderer.render(&SyncEvent::SourceStarted {
-            source: SourceKind::Claude,
-            files_total: 5,
-        });
-        renderer.render(&SyncEvent::Failed {
-            error: "boom".to_string(),
-        });
-        assert!(!renderer.has_active());
-        renderer.render(&SyncEvent::Failed {
-            error: "again".to_string(),
-        });
-        renderer.render(&SyncEvent::SourceStarted {
-            source: SourceKind::Claude,
-            files_total: 5,
-        });
-        assert!(
-            !renderer.has_active(),
-            "events after a terminal failure are ignored"
-        );
-        renderer.finish();
-        renderer.finish();
+        i18n::with_language(Language::Chinese, || {
+            let mut renderer = hidden_bar_renderer();
+            renderer.render(&SyncEvent::SourceStarted {
+                source: SourceKind::Claude,
+                files_total: 5,
+            });
+            renderer.render(&SyncEvent::Failed {
+                error: "boom".to_string(),
+            });
+            assert!(!renderer.has_active());
+            renderer.render(&SyncEvent::Failed {
+                error: "again".to_string(),
+            });
+            renderer.render(&SyncEvent::SourceStarted {
+                source: SourceKind::Claude,
+                files_total: 5,
+            });
+            assert!(
+                !renderer.has_active(),
+                "events after a terminal failure are ignored"
+            );
+            renderer.finish();
+            renderer.finish();
+        })
     }
 
     #[test]
     fn bar_renderer_cancelled_abandons_active_bar() {
-        let mut renderer = hidden_bar_renderer();
-        renderer.render(&SyncEvent::SourceStarted {
-            source: SourceKind::Codex,
-            files_total: 5,
-        });
-        assert!(renderer.has_active());
-        renderer.render(&SyncEvent::Cancelled);
-        assert!(!renderer.has_active());
-        renderer.finish();
-        renderer.finish();
+        i18n::with_language(Language::Chinese, || {
+            let mut renderer = hidden_bar_renderer();
+            renderer.render(&SyncEvent::SourceStarted {
+                source: SourceKind::Codex,
+                files_total: 5,
+            });
+            assert!(renderer.has_active());
+            renderer.render(&SyncEvent::Cancelled);
+            assert!(!renderer.has_active());
+            renderer.finish();
+            renderer.finish();
+        })
     }
 
     #[test]
     fn terminal_guard_finishes_renderer_on_drop() {
-        // Simulates a bootstrap-phase early `?` return: the guard is the only
-        // cleanup path because the reporter task was never spawned.
-        let renderer = Arc::new(Mutex::new(HumanRenderer::Bar(hidden_bar_renderer())));
-        let guard = TerminalGuard::new(Arc::clone(&renderer));
-        render_shared(&renderer, &SyncEvent::BootstrapStarted);
-        render_shared(
-            &renderer,
-            &SyncEvent::SourceStarted {
-                source: SourceKind::Codex,
-                files_total: 3,
-            },
-        );
-        drop(guard);
-        let renderer = renderer.lock().expect("renderer lock");
-        assert!(
-            !renderer.has_active_bar(),
-            "guard drop must abandon the active bar"
-        );
+        i18n::with_language(Language::Chinese, || {
+            // Simulates a bootstrap-phase early `?` return: the guard is the only
+            // cleanup path because the reporter task was never spawned.
+            let renderer = Arc::new(Mutex::new(HumanRenderer::Bar(hidden_bar_renderer())));
+            let guard = TerminalGuard::new(Arc::clone(&renderer));
+            render_shared(&renderer, &SyncEvent::BootstrapStarted);
+            render_shared(
+                &renderer,
+                &SyncEvent::SourceStarted {
+                    source: SourceKind::Codex,
+                    files_total: 3,
+                },
+            );
+            drop(guard);
+            let renderer = renderer.lock().expect("renderer lock");
+            assert!(
+                !renderer.has_active_bar(),
+                "guard drop must abandon the active bar"
+            );
+        })
     }
 
     #[test]
     fn selection_falls_back_to_line_renderer() {
-        assert!(matches!(
-            HumanRenderer::new(ProgressDrawTarget::hidden(), false),
-            HumanRenderer::Line(_)
-        ));
-        assert!(matches!(
-            HumanRenderer::new(ProgressDrawTarget::stderr_with_hz(10), true),
-            HumanRenderer::Line(_)
-        ));
+        i18n::with_language(Language::Chinese, || {
+            assert!(matches!(
+                HumanRenderer::new(ProgressDrawTarget::hidden(), false),
+                HumanRenderer::Line(_)
+            ));
+            assert!(matches!(
+                HumanRenderer::new(ProgressDrawTarget::stderr_with_hz(10), true),
+                HumanRenderer::Line(_)
+            ));
+        })
     }
 
     #[test]
     fn forced_line_requires_non_empty_env_value() {
-        assert!(!forced_line(None));
-        assert!(!forced_line(Some(OsString::new())));
-        assert!(forced_line(Some(OsString::from("off"))));
-        assert!(forced_line(Some(OsString::from("1"))));
+        i18n::with_language(Language::Chinese, || {
+            assert!(!forced_line(None));
+            assert!(!forced_line(Some(OsString::new())));
+            assert!(forced_line(Some(OsString::from("off"))));
+            assert!(forced_line(Some(OsString::from("1"))));
+        })
     }
 
     #[test]
     fn short_file_label_uses_last_segment_and_truncates() {
-        assert_eq!(
-            short_file_label("C:/data/opencode/opencode.db"),
-            "opencode.db"
-        );
-        assert_eq!(short_file_label("state.db"), "state.db");
-        let long = format!("{}\u{4e2d}.db", "a".repeat(80));
-        let label = short_file_label(&long);
-        assert_eq!(label.chars().count(), MAX_FILE_LABEL_CHARS);
-        assert!(label.ends_with('…'));
+        i18n::with_language(Language::Chinese, || {
+            assert_eq!(
+                short_file_label("C:/data/opencode/opencode.db"),
+                "opencode.db"
+            );
+            assert_eq!(short_file_label("state.db"), "state.db");
+            let long = format!("{}\u{4e2d}.db", "a".repeat(80));
+            let label = short_file_label(&long);
+            assert_eq!(label.chars().count(), MAX_FILE_LABEL_CHARS);
+            assert!(label.ends_with('…'));
+        })
     }
 
     #[test]
     fn human_lines_never_contain_ansi_escapes() {
-        let events = vec![
-            SyncEvent::BootstrapStarted,
-            SyncEvent::MigrationStarted {
-                version: 15,
-                name: "add_part_cursor".to_string(),
-                latest_version: 15,
-            },
-            SyncEvent::MigrationFinished {
-                version: 15,
-                name: "add_part_cursor".to_string(),
-                elapsed_ms: 12,
-            },
-            SyncEvent::PricingUpgradeStarted {
-                from_version: "static-v1".to_string(),
-                to_version: "static-v2".to_string(),
-                total_events: 50_000,
-            },
-            SyncEvent::PricingUpgradeProgress {
-                from_version: "static-v1".to_string(),
-                to_version: "static-v2".to_string(),
-                processed_events: 25_000,
-                total_events: 50_000,
-                elapsed_ms: 1_234,
-            },
-            SyncEvent::PricingBucketReconcileStarted {
-                to_version: "static-v2".to_string(),
-                bucket_count: 7_153,
-            },
-            SyncEvent::PricingUpgradeFinished {
-                from_version: "static-v1".to_string(),
-                to_version: "static-v2".to_string(),
-                updated_events: 539_146,
-                bucket_count: 7_153,
-                deleted_orphan_buckets: 2,
-                elapsed_ms: 46_000,
-            },
-            SyncEvent::LockWaiting { timeout_ms: 30_000 },
-            SyncEvent::LockAcquired { wait_ms: 3 },
-            SyncEvent::SourceStarted {
-                source: SourceKind::Codex,
-                files_total: 10,
-            },
-            SyncEvent::Progress {
-                source: SourceKind::Opencode,
-                files_scanned: 50_000,
-                records_imported: 12_345,
-                current_file: Some("opencode.db".to_string()),
-            },
-            source_finished(SourceKind::Claude),
-            SyncEvent::Failed {
-                error: "boom".to_string(),
-            },
-            SyncEvent::Cancelled,
-        ];
-        for event in &events {
-            if let Some(line) = human_progress_line(event) {
-                assert!(!line.contains('\u{1b}'), "ESC in line for {event:?}");
+        i18n::with_language(Language::Chinese, || {
+            let events = vec![
+                SyncEvent::BootstrapStarted,
+                SyncEvent::MigrationStarted {
+                    version: 15,
+                    name: "add_part_cursor".to_string(),
+                    latest_version: 15,
+                },
+                SyncEvent::MigrationFinished {
+                    version: 15,
+                    name: "add_part_cursor".to_string(),
+                    elapsed_ms: 12,
+                },
+                SyncEvent::PricingUpgradeStarted {
+                    from_version: "static-v1".to_string(),
+                    to_version: "static-v2".to_string(),
+                    total_events: 50_000,
+                },
+                SyncEvent::PricingUpgradeProgress {
+                    from_version: "static-v1".to_string(),
+                    to_version: "static-v2".to_string(),
+                    processed_events: 25_000,
+                    total_events: 50_000,
+                    elapsed_ms: 1_234,
+                },
+                SyncEvent::PricingBucketReconcileStarted {
+                    to_version: "static-v2".to_string(),
+                    bucket_count: 7_153,
+                },
+                SyncEvent::PricingUpgradeFinished {
+                    from_version: "static-v1".to_string(),
+                    to_version: "static-v2".to_string(),
+                    updated_events: 539_146,
+                    bucket_count: 7_153,
+                    deleted_orphan_buckets: 2,
+                    elapsed_ms: 46_000,
+                },
+                SyncEvent::LockWaiting { timeout_ms: 30_000 },
+                SyncEvent::LockAcquired { wait_ms: 3 },
+                SyncEvent::SourceStarted {
+                    source: SourceKind::Codex,
+                    files_total: 10,
+                },
+                SyncEvent::Progress {
+                    source: SourceKind::Opencode,
+                    files_scanned: 50_000,
+                    records_imported: 12_345,
+                    current_file: Some("opencode.db".to_string()),
+                },
+                source_finished(SourceKind::Claude),
+                SyncEvent::Failed {
+                    error: "boom".to_string(),
+                },
+                SyncEvent::Cancelled,
+            ];
+            for event in &events {
+                if let Some(line) = human_progress_line(event) {
+                    assert!(!line.contains('\u{1b}'), "ESC in line for {event:?}");
+                }
             }
+        })
+    }
+
+    #[test]
+    fn dynamic_progress_detail_is_escaped_for_lines_and_bars_without_changing_events() {
+        let events = [
+            SyncEvent::RemoteHostSkipped {
+                host_id: "remote".into(),
+                label: "host\u{1b}[31m\nlabel".into(),
+                reason: "failed\r\n\u{1b}[0m".into(),
+            },
+            SyncEvent::Failed {
+                error: "denied\u{1b}[31m\nnext line".into(),
+            },
+        ];
+        for language in [Language::English, Language::Chinese] {
+            i18n::with_language(language, || {
+                for event in &events {
+                    let before = serde_json::to_value(event).unwrap();
+                    let expected = if matches!(event, SyncEvent::RemoteHostSkipped { .. }) {
+                        language.select(
+                            "Warning: skipped remote host host\\u{1b}[31m\\nlabel: Original detail: failed\\r\\n\\u{1b}[0m",
+                            "警告：跳过远端主机 host\\u{1b}[31m\\nlabel：原始详情: failed\\r\\n\\u{1b}[0m",
+                        ).to_string()
+                    } else {
+                        human_progress_line(event).unwrap()
+                    };
+                    assert!(!expected.chars().any(char::is_control), "{expected}");
+                    assert!(expected.contains("\\u{1b}"), "{expected}");
+                    let line_output = CaptureTerm::default();
+                    let mut line = LineRenderer {
+                        language,
+                        stderr: Box::new(line_output.clone()),
+                        tty: false,
+                        last_line_len: 0,
+                        terminated: false,
+                        remote_facts: HashMap::new(),
+                    };
+                    line.render(event);
+                    assert_eq!(
+                        String::from_utf8(line_output.0.lock().unwrap().clone()).unwrap(),
+                        format!("{expected}\n")
+                    );
+                    let bar_output = CaptureTerm::default();
+                    let mut bar = BarRenderer::new(ProgressDrawTarget::hidden());
+                    bar.stderr = Box::new(bar_output.clone());
+                    bar.render(event);
+                    assert_eq!(
+                        String::from_utf8(bar_output.0.lock().unwrap().clone()).unwrap(),
+                        format!("{expected}\n")
+                    );
+                    assert_eq!(serde_json::to_value(event).unwrap(), before);
+                }
+                let file = short_file_label("/private/file\u{1b}[31m\n.db");
+                assert!(!file.chars().any(char::is_control));
+            });
         }
     }
 
     #[test]
     fn human_progress_describes_pricing_upgrade_phases() {
-        assert_eq!(
-            human_progress_line(&SyncEvent::BootstrapStarted).as_deref(),
-            Some("检查数据库 schema 与定价目录...")
-        );
-        assert_eq!(
-            human_progress_line(&SyncEvent::PricingUpgradeProgress {
+        i18n::with_language(Language::Chinese, || {
+            assert_eq!(
+                human_progress_line(&SyncEvent::BootstrapStarted).as_deref(),
+                Some("检查数据库 schema 与定价目录...")
+            );
+            assert_eq!(
+                human_progress_line(&SyncEvent::PricingUpgradeProgress {
+                    from_version: "static-v1".to_string(),
+                    to_version: "static-v2".to_string(),
+                    processed_events: 25_000,
+                    total_events: 50_000,
+                    elapsed_ms: 1_234,
+                })
+                .as_deref(),
+                Some(
+                    "升级定价目录 static-v1 → static-v2：已处理 25000/50000 条（50.0%），已用 1234ms"
+                )
+            );
+            assert_eq!(
+                human_progress_line(&SyncEvent::PricingBucketReconcileStarted {
+                    to_version: "static-v2".to_string(),
+                    bucket_count: 7_153,
+                })
+                .as_deref(),
+                Some("事件定价完成，正在对账 7153 个 static-v2 汇总桶...")
+            );
+            assert_eq!(
+                human_progress_line(&SyncEvent::PricingUpgradeFinished {
+                    from_version: "static-v1".to_string(),
+                    to_version: "static-v2".to_string(),
+                    updated_events: 539_146,
+                    bucket_count: 7_153,
+                    deleted_orphan_buckets: 2,
+                    elapsed_ms: 46_000,
+                })
+                .as_deref(),
+                Some(
+                    "定价目录 static-v2 升级完成：539146 条事件，7153 个桶，清理 2 个孤立桶（46000ms）"
+                )
+            );
+        })
+    }
+
+    #[test]
+    fn pricing_sync_event_serializes_as_additive_snake_case_ndjson() -> anyhow::Result<()> {
+        i18n::with_language(Language::Chinese, || {
+            let value = serde_json::to_value(SyncEvent::PricingUpgradeProgress {
                 from_version: "static-v1".to_string(),
                 to_version: "static-v2".to_string(),
                 processed_events: 25_000,
                 total_events: 50_000,
                 elapsed_ms: 1_234,
-            })
-            .as_deref(),
-            Some("升级定价目录 static-v1 → static-v2：已处理 25000/50000 条（50.0%），已用 1234ms")
-        );
-        assert_eq!(
-            human_progress_line(&SyncEvent::PricingBucketReconcileStarted {
-                to_version: "static-v2".to_string(),
-                bucket_count: 7_153,
-            })
-            .as_deref(),
-            Some("事件定价完成，正在对账 7153 个 static-v2 汇总桶...")
-        );
-        assert_eq!(
-            human_progress_line(&SyncEvent::PricingUpgradeFinished {
-                from_version: "static-v1".to_string(),
-                to_version: "static-v2".to_string(),
-                updated_events: 539_146,
-                bucket_count: 7_153,
-                deleted_orphan_buckets: 2,
-                elapsed_ms: 46_000,
-            })
-            .as_deref(),
-            Some(
-                "定价目录 static-v2 升级完成：539146 条事件，7153 个桶，清理 2 个孤立桶（46000ms）"
-            )
-        );
-    }
+            })?;
 
-    #[test]
-    fn pricing_sync_event_serializes_as_additive_snake_case_ndjson() -> anyhow::Result<()> {
-        let value = serde_json::to_value(SyncEvent::PricingUpgradeProgress {
-            from_version: "static-v1".to_string(),
-            to_version: "static-v2".to_string(),
-            processed_events: 25_000,
-            total_events: 50_000,
-            elapsed_ms: 1_234,
-        })?;
-
-        assert_eq!(value["event"], "pricing_upgrade_progress");
-        assert_eq!(value["processed_events"], 25_000);
-        assert_eq!(value["total_events"], 50_000);
-        Ok(())
+            assert_eq!(value["event"], "pricing_upgrade_progress");
+            assert_eq!(value["processed_events"], 25_000);
+            assert_eq!(value["total_events"], 50_000);
+            Ok(())
+        })
     }
 
     #[test]
     fn token_accounting_repair_events_have_actionable_copy_and_ndjson_shape() -> anyhow::Result<()>
     {
-        let sources = vec![SourceKind::Codex, SourceKind::Claude];
-        let started = SyncEvent::TokenAccountingRepairStarted {
-            sources: sources.clone(),
-        };
-        let finished = SyncEvent::TokenAccountingRepairFinished { sources };
+        i18n::with_language(Language::Chinese, || {
+            let sources = vec![SourceKind::Codex, SourceKind::Claude];
+            let started = SyncEvent::TokenAccountingRepairStarted {
+                sources: sources.clone(),
+            };
+            let finished = SyncEvent::TokenAccountingRepairFinished { sources };
 
-        assert_eq!(
-            human_progress_line(&started).as_deref(),
-            Some(
-                "警告：检测到旧版 token accounting（codex, claude）；本轮将自动执行无损重建，不会自动启用 --allow-lossy-rebuild。"
-            )
-        );
-        assert_eq!(
-            human_progress_line(&finished).as_deref(),
-            Some("Token accounting 自动修复完成：codex, claude")
-        );
+            assert_eq!(
+                human_progress_line(&started).as_deref(),
+                Some(
+                    "警告：检测到旧版 token accounting（codex, claude）；本轮将自动执行无损重建，不会自动启用 --allow-lossy-rebuild。"
+                )
+            );
+            assert_eq!(
+                human_progress_line(&finished).as_deref(),
+                Some("Token accounting 自动修复完成：codex, claude")
+            );
 
-        let started_json = serde_json::to_value(&started)?;
-        let finished_json = serde_json::to_value(&finished)?;
-        assert_eq!(started_json["event"], "token_accounting_repair_started");
-        assert_eq!(finished_json["event"], "token_accounting_repair_finished");
-        assert_eq!(
-            started_json["sources"],
-            serde_json::json!(["codex", "claude"])
-        );
-        assert_eq!(serde_json::from_value::<SyncEvent>(started_json)?, started);
-        assert_eq!(
-            serde_json::from_value::<SyncEvent>(finished_json)?,
-            finished
-        );
-        Ok(())
+            let started_json = serde_json::to_value(&started)?;
+            let finished_json = serde_json::to_value(&finished)?;
+            assert_eq!(started_json["event"], "token_accounting_repair_started");
+            assert_eq!(finished_json["event"], "token_accounting_repair_finished");
+            assert_eq!(
+                started_json["sources"],
+                serde_json::json!(["codex", "claude"])
+            );
+            assert_eq!(serde_json::from_value::<SyncEvent>(started_json)?, started);
+            assert_eq!(
+                serde_json::from_value::<SyncEvent>(finished_json)?,
+                finished
+            );
+            Ok(())
+        })
     }
 }

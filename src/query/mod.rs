@@ -50,6 +50,7 @@ mod breakdowns;
 mod comparison;
 mod diagnostics;
 mod optimize;
+pub(crate) use optimize::{OptimizeEvidence, OptimizePresentation};
 mod overview;
 mod snapshot;
 mod tools;

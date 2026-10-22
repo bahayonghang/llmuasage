@@ -105,7 +105,10 @@ async fn sync_zcode(
      * 2) 只依赖 last_completed_at + last_processed_ids 锚点续跑
      * 3) completed 行 → UsageEvent；error/cancelled 行只计数不落库
      */
-    info!("开始同步 ZCode SQLite 真源");
+    info!(
+        event_code = "parsers.zcode.01",
+        "开始同步 ZCode SQLite 真源"
+    );
 
     let parse_started = Instant::now();
     let db_path = integrations::zcode::resolve_db_path();
@@ -137,6 +140,9 @@ async fn sync_zcode(
     let connection = match open_source_db(&db_path) {
         Ok(connection) => connection,
         Err(_) => {
+            super::feedback::emit(super::feedback::ParserFeedback::SqliteOpenFailed {
+                source: SourceKind::Zcode,
+            });
             stats.last_error = Some("ZCode SQLite DB 打开失败".to_string());
             return Ok(stats);
         }
@@ -148,6 +154,7 @@ async fn sync_zcode(
     // 重置高水位全量重放（opencode 同款语义）。
     if !zcode_cursor_anchor_exists(&connection, &cursor)? {
         info!(
+            event_code = "parsers.zcode.02",
             last_completed_at = cursor.last_completed_at,
             anchor_ids = cursor.last_processed_ids.len(),
             "检测到 ZCode DB cursor 锚点缺失，重置高水位"
@@ -290,6 +297,7 @@ async fn sync_zcode(
     stats.parse_ms = total_elapsed.saturating_sub(write_ms);
 
     info!(
+        event_code = "parsers.zcode.03",
         rows_seen = seen_rows,
         events_seen = stats.events_seen,
         "完成 ZCode SQLite 真源解析"

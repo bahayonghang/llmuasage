@@ -13,8 +13,12 @@ use crate::{
         pricing::PricingStatus,
         pricing_catalog::{CatalogDocument, PricingCatalog},
     },
-    error::{LlmusageError, Result},
+    error::Result,
     util::hash_string,
+};
+
+use crate::domain::pricing_catalog::diagnostic::{
+    DiagnosticFacts as Fact, Failure, Result as PricingResult,
 };
 
 const META_ACTIVE_VERSION: &str = "pricing_catalog_version";
@@ -184,9 +188,13 @@ pub(super) fn in_progress_marker_value(
         upserts: activation.upserts.clone(),
     };
     serde_json::to_string(&marker).map_err(|error| {
-        config_invalid(format!(
-            "pricing recompute in-progress marker could not be encoded: {error}"
-        ))
+        config_invalid(
+            format!("pricing recompute in-progress marker could not be encoded: {error}"),
+            Fact::MarkerEncode {
+                detail: error.to_string(),
+            },
+        )
+        .into()
     })
 }
 
@@ -209,12 +217,15 @@ impl CatalogMeta {
         version: &'a Option<String>,
         file: &'a Option<String>,
         label: &str,
-    ) -> Result<(&'a str, &'a str)> {
+    ) -> PricingResult<(&'a str, &'a str)> {
         match (version.as_deref(), file.as_deref()) {
             (Some(version), Some(file)) => Ok((version, file)),
-            _ => Err(config_invalid(format!(
-                "active pricing {label} metadata is incomplete"
-            ))),
+            _ => Err(config_invalid(
+                format!("active pricing {label} metadata is incomplete"),
+                Fact::MetadataIncomplete {
+                    layer: label.into(),
+                },
+            )),
         }
     }
 }
@@ -223,6 +234,10 @@ impl Store {
     /// Loads the selected pricing catalog. Once SQLite points at a user file,
     /// any missing, corrupted, or invalid file is a hard error.
     pub(crate) fn active_pricing_catalog(&self) -> Result<PricingCatalog> {
+        self.active_pricing_catalog_with_facts().map_err(Into::into)
+    }
+
+    pub(crate) fn active_pricing_catalog_with_facts(&self) -> PricingResult<PricingCatalog> {
         let meta = self.pricing_meta()?;
         let identity = meta
             .active_version
@@ -238,21 +253,28 @@ impl Store {
             .clone()
             .unwrap_or_else(|| format!("{identity}.json"));
         self.load_base_layer(identity, &relative, PricingStatus::Snapshot)
-            .map_err(|error| {
-                config_invalid(format!(
-                    "active pricing catalog `{identity}` could not be loaded: {error}"
-                ))
-            })
+            .map_err(|error| error.load(false, identity))
     }
 
     /// Applies a v2 overlay to the recorded base layer and atomically selects
     /// the merged effective catalog after event and bucket recomputation.
     pub fn apply_pricing_overlay(&self, source_path: &Path) -> Result<CatalogApplyResult> {
+        self.apply_pricing_overlay_with_facts(source_path)
+            .map_err(Into::into)
+    }
+
+    pub(crate) fn apply_pricing_overlay_with_facts(
+        &self,
+        source_path: &Path,
+    ) -> PricingResult<CatalogApplyResult> {
         let operation = self.write_operation(HolderKind::Library)?;
         operation.store.apply_pricing_overlay_fenced(source_path)
     }
 
-    fn apply_pricing_overlay_fenced(&self, source_path: &Path) -> Result<CatalogApplyResult> {
+    fn apply_pricing_overlay_fenced(
+        &self,
+        source_path: &Path,
+    ) -> PricingResult<CatalogApplyResult> {
         validate_local_file(source_path, "pricing overlay")?;
         let overlay_document = PricingCatalog::load_overlay(source_path)?;
         let overlay_json = overlay_document.canonical_json()?;
@@ -270,7 +292,7 @@ impl Store {
                 file.to_string(),
             )
         } else {
-            let catalog = self.active_pricing_catalog()?;
+            let catalog = self.active_pricing_catalog_with_facts()?;
             let identity = catalog.version.clone();
             let file = self.persist_base_document(&catalog)?;
             (catalog, identity, file)
@@ -319,15 +341,26 @@ impl Store {
     /// Activates a complete base snapshot. This is the shared implementation
     /// behind the legacy `doctor --refresh-pricing` entrypoint.
     pub fn activate_pricing_snapshot(&self, source_path: &Path) -> Result<CatalogResetResult> {
+        self.activate_pricing_snapshot_with_facts(source_path)
+            .map_err(Into::into)
+    }
+
+    pub(crate) fn activate_pricing_snapshot_with_facts(
+        &self,
+        source_path: &Path,
+    ) -> PricingResult<CatalogResetResult> {
         let operation = self.write_operation(HolderKind::Library)?;
         operation
             .store
             .activate_pricing_snapshot_fenced(source_path)
     }
 
-    fn activate_pricing_snapshot_fenced(&self, source_path: &Path) -> Result<CatalogResetResult> {
+    fn activate_pricing_snapshot_fenced(
+        &self,
+        source_path: &Path,
+    ) -> PricingResult<CatalogResetResult> {
         validate_local_file(source_path, "pricing snapshot")?;
-        let mut catalog = PricingCatalog::load_snapshot(source_path)?;
+        let mut catalog = PricingCatalog::load_snapshot_with_facts(source_path)?;
         let canonical = catalog.document().canonical_json()?;
         let digest = hash_string(&canonical);
         let identity = catalog.declared_version().to_string();
@@ -348,11 +381,15 @@ impl Store {
     /// Removes the active overlay. A snapshot base remains pinned; an embedded
     /// base returns to the current binary's embedded catalog.
     pub fn reset_pricing_catalog(&self) -> Result<CatalogResetResult> {
+        self.reset_pricing_catalog_with_facts().map_err(Into::into)
+    }
+
+    pub(crate) fn reset_pricing_catalog_with_facts(&self) -> PricingResult<CatalogResetResult> {
         let operation = self.write_operation(HolderKind::Library)?;
         operation.store.reset_pricing_catalog_fenced()
     }
 
-    fn reset_pricing_catalog_fenced(&self) -> Result<CatalogResetResult> {
+    fn reset_pricing_catalog_fenced(&self) -> PricingResult<CatalogResetResult> {
         let meta = self.pricing_meta()?;
         if meta.has_overlay() {
             let (base_identity, base_file) =
@@ -396,7 +433,7 @@ impl Store {
             });
         }
 
-        let catalog = self.active_pricing_catalog()?;
+        let catalog = self.active_pricing_catalog_with_facts()?;
         Ok(CatalogResetResult {
             effective: layer_from_catalog(
                 &catalog.version,
@@ -418,17 +455,23 @@ impl Store {
         operation
             .store
             .update_refreshed_base_catalog_fenced(new_base)
+            .map_err(Into::into)
     }
 
     fn update_refreshed_base_catalog_fenced(
         &self,
         mut new_base: PricingCatalog,
-    ) -> Result<Option<usize>> {
+    ) -> PricingResult<Option<usize>> {
         let new_base_identity = new_base.declared_version().to_string();
         if !new_base_identity.starts_with("public-") {
-            return Err(config_invalid(format!(
-                "refreshed pricing catalog identity `{new_base_identity}` is not a public catalog"
-            )));
+            return Err(config_invalid(
+                format!(
+                    "refreshed pricing catalog identity `{new_base_identity}` is not a public catalog"
+                ),
+                Fact::RefreshIdentity {
+                    identity: new_base_identity.clone(),
+                },
+            ));
         }
         let canonical = new_base.document().canonical_json()?;
         let digest = hash_string(&canonical);
@@ -476,8 +519,12 @@ impl Store {
     }
 
     pub fn pricing_catalog_status(&self) -> Result<PricingCatalogStatus> {
+        self.pricing_catalog_status_with_facts().map_err(Into::into)
+    }
+
+    pub(crate) fn pricing_catalog_status_with_facts(&self) -> PricingResult<PricingCatalogStatus> {
         let meta = self.pricing_meta()?;
-        let effective_catalog = self.active_pricing_catalog()?;
+        let effective_catalog = self.active_pricing_catalog_with_facts()?;
         let effective_identity = meta
             .active_version
             .as_deref()
@@ -528,7 +575,7 @@ impl Store {
     pub(super) fn upgrade_embedded_pricing_if_needed(
         &self,
         progress_sink: Option<BootstrapProgressSink<'_>>,
-    ) -> Result<()> {
+    ) -> PricingResult<()> {
         // DATA-002 crash recovery: if a previous recompute was interrupted
         // mid-way, the in-progress marker survived.  Re-run the recompute
         // with the catalog version that was being targeted so the database
@@ -540,12 +587,12 @@ impl Store {
                 [META_RECOMPUTE_IN_PROGRESS],
                 |row| row.get(0),
             )
-            .optional()?;
+            .optional()
+            .map_err(crate::error::LlmusageError::from)?;
         drop(conn);
         if let Some(ref marker) = in_progress_version {
             let (catalog, activation) = self.load_in_progress_target(marker)?;
-            tracing::warn!(
-                target_version = %catalog.version,
+            tracing::warn!(event_code = "store.pricing_catalog.01", target_version = %catalog.version,
                 "发现定价重算未完成标记，正在恢复一致性重算"
             );
             self.recompute_costs_with_meta_and_progress(&catalog, &activation, None)?;
@@ -567,17 +614,24 @@ impl Store {
         Ok(())
     }
 
-    fn load_in_progress_target(&self, marker: &str) -> Result<(PricingCatalog, PricingMetaChange)> {
+    fn load_in_progress_target(
+        &self,
+        marker: &str,
+    ) -> PricingResult<(PricingCatalog, PricingMetaChange)> {
         let marker = marker.trim();
         if marker.starts_with('{') {
             let spec: RecomputeInProgress = serde_json::from_str(marker).map_err(|error| {
-                config_invalid(format!(
-                    "pricing recompute in-progress marker is invalid: {error}"
-                ))
+                config_invalid(
+                    format!("pricing recompute in-progress marker is invalid: {error}"),
+                    Fact::MarkerParse {
+                        detail: error.to_string(),
+                    },
+                )
             })?;
             if spec.identity.trim().is_empty() {
                 return Err(config_invalid(
                     "pricing recompute in-progress marker is missing catalog identity",
+                    Fact::MarkerMissingIdentity {},
                 ));
             }
             let catalog = self.load_target_catalog(&spec.identity, spec.file.as_deref())?;
@@ -592,6 +646,7 @@ impl Store {
         if marker.is_empty() {
             return Err(config_invalid(
                 "pricing recompute in-progress marker is empty",
+                Fact::MarkerEmpty {},
             ));
         }
         let catalog = self.load_target_catalog(marker, None)?;
@@ -603,7 +658,11 @@ impl Store {
         Ok((catalog, activation))
     }
 
-    fn load_target_catalog(&self, identity: &str, file: Option<&str>) -> Result<PricingCatalog> {
+    fn load_target_catalog(
+        &self,
+        identity: &str,
+        file: Option<&str>,
+    ) -> PricingResult<PricingCatalog> {
         if let Some(relative) = file {
             return self.load_in_progress_file(identity, relative);
         }
@@ -613,16 +672,16 @@ impl Store {
         self.load_in_progress_file(identity, &format!("{identity}.json"))
     }
 
-    fn load_in_progress_file(&self, identity: &str, relative: &str) -> Result<PricingCatalog> {
+    fn load_in_progress_file(
+        &self,
+        identity: &str,
+        relative: &str,
+    ) -> PricingResult<PricingCatalog> {
         self.load_base_layer(identity, relative, PricingStatus::Snapshot)
-            .map_err(|error| {
-                config_invalid(format!(
-                    "pricing recompute in-progress catalog `{identity}` could not be loaded: {error}"
-                ))
-            })
+            .map_err(|error| error.load(true, identity))
     }
 
-    fn pricing_meta(&self) -> Result<CatalogMeta> {
+    fn pricing_meta(&self) -> PricingResult<CatalogMeta> {
         let conn = self.open_connection()?;
         let read = |key: &str| -> Result<Option<String>> {
             Ok(conn
@@ -641,14 +700,14 @@ impl Store {
         })
     }
 
-    fn persist_base_document(&self, catalog: &PricingCatalog) -> Result<String> {
+    fn persist_base_document(&self, catalog: &PricingCatalog) -> PricingResult<String> {
         let canonical = catalog.document().canonical_json()?;
         let file = format!("base-{}.json", hash_string(&canonical));
         self.persist_catalog_file(&file, &canonical)?;
         Ok(file)
     }
 
-    fn persist_catalog_file(&self, relative: &str, contents: &str) -> Result<()> {
+    fn persist_catalog_file(&self, relative: &str, contents: &str) -> PricingResult<()> {
         let target = self.catalog_path(relative)?;
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent)?;
@@ -658,10 +717,12 @@ impl Store {
             if existing == contents {
                 return Ok(());
             }
-            return Err(config_invalid(format!(
-                "pricing catalog digest collision at {}",
-                target.display()
-            )));
+            return Err(config_invalid(
+                format!("pricing catalog digest collision at {}", target.display()),
+                Fact::DigestCollision {
+                    path: target.display().to_string(),
+                },
+            ));
         }
 
         let temp = target.with_extension(format!("tmp-{}", std::process::id()));
@@ -686,44 +747,61 @@ impl Store {
         identity: &str,
         relative: &str,
         status: PricingStatus,
-    ) -> Result<PricingCatalog> {
+    ) -> PricingResult<PricingCatalog> {
         let path = self.catalog_path(relative)?;
         let raw = fs::read_to_string(&path)?;
         let content_addressed = verify_content_digest(relative, &raw)?;
-        let mut catalog = PricingCatalog::load_snapshot(&path)?;
+        let mut catalog = PricingCatalog::load_snapshot_with_facts(&path)?;
         let is_effective = Path::new(relative)
             .file_name()
             .and_then(|name| name.to_str())
             .is_some_and(|name| name.starts_with("effective-"));
         if (!content_addressed || !is_effective) && catalog.declared_version() != identity {
-            return Err(config_invalid(format!(
-                "pricing catalog metadata expects `{identity}` but file declares `{}`",
-                catalog.declared_version()
-            )));
+            return Err(config_invalid(
+                format!(
+                    "pricing catalog metadata expects `{identity}` but file declares `{}`",
+                    catalog.declared_version()
+                ),
+                Fact::MetadataMismatch {
+                    overlay: false,
+                    identity: identity.into(),
+                    declared: catalog.declared_version().into(),
+                },
+            ));
         }
         catalog.set_runtime_identity(identity.to_string(), status);
         Ok(catalog)
     }
 
-    fn load_overlay_layer(&self, identity: &str, relative: &str) -> Result<CatalogDocument> {
+    fn load_overlay_layer(&self, identity: &str, relative: &str) -> PricingResult<CatalogDocument> {
         let path = self.catalog_path(relative)?;
         let raw = fs::read_to_string(&path)?;
         if !verify_content_digest(relative, &raw)? {
-            return Err(config_invalid(format!(
-                "pricing overlay `{identity}` is not content-addressed"
-            )));
+            return Err(config_invalid(
+                format!("pricing overlay `{identity}` is not content-addressed"),
+                Fact::OverlayNotAddressed {
+                    identity: identity.into(),
+                },
+            ));
         }
         let document = PricingCatalog::load_overlay(&path)?;
         if identity != document.version {
-            return Err(config_invalid(format!(
-                "pricing overlay metadata expects `{identity}` but file declares `{}`",
-                document.version
-            )));
+            return Err(config_invalid(
+                format!(
+                    "pricing overlay metadata expects `{identity}` but file declares `{}`",
+                    document.version
+                ),
+                Fact::MetadataMismatch {
+                    overlay: true,
+                    identity: identity.into(),
+                    declared: document.version.clone(),
+                },
+            ));
         }
         Ok(document)
     }
 
-    fn catalog_path(&self, relative: &str) -> Result<PathBuf> {
+    fn catalog_path(&self, relative: &str) -> PricingResult<PathBuf> {
         let relative = Path::new(relative);
         if relative.as_os_str().is_empty()
             || relative.is_absolute()
@@ -731,10 +809,15 @@ impl Store {
                 .components()
                 .any(|part| !matches!(part, Component::Normal(_)))
         {
-            return Err(config_invalid(format!(
-                "pricing catalog file must be a safe relative path: {}",
-                relative.display()
-            )));
+            return Err(config_invalid(
+                format!(
+                    "pricing catalog file must be a safe relative path: {}",
+                    relative.display()
+                ),
+                Fact::UnsafePath {
+                    path: relative.display().to_string(),
+                },
+            ));
         }
         Ok(self.paths.root_dir.join("pricing").join(relative))
     }
@@ -774,24 +857,33 @@ fn base_status(identity: &str) -> PricingStatus {
     }
 }
 
-fn validate_local_file(path: &Path, label: &str) -> Result<()> {
+fn validate_local_file(path: &Path, label: &str) -> PricingResult<()> {
     if let Some(raw) = path.to_str()
         && (raw.starts_with("http://") || raw.starts_with("https://"))
     {
-        return Err(config_invalid(format!(
-            "{label} must be a local file; URLs are not supported"
-        )));
+        return Err(config_invalid(
+            format!("{label} must be a local file; URLs are not supported"),
+            Fact::LocalOnly {
+                snapshot: label == "pricing snapshot",
+            },
+        ));
     }
     if !path.is_file() {
-        return Err(config_invalid(format!(
-            "{label} path does not exist or is not a file: {}",
-            path.display()
-        )));
+        return Err(config_invalid(
+            format!(
+                "{label} path does not exist or is not a file: {}",
+                path.display()
+            ),
+            Fact::NotFile {
+                snapshot: label == "pricing snapshot",
+                path: path.display().to_string(),
+            },
+        ));
     }
     Ok(())
 }
 
-fn verify_content_digest(relative: &str, raw: &str) -> Result<bool> {
+fn verify_content_digest(relative: &str, raw: &str) -> PricingResult<bool> {
     let Some(file_name) = Path::new(relative)
         .file_name()
         .and_then(|name| name.to_str())
@@ -809,23 +901,31 @@ fn verify_content_digest(relative: &str, raw: &str) -> Result<bool> {
         return Ok(false);
     };
     if digest.len() != 64 || !digest.chars().all(|ch| ch.is_ascii_hexdigit()) {
-        return Err(config_invalid(format!(
-            "invalid content-addressed pricing filename `{relative}`"
-        )));
+        return Err(config_invalid(
+            format!("invalid content-addressed pricing filename `{relative}`"),
+            Fact::InvalidFilename {
+                path: relative.into(),
+            },
+        ));
     }
     let actual = hash_string(raw);
     if actual != digest {
-        return Err(config_invalid(format!(
-            "pricing catalog digest mismatch for `{relative}`: expected {digest}, got {actual}"
-        )));
+        return Err(config_invalid(
+            format!(
+                "pricing catalog digest mismatch for `{relative}`: expected {digest}, got {actual}"
+            ),
+            Fact::DigestMismatch {
+                path: relative.into(),
+                expected: digest.into(),
+                actual: actual.clone(),
+            },
+        ));
     }
     Ok(true)
 }
 
-fn config_invalid(detail: impl Into<String>) -> LlmusageError {
-    LlmusageError::ConfigInvalid {
-        detail: detail.into(),
-    }
+fn config_invalid(detail: impl Into<String>, facts: Fact) -> Failure {
+    Failure::config(detail, facts)
 }
 
 #[cfg(test)]

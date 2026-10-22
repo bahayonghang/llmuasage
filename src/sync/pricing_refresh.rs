@@ -666,6 +666,7 @@ pub fn build_assembled_catalog(
 
 fn warn_pricing_fallback(source: &str, detail: &str) {
     tracing::warn!(
+        event_code = "sync.pricing_refresh.01",
         source = source,
         detail = detail,
         "pricing source refresh failed; using fallback catalog"

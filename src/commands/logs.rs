@@ -1,3 +1,9 @@
+use crate::common::i18n::{
+    commands::message,
+    current,
+    logging::{project, safe_text},
+    text,
+};
 use anyhow::Result;
 use serde::Serialize;
 
@@ -62,65 +68,78 @@ pub async fn run(
 }
 
 fn print_human(payload: &LogsPayload) {
-    println!("Logs:");
-    println!("- File: {}", payload.logs.path);
-    println!("- Exists: {}", payload.logs.exists);
-    println!("- Size: {} bytes", payload.logs.size_bytes);
+    println!("{}", message!(LogsTitle));
+    println!("{}", message!(LogFile, payload.logs.path));
     println!(
-        "- Retained: {} files, {} bytes total",
-        payload.logs.retained_files, payload.logs.total_size_bytes
+        "{}",
+        message!(
+            LogExists,
+            if payload.logs.exists {
+                text("yes", "是")
+            } else {
+                text("no", "否")
+            }
+        )
     );
-    println!("- Recent errors: {}", payload.logs.recent_error_count);
-    println!("- Dropped events: {}", payload.logs.dropped_event_count);
+    println!("{}", message!(LogSize, payload.logs.size_bytes));
     println!(
-        "- Maintenance errors: {}",
-        payload.logs.maintenance_error_count
+        "{}",
+        message!(
+            LogRetained,
+            payload.logs.retained_files,
+            payload.logs.total_size_bytes
+        )
     );
-
-    println!("Entries:");
+    println!("{}", message!(LogErrors, payload.logs.recent_error_count));
+    println!("{}", message!(LogDropped, payload.logs.dropped_event_count));
+    println!(
+        "{}",
+        message!(LogMaintenance, payload.logs.maintenance_error_count)
+    );
+    println!("{}", message!(LogEntries));
     if payload.entries.is_empty() {
-        println!("- none");
+        println!("{}", message!(LogNone));
     } else {
         for entry in &payload.entries {
-            let timestamp = entry.timestamp.as_deref().unwrap_or("-");
-            let target = entry.target.as_deref().unwrap_or("-");
-            let message = entry.message.as_deref().unwrap_or("");
-            let command = entry
-                .command
-                .as_deref()
-                .map(|value| format!(" command={value}"))
-                .unwrap_or_default();
-            let run_id = entry
-                .run_id
-                .map(|value| format!(" run_id={value}"))
-                .unwrap_or_default();
-            let error = entry
-                .error
-                .as_deref()
-                .map(|value| format!(" error={value}"))
-                .unwrap_or_default();
+            let timestamp = safe_text(entry.timestamp.as_deref().unwrap_or("-"));
             println!(
-                "- {timestamp} [{}] {target}{command}{run_id} {message}{error}",
-                entry.level
+                "- {timestamp} {}",
+                project(
+                    current(),
+                    &entry.level,
+                    entry.message.as_deref(),
+                    &entry.fields,
+                    matches!(entry.level.as_str(), "DEBUG" | "TRACE")
+                )
             );
         }
     }
-
-    println!("Run log:");
+    println!("{}", message!(RunLog));
     if payload.recent_runs.is_empty() {
-        println!("- none");
+        println!("{}", message!(LogNone));
     } else {
         for run in &payload.recent_runs {
-            let finished = run.finished_at.as_deref().unwrap_or("running");
-            let summary = run.summary.as_deref().unwrap_or("");
-            let error = run
-                .error
+            let finished = run
+                .finished_at
                 .as_deref()
-                .map(|value| format!(" error={value}"))
-                .unwrap_or_default();
+                .unwrap_or(text("running", "运行中"));
+            let status = match run.status.as_str() {
+                "running" => text("running", "运行中"),
+                "success" => text("success", "成功"),
+                "failed" => text("failed", "失败"),
+                "aborted" => text("aborted", "已中止"),
+                other => other,
+            };
             println!(
-                "- #{} [{}] {} {} -> {} {}{}",
-                run.id, run.status, run.command, run.started_at, finished, summary, error
+                "- #{} [{}] {} {} -> {} {}: {} {}",
+                run.id,
+                status,
+                safe_text(&run.command),
+                run.started_at,
+                finished,
+                message!(OriginalRun),
+                safe_text(run.summary.as_deref().unwrap_or("")),
+                safe_text(run.error.as_deref().unwrap_or(""))
             );
         }
     }

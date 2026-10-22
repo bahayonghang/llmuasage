@@ -1,3 +1,7 @@
+use super::cli_errors::Diagnostic;
+use crate::common::i18n::commands::{
+    DiagnosticFacts as Facts, reports::DiagnosticFacts as ReportFacts,
+};
 use anyhow::{Result, anyhow};
 use chrono::{FixedOffset, NaiveDate};
 use clap::{Args, ValueEnum};
@@ -290,9 +294,14 @@ fn resolve_host_id(store: &Store, label: Option<&str>) -> Result<Option<String>>
     } else {
         labels.join(", ")
     };
-    Err(anyhow!(
-        "unknown host label '{label}'; registered labels: {listed}"
-    ))
+    Err(Diagnostic::with_facts(
+        format!("unknown host label '{label}'; registered labels: {listed}"),
+        Facts::Reports(ReportFacts::UnknownHost {
+            label: label.to_string(),
+            labels,
+        }),
+    )
+    .into())
 }
 
 fn parse_report_date(value: &str) -> std::result::Result<String, String> {
@@ -314,10 +323,17 @@ fn parse_date_value(value: &str) -> Result<NaiveDate> {
     {
         "%Y-%m-%d"
     } else {
-        return Err(anyhow!("date must use YYYY-MM-DD or YYYYMMDD format"));
+        return Err(anyhow!(Diagnostic::with_facts(
+            "date must use YYYY-MM-DD or YYYYMMDD format",
+            Facts::Reports(ReportFacts::DateFormat {})
+        )));
     };
-    NaiveDate::parse_from_str(value, format)
-        .map_err(|_| anyhow!("date must use a valid YYYY-MM-DD or YYYYMMDD value"))
+    NaiveDate::parse_from_str(value, format).map_err(|_| {
+        anyhow!(Diagnostic::with_facts(
+            "date must use a valid YYYY-MM-DD or YYYYMMDD value",
+            Facts::Reports(ReportFacts::DateValue {})
+        ))
+    })
 }
 
 fn parse_timezone(value: &str) -> std::result::Result<String, String> {
@@ -333,22 +349,33 @@ fn parse_timezone_value(value: &str) -> Result<reports::ReportTimezone> {
     if value.eq_ignore_ascii_case("local") {
         return Ok(reports::ReportTimezone::Local);
     }
-    if value.len() == 6 && matches!(&value[0..1], "+" | "-") && &value[3..4] == ":" {
+    if value.is_ascii()
+        && value.len() == 6
+        && matches!(&value[0..1], "+" | "-")
+        && &value[3..4] == ":"
+    {
         let sign = if &value[0..1] == "-" { -1 } else { 1 };
         let hours: i32 = value[1..3].parse()?;
         let minutes: i32 = value[4..6].parse()?;
         if hours > 23 || minutes > 59 {
-            return Err(anyhow!("timezone offset must be between -23:59 and +23:59"));
+            return Err(anyhow!(Diagnostic::with_facts(
+                "timezone offset must be between -23:59 and +23:59",
+                Facts::Reports(ReportFacts::TimezoneRange {})
+            )));
         }
         let seconds = sign * (hours * 3600 + minutes * 60);
         let Some(offset) = FixedOffset::east_opt(seconds) else {
-            return Err(anyhow!("invalid timezone offset"));
+            return Err(anyhow!(Diagnostic::with_facts(
+                "invalid timezone offset",
+                Facts::Reports(ReportFacts::TimezoneOffset {})
+            )));
         };
         return Ok(reports::ReportTimezone::Fixed(offset));
     }
-    Err(anyhow!(
-        "timezone must be UTC, local (current fixed offset), or a fixed offset like +08:00"
-    ))
+    Err(anyhow!(Diagnostic::with_facts(
+        "timezone must be UTC, local (current fixed offset), or a fixed offset like +08:00",
+        Facts::Reports(ReportFacts::TimezoneFormat {})
+    )))
 }
 
 fn parse_locale(value: &str) -> std::result::Result<String, String> {

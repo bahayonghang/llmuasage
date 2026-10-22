@@ -1,3 +1,4 @@
+use crate::common::i18n::commands::reports::Message as Msg;
 use anyhow::Result;
 use tracing::debug;
 
@@ -11,7 +12,10 @@ use crate::{
 use super::{report_args::BlocksArgs, unified_report};
 
 pub async fn run(app: &AppContext, args: BlocksArgs) -> Result<()> {
-    debug!("starting blocks report output");
+    debug!(
+        event_code = "commands.blocks.01",
+        "starting blocks report output"
+    );
     let store = Store::new(&app.paths)?;
     store.require_initialized()?;
     let dashboard = Dashboard::open(&store)?;
@@ -26,7 +30,7 @@ pub async fn run(app: &AppContext, args: BlocksArgs) -> Result<()> {
         }
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
-        println!("Usage blocks");
+        println!("{}", Msg::UsageBlocks.text());
         println!(
             "{}",
             report_table::render_blocks_table(
@@ -37,6 +41,9 @@ pub async fn run(app: &AppContext, args: BlocksArgs) -> Result<()> {
         );
     }
 
-    debug!("finished blocks report output");
+    debug!(
+        event_code = "commands.blocks.02",
+        "finished blocks report output"
+    );
     Ok(())
 }

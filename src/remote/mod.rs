@@ -3,6 +3,7 @@
 //! This module must not depend on `crate::commands`. CLI wiring lives in
 //! `src/commands/remote.rs`.
 
+pub(crate) mod diagnostic;
 pub mod importer;
 pub mod protocol;
 pub mod register;

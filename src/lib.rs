@@ -94,24 +94,18 @@ pub use sync::{
 pub use testing::{Fixture, SeedEvent};
 
 use anyhow::Result as AnyhowResult;
-use clap::Parser;
 
 pub async fn run() -> AnyhowResult<()> {
-    if let Some(language) = commands::help::is_top_level_help_request(std::env::args().skip(1)) {
-        print!("{}", commands::help::top_level_help(language));
-        return Ok(());
+    match commands::entrypoint::run_args(std::env::args_os().collect()).await {
+        Err(error) => {
+            if let Some(output) = error.downcast_ref::<commands::cli_errors::ProcessOutput>()
+                && output.code == 0
+            {
+                output.print();
+                return Ok(());
+            }
+            Err(error)
+        }
+        success => success,
     }
-    let cli = commands::Cli::parse();
-    // `clean` must not create `logs/` and must not read `LLMUSAGE_HOME`.
-    // `AppContext::with_cli_home(None)` still calls `AppPaths::discover()`.
-    let app = if matches!(cli.command, Some(commands::Commands::Clean { .. })) {
-        let paths = crate::paths::AppPaths::with_cli_home(cli.home.clone())?;
-        runtime::logging::init_stderr_logging()?;
-        runtime::app::AppContext::from_paths(paths)?
-    } else {
-        let app = runtime::app::AppContext::with_cli_home(cli.home.clone())?;
-        runtime::logging::init_logging_for_paths(&app.paths)?;
-        app
-    };
-    commands::dispatch(app, cli).await
 }

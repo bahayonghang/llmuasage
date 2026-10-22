@@ -1,3 +1,8 @@
+use super::cli_errors::Diagnostic;
+use crate::common::i18n::commands::reports::Message as Msg;
+use crate::common::i18n::commands::{
+    DiagnosticFacts as Facts, reports::DiagnosticFacts as ReportFacts,
+};
 use anyhow::{Result, bail};
 use tracing::debug;
 
@@ -11,17 +16,26 @@ use crate::{
 use super::{report_args::DailyArgs, unified_report};
 
 pub async fn run(app: &AppContext, args: DailyArgs) -> Result<()> {
-    debug!("starting daily report output");
+    debug!(
+        event_code = "commands.daily.01",
+        "starting daily report output"
+    );
     let store = Store::new(&app.paths)?;
     store.require_initialized()?;
     let dashboard = Dashboard::open(&store)?;
     let conn = dashboard.connection();
     let mut filter = args.common.to_filter(&store, args.project.clone())?;
     if args.all && (filter.since.is_some() || filter.until.is_some()) {
-        bail!("--all cannot be combined with --since or --until");
+        bail!(Diagnostic::with_facts(
+            "--all cannot be combined with --since or --until",
+            Facts::Reports(ReportFacts::AllDates {})
+        ));
     }
     if args.instances && !args.unified.sections.is_empty() {
-        bail!("--sections cannot be combined with --instances");
+        bail!(Diagnostic::with_facts(
+            "--sections cannot be combined with --instances",
+            Facts::Reports(ReportFacts::SectionsInstances {})
+        ));
     }
 
     if !args.instances && !args.unified.sections.is_empty() {
@@ -42,7 +56,10 @@ pub async fn run(app: &AppContext, args: DailyArgs) -> Result<()> {
             args.common.compact,
             args.common.no_cost,
         )?;
-        debug!("finished daily report output");
+        debug!(
+            event_code = "commands.daily.02",
+            "finished daily report output"
+        );
         return Ok(());
     }
 
@@ -73,7 +90,7 @@ pub async fn run(app: &AppContext, args: DailyArgs) -> Result<()> {
                     left_key.cmp(&right_key)
                 }
             });
-            println!("Daily usage by project");
+            println!("{}", Msg::DailyProjects.text());
             println!(
                 "{}",
                 report_table::render_daily_table(
@@ -119,6 +136,9 @@ pub async fn run(app: &AppContext, args: DailyArgs) -> Result<()> {
         }
     }
 
-    debug!("finished daily report output");
+    debug!(
+        event_code = "commands.daily.03",
+        "finished daily report output"
+    );
     Ok(())
 }

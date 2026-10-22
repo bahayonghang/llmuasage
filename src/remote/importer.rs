@@ -4,7 +4,7 @@ use chrono::{DateTime, Duration, SecondsFormat, Utc};
 
 use crate::{
     domain::source_diagnostics::SourceIssues,
-    error::{LlmusageError, Result},
+    error::Result,
     models::SourceKind,
     parsers::SourceSyncStats,
     store::{
@@ -13,6 +13,7 @@ use crate::{
     util::now_utc,
 };
 
+use super::diagnostic::{DiagnosticFacts as Fact, ImportFailure, Result as ImportResult};
 use super::protocol::{SHARD_PROTOCOL_VERSION, ShardDecoder, ShardRecord};
 use super::transport::ShardSource;
 
@@ -29,6 +30,11 @@ pub struct ImportOutcome {
 
 pub struct RemoteImporter;
 
+pub(crate) struct ImportWithFacts {
+    pub(crate) outcome: ImportOutcome,
+    pub(crate) warnings: Vec<Fact>,
+}
+
 impl RemoteImporter {
     pub fn import(
         host: &Host,
@@ -36,6 +42,17 @@ impl RemoteImporter {
         writer: &mut SyncRunWriter,
         source: &dyn ShardSource,
     ) -> Result<ImportOutcome> {
+        Self::import_with_facts(host, store, writer, source)
+            .map(|result| result.outcome)
+            .map_err(|failure| failure.error)
+    }
+
+    pub(crate) fn import_with_facts(
+        host: &Host,
+        store: &Store,
+        writer: &mut SyncRunWriter,
+        source: &dyn ShardSource,
+    ) -> ImportResult<ImportWithFacts> {
         let since = since_from_watermark(host.import_watermark.as_deref());
         let mut session = source.open(host, since.as_deref())?;
         let mut max_event_at: Option<DateTime<Utc>> = None;
@@ -54,7 +71,7 @@ impl RemoteImporter {
             let mut omp_split_migrated = store
                 .meta_value(&format!("omp_split_migrated.{}", host.host_id))?
                 .is_some();
-            while let Some(record) = decoder.next_record()? {
+            while let Some(record) = decoder.next_record_with_facts()? {
                 match record {
                     ShardRecord::Header {
                         source_accounting_versions,
@@ -75,12 +92,15 @@ impl RemoteImporter {
                     }
                     ShardRecord::Shard { shard } => {
                         let listed = listed_sources.as_ref().ok_or_else(|| {
-                            LlmusageError::ConfigInvalid {
-                                detail: format!(
+                            ImportFailure::config(
+                                format!(
                                     "remote host {} emitted a shard before a validated header",
                                     host.host_id
                                 ),
-                            }
+                                Fact::BeforeHeader {
+                                    host: host.host_id.clone(),
+                                },
+                            )
                         })?;
                         if !listed.contains_key(&shard.source) {
                             return Err(unlisted_shard_source_error(&host.host_id, shard.source));
@@ -142,31 +162,43 @@ impl RemoteImporter {
         }
         let exit = session.finish()?;
         if !saw_header {
-            return Err(LlmusageError::ConfigInvalid {
-                detail: format!(
+            return Err(ImportFailure::config(
+                format!(
                     "remote shard stream from host {} had no header record: {}",
                     host.host_id,
                     exit.stderr.trim()
                 ),
-            });
+                Fact::NoHeader {
+                    host: host.host_id.clone(),
+                    stderr: exit.stderr.trim().to_string(),
+                },
+            ));
         }
         let Some(sources) = trailer_sources else {
-            return Err(LlmusageError::ConfigInvalid {
-                detail: format!(
+            return Err(ImportFailure::config(
+                format!(
                     "remote shard stream from host {} ended without a trailer; imported events were kept but the host watermark was not advanced{}",
                     host.host_id,
                     format_stderr_suffix(&exit.stderr)
                 ),
-            });
+                Fact::NoTrailer {
+                    host: host.host_id.clone(),
+                    stderr: exit.stderr.trim().to_string(),
+                },
+            ));
         };
         if exit.status != 0 && !saw_trailer {
-            return Err(LlmusageError::ConfigInvalid {
-                detail: format!(
+            return Err(ImportFailure::config(
+                format!(
                     "remote sync --emit-shards exited {} without a trailer: {}",
                     exit.status,
                     exit.stderr.trim()
                 ),
-            });
+                Fact::ExitWithoutTrailer {
+                    status: exit.status,
+                    stderr: exit.stderr.trim().to_string(),
+                },
+            ));
         }
 
         for stats in &sources {
@@ -201,25 +233,32 @@ impl RemoteImporter {
         }
 
         let mut warnings = Vec::new();
+        let mut warning_facts = Vec::new();
         if skipped_lines > 0 {
             let warning = format!(
                 "skipped {skipped_lines} non-JSON shard lines from host {}",
                 host.label
             );
-            tracing::warn!(
-                host_id = %host.host_id,
+            tracing::warn!(event_code = "remote.importer.01", host_id = %host.host_id,
                 skipped_lines,
                 "skipped non-JSON remote shard lines"
             );
             warnings.push(warning);
+            warning_facts.push(Fact::SkippedLines {
+                host: host.label.clone(),
+                lines: skipped_lines,
+            });
         }
 
-        Ok(ImportOutcome {
-            host_id: host.host_id.clone(),
-            skipped_lines,
-            shards_committed,
-            warnings,
-            sources,
+        Ok(ImportWithFacts {
+            outcome: ImportOutcome {
+                host_id: host.host_id.clone(),
+                skipped_lines,
+                shards_committed,
+                warnings,
+                sources,
+            },
+            warnings: warning_facts,
         })
     }
 }
@@ -263,28 +302,35 @@ fn validate_header_accounting(
     store: &Store,
     versions: &BTreeMap<String, u32>,
     omp_split_migrated: bool,
-) -> Result<(BTreeMap<SourceKind, u32>, BTreeSet<SourceKind>, bool)> {
+) -> ImportResult<(BTreeMap<SourceKind, u32>, BTreeSet<SourceKind>, bool)> {
     if versions.is_empty() {
-        return Err(LlmusageError::ConfigInvalid {
-            detail: format!(
+        return Err(ImportFailure::config(
+            format!(
                 "remote host {} shard header is missing source token-accounting versions; \
                  upgrade llmusage on that host so both sides share shard_protocol {SHARD_PROTOCOL_VERSION} \
                  and the header lists each source's token_accounting_version",
                 host.host_id
             ),
-        });
+            Fact::MissingVersions {
+                host: host.host_id.clone(),
+            },
+        ));
     }
 
     let mut parsed = BTreeMap::new();
     for (name, version) in versions {
         let Some(source) = SourceKind::parse_id(name) else {
-            return Err(LlmusageError::ConfigInvalid {
-                detail: format!(
+            return Err(ImportFailure::config(
+                format!(
                     "remote host {} shard header lists unknown source {name}; \
                      upgrade llmusage so both sides share shard_protocol {SHARD_PROTOCOL_VERSION}",
                     host.host_id
                 ),
-            });
+                Fact::UnknownSource {
+                    host: host.host_id.clone(),
+                    source: name.clone(),
+                },
+            ));
         };
         let expected = expected_token_accounting_version(source);
         if *version != expected {
@@ -364,18 +410,24 @@ fn accounting_mismatch_error(
     source: SourceKind,
     remote_version: Option<u32>,
     expected: u32,
-) -> LlmusageError {
+) -> ImportFailure {
     let remote =
         remote_version.map_or_else(|| "<missing>".to_string(), |version| version.to_string());
-    LlmusageError::ConfigInvalid {
-        detail: format!(
+    ImportFailure::config(
+        format!(
             "token accounting mismatch for host {host_id} source {}: local={expected} remote={remote}; \
              upgrade llmusage on that host so source {} reports token_accounting_version {expected} \
              in shard protocol {SHARD_PROTOCOL_VERSION}",
             source.as_str(),
             source.as_str()
         ),
-    }
+        Fact::Accounting {
+            host: host_id.to_string(),
+            source,
+            remote: remote_version,
+            expected,
+        },
+    )
 }
 
 fn historical_restore_error(
@@ -383,26 +435,36 @@ fn historical_restore_error(
     source: SourceKind,
     marker: Option<u32>,
     expected: u32,
-) -> LlmusageError {
+) -> ImportFailure {
     let historical = marker.map_or_else(|| "unknown".to_string(), |version| version.to_string());
-    LlmusageError::ConfigInvalid {
-        detail: format!(
+    ImportFailure::config(
+        format!(
             "remote host {host_id} source {} already has imported rows without a trusted \
              current token-accounting marker (historical={historical}, current={expected}); \
              a full restore is required (not implemented); existing events and watermarks were left unchanged",
             source.as_str()
         ),
-    }
+        Fact::Historical {
+            host: host_id.to_string(),
+            source,
+            marker,
+            expected,
+        },
+    )
 }
 
-fn unlisted_shard_source_error(host_id: &str, source: SourceKind) -> LlmusageError {
-    LlmusageError::ConfigInvalid {
-        detail: format!(
+fn unlisted_shard_source_error(host_id: &str, source: SourceKind) -> ImportFailure {
+    ImportFailure::config(
+        format!(
             "remote host {host_id} shard source {} is not listed in the header source_accounting_versions map; \
              upgrade llmusage on that host so the header lists every shard source and its token_accounting_version",
             source.as_str()
         ),
-    }
+        Fact::Unlisted {
+            host: host_id.to_string(),
+            source,
+        },
+    )
 }
 
 fn format_stderr_suffix(stderr: &str) -> String {

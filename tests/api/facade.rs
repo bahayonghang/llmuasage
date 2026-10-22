@@ -44,7 +44,10 @@ fn cli_sync_uses_shared_stable_validation_codes() {
         (&["sync", "--parallelism", "0"], "invalid_parallelism"),
     ];
     for (args, code) in cases {
+        let temp = TempDir::new().expect("create isolated CLI root");
         let output = crate::test_process::llmusage_command()
+            .arg("--home")
+            .arg(temp.path())
             .args(args)
             .output()
             .expect("run llmusage");

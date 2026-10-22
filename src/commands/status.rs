@@ -1,3 +1,4 @@
+use crate::common::i18n::commands::message;
 use anyhow::Result;
 use tracing::info;
 
@@ -13,7 +14,7 @@ pub async fn run(app: &AppContext) -> Result<()> {
      * 2) 汇总来源层与项目层的用量
      * 3) 展示来源状态与最近失败
      */
-    info!("开始输出状态摘要");
+    info!(event_code = "commands.status.01", "开始输出状态摘要");
 
     // 1.1 读取概览、来源和健康信息
     let store = Store::new(&app.paths)?;
@@ -24,7 +25,7 @@ pub async fn run(app: &AppContext) -> Result<()> {
     let health = dashboard.health()?;
     let mut capability_statuses = source_status::build_source_capability_statuses(&sources);
     source_status::apply_token_accounting_statuses(&store, &mut capability_statuses)?;
-    let platform_statuses = source_status::build_platform_monitor_statuses();
+    let platform_statuses = source_status::build_platform_monitor_statuses_with_facts();
     let parse_issues = store
         .sync_status()
         .load_source_sync_statuses("local")?
@@ -34,43 +35,68 @@ pub async fn run(app: &AppContext) -> Result<()> {
     let lock = store.current_worker_lock()?;
 
     // 1.2 打印人读摘要
-    println!("Status:");
-    println!("- DB: {}", app.paths.db_path.display());
-    println!("- Buckets: {}", overview.bucket_count);
+    println!("{}", message!(StatusTitle));
+    println!("{}", message!(StatusDb, app.paths.db_path.display()));
+    println!("{}", message!(StatusBuckets, overview.bucket_count));
     println!(
-        "- Last sync: {}",
-        overview.last_sync_at.as_deref().unwrap_or("never")
+        "{}",
+        message!(
+            LastSync,
+            overview
+                .last_sync_at
+                .as_deref()
+                .unwrap_or(crate::common::i18n::text("never", "从未"))
+        )
     );
     println!(
-        "- Last export: {}",
-        overview.last_export_at.as_deref().unwrap_or("never")
+        "{}",
+        message!(
+            LastExport,
+            overview
+                .last_export_at
+                .as_deref()
+                .unwrap_or(crate::common::i18n::text("never", "从未"))
+        )
     );
     for source in sources {
         println!(
-            "- Source {}: total={} last={}",
-            source.source,
-            source.total_tokens,
-            source.last_event_at.as_deref().unwrap_or("never")
+            "{}",
+            message!(
+                SourceTotal,
+                source.source,
+                source.total_tokens,
+                source
+                    .last_event_at
+                    .as_deref()
+                    .unwrap_or(crate::common::i18n::text("never", "从未"))
+            )
         );
     }
-    source_status::print_human_statuses(&capability_statuses, &platform_statuses, &parse_issues);
+    source_status::print_human_statuses_for_host(
+        &store,
+        crate::store::LOCAL_HOST_ID,
+        &capability_statuses,
+        &[],
+        &parse_issues,
+        &Default::default(),
+        &Default::default(),
+    )?;
+    source_status::print_platform_monitor_statuses(&platform_statuses);
     if let Some(lock) = lock {
         println!(
-            "- Worker lock: holder={} expires={}",
-            lock.holder_identity(),
-            lock.lease_expires_at
+            "{}",
+            message!(LockHeld, lock.holder_identity(), lock.lease_expires_at)
         );
     } else {
-        println!("- Worker lock: idle");
+        println!("{}", message!(LockIdle));
     }
     if let Some(run) = health.recent_failures.first() {
         println!(
-            "- Recent error: {} {}",
-            run.command,
-            run.error.as_deref().unwrap_or("")
+            "{}",
+            message!(RecentError, run.command, run.error.as_deref().unwrap_or(""))
         );
     }
 
-    info!("完成状态摘要输出");
+    info!(event_code = "commands.status.02", "完成状态摘要输出");
     Ok(())
 }

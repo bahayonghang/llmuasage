@@ -3,6 +3,9 @@
 //! Surfaces the same data as the `llmusage blocks` CLI report inside the
 //! interactive dashboard, reusing [`crate::query::Dashboard::blocks_report`].
 
+use crate::common::i18n::tui::format as tr_format;
+use crate::common::i18n::tui::text as tr;
+
 use ratatui::{
     Frame,
     layout::{Constraint, Rect},
@@ -33,15 +36,15 @@ pub(crate) fn render_sorted(
     sort: SortState,
 ) {
     match data {
-        None => placeholder(frame, area, "Loading...", theme::muted_style()),
+        None => placeholder(frame, area, tr("loading"), theme::muted_style()),
         Some(Err(e)) => placeholder(
             frame,
             area,
-            &format!("Data load failed: {e}"),
+            &tr_format!(data_load_failed_e, e = e),
             theme::error_style(),
         ),
         Some(Ok(items)) if items.is_empty() => {
-            placeholder(frame, area, "No block data found.", theme::muted_style())
+            placeholder(frame, area, tr("no_block_data_found"), theme::muted_style())
         }
         Some(Ok(items)) => render_table(frame, area, items, scroll, sort),
     }
@@ -50,7 +53,7 @@ pub(crate) fn render_sorted(
 fn placeholder(frame: &mut Frame, area: Rect, text: &str, style: Style) {
     let widget = Paragraph::new(text.to_string())
         .style(style)
-        .block(styled_block("Blocks"));
+        .block(styled_block(tr("blocks")));
     frame.render_widget(widget, area);
 }
 
@@ -62,13 +65,13 @@ fn render_table(
     sort: SortState,
 ) {
     let header = Row::new(vec![
-        Cell::from(sort.header("Window", TableSortKey::Date)),
-        Cell::from("Status"),
-        Cell::from(sort.header("Total Tokens", TableSortKey::Tokens)),
-        Cell::from("Burn/h"),
-        Cell::from("Projected"),
-        Cell::from("Limit"),
-        Cell::from(sort.header("Cost (USD)", TableSortKey::Cost)),
+        Cell::from(sort.header(tr("window_3"), TableSortKey::Date)),
+        Cell::from(tr("status_2")),
+        Cell::from(sort.header(tr("total_tokens"), TableSortKey::Tokens)),
+        Cell::from(tr("burn_h")),
+        Cell::from(tr("projected")),
+        Cell::from(tr("limit")),
+        Cell::from(sort.header(tr("cost_usd"), TableSortKey::Cost)),
     ])
     .style(theme::header_style())
     .bottom_margin(1);
@@ -93,7 +96,7 @@ fn render_table(
                 short_time(&item.start_at),
                 short_time(&item.end_at)
             );
-            let status = if item.is_active { "active" } else { "-" };
+            let status = if item.is_active { tr("active") } else { "-" };
             let limit = match item.token_limit_percent {
                 Some(percent) => format!("{percent:.0}%"),
                 None => "-".to_string(),
@@ -133,7 +136,7 @@ fn render_table(
         ],
     )
     .header(header)
-    .block(styled_block("Blocks (5h burn rate)"));
+    .block(styled_block(tr("blocks_5h_burn_rate")));
 
     frame.render_widget(table, area);
 }

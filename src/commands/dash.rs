@@ -1,3 +1,4 @@
+use crate::common::i18n::{commands::message, text};
 use anyhow::Result;
 use crossterm::style::{Color, Stylize, style};
 use tracing::info;
@@ -5,6 +6,7 @@ use tracing::info;
 use crate::tui::report_table::ColorMode;
 use crate::{app::AppContext, store::Store, tui};
 
+#[cfg(test)]
 const TUI_DEPRECATION_WARNING: &str = "warning: `tui` is deprecated, use `llmusage dash` instead";
 
 /// Returns the deprecation warning message if `deprecated` is true.
@@ -18,13 +20,15 @@ pub fn deprecation_message_with_color(deprecated: bool, color_mode: ColorMode) -
     }
 
     if color_mode.stderr_enabled() {
-        let warning = style("warning:").with(Color::Yellow).bold();
+        let warning = style(text("warning:", "警告：")).with(Color::Yellow).bold();
         let command = style("llmusage dash").with(Color::Cyan).bold();
-        Some(format!(
-            "{warning} `tui` is deprecated, use `{command}` instead"
-        ))
+        Some(message!(TuiDeprecated, warning, command))
     } else {
-        Some(TUI_DEPRECATION_WARNING.to_string())
+        Some(message!(
+            TuiDeprecated,
+            text("warning:", "警告："),
+            "llmusage dash"
+        ))
     }
 }
 
@@ -33,13 +37,13 @@ pub async fn run(app: &AppContext, deprecated: bool) -> Result<()> {
         eprintln!("{msg}");
     }
 
-    info!("开始启动本地 TUI");
+    info!(event_code = "commands.dash.01", "开始启动本地 TUI");
 
     let store = Store::new(&app.paths)?;
     store.require_initialized()?;
-    tui::run_terminal(&store)?;
+    tui::run_terminal_with_language(&store, crate::common::i18n::current())?;
 
-    info!("完成本地 TUI 会话");
+    info!(event_code = "commands.dash.02", "完成本地 TUI 会话");
     Ok(())
 }
 
@@ -51,6 +55,20 @@ mod tests {
     use crate::tui::report_table::ColorMode;
 
     use super::{TUI_DEPRECATION_WARNING, deprecation_message, deprecation_message_with_color};
+
+    #[test]
+    fn deprecated_alias_copy_obeys_scope_without_changing_command_or_ansi_policy() {
+        use crate::common::i18n::{Language, with_language};
+        for language in [Language::English, Language::Chinese] {
+            with_language(language, || {
+                let message = deprecation_message_with_color(true, ColorMode::Never).unwrap();
+                assert!(message.contains(language.select("deprecated", "已弃用")));
+                assert!(message.contains("llmusage dash"));
+                assert!(!message.contains('\u{1b}'));
+                assert!(deprecation_message_with_color(false, ColorMode::Never).is_none());
+            });
+        }
+    }
 
     #[test]
     fn dash_parses_from_args() {

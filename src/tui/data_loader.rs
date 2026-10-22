@@ -24,6 +24,52 @@ use super::app::{
 const TUI_DASHBOARD_QUERY_PERMITS: usize = 5;
 const TUI_RESULT_CHANNEL_CAPACITY: usize = 32;
 
+#[derive(Debug, thiserror::Error)]
+pub(super) enum LoadError {
+    #[error("dashboard query cancelled")]
+    Cancelled,
+    #[error("dashboard query semaphore closed")]
+    SemaphoreClosed,
+    #[error("dashboard query task failed: {0}")]
+    TaskFailed(String),
+    #[error("{0}")]
+    Query(#[from] crate::LlmusageError),
+    #[error("{0}")]
+    External(String),
+}
+
+impl From<anyhow::Error> for LoadError {
+    fn from(error: anyhow::Error) -> Self {
+        match error.downcast::<crate::LlmusageError>() {
+            Ok(error) => Self::Query(error),
+            Err(error) => Self::External(format!("{error:#}")),
+        }
+    }
+}
+
+impl LoadError {
+    pub(super) fn render(&self) -> String {
+        use crate::common::i18n::{commands::DomainDiagnostic, current, text};
+        match self {
+            Self::Cancelled => text("Dashboard query cancelled", "看板查询已取消").to_string(),
+            Self::SemaphoreClosed => {
+                text("Dashboard query semaphore closed", "看板查询调度已关闭").to_string()
+            }
+            Self::TaskFailed(detail) => format!(
+                "{} {}",
+                text("Dashboard query task failed.", "看板查询任务失败。"),
+                crate::common::i18n::tui::original(detail)
+            ),
+            Self::Query(error) => crate::common::i18n::commands::DiagnosticFacts::Domain(
+                DomainDiagnostic::from_error(error),
+            )
+            .render(current())
+            .unwrap_or_else(|| crate::common::i18n::tui::original(&error.to_string())),
+            Self::External(detail) => crate::common::i18n::tui::original(detail),
+        }
+    }
+}
+
 #[cfg(test)]
 static RUN_QUERY_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
@@ -48,17 +94,17 @@ pub(super) struct PanelResult {
 
 #[allow(clippy::large_enum_variant)]
 pub(super) enum PanelPayload {
-    Overview(Result<OverviewPanelPayload, String>),
-    SyncCenter(Result<SyncCommandCenterPayload, String>),
-    Models(Result<Vec<ModelBreakdown>, String>),
-    Daily(Result<Vec<DailyTrendPoint>, String>),
-    Hourly(Result<Vec<HourlyTrendPoint>, String>),
-    Monthly(Result<Vec<MonthlyTrendPoint>, String>),
-    DailyDetail(Result<Vec<PeriodDetailRow>, String>),
-    MonthlyDetail(Result<Vec<DailyTrendPoint>, String>),
-    Stats(Result<StatsPanelPayload, String>),
-    Behavior(Box<Result<BehaviorPanelPayload, String>>),
-    Blocks(Result<Vec<BlockReportRow>, String>),
+    Overview(Result<OverviewPanelPayload, LoadError>),
+    SyncCenter(Result<SyncCommandCenterPayload, LoadError>),
+    Models(Result<Vec<ModelBreakdown>, LoadError>),
+    Daily(Result<Vec<DailyTrendPoint>, LoadError>),
+    Hourly(Result<Vec<HourlyTrendPoint>, LoadError>),
+    Monthly(Result<Vec<MonthlyTrendPoint>, LoadError>),
+    DailyDetail(Result<Vec<PeriodDetailRow>, LoadError>),
+    MonthlyDetail(Result<Vec<DailyTrendPoint>, LoadError>),
+    Stats(Result<StatsPanelPayload, LoadError>),
+    Behavior(Box<Result<(BehaviorPanelPayload, crate::query::OptimizePresentation), LoadError>>),
+    Blocks(Result<Vec<BlockReportRow>, LoadError>),
 }
 
 pub(super) struct PanelDataLoader {
@@ -68,19 +114,28 @@ pub(super) struct PanelDataLoader {
     tx: mpsc::Sender<PanelResult>,
     rx: mpsc::Receiver<PanelResult>,
     active_cancel: Option<CancellationToken>,
+    pub(super) behavior_presentation: Option<crate::query::OptimizePresentation>,
 }
 
 impl PanelDataLoader {
     pub(super) fn new(store: &Store) -> Result<Self> {
         let (tx, rx) = mpsc::channel(TUI_RESULT_CHANNEL_CAPACITY);
         Ok(Self {
-            runtime: tokio::runtime::Handle::try_current()
-                .map_err(|err| anyhow!("TUI requires a Tokio runtime: {err}"))?,
+            runtime: tokio::runtime::Handle::try_current().map_err(|err| {
+                anyhow!(
+                    "{} {err}",
+                    crate::common::i18n::text(
+                        "TUI requires a Tokio runtime:",
+                        "TUI 需要 Tokio 运行时："
+                    )
+                )
+            })?,
             store: store.clone(),
             semaphore: Arc::new(Semaphore::new(TUI_DASHBOARD_QUERY_PERMITS)),
             tx,
             rx,
             active_cancel: None,
+            behavior_presentation: None,
         })
     }
 
@@ -133,7 +188,7 @@ async fn load_panel_request(
                 run_query(store, semaphore, cancel, move |dashboard| {
                     dashboard
                         .period_model_breakdown(&detail_filter)
-                        .map_err(|err| err.to_string())
+                        .map_err(LoadError::from)
                 })
                 .await,
             )
@@ -148,7 +203,7 @@ async fn load_panel_request(
                 run_query(store, semaphore, cancel, move |dashboard| {
                     dashboard
                         .trends_daily(&detail_filter)
-                        .map_err(|err| err.to_string())
+                        .map_err(LoadError::from)
                 })
                 .await,
             )
@@ -160,7 +215,7 @@ async fn load_panel_request(
             run_query(store, semaphore, cancel, move |dashboard| {
                 dashboard
                     .sync_command_center(&filter)
-                    .map_err(|err| err.to_string())
+                    .map_err(LoadError::from)
             })
             .await,
         ),
@@ -168,7 +223,7 @@ async fn load_panel_request(
             run_query(store, semaphore, cancel, move |dashboard| {
                 dashboard
                     .model_breakdown(&window_filter)
-                    .map_err(|err| err.to_string())
+                    .map_err(LoadError::from)
             })
             .await,
         ),
@@ -176,7 +231,7 @@ async fn load_panel_request(
             run_query(store, semaphore, cancel, move |dashboard| {
                 dashboard
                     .trends_daily(&window_filter)
-                    .map_err(|err| err.to_string())
+                    .map_err(LoadError::from)
             })
             .await,
         ),
@@ -184,7 +239,7 @@ async fn load_panel_request(
             run_query(store, semaphore, cancel, move |dashboard| {
                 dashboard
                     .trends_hourly(&window_filter)
-                    .map_err(|err| err.to_string())
+                    .map_err(LoadError::from)
             })
             .await,
         ),
@@ -192,7 +247,7 @@ async fn load_panel_request(
             run_query(store, semaphore, cancel, move |dashboard| {
                 dashboard
                     .trends_monthly(&window_filter)
-                    .map_err(|err| err.to_string())
+                    .map_err(LoadError::from)
             })
             .await,
         ),
@@ -204,7 +259,7 @@ async fn load_panel_request(
         )),
         (None, Panel::Blocks) => PanelPayload::Blocks(
             run_query(store, semaphore, cancel, |dashboard| {
-                dashboard.blocks_report().map_err(|err| err.to_string())
+                dashboard.blocks_report().map_err(LoadError::from)
             })
             .await,
         ),
@@ -226,23 +281,23 @@ async fn load_overview_panel_data(
     cancel: CancellationToken,
     base_filter: QueryFilter,
     window_filter: QueryFilter,
-) -> Result<OverviewPanelPayload, String> {
+) -> Result<OverviewPanelPayload, LoadError> {
     let totals = run_query(store.clone(), Arc::clone(&semaphore), cancel.clone(), {
         let filter = base_filter;
-        move |dashboard| dashboard.overview(&filter).map_err(|err| err.to_string())
+        move |dashboard| dashboard.overview(&filter).map_err(LoadError::from)
     });
     let daily_models = run_query(store.clone(), Arc::clone(&semaphore), cancel.clone(), {
         let filter = window_filter.clone();
         move |dashboard| {
             dashboard
                 .trends_daily_by_model(&filter)
-                .map_err(|err| err.to_string())
+                .map_err(LoadError::from)
         }
     });
     let models = run_query(store, semaphore, cancel, move |dashboard| {
         dashboard
             .model_breakdown(&window_filter)
-            .map_err(|err| err.to_string())
+            .map_err(LoadError::from)
     });
     let (totals, daily_models, models) = tokio::join!(totals, daily_models, models);
     Ok(OverviewPanelPayload {
@@ -258,26 +313,18 @@ async fn load_stats_panel_data(
     cancel: CancellationToken,
     base_filter: QueryFilter,
     window_filter: QueryFilter,
-) -> Result<StatsPanelPayload, String> {
+) -> Result<StatsPanelPayload, LoadError> {
     let overview = run_query(store.clone(), Arc::clone(&semaphore), cancel.clone(), {
         let filter = base_filter.clone();
-        move |dashboard| dashboard.overview(&filter).map_err(|err| err.to_string())
+        move |dashboard| dashboard.overview(&filter).map_err(LoadError::from)
     });
     let heatmap = run_query(store.clone(), Arc::clone(&semaphore), cancel.clone(), {
         let filter = base_filter.clone();
-        move |dashboard| {
-            dashboard
-                .heatmap(&filter, 365)
-                .map_err(|err| err.to_string())
-        }
+        move |dashboard| dashboard.heatmap(&filter, 365).map_err(LoadError::from)
     });
     let models = run_query(store.clone(), Arc::clone(&semaphore), cancel.clone(), {
         let filter = base_filter;
-        move |dashboard| {
-            dashboard
-                .model_breakdown(&filter)
-                .map_err(|err| err.to_string())
-        }
+        move |dashboard| dashboard.model_breakdown(&filter).map_err(LoadError::from)
     });
     let context_pressure = load_context_pressure(store, semaphore, cancel, window_filter);
     let (overview, heatmap, models, context_pressure) =
@@ -296,11 +343,9 @@ async fn load_context_pressure(
     semaphore: Arc<Semaphore>,
     cancel: CancellationToken,
     filter: QueryFilter,
-) -> Result<ContextPressurePayload, String> {
+) -> Result<ContextPressurePayload, LoadError> {
     run_query(store, semaphore, cancel, move |dashboard| {
-        dashboard
-            .context_pressure(&filter)
-            .map_err(|err| err.to_string())
+        dashboard.context_pressure(&filter).map_err(LoadError::from)
     })
     .await
 }
@@ -337,26 +382,26 @@ async fn load_behavior_panel_data(
     semaphore: Arc<Semaphore>,
     cancel: CancellationToken,
     filter: QueryFilter,
-) -> Result<BehaviorPanelPayload, String> {
+) -> Result<(BehaviorPanelPayload, crate::query::OptimizePresentation), LoadError> {
     let activity = run_query(store.clone(), Arc::clone(&semaphore), cancel.clone(), {
         let filter = filter.clone();
         move |dashboard| {
             dashboard
                 .activity_breakdown(&filter)
-                .map_err(|err| err.to_string())
+                .map_err(LoadError::from)
         }
     });
     let tools = run_query(store.clone(), Arc::clone(&semaphore), cancel.clone(), {
         let filter = filter.clone();
-        move |dashboard| {
-            dashboard
-                .tool_breakdown(&filter)
-                .map_err(|err| err.to_string())
-        }
+        move |dashboard| dashboard.tool_breakdown(&filter).map_err(LoadError::from)
     });
     let optimize = run_query(store.clone(), Arc::clone(&semaphore), cancel.clone(), {
         let filter = filter.clone();
-        move |dashboard| dashboard.optimize(&filter).map_err(|err| err.to_string())
+        move |dashboard| {
+            dashboard
+                .optimize_with_presentation(&filter)
+                .map_err(LoadError::from)
+        }
     });
     let zombie = run_query(
         store.clone(),
@@ -365,24 +410,28 @@ async fn load_behavior_panel_data(
         |dashboard| {
             dashboard
                 .zombie_report(&crate::query::InventoryRoots::discover())
-                .map_err(|err| err.to_string())
+                .map_err(LoadError::from)
         },
     );
     let compare = run_query(store, semaphore, cancel, move |dashboard| {
         dashboard
             .model_compare(&filter, None, None)
-            .map_err(|err| err.to_string())
+            .map_err(LoadError::from)
     });
     let (activity, tools, optimize, zombie, compare) =
         tokio::join!(activity, tools, optimize, zombie, compare);
 
-    Ok(BehaviorPanelPayload {
-        activity: activity?,
-        tools: tools?,
-        optimize: optimize?,
-        zombie: zombie?,
-        compare: compare?,
-    })
+    let (optimize, presentation) = optimize?;
+    Ok((
+        BehaviorPanelPayload {
+            activity: activity?,
+            tools: tools?,
+            optimize,
+            zombie: zombie?,
+            compare: compare?,
+        },
+        presentation,
+    ))
 }
 
 async fn run_query<T, F>(
@@ -390,16 +439,16 @@ async fn run_query<T, F>(
     semaphore: Arc<Semaphore>,
     cancel: CancellationToken,
     query: F,
-) -> Result<T, String>
+) -> Result<T, LoadError>
 where
     T: Send + 'static,
-    F: FnOnce(&Dashboard) -> Result<T, String> + Send + 'static,
+    F: FnOnce(&Dashboard) -> Result<T, LoadError> + Send + 'static,
 {
     #[cfg(test)]
     RUN_QUERY_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let permit = tokio::select! {
-        permit = semaphore.acquire_owned() => permit.map_err(|_| "dashboard query semaphore closed".to_string())?,
-        _ = cancel.cancelled() => return Err("dashboard query cancelled".to_string()),
+        permit = semaphore.acquire_owned() => permit.map_err(|_| LoadError::SemaphoreClosed)?,
+        _ = cancel.cancelled() => return Err(LoadError::Cancelled),
     };
     let cancelled = Arc::new(AtomicBool::new(false));
     let blocking_cancelled = Arc::clone(&cancelled);
@@ -407,9 +456,9 @@ where
     let blocking_interrupt = Arc::clone(&interrupt);
     let mut task = tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        let dashboard = Dashboard::open(&store).map_err(|err| err.to_string())?;
+        let dashboard = Dashboard::open(&store).map_err(LoadError::from)?;
         if blocking_cancelled.load(Ordering::SeqCst) {
-            return Err("dashboard query cancelled".to_string());
+            return Err(LoadError::Cancelled);
         }
         if let Ok(mut slot) = blocking_interrupt.lock() {
             *slot = Some(dashboard.interrupt_handle());
@@ -420,13 +469,13 @@ where
             {
                 interrupt.interrupt();
             }
-            return Err("dashboard query cancelled".to_string());
+            return Err(LoadError::Cancelled);
         }
         query(&dashboard)
     });
 
     tokio::select! {
-        joined = &mut task => joined.map_err(|err| format!("dashboard query task failed: {err}"))?,
+        joined = &mut task => joined.map_err(|err| LoadError::TaskFailed(err.to_string()))?,
         _ = cancel.cancelled() => {
             cancelled.store(true, Ordering::SeqCst);
             if let Ok(slot) = interrupt.lock()
@@ -435,7 +484,7 @@ where
                 interrupt.interrupt();
             }
             let _ = task.await;
-            Err("dashboard query cancelled".to_string())
+            Err(LoadError::Cancelled)
         }
     }
 }
@@ -446,6 +495,30 @@ mod tests {
     use crate::paths::AppPaths;
     use std::time::Instant;
     use tempfile::TempDir;
+
+    #[test]
+    fn loader_owned_failures_are_typed_before_presentation_and_external_detail_is_marked() {
+        use crate::common::i18n::{Language, with_language};
+        for (language, cancelled, closed, original) in [
+            (
+                Language::English,
+                "cancelled",
+                "semaphore closed",
+                "Original detail",
+            ),
+            (Language::Chinese, "已取消", "已关闭", "原始详情"),
+        ] {
+            with_language(language, || {
+                assert!(LoadError::Cancelled.render().contains(cancelled));
+                assert!(LoadError::SemaphoreClosed.render().contains(closed));
+                let detail = LoadError::External("SQLITE_SENTINEL".into()).render();
+                assert!(detail.contains(original) && detail.contains("SQLITE_SENTINEL"));
+                let typed = LoadError::from(crate::LlmusageError::NotInitialized).render();
+                assert!(typed.contains("llmusage init"));
+                assert!(!typed.contains(original));
+            });
+        }
+    }
 
     fn temp_store() -> Result<(TempDir, Store)> {
         let temp = TempDir::new()?;
@@ -466,7 +539,7 @@ mod tests {
             QueryFilter::default(),
         )
         .await
-        .map_err(anyhow::Error::msg)?;
+        .map_err(anyhow::Error::new)?;
         assert_eq!(
             RUN_QUERY_CALLS.load(std::sync::atomic::Ordering::Relaxed),
             1,
@@ -520,7 +593,7 @@ mod tests {
             filter.clone(),
         )
         .await
-        .map_err(anyhow::Error::msg)?;
+        .map_err(anyhow::Error::new)?;
         let parallel_behavior = load_behavior_panel_data(
             store.clone(),
             Arc::clone(&semaphore),
@@ -528,7 +601,7 @@ mod tests {
             filter.clone(),
         )
         .await
-        .map_err(anyhow::Error::msg)?;
+        .map_err(anyhow::Error::new)?;
 
         let dashboard = Dashboard::open(&store)?;
         let serial_stats = StatsPanelPayload {
@@ -562,23 +635,23 @@ mod tests {
             serde_json::to_value(&serial_stats.context_pressure)?
         );
         assert_eq!(
-            serde_json::to_value(&parallel_behavior.activity)?,
+            serde_json::to_value(&parallel_behavior.0.activity)?,
             serde_json::to_value(&serial_behavior.activity)?
         );
         assert_eq!(
-            serde_json::to_value(&parallel_behavior.tools)?,
+            serde_json::to_value(&parallel_behavior.0.tools)?,
             serde_json::to_value(&serial_behavior.tools)?
         );
         assert_eq!(
-            serde_json::to_value(&parallel_behavior.optimize)?,
+            serde_json::to_value(&parallel_behavior.0.optimize)?,
             serde_json::to_value(&serial_behavior.optimize)?
         );
         assert_eq!(
-            serde_json::to_value(&parallel_behavior.zombie)?,
+            serde_json::to_value(&parallel_behavior.0.zombie)?,
             serde_json::to_value(&serial_behavior.zombie)?
         );
         assert_eq!(
-            serde_json::to_value(&parallel_behavior.compare)?,
+            serde_json::to_value(&parallel_behavior.0.compare)?,
             serde_json::to_value(&serial_behavior.compare)?
         );
         Ok(())
@@ -592,13 +665,13 @@ mod tests {
             store,
             Arc::new(Semaphore::new(1)),
             cancel.clone(),
-            |dashboard| dashboard.test_slow_query().map_err(|err| err.to_string()),
+            |dashboard| dashboard.test_slow_query().map_err(LoadError::from),
         ));
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         cancel.cancel();
 
         let result = tokio::time::timeout(std::time::Duration::from_secs(2), task).await??;
-        assert_eq!(result.unwrap_err(), "dashboard query cancelled");
+        assert_eq!(result.unwrap_err().to_string(), "dashboard query cancelled");
         Ok(())
     }
 
@@ -621,7 +694,7 @@ mod tests {
             window_filter.clone(),
         )
         .await
-        .map_err(anyhow::Error::msg)?;
+        .map_err(anyhow::Error::new)?;
         let _ = load_behavior_panel_data(
             store.clone(),
             Arc::new(Semaphore::new(TUI_DASHBOARD_QUERY_PERMITS)),
@@ -629,7 +702,7 @@ mod tests {
             window_filter.clone(),
         )
         .await
-        .map_err(anyhow::Error::msg)?;
+        .map_err(anyhow::Error::new)?;
 
         let mut serial_stats_ms = Vec::new();
         let mut parallel_stats_ms = Vec::new();
@@ -662,7 +735,7 @@ mod tests {
                 window_filter.clone(),
             )
             .await
-            .map_err(anyhow::Error::msg)?;
+            .map_err(anyhow::Error::new)?;
             parallel_stats_ms.push(started.elapsed().as_secs_f64() * 1_000.0);
 
             let started = Instant::now();
@@ -677,7 +750,7 @@ mod tests {
                 window_filter.clone(),
             )
             .await
-            .map_err(anyhow::Error::msg)?;
+            .map_err(anyhow::Error::new)?;
             parallel_behavior_ms.push(started.elapsed().as_secs_f64() * 1_000.0);
         }
 

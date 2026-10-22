@@ -2,6 +2,8 @@ use std::{collections::BTreeMap, io::BufRead};
 
 use serde::{Deserialize, Serialize};
 
+use super::diagnostic::{DiagnosticFacts as Fact, ImportFailure, Result as ImportResult};
+
 use crate::{
     domain::source_diagnostics::SourceIssues,
     error::{LlmusageError, Result},
@@ -159,6 +161,11 @@ impl<R: BufRead> ShardDecoder<R> {
     }
 
     pub fn next_record(&mut self) -> Result<Option<ShardRecord>> {
+        self.next_record_with_facts()
+            .map_err(|failure| failure.error)
+    }
+
+    pub(crate) fn next_record_with_facts(&mut self) -> ImportResult<Option<ShardRecord>> {
         let mut line = String::new();
         loop {
             line.clear();
@@ -183,19 +190,22 @@ impl<R: BufRead> ShardDecoder<R> {
                                 ..
                             } => {
                                 if *shard_protocol != SHARD_PROTOCOL_VERSION {
-                                    return Err(protocol_mismatch_error(
-                                        *shard_protocol,
-                                        *schema_version,
+                                    return Err(ImportFailure::known(
+                                        protocol_mismatch_error(*shard_protocol, *schema_version),
+                                        Fact::Protocol {
+                                            remote: *shard_protocol,
+                                            schema: *schema_version,
+                                        },
                                     ));
                                 }
                                 self.header_seen = true;
                                 return Ok(Some(record));
                             }
                             _ => {
-                                return Err(LlmusageError::ConfigInvalid {
-                                    detail: "first deserialized shard record must be a header"
-                                        .to_string(),
-                                });
+                                return Err(ImportFailure::config(
+                                    "first deserialized shard record must be a header",
+                                    Fact::FirstRecord {},
+                                ));
                             }
                         }
                     }
@@ -243,6 +253,50 @@ mod tests {
             "2026-08-20T00:00:00Z",
             source_accounting_versions([SourceKind::Codex]),
         )
+    }
+
+    #[test]
+    fn private_decoder_facts_preserve_public_errors_and_validation_state() -> anyhow::Result<()> {
+        let mut mismatched = header();
+        if let ShardRecord::Header {
+            shard_protocol,
+            schema_version,
+            ..
+        } = &mut mismatched
+        {
+            *shard_protocol = 99;
+            *schema_version = 42;
+        }
+        let trailer = ShardRecord::Trailer {
+            sources: Vec::new(),
+            parse_issues: ParseIssues::default(),
+        };
+        for (record, expected) in [
+            (
+                mismatched,
+                "invalid config: shard protocol mismatch: local=2 remote=99 (remote schema_version=42); upgrade llmusage so both sides share shard_protocol 2",
+            ),
+            (
+                trailer,
+                "invalid config: first deserialized shard record must be a header",
+            ),
+        ] {
+            let text = format!("MOTD\n{}\n", encode_record(&record)?);
+            let mut public = decoder(&text);
+            let mut private = decoder(&text);
+            let original = public.next_record().expect_err("public rejection");
+            let failure = private
+                .next_record_with_facts()
+                .expect_err("private rejection");
+            assert_eq!(original.to_string(), expected);
+            assert_eq!(failure.error.to_string(), expected);
+            assert!(matches!(failure.error, LlmusageError::ConfigInvalid { .. }));
+            assert!(failure.facts.is_some());
+            assert_eq!(public.skipped_lines(), private.skipped_lines());
+            assert_eq!(public.skipped_lines(), 1);
+            assert!(!public.saw_header() && !private.saw_header());
+        }
+        Ok(())
     }
 
     #[test]

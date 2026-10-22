@@ -5,6 +5,9 @@ use anyhow::Result;
 use serde::Deserialize;
 
 use super::http::{client, status_error};
+use super::presentation::{
+    self, DiagnosticHint, MetricHint, PresentedOutput, RemainingHint, WindowHint,
+};
 use super::types::{UsageMetric, UsageOutput, capitalize};
 
 #[derive(Debug, Deserialize)]
@@ -69,16 +72,25 @@ pub fn has_credentials(user_home: &Path) -> bool {
         .any(|path| path.exists())
 }
 
-pub async fn fetch(user_home: &Path, usage_url: &str, timeout: Duration) -> Result<UsageOutput> {
+pub async fn fetch(
+    user_home: &Path,
+    usage_url: &str,
+    timeout: Duration,
+) -> Result<PresentedOutput> {
     let path = credentials_paths(user_home)
         .into_iter()
         .find(|path| path.exists())
-        .ok_or_else(|| anyhow::anyhow!("No Kimi credentials found. Run 'kimi' to log in."))?;
+        .ok_or_else(|| {
+            presentation::error(
+                "No Kimi credentials found. Run 'kimi' to log in.",
+                DiagnosticHint::MissingCredentials,
+            )
+        })?;
     let before = std::fs::read(&path)?;
     let creds: Credentials = serde_json::from_slice(&before)?;
-    let access_token = creds
-        .access_token
-        .ok_or_else(|| anyhow::anyhow!("No Kimi access token."))?;
+    let access_token = creds.access_token.ok_or_else(|| {
+        presentation::error("No Kimi access token.", DiagnosticHint::MissingToken)
+    })?;
 
     let http = client(timeout)?;
     let response = http
@@ -90,7 +102,10 @@ pub async fn fetch(user_home: &Path, usage_url: &str, timeout: Duration) -> Resu
     let status = response.status();
     let after = std::fs::read(&path).unwrap_or_default();
     if after != before {
-        anyhow::bail!("Kimi credentials were modified during fetch");
+        return Err(presentation::error(
+            "Kimi credentials were modified during fetch",
+            DiagnosticHint::CredentialsModified,
+        ));
     }
     if !status.is_success() {
         return Err(status_error("Kimi", status));
@@ -112,40 +127,46 @@ pub async fn fetch(user_home: &Path, usage_url: &str, timeout: Duration) -> Resu
         });
 
     let mut metrics = Vec::new();
+    let mut hints = Vec::new();
     let mut seen = std::collections::HashSet::new();
     if let Some(limits) = &body.limits {
         for entry in limits {
             if let Some(detail) = &entry.detail {
-                let label = match entry.window.as_ref().and_then(|window| window.duration) {
-                    Some(duration) if duration <= 3600 => "Session",
-                    _ => "Weekly",
+                let window = match entry.window.as_ref().and_then(|window| window.duration) {
+                    Some(duration) if duration <= 3600 => WindowHint::Session,
+                    _ => WindowHint::Weekly,
                 };
-                if let Some(metric) = parse_quota_detail(label, detail) {
+                if let Some((metric, hint)) = parse_quota_detail(window, detail) {
                     let key = metric_key(&metric);
                     if seen.insert(key) {
                         metrics.push(metric);
+                        hints.push(hint);
                     }
                 }
             }
         }
     }
     if let Some(usage) = &body.usage
-        && let Some(metric) = parse_quota_detail("Weekly", usage)
+        && let Some((metric, hint)) = parse_quota_detail(WindowHint::Weekly, usage)
     {
         let key = metric_key(&metric);
         if seen.insert(key) {
             metrics.push(metric);
+            hints.push(hint);
         }
     }
 
-    Ok(UsageOutput {
-        provider: "Kimi".into(),
-        account: None,
-        credential_source: None,
-        plan,
-        email: None,
-        metrics,
-    })
+    Ok((
+        UsageOutput {
+            provider: "Kimi".into(),
+            account: None,
+            credential_source: None,
+            plan,
+            email: None,
+            metrics,
+        },
+        hints,
+    ))
 }
 
 fn metric_key(metric: &UsageMetric) -> String {
@@ -158,7 +179,10 @@ fn metric_key(metric: &UsageMetric) -> String {
     )
 }
 
-fn parse_quota_detail(label: &str, detail: &QuotaDetail) -> Option<UsageMetric> {
+fn parse_quota_detail(
+    window: WindowHint,
+    detail: &QuotaDetail,
+) -> Option<(UsageMetric, MetricHint)> {
     let limit: i64 = detail.limit.as_ref()?.parse().ok()?;
     let remaining: i64 = detail.remaining.as_ref()?.parse().ok()?;
     if limit <= 0 {
@@ -166,11 +190,45 @@ fn parse_quota_detail(label: &str, detail: &QuotaDetail) -> Option<UsageMetric> 
     }
     let used = (limit - remaining).max(0);
     let used_pct = (used as f64 / limit as f64 * 100.0).clamp(0.0, 100.0);
-    Some(UsageMetric {
-        label: label.into(),
-        used_percent: used_pct,
-        remaining_percent: 100.0 - used_pct,
-        remaining_label: Some(format!("{remaining}/{limit} left")),
-        resets_at: detail.reset_time.clone(),
-    })
+    Some((
+        UsageMetric {
+            label: match window {
+                WindowHint::Session => "Session",
+                _ => "Weekly",
+            }
+            .into(),
+            used_percent: used_pct,
+            remaining_percent: 100.0 - used_pct,
+            remaining_label: Some(format!("{remaining}/{limit} left")),
+            resets_at: detail.reset_time.clone(),
+        },
+        MetricHint {
+            window,
+            prefix: None,
+            remaining: Some(RemainingHint::Integer { remaining, limit }),
+        },
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn presentation_keeps_original_integer_quantity_when_percentage_is_clamped() {
+        let detail = QuotaDetail {
+            limit: Some("100".into()),
+            remaining: Some("101".into()),
+            reset_time: None,
+        };
+        let (metric, hint) = parse_quota_detail(WindowHint::Weekly, &detail).unwrap();
+        assert_eq!(metric.remaining_percent, 100.0);
+        assert_eq!(metric.remaining_label.as_deref(), Some("101/100 left"));
+        assert_eq!(
+            hint.remaining,
+            Some(RemainingHint::Integer {
+                remaining: 101,
+                limit: 100
+            })
+        );
+    }
 }

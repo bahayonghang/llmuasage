@@ -1,3 +1,4 @@
+use crate::common::i18n::tui::text as tr;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
@@ -12,7 +13,7 @@ pub fn render(frame: &mut Frame, viewport: Rect, state: &AppState) {
     frame.render_widget(Clear, area);
 
     let block = Block::default()
-        .title(" Help / Settings ")
+        .title(tr("help_settings"))
         .borders(Borders::ALL)
         .border_style(theme::fg_style(theme::accent()));
     let inner = block.inner(area);
@@ -32,17 +33,17 @@ pub fn render(frame: &mut Frame, viewport: Rect, state: &AppState) {
 
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled("Theme ", theme::muted_style()),
+            Span::styled(tr("theme"), theme::muted_style()),
             Span::styled(
                 theme::active_theme().name,
                 theme::bold_fg_style(theme::accent()),
             ),
-            Span::styled(" • Source ", theme::muted_style()),
+            Span::styled(tr("source_2"), theme::muted_style()),
             Span::styled(
                 state.source_filter_label(),
                 theme::fg_style(theme::accent()),
             ),
-            Span::styled(" • Window ", theme::muted_style()),
+            Span::styled(tr("window_2"), theme::muted_style()),
             Span::styled(state.time_window.label(), theme::fg_style(theme::accent())),
         ])),
         rows[0],
@@ -53,25 +54,25 @@ pub fn render(frame: &mut Frame, viewport: Rect, state: &AppState) {
     );
 
     let lines = vec![
-        Line::from("tab / shift-tab: switch tabs    1-9: jump to tab"),
-        Line::from("j/k or arrows: select row        PgUp/PgDn: page"),
-        Line::from("Home/End: first/last row          o/O: sort key/direction"),
-        Line::from("mouse wheel: select row           h/l: Today/7d/30d/All"),
-        Line::from("window: Models/Daily/Hourly/Monthly/Stats/Behavior"),
-        Line::from("enter: day/month detail           Esc: back / quit"),
-        Line::from("Stats: click day / Enter today / Esc close"),
-        Line::from("s: source picker                 a: all sources in picker"),
-        Line::from("r: refresh dashboard cache       R: toggle auto refresh"),
-        Line::from("x: run sync for current source   y: sync status overlay"),
-        Line::from("m: show/hide Usage emails        t: cycle theme"),
-        Line::from("?: this dialog                    q or Esc: close / quit"),
+        Line::from(tr("tab_shift_tab_switch_tabs_1_9_jump_to_tab")),
+        Line::from(tr("j_k_or_arrows_select_row_pgup_pgdn_page")),
+        Line::from(tr("home_end_first_last_row_o_o_sort_key_direction")),
+        Line::from(tr("mouse_wheel_select_row_h_l_today_7d_30d_all")),
+        Line::from(tr("window_models_daily_hourly_monthly_stats_behavior")),
+        Line::from(tr("enter_day_month_detail_esc_back_quit")),
+        Line::from(tr("stats_click_day_enter_today_esc_close")),
+        Line::from(tr("s_source_picker_a_all_sources_in_picker")),
+        Line::from(tr("r_refresh_dashboard_cache_r_toggle_auto_refresh")),
+        Line::from(tr("x_run_sync_for_current_source_y_sync_status_overlay")),
+        Line::from(tr("m_show_hide_usage_emails_t_cycle_theme")),
+        Line::from(tr("this_dialog_q_or_esc_close_quit")),
     ];
     frame.render_widget(Paragraph::new(lines).style(theme::muted_style()), rows[2]);
 
     frame.render_widget(
-        Paragraph::new(
-            "Parserless platforms remain monitor-only until fixtures and token semantics exist.",
-        )
+        Paragraph::new(tr(
+            "parserless_platforms_remain_monitor_only_until_fixtures_and_token_semantics_exist",
+        ))
         .alignment(Alignment::Center)
         .style(theme::muted_style()),
         rows[3],

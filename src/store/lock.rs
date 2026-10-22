@@ -67,6 +67,7 @@ impl WorkerLock {
                                 // expired and was stolen by a new owner. Log at error so
                                 // ops/debuggers can trace dual-writer incidents.
                                 tracing::error!(
+                                    event_code = "store.lock.01",
                                     "SQLite worker 锁已被其他进程抢占（fencing generation \
                                      不匹配），当前 worker 应停止写入"
                                 );
@@ -74,7 +75,7 @@ impl WorkerLock {
                                 break;
                             }
                             Err(err) => {
-                                warn!(error = %err, "SQLite worker 锁 heartbeat 续租失败");
+                                warn!(event_code = "store.lock.02", error = %err, "SQLite worker 锁 heartbeat 续租失败");
                             }
                         }
                     }
@@ -213,12 +214,11 @@ impl Store {
                 detail: "emit-only store does not acquire the worker lock".to_string(),
             });
         }
-        info!(holder_kind = %kind, timeout_ms = timeout.as_millis(), "开始等待 SQLite worker 锁");
+        info!(event_code = "store.lock.03", holder_kind = %kind, timeout_ms = timeout.as_millis(), "开始等待 SQLite worker 锁");
         let started = Instant::now();
         loop {
             if let Some(lock) = self.try_acquire_worker_lock(kind)? {
-                info!(
-                    holder = %lock.meta().holder_identity(),
+                info!(event_code = "store.lock.04", holder = %lock.meta().holder_identity(),
                     wait_ms = started.elapsed().as_millis(),
                     "完成 SQLite worker 锁申请"
                 );
@@ -275,7 +275,7 @@ impl Store {
     fn try_acquire_worker_lock(&self, kind: HolderKind) -> Result<Option<WorkerLock>> {
         match self.try_acquire_worker_lock_inner(kind) {
             Err(error) if sqlite_lock_contention(&error) => {
-                info!(holder_kind = %kind, "SQLite worker 锁协调表正被并发更新");
+                info!(event_code = "store.lock.05", holder_kind = %kind, "SQLite worker 锁协调表正被并发更新");
                 Ok(None)
             }
             result => result,
@@ -283,7 +283,7 @@ impl Store {
     }
 
     fn try_acquire_worker_lock_inner(&self, kind: HolderKind) -> Result<Option<WorkerLock>> {
-        info!(holder_kind = %kind, "尝试申请 SQLite worker 锁");
+        info!(event_code = "store.lock.06", holder_kind = %kind, "尝试申请 SQLite worker 锁");
 
         self.ensure_worker_lock_table()?;
 
@@ -369,7 +369,7 @@ impl Store {
         tx.commit()?;
 
         if !acquired {
-            info!("SQLite worker 锁已被占用");
+            info!(event_code = "store.lock.07", "SQLite worker 锁已被占用");
             return Ok(None);
         }
 

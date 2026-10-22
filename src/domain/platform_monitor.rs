@@ -582,10 +582,22 @@ pub fn registered_platform_monitors() -> &'static [PlatformMonitorDescriptor] {
 }
 
 pub fn probe_registered_platforms() -> Vec<PlatformProbe> {
+    probe_registered_platforms_with_facts()
+        .into_iter()
+        .map(|(probe, _)| probe)
+        .collect()
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PlatformProbeFact {
+    pub(crate) labels: String,
+}
+
+pub(crate) fn probe_registered_platforms_with_facts() -> Vec<(PlatformProbe, PlatformProbeFact)> {
     let home_dir = resolve_home_dir();
     PLATFORM_MONITORS
         .iter()
-        .map(|descriptor| probe_platform_descriptor(descriptor, &home_dir))
+        .map(|descriptor| probe_platform_descriptor_with_facts(descriptor, &home_dir))
         .collect()
 }
 
@@ -593,6 +605,13 @@ pub fn probe_platform_descriptor(
     descriptor: &PlatformMonitorDescriptor,
     home_dir: &std::path::Path,
 ) -> PlatformProbe {
+    probe_platform_descriptor_with_facts(descriptor, home_dir).0
+}
+
+fn probe_platform_descriptor_with_facts(
+    descriptor: &PlatformMonitorDescriptor,
+    home_dir: &std::path::Path,
+) -> (PlatformProbe, PlatformProbeFact) {
     let resolved_roots = descriptor
         .roots
         .iter()
@@ -611,37 +630,43 @@ pub fn probe_platform_descriptor(
     } else {
         PlatformProbeStatus::Detected
     };
-    let detail = if detected.is_empty() {
-        let labels = descriptor
+    let labels = if detected.is_empty() {
+        descriptor
             .roots
             .iter()
             .map(|root| root.label())
             .collect::<Vec<_>>()
-            .join(", ");
-        format!("no candidate roots detected; checked {labels}")
+            .join(", ")
     } else {
-        let labels = detected
+        detected
             .iter()
             .map(|(root, _)| root.label())
             .collect::<Vec<_>>()
-            .join(", ");
+            .join(", ")
+    };
+    let detail = if detected.is_empty() {
+        format!("no candidate roots detected; checked {labels}")
+    } else {
         format!("candidate roots detected via {labels}")
     };
 
-    PlatformProbe {
-        platform_id: descriptor.platform_id,
-        display_name: descriptor.display_name,
-        source_kind: descriptor.source_kind,
-        status,
-        parser_status: descriptor.parser_status,
-        quality: descriptor.quality.map(quality_label),
-        privacy: privacy_label(descriptor.privacy),
-        roots_checked: resolved_roots.len(),
-        roots_detected: detected.len(),
-        artifact_patterns: descriptor.artifact_patterns,
-        detail,
-        next_action: descriptor.next_action,
-    }
+    (
+        PlatformProbe {
+            platform_id: descriptor.platform_id,
+            display_name: descriptor.display_name,
+            source_kind: descriptor.source_kind,
+            status,
+            parser_status: descriptor.parser_status,
+            quality: descriptor.quality.map(quality_label),
+            privacy: privacy_label(descriptor.privacy),
+            roots_checked: resolved_roots.len(),
+            roots_detected: detected.len(),
+            artifact_patterns: descriptor.artifact_patterns,
+            detail,
+            next_action: descriptor.next_action,
+        },
+        PlatformProbeFact { labels },
+    )
 }
 
 fn xdg_data_dir(home_dir: &std::path::Path) -> Option<PathBuf> {
@@ -681,6 +706,35 @@ mod tests {
 
     use super::*;
     use crate::domain::source_descriptor::registered_source_descriptors;
+
+    #[test]
+    fn presentation_facts_keep_detected_and_checked_label_semantics_and_public_payload()
+    -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let descriptor = PlatformMonitorDescriptor {
+            roots: &[MonitorRoot::Home("one"), MonitorRoot::Home("two")],
+            ..PLATFORM_MONITORS[0]
+        };
+        let (missing, fact) = probe_platform_descriptor_with_facts(&descriptor, temp.path());
+        assert_eq!(missing, probe_platform_descriptor(&descriptor, temp.path()));
+        assert_eq!(
+            missing.detail,
+            "no candidate roots detected; checked home, home"
+        );
+        assert_eq!(fact.labels, "home, home");
+        assert_eq!((missing.roots_checked, missing.roots_detected), (2, 0));
+        std::fs::create_dir(temp.path().join("two"))?;
+        let (detected, fact) = probe_platform_descriptor_with_facts(&descriptor, temp.path());
+        assert_eq!(
+            detected,
+            probe_platform_descriptor(&descriptor, temp.path())
+        );
+        assert_eq!(detected.detail, "candidate roots detected via home");
+        assert_eq!(fact.labels, "home");
+        assert_eq!((detected.roots_checked, detected.roots_detected), (2, 1));
+        assert!(!detected.detail.contains(&temp.path().display().to_string()));
+        Ok(())
+    }
 
     #[test]
     fn platform_monitor_ids_are_unique() {

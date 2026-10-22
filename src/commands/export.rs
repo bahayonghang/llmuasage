@@ -1,3 +1,4 @@
+use crate::common::i18n::commands::message;
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -15,10 +16,10 @@ pub async fn run_html(app: &AppContext, out: Option<PathBuf>) -> Result<()> {
      * 2) 保持导出结构与本地 Web UI 一致
      * 3) 导出过程只读数据库，不触发任何网络请求
      */
-    info!("开始导出静态 HTML 报告");
+    info!(event_code = "commands.export.01", "开始导出静态 HTML 报告");
 
     let store = Store::new(&app.paths)?;
-    store.bootstrap()?;
+    super::cli_errors::pricing_result(store.bootstrap_with_pricing_facts())?;
     let output_dir = out.unwrap_or_else(|| app.paths.exports_dir.join("latest"));
     let exported_dir = super::run_tracked(
         &store,
@@ -30,8 +31,8 @@ pub async fn run_html(app: &AppContext, out: Option<PathBuf>) -> Result<()> {
         |path| Some(format!("out={}", path.display())),
     )
     .await?;
-    println!("Exported HTML bundle to {}", exported_dir.display());
+    println!("{}", message!(Exported, exported_dir.display()));
 
-    info!("完成静态 HTML 报告导出");
+    info!(event_code = "commands.export.02", "完成静态 HTML 报告导出");
     Ok(())
 }

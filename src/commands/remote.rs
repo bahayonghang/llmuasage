@@ -1,14 +1,13 @@
-use anyhow::{Result, bail};
+use super::cli_errors::Diagnostic;
+use crate::common::i18n::commands::message;
+use anyhow::Result;
 use clap::Subcommand;
 use tracing::info;
 
 use crate::{
     app::AppContext,
     models::SourceKind,
-    remote::{
-        HandshakeResponse, RemoteImporter, ShardSource, SshCommandRunner, SshShardSource,
-        register_remote_host,
-    },
+    remote::{HandshakeResponse, RemoteImporter, ShardSource, SshCommandRunner, SshShardSource},
     store::{HolderKind, LOCAL_HOST_ID, Store},
 };
 
@@ -75,23 +74,40 @@ fn add(app: &AppContext, label: &str, ssh_target: &str, command: &str) -> Result
         store.acquire_worker_lock_with(std::time::Duration::from_secs(30), HolderKind::Cli)?;
     let fenced = lock.fenced_store();
     let heartbeat = lock.start_default_heartbeat();
-    fenced.bootstrap()?;
-    let host = register_remote_host(
+    super::cli_errors::pricing_result(fenced.bootstrap_with_pricing_facts())?;
+    let host = crate::remote::register::register_remote_host_with_facts(
         &fenced,
         label,
         ssh_target,
         command,
         &SshCommandRunner::default(),
-    )?;
+    )
+    .map_err(registration_error)?;
     drop(heartbeat);
     drop(lock);
     println!(
-        "Registered host {} (host_id={}, target={})",
-        host.label,
-        host.host_id,
-        host.ssh_target.as_deref().unwrap_or("")
+        "{}",
+        message!(
+            RemoteRegistered,
+            host.label,
+            host.host_id,
+            host.ssh_target.as_deref().unwrap_or("")
+        )
     );
     Ok(())
+}
+
+fn registration_error(failure: crate::remote::register::RegistrationFailure) -> anyhow::Error {
+    let error = anyhow::Error::new(failure.error);
+    if let Some(fact) = failure.fact {
+        let diagnostic = Diagnostic::with_facts_context(
+            &error,
+            crate::common::i18n::commands::OperationDiagnostic::Registration { fact },
+        );
+        error.context(diagnostic)
+    } else {
+        error
+    }
 }
 
 fn list(app: &AppContext) -> Result<()> {
@@ -99,15 +115,18 @@ fn list(app: &AppContext) -> Result<()> {
     store.require_initialized()?;
     for host in store.hosts().list()? {
         println!(
-            "{}\thost_id={}\ttransport={}\ttarget={}\tcommand={}\tlast_contacted={}\twatermark={}\terror={}",
-            host.label,
-            host.host_id,
-            host.transport,
-            host.ssh_target.as_deref().unwrap_or("-"),
-            host.command,
-            host.last_contacted_at.as_deref().unwrap_or("-"),
-            host.import_watermark.as_deref().unwrap_or("-"),
-            host.last_error.as_deref().unwrap_or("-"),
+            "{}",
+            message!(
+                RemoteList,
+                host.label,
+                host.host_id,
+                host.transport,
+                host.ssh_target.as_deref().unwrap_or("-"),
+                host.command,
+                host.last_contacted_at.as_deref().unwrap_or("-"),
+                host.import_watermark.as_deref().unwrap_or("-"),
+                host.last_error.as_deref().unwrap_or("-")
+            )
         );
     }
     Ok(())
@@ -115,20 +134,26 @@ fn list(app: &AppContext) -> Result<()> {
 
 fn remove(app: &AppContext, label: &str, delete_usage: bool, yes: bool) -> Result<()> {
     if delete_usage && !yes {
-        bail!("refusing to delete imported usage without --yes");
+        return Err(Diagnostic::new(
+            "refusing to delete imported usage without --yes",
+            "未提供 --yes，拒绝删除导入的用量记录",
+        )
+        .into());
     }
     let store = Store::new(&app.paths)?;
     let lock =
         store.acquire_worker_lock_with(std::time::Duration::from_secs(30), HolderKind::Cli)?;
     let fenced = lock.fenced_store();
     let heartbeat = lock.start_default_heartbeat();
-    fenced.bootstrap()?;
-    let host = fenced
-        .hosts()
-        .get_by_label(label)?
-        .ok_or_else(|| anyhow::anyhow!("host '{label}' is not registered"))?;
+    super::cli_errors::pricing_result(fenced.bootstrap_with_pricing_facts())?;
+    let host = fenced.hosts().get_by_label(label)?.ok_or_else(|| {
+        Diagnostic::new(
+            format!("host '{label}' is not registered"),
+            format!("主机 '{label}' 尚未注册"),
+        )
+    })?;
     if host.host_id == LOCAL_HOST_ID || host.transport == "local" {
-        bail!("cannot remove the local host");
+        return Err(Diagnostic::new("cannot remove the local host", "不能移除本地主机").into());
     }
     if delete_usage {
         for kind in [
@@ -151,12 +176,9 @@ fn remove(app: &AppContext, label: &str, delete_usage: bool, yes: bool) -> Resul
     drop(heartbeat);
     drop(lock);
     if delete_usage {
-        println!("Removed host '{label}' and deleted its imported usage rows.");
+        println!("{}", message!(RemoteRemovedUsage, label));
     } else {
-        println!(
-            "Removed host '{label}'. Imported usage rows were kept.\n\
-             To delete them, run: llmusage remote remove {label} --delete-usage --yes"
-        );
+        println!("{}", message!(RemoteRemoved, label, label));
     }
     Ok(())
 }
@@ -171,15 +193,21 @@ fn sync_remotes_with_source(
         store.acquire_worker_lock_with(std::time::Duration::from_secs(30), HolderKind::Cli)?;
     let fenced = lock.fenced_store();
     let heartbeat = lock.start_default_heartbeat();
-    fenced.bootstrap()?;
+    super::cli_errors::pricing_result(fenced.bootstrap_with_pricing_facts())?;
     let hosts = match host_label {
         Some(label) => {
-            let host = fenced
-                .hosts()
-                .get_by_label(label)?
-                .ok_or_else(|| anyhow::anyhow!("host '{label}' is not registered"))?;
+            let host = fenced.hosts().get_by_label(label)?.ok_or_else(|| {
+                Diagnostic::new(
+                    format!("host '{label}' is not registered"),
+                    format!("主机 '{label}' 尚未注册"),
+                )
+            })?;
             if host.transport != "ssh" {
-                bail!("host '{label}' is not an ssh remote");
+                return Err(Diagnostic::new(
+                    format!("host '{label}' is not an ssh remote"),
+                    format!("主机 '{label}' 不是 SSH 远程主机"),
+                )
+                .into());
             }
             vec![host]
         }
@@ -191,7 +219,7 @@ fn sync_remotes_with_source(
             .collect(),
     };
     if hosts.is_empty() {
-        println!("No ssh hosts registered.");
+        println!("{}", message!(RemoteNone));
         drop(heartbeat);
         drop(lock);
         return Ok(());
@@ -200,27 +228,34 @@ fn sync_remotes_with_source(
     let mut writer = fenced.begin_sync_run()?;
     let mut failed = 0usize;
     for host in &hosts {
-        info!(host_id = %host.host_id, "importing remote shards");
-        match RemoteImporter::import(host, &fenced, &mut writer, source) {
-            Ok(outcome) => {
-                for warning in &outcome.warnings {
-                    eprintln!("warning: {warning}");
+        info!(event_code = "commands.remote.01", host_id = %host.host_id, "importing remote shards");
+        match RemoteImporter::import_with_facts(host, &fenced, &mut writer, source) {
+            Ok(result) => {
+                for warning in &result.warnings {
+                    eprintln!("{}", import_warning_line(warning));
                 }
+                let outcome = result.outcome;
                 println!(
-                    "Imported host {} (shards={}, skipped_lines={})",
-                    host.label, outcome.shards_committed, outcome.skipped_lines
+                    "{}",
+                    message!(
+                        RemoteImported,
+                        host.label,
+                        outcome.shards_committed,
+                        outcome.skipped_lines
+                    )
                 );
             }
-            Err(err) => {
+            Err(failure) => {
                 failed += 1;
-                let detail = err.to_string();
+                let detail = failure.error.to_string();
                 let _ = fenced.hosts().record_contact(&host.host_id, Some(&detail));
-                eprintln!("error: host {}: {detail}", host.label);
+                let error = import_error(failure);
+                eprintln!("{}", import_error_line(&host.label, &error));
                 if host_label.is_some() {
                     writer.finish_sync_run()?;
                     drop(heartbeat);
                     drop(lock);
-                    return Err(err.into());
+                    return Err(error);
                 }
             }
         }
@@ -229,9 +264,37 @@ fn sync_remotes_with_source(
     drop(heartbeat);
     drop(lock);
     if failed > 0 {
-        bail!("{failed} remote host(s) failed to import");
+        return Err(Diagnostic::new(
+            format!("{failed} remote host(s) failed to import"),
+            format!("{failed} 台远程主机导入失败"),
+        )
+        .into());
     }
     Ok(())
+}
+
+fn import_error(failure: crate::remote::diagnostic::ImportFailure) -> anyhow::Error {
+    let error = anyhow::Error::new(failure.error);
+    if let Some(facts) = failure.facts {
+        let diagnostic = Diagnostic::with_facts_context(&error, *facts);
+        error.context(diagnostic)
+    } else {
+        error
+    }
+}
+
+fn import_error_line(host: &str, error: &anyhow::Error) -> String {
+    use crate::common::i18n::{current, text};
+    format!(
+        "{} {host}: {}",
+        text("Remote host", "远程主机"),
+        super::cli_errors::application_error(error, current())
+    )
+}
+
+fn import_warning_line(facts: &crate::remote::diagnostic::DiagnosticFacts) -> String {
+    use crate::common::i18n::{current, text};
+    format!("{}: {}", text("Warning", "警告"), facts.render(current()))
 }
 
 #[cfg(test)]
@@ -245,6 +308,88 @@ mod tests {
     };
     use std::collections::BTreeMap;
     use tempfile::TempDir;
+
+    #[test]
+    fn registration_rejections_preserve_public_errors_and_translate_typed_private_facts()
+    -> anyhow::Result<()> {
+        use crate::common::i18n::Language;
+        use crate::remote::{CommandOutput, SHARD_PROTOCOL_VERSION, ScriptedCommandRunner};
+        let temp = TempDir::new()?;
+        let store = Store::new(&AppPaths::with_root(temp.path().to_path_buf())?)?;
+        let lock =
+            store.acquire_worker_lock_with(std::time::Duration::from_secs(5), HolderKind::Cli)?;
+        let fenced = lock.fenced_store();
+        fenced.bootstrap()?;
+        for (version_status, handshake_status, protocol, en, zh) in [
+            (
+                127,
+                0,
+                SHARD_PROTOCOL_VERSION,
+                "--version failed",
+                "--version 失败",
+            ),
+            (
+                0,
+                42,
+                SHARD_PROTOCOL_VERSION,
+                "handshake failed",
+                "握手失败",
+            ),
+            (0, 0, 99, "shard protocol mismatch", "分片协议不一致"),
+        ] {
+            let runner = ScriptedCommandRunner {
+                version: CommandOutput {
+                    status: version_status,
+                    stdout: "llmusage test".into(),
+                    stderr: "EXTERNAL_DETAIL".into(),
+                },
+                handshake: CommandOutput {
+                    status: handshake_status,
+                    stdout: serde_json::to_string(&HandshakeResponse {
+                        shard_protocol: protocol,
+                        schema_version: 22,
+                        llmusage_version: "test".into(),
+                    })?,
+                    stderr: "EXTERNAL_DETAIL".into(),
+                },
+            };
+            let original = crate::remote::register_remote_host(
+                &fenced,
+                "devbox",
+                "me@devbox",
+                "llmusage",
+                &runner,
+            )
+            .expect_err("public rejection");
+            let failure = crate::remote::register::register_remote_host_with_facts(
+                &fenced,
+                "devbox",
+                "me@devbox",
+                "llmusage",
+                &runner,
+            )
+            .expect_err("private rejection");
+            assert_eq!(failure.error.to_string(), original.to_string());
+            let error = registration_error(failure);
+            assert_eq!(error.to_string(), original.to_string());
+            assert!(matches!(
+                error.downcast_ref::<crate::LlmusageError>(),
+                Some(crate::LlmusageError::ConfigInvalid { .. })
+            ));
+            for language in [Language::English, Language::Chinese] {
+                let rendered = super::super::cli_errors::application_error(&error, language);
+                assert!(rendered.contains(language.select(en, zh)), "{rendered}");
+                if protocol != 99 {
+                    assert!(rendered.contains("EXTERNAL_DETAIL"));
+                }
+                if language == Language::Chinese {
+                    assert!(!rendered.contains(en), "{rendered}");
+                }
+            }
+        }
+        assert_eq!(fenced.hosts().list()?.len(), 1);
+        Ok(())
+    }
 
     #[test]
     fn remote_remove_keeps_usage_rows_by_default() -> anyhow::Result<()> {
@@ -336,6 +481,247 @@ mod tests {
             last_error: None,
             import_watermark: None,
         }
+    }
+
+    fn import_language_fixture(
+        watermark: Option<&str>,
+    ) -> anyhow::Result<(TempDir, AppContext, Store)> {
+        let temp = TempDir::new()?;
+        let app = AppContext::with_cli_home(Some(temp.path().join("home")))?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let mut host = ssh_host("devbox", "devbox");
+        host.import_watermark = watermark.map(str::to_string);
+        store.hosts().upsert(&host)?;
+        Ok((temp, app, store))
+    }
+
+    fn import_language_stream(records: &[ShardRecord]) -> anyhow::Result<String> {
+        let mut text = String::new();
+        for record in records {
+            text.push_str(&encode_record(record)?);
+            text.push('\n');
+        }
+        Ok(text)
+    }
+
+    #[test]
+    fn remote_import_rejections_keep_canonical_errors_contact_data_and_partial_commits()
+    -> anyhow::Result<()> {
+        use super::super::cli_errors::{application_error, canonical_detail, log_facts};
+        use crate::common::i18n::{Language, with_language};
+        let header = || {
+            ShardRecord::header(
+                "2026-08-20T02:00:00Z",
+                crate::remote::source_accounting_versions([SourceKind::Codex]),
+            )
+        };
+        let trailer = || ShardRecord::Trailer {
+            sources: Vec::new(),
+            parse_issues: ParseIssues::default(),
+        };
+        let shard = || {
+            let mut shard = SyncShard::new(SourceKind::Codex);
+            shard.events.push(usage_event("codex:partial:1"));
+            ShardRecord::Shard { shard }
+        };
+        let expected_version = crate::store::expected_token_accounting_version(SourceKind::Codex);
+        let mut bad_protocol = header();
+        if let ShardRecord::Header {
+            shard_protocol,
+            schema_version,
+            ..
+        } = &mut bad_protocol
+        {
+            *shard_protocol = 99;
+            *schema_version = 42;
+        }
+        let cases = [
+            (Vec::new(), "remote shard stream from host devbox had no header record: SSH_DETAIL".to_string(), "没有 header 记录", 0),
+            (vec![trailer()], "first deserialized shard record must be a header".to_string(), "必须是 header", 0),
+            (vec![bad_protocol], "shard protocol mismatch: local=2 remote=99 (remote schema_version=42); upgrade llmusage so both sides share shard_protocol 2".to_string(), "分片协议不一致", 0),
+            (vec![ShardRecord::header("fixed", BTreeMap::new())], "remote host devbox shard header is missing source token-accounting versions; upgrade llmusage on that host so both sides share shard_protocol 2 and the header lists each source's token_accounting_version".to_string(), "缺少来源 token 计数版本", 0),
+            (vec![ShardRecord::header("fixed", BTreeMap::from([("future_source".to_string(), 1)]))], "remote host devbox shard header lists unknown source future_source; upgrade llmusage so both sides share shard_protocol 2".to_string(), "未知来源 future_source", 0),
+            (vec![ShardRecord::header("fixed", BTreeMap::from([("codex".to_string(), expected_version + 1)]))], format!("token accounting mismatch for host devbox source codex: local={expected_version} remote={}; upgrade llmusage on that host so source codex reports token_accounting_version {expected_version} in shard protocol 2", expected_version + 1), "token 计数版本不一致", 0),
+            (vec![ShardRecord::header("fixed", crate::remote::source_accounting_versions([SourceKind::Claude])), shard()], "remote host devbox shard source codex is not listed in the header source_accounting_versions map; upgrade llmusage on that host so the header lists every shard source and its token_accounting_version".to_string(), "未列在 header", 0),
+            (vec![header(), shard()], "remote shard stream from host devbox ended without a trailer; imported events were kept but the host watermark was not advanced: SSH_DETAIL".to_string(), "未推进主机水位", 1),
+        ];
+        for (records, canonical, chinese, imported) in cases {
+            for language in [Language::English, Language::Chinese] {
+                let (_temp, app, store) = import_language_fixture(None)?;
+                let source = MemoryShardSource {
+                    stdout: import_language_stream(&records)?,
+                    stderr: "SSH_DETAIL".into(),
+                    status: 1,
+                };
+                let error = with_language(language, || {
+                    sync_remotes_with_source(&app, Some("devbox"), &source)
+                })
+                .expect_err("fake rejection");
+                let expected = format!("invalid config: {canonical}");
+                assert_eq!(error.to_string(), expected);
+                assert_eq!(canonical_detail(&error), expected);
+                assert!(matches!(
+                    error.downcast_ref::<crate::LlmusageError>(),
+                    Some(crate::LlmusageError::ConfigInvalid { .. })
+                ));
+                let human = application_error(&error, language);
+                let immediate = with_language(language, || import_error_line("devbox", &error));
+                for text in [&human, &immediate] {
+                    assert!(
+                        text.contains(language.select(&canonical, chinese)),
+                        "{text}"
+                    );
+                    if language == Language::Chinese {
+                        assert!(!text.contains(&canonical), "{text}");
+                    }
+                }
+                let (code, facts) = log_facts(&error).expect("neutral metadata");
+                let fields = serde_json::json!({"event_code":"commands.mod.04","error":expected,"diagnostic_code":code,"diagnostic_facts":facts});
+                let replay = crate::common::i18n::logging::project(
+                    language,
+                    "ERROR",
+                    Some("run failed"),
+                    &fields,
+                    false,
+                );
+                assert!(
+                    replay.contains(language.select(&canonical, chinese)),
+                    "{replay}"
+                );
+                let host = store.hosts().get_by_label("devbox")?.expect("host");
+                assert_eq!(host.last_error.as_deref(), Some(expected.as_str()));
+                assert!(host.import_watermark.is_none());
+                assert_eq!(
+                    store.host_source_event_count("devbox", SourceKind::Codex)?,
+                    imported
+                );
+                assert!(
+                    store
+                        .token_accounting_version_for_host("devbox", SourceKind::Codex)?
+                        .is_none()
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn remote_import_historical_refusal_preserves_rows_watermark_and_original_cause()
+    -> anyhow::Result<()> {
+        use crate::common::i18n::{Language, with_language};
+        for language in [Language::English, Language::Chinese] {
+            let watermark = "2026-08-19T00:00:00Z";
+            let (_temp, app, store) = import_language_fixture(Some(watermark))?;
+            let mut shard = SyncShard::new_for_host(SourceKind::Codex, "devbox");
+            shard.events.push(usage_event("codex:old:1"));
+            let mut writer = store.begin_sync_run()?;
+            writer.commit_shard(shard)?;
+            writer.finish_sync_run()?;
+            let source = MemoryShardSource {
+                stdout: import_language_stream(&[ShardRecord::header(
+                    "fixed",
+                    crate::remote::source_accounting_versions([SourceKind::Codex]),
+                )])?,
+                stderr: String::new(),
+                status: 0,
+            };
+            let error = with_language(language, || {
+                sync_remotes_with_source(&app, Some("devbox"), &source)
+            })
+            .expect_err("untrusted history");
+            let expected_version =
+                crate::store::expected_token_accounting_version(SourceKind::Codex);
+            let canonical = format!(
+                "invalid config: remote host devbox source codex already has imported rows without a trusted current token-accounting marker (historical=unknown, current={expected_version}); a full restore is required (not implemented); existing events and watermarks were left unchanged"
+            );
+            assert_eq!(
+                super::super::cli_errors::canonical_detail(&error),
+                canonical
+            );
+            let human = super::super::cli_errors::application_error(&error, language);
+            assert!(
+                human.contains(language.select(
+                    "a full restore is required (not implemented)",
+                    "需要完整恢复（尚未实现）"
+                )),
+                "{human}"
+            );
+            if language == Language::Chinese {
+                assert!(!human.contains("historical=unknown"));
+            }
+            let host = store.hosts().get_by_label("devbox")?.expect("host");
+            assert_eq!(host.last_error.as_deref(), Some(canonical.as_str()));
+            assert_eq!(host.import_watermark.as_deref(), Some(watermark));
+            assert_eq!(
+                store.host_source_event_count("devbox", SourceKind::Codex)?,
+                1
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn remote_import_warning_facts_translate_without_changing_public_outcome() -> anyhow::Result<()>
+    {
+        use crate::common::i18n::{Language, with_language};
+        for language in [Language::English, Language::Chinese] {
+            let (_temp, app, store) = import_language_fixture(None)?;
+            let mut shard = SyncShard::new(SourceKind::Codex);
+            shard.events.push(usage_event("codex:warning:1"));
+            let source = MemoryShardSource {
+                stdout: format!(
+                    "MOTD\n{}",
+                    import_language_stream(&[
+                        ShardRecord::header(
+                            "fixed",
+                            crate::remote::source_accounting_versions([SourceKind::Codex])
+                        ),
+                        ShardRecord::Shard { shard },
+                        ShardRecord::Trailer {
+                            sources: vec![crate::parsers::SourceSyncStats {
+                                source: SourceKind::Codex,
+                                ..Default::default()
+                            }],
+                            parse_issues: ParseIssues::default()
+                        },
+                    ])?
+                ),
+                stderr: String::new(),
+                status: 0,
+            };
+            with_language(language, || {
+                sync_remotes_with_source(&app, Some("devbox"), &source)
+            })?;
+            let host = store.hosts().get_by_label("devbox")?.expect("host");
+            let mut writer = store.begin_sync_run()?;
+            let result = RemoteImporter::import_with_facts(&host, &store, &mut writer, &source)?;
+            writer.finish_sync_run()?;
+            assert_eq!(
+                result.outcome.warnings,
+                ["skipped 1 non-JSON shard lines from host devbox"]
+            );
+            assert_eq!(result.outcome.skipped_lines, 1);
+            assert_eq!(result.outcome.shards_committed, 1);
+            let warning = with_language(language, || import_warning_line(&result.warnings[0]));
+            assert!(
+                warning.contains(language.select(
+                    "skipped 1 non-JSON shard lines from host devbox",
+                    "已跳过主机 devbox 的 1 行非 JSON 分片内容"
+                )),
+                "{warning}"
+            );
+            assert_eq!(
+                store.host_source_event_count("devbox", SourceKind::Codex)?,
+                1
+            );
+            assert_eq!(
+                host.import_watermark.as_deref(),
+                Some("2026-08-20T00:00:00Z")
+            );
+            assert!(host.last_error.is_none());
+        }
+        Ok(())
     }
 
     #[test]

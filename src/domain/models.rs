@@ -178,6 +178,7 @@ impl ParseIssues {
             .saturating_add(self.accounting_anomaly_lines)
     }
 
+    #[cfg(test)]
     pub(crate) fn sample_summary(&self) -> String {
         let total = self.total().saturating_add(self.informational_total());
         let shown = self.samples.len().min(MAX_PARSE_ISSUE_SAMPLES);

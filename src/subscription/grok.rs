@@ -5,6 +5,9 @@ use anyhow::Result;
 use serde_json::Value;
 
 use super::http::{client, status_error};
+use super::presentation::{
+    self, DiagnosticHint, MetricHint, PresentedOutput, RemainingHint, WindowHint,
+};
 use super::types::{UsageMetric, UsageOutput};
 
 #[derive(Debug, Clone)]
@@ -29,7 +32,7 @@ pub async fn fetch(
     subscriptions_url: &str,
     task_usage_url: &str,
     timeout: Duration,
-) -> Result<UsageOutput> {
+) -> Result<PresentedOutput> {
     let path = auth_path(user_home);
     let before = std::fs::read(&path)?;
     let document: Value = serde_json::from_slice(&before)?;
@@ -39,12 +42,15 @@ pub async fn fetch(
 
     for creds in &credentials {
         match fetch_one(&http, creds, subscriptions_url, task_usage_url).await {
-            Ok(output) if !output.metrics.is_empty() || output.plan.is_some() => {
+            Ok((output, hints)) if !output.metrics.is_empty() || output.plan.is_some() => {
                 let after = std::fs::read(&path).unwrap_or_default();
                 if after != before {
-                    anyhow::bail!("Grok credentials were modified during fetch");
+                    return Err(presentation::error(
+                        "Grok credentials were modified during fetch",
+                        DiagnosticHint::CredentialsModified,
+                    ));
                 }
-                return Ok(output);
+                return Ok((output, hints));
             }
             Ok(_) => {}
             Err(error) => last_error = Some(error),
@@ -53,15 +59,23 @@ pub async fn fetch(
 
     let after = std::fs::read(&path).unwrap_or_default();
     if after != before {
-        anyhow::bail!("Grok credentials were modified during fetch");
+        return Err(presentation::error(
+            "Grok credentials were modified during fetch",
+            DiagnosticHint::CredentialsModified,
+        ));
     }
-    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("Grok usage unavailable")))
+    Err(last_error.unwrap_or_else(|| {
+        presentation::error("Grok usage unavailable", DiagnosticHint::Unavailable)
+    }))
 }
 
 fn credential_candidates(document: &Value) -> Result<Vec<Credentials>> {
-    let entries = document
-        .as_object()
-        .ok_or_else(|| anyhow::anyhow!("Grok auth.json must contain an object."))?;
+    let entries = document.as_object().ok_or_else(|| {
+        presentation::error(
+            "Grok auth.json must contain an object.",
+            DiagnosticHint::InvalidAuthObject,
+        )
+    })?;
     let mut candidates: Vec<_> = entries
         .iter()
         .filter_map(|(scope, value)| {
@@ -86,7 +100,10 @@ fn credential_candidates(document: &Value) -> Result<Vec<Credentials>> {
         .map(|(_, credentials)| credentials)
         .collect();
     if credentials.is_empty() {
-        anyhow::bail!("No Grok token found. Run 'grok login'.");
+        return Err(presentation::error(
+            "No Grok token found. Run 'grok login'.",
+            DiagnosticHint::MissingToken,
+        ));
     }
     Ok(credentials)
 }
@@ -96,29 +113,36 @@ async fn fetch_one(
     creds: &Credentials,
     subscriptions_url: &str,
     task_usage_url: &str,
-) -> Result<UsageOutput> {
+) -> Result<PresentedOutput> {
     let mut plan = None;
     let mut metrics = Vec::new();
+    let mut hints = Vec::new();
 
     if let Ok(value) = get_json(http, creds, task_usage_url, "Grok").await {
-        collect_task_usage_metrics(&value, &mut metrics);
+        collect_task_usage_metrics(&value, &mut metrics, &mut hints);
     }
     if let Ok(value) = get_json(http, creds, subscriptions_url, "Grok").await {
         plan = parse_subscription_plan(&value);
     }
 
     if metrics.is_empty() && plan.is_none() {
-        anyhow::bail!("Grok usage unavailable: no usage or active subscription data returned");
+        return Err(presentation::error(
+            "Grok usage unavailable: no usage or active subscription data returned",
+            DiagnosticHint::NoUsage,
+        ));
     }
 
-    Ok(UsageOutput {
-        provider: "Grok Build".into(),
-        account: None,
-        credential_source: None,
-        plan,
-        email: creds.email.clone(),
-        metrics,
-    })
+    Ok((
+        UsageOutput {
+            provider: "Grok Build".into(),
+            account: None,
+            credential_source: None,
+            plan,
+            email: creds.email.clone(),
+            metrics,
+        },
+        hints,
+    ))
 }
 
 async fn get_json(
@@ -186,6 +210,8 @@ fn numeric_value(value: &Value) -> Option<f64> {
 
 fn push_limit_metric(
     metrics: &mut Vec<UsageMetric>,
+    hints: &mut Vec<MetricHint>,
+    window: WindowHint,
     label: &str,
     used: Option<f64>,
     limit: Option<f64>,
@@ -197,6 +223,14 @@ fn push_limit_metric(
     let used = used.unwrap_or(0.0).clamp(0.0, limit);
     let used_percent = (used / limit * 100.0).clamp(0.0, 100.0);
     let remaining_label = format!("{:.0}/{:.0} left", limit - used, limit);
+    hints.push(MetricHint {
+        window,
+        prefix: None,
+        remaining: Some(RemainingHint::Rounded {
+            remaining: limit - used,
+            limit,
+        }),
+    });
     metrics.push(UsageMetric {
         label: label.into(),
         used_percent,
@@ -206,7 +240,11 @@ fn push_limit_metric(
     });
 }
 
-fn collect_task_usage_metrics(value: &Value, metrics: &mut Vec<UsageMetric>) {
+fn collect_task_usage_metrics(
+    value: &Value,
+    metrics: &mut Vec<UsageMetric>,
+    hints: &mut Vec<MetricHint>,
+) {
     if let Value::Object(object) = value {
         let reset = object
             .get("resetTime")
@@ -216,6 +254,8 @@ fn collect_task_usage_metrics(value: &Value, metrics: &mut Vec<UsageMetric>) {
             .map(ToString::to_string);
         push_limit_metric(
             metrics,
+            hints,
+            WindowHint::Weekly,
             "Weekly",
             object.get("usage").and_then(numeric_value),
             object.get("limit").and_then(numeric_value),
@@ -223,6 +263,8 @@ fn collect_task_usage_metrics(value: &Value, metrics: &mut Vec<UsageMetric>) {
         );
         push_limit_metric(
             metrics,
+            hints,
+            WindowHint::Frequent,
             "Frequent",
             object.get("frequentUsage").and_then(numeric_value),
             object.get("frequentLimit").and_then(numeric_value),
@@ -230,17 +272,50 @@ fn collect_task_usage_metrics(value: &Value, metrics: &mut Vec<UsageMetric>) {
         );
         push_limit_metric(
             metrics,
+            hints,
+            WindowHint::Occasional,
             "Occasional",
             object.get("occasionalUsage").and_then(numeric_value),
             object.get("occasionalLimit").and_then(numeric_value),
             reset,
         );
         for child in object.values() {
-            collect_task_usage_metrics(child, metrics);
+            collect_task_usage_metrics(child, metrics, hints);
         }
     } else if let Value::Array(items) = value {
         for child in items {
-            collect_task_usage_metrics(child, metrics);
+            collect_task_usage_metrics(child, metrics, hints);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn presentation_keeps_original_rounded_quantity_and_nested_metric_order() {
+        let mut metrics = Vec::new();
+        let mut hints = Vec::new();
+        let value = serde_json::json!({ "usage": 0.49, "limit": 1.0,
+            "children": [{ "frequentUsage": 1.2, "frequentLimit": 3.0 }] });
+        collect_task_usage_metrics(&value, &mut metrics, &mut hints);
+        assert_eq!(metrics.len(), 2);
+        assert_eq!(metrics[0].remaining_label.as_deref(), Some("1/1 left"));
+        assert_eq!(metrics[0].remaining_percent, 51.0);
+        assert_eq!(
+            hints[0].remaining,
+            Some(RemainingHint::Rounded {
+                remaining: 0.51,
+                limit: 1.0
+            })
+        );
+        assert_eq!(hints[1].window, WindowHint::Frequent);
+        assert_eq!(
+            hints[1].remaining,
+            Some(RemainingHint::Rounded {
+                remaining: 1.8,
+                limit: 3.0
+            })
+        );
     }
 }

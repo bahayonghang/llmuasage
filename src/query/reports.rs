@@ -1665,6 +1665,7 @@ fn load_blocks_report_at(
         .collect::<Vec<_>>();
     sort_by_key(&mut blocks, filter.order, |row| row.start_at.clone());
     debug!(
+        event_code = "query.reports.01",
         operation = "blocks_report",
         anchor_probe_events = scan.anchor_probe_events,
         scanned_events = scan.scanned_events,

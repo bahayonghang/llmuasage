@@ -86,6 +86,7 @@ fn preflight_listing(path: &Path, source: SourceKind) -> FamilyInputs {
                         Vec::new()
                     },
                     errors: Vec::new(),
+                    ..Default::default()
                 },
             )
         }),
@@ -1009,6 +1010,7 @@ async fn coverage_without_prior_diagnostics_reports_actual_disk_gaps() {
                         Vec::new()
                     },
                     errors: Vec::new(),
+                    ..Default::default()
                 },
             )
         }),
@@ -1101,6 +1103,7 @@ async fn coverage_ignores_stale_diagnostics_and_derives_from_current_disk() {
                         Vec::new()
                     },
                     errors: Vec::new(),
+                    ..Default::default()
                 },
             )
         }),

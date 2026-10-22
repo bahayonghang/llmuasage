@@ -73,11 +73,24 @@ pub async fn drive_with_events(ctx: DriveContext<'_, '_>) -> Result<Vec<SourceSy
 pub(crate) struct DriveResult {
     pub(crate) stats: Vec<SourceSyncStats>,
     pub(crate) source_issues: SourceIssues,
+    pub(crate) feedback: Vec<super::feedback::ParserFeedback>,
 }
 
 /// Antigravity rebuilds stage both native products before replacing history.
 /// Other parsers retain the engine's existing pre-reset behavior.
 pub(crate) async fn drive_with_rebuild(
+    ctx: DriveContext<'_, '_>,
+    rebuild: bool,
+    allow_lossy_rebuild: bool,
+) -> Result<DriveResult> {
+    let (result, feedback) =
+        super::feedback::collect(drive_with_rebuild_inner(ctx, rebuild, allow_lossy_rebuild)).await;
+    let mut result = result?;
+    result.feedback = feedback;
+    Ok(result)
+}
+
+async fn drive_with_rebuild_inner(
     mut ctx: DriveContext<'_, '_>,
     rebuild: bool,
     allow_lossy_rebuild: bool,
@@ -91,7 +104,11 @@ pub(crate) async fn drive_with_rebuild(
      * 2) 把外部锁等待耗时注入每个 source 的 stats
      * 3) 收集每源 SourceSyncStats 后返回
      */
-    info!(parsers = ctx.parsers.len(), "开始驱动 SourceParser 列表");
+    info!(
+        event_code = "parsers.driver.01",
+        parsers = ctx.parsers.len(),
+        "开始驱动 SourceParser 列表"
+    );
 
     let run_started_at = ctx.writer.run_started_at().to_string();
     let mut all_stats = Vec::with_capacity(ctx.parsers.len());
@@ -163,8 +180,7 @@ pub(crate) async fn drive_with_rebuild(
             stats.lock_wait_ms = ctx.lock_wait_ms;
             emit_parse_issues_log(&stats);
             let source = stats.source;
-            tracing::debug!(
-                source = %source,
+            tracing::debug!(event_code = "parsers.driver.02", source = %source,
                 parse_wall_ms = parse_started.elapsed().as_millis() as u64,
                 progress_dropped = progress_dropped.load(std::sync::atomic::Ordering::Relaxed),
                 "source parse finished"
@@ -179,7 +195,7 @@ pub(crate) async fn drive_with_rebuild(
                 || ctx.cancel.is_cancelled()
                 || (is_antigravity && ctx.recent_cutoff.is_some())
             {
-                info!(source = %source, "source inventory incomplete; skipping missing sweep");
+                info!(event_code = "parsers.driver.03", source = %source, "source inventory incomplete; skipping missing sweep");
             } else {
                 for host_id in &ctx.sweep_host_ids {
                     let swept =
@@ -187,7 +203,7 @@ pub(crate) async fn drive_with_rebuild(
                             .source_files()
                             .sweep_missing(source, host_id, &run_started_at)?;
                     if swept > 0 {
-                        info!(source = %source, host_id = %host_id, swept, "标记 missing 文件完成");
+                        info!(event_code = "parsers.driver.04", source = %source, host_id = %host_id, swept, "标记 missing 文件完成");
                     }
                 }
             }
@@ -204,10 +220,15 @@ pub(crate) async fn drive_with_rebuild(
         }
     }
 
-    info!(sources = all_stats.len(), "完成 SourceParser 列表驱动");
+    info!(
+        event_code = "parsers.driver.05",
+        sources = all_stats.len(),
+        "完成 SourceParser 列表驱动"
+    );
     Ok(DriveResult {
         stats: all_stats,
         source_issues,
+        feedback: Vec::new(),
     })
 }
 
@@ -223,8 +244,7 @@ fn emit_parse_issues_log(stats: &SourceSyncStats) {
         .filter(|reason| !reason.is_empty())
         .collect::<Vec<_>>()
         .join(",");
-    info!(
-        source = %stats.source,
+    info!(event_code = "parsers.driver.06", source = %stats.source,
         malformed = stats.parse_issues.malformed_lines,
         oversized = stats.parse_issues.oversized_lines,
         skipped = stats.parse_issues.skipped_lines,

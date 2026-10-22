@@ -1,3 +1,6 @@
+use crate::common::i18n::commands::{
+    DiagnosticFacts as Facts, reports::DiagnosticFacts as ReportFacts,
+};
 use std::{
     fs,
     io::{self, IsTerminal, Read},
@@ -9,6 +12,7 @@ use tracing::debug;
 
 use crate::{
     app::AppContext,
+    common::i18n::{commands::reports::Message as Msg, current},
     query::{
         Dashboard,
         reports::{self, ReportTimezone},
@@ -17,10 +21,16 @@ use crate::{
     tui::report_table,
 };
 
-use super::report_args::{CostSourceArg, StatuslineArgs};
+use super::{
+    cli_errors::Diagnostic,
+    report_args::{CostSourceArg, StatuslineArgs},
+};
 
 pub async fn run(app: &AppContext, args: StatuslineArgs) -> Result<()> {
-    debug!("starting statusline output");
+    debug!(
+        event_code = "commands.statusline.01",
+        "starting statusline output"
+    );
     let hook_input = read_hook_input()?;
     let store = Store::new(&app.paths)?;
     store.require_initialized()?;
@@ -28,7 +38,7 @@ pub async fn run(app: &AppContext, args: StatuslineArgs) -> Result<()> {
         .paths
         .root_dir
         .join("statusline-cache")
-        .join("latest.txt");
+        .join(format!("latest.{}.txt", current().code()));
 
     let dashboard = Dashboard::open(&store)?;
     let line = match reports::load_statusline_summary(dashboard.connection(), ReportTimezone::Local)
@@ -39,39 +49,53 @@ pub async fn run(app: &AppContext, args: StatuslineArgs) -> Result<()> {
                 .as_ref()
                 .map(|block| {
                     format!(
-                        "block {} projected {}",
+                        "{} {} {} {}",
+                        Msg::StatusBlock.text(),
                         report_table::format_count(block.totals.total_tokens),
+                        Msg::StatusProjected.text(),
                         report_table::format_count(block.projected_total_tokens)
                     )
                 })
-                .unwrap_or_else(|| "no active block".to_string());
+                .unwrap_or_else(|| Msg::NoActiveBlock.text().to_string());
             let cost = format_statusline_cost(args.cost_source, &summary.today, &hook_input);
             format!(
-                "{} | today {} {} | {}",
+                "{} | {} {} {} | {}",
                 hook_input
                     .model
                     .clone()
                     .unwrap_or_else(|| "llmusage".to_string()),
+                Msg::Today.text(),
                 report_table::format_count(summary.today.total_tokens),
                 cost,
                 active
             )
         }
         Err(err) if args.use_cache() => fs::read_to_string(&cache_path)
-            .unwrap_or_else(|_| format!("llmusage | unavailable: {err}")),
-        Err(err) => format!("llmusage | unavailable: {err}"),
+            .unwrap_or_else(|_| format!("llmusage | {}: {err}", Msg::Unavailable.text())),
+        Err(err) => format!("llmusage | {}: {err}", Msg::Unavailable.text()),
     };
+    let line = line.replace(['\r', '\n'], " ");
 
     println!("{line}");
     if args.use_cache() {
         if let Some(parent) = cache_path.parent() {
-            fs::create_dir_all(parent)?;
+            fs::create_dir_all(parent)
+                .map_err(|error| statusline_io(error, ReportFacts::StatuslineCacheDirectory {}))?;
         }
-        fs::write(cache_path, &line)?;
+        fs::write(cache_path, &line)
+            .map_err(|error| statusline_io(error, ReportFacts::StatuslineCacheWrite {}))?;
     }
 
-    debug!("finished statusline output");
+    debug!(
+        event_code = "commands.statusline.02",
+        "finished statusline output"
+    );
     Ok(())
+}
+
+fn statusline_io(error: io::Error, facts: ReportFacts) -> anyhow::Error {
+    let canonical = error.to_string();
+    anyhow::Error::new(error).context(Diagnostic::with_facts(canonical, Facts::Reports(facts)))
 }
 
 fn format_statusline_cost(
@@ -83,12 +107,18 @@ fn format_statusline_cost(
     let hook_cost = hook_input.cost_usd.map(report_table::format_cost);
     match cost_source {
         CostSourceArg::Llmusage => db_cost,
-        CostSourceArg::Hook => hook_cost.unwrap_or_else(|| "hook n/a".to_string()),
+        CostSourceArg::Hook => hook_cost.unwrap_or_else(|| Msg::HookUnavailable.text().to_string()),
         CostSourceArg::Both => hook_cost
-            .map(|value| format!("db {db_cost} hook {value}"))
-            .unwrap_or_else(|| format!("db {db_cost} hook n/a")),
+            .map(|value| format!("{} {db_cost} {} {value}", Msg::Db.text(), Msg::Hook.text()))
+            .unwrap_or_else(|| {
+                format!(
+                    "{} {db_cost} {}",
+                    Msg::Db.text(),
+                    Msg::HookUnavailable.text()
+                )
+            }),
         CostSourceArg::Auto => hook_cost
-            .map(|value| format!("db {db_cost} hook {value}"))
+            .map(|value| format!("{} {db_cost} {} {value}", Msg::Db.text(), Msg::Hook.text()))
             .unwrap_or(db_cost),
     }
 }
@@ -105,7 +135,9 @@ fn read_hook_input() -> Result<HookInput> {
         return Ok(HookInput::default());
     }
     let mut raw = String::new();
-    stdin.read_to_string(&mut raw)?;
+    stdin
+        .read_to_string(&mut raw)
+        .map_err(|error| statusline_io(error, ReportFacts::StatuslineRead {}))?;
     if raw.trim().is_empty() {
         return Ok(HookInput::default());
     }
@@ -156,5 +188,40 @@ fn find_cost_value(value: &Value) -> Option<f64> {
         }
         Value::Array(items) => items.iter().find_map(find_cost_value),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::i18n::{Language, with_language};
+
+    #[test]
+    fn statusline_io_preserves_original_display_and_typed_source_with_paired_context() {
+        for language in [Language::English, Language::Chinese] {
+            for facts in [
+                ReportFacts::StatuslineRead {},
+                ReportFacts::StatuslineCacheDirectory {},
+                ReportFacts::StatuslineCacheWrite {},
+            ] {
+                with_language(language, || {
+                    let error = statusline_io(
+                        io::Error::new(io::ErrorKind::PermissionDenied, "external OS detail"),
+                        facts.clone(),
+                    );
+                    assert_eq!(error.to_string(), "external OS detail");
+                    assert_eq!(
+                        error.downcast_ref::<io::Error>().unwrap().kind(),
+                        io::ErrorKind::PermissionDenied
+                    );
+                    let human = crate::commands::cli_errors::application_error(&error, language);
+                    assert!(
+                        human.contains(&facts.render(language).unwrap())
+                            && human.contains("external OS detail"),
+                        "{human}"
+                    );
+                });
+            }
+        }
     }
 }

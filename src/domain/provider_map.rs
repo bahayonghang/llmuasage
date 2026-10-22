@@ -96,15 +96,13 @@ impl ProviderIndex {
         match Self::load(&path) {
             Ok(index) => Ok(Some(index)),
             Err(LlmusageError::Io(err)) if err.kind() == std::io::ErrorKind::NotFound => {
-                debug!(
-                    path = %path.display(),
+                debug!(event_code = "domain.provider_map.01", path = %path.display(),
                     "CCR provider activation log not found; syncing without provider labels"
                 );
                 Ok(None)
             }
             Err(err) => {
-                warn!(
-                    path = %path.display(),
+                warn!(event_code = "domain.provider_map.02", path = %path.display(),
                     error = %err,
                     "failed to load default CCR provider activation log; syncing without provider labels"
                 );
@@ -149,8 +147,7 @@ fn parse_activation_line(
     let parsed: ProviderActivationLine = match serde_json::from_str(raw) {
         Ok(value) => value,
         Err(error) => {
-            debug!(
-                path = %path.display(),
+            debug!(event_code = "domain.provider_map.03", path = %path.display(),
                 line = line_number,
                 error = %error,
                 "skipping malformed provider activation line"
@@ -163,8 +160,7 @@ fn parse_activation_line(
     let source = match SourceKind::parse_id(platform) {
         Some(source) => source,
         None => {
-            debug!(
-                path = %path.display(),
+            debug!(event_code = "domain.provider_map.04", path = %path.display(),
                 line = line_number,
                 platform,
                 "skipping provider activation for unknown platform"
@@ -180,8 +176,7 @@ fn parse_activation_line(
     {
         Some(value) => value.with_timezone(&Utc),
         None => {
-            debug!(
-                path = %path.display(),
+            debug!(event_code = "domain.provider_map.05", path = %path.display(),
                 line = line_number,
                 "skipping provider activation with invalid timestamp"
             );
@@ -200,8 +195,7 @@ fn parse_activation_line(
             .unwrap_or("")
             .to_string(),
         _ => {
-            debug!(
-                path = %path.display(),
+            debug!(event_code = "domain.provider_map.06", path = %path.display(),
                 line = line_number,
                 event,
                 "skipping provider activation with unknown event"

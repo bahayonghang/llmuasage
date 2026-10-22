@@ -1,3 +1,4 @@
+use crate::common::i18n::commands::reports::Message as Msg;
 use anyhow::Result;
 use chrono::Duration;
 use serde::{
@@ -314,7 +315,7 @@ pub(crate) fn print_host_section(
         return Ok(());
     }
     println!();
-    println!("By host");
+    println!("{}", Msg::ByHost.text());
     for row in rows {
         if no_cost {
             println!("  {}  {}  {}", row.period, row.host, row.total_tokens);

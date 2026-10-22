@@ -1,5 +1,115 @@
 use super::*;
 
+/// Same-call, language-neutral evidence retained before canonical text erasure.
+#[derive(Debug, Clone)]
+pub(crate) enum OptimizeEvidence {
+    LowReadEdit {
+        reads: i64,
+        edits: i64,
+    },
+    DuplicateReads {
+        session: String,
+        target: String,
+        calls: i64,
+    },
+    JunkReads {
+        calls: i64,
+        example: String,
+    },
+    SessionOutlier {
+        session: String,
+        percent: f64,
+    },
+}
+
+impl OptimizeEvidence {
+    pub(crate) fn id(&self) -> &'static str {
+        match self {
+            Self::LowReadEdit { .. } => "low_read_edit_ratio",
+            Self::DuplicateReads { .. } => "duplicate_reads",
+            Self::JunkReads { .. } => "junk_reads",
+            Self::SessionOutlier { .. } => "session_outlier",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct OptimizePresentation {
+    fingerprint: Option<[u8; 32]>,
+    pub(crate) evidence: Vec<OptimizeEvidence>,
+}
+
+impl OptimizePresentation {
+    pub(crate) fn new(payload: &OptimizePayload, evidence: Vec<OptimizeEvidence>) -> Self {
+        Self {
+            fingerprint: Self::fingerprint(payload),
+            evidence,
+        }
+    }
+
+    fn fingerprint(payload: &OptimizePayload) -> Option<[u8; 32]> {
+        use sha2::{Digest, Sha256};
+        serde_json::to_vec(payload)
+            .ok()
+            .map(|bytes| Sha256::digest(bytes).into())
+    }
+
+    pub(crate) fn matches(&self, payload: &OptimizePayload) -> bool {
+        self.fingerprint.is_some() && self.fingerprint == Self::fingerprint(payload)
+    }
+}
+
+#[cfg(test)]
+mod presentation_tests {
+    use super::*;
+    use crate::testing::Fixture;
+
+    #[test]
+    fn same_call_hints_preserve_public_payload_and_original_detector_parameters()
+    -> anyhow::Result<()> {
+        let fixture = Fixture::new()?;
+        let conn = fixture.store().open_connection()?;
+        for index in 0..3 {
+            conn.execute(
+                "INSERT INTO usage_turn(turn_key,source,session_id,source_path_hash,project_hash,primary_model,started_at,category,has_edits,retries,one_shot,call_count,input_tokens,cache_read_tokens,cache_creation_tokens,output_tokens,reasoning_output_tokens,total_tokens,created_at) VALUES (?1,'codex','SESSION_SENTINEL','path','project','MODEL_SENTINEL','2026-08-19T00:00:00Z','coding',1,0,1,1,100,0,0,0,0,100,'2026-08-19T00:00:00Z')",
+                [format!("turn:hint:{index}")],
+            )?;
+        }
+        for index in 0..7 {
+            let kind = if index < 2 { "read" } else { "edit" };
+            conn.execute(
+                "INSERT INTO usage_tool_call(tool_call_key,turn_key,event_key,source,session_id,source_path_hash,project_hash,model,occurred_at,tool_name,tool_kind,mcp_server,mcp_tool,input_fingerprint,safe_preview,created_at) VALUES (?1,'turn:hint:0','hint:event','codex','SESSION_SENTINEL','path','project','MODEL_SENTINEL','2026-08-19T00:00:00Z','TOOL_SENTINEL',?2,NULL,NULL,'TARGET_SENTINEL','node_modules/EXAMPLE_SENTINEL','2026-08-19T00:00:00Z')",
+                rusqlite::params![format!("tool:hint:{index}"), kind],
+            )?;
+        }
+        let dashboard = Dashboard::open(fixture.store())?;
+        let filter = QueryFilter::default();
+        let (payload, hints) = dashboard.optimize_with_presentation(&filter)?;
+        assert_eq!(
+            serde_json::to_value(&payload)?,
+            serde_json::to_value(dashboard.optimize(&filter)?)?
+        );
+        assert_eq!(
+            serde_json::to_value(&payload)?,
+            serde_json::to_value(dashboard.legacy_optimize(&filter)?)?
+        );
+        assert_eq!(hints.evidence.len(), 4);
+        assert!(hints.matches(&payload));
+        assert!(
+            hints
+                .evidence
+                .iter()
+                .any(|item| matches!(item, OptimizeEvidence::LowReadEdit { reads: 2, edits: 5 }))
+        );
+        assert!(hints.evidence.iter().any(|item| matches!(item, OptimizeEvidence::DuplicateReads {calls: 2, target, ..} if target == "TARGET_SENTINEL")));
+        let mut wrong_report = payload.clone();
+        wrong_report.score += 1;
+        assert!(!hints.matches(&wrong_report));
+
+        Ok(())
+    }
+}
+
 fn severity_rank(severity: &str) -> i64 {
     match severity {
         "high" => 3,
@@ -90,29 +200,40 @@ impl Dashboard {
     /// `usage_turn` / `usage_tool_call` rows plus persisted event costs. They
     /// never inspect raw transcripts and never execute cleanup actions.
     pub fn optimize(&self, filter: &QueryFilter) -> Result<OptimizePayload> {
+        self.optimize_with_presentation(filter)
+            .map(|(payload, _)| payload)
+    }
+
+    pub(crate) fn optimize_with_presentation(
+        &self,
+        filter: &QueryFilter,
+    ) -> Result<(OptimizePayload, OptimizePresentation)> {
+        let mut evidence = Vec::new();
         let support = behavior_support(&self.conn, "usage_turn", filter.turn_filter(None))?;
         if !support.supported {
-            return Ok(OptimizePayload {
+            let payload = OptimizePayload {
                 support,
                 score: 100,
                 grade: "A".to_string(),
                 estimated_savings_tokens: 0,
                 estimated_savings_usd: 0.0,
                 findings: Vec::new(),
-            });
+            };
+            let presentation = OptimizePresentation::new(&payload, evidence);
+            return Ok((payload, presentation));
         }
 
         let mut findings = Vec::new();
-        if let Some(finding) = self.detect_low_read_edit_ratio(filter)? {
+        if let Some(finding) = self.detect_low_read_edit_ratio(filter, &mut evidence)? {
             findings.push(finding);
         }
-        if let Some(finding) = self.detect_duplicate_reads(filter)? {
+        if let Some(finding) = self.detect_duplicate_reads(filter, &mut evidence)? {
             findings.push(finding);
         }
-        if let Some(finding) = self.detect_junk_reads(filter)? {
+        if let Some(finding) = self.detect_junk_reads(filter, &mut evidence)? {
             findings.push(finding);
         }
-        if let Some(finding) = self.detect_session_outlier(filter)? {
+        if let Some(finding) = self.detect_session_outlier(filter, &mut evidence)? {
             findings.push(finding);
         }
 
@@ -144,14 +265,16 @@ impl Dashboard {
             .sum::<i64>();
         let score = (100 - penalty).clamp(0, 100);
 
-        Ok(OptimizePayload {
+        let payload = OptimizePayload {
             support,
             score,
             grade: health_grade(score).to_string(),
             estimated_savings_tokens,
             estimated_savings_usd,
             findings,
-        })
+        };
+        let presentation = OptimizePresentation::new(&payload, evidence);
+        Ok((payload, presentation))
     }
 
     #[cfg(test)]
@@ -172,10 +295,10 @@ impl Dashboard {
         if let Some(finding) = self.legacy_detect_low_read_edit_ratio(filter)? {
             findings.push(finding);
         }
-        if let Some(finding) = self.detect_duplicate_reads(filter)? {
+        if let Some(finding) = self.detect_duplicate_reads(filter, &mut Vec::new())? {
             findings.push(finding);
         }
-        if let Some(finding) = self.detect_junk_reads(filter)? {
+        if let Some(finding) = self.detect_junk_reads(filter, &mut Vec::new())? {
             findings.push(finding);
         }
         if let Some(finding) = self.legacy_detect_session_outlier(filter)? {
@@ -269,7 +392,11 @@ impl Dashboard {
         Ok(set)
     }
 
-    fn detect_low_read_edit_ratio(&self, filter: &QueryFilter) -> Result<Option<OptimizeFinding>> {
+    fn detect_low_read_edit_ratio(
+        &self,
+        filter: &QueryFilter,
+        evidence: &mut Vec<OptimizeEvidence>,
+    ) -> Result<Option<OptimizeFinding>> {
         let tool_filter = filter.tool_filter(Some("tc"));
         let count_sql = format!(
             r#"
@@ -312,6 +439,10 @@ impl Dashboard {
             params_from_iter(edit_filter.params().iter()),
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
+        evidence.push(OptimizeEvidence::LowReadEdit {
+            reads: read_calls,
+            edits: edit_calls,
+        });
         Ok(Some(OptimizeFinding {
             id: "low_read_edit_ratio".to_string(),
             title: "Low Read/Edit ratio".to_string(),
@@ -383,7 +514,11 @@ impl Dashboard {
         }))
     }
 
-    fn detect_duplicate_reads(&self, filter: &QueryFilter) -> Result<Option<OptimizeFinding>> {
+    fn detect_duplicate_reads(
+        &self,
+        filter: &QueryFilter,
+        evidence: &mut Vec<OptimizeEvidence>,
+    ) -> Result<Option<OptimizeFinding>> {
         let mut tool_filter = filter.tool_filter(Some("tc"));
         tool_filter.push_raw("tc.tool_kind IN ('read', 'search')");
         tool_filter.push_raw("tc.session_id IS NOT NULL");
@@ -420,6 +555,11 @@ impl Dashboard {
         let Some((session_id, target, calls, tokens, cost)) = row else {
             return Ok(None);
         };
+        evidence.push(OptimizeEvidence::DuplicateReads {
+            session: session_id.clone(),
+            target: safe_short(&target, 72),
+            calls,
+        });
         Ok(Some(OptimizeFinding {
             id: "duplicate_reads".to_string(),
             title: "Repeated reads in one session".to_string(),
@@ -436,7 +576,11 @@ impl Dashboard {
         }))
     }
 
-    fn detect_junk_reads(&self, filter: &QueryFilter) -> Result<Option<OptimizeFinding>> {
+    fn detect_junk_reads(
+        &self,
+        filter: &QueryFilter,
+        evidence: &mut Vec<OptimizeEvidence>,
+    ) -> Result<Option<OptimizeFinding>> {
         let mut tool_filter = filter.tool_filter(Some("tc"));
         tool_filter.push_raw(
             r#"
@@ -473,6 +617,10 @@ impl Dashboard {
         if calls == 0 {
             return Ok(None);
         }
+        evidence.push(OptimizeEvidence::JunkReads {
+            calls,
+            example: safe_short(example.as_deref().unwrap_or("--"), 72),
+        });
         Ok(Some(OptimizeFinding {
             id: "junk_reads".to_string(),
             title: "Generated or dependency reads".to_string(),
@@ -489,7 +637,11 @@ impl Dashboard {
         }))
     }
 
-    fn detect_session_outlier(&self, filter: &QueryFilter) -> Result<Option<OptimizeFinding>> {
+    fn detect_session_outlier(
+        &self,
+        filter: &QueryFilter,
+        evidence: &mut Vec<OptimizeEvidence>,
+    ) -> Result<Option<OptimizeFinding>> {
         let mut turn_filter = filter.turn_filter(Some("t"));
         turn_filter.push_raw("t.session_id IS NOT NULL");
         let sql = format!(
@@ -547,6 +699,10 @@ impl Dashboard {
             params_from_iter(session_filter.params().iter()),
             |row| row.get::<_, f64>(0),
         )?;
+        evidence.push(OptimizeEvidence::SessionOutlier {
+            session: session_id.clone(),
+            percent: tokens as f64 * 100.0 / total_tokens as f64,
+        });
         Ok(Some(OptimizeFinding {
             id: "session_outlier".to_string(),
             title: "One session dominates behavior cost".to_string(),

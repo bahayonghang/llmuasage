@@ -156,7 +156,10 @@ async fn sync_grok(
     cancel: &CancellationToken,
     mut progress: Option<ProgressSink<'_>>,
 ) -> Result<SourceSyncStats> {
-    info!("starting Grok Build passive session sync");
+    info!(
+        event_code = "parsers.grok.01",
+        "starting Grok Build passive session sync"
+    );
     let parse_started = Instant::now();
     let listing = source_files::list_grok_session_files();
     let cursor_map = store
@@ -172,7 +175,7 @@ async fn sync_grok(
         &inventory_paths,
         writer.run_started_at(),
     )?;
-    let inventory_error = listing.error_summary();
+    let inventory_error = listing.error_summary_with_feedback(SourceKind::Grok);
     let total_files = listing.paths.len();
 
     let mut sessions = BTreeMap::<PathBuf, Vec<PathBuf>>::new();
@@ -205,8 +208,7 @@ async fn sync_grok(
         let current = files.iter().cloned().collect::<HashSet<_>>();
         let known = known_by_session.get(&session_dir);
         if known.is_some_and(|paths| paths.iter().any(|path| !current.contains(path))) {
-            warn!(
-                session_hash = %hash_string(&session_dir.to_string_lossy()),
+            warn!(event_code = "parsers.grok.02", session_hash = %hash_string(&session_dir.to_string_lossy()),
                 "Grok session has a missing tracked sidecar; preserving prior usage"
             );
             continue;
@@ -324,6 +326,7 @@ async fn sync_grok(
     let total_elapsed = parse_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
     stats.parse_ms = total_elapsed.saturating_sub(write_ms);
     info!(
+        event_code = "parsers.grok.03",
         files_processed = stats.files_processed,
         changed_files = stats.changed_files,
         skipped_files = stats.skipped_files,

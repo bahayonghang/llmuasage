@@ -9,15 +9,18 @@ use crate::{app::AppContext, models::SourceKind, store::Store};
 pub mod blocks;
 pub mod catalog;
 pub mod clean;
+pub mod cli_errors;
 pub mod codex_tracer;
 pub mod daily;
 pub mod dash;
 pub mod diagnostics;
 pub mod doctor;
+pub mod entrypoint;
 pub mod export;
 pub mod focused;
 pub mod help;
 pub mod init;
+pub mod lang;
 pub mod logs;
 pub mod monthly;
 pub mod remote;
@@ -29,6 +32,7 @@ pub mod status;
 pub mod statusline;
 pub mod sync;
 pub mod sync_progress;
+pub(crate) mod sync_recovery;
 pub mod sync_summary;
 pub(crate) mod unified_report;
 pub mod uninstall;
@@ -39,7 +43,7 @@ pub mod weekly;
 #[command(
     name = "llmusage",
     version,
-    about = "本地优先的多 CLI 用量分析工具；无子命令时默认输出 daily 报表"
+    about = "Local-first usage analytics for AI coding CLIs; defaults to the daily report"
 )]
 pub struct Cli {
     /// Override the llmusage runtime root directory (defaults to LLMUSAGE_HOME or ~/.llmusage).
@@ -54,6 +58,10 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
+    /// Choose English or simplified Chinese for CLI and TUI text.
+    Lang {
+        language: Option<String>,
+    },
     /// Show daily token/cost usage. This is also the default command.
     Daily(report_args::DailyArgs),
     /// Show monthly token/cost usage.
@@ -259,7 +267,10 @@ where
     S: FnOnce(&T) -> Option<String>,
 {
     let run_id = store.run_log().record_run_start(command)?;
-    info!(command, run_id, "run started");
+    info!(
+        event_code = "commands.mod.01",
+        command, run_id, "run started"
+    );
     match body.await {
         Ok(value) => {
             let summary = success_summary(&value);
@@ -267,6 +278,7 @@ where
                 .run_log()
                 .finish_run(run_id, "success", summary.as_deref(), None)?;
             info!(
+                event_code = "commands.mod.02",
                 command,
                 run_id,
                 status = "success",
@@ -276,17 +288,23 @@ where
             Ok(value)
         }
         Err(err) => {
-            if let Err(finish_err) =
-                store
-                    .run_log()
-                    .finish_run(run_id, "failed", None, Some(&format!("{err:#}")))
-            {
+            if let Err(finish_err) = store.run_log().finish_run(
+                run_id,
+                "failed",
+                None,
+                Some(&cli_errors::canonical_detail(&err)),
+            ) {
                 return Err(err.context(format!(
                     "记录 {command} 失败 run_log 时也失败: {finish_err}"
                 )));
             }
-            error!(
-                command,
+            let failure = crate::sync::failure::log_facts(&err);
+            let diagnostic = cli_errors::log_facts(&err);
+            error!(event_code = "commands.mod.03", command,
+                failure_code = failure.as_ref().map(|(code, _)| *code),
+                failure_facts = failure.as_ref().map(|(_, facts)| facts.as_str()),
+                diagnostic_code = diagnostic.as_ref().map(|(code, _)| *code),
+                diagnostic_facts = diagnostic.as_ref().map(|(_, facts)| facts.as_str()),
                 run_id,
                 status = "failed",
                 error = %err,
@@ -320,7 +338,14 @@ where
     match body.await {
         Ok(value) => Ok(value),
         Err(err) => {
-            error!(command, error = %err, "run failed");
+            let failure = crate::sync::failure::log_facts(&err);
+            let diagnostic = cli_errors::log_facts(&err);
+            error!(event_code = "commands.mod.04", command,
+                failure_code = failure.as_ref().map(|(code, _)| *code),
+                failure_facts = failure.as_ref().map(|(_, facts)| facts.as_str()),
+                diagnostic_code = diagnostic.as_ref().map(|(code, _)| *code),
+                diagnostic_facts = diagnostic.as_ref().map(|(_, facts)| facts.as_str()),
+                error = %err, "run failed");
             Err(err)
         }
     }
@@ -328,6 +353,7 @@ where
 
 pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
     match cli.command {
+        Some(Commands::Lang { language }) => lang::run(&app.paths.root_dir, language.as_deref()),
         None => run_logged(&app, "daily", daily::run(&app, cli.default_daily)).await,
         Some(Commands::Daily(args)) => run_logged(&app, "daily", daily::run(&app, args)).await,
         Some(Commands::Monthly(args)) => {
@@ -402,7 +428,7 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
                 )
                 .await;
             }
-            let request = crate::sync::ValidatedSyncRequest::new(crate::sync::SyncRequestInput {
+            let request = cli_errors::validate_sync_request(crate::sync::SyncRequestInput {
                 rebuild,
                 source,
                 recent_days,
@@ -477,7 +503,11 @@ pub async fn dispatch(app: AppContext, cli: Cli) -> Result<()> {
             match update::run(channel, check) {
                 Ok(()) => Ok(()),
                 Err(err) => {
-                    error!(command = "update", error = %err, "run failed");
+                    let diagnostic = cli_errors::log_facts(&err);
+                    error!(event_code = "commands.mod.05", command = "update",
+                        diagnostic_code = diagnostic.as_ref().map(|(code, _)| *code),
+                        diagnostic_facts = diagnostic.as_ref().map(|(_, facts)| facts.as_str()),
+                        error = %err, "run failed");
                     Err(err)
                 }
             }

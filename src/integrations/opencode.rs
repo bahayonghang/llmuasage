@@ -18,6 +18,10 @@ const PLUGIN_NAME: &str = "llmusage-tracker.js";
 const OPENCODE_DB_NAME: &str = "opencode.db";
 
 pub fn cleanup(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
+    cleanup_with_facts(app, store).map(|outcome| outcome.action)
+}
+
+pub(crate) fn cleanup_with_facts(app: &AppContext, store: &Store) -> Result<super::CleanupOutcome> {
     let plugin_path = resolve_plugin_path(app);
     let residue_removed = recover_and_cleanup_residue(&plugin_path)?;
     if !plugin_path.exists() {
@@ -32,20 +36,25 @@ pub fn cleanup(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
                 None,
             )?;
         }
-        return Ok(IntegrationAction {
-            source: SourceKind::Opencode,
-            status: if residue_removed {
-                "restored"
-            } else {
-                "skipped"
-            }
-            .to_string(),
-            detail: if residue_removed {
-                "recovered legacy OpenCode atomic-write residue"
-            } else {
-                "no legacy OpenCode plugin found"
-            }
-            .to_string(),
+        return Ok(super::CleanupOutcome {
+            action: IntegrationAction {
+                source: SourceKind::Opencode,
+                status: if residue_removed {
+                    "restored"
+                } else {
+                    "skipped"
+                }
+                .to_string(),
+                detail: if residue_removed {
+                    "recovered legacy OpenCode atomic-write residue"
+                } else {
+                    "no legacy OpenCode plugin found"
+                }
+                .to_string(),
+            },
+            fact: super::CleanupFact::OpenCodeAbsent {
+                residue: residue_removed,
+            },
         });
     }
 
@@ -62,20 +71,25 @@ pub fn cleanup(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
                 None,
             )?;
         }
-        return Ok(IntegrationAction {
-            source: SourceKind::Opencode,
-            status: if residue_removed {
-                "restored"
-            } else {
-                "skipped"
-            }
-            .to_string(),
-            detail: if residue_removed {
-                "recovered residue; preserved unowned OpenCode plugin"
-            } else {
-                "preserved unowned OpenCode plugin"
-            }
-            .to_string(),
+        return Ok(super::CleanupOutcome {
+            action: IntegrationAction {
+                source: SourceKind::Opencode,
+                status: if residue_removed {
+                    "restored"
+                } else {
+                    "skipped"
+                }
+                .to_string(),
+                detail: if residue_removed {
+                    "recovered residue; preserved unowned OpenCode plugin"
+                } else {
+                    "preserved unowned OpenCode plugin"
+                }
+                .to_string(),
+            },
+            fact: super::CleanupFact::OpenCodeUnowned {
+                residue: residue_removed,
+            },
         });
     }
 
@@ -97,10 +111,13 @@ pub fn cleanup(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
     };
     remove_file_atomic_and_record(&plugin_path, record)?;
 
-    Ok(IntegrationAction {
-        source: SourceKind::Opencode,
-        status: "restored".to_string(),
-        detail: "removed legacy llmusage OpenCode plugin".to_string(),
+    Ok(super::CleanupOutcome {
+        action: IntegrationAction {
+            source: SourceKind::Opencode,
+            status: "restored".to_string(),
+            detail: "removed legacy llmusage OpenCode plugin".to_string(),
+        },
+        fact: super::CleanupFact::OpenCodePlugin,
     })
 }
 

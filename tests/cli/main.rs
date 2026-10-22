@@ -326,6 +326,10 @@ impl Default for SeedEvent<'_> {
     }
 }
 
+mod language;
+mod language_catalog;
+mod language_commands;
+mod language_reports;
 mod local_flow;
 mod operations;
 mod reports;

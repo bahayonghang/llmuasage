@@ -99,7 +99,7 @@ pub(crate) fn ingest_rollout_dir(
             Err(error) => {
                 any_change = true;
                 stats.errors = stats.errors.saturating_add(1);
-                tracing::warn!(path_hash, error = %error, "Failed to ingest Codex tracer file");
+                tracing::warn!(event_code = "commands.codex_tracer.ingest.01", path_hash, error = %error, "Failed to ingest Codex tracer file");
             }
         }
     }

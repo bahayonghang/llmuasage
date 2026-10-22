@@ -1,3 +1,4 @@
+use crate::common::i18n::commands::message;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -14,6 +15,70 @@ struct DoctorCheck {
     id: &'static str,
     status: &'static str,
     detail: String,
+    #[serde(skip)]
+    presentation: DoctorFact,
+}
+
+#[derive(Debug, Clone)]
+enum DoctorFact {
+    OpenCode {
+        path: String,
+    },
+    Logs {
+        disabled: bool,
+        path: String,
+        size: u64,
+    },
+    Errors(usize),
+    Dropped(u64),
+    Maintenance(u64),
+    RecentRuns {
+        failed: bool,
+    },
+    ParseIssues(Vec<(String, u64, u64)>),
+    SourceIssues(crate::domain::source_diagnostics::SourceIssues),
+}
+impl DoctorFact {
+    fn render(&self) -> String {
+        match self {
+            Self::OpenCode { path } => message!(DoctorDb, path),
+            Self::Logs {
+                disabled: true,
+                path,
+                ..
+            } => message!(DoctorLogsDisabled, path),
+            Self::Logs { path, size, .. } => message!(DoctorLogs, path, size),
+            Self::Errors(count) => message!(DoctorErrors, count),
+            Self::Dropped(count) => message!(DoctorDropped, count),
+            Self::Maintenance(count) => message!(DoctorMaintenance, count),
+            Self::RecentRuns { failed: true } => message!(DoctorRunsFailed),
+            Self::RecentRuns { failed: false } => message!(DoctorRunsOk),
+            Self::ParseIssues(faults) if faults.is_empty() => message!(DoctorNoParse),
+            Self::ParseIssues(faults) => faults
+                .iter()
+                .map(|(source, malformed, oversized)| {
+                    message!(DoctorParse, source, malformed, oversized)
+                })
+                .collect::<Vec<_>>()
+                .join("; "),
+            Self::SourceIssues(issues) if issues.is_empty() => message!(DoctorNoSources),
+            Self::SourceIssues(issues) => issues
+                .iter()
+                .flat_map(|(source, issues)| {
+                    issues.iter().flat_map(move |issue| {
+                        super::sync_summary::notice_lines(
+                            &crate::sync::notices::RunNotice::SourceIssue {
+                                source: *source,
+                                issue: issue.clone(),
+                            },
+                            false,
+                        )
+                    })
+                })
+                .collect::<Vec<_>>()
+                .join("; "),
+        }
+    }
 }
 
 pub async fn run(app: &AppContext, json: bool, refresh_pricing: Option<PathBuf>) -> Result<()> {
@@ -26,21 +91,26 @@ pub async fn run(app: &AppContext, json: bool, refresh_pricing: Option<PathBuf>)
 /// Validates and activates a complete local pricing snapshot, then recomputes
 /// per-event costs. URLs are refused and the persisted file is content-addressed.
 async fn refresh_pricing_catalog(app: &AppContext, source_path: &Path) -> Result<()> {
-    info!(path = %source_path.display(), "刷新定价快照");
+    info!(event_code = "commands.doctor.01", path = %source_path.display(), "刷新定价快照");
     let store = Store::new(&app.paths)?;
-    store.bootstrap()?;
-    let result = store.activate_pricing_snapshot(source_path)?;
+    super::cli_errors::pricing_result(store.bootstrap_with_pricing_facts())?;
+    let result =
+        super::cli_errors::pricing_result(store.activate_pricing_snapshot_with_facts(source_path))?;
     info!(
+        event_code = "commands.doctor.02",
         updated = result.updated_events,
         catalog = result.effective.identity,
         snapshot = result.effective.file.as_deref().unwrap_or("embedded"),
         "定价快照已落盘并重算"
     );
     println!(
-        "已激活 catalog `{}`（{}）并重算 {} 条事件的成本列",
-        result.effective.version,
-        result.effective.file.as_deref().unwrap_or("embedded"),
-        result.updated_events
+        "{}",
+        message!(
+            DoctorPricing,
+            result.effective.version,
+            result.effective.file.as_deref().unwrap_or("embedded"),
+            result.updated_events
+        )
     );
     Ok(())
 }
@@ -55,7 +125,10 @@ async fn diagnostics(app: &AppContext, json: bool) -> Result<()> {
      * 2) 用一份规则清单输出人读或 JSON 结果
      * 3) 保持 doctor 只读，不修复任何配置
      */
-    info!("开始执行 doctor 健康检查");
+    info!(
+        event_code = "commands.doctor.03",
+        "开始执行 doctor 健康检查"
+    );
 
     // 1.1 读取最近运行结果与关键文件存在性
     let store = Store::new(&app.paths)?;
@@ -74,10 +147,18 @@ async fn diagnostics(app: &AppContext, json: bool) -> Result<()> {
             "warn"
         },
         detail: format!("OpenCode DB: {}", opencode_db_path.display()),
+        presentation: DoctorFact::OpenCode {
+            path: opencode_db_path.display().to_string(),
+        },
     }];
 
     checks.push(DoctorCheck {
         id: "logs.file",
+        presentation: DoctorFact::Logs {
+            disabled: logging_disabled,
+            path: logs.path.clone(),
+            size: logs.size_bytes,
+        },
         status: if logging_disabled || logs.exists {
             "ok"
         } else {
@@ -95,6 +176,7 @@ async fn diagnostics(app: &AppContext, json: bool) -> Result<()> {
 
     checks.push(DoctorCheck {
         id: "logs.recent_errors",
+        presentation: DoctorFact::Errors(logs.recent_error_count),
         status: if logs.recent_error_count == 0 {
             "ok"
         } else {
@@ -108,6 +190,7 @@ async fn diagnostics(app: &AppContext, json: bool) -> Result<()> {
 
     checks.push(DoctorCheck {
         id: "logs.dropped_events",
+        presentation: DoctorFact::Dropped(logs.dropped_event_count),
         status: if logs.dropped_event_count == 0 {
             "ok"
         } else {
@@ -121,6 +204,7 @@ async fn diagnostics(app: &AppContext, json: bool) -> Result<()> {
 
     checks.push(DoctorCheck {
         id: "logs.maintenance_errors",
+        presentation: DoctorFact::Maintenance(logs.maintenance_error_count),
         status: if logs.maintenance_error_count == 0 {
             "ok"
         } else {
@@ -138,12 +222,14 @@ async fn diagnostics(app: &AppContext, json: bool) -> Result<()> {
     {
         checks.push(DoctorCheck {
             id: "recent.failures",
+            presentation: DoctorFact::RecentRuns { failed: true },
             status: "warn",
             detail: "最近运行中存在 failed/aborted 等非成功记录".to_string(),
         });
     } else {
         checks.push(DoctorCheck {
             id: "recent.failures",
+            presentation: DoctorFact::RecentRuns { failed: false },
             status: "ok",
             detail: "最近运行未发现 failed/aborted 等非成功记录".to_string(),
         });
@@ -157,13 +243,18 @@ async fn diagnostics(app: &AppContext, json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(&checks)?);
     } else {
-        println!("Doctor:");
+        println!("{}", message!(DoctorTitle));
         for check in checks {
-            println!("- [{}] {} {}", check.status, check.id, check.detail);
+            println!(
+                "- [{}] {} {}",
+                crate::common::i18n::commands::status_label(check.status),
+                check.id,
+                check.presentation.render()
+            );
         }
     }
 
-    info!("完成 doctor 健康检查");
+    info!(event_code = "commands.doctor.04", "完成 doctor 健康检查");
     Ok(())
 }
 
@@ -180,6 +271,7 @@ fn source_issues_doctor_check(
         .collect::<Vec<_>>();
     DoctorCheck {
         id: "source.issues",
+        presentation: DoctorFact::SourceIssues(issues.clone()),
         status: if details.is_empty() { "ok" } else { "warn" },
         detail: if details.is_empty() {
             "no source blockers in the latest source observations".to_string()
@@ -203,12 +295,38 @@ fn parse_issues_doctor_check(statuses: &[SourceSyncStatus]) -> DoctorCheck {
     if faults.is_empty() {
         DoctorCheck {
             id: "parse.issues",
+            presentation: DoctorFact::ParseIssues(
+                statuses
+                    .iter()
+                    .filter(|s| s.parse_issues.total() > 0)
+                    .map(|s| {
+                        (
+                            s.source.clone(),
+                            s.parse_issues.malformed_lines,
+                            s.parse_issues.oversized_lines,
+                        )
+                    })
+                    .collect(),
+            ),
             status: "ok",
             detail: "no malformed or oversized parse issues".to_string(),
         }
     } else {
         DoctorCheck {
             id: "parse.issues",
+            presentation: DoctorFact::ParseIssues(
+                statuses
+                    .iter()
+                    .filter(|s| s.parse_issues.total() > 0)
+                    .map(|s| {
+                        (
+                            s.source.clone(),
+                            s.parse_issues.malformed_lines,
+                            s.parse_issues.oversized_lines,
+                        )
+                    })
+                    .collect(),
+            ),
             status: "warn",
             detail: faults.join("; "),
         }

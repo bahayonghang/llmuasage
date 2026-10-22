@@ -12,6 +12,7 @@ pub mod codex;
 pub(crate) mod codex_envelope;
 pub mod driver;
 pub mod dsh;
+pub(crate) mod feedback;
 mod file_progress;
 pub mod file_state;
 pub mod grok;

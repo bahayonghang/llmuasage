@@ -1,3 +1,5 @@
+use crate::common::i18n::tui::format as tr_format;
+use crate::common::i18n::tui::text as tr;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
@@ -13,7 +15,7 @@ pub fn render(frame: &mut Frame, viewport: Rect, state: &AppState) {
     frame.render_widget(Clear, area);
 
     let block = Block::default()
-        .title(" Sources ")
+        .title(tr("sources"))
         .borders(Borders::ALL)
         .border_style(theme::fg_style(theme::accent()));
     let inner = block.inner(area);
@@ -31,10 +33,10 @@ pub fn render(frame: &mut Frame, viewport: Rect, state: &AppState) {
     ])
     .split(inner);
 
-    let current = format!("Filter: {}", state.source_filter_label());
+    let current = tr_format!(filter, state.source_filter_label());
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled("Source picker", theme::block_title_style()),
+            Span::styled(tr("source_picker"), theme::block_title_style()),
             Span::styled(" • ", theme::muted_style()),
             Span::styled(current, theme::muted_style()),
         ])),
@@ -48,7 +50,7 @@ pub fn render(frame: &mut Frame, viewport: Rect, state: &AppState) {
     render_list(frame, rows[2], state);
 
     frame.render_widget(
-        Paragraph::new("Enter select • a all sources • Esc close")
+        Paragraph::new(tr("enter_select_a_all_sources_esc_close"))
             .alignment(Alignment::Center)
             .style(theme::muted_style()),
         rows[3],
@@ -74,8 +76,8 @@ fn render_list(frame: &mut Frame, area: Rect, state: &AppState) {
     {
         let selected_row = index == selected;
         let active = probe.source_kind == state.filter.source;
-        let parser = probe.parser_status.as_str();
-        let quality = probe.quality.unwrap_or("unavailable");
+        let parser = crate::common::i18n::tui::value(probe.parser_status.as_str());
+        let quality = crate::common::i18n::tui::value(probe.quality.unwrap_or("unavailable"));
         let marker = if active {
             "[*]"
         } else if probe.source_kind.is_some() {
@@ -86,7 +88,7 @@ fn render_list(frame: &mut Frame, area: Rect, state: &AppState) {
         let row = format!(
             "{marker} {:<18} {:<10} {:<18} {}",
             probe.display_name,
-            probe.status.as_str(),
+            crate::common::i18n::tui::value(probe.status.as_str()),
             parser,
             quality
         );
@@ -105,7 +107,7 @@ fn render_list(frame: &mut Frame, area: Rect, state: &AppState) {
 
     if items.is_empty() {
         items.push(ListItem::new(Line::from(Span::styled(
-            "No source monitors",
+            tr("no_source_monitors"),
             theme::muted_style(),
         ))));
     }

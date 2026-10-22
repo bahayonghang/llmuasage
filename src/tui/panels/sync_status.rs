@@ -1,3 +1,5 @@
+use crate::common::i18n::tui::format as tr_format;
+use crate::common::i18n::tui::text as tr;
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
@@ -23,15 +25,15 @@ pub fn render(
 ) {
     match data {
         None => {
-            let widget = Paragraph::new("Loading...")
+            let widget = Paragraph::new(tr("loading"))
                 .style(theme::muted_style())
-                .block(theme::panel_block("Usage / Sync"));
+                .block(theme::panel_block(tr("usage_sync")));
             frame.render_widget(widget, area);
         }
         Some(Err(e)) => {
-            let widget = Paragraph::new(format!("Data load failed: {e}"))
+            let widget = Paragraph::new(tr_format!(data_load_failed_e, e = e))
                 .style(theme::error_style())
-                .block(theme::panel_block("Usage / Sync"));
+                .block(theme::panel_block(tr("usage_sync")));
             frame.render_widget(widget, area);
         }
         Some(Ok(payload)) => render_payload(frame, area, payload, probes, scroll),
@@ -45,7 +47,7 @@ fn render_payload(
     probes: &[PlatformProbe],
     scroll: &ScrollState,
 ) {
-    let block = theme::panel_block("Usage / Sync");
+    let block = theme::panel_block(tr("usage_sync"));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -100,48 +102,48 @@ fn render_summary(
             Span::styled(reason_text(&payload.reason_key), theme::muted_style()),
         ]),
         Line::from(vec![
-            Span::styled("events ", theme::muted_style()),
+            Span::styled(tr("events_3"), theme::muted_style()),
             Span::styled(
                 format_number(payload.metrics.events_seen),
                 metric_style(theme::metric_input()),
             ),
-            Span::styled("  inserted ", theme::muted_style()),
+            Span::styled(tr("inserted"), theme::muted_style()),
             Span::styled(
                 format_number(payload.metrics.inserted_delta),
                 metric_style(theme::positive_fg()),
             ),
-            Span::styled("  stored ", theme::muted_style()),
+            Span::styled(tr("stored"), theme::muted_style()),
             Span::styled(
                 format_number(payload.metrics.stored_events),
                 metric_style(theme::warning_fg()),
             ),
-            Span::styled("  sources ", theme::muted_style()),
+            Span::styled(tr("sources_2"), theme::muted_style()),
             Span::styled(
                 format!("{}/{}", payload.metrics.sources_ready, source_total),
                 metric_style(theme::metric_cache_write()),
             ),
         ]),
         Line::from(vec![
-            Span::styled("lock ", theme::muted_style()),
+            Span::styled(tr("lock"), theme::muted_style()),
             Span::styled(
-                payload.safety.worker_lock.as_str(),
+                crate::common::i18n::tui::value(&payload.safety.worker_lock),
                 if payload.safety.worker_lock == "available" {
                     metric_style(theme::positive_fg())
                 } else {
                     metric_style(theme::warning_fg())
                 },
             ),
-            Span::styled("  rebuild-risk ", theme::muted_style()),
+            Span::styled(tr("rebuild_risk"), theme::muted_style()),
             Span::styled(
                 yes_no(payload.safety.lossy_rebuild_risk),
                 theme::muted_style(),
             ),
-            Span::styled("  monitored ", theme::muted_style()),
+            Span::styled(tr("monitored"), theme::muted_style()),
             Span::styled(
-                format!("{detected}/{} detected", probes.len()),
+                tr_format!(detected_detected, probes.len(), detected = detected),
                 metric_style(theme::metric_input()),
             ),
-            Span::styled("  parserless ", theme::muted_style()),
+            Span::styled(tr("parserless"), theme::muted_style()),
             Span::styled(monitor_only.to_string(), metric_style(theme::warning_fg())),
         ]),
     ];
@@ -150,7 +152,7 @@ fn render_summary(
         lines.push(Line::from(last_run_spans(last_run)));
     } else {
         lines.push(Line::styled(
-            "last run: none recorded",
+            tr("last_run_none_recorded"),
             theme::muted_style(),
         ));
     }
@@ -160,15 +162,17 @@ fn render_summary(
             .risk_details
             .iter()
             .map(|detail| {
-                format!(
-                    "{} missing={} protected={}",
-                    detail.source, detail.missing_file_count, detail.protected_event_count
+                tr_format!(
+                    missing_protected,
+                    detail.source,
+                    detail.missing_file_count,
+                    detail.protected_event_count
                 )
             })
             .collect::<Vec<_>>()
             .join(", ");
         lines.push(Line::from(vec![
-            Span::styled("rebuild-risk facts ", theme::muted_style()),
+            Span::styled(tr("rebuild_risk_facts"), theme::muted_style()),
             Span::styled(details, theme::muted_style()),
         ]));
     }
@@ -187,12 +191,14 @@ fn render_sources(
     }
 
     if payload.sources.is_empty() {
-        let empty = Paragraph::new("No source sync status yet. Run sync or refresh after imports.")
-            .style(theme::muted_style())
-            .block(theme::trend_card_block(
-                "Source Sync",
-                theme::metric_input(),
-            ));
+        let empty = Paragraph::new(tr(
+            "no_source_sync_status_yet_run_sync_or_refresh_after_imports",
+        ))
+        .style(theme::muted_style())
+        .block(theme::trend_card_block(
+            tr("source_sync"),
+            theme::metric_input(),
+        ));
         frame.render_widget(empty, area);
         return;
     }
@@ -214,7 +220,7 @@ fn render_sources(
     let table = Table::new(rows, source_widths(very_narrow, narrow))
         .header(header)
         .block(theme::trend_card_block(
-            "Source Sync",
+            tr("source_sync"),
             theme::metric_input(),
         ));
     frame.render_widget(table, area);
@@ -244,18 +250,18 @@ fn render_monitor(frame: &mut Frame, area: Rect, probes: &[PlatformProbe]) {
         .map(|probe| probe.display_name)
         .collect::<Vec<_>>();
     let detected_line = if detected_names.is_empty() {
-        "monitor-only detected: none".to_string()
+        tr("monitor_only_detected_none").to_string()
     } else {
-        format!("monitor-only detected: {}", detected_names.join(", "))
+        tr_format!(monitor_only_detected, detected_names.join(", "))
     };
     let lines = vec![
         Line::from(vec![
-            Span::styled("platform probes ", theme::muted_style()),
+            Span::styled(tr("platform_probes"), theme::muted_style()),
             Span::styled(
                 format!("{detected}/{}", probes.len()),
                 metric_style(theme::metric_input()),
             ),
-            Span::styled("  blocked-no-samples ", theme::muted_style()),
+            Span::styled(tr("blocked_no_samples"), theme::muted_style()),
             Span::styled(
                 parserless_blocked.to_string(),
                 metric_style(theme::warning_fg()),
@@ -263,12 +269,12 @@ fn render_monitor(frame: &mut Frame, area: Rect, probes: &[PlatformProbe]) {
         ]),
         Line::styled(detected_line, theme::muted_style()),
         Line::styled(
-            "parserless platforms stay monitor-only until fixtures and token semantics exist",
+            tr("parserless_platforms_stay_monitor_only_until_fixtures_and_token_semantics_exist"),
             theme::muted_style(),
         ),
     ];
     let widget = Paragraph::new(lines).block(theme::trend_card_block(
-        "Platform Monitor",
+        tr("platform_monitor"),
         theme::metric_cache_write(),
     ));
     frame.render_widget(widget, area);
@@ -283,20 +289,23 @@ fn source_row(
     let mut row = if very_narrow {
         Row::new(vec![
             Cell::from(source.source.clone()),
-            Cell::from(source.status.clone()).style(tone_style(&source.tone)),
+            Cell::from(crate::common::i18n::tui::value(&source.status).to_string())
+                .style(tone_style(&source.tone)),
             Cell::from(format_number(source.stored_events)),
         ])
     } else if narrow {
         Row::new(vec![
             Cell::from(source.source.clone()),
-            Cell::from(source.status.clone()).style(tone_style(&source.tone)),
+            Cell::from(crate::common::i18n::tui::value(&source.status).to_string())
+                .style(tone_style(&source.tone)),
             Cell::from(format_number(source.events_seen)),
             Cell::from(format_number(source.stored_events)),
         ])
     } else {
         Row::new(vec![
             Cell::from(source.source.clone()).style(theme::bold_style()),
-            Cell::from(source.status.clone()).style(tone_style(&source.tone)),
+            Cell::from(crate::common::i18n::tui::value(&source.status).to_string())
+                .style(tone_style(&source.tone)),
             Cell::from(format_number(source.events_seen)),
             Cell::from(format_number(source.events_inserted)),
             Cell::from(format_number(source.skipped_files)),
@@ -315,13 +324,20 @@ fn source_row(
 
 fn source_header(very_narrow: bool, narrow: bool) -> Vec<Cell<'static>> {
     let labels: &[&str] = if very_narrow {
-        &["Source", "Status", "Stored"]
+        &[tr("source_3"), tr("status_2"), tr("stored_2")]
     } else if narrow {
-        &["Source", "Status", "Seen", "Stored"]
+        &[tr("source_3"), tr("status_2"), tr("seen"), tr("stored_2")]
     } else {
         &[
-            "Source", "Status", "Seen", "Inserted", "Skipped", "Stored", "Issues", "Share",
-            "Updated",
+            tr("source_3"),
+            tr("status_2"),
+            tr("seen"),
+            tr("inserted_2"),
+            tr("skipped"),
+            tr("stored_2"),
+            tr("issues"),
+            tr("share"),
+            tr("updated"),
         ]
     };
     labels
@@ -370,7 +386,8 @@ fn issue_spans(source: &SyncSourcePayload) -> Vec<Span<'static>> {
         }
         spans.push(Span::styled(
             format!(
-                "{label}={}",
+                "{}={}",
+                crate::common::i18n::tui::value(label),
                 format_number(i64::try_from(count).unwrap_or(i64::MAX))
             ),
             style,
@@ -406,35 +423,38 @@ fn last_run_spans(last_run: &SyncLastRunPayload) -> Vec<Span<'static>> {
         _ => metric_style(theme::warning_fg()),
     };
     vec![
-        Span::styled("last run ", theme::muted_style()),
-        Span::styled(last_run.status.clone(), status_style),
+        Span::styled(tr("last_run"), theme::muted_style()),
+        Span::styled(
+            crate::common::i18n::tui::value(&last_run.status).to_string(),
+            status_style,
+        ),
         Span::styled("  ", theme::muted_style()),
         Span::styled(
             last_run.command.clone(),
             metric_style(theme::metric_input()),
         ),
-        Span::styled("  started ", theme::muted_style()),
+        Span::styled(tr("started"), theme::muted_style()),
         Span::styled(last_run.started_at.clone(), theme::muted_style()),
     ]
 }
 
 fn headline_text(key: &str) -> &'static str {
     match key {
-        "syncCenter.headline.ready" => "Ready to sync",
-        "syncCenter.headline.busy" => "Sync is running",
-        "syncCenter.headline.failed" => "Recent sync failed",
-        "syncCenter.headline.rebuildRisk" => "Rebuild risk",
-        _ => "Sync status",
+        "syncCenter.headline.ready" => tr("ready_to_sync"),
+        "syncCenter.headline.busy" => tr("sync_is_running"),
+        "syncCenter.headline.failed" => tr("recent_sync_failed"),
+        "syncCenter.headline.rebuildRisk" => tr("rebuild_risk_2"),
+        _ => tr("sync_status"),
     }
 }
 
 fn reason_text(key: &str) -> &'static str {
     match key {
-        "syncCenter.reason.ready" => "local status looks usable",
-        "syncCenter.reason.empty" => "no sync status has been recorded",
-        "syncCenter.reason.lastRunFailed" => "the latest usage import failed",
-        "syncCenter.reason.rebuildRisk" => "missing source files protect stored history",
-        _ => "check sync details below",
+        "syncCenter.reason.ready" => tr("local_status_looks_usable"),
+        "syncCenter.reason.empty" => tr("no_sync_status_has_been_recorded"),
+        "syncCenter.reason.lastRunFailed" => tr("the_latest_usage_import_failed"),
+        "syncCenter.reason.rebuildRisk" => tr("missing_source_files_protect_stored_history"),
+        _ => tr("check_sync_details_below"),
     }
 }
 
@@ -452,5 +472,5 @@ fn metric_style(color: Color) -> Style {
 }
 
 fn yes_no(value: bool) -> &'static str {
-    if value { "yes" } else { "no" }
+    if value { tr("yes") } else { tr("no") }
 }

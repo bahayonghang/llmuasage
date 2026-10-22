@@ -914,42 +914,17 @@ mod tests {
     }
 
     #[test]
-    fn interactive_tui_copy_stays_english() {
-        let sources = [
-            include_str!("mod.rs"),
-            include_str!("footer.rs"),
-            include_str!("help_dialog.rs"),
-            include_str!("nav_bar.rs"),
-            include_str!("source_picker.rs"),
-            include_str!("panels/behavior.rs"),
-            include_str!("panels/blocks.rs"),
-            include_str!("panels/daily.rs"),
-            include_str!("panels/hourly.rs"),
-            include_str!("panels/models.rs"),
-            include_str!("panels/monthly.rs"),
-            include_str!("panels/period.rs"),
-            include_str!("panels/overview.rs"),
-            include_str!("panels/stats.rs"),
-            include_str!("panels/usage.rs"),
-            include_str!("panels/sync_status.rs"),
-            include_str!("../../tests/tui/main.rs"),
-            include_str!("../../tests/tui/shell.rs"),
-            include_str!("../../tests/tui/panels/behavior.rs"),
-            include_str!("../../tests/tui/panels/models.rs"),
-            include_str!("../../tests/tui/panels/overview.rs"),
-            include_str!("../../tests/tui/panels/period.rs"),
-            include_str!("../../tests/tui/panels/stats.rs"),
-            include_str!("../../tests/tui/panels/usage.rs"),
-        ];
-
-        assert!(sources.iter().all(|source| !source.chars().any(is_han)));
-    }
-
-    fn is_han(ch: char) -> bool {
-        matches!(
-            ch,
-            '\u{3400}'..='\u{4dbf}' | '\u{4e00}'..='\u{9fff}' | '\u{f900}'..='\u{faff}'
-        )
+    fn interactive_tui_copy_uses_the_shared_language_scope() {
+        use crate::common::i18n::{Language, with_language};
+        use crate::tui::app::{AppState, Panel, TimeWindow};
+        assert_eq!(Panel::Overview.label(), "Overview");
+        with_language(Language::Chinese, || {
+            assert_eq!(Panel::Overview.label(), "概览");
+            assert_eq!(Panel::Behavior.label(), "智能体");
+            assert_eq!(TimeWindow::Day24h.label(), "今天");
+            assert_eq!(AppState::new().source_filter_label(), "全部");
+        });
+        assert_eq!(Panel::Overview.label(), "Overview");
     }
 
     #[test]

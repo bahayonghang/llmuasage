@@ -6,7 +6,8 @@ use std::{
 use tracing::warn;
 use walkdir::WalkDir;
 
-use crate::util::resolve_home_dir;
+use super::feedback::{self, InventoryDiagnostic, InventoryIssue, ParserFeedback};
+use crate::{models::SourceKind, util::resolve_home_dir};
 
 pub(crate) const GROK_SIDECAR_NAMES: [&str; 4] = [
     "updates.jsonl",
@@ -24,6 +25,8 @@ pub(crate) struct SourceFileListing {
     pub paths: Vec<PathBuf>,
     /// Non-fatal filesystem enumeration errors seen while walking the source.
     pub errors: Vec<String>,
+    /// Typed provenance indexed into errors; arbitrary additional errors stay raw.
+    pub(crate) inventory_facts: Vec<(usize, InventoryIssue)>,
 }
 
 impl SourceFileListing {
@@ -32,6 +35,44 @@ impl SourceFileListing {
             .iter()
             .map(|path| path.to_string_lossy().to_string())
             .collect()
+    }
+
+    fn push_inventory_error(&mut self, canonical: String, fact: InventoryIssue) {
+        self.inventory_facts.push((self.errors.len(), fact));
+        self.errors.push(canonical);
+    }
+
+    pub(crate) fn error_summary_with_feedback(&self, source: SourceKind) -> Option<String> {
+        let summary = self.error_summary()?;
+        let errors: Vec<_> = self
+            .errors
+            .iter()
+            .enumerate()
+            .filter(|(_, error)| !is_ownership_skip_note(error))
+            .collect();
+        let samples: Vec<_> = errors
+            .iter()
+            .take(3)
+            .map(|(index, error)| {
+                self.inventory_facts
+                    .iter()
+                    .find(|(known, _)| known == index)
+                    .map(|(_, fact)| fact.clone())
+                    .unwrap_or_else(|| InventoryIssue::Unknown {
+                        detail: (*error).clone(),
+                    })
+            })
+            .collect();
+        let omitted = errors.len().saturating_sub(samples.len());
+        feedback::emit(ParserFeedback::Inventory {
+            source,
+            diagnostic: InventoryDiagnostic {
+                samples,
+                total: errors.len(),
+                omitted,
+            },
+        });
+        Some(summary)
     }
 
     pub(crate) fn error_summary(&self) -> Option<String> {
@@ -109,9 +150,12 @@ fn list_grok_session_files_under(root: PathBuf) -> SourceFileListing {
     let workspace_dirs = match std::fs::read_dir(&root) {
         Ok(entries) => entries,
         Err(error) => {
-            listing
-                .errors
-                .push(format!("source file inventory error: {error}"));
+            listing.push_inventory_error(
+                format!("source file inventory error: {error}"),
+                InventoryIssue::ExternalIo {
+                    detail: error.to_string(),
+                },
+            );
             return listing;
         }
     };
@@ -119,9 +163,12 @@ fn list_grok_session_files_under(root: PathBuf) -> SourceFileListing {
         let workspace_entry = match workspace_entry {
             Ok(entry) => entry,
             Err(error) => {
-                listing
-                    .errors
-                    .push(format!("source file inventory error: {error}"));
+                listing.push_inventory_error(
+                    format!("source file inventory error: {error}"),
+                    InventoryIssue::ExternalIo {
+                        detail: error.to_string(),
+                    },
+                );
                 continue;
             }
         };
@@ -131,9 +178,12 @@ fn list_grok_session_files_under(root: PathBuf) -> SourceFileListing {
         let session_dirs = match std::fs::read_dir(workspace_entry.path()) {
             Ok(entries) => entries,
             Err(error) => {
-                listing
-                    .errors
-                    .push(format!("source file inventory error: {error}"));
+                listing.push_inventory_error(
+                    format!("source file inventory error: {error}"),
+                    InventoryIssue::ExternalIo {
+                        detail: error.to_string(),
+                    },
+                );
                 continue;
             }
         };
@@ -141,9 +191,12 @@ fn list_grok_session_files_under(root: PathBuf) -> SourceFileListing {
             let session_entry = match session_entry {
                 Ok(entry) => entry,
                 Err(error) => {
-                    listing
-                        .errors
-                        .push(format!("source file inventory error: {error}"));
+                    listing.push_inventory_error(
+                        format!("source file inventory error: {error}"),
+                        InventoryIssue::ExternalIo {
+                            detail: error.to_string(),
+                        },
+                    );
                     continue;
                 }
             };
@@ -214,6 +267,13 @@ fn list_jsonl_session_files_from_roots(roots: Vec<PathBuf>) -> SourceFileListing
     let mut seen = HashSet::new();
     for root in roots {
         let listing = list_matching_files(root, |name, _path| name.ends_with(".jsonl"));
+        let offset = merged.errors.len();
+        merged.inventory_facts.extend(
+            listing
+                .inventory_facts
+                .into_iter()
+                .map(|(index, fact)| (index + offset, fact)),
+        );
         merged.errors.extend(listing.errors);
         for path in listing.paths {
             let canonical = canonical_path(&path);
@@ -345,16 +405,22 @@ fn list_matching_files_with_root_metadata(
     match root_metadata(&root) {
         Ok(metadata) if metadata.is_dir() => {}
         Ok(_) => {
-            listing
-                .errors
-                .push("source file inventory error: root is not a directory".to_string());
+            listing.push_inventory_error(
+                "source file inventory error: root is not a directory".to_string(),
+                InventoryIssue::RootNotDirectory,
+            );
             return listing;
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return listing,
         Err(error) => {
             let message = format!("source file inventory error: {error}");
-            warn!(error = %message, "failed to enumerate source file inventory");
-            listing.errors.push(message);
+            warn!(event_code = "parsers.source_files.01", inventory_error_kind = "external_io", inventory_error_detail = %error, error = %message, "failed to enumerate source file inventory");
+            listing.push_inventory_error(
+                message,
+                InventoryIssue::ExternalIo {
+                    detail: error.to_string(),
+                },
+            );
             return listing;
         }
     }
@@ -364,8 +430,10 @@ fn list_matching_files_with_root_metadata(
             Ok(entry) => entry,
             Err(error) => {
                 let message = format!("source file inventory error: {error}");
-                warn!(error = %message, "failed to enumerate source file inventory");
-                listing.errors.push(message);
+                let fact = walk_inventory_issue(&error);
+                let detail = error.io_error().map(ToString::to_string);
+                warn!(event_code = "parsers.source_files.02", inventory_error_kind = if detail.is_some() { "external_io" } else { "traversal" }, inventory_error_detail = detail.as_deref(), error = %message, "failed to enumerate source file inventory");
+                listing.push_inventory_error(message, fact);
                 continue;
             }
         };
@@ -385,6 +453,15 @@ fn list_matching_files_with_root_metadata(
     listing
 }
 
+fn walk_inventory_issue(error: &walkdir::Error) -> InventoryIssue {
+    error
+        .io_error()
+        .map(|error| InventoryIssue::ExternalIo {
+            detail: error.to_string(),
+        })
+        .unwrap_or(InventoryIssue::Traversal)
+}
+
 #[cfg(test)]
 mod tests {
     use std::{fs, path::PathBuf};
@@ -396,6 +473,82 @@ mod tests {
         list_jsonl_session_files_from_roots, list_matching_files,
         list_matching_files_with_root_metadata, list_omp_session_files_from,
     };
+
+    #[tokio::test]
+    async fn consumed_inventory_summary_has_typed_provenance_cap_and_unknown_details() {
+        use super::{InventoryIssue, ParserFeedback, SourceFileListing, SourceKind};
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("private-root");
+        fs::write(&root, "not directory").unwrap();
+        let (mut listing, facts) = super::feedback::collect(async {
+            let listing = list_matching_files(root, |_, _| true);
+            assert!(listing.error_summary().is_some());
+            listing
+        })
+        .await;
+        assert!(
+            facts.is_empty(),
+            "discovery/coverage consult alone must not assign a parser failure"
+        );
+        listing.errors.push("custom additional failure".into());
+        for _ in 0..3 {
+            listing.push_inventory_error(
+                "source file inventory error: permission denied".into(),
+                InventoryIssue::ExternalIo {
+                    detail: "permission denied".into(),
+                },
+            );
+        }
+        listing
+            .errors
+            .push("skipped 7 omp session file(s) already owned by pi".into());
+        let canonical = listing.error_summary();
+        let (result, facts) = super::feedback::collect(async {
+            listing.error_summary_with_feedback(SourceKind::Codex)
+        })
+        .await;
+        assert_eq!(result, canonical);
+        let ParserFeedback::Inventory { source, diagnostic } = &facts[0] else {
+            panic!("inventory fact");
+        };
+        assert_eq!(*source, SourceKind::Codex);
+        assert_eq!(diagnostic.total, 5);
+        assert_eq!(diagnostic.omitted, 2);
+        assert_eq!(diagnostic.samples.len(), 3);
+        assert_eq!(diagnostic.samples[0], InventoryIssue::RootNotDirectory);
+        assert_eq!(
+            diagnostic.samples[1],
+            InventoryIssue::Unknown {
+                detail: "custom additional failure".into()
+            }
+        );
+        let ownership_only = SourceFileListing {
+            errors: vec!["skipped 1 omp session file(s) already owned by pi".into()],
+            ..Default::default()
+        };
+        let (summary, facts) = super::feedback::collect(async {
+            ownership_only.error_summary_with_feedback(SourceKind::Omp)
+        })
+        .await;
+        assert!(summary.is_none() && facts.is_empty());
+    }
+
+    #[test]
+    fn walk_inventory_fact_retains_os_detail_without_embedded_private_path() {
+        let temp = TempDir::new().unwrap();
+        let private = temp.path().join("private-source-sentinel");
+        let error = walkdir::WalkDir::new(private)
+            .into_iter()
+            .next()
+            .unwrap()
+            .unwrap_err();
+        assert!(error.to_string().contains("private-source-sentinel"));
+        let super::InventoryIssue::ExternalIo { detail } = super::walk_inventory_issue(&error)
+        else {
+            panic!("OS detail");
+        };
+        assert!(!detail.contains("private-source-sentinel"));
+    }
 
     #[test]
     fn list_matching_files_retains_root_error_after_access_recovers() {

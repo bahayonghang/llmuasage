@@ -208,6 +208,7 @@ pub(crate) fn run_migrations_with_events_and_permit(
             }));
         }
         info!(
+            event_code = "store.migrations.01",
             version = *version,
             name = *name,
             "开始执行 schema migration"
@@ -238,6 +239,7 @@ pub(crate) fn run_migrations_with_events_and_permit(
                     }));
                 }
                 info!(
+                    event_code = "store.migrations.02",
                     version = *version,
                     name = *name,
                     elapsed_ms,

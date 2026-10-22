@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use serde_json::Value;
 
 use crate::{app::AppContext, models::SourceKind, store::Store, util::resolve_home_dir};
@@ -17,26 +17,35 @@ const ANTIGRAVITY_HOOK_EVENT: &str = "Stop";
 const LEGACY_GEMINI_HOOK_EVENT: &str = "SessionEnd";
 
 pub fn cleanup(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
+    cleanup_with_facts(app, store).map(|outcome| outcome.action)
+}
+
+pub(crate) fn cleanup_with_facts(app: &AppContext, store: &Store) -> Result<super::CleanupOutcome> {
     let antigravity_path = resolve_antigravity_hooks();
     let legacy_path = resolve_legacy_gemini_settings();
-    let mut changed_any = false;
+    let (antigravity_hooks, antigravity_residue) =
+        cleanup_antigravity_file(app, store, &antigravity_path)?;
+    let (gemini_hooks, gemini_residue) = cleanup_legacy_gemini_file(app, store, &legacy_path)?;
+    let hooks = antigravity_hooks || gemini_hooks;
+    let residue = antigravity_residue || gemini_residue;
+    let changed_any = hooks || residue;
 
-    changed_any |= cleanup_antigravity_file(app, store, &antigravity_path)?;
-    changed_any |= cleanup_legacy_gemini_file(app, store, &legacy_path)?;
-
-    Ok(IntegrationAction {
-        source: SourceKind::Antigravity,
-        status: if changed_any { "restored" } else { "skipped" }.to_string(),
-        detail: if changed_any {
-            "removed legacy llmusage Antigravity/Gemini hooks"
-        } else {
-            "no legacy Antigravity/Gemini hooks found"
-        }
-        .to_string(),
+    Ok(super::CleanupOutcome {
+        action: IntegrationAction {
+            source: SourceKind::Antigravity,
+            status: if changed_any { "restored" } else { "skipped" }.to_string(),
+            detail: if changed_any {
+                "removed legacy llmusage Antigravity/Gemini hooks"
+            } else {
+                "no legacy Antigravity/Gemini hooks found"
+            }
+            .to_string(),
+        },
+        fact: super::CleanupFact::Antigravity { hooks, residue },
     })
 }
 
-fn cleanup_antigravity_file(app: &AppContext, store: &Store, path: &Path) -> Result<bool> {
+fn cleanup_antigravity_file(app: &AppContext, store: &Store, path: &Path) -> Result<(bool, bool)> {
     let residue_removed = recover_and_cleanup_residue(path)?;
     let mut changed = false;
     if path.is_file() {
@@ -72,10 +81,14 @@ fn cleanup_antigravity_file(app: &AppContext, store: &Store, path: &Path) -> Res
             None,
         )?;
     }
-    Ok(changed || residue_removed)
+    Ok((changed, residue_removed))
 }
 
-fn cleanup_legacy_gemini_file(app: &AppContext, store: &Store, path: &Path) -> Result<bool> {
+fn cleanup_legacy_gemini_file(
+    app: &AppContext,
+    store: &Store,
+    path: &Path,
+) -> Result<(bool, bool)> {
     let residue_removed = recover_and_cleanup_residue(path)?;
     let mut changed = false;
     if path.is_file() {
@@ -111,7 +124,7 @@ fn cleanup_legacy_gemini_file(app: &AppContext, store: &Store, path: &Path) -> R
             None,
         )?;
     }
-    Ok(changed || residue_removed)
+    Ok((changed, residue_removed))
 }
 
 fn resolve_antigravity_hooks() -> PathBuf {
@@ -134,9 +147,9 @@ fn remove_direct_llmusage_commands(settings: &mut Value, event: &str) -> Result<
     let Some(entries_value) = root.get_mut(event) else {
         return Ok(false);
     };
-    let entries = entries_value
-        .as_array_mut()
-        .ok_or_else(|| anyhow!("Antigravity hooks.{event} must be an array"))?;
+    let entries = entries_value.as_array_mut().ok_or_else(|| {
+        super::CleanupInputError::config_shape("Antigravity", &format!("hooks.{event}"), true)
+    })?;
     let before = entries.len();
     entries.retain(|entry| {
         !entry
@@ -152,15 +165,15 @@ fn remove_nested_llmusage_commands(settings: &mut Value, event: &str) -> Result<
     let Some(hooks_value) = root.get_mut("hooks") else {
         return Ok(false);
     };
-    let hooks = hooks_value
-        .as_object_mut()
-        .ok_or_else(|| anyhow!("Gemini settings.json hooks field must be an object"))?;
+    let hooks = hooks_value.as_object_mut().ok_or_else(|| {
+        super::CleanupInputError::config_shape("Gemini settings.json", "hooks", false)
+    })?;
     let Some(entries_value) = hooks.get_mut(event) else {
         return Ok(false);
     };
-    let entries = entries_value
-        .as_array_mut()
-        .ok_or_else(|| anyhow!("Gemini hooks.{event} must be an array"))?;
+    let entries = entries_value.as_array_mut().ok_or_else(|| {
+        super::CleanupInputError::config_shape("Gemini", &format!("hooks.{event}"), true)
+    })?;
     let mut changed = false;
     for entry in entries.iter_mut() {
         let Some(commands) = entry.get_mut("hooks").and_then(Value::as_array_mut) else {
@@ -194,7 +207,7 @@ fn root_object_mut<'a>(
 ) -> Result<&'a mut serde_json::Map<String, Value>> {
     settings
         .as_object_mut()
-        .ok_or_else(|| anyhow!("{label} top level must be an object"))
+        .ok_or_else(|| super::CleanupInputError::config_shape(label, "", false).into())
 }
 
 #[cfg(test)]

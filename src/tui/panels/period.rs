@@ -1,3 +1,4 @@
+use crate::common::i18n::tui::text as tr;
 use ratatui::{
     layout::Constraint,
     widgets::{Cell, Row},
@@ -59,18 +60,18 @@ pub(crate) fn period_header_labels(
     match tier {
         WidthTier::VeryNarrow => vec![
             sort.header(time_label, TableSortKey::Date),
-            sort.header("Cost", TableSortKey::Cost),
+            sort.header(tr("cost_2"), TableSortKey::Cost),
         ],
         WidthTier::Narrow => {
             let mut labels = vec![sort.header(time_label, TableSortKey::Date)];
             labels.extend(extra_after_time.iter().map(|label| (*label).to_string()));
             if has_turns {
-                labels.push("Turn".to_string());
+                labels.push(tr("turn").to_string());
             }
             labels.extend([
-                "Msgs".to_string(),
-                sort.header("Tokens", TableSortKey::Tokens),
-                sort.header("Cost", TableSortKey::Cost),
+                tr("msgs").to_string(),
+                sort.header(tr("tokens_3"), TableSortKey::Tokens),
+                sort.header(tr("cost_2"), TableSortKey::Cost),
             ]);
             labels
         }
@@ -78,18 +79,18 @@ pub(crate) fn period_header_labels(
             let mut labels = vec![sort.header(time_label, TableSortKey::Date)];
             labels.extend(extra_after_time.iter().map(|label| (*label).to_string()));
             if has_turns {
-                labels.push("Turn".to_string());
+                labels.push(tr("turn").to_string());
             }
             labels.extend([
-                "Msgs".to_string(),
-                "Input".to_string(),
-                "Output".to_string(),
-                "Cache R".to_string(),
-                "Cache W".to_string(),
-                "Cache×".to_string(),
-                sort.header("Total", TableSortKey::Tokens),
-                sort.header("Cost", TableSortKey::Cost),
-                "Cost/1M".to_string(),
+                tr("msgs").to_string(),
+                tr("input").to_string(),
+                tr("output").to_string(),
+                tr("cache_r").to_string(),
+                tr("cache_w").to_string(),
+                tr("cache").to_string(),
+                sort.header(tr("total"), TableSortKey::Tokens),
+                sort.header(tr("cost_2"), TableSortKey::Cost),
+                tr("cost_1m").to_string(),
             ]);
             labels
         }

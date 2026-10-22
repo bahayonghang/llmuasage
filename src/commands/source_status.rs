@@ -1,3 +1,7 @@
+use crate::common::i18n::{
+    commands::{message, platform_action, status_label},
+    text,
+};
 use std::collections::{BTreeMap, HashMap};
 
 use anyhow::Result;
@@ -52,15 +56,18 @@ pub async fn run(app: &AppContext) -> Result<()> {
     let store = Store::new(&app.paths)?;
     store.require_initialized()?;
     let dashboard = Dashboard::open(&store)?;
-    let platform_statuses = build_platform_monitor_statuses();
+    let platform_statuses = build_platform_monitor_statuses_with_facts();
     let hosts = store.hosts().list()?;
 
-    println!("Source status:");
+    println!("{}", message!(SourceStatusTitle));
     for host in &hosts {
         println!(
-            "Host {}: status={}",
-            host.label,
-            host_lifecycle_status(host)
+            "{}",
+            message!(
+                HostStatus,
+                host.label,
+                status_label(host_lifecycle_status(host))
+            )
         );
         let sources = dashboard.source_breakdown(&QueryFilter {
             host_id: Some(host.host_id.clone()),
@@ -82,15 +89,17 @@ pub async fn run(app: &AppContext) -> Result<()> {
                 .keys()
                 .filter_map(|source| SourceKind::parse_id(source)),
         );
-        print_human_statuses_with_diagnostics(
+        print_human_statuses_for_host(
+            &store,
+            &host.host_id,
             &capability_statuses,
             &[],
             &parse_issues,
             &issues,
             &basenames,
-        );
+        )?;
     }
-    print_human_statuses(&[], &platform_statuses, &BTreeMap::new());
+    print_platform_monitor_statuses(&platform_statuses);
     Ok(())
 }
 
@@ -118,6 +127,27 @@ pub fn build_platform_monitor_statuses() -> Vec<PlatformMonitorStatus> {
         .into_iter()
         .map(platform_monitor_status_from_probe)
         .collect()
+}
+
+pub(crate) fn build_platform_monitor_statuses_with_facts()
+-> Vec<(PlatformMonitorStatus, platform_monitor::PlatformProbeFact)> {
+    platform_monitor::probe_registered_platforms_with_facts()
+        .into_iter()
+        .map(|(probe, fact)| (platform_monitor_status_from_probe(probe), fact))
+        .collect()
+}
+
+pub(crate) fn print_platform_monitor_statuses(
+    statuses: &[(PlatformMonitorStatus, platform_monitor::PlatformProbeFact)],
+) {
+    for (platform, fact) in statuses {
+        let detail = if platform.probe_status == "detected" {
+            message!(PlatformDetected, fact.labels)
+        } else {
+            message!(PlatformUndetected, fact.labels)
+        };
+        print_platform_status(platform, &detail);
+    }
 }
 
 pub fn apply_token_accounting_statuses(
@@ -209,6 +239,34 @@ pub fn print_human_statuses(
     );
 }
 
+pub(crate) fn print_human_statuses_for_host(
+    store: &Store,
+    host: &str,
+    capability_statuses: &[SourceCapabilityStatus],
+    platform_statuses: &[PlatformMonitorStatus],
+    parse_issues: &BTreeMap<String, ParseIssues>,
+    source_issues: &crate::domain::source_diagnostics::SourceIssues,
+    basenames: &HashMap<String, String>,
+) -> Result<()> {
+    let retained = if capability_statuses
+        .iter()
+        .any(|status| status.source == SourceKind::Antigravity)
+    {
+        store.retained_antigravity_history_count(host)?
+    } else {
+        0
+    };
+    print_human_statuses_with_context(
+        capability_statuses,
+        platform_statuses,
+        parse_issues,
+        source_issues,
+        basenames,
+        Some((host, retained)),
+    );
+    Ok(())
+}
+
 fn print_human_statuses_with_diagnostics(
     capability_statuses: &[SourceCapabilityStatus],
     platform_statuses: &[PlatformMonitorStatus],
@@ -216,19 +274,58 @@ fn print_human_statuses_with_diagnostics(
     source_issues: &crate::domain::source_diagnostics::SourceIssues,
     basenames: &HashMap<String, String>,
 ) {
+    print_human_statuses_with_context(
+        capability_statuses,
+        platform_statuses,
+        parse_issues_by_source,
+        source_issues,
+        basenames,
+        None,
+    );
+}
+
+fn print_human_statuses_with_context(
+    capability_statuses: &[SourceCapabilityStatus],
+    platform_statuses: &[PlatformMonitorStatus],
+    parse_issues_by_source: &BTreeMap<String, ParseIssues>,
+    source_issues: &crate::domain::source_diagnostics::SourceIssues,
+    basenames: &HashMap<String, String>,
+    context: Option<(&str, i64)>,
+) {
     for status in capability_statuses {
         println!(
-            "- Source status {}: status={} quality={} total={} last={} accounting={} ({})",
-            status.source,
-            status.status,
-            status.quality,
-            status.total_tokens,
-            status.last_event_at.as_deref().unwrap_or("never"),
-            status.accounting,
-            status.display_name
+            "{}",
+            message!(
+                SourceStatus,
+                status.source,
+                status_label(status.status),
+                status_label(status.quality),
+                status.total_tokens,
+                status
+                    .last_event_at
+                    .as_deref()
+                    .unwrap_or(text("never", "从未")),
+                status_label(status.accounting),
+                source_detail(status)
+            )
         );
-        if let Some(warning) = &status.token_accounting_warning {
-            println!("  warning: {warning}");
+        if let Some((host, retained)) = context {
+            if status.legacy_token_accounting {
+                let warning = if host == LOCAL_HOST_ID {
+                    message!(LegacySkipped, status.source)
+                } else {
+                    message!(RemoteAccounting, host, status.source)
+                };
+                println!("{}", message!(StatusWarning, warning));
+            }
+            if status.source == SourceKind::Antigravity && retained > 0 {
+                println!(
+                    "{}",
+                    message!(StatusWarning, message!(RetainedHooks, retained))
+                );
+            }
+        } else if let Some(warning) = &status.token_accounting_warning {
+            println!("{}", message!(OriginalWarning, warning));
         }
         if let Some(issues) = parse_issues_by_source.get(status.source.as_str()) {
             for line in parse_issue_status_lines_with_basenames(issues, basenames) {
@@ -237,24 +334,67 @@ fn print_human_statuses_with_diagnostics(
         }
         if let Some(issues) = source_issues.get(&status.source) {
             for issue in issues {
-                println!("  source issue: {}", issue.cli_line(status.source));
+                for line in super::sync_summary::notice_lines(
+                    &crate::sync::notices::RunNotice::SourceIssue {
+                        source: status.source,
+                        issue: issue.clone(),
+                    },
+                    false,
+                ) {
+                    println!("{line}");
+                }
             }
         }
     }
     for platform in platform_statuses {
-        println!(
-            "- Platform monitor {}: status={} parser={} quality={} roots={}/{} privacy={} ({}) next={}",
+        let detail = if crate::common::i18n::current() == crate::common::i18n::Language::English {
+            platform.detail.clone()
+        } else {
+            format!(
+                "{}：{}",
+                text("Original detail", "原始详情"),
+                platform.detail
+            )
+        };
+        print_platform_status(platform, &detail);
+    }
+}
+
+fn source_detail(status: &SourceCapabilityStatus) -> String {
+    if crate::common::i18n::current() == crate::common::i18n::Language::English {
+        return status.detail.clone();
+    }
+    match status.status {
+        "historical_only" => message!(SourceHistorical),
+        "passive_ready" | "passive_no_data"
+            if matches!(
+                status.source,
+                SourceKind::Antigravity | SourceKind::AntigravityIde
+            ) =>
+        {
+            message!(SourceNative)
+        }
+        "passive_ready" | "passive_no_data" => message!(SourcePassive),
+        _ => format!("原始详情：{}", status.detail),
+    }
+}
+
+fn print_platform_status(platform: &PlatformMonitorStatus, detail: &str) {
+    println!(
+        "{}",
+        message!(
+            PlatformStatus,
             platform.platform_id,
-            platform.probe_status,
-            platform.parser_status,
-            platform.quality.unwrap_or("unavailable"),
+            status_label(platform.probe_status),
+            status_label(platform.parser_status),
+            status_label(platform.quality.unwrap_or("unavailable")),
             platform.roots_detected,
             platform.roots_checked,
-            platform.privacy,
-            platform.display_name,
-            platform.next_action
-        );
-    }
+            status_label(platform.privacy),
+            detail,
+            platform_action(platform.platform_id, platform.next_action)
+        )
+    );
 }
 
 /// Read-only host lifecycle for `source-status`. `live` is a sync-event
@@ -279,22 +419,14 @@ fn parse_issue_status_lines_with_basenames(
     issues: &ParseIssues,
     basenames: &HashMap<String, String>,
 ) -> Vec<String> {
-    let Some(summary) = issues.summary_text() else {
-        return Vec::new();
-    };
-    let mut lines = vec![format!("  parse issues: {summary}")];
-    lines.push(format!("  {}", issues.sample_summary()));
-    for sample in issues
-        .samples
-        .iter()
-        .take(crate::domain::models::MAX_PARSE_ISSUE_SAMPLES)
-    {
-        lines.push(format!(
-            "    {}",
-            sample.cli_line(basenames.get(&sample.path_hash).map(String::as_str))
-        ));
-    }
-    lines
+    super::sync_summary::parse_issue_lines(
+        &crate::parsers::SourceSyncStats {
+            parse_issues: issues.clone(),
+            ..Default::default()
+        },
+        false,
+        basenames,
+    )
 }
 
 fn platform_monitor_status_from_probe(probe: PlatformProbe) -> PlatformMonitorStatus {
@@ -619,7 +751,7 @@ mod tests {
             ..ParseIssues::default()
         };
         let lines = parse_issue_status_lines(&issues);
-        assert_eq!(lines[0], "  parse issues: skipped=1");
+        assert_eq!(lines[0], "  Information: skipped=1");
         assert_eq!(
             lines[2],
             "    skipped zcode_unfinished:error:invalid_request [location unavailable]"

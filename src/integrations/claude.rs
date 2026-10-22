@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use serde_json::Value;
 
 use crate::{app::AppContext, models::SourceKind, store::Store, util::resolve_home_dir};
@@ -14,6 +14,10 @@ use super::{
 };
 
 pub fn cleanup(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
+    cleanup_with_facts(app, store).map(|outcome| outcome.action)
+}
+
+pub(crate) fn cleanup_with_facts(app: &AppContext, store: &Store) -> Result<super::CleanupOutcome> {
     let settings_path = resolve_claude_settings();
     let residue_removed = recover_and_cleanup_residue(&settings_path)?;
     if !settings_path.is_file() {
@@ -48,14 +52,17 @@ pub fn cleanup(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
         },
     )?;
 
-    Ok(restored("removed legacy llmusage Claude hooks"))
+    Ok(super::CleanupOutcome {
+        action: restored("removed legacy llmusage Claude hooks"),
+        fact: super::CleanupFact::ClaudeHooks,
+    })
 }
 
 fn finish_residue_only(
     store: &Store,
     settings_path: &Path,
     residue_removed: bool,
-) -> Result<IntegrationAction> {
+) -> Result<super::CleanupOutcome> {
     if residue_removed {
         record_action(
             store,
@@ -66,12 +73,18 @@ fn finish_residue_only(
             Some(settings_path),
             None,
         )?;
-        Ok(restored("recovered legacy Claude atomic-write residue"))
+        Ok(super::CleanupOutcome {
+            action: restored("recovered legacy Claude atomic-write residue"),
+            fact: super::CleanupFact::ClaudeResidue,
+        })
     } else {
-        Ok(IntegrationAction {
-            source: SourceKind::Claude,
-            status: "skipped".to_string(),
-            detail: "no legacy Claude hooks found".to_string(),
+        Ok(super::CleanupOutcome {
+            action: IntegrationAction {
+                source: SourceKind::Claude,
+                status: "skipped".to_string(),
+                detail: "no legacy Claude hooks found".to_string(),
+            },
+            fact: super::CleanupFact::ClaudeAbsent,
         })
     }
 }
@@ -95,19 +108,19 @@ fn read_settings(path: &Path) -> Result<Value> {
 fn remove_llmusage_event_commands(settings: &mut Value, event: &str) -> Result<bool> {
     let root = settings
         .as_object_mut()
-        .ok_or_else(|| anyhow!("Claude settings.json top level must be an object"))?;
+        .ok_or_else(|| super::CleanupInputError::config_shape("Claude settings.json", "", false))?;
     let Some(hooks_value) = root.get_mut("hooks") else {
         return Ok(false);
     };
-    let hooks = hooks_value
-        .as_object_mut()
-        .ok_or_else(|| anyhow!("Claude settings.json hooks field must be an object"))?;
+    let hooks = hooks_value.as_object_mut().ok_or_else(|| {
+        super::CleanupInputError::config_shape("Claude settings.json", "hooks", false)
+    })?;
     let Some(entries_value) = hooks.get_mut(event) else {
         return Ok(false);
     };
-    let entries = entries_value
-        .as_array_mut()
-        .ok_or_else(|| anyhow!("Claude hooks.{event} must be an array"))?;
+    let entries = entries_value.as_array_mut().ok_or_else(|| {
+        super::CleanupInputError::config_shape("Claude", &format!("hooks.{event}"), true)
+    })?;
     let mut changed = false;
 
     for entry in entries.iter_mut() {

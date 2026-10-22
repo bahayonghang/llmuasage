@@ -1,6 +1,6 @@
 use std::{fs, path::PathBuf};
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use toml_edit::{DocumentMut, Item, Value, value};
 
 use crate::{app::AppContext, models::SourceKind, store::Store, util::resolve_home_dir};
@@ -11,16 +11,27 @@ use super::{
 };
 
 pub fn cleanup(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
+    cleanup_with_facts(app, store).map(|outcome| outcome.action)
+}
+
+pub(crate) fn cleanup_with_facts(app: &AppContext, store: &Store) -> Result<super::CleanupOutcome> {
     let config_path = resolve_codex_config();
     let backup_value_path = app.paths.backups_dir.join("codex_notify_original.json");
     let residue_removed = recover_and_cleanup_residue(&config_path)?;
     if !config_path.is_file() {
         if backup_value_path.exists() {
-            bail!(
-                "cannot restore {} because {} is missing",
-                backup_value_path.display(),
-                config_path.display()
-            );
+            return Err(super::CleanupInputError::new(
+                format!(
+                    "cannot restore {} because {} is missing",
+                    backup_value_path.display(),
+                    config_path.display()
+                ),
+                super::CleanupFailureDetail::MissingCodexConfig {
+                    backup: backup_value_path.display().to_string(),
+                    config: config_path.display().to_string(),
+                },
+            )
+            .into());
         }
         return finish_residue_only(store, &config_path, residue_removed);
     }
@@ -99,10 +110,13 @@ pub fn cleanup(app: &AppContext, store: &Store) -> Result<IntegrationAction> {
     if restore_marker {
         fs::remove_file(&backup_value_path)?;
     }
-    Ok(IntegrationAction {
-        source: SourceKind::Codex,
-        status: "restored".to_string(),
-        detail: "legacy Codex notify cleanup completed".to_string(),
+    Ok(super::CleanupOutcome {
+        action: IntegrationAction {
+            source: SourceKind::Codex,
+            status: "restored".to_string(),
+            detail: "legacy Codex notify cleanup completed".to_string(),
+        },
+        fact: super::CleanupFact::CodexNotify,
     })
 }
 
@@ -110,7 +124,7 @@ fn finish_residue_only(
     store: &Store,
     config_path: &std::path::Path,
     residue_removed: bool,
-) -> Result<IntegrationAction> {
+) -> Result<super::CleanupOutcome> {
     if residue_removed {
         record_action(
             store,
@@ -121,16 +135,22 @@ fn finish_residue_only(
             Some(config_path),
             None,
         )?;
-        Ok(IntegrationAction {
-            source: SourceKind::Codex,
-            status: "restored".to_string(),
-            detail: "recovered legacy Codex atomic-write residue".to_string(),
+        Ok(super::CleanupOutcome {
+            action: IntegrationAction {
+                source: SourceKind::Codex,
+                status: "restored".to_string(),
+                detail: "recovered legacy Codex atomic-write residue".to_string(),
+            },
+            fact: super::CleanupFact::CodexResidue,
         })
     } else {
-        Ok(IntegrationAction {
-            source: SourceKind::Codex,
-            status: "skipped".to_string(),
-            detail: "no legacy Codex notify found".to_string(),
+        Ok(super::CleanupOutcome {
+            action: IntegrationAction {
+                source: SourceKind::Codex,
+                status: "skipped".to_string(),
+                detail: "no legacy Codex notify found".to_string(),
+            },
+            fact: super::CleanupFact::CodexAbsent,
         })
     }
 }

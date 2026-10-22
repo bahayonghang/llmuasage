@@ -1,6 +1,8 @@
+use super::cli_errors::Diagnostic;
+use crate::common::i18n::commands::{OperationDiagnostic as Fact, message};
 use std::path::PathBuf;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use serde_json::json;
 use tracing::info;
 
@@ -15,7 +17,7 @@ pub async fn run(
     let store = Store::new(&app.paths)?;
 
     if let Some(file_path) = forget_file {
-        store.bootstrap()?;
+        super::cli_errors::pricing_result(store.bootstrap_with_pricing_facts())?;
         return run_forget_file(&store, file_path, source);
     }
     store.require_initialized()?;
@@ -29,7 +31,10 @@ pub async fn run(
      * 2) 让 doctor 与外部调试都复用同一份诊断真源
      * 3) 支持写到文件或直接输出 stdout
      */
-    info!("开始导出 diagnostics JSON");
+    info!(
+        event_code = "commands.diagnostics.01",
+        "开始导出 diagnostics JSON"
+    );
 
     // 1.1 聚合本地诊断所需的全部数据面
     let dashboard = Dashboard::open(&store)?;
@@ -85,12 +90,15 @@ pub async fn run(
     let serialized = serde_json::to_string_pretty(&diagnostics)?;
     if let Some(out_path) = out {
         std::fs::write(&out_path, serialized)?;
-        println!("Wrote diagnostics to {}", out_path.display());
+        println!("{}", message!(DiagnosticsWrote, out_path.display()));
     } else {
         println!("{serialized}");
     }
 
-    info!("完成 diagnostics JSON 导出");
+    info!(
+        event_code = "commands.diagnostics.02",
+        "完成 diagnostics JSON 导出"
+    );
     Ok(())
 }
 
@@ -104,7 +112,12 @@ fn run_forget_file(store: &Store, file_path: PathBuf, source: Option<SourceKind>
      * 2) 同事务删除 source_cursor 同 file_path 行
      * 3) 不指定 --source 时若多源都存在则要求显式选源
      */
-    info!(?file_path, ?source, "开始登记 forget-file");
+    info!(
+        event_code = "commands.diagnostics.03",
+        ?file_path,
+        ?source,
+        "开始登记 forget-file"
+    );
 
     let raw_path = file_path.to_string_lossy().to_string();
     let target_source = match source {
@@ -113,11 +126,8 @@ fn run_forget_file(store: &Store, file_path: PathBuf, source: Option<SourceKind>
     };
 
     store.mark_source_file_deleted(target_source, "local", &raw_path)?;
-    println!(
-        "已将 {raw_path} 标记为 {} 源的 deleted_by_user",
-        target_source.as_str()
-    );
-    info!(source = %target_source, "完成 forget-file 登记");
+    println!("{}", message!(ForgotFile, raw_path, target_source.as_str()));
+    info!(event_code = "commands.diagnostics.04", source = %target_source, "完成 forget-file 登记");
     Ok(())
 }
 
@@ -131,14 +141,9 @@ fn resolve_unique_source(store: &Store, file_path: &str) -> Result<SourceKind> {
     let rows = stmt.query_map([file_path], |row| row.get::<_, String>(0))?;
     let candidates = rows.collect::<rusqlite::Result<Vec<_>>>()?;
     match candidates.as_slice() {
-        [] => bail!(
-            "找不到 file_path={file_path} 对应的源；请显式传 --source codex|claude|opencode|antigravity|kimi_code|pi|omp|grok"
-        ),
+        [] => Err(Diagnostic::with_facts(format!("找不到 file_path={file_path} 对应的源；请显式传 --source codex|claude|opencode|antigravity|kimi_code|pi|omp|grok"), Fact::ForgetMissing { path: file_path.to_owned() }).into()),
         [single] => SourceKind::parse_id(single)
-            .ok_or_else(|| anyhow::anyhow!("source_file 表里 source 列出现未知值：{single}")),
-        many => bail!(
-            "{file_path} 在多个源（{}）中存在，请用 --source 指定",
-            many.join(", ")
-        ),
+            .ok_or_else(|| Diagnostic::with_facts(format!("source_file 表里 source 列出现未知值：{single}"), Fact::ForgetUnknown { source: single.clone() }).into()),
+        many => Err(Diagnostic::with_facts(format!("{file_path} 在多个源（{}）中存在，请用 --source 指定", many.join(", ")), Fact::ForgetAmbiguous { path: file_path.to_owned(), sources: many.join(", ") }).into()),
     }
 }

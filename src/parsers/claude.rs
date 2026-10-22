@@ -118,7 +118,7 @@ async fn sync_claude(
      * 2) 只把缺失、追加或重放文件送去解析
      * 3) 返回 event / cursor / reset 指令给单 writer 统一落库
      */
-    info!("开始同步 Claude 项目真源");
+    info!(event_code = "parsers.claude.01", "开始同步 Claude 项目真源");
 
     // 1.1 构建按项目目录分片的候选文件计划
     let parse_started = Instant::now();
@@ -130,7 +130,7 @@ async fn sync_claude(
         &inventory_paths,
         writer.run_started_at(),
     )?;
-    let inventory_error = listing.error_summary();
+    let inventory_error = listing.error_summary_with_feedback(SourceKind::Claude);
     let inventory_root = listing.root;
     let files = listing.paths;
     let total_files = files.len();
@@ -306,6 +306,7 @@ async fn sync_claude(
     stats.parse_ms = total_elapsed.saturating_sub(write_ms);
 
     info!(
+        event_code = "parsers.claude.02",
         files_processed = stats.files_processed,
         trigger_files,
         changed_files = stats.changed_files,

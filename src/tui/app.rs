@@ -1,3 +1,5 @@
+use crate::common::i18n::tui::format as tr_format;
+use crate::common::i18n::tui::text as tr;
 use crate::query::reports::BlockReportRow;
 use crate::query::{
     ActivityPayload, ContextPressurePayload, DailyModelPoint, DailyTrendPoint, HeatmapPoint,
@@ -77,29 +79,29 @@ impl Panel {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Overview => "Overview",
-            Self::Trends => "Usage",
-            Self::Models => "Models",
-            Self::Sources => "Daily",
-            Self::Projects => "Hourly",
-            Self::Monthly => "Monthly",
-            Self::Health => "Stats",
-            Self::Behavior => "Agents",
-            Self::Blocks => "Blocks",
+            Self::Overview => tr("overview"),
+            Self::Trends => tr("usage"),
+            Self::Models => tr("models"),
+            Self::Sources => tr("daily"),
+            Self::Projects => tr("hourly"),
+            Self::Monthly => tr("monthly"),
+            Self::Health => tr("stats"),
+            Self::Behavior => tr("agents"),
+            Self::Blocks => tr("blocks"),
         }
     }
 
     pub fn short_label(self) -> &'static str {
         match self {
-            Self::Overview => "Ovw",
-            Self::Trends => "Use",
-            Self::Models => "Mod",
-            Self::Sources => "Day",
-            Self::Projects => "Hr",
-            Self::Monthly => "Mon",
-            Self::Health => "Sta",
-            Self::Behavior => "Agt",
-            Self::Blocks => "Blk",
+            Self::Overview => tr("ovw"),
+            Self::Trends => tr("use"),
+            Self::Models => tr("mod"),
+            Self::Sources => tr("day"),
+            Self::Projects => tr("hr"),
+            Self::Monthly => tr("mon"),
+            Self::Health => tr("sta"),
+            Self::Behavior => tr("agt"),
+            Self::Blocks => tr("blk"),
         }
     }
 }
@@ -196,10 +198,10 @@ impl TimeWindow {
     /// Human-readable label for the UI.
     pub fn label(&self) -> &'static str {
         match self {
-            Self::Day24h => "Today",
-            Self::Week7d => "7d",
-            Self::Month30d => "30d",
-            Self::All => "All",
+            Self::Day24h => tr("today"),
+            Self::Week7d => tr("7d"),
+            Self::Month30d => tr("30d"),
+            Self::All => tr("all"),
         }
     }
 
@@ -318,9 +320,9 @@ pub enum TableSortKey {
 impl TableSortKey {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Date => "date",
-            Self::Tokens => "tokens",
-            Self::Cost => "cost",
+            Self::Date => tr("date"),
+            Self::Tokens => tr("tokens"),
+            Self::Cost => tr("cost"),
         }
     }
 }
@@ -517,7 +519,10 @@ impl AppState {
     }
 
     pub fn source_filter_label(&self) -> &'static str {
-        self.filter.source.map(SourceKind::as_str).unwrap_or("all")
+        self.filter
+            .source
+            .map(SourceKind::as_str)
+            .unwrap_or(crate::common::i18n::text("all", "全部"))
     }
 
     pub fn open_source_picker(&mut self) {
@@ -536,9 +541,9 @@ impl AppState {
     pub fn toggle_usage_emails(&mut self) {
         self.hide_usage_emails = !self.hide_usage_emails;
         if self.hide_usage_emails {
-            self.set_status("Emails hidden");
+            self.set_status(tr("emails_hidden"));
         } else {
-            self.set_status("Emails visible");
+            self.set_status(tr("emails_visible"));
         }
     }
 
@@ -563,18 +568,19 @@ impl AppState {
             Some(source) => {
                 if self.filter.source == Some(source) {
                     self.filter.source = None;
-                    self.set_status("Source filter cleared");
+                    self.set_status(tr("source_filter_cleared"));
                 } else {
                     self.filter.source = Some(source);
-                    self.set_status(&format!("Source filter: {}", source.as_str()));
+                    self.set_status(&tr_format!(source_filter, source.as_str()));
                 }
                 self.invalidate_cached_data();
                 self.active_dialog = None;
             }
             None => {
-                self.set_status(&format!(
-                    "{} is monitor-only: {}",
-                    probe.display_name, probe.next_action
+                self.set_status(&tr_format!(
+                    is_monitor_only,
+                    probe.display_name,
+                    crate::common::i18n::tui::monitor_action(probe)
                 ));
             }
         }
@@ -584,7 +590,7 @@ impl AppState {
         self.filter.source = None;
         self.invalidate_cached_data();
         self.active_dialog = None;
-        self.set_status("Source filter cleared");
+        self.set_status(tr("source_filter_cleared"));
     }
 
     pub fn invalidate_cached_data(&mut self) {
@@ -614,9 +620,9 @@ impl AppState {
     pub fn toggle_auto_refresh(&mut self) {
         self.auto_refresh = !self.auto_refresh;
         if self.auto_refresh {
-            self.set_status("Auto refresh enabled");
+            self.set_status(tr("auto_refresh_enabled"));
         } else {
-            self.set_status("Auto refresh disabled");
+            self.set_status(tr("auto_refresh_disabled"));
         }
     }
 

@@ -17,7 +17,16 @@ use serde_json::Value;
 use tracing_appender::non_blocking::{ErrorCounter, NonBlockingBuilder, WorkerGuard};
 use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
+use crate::common::i18n::{Language, logging as copy};
 use crate::paths::AppPaths;
+use tracing::{
+    Event, Subscriber,
+    field::{Field, Visit},
+};
+use tracing_subscriber::{
+    fmt::{FmtContext, FormatEvent, FormatFields, format::Writer},
+    registry::LookupSpan,
+};
 
 const DEFAULT_FILE_LEVEL: &str = "warn";
 const MAX_LOG_FILE_BYTES: u64 = 10 * 1024 * 1024;
@@ -262,22 +271,38 @@ pub fn init_logging() -> Result<()> {
 /// `llmusage clean` uses this so a missing `--home` is not created just to
 /// open the rotating log writer.
 pub fn init_stderr_logging() -> Result<()> {
+    init_stderr_logging_with_language(None)
+}
+
+pub fn init_cli_stderr_logging(language: Language) -> Result<()> {
+    init_stderr_logging_with_language(Some(language))
+}
+
+fn init_stderr_logging_with_language(language: Option<Language>) -> Result<()> {
     let console_filter =
         EnvFilter::try_from_env("RUST_LOG").unwrap_or_else(|_| EnvFilter::new(DEFAULT_FILE_LEVEL));
     let stderr_layer = fmt::layer()
         .with_writer(StderrLogWriter::default)
-        .with_target(false)
+        .event_format(ConsoleFormat { language })
         .with_filter(console_filter);
     let _ = tracing_subscriber::registry().with(stderr_layer).try_init();
     Ok(())
 }
 
 pub fn init_logging_for_paths(paths: &AppPaths) -> Result<()> {
+    init_logging_with_language(paths, None)
+}
+
+pub fn init_cli_logging_for_paths(paths: &AppPaths, language: Language) -> Result<()> {
+    init_logging_with_language(paths, Some(language))
+}
+
+fn init_logging_with_language(paths: &AppPaths, language: Option<Language>) -> Result<()> {
     let console_filter =
         EnvFilter::try_from_env("RUST_LOG").unwrap_or_else(|_| EnvFilter::new(DEFAULT_FILE_LEVEL));
     let stderr_layer = fmt::layer()
         .with_writer(StderrLogWriter::default)
-        .with_target(false)
+        .event_format(ConsoleFormat { language })
         .with_filter(console_filter);
 
     if let Some(file_filter) = file_filter() {
@@ -300,6 +325,72 @@ pub fn init_logging_for_paths(paths: &AppPaths) -> Result<()> {
         let _ = tracing_subscriber::registry().with(stderr_layer).try_init();
     }
     Ok(())
+}
+
+struct ConsoleFormat {
+    language: Option<Language>,
+}
+
+#[derive(Default)]
+struct EventFields(serde_json::Map<String, Value>);
+
+impl Visit for EventFields {
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        self.0
+            .insert(field.name().into(), Value::String(format!("{value:?}")));
+    }
+    fn record_str(&mut self, field: &Field, value: &str) {
+        self.0
+            .insert(field.name().into(), Value::String(value.into()));
+    }
+    fn record_u64(&mut self, field: &Field, value: u64) {
+        self.0.insert(field.name().into(), value.into());
+    }
+    fn record_i64(&mut self, field: &Field, value: i64) {
+        self.0.insert(field.name().into(), value.into());
+    }
+    fn record_bool(&mut self, field: &Field, value: bool) {
+        self.0.insert(field.name().into(), value.into());
+    }
+}
+
+impl<S, N> FormatEvent<S, N> for ConsoleFormat
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+    N: for<'a> FormatFields<'a> + 'static,
+{
+    fn format_event(
+        &self,
+        context: &FmtContext<'_, S, N>,
+        mut writer: Writer<'_>,
+        event: &Event<'_>,
+    ) -> std::fmt::Result {
+        if let Some(language) = self.language {
+            let mut fields = EventFields::default();
+            event.record(&mut fields);
+            let level = event.metadata().level();
+            let message = fields
+                .0
+                .get("message")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            writeln!(
+                writer,
+                "{}",
+                copy::project(
+                    language,
+                    level.as_str(),
+                    message.as_deref(),
+                    &Value::Object(fields.0),
+                    *level == tracing::Level::DEBUG || *level == tracing::Level::TRACE
+                )
+            )
+        } else {
+            fmt::format()
+                .with_target(false)
+                .format_event(context, writer, event)
+        }
+    }
 }
 
 pub fn runtime_status(paths: &AppPaths) -> Result<LogsRuntimeStatus> {
@@ -660,6 +751,82 @@ fn level_rank(level: &str) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Clone, Default)]
+    struct Capture(Arc<Mutex<Vec<u8>>>);
+    impl Write for Capture {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn cli_console_captures_language_while_file_events_keep_original_message_level_and_fields() {
+        let mut documents = Vec::new();
+        for language in [Language::English, Language::Chinese] {
+            let console = Capture::default();
+            let console_writer = console.clone();
+            let file = Capture::default();
+            let file_writer = file.clone();
+            let subscriber = tracing_subscriber::registry()
+                .with(
+                    fmt::layer()
+                        .event_format(ConsoleFormat {
+                            language: Some(language),
+                        })
+                        .with_ansi(false)
+                        .with_writer(move || console_writer.clone()),
+                )
+                .with(
+                    fmt::layer()
+                        .json()
+                        .with_current_span(false)
+                        .with_span_list(false)
+                        .with_writer(move || file_writer.clone()),
+                );
+            tracing::subscriber::with_default(subscriber, || {
+                crate::common::i18n::with_language(
+                    if language == Language::English {
+                        Language::Chinese
+                    } else {
+                        Language::English
+                    },
+                    || {
+                        tracing::warn!(
+                            event_code = "store.mod.02",
+                            operation = "pricing_recompute",
+                            phase = "events",
+                            processed_events = 70000u64,
+                            total_events = 399560u64,
+                            elapsed_ms = 31100u64,
+                            from_version = "public-0123456789abcdef0123456789abcdef",
+                            "定价重算仍在进行"
+                        );
+                    },
+                )
+            });
+            let console = String::from_utf8(console.0.lock().unwrap().clone()).unwrap();
+            assert!(
+                console.contains(language.select("Pricing recalculation", "定价重算")),
+                "{console}"
+            );
+            assert!(console.ends_with('\n') && !console.contains('\u{1b}'));
+            assert!(!console.contains("0123456789abcdef") && !console.contains("phase="));
+            let document: Value = serde_json::from_slice(&file.0.lock().unwrap()).unwrap();
+            assert_eq!(document["level"], "WARN");
+            assert_eq!(document["fields"]["message"], "定价重算仍在进行");
+            assert_eq!(
+                document["fields"]["from_version"],
+                "public-0123456789abcdef0123456789abcdef"
+            );
+            documents.push(document["fields"].clone());
+        }
+        assert_eq!(documents[0], documents[1]);
+    }
     use std::{
         collections::HashSet,
         sync::mpsc::{Receiver, SyncSender, sync_channel},

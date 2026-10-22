@@ -1,3 +1,5 @@
+use crate::common::i18n::tui::format as tr_format;
+use crate::common::i18n::tui::text as tr;
 use ratatui::{
     Frame,
     layout::{Constraint, Rect},
@@ -33,21 +35,21 @@ pub(crate) fn render_with_plan(
 ) {
     match data {
         None => {
-            let widget = Paragraph::new("Loading...")
+            let widget = Paragraph::new(tr("loading"))
                 .style(theme::muted_style())
-                .block(styled_block("Models"));
+                .block(styled_block(tr("models")));
             frame.render_widget(widget, area);
         }
         Some(Err(e)) => {
-            let widget = Paragraph::new(format!("Data load failed: {e}"))
+            let widget = Paragraph::new(tr_format!(data_load_failed_e, e = e))
                 .style(theme::error_style())
-                .block(styled_block("Models"));
+                .block(styled_block(tr("models")));
             frame.render_widget(widget, area);
         }
         Some(Ok(items)) if items.is_empty() => {
-            let widget = Paragraph::new("No model data found.")
+            let widget = Paragraph::new(tr("no_model_data_found"))
                 .style(theme::muted_style())
-                .block(styled_block("Models"));
+                .block(styled_block(tr("models")));
             frame.render_widget(widget, area);
         }
         Some(Ok(items)) => render_table(frame, area, items, scroll, sort),
@@ -96,7 +98,7 @@ fn render_table(
     let table = Table::new(rows, table_widths(tier, area.width))
         .header(header)
         .column_spacing(column_spacing(tier, area.width))
-        .block(styled_block("Models"));
+        .block(styled_block(tr("models")));
 
     frame.render_widget(table, area);
 }
@@ -120,26 +122,29 @@ fn width_tier(width: u16) -> WidthTier {
 
 fn header_cells(tier: WidthTier, sort: SortState) -> Vec<Cell<'static>> {
     let labels: Vec<String> = match tier {
-        WidthTier::VeryNarrow => vec!["Model".to_string(), sort.header("Cost", TableSortKey::Cost)],
+        WidthTier::VeryNarrow => vec![
+            tr("model").to_string(),
+            sort.header(tr("cost_2"), TableSortKey::Cost),
+        ],
         WidthTier::Narrow => vec![
-            "Model".to_string(),
-            sort.header("Total", TableSortKey::Tokens),
-            sort.header("Cost", TableSortKey::Cost),
+            tr("model").to_string(),
+            sort.header(tr("total"), TableSortKey::Tokens),
+            sort.header(tr("cost_2"), TableSortKey::Cost),
         ],
         WidthTier::Wide => vec![
             "#".to_string(),
-            "Model".to_string(),
-            "Provider".to_string(),
-            "Source".to_string(),
-            "Input".to_string(),
-            "Output".to_string(),
-            "Cache R".to_string(),
-            "Cache W".to_string(),
-            "Cache×".to_string(),
-            sort.header("Total", TableSortKey::Tokens),
-            "Events".to_string(),
-            sort.header("Cost", TableSortKey::Cost),
-            "Cost/1M".to_string(),
+            tr("model").to_string(),
+            tr("provider").to_string(),
+            tr("source_3").to_string(),
+            tr("input").to_string(),
+            tr("output").to_string(),
+            tr("cache_r").to_string(),
+            tr("cache_w").to_string(),
+            tr("cache").to_string(),
+            sort.header(tr("total"), TableSortKey::Tokens),
+            tr("events").to_string(),
+            sort.header(tr("cost_2"), TableSortKey::Cost),
+            tr("cost_1m").to_string(),
         ],
     };
     labels.into_iter().map(Cell::from).collect()

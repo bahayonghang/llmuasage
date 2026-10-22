@@ -1,3 +1,5 @@
+use crate::common::i18n::tui::format as tr_format;
+use crate::common::i18n::tui::text as tr;
 use std::collections::HashMap;
 
 use chrono::{Datelike, NaiveDate};
@@ -18,8 +20,6 @@ use crate::tui::{
     theme,
 };
 
-const GRAPH_TITLE: &str = "Contribution Graph (52 weeks)";
-const BREAKDOWN_TITLE: &str = "Day Breakdown (ESC to close)";
 const CELL_WIDTH: u16 = 2;
 const MIN_GRAPH: u16 = 11;
 const STATS_FULL: u16 = 12;
@@ -57,15 +57,15 @@ pub fn render(
 ) {
     match data {
         None => {
-            let widget = Paragraph::new("Loading...")
+            let widget = Paragraph::new(tr("loading"))
                 .style(theme::muted_style())
-                .block(theme::panel_block("Stats"));
+                .block(theme::panel_block(tr("stats")));
             frame.render_widget(widget, area);
         }
         Some(Err(e)) => {
-            let widget = Paragraph::new(format!("Data load failed: {e}"))
+            let widget = Paragraph::new(tr_format!(data_load_failed_e, e = e))
                 .style(theme::error_style())
-                .block(theme::panel_block("Stats"));
+                .block(theme::panel_block(tr("stats")));
             frame.render_widget(widget, area);
         }
         Some(Ok(payload)) => render_payload(frame, area, payload, scroll, detail),
@@ -172,7 +172,7 @@ fn render_graph(
     heatmap: &[HeatmapPoint],
     selected_date: Option<&str>,
 ) {
-    let block = theme::panel_block(GRAPH_TITLE);
+    let block = theme::panel_block(tr("contribution_graph_52_weeks"));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.width == 0 || inner.height == 0 {
@@ -181,9 +181,9 @@ fn render_graph(
 
     let Some(layout) = GraphLayout::from_area(area, heatmap) else {
         let message = if heatmap.is_empty() {
-            "No heatmap data"
+            tr("no_heatmap_data")
         } else {
-            "Graph is too narrow"
+            tr("graph_is_too_narrow")
         };
         frame.render_widget(Paragraph::new(message).style(theme::muted_style()), inner);
         return;
@@ -244,10 +244,21 @@ fn render_month_labels(
         if x + 3 > inner.right() {
             continue;
         }
-        let label = MONTH_LABELS[(month as usize).saturating_sub(1).min(11)];
+        let index = (month as usize).saturating_sub(1).min(11);
+        let label = crate::common::i18n::text(
+            MONTH_LABELS[index],
+            [
+                "1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月",
+                "12月",
+            ][index],
+        );
+        let label_width = unicode_width::UnicodeWidthStr::width(label) as u16;
+        if x + label_width > inner.right() {
+            continue;
+        }
         frame.render_widget(
             Paragraph::new(label).style(theme::muted_style()),
-            Rect::new(x, inner.y, 3, 1),
+            Rect::new(x, inner.y, label_width, 1),
         );
     }
 }
@@ -265,14 +276,18 @@ fn render_weekday_labels(frame: &mut Frame, inner: Rect, layout: &GraphLayout) {
             continue;
         }
         frame.render_widget(
-            Paragraph::new(*label).style(theme::muted_style()),
+            Paragraph::new(crate::common::i18n::text(
+                label,
+                ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][weekday],
+            ))
+            .style(theme::muted_style()),
             Rect::new(inner.x, y, layout.label_width, 1),
         );
     }
 }
 
 fn render_stats_card(frame: &mut Frame, area: Rect, payload: &StatsPanelPayload, compact: bool) {
-    let block = theme::panel_block("Stats");
+    let block = theme::panel_block(tr("stats"));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.width == 0 || inner.height == 0 {
@@ -298,13 +313,17 @@ fn render_stats_card(frame: &mut Frame, area: Rect, payload: &StatsPanelPayload,
     let mut y = inner.y;
     let y_max = inner.bottom();
 
-    let favorite_label = if narrow { "Model:" } else { "Favorite model:" };
+    let favorite_label = if narrow {
+        tr("model_2")
+    } else {
+        tr("favorite_model")
+    };
     let favorite_value = match favorite {
         Some(model) => Span::styled(
             model.model.clone(),
             theme::fg_style(theme::vendor_fg(vendor_from_model(&model.model), 0)),
         ),
-        None => Span::styled("N/A", theme::muted_style()),
+        None => Span::styled(tr("n_a"), theme::muted_style()),
     };
     put_line(
         frame,
@@ -319,7 +338,11 @@ fn render_stats_card(frame: &mut Frame, area: Rect, payload: &StatsPanelPayload,
         y,
         col2_width,
         labeled(
-            if narrow { "Tokens:" } else { "Total tokens:" },
+            if narrow {
+                tr("tokens_4")
+            } else {
+                tr("total_tokens_2")
+            },
             Span::styled(
                 stat_compact(payload.overview.total.total_tokens),
                 theme::bold_fg_style(theme::metric_input()),
@@ -337,7 +360,7 @@ fn render_stats_card(frame: &mut Frame, area: Rect, payload: &StatsPanelPayload,
         y,
         col1_width,
         labeled(
-            "Events:",
+            tr("events_2"),
             Span::styled(
                 stat_compact(payload.overview.total_events),
                 theme::bold_fg_style(theme::metric_output()),
@@ -350,7 +373,11 @@ fn render_stats_card(frame: &mut Frame, area: Rect, payload: &StatsPanelPayload,
         y,
         col2_width,
         labeled(
-            if narrow { "Cost:" } else { "Total cost:" },
+            if narrow {
+                tr("cost_3")
+            } else {
+                tr("total_cost")
+            },
             Span::styled(
                 cost_compact(payload.overview.total_cost_usd),
                 theme::bold_fg_style(theme::positive_fg()),
@@ -368,9 +395,13 @@ fn render_stats_card(frame: &mut Frame, area: Rect, payload: &StatsPanelPayload,
         y,
         col1_width,
         labeled(
-            if narrow { "Streak:" } else { "Current streak:" },
+            if narrow {
+                tr("streak")
+            } else {
+                tr("current_streak")
+            },
             Span::styled(
-                format!("{current} days"),
+                tr_format!(current_days, current = current),
                 theme::bold_fg_style(theme::metric_cache_write()),
             ),
         ),
@@ -382,12 +413,12 @@ fn render_stats_card(frame: &mut Frame, area: Rect, payload: &StatsPanelPayload,
         col2_width,
         labeled(
             if narrow {
-                "Max streak:"
+                tr("max_streak")
             } else {
-                "Longest streak:"
+                tr("longest_streak")
             },
             Span::styled(
-                format!("{longest} days"),
+                tr_format!(longest_days, longest = longest),
                 theme::bold_fg_style(theme::metric_cache_write()),
             ),
         ),
@@ -403,7 +434,11 @@ fn render_stats_card(frame: &mut Frame, area: Rect, payload: &StatsPanelPayload,
         y,
         col1_width,
         labeled(
-            if narrow { "Active:" } else { "Active days:" },
+            if narrow {
+                tr("active_2")
+            } else {
+                tr("active_days")
+            },
             Span::styled(
                 format!("{active_days}/{total_days}"),
                 theme::bold_fg_style(theme::positive_fg()),
@@ -438,7 +473,7 @@ fn render_breakdown(
     detail: &PeriodDetailState,
     scroll: &ScrollState,
 ) {
-    let block = theme::panel_block(BREAKDOWN_TITLE);
+    let block = theme::panel_block(tr("day_breakdown_esc_to_close"));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.width == 0 || inner.height == 0 {
@@ -448,13 +483,14 @@ fn render_breakdown(
     match &detail.payload {
         None => {
             frame.render_widget(
-                Paragraph::new("Loading...").style(theme::muted_style()),
+                Paragraph::new(tr("loading")).style(theme::muted_style()),
                 inner,
             );
         }
         Some(Err(error)) => {
             frame.render_widget(
-                Paragraph::new(format!("Data load failed: {error}")).style(theme::error_style()),
+                Paragraph::new(tr_format!(data_load_failed_error, error = error))
+                    .style(theme::error_style()),
                 inner,
             );
         }
@@ -463,7 +499,7 @@ fn render_breakdown(
         }
         Some(Ok(PeriodDetailPayload::Monthly(_))) => {
             frame.render_widget(
-                Paragraph::new("No data for this day").style(theme::muted_style()),
+                Paragraph::new(tr("no_data_for_this_day")).style(theme::muted_style()),
                 inner,
             );
         }
@@ -481,7 +517,7 @@ fn render_breakdown_rows(
 ) {
     if rows.is_empty() {
         frame.render_widget(
-            Paragraph::new("No data for this day").style(theme::muted_style()),
+            Paragraph::new(tr("no_data_for_this_day")).style(theme::muted_style()),
             inner,
         );
         return;
@@ -535,14 +571,24 @@ fn breakdown_lines(
 
     for group in grouped_models(rows) {
         let model_count = group.models.len();
-        let plural = if model_count == 1 { "" } else { "s" };
+        let plural = if model_count == 1
+            || crate::common::i18n::current() == crate::common::i18n::Language::Chinese
+        {
+            ""
+        } else {
+            "s"
+        };
         lines.push(Line::from(vec![
             Span::styled(
                 format!("● {}", group.source),
                 theme::bold_fg_style(theme::accent()),
             ),
             Span::styled(
-                format!(" ({model_count} model{plural})"),
+                tr_format!(
+                    model_count_model_plural,
+                    model_count = model_count,
+                    plural = plural
+                ),
                 theme::muted_style(),
             ),
             Span::raw("  "),
@@ -583,13 +629,13 @@ fn channel_line(row: &PeriodDetailRow, narrow: bool) -> Line<'static> {
     } else {
         Line::from(vec![
             Span::raw("    "),
-            Span::styled("In · ", theme::muted_style()),
+            Span::styled(tr("in_2"), theme::muted_style()),
             Span::styled(input, theme::fg_style(theme::metric_input())),
-            Span::styled(" · Out · ", theme::muted_style()),
+            Span::styled(tr("out_2"), theme::muted_style()),
             Span::styled(output, theme::fg_style(theme::metric_output())),
-            Span::styled(" · CR · ", theme::muted_style()),
+            Span::styled(tr("cr_2"), theme::muted_style()),
             Span::styled(cache_read, theme::fg_style(theme::metric_cache_read())),
-            Span::styled(" · CW · ", theme::muted_style()),
+            Span::styled(tr("cw_2"), theme::muted_style()),
             Span::styled(cache_write, theme::fg_style(theme::metric_cache_write())),
         ])
     }
@@ -634,23 +680,30 @@ fn grouped_models(rows: &[PeriodDetailRow]) -> Vec<SourceGroup<'_>> {
 
 fn format_day_title(date: &str) -> String {
     NaiveDate::parse_from_str(date, "%Y-%m-%d")
-        .map(|parsed| parsed.format("%a, %b %d, %Y").to_string())
+        .map(|parsed| {
+            parsed
+                .format(crate::common::i18n::text("%a, %b %d, %Y", "%Y年%m月%d日"))
+                .to_string()
+        })
         .unwrap_or_else(|_| date.to_string())
 }
 
 fn context_pressure_line(pressure: &crate::query::ContextPressurePayload) -> Line<'static> {
     if pressure.priced_events == 0 {
-        return labeled("Context", Span::styled("n/a", theme::muted_style()));
+        return labeled(
+            tr("context"),
+            Span::styled(tr("n_a_2"), theme::muted_style()),
+        );
     }
     let peak_pct = pressure.peak_percent * 100.0;
     let avg_pct = pressure.avg_percent * 100.0;
     Line::from(vec![
-        Span::styled("Context peak ", theme::muted_style()),
+        Span::styled(tr("context_peak"), theme::muted_style()),
         Span::styled(
             format!("{peak_pct:.0}%"),
             theme::bold_fg_style(theme::bar_color(peak_pct)),
         ),
-        Span::styled("  avg ", theme::muted_style()),
+        Span::styled(tr("avg"), theme::muted_style()),
         Span::styled(
             format!("{avg_pct:.0}%"),
             theme::bold_fg_style(theme::accent()),
@@ -660,7 +713,7 @@ fn context_pressure_line(pressure: &crate::query::ContextPressurePayload) -> Lin
 
 fn heat_legend_line() -> Line<'static> {
     Line::from(vec![
-        Span::styled("Less ", theme::muted_style()),
+        Span::styled(tr("less"), theme::muted_style()),
         Span::styled("██", theme::fg_style(theme::heat(1))),
         Span::raw(" "),
         Span::styled("██", theme::fg_style(theme::heat(2))),
@@ -668,7 +721,7 @@ fn heat_legend_line() -> Line<'static> {
         Span::styled("██", theme::fg_style(theme::heat(3))),
         Span::raw(" "),
         Span::styled("██", theme::fg_style(theme::heat(4))),
-        Span::styled(" More", theme::muted_style()),
+        Span::styled(tr("more"), theme::muted_style()),
     ])
 }
 
@@ -688,7 +741,7 @@ fn put_line(frame: &mut Frame, x: u16, y: u16, width: u16, line: Line<'static>) 
 
 impl GraphLayout {
     fn from_area(area: Rect, heatmap: &[HeatmapPoint]) -> Option<Self> {
-        let inner = theme::panel_block(GRAPH_TITLE).inner(area);
+        let inner = theme::panel_block(tr("contribution_graph_52_weeks")).inner(area);
         if inner.width == 0 || inner.height == 0 || heatmap.is_empty() {
             return None;
         }
