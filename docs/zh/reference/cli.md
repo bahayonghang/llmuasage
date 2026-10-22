@@ -1,6 +1,6 @@
 # CLI 参考
 
-本页按版本 `2.0.0` 的 `cargo run -- --help`、`cargo run -- serve --help`、`cargo run -- export html --help` 对齐。顶层 help 使用紧凑表格；子命令 help 继续使用 clap 输出。
+本页说明版本 `2.0.1` 的 CLI。顶层 help 使用紧凑表格；根命令、嵌套命令的帮助和参数诊断均跟随已保存的界面语言。
 
 ## 顶层 help
 
@@ -11,7 +11,27 @@ llmusage -h
 llmusage help --zh
 ```
 
-`llmusage help`、`llmusage --help`、`llmusage -h` 输出英文表格 help；`llmusage help --zh` 输出中文表格 help。子命令旧版 clap help 仍使用 `llmusage help <COMMAND>` 或 `llmusage <COMMAND> --help`。
+`llmusage help`、`llmusage --help`、`llmusage -h` 跟随已保存的语言。子命令帮助使用 `llmusage help <COMMAND>` 或 `llmusage <COMMAND> --help`。`llmusage help --zh` 仅让本次帮助使用中文，不保存偏好。
+
+## 界面语言
+
+### `llmusage lang [en|zh|zh-CN]`
+
+```powershell
+llmusage lang
+llmusage lang zh
+llmusage lang en
+llmusage --home .\work-profile lang zh-CN
+llmusage --home .\work-profile daily --help
+```
+
+默认语言为英语，不受系统语言影响。保存的语言代码为 `en`、`zh`；`zh-CN` 是别名，保存时规范化为 `zh`。此设置控制 CLI 帮助、参数错误、人读命令/报表/控制台文字、受支持的日志回放，以及新启动的 `dash`/`tui`。命令、参数名、枚举值、原因码、单位、模型名和用户数据保持原值。
+
+偏好位于 `<runtime-root>/cli-settings.json`。根目录优先级为显式 `--home` > `LLMUSAGE_HOME` > `~/.llmusage`，因此各 profile 语言独立。`clean` 保留既有例外：使用显式 `--home` 或默认目录，忽略 `LLMUSAGE_HOME`。读取偏好、帮助、版本、参数错误和非交互 `lang` 不创建根目录、日志或数据库。设置缺失时使用英语；设置损坏或不可读时回退英语并显示修复诊断，读取不会改写文件。
+
+`lang` 无需初始化、数据库或 worker lock。stdin、stdout、stderr 都是终端时，显示 `English` / `中文（简体）` 选单；空输入、`q`/`Q` 或 EOF 取消且不保存。否则只显示当前语言和显式设置命令，不读取 stdin。显式 `lang en|zh|zh-CN` 保存选择；保存失败会报错并保留旧文件的完整内容。
+
+每次 CLI 调用读取一次设置。已运行的终端看板保持启动时语言，修改后需退出重开，不提供运行中的语言菜单。浏览器/桌面看板及导出 HTML 的语言保持独立。JSON/NDJSON/SSH/HTTP payload、持久化诊断和文件日志保持原始规范值；外部错误和缺少受支持展示元数据的历史日志可能保留原文。`--locale` 是独立的报表兼容值，不是界面语言开关。
 
 ## 全局参数
 
@@ -28,7 +48,7 @@ Usage: llmusage [OPTIONS] [COMMAND]
 | `--breakdown` | 在支持处包含按模型拆分的行或 payload |
 | `--order asc\|desc` | 按周期/活动排序报表行 |
 | `--timezone UTC\|local\|+08:00` | 报表时区。`local` 解析系统 IANA 时区，按各日期应用包含夏令时规则的偏移；解析失败时使用当前固定本地偏移。 |
-| `--locale <LOCALE>` | 标题和数字格式的轻量 locale 选择 |
+| `--locale <LOCALE>` | 报表兼容值：`en-US`、`zh-CN`、`ja-JP`；不选择 CLI/TUI 语言，也不引入按地区变化的数字格式 |
 | `--compact` | 使用更窄的表格布局 |
 | `--no-cost` | 从报表输出隐藏成本列与成本字段 |
 | `--source codex\|claude\|opencode\|antigravity\|antigravity_ide\|kimi_code\|pi\|omp\|grok` | 将顶层报表或同步命令限制到一个来源 |
@@ -50,6 +70,8 @@ Usage: llmusage [OPTIONS] [COMMAND]
 
 文件日志不会写入报表 stdout，也不会改变 `sync --json-events` stdout。分片在进程运行期间达到 10 MiB 即轮转，总量最多保留 30 MiB、7 个文件和 7 天；`logs` 与 `diagnostics` 状态会包含保留文件/字节数、队列丢弃事件数和维护失败数。
 
+人读控制台消息和受支持的 `logs` 回放根据稳定消息元数据跟随 `lang`。已保存的消息、字段、级别、过滤规则和历史记录不会被改写。未知或第三方详情会保留可辨识的原文。
+
 ## 报表命令
 
 报表命令只读取本地数据库。
@@ -63,7 +85,7 @@ llmusage daily --source codex --since 20260501 --until 20260518
 llmusage daily --json --breakdown
 ```
 
-默认命令。展示 daily token 与估算成本。daily、weekly、monthly 的文本输出采用统一的 `All` 加 `Agent` 行；CLI JSON 使用 camelCase，传入 `--by-agent` 时会加入嵌套来源行。
+默认命令。展示 daily token 与估算成本。daily、weekly、monthly 的文本输出采用聚合行和来源行，标签跟随界面语言（英语为 `All` / `Agent`）；CLI JSON 使用 camelCase，传入 `--by-agent` 时会加入嵌套来源行。
 
 ### `llmusage weekly`
 
@@ -126,7 +148,7 @@ llmusage statusline --no-cache
 llmusage statusline --refresh-interval 10 --cost-source llmusage
 ```
 
-输出一行适合 statusline 的摘要。
+输出一行适合 statusline 的摘要。标签跟随 `lang`，模型名、单位和数值语义保持原样。缓存按语言分为运行时根目录下的 `statusline-cache/latest.en.txt` 和 `latest.zh.txt`，不会回退到另一语言缓存或旧 `latest.txt`。
 
 ## 设置与同步命令
 
@@ -163,13 +185,15 @@ llmusage sync --rebuild --allow-lossy-rebuild
 
 设置 `LLMUSAGE_LOG=info` 可记录结构化的定价开始/对账/完成文件日志，`debug` 还会记录节流后的页进度。默认 `warn` 级别会在重算持续超过 30 秒时记录一次存活告警；终端进度不受文件日志级别影响。
 
-人读 stdout 摘要只输出一张对齐表格：每个来源一行，并以 `TOTAL` 收尾；已完成进度留在 stderr，不再成为重复的永久成功行。诊断行、警告、错误和样本只在 `TOTAL` 之后按来源输出，不插入表格行之间。表格按来源显示 `files`、`changed`、`skipped`、`seen`、`committed`、`stored_events`、bytes 和 parse/write 耗时。被保护或阻断的来源显示 `COMMITTED 0`、保留的 `STORED`、`CHANGED 0`、`BYTES 0`、`WRITE 0`，`FILES` 为只读覆盖发现的文件数。`skipped` 对文件型来源来自现有 cursor/fingerprint 证据，对 OpenCode 这种 DB 来源来自 SQLite 高水位 cursor；`committed` 是 SQLite 去重后本次新增写入数。重定向输出不含 ANSI，窄终端使用紧凑表头且不截断数值。
+人读 stdout 摘要是一张十列闭合线框表：来源、文件、变更、跳过、读取事件、新增事件、库存事件、读取量、解析、写入（英语为 `SOURCE`、`FILES`、`CHANGED`、`SKIPPED`、`SEEN`、`COMMITTED`、`STORED`、`BYTES`、`PARSE`、`WRITE`）。它有外框、竖线、表头分隔和合计前分隔，每个来源一行；标签跟随 `lang`。已完成进度留在 stderr，不再成为重复的永久成功行。诊断只在底边框后按来源输出，来源故障与记录/accounting 信息分开。被保护或阻断的来源显示新增事件 0、保留的库存事件、变更 0、读取量 0、写入 0，文件列为只读覆盖发现的文件数。`skipped` 对文件型来源来自现有 cursor/fingerprint 证据，对 OpenCode 这种 DB 来源来自 SQLite 高水位 cursor；`committed` 是 SQLite 去重后本次新增写入数。重定向输出不含 ANSI，窄终端使用紧凑表头且不截断数值；完整数值仍可能超出极窄终端。参见[实际夹具输出示例](../guide/first-sync#导入所有来源)。
 
 表格下方的记录诊断区分格式错误、超大记录、有意跳过和 accounting 异常。每个来源最多保留 8 个记录样本，摘要显示总数和未展示的样本数。同一个样本可以同时显示稳定原因码、定位值和安全文件名。JSONL 样本使用 `@` 标注非零字节偏移；ZCode 样本使用 `timestamp_ms=` 标注已有的毫秒时间戳定位值。不输出完整私有路径、路径哈希或记录正文。诊断中的 `skipped` 统计记录；表格中的 `SKIPPED` 统计文件。
 
 Codex 工具输出记录超过 4 MiB 上限时，可以使用 `oversized_non_usage_record` 原因码跳过；有界读取器继续处理后续 usage 记录。Grok 的 `usageIsIncomplete` 记录保留已报告的 token 数值和 accounting 警告，解析器不会用 fallback 估计值替换已报告数值。这些信息类诊断不表示整个来源失败。
 
 已跟踪的 Antigravity 数据库缺失等来源故障单独报告，不计入格式错误记录数。命令退出后，持久化来源状态仍保留故障。受阻来源保留已导入历史，不能被认证为无错误的 accounting 修复。文件库存反映最近一次完成的观察；持久化的 `live` 状态不保证路径当前仍存在。
+
+记录诊断总数统计提示，不一定对应不同记录或失败来源。恢复提示默认保留历史：`k`/`K`、空输入、EOF、读取失败或两次非法输入都保留；只有满足上述终端/参数条件时，`r`/`R` 才明确接受丢失。提示区分保留事件、当前/新增输入、物理缺失、仍存在但超出范围的输入和不可读/发现不完整。这些覆盖计数不是精确的丢失事件估计；访问或发现失败必须修复后重试。
 
 `WRITE` 表示已记录的 writer 经过时间。普通 shard 的计时包含 provider 映射、事务开始、reset、事实与 cursor 写入和 commit；host 前缀准备与内存中的 behavior 去重发生在该计时之前。Antigravity 分别记录每个产品的 apply 和 marker 写入时间，不含共享的组 reset、事务开始和 commit，因此分产品数值之和不能代表完整事务耗时。`PARSE` 是来源阶段总耗时扣除已记录 `WRITE` 后的余量，不能用来表示解析器 CPU 时间。`BYTES` 按各 reader 的输入口径统计，可能包含库存文件大小，不能用来表示物理磁盘读取量。
 
@@ -301,9 +325,11 @@ llmusage logs --command sync --json
 llmusage dash
 ```
 
-交互式终端 Dashboard。旧的隐藏 `tui` 命令是已废弃别名。
+交互式终端 Dashboard。旧的隐藏 `tui` 命令是已废弃别名。两者在启动时读取当前运行时根目录的语言一次，覆盖九个面板、导航、帮助/设置、来源选择、同步覆盖层、额度和加载/空/错状态。修改 `lang` 后需退出重开，没有运行中语言开关。浏览器和桌面语言保持独立。
 
-快捷键：`tab`/`shift-tab` 或 `1`-`9` 切换视图；`j`/`k`、方向键、Page Up/Page Down、Home/End 或鼠标滚轮选择行；`o` 循环可排序列，`O` 反转排序方向；`h`/`l` 在适用视图切换时间窗口；`s` 打开来源选择器；`r` 刷新 Dashboard 数据；`R` 切换自动刷新；`x` 通过现有 sync worker lock 按当前来源筛选运行 sync；`?` 打开帮助/设置；`q` 退出。
+快捷键：`tab`/`shift-tab` 或 `1`-`9` 切换视图；`j`/`k`、方向键、Page Up/Page Down、Home/End 或鼠标滚轮选择行；`o` 循环可排序列，`O` 反转排序方向；`h`/`l` 在适用视图切换时间窗口；`s` 打开来源选择器；`r` 刷新 Dashboard 数据；`R` 切换数据自动刷新；`m` 切换 Usage 邮箱隐藏；`y` 打开来源同步 / 平台监控；`x` 通过现有 sync worker lock 按当前来源筛选运行 sync；`?` 打开帮助/设置；`q` 退出。Daily/Monthly 按 Enter 打开明细、Esc 返回；Stats 按 Enter 选中日期，点击图格打开当天明细，Esc 关闭选择。
+
+进入 Usage 时获取额度，可使用仍在五分钟有效期内的缓存；`r` 绕过缓存刷新，`R` 不轮询额度 API。现有 CLI 凭据只读，邮箱默认隐藏，provider/model/account 值保持原样。`y` 覆盖层展示来源同步与仅监控平台；`x` 不会自动接受有损重建。语言设置不改变快捷键、排序、选择、鼠标导航、主题或 NoColor 行为。
 
 ### `llmusage serve`
 

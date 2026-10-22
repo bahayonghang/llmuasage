@@ -37,11 +37,30 @@ UsageFetchReport { outputs, diagnostics }
   a compatibility wrapper. Version preparation does not authorize publishing.
 - Applicable tools for cache provenance (`fetched_at`, `cache_hit`, no mtime
   signal): Claude Code, Codex, Grok Build, Kimi Code, OMP.
-- Cache documents store `UsageFetchReport` only. They must not store access or
-  refresh tokens.
+- Public `UsageFetchReport`, output/metric/diagnostic structs and
+  `UsageFetchOutcome` retain their existing fields, values and signatures.
+  Private `fetch_all_with_presentation` shares the same core and returns the
+  original outcome plus neutral `QuotaPresentationHints` for TUI rendering.
+- Private cache documents may add optional `presentation` metadata beside
+  `fetched_at` and the unchanged `report`. This is an explicit private-format
+  compatibility extension: old readers ignore it and old caches still load.
+  Bind hints to the exact report fingerprint; malformed or mismatched hints
+  are discarded independently of an otherwise valid fresh cache report.
+  TTL, cache-hit provenance and endpoint call counts remain unchanged.
+- Hints are emitted at original provider/HTTP decisions and contain stable
+  diagnostic/window/unit identities and original remaining/limit quantities.
+  Never recover facts by parsing English text or infer absolute quantities
+  from percentages. Do not store locale, translated templates, credentials,
+  tokens or response bodies in hints/cache metadata.
+- TUI holds hints in its private session, accepts them with the same quota
+  report/request tag and uses a fingerprint-checked frame scope. No required
+  public AppState field or global last-hint buffer is added. The private quota
+  request tag is a new stale-result association guard; request scheduling,
+  cancellation and r/R policy retain their prior meaning.
 - Tests inject `UsageEndpoints` to a local listener. CI must not contact public
   quota hosts.
-- Emails default to `[hidden email]`. `m` toggles visibility.
+- Emails default to the localized hidden-email label. `m` toggles visibility;
+  original email/account data is unchanged.
 - Source Sync remains in the `y` overlay. Web `sync_command_center` JSON is
   unchanged.
 
@@ -54,3 +73,7 @@ UsageFetchReport { outputs, diagnostics }
   (`cache_hit=true`, no endpoint call), and `bypass_cache=true` (live, false).
 - TestBackend covers quota titles/columns, hidden email, overlay Source Sync,
   and NoColor.
+- Pair live/fresh-cache rendering and preserve report numbers, exact absolute
+  remaining/limit, TTL/cache_hit and request counts. Cover old/new readers,
+  missing/malformed/mismatched hints, unchanged credential bytes, superseded
+  requests and r/R/m. Headless tests do not establish native terminal PASS.

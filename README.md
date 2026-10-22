@@ -42,9 +42,9 @@ follows the mutable `dev` branch and is not a verified stable release.
 `--check` / `-c` contacts the official repository to resolve refs and prints the
 plan, but never starts Cargo.
 
-Top-level help is table-oriented for quick scanning. Use `llmusage help --zh` for Chinese help, and `llmusage help <COMMAND>` or `llmusage <COMMAND> --help` for command-specific clap help.
+The CLI defaults to English. Save Simplified Chinese with `llmusage lang zh` (or `zh-CN`), or switch back with `llmusage lang en`; this works before `init`. Help, argument errors, human results, console logs, and new `dash`/`tui` sessions follow that setting. `llmusage help --zh` selects Chinese for that help invocation only. See the [language reference](./docs/reference/cli.md#interface-language).
 
-The runtime lives under `~/.llmusage/` by default. Override it with `--home <PATH>` or `LLMUSAGE_HOME`.
+The runtime lives under `~/.llmusage/` by default, with precedence `--home <PATH>` > `LLMUSAGE_HOME` > default. Language preferences are saved in that root's `cli-settings.json`, so profiles are independent. `clean` uses explicit `--home` or the default root and ignores `LLMUSAGE_HOME`.
 Structured runtime logs are local-only NDJSON shards at `~/.llmusage/logs/llmusage.ndjson.*`. Control file logging with `LLMUSAGE_LOG=off|error|warn|info|debug|trace` (default: `warn`); `RUST_LOG` continues to control console stderr logging. Shards rotate at 10 MiB while the process is running and retain at most 30 MiB, seven files, and seven days.
 
 ## Fast path
@@ -87,6 +87,9 @@ Machines upgraded from a release that installed hooks or plugins should run `llm
 ## Common commands
 
 ```powershell
+llmusage lang
+llmusage lang zh
+llmusage lang en
 llmusage daily --source codex --since 20260501 --until 20260518
 llmusage weekly --sections daily,monthly --no-cost
 llmusage codex daily --since 2026-05-01 --until 2026-05-18
@@ -108,13 +111,15 @@ Report commands are read-only SQLite queries; run `llmusage sync` when the datab
 
 ## Reports
 
-`daily`, `weekly`, `monthly`, and `session` use the shared coding-agent report shape. Human tables show an aggregate `All` row plus per-source `Agent` rows; CLI JSON uses camelCase fields, and `--by-agent` adds the nested source rows to JSON. `weekly` groups by the Monday that starts each week.
+`daily`, `weekly`, `monthly`, and `session` use the shared coding-agent report shape. Daily, weekly, and monthly human tables show aggregate and per-source rows, with labels following the selected language; session shows source rows. CLI JSON uses camelCase fields, and `--by-agent` adds the nested source rows to JSON. `weekly` groups by the Monday that starts each week. `--locale` retains its report compatibility values; it does not select interface language or change number formatting.
 
 Report date filters accept either `YYYYMMDD` or `YYYY-MM-DD`. Use `--sections daily,weekly,monthly,session` to combine periods in one output (the requested command period stays first), and `--no-cost` to remove cost columns and JSON cost fields without changing token totals.
 
 For a single-source view, use `llmusage <source> <period>`, for example `llmusage claude daily` or `llmusage codex monthly`. The supported source hosts are `claude`, `codex`, `opencode`, `antigravity`, and `antigravity-ide`; each supports `daily`, `weekly`, `monthly`, and `session`. They return the same data as `<period> --source <source>`, but remove the Agent comparison layer from text and JSON. `blocks` intentionally remains a top-level command. This uniform source surface is an llmusage extension, not a claim that every source mirrors ccusage's per-source capability matrix.
 
-`llmusage dash` uses a tokscale-style terminal dashboard. Keyboard controls: `tab`/`shift-tab` or `1`-`9` switch views; `j`/`k`, arrows, Page Up/Page Down, Home/End, or the mouse wheel select rows; `o` cycles sortable columns and `O` reverses direction; `s` opens the source picker; `r` refreshes dashboard data; `R` toggles auto-refresh; `x` runs sync for the current source filter; `?` opens help/settings; and `q` exits.
+`llmusage dash` uses a tokscale-style terminal dashboard and reads the same profile's language once at startup. Reopen it after changing `lang`; there is no live language menu. Keyboard controls: `tab`/`shift-tab` or `1`-`9` switch views; `j`/`k`, arrows, Page Up/Page Down, Home/End, or the mouse wheel select rows; `o` cycles sortable columns and `O` reverses direction; `s` opens the source picker; `r` refreshes dashboard data and, in Usage, quota with the cache bypassed; `R` toggles data auto-refresh without polling quota APIs; `m` toggles hidden Usage emails; `y` opens Source Sync / Platform Monitor; `x` runs sync for the current source filter; `?` opens help/settings; and `q` exits. See [dash controls](./docs/reference/cli.md#llmusage-dash).
+
+Browser and desktop dashboard language and exported HTML remain independent. JSON/NDJSON/SSH/HTTP data, stored diagnostics and historical/file logs keep their canonical values; human console and supported log replay text follow `lang`, while third-party or unknown historical details may remain in their original language. Statusline labels follow `lang` with separate language caches.
 
 The browser dashboard includes behavior panels and a local usage-analysis workbench for time, metric, and group-by analysis, including tool/non-tool cost attribution and offline snapshot export.
 

@@ -130,8 +130,9 @@ and let the command-scoped sink coordinate with `HumanRenderer::write_warning`.
 ### 1. Scope / Trigger
 
 Use this contract when a command must succeed against a missing runtime root.
-`llmusage clean` is the current case: printing an overview, or reporting that
-there is nothing to clean, must not create `logs/` or any other home directory.
+`llmusage clean`, help/version, parser failures and read-only `lang` must not
+create `logs/` or any other home directory. Language startup details are in
+[CLI Language Foundation Contracts](./cli-language-contracts.md).
 
 ### 2. Signatures
 
@@ -149,10 +150,12 @@ there is nothing to clean, must not create `logs/` or any other home directory.
 
 ### 3. Contracts
 
-`llmusage clean` parses first, then calls `AppPaths::with_cli_home(cli.home)`,
-`init_stderr_logging()`, and `AppContext::from_paths`. It must not call
-`AppContext::with_cli_home`, `AppPaths::discover`, or
-`init_logging_for_paths`. Other commands keep file logging. Do not change the
+The metadata bootstrap selects clean and its explicit home, reads preferences
+without creating directories, then formal Clap parsing validates the command.
+For clean, resolve `AppPaths::with_cli_home`, use `init_stderr_logging()`, and
+attach `AppContext::from_paths`. It must not call `AppContext::with_cli_home`,
+`AppPaths::discover`, or `init_logging_for_paths`. Help/version/parser failures
+and lang inspection return before logging. Other runtime commands keep file logging. Do not change the
 10 MiB / 30 MiB / seven-file / seven-day limits for this entrypoint. Deletion
 scope stays in `integration-file-contracts.md`; this scenario only covers home
 and log creation.
@@ -161,10 +164,11 @@ and log creation.
 
 | Condition | Required result |
 | --- | --- |
-| `clean` and the resolved root does not exist | Exit 0, print `没有可清理内容`, create nothing |
+| `clean` and the resolved root does not exist | Exit 0, print `Nothing to clean` / `没有可清理内容` in the selected language, create nothing |
 | `clean` without `--home` while `LLMUSAGE_HOME` is set | Ignore the variable and use `~/.llmusage` |
 | `clean` with `--home <path>` | Use that path and do not create it when it is missing |
-| Any other command | Keep `init_logging_for_paths` and existing `LLMUSAGE_HOME` discovery |
+| Help/version/parser failure/read-only lang | Return before logging; create nothing |
+| Other runtime commands | Keep file logging and existing `LLMUSAGE_HOME` discovery |
 | File-log filter disabled | `init_logging_for_paths` still must not be the `clean` path |
 
 ### 5. Good/Base/Bad Cases
@@ -186,3 +190,94 @@ and log creation.
 Wrong: `let app = AppContext::with_cli_home(cli.home)?; init_logging_for_paths(&app.paths)?;`
 for `clean`. Correct: resolve `AppPaths::with_cli_home(cli.home)`, call
 `init_stderr_logging()`, then `AppContext::from_paths`.
+
+## Scenario: Captured CLI Language And Stable Event Projection
+
+### 1. Scope / Trigger
+
+Use when adding a production tracing site, changing CLI console formatting, or
+replaying human `logs` output. The file record remains canonical diagnostic data.
+
+### 2. Signatures
+
+- `init_cli_logging_for_paths(&AppPaths, Language) -> Result<()>` and
+  `init_cli_stderr_logging(Language) -> Result<()>` capture the startup language.
+- `common::i18n::logging::project(Language, &str, Option<&str>, &Value, bool)
+  -> String` projects level, original message, fields and detailed-mode selection.
+- Production tracing fields include a unique stable `event_code`. Preserve IDs
+  when moving a site; do not renumber existing sites to match new line numbers.
+
+### 3. Contracts
+
+The CLI formatter uses the captured language even on worker threads. Existing
+non-CLI initialization retains its original formatter. Preserve original message,
+level, target and fields in NDJSON, as well as filtering, lossy queue counters,
+rotation and complete-event stderr routing. Localization adds optional metadata;
+it does not replace original fields or rewrite old files.
+
+Select templates only by `event_code`, never by matching message text. Normal
+known-event output hides redundant phase/operation, version, hash and path detail,
+while retaining critical source, host, count and error facts. DEBUG/TRACE detailed
+projection keeps diagnostic fields. Unknown and historical entries have an
+explicit original-log marker. Escape control characters in human projections.
+
+Known sync refusals may carry neutral `failure_code`/`failure_facts` alongside
+the unchanged canonical `error`. Suppress those fields only after successful,
+matching typed projection. Unknown, malformed or mismatched metadata stays
+available as original detail; detailed replay must not silently discard it.
+
+Existing command run-failed sites `.03`, `.04` and update `.05` may add
+`diagnostic_code`/`diagnostic_facts` for closed Reports/Operations/Domain/Pricing/RemoteImport facts.
+The final CLI error and console/replay adapter share the paired catalog. Original
+`error`, message, run status and stored detail stay canonical. Metadata contains
+neutral facts, not English/Chinese templates. Before hiding raw data, validate
+the complete recognized shape including nested fields. Serde internally tagged
+unit variants can ignore extra fields even with `deny_unknown_fields`; an
+attribute alone is not proof of strict projection. Future extra fields require
+visible fallback just like unknown codes and malformed JSON.
+
+When paired presentation is attached as a context to an existing canonical
+error, the context is explicitly marked by `Diagnostic::with_facts_context`.
+Run failure storage uses `cli_errors::canonical_detail` to omit only that added
+wrapper, retaining the complete original cause chain. Ordinary contexts and
+original repeated text are preserved; no string-based deduplication is allowed.
+File-event `error` and public error values remain canonical as before.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Known event in en/zh CLI | Paired template and critical facts; original file data unchanged |
+| Console runs on a worker | Startup language retained |
+| Missing or unknown event ID | Explicit original-log marker and original detail |
+| Valid matching typed refusal | Localized human refusal; canonical file error retained |
+| Unknown/malformed/mismatched failure facts | Original detail remains visible |
+| Known code plus unknown top-level/nested metadata field | Original error and complete metadata remain inspectable |
+| Control characters in dynamic text | Escaped in human output; original structured data retained |
+
+### 5. Good/Base/Bad Cases
+
+- Good: human log replay calls the same pure projector as live CLI logging.
+- Base: old records without IDs remain inspectable in either language.
+- Bad: translating `message` before tracing or discarding unrecognized metadata.
+
+### 6. Tests Required
+
+- `production_tracing_sites_have_unique_paired_catalog_entries` parses current
+  Rust syntax, including imported macros, and checks exact production coverage.
+- `cli_console_captures_language_while_file_events_keep_original_message_level_and_fields`
+  checks console/file separation and the captured language.
+- `default_known_events_keep_source_and_protection_counts_visible` retains
+  source/protection/pricing counts in normal output.
+- `unknown_or_mismatched_failure_metadata_remains_available_as_original_detail`
+  checks fallback and detailed replay without message-text classification.
+- Command language tests exercise actual paired rejections with `RUST_LOG=error`
+  and canonical file data. Metadata tests include known-code extra fields at
+  both root and nested argument levels, normal and detailed output, as well as
+  stable round-trip serialization and malformed/unknown/mismatched facts.
+
+### 7. Wrong vs Correct
+
+Wrong: identify a refusal with `error.contains("Refusing lossy")` or emit a
+translated tracing `error`. Correct: preserve the canonical error, attach neutral
+typed facts at its producer, and project only the CLI presentation.

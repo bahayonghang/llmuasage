@@ -6,6 +6,9 @@ output, and dashboard/TUI consumers.
 
 ## Pre-Development Checklist
 
+- Read [CLI Language Foundation Contracts](./cli-language-contracts.md) before
+  changing preferences, startup/help/errors, or shared CLI/TUI language scopes.
+
 - Read [Source Sync Contracts](./source-sync-contracts.md) before changing
   source registries, parser sync stats, sync command summaries, source status,
   or dashboard/TUI sync payloads.
@@ -49,7 +52,7 @@ output, and dashboard/TUI consumers.
 | [Codex Tracer Contracts](./codex-tracer-contracts.md) | Codex-specific usage tracker with detailed token accounting and thread tracking | Documented |
 | [Dashboard Performance Contracts](./dashboard-performance-contracts.md) | Interactive payload, query routing, cancellation, and range-refresh budgets | Documented |
 | [Token Accounting Contracts](./token-accounting-contracts.md) | Parser normalization, logical dedupe, authoritative totals, and guarded legacy rebuild | Documented |
-| [TUI Presentation Contracts](./tui-presentation-contracts.md) | Interactive theme slots, English copy, shared formatters, and terminal color fallback | Documented |
+| [TUI Presentation Contracts](./tui-presentation-contracts.md) | Interactive theme slots, shared CLI language, display-width navigation, formatters, and terminal color fallback | Documented |
 | [TUI Runtime Contracts](./tui-runtime-contracts.md) | Dirty redraws, tick coalescing, frame snapshots, and visible-row caches | Documented |
 | [TUI Subscription Contracts](./tui-subscription-contracts.md) | Read-only quota fetchers, cache TTL, and Usage overlay | Documented |
 | [Report CLI Contracts](./report-cli-contracts.md) | Unified/focused report command surface, DTO projections, and output invariants | Documented |
@@ -58,6 +61,7 @@ output, and dashboard/TUI consumers.
 | [CI And Toolchain Contracts](./ci-toolchain-contracts.md) | Shared Rust gate, verified MSRV, dependency batches, and subprocess-test evidence rules | Documented |
 | [Write Fencing Contracts](./write-fencing-contracts.md) | Generation permits, transaction fencing, bootstrap ordering, and mutation entrypoints | Documented |
 | [Integration File Contracts](./integration-file-contracts.md) | Cross-platform atomic replace, recovery, and integration action recording | Documented |
+| [CLI Language Foundation Contracts](./cli-language-contracts.md) | Invocation language, independent atomic preferences, startup/help/errors, and scope isolation | Documented |
 | [Runtime Log Contracts](./runtime-log-contracts.md) | Bounded runtime-log rotation, retention, counters, and tail reads | Documented |
 
 ## Quality Check

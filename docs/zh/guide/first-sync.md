@@ -2,17 +2,36 @@
 
 `llmusage sync` 会把本地用量导入 SQLite。报表命令不会自动 sync；数据库过旧时需要先同步。
 
+界面默认使用英语。可在 `init` 前用 `llmusage lang zh`（别名 `zh-CN`）保存中文，或用 `llmusage lang en` 切回英语。选择属于当前运行时根目录，也适用于新启动的 `dash`/`tui`；已运行的 TUI 需退出重开。profile 选择与非交互行为见[界面语言](../reference/cli#界面语言)。浏览器和桌面看板语言保持独立。
+
 ## 导入所有来源
 
 ```powershell
 llmusage sync
 ```
 
-人读进度写入 stderr。最终 stdout 摘要只保留一张逐来源表，并以 `TOTAL` 行收尾；已完成的进度行会被清理，不会在表格上方重复出现。重定向输出不含 ANSI 控制序列，窄终端会使用紧凑表头，但不会截断数值。
+人读进度写入 stderr。最终 stdout 摘要是一张十列闭合线框表，有外框、竖线、表头后分隔和合计前分隔。两种语言保持相同的来源顺序、计数、单位和精度。已完成的进度行会被清理，不会在表格上方重复出现。重定向输出不含 ANSI 控制序列，窄终端会使用紧凑表头，但不会截断数值；完整数值仍可能超出极窄终端。
+
+下面是在中文 profile 中运行 `llmusage --home <temporary-profile> sync --source codex` 导入隔离 Codex 夹具的实际 stdout。夹具含一个 482 字节文件和一个事件，不是真实用户用量。英文指南展示独立英文 profile 中的同一夹具；实测耗时会随运行变化：
+
+```text
+同步完成：
+┌───────┬──────┬──────┬──────┬──────────┬──────────┬──────────┬────────┬──────┬──────┐
+│ 来源  │ 文件 │ 变更 │ 跳过 │ 读取事件 │ 新增事件 │ 库存事件 │ 读取量 │ 解析 │ 写入 │
+├───────┼──────┼──────┼──────┼──────────┼──────────┼──────────┼────────┼──────┼──────┤
+│ codex │    1 │    1 │    0 │        1 │        1 │        1 │  482 B │  7ms │  1ms │
+├───────┼──────┼──────┼──────┼──────────┼──────────┼──────────┼────────┼──────┼──────┤
+│ 合计  │    1 │    1 │    0 │        1 │        1 │        1 │  482 B │  7ms │  1ms │
+└───────┴──────┴──────┴──────┴──────────┴──────────┴──────────┴────────┴──────┴──────┘
+```
 
 如果内置定价目录自上次运行后发生变化，bootstrap 会在扫描来源前重算历史事件价格。进度会显示新旧目录版本、已处理/总事件数、汇总桶对账和最终耗时。对未固定的内置目录，这是一轮一次性升级；目录已是最新或已固定时会跳过。
 
 摘要会按来源显示 `files`、`changed`、`skipped`、`seen`、`committed` 和 `stored_events`。对文件型来源，`skipped` 表示已保存的 cursor、文件大小、mtime、头部 fingerprint、尾部签名和 offset 证明文件未变化。对 OpenCode，`skipped` 表示 SQLite 高水位 cursor 没找到更新行。`committed` 是 SQLite 去重后本次新增写入数；`stored_events` 是数据库中的持久总量。
+
+其余列表示来源、reader 口径读取量及已记录的解析/写入时间。读取量（`BYTES`）不是物理磁盘 I/O，解析（`PARSE`）不是解析器 CPU 时间，各来源解析/写入耗时之和也不是整个命令的墙钟耗时。详见[指标边界](../reference/cli#llmusage-sync)。
+
+诊断在底边框之后按来源组织。来源故障与格式错误/超大记录、有意跳过记录、accounting 信息分开。每个来源最多显示 8 个记录样本及省略数量，保留稳定原因码和安全定位，不打印私有路径或记录正文。这些计数不是失败来源数，也不一定是不同记录数；表格的跳过列统计文件。
 
 ## 只导入一个来源
 
@@ -33,7 +52,7 @@ llmusage sync --source grok
 
 Kimi Code 读取 `~/.kimi-code/sessions/**/wire.jsonl`（或 `KIMI_CODE_HOME/sessions`），只导入显式 turn-scoped `usage.record`。它分别映射非缓存输入、输出、cache read 与 cache creation，保留 `kimi-code/k3` 等原始模型名，并忽略聚合、零 token、非 turn 和损坏记录。
 
-Pi 读取 `~/.pi/agent/sessions`（或 `PI_AGENT_DIR`），来源为 `pi`。Oh My Pi 读取 `~/.omp/agent/sessions`，来源为 `omp`。两者共用一份解析实现。路径重叠时 `pi` 优先，`omp` 只跳过冲突文件。Assistant usage 会保留 input、output、cache read/write、权威 total 与诊断型 reasoning token。升级后先跑一次不带 `--source` 的完整 `llmusage sync`，让存量 `pi` 行重建、`.omp` 文件记为 `omp`。后续 provider、project、成本、行为回填使用 `llmusage sync --rebuild --source omp`。当前准入证据包含本机 Oh My Pi 样本和脱敏 Pi-compatible fixture；本机没有 Pi-only 样本，因此 Pi 专属格式变化仍是显式证据缺口。
+Pi 读取 `~/.pi/agent/sessions`（或 `PI_AGENT_DIR`），来源为 `pi`。Oh My Pi 读取 `~/.omp/agent/sessions`，来源为 `omp`。两者共用一份解析实现。路径重叠时 `pi` 优先，`omp` 只跳过冲突文件。Assistant usage 会保留 input、output、cache read/write、权威 total 与诊断型 reasoning token。普通 `sync` 保留存量旧版 `pi` 历史并跳过其写入，修复需要显式运行 `llmusage sync --rebuild --source pi`。完成修复后，普通 sync 可将 `.omp` 文件导入 `omp`；后续 provider、project、成本、行为回填使用 `llmusage sync --rebuild --source omp`。当前准入证据包含本机 Oh My Pi 样本和脱敏 Pi-compatible fixture；本机没有 Pi-only 样本，因此 Pi 专属格式变化仍是显式证据缺口。
 
 Grok Build 只读取 `~/.grok/sessions/*/*/`（或 `GROK_HOME/sessions`）会话根目录下的 sidecar。主路径把每条 `turn_completed` 的 `params.update.usage` 映射为一条 precise 事件。没有 usage 的会话仍走 `_meta.totalTokens` 加 `signals.json` 的 total-only 回退。成本保持 `unpriced`。任一 sidecar 变化会整体重放该会话；已追踪 sidecar 缺失时保留旧行，并在文件恢复前拒绝有损 rebuild。
 
@@ -48,6 +67,8 @@ llmusage sync --json-events
 ```
 
 该模式会在 stdout 输出 NDJSON 生命周期/进度事件。定价升级会依次增加 `pricing_upgrade_started`、节流后的 `pricing_upgrade_progress`、`pricing_bucket_reconcile_started` 和 `pricing_upgrade_finished`，适合 wrapper 或 UI adapter 使用。
+
+此模式下 `lang` 仅改变人读 stderr 上下文；stdout NDJSON 的键、代码、枚举值和数值语义保持机器契约，不混入语言菜单或人读摘要。持久化诊断/文件日志及 SSH/HTTP payload 也保留原始规范值；人读控制台和受支持的日志回放跟随所选语言。
 
 人读进度不依赖结构化日志。文件诊断可用 `LLMUSAGE_LOG=info` 记录定价阶段边界，或用 `debug` 记录页进度；默认 `warn` 级别会在重算超过 30 秒后记录一次存活告警。
 
@@ -73,6 +94,9 @@ Token 统计口径按 parser 来源单独记录版本。含旧口径行的数据
 `--json-events`、`--rebuild` 或 `--recent-days` 时，才能确认接受 `antigravity` 或
 `antigravity_ide` 的丢失并在本轮重建；其他旧记账来源
 保持跳过。其他口径已更新的来源仍可同步。
+
+恢复提示说明来源、保留的历史事件数、当前/新增输入，以及物理缺失、仍存在但超出发现范围、不可读或发现不完整的输入。这些是覆盖事实，不是精确的丢失事件预测。`k`/`K`、空输入、EOF、读取失败或两次非法输入默认保留历史；`r`/`R` 明确接受丢弃缺失或范围外输入对应的历史，只从当前可解析文件重建。不可读或发现不完整时，必须恢复访问后重试，接受丢失不能绕过保护。CLI `--allow-lossy-rebuild` 不会让普通 sync 自动重建。
+
 恢复缺失的源文件后，显式重建受影响的来源：
 
 ```powershell

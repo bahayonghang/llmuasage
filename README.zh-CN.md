@@ -40,9 +40,9 @@ llmusage update dev
 经过稳定发布验证的版本。`--check` / `-c` 会联网解析官方 refs 并打印计划，
 但绝不启动 Cargo。
 
-顶层 help 现在使用表格形式，方便快速浏览。中文顶层 help 可用 `llmusage help --zh`；子命令旧版 clap help 仍可用 `llmusage help <COMMAND>` 或 `llmusage <COMMAND> --help`。
+CLI 默认使用英语。用 `llmusage lang zh`（或 `zh-CN`）保存简体中文，用 `llmusage lang en` 切回英语；无需先运行 `init`。帮助、参数错误、人读结果、控制台日志与新启动的 `dash`/`tui` 都跟随此设置。`llmusage help --zh` 仅让本次帮助使用中文。详见[界面语言参考](./docs/zh/reference/cli.md#界面语言)。
 
-默认运行时目录是 `~/.llmusage/`。可用 `--home <PATH>` 或 `LLMUSAGE_HOME` 覆盖。
+默认运行时目录是 `~/.llmusage/`，优先级为 `--home <PATH>` > `LLMUSAGE_HOME` > 默认目录。语言偏好保存在该根目录的 `cli-settings.json`，不同 profile 互不影响。`clean` 使用显式 `--home` 或默认目录，忽略 `LLMUSAGE_HOME`。
 结构化运行日志只写本地 NDJSON 分片：`~/.llmusage/logs/llmusage.ndjson.*`。文件日志可用 `LLMUSAGE_LOG=off|error|warn|info|debug|trace` 控制（默认 `warn`）；`RUST_LOG` 继续只控制控制台 stderr 日志。分片在进程运行期间达到 10 MiB 即轮转，总量最多保留 30 MiB、7 个文件和 7 天。
 
 ## 最短路径
@@ -85,6 +85,9 @@ Kimi Code、Pi、Oh My Pi、ZCode、Antigravity CLI、DeepSeek Harness 和 Grok 
 ## 常用命令
 
 ```powershell
+llmusage lang
+llmusage lang zh
+llmusage lang en
 llmusage daily --source codex --since 20260501 --until 20260518
 llmusage weekly --sections daily,monthly --no-cost
 llmusage codex daily --since 2026-05-01 --until 2026-05-18
@@ -106,13 +109,15 @@ llmusage export html --out .\llmusage-report
 
 ## 报表
 
-`daily`、`weekly`、`monthly` 和 `session` 共用 coding-agent 报表形状。人读表格展示聚合 `All` 行和按来源拆分的 `Agent` 行；CLI JSON 使用 camelCase 字段，`--by-agent` 会把嵌套来源行加入 JSON。`weekly` 按每周周一的起始日期分组。
+`daily`、`weekly`、`monthly` 和 `session` 共用 coding-agent 报表形状。daily、weekly、monthly 人读表格展示聚合行和按来源拆分的行，标签跟随所选语言；session 展示来源行。CLI JSON 使用 camelCase 字段，`--by-agent` 会把嵌套来源行加入 JSON。`weekly` 按每周周一的起始日期分组。`--locale` 保留报表兼容取值，不选择界面语言，也不改变数字格式。
 
 报表日期筛选同时接受 `YYYYMMDD` 和 `YYYY-MM-DD`。`--sections daily,weekly,monthly,session` 可以在一次输出中组合多个周期段（当前命令周期始终排在最前）；`--no-cost` 会隐藏成本列与 JSON 成本字段，但不会改变 token 总量。
 
 单来源视图使用 `llmusage <source> <period>`，例如 `llmusage claude daily` 或 `llmusage codex monthly`。支持的 source host 是 `claude`、`codex`、`opencode` 、`antigravity` 和 `antigravity-ide`，每个都支持 `daily`、`weekly`、`monthly`、`session`。它与 `<period> --source <source>` 的数据相同，但会从文本和 JSON 移除 Agent 对比层。`blocks` 有意继续作为顶层命令。这个均匀来源 surface 是 llmusage 的扩展，不表示每个来源都复刻 ccusage 的逐来源能力矩阵。
 
-`llmusage dash` 使用 tokscale 风格的终端 Dashboard。快捷键：`tab`/`shift-tab` 或 `1`-`9` 切换视图；`j`/`k`、方向键、Page Up/Page Down、Home/End 或鼠标滚轮选择行；`o` 循环可排序列，`O` 反转排序方向；`s` 打开来源选择器；`r` 刷新 Dashboard 数据；`R` 切换自动刷新；`x` 按当前来源筛选运行 sync；`?` 打开帮助/设置；`q` 退出。
+`llmusage dash` 使用 tokscale 风格的终端 Dashboard，启动时读取同一 profile 的语言一次。修改 `lang` 后需退出重开，不提供运行中的语言菜单。快捷键：`tab`/`shift-tab` 或 `1`-`9` 切换视图；`j`/`k`、方向键、Page Up/Page Down、Home/End 或鼠标滚轮选择行；`o` 循环可排序列，`O` 反转排序方向；`s` 打开来源选择器；`r` 刷新 Dashboard 数据，在 Usage 中还会绕过缓存刷新额度；`R` 切换数据自动刷新，不轮询额度 API；`m` 切换 Usage 邮箱隐藏；`y` 打开来源同步 / 平台监控；`x` 按当前来源筛选运行 sync；`?` 打开帮助/设置；`q` 退出。详见 [dash 操作](./docs/zh/reference/cli.md#llmusage-dash)。
+
+浏览器和桌面看板、导出 HTML 的语言保持独立。JSON/NDJSON/SSH/HTTP 数据、持久化诊断及历史/文件日志保留原始规范值；人读控制台和受支持的日志回放跟随 `lang`，第三方或未知历史详情可能保留原文。Statusline 标签跟随 `lang`，两种语言使用独立缓存。
 
 浏览器看板包含行为分析面板和本地用量分析工作台，可按时间、指标和分组维度分析用量，并支持工具/非工具成本归因与离线快照导出。
 

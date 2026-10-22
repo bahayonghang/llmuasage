@@ -5,6 +5,13 @@
 - Related code: `src/domain/models.rs`, `src/parsers/pi.rs`, `src/parsers/source_files.rs`, `src/registry.rs`, `src/store/schema.rs`, `src/commands/sync.rs`, `src/remote/importer.rs`
 - Related terms: Source, SourceParser, SourceDescriptor, FileCursor, token accounting version
 
+> 2026-10-21 policy update: the local migration commands below describe the
+> original split rollout. Ordinary sync now skips legacy accounting sources and
+> retains their history. Repair local Pi explicitly with
+> `llmusage sync --rebuild --source pi` before importing OMP separately. Source
+> identities and the remote migration decision remain as recorded here. See
+> [first sync](../guide/first-sync.md) for current commands and safeguards.
+
 ## Context
 
 Pi and Oh My Pi write the same session JSONL shape. Discovery previously merged

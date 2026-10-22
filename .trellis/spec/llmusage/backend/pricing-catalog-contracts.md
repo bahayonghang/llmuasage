@@ -204,3 +204,65 @@
 - Library and `cargo test` runs do not contact the price network. Production
   CLI and desktop binaries enable live refresh unless
   `LLMUSAGE_PRICING_REFRESH` is `off` or `0`. Tests inject a fixture fetcher.
+
+## Scenario: Private validation facts and canonical errors
+
+### 1. Scope / Trigger
+
+Apply when changing pricing validation, load/activation failures, bootstrap
+recovery of a pricing recompute marker, or CLI catalog/doctor error presentation.
+
+### 2. Signatures
+
+`domain::pricing_catalog::diagnostic::Failure` carries the original
+`LlmusageError` and optional boxed neutral `DiagnosticFacts`.
+`diagnostic::Result<T>` is crate-private. Public domain/Store APIs retain their
+existing signatures and unwrap that exact original error. Private Store
+`*_with_facts` entries share the same core for active/apply/activate/reset/status
+and bootstrap; `commands::cli_errors::pricing_result` owns the CLI adapter.
+
+### 3. Contracts
+
+- Emit facts at the existing validation decision. Preserve canonical strings,
+  error variants/causes, conditions, IO count/order, locks and transaction rules.
+- Domain/store never select a language, depend on commands, infer a code from
+  error text, or repeat a read/parse just to recover display arguments.
+- Known schema/model/matcher/rate/path/digest/marker failures use the same paired
+  catalog for final errors and live/replayed logs. Unknown OS/serde details stay
+  visible as original detail with localized context.
+- A failed bootstrap may precede the command body. The private facts route must
+  preserve known pricing reasons across that boundary. Do not wrap an existing
+  canonical chain twice in run storage; use the marked presentation context and
+  canonical-detail projection described in the CLI language contract.
+- Metadata decoding validates complete nested shape before suppressing original
+  fields. Unknown/malformed/mismatched metadata remains inspectable.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Invalid document in either language | Same public error and unchanged data; paired reason |
+| Corrupt recompute marker during bootstrap | Paired CLI reason, original marker bytes retained |
+| Valid apply/reset in either language | Identical fixed status JSON, tokens and cost behavior |
+| Added presentation context | Original full run detail and typed cause retained |
+
+### 5. Good/Base/Bad Cases
+
+- Good: carry the original duplicate-model id alongside its typed reason.
+- Base: public `load_snapshot` still returns its original `LlmusageError`.
+- Bad: identify a validator using `detail.contains(...)` or translate a stored
+  ConfigInvalid string before logging it.
+
+### 6. Tests Required
+
+Keep pricing domain/Store/bootstrap/recompute regressions. Paired
+`tests/cli/language_catalog.rs` covers invalid-document families, URL/missing
+paths, doctor refresh, corrupt markers, successful apply/reset and exact
+canonical run/file data. Adapter tests retain public Display/variant/cause;
+nested metadata tests retain unknown-field fallback.
+
+### 7. Wrong vs Correct
+
+Wrong: parse English error text in the CLI or discard its typed source.
+Correct: emit neutral facts at the original decision, unwrap original errors at
+public boundaries, and add marked presentation context only at the CLI boundary.

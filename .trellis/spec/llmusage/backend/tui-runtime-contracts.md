@@ -36,6 +36,28 @@ monthly::render_sorted(..., sort: SortState, detail)
 - Panel and sync result channels are drained before the tick redraw decision.
   An accepted result therefore becomes visible on the next frame without a
   blocking query on the render thread.
+- CLI dispatch passes its already resolved startup language to the private
+  terminal entry; direct public dashboard callers read the selected Store root
+  once. Both enter `common::i18n::with_language` on the UI thread, without a
+  duplicate CLI settings read or repair warning.
+  Reopening applies a changed preference; ticks do not poll settings and worker
+  tasks do not inherit or select a language.
+- Private `LoadError` retains known query/domain failures until an accepted
+  result is projected on the UI thread. Unknown external detail is explicitly
+  marked as original; required public AppState payloads remain unchanged.
+- Behavior loading calls the private `Dashboard::optimize_with_presentation`
+  once. Neutral detector arguments accompany the original payload through its
+  existing request generation/filter/window acceptance. A render scope verifies
+  the payload fingerprint; absent or mismatched facts preserve original detail.
+  Public optimize DTOs, SQL, scores, thresholds and ordering stay canonical.
+- The sync controller associates borrowed registry facts with the active job id
+  before rendering notices/failures. Its private registry-finish wrapper keeps
+  the original terminal refusal available when recording the run also fails.
+  Public SyncEvent/JobSnapshot/run-log values and scheduling remain canonical.
+  Drain event batches at the existing 128-item capacity before presentation
+  facts, then remove per-host facts at their matching remote-skipped event.
+  Existing bounded event backpressure limits pending facts; the observer must
+  neither block nor silently discard presentation data.
 - Consecutive queued ticks collapse to one notification. The first following
   key, mouse, or resize event is retained in order and must never be dropped.
 - `draw::draw` enters one frame-scoped `ThemeState` snapshot. Semantic theme

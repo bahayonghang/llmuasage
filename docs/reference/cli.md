@@ -1,6 +1,6 @@
 # CLI reference
 
-This page is aligned with `cargo run -- --help`, `cargo run -- serve --help`, and `cargo run -- export html --help` for version `2.0.0`. Top-level help is rendered as a compact table; command-specific help still uses the clap output.
+This page describes the CLI for version `2.0.1`. Top-level help uses a compact table; root and nested help and argument diagnostics follow the saved interface language.
 
 ## Top-level help
 
@@ -11,7 +11,27 @@ llmusage -h
 llmusage help --zh
 ```
 
-`llmusage help`, `llmusage --help`, and `llmusage -h` print the English table help. `llmusage help --zh` prints the Chinese table help. Use `llmusage help <COMMAND>` or `llmusage <COMMAND> --help` for the legacy command-specific clap help.
+`llmusage help`, `llmusage --help`, and `llmusage -h` follow the saved language. Use `llmusage help <COMMAND>` or `llmusage <COMMAND> --help` for command-specific help. `llmusage help --zh` forces Chinese for that invocation without saving a preference.
+
+## Interface language
+
+### `llmusage lang [en|zh|zh-CN]`
+
+```powershell
+llmusage lang
+llmusage lang zh
+llmusage lang en
+llmusage --home .\work-profile lang zh-CN
+llmusage --home .\work-profile daily --help
+```
+
+English is the default, regardless of system locale. `en` and `zh` are the saved language codes; `zh-CN` is an alias saved as `zh`. This setting covers CLI help, argument errors, human command/report/console text, supported log replay, and new `dash`/`tui` sessions. Commands, flags, enum values, reason codes, units, model names, and user data retain their original values.
+
+Preferences live in `<runtime-root>/cli-settings.json`. Root precedence is explicit `--home` > `LLMUSAGE_HOME` > `~/.llmusage`, so each profile has its own language. `clean` retains its exception: explicit `--home` or the default root, ignoring `LLMUSAGE_HOME`. Reading preferences, help, version, argument errors, and non-interactive `lang` do not create the root, logs, or database. Missing settings use English; invalid or unreadable settings fall back to English with a repair diagnostic and are not rewritten on read.
+
+`lang` needs no initialization, database, or worker lock. When stdin, stdout, and stderr are all terminals, it offers `English` / `中文（简体）`; empty input, `q`/`Q`, or EOF cancels without saving. Otherwise it prints the current language and explicit setting commands without reading stdin. Explicit `lang en|zh|zh-CN` saves the choice; a failed save reports an error and preserves the old complete file.
+
+Each CLI invocation reads the setting once. A running terminal dashboard keeps its startup language; exit and reopen after a change. There is no live TUI language menu. Browser/desktop dashboards and exported HTML keep their independent language behavior. JSON/NDJSON/SSH/HTTP payloads and persisted diagnostics/file logs remain canonical; external errors and historical logs without supported presentation metadata may retain original detail. `--locale` is a separate report compatibility value, not an interface-language switch.
 
 ## Global options
 
@@ -28,7 +48,7 @@ Usage: llmusage [OPTIONS] [COMMAND]
 | `--breakdown` | Include per-model breakdown rows or payloads where supported |
 | `--order asc\|desc` | Sort report rows by period/activity |
 | `--timezone UTC\|local\|+08:00` | Report timezone. `local` resolves the system IANA timezone and applies the offset for each date, including DST. If resolution fails, it uses the current fixed local offset. |
-| `--locale <LOCALE>` | Lightweight locale selector for titles and number formatting |
+| `--locale <LOCALE>` | Report compatibility value: `en-US`, `zh-CN`, or `ja-JP`; does not select CLI/TUI language or introduce locale-specific number formatting |
 | `--compact` | Use a narrower table layout |
 | `--no-cost` | Hide cost columns and cost fields from report output |
 | `--source codex\|claude\|opencode\|antigravity\|antigravity_ide\|kimi_code\|pi\|omp\|grok` | Restrict a top-level report or sync command to one source |
@@ -50,6 +70,8 @@ Usage: llmusage [OPTIONS] [COMMAND]
 
 File logging does not write to report stdout and does not change `sync --json-events` stdout. Shards rotate at 10 MiB while the process is running and retain at most 30 MiB, seven files, and seven days. `logs` and `diagnostics` status include retained size/count plus dropped-event and maintenance-failure counters.
 
+Human console messages and supported `logs` replay follow `lang`, using stable message metadata. Stored messages, fields, levels, filters, and historical records are not rewritten. Unknown or third-party details remain identifiable as original detail.
+
 ## Report commands
 
 Report commands read the local database only.
@@ -63,7 +85,7 @@ llmusage daily --source codex --since 20260501 --until 20260518
 llmusage daily --json --breakdown
 ```
 
-Default command. Shows daily token and estimated-cost usage. Daily, weekly, and monthly text output uses the unified `All` plus `Agent` rows; CLI JSON is camelCase and adds nested source rows when `--by-agent` is set.
+Default command. Shows daily token and estimated-cost usage. Daily, weekly, and monthly text output uses aggregate and per-source rows with localized labels (`All` / `Agent` in English); CLI JSON is camelCase and adds nested source rows when `--by-agent` is set.
 
 ### `llmusage weekly`
 
@@ -126,7 +148,7 @@ llmusage statusline --no-cache
 llmusage statusline --refresh-interval 10 --cost-source llmusage
 ```
 
-Prints one statusline-friendly usage summary.
+Prints one statusline-friendly usage summary. Its labels follow `lang`; model names, units, and numerical values retain their semantics. Caches are separate at `statusline-cache/latest.en.txt` and `latest.zh.txt` under the runtime root; another language's cache and legacy `latest.txt` are never used as a fallback.
 
 ## Setup and sync commands
 
@@ -163,13 +185,15 @@ Human stderr reports catalog versions, processed/total events, bucket reconcilia
 
 Set `LLMUSAGE_LOG=info` for structured pricing start/reconcile/finish file records, or `debug` for throttled page progress. The default `warn` file level records one liveness warning if repricing continues beyond 30 seconds; terminal progress remains visible at every file-log level.
 
-The human stdout summary is one aligned table with one row per source plus `TOTAL`; completed progress remains on stderr and is not repeated as permanent success lines. Diagnostic lines, warnings, errors, and samples appear strictly after `TOTAL`, never between table data rows. It includes `files`, `changed`, `skipped`, `seen`, `committed`, `stored_events`, bytes, and parse/write duration. Protected or blocked sources show `COMMITTED = 0`, retained `STORED`, `CHANGED = 0`, `BYTES = 0`, `WRITE = 0`, and `FILES` showing the discovered file count from read-only coverage. `skipped` is derived from existing cursor/fingerprint evidence for file-backed sources and from the OpenCode SQLite high-water cursor for DB-backed sync. `committed` is the newly inserted event delta after SQLite dedupe. Redirected output has no ANSI escapes, and narrow terminals use compact headers without truncating numeric values.
+The human stdout summary is one closed grid with ten columns: `SOURCE`, `FILES`, `CHANGED`, `SKIPPED`, `SEEN`, `COMMITTED`, `STORED`, `BYTES`, `PARSE`, and `WRITE`. It has an outer frame, vertical cell borders, a header separator, one row per source, and a separator before `TOTAL`; labels follow `lang`. Completed progress remains on stderr and is not repeated as permanent success lines. Diagnostics appear after the bottom border, grouped by source with faults separated from record/accounting information. Protected or blocked sources show `COMMITTED = 0`, retained `STORED`, `CHANGED = 0`, `BYTES = 0`, `WRITE = 0`, and `FILES` showing the discovered file count from read-only coverage. `skipped` is derived from existing cursor/fingerprint evidence for file-backed sources and from the OpenCode SQLite high-water cursor for DB-backed sync. `committed` is the newly inserted event delta after SQLite dedupe. Redirected output has no ANSI escapes, and narrow terminals use compact headers without truncating numeric values; full numbers can still exceed a very narrow terminal. See the [captured fixture example](../guide/first-sync#import-all-sources).
 
 Record diagnostics below the table distinguish malformed records, oversized records, intentional skips, and accounting anomalies. Each source retains at most eight record samples. The summary states the total count and the number of samples omitted. A sample can show a stable reason, its location value, and a safe file basename together. JSONL samples use `@` for a nonzero byte offset. ZCode samples use `timestamp_ms=` for the existing millisecond timestamp locator. Full private paths, path hashes, and record bodies are not printed. The diagnostic `skipped` count refers to records; the table's `SKIPPED` column refers to files.
 
 Codex tool-output records above the 4 MiB limit can be skipped with `oversized_non_usage_record`; the bounded reader continues to later usage records. Grok records marked `usageIsIncomplete` retain their reported token values and an accounting warning. The parser does not replace those values with fallback estimates. These informational diagnostics do not mean that the entire source failed.
 
 Source failures, such as a missing tracked Antigravity database, are separate from malformed record counts. The stored source status retains the failure after the command exits. A blocked source keeps its imported history and cannot be certified as a clean accounting repair. File inventory reflects the most recent completed observation; a stored `live` state does not prove that a path exists now.
+
+Record diagnostic totals count notices, which need not represent distinct records or failed sources. Recovery prompts default to keeping history: `k`/`K`, empty input, EOF, read failure, or two invalid attempts keep it; `r`/`R` explicitly accepts loss only within the terminal/flag gate above. Prompts distinguish preserved events, current/new inputs, physical absence, still-present out-of-scope inputs, and unreadable/incomplete discovery. Coverage counts are not an exact event-loss estimate. Access/discovery failures must be repaired before retrying.
 
 `WRITE` reports recorded writer elapsed time. Ordinary shard timing includes provider mapping, transaction start, resets, persisted facts and cursors, and commit; host-prefix preparation and in-memory behavior deduplication occur before that timer. Antigravity records each product's apply and marker time separately, excluding the shared group reset, transaction start, and commit. Do not add those product values to estimate the entire transaction. `PARSE` is the remaining source-stage time after recorded `WRITE`, so it is not a measure of parser CPU time. `BYTES` follows each reader's input accounting, which can include inventoried file sizes; it is not a physical disk-I/O measurement.
 
@@ -301,9 +325,11 @@ Queries local structured runtime log entries and recent SQLite `run_log` command
 llmusage dash
 ```
 
-Interactive terminal dashboard. The old hidden `tui` command is a deprecated alias.
+Interactive terminal dashboard. The old hidden `tui` command is a deprecated alias. Both use the current runtime root's saved language once at startup, including all nine panels, navigation, help/settings, source picker, sync overlay, quota, and loading/empty/error states. Exit and reopen to apply a changed `lang`; there is no runtime language switch. Browser and desktop language remain independent.
 
-Controls: `tab`/`shift-tab` or `1`-`9` switch views; `j`/`k`, arrows, Page Up/Page Down, Home/End, or the mouse wheel select rows; `o` cycles sortable columns and `O` reverses direction; `h`/`l` change the active time window where applicable; `s` opens the source picker; `r` refreshes dashboard data; `R` toggles auto-refresh; `x` runs sync through the existing sync worker lock for the current source filter; `?` opens help/settings; and `q` exits.
+Controls: `tab`/`shift-tab` or `1`-`9` switch views; `j`/`k`, arrows, Page Up/Page Down, Home/End, or the mouse wheel select rows; `o` cycles sortable columns and `O` reverses direction; `h`/`l` change the active time window where applicable; `s` opens the source picker; `r` refreshes dashboard data; `R` toggles data auto-refresh; `m` toggles hidden Usage emails; `y` opens Source Sync / Platform Monitor; `x` runs sync through the existing sync worker lock for the current source filter; `?` opens help/settings; and `q` exits. Daily/Monthly Enter opens detail and Esc returns; Stats Enter selects a day, graph clicks open its breakdown, and Esc closes that selection.
+
+Usage fetches quota on entry, using a five-minute cache when fresh; `r` bypasses that cache. `R` does not poll quota APIs. Existing CLI credentials are read-only, emails are hidden by default, and provider/model/account values remain unchanged. The `y` overlay shows source sync and monitored platforms; `x` does not automatically accept a lossy rebuild. Language changes do not alter shortcuts, sorting, selection, mouse navigation, themes, or NoColor behavior.
 
 ### `llmusage serve`
 

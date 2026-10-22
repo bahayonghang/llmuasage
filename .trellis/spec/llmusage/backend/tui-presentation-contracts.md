@@ -43,8 +43,19 @@ theme::{vendor_style, vendor_fg, metric_cache_hit, metric_cost_per_million,
 - Panel and dialog code uses semantic theme accessors and centralized style
   constructors. `Color::*` is allowed in `theme.rs` and the independent CLI
   `report_table.rs`, not in panels or the source picker.
-- Interactive TUI copy is English. The Chinese README/docs surface is
-  independent and must not be changed solely for TUI copy normalization.
+- Interactive TUI copy follows the shared CLI profile language: English by
+  default, or simplified Chinese after `llmusage lang zh` (`zh-CN` is an alias).
+  `dash` and the `tui` alias use the resolved Store root and one startup snapshot
+  before raw mode. Reopen the TUI after a setting change; do not add a language
+  menu, preference polling or locale-specific number formats. Browser/desktop
+  language remains independent.
+- Apply the language on the synchronous UI/render thread using the shared
+  unwind-safe scope. Enum/query/sort/theme IDs, hotkeys, source/model/provider
+  and user values stay stable. Workers carry neutral data; render owned labels,
+  explanations and known failures from paired catalogs on the UI thread.
+- Navigation drawing and mouse hit testing use the same localized tab labels
+  and Unicode display width, including clipped tabs and separators. Existing
+  narrow thresholds, panel order and shortcut numbers remain unchanged.
 - Shared format helpers preserve their named output contracts; do not merge
   helpers with different thresholds, precision, or suffix casing.
 - `stat_compact` is the interactive analytics formatter. Absolute values below
@@ -101,7 +112,7 @@ theme::{vendor_style, vendor_fg, metric_cache_hit, metric_cost_per_million,
 | no capability variables                    | Preserve default truecolor behavior           |
 | unknown `LLMUSAGE_THEME`                   | Use `dark` without failing startup            |
 | panel-local `Color::*` added               | Source guard test fails                       |
-| Chinese interactive copy added             | TUI language guard fails                      |
+| English/Chinese interactive copy selected  | Paired catalogs render in the startup language; stable data and controls remain unchanged |
 | `999`, `1_000`, `12_500`                   | `999`, `1K`, `12.5K`                          |
 | `999_950`, `999_950_000`                   | Promote to `1M`, `1B`; never render `1000K/M` |
 | Usage sync count `8_000`                   | Keep exact grouped output `8,000`             |
@@ -131,8 +142,12 @@ theme::{vendor_style, vendor_fg, metric_cache_hit, metric_cost_per_million,
   an empty modifier set.
 - Unit-test environment detection and assert ANSI16-adapted themes contain no
   `Color::Rgb` slots.
-- Scan panel/source-picker source for `Color::*` and interactive TUI source/tests
-  for Chinese UI strings.
+- Scan panel/source-picker source for `Color::*`. Replace the superseded
+  English-only Han-character guard with paired catalog/TestBackend coverage;
+  never hide legitimate Chinese text behind Unicode escapes to evade a guard.
+- Cover T01–T10 data/loading/empty/error/dialog and sync/quota states in both
+  languages, Chinese navigation hit ranges, period/back selection, hotkeys and
+  sorting. Preserve the theme/NoColor, idle tick and visible-row regressions.
 - Unit-test compact thresholds, rounding promotion, negatives, and signed
   extremes. Render screenshot-scale Overview chart/list data through wide and
   narrow `TestBackend` layouts, including NoColor cells, and keep representative

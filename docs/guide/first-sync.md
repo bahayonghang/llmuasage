@@ -2,17 +2,36 @@
 
 `llmusage sync` imports local usage into SQLite. Report commands do not auto-sync, so run sync when the database is stale.
 
+The interface defaults to English. Optionally run `llmusage lang zh` (`zh-CN` is an alias) before `init`, or `llmusage lang en` to switch back. The saved choice belongs to the current runtime root and also applies to new `dash`/`tui` sessions; reopen a running TUI after changing it. See [interface language](../reference/cli#interface-language) for profile selection and non-interactive behavior. Browser and desktop dashboard language remain independent.
+
 ## Import all sources
 
 ```powershell
 llmusage sync
 ```
 
-Human progress is written to stderr. The final stdout summary is one table with a row per source and a `TOTAL` row; completed progress lines are cleared instead of being repeated above it. Redirected output contains no ANSI control sequences, and narrow terminals use compact headers without truncating numeric values.
+Human progress is written to stderr. The final stdout summary is a closed ten-column grid with an outer frame, vertical borders, and separators after the header and before the total row. Source order, counts, units, and precision are unchanged between languages. Completed progress lines are cleared instead of being repeated above it. Redirected output contains no ANSI control sequences, and narrow terminals use compact headers without truncating numeric values; full numbers can still exceed a very narrow terminal.
+
+This is actual stdout from an isolated Codex fixture imported with `llmusage --home <temporary-profile> sync --source codex` in an English profile. It contains one 482-byte file and one event; it is not real user usage. The Chinese guide shows the same fixture in a separate Chinese profile. Measured timings vary between runs:
+
+```text
+Sync finished:
+┌────────┬───────┬─────────┬─────────┬──────┬───────────┬────────┬───────┬───────┬───────┐
+│ SOURCE │ FILES │ CHANGED │ SKIPPED │ SEEN │ COMMITTED │ STORED │ BYTES │ PARSE │ WRITE │
+├────────┼───────┼─────────┼─────────┼──────┼───────────┼────────┼───────┼───────┼───────┤
+│ codex  │     1 │       1 │       0 │    1 │         1 │      1 │ 482 B │   8ms │   1ms │
+├────────┼───────┼─────────┼─────────┼──────┼───────────┼────────┼───────┼───────┼───────┤
+│ TOTAL  │     1 │       1 │       0 │    1 │         1 │      1 │ 482 B │   8ms │   1ms │
+└────────┴───────┴─────────┴─────────┴──────┴───────────┴────────┴───────┴───────┴───────┘
+```
 
 If the embedded pricing catalog changed since the previous run, bootstrap reprices historical events before source scanning. Progress shows the old/new catalog versions, processed and total event counts, bucket reconciliation, and final elapsed time. This is a one-time upgrade for an unpinned embedded catalog; a current or pinned catalog skips the phase.
 
 The summary includes `files`, `changed`, `skipped`, `seen`, `committed`, and `stored_events` per source. For file-backed sources, `skipped` means the stored cursor, size, mtime, head fingerprint, tail signature, and offset show the artifact is unchanged. For OpenCode, `skipped` means the SQLite high-water cursor found no newer rows. `committed` is the newly inserted event delta after SQLite dedupe; `stored_events` is the durable total currently in the database.
+
+The other columns identify the source, reader-accounted bytes, and recorded parse/write time. `BYTES` is not physical disk I/O, `PARSE` is not parser CPU time, and adding source `PARSE`/`WRITE` values does not give whole-command wall-clock time. See the [metric boundaries](../reference/cli#llmusage-sync).
+
+Diagnostics follow the bottom border, grouped by source. Source faults are separate from malformed/oversized records, intentional record skips, and accounting information. Each source shows at most eight record samples and an omitted-sample count, with stable reason codes and safe locations rather than private paths or record bodies. These counts are not a count of failed sources or necessarily distinct records; the table's skipped count refers to files.
 
 ## Import one source
 
@@ -33,7 +52,7 @@ The accepted source values match `cargo run -- --help`: `codex`, `claude`, `open
 
 Kimi Code reads `~/.kimi-code/sessions/**/wire.jsonl` (or `KIMI_CODE_HOME/sessions`) and imports only explicit turn-scoped `usage.record` rows. It maps non-cached input, output, cache read, and cache creation independently, preserves raw models such as `kimi-code/k3`, and ignores aggregate, zero-token, non-turn, and malformed records.
 
-Pi reads `~/.pi/agent/sessions` (or `PI_AGENT_DIR`) as source `pi`. Oh My Pi reads `~/.omp/agent/sessions` as source `omp`. The two sources share one parse implementation. If a path overlaps, `pi` wins and `omp` skips only the conflicting files. Assistant usage rows preserve input, output, cache read/write, authoritative total, and diagnostic reasoning tokens. After upgrade, run one unbounded `llmusage sync` with no `--source` so legacy `pi` rows rebuild and `.omp` files land as `omp`. Later provider, project, cost, and behavior backfill uses `llmusage sync --rebuild --source omp`. The local admission evidence includes real Oh My Pi samples and sanitized Pi-compatible fixtures; this machine had no Pi-only sample, so Pi-specific format changes remain an explicit evidence gap.
+Pi reads `~/.pi/agent/sessions` (or `PI_AGENT_DIR`) as source `pi`. Oh My Pi reads `~/.omp/agent/sessions` as source `omp`. The two sources share one parse implementation. If a path overlaps, `pi` wins and `omp` skips only the conflicting files. Assistant usage rows preserve input, output, cache read/write, authoritative total, and diagnostic reasoning tokens. Ordinary `sync` preserves legacy `pi` history and skips its writes; repair requires `llmusage sync --rebuild --source pi`. Once that repair is complete, ordinary sync can import `.omp` files under `omp`; later provider, project, cost, and behavior backfill uses `llmusage sync --rebuild --source omp`. The local admission evidence includes real Oh My Pi samples and sanitized Pi-compatible fixtures; this machine had no Pi-only sample, so Pi-specific format changes remain an explicit evidence gap.
 
 Grok Build reads only direct sidecars under `~/.grok/sessions/*/*/` (or `GROK_HOME/sessions`). The primary path maps each `turn_completed` `params.update.usage` record to one precise event. Sessions without usage keep the older `_meta.totalTokens` plus `signals.json` total-only fallback. Cost remains `unpriced`. Any sidecar change replays the full session; a tracked missing sidecar preserves prior rows and blocks lossy rebuild until the file returns.
 
@@ -48,6 +67,8 @@ llmusage sync --json-events
 ```
 
 This mode prints lifecycle and progress events as NDJSON on stdout. Pricing upgrades add `pricing_upgrade_started`, throttled `pricing_upgrade_progress`, `pricing_bucket_reconcile_started`, and `pricing_upgrade_finished` in that order. Use it for wrappers or UI adapters that need machine-readable progress.
+
+`lang` changes human stderr context only in this mode: stdout NDJSON keys, codes, enum values, and numeric semantics retain their machine contract, with no language menu or human summary mixed in. Stored diagnostics/file logs and SSH/HTTP payloads also retain canonical values; human console and supported log replay follow the selected language.
 
 Human progress does not depend on structured logging. For file diagnostics, use `LLMUSAGE_LOG=info` for pricing phase boundaries or `debug` for page progress; the default `warn` level records one liveness warning after 30 seconds.
 
@@ -74,6 +95,9 @@ skips its imports, and warns that an explicit rebuild is required. When stdin, s
 `--rebuild`, or `--recent-days`, you can explicitly accept loss for
 `antigravity` or `antigravity_ide` to rebuild that product in the same run;
 all other legacy sources remain skipped. Other current sources can still sync.
+
+The recovery prompt identifies the source, preserved event count, current/new inputs, and any physically missing, still-present but out-of-scope, unreadable, or incompletely discovered inputs. These are coverage facts, not an exact forecast of lost events. `k`/`K`, empty input, EOF, read failure, or two invalid attempts keep history by default; `r`/`R` explicitly accepts discarding history from missing or out-of-scope inputs and rebuilding from currently parseable files. Unreadable inputs or incomplete discovery require restoring access and retrying; acceptance cannot bypass that protection. The CLI `--allow-lossy-rebuild` flag does not enable automatic rebuilding during ordinary sync.
+
 Restore any missing source files, then explicitly rebuild the affected source:
 
 ```powershell

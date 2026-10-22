@@ -36,6 +36,14 @@ unified_report::{report_json, focused_report_json}(..., no_cost) -> JSON
 - Top-level daily, weekly, monthly, and session commands load through the
   shared unified report query. Daily, weekly, and monthly text use an `All`
   row plus source rows in the `Agent` column; session remains source-row based.
+- Human report titles, headers, empty states, notes and own errors consume the
+  invocation language from `common::i18n`; report `--locale` does not select UI
+  language or introduce numeric culture formatting. User/model/host/source
+  identities, units and all JSON values remain unchanged. Paired own errors use
+  closed report facts while retaining the exact canonical error and cause.
+- CLI report tables measure, shorten and pad text by Unicode display width.
+  Only text columns may shrink; right-aligned numeric columns retain their full
+  formatted values even when the resulting table exceeds terminal width.
 - CLI-only DTOs own camelCase serialization. Query structs retain their
   existing snake_case serialization for dashboard, export, and interactive TUI
   callers.
@@ -101,6 +109,8 @@ unified_report::{report_json, focused_report_json}(..., no_cost) -> JSON
 | Persisted `total_tokens` exceeds the four visible token channels        | Text uses the visible-channel sum; JSON retains persisted `totalTokens`  |
 | A visible token sum approaches `i64::MAX`                               | Saturate instead of overflowing or panicking                             |
 | Human token value crosses a unit boundary                               | Render with the shared compact formatter and stable `K`/`M`/`B` rounding |
+| Chinese headers or user labels contain wide/combining characters         | Consistent borders by display width; numeric values remain complete      |
+| Same fixture rendered in English and Chinese                             | Paired copy; unchanged ordering, token/cost values, placeholders and JSON |
 
 ### 5. Good/Base/Bad Cases
 
@@ -142,6 +152,11 @@ unified_report::{report_json, focused_report_json}(..., no_cost) -> JSON
   `--by-agent`, both date formats, section order, and no-cost token invariance.
 - Run `cargo fmt --check`, strict clippy, focused report tests, and the full
   report command suite before the project-wide gate.
+- `tests/cli/language_reports.rs` expands the 20 focused leaves from the actual
+  Clap schema and covers paired data/empty/rejection output, fixed JSON,
+  source/host value preservation, sections and statusline cache isolation.
+- `report_table` paired width tests include Chinese/combining labels and large
+  numeric cells; canonical-error tests retain original Display and typed causes.
 
 ### 7. Wrong vs Correct
 
@@ -193,6 +208,55 @@ cells.push(format_token_compact(table_total_tokens(
 
 This makes the human table auditable while JSON continues to serialize the
 authoritative `total_tokens` field.
+
+## Scenario: Statusline language and cache isolation
+
+### 1. Scope / Trigger
+
+Apply when changing `src/commands/statusline.rs` or its hook, output and cache
+tests. This is CLI human output; it does not control browser/desktop language.
+
+### 2. Signatures
+
+`llmusage statusline [--cost-source auto|llmusage|hook|both]` keeps its existing hook
+stdin JSON, query, cost selection and public command signatures.
+
+### 3. Contracts
+
+- Today/block/projected/unavailable and cost-source labels follow the invocation
+  language; model and numeric values keep their existing semantics and units.
+- Output is one line, including when a hook value contains CR/LF.
+- Cache files are `statusline-cache/latest.en.txt` and `latest.zh.txt`. Read only
+  the selected language's file. Never fall back to `latest.txt` or another
+  language; leave an existing legacy file untouched.
+- New paired context on hook/cache IO errors preserves the prior original OS
+  Display and typed IO cause. The cache remains human presentation output;
+  localized unavailable labels do not alter canonical diagnostic data.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| English then Chinese invocation | Separate cache content and translated labels |
+| Only another language or legacy cache exists | No cross-language replay; old file remains |
+| CR/LF in a hook value | One output line |
+| Hook/cache IO failure | Paired context plus original Display and error kind |
+
+### 5. Good/Base/Bad Cases
+
+- Good: independent en/zh caches under the same selected profile.
+- Base: missing cache retains the existing unavailable/query behavior.
+- Bad: sharing `latest.txt` and showing a previous process's language.
+
+### 6. Tests Required
+
+Use the paired process tests in `language_reports` for cache/hook behavior and
+the statusline unit test for exact OS Display and typed causes in both scopes.
+
+### 7. Wrong vs Correct
+
+Wrong: read a global `latest.txt` regardless of language. Correct: derive
+`latest.<current().code()>.txt` inside the existing statusline cache directory.
 
 ## Scenario: Canonical period aggregation and fuzzy project filters
 
