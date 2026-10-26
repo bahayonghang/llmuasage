@@ -439,3 +439,26 @@ sync 默认汇总改为从数据库读取最近 7 天（本地时间）用量，
 ### Status
 
 [OK] **Completed**
+
+
+## Session 82: 将 Cindy 纳入用量统计
+<!-- trellis-session: v=2 fp=0f507c9583505bb5 -->
+
+**Date**: 2026-10-26
+**Task**: 将 Cindy 纳入用量统计
+**Branch**: `dev`
+
+### Summary
+
+新增独立来源 cindy，被动读取正式 profile 的 Pi 会话，并拆分提交实现与文档后归档任务。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `00d06b3` | feat(同步): ✨ 纳入 Cindy 正式会话用量 |
+| `6e08782` | docs(文档): 📝 记录 Cindy 来源发现与重叠规则 |
+
+### Status
+
+[OK] **Completed**
