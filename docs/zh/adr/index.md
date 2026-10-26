@@ -22,3 +22,4 @@ ADR 目前以英文工程记录为主，并复用仓库根目录 `CONTEXT.md` �
 - [0014 — SSH remote-host import](../../adr/0014-ssh-remote-host-import)
 - [0015 — Oh My Pi source split](../../adr/0015-omp-source-split)
 - [0016 — Source-reported cost for Pi / Oh My Pi](../../adr/0016-source-reported-cost)
+- [0018 — Cindy passive source](../../adr/0018-cindy-passive-source)

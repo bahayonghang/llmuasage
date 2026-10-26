@@ -18,7 +18,7 @@ is the compatibility baseline when reference implementations disagree.
   `meta('token_accounting_version.pi') = '3'`;
   `meta('token_accounting_version.antigravity') = '3'` and
   `meta('token_accounting_version.antigravity_ide') = '3'`; Claude, OpenCode,
-  Kimi Code, Oh My Pi (`omp`), ZCode, and DeepSeek Harness remain `2`.
+  Kimi Code, Oh My Pi (`omp`), Cindy (`cindy`), ZCode, and DeepSeek Harness remain `2`.
   `expected_token_accounting_version(SourceKind) -> u32` owns this source-aware
   contract.
 - Legacy repair: explicit `llmusage sync --rebuild --source <source>`. Ordinary

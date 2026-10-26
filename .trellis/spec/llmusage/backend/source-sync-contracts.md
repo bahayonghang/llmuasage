@@ -148,11 +148,12 @@ unchanged, and let the human adapter choose its language.
   reuse `last_processed_ids_json` or `last_total_json` for skip diagnostics.
 - Stable passive parser ids include `kimi_code` for
   `~/.kimi-code/sessions/**/wire.jsonl`, `pi` for `~/.pi/agent/sessions` (or
-  comma-separated `PI_AGENT_DIR`), and `omp` for `~/.omp/agent/sessions`.
-  Overlapping canonical paths belong to `pi`. Grok Build uses `grok`
+  comma-separated `PI_AGENT_DIR`), `omp` for `~/.omp/agent/sessions`, and
+  `cindy` for official Cindy profile `pi-agent-home/sessions`.
+  Overlapping canonical paths belong to `pi`, then `omp`. Grok Build uses `grok`
   for direct sidecars under `~/.grok/sessions/*/*/` or `GROK_HOME/sessions`.
 - Registered passive parsers are Codex, Claude, OpenCode, Antigravity CLI/IDE, Kimi
-  Code, Pi, Oh My Pi, Grok Build, ZCode, and DeepSeek Harness.
+  Code, Pi, Oh My Pi, Cindy, Grok Build, ZCode, and DeepSeek Harness.
 - Monitor descriptors live outside parser promotion and report detection status,
   candidate roots, and parser availability.
 
@@ -180,13 +181,18 @@ unchanged, and let the human adapter choose its language.
 - Kimi Code imports only explicit `type=usage.record` plus
   `usageScope=turn` rows. It preserves the raw model id and maps non-cached
   input, cache read, cache creation, and output as separate channels.
-- Pi and Oh My Pi share one parse implementation and register two sources.
+- Pi, Oh My Pi, and Cindy share one parse implementation and register three sources.
   `pi` lists `PI_AGENT_DIR` or `~/.pi/agent/sessions`. `omp` lists
   `~/.omp/agent/sessions` and skips a candidate when its canonical path
   overlaps a Pi root (equal / ancestor / descendant). Pi wins; unconflicted
-  `.omp` files remain. Skip notes stay on the listing for diagnostics and
+  `.omp` files remain. `cindy` lists official
+  `{config_dir}/Cindy/pi-agent-home/sessions` and
+  `{config_dir}/CindyGlobal/pi-agent-home/sessions`, unless
+  `LLMUSAGE_CINDY_SESSION_DIRS` replaces those roots. It does not read
+  `PI_AGENT_DIR`, omits `sessions/shared`, and skips paths owned by `pi` or
+  `omp`. Skip notes stay on the listing for diagnostics and
   must not set `SourceSyncStats.last_error`, so the missing-file sweep still
-  runs. Both sources use the ordinary append/reparse `FileCursor` state
+  runs. All three sources use the ordinary append/reparse `FileCursor` state
   machine. Assistant usage keeps the upstream total authoritative and
   reasoning diagnostic-only. `event_key` is `{source}:{hash}`.
 - Grok Build discovery uses exactly two `read_dir` levels for

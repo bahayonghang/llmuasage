@@ -23,6 +23,7 @@ ADRs are engineering records, not end-user tutorials. Start with [Architecture](
 - [0015 — Oh My Pi source split](./0015-omp-source-split)
 - [0016 — Source-reported cost for Pi / Oh My Pi](./0016-source-reported-cost)
 - [0017 — Antigravity CLI and IDE native accounting](./0017-antigravity-native-accounting)
+- [0018 — Cindy passive source](./0018-cindy-passive-source)
 
 ## Companion docs
 

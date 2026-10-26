@@ -59,6 +59,7 @@ llmusage init
 | Kimi Code | Turn-scoped `usage.record` rows | Passive parser |
 | Pi | Session JSONL under `~/.pi/agent/sessions` or `PI_AGENT_DIR` | Passive parser |
 | Oh My Pi | Session JSONL under `~/.omp/agent/sessions` | Passive parser |
+| Cindy | Pi-format JSONL under official `Cindy` and `CindyGlobal` `pi-agent-home/sessions` | Passive parser (`cindy`) |
 | Grok Build | Direct session sidecars | Passive parser (`precise`, `unpriced`) |
 | Antigravity CLI / IDE | `~/.gemini/antigravity-cli/conversations/*.db` / `~/.gemini/antigravity-ide/conversations/*.db` (`GEMINI_CLI_HOME` overrides `.gemini`) | Separate `antigravity` / `antigravity_ide` passive readers; hook history retained |
 | ZCode | `cli/db/db.sqlite` `model_usage` completed rows | Passive parser |

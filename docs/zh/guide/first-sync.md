@@ -76,11 +76,11 @@ llmusage sync --source grok
 # gemini 不再作为来源 id；gemini-* 模型名保持不变
 ```
 
-合法来源与 `cargo run -- --help` 一致：`codex`、`claude`、`opencode`、`antigravity`、`antigravity_ide`、`kimi_code`、`pi`、`omp`、`grok`。`gemini` 不再作为来源 id；`gemini-*` 仍只是模型名前缀。
+合法来源与 `cargo run -- --help` 一致：`codex`、`claude`、`opencode`、`antigravity`、`antigravity_ide`、`kimi_code`、`pi`、`omp`、`cindy`、`grok`。`gemini` 不再作为来源 id；`gemini-*` 仍只是模型名前缀。
 
 Kimi Code 读取 `~/.kimi-code/sessions/**/wire.jsonl`（或 `KIMI_CODE_HOME/sessions`），只导入显式 turn-scoped `usage.record`。它分别映射非缓存输入、输出、cache read 与 cache creation，保留 `kimi-code/k3` 等原始模型名，并忽略聚合、零 token、非 turn 和损坏记录。
 
-Pi 读取 `~/.pi/agent/sessions`（或 `PI_AGENT_DIR`），来源为 `pi`。Oh My Pi 读取 `~/.omp/agent/sessions`，来源为 `omp`。两者共用一份解析实现。路径重叠时 `pi` 优先，`omp` 只跳过冲突文件。Assistant usage 会保留 input、output、cache read/write、权威 total 与诊断型 reasoning token。普通 `sync` 保留存量旧版 `pi` 历史并跳过其写入，修复需要显式运行 `llmusage sync --rebuild --source pi`。完成修复后，普通 sync 可将 `.omp` 文件导入 `omp`；后续 provider、project、成本、行为回填使用 `llmusage sync --rebuild --source omp`。当前准入证据包含本机 Oh My Pi 样本和脱敏 Pi-compatible fixture；本机没有 Pi-only 样本，因此 Pi 专属格式变化仍是显式证据缺口。
+Pi 读取 `~/.pi/agent/sessions`（或 `PI_AGENT_DIR`），来源为 `pi`。Oh My Pi 读取 `~/.omp/agent/sessions`，来源为 `omp`。Cindy 读取正式 `{config_dir}/Cindy/pi-agent-home/sessions` 与 `{config_dir}/CindyGlobal/pi-agent-home/sessions`，来源为 `cindy`；`LLMUSAGE_CINDY_SESSION_DIRS` 会替换这些根，且不读取 `PI_AGENT_DIR`。三者共用一份解析实现。路径重叠时 `pi` 优先于 Oh My Pi，Cindy 跳过已被二者占用的文件。Cindy 也不导入 `sessions/shared`。Assistant usage 会保留 input、output、cache read/write、权威 total 与诊断型 reasoning token。普通 `sync` 保留存量旧版 `pi` 历史并跳过其写入，修复需要显式运行 `llmusage sync --rebuild --source pi`。完成修复后，普通 sync 可将 `.omp` 文件导入 `omp`；后续 provider、project、成本、行为回填使用 `llmusage sync --rebuild --source omp`。当前准入证据包含本机 Oh My Pi 样本和脱敏 Pi-compatible fixture；本机没有 Pi-only 样本，因此 Pi 专属格式变化仍是显式证据缺口。
 
 Grok Build 只读取 `~/.grok/sessions/*/*/`（或 `GROK_HOME/sessions`）会话根目录下的 sidecar。主路径把每条 `turn_completed` 的 `params.update.usage` 映射为一条 precise 事件。没有 usage 的会话仍走 `_meta.totalTokens` 加 `signals.json` 的 total-only 回退。成本保持 `unpriced`。任一 sidecar 变化会整体重放该会话；已追踪 sidecar 缺失时保留旧行，并在文件恢复前拒绝有损 rebuild。
 
