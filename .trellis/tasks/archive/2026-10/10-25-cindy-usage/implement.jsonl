@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "Source registry, Pi/OMP discovery, overlap skip, and cursor contracts"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "Token version and precise channel contract to reuse"}
+{"file": "docs/agents/passive-parser-onboarding.md", "reason": "Passive reader gate for the new source"}
+{"file": "docs/adr/0015-omp-source-split.md", "reason": "Precedent for splitting a Pi-format product into its own source"}
+{"file": "docs/adr/0016-source-reported-cost.md", "reason": "Source-reported cost contract shared by the Pi parser"}
+{"file": ".trellis/tasks/10-25-cindy-usage/research/ccusage-and-cindy.md", "reason": "ccusage named-store evidence and local Cindy artifact facts"}

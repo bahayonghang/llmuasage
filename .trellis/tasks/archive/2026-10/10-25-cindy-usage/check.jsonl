@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/llmusage/backend/source-sync-contracts.md", "reason": "Verify registry, overlap, and status behavior"}
+{"file": ".trellis/spec/llmusage/backend/token-accounting-contracts.md", "reason": "Verify Cindy uses accounting version 2 and Pi token mapping"}
+{"file": "docs/agents/passive-parser-onboarding.md", "reason": "Verify fixtures, sync-twice, and privacy boundary"}
+{"file": ".trellis/tasks/10-25-cindy-usage/prd.md", "reason": "Acceptance criteria for the approved Cindy scope"}
