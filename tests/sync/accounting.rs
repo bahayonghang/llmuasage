@@ -2014,6 +2014,7 @@ impl Fixture {
             "CODEX_HOME",
             "OPENCODE_HOME",
             "GEMINI_CLI_HOME",
+            "LLMUSAGE_CINDY_SESSION_DIRS",
         ]);
         unsafe {
             std::env::set_var("HOME", &home);
@@ -2021,6 +2022,10 @@ impl Fixture {
             std::env::set_var("CODEX_HOME", &codex_home);
             std::env::set_var("OPENCODE_HOME", &opencode_home);
             std::env::set_var("GEMINI_CLI_HOME", home.join(".gemini"));
+            std::env::set_var(
+                "LLMUSAGE_CINDY_SESSION_DIRS",
+                home.join("cindy-sessions-absent"),
+            );
         }
 
         Ok(Self {

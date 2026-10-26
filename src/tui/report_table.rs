@@ -1406,6 +1406,11 @@ fn source_color(source: SourceKind) -> Color {
         SourceKind::KimiCode => Color::Yellow,
         SourceKind::Pi => Color::Red,
         SourceKind::Omp => Color::DarkMagenta,
+        SourceKind::Cindy => Color::Rgb {
+            r: 194,
+            g: 65,
+            b: 12,
+        },
         SourceKind::Grok => Color::DarkCyan,
         SourceKind::Zcode => Color::DarkYellow,
         SourceKind::DeepseekHarness => Color::DarkBlue,

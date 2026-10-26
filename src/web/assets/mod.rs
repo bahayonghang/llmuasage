@@ -67,7 +67,7 @@ pub(crate) fn find_asset(path: &str) -> Option<&'static WebAsset> {
     ASSET_MANIFEST.iter().find(|asset| asset.path == path)
 }
 
-static ASSET_MANIFEST: [WebAsset; 47] = [
+static ASSET_MANIFEST: [WebAsset; 48] = [
     WebAsset {
         path: "base.css",
         content_type: "text/css; charset=utf-8",
@@ -318,6 +318,12 @@ static ASSET_MANIFEST: [WebAsset; 47] = [
         path: "agent-logos/omp.svg",
         content_type: "image/svg+xml",
         body: include_str!("agent-logos/omp.svg"),
+        etag: OnceLock::new(),
+    },
+    WebAsset {
+        path: "agent-logos/cindy.svg",
+        content_type: "image/svg+xml",
+        body: include_str!("agent-logos/cindy.svg"),
         etag: OnceLock::new(),
     },
     WebAsset {

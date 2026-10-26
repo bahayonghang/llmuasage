@@ -25,8 +25,9 @@ fn sync_hot_run_and_append_remain_incremental() -> Result<()> {
         let first_overview = Dashboard::open(&store)?.overview(&Default::default())?;
         let first_sync_status = store.sync_status().load_source_sync_statuses("local")?;
         // One status per registered source: codex, claude, opencode,
-        // antigravity, antigravity_ide, kimi_code, pi, omp, grok, zcode, and deepseek_harness.
-        assert_eq!(first_sync_status.len(), 11);
+        // antigravity, antigravity_ide, kimi_code, pi, omp, cindy, grok, zcode,
+        // and deepseek_harness.
+        assert_eq!(first_sync_status.len(), 12);
 
         commands::sync::run(&app).await?;
         let second_overview = Dashboard::open(&store)?.overview(&Default::default())?;

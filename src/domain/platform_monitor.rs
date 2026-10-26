@@ -293,6 +293,20 @@ pub const PLATFORM_MONITORS: &[PlatformMonitorDescriptor] = &[
         next_action: "parsed by the registered Oh My Pi source parser",
     },
     PlatformMonitorDescriptor {
+        platform_id: "cindy",
+        display_name: "Cindy",
+        source_kind: Some(SourceKind::Cindy),
+        roots: &[
+            MonitorRoot::ConfigDir("Cindy/pi-agent-home/sessions"),
+            MonitorRoot::ConfigDir("CindyGlobal/pi-agent-home/sessions"),
+        ],
+        artifact_patterns: &["*.jsonl"],
+        parser_status: ParserSupportStatus::Registered,
+        quality: Some(UsageQuality::Precise),
+        privacy: PrivacyClass::LocalArtifacts,
+        next_action: "parsed by the registered Cindy source parser",
+    },
+    PlatformMonitorDescriptor {
         platform_id: "grok",
         display_name: "Grok Build",
         source_kind: Some(SourceKind::Grok),
@@ -846,6 +860,27 @@ mod tests {
                 MonitorRoot::Home(".deepseek"),
             ]
         );
+    }
+
+    #[test]
+    fn cindy_monitor_probes_official_profiles_only() {
+        let cindy = registered_platform_monitors()
+            .iter()
+            .find(|descriptor| descriptor.platform_id == "cindy")
+            .expect("Cindy monitor should exist");
+        assert_eq!(cindy.source_kind, Some(SourceKind::Cindy));
+        assert_eq!(cindy.display_name, "Cindy");
+        assert_eq!(cindy.parser_status, ParserSupportStatus::Registered);
+        assert_eq!(cindy.quality, Some(UsageQuality::Precise));
+        assert_eq!(cindy.privacy, PrivacyClass::LocalArtifacts);
+        assert_eq!(
+            cindy.roots,
+            &[
+                MonitorRoot::ConfigDir("Cindy/pi-agent-home/sessions"),
+                MonitorRoot::ConfigDir("CindyGlobal/pi-agent-home/sessions"),
+            ]
+        );
+        assert_eq!(cindy.artifact_patterns, &["*.jsonl"]);
     }
 
     #[test]

@@ -24,6 +24,7 @@ pub fn registered_parsers() -> Vec<Box<dyn SourceParser>> {
         Box::new(KimiCodeParser),
         Box::new(PiFormatParser::pi()),
         Box::new(PiFormatParser::omp()),
+        Box::new(PiFormatParser::cindy()),
         Box::new(GrokParser),
         Box::new(ZcodeParser),
         Box::new(DeepseekHarnessParser),
@@ -116,6 +117,8 @@ mod tests {
         assert_eq!(parse_source_id("pi"), Some(SourceKind::Pi));
         assert_eq!(parse_source_id("omp"), Some(SourceKind::Omp));
         assert_eq!(SourceKind::parse_id("omp"), Some(SourceKind::Omp));
+        assert_eq!(parse_source_id("cindy"), Some(SourceKind::Cindy));
+        assert_eq!(SourceKind::parse_id("cindy"), Some(SourceKind::Cindy));
         assert_eq!(parse_source_id("grok"), Some(SourceKind::Grok));
         assert_eq!(parse_source_id("zcode"), Some(SourceKind::Zcode));
         assert_eq!(
@@ -127,16 +130,19 @@ mod tests {
     }
 
     #[test]
-    fn pi_format_parser_is_registered_for_pi_and_omp() {
+    fn pi_format_parser_is_registered_for_pi_omp_and_cindy() {
         let sources = parser_sources();
         assert!(sources.contains(&SourceKind::Pi));
         assert!(sources.contains(&SourceKind::Omp));
+        assert!(sources.contains(&SourceKind::Cindy));
         assert_eq!(
             sources
                 .iter()
-                .filter(|source| **source == SourceKind::Pi || **source == SourceKind::Omp)
+                .filter(|source| {
+                    matches!(source, SourceKind::Pi | SourceKind::Omp | SourceKind::Cindy)
+                })
                 .count(),
-            2
+            3
         );
     }
 

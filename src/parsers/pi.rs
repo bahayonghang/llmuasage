@@ -2,9 +2,10 @@
 //!
 //! Pi and Oh My Pi persist the same session transcript shape under
 //! `<root>/<project>/agent_<session>.jsonl`. They share this parse
-//! implementation and register as two sources: `pi` enumerates `PI_AGENT_DIR`
-//! or `~/.pi/agent/sessions`, and `omp` enumerates `~/.omp/agent/sessions`.
-//! Overlapping paths belong to `pi`. Only assistant `message` records that
+//! implementation and register as three sources: `pi` enumerates `PI_AGENT_DIR`
+//! or `~/.pi/agent/sessions`, `omp` enumerates `~/.omp/agent/sessions`, and
+//! `cindy` enumerates official Cindy profile session directories. Overlapping
+//! paths belong to `pi`, then `omp`. Only assistant `message` records that
 //! carry a `usage` block become [`UsageEvent`]s; `title`/`session`/
 //! `model_change`/thinking-level metadata lines are ignored. Each retained
 //! record maps 1:1 to one event, so there is no cumulative-delta bookkeeping
@@ -107,6 +108,13 @@ impl PiFormatParser {
             list_files: source_files::list_omp_session_files,
         }
     }
+
+    pub fn cindy() -> Self {
+        Self {
+            source: SourceKind::Cindy,
+            list_files: source_files::list_cindy_session_files,
+        }
+    }
 }
 
 impl SourceParser for PiFormatParser {
@@ -173,6 +181,7 @@ async fn sync_pi_format(
     let discovery_roots = match source {
         SourceKind::Pi => source_files::pi_session_roots(),
         SourceKind::Omp => vec![source_files::omp_session_root()],
+        SourceKind::Cindy => source_files::cindy_session_roots(),
         _ => Vec::new(),
     };
     let cursor_map = store.cursors().load_file_cursors(source, "local")?;

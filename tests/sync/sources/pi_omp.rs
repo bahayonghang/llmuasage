@@ -1155,3 +1155,168 @@ fn omp_source_sync_refuses_until_pi_split_migration() -> Result<()> {
     fixture.restore_env();
     Ok(())
 }
+
+#[test]
+fn cindy_imports_official_session_shape_without_pi_dir_or_shared_transcripts() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let sessions = fixture.home.join("cindy-sessions");
+    let other_pi = fixture.home.join("other-pi-sessions");
+    fixture.seed_pi_under(
+        &sessions,
+        "project-cindy",
+        "live",
+        &[
+            pi_message_line_with_cost(
+                "2026-06-05T00:00:00Z",
+                "grok-4.7",
+                40,
+                8,
+                12,
+                3,
+                63,
+                5,
+                serde_json::json!({
+                    "input": 0.1,
+                    "output": 0.2,
+                    "cacheRead": 0.0,
+                    "cacheWrite": 0.0,
+                    "total": 0.3
+                }),
+            ),
+            serde_json::json!({
+                "type": "message",
+                "timestamp": "2026-06-05T00:00:01Z",
+                "message": {
+                    "role": "assistant",
+                    "model": "ignored-zero",
+                    "usage": {
+                        "input": 0,
+                        "output": 0,
+                        "cacheRead": 0,
+                        "cacheWrite": 0,
+                        "totalTokens": 0
+                    }
+                }
+            })
+            .to_string(),
+        ],
+    )?;
+    fixture.seed_pi_under(
+        &sessions.join("shared"),
+        "imported",
+        "foreign",
+        &[pi_message_line(
+            "2026-06-05T00:00:02Z",
+            "shared-model",
+            99,
+            9,
+            0,
+            0,
+            108,
+            0,
+        )],
+    )?;
+    fixture.seed_pi_under(
+        &other_pi,
+        "project-pi",
+        "not-cindy",
+        &[pi_message_line(
+            "2026-06-05T00:00:03Z",
+            "pi-only-model",
+            7,
+            1,
+            0,
+            0,
+            8,
+            0,
+        )],
+    )?;
+    unsafe {
+        std::env::set_var("PI_AGENT_DIR", &other_pi);
+        std::env::set_var("LLMUSAGE_CINDY_SESSION_DIRS", &sessions);
+    }
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let app = AppContext::discover()?;
+        let store = Store::new(&app.paths)?;
+        store.bootstrap()?;
+        let first = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Cindy),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(first.sources[0].source, SourceKind::Cindy);
+        assert_eq!(first.sources[0].events_inserted, 1);
+
+        let conn = Connection::open(&app.paths.db_path)?;
+        let (model, input, output, cache_read, cache_write, total, cost, pricing): (
+            String,
+            i64,
+            i64,
+            i64,
+            i64,
+            i64,
+            f64,
+            String,
+        ) = conn.query_row(
+            "SELECT model, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, total_tokens, cost_with_cache_usd, pricing_status FROM usage_event WHERE source = 'cindy'",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                ))
+            },
+        )?;
+        assert_eq!(model, "grok-4.7");
+        assert_eq!((input, output, cache_read, cache_write, total), (40, 8, 12, 3, 63));
+        assert_eq!(pricing, "source_reported");
+        assert!((cost - 0.3).abs() < 0.000_001);
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM usage_event WHERE model = 'shared-model' OR model = 'pi-only-model' OR model = 'ignored-zero'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )?,
+            0
+        );
+
+        let second = commands::sync::run_once_with_options(
+            &app,
+            &store,
+            0,
+            &commands::sync::SyncRunOptions {
+                source: Some(SourceKind::Cindy),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        assert_eq!(second.sources[0].events_inserted, 0);
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM usage_event WHERE source = 'cindy'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )?,
+            1
+        );
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    fixture.restore_env();
+    Ok(())
+}

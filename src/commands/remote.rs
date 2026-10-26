@@ -165,6 +165,7 @@ fn remove(app: &AppContext, label: &str, delete_usage: bool, yes: bool) -> Resul
             SourceKind::KimiCode,
             SourceKind::Pi,
             SourceKind::Omp,
+            SourceKind::Cindy,
             SourceKind::Grok,
             SourceKind::Zcode,
             SourceKind::DeepseekHarness,

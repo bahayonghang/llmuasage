@@ -61,6 +61,7 @@ pub const fn expected_token_accounting_version(source: SourceKind) -> u32 {
         | SourceKind::Opencode
         | SourceKind::KimiCode
         | SourceKind::Omp
+        | SourceKind::Cindy
         | SourceKind::Zcode
         | SourceKind::DeepseekHarness => TOKEN_ACCOUNTING_VERSION,
     }

@@ -30,6 +30,9 @@ pub enum SourceKind {
     /// Oh My Pi local agent session JSONL artifacts.
     #[value(name = "omp")]
     Omp,
+    /// Cindy local Pi-format session JSONL under the official app profile.
+    #[value(name = "cindy")]
+    Cindy,
     /// Grok Build local session sidecars.
     #[value(name = "grok")]
     Grok,
@@ -53,6 +56,7 @@ impl SourceKind {
             Self::KimiCode => "kimi_code",
             Self::Pi => "pi",
             Self::Omp => "omp",
+            Self::Cindy => "cindy",
             Self::Grok => "grok",
             Self::Zcode => "zcode",
             Self::DeepseekHarness => "deepseek_harness",

@@ -39,6 +39,7 @@ impl Fixture {
             "OPENCODE_DB",
             "KIMI_CODE_HOME",
             "PI_AGENT_DIR",
+            "LLMUSAGE_CINDY_SESSION_DIRS",
             "GROK_HOME",
             "ZCODE_HOME",
             "GEMINI_CLI_HOME",
@@ -53,6 +54,10 @@ impl Fixture {
             std::env::remove_var("OPENCODE_DB");
             std::env::remove_var("KIMI_CODE_HOME");
             std::env::remove_var("PI_AGENT_DIR");
+            std::env::set_var(
+                "LLMUSAGE_CINDY_SESSION_DIRS",
+                home.join("cindy-sessions-absent"),
+            );
             std::env::remove_var("GROK_HOME");
             std::env::remove_var("ZCODE_HOME");
             std::env::remove_var("GEMINI_CLI_HOME");

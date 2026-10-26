@@ -138,6 +138,18 @@ pub const SOURCE_DESCRIPTORS: &[SourceDescriptor] = &[
         privacy: PrivacyClass::LocalArtifacts,
     },
     SourceDescriptor {
+        kind: SourceKind::Cindy,
+        stable_id: "cindy",
+        aliases: &[],
+        display_name: "Cindy",
+        capabilities: SourceCapabilities {
+            parser: true,
+            passive_probe: true,
+        },
+        quality: UsageQuality::Precise,
+        privacy: PrivacyClass::LocalArtifacts,
+    },
+    SourceDescriptor {
         kind: SourceKind::Grok,
         stable_id: "grok",
         aliases: &[],

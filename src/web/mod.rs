@@ -3532,6 +3532,7 @@ mod tests {
                 "agent-logos/kimi_code.svg",
                 "agent-logos/pi.svg",
                 "agent-logos/omp.svg",
+                "agent-logos/cindy.svg",
                 "agent-logos/grok.svg",
                 "agent-logos/zcode.svg",
                 "agent-logos/deepseek_harness.svg",
@@ -3606,6 +3607,10 @@ mod tests {
             (
                 "agent-logos/omp.svg",
                 "727019727006f26fe3d1f187d3fe9830f26213733a51721096a2044ab059cf61",
+            ),
+            (
+                "agent-logos/cindy.svg",
+                "e487722ce637d2f99580ee66830c2ab262df8a24a8816142ff06774979367191",
             ),
             (
                 "agent-logos/grok.svg",
@@ -6750,6 +6755,7 @@ mod tests {
             "kimi_code.svg",
             "pi.svg",
             "omp.svg",
+            "cindy.svg",
             "grok.svg",
             "zcode.svg",
             "deepseek_harness.svg",

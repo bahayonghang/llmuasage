@@ -26,6 +26,7 @@ fn suppress_startup_repair(store: &Store) -> anyhow::Result<()> {
         SourceKind::KimiCode,
         SourceKind::Pi,
         SourceKind::Omp,
+        SourceKind::Cindy,
         SourceKind::Grok,
         SourceKind::Zcode,
         SourceKind::DeepseekHarness,

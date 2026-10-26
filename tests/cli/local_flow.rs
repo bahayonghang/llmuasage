@@ -104,6 +104,7 @@ fn local_flow_bootstraps_and_syncs_without_installing_integrations() -> Result<(
             "kimi_code.svg",
             "pi.svg",
             "omp.svg",
+            "cindy.svg",
             "grok.svg",
             "zcode.svg",
             "deepseek_harness.svg",
@@ -734,6 +735,7 @@ impl Fixture {
             "CODEX_HOME",
             "OPENCODE_HOME",
             "OPENCODE_CONFIG_DIR",
+            "LLMUSAGE_CINDY_SESSION_DIRS",
         ]);
         unsafe {
             std::env::set_var("HOME", &home);
@@ -741,6 +743,10 @@ impl Fixture {
             std::env::set_var("CODEX_HOME", &codex_home);
             std::env::set_var("OPENCODE_HOME", &opencode_home);
             std::env::set_var("OPENCODE_CONFIG_DIR", &opencode_config);
+            std::env::set_var(
+                "LLMUSAGE_CINDY_SESSION_DIRS",
+                home.join("cindy-sessions-absent"),
+            );
         }
 
         fs::create_dir_all(home.join(".claude").join("projects").join("demo"))?;

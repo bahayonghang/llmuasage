@@ -259,6 +259,110 @@ pub(crate) fn omp_session_root() -> PathBuf {
         .join("sessions")
 }
 
+const CINDY_PROFILE_NAMES: [&str; 2] = ["Cindy", "CindyGlobal"];
+const CINDY_SESSION_DIR_ENV: &str = "LLMUSAGE_CINDY_SESSION_DIRS";
+
+/// Enumerates Cindy session JSONL files under official app profiles.
+///
+/// Roots are `{config_dir}/Cindy/pi-agent-home/sessions` and
+/// `{config_dir}/CindyGlobal/pi-agent-home/sessions`, unless
+/// `LLMUSAGE_CINDY_SESSION_DIRS` is a non-empty comma-separated list.
+/// That override replaces the official roots and does not read
+/// `PI_AGENT_DIR`. Files under `sessions/shared` are imported transcripts
+/// and are omitted. A candidate whose canonical path overlaps a Pi or Oh
+/// My Pi root is skipped; those sources keep the file.
+pub(crate) fn list_cindy_session_files() -> SourceFileListing {
+    list_cindy_session_files_from(cindy_session_roots(), &cindy_protected_roots())
+}
+
+/// Official or overridden Cindy session roots. Missing directories are empty.
+pub(crate) fn cindy_session_roots() -> Vec<PathBuf> {
+    std::env::var_os(CINDY_SESSION_DIR_ENV)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            value
+                .to_string_lossy()
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from)
+                .collect::<Vec<_>>()
+        })
+        .filter(|roots| !roots.is_empty())
+        .unwrap_or_else(official_cindy_session_roots)
+}
+
+/// Session roots for the published Cindy and CindyGlobal profiles.
+pub(crate) fn official_cindy_session_roots() -> Vec<PathBuf> {
+    cindy_profile_session_roots(dirs::config_dir().unwrap_or_default().as_path())
+}
+
+pub(crate) fn cindy_profile_session_roots(config_dir: &Path) -> Vec<PathBuf> {
+    if config_dir.as_os_str().is_empty() {
+        return Vec::new();
+    }
+    CINDY_PROFILE_NAMES
+        .into_iter()
+        .map(|name| config_dir.join(name).join("pi-agent-home").join("sessions"))
+        .collect()
+}
+
+fn cindy_protected_roots() -> Vec<PathBuf> {
+    let mut roots = pi_session_roots();
+    roots.push(omp_session_root());
+    roots
+}
+
+pub(crate) fn list_cindy_session_files_from(
+    roots: Vec<PathBuf>,
+    protected_roots: &[PathBuf],
+) -> SourceFileListing {
+    let canonical_roots = roots
+        .iter()
+        .map(|path| canonical_path(path))
+        .collect::<Vec<_>>();
+    let canonical_protected = protected_roots
+        .iter()
+        .map(|path| canonical_path(path))
+        .collect::<Vec<_>>();
+    let mut listing = list_jsonl_session_files_from_roots(roots);
+    let mut kept = Vec::new();
+    let mut skipped = 0usize;
+    for path in listing.paths {
+        let canonical = canonical_path(&path);
+        if cindy_shared_transcript(&canonical_roots, &canonical) {
+            continue;
+        }
+        if canonical_protected
+            .iter()
+            .any(|protected| paths_overlap(&canonical, protected))
+        {
+            skipped += 1;
+            continue;
+        }
+        kept.push(canonical);
+    }
+    if skipped > 0 {
+        listing.errors.push(format!(
+            "skipped {skipped} cindy session file(s) already owned by pi or omp"
+        ));
+    }
+    kept.sort();
+    listing.paths = kept;
+    listing
+}
+
+fn cindy_shared_transcript(roots: &[PathBuf], path: &Path) -> bool {
+    roots.iter().any(|root| {
+        path.strip_prefix(root).is_ok_and(|relative| {
+            relative
+                .components()
+                .next()
+                .is_some_and(|component| component.as_os_str() == "shared")
+        })
+    })
+}
+
 fn list_jsonl_session_files_from_roots(roots: Vec<PathBuf>) -> SourceFileListing {
     let mut merged = SourceFileListing {
         root: roots.first().cloned().unwrap_or_default(),
@@ -469,8 +573,8 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{
-        list_dsh_session_files_under, list_grok_session_files_under,
-        list_jsonl_session_files_from_roots, list_matching_files,
+        cindy_profile_session_roots, list_cindy_session_files_from, list_dsh_session_files_under,
+        list_grok_session_files_under, list_jsonl_session_files_from_roots, list_matching_files,
         list_matching_files_with_root_metadata, list_omp_session_files_from,
     };
 
@@ -790,5 +894,42 @@ mod tests {
             vec!["skipped 1 omp session file(s) already owned by pi"]
         );
         assert!(omp.error_summary().is_none());
+    }
+
+    #[test]
+    fn cindy_profile_roots_use_exact_published_names() {
+        let config = PathBuf::from("/config");
+        let roots = cindy_profile_session_roots(&config);
+        let rendered = roots
+            .iter()
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            rendered,
+            vec![
+                "/config/Cindy/pi-agent-home/sessions",
+                "/config/CindyGlobal/pi-agent-home/sessions",
+            ]
+        );
+        assert!(cindy_profile_session_roots(std::path::Path::new("")).is_empty());
+    }
+
+    #[test]
+    fn cindy_listing_skips_shared_transcripts_and_owned_paths() {
+        let temp = TempDir::new().expect("temp dir");
+        let sessions = temp.path().join("sessions");
+        write_session(&sessions, "project-a", "agent_own.jsonl");
+        write_session(&sessions.join("shared"), "imported", "agent_shared.jsonl");
+        let owned = sessions.join("project-owned");
+        write_session(&sessions, "project-owned", "agent_owned.jsonl");
+
+        let listing = list_cindy_session_files_from(vec![sessions], &[owned]);
+
+        assert_eq!(listing_names(&listing), vec!["agent_own.jsonl"]);
+        assert_eq!(
+            listing.errors,
+            vec!["skipped 1 cindy session file(s) already owned by pi or omp"]
+        );
+        assert!(listing.error_summary().is_none());
     }
 }

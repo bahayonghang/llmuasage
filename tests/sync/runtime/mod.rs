@@ -53,12 +53,17 @@ impl SourceEnvFixture {
             "USERPROFILE",
             "CODEX_HOME",
             "OPENCODE_HOME",
+            "LLMUSAGE_CINDY_SESSION_DIRS",
         ]);
         unsafe {
             std::env::set_var("HOME", &home);
             std::env::set_var("USERPROFILE", &home);
             std::env::set_var("CODEX_HOME", &codex_home);
             std::env::set_var("OPENCODE_HOME", &opencode_home);
+            std::env::set_var(
+                "LLMUSAGE_CINDY_SESSION_DIRS",
+                home.join("cindy-sessions-absent"),
+            );
         }
 
         Ok(Self {
@@ -332,12 +337,17 @@ impl OpencodeFixture {
             "USERPROFILE",
             "OPENCODE_HOME",
             "CODEX_HOME",
+            "LLMUSAGE_CINDY_SESSION_DIRS",
         ]);
         unsafe {
             std::env::set_var("HOME", &home);
             std::env::set_var("USERPROFILE", &home);
             std::env::set_var("OPENCODE_HOME", &opencode_home);
             std::env::set_var("CODEX_HOME", home.join(".codex"));
+            std::env::set_var(
+                "LLMUSAGE_CINDY_SESSION_DIRS",
+                home.join("cindy-sessions-absent"),
+            );
         }
 
         Ok(Self {

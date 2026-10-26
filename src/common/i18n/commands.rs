@@ -941,7 +941,7 @@ pub(crate) fn platform_action(id: &str, canonical: &str) -> String {
         "deepseek_harness" => {
             "由已注册的 DeepSeek Harness 来源解析器读取 session.jsonl.zstd".into()
         }
-        "codex" | "claude" | "opencode" | "kimi_code" | "pi" | "omp" | "grok" => {
+        "codex" | "claude" | "opencode" | "kimi_code" | "pi" | "omp" | "cindy" | "grok" => {
             format!("由已注册的 {id} 来源解析器读取")
         }
         "reasonix" => "仅监测；当前会话缺少可重放的逐轮用量".into(),

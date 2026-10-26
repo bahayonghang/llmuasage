@@ -801,6 +801,7 @@ impl Fixture {
             "OPENCODE_DB",
             "KIMI_CODE_HOME",
             "PI_AGENT_DIR",
+            "LLMUSAGE_CINDY_SESSION_DIRS",
             "GROK_HOME",
             "ZCODE_HOME",
             "GEMINI_CLI_HOME",
@@ -817,6 +818,11 @@ impl Fixture {
             std::env::remove_var("KIMI_CODE_HOME");
             // Pi discovery falls back to the two roots under the temp HOME.
             std::env::remove_var("PI_AGENT_DIR");
+            // Cindy discovery otherwise reads the developer config dir.
+            std::env::set_var(
+                "LLMUSAGE_CINDY_SESSION_DIRS",
+                home.join("cindy-sessions-absent"),
+            );
             // Grok discovery also falls back under the isolated temp HOME.
             std::env::remove_var("GROK_HOME");
             // ZCode / Antigravity CLI / dsh discovery fall back under the temp HOME.
